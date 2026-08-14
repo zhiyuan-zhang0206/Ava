@@ -446,8 +446,7 @@ def test_unit_dial_url_gateway_runner_uses_reachable_host(
         lambda name: 8600 if name == "ops" else 0,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     )
     assert (
-        machines.unit_dial_url(frozenset({"gateway", "agent-runner"}))
-        == "http://100.64.0.2:8600"
+        machines.unit_dial_url(frozenset({"gateway", "agent-runner"})) == "http://100.64.0.2:8600"
     )
 
 

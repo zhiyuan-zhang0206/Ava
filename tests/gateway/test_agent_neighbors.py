@@ -228,5 +228,3 @@ def test_telemetry_message_does_not_create_neighbor(db_conn: psycopg.Connection)
 
 
 # ── migration round-trip: the W9 down migration must actually execute ────────
-
-
