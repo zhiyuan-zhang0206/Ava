@@ -1,0 +1,107 @@
+# OTel Collector sidecar — one per machine, the ONLY OTLP entry Ava agents see.
+#
+# Generated at converge from this template (cli/commands/_otel_collector.py):
+# the dollar placeholders below are baked from this unit's settings, so the file
+# is static at runtime — no env substitution dependency on the session env.
+#
+# Architecture (task #1266, user ruling 2026-08-14): every agent process on
+# this host sends OTLP/HTTP to 127.0.0.1:4317/4318; this collector fans out
+#   traces  -> Tempo OTLP/HTTP      (TEMPO_ENDPOINT placeholder)
+#   logs    -> Loki native OTLP     (LOKI_BASE placeholder, /v1/logs appended)
+#   metrics -> Prometheus OTLP recv (PROM_BASE placeholder, /v1/metrics appended)
+# and mirrors traces to a local JSONL ($AVA_HOME/traces/spans.jsonl, rotated)
+# so agents can grep spans without any backend. file_storage backs every
+# fan-out exporter's sending queue: a backend outage buffers on disk (the
+# queue survives collector restarts), and only a queue overflow sheds — the
+# mirror keeps everything, `ava trace ship` replays the gap straight to Tempo.
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 127.0.0.1:4317
+      http:
+        endpoint: 127.0.0.1:4318
+
+processors:
+  batch:
+    send_batch_size: 512
+    timeout: 5s
+
+extensions:
+  file_storage:
+    directory: $AVA_HOME/otel-collector/queue
+    create_directory: true
+    timeout: 1s
+    # fsync off by default: the queue is a buffer, not the durable record —
+    # the JSONL mirror is. Durability comes from the mirror + replay.
+
+exporters:
+  otlphttp/tempo:
+    endpoint: $TEMPO_ENDPOINT
+    tls:
+      insecure: true
+    sending_queue:
+      enabled: true
+      queue_size: 5000
+      storage: file_storage
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      # Unlimited retry: never give up on a batch while the backend is down —
+      # overflow is the only shed, and the mirror covers it.
+      max_elapsed_time: 0s
+  otlphttp/loki:
+    endpoint: $LOKI_BASE
+    tls:
+      insecure: true
+    sending_queue:
+      enabled: true
+      queue_size: 5000
+      storage: file_storage
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 0s
+  otlphttp/prometheus:
+    endpoint: $PROM_BASE
+    tls:
+      insecure: true
+    sending_queue:
+      enabled: true
+      queue_size: 5000
+      storage: file_storage
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 0s
+  # Local JSONL mirror — the grep surface (user ruling: "agent debug 时 grep
+  # 最方便"). One line per export batch, each line a standard OTLP/JSON
+  # ExportTraceServiceRequest. Rotation (lumberjack) gives append semantics
+  # across collector restarts: the ACTIVE file is never truncated, and
+  # max_days / max_backups bound the directory. `spans.jsonl` -> rotated
+  # `spans-<ISO-timestamp>.jsonl` on rotation.
+  file/traces:
+    path: $AVA_HOME/traces/spans.jsonl
+    rotation:
+      max_megabytes: 256
+      max_days: $RETENTION_DAYS
+      max_backups: 16
+
+service:
+  extensions: [file_storage]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlphttp/tempo, file/traces]
+    logs:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlphttp/loki]
+    metrics:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlphttp/prometheus]

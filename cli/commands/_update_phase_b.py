@@ -1,0 +1,550 @@
+"""
+Phase B of the gateway `ava cluster update` — fan out self-updates, poll back.
+
+Split out of `cli/commands/update.py` to keep that module within the file-size
+budget. Phase B tells every remote agent-runner to self-update, then polls each
+one's ops server until it reports paused=false, provably stops
+(POLL_STALLED), or the family's no-progress bound elapses (POLL_CONVERGING) —
+see `shared.deploy_timing` for why that bound is not a number of its own:
+- `PollVerdict` + `_probe_verdict` + `_probe_one_until_unpaused` +
+  `_poll_until_unpaused` — the poll loop (unreachable = expected mid-restart
+  reading, never a verdict; the early STALLED exit is what makes the deadline
+  affordable).
+- `_renew_lease_while_polling` — renews the cluster deploy lease beside the
+  poll (the long pole) so the lease outlives the operation it protects.
+- `_gateway_ready_or_incomplete` — Phase B's gate: the gateway must actually be
+  serving the endpoint each runner's own preflight probes.
+- `_phase_b_payload` / `_phase_b_and_poll` / `_phase_b_outcome` /
+  `_still_converging` — the fan-out + poll composition and the verdict.
+
+Re-imported by `cli/commands/update.py` (and re-exported through `cli.commands`)
+so `cli.commands(.update)._poll_until_unpaused` / `._probe_one_until_unpaused` /
+`._renew_lease_while_polling` / `._POLL_TIMEOUT_S` / `PollVerdict` /
+`POLL_*` keep resolving for tests and the ops controllers.
+
+"""
+
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import sys
+import time
+from typing import Any, NamedTuple
+
+from cli.commands._gateway_ready import (
+    GatewayReadiness,
+    gateway_readiness_detail,
+)
+from cli.commands._update_fanout import (
+    _PHASE_B_TIMEOUT_S,
+    ClusterOpPayload,
+    _print_fan_out_results,
+)
+from cli.commands._update_recover import RolloutOutcome
+from shared.deploy_timing import NO_PROGRESS_TIMEOUT_S
+from shared.host_deploy_state import POSTURE_IDLE, POSTURE_PAUSED, read
+
+# How long Phase B waits for one agent-runner to come back. The family's single
+# no-progress definition (`shared.deploy_timing`), not a number of its own: the
+# gateway must not declare a host degraded while that host still believes its own
+# updater is slow-but-working, and the previous 120 s — 8x the measured POSIX leg but
+# far under a Windows one — is what made the deploy lease expire mid-transition.
+# A host that has provably stopped is cut loose in seconds regardless, which is what
+# makes a bound this generous affordable (`_probe_one_until_unpaused`).
+_POLL_TIMEOUT_S = NO_PROGRESS_TIMEOUT_S
+_POLL_INTERVAL_S = 2.0
+
+
+# Phase-B poll verdicts. Three facts, deliberately not one word: 'the poll ran out
+# of patience' and 'this host provably stopped trying' need different operator
+# responses (wait vs go look), and neither is 'the rollout finished cleanly'.
+POLL_OK = "ok"  # reported paused=false: converged
+POLL_CONVERGING = "converging"  # patience ran out while it may still be working
+POLL_STALLED = "stalled"  # reachable, still paused, no updater running: not coming back
+
+# R1 (Task #1021): the stall fact is the host_deploy_state row, not a wire field.
+# The probe's `paused` alone cannot carry it — the updater's lease touch moves
+# posture to `converging` (read as "not paused") while the host is still
+# mid-transition, and a declined restart leaves the host stuck on old code with
+# no lease at all. The DB row is the authority:
+# - posture `idle` (or no row) -> converged;
+# - a LIVE updater lease -> still working, keep polling;
+# - `paused` with NO lease -> the fan-out window / a legacy pre-lease chain
+#   ("cannot tell", never a stall);
+# - `paused` with an EXPIRED lease, or `converging` with no live lease (the
+#   updater finished or aborted and the host did not return to idle) -> the
+#   provable-stall fact, confirmed `_STALL_CONFIRMATIONS` times.
+# The two "keep polling" rows are lease readings, and a lease that is never
+# cleared claims liveness for as long as this poll would wait — so a terminal
+# `last_updater_outcome` (the updater wrote its own ending) overrides both.
+
+# How many consecutive stall observations end the poll for a host. Two, not one: the
+# op acks after the updater session is spawned, so a single contrary reading is a
+# teardown/handoff race rather than evidence, and abandoning a host on it would be
+# the same too-eager verdict this rewrite exists to remove — one interval apart it
+# costs `_POLL_INTERVAL_S`, not a rollout.
+_STALL_CONFIRMATIONS = 2
+
+
+class PollVerdict(NamedTuple):
+    """One host's terminal poll state, and the reason behind it when there is one.
+
+    `status` is a POLL_* above (or a Phase-B fan-out status the caller folds in).
+    `updater` is the `last_updater_outcome` the host reported on the probe that
+    settled the verdict — the fact that turns `POLL_STALLED` from "this host
+    stopped" into "this host *refused*, and is still serving" or "its updater died
+    after moving the checkout". Those need opposite next actions and used to read
+    identically (#995).
+
+    None whenever the host did not send one: an older commit answering mid-rollout
+    (the field did not exist), a host that converged normally, or one whose log did
+    not speak for this update. "No record" is reported as itself, never as rc=0.
+    """
+
+    status: str
+    updater: dict[str, Any] | None = None
+
+
+def _probe_verdict(
+    result: dict[str, Any] | None, stalls: int, machine: str
+) -> tuple[PollVerdict | None, int]:
+    """One status_probe response + this host's deploy-state row → (verdict, stalls).
+
+    Verdict None = keep polling. A non-dict result (unreachable / failed are
+    swallowed by the caller and leave result None) clears the stall counter —
+    silence is the expected mid-restart reading, never evidence. The verdict
+    itself reads the host_deploy_state row (the R1 authority), not the probe's
+    `paused` field: posture `idle` is convergence; a live updater lease is
+    "still working"; `paused` with no lease is the fan-out window / a legacy
+    chain ("cannot tell", never a stall); `paused` with an expired lease or
+    `converging` with no live lease is the provable-stall fact, confirmed
+    `_STALL_CONFIRMATIONS` times before it ends the poll. A row read failure is
+    "cannot tell" (fail-soft — the poll keeps its deadline).
+
+    **The updater's own written verdict overrides both "keep polling" readings.**
+    Those two read the lease, and a lease is one write at the run's start good for
+    `UPDATER_LEASE_TTL_S` — the same 15 minutes this poll is willing to wait — so
+    every way of not reaching its clear step (a chain that exits first, a clear that
+    cannot reach the DB through the restart it is part of, a killed process) is a
+    host that stopped in seconds and reads as busy for the whole bound. That is not
+    a rare shape: it is what a *failing* Windows update looked like on prod, and it
+    put the expensive reading on exactly the runs that had already failed. A
+    terminal `last_updater_outcome` (`updater_outcome_terminal`) is the independent
+    proof — the updater wrote its own ending — and it is only consulted once posture
+    has already said this host is not converged.
+
+    The stall verdict carries the host's `last_updater_outcome` from *this same
+    probe response*, which is why the reason costs no extra dial: the probe that
+    proves the host stopped is the probe that says why.
+    """
+    from ops.updater_outcome import UpdaterOutcome, updater_outcome_terminal
+
+    if not isinstance(result, dict):
+        return None, 0
+    try:
+        state = read(machine)
+    except Exception:
+        # "cannot tell", never convergence: reporting a host converged because
+        # its row could not be read would release the deploy lease while the
+        # host is still mid-transition — the wrong polarity. Keep polling.
+        return None, stalls
+    if state is None or state.posture == POSTURE_IDLE:
+        return PollVerdict(POLL_OK), stalls
+    raw = result.get("last_updater_outcome")
+    outcome = raw if isinstance(raw, dict) else None
+    try:
+        finished = updater_outcome_terminal(
+            UpdaterOutcome.model_validate(outcome) if outcome else None
+        )
+    except Exception:
+        # Read leniently, and never raise: this runs inside the gathered poll, so an
+        # exception here abandons every host's poll, not just this one's. The runner
+        # answering is on a different commit from this orchestrator for the whole
+        # rollout by construction, so a field it phrases differently costs this pass
+        # its short-cut and nothing more.
+        finished = False
+    if not finished:
+        if state.updater_live:
+            return None, 0  # lease live: the updater is still working — reset the counter
+        if state.posture == POSTURE_PAUSED and not state.updater_expired:
+            # Paused with no lease this pause window armed: the updater has not
+            # touched yet (a session spawn plus a Python cold start), or a legacy
+            # pre-lease chain, or a PREVIOUS run's uncleared expiry still sitting in
+            # the row. "Cannot tell", never a stall — see `updater_expired`.
+            return None, 0
+    stalls += 1
+    if stalls >= _STALL_CONFIRMATIONS:
+        return PollVerdict(POLL_STALLED, outcome), stalls
+    return None, stalls
+
+
+async def _probe_one_until_unpaused(
+    name: str, deadline: float, ops_url: str | None = None
+) -> tuple[str, PollVerdict]:
+    """Repeatedly POST status_probe to one agent-runner's ops server until it
+    converges, provably stops, or the shared deadline expires. Returns
+    (name, verdict) — one of the three POLL_* above.
+
+    Each probe carries one short timeout; an unreachable ops server means the
+    agent-runner is mid-restart — `ops` is itself a service its own self-update
+    stops, so silence is the *expected* reading through the middle of a healthy leg
+    and is never a verdict. On that the loop simply retries until the deadline.
+    `ops_url` (pre-resolved) keeps the probe from re-querying Postgres each pass.
+
+    **The early `POLL_STALLED` exit is what makes the deadline affordable.** A host
+    whose deploy-state row says "still mid-transition, and no live updater lease"
+    has lost its updater without resuming: its checkout moved, its processes did
+    not, and no amount of further waiting changes that — the forward path is its
+    watchdog's re-trigger or an operator. Measured on prod: three consecutive rollouts marked
+    a runner degraded after burning the full poll on it, when its updater had in
+    fact exited in ~3 s (`updater-*.log` rc=3, preflight refused the restart because
+    the gateway was not yet reachable). Waiting out a bound for a host that has
+    already given up is what forced the bound to stay small, which is what made it
+    expire under the hosts that genuinely needed it.
+    """
+    import cli.commands as _ns
+    from ops import cluster_rpc as cr
+
+    stalls = 0
+    while time.monotonic() < deadline:
+        slice_timeout = min(_ns._POLL_INTERVAL_S, deadline - time.monotonic())
+        if slice_timeout <= 0:
+            break
+        result: object | None = None
+        try:
+            result = await cr.dispatch_to_machine(
+                target_machine=name,
+                kind="status_probe",
+                payload={},
+                timeout_s=slice_timeout,
+                ops_url=ops_url,
+            )
+        except cr.ClusterOpUnreachable:
+            # An unreachable ops server IS the expected mid-restart reading — `ops` is
+            # a service its own self-update stops — so it is deliberately neither a
+            # verdict nor evidence. `result` stays None and the loop retries.
+            pass  # fail-fast-ok: silence is the expected mid-restart reading, not a fault
+        except cr.ClusterOpFailed:
+            # The op ran but could not resolve status (also mid-restart). Same reading
+            # as unreachable, and for the same reason.
+            pass  # fail-fast-ok: same mid-restart reading as unreachable
+        verdict, stalls = _probe_verdict(result, stalls, name)
+        if verdict is not None:
+            return name, verdict
+        # Pace the loop explicitly. `slice_timeout` bounds one *dial*, not one pass:
+        # a host that answers instantly (which a paused-but-reachable one does) would
+        # otherwise be re-dialled as fast as the event loop allows for the whole
+        # bound — a hot loop against a host that is mid-restart, and one that starves
+        # the lease-renewal task sharing this event loop of its turn.
+        await asyncio.sleep(min(_ns._POLL_INTERVAL_S, max(0.0, deadline - time.monotonic())))
+    return name, PollVerdict(POLL_CONVERGING)
+
+
+async def _renew_lease_while_polling(holder: str) -> None:
+    """Prove this orchestration is still executing, every `LEASE_RENEW_INTERVAL_S`, for
+    as long as the caller keeps this task alive — to the deploy lease, and to the
+    rollout log.
+
+    Runs beside the Phase-B poll because the poll is the long pole: it is the phase
+    that waits on other machines, and the phase whose bound just grew from a
+    POSIX-era 120 s to the family's no-progress definition. Renewing here is what
+    keeps **the lease outliving the operation it protects** independent of how long
+    the operation takes — the invariant this whole family exists to hold. Cancelled
+    (never awaited to completion) by the poll's `finally`, so the renewal stops the
+    moment the orchestration stops executing and a crashed rollout still lapses.
+
+    **The printed half is the same claim, written where an outside observer can read
+    it.** `_probe_one_until_unpaused` narrates nothing per pass on purpose — one line
+    per host per two seconds would bury the log — so Phase B was a legitimately silent
+    stretch of up to `_POLL_TIMEOUT_S`, which is the *same* number
+    `ops.controllers.stalled_rollout` reads log silence against before declaring the
+    orchestration hung. A healthy slow fan-out would have sat exactly on that boundary.
+    One line per renewal interval keeps the log's quietest healthy phase an order of
+    magnitude inside the bound, and it costs nothing on the fast path: the poll returns
+    the instant every host converges, usually before the first line is due.
+
+    Never raises out: a DB hiccup here must not abort a rollout that is otherwise
+    fine. `renew_update_lock` already logs a failed round at WARNING, and a missed
+    round is survivable precisely because `LOCK_TTL_S` is many intervals wide.
+    """
+    from shared.cluster_lock import renew_update_lock
+    from shared.deploy_timing import LEASE_RENEW_INTERVAL_S
+
+    waited = 0.0
+    while True:
+        await asyncio.sleep(LEASE_RENEW_INTERVAL_S)
+        waited += LEASE_RENEW_INTERVAL_S
+        # Printed before the renewal, not after: a DB that has gone away is exactly
+        # when the lease cannot be re-armed, and it is also exactly when the log line
+        # saying this process is still alive matters most.
+        print(f"  · still polling Phase B ({waited / 60:.0f}m)", file=sys.stderr)
+        try:
+            await asyncio.to_thread(renew_update_lock, holder)
+        except Exception as exc:
+            print(f"  · lease renewal round failed ({exc!r}); retrying", file=sys.stderr)
+
+
+def _poll_until_unpaused(agent_runners: list[tuple[str, str | None]]) -> dict[str, PollVerdict]:
+    """Poll each agent-runner's paused state via direct status_probe POSTs to its
+    ops server until it converges, provably stops, or `_POLL_TIMEOUT_S` elapses.
+
+    Returns name -> verdict (one of the POLL_* above). The `gateway_url` field
+    in the input tuple is unused but kept for caller-signature compatibility.
+
+    The lease renewal rides here rather than in the caller because this is the one
+    stretch of the orchestration long enough to matter, and because the holder is
+    derivable (`self_holder()`) from the process running it — the poll and the
+    `acquire_update_lock` that opened the rollout are the same pid, so nothing has
+    to be threaded down four frames to keep the protection alive.
+    """
+    # Dynamic lookup for the timeout constant + probe helper so tests can
+    # shrink them.
+    import cli.commands as _ns
+    from shared.cluster_lock import self_holder
+
+    deadline = time.monotonic() + _ns._POLL_TIMEOUT_S
+    holder = self_holder()
+
+    async def _run() -> dict[str, PollVerdict]:
+        renewal = asyncio.ensure_future(_renew_lease_while_polling(holder))
+        try:
+            tasks = [
+                _ns._probe_one_until_unpaused(name, deadline, ops_url=url)
+                for name, url in agent_runners
+            ]
+            return dict(await asyncio.gather(*tasks))
+        finally:
+            # Cancel AND await: `asyncio.run` closes the loop as soon as this returns,
+            # and a cancelled-but-unawaited task there surfaces as a "Task was
+            # destroyed but it is pending" warning on the rollout's own log — noise
+            # in exactly the place an operator reads to find real problems.
+            renewal.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await renewal
+
+    return asyncio.run(_run())
+
+
+def _gateway_ready_or_incomplete(
+    fanout_targets: list[tuple[str, str | None]],
+    paused_names: set[str],
+    unconverged: list[str] | None,
+) -> bool:
+    """Phase B's gate: True when the gateway is serving and the fan-out may proceed.
+
+    Every agent-runner's self-update begins by proving it can still reach the gateway
+    before it stops anything (validate-before-kill), so a runner told to update while
+    the gateway is not yet serving correctly *declines* — three prod rollouts' worth of
+    "slow hosts" were in fact hosts that had refused in ~3 s with `gateway
+    unreachable`. The local update returning 0 does not mean the gateway is serving:
+    its `ava start` child's own readiness wait is 15 s and non-fatal. So the wait
+    belongs here, once, against the same URL + endpoint + headers each runner will use.
+    `cli/commands/_gateway_ready.py` carries the full reasoning — including why a
+    bounded retry inside the runner's preflight is the weaker fix.
+
+    On a non-SERVING verdict this fills `unconverged` with the hosts **Phase A
+    paused**, so the caller's `finally` converts the lease into a settle hold over
+    exactly them. That is the one place the settle set cannot come from a Phase-B ack,
+    and the acked-only rule survives in the same form: only hosts this rollout actually
+    put into a transition are held for, so a powered-off runner still cannot make every
+    rollout idle out a settle window. The verdict is `INCOMPLETE`, never ABORTED — the
+    gateway migrated and the pin advanced — and never CLEAN.
+
+    `fanout_targets` excludes this host (`_phase_b_targets`), so on a single box the
+    list is empty and there is no dependent to strand. The gate is still asked, because
+    the local leg started the gateway with `--no-readiness-gate` — this is the only
+    thing that checks the box came back serving, and a rollout whose gateway never
+    rebound must not report CLEAN.
+    """
+    import cli.commands as _ns
+
+    readiness, detail = _ns._await_gateway_serving()
+    if readiness is GatewayReadiness.SERVING:
+        return True
+    if unconverged is not None:
+        unconverged.extend(sorted(paused_names))
+    left_behind = (
+        f"{len(fanout_targets)} agent-runner(s) stay on the previous commit against the "
+        f"migrated schema; none was told to self-update, so none is mid-checkout."
+        if fanout_targets
+        else "This host was the only rollout target, so no other host is affected — but "
+        "its own gateway is not serving."
+    )
+    print(
+        f"\n✗ rollout incomplete: Phase B not started — "
+        f"{gateway_readiness_detail(readiness, detail)}. {left_behind}",
+        file=sys.stderr,
+    )
+    return False
+
+
+def _phase_b_payload(
+    *, restart_only: bool, target_sha: str | None, force_reap: bool = False
+) -> ClusterOpPayload | None:
+    """The optional params a Phase-B cluster op carries: `restart_only` (a
+    restart-only bounce vs a full self-update), `target_sha` (the pinned rollout
+    commit every node checks out) and `force_reap` (the host's updater kills its
+    still-live agents — the quiesce-timeout backstop; Phase B itself never
+    quiesces, the gateway-side quiesce already drained the fleet). None when all
+    are absent."""
+    payload: ClusterOpPayload = {}
+    if restart_only:
+        payload["restart_only"] = True
+    if target_sha is not None:
+        payload["target_sha"] = target_sha
+    if force_reap:
+        payload["force_reap"] = True
+    return payload or None
+
+
+def _phase_b_and_poll(
+    fanout_targets: list[tuple[str, str | None]],
+    *,
+    target_sha: str | None,
+    restart_only: bool,
+    force_reap: bool = False,
+) -> dict[str, PollVerdict]:
+    """Phase B + poll: fan out each agent-runner's self-update (or restart-only
+    bounce), then poll each back to healthy; return name -> terminal poll state
+    ('ok' | 'degraded'). Each host's own `ava start` unlinks its flag (the natural
+    resume); the caller resumes whichever the poll still reports non-'ok'. No abort
+    on a Phase-B 5xx (already migrated); a failed host is only marked degraded.
+
+    `target_sha` (the pinned rollout commit) rides each host's `cluster_update`
+    payload so every agent-runner force-checks-out the *same* commit the gateway
+    did — not its own re-resolution of origin/main.
+
+    `fanout_targets` is the rollout list minus this host (`_phase_b_targets`), so on a
+    single box it is empty and Phase B is a no-op — the local leg already did the work
+    this phase exists to dispatch.
+    """
+    import cli.commands as _ns
+
+    if not fanout_targets:
+        print(
+            "\n→ Phase B: nothing to trigger — this host was the whole rollout and its "
+            "local leg already checked it out, migrated it and restarted it"
+        )
+        return {}
+    label = "restart" if restart_only else "self-update"
+    print(f"\n→ Phase B: trigger {len(fanout_targets)} agent-runner {label}")
+    results = _ns._fan_out(
+        fanout_targets,
+        "/api/cluster/update",
+        _PHASE_B_TIMEOUT_S,
+        payload=_phase_b_payload(
+            restart_only=restart_only, target_sha=target_sha, force_reap=force_reap
+        ),
+    )
+    _print_fan_out_results("self-update spawn", results)
+    # Poll only the hosts whose Phase-B spawn acked: a host that never received
+    # the op (unreachable / 5xx) cannot reach paused=false through this update, so
+    # polling it would just burn the full _POLL_TIMEOUT_S per host. Carry the
+    # non-acked hosts straight into the result as still-paused — the caller's
+    # compensating resume must still cover any that Phase A paused (resume coverage
+    # is unchanged); their forward path is the watchdog re-trigger on return.
+    acked_names = {name for name, status, _ in results if status == "ok"}
+    to_poll = [(name, url) for name, url in fanout_targets if name in acked_names]
+    print(
+        f"\n→ Poll {len(to_poll)} acked agent-runner(s) until /api/cluster/status reports "
+        f"paused=false (up to {_POLL_TIMEOUT_S / 60:.0f}m each, cut short the moment a host "
+        f"provably stops)"
+    )
+    polls = _ns._poll_until_unpaused(to_poll)
+    for name, status, _ in results:
+        if status != "ok":
+            polls.setdefault(name, PollVerdict(status))
+    _print_poll_verdicts(polls)
+    return polls
+
+
+def _still_converging(polls: dict[str, PollVerdict]) -> list[str]:
+    """The agent-runners left mid-transition now that the orchestration is done — the
+    hosts whose Phase-B spawn was **acked** but which never reported `paused=false`.
+
+    Both non-OK poll verdicts qualify, and for the same reason: whether the host is
+    still working (`POLL_CONVERGING`) or has provably stopped (`POLL_STALLED`), its
+    checkout has moved and its processes have not, which is exactly the window a
+    second deploy must not start into. The verdicts differ in what an operator does
+    next, not in whether the cluster is mid-transition — so they differ in the report
+    (`_poll_verdict_detail`) and not here.
+
+    Acked-only is load-bearing — `_phase_b_and_poll` polls only acked hosts and folds
+    the rest back in under their fan-out status (`'unreachable'` / `'fatal'`) — because
+    a host that never acked never began transitioning, so a decommissioned or
+    permanently-offline agent-runner must not hold the whole cluster for a settle
+    window on every rollout.
+    """
+    return [
+        name for name, verdict in polls.items() if verdict.status in (POLL_CONVERGING, POLL_STALLED)
+    ]
+
+
+def _phase_b_outcome(
+    fanout_targets: list[tuple[str, str | None]],
+    *,
+    target_sha: str | None,
+    restart_only: bool,
+    runner_urls: dict[str, str | None],
+    unconverged: list[str] | None,
+    force_reap: bool = False,
+) -> tuple[int, RolloutOutcome, list[tuple[str, str | None]]]:
+    """Phase B + poll, then the verdict.
+
+    Returns (rc, outcome, hosts_to_resume) — outcome and hosts_to_resume feed
+    the caller's compensating `finally`, which must run on every path. A poll
+    that gave up on an acked host is not a clean finish, and the rollout must
+    not report one. Only the hosts that *took* the op count: a host that was
+    unreachable for the Phase-B fan-out never began transitioning (its forward
+    path is the watchdog re-trigger on return), and letting a powered-off
+    laptop fail every rollout would destroy the signal this distinction
+    creates.
+
+    This host is not in `fanout_targets` (`_phase_b_targets`) and so appears in
+    neither the polls nor `hosts_to_resume`. It does not need to: the caller's
+    `finally` unpauses it locally on every path.
+    """
+    from cli.commands import update as _up_mod
+
+    polls = _up_mod._phase_b_and_poll(
+        fanout_targets,
+        target_sha=target_sha,
+        restart_only=restart_only,
+        force_reap=force_reap,
+    )
+    mid_transition = _up_mod._still_converging(polls)
+    if unconverged is not None:
+        unconverged.extend(mid_transition)
+    # The hosts the poll still reports paused did not self-resume (each host's
+    # own update unlinks its flag — the natural resume), and a paused host's
+    # watchdog will not self-heal it, so the finally must. Carry each host's
+    # pre-resolved ops URL through so the compensating resume stays
+    # Postgres-free.
+    hosts_to_resume = [
+        (name, runner_urls.get(name))
+        for name, verdict in polls.items()
+        if verdict.status != POLL_OK
+    ]
+    if mid_transition:
+        outcome = RolloutOutcome.INCOMPLETE
+        print(
+            f"\n✗ rollout incomplete: {len(mid_transition)} of {len(polls)} agent-runner(s) "
+            f"acked the self-update and never came back ({', '.join(sorted(mid_transition))}). "
+            f"The gateway migrated and the pin advanced; those hosts have not.",
+            file=sys.stderr,
+        )
+        return 1, outcome, hosts_to_resume
+    return 0, RolloutOutcome.CLEAN, hosts_to_resume
+
+
+def _print_poll_verdicts(polls: dict[str, PollVerdict]) -> None:
+    """One line per polled host: ✓ back up, or ⚠ with the verdict's next-step
+    sentence (`_poll_verdict_detail`) on stderr."""
+    import cli.commands as _ns
+
+    for name, verdict in polls.items():
+        if verdict.status == POLL_OK:
+            print(f"  ✓ {name}: back up")
+        else:
+            print(f"  ⚠ {name}: {_ns._poll_verdict_detail(verdict)}", file=sys.stderr)

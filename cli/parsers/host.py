@@ -1,0 +1,301 @@
+"""`ava` host-level lifecycle verbs — argparse builders + their `_h_*` handlers.
+
+`start` / `stop` / `restart` / `status` / `converge` / `firewall` / `trace` act
+on THIS host (or the unit this checkout owns), as opposed to the cluster-wide
+verbs in ``cli.parsers.cluster``. Handlers stay thin: each lazy-imports its
+`cmd_*` implementation from ``cli.commands`` so building the parser never loads
+Settings (see ``cli.main`` module docstring)."""
+
+from __future__ import annotations
+
+import argparse
+
+
+def _h_start(args: argparse.Namespace) -> int:
+    # The installed-home gate already ran in main() (cli.preflight, settings-free,
+    # BEFORE this handler's cli.commands import can trip a generic Settings
+    # validation error on an uninstalled home).
+    from cli.commands import cmd_start
+
+    return cmd_start(
+        machine_name=args.machine_name,
+        serve_gateway=args.serve_gateway,
+        serve_agent_runner=args.serve_agent_runner,
+        machine_description=args.machine_description,
+        memory_remote=args.memory_remote,
+        gateway_url=args.gateway_url,
+        disabled_services=tuple(args.disable_service),
+        persist_services=args.persist_services,
+        readiness_gate=not args.no_readiness_gate,
+    )
+
+
+def _h_stop(args: argparse.Namespace) -> int:
+    from cli.commands import cmd_stop
+
+    return cmd_stop(
+        keep_infra=args.keep_infra,
+        require_confirmation=not args.yes,
+        stop_browser=args.stop_browser,
+    )
+
+
+def _h_restart(args: argparse.Namespace) -> int:
+    from cli.commands import cmd_restart
+
+    return cmd_restart(
+        quiesce=args.quiesce,
+        mode=args.mode,
+        force_reap=args.force_reap,
+    )
+
+
+def _h_status(_args: argparse.Namespace) -> int:
+    from cli.commands import cmd_status
+
+    return cmd_status()
+
+
+def _h_converge(_args: argparse.Namespace) -> int:
+    from cli.commands import cmd_converge
+
+    return cmd_converge()
+
+
+def _h_firewall_status(_args: argparse.Namespace) -> int:
+    from cli.commands import cmd_firewall_status
+
+    return cmd_firewall_status()
+
+
+def _h_firewall_sync(_args: argparse.Namespace) -> int:
+    from cli.commands import cmd_firewall_sync
+
+    return cmd_firewall_sync()
+
+
+def _h_trace_ship(args: argparse.Namespace) -> int:
+    from cli.commands import cmd_trace_ship
+
+    return cmd_trace_ship(since=args.since, until=args.until, dry_run=args.dry_run)
+
+
+def _add_start_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    from cli.main import _h_start
+
+    # `ava start` — multi-machine setup args; pass once on first run, CLI persists
+    # to file and subsequent calls do not need them. NO TTY prompt — agent-first
+    # design, agent has no TTY, missing values fail loud.
+    start_p = sub.add_parser(
+        "start",
+        help="[host] bring up this unit's full stack (idempotent). Cluster identity "
+        "is checkout-anchored — never a flag. Machine identity is first-run only: "
+        "pass --machine-name / --serve-gateway / --serve-agent-runner / "
+        "--gateway-url on the FIRST start (or set the env vars / $AVA_HOME files); "
+        "the values are persisted and later runs need none of them.",
+    )
+    start_p.add_argument(
+        "--machine-name",
+        default=None,
+        help="usually first-run only: stable identifier for this host (e.g. host-a / host-b). "
+        "Persisted to $AVA_HOME/machine_name; env AVA_MACHINE_NAME wins over the file",
+    )
+    start_p.add_argument(
+        "--serve-gateway",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="usually first-run only: serve the gateway capability (central pg/redis + all daemons). Single box "
+        "passes both --serve-gateway --serve-agent-runner; unset falls back to the "
+        "$AVA_HOME/machine_serve_gateway file. env: AVA_MACHINE_SERVE_GATEWAY",
+    )
+    start_p.add_argument(
+        "--serve-agent-runner",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="usually first-run only: serve the agent-runner capability (runner/restarter/watchdog + agent "
+        "processes); unset falls back to the $AVA_HOME/machine_serve_agent_runner file. "
+        "env: AVA_MACHINE_SERVE_AGENT_RUNNER",
+    )
+    start_p.add_argument(
+        "--machine-description",
+        default=None,
+        help='Free-text note of what this host is for (e.g. "voice IO + browser"); persisted to $AVA_HOME/machine_description and the machines table.',
+    )
+    start_p.add_argument(
+        "--memory-remote",
+        default=None,
+        help="usually first-run only: central git remote URL for memory pool (e.g. git@github.com:you/AvaMemory.git). env: AVA_MEMORY_REMOTE",
+    )
+    start_p.add_argument(
+        "--gateway-url",
+        default=None,
+        help="usually first-run only: public URL of the gateway. On the gateway this host's own URL; on an agent-runner, the gateway it reaches. env: AVA_GATEWAY_URL",
+    )
+    start_p.add_argument(
+        "--disable-service",
+        action="append",
+        default=[],
+        metavar="SERVICE",
+        help="durably disable this service session (repeatable; e.g. --disable-service labeler "
+        "--disable-service frontend). Pass the bare service name. The disable is recorded so the "
+        "watchdog leaves it down; re-enable by running `ava start` again without the flag.",
+    )
+    start_p.add_argument(
+        # Internal: an update / recovery / restart forwards its transient disabled set
+        # (e.g. leave frontend running) without rewriting the operator's durable
+        # --disable-service marker. Hidden from --help; operators never pass it.
+        "--persist-services",
+        action="store_false",
+        default=True,
+        help=argparse.SUPPRESS,
+    )
+    start_p.add_argument(
+        "--no-readiness-gate",
+        action="store_true",
+        default=False,
+        help="exit 0 even when a launched service never passes its liveness probe "
+        "(default: exit 4 and name it, after the status snapshot). For callers that "
+        "retry without a cap — the OS boot job passes this, because an unbounded "
+        "retry on a permanently-unready service is a host that never finishes "
+        "booting — or that answer readiness themselves, like the rollout's off-box "
+        "gateway gate. The wait and the printed crosses are unaffected.",
+    )
+    start_p.set_defaults(func=_h_start)
+
+
+def _add_stop_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    from cli.main import _h_stop
+
+    stop_p = sub.add_parser(
+        "stop", help="[host] stop full stack (force-kill by default, stdin y to confirm)"
+    )
+    stop_p.add_argument(
+        "--keep-infra",
+        action="store_true",
+        help="do not stop the shared Postgres/Redis. Used by the internal "
+        "cluster-down helper (reached via `ava cluster destroy`), which is "
+        "cluster-scoped — stopping one cluster's gateway must not tear down the "
+        "infra other clusters share.",
+    )
+    stop_p.add_argument(
+        "-y",
+        "--yes",
+        action="store_true",
+        help="skip the stdin y/N confirmation (non-interactive / scripted use).",
+    )
+    stop_p.add_argument(
+        "--stop-browser",
+        action="store_true",
+        help="also stop the headed browser session (its login Chrome). Off by "
+        "default: an in-place stop preserves it so the login session is not lost. "
+        "The cluster-down helper (`ava cluster destroy`) sets it — a full teardown "
+        "removes everything.",
+    )
+    stop_p.set_defaults(func=_h_stop)
+
+
+def _add_restart_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    from cli.main import _h_restart
+
+    restart_p = sub.add_parser(
+        "restart",
+        help="[host] stop (force, no confirmation prompt) then start — designed for the updater path",
+    )
+    restart_p.add_argument(
+        "--quiesce",
+        action="store_true",
+        help="drain this host's agents before the bounce (per-host self-heal): "
+        "signal each live agent to restart, wait per --mode, force-reap stragglers "
+        "on timeout. The updater's watchdog / standalone update path; a rollout's "
+        "Phase B passes --force-reap instead (its agents were already drained "
+        "cluster-wide).",
+    )
+    restart_p.add_argument(
+        "--mode",
+        choices=("smooth", "force"),
+        default="smooth",
+        help="agent-drain policy with --quiesce: 'smooth' (default) waits out the "
+        "longest single execute_code (exec_timeout_seconds x 1.2) then force-reaps "
+        "stragglers; 'force' waits ~10s (idle agents drain) then force-reaps.",
+    )
+    restart_p.add_argument(
+        "--force-reap",
+        action="store_true",
+        help="no signal, no wait — mark this host's still-live agents 'restarting' "
+        "and kill their processes (the rollout's Phase-B quiesce-timeout backstop; "
+        "the gateway-side quiesce already drained the fleet).",
+    )
+    restart_p.set_defaults(func=_h_restart)
+
+
+def _add_status_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    from cli.main import _h_status
+
+    status_p = sub.add_parser(
+        "status",
+        help="[host] one-screen view of sessions / pidfile / curl / infra / cron "
+        "+ the gateway's own cluster-status snapshot",
+    )
+    status_p.set_defaults(func=_h_status)
+
+
+def _add_converge_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    from cli.main import _h_converge
+
+    converge_p = sub.add_parser(
+        "converge",
+        help="[host] re-apply idempotent host wiring (symlink/PATH/dirs/plugin images/memory pool); "
+        "normally run automatically by ava start",
+    )
+    converge_p.set_defaults(func=_h_converge)
+
+
+def _add_firewall_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    from cli.main import _h_firewall_status, _h_firewall_sync
+
+    firewall_p = sub.add_parser(
+        "firewall",
+        help="macOS Application Firewall allowlist manifest (status / sync)",
+    )
+    firewall_sub = firewall_p.add_subparsers(dest="firewall_cmd", required=True)
+    firewall_status_p = firewall_sub.add_parser(
+        "status",
+        help="audit the host + diff the allowlist manifest against ALF (read-only)",
+    )
+    firewall_status_p.set_defaults(func=_h_firewall_status)
+    firewall_sync_p = firewall_sub.add_parser(
+        "sync",
+        help="apply the allowlist manifest now (repair + prune; needs the one-time "
+        "sudoers grant from scripts/install-firewall-sudoers.sh)",
+    )
+    firewall_sync_p.set_defaults(func=_h_firewall_sync)
+
+
+def _add_trace_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    from cli.main import _h_trace_ship
+
+    # `ava trace ship` — replay the local OTel trace mirror to Tempo over OTLP
+    trace_p = sub.add_parser("trace", help="trace mirror subcommands")
+    trace_sub = trace_p.add_subparsers(dest="trace_cmd", required=True)
+    trace_ship_p = trace_sub.add_parser(
+        "ship",
+        help="replay the local $AVA_HOME/traces mirror to Tempo over OTLP "
+        "(incremental from a per-file watermark; --since/--until re-ships a window)",
+    )
+    trace_ship_p.add_argument(
+        "--since",
+        default=None,
+        help="ship files dated on/after this day (YYYY-MM-DD); ignores watermark",
+    )
+    trace_ship_p.add_argument(
+        "--until",
+        default=None,
+        help="ship files dated on/before this day (YYYY-MM-DD); ignores watermark",
+    )
+    trace_ship_p.add_argument(
+        "--dry-run",
+        action="store_true",
+        default=False,
+        help="count what would ship without POSTing",
+    )
+    trace_ship_p.set_defaults(func=_h_trace_ship)

@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "policy": "Built-in schedules ship with Ava. Product schedules (self-evolution, memory) are created enabled by default; cluster-operator schedules are created but disabled. provision_builtin_schedules() (gateway boot + `ava schedules provision`) creates missing built-ins keyed by name and never modifies existing rows.",
+  "builtin_schedules": [
+    {
+      "name": "self-evolution-weekly",
+      "class": "product",
+      "default_enabled": true,
+      "description": "Weekly self-evolution — fires the self-evolution agent when the past week's event volume clears a minimum threshold (dynamic; busy weeks get a mid-week follow-up).",
+      "script": "self-evolution-weekly-schedule.py",
+      "command": "python self-evolution-weekly-schedule.py"
+    },
+    {
+      "name": "self-evolution-daily",
+      "class": "product",
+      "default_enabled": true,
+      "description": "Daily incremental self-evolution scan — runs daily_scan.py at 00:00 (embedded timezone), wakes the self-evolution agent on ALERT (exit 2) or timeout.",
+      "script": "self-evolution-daily-schedule.py",
+      "command": "python self-evolution-daily-schedule.py"
+    },
+    {
+      "name": "memory-arbiter",
+      "class": "product",
+      "default_enabled": true,
+      "description": "Memory pool daily maintenance — 4AM consolidation (commit + push + PR merge) and 7AM health check (OKF, size, dedup, stale).",
+      "script": "memory-steward-schedule.py",
+      "command": "python memory-steward-schedule.py"
+    },
+    {
+      "name": "trace-ship-tempo",
+      "class": "operator",
+      "default_enabled": false,
+      "description": "Replay the local trace mirror (collector JSONL) to Tempo every 5 minutes — gap-replay only since task #1266 (the sidecar fans traces out live); incremental by per-file watermark.",
+      "script": "trace-ship-tempo-schedule.py",
+      "command": "python trace-ship-tempo-schedule.py"
+    }
+  ]
+}

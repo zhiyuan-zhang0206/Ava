@@ -1,0 +1,36 @@
+# The runtime data plane (pg/redis) is NO LONGER here — it runs natively on the
+# host, under the cluster's own $AVA_HOME (driven by pg_ctl / redis-server),
+# brought up by `ava start`. See `cli/commands/_cluster_instance.py`.
+#
+# This file now holds only `postgres-test`: a dedicated, profile-gated PG for
+# `pytest` / eval runs on agent-runner machines whose `AVA_DB_URL` points at the
+# public gateway. Test DB URLs in `.env` target this localhost
+# instance instead of the gateway so test sessions stay fast (no public RTT),
+# offline-capable, and isolated from prod's connection slots. It is opt-in and
+# never started by `ava start`.
+#
+# Activated only under the `test` profile. To bring it up:
+#   docker compose --profile test up -d postgres-test
+services:
+  postgres-test:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    profiles: ["test"]
+    environment:
+      POSTGRES_DB: ava
+      POSTGRES_USER: ava
+      POSTGRES_PASSWORD: ava_dev_only
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_test_data:/var/lib/postgresql/data
+      - ./db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./db/setup-test-db.sh:/docker-entrypoint-initdb.d/02-setup-test-db.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ava -d ava"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  postgres_test_data:

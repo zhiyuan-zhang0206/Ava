@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>周计划</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="page-header">
+    <h1>周计划</h1>
+    <p class="page-sub">周一到周日 · 任务自动保存在本机，关掉页面再打开也不会丢</p>
+  </header>
+
+  <main class="app-main" id="app">
+    <div class="sr-only" id="live-region" role="status" aria-live="polite"></div>
+
+    <div class="week-grid" role="grid" aria-label="一周计划，周一到周日">
+      <div class="grid-head-row" role="row">
+        <div class="grid-head" role="columnheader" id="day-head-0" aria-label="周一">
+          <span class="day-name">周一</span>
+          <span class="day-date" id="day-date-0">—</span>
+          <span class="today-badge" id="day-today-0" hidden>今天</span>
+          <span class="day-count" id="day-count-0" hidden></span>
+        </div>
+        <div class="grid-head" role="columnheader" id="day-head-1" aria-label="周二">
+          <span class="day-name">周二</span>
+          <span class="day-date" id="day-date-1">—</span>
+          <span class="today-badge" id="day-today-1" hidden>今天</span>
+          <span class="day-count" id="day-count-1" hidden></span>
+        </div>
+        <div class="grid-head" role="columnheader" id="day-head-2" aria-label="周三">
+          <span class="day-name">周三</span>
+          <span class="day-date" id="day-date-2">—</span>
+          <span class="today-badge" id="day-today-2" hidden>今天</span>
+          <span class="day-count" id="day-count-2" hidden></span>
+        </div>
+        <div class="grid-head" role="columnheader" id="day-head-3" aria-label="周四">
+          <span class="day-name">周四</span>
+          <span class="day-date" id="day-date-3">—</span>
+          <span class="today-badge" id="day-today-3" hidden>今天</span>
+          <span class="day-count" id="day-count-3" hidden></span>
+        </div>
+        <div class="grid-head" role="columnheader" id="day-head-4" aria-label="周五">
+          <span class="day-name">周五</span>
+          <span class="day-date" id="day-date-4">—</span>
+          <span class="today-badge" id="day-today-4" hidden>今天</span>
+          <span class="day-count" id="day-count-4" hidden></span>
+        </div>
+        <div class="grid-head" role="columnheader" id="day-head-5" aria-label="周六">
+          <span class="day-name">周六</span>
+          <span class="day-date" id="day-date-5">—</span>
+          <span class="today-badge" id="day-today-5" hidden>今天</span>
+          <span class="day-count" id="day-count-5" hidden></span>
+        </div>
+        <div class="grid-head" role="columnheader" id="day-head-6" aria-label="周日">
+          <span class="day-name">周日</span>
+          <span class="day-date" id="day-date-6">—</span>
+          <span class="today-badge" id="day-today-6" hidden>今天</span>
+          <span class="day-count" id="day-count-6" hidden></span>
+        </div>
+      </div>
+      <div class="grid-body-row" role="row">
+        <div class="day-cell" role="gridcell" id="day-cell-0" aria-label="周一 的任务">
+          <h2 class="mobile-head">
+            <span class="day-name">周一</span>
+            <span class="day-date" id="day-mdate-0">—</span>
+            <span class="today-badge" id="day-mtoday-0" hidden>今天</span>
+            <span class="day-count" id="day-mcount-0" hidden></span>
+          </h2>
+          <form class="add-form" id="day-form-0" novalidate>
+            <label class="sr-only" for="day-input-0">在周一添加任务</label>
+            <input class="add-input" id="day-input-0" type="text" placeholder="添加任务…" autocomplete="off" aria-describedby="day-error-0">
+            <button class="add-btn" type="submit">添加</button>
+            <p class="form-error" id="day-error-0" role="alert" hidden></p>
+          </form>
+          <ul class="task-list" role="list" id="day-list-0" aria-label="周一 的任务"></ul>
+          <button class="more-btn" type="button" id="day-more-0" hidden></button>
+        </div>
+        <div class="day-cell" role="gridcell" id="day-cell-1" aria-label="周二 的任务">
+          <h2 class="mobile-head">
+            <span class="day-name">周二</span>
+            <span class="day-date" id="day-mdate-1">—</span>
+            <span class="today-badge" id="day-mtoday-1" hidden>今天</span>
+            <span class="day-count" id="day-mcount-1" hidden></span>
+          </h2>
+          <form class="add-form" id="day-form-1" novalidate>
+            <label class="sr-only" for="day-input-1">在周二添加任务</label>
+            <input class="add-input" id="day-input-1" type="text" placeholder="添加任务…" autocomplete="off" aria-describedby="day-error-1">
+            <button class="add-btn" type="submit">添加</button>
+            <p class="form-error" id="day-error-1" role="alert" hidden></p>
+          </form>
+          <ul class="task-list" role="list" id="day-list-1" aria-label="周二 的任务"></ul>
+          <button class="more-btn" type="button" id="day-more-1" hidden></button>
+        </div>
+        <div class="day-cell" role="gridcell" id="day-cell-2" aria-label="周三 的任务">
+          <h2 class="mobile-head">
+            <span class="day-name">周三</span>
+            <span class="day-date" id="day-mdate-2">—</span>
+            <span class="today-badge" id="day-mtoday-2" hidden>今天</span>
+            <span class="day-count" id="day-mcount-2" hidden></span>
+          </h2>
+          <form class="add-form" id="day-form-2" novalidate>
+            <label class="sr-only" for="day-input-2">在周三添加任务</label>
+            <input class="add-input" id="day-input-2" type="text" placeholder="添加任务…" autocomplete="off" aria-describedby="day-error-2">
+            <button class="add-btn" type="submit">添加</button>
+            <p class="form-error" id="day-error-2" role="alert" hidden></p>
+          </form>
+          <ul class="task-list" role="list" id="day-list-2" aria-label="周三 的任务"></ul>
+          <button class="more-btn" type="button" id="day-more-2" hidden></button>
+        </div>
+        <div class="day-cell" role="gridcell" id="day-cell-3" aria-label="周四 的任务">
+          <h2 class="mobile-head">
+            <span class="day-name">周四</span>
+            <span class="day-date" id="day-mdate-3">—</span>
+            <span class="today-badge" id="day-mtoday-3" hidden>今天</span>
+            <span class="day-count" id="day-mcount-3" hidden></span>
+          </h2>
+          <form class="add-form" id="day-form-3" novalidate>
+            <label class="sr-only" for="day-input-3">在周四添加任务</label>
+            <input class="add-input" id="day-input-3" type="text" placeholder="添加任务…" autocomplete="off" aria-describedby="day-error-3">
+            <button class="add-btn" type="submit">添加</button>
+            <p class="form-error" id="day-error-3" role="alert" hidden></p>
+          </form>
+          <ul class="task-list" role="list" id="day-list-3" aria-label="周四 的任务"></ul>
+          <button class="more-btn" type="button" id="day-more-3" hidden></button>
+        </div>
+        <div class="day-cell" role="gridcell" id="day-cell-4" aria-label="周五 的任务">
+          <h2 class="mobile-head">
+            <span class="day-name">周五</span>
+            <span class="day-date" id="day-mdate-4">—</span>
+            <span class="today-badge" id="day-mtoday-4" hidden>今天</span>
+            <span class="day-count" id="day-mcount-4" hidden></span>
+          </h2>
+          <form class="add-form" id="day-form-4" novalidate>
+            <label class="sr-only" for="day-input-4">在周五添加任务</label>
+            <input class="add-input" id="day-input-4" type="text" placeholder="添加任务…" autocomplete="off" aria-describedby="day-error-4">
+            <button class="add-btn" type="submit">添加</button>
+            <p class="form-error" id="day-error-4" role="alert" hidden></p>
+          </form>
+          <ul class="task-list" role="list" id="day-list-4" aria-label="周五 的任务"></ul>
+          <button class="more-btn" type="button" id="day-more-4" hidden></button>
+        </div>
+        <div class="day-cell" role="gridcell" id="day-cell-5" aria-label="周六 的任务">
+          <h2 class="mobile-head">
+            <span class="day-name">周六</span>
+            <span class="day-date" id="day-mdate-5">—</span>
+            <span class="today-badge" id="day-mtoday-5" hidden>今天</span>
+            <span class="day-count" id="day-mcount-5" hidden></span>
+          </h2>
+          <form class="add-form" id="day-form-5" novalidate>
+            <label class="sr-only" for="day-input-5">在周六添加任务</label>
+            <input class="add-input" id="day-input-5" type="text" placeholder="添加任务…" autocomplete="off" aria-describedby="day-error-5">
+            <button class="add-btn" type="submit">添加</button>
+            <p class="form-error" id="day-error-5" role="alert" hidden></p>
+          </form>
+          <ul class="task-list" role="list" id="day-list-5" aria-label="周六 的任务"></ul>
+          <button class="more-btn" type="button" id="day-more-5" hidden></button>
+        </div>
+        <div class="day-cell" role="gridcell" id="day-cell-6" aria-label="周日 的任务">
+          <h2 class="mobile-head">
+            <span class="day-name">周日</span>
+            <span class="day-date" id="day-mdate-6">—</span>
+            <span class="today-badge" id="day-mtoday-6" hidden>今天</span>
+            <span class="day-count" id="day-mcount-6" hidden></span>
+          </h2>
+          <form class="add-form" id="day-form-6" novalidate>
+            <label class="sr-only" for="day-input-6">在周日添加任务</label>
+            <input class="add-input" id="day-input-6" type="text" placeholder="添加任务…" autocomplete="off" aria-describedby="day-error-6">
+            <button class="add-btn" type="submit">添加</button>
+            <p class="form-error" id="day-error-6" role="alert" hidden></p>
+          </form>
+          <ul class="task-list" role="list" id="day-list-6" aria-label="周日 的任务"></ul>
+          <button class="more-btn" type="button" id="day-more-6" hidden></button>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script src="store.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,25 @@
+# Loki + Prometheus datasources for the ALERTING Grafana
+# (127.0.0.1:3002, launchd com.ava.grafana) — the data sources behind the
+# R1-R7 rules migrated off Postgres (Task #1224). The LGTM docker stack
+# (deploy/local/lgtm) owns Loki :3100 and Prometheus :9090 on this host; the
+# alerting Grafana reaches them on loopback.
+#
+# The `ops` Postgres datasource (hand-maintained ops.yaml in the same
+# provisioning dir) stays: the ava-ops dashboards still query it. Datasource
+# file provisioning hot-reloads, and _update_local.py copies this file with
+# the rollout (see _sync_grafana_provisioning), so a new datasource rides
+# the same deploy as the rules that use it.
+apiVersion: 1
+datasources:
+  - name: loki
+    uid: loki
+    type: loki
+    access: proxy
+    url: http://127.0.0.1:3100
+    editable: false
+  - name: prometheus
+    uid: prometheus
+    type: prometheus
+    access: proxy
+    url: http://127.0.0.1:9090
+    editable: false

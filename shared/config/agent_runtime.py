@@ -1,0 +1,47 @@
+"""Agent process-runtime knobs — AgentRuntimeSettings.
+
+DB wait/pool timeouts and the node-stall hang diagnostic: operational bounds of the agent process itself, independent of what the prompt contains or how memory/compaction behave. Split out of the former flat AgentSettings schema; each field keeps its exact env alias so the .env surface is unchanged."""
+
+from __future__ import annotations
+
+from pydantic import Field
+
+from shared.config._base import EnvSettings
+
+
+class AgentRuntimeSettings(EnvSettings):
+    db_notify_wait_timeout_seconds: float = Field(
+        default=30.0,
+        alias="AVA_DB_NOTIFY_WAIT_TIMEOUT_SECONDS",
+        description="Default wait timeout (seconds) for the agent claim node's inbound Redis pub/sub wait. Fallback for a lost wake: SELECT once on expiry.",
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    node_stall_dump_seconds: float = Field(
+        default=0.0,
+        alias="AVA_NODE_STALL_DUMP_SECONDS",
+        description="If > 0, dump every thread's stack to stderr when a graph node stays in one node longer than this many seconds (one-shot per node). 0 disables. A hang diagnostic; off in prod, on in the e2e harness.",
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    db_pool_acquire_timeout_seconds: float = Field(
+        default=30.0,
+        alias="AVA_DB_POOL_ACQUIRE_TIMEOUT_SECONDS",
+        description="Max seconds an agent waits to borrow a Postgres connection before raising. Keep it generous: a mid-turn raise exits the agent process, which is not auto-resurrected.",
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )

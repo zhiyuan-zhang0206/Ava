@@ -1,0 +1,59 @@
+# Loki 3.x single-binary config — filesystem storage, no auth (local viewer).
+# Paths under /loki: the image ships /loki owned by the loki user (uid 10001),
+# and a fresh named volume preserves that ownership (mounting a root-owned
+# path like /var/loki breaks the non-root default user).
+auth_enabled: false
+
+server:
+  http_listen_port: 3100
+
+common:
+  path_prefix: /loki
+  storage:
+    filesystem:
+      chunks_directory: /loki/chunks
+      rules_directory: /loki/rules
+  replication_factor: 1
+  ring:
+    kvstore:
+      store: inmemory
+
+schema_config:
+  configs:
+    - from: 2024-01-01
+      store: tsdb
+      object_store: filesystem
+      schema: v13
+      index:
+        prefix: index_
+        period: 24h
+
+# Retention: the viewer ingests Ava session stdout (~20MB/day new + ~130MB
+# one-time backfill of the existing logs dir) plus the OTLP event stream.
+# Without a cap the filesystem store grows linearly forever. 7d matches the
+# write-side JSONL mirror retention.
+#
+# Task #1281 (PG events archive import): the archived events (8.7M rows,
+# 05-23 -> 08-12) land under the stream label stream="archive" and get a
+# 365d retention via retention_streams (compactor-driven, applied on top of
+# the 168h period). The import also needs reject_old_samples=false — Loki's
+# default rejects any sample older than reject_old_samples_max_age (336h),
+# and the archive is up to ~83 days old. FLIP BACK to true (and drop the
+# explicit false) once the import finishes: the emitter never writes old
+# samples, and the false disables a useful clock-drift guard.
+limits_config:
+  retention_period: 168h
+  retention_stream:
+    - selector: '{stream="archive"}'
+      priority: 1
+      period: 8760h
+  reject_old_samples: false
+  reject_old_samples_max_age: 336h
+  # The archive spans ~83 days (05-23 -> 08-12); Loki's default
+  # max_query_length (30d1h) would reject any whole-span parity/read query.
+  max_query_length: 2160h
+
+compactor:
+  working_directory: /loki/compactor
+  retention_enabled: true
+  delete_request_store: filesystem

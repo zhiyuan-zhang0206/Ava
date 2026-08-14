@@ -1,0 +1,117 @@
+/* Shared look for the gate's static pages — inlined into every page by
+   `Gate.__init__` (the `__THEME_CSS__` marker), because the gate serves one
+   page per request and has no route to hand a browser a second asset.
+
+   Everything here mirrors the app (`frontend/src/app/globals.css` and the
+   shadcn primitives built on it) so a user who lands on the gate during a
+   rollout sees the same product, not a different one. The token values are
+   copied verbatim; when the app's palette moves, move these with it.
+
+   The one deliberate divergence is the type face. The app loads Inter as a
+   web font; the gate must stay a zero-dependency page it can serve while
+   everything else is down, so it starts at the app's own fallback stack
+   instead of vendoring a 47 KB font into a page that reloads every 4s. */
+
+/* ---- tokens ------------------------------------------------------------ */
+
+:root {
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.708 0 0);
+  --radius: 0.625rem;
+  color-scheme: light;
+}
+
+html.dark {
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.205 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.922 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.556 0 0);
+  color-scheme: dark;
+}
+
+/* No-JS path only. theme.js always lands an explicit `light` or `dark` class,
+   so the `:not()` guards keep a user's stored choice winning over the OS
+   preference — this block applies only when the class never arrived. */
+@media (prefers-color-scheme: dark) {
+  html:not(.light):not(.dark) {
+    --background: oklch(0.145 0 0);
+    --foreground: oklch(0.985 0 0);
+    --card: oklch(0.205 0 0);
+    --card-foreground: oklch(0.985 0 0);
+    --primary: oklch(0.922 0 0);
+    --primary-foreground: oklch(0.205 0 0);
+    --muted-foreground: oklch(0.708 0 0);
+    --destructive: oklch(0.704 0.191 22.216);
+    --border: oklch(1 0 0 / 10%);
+    --input: oklch(1 0 0 / 15%);
+    --ring: oklch(0.556 0 0);
+    color-scheme: dark;
+  }
+}
+
+/* ---- base -------------------------------------------------------------- */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  font-size: 16px;
+  font-family:
+    system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC",
+    "Microsoft YaHei", "Noto Sans SC", "Hiragino Sans GB", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  padding: 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--background);
+  color: var(--foreground);
+}
+
+h1 {
+  margin: 0;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+}
+
+p {
+  margin: 0;
+}
+
+/* ---- shared pieces ----------------------------------------------------- */
+
+.stack {
+  display: flex;
+  flex-direction: column;
+}
+
+.muted {
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  color: var(--muted-foreground);
+}

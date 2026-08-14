@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Snake — Arcade</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+
+    <!-- Start screen -->
+    <section id="screen-start" class="screen active">
+      <h1 class="logo">🐍 SNAKE</h1>
+      <p class="tagline">The full arcade package</p>
+      <div class="difficulty-row">
+        <button class="difficulty-btn" data-difficulty="slow" type="button">🐢 Slow</button>
+        <button class="difficulty-btn" data-difficulty="normal" type="button">⚡ Normal</button>
+        <button class="difficulty-btn" data-difficulty="fast" type="button">🔥 Fast</button>
+      </div>
+      <div class="panel">
+        <h2>🏆 High Scores</h2>
+        <ol id="start-scores" class="score-table"></ol>
+      </div>
+      <p class="hint">Arrow keys / WASD / swipe / d-pad to steer<br>P or Space to pause · auto-pauses when the tab hides</p>
+    </section>
+
+    <!-- Game screen -->
+    <section id="screen-game" class="screen">
+      <div class="hud">
+        <div class="hud-item"><span class="hud-label">Score</span><span id="hud-score" class="hud-value">0</span></div>
+        <div class="hud-item"><span class="hud-label">Best</span><span id="hud-best" class="hud-value">0</span></div>
+        <div class="hud-item"><span class="hud-label">Level</span><span id="hud-level" class="hud-value">1</span></div>
+        <button id="btn-pause" class="icon-btn" type="button" aria-label="Pause">⏸</button>
+      </div>
+      <div id="board-wrap">
+        <canvas id="board" role="img" aria-label="Snake game board"></canvas>
+        <div id="pause-overlay" class="overlay hidden">
+          <div class="overlay-card">
+            <h2>⏸ PAUSED</h2>
+            <button id="btn-resume" class="btn primary" type="button">Resume</button>
+          </div>
+        </div>
+      </div>
+      <div class="dpad" aria-label="Direction pad">
+        <button class="dpad-btn" data-dir="UP" type="button" aria-label="Up">▲</button>
+        <button class="dpad-btn" data-dir="LEFT" type="button" aria-label="Left">◀</button>
+        <button class="dpad-btn" data-dir="RIGHT" type="button" aria-label="Right">▶</button>
+        <button class="dpad-btn" data-dir="DOWN" type="button" aria-label="Down">▼</button>
+      </div>
+    </section>
+
+    <!-- Game-over screen -->
+    <section id="screen-over" class="screen">
+      <h1 id="over-title" class="logo">Game Over</h1>
+      <p class="final-score">Final score: <span id="over-score">0</span></p>
+      <div id="over-qualify" class="qualify hidden">
+        <label for="name-input">🌟 New high score! Enter your name:</label>
+        <div class="name-row">
+          <input id="name-input" type="text" maxlength="12" placeholder="PLAYER" autocomplete="off">
+          <button id="btn-save-score" class="btn primary" type="button">Save</button>
+        </div>
+      </div>
+      <div class="panel">
+        <h2>🏆 High Scores</h2>
+        <ol id="over-scores" class="score-table"></ol>
+      </div>
+      <div class="actions">
+        <button id="btn-restart" class="btn primary" type="button">Play again</button>
+        <button id="btn-home" class="btn" type="button">Menu</button>
+      </div>
+    </section>
+
+  </div>
+  <script src="game.js"></script>
+</body>
+</html>

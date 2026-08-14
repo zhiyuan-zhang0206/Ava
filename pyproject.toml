@@ -1,0 +1,591 @@
+[project]
+name = "ava"
+version = "0.1.5"
+description = "minimal code-as-action agent"
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "Ava contributors" }]
+keywords = ["agent", "llm", "code-as-action", "langgraph", "anthropic"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Application Frameworks",
+]
+requires-python = ">=3.12"
+dependencies = [
+    "argon2-cffi>=23.1.0",
+    "psycopg[binary]>=3.2",
+    "psutil>=5.9.0",
+    "langchain-anthropic>=0.3",
+    "langgraph>=0.3",
+    "python-dotenv>=1.2.2",
+    "redis>=7.4.0",
+    "pydantic-settings>=2.13.1",
+    "langgraph-checkpoint-postgres>=3.0.5",
+    "fastapi>=0.120",
+    "uvicorn[standard]>=0.40",
+    "loguru>=0.7.3",
+    "mcp>=2.0.0,<3",
+    "langchain-google-genai>=4.2.4",
+    "langchain-openai>=0.3",
+    "langchain-moonshot>=0.1.0",
+    "langchain-xai>=1.2.0",
+    "croniter>=6.2.2",
+    "google-genai>=2.0",
+    "watchdog>=6.0.0",
+    "numpy>=2.4.4",
+    "pymilvus[milvus-lite]>=3.0.0",
+    "pyte>=0.8.0",  # terminal emulation screen model for PTY sessions (S6 step 2)
+    "traceloop-sdk>=0.61",
+    # Imported directly: shared/trace.py (span exporter, OTLP protobuf encode)
+    # and shared/telemetry_otlp.py (OTLP/HTTP logs + metrics exporters).
+    # Transitively pulled by traceloop-sdk already; declared here because we
+    # import them by name.
+    "opentelemetry-sdk>=1.30",
+    "opentelemetry-exporter-otlp-proto-http>=1.30",
+    "yt-dlp>=2026.3.17",
+    "browser-cookie3>=0.20.1",
+    "pyyaml>=6.0.3",
+    "markdown-it-py>=4.0",  # CommonMark markdown rendering for ava.ui.serve_markdown
+    "mdit-py-plugins>=0.4",  # GFM plugin set (tables / strikethrough / task lists)
+    "httpx>=0.28",
+    "feedparser>=6.0.12",
+    "trafilatura>=2.1.0",
+    # --- Common libraries pre-installed for the agent runtime (task #630) ---
+    # Agents routinely import these (data/image/Excel/PDF/HTTP); the user wants
+    # them available out of the box even though the set is heavy. Deliberately
+    # excluded: torch / tensorflow / jax / transformers / opencv / numba / dask.
+    "pandas>=2.2.3",  # tabular data — DataFrame
+    "scipy>=1.14.1",  # scientific computing
+    "scikit-learn>=1.5.0",  # machine learning
+    "statsmodels>=0.14.4",  # statistics / regression
+    "matplotlib>=3.9.0",  # plotting
+    "Pillow>=10.4.0",  # image processing (PIL)
+    "openpyxl>=3.1.2",  # Excel .xlsx read/write
+    "xlsxwriter>=3.2.0",  # Excel .xlsx writing
+    "python-docx>=1.1.0",  # Word .docx
+    "pypdf>=4.2.0",  # PDF text extraction
+    "requests>=2.32.0",  # sync HTTP client
+    "aiohttp>=3.9.0",  # async HTTP client
+    "beautifulsoup4>=4.12.3",  # HTML parsing
+    "lxml>=5.2.0",  # fast XML/HTML parsing
+    "rich>=13.7.0",  # terminal formatting
+    "tqdm>=4.66.0",  # progress bars
+    "python-dateutil>=2.9.0",  # date parsing
+    "tabulate>=0.9.0",  # table formatting
+    "cryptography>=42.0.0",  # crypto primitives
+    "lark-oapi>=1.7.1",
+    "websockets>=15.0.1",
+]
+
+[project.scripts]
+# `uv sync` installs `.venv/bin/ava` — cluster ops CLI (start/stop/status/update/...).
+# Implementation in `cli/main.py` (argparse entry) + `cli/parsers/` (per-domain builders
+# + handlers) + `cli/commands/` (cmd_* implementations). Decoupled from the `ava/`
+# SDK — the agent is unaware of docker / cron.
+ava = "cli.main:main"
+
+[project.urls]
+Homepage = "https://github.com/<user>an-zhang0206/Ava"
+Repository = "https://github.com/<user>an-zhang0206/Ava"
+Issues = "https://github.com/<user>an-zhang0206/Ava/issues"
+
+[build-system]
+# hatchling is the default minimal builder for the uv / PEP 621 stack. `[tool.uv] package
+# = true` makes `[project.scripts]` take effect and install the `ava` CLI entry point. Other top-level dirs
+# (agent/ gateway/ services/ shared/) don't go into the wheel — these are an application,
+# not a library.
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+# vendor `ava/` (SDK) + `cli/` (ops CLI); two independent packages, agent unaware of
+# CLI's existence. Both dev / deploy use editable install, the actual source running is the working tree.
+packages = ["ava", "cli"]
+
+[tool.uv]
+package = true
+
+[dependency-groups]
+dev = [
+    "import-linter>=2.0",
+    "pre-commit>=4.5.1",
+    "pyright>=1.1.402",
+    "pytest>=9.0.3",
+    "pytest-asyncio>=1.0",
+    "pytest-playwright>=0.7.0",
+    "pytest-xdist>=3.8",
+    "ruff>=0.15.12",
+    "pytest-cov>=7.0",
+    # starlette 1.2+ TestClient prefers httpx2 over httpx; declaring it here
+    # makes the in-process TestClient (FastAPI re-exports starlette's) run on
+    # httpx2 and silences the deprecation warning. Prod HTTP stays on httpx
+    # (the SDKs + bootstrap fetch); httpx2 is test-only.
+    "httpx2>=2.3.0",
+    "mutmut>=3.5.0",
+]
+
+# Import-direction contract: lock the layering the sink refactors established
+# so no new reverse edge can creep back in. A lower layer importing a higher
+# one fails CI; higher importing lower is allowed (agent imports ava; everyone
+# imports shared).
+#
+# `services` is deliberately NOT a layer: the package straddles levels —
+# `services.memory_indexer` is imported by gateway (so it sits below gateway),
+# while `services.labeler` / `services.runner` / `services.restarter` etc. are
+# daemons that import gateway (so they sit above it). That submodule-level
+# split would need its own contracts; out of scope here, so the layers
+# contract covers only the clean spine and a separate forbidden contract locks
+# the one reverse edge the sinks removed (services -> agent). `plugins` is left
+# ungoverned (the built-in ava_compact is intentionally coupled to the agent
+# kernel, so agent <-> plugins is cyclic by design).
+[tool.importlinter]
+root_packages = ["shared", "ava", "agent", "gateway", "cli", "ops", "services", "ava_builtins"]
+
+[[tool.importlinter.contracts]]
+name = "Layered architecture (shared < ava < agent < gateway < cli)"
+type = "layers"
+layers = [
+    "cli",
+    "gateway",
+    "agent",
+    "ava",
+    "shared",
+]
+
+[[tool.importlinter.contracts]]
+name = "services must not import the agent kernel"
+type = "forbidden"
+source_modules = ["services"]
+forbidden_modules = ["agent"]
+
+# Ops layer: shared < ops < {gateway, cli}. The ops module (Spec / Status /
+# controllers) sits above shared and is consumed by gateway + cli (and by the
+# services daemons, which become thin mains over the controllers) — but must never
+# reach up into them. A standalone layers contract (not folded into the main stack)
+# because ops's relationship to ava/agent is still being untangled. The gateway
+# <-> cli HTTP API contracts that BOTH speak (MachineStatus / Config*) are
+# downshifted to `shared.api_contracts` — below both ops and gateway — so cli
+# decodes a gateway response without importing up; ops keeps only the
+# gateway<->runner RPC-shared closure (ops/rpc_schemas.py). See
+# ops/ops-module.md.
+[[tool.importlinter.contracts]]
+name = "Ops layer (shared < ops < {gateway, cli})"
+type = "layers"
+layers = [
+    "gateway | cli",
+    "ops",
+    "shared",
+]
+
+[tool.ruff]
+line-length = 100
+# Vendored third-party skill content (inventory + upstream versions in
+# ava_builtins/skills/VENDORED.md) is kept byte-identical to upstream so a future
+# sync can diff it directly. Reformatting or relinting it here would turn every
+# upstream comparison into pure noise, so it is excluded from both check and
+# format. Ava-authored SKILL.md prose beside it is still reviewed normally; only
+# the untouched upstream payload is exempt.
+extend-exclude = ["ava_builtins/skills/ava-ui/dataviz/scripts"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",       # pycodestyle
+    "F",            # pyflakes
+    "I",            # isort
+    "B",            # bugbear
+    "UP",           # pyupgrade
+    "N",            # pep8-naming
+    "SIM",          # simplify
+    "RUF",          # ruff-specific
+    "ARG",          # unused arguments
+    "C4",           # comprehensions
+    "PTH",          # pathlib over os.path
+    "PIE",          # misc
+    "RET",          # return statements
+    "Q",            # quotes
+    "RSE",          # raise statements
+    "ERA",          # commented-out code
+    "DTZ",          # datetime timezone
+    "S",            # bandit security
+    "TID",          # tidy imports
+    "LOG",          # logging
+    "PL",           # pylint
+    "TRY",          # tryceratops (try/except best practices)
+    "FBT",          # boolean trap
+    "ANN",          # type annotations
+    "T20",          # flake8-print: framework code logs via shared.log.logger, not print()
+]
+ignore = [
+    "E501",         # line too long — formatter handles
+    "S102",         # exec() is core to this design
+    "PLR0911",      # too many return statements — dispatch-style match/case naturally has many returns
+    "PLR0912",      # too many branches — top-level orchestration functions (cmd_start etc.) naturally have many branches
+    "PLR0913",      # too many arguments
+    "PLR2004",      # magic value comparisons
+    "PLC0415",      # import inside function
+    "TRY003",       # long exception messages
+    "TRY300",       # consider moving to else block
+    "S607",         # partial executable path — we resolve git / npx / uvx all via PATH,
+                    # don't pin absolute paths (varying across dev / docker environments is a feature, not a bug)
+    "ANN401",       # allow Any — LangGraph state dict / SDK reflection / MCP dynamic
+                    # tool dispatch etc. naturally can't be precisely typed
+    "PLC0414",      # `from X import Y as Y` is PEP 484 explicit re-export, required under pyright
+                    # strict; ruff by default treats alias-equal-to-original as a noop, conflicting
+                    # with typed Python convention. Allowed across the codebase.
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101", "PLR2004", "SLF001", "ARG001", "ARG002", "ANN", "FBT", "RUF001", "RUF002", "RUF003"]
+"demos/*" = ["RUF001", "RUF002", "RUF003", "ARG001", "ERA001", "S108"]
+# schedules/* are version-controlled deployment templates (runnable scripts
+# referenced by the ops docs), not runtime source: exempt them from source-level
+# rules (typing, ambiguous unicode, security heuristics) so they stay readable.
+"schedules/*" = ["ANN", "RUF003", "S", "DTZ", "PTH", "TID", "I", "UP", "ERA", "Q", "RET", "ARG", "PLR2004", "T201"]
+# FBT: a boolean positional in a test is the value-under-test (e.g.
+# `validate("browser_enabled", True)`), not a real boolean-trap call site.
+# Skill reference snippets are agent-facing examples the agent reads and adapts;
+# a commented-out alternative (e.g. a fallback implementation) is intentional
+# documentation, not dead code (ERA001). Some reference scripts are runnable
+# CLIs the agent invokes via bash and that print their JSON result to stdout —
+# print() is their output contract (T20). Reference modules are historical /
+# example code (e.g. low-level ctypes + subprocess probes) the agent reads and
+# adapts, not the maintained live path, so the subprocess/security heuristics,
+# bugbear, pylint-refactor and naming nits are noise here.
+"ava_builtins/skills/*/reference/*.py" = ["ERA001", "T20", "B904", "F841", "RUF059", "PLW1510", "S110", "S112", "S603", "C401", "PLR0915", "N806"]
+# Skill scripts are runnable CLIs the agent invokes via bash: print() is their
+# stdout contract (T20); they drive the OS through hardcoded subprocess commands
+# (open / screencapture / osascript / pbcopy) writing to a /tmp scratch dir, so
+# the subprocess/temp-file security lints are noise (S603, S108); boolean flags
+# and best-effort subprocess.run are fine here (FBT, PLW1510, PTH, ANN).
+"ava_builtins/skills/*/scripts/*.py" = ["ERA001", "T20", "S603", "S108", "FBT", "PLW1510", "PTH", "ANN"]
+# Project skills under .agents/skills/ ship the same kind of runnable CLI
+# scripts — same exemptions apply.
+".agents/skills/*/scripts/*.py" = ["ERA001", "T20", "S603", "S108", "S310", "FBT", "PLW1510", "PTH", "ANN"]
+# Same intent for skill reference files bundled inside a plugin's skill package
+# (a plugin can ship its own skill tree under ava_builtins/plugins/<name>/skills/...).
+"ava_builtins/plugins/*/skills/**/reference/*.py" = ["ERA001", "T20", "B904", "F841", "RUF059", "PLW1510", "S110", "S112", "S603", "C401", "PLR0915", "N806"]
+"ava_builtins/plugins/*/skills/**/scripts/*.py" = ["ERA001", "T20", "S603", "S108", "FBT", "PLW1510", "PTH", "ANN"]
+"scripts/*" = ["ANN", "T20"]
+# T20 exemptions — print() is legitimate here: cli/ writes to the user's
+# terminal; ava/ and plugins/ print() is agent-facing dump (help() / context
+# injection), the SDK's documented output channel.
+"cli/*" = ["T20"]
+"ava/*" = ["T20"]
+"ava_builtins/plugins/*" = ["T20"]
+# ops CLI runs docker / tmux / cron / curl — all hardcoded commands + static args;
+# S603 (subprocess untrusted input) is meaningless.
+"cli/commands/*.py" = ["S603"]
+"services/healthchecks/*.py" = ["S603"]
+# ava_syntax_fix uses fullwidth chars in docstrings as examples of what the fixer targets,
+# and carries Chinese notes from data analysis of real error corpora.
+"ava_builtins/plugins/ava_syntax_fix/*" = ["RUF001", "RUF002", "RUF003"]
+# CJK regex explanation comment — legitimate.
+"scripts/lint_agent_docstrings.py" = ["RUF003"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["ava", "cli", "shared", "runtime"]
+
+[tool.ruff.format]
+quote-style = "double"
+line-ending = "lf"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+# importlib mode lets tests/ not require __init__.py; same-named test_X.py in different subdirs
+# also doesn't collide (pytest uses full module path tests.foo.test_X rather than bare test_X). The default
+# prepend mode requires __init__.py for every dir containing tests, inconsistent and prone to basename collisions.
+addopts = ["-ra", "--strict-markers", "--import-mode=importlib"]
+markers = [
+    # Opt out of the autouse agent-launch guard (tests/conftest.py) for tests that
+    # exercise the *real* gateway.agents._launch_agent_process (spawn confirm /
+    # logs-dir / env-forward / config-overlay argv paths) rather than a spawn that
+    # should be a no-op.
+    "real_agent_launch: let this test call the real _launch_agent_process",
+    # Opt out of the autouse warm-up guard (tests/conftest.py) for tests that
+    # exercise the *real* cli.commands._launch_agent_warmup (role gate / Popen
+    # argv / detach) rather than a launch that should be a no-op.
+    "real_warmup_launch: let this test call the real _launch_agent_warmup",
+    # Opt out of the autouse daemon-respawn guard (tests/conftest.py) for tests that
+    # exercise the *real* shared.service_respawn.respawn_service — argv-shape
+    # assertions against a faked subprocess.run, or the venv-activation test that
+    # genuinely spawns a session.
+    "real_service_respawn: let this test call the real respawn_service",
+    # Opt out of the autouse cluster-spawn guard (tests/conftest.py) for tests whose
+    # subject IS ops.cluster.unpause_local_cluster / spawn_update / spawn_rollout /
+    # spawn_restart — they fake subprocess.run, so nothing is really spawned.
+    "real_cluster_spawn: let this test call the real ops.cluster spawn entry points",
+    # Opt out of the autouse gateway-readiness guard (tests/conftest.py) for tests whose
+    # subject IS the pre-Phase-B gate — they stub the probe seams instead, so nothing
+    # is really dialed.
+    "real_gateway_readiness_gate: let this test call the real await_gateway_serving",
+    "real_service_readiness_gate: let this test call the real _wait_for_services_ready",
+    "real_health_port_gate: let this test call the real _occupied_health_ports",
+    # Tests that are timing-sensitive, race-prone, or use real DB LISTEN/NOTIFY —
+    # run serial (-n 1) while stable tests run parallel (-n auto).
+    "flaky: timing-sensitive or race-prone test that must run serially",
+]
+# The kernel goes fully async (psycopg AsyncConnection / AsyncPostgresSaver / aioredis
+# / asyncio.create_subprocess_exec) — tests written as `async def test_...` auto-run,
+# no need to hang `@pytest.mark.asyncio` on each. Pure synchronous tests (UI / SDK / pure
+# helpers) are unaffected.
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+# Actionable warnings are fixed at the source, not filtered: psycopg
+# ConnectionPool `open=` at each call site; the langgraph `allowed_objects`
+# PendingDeprecationWarning by upgrading langgraph-checkpoint to 4.1.1 (it now
+# passes `Reviver(allowed_objects="core")`). The one filter here is a
+# test-harness artifact: starlette's TestClient warns when code under test
+# passes `timeout=` to its httpx-shaped client (bootstrap.fetch_bootstrap_config
+# does, correctly, for real httpx in prod) — not a prod issue.
+filterwarnings = [
+    "ignore:You should not use the .timeout. argument with the TestClient:DeprecationWarning",
+    # traceloop's own models still use pydantic v1 class-based `config`. Scoped to
+    # traceloop's module so our own class-based-config deprecations stay visible.
+    "ignore::pydantic.PydanticDeprecatedSince20:traceloop.sdk.prompts.model",
+]
+
+[tool.coverage.run]
+source = ["agent", "ava", "cli", "gateway", "shared", "ava_builtins"]
+omit = [
+    "*/__main__.py",
+    "*/__init__.py",
+    "*/tests/*",
+]
+
+[tool.coverage.report]
+# fail_under is intentionally NOT set here: the hard gate lives in ci.yml's
+# coverage-gate steps (BACKEND_COVERAGE_THRESHOLD=80 / FRONTEND_COVERAGE_THRESHOLD=77),
+# whose env fallbacks equal the env values. Local runs use this file's
+# measurement set ([tool.coverage.run].source) without a blocking floor
+# (audit round-2 tests-ci P2 — the old comment described a pre-gate era).
+# fail_under = 60
+exclude_also = [
+    "def __repr__",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "@(abc\\.)?abstractmethod",
+]
+show_missing = true
+skip_covered = false
+
+[tool.coverage.html]
+directory = "htmlcov"
+
+
+[tool.pyright]
+# "strict" mode: catches real bugs (un-unwrapped Optional, parameter type mismatch, missing
+# attribute, wrong call signature) + enforces type annotation completeness in this repo.
+# Every strict rule that produces actionable signal here stays at error level and blocks merge.
+# The reportUnknown*/reportMissing* family is run on a LADDER (see reportUnknown* block below):
+# "warning" globally + "error" on the shared/ops/services core via executionEnvironments.
+# Measured cost (origin/main, pyright 1.1.402): 11319 total findings, of which 85% (9644) land in
+# tests/ — monkeypatch lambdas, fake-helper signatures, and untyped-assignment scaffolding that is
+# idiomatic test-stub style, not a bug signal. The historical "third-party stacks lack stubs"
+# rationale no longer holds: every dependency now ships py.typed (langchain_core / redis / psycopg /
+# loguru / httpx / fastapi / starlette / anthropic / pydantic / openai / langgraph), and only ~0.6%
+# of findings name any library type — the rest is `Type of "x" is unknown` propagated from our own
+# untyped code. So the ladder gates the highest-signal core layers at error (234 findings, all
+# fixed here) while keeping the rest visible-but-non-blocking at warning; CI's `uv run pyright` and
+# the pre-commit hook both exit 0 on warnings, so the global downgrade never blocks merge.
+# reportUnnecessaryIsInstance stays fully OFF (see its own note below).
+typeCheckingMode = "strict"
+pythonVersion = "3.12"
+# Point pyright at the in-checkout venv so it resolves third-party imports when
+# invoked directly (`.venv/bin/pyright`) — without this it only finds the venv
+# when `uv run` has exported VIRTUAL_ENV, so a bare/pre-commit invocation would
+# report every third-party import as unresolved.
+venvPath = "."
+venv = ".venv"
+include = [
+    "ava",
+    "agent",
+    "cli",
+    "gateway",
+    "ops",
+    "ava_builtins",
+    "services",
+    "shared",
+    "scripts",
+    "tests",
+]
+exclude = [
+    "**/__pycache__",
+    "**/.venv",
+    # `.claude/worktrees` is the actual location of the current worktree.
+    ".claude/worktrees",
+    # Skill reference snippets are agent-facing examples the agent reads and
+    # adapts, not importable code — they cite plugin-provided `ava.*` surface
+    # (e.g. `ava.self.log`) absent from a bare `import ava`. Mirrors the ruff
+    # per-file-ignores for the same paths.
+    "ava_builtins/skills/*/reference",
+    "ava_builtins/plugins/*/skills/**/reference",
+    # Vendored upstream code, held byte-identical for upstream diffing — see the
+    # extend-exclude note under [tool.ruff] and ava_builtins/skills/VENDORED.md.
+    "ava_builtins/skills/ava-ui/dataviz/scripts",
+]
+# Libraries with incomplete third-party stubs — temporarily lenient.
+reportMissingTypeStubs = false
+# tests deliberately import internal helpers prefixed with underscore (_handle_compact_if_any
+# etc.) for unit tests, not as implementation users.
+reportPrivateUsage = "none"
+reportUnusedFunction = "none"
+# Ladder (see the [tool.pyright] header for cost data): global "warning" makes all 11319 Unknown/
+# Missing findings visible in the IDE and CI logs without gating merge; the shared/ops/services
+# executionEnvironments below raise these same seven rules to "error" on the core layers, where the
+# 234 real findings have been annotated away. tests/ stays at warning — its 9644 findings are
+# monkeypatch/fake-helper stub idiom, not bugs, and gating them would be pure churn.
+reportUnknownMemberType = "warning"
+reportUnknownArgumentType = "warning"
+reportUnknownVariableType = "warning"
+reportUnknownParameterType = "warning"
+reportMissingParameterType = "warning"
+reportUnknownLambdaType = "warning"
+reportMissingTypeArgument = "warning"
+# defensive isinstance/issubclass at dispatch entry points (e.g. plugin author passed a non-
+# BaseModel / env-loaded factory return / plugin-tampered ava.state_update) is a
+# fail-fast guard, pulling "caller error" forward to an entrypoint TypeError, not dead code.
+# pyright statically over-narrows the guarded value (it can't see the runtime-dynamic source) and
+# flags every such guard as "unnecessary" — all 18 current findings are false positives of exactly
+# this kind, so the rule is off rather than left as ignored warnings.
+reportUnnecessaryIsInstance = "none"
+
+# Ladder rung: raise the reportUnknown*/reportMissing* family to "error" on the highest-signal core
+# layers, gating merge there while the rest of the tree stays at the global "warning". These three
+# roots carried 234 findings on origin/main, all fixed. Expand outward (gateway / agent / ava …) by
+# adding roots here once each layer is annotated.
+[[tool.pyright.executionEnvironments]]
+root = "shared"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+reportUnknownVariableType = "error"
+reportUnknownParameterType = "error"
+reportMissingParameterType = "error"
+reportUnknownLambdaType = "error"
+reportMissingTypeArgument = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "ops"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+reportUnknownVariableType = "error"
+reportUnknownParameterType = "error"
+reportMissingParameterType = "error"
+reportUnknownLambdaType = "error"
+reportMissingTypeArgument = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "services"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+reportUnknownVariableType = "error"
+reportUnknownParameterType = "error"
+reportMissingParameterType = "error"
+reportUnknownLambdaType = "error"
+reportMissingTypeArgument = "error"
+
+# Ladder rung — tests/ call-site rules (audit round-2 tests-ci P1, task
+# #1143). The two call-signature rules gate merge on these test directories:
+# the first ones zeroed by the tests/ annotation sweep (integration 16, e2e
+# 25 findings on 2026-08-10). Expand outward by zeroing a directory then
+# adding its EE here.
+[[tool.pyright.executionEnvironments]]
+root = "tests/integration"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "tests/e2e"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "tests/scripts"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "tests/ops"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "tests/plugins"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "tests/skills"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "tests/ava"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "tests/agent"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "tests/cli"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "tests/gateway"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "tests/shared"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "tests/services"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "cli"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "gateway"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "agent"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[tool.mutmut]
+# Mutation testing exploratory config (mutmut).
+# Modify paths_to_mutate / tests_dir
+# to switch target. mutmut runs pytest in mutants/ dir; also_copy lists all source pkgs
+# in this repo so conftest imports don't ModuleNotFoundError.
+paths_to_mutate = ["agent/loop.py"]
+tests_dir = [
+    "tests/agent/test_loop.py",
+    "tests/agent/test_loop_main.py",
+]
+also_copy = [
+    "shared",
+    "agent",
+    "gateway",
+    "ava",
+    "cli",
+    "services",
+    "scripts",
+    "ava_builtins",
+    "db",
+    "migrations",
+]

@@ -1,0 +1,261 @@
+"""Structural lints that keep the codebase legible to agents: no `TYPE_CHECKING`
+import-folding, and a per-file line ceiling.
+
+Run: `.venv/bin/python scripts/lint_code_structure.py [path ...]` (defaults to the
+whole repo). Also run automatically via pre-commit hook before commit.
+
+## Why
+
+A fully agent-generated codebase is optimized first for the agent's ability to
+reason over it directly. Two structural rules protect that:
+
+### Rule 1: no `if TYPE_CHECKING:` import folding
+
+All dependencies are imported at top level. Reasons (see AGENTS.md "Python
+coding conventions"): an application's deps are always on the runtime path, so
+the startup-cost TYPE_CHECKING saves does not exist (the module is already
+cached); and LangGraph / Pydantic introspect type hints at runtime via
+`get_type_hints()` / `inspect.signature`, so a name imported only under
+`TYPE_CHECKING` raises NameError. The genuine exceptions — a real circular
+import, or an `import torch`-class heavy dependency on a path that does not use
+the type — go in `_TYPE_CHECKING_ALLOWED` with a one-line reason.
+
+### Rule 2: per-file line budget (500 soft / 800 hard)
+
+500-800 lines is a transitional zone: tolerated, but surfaced on every full run
+as a nudge to split. Past 800 it is a hard error — a file that large is hard for
+an agent to hold in context and reason about as a unit. `_OVERSIZE_ALLOWED`
+grandfathers the few files that exceed 800 yet are genuinely cohesive (a single
+schema block, an aggregator re-export) and should not be split. It carries a
+second, clearly-marked section for the opposite case: files that are simply too
+big and were inherited when a previously ungated package entered `_SCAN_DIRS`.
+Those are debt with a pending split, not a blessing — the distinction is the
+point of listing them separately rather than raising the ceiling.
+
+Scope (`_SCAN_DIRS`) tracks `[tool.importlinter] root_packages` in pyproject.toml,
+so a new governed package is gated the moment it is declared a layer.
+
+Hard violations (TYPE_CHECKING, over-800) print `file:line: <remediation>` and
+fail the run; transitional-zone files print a note to stderr and do not fail.
+"""
+
+from __future__ import annotations
+
+import ast
+import sys
+from pathlib import Path
+
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+
+_TRANSITIONAL_FLOOR = 500
+_HARD_CEILING = 800
+
+# Core source held to the line budget — scripts/migrations/db/tests
+# are not scanned.
+#
+# Kept in step with `[tool.importlinter] root_packages` in pyproject.toml, which
+# is the repo's standing list of governed source packages. A package that is a
+# layer there but absent here is silently ungated, and that is an easy hole to
+# fall into: this tuple was written once (2026-05-28) and never revisited, so
+# `ops/` — extracted out of the scanned `gateway/` a month later — carried its
+# files out of the budget with it. `ava_builtins` (mcps + skills + plugins)
+# entered 2026-08-07 (Task #1011) after its oversized files were split to the
+# budget. Its `skills/*/reference/*.py` are agent-facing reference scripts and
+# `skills/*/vendor/` holds vendored third-party payloads, but only `*.py` is
+# collected by `_iter_py_files` anyway — the vendored highlight.js under
+# skills/ava-ui/widgets/markdown/vendor/ is outside the scan by construction.
+_SCAN_DIRS = (
+    "agent",
+    "ava",
+    "ava_builtins",
+    "gateway",
+    "shared",
+    "services",
+    "ops",
+    "cli",
+)
+
+# Files allowed to exceed _HARD_CEILING — naturally cohesive single units that
+# splitting would only scatter:
+#   shared/config/agent.py - per-domain AgentSettings schema block; splitting breaks `settings.agent.*`
+#   (gateway/schemas.py was split into gateway/schemas/ package — all files under 500 lines)
+_OVERSIZE_ALLOWED = frozenset(
+    {
+        # Per-domain config schema block (AgentSettings) — one cohesive pydantic
+        # class; splitting it would break `settings.agent.*` aggregation or force
+        # inheritance chains that cost more than they save. Same rationale as the
+        # original single-file Settings schema (decomposed into this package,
+        # 2026-08) — the cohesion rationale outlives the file.
+        "shared/config/agent.py",
+        # agent/db.py — kernel inbound-queue SQL module: inbound CRUD, claim,
+        # two-phase reconcile + the stale-claimed dead-letter cutoff (Task
+        # #654). One cohesive data-plane surface at the 800-line ceiling; the
+        # reconcile logic shares the claim/status machinery it would have to
+        # import back if split out.
+        "agent/db.py",
+        # cli/commands/update.py was split out of the exemption list with the
+        # 2101-line -> 13-module refactor (2026-08): the orchestration core now
+        # fits the 800-line ceiling on its own, and the `_update_*` helpers each
+        # stay under 500.
+        # The /api/agents/* router surface — CRUD + lifecycle handlers plus the
+        # endpoint-private cross-machine forward helpers (deliberately co-located
+        # per the module docstring, not in ops_*.py); splitting scatters one
+        # cohesive routing surface.
+        "gateway/routers/agents.py",
+        # Inbound dispatch — single cohesive state machine: long-poll wait,
+        # batch claim, kind-based dispatch (chat/restart/terminate/compact/
+        # resurrect/fork), lifecycle routing, and idle-restart gate; splitting
+        # scatters the dispatch control flow across files.
+        # services/im_bridge/core.py — IM Bridge core: envelope, command
+        # routing, per-channel state, SSE subscription push, and the inbound
+        # outbox (Task #1032). One cohesive module; the pieces it was already
+        # split into (spawn_menu, notice_bridge, push_watchdog) live beside it.
+        "services/im_bridge/core.py",
+        "agent/graph/_claim.py",
+        # gateway/loki_events.py — the whole Loki read-side query surface in
+        # one module: history slice, exact count, payload aggregates, projected
+        # rows and grouped counts share the pipeline builders
+        # (_build_logql/_agg_pipeline/_escape_label); splitting would scatter
+        # the shared LogQL machinery (task #1197 A3).
+        "gateway/loki_events.py",
+        # shared/metrics_aggregate.py — aggregate fetch + report assemblers +
+        # the injected LokiBackend contract: one cohesive unit whose pieces
+        # (counts/groups/projected rows) share the EventAggregate shape (task
+        # #1197 A3).
+        "shared/metrics_aggregate.py",
+        # The grandfathered-DEBT section that sat here is gone: `ops/cluster.py`
+        # and `ops/agents.py` were listed only because `ops/` was ungated until it
+        # entered _SCAN_DIRS, and both are now split. Every entry above is a
+        # deliberate cohesion exemption, so there is no longer a second category —
+        # a new entry here has to argue cohesion, not inheritance.
+        # shared/plugin_metrics.py — the metric registry: MetricSpec schema +
+        # the SQL-template whitelist + dialect routing to the LogQL validation
+        # (split to shared/metrics_logql.py, task #1280) + template rendering,
+        # one cohesive registry surface the gateway and generator both consume;
+        # the SQL-whitelist section (500+ lines) shares its helpers with the
+        # render path, so a split would force a circular import.
+        "shared/plugin_metrics.py",
+    }
+)
+
+# Files allowed to use `if TYPE_CHECKING:` — real circular import or heavy
+# optional dependency. Empty today; add an entry with a one-line reason.
+_TYPE_CHECKING_ALLOWED: frozenset[str] = frozenset()
+
+
+def _type_checking_violations(tree: ast.Module) -> list[int]:
+    """Line numbers of `if TYPE_CHECKING:` / `if typing.TYPE_CHECKING:` blocks."""
+    hits: list[int] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.If):
+            continue
+        test = node.test
+        name = (
+            test.id
+            if isinstance(test, ast.Name)
+            else test.attr
+            if isinstance(test, ast.Attribute)
+            else None
+        )
+        if name == "TYPE_CHECKING":
+            hits.append(node.lineno)
+    return hits
+
+
+def _scan_file(path: Path, rel_path: str) -> list[tuple[int, str, str]]:
+    """Return [(lineno, message, severity), ...]; severity is "error" | "note"."""
+    text = path.read_text(encoding="utf-8")
+    out: list[tuple[int, str, str]] = []
+
+    if rel_path not in _TYPE_CHECKING_ALLOWED:
+        for lineno in _type_checking_violations(ast.parse(text, filename=rel_path)):
+            out.append(
+                (
+                    lineno,
+                    "`if TYPE_CHECKING:` is banned — import at top level. "
+                    "App deps are always on the runtime path and LangGraph/Pydantic "
+                    "introspect type hints at runtime (deferred imports NameError). "
+                    "Real circular-import / heavy-dep cases: refactor, or add this file "
+                    "to _TYPE_CHECKING_ALLOWED in scripts/lint_code_structure.py with a reason.",
+                    "error",
+                )
+            )
+
+    n_lines = len(text.splitlines())
+    if rel_path in _OVERSIZE_ALLOWED:
+        pass  # grandfathered cohesive file — no line-budget check
+    elif n_lines > _HARD_CEILING:
+        out.append(
+            (
+                n_lines,
+                f"file is {n_lines} lines, over the {_HARD_CEILING}-line hard ceiling — "
+                "split into focused modules. If genuinely cohesive (one schema block / "
+                "an aggregator re-export), add to _OVERSIZE_ALLOWED in "
+                "scripts/lint_code_structure.py with a one-line reason.",
+                "error",
+            )
+        )
+    elif n_lines > _TRANSITIONAL_FLOOR:
+        out.append(
+            (
+                n_lines,
+                f"file is {n_lines} lines, in the {_TRANSITIONAL_FLOOR}-{_HARD_CEILING} "
+                "transitional zone — consider splitting before it hits the hard ceiling.",
+                "note",
+            )
+        )
+    return out
+
+
+def _in_scan_scope(rel_path: str) -> bool:
+    return any(rel_path == d or rel_path.startswith(f"{d}/") for d in _SCAN_DIRS)
+
+
+def _iter_py_files(roots: list[Path]) -> list[Path]:
+    files: list[Path] = []
+    for root in roots:
+        if root.is_file() and root.suffix == ".py":
+            files.append(root)
+        elif root.is_dir():
+            files.extend(root.rglob("*.py"))
+    return files
+
+
+def main(argv: list[str] | None = None) -> int:
+    argv = argv if argv is not None else sys.argv[1:]
+    # argv non-empty = pre-commit passed changed files; empty = full scan of _SCAN_DIRS.
+    targets = [Path(a).resolve() for a in argv] if argv else [_REPO_ROOT / d for d in _SCAN_DIRS]
+
+    errors = 0
+    notes: list[str] = []
+    for path in sorted(_iter_py_files(targets)):
+        try:
+            rel = path.relative_to(_REPO_ROOT).as_posix()
+        except ValueError:
+            rel = path.as_posix()
+        if not _in_scan_scope(rel):
+            continue
+        for lineno, message, severity in _scan_file(path, rel):
+            if severity == "error":
+                errors += 1
+                print(f"{rel}:{lineno}: {message}")
+            else:
+                notes.append(f"{rel}:{lineno}: {message}")
+
+    if notes:
+        print(f"\n{len(notes)} file(s) in the transitional zone (not blocking):", file=sys.stderr)
+        for note in notes:
+            print(f"  {note}", file=sys.stderr)
+
+    if errors:
+        print(
+            f"\n{errors} hard violations. See the docstring at the top of "
+            "scripts/lint_code_structure.py for the rules and exemption procedure.",
+            file=sys.stderr,
+        )
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

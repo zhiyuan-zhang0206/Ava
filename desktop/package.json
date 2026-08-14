@@ -1,0 +1,17 @@
+{
+  "name": "ava-desktop",
+  "version": "0.3.0",
+  "description": "Ava \u5de5\u4f5c\u533a \u2014 Electron \u8584 wrapper\uff08\u5f53\u524d\u89c2\u770b agent \u7684 Page \u81ea\u52a8\u5206\u5c4f\uff09",
+  "main": "electron/main.js",
+  "private": true,
+  "license": "UNLICENSED",
+  "scripts": {
+    "start": "electron .",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder"
+  },
+  "devDependencies": {
+    "electron": "^43.2.0",
+    "electron-builder": "^26.15.3"
+  }
+}

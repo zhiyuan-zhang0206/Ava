@@ -1,0 +1,197 @@
+// Sidebar state hooks: width / collapsed / view mode / sort / stats window are
+// DB-backed user settings (display.sidebar_*), so the choice survives refreshes
+// AND stays in sync across every frontend entrypoint via the shared
+// ["user-settings"] cache. Width is FIXED (user ruling, task #750: dragging
+// was removed — the spawn/toolbar rows must never wrap, and a fixed width
+// makes that unconditional); only collapsed / view mode / sort / stats window
+// write through to the DB.
+//
+// Agent labels don't live here — the backend `threads.label` column is
+// the source of truth; the gateway BackgroundTask runs an LLM in the
+// background to generate a short label when spawn carries a prompt;
+// user overrides go through `api.patchAgentLabel`.
+
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { useCallback } from "react";
+
+import { api } from "./api";
+import type { StatsDashboard } from "./types";
+import { useUserSettings } from "./use-user-settings";
+
+// Fixed sidebar width (task #750, user ruling 2026-08-04: remove the drag
+// resize — a user-tunable width is what let the spawn row wrap). Measured
+// live in Chrome (dev server, macOS): the spawn row needs 417px of content
+// width at minimum — preset(120) + model(120) + effort(80) + Spawn(79.3)
+// + 4×gap-1(16) + the flex-1 spacer(1.7) — plus 24px of px-3 padding and
+// 1px border-right. The previous floor (440) left ZERO slack, so any font
+// or rounding difference wrapped the Spawn button onto a second line.
+// 460 = 442px hard need + 18px slack; the toolbar row (~310px) fits easily.
+export const SIDEBAR_WIDTH = 460;
+// At/above this width the rows switch to the detailed multi-agent
+// monitoring layout (per-row live activity line); below it the sidebar
+// stays the compact lineage tree.
+export const SIDEBAR_WIDE_THRESHOLD = 380;
+
+// Fixed sidebar width + collapsed flag. Width is the SIDEBAR_WIDTH constant
+// (task #750: no drag resize, no persisted display.sidebar_width — a stored
+// legacy value is ignored). Collapsed stays DB-backed (display.sidebar_collapsed)
+// and syncs across frontends WITHIN a session, but is reset to expanded on
+// every entry (#723 ruling — the reset waits for settings to load, see
+// agent-sidebar/index.tsx).
+export function useSidebarWidth(): {
+  width: number;
+  collapsed: boolean;
+  setCollapsed: (c: boolean) => void;
+} {
+  const { settings, setSetting } = useUserSettings();
+  const collapsed = settings["display.sidebar_collapsed"] === true;
+  const setCollapsed = useCallback(
+    (c: boolean) => setSetting("display.sidebar_collapsed", c),
+    [setSetting],
+  );
+
+  return { width: SIDEBAR_WIDTH, collapsed, setCollapsed };
+}
+
+// Whether terminated agents are shown lives in the DB-backed user setting
+// `display.show_terminated` (read via useUserSettings), not here — that keeps
+// the sidebar toggle and the Display settings page pointed at one source of
+// truth instead of a localStorage copy that could drift.
+
+// Whether agents are shown as a flat sortable list (default) or a spawn-lineage
+// tree. Flat + sort-by-id is the default so the list has a stable, predictable
+// order; the tree remains available via the toggle. DB-backed
+// (display.sidebar_view_mode).
+export function useSidebarViewMode(): {
+  viewMode: "tree" | "flat";
+  setViewMode: (v: "tree" | "flat") => void;
+} {
+  const { settings, setSetting } = useUserSettings();
+  const viewMode: "tree" | "flat" =
+    settings["display.sidebar_view_mode"] === "tree" ? "tree" : "flat";
+  const setViewMode = useCallback(
+    (v: "tree" | "flat") => setSetting("display.sidebar_view_mode", v),
+    [setSetting],
+  );
+  return { viewMode, setViewMode };
+}
+
+// Flat-list sort: which key + direction. DB-backed (display.sidebar_sort).
+// Default is id descending (a stable, predictable order); switching to
+// last_active defaults to most-recent-first.
+export type FlatSortKey = "id" | "last_active" | "status";
+export type SortDir = "asc" | "desc";
+export interface SidebarSort {
+  key: FlatSortKey;
+  dir: SortDir;
+}
+export const SIDEBAR_SORT_DEFAULT: SidebarSort = { key: "id", dir: "desc" };
+// Direction a key snaps to when first selected (id/status ascending, last_active
+// most-recent-first); clicking the already-active key reverses it.
+export const SORT_DEFAULT_DIR: Record<FlatSortKey, SortDir> = {
+  id: "desc",
+  last_active: "desc",
+  status: "asc",
+};
+
+function isFlatSortKey(v: unknown): v is FlatSortKey {
+  return v === "id" || v === "last_active" || v === "status";
+}
+
+export function isSidebarSort(v: unknown): v is SidebarSort {
+  if (typeof v !== "object" || v === null) return false;
+  const s = v as Record<string, unknown>;
+  return isFlatSortKey(s.key) && (s.dir === "asc" || s.dir === "desc");
+}
+
+export function useSidebarSort(): {
+  sort: SidebarSort;
+  setSort: (s: SidebarSort) => void;
+} {
+  const { settings, setSetting } = useUserSettings();
+  const raw = settings["display.sidebar_sort"];
+  const sort = isSidebarSort(raw) ? raw : SIDEBAR_SORT_DEFAULT;
+  const setSort = useCallback(
+    (s: SidebarSort) => setSetting("display.sidebar_sort", s),
+    [setSetting],
+  );
+  return { sort, setSort };
+}
+
+// Aggregation windows the stats endpoint accepts (`?hours=`), with the
+// compact labels the selector renders. Must mirror the backend whitelist
+// (`gateway/schemas.py:StatsWindowHours`) — any other value 422s.
+export const STATS_WINDOWS = [1, 6, 24, 72, 168] as const;
+export type StatsWindowHours = (typeof STATS_WINDOWS)[number];
+export const STATS_WINDOW_LABELS: Record<StatsWindowHours, string> = {
+  1: "1h",
+  6: "6h",
+  24: "24h",
+  72: "3d",
+  168: "7d",
+};
+export const STATS_WINDOW_DEFAULT: StatsWindowHours = 24;
+
+// Selected stats window, DB-backed (display.stats_window_hours) so it survives
+// refreshes and syncs across frontends. A stored value outside STATS_WINDOWS
+// (stale from an older build) is ignored and the default kept.
+export function useStatsWindow(): {
+  windowHours: StatsWindowHours;
+  setWindowHours: (h: StatsWindowHours) => void;
+} {
+  const { settings, setSetting } = useUserSettings();
+  const raw = settings["display.stats_window_hours"];
+  const windowHours: StatsWindowHours =
+    typeof raw === "number" && (STATS_WINDOWS as readonly number[]).includes(raw)
+      ? (raw as StatsWindowHours)
+      : STATS_WINDOW_DEFAULT;
+  const setWindowHours = useCallback(
+    (h: StatsWindowHours) => setSetting("display.stats_window_hours", h),
+    [setSetting],
+  );
+  return { windowHours, setWindowHours };
+}
+
+// `/api/stats/dashboard` 5s polling — data source for the sidebar stat
+// cards. Same 5s cadence as `useAgents`, no extra backend hit rate.
+// `error` is exposed to callers so "DB down / endpoint 500" is visually
+// distinguishable from "first load hasn't completed" (StatsCards
+// renders them differently). `windowHours` is part of the query key, so
+// switching the window refetches immediately instead of waiting out the
+// poll interval.
+const STATS_POLL_MS = 5000;
+
+export function useStatsDashboard(windowHours: StatsWindowHours): {
+  stats: StatsDashboard | undefined;
+  error: unknown;
+} {
+  const { data: stats, error } = useQuery({
+    queryKey: ["stats", "dashboard", windowHours],
+    queryFn: () => api.getStatsDashboard(windowHours),
+    refetchInterval: STATS_POLL_MS,
+    // Keep previous data visible when switching the window (e.g. 24h → 7d)
+    // so the stat cards never flicker to "—" placeholders.
+    placeholderData: keepPreviousData,
+  });
+  return { stats, error };
+}
+
+// Relative time formatting — `just now` / `5m` / `2h` / `3d`. Concise,
+// for sidebar rows. The exact date is in the hover tooltip (ISO string
+// passed as title).
+export function formatRelativeTime(iso: string, now: Date = new Date()): string {
+  const t = new Date(iso).getTime();
+  const elapsedMs = now.getTime() - t;
+  if (!Number.isFinite(elapsedMs) || elapsedMs < 0) return "Just now";
+  const sec = Math.floor(elapsedMs / 1000);
+  if (sec < 60) return "Just now";
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m`;
+  const hour = Math.floor(min / 60);
+  if (hour < 24) return `${hour}h`;
+  const day = Math.floor(hour / 24);
+  if (day < 30) return `${day}d`;
+  const month = Math.floor(day / 30);
+  if (month < 12) return `${month}mo`;
+  return `${Math.floor(month / 12)}y`;
+}

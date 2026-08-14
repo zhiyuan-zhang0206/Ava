@@ -1,0 +1,408 @@
+"""Fleet graph endpoint — weighted agent graph for force-directed visualization.
+
+Nodes carry agent identity + status + a recent-work score; edges carry a
+dynamic weight that sums per-event recency decay over a time window.
+
+Data sources (task #1197 LGTM cutover):
+- `agents_meta` + `agents` (Postgres): node identity, liveness, labels.
+- Prometheus (`gateway/prom_metrics.py`): the llm_usage token aggregates —
+  all-time totals + windowed scores — from the OTLP-mapped counters
+  `ava_llm_usage_in_total` / `ava_llm_usage_out_total`.
+- Edge events (audit category, spawn/send_message/fork/resurrect): the
+  frozen PG `events` archive (pre-cutover structural history) stitched with
+  Loki (the live tail). Task #1281 imports the archive into Loki, after
+  which the PG side collapses and this read becomes Loki-only.
+"""
+
+from __future__ import annotations
+
+import math
+from datetime import UTC, datetime, timedelta
+from typing import Annotated, Any, LiteralString
+
+import httpx
+from fastapi import APIRouter, Query, Request
+from psycopg import errors as pg_errors
+
+from gateway import loki_events, prom_metrics
+from gateway.schemas import FleetGraphEdge, FleetGraphNode, FleetGraphResponse, StatsWindowHours
+from shared.log import logger
+from shared.redis_client import sync_redis
+
+router = APIRouter()
+
+# The fleet view polls this endpoint every 5s, while the underlying data moves
+# slowly (all-time token totals, recency-decayed edge weights). A 30s Redis
+# TTL is invisible to that polling cadence but cuts DB query frequency 6x and
+# — the actual incident driver — serves the graph from cache during
+# deploy/lifecycle storms, when Postgres is busy with migration write-amplify
+# and fleet_graph's all-time llm_usage aggregation can exceed the 1min
+# statement timeout. Cache is fail-open: a Redis outage degrades to a direct
+# query, never to a 500.
+_CACHE_TTL_SECONDS = 30
+
+# Audit event names that form edges. Lineage (spawn/fork/resurrect) is
+# permanent and all-time; messages (send_message) decay with recency.
+_EDGE_EVENT_NAMES = ("send_message", "spawn", "fork", "resurrect")
+
+# Loki fetch cap for the edge stream. Audit events are low-volume (a few
+# thousand since the cutover); the cap is a guardrail, not an expectation.
+_LOKI_EDGE_LIMIT = 50_000
+
+# The OTLP-mapped llm_usage counters (shared/telemetry_otlp._record_metrics:
+# int payload field -> Counter named ava_<event>_<field>, Prometheus appends
+# `_total`). The token totals are the sum of the two counters.
+_IN_METRIC = "ava_llm_usage_in_total"
+_OUT_METRIC = "ava_llm_usage_out_total"
+
+
+def _cache_key(
+    *, include_terminated: bool, hours: StatsWindowHours | None, decay_lambda: float
+) -> str:
+    return (
+        f"fleet_graph:{int(include_terminated)}:"
+        f"{int(hours) if hours is not None else 'all'}:{decay_lambda}"
+    )
+
+
+def _read_cached_graph(key: str) -> FleetGraphResponse | None:
+    """Serve a cached response if one exists; fail-open (None) on Redis
+    outage — the next request retries the cache write."""
+    try:
+        with sync_redis(decode_responses=True) as redis:
+            cached = redis.get(key)
+        if cached is not None:
+            return FleetGraphResponse.model_validate_json(cached)
+    except Exception as exc:
+        logger.debug("fleet_graph cache read failed — falling back to direct query: %s", exc)
+    return None
+
+
+def _fetch_loki_edges(*, boundary: datetime | None, now: datetime) -> list[dict[str, Any]]:
+    """Live-tail audit rows from Loki since the archive freeze boundary.
+
+    Lineage events are all-time (fetch from the boundary); message events
+    additionally respect the `hours` window, applied per row by the caller —
+    the lineage tail must not be clipped by the message window. A Loki outage
+    raises `httpx.HTTPError`; the route degrades to a stale empty graph."""
+    loki_from = boundary if boundary is not None else now - timedelta(days=30)
+    rows, has_more = loki_events.query_events(
+        event_names=list(_EDGE_EVENT_NAMES),
+        categories=["audit"],
+        from_=loki_from,
+        to=now,
+        limit=_LOKI_EDGE_LIMIT,
+        direction="forward",
+    )
+    if has_more:
+        logger.warning(
+            "fleet_graph Loki edge stream exceeded the %d-row fetch cap — edges truncated",
+            _LOKI_EDGE_LIMIT,
+        )
+    return rows
+
+
+def _merge_edge_rows(
+    archive_rows: list[tuple[Any, ...]],
+    loki_rows: list[dict[str, Any]],
+    *,
+    live_ids: set[int] | None,
+    win_start: datetime | None,
+    now: datetime,
+    decay_lambda: float,
+) -> list[FleetGraphEdge]:
+    """Merge the archive and Loki edge rows per (from, to, event_type).
+
+    The two sides partition the timeline at the freeze boundary (no overlap,
+    no gap), so a plain add keeps every weight exact: lineage adds 2.0 per
+    event, messages add the same EXP decay each row contributed on the SQL
+    side. Loki rows touching a terminated endpoint are dropped here (the
+    archive side filters them in SQL); message rows older than `win_start`
+    (the `hours` window) are dropped per row so the lineage tail is never
+    clipped by the message window."""
+    merged: dict[tuple[int, int, str], list[Any]] = {}
+
+    def _absorb(key: tuple[int, int, str], weight: float, count: int, last_seen: datetime) -> None:
+        slot = merged.get(key)
+        if slot is None:
+            merged[key] = [weight, count, last_seen]
+        else:
+            slot[0] += weight
+            slot[1] += count
+            slot[2] = max(slot[2], last_seen)
+
+    for r in archive_rows:
+        _absorb((int(r[0]), int(r[1]), str(r[2])), float(r[3]), int(r[4]), r[5])
+
+    for r in loki_rows:
+        target = r.get("target_agent_id")
+        agent = r.get("agent_id")
+        name = r.get("event_name")
+        if target is None or agent is None or name is None:
+            continue
+        if live_ids is not None and (int(target) not in live_ids or int(agent) not in live_ids):
+            continue
+        if name == "send_message":
+            if win_start is not None and r["ts"] < win_start:
+                continue
+            weight = math.exp(-decay_lambda * (now - r["ts"]).total_seconds() / 86400.0)
+        else:
+            weight = 2.0
+        _absorb((int(target), int(agent), str(name)), weight, 1, r["ts"])
+
+    edges = [
+        FleetGraphEdge(
+            from_agent=target,
+            to_agent=agent,
+            event_type=name,
+            weight=round(slot[0], 4),
+            event_count=slot[1],
+            last_seen_at=slot[2].isoformat(),
+        )
+        for (target, agent, name), slot in merged.items()
+        if name != "send_message" or slot[0] > 0.01
+    ]
+    edges.sort(key=lambda e: e.weight, reverse=True)
+    return edges
+
+
+def _archive_boundary(cur: Any) -> datetime | None:
+    """The frozen PG `events` archive's freeze point — its newest row's ts.
+
+    Rows older than the boundary come from the archive, rows at/after it from
+    Loki (task #1280 interim; task #1281 imports the archive into Loki, after
+    which the archive read collapses to Loki-only)."""
+    cur.execute("SELECT max(ts) FROM events")
+    row = cur.fetchone()
+    return row[0] if row is not None else None
+
+
+def _fetch_archive_edges(
+    cur: Any,
+    *,
+    decay_lambda: float,
+    now: datetime,
+    boundary: datetime | None,
+    edge_live: LiteralString,
+    edge_win: LiteralString,
+    win_params: tuple[datetime, ...],
+) -> list[tuple[Any, ...]]:
+    """Pre-cutover edge rows from the frozen PG archive, grouped per
+    (from, to, event_type) with the same weight semantics as the Loki side
+    (lineage COUNT*2.0 permanent; messages EXP-decayed). The decay reference
+    is `now` (the same instant the Loki side uses) so the two sides sum
+    without drift. S608 — only the fixed window LiteralString fragments are
+    spliced; every value binds via %s."""
+    edge_params: tuple[float | datetime | int | None, ...] = (
+        decay_lambda,
+        now,
+        boundary,
+        *win_params,
+        decay_lambda,
+        now,
+    )
+    cur.execute(
+        "SELECT "  # noqa: S608
+        "    target_agent_id, "
+        "    agent_id, "
+        "    event_name, "
+        "    CASE WHEN event_name = 'send_message' "
+        "        THEN SUM(EXP(-%s * EXTRACT(EPOCH FROM (%s - ts)) / 86400.0)) * 1.0 "
+        "        ELSE COUNT(*) * 2.0 "
+        "    END AS weight, "
+        "    COUNT(*) AS event_count, "
+        "    MAX(ts) AS last_seen_at "
+        "FROM events "
+        "WHERE category = 'audit' "
+        "  AND event_name IN ('send_message', 'spawn', 'fork', 'resurrect') "
+        "  AND target_agent_id IS NOT NULL "
+        "  AND agent_id IS NOT NULL "
+        "  AND ts < %s" + edge_live + edge_win + " "
+        "GROUP BY target_agent_id, agent_id, event_name "
+        "HAVING event_name <> 'send_message' "
+        "    OR SUM(EXP(-%s * EXTRACT(EPOCH FROM (%s - ts)) / 86400.0)) * 1.0 > 0.01 "
+        "ORDER BY weight DESC",
+        edge_params,
+    )
+    return list(cur.fetchall())
+
+
+@router.get("/api/fleet/graph")
+def get_fleet_graph(
+    request: Request,
+    include_terminated: Annotated[  # noqa: FBT002
+        bool,
+        Query(description="Include terminated agents"),
+    ] = False,
+    hours: Annotated[StatsWindowHours | None, Query()] = None,
+    decay_lambda: Annotated[float, Query(ge=0)] = 0.5,
+) -> FleetGraphResponse:
+    """Fleet-wide weighted agent graph — nodes (agents) + edges (lineage + messages).
+
+    Nodes carry status, label, a windowed recent-work `node_score`, and the
+    all-time `total_tokens`. Edges split into two families: lineage
+    (spawn/fork/resurrect) is structural and permanent; messages (send_message)
+    decay with recency. Terminated agents — and edges touching a terminated
+    agent — are excluded by default (user ruling 2026-08-09 #1104: terminated
+    agents never appear in the graph, mirroring the sidebar's agent tree). The
+    filter ORDER is liveness first: the node set is live-only (`status !=
+    'terminated'`, so hibernating/restarting etc. stay), and edges only ever
+    connect two live endpoints — a live node whose lineage partner has since
+    terminated simply renders without that edge. Filtering at the SQL layer
+    saves ~90% of the payload; pass `?include_terminated=true` for the full
+    archive.
+
+    `?hours=` (whitelisted 1/6/24/72/168; omitted = all-time) windows both the
+    node score and the edge events. `?decay_lambda=` (>= 0, default 0.5) is the
+    per-day decay constant for the message edge weight.
+
+    Node score (windowed, drives node size):
+        node_score = SUM(in_total) * 0.1 + SUM(out_total) * 1.0
+    over the agent's `llm_usage` counters in the window — read from
+    Prometheus (`ava_llm_usage_in_total` / `ava_llm_usage_out_total`,
+    windowed via `increase(...[Nh])`). `total_tokens` is the all-time sum of
+    the same two counters (cumulative since the exporting process started).
+
+    Edge weight:
+        lineage (spawn/fork/resurrect): weight = event_count * 2.0 (no time decay,
+            always shown — the structural skeleton never fades)
+        message (send_message): weight = SUM(EXP(-decay_lambda * days_ago)) * 1.0
+            (recency-decayed; dropped below 0.01)
+    """
+    # Windowed-filter fragment spliced into the edge SQL below. Kept as a literal
+    # (not an f-string) so the composed query stays a LiteralString for psycopg.
+    # None => all-time (no filter, no param). The node token window is applied in
+    # PromQL (increase over [Nh]) instead — see the Prometheus block below.
+    now = datetime.now(UTC)
+    win_start = now - timedelta(hours=hours) if hours is not None else None
+    edge_win: LiteralString
+    if hours is None:
+        edge_win, win_params = "", ()
+    else:
+        edge_win = " AND (event_name <> 'send_message' OR ts >= %s)"
+        win_params = (now - timedelta(hours=hours),)
+
+    not_terminated: LiteralString = "" if include_terminated else "WHERE a.status != 'terminated'"
+    # Same live-frontier rule for edges: an edge touching a terminated agent can
+    # never be drawn (its endpoint is not in the node set), so filtering it here
+    # shrinks the payload (24h window: ~2436 -> ~150 edges) with no visual change.
+    edge_live: LiteralString = (
+        ""
+        if include_terminated
+        else (
+            " AND agent_id IN (SELECT id FROM agents_meta WHERE status != 'terminated')"
+            " AND target_agent_id IN (SELECT id FROM agents_meta WHERE status != 'terminated')"
+        )
+    )
+
+    key = _cache_key(include_terminated=include_terminated, hours=hours, decay_lambda=decay_lambda)
+    cached = _read_cached_graph(key)
+    if cached is not None:
+        return cached
+
+    try:
+        with request.app.state.db_pool.connection() as conn, conn.cursor() as cur:
+            # --- Nodes: identity + liveness from PG (the token aggregates come
+            # from Prometheus below) ---
+            cur.execute(
+                # S608: the terminated filter is the only spliced fragment and
+                # it is a fixed internal literal (not caller input).
+                "SELECT "
+                "    a.id, "
+                "    t.label, "
+                "    a.status, "
+                "    a.spawner, "
+                "    a.machine "
+                "FROM agents_meta a "
+                "JOIN agents t ON t.id = a.id " + not_terminated + " ORDER BY a.id"
+            )
+            node_rows = cur.fetchall()
+
+            # --- Edges: frozen PG archive + Loki stitch ---
+            # Lineage (spawn/fork/resurrect) is permanent (weight = COUNT(*) * 2.0);
+            # messages decay per event and drop below 0.01. The PG `events` table
+            # is the frozen pre-cutover archive (task #1197): rows older than its
+            # max(ts) boundary come from here, rows at/after it from Loki.
+            boundary = _archive_boundary(cur)
+            archive_rows = _fetch_archive_edges(
+                cur,
+                decay_lambda=decay_lambda,
+                now=now,
+                boundary=boundary,
+                edge_live=edge_live,
+                edge_win=edge_win,
+                win_params=win_params,
+            )
+
+    except pg_errors.QueryCanceled:
+        # Postgres is under heavy load (deploy migration / lifecycle storm) and
+        # canceled the statement at its 1min timeout. Degrade to an empty graph
+        # instead of a 500 — but the degradation must be VISIBLE (R4 layer 2:
+        # failed != empty): `stale=True` tells the frontend to render "data
+        # temporarily unavailable" rather than an empty fleet. The empty
+        # response is deliberately NOT cached — the next request retries the
+        # query.
+        logger.warning("fleet_graph query canceled (statement timeout) — returning empty graph")
+        return FleetGraphResponse(nodes=[], edges=[], stale=True)
+
+    # --- Loki side: the live tail of the audit stream ---
+    try:
+        loki_rows = _fetch_loki_edges(boundary=boundary, now=now)
+    except httpx.HTTPError as exc:
+        logger.warning("fleet_graph Loki query failed — returning empty graph: %s", exc)
+        return FleetGraphResponse(nodes=[], edges=[], stale=True)
+
+    live_ids: set[int] | None = None
+    if not include_terminated:
+        live_ids = {int(r[0]) for r in node_rows}
+    edges = _merge_edge_rows(
+        archive_rows,
+        loki_rows,
+        live_ids=live_ids,
+        win_start=win_start,
+        now=now,
+        decay_lambda=decay_lambda,
+    )
+
+    # --- Token aggregates from Prometheus (the llm_usage counters) ---
+    # total_tokens is the all-time counter sum (tooltip); node_score is the
+    # windowed weighted score (node size). Both read the OTLP-mapped counters
+    # via gateway/prom_metrics; the `hours` window becomes a PromQL range
+    # selector (increase over [Nh]) instead of a SQL fragment.
+    try:
+        in_all = prom_metrics.sum_by(_IN_METRIC, "agent_id")
+        out_all = prom_metrics.sum_by(_OUT_METRIC, "agent_id")
+        if hours is None:
+            in_win, out_win = in_all, out_all
+        else:
+            in_win = prom_metrics.sum_by(_IN_METRIC, "agent_id", window_hours=hours)
+            out_win = prom_metrics.sum_by(_OUT_METRIC, "agent_id", window_hours=hours)
+    except (httpx.HTTPError, ValueError) as exc:
+        # Prometheus unreachable / malformed — the same visible degradation as
+        # a canceled query: an EMPTY graph marked stale, never a silent zero
+        # (R4 layer 2: failed != empty). Deliberately NOT cached — the next
+        # request retries.
+        logger.warning("fleet_graph Prometheus query failed — returning empty graph: %s", exc)
+        return FleetGraphResponse(nodes=[], edges=[], stale=True)
+
+    nodes = [
+        FleetGraphNode(
+            agent_id=r[0],
+            label=r[1],
+            status=r[2],
+            spawner=r[3],
+            machine=r[4],
+            total_tokens=round(in_all.get(str(r[0]), 0.0) + out_all.get(str(r[0]), 0.0)),
+            node_score=round(in_win.get(str(r[0]), 0.0) * 0.1 + out_win.get(str(r[0]), 0.0), 2),
+        )
+        for r in node_rows
+    ]
+
+    response = FleetGraphResponse(nodes=nodes, edges=edges)
+    try:
+        with sync_redis(decode_responses=True) as redis:
+            redis.set(key, response.model_dump_json(), ex=_CACHE_TTL_SECONDS)
+    except Exception as exc:
+        # Fail-open: a cache write failure must not fail the response.
+        logger.debug("fleet_graph cache write failed: %s", exc)
+    return response

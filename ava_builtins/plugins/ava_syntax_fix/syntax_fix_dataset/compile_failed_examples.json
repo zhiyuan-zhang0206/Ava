@@ -1,0 +1,315 @@
+{
+  "description": "Real compile_failed examples from agent logs for syntax fix pattern development",
+  "total_examples": 50,
+  "categories": {},
+  "examples": [
+    {
+      "agent_log": "agent-1096.log",
+      "error": "invalid syntax (<agent_code>, line 241)",
+      "prior_fixes": "none",
+      "category": "general_syntax"
+    },
+    {
+      "agent_log": "agent-1096.log",
+      "error": "unterminated string literal (detected at line 6) (<agent_code>, line 6)",
+      "prior_fixes": "none",
+      "category": "string_newlines"
+    },
+    {
+      "agent_log": "agent-1107.log",
+      "error": "unterminated string literal (detected at line 10) (<agent_code>, line 10)",
+      "prior_fixes": "none",
+      "category": "string_newlines"
+    },
+    {
+      "agent_log": "agent-1135.log",
+      "error": "unexpected indent (<agent_code>, line 100)",
+      "prior_fixes": "none",
+      "category": "indentation"
+    },
+    {
+      "agent_log": "agent-1172.log",
+      "error": "unexpected character after line continuation character (<agent_code>, line 27)",
+      "prior_fixes": "none",
+      "category": "backslash_trailing"
+    },
+    {
+      "agent_log": "agent-1179.log",
+      "error": "unterminated f-string literal (detected at line 7) (<agent_code>, line 7)",
+      "prior_fixes": "none",
+      "category": "fstring_expr"
+    },
+    {
+      "agent_log": "agent-1182.log",
+      "error": "",
+      "prior_fixes": "none",
+      "category": "other"
+    },
+    {
+      "agent_log": "agent-1192.log",
+      "error": "unterminated f-string literal (detected at line 11) (<agent_code>, line 11)",
+      "prior_fixes": "none",
+      "category": "fstring_expr"
+    },
+    {
+      "agent_log": "agent-1193.log",
+      "error": "unterminated string literal (detected at line 6) (<agent_code>, line 6)",
+      "prior_fixes": "none",
+      "category": "string_newlines"
+    },
+    {
+      "agent_log": "agent-1205.log",
+      "error": "unexpected indent (<agent_code>, line 6)",
+      "prior_fixes": "none",
+      "category": "indentation"
+    },
+    {
+      "agent_log": "agent-1211.log",
+      "error": "invalid character '\u2014' (U+2014) (<agent_code>, line 24)",
+      "prior_fixes": "chinese_punct(12)",
+      "category": "other"
+    },
+    {
+      "agent_log": "agent-1216.log",
+      "error": "",
+      "prior_fixes": "none",
+      "category": "other"
+    },
+    {
+      "agent_log": "agent-1216.log",
+      "error": "",
+      "prior_fixes": "none",
+      "category": "other"
+    },
+    {
+      "agent_log": "agent-1216.log",
+      "error": "",
+      "prior_fixes": "none",
+      "category": "other"
+    },
+    {
+      "agent_log": "agent-1216.log",
+      "error": "",
+      "prior_fixes": "none",
+      "category": "other"
+    },
+    {
+      "agent_log": "agent-1216.log",
+      "error": "",
+      "prior_fixes": "none",
+      "category": "other"
+    },
+    {
+      "agent_log": "agent-1216.log",
+      "error": "",
+      "prior_fixes": "none",
+      "category": "other"
+    },
+    {
+      "agent_log": "agent-1216.log",
+      "error": "",
+      "prior_fixes": "none",
+      "category": "other"
+    },
+    {
+      "agent_log": "agent-1216.log",
+      "error": "",
+      "prior_fixes": "none",
+      "category": "other"
+    },
+    {
+      "agent_log": "agent-1216.log",
+      "error": "",
+      "prior_fixes": "none",
+      "category": "other"
+    },
+    {
+      "agent_log": "agent-1216.log",
+      "error": "",
+      "prior_fixes": "none",
+      "category": "other"
+    },
+    {
+      "agent_log": "agent-1216.log",
+      "error": "",
+      "prior_fixes": "none",
+      "category": "other"
+    },
+    {
+      "agent_log": "agent-1220.log",
+      "error": "unterminated string literal (detected at line 7) (<agent_code>, line 7)",
+      "prior_fixes": "none",
+      "category": "string_newlines"
+    },
+    {
+      "agent_log": "agent-1229.log",
+      "error": "",
+      "prior_fixes": "none",
+      "category": "other"
+    },
+    {
+      "agent_log": "agent-1229.log",
+      "error": "",
+      "prior_fixes": "none",
+      "category": "other"
+    },
+    {
+      "agent_log": "agent-1229.log",
+      "error": "",
+      "prior_fixes": "none",
+      "category": "other"
+    },
+    {
+      "agent_log": "agent-1229.log",
+      "error": "unexpected character after line continuation character (<agent_code>, line 86)",
+      "prior_fixes": "none",
+      "category": "backslash_trailing"
+    },
+    {
+      "agent_log": "agent-1229.log",
+      "error": "unterminated string literal (detected at line 5) (<agent_code>, line 5)",
+      "prior_fixes": "none",
+      "category": "string_newlines"
+    },
+    {
+      "agent_log": "agent-1229.log",
+      "error": "unexpected character after line continuation character (<agent_code>, line 88)",
+      "prior_fixes": "none",
+      "category": "backslash_trailing"
+    },
+    {
+      "agent_log": "agent-1229.log",
+      "error": "unexpected character after line continuation character (<agent_code>, line 38)",
+      "prior_fixes": "none",
+      "category": "backslash_trailing"
+    },
+    {
+      "agent_log": "agent-1229.log",
+      "error": "",
+      "prior_fixes": "none",
+      "category": "other"
+    },
+    {
+      "agent_log": "agent-1229.log",
+      "error": "",
+      "prior_fixes": "none",
+      "category": "other"
+    },
+    {
+      "agent_log": "agent-1229.log",
+      "error": "",
+      "prior_fixes": "none",
+      "category": "other"
+    },
+    {
+      "agent_log": "agent-1229.log",
+      "error": "",
+      "prior_fixes": "none",
+      "category": "other"
+    },
+    {
+      "agent_log": "agent-1229.stderr.log",
+      "error": "invalid syntax (<agent_code>, line 241)",
+      "prior_fixes": "none",
+      "category": "general_syntax"
+    },
+    {
+      "agent_log": "agent-240.log",
+      "error": "unexpected character after line continuation character (<agent_code>, line 9)",
+      "prior_fixes": "none",
+      "category": "backslash_trailing"
+    },
+    {
+      "agent_log": "agent-240.log",
+      "error": "unterminated string literal (detected at line 13) (<agent_code>, line 13)",
+      "prior_fixes": "none",
+      "category": "string_newlines"
+    },
+    {
+      "agent_log": "agent-405.log",
+      "error": "unexpected indent (<agent_code>, line 182)",
+      "prior_fixes": "none",
+      "category": "indentation"
+    },
+    {
+      "agent_log": "agent-405.log",
+      "error": "f-string: expecting a valid expression after '{' (<agent_code>, line 13)",
+      "prior_fixes": "none",
+      "category": "fstring_expr"
+    },
+    {
+      "agent_log": "agent-405.log",
+      "error": "unterminated f-string literal (detected at line 6) (<agent_code>, line 6)",
+      "prior_fixes": "none",
+      "category": "fstring_expr"
+    },
+    {
+      "agent_log": "agent-808.log",
+      "error": "unterminated string literal (detected at line 131) (<agent_code>, line 131)",
+      "prior_fixes": "none",
+      "category": "string_newlines"
+    },
+    {
+      "agent_log": "agent-892.log",
+      "error": "invalid syntax (<agent_code>, line 396)",
+      "prior_fixes": "invalid_escape(69)",
+      "category": "general_syntax"
+    },
+    {
+      "agent_log": "agent-897.log",
+      "error": "unterminated string literal (detected at line 10) (<agent_code>, line 10)",
+      "prior_fixes": "none",
+      "category": "string_newlines"
+    },
+    {
+      "agent_log": "agent-906.log",
+      "error": "invalid character '\u2014' (U+2014) (<agent_code>, line 9)",
+      "prior_fixes": "none",
+      "category": "other"
+    },
+    {
+      "agent_log": "agent-909.log",
+      "error": "unterminated string literal (detected at line 9) (<agent_code>, line 9)",
+      "prior_fixes": "none",
+      "category": "string_newlines"
+    },
+    {
+      "agent_log": "agent-912.log",
+      "error": "unterminated string literal (detected at line 9) (<agent_code>, line 9)",
+      "prior_fixes": "none",
+      "category": "string_newlines"
+    },
+    {
+      "agent_log": "agent-926.log",
+      "error": "invalid syntax. Perhaps you forgot a comma? (<agent_code>, line 5)",
+      "prior_fixes": "none",
+      "category": "general_syntax"
+    },
+    {
+      "agent_log": "agent-954.log",
+      "error": "unterminated triple-quoted string literal (detected at line 28) (<agent_code>, line 16)",
+      "prior_fixes": "none",
+      "category": "other"
+    },
+    {
+      "agent_log": "agent-982.log",
+      "error": "invalid character '\u2014' (U+2014) (<agent_code>, line 16)",
+      "prior_fixes": "none",
+      "category": "other"
+    },
+    {
+      "agent_log": "agent-986.log",
+      "error": "unterminated triple-quoted string literal (detected at line 78) (<agent_code>, line 45)",
+      "prior_fixes": "none",
+      "category": "other"
+    }
+  ],
+  "category_counts": {
+    "general_syntax": 4,
+    "string_newlines": 10,
+    "indentation": 3,
+    "backslash_trailing": 5,
+    "fstring_expr": 4,
+    "other": 24
+  }
+}

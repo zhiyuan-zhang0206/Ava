@@ -1,0 +1,684 @@
+"use client";
+
+// /insights#status — live cluster status. Gateway and agent-runners are
+// SERVICES of the cluster, not "machines": the Services block renders the
+// gateway as a single card (host / status / health / last seen) and the
+// agent-runners as a table (host / status / agents / last seen), with the
+// cluster-wide Update / Restart actions on the shared header. Below it: the
+// resource charts and the gateway's daemon list. (The per-agent session tree
+// was removed 2026-08-05 per user ruling — the Grafana embed shows runner
+// health now.)
+//
+// Rendered as a section of the vertical Insights page; `useSectionVisible`
+// starts the 10s status poll and the 30s update-check poll on first paint and
+// pauses them once the Status section scrolls off-screen, so it doesn't keep
+// hitting the gateway while unseen. Also usable as the bare `/insights/status`
+// route (no provider ⇒ visible defaults true).
+
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Loader2, RefreshCw, RotateCcw, Server } from "lucide-react";
+import { type ComponentType, type ReactNode } from "react";
+
+import { ResourceChart } from "@/components/metrics/resource-chart";
+import { Button } from "@/components/ui/button";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { api } from "@/lib/api";
+import { errMsg } from "@/lib/errors";
+import { useStore } from "@/lib/store";
+import type { ClusterPanel, ClusterUpdateCheck, MachineStatus, SystemStatus } from "@/lib/types";
+import { SYSTEM_STATUS_QUERY_KEY } from "@/lib/use-cluster-health";
+
+import { useSectionVisible } from "@/app/control/_visibility";
+import { FLEX } from "@/lib/layout";
+import { cn } from "@/lib/utils";
+
+export default function StatusPage() {
+  const visible = useSectionVisible();
+  // Shares SYSTEM_STATUS_QUERY_KEY with the app-root health poll + the sidebar
+  // badges — one query, one poll for /api/status app-wide. The interval stays
+  // because the app-root health poll (5s) only mounts on the conversation route,
+  // not here; on /control this observer is what keeps Status fresh (gated to
+  // on-screen time).
+  const { data, isLoading, error } = useQuery({
+    queryKey: SYSTEM_STATUS_QUERY_KEY,
+    queryFn: api.getSystemStatus,
+    refetchInterval: 10_000,
+    enabled: visible,
+  });
+
+  if (isLoading)
+    return (
+      <div className={cn("justify-center py-12", FLEX)}>
+        <Loader2 className="size-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  if (error && !data) {
+    // Status auto-refetches every 10s, so a fetch miss is usually transient
+    // (gateway restarting / momentary network). A cold failure gets a quiet
+    // line; a failure WITH cached data keeps showing the data (stale-while-
+    // error, Task #1051) instead of swapping the panel for an error page.
+    return (
+      <div className="p-8 text-center text-sm text-muted-foreground">
+        Couldn't reach the gateway — retrying…
+      </div>
+    );
+  }
+  if (!data) {
+    return (
+      <div className="p-8 text-center text-sm text-muted-foreground">
+        No status data yet
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <ServicesPanel data={data.cluster} />
+      <ResourcesSection data={data.cluster} />
+      <GatewayDaemonsSection data={data} />
+    </div>
+  );
+}
+
+function restartSidesLabel(check: ClusterUpdateCheck): string {
+  // Which services a rollout would restart — mirrors `ava cluster update`'s own
+  // selective-restart classification (backend-only leaves the UI serving).
+  const sides = [
+    check.frontend_changed ? "frontend" : null,
+    check.backend_changed ? "backend" : null,
+  ].filter(Boolean);
+  return sides.length > 0 ? sides.join(" + ") : "nothing";
+}
+
+// ── shared status verdicts ──
+//
+// One machine → one (label, tone) verdict, used by the gateway card and the
+// runner table alike. Colors: green = online/running, amber = paused,
+// red = error (offline / identity mismatch), muted = deliberate stop / unknown.
+
+type StatusTone = "ok" | "warn" | "error" | "muted";
+
+const TONE_TEXT: Record<StatusTone, string> = {
+  ok: "text-green-600 dark:text-green-400",
+  warn: "text-amber-600 dark:text-amber-400",
+  error: "text-destructive",
+  muted: "text-muted-foreground",
+};
+
+const TONE_DOT: Record<StatusTone, string> = {
+  ok: "bg-green-500",
+  warn: "bg-amber-500",
+  error: "bg-destructive",
+  muted: "bg-muted-foreground",
+};
+
+function machineVerdict(m: MachineStatus, runningLabel: string): { label: string; tone: StatusTone } {
+  // identity_mismatch is a loud state: the probe reached an ops server that
+  // answered under the WRONG machine_name, so this row's gateway_url points at
+  // the wrong host. It outranks online/offline — never green.
+  if (m.identity_mismatch) return { label: "identity mismatch", tone: "error" };
+  if (m.online && m.paused) return { label: "paused", tone: "warn" };
+  if (m.online) return { label: runningLabel, tone: "ok" };
+  // stopped_at, set by `ava stop` and cleared by `ava start`, separates a
+  // deliberate stop from a crash — the live probe alone can't.
+  if (m.stopped_at != null) return { label: "stopped", tone: "muted" };
+  return { label: "offline", tone: "error" };
+}
+
+function StatusText({ m, runningLabel }: { m: MachineStatus; runningLabel: string }) {
+  const v = machineVerdict(m, runningLabel);
+  // running_sha is the code the live process loaded; head_sha is its checkout.
+  // A drift means the checkout advanced (pull / rollout) but the process was
+  // not restarted — a node can read pin ✓ yet still run stale code.
+  const codeDrift =
+    m.running_sha != null && m.head_sha != null && m.running_sha !== m.head_sha;
+  return (
+    <span className={`inline-flex items-center gap-1.5 ${TONE_TEXT[v.tone]}`}>
+      <span className={`size-1.5 rounded-full ${TONE_DOT[v.tone]}`} />
+      {v.label}
+      {codeDrift && (
+        <span
+          className="text-amber-600 dark:text-amber-400"
+          title={`Code drift: running ${m.running_sha?.slice(0, 7)} ≠ head ${m.head_sha?.slice(0, 7)} — restart needed to pick up the latest checkout`}
+        >
+          ⚠{m.running_sha?.slice(0, 7)}
+        </span>
+      )}
+      {!codeDrift && m.on_pin === false && (
+        <span
+          className="text-amber-600 dark:text-amber-400"
+          title={`Off the cluster pin (head ${m.head_sha?.slice(0, 7) ?? "?"}) — this node missed a rollout`}
+        >
+          off-pin
+        </span>
+      )}
+      {/* The live settle hold names this host. Recorded by the lease when the
+          rollout exited (this host acked its self-update and had not finished
+          converging), NOT a live check — the off-pin / code-drift badges beside it
+          are the live verdicts, and its absence does not prove convergence. */}
+      {m.settle_waited_on && (
+        <span
+          className="text-amber-600 dark:text-amber-400"
+          title="A deploy's settle hold is still waiting on this host: it acked its self-update and had not converged when the rollout exited. Recorded by the lease, not a live check — the off-pin / code badges are the live verdicts. While the hold stands, deploys are refused and auto-rollback is suppressed."
+        >
+          settle-hold
+        </span>
+      )}
+    </span>
+  );
+}
+
+// Daemon liveness → one health verdict for the gateway card. Both pidfile
+// probes alive = healthy; any dead = degraded; unknown probes = "—".
+function healthVerdict(m: MachineStatus): { label: string; tone: StatusTone; title: string } {
+  const title = `restarter ${daemonMark(m.restarter_online)} · watchdog ${daemonMark(m.watchdog_online)}`;
+  if (!m.online) return { label: "—", tone: "muted", title };
+  if (m.restarter_online === false || m.watchdog_online === false)
+    return { label: "degraded", tone: "warn", title };
+  if (m.restarter_online === true && m.watchdog_online === true)
+    return { label: "healthy", tone: "ok", title };
+  return { label: "—", tone: "muted", title };
+}
+
+function daemonMark(ok: boolean | null | undefined): string {
+  return ok === true ? "✓" : ok === false ? "✗" : "?";
+}
+
+// "Up since" for a live host — a boot/announce stamp, not a heartbeat, so it is
+// only ever rendered, never freshness-tested (see MachineStatus.up_since_at). An
+// offline host's row states the stop instead, which IS a "last seen".
+function upSinceLabel(m: MachineStatus): string {
+  if (m.online) return relativeTime(m.up_since_at);
+  if (m.stopped_at != null) return `stopped ${relativeTime(m.stopped_at)}`;
+  return "—";
+}
+
+function relativeTime(iso: string): string {
+  // Short relative time — "just now / 3 minutes ago / 2 hours ago / 3 days ago / iso date".
+  const now = Date.now();
+  const t = Date.parse(iso);
+  if (isNaN(t)) return iso;
+  const diffSec = Math.floor((now - t) / 1000);
+  if (diffSec < 60) return "just now";
+  if (diffSec < 3600) return `${Math.floor(diffSec / 60)} min ago`;
+  if (diffSec < 86400) return `${Math.floor(diffSec / 3600)} h ago`;
+  if (diffSec < 86400 * 30) return `${Math.floor(diffSec / 86400)} d ago`;
+  return iso.slice(0, 10);
+}
+
+// ── Services: gateway card + agent-runner table + cluster-wide actions ──
+
+function ServicesPanel({ data }: { data: ClusterPanel }) {
+  const visible = useSectionVisible();
+  const showToast = useStore((s) => s.showToast);
+  const queryClient = useQueryClient();
+  const isGateway = data.current_serve_gateway;
+
+  // Preflight poll — drives the Update button's "no updates" state. Gateway
+  // only (the endpoint 400s elsewhere); the frontend always runs on the
+  // gateway, but gate defensively.
+  const check = useQuery({
+    queryKey: ["cluster-update-check"],
+    queryFn: api.checkClusterUpdate,
+    refetchInterval: 30_000,
+    enabled: isGateway && visible,
+  });
+  const behind = check.data?.behind;
+  const noUpdates = behind === 0;
+
+  const inFlightMsg = (msg: string) =>
+    msg.includes("409") ||
+    msg.toLowerCase().includes("in progress") ||
+    msg.toLowerCase().includes("in flight");
+
+  // The detached rollout/restart session is alive by the time the trigger
+  // POST returns, so refetching status immediately picks up
+  // `current_orchestration` and disables the actions with no poll-interval gap a
+  // second click could slip through.
+  const refreshClusterState = () => {
+    // One key now backs both this view's roster and the app-root "updating"
+    // banner (SYSTEM_STATUS_QUERY_KEY = the shared /api/status key), so a single
+    // invalidate refreshes both at once — no poll-interval gap a second click
+    // could slip through.
+    void queryClient.invalidateQueries({ queryKey: SYSTEM_STATUS_QUERY_KEY });
+    void queryClient.invalidateQueries({ queryKey: ["cluster-update-check"] });
+  };
+
+  const update = useMutation({
+    mutationFn: api.triggerClusterRollout,
+    onSuccess: (result) => {
+      refreshClusterState();
+      showToast(
+        `Cluster rollout started — agents will restart on new code; watch per-host status below. (session ${result.session}, log: ${result.log})`,
+      );
+    },
+    onError: (err: unknown) => {
+      const msg = errMsg(err);
+      showToast(
+        inFlightMsg(msg)
+          ? "A rollout is already in flight — wait for it to finish, then retry."
+          : `Rollout failed: ${msg}`,
+      );
+    },
+  });
+
+  const restart = useMutation({
+    mutationFn: api.triggerClusterRestart,
+    onSuccess: (result) => {
+      refreshClusterState();
+      showToast(
+        `Cluster restart started — services bounce on the current code (no pull); agents finish their turn then restart. (session ${result.session}, log: ${result.log})`,
+      );
+    },
+    onError: (err: unknown) => {
+      const msg = errMsg(err);
+      showToast(
+        inFlightMsg(msg)
+          ? "A restart/rollout is already in flight — wait for it to finish, then retry."
+          : `Restart failed: ${msg}`,
+      );
+    },
+  });
+
+  // A rollout/restart runs for minutes in a detached session after the request
+  // returns. `current_orchestration` (the live orchestration session) is the
+  // durable in-flight signal — it flips true the moment the session spawns and
+  // stays true for the whole run, so the actions stay disabled across it (not just
+  // for the POST blink). `current_paused` is kept as a secondary guard; firing a
+  // second rollout into an active one just 409s either way.
+  const orchestration = data.current_orchestration;
+  const updating = update.isPending || orchestration === "rollout" || orchestration === "update";
+  const restarting = restart.isPending || orchestration === "restart";
+  const busy = updating || restarting || data.current_paused;
+
+  const onUpdate = () => {
+    if (noUpdates) return;
+    // Native confirm — cluster-wide restart is irreversible-in-progress; one
+    // misclick stops every agent. Native dialog is mobile-friendly, blocks
+    // the event loop until decided, and adds no headless-component baggage.
+    const sides = check.data ? ` Restarts: ${restartSidesLabel(check.data)}.` : "";
+    const n = typeof behind === "number" ? `${behind} ${behind === 1 ? "commit" : "commits"} behind.` : "";
+    const ok = window.confirm(
+      `Roll the whole cluster forward?\n\n${n}${sides}\n\n` +
+        "All agents across every host finish their current turn, then restart on new code.",
+    );
+    if (ok) update.mutate();
+  };
+
+  const onRestart = () => {
+    const ok = window.confirm(
+      "Restart the whole cluster on the current code?\n\n" +
+        "No git pull — every service bounces to apply config changes. " +
+        "Agents finish their current turn, then restart.",
+    );
+    if (ok) restart.mutate();
+  };
+
+  const gateways = data.machines.filter((m) => m.serve_gateway);
+  const runners = data.machines.filter((m) => m.serve_agent_runner);
+
+  return (
+    <div id="status-services" className="scroll-mt-4">
+      <div className={cn("mb-2 items-center justify-between", FLEX)}>
+        <h3 className="text-sm font-semibold">Services</h3>
+        <div className={cn("items-center gap-2", FLEX)}>
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            onClick={onRestart}
+            disabled={busy}
+          >
+            {restarting ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : (
+              <RotateCcw className="size-3.5" />
+            )}
+            <span className="ml-1.5">{restarting ? "Restarting…" : "Restart"}</span>
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={onUpdate}
+            disabled={busy || !isGateway || noUpdates}
+          >
+            {updating ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : (
+              <RefreshCw className="size-3.5" />
+            )}
+            <span className="ml-1.5">
+              {updating ? "Updating…" : noUpdates ? "Up to date" : behind ? `Update (${behind})` : "Update"}
+            </span>
+          </Button>
+        </div>
+      </div>
+
+      <div className="mb-3 text-xs text-muted-foreground">
+        this host: {data.current_machine} (
+        {[
+          data.current_serve_gateway && "gateway",
+          data.current_serve_agent_runner && "agent-runner",
+        ]
+          .filter(Boolean)
+          .join(" + ") || "no capability"}
+        )
+        {data.current_paused && (
+          <span className="ml-1 text-amber-600 dark:text-amber-400">· paused</span>
+        )}
+        {data.cluster_target_sha && (
+          <span className="ml-1">· pinned to {data.cluster_target_sha.slice(0, 7)}</span>
+        )}
+        {/* Recorded since the pin existed and shown nowhere until now — without it a
+            rollback presents as the pin simply moving to an older commit, with
+            nothing saying that commit is the anchor the cluster fell back to. */}
+        {data.cluster_last_known_good_sha && (
+          <span
+            className="ml-1"
+            title="The cluster's rollback anchor — `ava cluster rollback` with no target falls back to this commit."
+          >
+            · last known good {data.cluster_last_known_good_sha.slice(0, 7)}
+          </span>
+        )}
+        {isGateway && (
+          <span className="ml-2">
+            {orchestration ? (
+              <span className="inline-flex items-center gap-1.5 text-amber-600 dark:text-amber-400">
+                <Loader2 className="size-3 animate-spin" />
+                {orchestration === "restart"
+                  ? "cluster restart in progress — services bounce, agents finish their turn then restart"
+                  : "cluster rollout in progress — every host finishes its turn then restarts on new code"}
+              </span>
+            ) : check.isLoading ? (
+              <span>checking for updates…</span>
+            ) : check.error ? (
+              <span>update check unavailable</span>
+            ) : noUpdates ? (
+              <span className="text-green-600 dark:text-green-400">✓ up to date with origin/main</span>
+            ) : check.data ? (
+              <span className="text-amber-600 dark:text-amber-400">
+                ↑ {check.data.behind} {check.data.behind === 1 ? "commit" : "commits"} behind — Update restarts{" "}
+                {restartSidesLabel(check.data)}
+              </span>
+            ) : null}
+          </span>
+        )}
+      </div>
+
+      <LastUpdateBanner record={data.last_update ?? null} />
+
+      {data.machines.length === 0 ? (
+        <p className="text-xs text-muted-foreground">
+          (no host has run `ava start` yet)
+        </p>
+      ) : (
+        <div className="space-y-3">
+          {gateways.map((m) => (
+            <GatewayCard key={m.name} m={m} currentMachine={data.current_machine} />
+          ))}
+          {runners.length > 0 && <AgentRunnersCard runners={runners} />}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// The gateway service as one card: host / status / health / last seen.
+// A failed rollout used to reach this page only as a COLOUR: the amber pin/head
+// mismatch a few lines up. That mismatch is equally produced by a node that missed
+// a rollout, by a checkout that moved without a restart, and by a rollout that
+// failed and rolled back — so on 2026-07-30 the operator was left to work out which
+// (#1012). This states the fact in a sentence, from the record the rollout itself
+// wrote, and says nothing at all when the last update succeeded: a permanent
+// "last update: ok" line is one people stop reading, and this is the line that has
+// to be read the one time it appears.
+function relativeAge(from: Date): string {
+  const seconds = (Date.now() - from.getTime()) / 1000;
+  if (seconds < 3600) return `${Math.round(seconds / 60)}m`;
+  if (seconds < 86400) return `${Math.round(seconds / 3600)}h`;
+  return `${Math.round(seconds / 86400)}d`;
+}
+
+function LastUpdateBanner({ record }: { record: ClusterPanel["last_update"] }) {
+  if (!record?.failed) return null;
+  const target = record.target_sha ? ` to ${record.target_sha.slice(0, 7)}` : "";
+  const when = record.started_at ? new Date(record.started_at).toLocaleString() : null;
+  // How stale the failure is changes what to do with it: minutes old is a live
+  // incident, days old is a cluster nobody has updated since.
+  const age = record.started_at ? relativeAge(new Date(record.started_at)) : null;
+  // A recovered update failed and then put the cluster back on a commit that
+  // works. It still has to be stated — 2026-07-30 is the incident where a silent
+  // recovery left the operator reading a sha mismatch as a live fault — but it is
+  // not the same call to action as a failure nobody has handled, so it renders
+  // amber rather than destructive.
+  const recovered = record.outcome === "recovered";
+  return (
+    <div
+      role="alert"
+      className={
+        recovered
+          ? "mb-3 rounded-md border border-amber-500/40 bg-amber-500/5 px-3 py-2 text-xs"
+          : "mb-3 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs"
+      }
+    >
+      <p className={recovered ? "font-semibold text-amber-600" : "font-semibold text-destructive"}>
+        Last update{target} failed
+        {recovered ? " — the cluster recovered" : ""}
+        {when ? ` (started ${when}${age ? `, ${age} ago` : ""})` : ""}
+      </p>
+      <p className="mt-1 text-muted-foreground">
+        {record.outcome === "orphaned"
+          ? "Its orchestration died without reporting an outcome — the deploy lease it held is gone."
+          : record.failing_step
+            ? `It stopped at ${record.failing_step}.`
+            : `It ended ${record.outcome}.`}{" "}
+        {recovered
+          ? "The cluster is running on a commit that works, so there is nothing to repair here — but the code it is running is not the one that was being rolled out."
+          : record.pin_advanced
+            ? "The gateway reached the target and the cluster pin advanced, so hosts still off it converge via their watchdog."
+            : "The cluster pin was left where it was, so nothing is converging toward the failed target — a node showing a sha mismatch here is a consequence of this failure, not a separate problem."}
+      </p>
+      {record.observed_by && (
+        <p className="mt-1 text-muted-foreground">
+          Since then: {record.observed_by}. A rollback is the cluster falling back to its
+          last-known-good anchor, not drift.
+        </p>
+      )}
+      <p className="mt-1 text-muted-foreground">
+        The rollout&apos;s own log is on the gateway under{" "}
+        <code>{record.log_path ?? "$AVA_HOME/logs/rollout-<epoch>.log"}</code>. The next
+        successful update replaces this record.
+      </p>
+    </div>
+  );
+}
+
+function GatewayCard({ m, currentMachine }: { m: MachineStatus; currentMachine: string }) {
+  const health = healthVerdict(m);
+  return (
+    <div className="rounded-md border border-border" data-testid={`gateway-card-${m.name}`}>
+      <div className="border-b border-border px-3 py-2">
+        <h4 className="text-sm font-semibold">Gateway</h4>
+      </div>
+      <div className="grid grid-cols-2 gap-x-4 gap-y-2 px-3 py-2.5 sm:grid-cols-4">
+        <div>
+          <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Host</div>
+          <div className="mt-0.5 text-sm font-medium">
+            {m.name}
+            {m.is_staging && (
+              <span className="ml-1.5 rounded-sm border border-amber-500/50 px-1 text-[10px] font-normal text-amber-600 dark:text-amber-400" title="Staging host — visible here but excluded from cluster rollouts">
+                staging
+              </span>
+            )}
+            {m.name === currentMachine && (
+              <span className="font-normal text-muted-foreground"> (this host)</span>
+            )}
+          </div>
+        </div>
+        <div>
+          <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Status</div>
+          <div className="mt-0.5 text-sm font-medium">
+            <StatusText m={m} runningLabel="running" />
+          </div>
+        </div>
+        <div>
+          <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Health</div>
+          <div className={`mt-0.5 text-sm font-medium ${TONE_TEXT[health.tone]}`} title={health.title}>
+            {health.label}
+          </div>
+        </div>
+        <div>
+          <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Up since</div>
+          <div className="mt-0.5 text-sm font-medium">{upSinceLabel(m)}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Every agent-runner service as one table: host / status / agents / up since.
+function AgentRunnersCard({ runners }: { runners: MachineStatus[] }) {
+  return (
+    <div className="rounded-md border border-border" data-testid="agent-runners-card">
+      <div className="border-b border-border px-3 py-2">
+        <h4 className="text-sm font-semibold">Agent runners</h4>
+      </div>
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Host</TableHead>
+            <TableHead>Status</TableHead>
+            <TableHead>Agents</TableHead>
+            <TableHead>Up since</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {runners.map((m) => (
+            <TableRow key={m.name}>
+              <TableCell className="font-medium">
+                {m.name}
+                {m.is_staging && (
+                  <span className="ml-1.5 rounded-sm border border-amber-500/50 px-1 text-[10px] font-normal text-amber-600 dark:text-amber-400" title="Staging host — visible here but excluded from cluster rollouts">
+                    staging
+                  </span>
+                )}
+              </TableCell>
+              <TableCell className="text-xs">
+                <StatusText m={m} runningLabel="online" />
+              </TableCell>
+              <TableCell className="tabular-nums">{m.agent_count}</TableCell>
+              <TableCell className="text-xs text-muted-foreground">{upSinceLabel(m)}</TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </div>
+  );
+}
+
+// The gateway-only daemons (labeler, memory indexer) — pidfile liveness.
+// Per-host daemons (restarter, watchdog) ride each machine's probe and feed
+// the Gateway card's health verdict instead.
+function GatewayDaemonsSection({ data }: { data: SystemStatus }) {
+  const services = data.services.items;
+  const cur = data.cluster.current_machine;
+  return (
+    <StatusSection id="status-gateway-daemons" icon={Server} title="Gateway daemons" subtitle={`(${cur})`}>
+      {services.length === 0 ? (
+        <p className="text-xs text-muted-foreground">No service data</p>
+      ) : (
+        <div className="border border-border rounded-md overflow-x-auto">
+          <Table className="[&_th]:border-r [&_th]:border-border [&_th:last-child]:border-r-0 [&_td]:border-r [&_td]:border-border [&_td:last-child]:border-r-0">
+            <TableBody>
+            {services.map((svc) => (
+              <TableRow key={svc.name}>
+                <TableCell className="w-full">
+                  <span className="inline-flex items-center gap-2">
+                    <span
+                      className={`size-2 rounded-full ${
+                        svc.online === true
+                          ? "bg-green-500"
+                          : svc.online === false
+                            ? "bg-destructive"
+                            : "bg-muted-foreground/30"
+                      }`}
+                    />
+                    {svc.label}
+                  </span>
+                </TableCell>
+                <TableCell className="text-right text-muted-foreground font-mono">
+                  {svc.detail ?? (svc.pid != null ? `PID ${svc.pid}` : "—")}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+          </Table>
+        </div>
+      )}
+    </StatusSection>
+  );
+}
+
+function ResourcesSection({ data }: { data: ClusterPanel }) {
+  // One chart row per online machine that has resource data.
+  // Machine dedup is inherent: the roster is already per-machine-name.
+  const machinesWithData = data.machines.filter(
+    (m) => m.online && m.resource_history.length > 0,
+  );
+  if (machinesWithData.length === 0) return null;
+
+  return (
+    <StatusSection id="status-resources" icon={Server} title="Resources" subtitle="(CPU / memory / disk)">
+      <div className="space-y-3">
+        {machinesWithData.map((m) => (
+          <div key={m.name}>
+            {machinesWithData.length > 1 && (
+              <div className="text-xs text-muted-foreground mb-1.5 font-medium">{m.name}</div>
+            )}
+            <ResourceChart history={m.resource_history} />
+          </div>
+        ))}
+      </div>
+    </StatusSection>
+  );
+}
+
+// Unified chrome for the secondary status blocks: bordered card + icon +
+// title + optional dim subtitle + optional right-aligned action.
+function StatusSection({
+  id,
+  icon: Icon,
+  title,
+  subtitle,
+  action,
+  children,
+}: {
+  id?: string;
+  icon: ComponentType<{ className?: string }>;
+  title: ReactNode;
+  subtitle?: ReactNode;
+  action?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <div id={id} className="scroll-mt-4 rounded-md border border-border p-4">
+      <div className={cn("items-center gap-2 mb-3", FLEX)}>
+        <Icon className="size-4" />
+        <h3 className="text-sm font-semibold">{title}</h3>
+        {subtitle ? (
+          <span className="text-xs text-muted-foreground">{subtitle}</span>
+        ) : null}
+        {action ? <div className="ml-auto">{action}</div> : null}
+      </div>
+      {children}
+    </div>
+  );
+}

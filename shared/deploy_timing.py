@@ -1,0 +1,178 @@
+"""The deploy timeout family — one definition of "this host stopped making
+progress", and the rule that keeps the deploy lease alive across it.
+
+These numbers used to live as three independent constants in three modules, each
+calibrated when every host in the fleet was POSIX:
+
+- `cli.commands.update._POLL_TIMEOUT_S` (120 s) — how long Phase B waits for an
+  agent-runner to report `paused=false`.
+- `shared.cluster_lock.SETTLE_TTL_S` (900 s) — how long the lease stays held after
+  an orchestration exits with hosts still converging.
+- `ops.cluster_deploy._UPDATER_STALL_TIMEOUT_S` (900 s) — when a host's own updater
+  session is hung rather than slow.
+
+**They are not independent.** All three answer the same question — "has this host
+stopped making progress?" — and the smallest of them decided when the deploy lease
+stopped protecting the deploy. A host slower than 120 s made the Phase-B poll give
+up, the orchestration return, and the lease be released or downgraded *while that
+host's checkout had moved and its processes had not*: the exact state a second
+deploy must not start into (the 2026-07-29 incident). A protection that expires
+mid-operation is worse than a visibly absent one, because everything downstream —
+the pin controller, the code controller, the stranded-pause controller, the health
+probe's auto-rollback suppression — reads the lease and believes it.
+
+## The invariant
+
+**The lease must not expire before the operation it protects can finish.**
+
+It is held two ways, and the split matters:
+
+1. **While the orchestration is executing**, the lease is *renewed* on a timer
+   (`LEASE_RENEW_INTERVAL_S`) by the process running it — see
+   `shared.cluster_lock.renew_update_lock`. So `LOCK_TTL_S` is no longer a ceiling
+   on how long a deploy may take; it is purely the crash-reclaim bound its
+   docstring always claimed it was. This is what decouples *how long is allowed*
+   from *how long is normal*: a slower fleet no longer needs any constant here
+   re-audited, and a rollout whose process dies still releases within one TTL
+   because renewal dies with it.
+2. **After the orchestration stops executing** with hosts still mid-transition, the
+   lease converts to a bounded settle hold (`SETTLE_TTL_S`) that
+   `ops.deploy_window` ends the moment those hosts reach the pin.
+
+## Why one number, and why 900 s
+
+`NO_PROGRESS_TIMEOUT_S` is the single definition of "stopped making progress", used
+by every consumer above. Two clocks that disagree about that are two chances to
+declare a host dead while it is working, or alive while it is not.
+
+The value is inherited from `_UPDATER_STALL_TIMEOUT_S`, which was already this
+repo's standing answer to the question, rather than re-derived — the point of this
+module is to stop having several answers. It is **far** above the measured POSIX
+leg: a full agent-runner self-update (fetch + force-checkout + `uv sync` + restart
+to serving) took 2-15 s across 44 samples on two hosts (`updater-*.log`
+epoch-to-mtime on a runner n=24 and a WSL host n=20, 2026-07-01..29).
+
+It is generous because the *Windows* leg is two orders of magnitude slower, which
+prod's rollout logs now show rather than guess: `win` converged through Phase B on
+11 of the 32 rollouts of 2026-08-06..12, inside polls of 0-11 minutes — an upper
+bound on its own leg, since a poll ends only when the slowest acked host returns.
+Five of the remaining rounds spent the whole bound. So this number is not a
+first-principles ceiling any more; it is roughly 1.5x the longest leg observed, and
+the thing that has to stay true is the sentence below rather than the margin.
+
+`GATEWAY_READY_TIMEOUT_S` is **not** a fourth answer to that question and must not be
+folded into it. It bounds one local uvicorn binding its port before Phase B is allowed
+to fan out at all — a strictly smaller job than the remote checkout + sync + restart
+the no-progress number covers, and a *precondition* of that work rather than a
+measurement of it. Two clocks that disagree about "stopped making progress" are a bug;
+two clocks measuring two different things are not.
+
+Raising the poll from 120 s to this is only affordable because the poll no longer
+*spends* it on a host that has provably stopped: a host that answers "still
+paused, no orchestration running" has lost its updater and is not coming back on
+its own, and the poll returns that verdict in seconds instead of waiting out the
+bound (`cli.commands.update._probe_one_until_unpaused`). Patience for the slow case
+and speed for the failed case are the same change.
+
+**Which puts the whole weight on the failed case being *detectable*.** A bound
+this generous is a liability for exactly as long as a stopped host can look busy,
+and this number is also the updater lease's TTL — one write at the run's start —
+so anything that keeps a run from clearing it buys the failure the patience meant
+for the slow. That is why the updater states its own ending on both platforms now
+(`ops.updater_outcome.native_exit_line`) and why the poll treats that ending as
+outranking the lease.
+"""
+
+from __future__ import annotations
+
+# The one definition of "this host has stopped making progress". Consumers:
+# `cli.commands.update._POLL_TIMEOUT_S`, `shared.cluster_lock.SETTLE_TTL_S`,
+# `ops.cluster_deploy._UPDATER_STALL_TIMEOUT_S`.
+NO_PROGRESS_TIMEOUT_S = 900.0
+
+# How often the process running an orchestration re-arms its own lease. Small
+# relative to `LOCK_TTL_S` so a missed round (a slow DB, one dropped connection) is
+# never fatal, and large enough that a multi-minute rollout costs a handful of
+# single-row UPDATEs rather than a poll-rate write stream.
+LEASE_RENEW_INTERVAL_S = 60.0
+
+# The agent-process lease (R1, Task #1021): `agents_meta.lease_expires_at`.
+# TTL = 10x the renewal interval — a healthy agent renews every 60 s and the
+# reaper runs every 30 s, so a transient renewal blip (a DB hiccup) never reads
+# as death; expiry is the crash-reclaim bound (the backfill granted the same
+# 600 s at migration, and the reaper's grace must outlast the renewal period).
+AGENT_LEASE_TTL_S = 600.0
+AGENT_LEASE_RENEW_INTERVAL_S = 60.0
+# Post-outage grace for the lease-zombie pass (2026-08-08 audit, P1-2): the
+# restarter daemon skips force-killing expired-lease rows for this long after
+# ITS OWN DB link recovers (laptop sleep / network black-hole), so a
+# paused-but-alive agent — whose lease expired while it could not renew — gets
+# time to renew instead of being killed on the first post-outage reap.
+# Registered in the clock lattice: MUST exceed AGENT_LEASE_RENEW_INTERVAL_S.
+AGENT_LEASE_ZOMBIE_GRACE_S = 180.0
+# The wall-clock tick gap (seconds) between restarter poll iterations that
+# means "the daemon or host was suspended" (time.time() advances through a
+# system sleep; time.monotonic() does not), arming the grace window above.
+AGENT_LEASE_SUSPEND_GAP_S = 10.0
+
+# How long the orchestration waits for its own gateway to be serving before it tells
+# any agent-runner to update (`cli.commands._gateway_ready`). A different question
+# from `NO_PROGRESS_TIMEOUT_S` — that one bounds a remote host doing
+# checkout + sync + restart; this one bounds one local uvicorn binding its port — so
+# it is deliberately its own number and deliberately much smaller.
+#
+# Not measured on the prod gateway, and it does not need to be, because nothing on
+# the healthy path waits: the gate returns on its first probe when the gateway is
+# already serving, and every *diagnosable* failure exits at once (the gateway
+# session is gone, it answers on loopback but not off-box, it answers non-200). The
+# bound is spent only by a gateway that is alive and has bound nothing — and 3
+# minutes of that is a hung gateway, not a slow one. The one hard datum behind the
+# magnitude: prod's 2026-07-29 05:09 rollout has an agent-runner taking
+# `[Errno 61] Connection refused` from the gateway ~39 s into the rollout, so
+# whatever bounds "one local uvicorn binds its port" is well above 15 s.
+#
+# It must also stay far under `LOCK_TTL_S`: this wait sits *before* the Phase-B
+# poll, so — unlike the poll — it spends lease time with no renewal task armed.
+GATEWAY_READY_TIMEOUT_S = 180.0
+
+# How long an agent-runner's self-update preflight keeps re-dialing the gateway
+# before it declines (`cli.commands._repo._probe_gateway_or_die`). Defense in depth
+# behind `GATEWAY_READY_TIMEOUT_S`, not a competitor to it: the gate above decides
+# whether the fan-out happens at all, this one decides whether a *single* refused
+# dial, arriving after the gate already saw a 200, is enough to declare the gateway
+# down and strand the host for a settle window.
+#
+# 30 s, because the hole it must survive is one gateway restart the rollout itself
+# causes — measured at ~9 s on the 2026-08-01 rollout (`gateway.log` silent
+# 00:14:45 -> 00:14:54). It is deliberately far below `NO_PROGRESS_TIMEOUT_S`: the
+# preflight is one dial in a leg that number bounds whole, so spending 30 s here can
+# never be what makes a host look stalled. And it is spent only on the failing path —
+# a reachable gateway answers on the first dial, exactly as before.
+#
+# It is NOT sized to outlast a gateway that really died: that needs the watchdog's
+# 60 s round plus a respawn, and waiting for it here would only convert a legible
+# `INCOMPLETE` into a slow one (`decisions/2026-07-30-accept-readiness-gate-residual-race.md`
+# priced that and refused it).
+GATEWAY_PREFLIGHT_BUDGET_S = 30.0
+
+# How long `ava start` waits for the services it just launched to pass their
+# liveness probes before it reports them unready and exits
+# `SERVICES_NOT_READY_EXIT_CODE` (`cli.commands._probe._wait_for_services_ready`).
+#
+# The same physical job as `GATEWAY_READY_TIMEOUT_S` — a local daemon binding its
+# port — hence the same value, and for the same reasons: nothing healthy waits (the
+# poll returns the instant every probe passes), and a service whose session has
+# died ends the wait at once instead of spending the bound. It is a separate
+# constant rather than a reuse because the two have different observers and
+# different escalation paths: that one is the rollout orchestrator asking, off-box
+# and authenticated, whether the *gateway* serves the address the cluster dials,
+# and it alone carries the `LOCK_TTL_S` constraint above. This one is a host asking,
+# on loopback, whether *every* service it just launched came up. Retuning one is not
+# automatically a reason to retune the other, so they are stated separately — but
+# they are stated adjacently, because a change in what "a daemon binds its port"
+# costs would move both.
+#
+# They never nest: the rollout's local leg starts the gateway with
+# `--no-readiness-gate` precisely so the readiness question is asked once, by the
+# stronger off-box gate, rather than waited out twice.
+SERVICE_READY_TIMEOUT_S = 180.0

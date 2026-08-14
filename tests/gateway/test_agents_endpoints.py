@@ -1,0 +1,742 @@
+"""Gateway lifecycle endpoints HTTP integration tests.
+
+POST /api/agents (spawn + optional prompt + optional fork_from)
+POST /api/agents/{id}/terminate (INSERT terminate inbound)
+GET /api/agents (full snapshot of agents_meta table)
+
+`_launch_agent_process` monkeypatch (does not actually start process); uses ava_test DB with real SQL.
+"""
+
+from __future__ import annotations
+
+import signal
+
+import psycopg
+import pytest
+from fastapi.testclient import TestClient
+
+from gateway.app import app
+
+
+def _stub_native_kill(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stub the native supervisor's kill so force-terminate does not touch a real
+    agent process session in the test (there is none)."""
+
+    class _FakeSupervisor:
+        @staticmethod
+        def kill_session(*_a, **_kw):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+            return (True, "noop")
+
+    monkeypatch.setattr("ops.ops_lifecycle.native_proc", lambda: _FakeSupervisor)
+
+
+def _agent_row(db: psycopg.Connection, agent_id: int) -> tuple | None:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    with db.cursor() as cur:
+        cur.execute(
+            "SELECT id, spawner, fork_source_agent_id, "
+            "fork_source_checkpoint_id, status FROM agents_meta WHERE id = %s",
+            (agent_id,),
+        )
+        return cur.fetchone()
+
+
+def _inbound_rows(db: psycopg.Connection, agent_id: int) -> list[tuple[str, str, str]]:
+    with db.cursor() as cur:
+        cur.execute(
+            "SELECT content, kind, source FROM inbound_messages WHERE agent_id = %s ORDER BY id",
+            (agent_id,),
+        )
+        return cur.fetchall()
+
+
+def test_get_models_returns_grouped_supported_models() -> None:
+    with TestClient(app) as client:
+        resp = client.get("/api/models")
+    assert resp.status_code == 200
+    body = resp.json()
+    flat = [m for group in body["providers"].values() for m in group]
+    assert "deepseek-v4-pro" in flat
+    assert "gpt-5.6-sol" in flat
+    # additional verified-live models
+    assert "claude-sonnet-5" in flat
+    assert "gpt-5.6-terra" in flat
+    assert "gpt-5.6-luna" in flat
+    from shared.config import settings
+
+    assert body["default"] == settings.lm.llm_model
+
+
+def test_get_models_every_model_has_reasoning_effort_control() -> None:
+    """No model may render a bare "Effort: default" blank dropdown — every
+    provider either exposes a graded reasoning_effort field, or, where the
+    real API only has a binary thinking on/off switch (mimo,
+    claude-haiku-4-5-20251001), a two-value control mapped onto that switch. Locks in
+    the 2026-07-24 audit that closed the mimo/haiku gap (both used to return
+    `reasoning_effort_options: null`, hiding the dropdown entirely)."""
+    with TestClient(app) as client:
+        resp = client.get("/api/models")
+    body = resp.json()
+    missing = [
+        model for model, info in body["models"].items() if info["reasoning_effort_options"] is None
+    ]
+    assert missing == [], f"models with no reasoning effort control: {missing}"
+
+
+def test_get_models_reasoning_effort_options_match_factory_tables() -> None:
+    """Gateway's per-model effort option lists come straight off the registry
+    (`ModelSpec.effort_levels`), and the registry values for the OpenAI-style
+    providers must mirror the factory's per-provider clamp tables — a drift
+    would silently offer the spawn UI a value build_chat_model then clamps
+    away, or hide a value the provider actually accepts."""
+    from shared.lm._effort import _PROVIDER_EFFORT_LEVELS
+    from shared.lm.registry import MODELS
+
+    with TestClient(app) as client:
+        resp = client.get("/api/models")
+    models = resp.json()["models"]
+
+    # The endpoint serves exactly the registry's per-model vocabulary.
+    for model, info in models.items():
+        expected_levels = MODELS[model].effort_levels
+        assert expected_levels is not None, model
+        assert info["reasoning_effort_options"] == list(expected_levels), model
+
+    # And the registry vocabulary for the OpenAI-style providers matches the
+    # per-provider wire clamp, so UI options and clamp cannot diverge.
+    for provider in ("gemini", "grok", "kimi", "glm", "mimo"):
+        expected = list(_PROVIDER_EFFORT_LEVELS[provider])
+        provider_models = [m for m, info in models.items() if info["provider"] == provider]
+        assert provider_models, f"no models registered for provider {provider!r}"
+        for model in provider_models:
+            assert models[model]["reasoning_effort_options"] == expected, model
+
+    assert models["claude-haiku-4-5-20251001"]["reasoning_effort_options"] == ["none", "high"]
+
+
+def test_get_models_reasoning_effort_default_is_the_per_model_tuning_value(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Every spawnable model publishes a concrete `reasoning_effort_default`
+    (what the picker pre-selects), equal to the registry's per-model tuning
+    layer — never "" (provider default, not displayable) and never the ladder
+    floor by accident. An explicit cluster-wide AVA_REASONING_EFFORT pin must
+    NOT leak into the published default: the picker shows the model's own
+    default, while the pin is operator policy (visible in the config panel's
+    per-model view)."""
+    from shared.config import settings
+    from shared.lm.registry import MODELS
+
+    with TestClient(app) as client:
+        resp = client.get("/api/models")
+    assert resp.status_code == 200
+    models = resp.json()["models"]
+
+    # Spot-check the documented vendor defaults (decision doc
+    # 2026-07-25-per-model-tuning-values.md Decision 4): deepseek max,
+    # claude adaptive family high, gpt medium, kimi/glm max.
+    assert models["deepseek-v4-pro"]["reasoning_effort_default"] == "max"
+    assert models["claude-sonnet-5"]["reasoning_effort_default"] == "high"
+    assert models["claude-haiku-4-5-20251001"]["reasoning_effort_default"] == "none"
+    assert models["gpt-5.6-sol"]["reasoning_effort_default"] == "medium"
+    assert models["kimi-k3"]["reasoning_effort_default"] == "max"
+    assert models["glm-5.2"]["reasoning_effort_default"] == "max"
+
+    # General invariant: default == the registry's tuning value, is concrete,
+    # and sits on the model's own ladder (a default off the ladder would be
+    # clamped or dropped at build — a UI lie).
+    for model, info in models.items():
+        expected = MODELS[model].tuning.reasoning_effort
+        assert info["reasoning_effort_default"] == expected, model
+        assert expected, model  # concrete, never ""
+        assert expected in info["reasoning_effort_options"], model
+
+    # The published default is the MODEL's default, not the cluster pin.
+    monkeypatch.setattr(settings.lm, "reasoning_effort", "low")
+    with TestClient(app) as client:
+        resp = client.get("/api/models")
+    models = resp.json()["models"]
+    assert models["deepseek-v4-pro"]["reasoning_effort_default"] == "max"
+
+
+class TestSpawn:
+    def test_spawn_minimal_no_prompt_no_spawner(self, db_conn: psycopg.Connection) -> None:
+        with TestClient(app) as client:
+            resp = client.post("/api/agents", json={})
+        assert resp.status_code == 201
+        new_id = resp.json()["id"]
+        row = _agent_row(db_conn, new_id)  # pyright: ignore[reportUnknownVariableType]
+        # spawner defaults to 'user' (triggered by UI button)
+        assert row == (new_id, "user", None, None, "allocated")
+        # No inbound delivered
+        assert _inbound_rows(db_conn, new_id) == []
+
+    def test_spawn_with_prompt_inserts_chat_inbound(self, db_conn: psycopg.Connection) -> None:
+        with TestClient(app) as client:
+            resp = client.post("/api/agents", json={"prompt": "查 X", "prompt_source": "user"})
+        new_id = resp.json()["id"]
+        assert _inbound_rows(db_conn, new_id) == [("查 X", "chat", "user")]
+
+    def test_spawn_with_explicit_spawner(self, db_conn: psycopg.Connection) -> None:
+        """spawner can be passed explicitly — e.g., when claude-code starts an ava agent, pass 'claude-code'."""
+        with TestClient(app) as client:
+            resp = client.post("/api/agents", json={"spawner": "claude-code"})
+        new_id = resp.json()["id"]
+        row = _agent_row(db_conn, new_id)  # pyright: ignore[reportUnknownVariableType]
+        assert row is not None and row[1] == "claude-code"
+
+    def test_spawn_fork_resolves_latest_and_copies_checkpoint(
+        self, db_conn: psycopg.Connection
+    ) -> None:
+        """fork_from given → gateway internally SELECT max(checkpoint_id) → spawn_agent
+        with explicit fork_checkpoint. New agent gets full checkpoint chain."""
+        with TestClient(app) as client:
+            source = client.post("/api/agents", json={}).json()["id"]
+            with db_conn.cursor() as cur:
+                for ckpt, parent in [("cka", None), ("ckb", "cka"), ("ckc", "ckb")]:
+                    cur.execute(
+                        "INSERT INTO checkpoints (thread_id, checkpoint_id, parent_checkpoint_id, "
+                        "checkpoint, metadata) VALUES (%s, %s, %s, '{}'::jsonb, '{}'::jsonb)",
+                        (str(source), ckpt, parent),
+                    )
+            db_conn.commit()
+
+            resp = client.post("/api/agents", json={"fork_from": source})
+        new_id = resp.json()["id"]
+        # agents row records fork_source_*
+        row = _agent_row(db_conn, new_id)  # pyright: ignore[reportUnknownVariableType]
+        assert row is not None
+        assert row[2] == source and row[3] == "ckc"  # latest = ckc
+        # new agent gets full a/b/c chain
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "SELECT checkpoint_id FROM checkpoints WHERE thread_id = %s ORDER BY checkpoint_id",
+                (str(new_id),),
+            )
+            ckpts = [r[0] for r in cur.fetchall()]
+        assert ckpts == ["cka", "ckb", "ckc"]
+
+    def test_spawn_fork_source_no_checkpoint_returns_409(
+        self,
+        db_conn: psycopg.Connection,
+    ) -> None:
+        """fork_from's source has no checkpoint → 409 + reason='fork_source_empty'
+        (follows ForkSourceEmpty wire-encoded path, handler maps uniformly, SDK reconstructs from code)."""
+        with TestClient(app) as client:
+            source = client.post("/api/agents", json={}).json()["id"]
+            resp = client.post("/api/agents", json={"fork_from": source})
+        assert resp.status_code == 409
+        body = resp.json()
+        assert body["reason"] == "fork_source_empty"
+        assert "no checkpoint" in body["detail"]
+
+    def test_spawn_empty_prompt_validation(
+        self,
+        db_conn: psycopg.Connection,
+    ) -> None:
+        """Empty prompt → 422 (pydantic StringConstraints strip + min_length)."""
+        with TestClient(app) as client:
+            resp = client.post("/api/agents", json={"prompt": "   "})
+        assert resp.status_code == 422
+
+    def test_spawn_prompt_without_prompt_source_returns_422(
+        self,
+        db_conn: psycopg.Connection,
+    ) -> None:
+        """prompt given but prompt_source missing → 422 (model_validator blocks).
+        Prevents the anti-pattern of "caller forgot field silently attributed to user"."""
+        with TestClient(app) as client:
+            resp = client.post("/api/agents", json={"prompt": "查 X"})
+        assert resp.status_code == 422
+        # detail contains validator's Chinese-language prompt
+        assert "prompt_source" in resp.text
+
+
+class TestTerminate:
+    def test_terminate_inserts_inbound_and_returns_enqueued(
+        self, db_conn: psycopg.Connection
+    ) -> None:
+        with TestClient(app) as client:
+            agent_id = client.post("/api/agents", json={}).json()["id"]
+            resp = client.post(f"/api/agents/{agent_id}/terminate")
+        assert resp.status_code == 200
+        assert resp.json() == {"status": "enqueued"}
+        assert _inbound_rows(db_conn, agent_id) == [("", "terminate", "user")]
+
+    def test_terminate_already_terminated_is_noop(self, db_conn: psycopg.Connection) -> None:
+        with TestClient(app) as client:
+            agent_id = client.post("/api/agents", json={}).json()["id"]
+            with db_conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,)
+                )
+            db_conn.commit()
+            resp = client.post(f"/api/agents/{agent_id}/terminate")
+        assert resp.status_code == 200
+        assert resp.json() == {"status": "already_terminated"}
+        assert _inbound_rows(db_conn, agent_id) == []  # not delivered
+
+    def test_terminate_nonexistent_404(
+        self,
+        db_conn: psycopg.Connection,
+    ) -> None:
+        with TestClient(app) as client:
+            resp = client.post("/api/agents/9999/terminate")
+        assert resp.status_code == 404
+        assert "does not exist" in resp.json()["detail"]
+
+    def test_terminate_force_kills_and_returns_force_killed(
+        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """force=true skips inbound path, directly kills the session + forcefully marks
+        terminated + inserts audit inbound."""
+        # stub kill-session — no real session in test
+        _stub_native_kill(monkeypatch)
+
+        with TestClient(app) as client:
+            agent_id = client.post("/api/agents", json={}).json()["id"]
+            resp = client.post(f"/api/agents/{agent_id}/terminate", json={"force": True})
+        assert resp.status_code == 200
+        assert resp.json() == {"status": "force_killed"}
+
+        # status should become 'terminated'
+        row = _agent_row(db_conn, agent_id)  # pyright: ignore[reportUnknownVariableType]
+        assert row is not None and row[4] == "terminated"
+
+        # should have inserted an audit inbound (terminate kind)
+        assert _inbound_rows(db_conn, agent_id) == [("", "terminate", "user")]
+
+    def test_terminate_force_with_custom_source(
+        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """force=true passes source parameter through to audit inbound."""
+        _stub_native_kill(monkeypatch)
+
+        with TestClient(app) as client:
+            agent_id = client.post("/api/agents", json={}).json()["id"]
+            resp = client.post(
+                f"/api/agents/{agent_id}/terminate",
+                json={"force": True, "source": "agent:42"},
+            )
+        assert resp.json() == {"status": "force_killed"}
+
+        # inbound source should be agent:42, not default user
+        rows = _inbound_rows(db_conn, agent_id)
+        assert rows == [("", "terminate", "agent:42")]
+
+    def test_terminate_force_already_terminated_returns_already_terminated(
+        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """force=true for already terminated agent is still noop — does not kill again."""
+        _stub_native_kill(monkeypatch)
+
+        with TestClient(app) as client:
+            agent_id = client.post("/api/agents", json={}).json()["id"]
+            with db_conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE agents_meta SET status = 'terminated' WHERE id = %s",
+                    (agent_id,),
+                )
+            db_conn.commit()
+            resp = client.post(f"/api/agents/{agent_id}/terminate", json={"force": True})
+        assert resp.json() == {"status": "already_terminated"}
+
+    def test_terminate_force_nonexistent_404(
+        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """force=true for nonexistent agent still 404."""
+        _stub_native_kill(monkeypatch)
+
+        with TestClient(app) as client:
+            resp = client.post("/api/agents/9999/terminate", json={"force": True})
+        assert resp.status_code == 404
+        assert "does not exist" in resp.json()["detail"]
+
+    def test_terminate_force_with_pid_sends_sigkill(
+        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """force=true and pid is not NULL, sends SIGKILL."""
+        _stub_native_kill(monkeypatch)
+
+        # track os.kill calls
+        kill_calls: list[tuple] = []  # pyright: ignore[reportMissingTypeArgument, reportUnknownVariableType]
+        monkeypatch.setattr("shared.proc.os.kill", lambda pid, sig: kill_calls.append((pid, sig)))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType, reportUnknownMemberType]
+
+        with TestClient(app) as client:
+            agent_id = client.post("/api/agents", json={}).json()["id"]
+            # manually set pid — simulating agent running
+            with db_conn.cursor() as cur:
+                cur.execute("UPDATE agents_meta SET pid = 12345 WHERE id = %s", (agent_id,))
+            db_conn.commit()
+            resp = client.post(f"/api/agents/{agent_id}/terminate", json={"force": True})
+        assert resp.json() == {"status": "force_killed"}
+        assert kill_calls == [(12345, signal.SIGKILL)]
+
+
+class TestAutoResurrect:
+    def test_chat_to_terminated_agent_triggers_auto_resurrect(
+        self, db_conn: psycopg.Connection
+    ) -> None:
+        """Sending chat message to a terminated agent → auto-resurrect triggers automatically,
+        INSERT 'resurrect' lifecycle inbound."""
+        with TestClient(app) as client:
+            agent_id = client.post("/api/agents", json={}).json()["id"]
+            with db_conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,)
+                )
+            db_conn.commit()
+            resp = client.post(
+                f"/api/agents/{agent_id}/messages",
+                json={"content": "resume your work", "source": "user"},
+            )
+        assert resp.status_code == 201
+        rows = _inbound_rows(db_conn, agent_id)
+        # Auto-resurrect inserts a 'resurrect' inbound (source='system') before the chat
+        assert ("", "resurrect", "system") in rows
+        assert ("resume your work", "chat", "user") in rows
+
+    def test_chat_to_alive_agent_no_resurrect(self, db_conn: psycopg.Connection) -> None:
+        """Sending chat to an alive agent → no resurrect inbound inserted."""
+        with TestClient(app) as client:
+            agent_id = client.post("/api/agents", json={}).json()["id"]
+            resp = client.post(
+                f"/api/agents/{agent_id}/messages",
+                json={"content": "hello", "source": "user"},
+            )
+        assert resp.status_code == 201
+        # Only the chat, no resurrect marker
+        rows = _inbound_rows(db_conn, agent_id)
+        assert ("hello", "chat", "user") in rows
+        # No resurrect row
+        resurrect_rows = [r for r in rows if r[1] == "resurrect"]
+        assert len(resurrect_rows) == 0
+
+    def test_chat_illegal_source_rejected_422(self, db_conn: psycopg.Connection) -> None:
+        """source not in envelope allowlist → 422."""
+        with TestClient(app) as client:
+            agent_id = client.post("/api/agents", json={}).json()["id"]
+            resp = client.post(
+                f"/api/agents/{agent_id}/messages",
+                json={"content": "hello", "source": "ui:web"},
+            )
+        assert resp.status_code == 422
+
+
+class TestRestart:
+    def test_restart_inserts_inbound_and_returns_enqueued(
+        self, db_conn: psycopg.Connection
+    ) -> None:
+        with TestClient(app) as client:
+            agent_id = client.post("/api/agents", json={}).json()["id"]
+            resp = client.post(f"/api/agents/{agent_id}/restart")
+        assert resp.status_code == 200
+        assert resp.json() == {"status": "enqueued"}
+        assert _inbound_rows(db_conn, agent_id) == [("", "restart", "user")]
+
+    def test_restart_already_terminated_is_noop(self, db_conn: psycopg.Connection) -> None:
+        with TestClient(app) as client:
+            agent_id = client.post("/api/agents", json={}).json()["id"]
+            with db_conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,)
+                )
+            db_conn.commit()
+            resp = client.post(f"/api/agents/{agent_id}/restart")
+        assert resp.status_code == 200
+        assert resp.json() == {"status": "already_terminated"}
+        assert _inbound_rows(db_conn, agent_id) == []  # not delivered
+
+    def test_restart_nonexistent_404(
+        self,
+        db_conn: psycopg.Connection,
+    ) -> None:
+        with TestClient(app) as client:
+            resp = client.post("/api/agents/9999/restart")
+        assert resp.status_code == 404
+
+
+class TestList:
+    def test_get_agents_returns_all_with_status_and_lineage(
+        self, db_conn: psycopg.Connection
+    ) -> None:
+        with TestClient(app) as client:
+            a_id = client.post("/api/agents", json={}).json()["id"]
+            b_id = client.post("/api/agents", json={"spawner": f"agent:{a_id}"}).json()["id"]
+            with db_conn.cursor() as cur:
+                cur.execute("UPDATE agents_meta SET status = 'idling' WHERE id = %s", (b_id,))
+            db_conn.commit()
+            resp = client.get("/api/agents")
+        assert resp.status_code == 200
+        rows = resp.json()
+        assert len(rows) == 2
+        by_id = {r["agent_id"]: r for r in rows}
+        assert by_id[a_id]["status"] == "allocated"
+        assert by_id[a_id]["spawner"] == "user"
+        assert by_id[b_id]["status"] == "idling"
+        assert by_id[b_id]["spawner"] == f"agent:{a_id}"
+        # spawn without prompt → label stays NULL (BackgroundTask LLM generation not triggered)
+        assert by_id[a_id]["label"] is None
+        assert by_id[b_id]["label"] is None
+
+    def test_get_agents_joins_thread_label(
+        self,
+        db_conn: psycopg.Connection,
+    ) -> None:
+        """label field fetched from agents JOIN — after PATCH write, GET should see it."""
+        with TestClient(app) as client:
+            a_id = client.post("/api/agents", json={}).json()["id"]
+            client.patch(f"/api/agents/{a_id}", json={"label": "我的 agent"})
+            resp = client.get("/api/agents")
+        assert resp.status_code == 200
+        by_id = {r["agent_id"]: r for r in resp.json()}
+        assert by_id[a_id]["label"] == "我的 agent"
+
+    def test_get_single_agent_returns_label(self, db_conn: psycopg.Connection) -> None:
+        with TestClient(app) as client:
+            a_id = client.post("/api/agents", json={}).json()["id"]
+            client.patch(f"/api/agents/{a_id}", json={"label": "single-x"})
+            resp = client.get(f"/api/agents/{a_id}")
+        assert resp.status_code == 200
+        assert resp.json()["label"] == "single-x"
+
+    def test_get_agents_returns_machine_column(self, db_conn: psycopg.Connection) -> None:
+        """AgentRow.machine comes from agents_meta.machine — frontend sidebar uses it to display
+        machine badge + fork picker default placement."""
+        with TestClient(app) as client:
+            a_id = client.post("/api/agents", json={}).json()["id"]
+            # manually change machine to simulate cross-machine deployment (default spawn_agent writes local machine_name())
+            with db_conn.cursor() as cur:
+                cur.execute("UPDATE agents_meta SET machine = 'test-host' WHERE id = %s", (a_id,))
+            db_conn.commit()
+            list_resp = client.get("/api/agents")
+            single_resp = client.get(f"/api/agents/{a_id}")
+        assert list_resp.status_code == 200
+        assert single_resp.status_code == 200
+        list_row = next(r for r in list_resp.json() if r["agent_id"] == a_id)
+        assert list_row["machine"] == "test-host"
+        assert single_resp.json()["machine"] == "test-host"
+
+    def test_get_agents_empty_returns_empty_list(
+        self,
+        db_conn: psycopg.Connection,
+    ) -> None:
+        with TestClient(app) as client:
+            resp = client.get("/api/agents")
+        assert resp.status_code == 200
+        assert resp.json() == []
+
+
+class TestGetLastMessage:
+    def test_any_agent_can_query_unrelated_agent(self, db_conn: psycopg.Connection) -> None:
+        """Any agent in the cluster can query — not just spawn-chain ancestors."""
+        from langchain_core.messages import AIMessage
+        from langgraph.checkpoint.base import empty_checkpoint
+        from langgraph.checkpoint.postgres import PostgresSaver
+
+        from shared.config import settings
+        from shared.db import create_agent
+
+        # Create two unrelated agents (no spawn chain).
+        # create_agent inserts into agents (LangGraph thread); we also need
+        # agents_meta for the endpoint's existence check.
+        agent_a = create_agent(db_conn)
+        agent_b = create_agent(db_conn)
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO agents_meta (id, spawner, status) VALUES (%s, 'test', 'running')",
+                (agent_a,),
+            )
+            cur.execute(
+                "INSERT INTO agents_meta (id, spawner, status) VALUES (%s, 'test', 'running')",
+                (agent_b,),
+            )
+        db_conn.commit()
+
+        # Write a checkpoint for agent_a with an AIMessage
+        msg = AIMessage(content="hello from agent A", id="msg-1")
+        ckpt = empty_checkpoint()
+        ckpt["channel_values"] = {"messages": [msg]}
+        ckpt["channel_versions"] = {"messages": "1", "__start__": "1"}
+        with PostgresSaver.from_conn_string(settings.data_plane.db_url) as saver:
+            saver.setup()
+            saver.put(
+                config={"configurable": {"thread_id": str(agent_a), "checkpoint_ns": ""}},
+                checkpoint=ckpt,
+                metadata={"source": "input", "step": 1, "parents": {}},
+                new_versions={"messages": "1"},
+            )
+
+        with TestClient(app) as client:
+            # Agent B queries Agent A's last message — should succeed
+            resp = client.get(
+                f"/api/agents/{agent_a}/last-message",
+                params={"caller": f"agent:{agent_b}"},
+            )
+        assert resp.status_code == 200
+        assert resp.json()["text"] == "hello from agent A"
+
+    def test_none_for_agent_without_ai_message(self, db_conn: psycopg.Connection) -> None:
+        """Returns text=None when the agent has no AI message yet."""
+        from shared.db import create_agent
+
+        agent_id = create_agent(db_conn)
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO agents_meta (id, spawner, status) VALUES (%s, 'test', 'running')",
+                (agent_id,),
+            )
+        db_conn.commit()
+
+        with TestClient(app) as client:
+            resp = client.get(
+                f"/api/agents/{agent_id}/last-message",
+                params={"caller": "agent:99999"},
+            )
+        assert resp.status_code == 200
+        assert resp.json()["text"] is None
+
+    def test_returns_last_message_text_from_column(self, db_conn: psycopg.Connection) -> None:
+        """When last_message_text is set, return it — no checkpoint needed."""
+        from shared.db import create_agent
+
+        agent_id = create_agent(db_conn)
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO agents_meta (id, spawner, status, last_message_text) "
+                "VALUES (%s, 'test', 'running', %s)",
+                (agent_id, "hello from column"),
+            )
+        db_conn.commit()
+
+        with TestClient(app) as client:
+            resp = client.get(
+                f"/api/agents/{agent_id}/last-message",
+                params={"caller": "agent:99999"},
+            )
+        assert resp.status_code == 200
+        assert resp.json()["text"] == "hello from column"
+
+    def test_last_message_text_survives_without_checkpoint(
+        self, db_conn: psycopg.Connection
+    ) -> None:
+        """After compact wipes the checkpoint, last_message_text still returns the last AI text."""
+        from shared.db import create_agent
+
+        agent_id = create_agent(db_conn)
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO agents_meta (id, spawner, status, last_message_text) "
+                "VALUES (%s, 'test', 'running', %s)",
+                (agent_id, "pre-compact message"),
+            )
+        db_conn.commit()
+
+        # No checkpoint written — simulating post-compact state where
+        # checkpoint only has [SystemMessage, summary] (no AIMessage).
+        with TestClient(app) as client:
+            resp = client.get(
+                f"/api/agents/{agent_id}/last-message",
+                params={"caller": "agent:99999"},
+            )
+        assert resp.status_code == 200
+        assert resp.json()["text"] == "pre-compact message"
+
+    def test_falls_back_to_checkpoint_when_column_null(self, db_conn: psycopg.Connection) -> None:
+        """Backward compat: when last_message_text IS NULL, scan checkpoint."""
+        from langchain_core.messages import AIMessage
+        from langgraph.checkpoint.base import empty_checkpoint
+        from langgraph.checkpoint.postgres import PostgresSaver
+
+        from shared.config import settings
+        from shared.db import create_agent
+
+        agent_id = create_agent(db_conn)
+        with db_conn.cursor() as cur:
+            # last_message_text is left NULL (default)
+            cur.execute(
+                "INSERT INTO agents_meta (id, spawner, status) VALUES (%s, 'test', 'running')",
+                (agent_id,),
+            )
+        db_conn.commit()
+
+        # Write a checkpoint with an AIMessage
+        msg = AIMessage(content="from checkpoint", id="msg-1")
+        ckpt = empty_checkpoint()
+        ckpt["channel_values"] = {"messages": [msg]}
+        ckpt["channel_versions"] = {"messages": "1", "__start__": "1"}
+        with PostgresSaver.from_conn_string(settings.data_plane.db_url) as saver:
+            saver.setup()
+            saver.put(
+                config={"configurable": {"thread_id": str(agent_id), "checkpoint_ns": ""}},
+                checkpoint=ckpt,
+                metadata={"source": "input", "step": 1, "parents": {}},
+                new_versions={"messages": "1"},
+            )
+
+        with TestClient(app) as client:
+            resp = client.get(
+                f"/api/agents/{agent_id}/last-message",
+                params={"caller": "agent:99999"},
+            )
+        assert resp.status_code == 200
+        assert resp.json()["text"] == "from checkpoint"
+
+    def test_falls_back_to_checkpoint_when_column_missing(
+        self, db_conn: psycopg.Connection
+    ) -> None:
+        """When last_message_text column does not exist (migration not applied),
+        fall back to checkpoint scan instead of returning 500."""
+        from langchain_core.messages import AIMessage
+        from langgraph.checkpoint.base import empty_checkpoint
+        from langgraph.checkpoint.postgres import PostgresSaver
+
+        from shared.config import settings
+        from shared.db import create_agent
+
+        agent_id = create_agent(db_conn)
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO agents_meta (id, spawner, status) VALUES (%s, 'test', 'running')",
+                (agent_id,),
+            )
+        db_conn.commit()
+
+        # Write a checkpoint with an AIMessage
+        msg = AIMessage(content="from checkpoint fallback", id="msg-1")
+        ckpt = empty_checkpoint()
+        ckpt["channel_values"] = {"messages": [msg]}
+        ckpt["channel_versions"] = {"messages": "1", "__start__": "1"}
+        with PostgresSaver.from_conn_string(settings.data_plane.db_url) as saver:
+            saver.setup()
+            saver.put(
+                config={"configurable": {"thread_id": str(agent_id), "checkpoint_ns": ""}},
+                checkpoint=ckpt,
+                metadata={"source": "input", "step": 1, "parents": {}},
+                new_versions={"messages": "1"},
+            )
+
+        # Drop the last_message_text column to simulate migration not applied
+        with db_conn.cursor() as cur:
+            cur.execute("ALTER TABLE agents_meta DROP COLUMN IF EXISTS last_message_text")
+        db_conn.commit()
+
+        with TestClient(app) as client:
+            resp = client.get(
+                f"/api/agents/{agent_id}/last-message",
+                params={"caller": "agent:99999"},
+            )
+        assert resp.status_code == 200
+        assert resp.json()["text"] == "from checkpoint fallback"
+
+        # Restore the column for subsequent tests
+        with db_conn.cursor() as cur:
+            cur.execute("ALTER TABLE agents_meta ADD COLUMN IF NOT EXISTS last_message_text TEXT")
+        db_conn.commit()
+
+    def test_404_for_nonexistent_agent(self, db_conn: psycopg.Connection) -> None:
+        with TestClient(app) as client:
+            resp = client.get(
+                "/api/agents/99999/last-message",
+                params={"caller": "agent:1"},
+            )
+        assert resp.status_code == 404

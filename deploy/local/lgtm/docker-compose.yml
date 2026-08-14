@@ -1,0 +1,102 @@
+# deploy/local/lgtm/docker-compose.yml — AVA local observability viewer
+# (Tempo + Loki + Prometheus + Grafana, the LGTM stack), hosted on this machine.
+#
+# Role: read-only VIEWER for Ava's telemetry. Producers are untouched — nothing
+# here writes to ~/.ava/traces, the events table, or any main-flow service.
+# The OTLP entry is the NATIVE per-machine sidecar (ava-otel-collector session,
+# task #1266) on host 4317/4318 — this stack only hosts the backends it fans
+# out to.
+#
+# Operations:
+#   bash start.sh   # docker compose up -d, wait for health, print URL
+#   bash stop.sh    # docker compose down (data volumes persist)
+#   docker compose down -v   # wipe viewer data (traces/logs/metrics history)
+#
+# Ports (host):
+#   3003  Grafana UI (anonymous viewer; 3000/3002 already taken by frontend/ops Grafana)
+#   3100  Loki API (+ OTLP /otlp/v1/logs, sidecar logs fan-out)
+#   3200  Tempo query API (Grafana datasource target)
+#   14318 Tempo OTLP/HTTP intake (sidecar traces fan-out + `ava trace ship` replay)
+#   9090  Prometheus API (+ OTLP receiver /api/v1/otlp, sidecar metrics fan-out)
+#
+# Images are pinned to exact versions for reproducibility. restart: "no" keeps
+# the viewer off after a reboot/VM restart until start.sh is run again.
+services:
+  # No otel-collector container: since task #1266 the OTLP entry is the
+  # NATIVE per-machine sidecar (ava-otel-collector session, supervised by the
+  # watchdog) on host 4317/4318. The sidecar fans out traces -> Tempo OTLP
+  # (host 14318), logs -> Loki (3100), metrics -> Prometheus (9090).
+  tempo:
+    image: grafana/tempo:3.0.2
+    command: ["-config.file=/etc/tempo.yaml"]
+    volumes:
+      - ./config/tempo.yaml:/etc/tempo.yaml:ro
+      - tempo-data:/var/tempo
+    ports:
+      - "3200:3200"
+      # OTLP/HTTP intake for the native sidecar's traces pipeline + `ava trace
+      # ship` replay. Non-standard host port: 4318 belongs to the sidecar.
+      - "14318:4318"
+    restart: "no"
+
+  loki:
+    image: grafana/loki:3.7.6
+    command: ["-config.file=/etc/loki.yaml"]
+    volumes:
+      - ./config/loki.yaml:/etc/loki.yaml:ro
+      - loki-data:/loki
+    ports:
+      - "3100:3100"
+    restart: "no"
+
+  promtail:
+    image: grafana/promtail:3.6.0
+    command: ["-config.file=/etc/promtail/config.yml"]
+    volumes:
+      - ./config/promtail.yml:/etc/promtail/config.yml:ro
+      # Session stdout ($AVA_HOME/logs), read-only. Defaults to the
+      # operator's ~/.ava/logs; other homes override via the environment:
+      # AVA_LOGS_DIR=/path/to/logs bash start.sh
+      - ${AVA_LOGS_DIR:-~/.ava/logs}:/var/log/ava:ro
+      - promtail-positions:/tmp
+    restart: "no"
+
+  prometheus:
+    image: prom/prometheus:v3.13.2
+    command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.path=/prometheus", "--web.enable-otlp-receiver"]
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prom-data:/prometheus
+    ports:
+      - "9090:9090"
+    restart: "no"
+
+  grafana:
+    image: grafana/grafana:13.1.3
+    environment:
+      GF_SERVER_HTTP_PORT: "3000"
+      GF_SERVER_ROOT_URL: "${GRAFANA_ROOT_URL:-http://localhost:3003}"
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: "Viewer"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SECURITY_ALLOW_EMBEDDING: "true"
+      # Grafana 13 needs serve_from_sub_path for the /grafana/* proxy
+      # prefix (the ops/metrics iframes reach 3003 through it).
+      GF_SERVER_SERVE_FROM_SUB_PATH: "true"
+      GF_PATHS_PROVISIONING: "/etc/grafana/provisioning"
+      # Alerting webhook token (contact.yml $__env expansion). Value comes
+      # from deploy/local/lgtm/.env (gitignored) — never commit it.
+      OPS_ALERTS_WEBHOOK_TOKEN: "${OPS_ALERTS_WEBHOOK_TOKEN:-}"
+    volumes:
+      - ./config/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "3003:3000"
+    restart: "no"
+
+volumes:
+  tempo-data:
+  loki-data:
+  prom-data:
+  grafana-data:
+  promtail-positions:

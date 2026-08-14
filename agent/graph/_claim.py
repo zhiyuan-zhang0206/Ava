@@ -1,0 +1,177 @@
+"""claim node: long await + dispatch by inbound kind.
+
+Replaces V1's transitional entry_node + loop.py's pick_thread/claim/mark_done
+flow. Per framework-rearchitecture v2 unified gateway design: all agent
+control signals pass through the inbound table, dispatched here by kind (see
+decisions/2026-05-02-self-cycling-langgraph.md +
+decisions/2026-04-26-inbound-queue.md).
+
+This module is the pipeline orchestrator; the per-axis logic lives in
+co-located modules (Task #1006 split — the original 979-line file was divided
+by the batch-claim / kind-dispatch / lifecycle-routing axes, behavior preserved):
+
+- `_claim_batch.py`     — batch acquisition: idle wait loop, batch claim, idle trim, chat deferral
+- `_claim_routing.py`   — lifecycle routing: ClaimGoto vocabulary + batch winner resolution
+- `_claim_dispatch.py`  — per-kind dispatch: batch state, lifecycle markers, handlers, dispatch loop
+- `_claim_decide.py`    — decision: post-dispatch short-circuit rules → single Command
+- `_claim_present.py`   — display: SSE publishing for the frontend timeline
+
+Pipeline (see _claim_node_impl): container early-return → first SELECT →
+idle wait (if halted / no conversation) → routing → dispatch → decide → END
+snapshot. The full dispatch-by-kind behavior spec and the routing winner
+semantics are preserved in the submodule docstrings above.
+
+after_exec **always** routes to claim now (no longer only when halted=True),
+ensuring user chat in the middle of a multi-step loop can also be promptly
+claimed and merged into the next LLM round.
+
+Auto-compact logic now lives in `agent/hooks/compact.py:auto_compact_before_llm`
+as a builtin before_llm hook — claim no longer does maintenance work, only
+inbound dispatch.
+
+Deps injected via `runtime.context: AvaContext` (see agent/graph/_context.py).
+agent_id read from RunnableConfig (LangGraph checkpointer standard).
+
+State type hint key design (`state: _state.AgentState` + `from __future__ import
+annotations`): see `agent/graph/_exec.py` module docstring last paragraph —
+LangGraph narrows channels by the node's first param type hint; directly
+importing `AgentState` captures the BaseAgentState alias and loses all plugin
+fields; using the module attribute + deferred annotation evaluation picks up
+the dynamic class rebound by build_agent_state.
+
+Refactored (2026-08): _Routing + resolve_routing, _BatchState + per-kind
+handlers, _Outcome + decide extracted; display logic moved to _claim_present.py;
+file split by axis under Task #1006. cc 70 → ~8-10 per module.
+"""
+
+from __future__ import annotations
+
+from langchain_core.runnables import RunnableConfig
+from langgraph.runtime import Runtime
+from langgraph.types import Command
+
+from agent import state as _state
+from agent.db import claim_inbound_batch, leave_starting_state
+from agent.graph._claim_batch import LifecycleCasLostError, _wait_for_batch
+from agent.graph._claim_decide import decide
+from agent.graph._claim_dispatch import _BatchState, dispatch_batch
+from agent.graph._claim_present import (
+    publish_end_timeline_snapshot,
+    publish_inbound_committed,
+)
+from agent.graph._claim_routing import ClaimGoto, resolve_routing
+from agent.graph._context import AvaContext, agent_id_from_config
+from agent.graph._node_log import node_lifecycle
+from agent.graph._nodes import BEFORE_LLM, CLAIM, END
+from agent.messages import has_conversation
+from shared.log import logger
+
+# Names moved to co-located submodules during the Task #1006 split, re-exported
+# here so existing `from agent.graph._claim import ...` call sites (tests) keep
+# working unchanged. New code should import from the submodule that owns them.
+from ._claim_dispatch import _by_who as _by_who
+from ._claim_dispatch import _flip_to_restarting as _flip_to_restarting
+from ._claim_dispatch import _handle_heartbeat as _handle_heartbeat
+from ._claim_dispatch import _render_restart_completed_marker as _render_restart_completed_marker
+
+
+async def _claim_node_impl(
+    state: _state.AgentState,
+    runtime: Runtime[AvaContext],
+    config: RunnableConfig,
+) -> Command[ClaimGoto]:
+    """Claim-node pipeline: container early-return → batch → routing → dispatch → decide.
+
+    The original 590-line / cc=70 function is now a ~60-line / cc≈8 pipeline
+    of extracted stages, each independently testable.
+    """
+    ctx = runtime.context
+
+    # ── Container mode ──
+    if ctx.ops_pool is None:
+        if state.halted:
+            return Command[ClaimGoto](goto=END)
+        return Command[ClaimGoto](update={"halted": False}, goto=BEFORE_LLM)
+
+    agent_id = agent_id_from_config(config)
+    await leave_starting_state(ctx.ops_pool, agent_id)
+
+    # ── First SELECT: try uncontended claim before pub/sub wait ──
+    batch = await claim_inbound_batch(ctx.ops_pool, agent_id)
+    if not batch:
+        if state.halted or not has_conversation(state.messages):
+            try:
+                batch = await _wait_for_batch(ctx, agent_id)
+            except LifecycleCasLostError as exc:
+                # Claim-time lifecycle race: between the idle flip and the
+                # IDLING→RUNNING flip, another op (terminate / hibernate
+                # swap-out / reaper) took ownership of the row. End the
+                # process cleanly instead of crashing — a crash during a
+                # network outage cannot be resurrected (Task #688); the
+                # owning controller (swap-in / restarter / resurrect)
+                # relaunches or leaves it dead as intended.
+                logger.warning(
+                    "claim wait aborted: {reason}",
+                    event="claim_cas_lost_exit",
+                    agent_id=agent_id,
+                    reason=str(exc),
+                )
+                return Command[ClaimGoto](goto=END)
+        else:
+            return Command[ClaimGoto](
+                update={"halted": False},
+                goto=BEFORE_LLM,
+            )
+
+    # ── Routing: resolve winner once ──
+    routing = await resolve_routing(ctx, agent_id, batch)  # pyright: ignore[reportUnknownArgumentType]
+
+    # ── Dispatch: run every item through its handler ──
+    st = _BatchState(update_initiated=state.update_initiated)
+    await dispatch_batch(ctx, state, agent_id, batch, routing, st)  # pyright: ignore[reportUnknownArgumentType]
+
+    # ── Display: tell the frontend which chat inbounds were committed ──
+    await publish_inbound_committed(ctx, agent_id, st.committed_chat_ids)
+
+    # ── Decide: post-dispatch decision → single Command ──
+    outcome = await decide(ctx, state, agent_id, batch, st, routing)  # pyright: ignore[reportUnknownArgumentType]
+
+    # ── END snapshot ──
+    if outcome.publish_end_snapshot:
+        await publish_end_timeline_snapshot(ctx, state, agent_id, st.new_msgs)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+
+    return outcome.command
+
+
+async def claim_node(
+    state: _state.AgentState,
+    runtime: Runtime[AvaContext],
+    config: RunnableConfig,
+) -> Command[ClaimGoto]:
+    """Public entry point: wraps _claim_node_impl with node-lifecycle logging.
+
+    This is the node registered in the LangGraph state graph.  Its signature
+    and return type are part of the public graph contract and MUST NOT change.
+    """
+    event_publisher = runtime.context.event_publisher
+    assert event_publisher is not None, "claim_node requires ctx.event_publisher"  # noqa: S101
+    # Turn-end fallback: when claim is about to block in _wait_for_batch
+    # (idle), publish a FULL-WINDOW snapshot on enter — the only race-free
+    # (in-memory, no checkpoint async-commit race) view of the finished turn.
+    # This is what heals a frontend that missed events (SSE gap / dropped
+    # deltas): the incremental snapshots in this design cover commits only, so
+    # without it a reconnect GET could read a lagging checkpoint and the tail
+    # of the turn would never appear. The predicate mirrors _claim_node_impl's
+    # idle decision exactly (same expression, same state). If a batch wakes the
+    # claim right after, the snapshot is still a legal view of the committed
+    # state — the next node's incremental snapshot covers the new messages.
+    will_idle = state.halted or not has_conversation(state.messages)
+    async with node_lifecycle(
+        CLAIM,
+        messages=state.messages,
+        ops_pool=runtime.context.ops_pool,
+        event_publisher=event_publisher,
+        agent_id=agent_id_from_config(config),
+        full_window=will_idle,
+    ):
+        return await _claim_node_impl(state, runtime, config)

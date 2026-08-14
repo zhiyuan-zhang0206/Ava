@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Ava — Sign in</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>/*__THEME_JS__*/</script>
+<style>
+/*__THEME_CSS__*/
+
+/* The app's own sign-in screen (frontend/src/app/login/page.tsx +
+   components/auth/login-form.tsx), rebuilt from the same tokens. */
+
+.card {
+  width: 100%;
+  max-width: 24rem;
+  gap: 1.5rem;
+  padding: 2rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+  color: var(--card-foreground);
+  box-shadow: 0 1px 3px 0 #0000001a, 0 1px 2px -1px #0000001a;
+}
+
+.card-head {
+  gap: 0.5rem;
+  text-align: center;
+}
+
+.card-head h1 {
+  font-size: 1.5rem;
+  line-height: 2rem;
+}
+
+form {
+  gap: 1rem;
+}
+
+.field {
+  gap: 0.5rem;
+}
+
+label {
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  font-weight: 500;
+}
+
+input {
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--input);
+  border-radius: calc(var(--radius) * 0.8);
+  background: var(--background);
+  color: var(--foreground);
+  font: inherit;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  transition: box-shadow 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+input::placeholder {
+  color: var(--muted-foreground);
+}
+
+input:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--ring);
+}
+
+input:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.5rem 1rem;
+  border: 0;
+  border-radius: calc(var(--radius) * 0.8);
+  background: var(--primary);
+  color: var(--primary-foreground);
+  font: inherit;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+button:hover {
+  background: color-mix(in oklab, var(--primary) 90%, transparent);
+}
+
+button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--ring);
+}
+
+button:disabled {
+  pointer-events: none;
+  opacity: 0.5;
+}
+
+.error {
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  color: var(--destructive);
+}
+</style>
+</head>
+<body>
+  <div class="card stack">
+    <div class="card-head stack">
+      <h1>Ava</h1>
+      <p class="muted">Enter the cluster password to continue</p>
+    </div>
+    <form class="stack" id="form">
+      <div class="field stack">
+        <label for="username">Username</label>
+        <input type="text" id="username" name="username" placeholder="admin" autocomplete="username" autofocus>
+      </div>
+      <div class="field stack">
+        <label for="password">Password</label>
+        <input type="password" id="password" name="password" placeholder="Cluster secret" autocomplete="current-password">
+      </div>
+      <p class="error" id="error" role="alert" hidden></p>
+      <button type="submit" id="submit">Sign in</button>
+    </form>
+  </div>
+  <script>
+    // The same login call the app's form makes. `username` is accepted but never
+    // validated by the gateway — it is there so password managers offer to save
+    // the secret — so a blank one takes the app's "admin" default.
+    var form = document.getElementById("form");
+    var submit = document.getElementById("submit");
+    var error = document.getElementById("error");
+    var passwordField = document.getElementById("password");
+
+    // The app's button is disabled until there is a secret to send; a password
+    // manager filling the field raises `input` the same as typing does.
+    function idle() {
+      submit.disabled = !passwordField.value.trim();
+      submit.textContent = "Sign in";
+    }
+
+    passwordField.addEventListener("input", idle);
+    idle();
+
+    function fail(message) {
+      error.textContent = message;
+      error.hidden = false;
+      idle();
+    }
+
+    form.addEventListener("submit", async function (event) {
+      event.preventDefault();
+      var password = passwordField.value.trim();
+      if (!password) return;
+      error.hidden = true;
+      submit.disabled = true;
+      submit.textContent = "Signing in…";
+      var response;
+      try {
+        response = await fetch("__GATEWAY_BASE__/api/auth/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({
+            username: document.getElementById("username").value.trim() || "admin",
+            password: password,
+          }),
+        });
+      } catch {
+        fail("Connection failed — is the gateway running?");
+        return;
+      }
+      if (response.ok) location.href = "/";
+      else if (response.status === 401) fail("Invalid password");
+      else fail("Sign-in failed (" + response.status + ")");
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,7 @@
+{
+  "agent_id": 7,
+  "role": "token_usage",
+  "input_tokens": 1234,
+  "output_tokens": 56,
+  "reasoning_tokens": 0
+}

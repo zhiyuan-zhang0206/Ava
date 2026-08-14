@@ -1,0 +1,59 @@
+// HeaderBar: label render + sidebar button (mobile) + Memory Graph / Fleet / Insights / Control navigation + children slot.
+
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { HeaderBar } from "./header-bar";
+
+afterEach(() => {
+  cleanup();
+});
+
+describe("HeaderBar", () => {
+  it("renders label text", () => {
+    render(<HeaderBar label="Agent #5 · idle" onOpenSidebar={vi.fn()} />);
+    expect(screen.getByText("Agent #5 · idle")).toBeTruthy();
+  });
+
+  it("click sidebar button → onOpenSidebar called", () => {
+    const onOpen = vi.fn();
+    render(<HeaderBar label="x" onOpenSidebar={onOpen} />);
+    fireEvent.click(screen.getByRole("button", { name: "Open sidebar" }));
+    expect(onOpen).toHaveBeenCalled();
+  });
+
+  it("floats above the timeline with a blurred translucent background", () => {
+    // User ruling 2026-08-06: the header bar is a floating layer over the
+    // full-bleed timeline surface (absolute + backdrop blur), not a sticky
+    // row in the content column.
+    const { container } = render(<HeaderBar label="x" onOpenSidebar={vi.fn()} />);
+    const header = container.querySelector("header");
+    expect(header?.className).toContain("absolute");
+    expect(header?.className).toContain("top-0");
+    expect(header?.className).toContain("z-20");
+    expect(header?.className).toContain("bg-background/80");
+    expect(header?.className).toContain("backdrop-blur-md");
+  });
+
+  it("maxWidthCss centers the inner content with the timeline column", () => {
+    const { container } = render(
+      <HeaderBar label="x" onOpenSidebar={vi.fn()} maxWidthCss="min(40vw, 1280px)" />,
+    );
+    const inner = container.querySelector("header > div");
+    expect((inner as HTMLElement | null)?.style.maxWidth).toBe("min(40vw, 1280px)");
+    expect(inner?.className).toContain("mx-auto");
+    // w-full: on narrow viewports (no maxWidthCss) the inner bar spans
+    // the pane like every other bar instead of shrink-wrapping its
+    // content (Task #881).
+    expect(inner?.className).toContain("w-full");
+  });
+
+  it("children slot renders custom content on the right", () => {
+    render(
+      <HeaderBar label="x" onOpenSidebar={vi.fn()}>
+        <span data-testid="header-extra">extra</span>
+      </HeaderBar>,
+    );
+    expect(screen.getByTestId("header-extra")).toBeTruthy();
+  });
+});

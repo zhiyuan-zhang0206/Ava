@@ -1,0 +1,237 @@
+"""File upload endpoints — /api/agents/{agent_id}/uploads.
+
+POST saves each uploaded file to ~/Downloads/AvaAgent-{agent_id}/. With the
+default `deliver=true` it also notifies the agent with a single chat inbound
+listing every saved path (the paperclip / drag-drop path for arbitrary files).
+With `deliver=false` it saves silently and returns each file's reference url —
+the native-image-attachment path, where the frontend then sends the url inside
+the next multimodal message instead of as a standalone notification.
+
+Cross-machine: the file physically lands on the gateway, but an agent that
+runs on a remote runner cannot read the gateway's disk. When `deliver=true`
+and the agent's machine is not this host, the gateway dispatches an
+`upload_receive` op to that runner first, which pulls the file into the
+runner's own ~/Downloads/AvaAgent-{agent_id}/; the notification then carries
+the agent's LOCAL absolute path. If the runner is unreachable the upload
+still succeeds and the message falls back to the gateway-side path (the URL
+remains the uniform address any machine can dial).
+
+GET serves a saved file back (image thumbnails in the timeline, and any client
+that wants to fetch an upload by its reference url).
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+
+from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile
+from fastapi.responses import FileResponse
+from psycopg_pool import ConnectionPool
+
+from gateway.routers._delivery import deliver_chat_inbound
+from gateway.schemas import UploadedBatch, UploadedFile
+from shared.agents import AgentNotFound
+from shared.db import agent_exists
+from shared.uploads import (
+    MAX_AGENT_UPLOAD_BYTES,
+    MAX_AGENT_UPLOAD_FILES,
+    MAX_UPLOAD_BYTES,
+    agent_upload_dir,
+    render_safe_headers,
+    resolve_upload_path,
+    sanitize_upload_name,
+    upload_quota_used,
+    upload_url,
+)
+
+router = APIRouter()
+
+_log = logging.getLogger(__name__)
+
+router = APIRouter()
+
+
+@router.post("/api/agents/{agent_id}/uploads", response_model=UploadedBatch)
+async def upload_files(
+    agent_id: int,
+    request: Request,
+    files: list[UploadFile] = File(...),  # noqa: B008
+    deliver: bool = Query(default=True),  # noqa: FBT001 — FastAPI query param, not a flag arg
+) -> UploadedBatch:
+    """Upload one or more files in a single batch. Each file is saved to
+    ~/Downloads/AvaAgent-{agent_id}/ and returned with its reference url.
+
+    `deliver=true` (default) inserts a single inbound listing every saved path,
+    so the agent learns about the whole batch at once. `deliver=false` saves
+    silently (no inbound) — the caller carries the returned urls into a later
+    multimodal message.
+
+    response_model makes FastAPI validate the return + emit the schema into
+    OpenAPI components; the frontend codegen auto-syncs to types-generated.ts."""
+
+    # Check agent exists first (fail fast before writing any file)
+    await asyncio.to_thread(_agent_exists_blocking, request.app.state.db_pool, agent_id)
+
+    dest_dir = agent_upload_dir(agent_id)
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    # Quota baseline (audit round-2 security P1-2): the endpoint is the
+    # gateway's one authenticated user->disk write surface, so a batch is
+    # bounded before any byte lands — per-file size, per-agent total bytes,
+    # and per-agent file count. Without this an authenticated caller (or a
+    # stolen session cookie) can fill the disk.
+    quota_bytes, quota_files = await asyncio.to_thread(upload_quota_used, dest_dir)
+    batch_bytes = 0
+
+    saved: list[UploadedFile] = []
+    for file in files:
+        safe_name = sanitize_upload_name(file.filename or "untitled")
+        dest = dest_dir / safe_name
+        contents = await file.read(MAX_UPLOAD_BYTES + 1)
+        if len(contents) > MAX_UPLOAD_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=f"upload {safe_name!r} exceeds the {MAX_UPLOAD_BYTES:,}-byte per-file limit",
+            )
+        batch_bytes += len(contents)
+        if quota_bytes + batch_bytes > MAX_AGENT_UPLOAD_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=(
+                    f"upload would exceed agent {agent_id}'s "
+                    f"{MAX_AGENT_UPLOAD_BYTES:,}-byte total quota"
+                ),
+            )
+        if quota_files + len(saved) >= MAX_AGENT_UPLOAD_FILES:
+            raise HTTPException(
+                status_code=413,
+                detail=f"agent {agent_id} already holds {MAX_AGENT_UPLOAD_FILES} uploads",
+            )
+        await asyncio.to_thread(dest.write_bytes, contents)
+        saved.append(
+            UploadedFile(
+                filename=safe_name,
+                path=str(dest),
+                url=upload_url(agent_id, safe_name),
+                size=len(contents),
+                content_type=file.content_type or "application/octet-stream",
+            )
+        )
+
+    if deliver:
+        # One inbound for the whole batch. When the agent runs on a remote
+        # runner, first pull the files onto that host so the message can carry
+        # the agent's LOCAL absolute path (the address it can act on) — the
+        # gateway's own path is meaningless on another machine. A runner that
+        # is unreachable does NOT fail the upload: the file is safe on the
+        # gateway and the message falls back to the gateway-side path.
+        local_paths: list[str] = await _pull_uploads_to_agent_machine(
+            request, agent_id, [f.filename for f in saved]
+        )
+        if len(saved) == 1:
+            f = saved[0]
+            path = local_paths[0] if len(local_paths) == 1 else f.path
+            message = f"File uploaded: {path} ({f.size} bytes)"
+        else:
+            lines: list[str] = []
+            for i, f in enumerate(saved):
+                lp = local_paths[i] if i < len(local_paths) else None
+                path = lp if lp else f.path
+                lines.append(f"- {path} ({f.size} bytes)")
+            message = f"{len(saved)} files uploaded:\n" + "\n".join(lines)
+        await deliver_chat_inbound(
+            request.app.state.db_pool, agent_id, prepare=lambda _conn: message
+        )
+
+    return UploadedBatch(files=saved)
+
+
+@router.get("/api/agents/{agent_id}/uploads/{filename}")
+def serve_upload(agent_id: int, filename: str, request: Request) -> FileResponse:
+    """Serve one saved upload back (image thumbnails in the timeline).
+
+    Traversal-safe: `resolve_upload_path` refuses any name escaping the agent's
+    upload dir. 404 when the agent or the file does not exist.
+    """
+    with request.app.state.db_pool.connection() as conn:
+        if not agent_exists(conn, agent_id):
+            raise AgentNotFound(agent_id)
+    try:
+        path = resolve_upload_path(agent_id, filename)
+    except ValueError as e:
+        # A traversal attempt is a bad request, not a server error.
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    if not path.is_file():
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=404, detail=f"upload {filename!r} not found")
+    return FileResponse(path, headers=render_safe_headers(filename))
+
+
+def _agent_machine_blocking(pool: ConnectionPool, agent_id: int) -> str:
+    """Sync home-machine lookup for uploads — via to_thread."""
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute("SELECT machine FROM agents_meta WHERE id = %s", (agent_id,))
+        row = cur.fetchone()
+    if row is None:
+        raise AgentNotFound(f"agent {agent_id} does not exist")
+    return row[0]
+
+
+async def _pull_uploads_to_agent_machine(
+    request: Request, agent_id: int, names: list[str]
+) -> list[str]:
+    """Pull the just-saved uploads onto the agent's own machine, if remote.
+
+    Returns the LOCAL absolute paths on the agent's machine (one per name,
+    in order). An empty list means no pull happened: either the agent runs on
+    this gateway (its local path IS the gateway's path, already usable), the
+    machine is unknown, or every pull failed — the caller then falls back to
+    the gateway-side path in the message.
+
+    Best-effort by design: a failed pull (runner offline / mid-rollout /
+    unregistered) must not fail the upload itself. The file is already safe
+    on the gateway, and the URL in the message remains the uniform address.
+    """
+    machine = await asyncio.to_thread(_agent_machine_blocking, request.app.state.db_pool, agent_id)
+    if not machine or machine == "unknown":
+        return []
+    from shared.machine import machine_name
+
+    if machine == machine_name():
+        # Same host — the gateway path IS the agent's local path.
+        return []
+
+    from ops import cluster_rpc
+
+    pulled: list[str] = []
+    for name in names:
+        try:
+            result = await cluster_rpc.dispatch_to_machine(
+                target_machine=machine,
+                kind="upload_receive",
+                payload={"agent_id": agent_id, "name": name},
+                # A large file pull (video / archive) over the private network
+                # can exceed the default 30s op deadline; give it headroom.
+                timeout_s=120.0,
+            )
+            pulled.append(result["path"])
+        except Exception as exc:  # ClusterOpUnreachable / ClusterOpFailed / wire errors
+            _log.warning(
+                "upload: pull %s to machine=%r failed (%r) — file stays on the "
+                "gateway, message carries the URL only",
+                name,
+                machine,
+                exc,
+            )
+    return pulled
+
+
+def _agent_exists_blocking(pool: ConnectionPool, agent_id: int) -> None:
+    """Sync agent-exists guard for uploads — via to_thread."""
+    with pool.connection() as conn:
+        if not agent_exists(conn, agent_id):
+            raise AgentNotFound(agent_id)

@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "computer": {
+      "command": ".venv/bin/python",
+      "args": [
+        "-m",
+        "services.computer.mcp_wrapper"
+      ],
+      "requires": {
+        "display": true,
+        "unix_socket": true
+      },
+      "description": "drive the shared desktop through the signed permissions helper: snapshots, clicks, typing, keys, scrolling, window/session info. Actions are serialized machine-wide and audited as computer_action events",
+      "shared": "computer"
+    }
+  }
+}

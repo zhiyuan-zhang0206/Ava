@@ -1,0 +1,606 @@
+"use client";
+
+import { useTranslations } from "next-intl";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+
+import { ContextButton } from "@/components/context-breakdown";
+import {
+  parseSlash,
+  SlashAutocomplete,
+  type SlashAutocompleteHandle,
+} from "@/components/slash-autocomplete";
+import { SendButton } from "@/components/ui/send-button";
+import { Textarea } from "@/components/ui/textarea";
+import { api } from "@/lib/api";
+import { errMsg } from "@/lib/errors";
+import { track } from "@/lib/telemetry";
+import type { CommandItem } from "@/lib/types";
+import { cn } from "@/lib/utils";
+import { FLEX, FLEX_1, FLEX_COL, MIN_W_0 } from "@/lib/layout";
+
+/** Composer tri-state: disabled (no active agent), idle (ready to send),
+ *  busy (agent running — empty composer's button becomes Stop). "busy"
+ *  covers the whole running state, not only mid-action, so Stop stays
+ *  available between actions (the durable cancel is caught at claim).
+ *  Terminated agents are now idle (send_message auto-resurrects them).
+ *  Derived in page.tsx; TS exhaustiveness will flag when a new agent
+ *  status needs to be wired in. */
+export type ComposerMode = "disabled" | "idle" | "busy";
+
+interface Props {
+  mode: ComposerMode;
+  children?: React.ReactNode;
+  /** Right-edge controls on the composer's top row (Details selector,
+   *  Inspector toggle) — user ruling 2026-08-05: they move from the header
+   *  bar to the composer's top-right corner. */
+  details?: React.ReactNode;
+  inspect?: React.ReactNode;
+  /** Returns true on success — composer clears the input + attachments then;
+   *  on false the user's text and images are preserved to avoid loss.
+   *  `imageUrls` are the reference urls of attached images (empty for a
+   *  plain-text send). */
+  onSend: (content: string, imageUrls: string[]) => Promise<boolean>;
+  onStop: () => void;
+  // Non-image files dragged onto / pasted into the composer are uploaded
+  // through this (same path as the paperclip button — a text notification to
+  // the agent). Undefined when no agent is active.
+  onUploadFiles?: (files: File[]) => void;
+  // Pasted / dropped images go through this instead: it uploads one image
+  // silently and resolves to its reference url, which the composer attaches to
+  // the next message as native model content. Undefined when no agent is active.
+  onAttachImage?: (file: File) => Promise<string>;
+  // Monotonically increasing token — every value change steals focus
+  // back to the textarea. Callers (page.tsx) increment this at moments
+  // that demand "be able to type immediately" (spawn, switch thread, etc.).
+  focusToken?: number;
+  // context-window input_tokens — fed by useTokenUsage; 0 = the thread
+  // hasn't done an LLM call yet (newly spawned / just switched to),
+  // so the number is hidden
+  contextTokens: number;
+  // model context window ceiling; 0 = unknown — the "/max" segment
+  // is hidden when 0
+  maxContextTokens?: number;
+  // per-agent wind-down (soft) + force-compact (hard) thresholds, each a
+  // fraction of the model window; 0 = unknown. Shown as marks on the gauge and
+  // as numbers beside the readout.
+  softCompactTokens?: number;
+  hardCompactTokens?: number;
+  // the active agent id — makes the context readout a button that expands the
+  // breakdown panel. null = no active agent (readout is non-interactive).
+  agentId?: number | null;
+  // CSS max-width for the composer root, from the timeline-width user setting
+  // (lib/timeline-width.ts timelineMaxWidthCss) — aligned with the timeline
+  // column (#723-⑧). The home page passes the viewport-ratio-derived cap on
+  // desktop; undefined/absent = full-width — the narrow-viewport (mobile)
+  // case (#805): no inline maxWidth is rendered and the composer fills its
+  // column. One falsy convention shared with TimelineView/HeaderBar/
+  // PendingStrip: undefined, never "" (audit C2).
+  maxWidthCss?: string;
+}
+
+// One image attached to the composer, before / after its silent upload.
+// `previewUrl` is a local object URL for the thumbnail; `url` is the gateway
+// reference url, present once the upload resolves.
+interface PendingImage {
+  key: string;
+  name: string;
+  previewUrl: string;
+  url?: string;
+  status: "uploading" | "ready" | "error";
+}
+
+
+/** sessionStorage key for per-agent draft persistence across agent switches. */
+const draftKey = (id: number) => `composer-draft-${id}`;
+
+export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, focusToken, contextTokens, maxContextTokens = 0, softCompactTokens = 0, hardCompactTokens = 0, agentId = null, maxWidthCss, children, details, inspect }: Props) {
+  const t = useTranslations("common");
+  const prevAgentIdRef = useRef(agentId);
+  const [value, setValue] = useState(() => {
+    if (agentId == null) return '';
+    return sessionStorage.getItem(draftKey(agentId)) ?? '';
+  });
+  // Caret offset in `value`. The slash dropdown and the instruction hint are
+  // both scoped to the token / command segment the caret is in, so the caret is
+  // state here, not just a DOM detail: every move has to re-render them. Kept
+  // in sync by syncCaret (below) and by the writes that replace `value`
+  // wholesale (draft restore, send, command selection).
+  const [caret, setCaret] = useState(() => value.length);
+  const [dragOver, setDragOver] = useState(false);
+  const [images, setImages] = useState<PendingImage[]>([]);
+  // sending: the window from submit() firing onSend until it resolves
+  // (~50-200ms on localhost, possibly seconds on a flaky network).
+  // turnActive only flips to busy once SSE inbound_arrived arrives
+  // (~100ms RTT); in the meantime the button is still idle/send, so the
+  // user can keep clicking send → keep the button disabled + spinner
+  // during sending to physically block repeats.
+  const [sending, setSending] = useState(false);
+  // The command list is owned here (not in the dropdown) so it doubles as the
+  // lookup for the committed command's instruction hint, shown once the name is
+  // followed by whitespace and the dropdown has closed.
+  const [commands, setCommands] = useState<CommandItem[]>([]);
+  const taRef = useRef<HTMLTextAreaElement>(null);
+  const acRef = useRef<SlashAutocompleteHandle>(null);
+  // Single popover owner: the composer has two upward popovers over the same
+  // spot (the context-breakdown panel + the slash dropdown); this state plus
+  // the two handlers below keep them mutually exclusive — opening one closes
+  // the other, so the z-50 layers can never stack.
+  const [breakdownOpen, setBreakdownOpen] = useState(false);
+  const handleBreakdownOpenChange = useCallback((open: boolean) => {
+    setBreakdownOpen(open);
+    if (open) acRef.current?.close();
+  }, []);
+  const handleAutocompleteOpenChange = useCallback((open: boolean) => {
+    if (open) setBreakdownOpen(false);
+  }, []);
+  // Set by runCommand: the offset the next value commit puts the caret at —
+  // just past the freshly-inserted `/<name> `, where the instruction goes.
+  const pendingCaret = useRef<number | null>(null);
+  const syncCaret = (ta: HTMLTextAreaElement) => setCaret(ta.selectionStart);
+
+  const query = parseSlash(value, caret)?.query ?? null;
+
+  // Whose instruction_hint the meta row shows while the instruction is being
+  // typed. The caret picks it: the hint belongs to the command segment being
+  // edited — the nearest `/name` token before the caret — so in a
+  // multi-command message it follows the caret instead of being pinned to the
+  // first command. Two edges: inside a name the dropdown is up and renders its
+  // own copy, so the row stays quiet; and with the caret ahead of every command
+  // (leading prose) the first hinted command stands in, since that is the one
+  // the message opens with. Covers dropdown-selected and hand-typed names
+  // alike — it is derived from the value, not from what was selected.
+  const commandHint = useMemo(() => {
+    const hintOf = (token: string) => {
+      const hint = commands.find((c) => c.name === token.slice(1))?.instruction_hint;
+      if (!hint) return null; // unknown command, or a command with no hint
+      return hint;
+    };
+    if (parseSlash(value, caret)) return null;
+    // #836: the hint follows the same first-token rule as the dropdown — only
+    // a leading command (first whitespace-delimited run, starting with /)
+    // shows its hint; a mid-message slash never does.
+    const firstToken = /\S+/.exec(value);
+    if (firstToken && firstToken[0].startsWith("/") && firstToken.index < caret) {
+      return hintOf(firstToken[0]);
+    }
+    return null;
+  }, [value, caret, commands]);
+
+  // Fetch the command list once on mount; it backs both the dropdown's
+  // filtering and the instruction-hint lookup.
+  useEffect(() => {
+    let alive = true;
+    api
+      .getCommands()
+      .then((c) => {
+        if (alive) setCommands(c);
+      })
+      .catch((e: unknown) => {
+        // A missing list just means no autocomplete — don't surface it in the
+        // composer. Log so a real backend failure (500 / shape change) isn't
+        // indistinguishable from "gateway down".
+        console.warn(`[composer] getCommands failed: ${errMsg(e)}`);
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (focusToken === undefined) return;
+    taRef.current?.focus();
+  }, [focusToken]);
+
+  useEffect(() => {
+    const pos = pendingCaret.current;
+    if (pos === null) return;
+    pendingCaret.current = null;
+    const ta = taRef.current;
+    if (!ta) return;
+    ta.focus();
+    ta.setSelectionRange(pos, pos);
+    // `caret` is a dependency too: picking a command whose text is already
+    // exactly right ("/recap " with the caret still in the name) changes only
+    // the caret, and that commit still has to reach the DOM.
+  }, [value, caret]);
+
+  // Auto-grow relies on the textarea base component's
+  // `field-sizing-content` (CSS) — Chrome 123+ / Safari 18.4+ /
+  // Firefox 137+ — no more JS scrollHeight fallback. max-h-[50vh] cap,
+  // overflow-y-auto for the inner scrollbar.
+
+  // Revoke every attached image's object URL and drop them. Called on a clean
+  // send and on unmount so the blobs don't leak.
+  const clearImages = () => {
+    setImages((prev) => {
+      for (const img of prev) URL.revokeObjectURL(img.previewUrl);
+      return [];
+    });
+  };
+  useEffect(() => {
+    // Unmount cleanup only — the callback closes over the latest images via the
+    // functional updater, so no dependency on `images` is needed.
+    return () => {
+      setImages((prev) => {
+        for (const img of prev) URL.revokeObjectURL(img.previewUrl);
+        return prev;
+      });
+    };
+  }, []);
+
+  // Persist draft in sessionStorage so text survives agent switches (sidebar
+  // agent change) and page refresh. Keyed by agentId.
+  useEffect(() => {
+    const prevId = prevAgentIdRef.current;
+    // Save the current draft for the previous agent before switching.
+    if (prevId != null && prevId !== agentId) {
+      const trimmed = value.trim();
+      if (trimmed) {
+        sessionStorage.setItem(draftKey(prevId), value);
+      } else {
+        sessionStorage.removeItem(draftKey(prevId));
+      }
+    }
+    // Load the draft for the newly-selected agent.
+    if (agentId != null && agentId !== prevId) {
+      const draft = sessionStorage.getItem(draftKey(agentId)) ?? "";
+      setValue(draft);
+      setCaret(draft.length); // resume at the end, like the browser does
+    }
+    prevAgentIdRef.current = agentId;
+    // `value` is intentionally omitted — we only want to react to agentId
+    // changes, not to every keystroke. The closure captures the value at the
+    // moment of the switch, which is the draft we want to save.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [agentId]);
+
+  // Sync the current draft to sessionStorage as the user types.
+  useEffect(() => {
+    if (agentId == null) return;
+    const trimmed = value.trim();
+    if (trimmed) {
+      sessionStorage.setItem(draftKey(agentId), value);
+    } else {
+      sessionStorage.removeItem(draftKey(agentId));
+    }
+  }, [value, agentId]);
+
+  const removeImage = (key: string) => {
+    setImages((prev) => {
+      const gone = prev.find((i) => i.key === key);
+      if (gone) URL.revokeObjectURL(gone.previewUrl);
+      return prev.filter((i) => i.key !== key);
+    });
+  };
+
+  // Attach each image: show a thumbnail immediately, upload silently, then
+  // stamp the resolved reference url (or mark the upload failed).
+  const attachImages = (files: File[]) => {
+    if (!onAttachImage) return;
+    for (const file of files) {
+      const key = `${file.name}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const previewUrl = URL.createObjectURL(file);
+      setImages((prev) => [...prev, { key, name: file.name, previewUrl, status: "uploading" }]);
+      onAttachImage(file)
+        .then((u) =>
+          setImages((prev) =>
+            prev.map((i) => (i.key === key ? { ...i, url: u, status: "ready" as const } : i)),
+          ),
+        )
+        .catch(() =>
+          setImages((prev) =>
+            prev.map((i) => (i.key === key ? { ...i, status: "error" as const } : i)),
+          ),
+        );
+    }
+  };
+
+  const send = async (content: string, imageUrls: string[]) => {
+    if (sending) return; // Physical dedup against repeated clicks
+    setSending(true);
+    try {
+      const ok = await onSend(content, imageUrls);
+      // Only clear on success — keep the user's text + images on failure
+      // (a network error isn't the user's fault)
+      if (ok) {
+        track("composer-send");
+        setValue("");
+        setCaret(0);
+        clearImages();
+        // Clear the persisted draft so a future switch back doesn't restore
+        // already-sent text.
+        if (agentId != null) sessionStorage.removeItem(draftKey(agentId));
+      }
+    } finally {
+      setSending(false);
+    }
+  };
+
+  // Reference urls of the images whose upload has resolved (flatMap narrows out
+  // the still-uploading / failed ones without a non-null assertion).
+  const readyImageUrls = images.flatMap((i) => (i.status === "ready" && i.url ? [i.url] : []));
+  const uploadingImages = images.some((i) => i.status === "uploading");
+
+  const submit = () => {
+    const content = value.trim();
+    if (uploadingImages) return; // wait for in-flight uploads so none are dropped
+    if (!content && readyImageUrls.length === 0) return;
+    void send(content, readyImageUrls);
+  };
+
+  // Picking a command does NOT send — every command takes a natural-language
+  // instruction after its name, so selection just drops `/<name> ` into the
+  // composer and waits for the user to type that instruction. Enter then sends
+  // the raw `/<name> <instruction>` text; the agent's claim node expands it.
+  //
+  // Only the caret's own token is replaced, so completing the second command of
+  // a message leaves the first one (and its instruction, and any text after)
+  // exactly as typed. Exactly one space follows the name — reusing the one
+  // already there rather than doubling it — and the caret lands past that
+  // space: that is both where the instruction goes and what closes the dropdown
+  // (the caret is no longer inside a `/token`).
+  const runCommand = (cmd: CommandItem) => {
+    const token = parseSlash(value, caret);
+    if (!token) return; // unreachable: the dropdown is only open on a token
+    const head = `${value.slice(0, token.start)}/${cmd.name}`;
+    const tail = value.slice(token.end);
+    const pos = head.length + 1;
+    pendingCaret.current = pos;
+    setCaret(pos);
+    setValue(`${head}${/^\s/.test(tail) ? "" : " "}${tail}`);
+  };
+
+  // Drag-and-drop + paste. Images become native attachments on this message
+  // (attachImages); any other file goes to onUploadFiles (a path notification,
+  // same as the paperclip button). When no image handler is wired, images fall
+  // back to the file-upload path. dragOver drives the drop-zone highlight; only
+  // file drags (not text / selection drags) arm it.
+  const routeFiles = (files: File[]) => {
+    const imgs = files.filter((f) => f.type.startsWith("image/"));
+    const others = files.filter((f) => !f.type.startsWith("image/"));
+    if (imgs.length > 0) {
+      if (onAttachImage) attachImages(imgs);
+      else onUploadFiles?.(imgs);
+    }
+    if (others.length > 0) onUploadFiles?.(others);
+  };
+  const canReceiveFiles = !!onUploadFiles || !!onAttachImage;
+  const handleDrop = (e: React.DragEvent) => {
+    if (!canReceiveFiles) return;
+    e.preventDefault();
+    setDragOver(false);
+    const files = Array.from(e.dataTransfer.files);
+    if (files.length > 0) routeFiles(files);
+  };
+  const handleDragOver = (e: React.DragEvent) => {
+    if (!canReceiveFiles || !e.dataTransfer.types.includes("Files")) return;
+    e.preventDefault();
+    setDragOver(true);
+  };
+  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    if (!canReceiveFiles) return;
+    const files = Array.from(e.clipboardData.files);
+    if (files.length > 0) {
+      e.preventDefault();
+      routeFiles(files);
+    }
+  };
+
+  // Button action derived from (mode, draft): busy + empty → stop (cancel
+  // current turn); other send-capable combinations → submit. Stop is
+  // narrowed to "empty input + busy" because once the user starts typing,
+  // the intent is clearly to send a new message, not stop the turn —
+  // while busy, send goes through the inbound queue (backend INSERTs a
+  // pending inbound, agent consumes it naturally after the current turn),
+  // which doesn't affect stop semantics. Enter always calls submit,
+  // decoupled from the button: keyboard misfires hitting stop are
+  // costly. Enter on busy + empty is absorbed by submit's trim early-
+  // return no-op (the button in the same state goes through the onStop
+  // branch; this trim fallback only serves Enter).
+  const trimmed = value.trim();
+  // A message is sendable with text OR at least one uploaded image. Stop is
+  // narrowed to the truly-empty composer (no text, no attachments).
+  const hasContent = !!trimmed || readyImageUrls.length > 0;
+  const showStop = mode === "busy" && !hasContent && !sending;
+  const buttonDisabled =
+    sending || mode === "disabled" || uploadingImages || (!showStop && !hasContent);
+
+  return (
+    // No <form>: browser extensions (iOS Quark etc.) inject attributes
+    // when they see a form, triggering a Next.js 16 hydration mismatch
+    // that falls the root back to not-found. Use div + button onClick +
+    // textarea Enter dispatching submit manually.
+    //
+    // suppressHydrationWarning is on the textarea (not the outer div) —
+    // what extensions really inject into is input/textarea, not a plain div.
+    <div
+      data-testid="composer"
+      onDrop={handleDrop}
+      onDragOver={handleDragOver}
+      onDragLeave={() => setDragOver(false)}
+      style={maxWidthCss ? { maxWidth: maxWidthCss } : undefined}
+      className={cn(
+        // Composer sits at the bottom of the capped content column, aligned
+        // with the timeline width (task #723-⑧ dropped the #715 48px-narrower
+        // offset). The cap comes from the display.timeline_width_ratio setting
+        // via the maxWidthCss prop (inline maxWidth: min(<ratio>vw, 1280px));
+        // an absent maxWidthCss renders no inline maxWidth, so on narrow
+        // viewports (mobile, #805) the composer is full-width.
+        // Task #835-⑥ (user ruling 2026-08-05): the top divider no longer
+        // runs edge to edge — the root carries px-4 so the divider (on the
+        // inner wrapper) aligns with the timeline's px-4 content; the
+        // textarea/upload rows indent a further 2px (px-0.5) from it, and
+        // vertical rhythm is even (py-2 + gap-2).
+        "mx-auto w-full px-4 pt-2 pb-5 transition-colors",
+        MIN_W_0,
+        dragOver && "bg-primary/5 ring-1 ring-inset ring-primary/40",
+      )}
+    >
+      <div className={cn("gap-2 border-t border-border pt-2", FLEX, FLEX_COL)}>
+      {/* `relative` anchors ContextButton's breakdown panel (absolute
+          bottom-full → it expands upward over the timeline, never covering the
+          composer below) — same anchor contract as SlashAutocomplete's. */}
+      <div className={cn("relative items-center gap-2 px-0.5 text-xs text-muted-foreground h-4 leading-4", FLEX, MIN_W_0)}>
+        {/* Task #723-⑩: the upload button lives at the LEFT of the context
+            bar (children slot), so the meta row has a single left-aligned
+            cluster. */}
+        {children}
+        {/* While composing a command's instruction the hint takes the row;
+            otherwise the context-token readout (invisible spacer at 0 prevents
+            layout jump). */}
+        <span data-testid="composer-meta" className={cn("truncate", commandHint && "italic", MIN_W_0)}>
+          {commandHint ??
+            (contextTokens > 0 ? (
+              <ContextButton
+                agentId={agentId}
+                open={breakdownOpen}
+                onOpenChange={handleBreakdownOpenChange}
+                contextTokens={contextTokens}
+                maxContextTokens={maxContextTokens}
+                softCompactTokens={softCompactTokens}
+                hardCompactTokens={hardCompactTokens}
+              />
+            ) : (
+              " "
+            ))}
+        </span>
+        {/* Right-edge cluster (top-right corner of the composer): the Details
+            selector + Inspector toggle moved here from the header bar
+            (user ruling 2026-08-05). */}
+        {(details ?? inspect) && (
+          // relative: the InspectorPanel floating layer (rendered inside the
+          // inspect slot) anchors itself to this corner — bottom-full right-0.
+          <span className={cn("relative ml-auto shrink-0 items-center gap-2", FLEX)}>{details}{inspect}</span>
+        )}
+      </div>
+      {images.length > 0 ? (
+        <div className={cn("flex-wrap gap-2 px-0.5 pb-1", FLEX)} data-testid="composer-attachments">
+          {images.map((img) => (
+            <div key={img.key} className="relative">
+              {/* eslint-disable-next-line @next/next/no-img-element -- local object-url preview, not a static asset */}
+              <img
+                src={img.previewUrl}
+                alt={img.name}
+                className={cn(
+                  "h-14 w-14 rounded border border-border object-cover",
+                  img.status === "uploading" && "opacity-50",
+                  img.status === "error" && "ring-1 ring-destructive",
+                )}
+              />
+              {img.status !== "ready" ? (
+                <span
+                  className={cn(
+                    "absolute inset-0 items-center justify-center text-[10px]",
+                    img.status === "error" ? "text-destructive" : "text-muted-foreground",
+                    FLEX
+                  )}
+                >
+                  {img.status === "error" ? "Failed" : "…"}
+                </span>
+              ) : null}
+              <button
+                type="button"
+                aria-label={t("removeImage", { name: img.name })}
+                onClick={() => removeImage(img.key)}
+                className={cn("absolute -right-1.5 -top-1.5 h-4 w-4 items-center justify-center rounded-full bg-foreground/80 text-background text-[10px] leading-none", FLEX)}
+              >
+                ×
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : null}
+      <div className="relative">
+        <SlashAutocomplete
+          ref={acRef}
+          commands={commands}
+          query={query}
+          onSelect={runCommand}
+          onOpenChange={handleAutocompleteOpenChange}
+        />
+        <div className={cn("gap-2 items-end", FLEX)}>
+        <Textarea
+          ref={taRef}
+          data-testid="composer-input"
+          aria-label={t("composerInput")}
+          value={value}
+          onChange={(e) => {
+            setValue(e.target.value);
+            syncCaret(e.target);
+          }}
+          // Every other way the caret moves without the text changing: arrows /
+          // Home / End (keyUp), pointer placement (click), drag-select and the
+          // browser's own selection changes (select).
+          onKeyUp={(e) => syncCaret(e.currentTarget)}
+          onClick={(e) => syncCaret(e.currentTarget)}
+          onSelect={(e) => syncCaret(e.currentTarget)}
+          onPaste={handlePaste}
+          disabled={mode === "disabled"}
+          focusVisible={false}
+          className={cn("font-mono text-base resize-none max-h-[50vh] overflow-y-auto min-h-9 py-1.5 leading-5", FLEX_1)}
+          suppressHydrationWarning
+          onKeyDown={(e) => {
+            // During IME composition (CJK input methods composing words),
+            // Enter commits the candidate — don't treat as submit. Older
+            // Safari needs keyCode === 229 as a fallback.
+            const composing = e.nativeEvent.isComposing || e.key === "Process";
+            // While the slash-command dropdown is open, arrows / tab / enter /
+            // escape drive it instead of the textarea: arrows move the
+            // highlight, Tab and Enter both pick the active command (fill
+            // `/<name> ` and wait, not send), Esc dismisses. Enter only falls
+            // through to submit when the dropdown consumed nothing.
+            const ac = acRef.current;
+            if (ac?.isOpen() && !composing) {
+              if (e.key === "ArrowDown") {
+                e.preventDefault();
+                ac.moveDown();
+                return;
+              }
+              if (e.key === "ArrowUp") {
+                e.preventDefault();
+                ac.moveUp();
+                return;
+              }
+              if (e.key === "Escape") {
+                e.preventDefault();
+                ac.close();
+                return;
+              }
+              if (e.key === "Tab" && !e.shiftKey) {
+                e.preventDefault();
+                ac.selectActive();
+                return;
+              }
+              if (e.key === "Enter" && !e.shiftKey) {
+                // An open dropdown means the caret is inside a `/token`, i.e.
+                // still typing a name — so Enter picks the command. Once the
+                // caret moves into the instruction the dropdown is closed and
+                // Enter never reaches here; it sends.
+                e.preventDefault();
+                if (ac.selectActive()) return;
+              }
+            }
+            if (e.key === "Enter" && !e.shiftKey && !composing) {
+              e.preventDefault();
+              // Enter always submits, never onStop (core of decoupling
+              // it from the button). In disabled mode the textarea is
+              // itself disabled so keydown can't reach here; on busy +
+              // empty input, submit's trim early-return absorbs it as a no-op.
+              if (mode === "disabled") return;
+              submit();
+            }
+          }}
+        />
+        <SendButton
+          data-testid="composer-send"
+          state={sending ? "sending" : showStop ? "stop" : "send"}
+          aria-label={sending ? "Sending" : showStop ? "Stop current turn" : "Send message"}
+          disabled={buttonDisabled}
+          onClick={() => { if (showStop) { track("composer-stop"); onStop(); } else { submit(); } }}
+        />
+        </div>
+      </div>
+      </div>
+    </div>
+  );
+}

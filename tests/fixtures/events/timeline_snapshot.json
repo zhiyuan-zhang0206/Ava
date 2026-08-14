@@ -1,0 +1,15 @@
+{
+  "agent_id": 7,
+  "role": "timeline_snapshot",
+  "items": [
+    {
+      "item_id": "1.0",
+      "kind": "inbound_chat",
+      "payload": "test",
+      "source": null,
+      "created_at": "2026-01-01T00:00:00Z",
+      "inbound_id": null
+    }
+  ],
+  "msg_count": 2
+}

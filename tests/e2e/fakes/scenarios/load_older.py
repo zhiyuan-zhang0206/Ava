@@ -1,0 +1,44 @@
+"""Long-history scenario — enough turns to exceed the timeline tail window
+(DEFAULT_TIMELINE_LIMIT=50), so scroll-up history loading has a previous page
+to fetch (has_more=true).
+
+13 turns, each thinking + narration + a trivial execute_code tool call → the
+real exec runs → ~4 timeline items per turn (agent_reasoning, agent_chat,
+agent_code, code_output); the final turn replies only. One user message drives
+the whole script (the agent graph loops the SCRIPT per inbound).
+"""
+
+from __future__ import annotations
+
+from langchain_core.messages import AIMessage
+
+from tests.e2e.fakes._chat_model import ScriptedFakeChatModel
+
+_USAGE = {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
+
+
+def _turn(i: int) -> AIMessage:
+    return AIMessage(
+        content=[
+            {"type": "thinking", "thinking": f"第 {i} 步思考。", "index": 0},
+            {"type": "text", "text": f"执行第 {i} 步。", "index": 1},
+        ],
+        tool_calls=[
+            {
+                "id": f"call_{i}",
+                "name": "execute_code",
+                "args": {"code": f"print({i})"},
+            }
+        ],
+        usage_metadata=_USAGE,
+    )
+
+
+LOAD_OLDER_SCRIPT: tuple[AIMessage, ...] = (
+    *(_turn(i) for i in range(1, 14)),
+    AIMessage(content="全部执行完毕。", usage_metadata=_USAGE),
+)
+
+
+def build(model: str) -> ScriptedFakeChatModel:
+    return ScriptedFakeChatModel(script=LOAD_OLDER_SCRIPT)

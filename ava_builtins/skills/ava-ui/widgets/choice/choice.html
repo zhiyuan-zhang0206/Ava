@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Choose</title>
+<!--
+  choice widget (vanilla, single-file, zero build).
+
+  Presents N options as a single-select (radio) or multi-select (checkbox) list
+  with a confirm button, then sends the selection back to the agent via the
+  ava_reply spine (embedded below).
+
+  Fill in when you write the page:
+  - TITLE: what you are asking.
+  - MULTI: false = pick one, true = pick any number.
+  - OPTIONS: the list. Each is {value, label, detail?}.
+  - The three AVA_* placeholders in the <script> (see widgets/ava_reply).
+
+  On confirm the page calls avaReply("choice: <labels>") and shows a sent state.
+  Embedding into your own page: copy the <style>, the <div id="choice">, and the
+  two <script> blocks; drop this DOCTYPE+html wrap.
+-->
+<style>
+  :root {
+    --bg: #ffffff;
+    --bg-secondary: #f6f8fa;
+    --text: #1a1a1a;
+    --text-secondary: #555555;
+    --border: #dddddd;
+    --primary: #2563eb;
+    --success: #15803d;
+    --error: #b91c1c;
+    --disabled-bg: #99aabb;
+    color-scheme: light dark;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d1117;
+      --bg-secondary: #161b22;
+      --text: #c9d1d9;
+      --text-secondary: #8b949e;
+      --border: #30363d;
+      --primary: #58a6ff;
+      --success: #3fb950;
+      --error: #f85149;
+      --disabled-bg: #484f58;
+    }
+  }
+
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 640px; margin: 2em auto; padding: 0 1em; background: var(--bg); color: var(--text); }
+  h1 { font-size: 1.25rem; }
+  #choice ul { list-style: none; padding: 0; }
+  #choice li { margin: 0; }
+  #choice label { display: flex; gap: 0.6em; align-items: flex-start; padding: 0.7em 0.9em; border: 1px solid var(--border); border-radius: 8px; margin: 0.4em 0; cursor: pointer; }
+  #choice label:hover { background: var(--bg-secondary); }
+  #choice .opt-label { font-weight: 600; }
+  #choice .opt-detail { display: block; font-weight: 400; color: var(--text-secondary); font-size: 0.9em; margin-top: 0.15em; }
+  #submit { margin-top: 1em; padding: 0.6em 1.4em; font-size: 1rem; border: 0; border-radius: 8px; background: var(--primary); color: #fff; cursor: pointer; }
+  #submit:disabled { background: var(--disabled-bg); cursor: default; }
+  #status { margin-top: 1em; color: var(--success); font-weight: 600; }
+  #status.err { color: var(--error); }
+</style>
+</head>
+<body>
+
+<div id="choice">
+  <h1 id="title"></h1>
+  <ul id="options"></ul>
+  <button id="submit" disabled>Confirm</button>
+  <div id="status"></div>
+</div>
+
+<script>
+  // --- fill these in ---
+  const TITLE = "Pick an option";
+  const MULTI = false;
+  const OPTIONS = [
+    { value: "a", label: "Option A", detail: "optional one-line detail" },
+    { value: "b", label: "Option B" },
+    { value: "c", label: "Option C" },
+  ];
+</script>
+
+<script>
+  // --- ava_reply spine (see widgets/ava_reply); template the three values ---
+  const AVA_GATEWAY_URL = "__GATEWAY_URL__";
+  const AVA_AGENT_ID = "__AGENT_ID__";
+  const AVA_PAGE_NAME = "__PAGE_NAME__";
+  async function avaReply(content) {
+    const res = await fetch(`${AVA_GATEWAY_URL}/api/agents/${AVA_AGENT_ID}/messages`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content, source: `ui:page:${AVA_PAGE_NAME}` }),
+    });
+    if (!res.ok) throw new Error(`avaReply failed: HTTP ${res.status}`);
+    return res.json();
+  }
+
+  // --- render + submit ---
+  const submit = document.getElementById("submit");
+  const statusEl = document.getElementById("status");
+  document.getElementById("title").textContent = TITLE;
+  const type = MULTI ? "checkbox" : "radio";
+  const ul = document.getElementById("options");
+  for (const opt of OPTIONS) {
+    const li = document.createElement("li");
+    const label = document.createElement("label");
+    const input = document.createElement("input");
+    input.type = type;
+    input.name = "choice";
+    input.value = opt.value;
+    input.addEventListener("change", refresh);
+    const span = document.createElement("span");
+    const main = document.createElement("span");
+    main.className = "opt-label";
+    main.textContent = opt.label;
+    span.appendChild(main);
+    if (opt.detail) {
+      const d = document.createElement("span");
+      d.className = "opt-detail";
+      d.textContent = opt.detail;
+      span.appendChild(d);
+    }
+    label.appendChild(input);
+    label.appendChild(span);
+    li.appendChild(label);
+    ul.appendChild(li);
+  }
+  function selected() {
+    return [...document.querySelectorAll('input[name="choice"]:checked')];
+  }
+  function refresh() {
+    submit.disabled = selected().length === 0;
+  }
+  submit.addEventListener("click", async () => {
+    const picked = selected();
+    if (!picked.length) return;
+    submit.disabled = true;
+    const labels = picked.map((i) => OPTIONS.find((o) => o.value === i.value)?.label ?? i.value);
+    try {
+      await avaReply(`choice: ${labels.join(", ")}`);
+      statusEl.className = "";
+      ul.style.pointerEvents = "none";
+      ul.style.opacity = "0.5";
+      statusEl.textContent = "✓ Sent. You can close this tab.";
+    } catch (e) {
+      statusEl.className = "err";
+      statusEl.textContent = `Failed to send: ${e.message}. Retry?`;
+      submit.disabled = false;
+    }
+  });
+</script>
+</body>
+</html>

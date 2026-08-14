@@ -1,0 +1,391 @@
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.12
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: [--maxkb=500]
+      - id: detect-private-key
+      - id: check-case-conflict
+      - id: mixed-line-ending
+        args: [--fix=lf]
+
+  - repo: local
+    hooks:
+      - id: pyright
+        name: pyright (strict mode)
+        # Use the pyright from the uv venv — deps are complete, no need to
+        # reinstall langgraph / psycopg / redis etc. in an isolated hook env.
+        # Equivalent to running `.venv/bin/pyright` on a dev machine.
+        entry: .venv/bin/pyright
+        language: system
+        types: [python]
+        pass_filenames: false
+
+      # No sync blocking calls in async bodies (gateway + ops event-loop surfaces).
+      # One sync psycopg / subprocess call in an async handler freezes the
+      # whole gateway (2026-08-03 incident); a justified bounded read opts out with
+      # `# async-blocking-ok: <reason>`; see the script header for the full rules.
+      - id: lint-async-no-sync-blocking
+        name: lint async bodies (no sync blocking calls)
+        entry: .venv/bin/python scripts/lint_async_no_sync_blocking.py
+        language: system
+        files: ^(gateway|ops)/.*\.py$
+        pass_filenames: false
+
+      # Ban raw os.environ / os.getenv — runtime config must go through shared.config.settings.
+      # Legitimate exceptions (3rd-party secret / IPC handoff / container entrypoints)
+      # use an inline `# env-ok: <reason>` exemption, see scripts/lint_no_os_environ.py header.
+      - id: lint-no-os-environ
+        name: lint os.environ (force settings)
+        entry: .venv/bin/python scripts/lint_no_os_environ.py
+        language: system
+        types: [python]
+        pass_filenames: false
+
+      # A fixture whose scope outlives the blast radius of the process global it
+      # mutates. A session-scoped fixture in a SUBDIRECTORY conftest restores env in
+      # a teardown that fires at end-of-session, so every test collected after that
+      # directory keeps running with the mutated value — which is how tests/e2e/'s
+      # env layering disarmed tests/test_home_isolation.py on main while CI stayed
+      # green. Also catches `scope="package"` in a directory with no __init__.py,
+      # where pytest silently resolves the scope to the session node. Session scope
+      # is exempt only in tests/conftest.py; see the script header.
+      - id: lint-fixture-scope
+        name: lint fixture scope (no session-scoped mutation of a process global)
+        entry: .venv/bin/python scripts/lint_fixture_scope.py
+        language: system
+        files: ^tests/.*\.py$
+        pass_filenames: false
+
+      # Ban building a psycopg pool without TCP keepalives. Sync pools go through
+      # `shared.db.pool()`; the async pools that cannot must unpack
+      # `**PG_KEEPALIVE_KWARGS` themselves. See scripts/lint_pool_keepalives.py header.
+      - id: lint-pool-keepalives
+        name: lint pool keepalives (no pool without PG_KEEPALIVE_KWARGS)
+        entry: .venv/bin/python scripts/lint_pool_keepalives.py
+        language: system
+        types: [python]
+        pass_filenames: false
+
+      # Ban decorative emoji in core Python (agent + backend layers). UX surfaces
+      # (cli/, ui/) and prose/content (skills/, docs/, frontend/) are exempt and
+      # not scanned. A line that genuinely needs the character uses an inline
+      # `# emoji-ok: <reason>`; see scripts/lint_no_emoji.py header for scope.
+      - id: lint-no-emoji
+        name: lint no emoji (core code stays glyph-free)
+        entry: .venv/bin/python scripts/lint_no_emoji.py
+        language: system
+        types: [python]
+        pass_filenames: false
+
+      # Ban bare `ava.x.y = ...` / setattr monkey-patching in plugins — SDK wraps
+      # go through `ava.extend.wrap` so the stack stays introspectable + reversible.
+      # Deliberate exceptions use an inline `# wrap-ok: <reason>`; see
+      # scripts/lint_no_plugin_wrap.py header.
+      - id: lint-no-plugin-wrap
+        name: lint no plugin wrap (force ava.extend.wrap)
+        entry: .venv/bin/python scripts/lint_no_plugin_wrap.py
+        language: system
+        types: [python]
+        pass_filenames: false
+
+      # Agent-visible docstring lint — docstrings in ava/*.py + plugin namespace
+      # modules + plugin.py wrap targets are spliced into the LLM system prompt
+      # and must be all English with no framework impl-details. Rules and the
+      # _KNOWN_DIRTY_FILES allowlist live in scripts/lint_agent_docstrings.py
+      # header and the "SDK docstring discipline" section of AGENTS.md.
+      - id: lint-agent-docstrings
+        name: lint agent-visible docstrings (no CJK, no impl-detail leak)
+        entry: .venv/bin/python scripts/lint_agent_docstrings.py
+        language: system
+        types: [python]
+        pass_filenames: false
+
+      # Structural lints for agent legibility — bans `if TYPE_CHECKING:` import
+      # folding and enforces a 500-line per-file ceiling. Rules + the
+      # _OVERSIZE_ALLOWED / _TYPE_CHECKING_ALLOWED lists live in
+      # scripts/lint_code_structure.py header. (print() bans are enforced by
+      # ruff T20, not here.)
+      - id: lint-code-structure
+        name: lint code structure (no TYPE_CHECKING, file size ceiling)
+        entry: .venv/bin/python scripts/lint_code_structure.py
+        language: system
+        types: [python]
+        pass_filenames: false
+
+      # AGENTS.md line-count ceiling (constants in the script; hard + a
+      # transitional note zone below it). Prevents progressive bloat —
+      # specialized rules go in conventions/.
+      - id: lint-agents-md-size
+        name: lint AGENTS.md size (100-line ceiling)
+        entry: .venv/bin/python scripts/lint_agents_md_size.py
+        language: system
+        files: AGENTS.md
+        pass_filenames: false
+
+      # SKILL.md frontmatter gate: (1) must load with the runtime parser +
+      # carry name/description — a malformed repo skill would crash every agent
+      # at system-prompt build, so it is caught at merge here (the runtime loader
+      # only skip-warns the externally-installed ones it cannot gate); (2)
+      # description hard ceiling 80 units (one CJK char or one non-CJK word = 1
+      # unit) — the index line the agent reads, in every system prompt for
+      # injected skills. Soft target (50) is the sweeper's skill-desc class.
+      - id: lint-skill-descriptions
+        name: lint SKILL.md frontmatter (parse + required fields + description length)
+        entry: .venv/bin/python scripts/lint_skill_descriptions.py
+        language: system
+        files: '((\.ava/)?skills|plugins)/.*/SKILL\.md$'
+        pass_filenames: false
+
+      # SKILL.md line-count ceiling to prevent progressive bloat.
+      # Hard ceiling 300 lines; transitional zone 250-300.
+      - id: lint-skill-md-size
+        name: lint SKILL.md size (line-count ceiling)
+        entry: .venv/bin/python scripts/lint_skill_md_size.py
+        language: system
+        files: '((\.ava/)?skills|plugins)/.*/SKILL\.md$'
+        pass_filenames: false
+
+      # Runbook daemon roster <-> build_services() must agree (both directions).
+      # Catches "deleted a daemon but left it documented" (#728's scheduler row)
+      # and "added a daemon, forgot the roster". Parses the table under the
+      # <!-- lint:roster-table --> sentinel; reads both sides itself.
+      - id: lint-doc-roster
+        name: lint-doc-roster
+        language: system
+        entry: .venv/bin/python scripts/lint_doc_roster.py
+        files: ^(cli/commands/_repo\.py|conventions/runbook\.md)$
+        pass_filenames: false
+
+      # Every `ava.<name>` reference in the procedural docs — conventions and
+      # the repo's own dev skills under .agents/skills — (inside a code span) must
+      # resolve to a live member of the ava namespace. Catches "deleted/renamed
+      # an SDK module, forgot to scrub the doc" (the ava.monitor/ava.schedule
+      # drift class). Valid set = ava.__all__ + real submodules + module attrs +
+      # plugin-registered namespaces; prose mentions are excluded (zero-FP guard).
+      - id: lint-doc-symbols
+        name: lint-doc-symbols
+        language: system
+        entry: .venv/bin/python scripts/lint_doc_symbols.py
+        files: ^(conventions/.*\.md|\.agents/skills/.*\.md|ava/__init__\.py)$
+        pass_filenames: false
+
+      # Every `path/to/file.py:symbol` anchor in traces/ must still resolve
+      # (file exists; for Python, the symbol is AST-*defined* in it, not merely
+      # mentioned). A trace's claim is that it is evidence rather than
+      # architecture fiction, and a renamed function silently turns a step into a
+      # plausible-reading lie — the one drift class the genre cannot survive.
+      # Anchors are only read inside code spans, so prose is never flagged; see
+      # scripts/lint_trace_anchors.py header. Gated on the docs + any source file
+      # an anchor could point at, so a rename is caught at the rename.
+      - id: lint-trace-anchors
+        name: lint trace anchors (every file:symbol in traces resolves)
+        language: system
+        entry: .venv/bin/python scripts/lint_trace_anchors.py
+        files: ^(traces/.*\.md$|.*\.(py|ts|tsx|sql|sh)$)
+        pass_filenames: false
+
+      # Every CLI flag written as a command invocation, and every relative
+      # markdown link, across all tracked docs — checked against the live
+      # argparse tree / scripts/*.sh case arms / the tree on disk. Runs the
+      # whole doc set regardless of which files changed (pass_filenames: false):
+      # a link goes stale from a move anywhere, not just an edit to the doc
+      # citing it. decisions/ is exempt entirely; future/ only skips
+      # flag checks (a `(planned)` marker opts a specific link out) — see
+      # scripts/check_doc_references.py's own docstring for the full rationale
+      # (including issue #1045, why future/ is no longer a blanket skip).
+      - id: check-doc-references
+        name: check doc references (CLI flags + relative links resolve)
+        language: system
+        entry: .venv/bin/python scripts/check_doc_references.py
+        files: (\.md$|^cli/(main|enroll)\.py$|^scripts/(check_doc_references\.py|.*\.sh)$)
+        pass_filenames: false
+
+      - id: check-narrative-facts
+        name: check narrative facts (skill catalog / IM commands / IM channels match code)
+        language: system
+        entry: .venv/bin/python scripts/check_narrative_facts.py
+        files: (\.md$|^scripts/check_narrative_facts\.py$|^services/im_bridge/)
+        pass_filenames: false
+
+      # Ban the silent `except ...: pass` swallow (AST, not grep — catches
+      # multi-line forms). A handler whose body is a lone `pass` is the
+      # defensive swallow AGENTS.md's "Fail fast" principle bans. Sanctioned
+      # explicit form is `contextlib.suppress(SpecificError)`; a justified
+      # best-effort path uses an inline `# fail-fast-ok: <reason>`. The script
+      # self-filters to the 7 framework dirs, so files: \.py$ is a coarse gate.
+      - id: lint-fail-fast
+        name: lint-fail-fast
+        language: system
+        entry: .venv/bin/python scripts/lint_fail_fast.py
+        files: \.py$
+        pass_filenames: false
+
+      # Every UPDATE that writes agents_meta.status='terminated' must stamp
+      # termination_source in the SAME statement. A NULL source is permanently
+      # unresurrectable (CrashResurrectController's claim filters on it), so a
+      # write site that forgets leaves a corpse nothing can revive and silently
+      # strands its queued inbound work — no error, no log. AST-based, so it
+      # catches the bind-parameter form (`SET status = %s` with
+      # AgentStatus.TERMINATED in the params) that a grep misses; that is exactly
+      # the form the boot-gate site slipped through in. The script self-filters to
+      # non-test dirs, so files: \.py$ is a coarse gate.
+      - id: lint-termination-source
+        name: lint termination_source stamping (every terminated-write names its source)
+        language: system
+        entry: .venv/bin/python scripts/lint_termination_source.py
+        files: \.py$
+        pass_filenames: false
+
+      - id: lint-clock-lattice
+        name: lint clock lattice (lattice-vocabulary clocks only in the family modules)
+        language: system
+        entry: .venv/bin/python scripts/lint_clock_lattice.py
+        files: \.py$
+        pass_filenames: false
+
+      # (Config-scope ownership is now enforced at import by the config package's
+      # registry builder — shared/config/__init__.py:_build_registry fails fast on
+      # a field with a missing/invalid scope, so the former standalone
+      # lint-config-scope hook retired.)
+
+      # Import-direction contract (config in pyproject [tool.importlinter]):
+      # locks shared < ava < agent < gateway < {services,cli} so no new
+      # reverse edge into a lower layer can creep back in. Analyzes the whole
+      # import graph, so pass_filenames: false + trigger on any .py change.
+      - id: lint-imports
+        name: lint import direction (layered architecture)
+        entry: .venv/bin/lint-imports
+        language: system
+        types: [python]
+        pass_filenames: false
+
+
+      # NoteTag <-> system_marker sync: every NoteTag enum value in
+      # agent/messages.py must be referenced in the frontend markers.tsx
+      # dispatch. When a tag is added to the Python enum without updating the
+      # TypeScript, it falls through to the red 'Unrecognized system_marker'
+      # alarm. This lint catches the drift at commit time.
+      - id: lint-note-tags
+        name: lint NoteTag / system_marker sync (every NoteTag covered in markers.tsx)
+        entry: .venv/bin/python scripts/lint_note_tags.py
+        language: system
+        files: ^(shared/message_kwargs\.py|frontend/src/components/timeline/markers\.tsx)$
+        pass_filenames: false
+
+      # Migration layout: timestamp-id filename format, unique names, up/down
+      # pairing (every post-baseline migration must be reversible — the baseline
+      # is the rollback floor), and db/schema.sql's baseline seed. CI has always
+      # run this; locally it ran nowhere, so a malformed migration was only
+      # caught after push — and migrations are the change class where finding
+      # out late costs the most. Gated on migrations/ + db/schema.sql (the two
+      # inputs the script reads), so it costs nothing on any other commit.
+      #
+      # Note the heavier sibling stays CI-only *deliberately*:
+      # scripts/migration_smoke.py boots a throwaway Postgres and shells out to
+      # `psql` for the baseline apply + trigger poke. That toolchain is in the
+      # CI image but not on every dev machine, so as a commit hook it would fail
+      # for reasons unrelated to the commit — which is precisely the pressure
+      # that produces a `--no-verify` habit (see .agents/skills/ship-a-change/SKILL.md).
+      - id: lint-migrations
+        name: lint migrations (timestamp-id format + up/down pairing + baseline seed)
+        entry: .venv/bin/python scripts/lint_migrations.py
+        language: system
+        files: ^(migrations/|db/schema\.sql$)
+        pass_filenames: false
+
+      # No pytest hook: the commit gate is lint-only. The full non-e2e suite
+      # used to run here (each xdist worker provisioning its own throwaway
+      # native Postgres + Redis), which saturated the dev host on
+      # every commit and — with several Claude Code sessions committing in
+      # parallel worktrees — made concurrent sessions squeeze
+      # each other into connection-timeout false failures. Kernel-style
+      # layering instead: while developing, run the tests for the scope you
+      # touched; the full suite + e2e + coverage run in CI, the merge gate.
+
+      # Frontend TypeScript typecheck — `tsc --noEmit` runs across the whole
+      # project to catch type drift / missed union updates / cross-file type
+      # mismatches (the root cause of plain-text silent fallback in things
+      # like SystemMarker: TS doesn't report, but runtime gets a bare string).
+      # Triggers on any frontend ts/tsx change; runs the whole project because
+      # tsc doesn't support incremental single-file checks.
+      - id: frontend-tsc
+        name: frontend tsc --noEmit
+        entry: bash -c 'cd frontend && npx --no-install next typegen && npx --no-install tsc --noEmit'
+        language: system
+        files: ^frontend/.*\.(ts|tsx)$
+        pass_filenames: false
+
+      # ESLint — aligned with frontend CI, 0 errors required to commit.
+      - id: frontend-eslint
+        name: frontend eslint
+        entry: bash -c 'cd frontend && npx --no-install eslint . --max-warnings 0'
+        language: system
+        files: ^frontend/.*\.(ts|tsx|js|mjs)$
+        pass_filenames: false
+
+      # Frontend unit tests — vitest run executes the full suite in ~1.5s
+      # (fast enough). Triggers on ts/tsx changes so core logic like timeline
+      # reducer / merge / use-timeline stays covered.
+      - id: frontend-vitest
+        name: frontend vitest run
+        entry: bash -c 'cd frontend && npx --no-install vitest run'
+        language: system
+        files: ^frontend/.*\.(ts|tsx)$
+        pass_filenames: false
+
+      # types-generated.ts + openapi.json must stay in sync with the Pydantic
+      # schema. check-types-fresh.sh writes to temp + diffs (does not mutate
+      # actual files, otherwise pre-commit's stash/restore would see mtime
+      # changes and judge "files modified" as a failure).
+      #
+      # History: types.ts and the Pydantic models were maintained on separate
+      # tracks by hand. Whenever frontend added a new field / backend renamed
+      # one, both sides had to remember to change. Drift (the lifecycle source
+      # incident, where timeline.tsx referenced non-existent kinds like
+      # inbound_compact_prompt) went uncaught — switched to single-source codegen,
+      # and now any schema change without running codegen turns this hook red.
+      - id: types-codegen-fresh
+        name: "types-generated.ts in sync with Pydantic schema (drift: run ./scripts/codegen-types.sh)"
+        entry: ./scripts/check-types-fresh.sh
+        language: system
+        files: ^(gateway/schemas/.*\.py$|gateway/app\.py$|gateway/routers/.*\.py$|shared/agents\.py$|shared/api_contracts/.*\.py$|shared/timeline\.py$|shared/agent_snapshot\.py$|shared/resource_monitor\.py$|ops/rpc_schemas\.py$|ops/cluster\.py$|frontend/src/lib/types-generated\.ts$|frontend/openapi\.json$)
+        pass_filenames: false
+      - id: constants-codegen-fresh
+        name: "constants-generated.ts in sync with shared/live_events.py (drift: run ./scripts/dump_frontend_constants.py)"
+        entry: ./scripts/check-constants-fresh.sh
+        language: system
+        files: ^(shared/live_events\.py$|scripts/dump_frontend_constants\.py$|frontend/src/lib/constants-generated\.ts$)
+        pass_filenames: false
+
+      # shared/events/registry.md must stay in sync with the event contract
+      # registry (shared/events/contract.py EVENTS + live_events SSE roles) —
+      # the doc is a generated artifact (R2-C): a new/renamed event or role
+      # without regenerating turns this hook red.
+      - id: events-registry-fresh
+        name: "shared/events/registry.md in sync with EVENTS registry (drift: run .venv/bin/python scripts/gen_event_registry.py)"
+        entry: ./scripts/check-events-registry-fresh.sh
+        language: system
+        files: ^(shared/events/contract\.py$|shared/live_events\.py$|scripts/gen_event_registry\.py$|shared/events/registry\.md$)
+        pass_filenames: false
+
+  - repo: local
+    hooks:
+      - id: lint-ava-okf
+        name: Lint Ava OKF documents
+        entry: .venv/bin/python scripts/lint_ava_okf.py
+        language: system
+        files: \.ava\.okf\.md$
+        pass_filenames: false

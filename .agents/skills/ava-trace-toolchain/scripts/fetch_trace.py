@@ -1,0 +1,300 @@
+#!/usr/bin/env python3
+"""Fetch one OTel trace as normalized JSON — from the local mirror or Tempo.
+
+Two modes:
+
+- **Find** (`--search <traceql>`): query Tempo's search API and list matching
+  traces (id, duration, matched span count). Run this first to get trace ids.
+- **Fetch** (`--trace-id <hex-32>`): pull one trace's full span set and write
+  `trace_raw.json` for `read_trace.py`. Sources:
+    - `mirror` (default): scan `$AVA_HOME/traces/spans*.jsonl` (active `spans.jsonl` + rotated `spans-<ISO>.jsonl`) — the durable
+      record, complete, no size cap, no network. Needs filesystem access to
+      the machine that recorded the trace. Stops at the first file that
+      yields spans (one trace lives in one file — the recording process's
+      daily file). The trace id is base64 in the mirror; convert inside.
+    - `tempo`: `GET /api/traces/{id}` — refused above Tempo's 5 MB cap
+      ("trace exceeds max size"); the error message points back to `mirror`.
+
+Output `trace_raw.json` (contract for read_trace.py):
+
+    {
+      "trace_id": "<hex-32>",
+      "source": "mirror" | "tempo",
+      "fetched_at": "<ISO-8601>",
+      "spans": [
+        {
+          "span_id": "<hex-16>",
+          "parent_span_id": "<hex-16>" | null,
+          "name": str,
+          "kind": "INTERNAL" | "CLIENT" | "SERVER" | "PRODUCER" | "CONSUMER" | null,
+          "start_ns": int, "end_ns": int,
+          "status": "OK" | "ERROR" | null,
+          "attributes": {key: scalar}
+        }
+      ]
+    }
+
+stdlib only; runs inside the repo venv or any Python 3.12.
+"""
+
+from __future__ import annotations
+
+import argparse
+import base64
+import json
+import os
+import re
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+
+_KIND_STRIP = "SPAN_KIND_"
+_STATUS_OK = "STATUS_CODE_OK"
+_STATUS_ERROR = "STATUS_CODE_ERROR"
+
+
+def _anyvalue(value: dict) -> object:
+    """Collapse a proto3-JSON AnyValue dict to a plain scalar/list."""
+    for key in ("stringValue", "intValue", "doubleValue", "boolValue"):
+        if key in value:
+            return value[key]
+    if "arrayValue" in value:
+        return [_anyvalue(v) for v in value["arrayValue"].get("values", [])]
+    if "kvlistValue" in value:
+        return {
+            f["key"]: _anyvalue(f["value"])
+            for f in value["kvlistValue"].get("values", [])
+            if "key" in f and "value" in f
+        }
+    return None
+
+
+def _normalize_span(sp: dict) -> dict:
+    """One OTLP span dict (proto3 JSON, base64 ids) -> normalized dict."""
+    attributes = {a["key"]: _anyvalue(a["value"]) for a in sp.get("attributes", [])}
+    kind = sp.get("kind")
+    if isinstance(kind, str):
+        kind = kind.removeprefix(_KIND_STRIP) or None
+    status = sp.get("status", {})
+    code = status.get("code", "") if status else ""
+    if isinstance(code, str):
+        status_out = "ERROR" if code == _STATUS_ERROR else ("OK" if code == _STATUS_OK else None)
+    elif isinstance(code, int):
+        status_out = "ERROR" if code == 2 else ("OK" if code == 1 else None)
+    else:
+        status_out = None
+    return {
+        "span_id": base64.b64decode(sp["spanId"]).hex(),
+        "parent_span_id": (
+            base64.b64decode(sp["parentSpanId"]).hex() if sp.get("parentSpanId") else None
+        ),
+        "name": sp.get("name", ""),
+        "kind": kind,
+        "start_ns": int(sp["startTimeUnixNano"]),
+        "end_ns": int(sp["endTimeUnixNano"]),
+        "status": status_out,
+        "attributes": attributes,
+    }
+
+
+def _spans_from_envelope(data: dict, hex_trace_id: str | None) -> list[dict]:
+    """Walk an OTLP JSON envelope (mirror line or Tempo batches) for spans."""
+    # Mirror line: {"resourceSpans": [...]} — Tempo full trace: {"batches": [...]}.
+    groups = data.get("resourceSpans") or data.get("batches") or []
+    out: list[dict] = []
+    for group in groups:
+        for ss in group.get("scopeSpans", []):
+            for sp in ss.get("spans", []):
+                if hex_trace_id is not None and (
+                    base64.b64decode(sp["traceId"]).hex() != hex_trace_id
+                ):
+                    continue
+                out.append(_normalize_span(sp))
+    return out
+
+
+# ── find mode ────────────────────────────────────────────────────────────────
+
+
+def _http_get_json(url: str) -> dict:
+    import urllib.request
+
+    if not url.startswith(("http://", "https://")):
+        raise ValueError(f"refusing non-http(s) URL: {url[:60]!r}")
+    with urllib.request.urlopen(url, timeout=60) as resp:
+        return json.loads(resp.read().decode())
+
+
+def cmd_search(args) -> int:
+    import urllib.parse
+
+    params = {"q": args.search, "limit": str(args.limit)}
+    if args.spss:
+        params["spss"] = str(args.spss)
+    url = args.tempo_url.rstrip("/") + "/api/search?" + urllib.parse.urlencode(params)
+    data = _http_get_json(url)
+    traces = data.get("traces", [])
+    print(f"{len(traces)} trace(s) match {args.search!r} ({args.tempo_url})")
+    for t in traces:
+        start_ns = int(t.get("startTimeUnixNano", 0))
+        started = datetime.fromtimestamp(start_ns / 1e9, tz=UTC).isoformat()
+        print(
+            f"  {t['traceID']}  dur={t.get('durationMs')}ms  "
+            f"spans={t.get('spanSet', {}).get('matched')}  root={t.get('rootServiceName')}  "
+            f"start={started}"
+        )
+    return 0
+
+
+# ── fetch mode ────────────────────────────────────────────────────────────────
+
+
+def _mirror_dir(args) -> Path:
+    if args.mirror_dir:
+        return Path(args.mirror_dir)
+    ava_home = Path(os.environ.get("AVA_HOME", Path.home() / ".ava"))
+    return ava_home / "traces"
+
+
+def _trace_id_b64(hex_trace_id: str) -> str:
+    return base64.b64encode(bytes.fromhex(hex_trace_id)).decode()
+
+
+def _mirror_day(fp: Path) -> datetime.date | None:
+    """Day stamp from a mirror filename (legacy `spans-YYYYMMDD-<pid>.jsonl`
+    or the sidecar's rotated `spans-<ISO-timestamp>.jsonl`); None for the
+    unstamped ACTIVE `spans.jsonl`."""
+    m = re.match(r"spans-(\d{8})-", fp.name)
+    if m:
+        try:
+            return datetime.strptime(m.group(1), "%Y%m%d").replace(tzinfo=UTC).date()
+        except ValueError:
+            return None
+    m = re.match(r"spans-(\d{4})-(\d{2})-(\d{2})T", fp.name)
+    if m:
+        return datetime.date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+    return None
+
+
+def _mirror_files(directory: Path, days: int) -> list[Path]:
+    """Mirror files within the last `days` days, newest first: the active
+    `spans.jsonl` (day = mtime) plus rotated/legacy `spans-*.jsonl`."""
+    cutoff = datetime.now(UTC).date() - timedelta(days=days - 1)
+    files = sorted(directory.glob("spans*.jsonl"), reverse=True)
+    kept = []
+    for fp in files:
+        day = _mirror_day(fp)
+        if day is None:
+            day = datetime.fromtimestamp(fp.stat().st_mtime, tz=UTC).date()
+        if day >= cutoff:
+            kept.append(fp)
+        elif kept:
+            break  # files are newest-first; the rest are older
+    return kept
+
+
+def fetch_from_mirror(args, hex_trace_id: str) -> list[dict]:
+    directory = _mirror_dir(args)
+    needle = _trace_id_b64(hex_trace_id)
+    files = _mirror_files(directory, args.days)
+    print(f"scanning {len(files)} mirror file(s) in {directory} (days={args.days})")
+    for fp in files:
+        hits: list[dict] = []
+        with fp.open(encoding="utf-8") as f:
+            for line in f:
+                if needle not in line:
+                    continue
+                try:
+                    req = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                hits.extend(_spans_from_envelope(req, hex_trace_id))
+        if hits:
+            print(f"found {len(hits)} spans in {fp.name}")
+            return hits
+    return []
+
+
+def fetch_from_tempo(args, hex_trace_id: str) -> list[dict]:
+    import urllib.error
+
+    url = f"{args.tempo_url.rstrip('/')}/api/traces/{hex_trace_id}"
+    try:
+        data = _http_get_json(url)
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode(errors="replace")
+        if "exceeds max size" in body:
+            print(
+                "tempo: trace exceeds the 5 MB full-trace cap. Use "
+                "`--source mirror` on the recording machine, or narrow with --search."
+            )
+            return []
+        raise
+    spans = _spans_from_envelope(data, hex_trace_id)
+    print(f"tempo: {len(spans)} spans from {url}")
+    return spans
+
+
+def cmd_fetch(args) -> int:
+    if not re.fullmatch(r"[0-9a-f]{32}", args.trace_id or ""):
+        print("--trace-id must be a 32-char hex id")
+        return 2
+    spans = (
+        fetch_from_mirror(args, args.trace_id)
+        if args.source == "mirror"
+        else fetch_from_tempo(args, args.trace_id)
+    )
+    if not spans:
+        print(
+            "no spans found. Is the trace id right? Old mirror files are "
+            "retention-pruned — widen --days. In Tempo, traces arrive via "
+            "`ava trace ship` (gap-replay; the sidecar fans out live)."
+        )
+        return 1
+    spans.sort(key=lambda s: s["start_ns"])
+    out = {
+        "trace_id": args.trace_id,
+        "source": args.source,
+        "fetched_at": datetime.now(UTC).isoformat(),
+        "spans": spans,
+    }
+    Path(args.out).write_text(json.dumps(out, indent=1), encoding="utf-8")
+    print(f"wrote {len(spans)} spans -> {args.out}")
+    return 0
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[1])
+    ap.add_argument(
+        "--tempo-url",
+        default=os.environ.get("AVA_TRACE_TEMPO_URL", "http://localhost:3200"),
+        help="Tempo query API base (or the Grafana datasource proxy path). Default localhost:3200.",
+    )
+    ap.add_argument("--out", default="trace_raw.json")
+    mode = ap.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--search", metavar="TRACEQL", help="find traces (Tempo search API)")
+    mode.add_argument("--trace-id", metavar="HEX32", help="fetch one full trace")
+    ap.add_argument("--limit", type=int, default=10, help="search mode: max traces")
+    ap.add_argument("--spss", type=int, default=3, help="search mode: spans per span set")
+    ap.add_argument(
+        "--source",
+        choices=("mirror", "tempo"),
+        default="mirror",
+        help="fetch mode: mirror = $AVA_HOME/traces JSONL (default); tempo = /api/traces/{id}",
+    )
+    ap.add_argument(
+        "--days",
+        type=int,
+        default=2,
+        help="fetch mode (mirror): scan files from the last N days, newest first",
+    )
+    ap.add_argument(
+        "--mirror-dir",
+        default=None,
+        help="fetch mode (mirror): override $AVA_HOME/traces",
+    )
+    args = ap.parse_args()
+    return cmd_search(args) if args.search else cmd_fetch(args)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

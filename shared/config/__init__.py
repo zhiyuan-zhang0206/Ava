@@ -1,0 +1,441 @@
+"""Unified runtime config — per-domain sub-models aggregated into one `settings`.
+
+pydantic-settings validates types at startup (format errors blow up immediately),
+centralizes defaults in one place, and replaces scattered `os.environ.get()` with
+attribute access.
+
+The former flat `Settings` god object is split by owning domain into sub-models
+(`LmSettings`, `AgentSettings`, `DataPlaneSettings`, …), each its own
+`BaseSettings` that populates from the flat `os.environ` through its fields' env
+aliases. `Settings` aggregates one instance of each; access is nested
+(`settings.lm.llm_model`). The split is invisible to `.env`: every AVA_* alias is
+unchanged, so `.env` files, `_enforce_cluster_env_authority`, the bootstrap
+payload, and the config PUT keep working byte-for-byte.
+
+Precedence: env var > Field default. `$AVA_HOME/.env` is the single source of
+truth — the config panel and `ava config set` write edits straight into it
+(`set_key` / `unset_key` by alias; see `shared/runtime_config.py`), and
+pydantic-settings reads it at startup. There is no separate override layer: a
+value lives in exactly one place.
+
+Third-party-library-consumed secrets (ANTHROPIC_API_KEY, ...) are modeled
+as fields — our own Python code accesses via `settings.<domain>.X.get_secret_value()`;
+the LangChain SDK still reads `os.environ` itself (we do not prevent it).
+`load_ava_env(~/.ava/.env)` runs at import time so both Settings and third-party
+consumers can see .env content.
+
+The metadata machinery (`get_config_metadata`, `BOOTSTRAP_FIELDS`,
+`bootstrap_config_values`, …) walks the sub-models and keys everything by the flat
+field NAME — field names stay globally unique across sub-models, so the wire /
+`.env` / bootstrap surfaces are unchanged. The frontend's config-panel display
+grouping is NOT this metadata: the top-level display sections are the frontend's
+own static regrouping (`frontend/src/app/control/_config_groups.ts`); the second
+level is the owning sub-model's `group` label. `capability` below is conceptual
+ownership + the remote-view field filter, not panel grouping (default capability
+per domain in `_DOMAIN_MODELS`). Each Field's json_schema_extra carries the
+remaining metadata the frontend and distribution logic need:
+- restart_required: "agent" | "ops" | "gateway" | "all" | "" — which process must restart after a change
+- writable: whether the frontend allows editing
+- sensitive: whether the frontend masks the display
+- scope: cluster-pinned | cluster-default | host | agent — drives BOOTSTRAP_FIELDS + write routing
+- capability (optional, else the domain default): gateway | agent-runner | common —
+  conceptual ownership + remote-view filter (agent-runner views show only agent-runner
+  + common fields), orthogonal to scope; NOT panel grouping. `common` = not owned by
+  a single capability (cluster-wide policy or the shared host identity).
+- per_agent: whether a spawn/restart `config_overlay` may override the field
+- lifecycle: frozen | live — REQUIRED on every per_agent field (see below)
+
+## The per-agent config lifecycle axis (`lifecycle`)
+
+`per_agent=True` says a field CAN be overridden for one agent. `lifecycle` says
+what happens to that field when NOBODY overrode it — i.e. how a running agent
+tracks a later change to the cluster default:
+
+- **frozen** — resolved ONCE at the spawn boundary from the then-current default,
+  persisted on the agent's own row (`agents_meta.birth_config`), and replayed on
+  every restart / respawn / resurrect / compact for the rest of that agent's life.
+  Flipping the cluster default afterwards moves nobody who already exists. This is
+  the agent's *identity material*: the brain (model / effort / thinking budget) and
+  everything that shapes the system prompt. Compact rebuilds the system prompt from
+  current config, so a live default here would silently swap a living agent's
+  identity mid-life.
+- **live** — re-read from current cluster config at every process start. A cluster
+  edit reaches every agent on its next restart. This is the right class for
+  operational knobs (compaction thresholds, stream timeouts, recall tuning): they
+  tune the runtime around the agent, they do not define it.
+
+An explicit `config_overlay` is ORTHOGONAL to this axis and always wins:
+`config_overlay > birth_config > current default`. The two stores are deliberately
+separate so provenance survives — "the user chose this for this agent" and "this
+was merely the cluster default the day it was born" must stay distinguishable.
+
+**Boundary**: `lifecycle` applies only to `per_agent=True` fields. A field that is
+not per-agent has no per-agent instance to freeze — cluster-scope config is by
+definition read live by whatever process next starts, so declaring `lifecycle` on
+one is a category error and the registry rejects it. Plugin `Config` fields
+(`shared/plugin_config_registry.py`) are outside this registry and are not part of
+the frozen set; they behave as `live` and only an explicit overlay pins them.
+
+Resolution + stamping mechanics: `shared/birth_config.py`.
+"""
+
+from __future__ import annotations
+
+import os
+from datetime import datetime
+from typing import Any, cast
+from zoneinfo import ZoneInfo
+
+from pydantic import BaseModel, Field
+
+import shared.config_registry as _config_registry
+from shared.bootstrap import (
+    CONFIG_FETCH_ENV,
+    CONFIG_FETCH_SKIP,
+    config_source_is_local,
+    should_fetch_from_gateway,
+)
+from shared.config.agent import AgentSettings
+from shared.config.alerts import AlertsSettings
+from shared.config.daemon import DaemonSettings
+from shared.config.data_plane import (
+    DataPlaneSettings,
+)
+from shared.config.data_plane import (
+    _self_machine_host as _self_machine_host,  # re-export: service_read resolves it through this module so tests can monkeypatch it
+)
+from shared.config.feishu import FeishuSettings
+from shared.config.gateway import GatewaySettings
+from shared.config.general import GeneralSettings
+from shared.config.lm import LmSettings
+from shared.config.observability import ObservabilitySettings
+from shared.config.profiles import (
+    AVA_PROCESS_PROFILE_ENV,
+    PROCESS_PROFILES,
+    PROFILE_UNSET,
+    ProcessProfile,
+)
+from shared.config.sandbox import SandboxSettings
+from shared.config.service_read import (
+    warn_deprecated_env_aliases as warn_deprecated_env_aliases,
+)
+from shared.config.services import ServiceSettings
+from shared.config.telegram import TelegramSettings
+from shared.config.web import WebSettings
+from shared.config_registry import (
+    _DOMAIN_ATTRS as _DOMAIN_ATTRS,
+)
+from shared.config_registry import (
+    _DOMAIN_MODELS as _DOMAIN_MODELS,
+)
+from shared.config_registry import (
+    Capability as Capability,
+)
+from shared.config_registry import (
+    Lifecycle as Lifecycle,
+)
+from shared.config_registry import (
+    _schema_extra as _schema_extra,
+)
+from shared.config_registry import (
+    field_alias as field_alias,
+)
+from shared.config_registry import (
+    field_alias_map as field_alias_map,
+)
+from shared.config_registry import (
+    field_domain as field_domain,
+)
+from shared.config_registry import (
+    field_lifecycle as field_lifecycle,
+)
+from shared.config_registry import (
+    field_names as field_names,
+)
+from shared.config_registry import (
+    frozen_field_names as frozen_field_names,
+)
+from shared.config_registry import (
+    live_field_names as live_field_names,
+)
+from shared.config_registry import (
+    per_agent_field_names as per_agent_field_names,
+)
+from shared.dotenv_boot import load_ava_env
+from shared.netutil import (
+    is_loopback_host as is_loopback_host,  # re-export: tests use config.is_loopback_host
+)
+from shared.url_secret import (
+    url_with_host as url_with_host,  # re-export: tests use config.url_with_host
+)
+
+# The flat field registry (shared/config_registry.py) is imported BEFORE the
+# Settings singleton below constructs, and built eagerly here: its module-level
+# consumers (BOOTSTRAP_FIELDS etc.) and the re-exported names must see a built
+# registry regardless of import order.
+
+
+# ── Flat field registry (name -> owning sub-model + FieldInfo) ──
+#
+# The wire / .env / bootstrap surfaces are keyed by the flat field NAME. Field
+# names are globally unique across sub-models, so this registry lets every
+# metadata consumer walk the decomposed model exactly as it walked the old flat
+# one, and lets the per-agent config overlay resolve a flat key to its sub-model.
+# The build itself lives in shared/config_registry.py (importable before
+# Settings exists — the dotenv_boot env-authority pass runs at .env-load time).
+
+
+_config_registry.ensure_built()
+# The flat name->owner registry. The registry module builds lazily (the
+# dotenv_boot pre-Settings boot imports it without triggering the package);
+# the build was forced just above, so this binding is the real dict.
+_FIELDS: dict[str, Any] = _config_registry._fields()
+
+# Leaf FieldInfo by name — the compat replacement for the old flat
+# `Settings.model_fields` for code that iterated field metadata. The registry
+# module builds lazily; the build was forced above, so this binding is eager.
+FIELD_INFOS: dict[str, Any] = {n: r.info for n, r in _FIELDS.items()}
+
+
+class Settings(BaseModel):
+    """Aggregate of the per-domain config sub-models. Access is nested:
+    `settings.lm.llm_model`, `settings.data_plane.db_url`. Each sub-model is a
+    `BaseSettings` that reads the flat env; this composite just holds one of each.
+
+    `profile` selects the per-process domain set (PROCESS_PROFILES): a domain
+    outside the profile is NOT constructed and its attribute access raises an
+    actionable AttributeError (fail-fast — a cross-profile read used to
+    silently read a default). `has_domain()` is the dynamic-code escape hatch.
+    With no profile marker the composite constructs every domain, unchanged.
+    """
+
+    # The process profile this aggregate was constructed for (None = full
+    # construction). A plain excluded field, not a PrivateAttr: the profile
+    # fail-fast in __getattr__ reads it as a normal attribute, and
+    # model_dump()/validation never sees it (exclude=True).
+    profile: str | None = Field(default=None, exclude=True)
+
+    lm: LmSettings = Field(default_factory=LmSettings)
+    alerts: AlertsSettings = Field(default_factory=AlertsSettings)
+    sandbox: SandboxSettings = Field(default_factory=SandboxSettings)
+    agent: AgentSettings = Field(default_factory=AgentSettings)
+    web: WebSettings = Field(default_factory=WebSettings)
+    gateway: GatewaySettings = Field(default_factory=GatewaySettings)
+    daemon: DaemonSettings = Field(default_factory=DaemonSettings)
+    # DataPlaneSettings has required no-default fields (db_url / redis_url) that
+    # BaseSettings fills from env at construction; pyright sees the zero-arg factory
+    # as under-supplied.
+    data_plane: DataPlaneSettings = Field(default_factory=DataPlaneSettings)  # pyright: ignore[reportArgumentType, reportUnknownVariableType]
+    services: ServiceSettings = Field(default_factory=ServiceSettings)
+    observability: ObservabilitySettings = Field(default_factory=ObservabilitySettings)
+    feishu: FeishuSettings = Field(default_factory=FeishuSettings)
+    telegram: TelegramSettings = Field(default_factory=TelegramSettings)
+    general: GeneralSettings = Field(default_factory=GeneralSettings)
+
+    def __init__(self, *, profile: str | None = PROFILE_UNSET, **data: Any) -> None:
+        """Construct the aggregate for `profile`.
+
+        `profile` defaults to the process's AVA_PROCESS_PROFILE env marker; an
+        explicit `profile=None` builds every domain (config-service read paths,
+        tests, CLI). An unknown profile name fails fast — the marker is set by
+        launchers, not by hand.
+        """
+        if profile == PROFILE_UNSET:
+            profile = os.environ.get(AVA_PROCESS_PROFILE_ENV)
+        if profile is not None and profile not in PROCESS_PROFILES:
+            raise ValueError(
+                f"{AVA_PROCESS_PROFILE_ENV}={profile!r} is not a known process profile; "
+                f"must be one of {sorted(PROCESS_PROFILES)} — the marker is set by the "
+                f"process launcher, not by hand"
+            )
+        super().__init__(**data)
+        self.profile = profile
+        if profile is not None:
+            allowed = PROCESS_PROFILES[profile]
+            for attr, *_rest in _DOMAIN_MODELS:
+                if attr not in allowed:
+                    vars(self).pop(attr, None)
+
+    def __getattr__(self, name: str) -> Any:
+        # A missing attribute on this aggregate is either a typo or — on a
+        # profile-limited instance — a domain the process profile deliberately
+        # does not construct (fail-fast: a cross-profile read used to silently
+        # read a default). The actionable message names the fix for both.
+        profile = self.profile
+        if (
+            profile is not None
+            and name in _DOMAIN_ATTRS
+            and name not in PROCESS_PROFILES[cast("ProcessProfile", profile)]
+        ):
+            raise AttributeError(
+                f"'{profile}' process profile does not construct the {name!r} config "
+                f"domain (per-process config, Task #856) — nothing in this process "
+                f"kind reads settings.{name}. If this read is legitimate, add the "
+                f"domain to the '{profile}' profile in PROCESS_PROFILES AND to the "
+                f"consumption-matrix guard (tests/shared/test_gateway_consumer_guard.py); "
+                f"otherwise move the read to the process kind that owns the domain. "
+                f"Dynamic code can check settings.has_domain({name!r}) first."
+            ) from None
+        raise AttributeError(f"'{type(self).__name__}' object has no attribute {name!r}")
+
+    def has_domain(self, name: str) -> bool:
+        """Whether this process's profile constructs the `name` config domain.
+
+        The escape hatch for dynamic code (plugins) that must probe before
+        reading; static code should simply access `settings.<domain>` and let
+        the fail-fast AttributeError point at the fix.
+        """
+        profile = self.profile
+        if profile is None:
+            return True
+        return name in PROCESS_PROFILES[cast("ProcessProfile", profile)]
+
+
+load_ava_env()
+
+# Config source is role-derived (AVA_CONFIG_SOURCE deleted 2026-08-01):
+# - a gateway-capable unit keeps the cluster's config in its own .env — local
+#   source, never fetched;
+# - a configured pure agent-runner (serve_agent_runner flag on + gateway URL
+#   present) fetches the cluster's config from the gateway at EVERY process
+#   start. The fetched values are authoritative (inject overrides env/.env), so
+#   there is no .env cache that could go stale — a cluster edit reaches a runner
+#   on its next restart;
+# - a bare checkout with no role flags (CI, lint scripts, dev tools) and a
+#   not-yet-enrolled runner construct locally with no fetch and no error —
+#   `ava start`'s preflight gate refuses the unenrolled runner.
+# Maintenance verbs (ava stop/status/watchdog-probe/...) set AVA_CONFIG_FETCH=skip
+# so they construct Settings while the gateway is down (settings-lite): the
+# cluster-scope fields then fall back to never-dialed placeholders, which is fine
+# because lite verbs never touch the data plane.
+# Importing a sub-model above only defines its class — no env is read until
+# construction (below, at `Settings()`) — so this still lands before any field
+# reads the environment.
+
+# A settings-lite process's placeholder for the required redis URL (the db URL
+# placeholder is UNANCHORED_DB_SENTINEL, which shared/db.connect already refuses
+# with an actionable error). Lite verbs never dial the data plane, so the values
+# are never reached; they exist only so Settings constructs.
+_LITE_REDIS_URL = "redis://config-lite@127.0.0.1:1/0"
+
+
+def _plant_lite_placeholders() -> None:
+    """Plant never-dialed placeholders for the required data-plane URLs so
+    Settings constructs without a gateway fetch. A value already in env/.env (the
+    suite's pins, CI's sentinels, a stale pre-cutover materialization) is left
+    alone — the placeholder only fills the nothing-at-all case."""
+    from shared.dotenv_boot import UNANCHORED_DB_SENTINEL
+
+    os.environ.setdefault("AVA_DB_URL", UNANCHORED_DB_SENTINEL)
+    os.environ.setdefault("AVA_REDIS_URL", _LITE_REDIS_URL)
+
+
+if config_source_is_local():
+    pass  # a gateway-capable unit: the local .env IS the source of truth
+elif os.environ.get(CONFIG_FETCH_ENV) == CONFIG_FETCH_SKIP:
+    # settings-lite (maintenance verbs): construct with the gateway down.
+    _plant_lite_placeholders()
+elif should_fetch_from_gateway():
+    from shared.bootstrap import inject_config_from_gateway
+
+    inject_config_from_gateway()
+else:
+    # A bare checkout (no role flags) or a not-yet-enrolled runner: not a
+    # configured unit yet, so build Settings from local env/.env with no fetch.
+    # `ava start`'s preflight gate is the fail-fast for the unenrolled runner.
+    _plant_lite_placeholders()
+
+settings = Settings()
+
+# Cluster-common config an agent-runner fetches from the gateway via
+# GET /api/bootstrap. Derived from each field's ownership scope: the two cluster
+# scopes are distributed; host / agent fields are not.
+BOOTSTRAP_FIELDS: tuple[str, ...] = tuple(
+    name
+    for name, ref in _FIELDS.items()
+    if _schema_extra(ref.info).get("scope") in ("cluster-pinned", "cluster-default")
+)
+
+
+def get_field(name: str) -> Any:
+    """Current value of a leaf field by name, resolved to its owning sub-model.
+
+    The escape hatch for reflective / dynamic access — a flat
+    `getattr(settings, name)` no longer works now that fields live on
+    `settings.<domain>`. Static access should use the nested attribute directly
+    (`settings.lm.llm_model`); this is for call sites that hold the field name as a
+    runtime string (health-port map, model-key map, capability probes)."""
+    ref = _FIELDS[name]
+    return getattr(getattr(settings, ref.domain), name)
+
+
+def set_field(name: str, value: Any) -> None:
+    """In-place set a field on its owning sub-model of the singleton. Every holder
+    of `from shared.config import settings` sees it (same sub-model instance). Used
+    by the per-agent config overlay at process boot."""
+    ref = _FIELDS[name]
+    setattr(getattr(settings, ref.domain), name, value)
+
+
+def flat_dump(mode: str = "python") -> dict[str, Any]:
+    """Flat `{field name: value}` dump across all sub-models — the shape the old
+    flat `settings.model_dump()` produced, used by the config-overlay snapshot.
+
+    Reads through the profile-independent path (`_all_domains_settings` for a
+    domain the running profile excludes), so an agent process — whose profile
+    excludes daemon/alerts/telegram/feishu — can still snapshot the full
+    overlay base at bind time."""
+    from shared.config.service_read import _all_domains_settings
+
+    out: dict[str, Any] = {}
+    for attr, _label, _model, _cap in _DOMAIN_MODELS:
+        try:
+            sub = getattr(settings, attr)
+        except AttributeError:
+            sub = getattr(_all_domains_settings(), attr)
+        out.update(sub.model_dump(mode=mode))
+    return out
+
+
+# Cluster-common config an agent-runner fetches from the gateway via
+# GET /api/bootstrap. Derived from each field's ownership scope: the two cluster
+# scopes are distributed; host / agent fields are not.
+
+
+def now_timestamp() -> str:
+    """Return the current-time agent-facing timestamp string.
+
+    Format: ``[YYYY-MM-DD HH:MM:SS TZ]``, e.g. ``[2026-05-06 14:32:05 PDT]``. When
+    ``settings.general.message_timestamp_weekday`` is enabled the weekday
+    abbreviated name is included between date and time. Timezone from
+    ``settings.general.timezone``, defaults to ``America/Los_Angeles``.
+    """
+    tz = ZoneInfo(settings.general.timezone)
+    now = datetime.now(tz)
+    if settings.general.message_timestamp_weekday:
+        return now.strftime("[%Y-%m-%d %a %H:%M:%S %Z]")
+    return now.strftime("[%Y-%m-%d %H:%M:%S %Z]")
+
+
+# ── Re-exports of the split-out consumer modules (import sites unchanged) ──
+#
+# These import the config package lazily and load at the tail of this module
+# (a top-level import would be circular), hence the E402 suppressions.
+from shared.config.metadata import (  # noqa: E402
+    CONFIG_UNCHANGED_SENTINEL as CONFIG_UNCHANGED_SENTINEL,
+)
+from shared.config.metadata import (  # noqa: E402
+    ConfigFieldMeta as ConfigFieldMeta,
+)
+from shared.config.metadata import (  # noqa: E402
+    env_override_values as env_override_values,
+)
+from shared.config.metadata import (  # noqa: E402
+    get_config_metadata as get_config_metadata,
+)
+from shared.config.service_read import (  # noqa: E402
+    bootstrap_config_values as bootstrap_config_values,
+)
+from shared.config.service_read import (  # noqa: E402
+    current_field_values as current_field_values,
+)

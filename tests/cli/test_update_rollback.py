@@ -1,0 +1,524 @@
+"""Layer 2 — gateway rollback-to-last-known-good on a failed local update.
+
+`_run_gateway_local_update` graceful-stops the gateway before it pulls, so
+any pull / uv sync / `ava start` failure leaves the gateway offline. Each
+failure must call `_recover_gateway_local` (roll the schema back to the
+pre-update snapshot, `git reset --hard` to `from_sha`, uv sync, re-`ava start`)
+so the gateway revives and Layer 1's compensating cluster/resume rows deliver.
+
+Three layers tested here, all with monkeypatched seams (no real git / DB DDL /
+subprocess):
+- `_update_git` wrappers (`current_schema_state`, `rollback_schema_to`) open a
+  connection and delegate — assert the delegation, not the DB behavior (that is
+  `tests/ava/test_migrations.py`).
+- `_recover_gateway_local`: ordering (rollback BEFORE reset — the down files
+  vanish after the reset) + the unrecoverable exits (pre-baseline schema, sync /
+  start failure) return non-zero without leaving an inconsistent half-state.
+- `_run_gateway_local_update`: every failure path invokes recovery and
+  returns non-zero; success and a restart-only bounce do not.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+from cli import commands as _cli
+from cli.commands import _update_git as _git_mod
+from cli.commands import _update_recover as _rec
+from cli.commands import update as _up
+from shared.migrations import MigrationFailed, RollbackBelowFloor
+
+# Opaque applied-set snapshot passed through the recovery seams (the DB behavior
+# is exercised in tests/ava/test_migrations.py; here the stubs ignore its value).
+_SNAP = {"00000000T000000_baseline"}
+
+
+@pytest.fixture(autouse=True)
+def _stub_update_lock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The orchestration wrapper takes the cluster update lock; stub it so the
+    orchestration-threading tests don't hit / contend the central-DB lock. The
+    lock-held test re-stubs `acquire_update_lock` to return False."""
+    monkeypatch.setattr(_up, "acquire_update_lock", lambda _holder, **_kw: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_up, "release_update_lock", lambda _holder: None)  # pyright: ignore[reportUnknownArgumentType]
+
+
+class _FakeSubprocess:
+    """Stand-in for the `subprocess` module: records each `run` argv and returns a
+    configurable returncode per call (keyed by a marker in the argv)."""
+
+    def __init__(self, rc_for) -> None:  # rc_for: Callable[[list[str]], int]
+        self.calls: list[list[str]] = []
+        self._rc_for = rc_for
+
+    def run(self, args, **_kw):  # type: ignore[no-untyped-def]
+        argv = list(args)  # pyright: ignore[reportUnknownArgumentType]
+        self.calls.append(argv)  # pyright: ignore[reportUnknownArgumentType]
+        return SimpleNamespace(returncode=self._rc_for(argv))
+
+
+def _is_uv_sync(argv: list[str]) -> bool:
+    return argv[:2] == ["uv", "sync"]
+
+
+def _is_ava_start(argv: list[str]) -> bool:
+    # The start runs through the pty wrapper as a plain argv: [<ava_bin>, "start", ...]
+    return len(argv) >= 2 and argv[0].endswith("ava") and argv[1] == "start"
+
+
+# --- _update_git wrapper delegation ------------------------------------------
+
+
+def test_current_schema_state_delegates(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Opens a connection, hands it to shared.migrations.applied_migration_names,
+    returns that result (the applied-set snapshot the recovery rolls back to)."""
+    import shared.migrations as _mig
+
+    seen: dict[str, object] = {}
+
+    def _applied(conn):  # type: ignore[no-untyped-def]
+        seen["conn_truthy"] = conn is not None
+        return {"00000000T000000_baseline"}
+
+    monkeypatch.setattr(_mig, "applied_migration_names", _applied)  # pyright: ignore[reportUnknownArgumentType]
+    assert _git_mod.current_schema_state() == {"00000000T000000_baseline"}
+    assert seen["conn_truthy"] is True
+
+
+def test_rollback_schema_to_delegates(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Opens a connection and forwards the keep-set to shared.migrations.rollback_to,
+    returning the rolled-back names."""
+    import shared.migrations as _mig
+
+    seen: dict[str, object] = {}
+
+    def _rollback_to(conn, keep):  # type: ignore[no-untyped-def]
+        seen["keep"] = keep
+        seen["conn_truthy"] = conn is not None
+        return ["29991231T235959_x"]
+
+    monkeypatch.setattr(_mig, "rollback_to", _rollback_to)  # pyright: ignore[reportUnknownArgumentType]
+    keep = {"00000000T000000_baseline"}
+    assert _git_mod.rollback_schema_to(keep) == ["29991231T235959_x"]
+    assert seen["keep"] == keep
+    assert seen["conn_truthy"] is True
+
+
+# --- _recover_gateway_local --------------------------------------------
+
+
+def _patch_recover(monkeypatch: pytest.MonkeyPatch, *, rollback, sync_rc=0, start_rc=0):
+    """Wire `_recover_gateway_local`'s seams; return (order, fake_subprocess).
+
+    `rollback` is either a list (the rolled-back versions) or an exception to raise.
+    `order` records the sequence of side effects so a test can assert the schema
+    rollback runs before the git reset.
+    """
+    order: list[str] = []
+
+    def _rollback_schema_to(target):  # type: ignore[no-untyped-def]
+        order.append("rollback")
+        if isinstance(rollback, Exception):
+            raise rollback
+        return rollback
+
+    def _git_reset_hard(sha):  # type: ignore[no-untyped-def]
+        order.append(f"reset:{sha}")
+
+    def _rc_for(argv: list[str]) -> int:
+        if _is_uv_sync(argv):
+            order.append("uv-sync")
+            return sync_rc
+        if _is_ava_start(argv):
+            order.append("ava-start")
+            return start_rc
+        return 0
+
+    fake = _FakeSubprocess(_rc_for)
+    monkeypatch.setattr(_rec, "rollback_schema_to", _rollback_schema_to)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_rec, "git_reset_hard", _git_reset_hard)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_rec, "subprocess", fake)
+    return order, fake
+
+
+def test_recover_happy_path_orders_rollback_before_reset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Recovered: rollback → reset → uv sync → ava start, in that order, rc 0."""
+    order, fake = _patch_recover(monkeypatch, rollback=[23])
+    rc = _rec._recover_gateway_local(Path("/repo"), "FROMSHA", _SNAP, preserve_sessions=frozenset())
+    assert rc == 0
+    assert order == ["rollback", "reset:FROMSHA", "uv-sync", "ava-start"]
+    # ava start has no --disable-service when nothing is skipped
+    start = next(c for c in fake.calls if _is_ava_start(c))
+    assert "--disable-service" not in start
+
+
+def test_recover_forwards_preserve_sessions(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A backend-only update left the frontend running; recovery must keep skipping
+    it (forwarded as --disable-service)."""
+    _order, fake = _patch_recover(monkeypatch, rollback=[])
+    rc = _rec._recover_gateway_local(
+        Path("/repo"), "FROMSHA", _SNAP, preserve_sessions=frozenset({"frontend"})
+    )
+    assert rc == 0
+    start = next(c for c in fake.calls if _is_ava_start(c))
+    assert "--disable-service" in start
+    assert "frontend" in start
+
+
+def test_recover_below_floor_does_not_reset(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pre-baseline schema (no down to reverse) -> return 1 WITHOUT git reset:
+    resetting code to from_sha while the schema is newer would make every daemon
+    CodeBehindSchema. Leave code+schema consistent on the new revision for a human."""
+    order, fake = _patch_recover(
+        monkeypatch, rollback=RollbackBelowFloor("below baseline 22 (target 21)")
+    )
+    rc = _rec._recover_gateway_local(Path("/repo"), "FROMSHA", _SNAP, preserve_sessions=frozenset())
+    assert rc == 1
+    assert order == ["rollback"]  # no reset, no uv sync, no start
+    assert fake.calls == []
+
+
+def test_recover_migration_failed_mid_rollback_does_not_reset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A down failing mid-rollback (MigrationFailed) -> return 1 WITHOUT git reset.
+    rollback_to commits each down in its own txn, so the schema is partially rolled
+    back; resetting the code on top would compound the inconsistency. Leave the
+    half-state for a human (the I2 review finding — MigrationError must be caught,
+    not just RollbackBelowFloor, or this escapes as a bare traceback)."""
+    order, fake = _patch_recover(
+        monkeypatch, rollback=MigrationFailed("down migration 0023 (...) failed")
+    )
+    rc = _rec._recover_gateway_local(Path("/repo"), "FROMSHA", _SNAP, preserve_sessions=frozenset())
+    assert rc == 1
+    assert order == ["rollback"]  # no reset, no uv sync, no start
+    assert fake.calls == []
+
+
+def test_recover_git_reset_failure_returns_1(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A `git reset --hard` that does not land (index-lock timeout / wedged tree /
+    mixed tree) is a recovery failure like any other: it used to escape as a bare
+    traceback while the gateway sat stopped — the MANUAL INTERVENTION marker the
+    rollback/uv-sync/start failures all print never appeared. Return 1, no uv sync,
+    no start on a tree that is not last-known-good."""
+    order: list[str] = []
+
+    def _rollback_schema_to(target):  # type: ignore[no-untyped-def]
+        order.append("rollback")
+        return [23]
+
+    def _git_reset_hard(sha):  # type: ignore[no-untyped-def]
+        order.append(f"reset:{sha}")
+        raise _git_mod.GitPullFailed(
+            "another git process holds .git/index.lock for >30s; refusing to run a "
+            "second mutating git op on the same tree"
+        )
+
+    monkeypatch.setattr(_rec, "rollback_schema_to", _rollback_schema_to)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_rec, "git_reset_hard", _git_reset_hard)  # pyright: ignore[reportUnknownArgumentType]
+    rc = _rec._recover_gateway_local(Path("/repo"), "FROMSHA", _SNAP, preserve_sessions=frozenset())
+    assert rc == 1
+    assert order == ["rollback", "reset:FROMSHA"]  # no uv-sync, no ava-start
+
+
+def test_recover_uv_sync_failure_returns_1(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Recovery uv sync fails -> 1, ava start never attempted (gateway DOWN)."""
+    order, _fake = _patch_recover(monkeypatch, rollback=[23], sync_rc=1)
+    rc = _rec._recover_gateway_local(Path("/repo"), "FROMSHA", _SNAP, preserve_sessions=frozenset())
+    assert rc == 1
+    assert order == ["rollback", "reset:FROMSHA", "uv-sync"]  # no ava-start
+
+
+def test_recover_start_failure_returns_1(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Recovery `ava start` on last-known-good itself fails -> 1 (alert + human)."""
+    order, _fake = _patch_recover(monkeypatch, rollback=[23], start_rc=1)
+    rc = _rec._recover_gateway_local(Path("/repo"), "FROMSHA", _SNAP, preserve_sessions=frozenset())
+    assert rc == 1
+    assert order == ["rollback", "reset:FROMSHA", "uv-sync", "ava-start"]
+
+
+def test_recover_noop_rollback_still_restarts(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Start never advanced the schema (rollback returns []) -> still reset + sync +
+    restart back to from_sha (e.g. a uv-sync-stage failure)."""
+    order, _fake = _patch_recover(monkeypatch, rollback=[])
+    rc = _rec._recover_gateway_local(Path("/repo"), "FROMSHA", _SNAP, preserve_sessions=frozenset())
+    assert rc == 0
+    assert order == ["rollback", "reset:FROMSHA", "uv-sync", "ava-start"]
+
+
+# --- _run_gateway_local_update recovery wiring -------------------------
+
+
+def _patch_local_update(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    checkout_raises=False,
+    sync_rc=0,
+    start_rc=0,
+    recover_rc=0,
+    start_interrupts=False,
+):
+    """Wire `_run_gateway_local_update`'s seams; return (order, recover_calls).
+
+    `recover_calls` records each `_recover_gateway_local` invocation as
+    (from_sha, schema_snapshot, preserve_sessions). `order` records the snapshot vs
+    checkout sequence so a test can assert the snapshot is taken BEFORE the
+    force-checkout. `recover_rc` is what the stubbed recovery returns (0 = recovered
+    to last-known-good, non-zero = gateway still DOWN).
+    """
+    order: list[str] = []
+    recover_calls: list[tuple[str, set[str], frozenset[str]]] = []
+
+    monkeypatch.setattr(_up, "_do_stop", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_up, "git_head_sha", lambda: order.append("snapshot:sha") or "FROMSHA")
+    monkeypatch.setattr(
+        _up, "current_schema_state", lambda: order.append("snapshot:schema") or _SNAP
+    )
+
+    def _checkout(sha):  # type: ignore[no-untyped-def]
+        order.append(f"checkout:{sha}")
+        if checkout_raises:
+            raise _up.GitPullFailed("checkout failed")
+        return "FROMSHA"
+
+    monkeypatch.setattr(_up, "git_checkout_sha", _checkout)  # pyright: ignore[reportUnknownArgumentType]
+
+    def _rc_for(argv: list[str]) -> int:
+        if _is_uv_sync(argv):
+            return sync_rc
+        if _is_ava_start(argv):
+            if start_interrupts:
+                # What a SIGINT arriving mid-`ava start` looks like from in here: the
+                # signal unwinds out of the subprocess call, carrying no returncode.
+                raise KeyboardInterrupt
+            return start_rc
+        return 0
+
+    fake = _FakeSubprocess(_rc_for)
+    monkeypatch.setattr(_up, "subprocess", fake)
+
+    # `_run_gateway_local_update` calls `_recover_rc`, which lives in
+    # `_update_recover` and calls `_recover_gateway_local` there — so patch the
+    # recover fn in `_rec` to exercise the real rc-mapping (0 -> 1 recovered, non-0 ->
+    # 2 DOWN) on the way back up.
+    def _recover(_repo, from_sha, schema_snapshot, *, preserve_sessions):  # type: ignore[no-untyped-def]
+        recover_calls.append((from_sha, schema_snapshot, preserve_sessions))  # pyright: ignore[reportUnknownArgumentType]
+        return recover_rc
+
+    monkeypatch.setattr(_rec, "_recover_gateway_local", _recover)  # pyright: ignore[reportUnknownArgumentType]
+    return order, recover_calls
+
+
+def test_local_update_checkout_failure_recovers(monkeypatch: pytest.MonkeyPatch) -> None:
+    """git checkout fails -> recovery invoked with the pre-checkout snapshot; recovered -> rc 1."""
+    order, recover_calls = _patch_local_update(monkeypatch, checkout_raises=True)
+    rc = _up._run_gateway_local_update(Path("/repo"), target_sha="TARGETSHA", pull=True)
+    assert rc == 1  # recovered to last-known-good (recover returned 0)
+    assert recover_calls == [("FROMSHA", _SNAP, frozenset())]
+    # snapshot captured before the checkout (from_sha's schema, before start migrates)
+    assert order.index("snapshot:schema") < order.index("checkout:TARGETSHA")
+
+
+def test_an_interrupt_mid_start_recovers_like_any_other_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An interrupt is one of the "ANY failure below" the graceful stop's own comment
+    covers, and it is the one that arrives with no returncode to carry the verdict.
+
+    This is the path `ops.controllers.stalled_rollout` drives: a rollout that has
+    stopped making progress is SIGINT'd rather than killed, precisely so this recovery
+    runs. Left to propagate, the interrupt would skip it and leave the gateway stopped
+    on a half-applied transition — checkout moved, migrations not run — which is worse
+    than what a failed step produces, and it would make the reclaim's whole claim
+    ("a hang becomes a failure") false. So it recovers to last-known-good and reports
+    through the same rc the caller already reads.
+    """
+    _order, recover_calls = _patch_local_update(monkeypatch, start_interrupts=True)
+
+    rc = _up._run_gateway_local_update(Path("/repo"), target_sha="TARGETSHA", pull=True)
+
+    assert rc == 1  # recovered to last-known-good, exactly as a non-zero start reports
+    assert recover_calls == [("FROMSHA", _SNAP, frozenset())]
+
+
+def test_an_interrupt_with_nothing_to_roll_back_to_still_propagates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A restart-only bounce takes no snapshot because it changes no code and no
+    schema, so there is no last-known-good to recover to. Swallowing the interrupt
+    there would report a recovery that never happened; it propagates to the
+    orchestration's `finally`, which still unpauses and resumes."""
+    _order, recover_calls = _patch_local_update(monkeypatch, start_interrupts=True)
+
+    with pytest.raises(KeyboardInterrupt):
+        _up._run_gateway_local_update(Path("/repo"), pull=False)
+
+    assert recover_calls == []
+
+
+def test_local_update_snapshots_before_stopping_data_plane(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The last-known-good snapshot (HEAD + applied-migration set) must be read
+    BEFORE the graceful stop, not after it. Reading it after a data-plane teardown
+    was the 2026-07-20 incident: the stop meant to keep pg/redis actually took them
+    down, so the snapshot's connect hit connection-refused and crashed the rollout.
+    Locks the order structurally: both snapshot reads precede `_do_stop`, and
+    `_do_stop` precedes the force-checkout."""
+    order, _recover_calls = _patch_local_update(monkeypatch)
+    # `_patch_local_update` stubs `_do_stop` to a silent no-op; re-stub it to record
+    # its position so we can assert the snapshot precedes the stop.
+    monkeypatch.setattr(_up, "_do_stop", lambda *_a, **_k: order.append("stop"))  # pyright: ignore[reportUnknownArgumentType]
+
+    rc = _up._run_gateway_local_update(Path("/repo"), target_sha="TARGETSHA", pull=True)
+    assert rc == 0
+    assert order.index("snapshot:sha") < order.index("stop")
+    assert order.index("snapshot:schema") < order.index("stop")
+    assert order.index("stop") < order.index("checkout:TARGETSHA")
+
+
+def test_local_update_uv_sync_failure_recovers(monkeypatch: pytest.MonkeyPatch) -> None:
+    """uv sync fails after a good checkout -> recovery; recovered ok -> rc 1."""
+    _order, recover_calls = _patch_local_update(monkeypatch, sync_rc=1)
+    rc = _up._run_gateway_local_update(Path("/repo"), target_sha="TARGETSHA", pull=True)
+    assert rc == 1
+    assert recover_calls == [("FROMSHA", _SNAP, frozenset())]
+
+
+def test_local_update_start_failure_recovers(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`ava start` fails (a migration may have applied) -> recovery; recovered ok -> rc 1."""
+    _order, recover_calls = _patch_local_update(monkeypatch, start_rc=1)
+    rc = _up._run_gateway_local_update(Path("/repo"), target_sha="TARGETSHA", pull=True)
+    assert rc == 1
+    assert recover_calls == [("FROMSHA", _SNAP, frozenset())]
+
+
+def test_local_update_recovery_failure_returns_down_rc(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`ava start` fails AND recovery cannot bring the gateway back (recover
+    returns non-zero) -> rc 2, the orchestration's 'DOWN, needs a human' signal
+    (distinct from rc 1 = recovered, the whole point of propagating the recover rc)."""
+    _order, recover_calls = _patch_local_update(monkeypatch, start_rc=1, recover_rc=1)
+    rc = _up._run_gateway_local_update(Path("/repo"), target_sha="TARGETSHA", pull=True)
+    assert rc == 2
+    assert recover_calls == [("FROMSHA", _SNAP, frozenset())]
+
+
+def test_local_update_success_does_not_recover(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Clean update -> rc 0, recovery never called (must not re-start on success)."""
+    _order, recover_calls = _patch_local_update(monkeypatch)
+    rc = _up._run_gateway_local_update(Path("/repo"), target_sha="TARGETSHA", pull=True)
+    assert rc == 0
+    assert recover_calls == []
+
+
+def test_local_update_requires_target_sha_when_pull(monkeypatch: pytest.MonkeyPatch) -> None:
+    """pull=True without a pinned target_sha is a contract violation -> raises."""
+    _patch_local_update(monkeypatch)
+    with pytest.raises(ValueError, match="requires a target_sha"):
+        _up._run_gateway_local_update(Path("/repo"), target_sha=None, pull=True)
+
+
+def test_backend_only_recovery_skips_frontend(monkeypatch: pytest.MonkeyPatch) -> None:
+    """restart_frontend=False -> the frontend session is forwarded to recovery as a
+    skip (recovery must not rebuild a UI that was never stopped)."""
+    _order, recover_calls = _patch_local_update(monkeypatch, start_rc=1)
+    rc = _up._run_gateway_local_update(
+        Path("/repo"), target_sha="TARGETSHA", restart_frontend=False, pull=True
+    )
+    assert rc == 1
+    assert recover_calls == [("FROMSHA", _SNAP, frozenset({"frontend"}))]
+
+
+def test_restart_only_start_failure_does_not_recover(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A restart-only bounce (pull=False) changed no code/schema -> nothing to roll
+    back; a failed start returns its raw rc with no recovery attempt."""
+    _order, recover_calls = _patch_local_update(monkeypatch, start_rc=1)
+    rc = _up._run_gateway_local_update(Path("/repo"), restart_frontend=True, pull=False)
+    assert rc == 1
+    assert recover_calls == []
+
+
+# --- SHA-pin threading (orchestration -> local update + Phase B payload) ------
+
+
+def test_orchestration_resolves_and_threads_target_sha(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The orchestration resolves ONE target_sha (origin/main) and threads the same
+    sha to the gateway local update AND every agent-runner's Phase-B self-update
+    — the core of the SHA-pin: no node re-resolves a tip that could move mid-rollout."""
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(_up, "git_resolve_origin_main", lambda: "PINNEDSHA")
+    # the orchestration vets the target's migrations/ layout (git read) before Phase A;
+    # the synthetic PINNEDSHA is not a real object, so pass the vet here.
+    monkeypatch.setattr(_up, "_vet_rollout_target", lambda _sha: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_cli, "_changed_paths_vs_origin", lambda: ["gateway/app.py"])
+    monkeypatch.setattr(_cli, "_list_agent_runners", lambda: [("a", None)])
+    monkeypatch.setattr(_cli, "_quiesce_all_agents", lambda **_: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_cli, "_fan_out", lambda *_a, **_k: [("a", "ok", "")])  # pyright: ignore[reportUnknownArgumentType]
+
+    def _local(_repo, *, target_sha, restart_frontend, pull=True, force_reap_agents=False):  # type: ignore[no-untyped-def]
+        captured["local_target"] = target_sha
+        return 0
+
+    monkeypatch.setattr(_cli, "_run_gateway_local_update", _local)  # pyright: ignore[reportUnknownArgumentType]
+
+    def _phase_b(_hosts, *, target_sha, restart_only, force_reap=False):  # type: ignore[no-untyped-def]
+        captured["phaseb_target"] = target_sha
+        return {"a": _cli.PollVerdict("ok")}
+
+    monkeypatch.setattr(_up, "_phase_b_and_poll", _phase_b)  # pyright: ignore[reportUnknownArgumentType]
+
+    rc = _cli._run_gateway_orchestration(Path("/unused"), origin="test-origin")
+    assert rc == 0
+    assert captured["local_target"] == "PINNEDSHA"
+    assert captured["phaseb_target"] == "PINNEDSHA"
+
+
+def test_orchestration_resolve_failure_aborts_before_pausing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If origin/main can't be resolved, the rollout aborts BEFORE Phase A — nothing
+    paused, no local update."""
+    monkeypatch.setattr(_cli, "_changed_paths_vs_origin", lambda: ["gateway/app.py"])
+
+    def _boom() -> str:
+        raise _up.GitPullFailed("network down")
+
+    monkeypatch.setattr(_up, "git_resolve_origin_main", _boom)
+    monkeypatch.setattr(
+        _cli, "_list_agent_runners", lambda: pytest.fail("must abort before Phase A")
+    )
+    rc = _cli._run_gateway_orchestration(Path("/unused"), origin="test-origin")
+    assert rc == 1
+
+
+def test_phase_b_payload_carries_target_sha(monkeypatch: pytest.MonkeyPatch) -> None:
+    """_phase_b_and_poll forwards target_sha in each agent-runner's cluster_update payload
+    (so the host force-checks-out the pinned commit, not its own origin/main)."""
+    captured: dict[str, object] = {}
+
+    def _fan_out(hosts, path, _timeout, payload=None):  # type: ignore[no-untyped-def]
+        captured["payload"] = payload
+        return [(h[0], "ok", "") for h in hosts]
+
+    monkeypatch.setattr(_cli, "_fan_out", _fan_out)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_cli, "_poll_until_unpaused", lambda _hosts: {"a": _cli.PollVerdict("ok")})  # pyright: ignore[reportUnknownArgumentType]
+    _up._phase_b_and_poll([("a", None)], target_sha="PINNEDSHA", restart_only=False)
+    assert captured["payload"] == {"target_sha": "PINNEDSHA"}
+
+
+def test_orchestration_aborts_when_update_lock_held(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A second gateway update that finds the cluster update lock held by a live
+    holder aborts before doing anything — #2 (serialize updates; the 2026-06-01
+    collision was two gateway updates racing). Overrides the autouse stub."""
+    monkeypatch.setattr(_up, "acquire_update_lock", lambda _holder, **_kw: False)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_up, "update_lock_holder", lambda: "cloud:pid999")
+    monkeypatch.setattr(
+        _cli, "_changed_paths_vs_origin", lambda: pytest.fail("must abort before classify")
+    )
+    monkeypatch.setattr(_cli, "_list_agent_runners", lambda: pytest.fail("must not pause anything"))
+    rc = _cli._run_gateway_orchestration(Path("/unused"), origin="test-origin")
+    assert rc == 1

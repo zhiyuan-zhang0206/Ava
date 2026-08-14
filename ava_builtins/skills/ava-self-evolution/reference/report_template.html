@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ava Self-Evolution Report — {{ week }}</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #0d1117; color: #c9d1d9; line-height: 1.5;
+    max-width: 960px; margin: 0 auto; padding: 2rem 1.5rem;
+  }
+  h1 { font-size: 1.5rem; font-weight: 600; color: #f0f6fc; margin-bottom: 0.25rem; }
+  h2 { font-size: 1.15rem; font-weight: 600; color: #f0f6fc; margin: 2rem 0 0.75rem; }
+  h3 { font-size: 0.95rem; font-weight: 600; color: #f0f6fc; margin: 1.25rem 0 0.5rem; }
+  .subtitle { color: #8b949e; font-size: 0.85rem; margin-bottom: 1.5rem; }
+
+  .card-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 0.75rem; margin: 1rem 0;
+  }
+  .card {
+    background: #161b22; border: 1px solid #30363d; border-radius: 8px;
+    padding: 1rem;
+  }
+  .card-label { font-size: 0.75rem; color: #8b949e; text-transform: uppercase; letter-spacing: 0.05em; }
+  .card-value { font-size: 1.5rem; font-weight: 600; color: #f0f6fc; margin-top: 0.25rem; }
+  .card-sub  { font-size: 0.8rem; color: #8b949e; margin-top: 0.15rem; }
+
+  .score-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 0.75rem; margin: 1rem 0;
+  }
+  .score-card {
+    background: #161b22; border: 1px solid #30363d; border-radius: 8px;
+    padding: 1rem;
+  }
+  .score-skill-name {
+    font-size: 0.9rem; font-weight: 600; color: #f0f6fc;
+    margin-bottom: 0.75rem; padding-bottom: 0.5rem; border-bottom: 1px solid #21262d;
+  }
+  .score-row {
+    display: flex; align-items: center; gap: 0.5rem; margin: 0.4rem 0;
+    font-size: 0.82rem;
+  }
+  .score-dim  { width: 90px; color: #8b949e; flex-shrink: 0; }
+  .score-before { width: 48px; text-align: right; color: #f85149; flex-shrink: 0; font-variant-numeric: tabular-nums; }
+  .score-after  { width: 48px; text-align: right; color: #3fb950; flex-shrink: 0; font-variant-numeric: tabular-nums; }
+  .score-arrow  { width: 20px; text-align: center; color: #8b949e; flex-shrink: 0; font-size: 0.75rem; }
+  .score-bar-wrap {
+    flex: 1; height: 8px; background: #21262d; border-radius: 4px;
+    display: flex; overflow: hidden; position: relative;
+  }
+  .score-bar-before {
+    height: 100%; background: #f85149; border-radius: 4px 0 0 4px;
+    transition: width 0.4s;
+  }
+  .score-bar-after {
+    height: 100%; background: #3fb950; border-radius: 0 4px 4px 0;
+    transition: width 0.4s;
+  }
+  .score-delta {
+    font-size: 0.7rem; font-weight: 600; margin-left: 4px; flex-shrink: 0;
+  }
+  .delta-up   { color: #3fb950; }
+  .delta-down { color: #f85149; }
+  .delta-flat { color: #8b949e; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin: 0.75rem 0; }
+  th { text-align: left; color: #8b949e; font-weight: 500; padding: 0.5rem 0.75rem;
+       border-bottom: 1px solid #30363d; font-size: 0.75rem; text-transform: uppercase; }
+  td { padding: 0.5rem 0.75rem; border-bottom: 1px solid #21262d; }
+  tr:hover td { background: #1c2128; }
+
+  .cluster {
+    background: #161b22; border: 1px solid #30363d; border-radius: 8px;
+    padding: 1rem; margin: 0.6rem 0;
+  }
+  .cluster-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 0.5rem;
+  }
+  .cluster-skill { font-weight: 600; color: #f0f6fc; font-size: 0.9rem; }
+  .cluster-count { font-size: 0.8rem; color: #8b949e; }
+  .cluster-badge {
+    display: inline-block; padding: 2px 8px; border-radius: 10px;
+    font-size: 0.7rem; font-weight: 600; margin-left: 0.5rem;
+  }
+  .badge-failed  { background: #490202; color: #f85149; }
+  .badge-fumbled { background: #341a00; color: #d29922; }
+
+  .cluster-signals {
+    display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.4rem;
+  }
+  .signal-tag {
+    font-size: 0.72rem; padding: 2px 8px; border-radius: 4px;
+    background: #1c2128; color: #c9d1d9; border: 1px solid #30363d;
+  }
+  .run-list { margin-top: 0.5rem; font-size: 0.8rem; color: #8b949e; max-height: 180px; overflow-y: auto; }
+  .run-item { padding: 2px 0; border-bottom: 1px solid #21262d; }
+  .run-item:last-child { border-bottom: none; }
+  .run-label { font-weight: 500; }
+  .label-failed  { color: #f85149; }
+  .label-fumbled { color: #d29922; }
+
+  .eval-summary {
+    display: flex; gap: 1.5rem; flex-wrap: wrap; margin: 0.5rem 0 1rem;
+  }
+  .eval-stat { text-align: center; }
+  .eval-stat-value { font-size: 1.5rem; font-weight: 600; color: #f0f6fc; }
+  .eval-stat-label { font-size: 0.75rem; color: #8b949e; }
+
+  .empty { color: #484f58; font-style: italic; padding: 1rem 0; font-size: 0.85rem; }
+</style>
+</head>
+<body>
+
+<h1>🔄 Ava Self-Evolution Report</h1>
+<p class="subtitle">
+  Week of {{ week }} &middot; generated {{ generated_at }} &middot;
+  {{ skill_count }} skills &middot; {{ total_runs }} runs
+</p>
+
+<!-- ──── Summary Cards ──── -->
+<div class="card-grid">
+  <div class="card">
+    <div class="card-label">Skills Modified</div>
+    <div class="card-value">{{ changes_count }}</div>
+    <div class="card-sub">PRs opened this round</div>
+  </div>
+  <div class="card">
+    <div class="card-label">Overall Score Δ</div>
+    <div class="card-value">{{ overall_delta }}</div>
+    <div class="card-sub">weighted composite (completion 70% + efficiency 30%)</div>
+  </div>
+  <div class="card">
+    <div class="card-label">Tasks Replayed</div>
+    <div class="card-value">{{ tasks_replayed }}</div>
+    <div class="card-sub">{{ improved }} improved / {{ regressed }} regressed</div>
+  </div>
+  <div class="card">
+    <div class="card-label">Failure Clusters</div>
+    <div class="card-value">{{ cluster_count }}</div>
+    <div class="card-sub">across {{ cluster_skills }} skills</div>
+  </div>
+</div>
+
+<!-- ──── Score Comparison ──── -->
+<h2>📊 Score Comparison — Before vs After</h2>
+<p style="color:#8b949e;font-size:0.82rem;margin-bottom:0.75rem;">
+  Red = before (baseline), Green = after (this round). Bars scaled to 0–1.
+</p>
+<!-- SCORE_SKILLS -->
+<!-- END_SCORE_SKILLS -->
+
+<!-- ──── Changes This Round ──── -->
+<h2>📝 Changes This Round</h2>
+<!-- CHANGES_TABLE -->
+<!-- END_CHANGES_TABLE -->
+
+<!-- ──── Failure Clusters ──── -->
+<h2>🔍 Failure Clusters</h2>
+<p style="color:#8b949e;font-size:0.82rem;margin-bottom:0.75rem;">
+  Top failure patterns detected this week, grouped by skill. Signals are trace-level indicators:
+  <em>ended-on-exec-fail</em> (run's last exec errored),
+  <em>breached</em> (delivery deadline exceeded),
+  <em>reprompts</em> (user had to re-prompt),
+  <em>compactions</em> (context pressure forced compaction).
+</p>
+<!-- FAILURE_CLUSTERS -->
+<!-- END_FAILURE_CLUSTERS -->
+
+<!-- ──── Eval Results ──── -->
+<h2>🧪 Eval Results</h2>
+<!-- EVAL_RESULTS -->
+<!-- END_EVAL_RESULTS -->
+
+<!-- ──── Footer ──── -->
+<div style="margin-top:3rem;padding-top:1rem;border-top:1px solid #21262d;font-size:0.75rem;color:#484f58;text-align:center;">
+  Ava Self-Evolution Report &middot; {{ generated_at }} &middot; generated automatically
+</div>
+
+</body>
+</html>

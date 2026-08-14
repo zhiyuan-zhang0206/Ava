@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ledger — personal finance tracker</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+
+<header class="app-header">
+  <h1>Ledger</h1>
+  <div class="header-actions">
+    <button type="button" class="btn btn-primary" id="btn-add-entry">Add entry</button>
+    <button type="button" class="btn" id="btn-export">Export CSV</button>
+    <button type="button" class="btn" id="btn-import">Import CSV</button>
+    <input type="file" id="file-import" accept=".csv,text/csv" hidden>
+  </div>
+</header>
+
+<nav class="view-nav" aria-label="Views">
+  <button type="button" class="nav-btn" data-view="dashboard" aria-current="page">Dashboard</button>
+  <button type="button" class="nav-btn" data-view="transactions">Transactions</button>
+  <button type="button" class="nav-btn" data-view="budgets">Budgets</button>
+  <button type="button" class="nav-btn" data-view="charts">Charts</button>
+</nav>
+
+<main id="main">
+  <section class="view" data-view="dashboard" id="view-dashboard">
+    <h2>Dashboard</h2>
+    <p class="view-sub" id="dashboard-month"></p>
+    <div class="stats">
+      <div class="stat-card">
+        <span class="stat-label">Income</span>
+        <span class="stat-value" id="stat-income">0.00</span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-label">Expenses</span>
+        <span class="stat-value" id="stat-expenses">0.00</span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-label">Balance</span>
+        <span class="stat-value" id="stat-balance">0.00</span>
+      </div>
+    </div>
+    <h3 class="section-title">Recent activity</h3>
+    <ul class="entry-list" id="recent-list"></ul>
+  </section>
+
+  <section class="view" data-view="transactions" id="view-transactions" hidden>
+    <h2>Transactions</h2>
+    <div class="filters">
+      <label class="filter-field">
+        <span>Month</span>
+        <select id="filter-month"></select>
+      </label>
+      <label class="filter-field">
+        <span>Category</span>
+        <select id="filter-category"></select>
+      </label>
+      <label class="filter-field">
+        <span>Type</span>
+        <select id="filter-type">
+          <option value="all">All</option>
+          <option value="income">Income</option>
+          <option value="expense">Expenses</option>
+        </select>
+      </label>
+      <label class="filter-field filter-search">
+        <span>Search</span>
+        <input type="search" id="search-input" placeholder="Search titles…" autocomplete="off">
+      </label>
+    </div>
+    <p class="muted" id="tx-count"></p>
+    <ul class="entry-list" id="tx-list"></ul>
+  </section>
+
+  <section class="view" data-view="budgets" id="view-budgets" hidden>
+    <h2>Budgets</h2>
+    <p class="view-sub">Monthly budgets for <span id="budget-month-label"></span>.</p>
+    <ul class="budget-list" id="budget-list"></ul>
+    <details class="cat-manage">
+      <summary>Manage categories</summary>
+      <form class="inline-form" id="cat-add-form">
+        <label for="cat-add-name">New category name</label>
+        <input type="text" id="cat-add-name" maxlength="60" autocomplete="off">
+        <button type="submit" class="btn">Add category</button>
+      </form>
+      <ul class="cat-list" id="cat-list"></ul>
+    </details>
+  </section>
+
+  <section class="view" data-view="charts" id="view-charts" hidden>
+    <h2>Charts</h2>
+    <p class="view-sub">Income vs expenses — last six months.</p>
+    <div class="chart-wrap">
+      <canvas id="chart-canvas" role="img" aria-label="Bar chart of income and expenses for the last six months"></canvas>
+    </div>
+    <div class="legend">
+      <span class="legend-item"><span class="swatch swatch-income"></span>Income</span>
+      <span class="legend-item"><span class="swatch swatch-expense"></span>Expense</span>
+    </div>
+  </section>
+</main>
+
+<dialog id="entry-dialog" aria-labelledby="entry-dialog-title">
+  <form id="entry-form" novalidate>
+    <h2 id="entry-dialog-title">New entry</h2>
+    <div class="form-row">
+      <div class="field">
+        <label for="entry-type">Type</label>
+        <select id="entry-type">
+          <option value="expense">Expense</option>
+          <option value="income">Income</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="entry-category">Category</label>
+        <select id="entry-category"></select>
+      </div>
+    </div>
+    <div class="field">
+      <label for="entry-title">Title</label>
+      <input type="text" id="entry-title" maxlength="120" autocomplete="off">
+      <p class="field-error" id="entry-title-error" hidden></p>
+    </div>
+    <div class="form-row">
+      <div class="field">
+        <label for="entry-amount">Amount</label>
+        <input type="text" id="entry-amount" inputmode="decimal" placeholder="0.00" autocomplete="off">
+        <p class="field-error" id="entry-amount-error" hidden></p>
+      </div>
+      <div class="field">
+        <label for="entry-date">Date</label>
+        <input type="date" id="entry-date">
+        <p class="field-error" id="entry-date-error" hidden></p>
+      </div>
+    </div>
+    <div class="dialog-actions">
+      <button type="button" class="btn danger" id="entry-delete" hidden>Delete</button>
+      <button type="button" class="btn" id="entry-cancel">Cancel</button>
+      <button type="submit" class="btn btn-primary" id="entry-save">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="confirm-dialog" aria-labelledby="confirm-title" aria-describedby="confirm-text">
+  <h2 id="confirm-title">Confirm</h2>
+  <p id="confirm-text"></p>
+  <div class="dialog-actions">
+    <button type="button" class="btn" id="confirm-cancel">Cancel</button>
+    <button type="button" class="btn danger" id="confirm-ok">Delete</button>
+  </div>
+</dialog>
+
+<div class="visually-hidden" id="announcer" role="status" aria-live="polite"></div>
+
+<noscript><p class="noscript-note">Ledger needs JavaScript enabled to work. It runs entirely on your computer — no data ever leaves it.</p></noscript>
+
+<script src="store.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

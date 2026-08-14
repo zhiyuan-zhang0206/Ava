@@ -1,0 +1,21 @@
+appId: com.ava.desktop
+productName: Ava
+directories:
+  output: dist
+  buildResources: assets
+files:
+  - electron/**
+  - assets/**
+  - package.json
+# Local self-use: no Developer ID — ad-hoc / unsigned. Gatekeeper will not
+# block a locally built app; distribution would need signing + notarization.
+mac:
+  category: public.app-category.productivity
+  icon: assets/icon.png
+  identity: null
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+dmg:
+  sign: false
+npmRebuild: false

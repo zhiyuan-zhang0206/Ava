@@ -1,0 +1,168 @@
+"use client";
+
+import { AppWindow } from "lucide-react";
+
+import { STATUS_DOT } from "@/components/agent-row";
+import { PRIORITY_BG } from "@/lib/notices";
+import { formatRelativeTime } from "@/lib/sidebar";
+import type { AgentStatus, OpenNotice, PageRow } from "@/lib/types";
+import { cn } from "@/lib/utils";
+import { FLEX, FLEX_1, MIN_W_0 } from "@/lib/layout";
+
+export function PriorityBadge({ priority, muted }: { priority: OpenNotice["priority"]; muted?: boolean }) {
+  return (
+    <span
+      className={cn(
+        "shrink-0 rounded px-1 text-[10px] font-semibold text-white",
+        muted ? "bg-muted-foreground/40" : PRIORITY_BG[priority],
+      )}
+    >
+      {priority}
+    </span>
+  );
+}
+
+
+export function AgentStatusDot({ status }: { status: AgentStatus | null }) {
+  if (!status) return null;
+  return (
+    <span
+      className={cn("size-1.5 rounded-full shrink-0", STATUS_DOT[status])}
+    />
+  );
+}
+
+// A direct link to an agent's live page (ava.ui.show), opened in a new tab — the
+// inbox's entry point to what the agent is showing. Icon-only on a queue row,
+// icon + title in a detail header. Stops click propagation so opening the page
+// never also selects the row it sits on.
+
+export function AgentPageLink({
+  page,
+  showLabel,
+  className,
+}: {
+  page: PageRow;
+  showLabel?: boolean;
+  className?: string;
+}) {
+  return (
+    <a
+      href={page.url}
+      target="_blank"
+      rel="noopener noreferrer"
+      onClick={(e) => e.stopPropagation()}
+      aria-label={`Open live page: ${page.title ?? page.name}`}
+      className={cn(
+        "inline-flex items-center gap-1 text-muted-foreground hover:text-primary",
+        className,
+      )}
+    >
+      <AppWindow className="size-3.5 shrink-0" aria-hidden />
+      {showLabel && <span className="truncate">{page.title ?? page.name}</span>}
+    </a>
+  );
+}
+
+
+export function NoticeListRow({
+  priority,
+  blocking,
+  title,
+  agentLabel,
+  agentId,
+  agentStatus,
+  agentPage,
+  createdAt,
+  muted,
+  indent,
+  selected,
+  onSelect,
+  onSelectAgent,
+}: {
+  priority: OpenNotice["priority"];
+  blocking: boolean;
+  title: string;
+  agentLabel: string;
+  agentId: number;
+  agentStatus: AgentStatus | null;
+  agentPage?: PageRow;
+  createdAt?: string;
+  muted?: boolean;
+  indent?: boolean;
+  selected: boolean;
+  onSelect: () => void;
+  onSelectAgent?: (agentId: number | null) => void;
+}) {
+  return (
+    <li
+      data-testid="inbox-row"
+      className={cn(
+        "items-stretch border-b border-border/50",
+        selected && "bg-sidebar-accent",
+        FLEX
+      )}
+    >
+      <button
+        type="button"
+        onClick={() => {
+          onSelect();
+          onSelectAgent?.(agentId);
+        }}
+        className={cn(
+          "text-left px-4 py-2.5 items-center gap-2 hover:bg-sidebar-accent/50",
+          indent && "pl-7",
+          muted && "opacity-55",
+          MIN_W_0, FLEX_1, FLEX
+        )}
+      >
+        <PriorityBadge priority={priority} muted={muted} />
+        {blocking && (
+          <span className="shrink-0 rounded bg-destructive/10 px-1 text-[9px] font-medium uppercase text-destructive">
+            Blocking
+          </span>
+        )}
+        <span className={cn("truncate text-xs", MIN_W_0, FLEX_1)}>{title}</span>
+        <span className={cn("max-w-[45%] items-center gap-1.5 font-mono text-[10px] text-muted-foreground", FLEX, MIN_W_0)}>
+          <AgentStatusDot status={agentStatus} />
+          <span className={cn("truncate", MIN_W_0)}>
+            {agentLabel}
+            {createdAt ? ` · ${formatRelativeTime(createdAt)}` : ""}
+          </span>
+        </span>
+      </button>
+      {agentPage && <AgentPageLink page={agentPage} className="shrink-0 px-2.5" />}
+    </li>
+  );
+}
+
+// The detail header identifying the agent (status + label + relative time). The
+// notice's own content and reply controls come from the shared
+// <OpenNoticeDetail> below it.
+
+export function AgentContextHeader({
+  agentLabel,
+  agentStatus,
+  agentPage,
+  createdAt,
+}: {
+  agentLabel: string;
+  agentStatus: AgentStatus | null;
+  agentPage?: PageRow;
+  createdAt?: string;
+}) {
+  return (
+    <div className="mb-3">
+      <div className={cn("items-center gap-2", FLEX)}>
+        <AgentStatusDot status={agentStatus} />
+        <span className={cn("truncate font-mono text-[10px] text-muted-foreground", MIN_W_0)}>
+          {agentLabel}
+          {createdAt ? ` · ${formatRelativeTime(createdAt)}` : ""}
+        </span>
+        {agentPage && (
+          <AgentPageLink page={agentPage} showLabel className={cn("ml-auto text-[10px]", MIN_W_0)} />
+        )}
+      </div>
+    </div>
+  );
+}
