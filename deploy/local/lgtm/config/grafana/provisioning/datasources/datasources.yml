@@ -20,3 +20,24 @@ datasources:
     type: prometheus
     access: proxy
     url: http://prometheus:9090
+
+  # Read-only Postgres — the remaining SQL panels (core_live_agents reads the
+  # live agents_meta table; the plugin panels query the retired events table,
+  # which returns no rows). Task #1280 decision (405 2026-08-14): agents_meta
+  # is the authoritative live source, so the panel stays SQL instead of an
+  # event-stream approximation. The role is grafana_ro — a dedicated read-only
+  # role (SELECT on agents_meta/events only, no writes), password injected via
+  # the container env ($GRAFANA_PG_PASSWORD from deploy/local/lgtm/.env,
+  # gitignored — never in this repo).
+  - name: Postgres (ava read-only)
+    uid: ops
+    type: postgres
+    access: proxy
+    url: host.docker.internal:5433
+    user: grafana_ro
+    secureJsonData:
+      password: $GRAFANA_PG_PASSWORD
+    jsonData:
+      database: ava_main
+      sslmode: disable
+      postgresVersion: 1700
