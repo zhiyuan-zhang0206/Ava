@@ -87,6 +87,9 @@ services:
       # Alerting webhook token (contact.yml $__env expansion). Value comes
       # from deploy/local/lgtm/.env (gitignored) — never commit it.
       OPS_ALERTS_WEBHOOK_TOKEN: "${OPS_ALERTS_WEBHOOK_TOKEN:-}"
+      # Read-only Postgres password for the grafana_ro datasource role
+      # (datasources.yml $GRAFANA_PG_PASSWORD). From .env (gitignored).
+      GRAFANA_PG_PASSWORD: "${GRAFANA_PG_PASSWORD:-}"
     volumes:
       - ./config/grafana/provisioning:/etc/grafana/provisioning:ro
       - grafana-data:/var/lib/grafana
