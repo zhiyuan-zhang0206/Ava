@@ -220,10 +220,10 @@ worth applying carefully rather than assumed.
 
 It lands cleanly, and the split is the one the criterion already names: the
 **dispatch and the registry contract stay in core** (they are the extension
-points), while each **vendor binding becomes strippable** — its lifetime is tied
+points), while each **vendor binding becomes removable** — its lifetime is tied
 to that vendor's endpoint existing and being wanted on this deployment, not to
 model capability. Disabling a provider plugin should leave no trace: no
-dependency, no config field, no dropdown entry. That is the same strippability
+dependency, no config field, no dropdown entry. That is the same removability
 test every other plugin is held to.
 
 The eight bindings in `shared/lm/_providers.py` today are not automatically
@@ -238,7 +238,7 @@ allows a ninth.
   the *end state*, not as a description of today. The table above is the cost:
   every vendor widens the core dispatch surface — a factory branch, a key field,
   an effort table, sometimes a stop-reason table — which is the opposite of the
-  small-core strippable design, and a vendor binding is exactly the kind of
+  small-core minimal design, and a vendor binding is exactly the kind of
   thing whose lifetime is tied to an endpoint existing rather than to model
   capability. The seams are named here only because they are where a plugin
   hooks; the commitment is that a *new* provider stops editing them.

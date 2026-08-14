@@ -77,7 +77,7 @@ which is the fail-fast answer. Membership is replaced rather than unioned, so a
 skill removed and reinstalled does announce again.
 
 **Put it behind a settings toggle.** Every comparable layer (passive recall, the
-SDK reminder) is strippable. Rejected here because a default-off toggle does not
+SDK reminder) is removable. Rejected here because a default-off toggle does not
 close the gap and a default-on toggle is a switch with no one to flip it: an
 index that silently under-reports is a correctness problem in a promise the
 prompt already makes, not an optional enhancement.

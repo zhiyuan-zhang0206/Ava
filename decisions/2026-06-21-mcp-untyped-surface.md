@@ -26,7 +26,7 @@ names.
 
 **Do not add Pydantic models, and do not add pre-call validation.** The four
 "gaps" are deliberate non-features, each the reverse of a core principle
-(fail-fast, single `execute_code` tool, strippable SDK surface). The fail-fast
+(fail-fast, single `execute_code` tool, removable SDK surface). The fail-fast
 loop already works: the MCP server rejects a bad call with a precise error, and
 `_call_text` re-raises the server's message as `MCPCallError` back to the model.
 
@@ -86,7 +86,7 @@ def _schema_to_signature(schema: dict[str, Any]) -> inspect.Signature | None:
    dynamic, so there is nothing to enumerate into static stubs at build time.
 
 4. **It grows a layer meant to get thinner.** "Output parsing, SDK surface" are
-   listed as *strippable* layers; the single-`execute_code`-tool decision
+   listed as *removable* layers; the single-`execute_code`-tool decision
    explicitly rejected per-capability schema dispatch. A model-per-tool
    reintroduces exactly that machinery.
 
@@ -112,7 +112,7 @@ def _schema_to_signature(schema: dict[str, Any]) -> inspect.Signature | None:
 
 Considered: the JSON Schema block already conveys every parameter, so a strong
 model needs nothing more. Rejected only narrowly — the synthesized signature is
-a small, self-contained, no-enforcement, trivially strippable readability win
+a small, self-contained, no-enforcement, trivially removable readability win
 (`del call.__signature__` reverts it), and turning `(**kwargs)` into named
 parameters on the signature line is a real if marginal improvement to the
 `help()` view. It carries none of the costs above precisely because it validates
@@ -128,5 +128,5 @@ nothing.
   `properties`, fall back to `(**kwargs)` — the docstring's JSON schema still
   lists every parameter, so nothing is hidden.
 - The added surface is one helper plus two lines, with no new dependency and no
-  effect on the cache, the daemon, or the wire protocol. It is fully strippable
+  effect on the cache, the daemon, or the wire protocol. It is fully removable
   if a future model makes even the signature line redundant.

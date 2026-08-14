@@ -27,8 +27,8 @@ strategic item has a build-level design.
    task mechanism inside the SDK — it goes into a separate Python script the
    agent runs (`ava.watcher.launch` / a standalone process). Do not grow the SDK
    toward a job/queue/async-result API.
-3. **Small core, strippable.** Every item is judged on whether it can later be
-   removed as the model gets stronger. UI surfaces and skills are strippable;
+3. **Small core, minimal.** Every item is judged on whether it can later be
+   removed as the model gets stronger. UI surfaces and skills are removable;
    the sandbox/persistence/wake substrate is not.
 4. **The working loop: brainstorm -> fan out parallel directions -> converge.**
    Requirements are thought up first, split into a few directions run in
@@ -37,7 +37,7 @@ strategic item has a build-level design.
    ([`large-scale-orchestration.md`](large-scale-orchestration.md)) is just this
    same loop run by an agent over many agents. Framed as **current-capability-
    bounded**, not an eternal law: it is what today's agent strength affords, and
-   it is expected to simplify as agents get stronger (strippable, like
+   it is expected to simplify as agents get stronger (removable, like
    everything else under principle 3).
 
 ## North stars — the biggest ambitions (not urgent, never forget)

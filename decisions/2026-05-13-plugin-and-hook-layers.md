@@ -13,7 +13,7 @@ plugin surface that answers four questions at once:
 3. **What does the agent see** — the SDK surface the model reads must equal the import paths it
    writes; a separate "virtual" view splits the two.
 4. **What stays out** — every extension point is permanent surface area that contradicts the
-   "small core, strippable" principle, so the denominator must be defended.
+   "small core, minimal" principle, so the denominator must be defended.
 
 Three industry harnesses bound the design space: LangChain `AgentMiddleware` (8 hooks, deep
 wrap-stack), OpenClaw plugin hooks (34 hooks, broad pub/sub + 63 register surfaces), and Claude
@@ -72,7 +72,7 @@ considered as an *addition* (convenient for trivial formatter/log hooks) and def
 in-process only, add when a real need appears.
 
 **Broad pub/sub with 34+ hooks and 63 register surfaces (OpenClaw scale).** Maximally expressive
-but it inflates permanent surface area against the strippable-core principle. Several specific
+but it inflates permanent surface area against the minimal-core principle. Several specific
 OpenClaw hooks were rejected on principle, not budget:
 - `before_agent_finalize` *revise* mode (re-run the model on a "bad" answer) and `before_agent_reply`
   (replace the model's reply) — both contradict fail-fast: let it blow up, feed the error back,

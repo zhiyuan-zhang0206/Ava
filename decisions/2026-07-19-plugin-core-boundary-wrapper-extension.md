@@ -20,7 +20,7 @@ physics, not a model weakness, which is why compact was deliberately promoted
 from plugin to `agent/hooks/compact.py`). Plugins are also the sanctioned
 quarantine zone for shims that would violate core philosophy if they lived in
 core (`ava_syntax_fix` vs "no fallbacks for model mistakes"): the shim is
-tolerable because it is strippable. Quarantine is a philosophy exemption, not
+tolerable because it is removable. Quarantine is a philosophy exemption, not
 a quality exemption — a live shim is maintained at full standard, and every
 shim must measure its own obsolescence (fire-rate telemetry per model; a rate
 near zero is the empirical strip signal).
@@ -66,7 +66,7 @@ hand-maintained in two drifting trees.
 
 Design detail in `future/plugin-extension-api.md` (since removed — the
 primitive shipped; see `ava/_extend.py`): the wrap primitive and
-its home (`ava/_extend.py`), strippability CI, a plugins test root, narrowing
+its home (`ava/_extend.py`), removability CI, a plugins test root, narrowing
 the import-linter exemption (its original justification — `ava_compact`'s
 intentional cycle with the agent kernel — expired when compact moved into
 core), and shim fire-rate telemetry.

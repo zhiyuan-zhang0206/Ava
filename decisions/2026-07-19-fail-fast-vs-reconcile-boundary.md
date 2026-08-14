@@ -14,7 +14,7 @@ One criterion: **look for a learner in the causal chain of the error.**
 
 1. **Model mistakes** (bad code, wrong enum, hallucinated API) → fail fast in
    the turn. The model is in the loop; a shim steals its learning signal.
-   Sole exemption: strippable shims in the plugin quarantine
+   Sole exemption: removable shims in the plugin quarantine
    (`ava_syntax_fix`), which must themselves fail fast internally
    (compile-guard: if the fix isn't provably safe, return the original).
 2. **Operator/config mistakes** → fail fast at the boundary (boot/spawn

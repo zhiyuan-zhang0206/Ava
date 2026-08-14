@@ -6,7 +6,7 @@ tags:
 - agent-core
 - memory
 - context
-- strippable
+- removable
 ---
 
 # Memory Recall — Passive Memory Recall

@@ -83,7 +83,7 @@ the down-alert to a component that may be down.
 
 - **Telegram has zero core surface.** No service, no route, no channel, no daemon,
   no reserved port, no healthcheck. It sits with Discord/Twitter/WeChat as an
-  agent tool. This is the "small core, strippable" principle applied literally.
+  agent tool. This is the "small core, minimal" principle applied literally.
 - **The owner-alert is more robust, not less.** It previously required redis + the
   telegram daemon to both be up — the two things least reliable during an
   incident. A direct Bot API call needs only outbound HTTPS from the gateway host.
