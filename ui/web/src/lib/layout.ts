@@ -8,7 +8,7 @@
 //      forbids raw writes, so a layout redesign becomes "change one
 //      primitive's value" and every consumer follows.
 //   2. Tests import LAYOUT_INVARIANTS so the jsdom class-contract layer
-//      (frontend/src/app/page.test.tsx + fleet tests) and the real-engine
+//      (ui/web/src/app/page.test.tsx + fleet tests) and the real-engine
 //      Playwright layer (tests/e2e/test_layout_invariants.py) share one
 //      named checklist: every invariant has a jsdom contract AND an
 //      engine assertion at the 320 / 390 / 768 viewport tiers.

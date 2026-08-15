@@ -8,7 +8,7 @@ tags:
 
 # Frontend State Management
 
-Three mechanisms, one writer per cache/flag (`frontend/CLAUDE.md` + `conventions/frontend-stack.md`). Ava-1968 (2026-07) eliminated races from mirroring server data into Zustand; #657 moved nearly all persistent UI preferences from localStorage to server-side `user_settings`; the `useSyncExternalStore` singleton pattern is **completely removed**.
+Three mechanisms, one writer per cache/flag (`ui/web/CLAUDE.md` + `conventions/frontend-stack.md`). Ava-1968 (2026-07) eliminated races from mirroring server data into Zustand; #657 moved nearly all persistent UI preferences from localStorage to server-side `user_settings`; the `useSyncExternalStore` singleton pattern is **completely removed**.
 
 ## Three Mechanisms Division of Responsibilities
 

@@ -25,4 +25,4 @@ mobile tab, last-viewed agent, panel split ratios) — never a durable preferenc
 mirror server data into Zustand; don't persist a preference to localStorage
 (`lib/localstorage-policy.test.ts` enforces the allowlist); one writer per
 cache/flag. Full boundaries + the SSE-cache pattern in
-[`frontend/src/frontend-state.ava.okf.md`](src/frontend-state.ava.okf.md).
+[`ui/web/src/frontend-state.ava.okf.md`](src/frontend-state.ava.okf.md).

@@ -24,7 +24,7 @@ The audit Round 1 (2026-08-07) traced 48h of incidents to **four root design pro
 | **R1** | State / liveness has no explicit model — "what is happening now" is an implicit conjunction of signals | [[okf/design/r1-state-liveness.ava.okf.md]] | Design v3.3 · **partially landed**: `host_deploy_state` + `deployment_state` table, agent/updater leases on main |
 | **R2** | Single-source-of-truth discipline missing — every incident appended a copy of the logic at the incident site | [[okf/design/r2-single-source-of-truth.ava.okf.md]] | Design v0.4 · **partially landed**: `env_registry.py`, `SkillIdentity` (`shared/skill_names.py`), `EventSpec` registry (`shared/events/contract.py`) on main; retry convergence still in flight |
 | **R3** | Cross-process boundary contracts have no owner — contracts survive on comments and goodwill | [[okf/design/r3-boundary-contracts.ava.okf.md]] | Design v0.3 · **partially landed**: `contracts.py`, `skill_index.py`, page-server supervision, notices unified write API on main; doorplate enforcement still in flight |
-| **R4** | Frontend: layout contract has zero enforcement; realtime fold layer is a cognitive single point | [[okf/design/r4-frontend-projection.ava.okf.md]] | Design v0.6 · **partially landed**: fold layer (`frontend/src/lib/fold/`) on main; layout invariants / two-layer defense still in flight |
+| **R4** | Frontend: layout contract has zero enforcement; realtime fold layer is a cognitive single point | [[okf/design/r4-frontend-projection.ava.okf.md]] | Design v0.6 · **partially landed**: fold layer (`ui/web/src/lib/fold/`) on main; layout invariants / two-layer defense still in flight |
 | **R5** | Skill / MCP / plugin install & update | — (design lead #2884 in progress) | **In design — not written up** |
 
 ## Shared vocabulary (one concept, one definition)
@@ -60,4 +60,4 @@ The four designs independently coined overlapping terms. This is the consolidate
 
 ## Related as-is nodes
 
-Current-system descriptions these designs will change: [[cli/cli.ava.okf.md]] (orchestration/update legs) · [[gateway/gateway.ava.okf.md]] (pause middleware, API surface) · [[shared/shared.ava.okf.md]] (env keys, events, telemetry) · [[frontend/frontend.ava.okf.md]] · [[agent/agent.ava.okf.md]] (lifecycle) · [[services/services.ava.okf.md]] (daemons).
+Current-system descriptions these designs will change: [[cli/cli.ava.okf.md]] (orchestration/update legs) · [[gateway/gateway.ava.okf.md]] (pause middleware, API surface) · [[shared/shared.ava.okf.md]] (env keys, events, telemetry) · [[ui/web/web.ava.okf.md]] · [[agent/agent.ava.okf.md]] (lifecycle) · [[services/services.ava.okf.md]] (daemons).

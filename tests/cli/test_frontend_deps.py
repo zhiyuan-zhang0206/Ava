@@ -19,9 +19,9 @@ from cli.commands import _repo
 
 
 def _make_repo(tmp_path: Path, lock_body: str) -> Path:
-    """A repo skeleton with frontend/package-lock.json holding `lock_body`."""
-    fe = tmp_path / "frontend"
-    fe.mkdir()
+    """A repo skeleton with ui/web/package-lock.json holding `lock_body`."""
+    fe = tmp_path / "ui" / "web"
+    fe.mkdir(parents=True)
     (fe / "package-lock.json").write_text(lock_body)
     return tmp_path
 
@@ -47,9 +47,9 @@ def fake_npm_ci(monkeypatch: pytest.MonkeyPatch) -> list[Path]:
 def test_installs_when_node_modules_missing(tmp_path: Path, fake_npm_ci: list[Path]) -> None:
     repo = _make_repo(tmp_path, '{"lock": 1}')
     _repo._ensure_frontend_deps(repo)
-    assert fake_npm_ci == [repo / "frontend"]
+    assert fake_npm_ci == [repo / "ui" / "web"]
     # stamp written so the next call is a noop
-    assert (repo / "frontend" / "node_modules" / ".ava-lock-hash").is_file()
+    assert (repo / "ui" / "web" / "node_modules" / ".ava-lock-hash").is_file()
 
 
 def test_skips_when_stamp_matches_lockfile(tmp_path: Path, fake_npm_ci: list[Path]) -> None:
@@ -65,9 +65,9 @@ def test_reinstalls_when_lockfile_changed(tmp_path: Path, fake_npm_ci: list[Path
     _repo._ensure_frontend_deps(repo)  # installs against lock v1
     fake_npm_ci.clear()
     # `ava cluster update` pulls a lockfile that added a dependency
-    (repo / "frontend" / "package-lock.json").write_text('{"lock": 2, "added": "dep"}')
+    (repo / "ui" / "web" / "package-lock.json").write_text('{"lock": 2, "added": "dep"}')
     _repo._ensure_frontend_deps(repo)
-    assert fake_npm_ci == [repo / "frontend"]
+    assert fake_npm_ci == [repo / "ui" / "web"]
 
 
 def test_reinstalls_when_node_modules_exists_without_stamp(
@@ -76,6 +76,6 @@ def test_reinstalls_when_node_modules_exists_without_stamp(
     """Legacy install (node_modules from before this stamp existed) → reinstall
     once so the stamp gets written; a bare node_modules is no longer trusted."""
     repo = _make_repo(tmp_path, '{"lock": 1}')
-    (repo / "frontend" / "node_modules").mkdir()  # exists, but no .ava-lock-hash
+    (repo / "ui" / "web" / "node_modules").mkdir()  # exists, but no .ava-lock-hash
     _repo._ensure_frontend_deps(repo)
-    assert fake_npm_ci == [repo / "frontend"]
+    assert fake_npm_ci == [repo / "ui" / "web"]

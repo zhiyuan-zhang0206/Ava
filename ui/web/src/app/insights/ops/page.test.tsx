@@ -78,7 +78,7 @@ describe("Ops tab (Grafana embed)", () => {
   it("embed height matches the dashboard gridPos-derived height", () => {
     const dash = JSON.parse(
       readFileSync(
-        join(__dirname, "../../../../../dashboards/ops/ava-ops-main.json"),
+        join(__dirname, "../../../../../../dashboards/ops/ava-ops-main.json"),
         "utf-8",
       ),
     ) as { panels: { gridPos: { y: number; h: number } }[] };

@@ -23,7 +23,7 @@ Three layers: `HomePage` (read-only toast) → `HomeShell` (`useAgents`, activeI
 
 ## Fleet View
 
-The full-screen supervision surface (`components/fleet/`, `app/fleet/page.tsx`) — relationship graph, task graph, task board, unified Inbox queue, shared force controls — has its own node: [[frontend/src/frontend-components/fleet-view.ava.okf.md|Fleet View]].
+The full-screen supervision surface (`components/fleet/`, `app/fleet/page.tsx`) — relationship graph, task graph, task board, unified Inbox queue, shared force controls — has its own node: [[ui/web/src/frontend-components/fleet-view.ava.okf.md|Fleet View]].
 
 ## Settings / Auth
 

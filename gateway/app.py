@@ -40,9 +40,9 @@ Concurrency:
   `shared.redis_client.get_async_redis()`; SSE / pubsub subscribers still
   open their own connection per request (subscriber lifecycle ≠ publisher).
 
-Frontend: Next.js app under `frontend/`, served on :3000; the browser calls
+Frontend: Next.js app under `ui/web/`, served on :3000; the browser calls
 this service directly at `<hostname>:8000` (no rewrites proxy — see
-frontend/next.config.ts).
+ui/web/next.config.ts).
 
 Endpoint implementations live under `gateway/routers/<domain>.py` and are
 mounted at the bottom of this file. Only lifespan + the two middlewares +

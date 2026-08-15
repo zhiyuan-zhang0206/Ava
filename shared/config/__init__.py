@@ -29,7 +29,7 @@ The metadata machinery (`get_config_metadata`, `BOOTSTRAP_FIELDS`,
 field NAME — field names stay globally unique across sub-models, so the wire /
 `.env` / bootstrap surfaces are unchanged. The frontend's config-panel display
 grouping is NOT this metadata: the top-level display sections are the frontend's
-own static regrouping (`frontend/src/app/control/_config_groups.ts`); the second
+own static regrouping (`ui/web/src/app/control/_config_groups.ts`); the second
 level is the owning sub-model's `group` label. `capability` below is conceptual
 ownership + the remote-view field filter, not panel grouping (default capability
 per domain in `_DOMAIN_MODELS`). Each Field's json_schema_extra carries the

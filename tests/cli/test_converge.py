@@ -424,8 +424,8 @@ def test_migrate_registry_keys_step_reports(
 
 def test_frontend_env_override_guard_passes_clean(tmp_path: Path):
     repo = tmp_path / "repo"
-    (repo / "frontend").mkdir(parents=True)
-    (repo / "frontend" / ".env.development").write_text("# tracked, next-dev-only\n")
+    (repo / "ui" / "web").mkdir(parents=True)
+    (repo / "ui" / "web" / ".env.development").write_text("# tracked, next-dev-only\n")
     ava_home = tmp_path / "avahome"
     ava_home.mkdir()
     # A unit .env carrying only AVA_* vars (the legitimate case) must pass.
@@ -439,8 +439,8 @@ def test_frontend_env_override_guard_rejects_build_time_files(tmp_path: Path, na
     """`next build` bakes NEXT_PUBLIC_* from these files into the bundle,
     silently beating the runtime gateway inference (2026-06-09 prod outage)."""
     repo = tmp_path / "repo"
-    (repo / "frontend").mkdir(parents=True)
-    (repo / "frontend" / name).write_text("NEXT_PUBLIC_API_BASE=https://dead.example\n")  # pyright: ignore[reportUnknownMemberType]
+    (repo / "ui" / "web").mkdir(parents=True)
+    (repo / "ui" / "web" / name).write_text("NEXT_PUBLIC_API_BASE=https://dead.example\n")  # pyright: ignore[reportUnknownMemberType]
 
     with pytest.raises(RuntimeError, match="build-time env override"):
         _converge._ensure_no_frontend_env_overrides(_ctx(repo, tmp_path))
@@ -452,7 +452,7 @@ def test_frontend_env_override_guard_rejects_next_public_in_unit_env(tmp_path: P
     stale value (8800, a VPS port) baked into the bundle and broke login. NEXT_PUBLIC_*
     is derived + injected on the build command line, so it belongs nowhere in .env."""
     repo = tmp_path / "repo"
-    (repo / "frontend").mkdir(parents=True)
+    (repo / "ui" / "web").mkdir(parents=True)
     ava_home = tmp_path / "avahome"
     ava_home.mkdir()
     (ava_home / ".env").write_text("AVA_GATEWAY_PORT=8000\nNEXT_PUBLIC_GATEWAY_PORT=8800\n")

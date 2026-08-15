@@ -208,7 +208,7 @@ def _noop_start_prechecks(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(_cli, "_husk_session_reason", lambda _spec: None)  # pyright: ignore[reportUnknownArgumentType]
     # _ensure_frontend_deps shells out to `npm ci` when frontend deps are stale;
     # these tests assert session call shape, not dep install, and must stay hermetic
-    # regardless of whether this checkout happens to have frontend/node_modules.
+    # regardless of whether this checkout happens to have ui/web/node_modules.
     from cli.commands import _session_lifecycle as _session_mod
 
     monkeypatch.setattr(_session_mod, "_ensure_frontend_deps", lambda _repo: None)  # pyright: ignore[reportUnknownArgumentType]

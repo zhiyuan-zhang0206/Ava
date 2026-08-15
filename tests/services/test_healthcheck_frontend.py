@@ -55,8 +55,8 @@ def test_restart_routes_through_respawn_service(
     """_restart routes through respawn_service — the shared service-respawn helper
     that kills any stale session on both backends and launches through the
     session backend (native on POSIX, winproc on Windows)."""
-    frontend_dir = tmp_path / "frontend"
-    frontend_dir.mkdir()
+    frontend_dir = tmp_path / "ui" / "web"
+    frontend_dir.mkdir(parents=True)
     from shared.config import settings
 
     monkeypatch.setattr(settings.services, "project_root", tmp_path)
@@ -74,7 +74,7 @@ def test_restart_routes_through_respawn_service(
     service, cmd, repo, checkout, extra_env = captured[0]
     assert service == "frontend"
     assert repo == frontend_dir
-    # npm runs in frontend/, but the launch-site guard judges the checkout above
+    # npm runs in ui/web/, but the launch-site guard judges the checkout above
     # it — passing the subdirectory as both made the guard refuse every prod
     # restart, so the frontend could never self-heal.
     assert checkout == tmp_path
@@ -91,8 +91,8 @@ def test_restart_injects_gateway_port_matching_servicespec(
     canonical ServiceSpec — both derive from settings.gateway.gateway_port via the shared
     helper, so a watchdog restart can never bake a stale port (the 2026-06-23 prod
     outage). Asserting the exact prefix on the respawn command pins the two paths."""
-    frontend_dir = tmp_path / "frontend"
-    frontend_dir.mkdir()
+    frontend_dir = tmp_path / "ui" / "web"
+    frontend_dir.mkdir(parents=True)
     from shared.config import settings
 
     monkeypatch.setattr(settings.services, "project_root", tmp_path)

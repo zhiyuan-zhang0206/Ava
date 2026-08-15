@@ -5,7 +5,7 @@ Why it exists: Task #979 (user report 2026-08-07) — the mobile timeline clippe
 Tasks toolbar pushed the page 21px wider than the viewport.
 
 Root causes fixed in the same PR:
-- `timeline-surface` (frontend/src/app/page.tsx) was a flex item without
+- `timeline-surface` (ui/web/src/app/page.tsx) was a flex item without
   `min-w-0`: its `min-width:auto` resolved to the composer footer's min-content
   (702px), so in the 390px `overflow-hidden` section it laid out 702px wide and
   the right 312px were unreachable. The vertical-axis twin (missing
@@ -101,7 +101,7 @@ def _no_page_scroll(page: Page) -> bool:
 
 # NOTE: the timeline page's own truncation invariant (the `min-w-0` on
 # `timeline-surface`, Task #979) is guarded by a class-contract test in
-# frontend/src/app/page.test.tsx instead of a Playwright assertion: the
+# ui/web/src/app/page.test.tsx instead of a Playwright assertion: the
 # timeline is SSE-fed, and a fresh Playwright context cannot open the SSE
 # stream against a cookie-gated deployed cluster (EventSource stays
 # CONNECTING), so the surface never grows past viewport width and the

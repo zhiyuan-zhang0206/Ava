@@ -15,18 +15,18 @@ trap "rm -rf $TMPDIR" EXIT
 cd "$(dirname "$0")/.."  # repo root
 
 .venv/bin/python scripts/dump_openapi.py "$TMPDIR/openapi.json" >/dev/null
-(cd frontend && npx --no-install openapi-typescript "$TMPDIR/openapi.json" -o "$TMPDIR/types-generated.ts" >/dev/null)
+(cd ui/web && npx --no-install openapi-typescript "$TMPDIR/openapi.json" -o "$TMPDIR/types-generated.ts" >/dev/null)
 
-if ! diff -q frontend/openapi.json "$TMPDIR/openapi.json" >/dev/null; then
-    echo "ERROR: frontend/openapi.json is out of sync with Pydantic schema"
+if ! diff -q ui/web/openapi.json "$TMPDIR/openapi.json" >/dev/null; then
+    echo "ERROR: ui/web/openapi.json is out of sync with Pydantic schema"
     echo "   run ./scripts/codegen-types.sh to regenerate"
-    diff frontend/openapi.json "$TMPDIR/openapi.json" | head -30
+    diff ui/web/openapi.json "$TMPDIR/openapi.json" | head -30
     exit 1
 fi
 
-if ! diff -q frontend/src/lib/types-generated.ts "$TMPDIR/types-generated.ts" >/dev/null; then
-    echo "ERROR: frontend/src/lib/types-generated.ts is out of sync with OpenAPI spec"
+if ! diff -q ui/web/src/lib/types-generated.ts "$TMPDIR/types-generated.ts" >/dev/null; then
+    echo "ERROR: ui/web/src/lib/types-generated.ts is out of sync with OpenAPI spec"
     echo "   run ./scripts/codegen-types.sh to regenerate"
-    diff frontend/src/lib/types-generated.ts "$TMPDIR/types-generated.ts" | head -30
+    diff ui/web/src/lib/types-generated.ts "$TMPDIR/types-generated.ts" | head -30
     exit 1
 fi

@@ -1,7 +1,7 @@
 """Lint: backend NoteTag enum ⊆ frontend system_marker dispatch sets.
 
 The frontend classifies a system_marker's `source` (a NoteTag value) through
-the dispatch sets in `frontend/src/components/timeline/markers.tsx`
+the dispatch sets in `ui/web/src/components/timeline/markers.tsx`
 (LIFECYCLE_TAGS / MEMORY_SOURCES / NOTE_SOURCES); any source outside them
 renders the red UnknownMarkerChip alarm — fail-loud by design, but a NEW
 backend tag landing without a frontend branch is exactly the regression class
@@ -14,7 +14,7 @@ backend member with no frontend branch fails CI immediately.
 
 The frontend side of the same contract — every dispatch-set member renders
 its chip and never the alarm — lives in
-`frontend/src/components/timeline.test.tsx` ("Marker contract: every
+`ui/web/src/components/timeline.test.tsx` ("Marker contract: every
 dispatch-set source renders without the red alarm").
 
 Companion backend-internal contract: `tests/gateway/test_timeline.py`
@@ -30,7 +30,7 @@ from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _MESSAGE_KWARGS = _REPO_ROOT / "shared" / "message_kwargs.py"
-_MARKERS_TS = _REPO_ROOT / "frontend" / "src" / "components" / "timeline" / "markers.tsx"
+_MARKERS_TS = _REPO_ROOT / "ui" / "web" / "src" / "components" / "timeline" / "markers.tsx"
 
 
 def _note_tag_members() -> set[str]:

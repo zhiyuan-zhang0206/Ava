@@ -142,7 +142,7 @@ def fe_build_env() -> str:
     subprocess. Instead derive it from the single source of truth
     (AVA_GATEWAY_PORT == settings.gateway.gateway_port) and inject it directly on the
     build command line. The browser then dials `${hostname}:${gateway_port}`
-    (frontend/src/lib/api.ts), correct on any host whose gateway is not on the
+    (ui/web/src/lib/api.ts), correct on any host whose gateway is not on the
     default 8000 (e.g. the prod VPS on 8800, co-located with another service
     holding 8000).
 

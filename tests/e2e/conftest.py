@@ -68,12 +68,12 @@ def pytest_collection_modifyitems(
     skips the item before any fixture runs. This keeps a missing-node_modules
     local run from polluting later async tests (see playwright_runtime).
     """
-    if shutil.which("npm") and (_REPO_ROOT / "frontend" / "node_modules" / "next").exists():
+    if shutil.which("npm") and (_REPO_ROOT / "ui" / "web" / "node_modules" / "next").exists():
         return
     for item in items:
         if item.nodeid.startswith("tests/e2e/"):
             item.add_marker(
-                pytest.mark.skip(reason="e2e prerequisites missing (npm or frontend/node_modules)")
+                pytest.mark.skip(reason="e2e prerequisites missing (npm or ui/web/node_modules)")
             )
 
 
@@ -108,9 +108,9 @@ def _gc_orphan_e2e() -> None:
                 continue
             with contextlib.suppress(OSError):
                 shutil.rmtree(d)
-    # frontend build dirs (in frontend/.builds/, not in tmp/ because Turbopack
+    # frontend build dirs (in ui/web/.builds/, not in tmp/ because Turbopack
     # symlink constraints—see frontend_proc fixture docstring)
-    builds_root = _REPO_ROOT / "frontend" / ".builds"
+    builds_root = _REPO_ROOT / "ui" / "web" / ".builds"
     if builds_root.exists():
         for d in builds_root.glob("build-*"):
             try:
@@ -344,26 +344,26 @@ def frontend_proc() -> Iterator[None]:
     memory too heavy, prod start ~200MB, e2e total memory peak 2.2GB → 0.9GB).
 
     Multi-worker (pytest-xdist) isolation: each session runs build in
-    `frontend/.builds/build-<suffix>/`, source (src/public/config total <1MB) copied in,
-    `node_modules` (624MB) symlinked to `../../node_modules` (=main frontend/node_modules) not duplicating disk.
+    `ui/web/.builds/build-<suffix>/`, source (src/public/config total <1MB) copied in,
+    `node_modules` (624MB) symlinked to `../../node_modules` (=main ui/web/node_modules) not duplicating disk.
 
-    Why build_dir placed at `frontend/.builds/`:
+    Why build_dir placed at `ui/web/.builds/`:
     - Turbopack strictly checks node_modules symlink cannot point outside "filesystem root",
-      symlink in parallel tmp/ dir fails; `frontend/.builds/build-X/node_modules
+      symlink in parallel tmp/ dir fails; `ui/web/.builds/build-X/node_modules
       → ../../node_modules` is monorepo-style hoisted lookup, Turbopack accepts
     - `.builds/` starts with dot, Next dev watcher default ignore won't trigger reload
-    - `.gitignore` already added frontend/.builds/
+    - `.gitignore` already added ui/web/.builds/
 
     Each session is a cold build (`.next/` not reused across sessions): `NEXT_PUBLIC_API_BASE`
     build-time inlined into client bundle (api.ts:46), reusing cached chunk across sessions
     would leave the previous session's dynamic GATEWAY_URL residual. Project small cold build 5-6s,
     safer than 0.7s incremental build.
     """
-    frontend_src = _REPO_ROOT / "frontend"
+    frontend_src = _REPO_ROOT / "ui" / "web"
     if not shutil.which("npm"):
         pytest.skip("npm not found — e2e tests require Node.js")
     if not (frontend_src / "node_modules" / "next").exists():
-        pytest.skip("frontend/node_modules not installed — run `npm install` in frontend/ first")
+        pytest.skip("ui/web/node_modules not installed — run `npm install` in ui/web/ first")
     build_dir = frontend_src / ".builds" / f"build-{_E2E_SUFFIX}"
     env = {**os.environ, "NEXT_PUBLIC_API_BASE": GATEWAY_URL}
 
@@ -376,7 +376,7 @@ def frontend_proc() -> Iterator[None]:
             "node_modules", ".next", ".builds", "coverage", "*.log", "tsconfig.tsbuildinfo"
         ),
     )
-    # symlink goes relative path `../../node_modules` (= frontend/node_modules)
+    # symlink goes relative path `../../node_modules` (= ui/web/node_modules)
     (build_dir / "node_modules").symlink_to(Path("../../node_modules"))
 
     # _LOG_DIR is created by the package-scoped _e2e_process_env, which runs

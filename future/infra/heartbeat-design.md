@@ -506,4 +506,4 @@ cluster admin shouldn't need to configure it per agent.
 - OpenClaw Design Patterns (Part 3): <https://kenhuangus.substack.com/p/openclaw-design-patterns-part-3-of>
 - Stanza: OpenClaw Heartbeat — Cron & Automation: <https://www.stanza.dev/concepts/openclaw-heartbeat-automation>
 - Ava Fleet View: the design doc was deleted once the `/fleet` view shipped; read
-  `frontend/src/components/fleet/` + `gateway/routers/fleet_graph.py` instead.
+  `ui/web/src/components/fleet/` + `gateway/routers/fleet_graph.py` instead.

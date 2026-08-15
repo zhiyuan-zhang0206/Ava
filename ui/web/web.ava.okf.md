@@ -8,7 +8,7 @@ description: Overview index of the Ava frontend subsystem—Next.js 16 Web UI (f
 
 ## What it is
 
-Ava frontend subsystem—Next.js 16 web interface for fleet supervision, agent conversation management, task tracking, cluster configuration. All source code is in `frontend/src/`.
+Ava frontend subsystem—Next.js 16 web interface for fleet supervision, agent conversation management, task tracking, cluster configuration. All source code is in `ui/web/src/`.
 
 **Role assignment**: gateway side (pure agent-runner does not run it)—Next.js server is a `frontend` session from `build_services` (not in `_AGENT_RUNNER_ONLY_SESSIONS`), roster derived by `ops/spec.py:services_for_capabilities` by capability (re-exported by `cli/commands/_repo.py`).
 
@@ -18,4 +18,4 @@ Ava frontend subsystem—Next.js 16 web interface for fleet supervision, agent c
 
 ## Sub-concepts
 
-- [[frontend/src/src.ava.okf.md|Src]]
+- [[ui/web/src/src.ava.okf.md|Src]]

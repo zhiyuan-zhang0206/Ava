@@ -38,7 +38,7 @@ fi
 if echo "$CHANGED" | grep -q '\.py$'; then
     HAS_PYTHON=1
 fi
-if echo "$CHANGED" | grep -q '^frontend/'; then
+if echo "$CHANGED" | grep -q '^ui/web/'; then
     HAS_FRONTEND=1
 fi
 
@@ -72,7 +72,7 @@ fi
 if [ "$HAS_FRONTEND" -eq 1 ]; then
     echo "→ Frontend changes detected — running vitest + eslint + tsc …"
 
-    cd frontend
+    cd ui/web
 
     echo "  vitest …"
     npx --no-install vitest run || EXIT_CODE=1

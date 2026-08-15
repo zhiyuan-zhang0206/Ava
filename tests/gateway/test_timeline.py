@@ -467,7 +467,7 @@ class TestAvaMsgTypeDispatch:
 
     Companion cross-stack contract: tests/test_lint_marker_contract.py
     (backend NoteTag ⊆ frontend dispatch sets) + the frontend marker-contract
-    tests in frontend/src/components/timeline.test.tsx.
+    tests in ui/web/src/components/timeline.test.tsx.
     """
 
     @staticmethod

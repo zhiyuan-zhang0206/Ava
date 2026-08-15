@@ -25,7 +25,7 @@ _DOC_ROOTS = (
 def is_doc_path(path: str) -> bool:
     """Docs need no service restart: under a doc axis/artifact root, or a
     top-level Markdown file (CLAUDE.md / README.md / AGENTS.md). A nested *.md
-    (e.g. frontend/CLAUDE.md) is classified by its directory, not here.
+    (e.g. ui/web/CLAUDE.md) is classified by its directory, not here.
     """
     return path.startswith(_DOC_ROOTS) or (path.endswith(".md") and "/" not in path)
 
@@ -33,12 +33,12 @@ def is_doc_path(path: str) -> bool:
 def classify_change(paths: list[str]) -> tuple[bool, bool]:
     """Map changed file paths to (frontend_changed, backend_changed).
 
-    frontend = under `frontend/`; backend = anything else that isn't a pure doc.
+    frontend = under `ui/web/`; backend = anything else that isn't a pure doc.
     A docs-only (or empty) diff yields (False, False) -> nothing to restart.
     """
     frontend = backend = False
     for p in paths:
-        if p.startswith("frontend/"):
+        if p.startswith("ui/web/"):
             frontend = True
         elif is_doc_path(p):
             continue

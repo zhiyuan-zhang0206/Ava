@@ -317,7 +317,7 @@ cluster; that has to come from outside Ava today. Full policy and reporting:
 | Package manager | uv |
 | Frontend | Next.js 16 + React 19 + Tailwind 4 + shadcn/ui |
 
-[Frontend stack →](frontend/frontend.ava.okf.md)
+[Frontend stack →](ui/web/web.ava.okf.md)
 [Connection budget →](agent/db.ava.okf.md)
 [Model registry →](shared/lm/registry.py)
 
@@ -351,7 +351,7 @@ full design.
 ## Agent instruction files
 
 `AGENTS.md` is this repo's entry point for all AI coding agents.
-`CLAUDE.md` is a symlink → `AGENTS.md`. `frontend/CLAUDE.md` → `frontend/AGENTS.md`.
+`CLAUDE.md` is a symlink → `AGENTS.md`. `ui/web/CLAUDE.md` → `ui/web/AGENTS.md`.
 
 ## Contributing
 

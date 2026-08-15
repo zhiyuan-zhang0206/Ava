@@ -11,7 +11,7 @@ Ava's **external interface layer**—three subsystems working together form all 
 
 - **Gateway** (`gateway/`): FastAPI HTTP API service, port 8000, pure JSON API. Frontend, CLI, agent SDK, bootstrap scripts all access the cluster via `/api/*` endpoints. Does not render HTML.
 - **CLI** (`cli/`): `ava` command-line tool, manages cluster lifecycle (start/stop/status/update) and various operational tasks. Dispatches via argparse to subcommands under `cli/commands/`.
-- **Frontend** (`frontend/`): Next.js 16 + React 19 Web UI, port 3000. Pages include Fleet view, Memory Graph, Settings, Shell terminal, etc. Receives agent event stream in real-time via SSE.
+- **Frontend** (`ui/web/`): Next.js 16 + React 19 Web UI, port 3000. Pages include Fleet view, Memory Graph, Settings, Shell terminal, etc. Receives agent event stream in real-time via SSE.
 
 The three are loosely coupled via HTTP + SSE: frontend directly calls Gateway API, Gateway does not depend on CLI; CLI launches Gateway process via `ava start`.
 
@@ -28,14 +28,14 @@ The three are loosely coupled via HTTP + SSE: frontend directly calls Gateway AP
 - [[loop.ava.okf.md]] — Gateway's `/api/agents/*` endpoints trigger agent lifecycle
 - [[shared/lm/lm.ava.okf.md]] — Gateway does not directly run LLM; also does **not** import any `agent.*` (`/`-autocomplete reuses `ava._commands.discover_commands`, `gateway/routers/commands.py:14`)
 - [[../cli/cli.ava.okf.md]] — CLI command surface details (cluster lifecycle + operational commands)
-- [[frontend/src/frontend.ava.okf.md]] — frontend architecture details (routing, state, SSE data flow)
+- [[ui/web/src/frontend.ava.okf.md]] — frontend architecture details (routing, state, SSE data flow)
 
 ## Entry Points
 
 - `gateway/app.py` — FastAPI app definition + lifespan + middleware
 - `cli/main.py:main()` — CLI argparse entry
-- `frontend/src/app/layout.tsx` — Next.js root layout
-- `frontend/src/app/page.tsx` — home page (Fleet view)
+- `ui/web/src/app/layout.tsx` — Next.js root layout
+- `ui/web/src/app/page.tsx` — home page (Fleet view)
 
 ## Notes
 

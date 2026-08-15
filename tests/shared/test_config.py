@@ -1052,7 +1052,7 @@ def test_timezone_validated_at_construction(monkeypatch: pytest.MonkeyPatch) -> 
     assert GeneralSettings().timezone == "Asia/Shanghai"
 
 
-# ─── frontend config-group map alignment (frontend/src/app/control/_config_groups.ts) ───
+# ─── frontend config-group map alignment (ui/web/src/app/control/_config_groups.ts) ───
 
 
 def test_frontend_config_group_keys_match_backend_aliases() -> None:
@@ -1069,7 +1069,8 @@ def test_frontend_config_group_keys_match_backend_aliases() -> None:
 
     groups_ts = (
         Path(__file__).resolve().parent.parent.parent
-        / "frontend"
+        / "ui"
+        / "web"
         / "src"
         / "app"
         / "control"

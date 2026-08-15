@@ -79,7 +79,7 @@ def _ensure_frontend_deps(repo: Path) -> None:
     against the current lockfile. Written *after* `npm ci` because `npm ci`
     wipes node_modules first.
     """
-    fe = repo / "frontend"
+    fe = repo / "ui" / "web"
     node_modules = fe / "node_modules"
     stamp = node_modules / ".ava-lock-hash"
     want = hashlib.sha256((fe / "package-lock.json").read_bytes()).hexdigest()

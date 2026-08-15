@@ -10,7 +10,7 @@ LGPL/MPL "use without infecting" path), so the obligations attach to those
 libraries' own files, not to Ava's source.
 
 The authoritative, always-current license set is the metadata of the resolved
-dependencies (`uv.lock`, `frontend/package-lock.json`); regenerate a full
+dependencies (`uv.lock`, `ui/web/package-lock.json`); regenerate a full
 report with `uv pip licenses` / `npx license-checker` when shipping a release.
 
 ## Runtime dependencies under weak copyleft

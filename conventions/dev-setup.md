@@ -135,7 +135,7 @@ change):
   URLs, so the suite never touches a real cluster or prod. Fastest inner loop — reach for it
   first. Pick the dir by change type (see CLAUDE.md "Workflow": DB -> `tests/ava` +
   `tests/gateway`, wire -> `tests/agent` + `tests/gateway`, agent core ->
-  `tests/agent`, frontend -> `cd frontend && npm test`).
+  `tests/agent`, frontend -> `cd ui/web && npm test`).
 - **A bare DB poke / SDK script** (`.venv/bin/python -c "...shared.db.connect()..."`)
   needs the worktree to have been `ava start`'d (born). Before that the worktree is
   *unanchored*: home falls back to `~/.ava` but `AVA_DB_URL` is the unanchored

@@ -76,9 +76,9 @@ def _session_exists() -> bool:
 
 
 def _restart() -> bool:
-    """kill old session + start a new one running build + start (cwd = repo/frontend/)."""
+    """kill old session + start a new one running build + start (cwd = repo/ui/web/)."""
     project_root = settings.services.project_root or Path(__file__).resolve().parent.parent.parent
-    frontend_dir = project_root / "frontend"
+    frontend_dir = project_root / "ui" / "web"
     if not frontend_dir.is_dir():
         _log.error("[frontend healthcheck] %s does not exist", frontend_dir)
         return False
@@ -104,10 +104,10 @@ def _restart() -> bool:
         # whatever NEXT_PUBLIC_GATEWAY_PORT is frozen in the server env (a stale
         # value bakes the wrong gateway port into the bundle, breaking login).
         cmd = f"cd {frontend_dir.as_posix()} && {fe_build_env()} npm run build && npm run start -- -p {port}"
-    # The session starts in frontend/ (npm must run there), but the code it runs
+    # The session starts in ui/web/ (npm must run there), but the code it runs
     # belongs to the checkout above it — which is what the launch-site guard
     # judges. Passing the subdirectory as both made the guard compare
-    # `<checkout>/frontend` against the prod home's anchored checkout, so it read
+    # `<checkout>/ui/web` against the prod home's anchored checkout, so it read
     # every legitimate prod restart as a dev checkout and refused it: the
     # frontend was the one service that could never self-heal.
     return respawn_service(

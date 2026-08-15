@@ -63,9 +63,9 @@ orchestration's complexity.
 ## Cost, and a codebase-specific synergy
 
 - **Disk:** `uv` venvs hardlink from `~/.cache/uv` (cheap per release); git objects
-  shared via worktree. The real cost is `frontend/node_modules` + `.next` per
+  shared via worktree. The real cost is `ui/web/node_modules` + `.next` per
   release (hundreds of MB; npm does not share like uv).
-- **Synergy:** `shared.repo_change`'s frontend/backend change classification (already
+- **Synergy:** `shared.repo_change`'s ui/web/backend change classification (already
   used to skip the npm build) maps directly onto "does this release need a fresh
   `node_modules`/`.next` or can it symlink the previous release's?" Backend-only
   changes (the common case) reuse the prior frontend build.

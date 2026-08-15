@@ -46,7 +46,7 @@ The following are mounted onto the `ava.ui` namespace by the `ava_fleet` plugin 
 P0 (highest) → P1 → P2 (default) → P3 (lowest). This is advisory—does not affect processing order.
 
 ## Key Dependencies
-- [[frontend/src/frontend.ava.okf.md]] — Frontend UI renders pages and notifications
+- [[ui/web/src/frontend.ava.okf.md]] — Frontend UI renders pages and notifications
 
 ## Notes
 `notify` is the only reliable channel for agents to reach users, with **queue** semantics—users consume at their own pace, delivery is delivery. Use `require_response=True` when user decision is needed (irreversible operations, spending money, contacting real people)—authorization/decision goes directly to the user from any depth; progress/conclusions are first reported to the delegator for aggregation (fleet communication dichotomy), and agent-to-agent matters use `send_message`. Out-of-band pushes (e.g., telegram) are only allowed for truly urgent matters, discipline is governed by the disturbance discipline skill.
