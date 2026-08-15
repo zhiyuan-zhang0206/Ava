@@ -21,7 +21,7 @@ life — first wake, and the turn after any compaction — and by one owner.
 
 ### Memory Injection (`plugins/ava_memory/notes.py`, registered by the plugin)
 - Both stores belong to `ava_memory`; disabling it removes stores, SDK surface, notes, and discipline section together.
-- Two sources, independently switchable (strippable):
+- Two sources, independently switchable (removable):
   - **Shared MEMORY.md** (memory pool root `ava.memory.PATH`, pointer index, visible to all agents) — `settings.agent.memory_index_inject_enabled`
   - **Per-agent memory** (workspace `memory/` dir: `memory/MEMORY.md` index, entries as sibling files read on demand) — `settings.agent.memory_per_agent_inject_enabled`. Not injected on fork; empty index created if missing; a legacy single-file `<workspace>/MEMORY.md` migrates in on first injection, never overwriting. **Only the index is injected**; past `memory_per_agent_index_max_lines` (default 200, 0=off) a maintenance reminder is appended — no truncation.
 - The write discipline both stores share (criteria, mandatory-write triggers, the `type/*` vocabulary, weighing a memory against self-verifying vs asserted sources) is a **system prompt section** owned by the same plugin — fixed text, where an index is not.

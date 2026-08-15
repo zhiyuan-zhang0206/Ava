@@ -23,7 +23,7 @@ Why message-tail detection (no plugin state):
   tail is no longer that AIMessage, so it does not re-fire. A second silent idle
   commits a fresh reasoning AIMessage as the new tail and earns its own nudge.
 
-Strippability: disabling this plugin removes only the nudge text. The kernel
+Removability: disabling this plugin removes only the nudge text. The kernel
 still continue-loops and still guard-halts after the cap; the agent just relies
 on seeing its own reasoning to act, with no explicit prompt.
 

@@ -674,7 +674,9 @@ def test_schema_sql_has_birth_config_column() -> None:
     CHECK-level comment in schema.sql documents the overlay-vs-default
     precedence the migration used to enforce by hand."""
     schema = _SCHEMA_SQL.read_text()
-    assert "birth_config               JSONB" in schema, "birth_config column missing from agents_meta"
+    assert "birth_config               JSONB" in schema, (
+        "birth_config column missing from agents_meta"
+    )
 
 
 def test_schema_sql_has_r1_deploy_state_tables() -> None:
@@ -694,9 +696,7 @@ def test_schema_sql_seeds_presets_without_a_skill_index() -> None:
     assert _KEY not in seed_block
 
 
-def test_apply_pending_squashes_orphaned_applied_names(
-    db_conn, monkeypatch, tmp_path
-) -> None:
+def test_apply_pending_squashes_orphaned_applied_names(db_conn, monkeypatch, tmp_path) -> None:
     """The v0.1.0 reset scenario: the DB's applied set holds pre-reset migration
     names whose files no longer exist in migrations/. apply converges them away
     (schema unchanged — the baseline already carries their effect) and then
@@ -718,9 +718,7 @@ def test_apply_pending_squashes_orphaned_applied_names(
             c.execute("DELETE FROM schema_migrations WHERE name = %s", (orphan,))
 
 
-def test_apply_pending_squash_then_apply_pending(
-    db_conn, monkeypatch, tmp_path
-) -> None:
+def test_apply_pending_squash_then_apply_pending(db_conn, monkeypatch, tmp_path) -> None:
     """Squash and forward-apply compose in one call: an orphaned pre-reset name
     is converged away AND a pending migration (the v010 anchor, say) applies
     in the same run."""
@@ -770,9 +768,7 @@ def test_squash_does_not_touch_baseline_or_pending(db_conn, monkeypatch, tmp_pat
             c.execute("DELETE FROM schema_migrations WHERE name = %s", (_SYN,))
 
 
-def test_squash_authority_checked_even_without_pending(
-    db_conn, monkeypatch, tmp_path
-) -> None:
+def test_squash_authority_checked_even_without_pending(db_conn, monkeypatch, tmp_path) -> None:
     """A squash is a mutation: a non-gateway checkout that would only ever
     trigger the squash path (no pending files) must still be refused."""
     _ = db_conn
@@ -808,14 +804,10 @@ def test_squash_authority_checked_even_without_pending(
     finally:
         with psycopg.connect(settings.data_plane.db_url, autocommit=True) as c:
             c.execute("DELETE FROM schema_migrations WHERE name = %s", (orphan,))
-            c.execute(
-                "DELETE FROM machine_units WHERE machine_name = 'real-gateway'"
-            )
+            c.execute("DELETE FROM machine_units WHERE machine_name = 'real-gateway'")
 
 
-def test_squash_logs_the_converged_names(
-    db_conn, monkeypatch, tmp_path, loguru_records
-) -> None:
+def test_squash_logs_the_converged_names(db_conn, monkeypatch, tmp_path, loguru_records) -> None:
     """The convergence is loud: the log names every orphaned applied name so an
     operator can audit what the reset folded away."""
     _ = db_conn
@@ -827,16 +819,15 @@ def test_squash_logs_the_converged_names(
     try:
         with psycopg.connect(settings.data_plane.db_url) as fresh:
             apply_pending_migrations(fresh)
-        assert any(
-            "squash" in r["message"] and orphan in r["message"] for r in loguru_records
-        ), "the squash must be loud"
+        assert any("squash" in r["message"] and orphan in r["message"] for r in loguru_records), (
+            "the squash must be loud"
+        )
     finally:
         with psycopg.connect(settings.data_plane.db_url, autocommit=True) as c:
             c.execute("DELETE FROM schema_migrations WHERE name = %s", (orphan,))
 
-def test_squash_refuses_partial_pre_reset_history(
-    db_conn, monkeypatch, tmp_path
-) -> None:
+
+def test_squash_refuses_partial_pre_reset_history(db_conn, monkeypatch, tmp_path) -> None:
     """P1 guard: a DB holding only PART of the pre-v0.1.0 history must be
     refused, never silently converged — deleting its tracking rows would
     certify a schema that never ran the missing migrations."""
@@ -850,8 +841,9 @@ def test_squash_refuses_partial_pre_reset_history(
         for name in partial:
             c.execute("INSERT INTO schema_migrations (name) VALUES (%s)", (name,))
     try:
-        with psycopg.connect(settings.data_plane.db_url) as fresh, pytest.raises(
-            MigrationHistoryGap
+        with (
+            psycopg.connect(settings.data_plane.db_url) as fresh,
+            pytest.raises(MigrationHistoryGap),
         ):
             apply_pending_migrations(fresh)
         # nothing was deleted by the refusal
@@ -864,9 +856,7 @@ def test_squash_refuses_partial_pre_reset_history(
                 c.execute("DELETE FROM schema_migrations WHERE name = %s", (name,))
 
 
-def test_squash_converges_full_pre_reset_history(
-    db_conn, monkeypatch, tmp_path
-) -> None:
+def test_squash_converges_full_pre_reset_history(db_conn, monkeypatch, tmp_path) -> None:
     """A DB that ran the COMPLETE pre-reset history converges cleanly: the
     baseline carries the net effect of all 47, so deleting their tracking rows
     is safe and leaves applied == required."""
@@ -910,5 +900,3 @@ def test_squash_ignores_pre_reset_names_outside_the_frozen_set(
     finally:
         with psycopg.connect(settings.data_plane.db_url, autocommit=True) as c:
             c.execute("DELETE FROM schema_migrations WHERE name = %s", (SYN_ORPHAN,))
-
-

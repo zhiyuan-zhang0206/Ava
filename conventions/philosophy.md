@@ -8,8 +8,8 @@ only the *why* lives here, the *how* stays in AGENTS.md.
 
 Ava bets the model keeps getting stronger. So every layer is built asking: **can
 this scaffolding be stripped later, once the model no longer needs it?**
-(*Strippable*: output parsing, retry, middleware, SDK surface, long-term memory.
-*Not strippable*: persistence, wake, and — once one is built — an execution
+(*Removable*: output parsing, retry, middleware, SDK surface, long-term memory.
+*Not removable*: persistence, wake, and — once one is built — an execution
 sandbox; Ava has none today (see [`SECURITY.md`](../SECURITY.md)), but the
 bet is that a real isolation boundary stays load-bearing even as the model
 gets stronger, unlike scaffolding built to cover for a weaker model.)
@@ -65,8 +65,8 @@ every time:
 
 6. **Plugins are the quarantine zone for model-weakness shims.** Core never
    shims (rule 4); a shim that pays for itself today lives in a plugin,
-   strippable, maintained at full standard while alive, and measures its own
-   obsolescence (activation telemetry per model) — "strippable" as a gauge, not
+   removable, maintained at full standard while alive, and measures its own
+   obsolescence (activation telemetry per model) — "removable" as a gauge, not
    a vibe.
 
 In one line: every design choice asks *"can a stronger invariant make this

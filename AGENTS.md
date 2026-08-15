@@ -1,11 +1,11 @@
 # Ava — minimal code-as-action agent
 
-Small core, strippable by design. One tool (`execute_code`), one namespace (`ava.*`).
+Small core, minimal by design. One tool (`execute_code`), one namespace (`ava.*`).
 [Philosophy →](conventions/philosophy.md)
 
 ## Core principles
 
-1. **Small core, strippable** — each layer considered for removal as models improve.
+1. **Small core, minimal** — each layer considered for removal as models improve.
 2. **Fail fast** — no fallbacks for model mistakes; use `[]` not `.get()`, explode on unknown enums.
 3. **Don't reinvent** — LangGraph, psycopg, uv; swap only when they get in the way.
 4. **Single tool** — `execute_code(code: str)` + `ava.*` namespace = all capabilities.

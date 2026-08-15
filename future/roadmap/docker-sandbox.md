@@ -54,6 +54,6 @@ finer boundary is not needed for these use cases and is not in scope.
 
 [`non-goals.md`](../../conventions/non-goals.md) lists sandbox as a V1 non-goal ("runs bare on the
 host") while the small-core charter lists sandbox as explicitly **not**
-strippable ("safety is never free"). This item resolves that: the boundary is
+removable ("safety is never free"). This item resolves that: the boundary is
 the disposable containerized cluster, and it is close, not far — most of it
 already runs in the test rig.

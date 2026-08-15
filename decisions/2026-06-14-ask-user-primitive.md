@@ -136,8 +136,8 @@ parsed.
 **Update (2026-06-17):** `ask` is no longer a *core* `ava.ui` member. It moved
 into the `ava_fleet` plugin (still exposed at `ava.ui.ask_question`), so it strips together
 with the rest of the human-supervision surface (`ava.self.log` / `ava.ui.submit_report`).
-The reclassification — the strippability circle's center is "is a human
+The reclassification — the removability circle's center is "is a human
 supervising," not `ask` itself; with no human, `ask` has no one to answer it — is
 argued in `future/supervision-queue.md` §2 (since removed).
 The behavioral design above (fire-then-idle, the two axes, the flat queue,
-free-text answers) is unchanged; only its home and strippability moved.
+free-text answers) is unchanged; only its home and removability moved.

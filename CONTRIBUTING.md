@@ -1,7 +1,7 @@
 # Contributing to Ava
 
 Ava is an Apache-2.0 **code-as-action** agent with a deliberately small,
-strippable core. Skim [conventions/philosophy.md](conventions/philosophy.md)
+minimal core. Skim [conventions/philosophy.md](conventions/philosophy.md)
 before a non-trivial change — a contribution that fits the small-core /
 fail-fast charter is far more likely to land. [AGENTS.md](AGENTS.md) is the
 architecture overview (much of it is maintainer ops you can skip).
