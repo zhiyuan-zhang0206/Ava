@@ -382,7 +382,7 @@ def test_respawn_judges_the_checkout_not_the_working_directory(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A service may run from a subdirectory of its checkout — the frontend runs
-    npm inside ``<checkout>/frontend`` — and the launch-site guard judges the
+    npm inside ``<checkout>/ui/web`` — and the launch-site guard judges the
     checkout, not that working directory. Judging the working directory read the
     prod home's OWN frontend as a foreign checkout and refused every legitimate
     restart, leaving the frontend the one service that could not self-heal."""
@@ -394,14 +394,14 @@ def test_respawn_judges_the_checkout_not_the_working_directory(
     monkeypatch.setattr(_paths, "ava_home", lambda: Path.home() / ".ava")
     source = Path.home() / ".ava" / "source"
 
-    ok = respawn_service("frontend", "npm run start", source / "frontend", checkout=source)
+    ok = respawn_service("frontend", "npm run start", source / "ui" / "web", checkout=source)
 
     assert ok is True
-    # The session still starts in frontend/ — only the guard's subject moved.
-    assert service.launched[0][2] == source / "frontend"
+    # The session still starts in ui/web/ — only the guard's subject moved.
+    assert service.launched[0][2] == source / "ui" / "web"
     # The contrast that names the bug: judged by the working directory alone,
     # the prod home's own frontend is read as a foreign checkout and refused.
-    assert respawn_service("frontend", "npm run start", source / "frontend") is False
+    assert respawn_service("frontend", "npm run start", source / "ui" / "web") is False
 
 
 def test_respawn_checkout_arg_cannot_launder_a_dev_checkout(
@@ -417,7 +417,7 @@ def test_respawn_checkout_arg_cannot_launder_a_dev_checkout(
     monkeypatch.setattr(_paths, "ava_home", lambda: Path.home() / ".ava")
     worktree = Path.home() / ".ava" / "worktrees" / "ava-2750-dev-wt"
     with caplog.at_level(logging.ERROR, logger="shared.service_respawn"):  # pyright: ignore[reportUnknownMemberType]
-        ok = respawn_service("frontend", "x", worktree / "frontend", checkout=worktree)
+        ok = respawn_service("frontend", "x", worktree / "ui" / "web", checkout=worktree)
     assert ok is False
     assert "01:13 worktree accident" in caplog.text  # pyright: ignore[reportUnknownMemberType]
 

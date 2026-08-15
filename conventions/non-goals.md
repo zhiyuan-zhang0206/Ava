@@ -66,7 +66,7 @@ first and ask "what changed that made it worth doing".
   `execute_code` calls. Add one only if a use case appears where a single
   cluster must run agents against each other at different trust levels.
 - **Terminal UI (TUI)**: the product surface is the Next.js fleet console
-  ([`frontend/frontend.ava.okf.md`](../frontend/frontend.ava.okf.md)) plus chat
+  ([`ui/web/web.ava.okf.md`](../ui/web/web.ava.okf.md)) plus chat
   channels (e.g. X, wired through `ava mcp install`) for talking to
   individual agents — not a terminal. Ava is an always-on, multi-agent fleet:
   supervision means seeing which agents exist, their health, the spawn/fork/

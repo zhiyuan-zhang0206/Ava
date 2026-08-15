@@ -5,7 +5,7 @@ schemas change, the frontend types-generated.ts also needs codegen to sync).
 Usage:
     .venv/bin/python scripts/dump_openapi.py [out_path]
 
-Default writes to `frontend/openapi.json`. The npm `codegen:types` script
+Default writes to `ui/web/openapi.json`. The npm `codegen:types` script
 invokes this and then runs openapi-typescript to convert the JSON to TS.
 
 import does not trigger lifespan (FastAPI app instantiation), so the DB
@@ -30,7 +30,7 @@ def main() -> int:
     from gateway.app import app
 
     spec = app.openapi()
-    out = Path(sys.argv[1] if len(sys.argv) > 1 else "frontend/openapi.json")
+    out = Path(sys.argv[1] if len(sys.argv) > 1 else "ui/web/openapi.json")
     out.parent.mkdir(parents=True, exist_ok=True)
     # Trailing newline so the pre-commit `end-of-file-fixer` hook stops
     # touching this generated file (POSIX text file convention + reduces

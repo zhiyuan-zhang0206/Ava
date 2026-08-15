@@ -63,15 +63,15 @@ coverage/
 
 # Node (for skills that bundle JS helpers)
 node_modules/
-/frontend/.builds/
+/ui/web/.builds/
 
 # mutmut workdir
 mutants/
 
 # Stryker.js workdir + reports
-frontend/reports/
+ui/web/reports/
 .stryker-tmp/
-frontend/.stryker-tmp/
+ui/web/.stryker-tmp/
 
 # metrics.py raw reports (keep the dir, ignore the reports)
 outputs/*
@@ -95,7 +95,7 @@ okf-d3.html
 # PR disposition notes from an earlier root-strays cleanup.
 /MEMORY.md
 /memory/
-/frontend/MEMORY.md
+/ui/web/MEMORY.md
 /.ava/agents/
 # Scratch notes agents leave in the repo root.
 /task564-notes.md

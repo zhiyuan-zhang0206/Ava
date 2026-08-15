@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Lint: every ``NoteTag`` enum value in ``shared/message_kwargs.py`` must be
 referenced in the frontend system_marker dispatch at
-``frontend/src/components/timeline/markers.tsx``.
+``ui/web/src/components/timeline/markers.tsx``.
 
 When a new NoteTag is added to the Python enum without updating the
 TypeScript dispatch, the tag falls through to ``UnknownMarkerChip`` — a
@@ -24,7 +24,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 PYTHON_SRC = REPO_ROOT / "shared" / "message_kwargs.py"
-TS_SRC = REPO_ROOT / "frontend" / "src" / "components" / "timeline" / "markers.tsx"
+TS_SRC = REPO_ROOT / "ui" / "web" / "src" / "components" / "timeline" / "markers.tsx"
 
 
 def extract_note_tags(path: Path) -> list[str]:

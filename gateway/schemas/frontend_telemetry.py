@@ -1,6 +1,6 @@
 """Frontend telemetry ingestion — request schema for POST /api/frontend-telemetry.
 
-The browser telemetry module (`frontend/src/lib/telemetry.ts`) batches tracked
+The browser telemetry module (`ui/web/src/lib/telemetry.ts`) batches tracked
 interactions and posts them here. Validation is strict on shape (fail fast:
 a malformed batch is a bug in our own client) and lenient on content (the
 semantic allowlist — which elements exist — lives in the frontend module, the

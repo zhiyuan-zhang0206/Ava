@@ -20,7 +20,7 @@
 // they must compose the primitives themselves.
 
 // The contract classes → the lib/layout.ts constant that replaces them.
-// Keep in sync with frontend/src/lib/layout.ts.
+// Keep in sync with ui/web/src/lib/layout.ts.
 const PRIMITIVES = {
   flex: "FLEX",
   "flex-1": "FLEX_1",

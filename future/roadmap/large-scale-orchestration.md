@@ -11,7 +11,7 @@ spawn/fork, lineage, the 24-event `ava:events` stream) already exists — what i
 missing is the *scale* of the leader's skill and the leader's batch controls.
 
 > **Status:** the leader's eyes are built; the leader's hands are not. The
-> `/fleet` board shipped — `frontend/src/components/fleet/` (graph, task graph,
+> `/fleet` board shipped — `ui/web/src/components/fleet/` (graph, task graph,
 > task kanban, inbox queue, force controls) over `gateway/routers/fleet_graph.py`
 > — so lineage, per-agent activity, and label are all legible at a glance. The
 > leader skill `ava_fleet` also has a first cut (two dials Effort × Autonomy,

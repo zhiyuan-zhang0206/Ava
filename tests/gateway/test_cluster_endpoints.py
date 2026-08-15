@@ -1134,7 +1134,7 @@ class TestUpdateCheck:
             if args[:2] == ("rev-list", "--count"):
                 return "1"
             if args[0] == "diff":
-                return "frontend/src/app/page.tsx\n"
+                return "ui/web/src/app/page.tsx\n"
             return ""
 
         monkeypatch.setattr(update_check_mod, "_git_ro", _git_ro)

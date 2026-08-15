@@ -24,7 +24,7 @@ on the axis that owns the question and replace the other with a pointer.
 Anything derivable from the code — modules, endpoints, schemas, wiring, data
 flow — lives in the OKF graph, never in `conventions/`. The graph is
 **co-located**: most `.ava.okf.md` files sit inside the source trees they
-describe (`agent/`, `ava/`, `ava_builtins/`, `cli/`, `frontend/`, `gateway/`,
+describe (`agent/`, `ava/`, `ava_builtins/`, `cli/`, `ui/web/`, `gateway/`,
 `services/`, `shared/`); the rest are index-layer nodes in `okf/`.
 
 Hierarchy is filesystem-derived (`shared/okf_graph.py:compute_parent`):
@@ -39,7 +39,7 @@ Splitting an over-cap node follows the same rule: the child goes in the
 directory named after the parent's stem, so the parent edge is derived rather
 than asserted. That directory holds only documents when the code it describes
 lives elsewhere (`ava_builtins/plugins/ava_fleet/neighbors/`,
-`frontend/src/frontend-components/`) — placing the child beside the code instead
+`ui/web/src/frontend-components/`) — placing the child beside the code instead
 would leave it with no filesystem parent, and it would fall back to the root.
 
 The one exception is the **index layer**: the apex and the cross-domain concept
@@ -114,7 +114,7 @@ directory) when the domain's shape changed:
 | SDK surface (`ava/__init__.py`, new namespaces) | `ava/ava.ava.okf.md` |
 | Gateway routes / SSE / auth | `gateway/gateway.ava.okf.md` |
 | CLI commands / cluster lifecycle | `cli/cli.ava.okf.md` |
-| Frontend | `frontend/frontend.ava.okf.md` |
+| Frontend | `ui/web/web.ava.okf.md` |
 | Shared library / LM providers / config / migrations | `shared/shared.ava.okf.md` |
 | Background services | `services/services.ava.okf.md` |
 | GitHub Actions / CI workflows | `.github/.github.ava.okf.md` |

@@ -2,7 +2,7 @@
    `Gate.__init__` (the `__THEME_CSS__` marker), because the gate serves one
    page per request and has no route to hand a browser a second asset.
 
-   Everything here mirrors the app (`frontend/src/app/globals.css` and the
+   Everything here mirrors the app (`ui/web/src/app/globals.css` and the
    shadcn primitives built on it) so a user who lands on the gate during a
    rollout sees the same product, not a different one. The token values are
    copied verbatim; when the app's palette moves, move these with it.

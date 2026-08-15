@@ -80,7 +80,7 @@ repos:
         pass_filenames: false
 
       # Ban decorative emoji in core Python (agent + backend layers). UX surfaces
-      # (cli/, ui/) and prose/content (skills/, docs/, frontend/) are exempt and
+      # (cli/, ui/) and prose/content (skills/, docs/, ui/web/) are exempt and
       # not scanned. A line that genuinely needs the character uses an inline
       # `# emoji-ok: <reason>`; see scripts/lint_no_emoji.py header for scope.
       - id: lint-no-emoji
@@ -282,7 +282,7 @@ repos:
         name: lint NoteTag / system_marker sync (every NoteTag covered in markers.tsx)
         entry: .venv/bin/python scripts/lint_note_tags.py
         language: system
-        files: ^(shared/message_kwargs\.py|frontend/src/components/timeline/markers\.tsx)$
+        files: ^(shared/message_kwargs\.py|ui/web/src/components/timeline/markers\.tsx)$
         pass_filenames: false
 
       # Migration layout: timestamp-id filename format, unique names, up/down
@@ -323,17 +323,17 @@ repos:
       # tsc doesn't support incremental single-file checks.
       - id: frontend-tsc
         name: frontend tsc --noEmit
-        entry: bash -c 'cd frontend && npx --no-install next typegen && npx --no-install tsc --noEmit'
+        entry: bash -c 'cd ui/web && npx --no-install next typegen && npx --no-install tsc --noEmit'
         language: system
-        files: ^frontend/.*\.(ts|tsx)$
+        files: ^ui/web/.*\.(ts|tsx)$
         pass_filenames: false
 
       # ESLint — aligned with frontend CI, 0 errors required to commit.
       - id: frontend-eslint
         name: frontend eslint
-        entry: bash -c 'cd frontend && npx --no-install eslint . --max-warnings 0'
+        entry: bash -c 'cd ui/web && npx --no-install eslint . --max-warnings 0'
         language: system
-        files: ^frontend/.*\.(ts|tsx|js|mjs)$
+        files: ^ui/web/.*\.(ts|tsx|js|mjs)$
         pass_filenames: false
 
       # Frontend unit tests — vitest run executes the full suite in ~1.5s
@@ -341,9 +341,9 @@ repos:
       # reducer / merge / use-timeline stays covered.
       - id: frontend-vitest
         name: frontend vitest run
-        entry: bash -c 'cd frontend && npx --no-install vitest run'
+        entry: bash -c 'cd ui/web && npx --no-install vitest run'
         language: system
-        files: ^frontend/.*\.(ts|tsx)$
+        files: ^ui/web/.*\.(ts|tsx)$
         pass_filenames: false
 
       # types-generated.ts + openapi.json must stay in sync with the Pydantic
@@ -361,13 +361,13 @@ repos:
         name: "types-generated.ts in sync with Pydantic schema (drift: run ./scripts/codegen-types.sh)"
         entry: ./scripts/check-types-fresh.sh
         language: system
-        files: ^(gateway/schemas/.*\.py$|gateway/app\.py$|gateway/routers/.*\.py$|shared/agents\.py$|shared/api_contracts/.*\.py$|shared/timeline\.py$|shared/agent_snapshot\.py$|shared/resource_monitor\.py$|ops/rpc_schemas\.py$|ops/cluster\.py$|frontend/src/lib/types-generated\.ts$|frontend/openapi\.json$)
+        files: ^(gateway/schemas/.*\.py$|gateway/app\.py$|gateway/routers/.*\.py$|shared/agents\.py$|shared/api_contracts/.*\.py$|shared/timeline\.py$|shared/agent_snapshot\.py$|shared/resource_monitor\.py$|ops/rpc_schemas\.py$|ops/cluster\.py$|ui/web/src/lib/types-generated\.ts$|ui/web/openapi\.json$)
         pass_filenames: false
       - id: constants-codegen-fresh
         name: "constants-generated.ts in sync with shared/live_events.py (drift: run ./scripts/dump_frontend_constants.py)"
         entry: ./scripts/check-constants-fresh.sh
         language: system
-        files: ^(shared/live_events\.py$|scripts/dump_frontend_constants\.py$|frontend/src/lib/constants-generated\.ts$)
+        files: ^(shared/live_events\.py$|scripts/dump_frontend_constants\.py$|ui/web/src/lib/constants-generated\.ts$)
         pass_filenames: false
 
       # shared/events/registry.md must stay in sync with the event contract

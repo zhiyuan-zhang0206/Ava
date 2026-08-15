@@ -19,7 +19,7 @@ import { describe, expect, it } from "vitest";
 
 import type { SystemEvent } from "./types";
 
-const FIXTURES_DIR = join(__dirname, "../../../tests/fixtures/events");
+const FIXTURES_DIR = join(__dirname, "../../../../tests/fixtures/events");
 
 function loadFixture(role: string): unknown {
   return JSON.parse(readFileSync(join(FIXTURES_DIR, `${role}.json`), "utf-8"));

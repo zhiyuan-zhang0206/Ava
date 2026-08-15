@@ -19,7 +19,7 @@ Root node of the Ava project's OKF (Open Knowledge Format) knowledge graph. Each
 | [[../ava/ava.ava.okf.md]] | SDK surface — `ava.*` single namespace: files / shell / agents / task / memory / skills / mcps / web / self / ui / watcher |
 | [[../gateway/gateway.ava.okf.md]] | Gateway — HTTP API, SSE push, authentication, `/api/agents` derived endpoints, bootstrap handshake |
 | [[../cli/cli.ava.okf.md]] | CLI — cluster lifecycle: start / stop / update / enroll / converge, multi-machine deployment orchestration |
-| [[../frontend/frontend.ava.okf.md]] | Frontend Web UI — fleet monitoring, agent management, task tracking |
+| [[../ui/web/web.ava.okf.md]] | Frontend Web UI — fleet monitoring, agent management, task tracking |
 | [[../desktop/desktop.ava.okf.md]] | Desktop shell — the native window wrapping the frontend console |
 | [[../shared/shared.ava.okf.md]] | Shared library — lm provider abstraction, agents-contract wire protocol, migrations, logging, configuration |
 | [[../services/services.ava.okf.md]] | Background services — long-running subsystems such as browser MCP wrapper |

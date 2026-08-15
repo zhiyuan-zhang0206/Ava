@@ -26,15 +26,15 @@ prints, it does NOT open a PR). Read it via `ava.files.read`.
 ### 1. deps (whole-repo)
 
 Run `uv pip list --outdated` (repo root) and `npm outdated --json` (in
-`frontend/`). Consider minor + major bumps only; skip patch. Flag known high-risk
+`ui/web/`). Consider minor + major bumps only; skip patch. Flag known high-risk
 majors (e.g. protobuf 6→7, marshmallow 3→4, google-genai 1→2, TypeScript 5→6) so
 they can be sequenced separately. Put the **full** outdated lists in the PR body,
 not the tracker; create a tracker entry only for an actionable high-risk bump.
-`npm outdated` needs `frontend/node_modules` to report real `current` versions (a
+`npm outdated` needs `ui/web/node_modules` to report real `current` versions (a
 missing install reports `current: null`, inflating every package to a phantom
 major). If it is missing — e.g. a fresh worktree — do not skip: make it available
 first by symlinking an existing `node_modules` from another checkout, or running
-`npm install` in `frontend/`, then run the check.
+`npm install` in `ui/web/`, then run the check.
 
 ### 2. docs-aging (whole-repo)
 

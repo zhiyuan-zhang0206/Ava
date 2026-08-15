@@ -164,7 +164,7 @@ def _ensure_redis_url_identity_step(ctx: ConvergeCtx) -> None:
 
 # `next build` / `next start` load these env files; an untracked override here
 # bakes NEXT_PUBLIC_* into the JS bundle and silently beats the runtime gateway
-# inference in frontend/src/lib/api.ts — a leftover Vercel-era .env.production
+# inference in ui/web/src/lib/api.ts — a leftover Vercel-era .env.production
 # pointed every browser at a retired host's API (a past prod outage). Only the
 # tracked .env.development is legitimate; it affects `next dev` only.
 _FORBIDDEN_FRONTEND_ENV_FILES = (".env", ".env.local", ".env.production", ".env.production.local")
@@ -185,9 +185,9 @@ def _ensure_no_frontend_env_overrides(ctx: ConvergeCtx) -> None:
     """Block any NEXT_PUBLIC_* build-time override that could poison the bundle.
 
     Two sources are scanned, both of which `next build` would inline into the JS
-    bundle, silently beating the runtime gateway inference (frontend/src/lib/api.ts):
+    bundle, silently beating the runtime gateway inference (ui/web/src/lib/api.ts):
 
-    - Forbidden env FILES under `frontend/` (`.env.production` etc.) — `next build`
+    - Forbidden env FILES under `ui/web/` (`.env.production` etc.) — `next build`
       loads them directly.
     - NEXT_PUBLIC_* lines in the unit `$AVA_HOME/.env` — `load_ava_env` loads the
       WHOLE unit .env into os.environ at process start, so a stray
@@ -198,13 +198,13 @@ def _ensure_no_frontend_env_overrides(ctx: ConvergeCtx) -> None:
       from AVA_GATEWAY_PORT and injected on the build command line
       (shared.cluster.fe_build_env), never read from .env.
     """
-    frontend = ctx.repo / "frontend"
+    frontend = ctx.repo / "ui" / "web"
     present = [name for name in _FORBIDDEN_FRONTEND_ENV_FILES if (frontend / name).exists()]
     if present:
         raise RuntimeError(
             f"build-time env override(s) under {frontend}: {', '.join(present)} — "
             "these bake NEXT_PUBLIC_* into the frontend bundle and override the "
-            "runtime gateway inference (frontend/src/lib/api.ts). Move them aside "
+            "runtime gateway inference (ui/web/src/lib/api.ts). Move them aside "
             "(e.g. add a .bak suffix) and rerun."
         )
     unit_env = ctx.ava_home / ".env"
@@ -214,7 +214,7 @@ def _ensure_no_frontend_env_overrides(ctx: ConvergeCtx) -> None:
             f"NEXT_PUBLIC_* override(s) in {unit_env}: {', '.join(leaked)} — the whole "
             "unit .env loads into os.environ at process start, so these bake into the "
             "frontend bundle (and every service session's inherited env) and override the runtime "
-            "gateway inference (frontend/src/lib/api.ts). NEXT_PUBLIC_GATEWAY_PORT is "
+            "gateway inference (ui/web/src/lib/api.ts). NEXT_PUBLIC_GATEWAY_PORT is "
             "derived from AVA_GATEWAY_PORT and injected on the build command line — it "
             "must not live in .env. Delete the NEXT_PUBLIC_* line(s) and rerun."
         )

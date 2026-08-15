@@ -98,8 +98,8 @@ confirms one, push it down into a deterministic check and mark the checklist
 row's `codified_as`:
 
 - **Source-visible** (casing an attribute slipped, a forbidden string) → extend
-  `frontend/eslint-rules/sentence-case.mjs` (its COPY_KEYS / scope) or add a
-  `no-restricted-syntax` selector in `frontend/eslint.config.mjs`. Zero false
+  `ui/web/eslint-rules/sentence-case.mjs` (its COPY_KEYS / scope) or add a
+  `no-restricted-syntax` selector in `ui/web/eslint.config.mjs`. Zero false
   positives, blocks at PR.
 - **Rendered-DOM computable** (alignment, scrollbar, empty box, duplicate
   control) → add a structural assertion to the Playwright harness in

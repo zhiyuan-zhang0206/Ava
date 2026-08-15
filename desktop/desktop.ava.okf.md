@@ -24,7 +24,7 @@ tags:
 
 ## Key dependencies
 
-- [[../frontend/frontend.ava.okf.md|Frontend]] — the web console the window renders (the product body; desktop carries no UI of its own)
+- [[../ui/web/web.ava.okf.md|Frontend]] — the web console the window renders (the product body; desktop carries no UI of its own)
 - [[services/gateway_side/gateway_side.ava.okf.md|Gateway-side services]] — the gate (`services/gate/daemon.py`) owns `:3000` (the desktop's `entryUrl`) and serves the login page when unauthenticated
 - [[../gateway/gateway.ava.okf.md|Gateway]] — auto-login talks to `/api/auth/login` + `/api/auth/check`; the `ava_session` cookie is host-only and shared across ports, which is why entry and gateway must share a hostname
 - [[services/agent_runner_side/browser/browser.ava.okf.md|Browser]] — the browser-mcp unix socket the external-link fallback opens tabs through (present only on a machine with a local cluster)

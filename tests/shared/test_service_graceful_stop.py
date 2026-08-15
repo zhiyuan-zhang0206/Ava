@@ -211,7 +211,7 @@ def test_exec_into_prefixes_a_simple_command():
 
 
 def test_exec_into_passes_through_a_command_that_execs_itself():
-    cmd = "cd frontend && npm run build && exec npm run start -- -p 3001"
+    cmd = "cd ui/web && npm run build && exec npm run start -- -p 3001"
     assert exec_into(cmd) == cmd
 
 

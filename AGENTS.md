@@ -33,7 +33,7 @@ with no escape hell.
 | Package manager | uv |
 | Frontend | Next.js 16 + React 19 + Tailwind 4 + shadcn/ui |
 
-[Frontend OKF →](frontend/frontend.ava.okf.md)
+[Frontend OKF →](ui/web/web.ava.okf.md)
 
 ## Running
 
@@ -174,7 +174,7 @@ enforces format + pairing. `rollback_to`/`apply_down`: `future/infra/commit-pinn
 ## Agent instruction files
 
 This `AGENTS.md` is this repo's entry point for all AI coding agents.
-`CLAUDE.md` is a symlink → `AGENTS.md`. `frontend/CLAUDE.md` → `frontend/AGENTS.md`. Repo skills live in `.agents/skills/` (open Agent Skills standard); `.ava/skills/` + `.claude/skills/` link back to it, built-ins (Ava Guide, …) link in from `ava_builtins/skills/`.
+`CLAUDE.md` is a symlink → `AGENTS.md`. `ui/web/CLAUDE.md` → `ui/web/AGENTS.md`. Repo skills live in `.agents/skills/` (open Agent Skills standard); `.ava/skills/` + `.claude/skills/` link back to it, built-ins (Ava Guide, …) link in from `ava_builtins/skills/`.
 
 ## Key docs — read on demand
 

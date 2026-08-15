@@ -367,19 +367,19 @@ def build_services() -> tuple[ServiceSpec, ...]:
             # list2cmdline would escape them to \" , which cmd reads as a literal
             # backslash plus a quote toggle, setting a variable named `\`.
             cmd=(
-                f'cd frontend && set "{_fe_build_env}" && '
+                f'cd ui/web && set "{_fe_build_env}" && '
                 f"npm run build && npm run start -- -p {_fe_port}"
                 if IS_WINDOWS
                 # `exec` on the serve stage (POSIX): the build is a transient
                 # prelude, so the shell must hand its pid to `npm run start` —
                 # otherwise it outlives it and swallows the graceful-stop
                 # SIGTERM (shared.session_env.exec_into).
-                else f"cd frontend && {_fe_build_env} npm run build && "
+                else f"cd ui/web && {_fe_build_env} npm run build && "
                 f"exec npm run start -- -p {_fe_port}"
             ),
             capabilities=_GATEWAY,
             # Next.js reaches data only through the gateway HTTP API — no pg client in
-            # frontend/package.json. Reviving it during a DB outage brings the
+            # ui/web/package.json. Reviving it during a DB outage brings the
             # operator UI back to report the outage rather than leaving it dark.
             requires_db=False,
             curl_url=_fe_url,

@@ -35,24 +35,24 @@ def _stub_rollout_target(monkeypatch: pytest.MonkeyPatch) -> None:
 
 class TestClassifyChange:
     def test_frontend_only(self) -> None:
-        assert _up._classify_change(["frontend/src/app/page.tsx"]) == (True, False)
+        assert _up._classify_change(["ui/web/src/app/page.tsx"]) == (True, False)
 
     def test_backend_only(self) -> None:
         assert _up._classify_change(["gateway/app.py", "shared/db.py"]) == (False, True)
 
     def test_both(self) -> None:
-        assert _up._classify_change(["frontend/src/x.tsx", "agent/graph/_claim.py"]) == (True, True)
+        assert _up._classify_change(["ui/web/src/x.tsx", "agent/graph/_claim.py"]) == (True, True)
 
     def test_docs_only_is_neither(self) -> None:
         assert _up._classify_change(["conventions/runbook.md", "README.md"]) == (False, False)
 
     def test_docs_do_not_count_as_backend(self) -> None:
         # a frontend change + a top-level doc → frontend only, not backend
-        assert _up._classify_change(["frontend/x.tsx", "CLAUDE.md"]) == (True, False)
+        assert _up._classify_change(["ui/web/x.tsx", "CLAUDE.md"]) == (True, False)
 
     def test_nested_md_classified_by_dir_not_as_doc(self) -> None:
-        # frontend/CLAUDE.md is under frontend/, so it's a frontend change
-        assert _up._classify_change(["frontend/CLAUDE.md"]) == (True, False)
+        # ui/web/CLAUDE.md is under ui/web/, so it's a frontend change
+        assert _up._classify_change(["ui/web/CLAUDE.md"]) == (True, False)
 
     def test_empty(self) -> None:
         assert _up._classify_change([]) == (False, False)
@@ -62,7 +62,7 @@ def test_frontend_only_takes_fast_path(monkeypatch: pytest.MonkeyPatch) -> None:
     """frontend-only change → _run_frontend_only_update; Phase A / quiesce /
     local update never run."""
     called: list[str] = []
-    monkeypatch.setattr(_cli, "_changed_paths_vs_origin", lambda: ["frontend/src/app/page.tsx"])
+    monkeypatch.setattr(_cli, "_changed_paths_vs_origin", lambda: ["ui/web/src/app/page.tsx"])
     monkeypatch.setattr(
         _cli,
         "_run_frontend_only_update",
@@ -124,7 +124,7 @@ def test_backend_only_runs_full_flow_without_frontend_restart(
 def test_both_changed_restarts_frontend_too(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, object] = {}
     monkeypatch.setattr(
-        _cli, "_changed_paths_vs_origin", lambda: ["frontend/x.tsx", "gateway/app.py"]
+        _cli, "_changed_paths_vs_origin", lambda: ["ui/web/x.tsx", "gateway/app.py"]
     )
     monkeypatch.setattr(_cli, "_list_agent_runners", list)
     monkeypatch.setattr(_cli, "_quiesce_all_agents", lambda **_: None)  # pyright: ignore[reportUnknownArgumentType]

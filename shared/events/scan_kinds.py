@@ -59,7 +59,7 @@ EXCLUDE_DIRS = {
     ".pyright",
     "demos",
     "deploy",
-    "frontend",
+    "web",
     "desktop",
     "dashboards",
 }

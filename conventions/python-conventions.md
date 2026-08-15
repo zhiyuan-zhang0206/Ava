@@ -41,7 +41,7 @@ One-off legitimate cases use inline `# noqa: T201` with a reason.
 
 Agent + backend code stays glyph-free. Enforced by
 `scripts/lint_no_emoji.py` (hook `lint-no-emoji`). Exempt: `cli/` and `ui/`
-(deliberate-UX surfaces), prose/content (`skills/`, the doc axes, `frontend/`).
+(deliberate-UX surfaces), prose/content (`skills/`, the doc axes, `ui/web/`).
 Plain text marks (✓ ✗) are allowed. A line that genuinely needs the character
 uses inline `# emoji-ok: <reason>`.
 

@@ -1,6 +1,6 @@
 """Frontend telemetry ingestion — `POST /api/frontend-telemetry`.
 
-The web frontend's user-modeling telemetry (`frontend/src/lib/telemetry.ts`)
+The web frontend's user-modeling telemetry (`ui/web/src/lib/telemetry.ts`)
 batches tracked interactions — key-control clicks, page views, user_settings
 changes — and posts them here; this router validates the batch and emits one
 `frontend_interaction` event (category=telemetry, source=user) per accepted

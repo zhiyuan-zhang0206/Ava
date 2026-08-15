@@ -45,9 +45,9 @@ echo "--- [1/5] deps: uv pip list --outdated ---"
 uv pip list --outdated 2>&1 || echo "(uv pip list failed)"
 echo ""
 
-if [ -d frontend/node_modules ]; then
+if [ -d ui/web/node_modules ]; then
     echo "--- [1/5] deps: npm outdated (frontend) ---"
-    (cd frontend && npm outdated --json 2>&1) || echo "(npm outdated failed)"
+    (cd ui/web && npm outdated --json 2>&1) || echo "(npm outdated failed)"
     echo ""
 else
     echo "--- [1/5] deps: npm outdated SKIPPED (no node_modules) ---"

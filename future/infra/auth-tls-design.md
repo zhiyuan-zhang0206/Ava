@@ -91,7 +91,7 @@ later once Phase 3 adds TLS.
 ### Alternatives rejected
 
 - **Next.js API proxy** (the original recommendation): a catch-all
-  `frontend/src/app/api/[[...path]]/route.ts` forwarding to the gateway with the
+  `ui/web/src/app/api/[[...path]]/route.ts` forwarding to the gateway with the
   Bearer secret injected server-side, so the browser stays same-origin and never sees
   the secret. Rejected — it exists *only* to work around `EventSource`'s header
   limitation, which cookies solve natively; it puts the Next.js server on the

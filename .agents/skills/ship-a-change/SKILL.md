@@ -137,9 +137,9 @@ file-tree diff with ★ critical paths + prose data flow.
 
 ## When a pre-commit hook cannot run: `SKIP=`, never `--no-verify`
 
-Four hooks shell out to `npx` against `frontend/node_modules`:
+Four hooks shell out to `npx` against `ui/web/node_modules`:
 `frontend-tsc`, `frontend-eslint`, `frontend-vitest`, `types-codegen-fresh`.
-A fresh agent worktree has no `frontend/node_modules` and often cannot fetch
+A fresh agent worktree has no `ui/web/node_modules` and often cannot fetch
 packages, so all four fail there — identically on a clean `main`, with no change
 of yours involved.
 

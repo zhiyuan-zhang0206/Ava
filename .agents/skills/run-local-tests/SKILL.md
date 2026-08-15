@@ -12,7 +12,7 @@ description: Use before pushing, to run the Python, frontend, and e2e suites for
 - **Local tests before push** — mandatory. After commit and before `git push`,
   run tests for the areas you touched:
   - Python: `.venv/bin/pytest <touched-test-files>` (at minimum; wider is fine)
-  - Frontend: `cd frontend && npx vitest run && npx eslint . --max-warnings 0 && npx next typegen && npx tsc --noEmit`
+  - Frontend: `cd ui/web && npx vitest run && npx eslint . --max-warnings 0 && npx next typegen && npx tsc --noEmit`
   Failures must be fixed before pushing; do not rely on CI to catch them.
   A new test must be **shown to fail without the fix** — run it against the
   stashed pre-change code, or invert its assertion momentarily.

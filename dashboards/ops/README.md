@@ -11,7 +11,7 @@ proxy as
 /grafana/d/ava-ops-main?theme=<light|dark>&kiosk
 ```
 
-(`frontend/src/app/insights/ops/page.tsx` builds the URL. Since 2026-08-05
+(`ui/web/src/app/insights/ops/page.tsx` builds the URL. Since 2026-08-05
 the URL carries no `from`/`to`: the frontend window selector was removed —
 the time range and refresh interval are Grafana's native timepicker, the
 dashboard's own defaults apply. `kiosk` hides the Grafana sidemenu/topnav
@@ -168,7 +168,7 @@ would disagree with the JSON).
 Row pitch is 30px with an 8px gap; panels render at natural size and the
 embed is **full-height** — the frontend iframe is sized to the dashboard's
 fixed rendered height (see `EMBED_HEIGHT` in
-`frontend/src/app/insights/ops/page.tsx`) so the page scrolls and the iframe
+`ui/web/src/app/insights/ops/page.tsx`) so the page scrolls and the iframe
 has no inner scrollbar. **Do not add `autofitpanels` back**: on Grafana
 13.1.1 it collapses every panel to a 30px title bar at embed widths, and
 even where it scales instead it shrinks fonts below readability.
@@ -178,7 +178,7 @@ carries a row header (h=1) that the previous hand-written layout did not
 have, so the total row count differs from the pre-migration 124 rows. After
 the integration is verified, recompute `rows × 30px + (rows-1) × 8px +
 116px chrome` and bump `EMBED_HEIGHT` in
-`frontend/src/app/insights/ops/page.tsx`.
+`ui/web/src/app/insights/ops/page.tsx`.
 
 ## Plugin metrics (generated) — the plugin section
 

@@ -69,4 +69,4 @@ Implementation shape (already decided, not a decision point): final-state design
 
 ## Related as-is nodes
 
-[[../../frontend/frontend.ava.okf.md]] · [[frontend/src/frontend-state.ava.okf.md]]
+[[../../ui/web/web.ava.okf.md]] · [[ui/web/src/frontend-state.ava.okf.md]]

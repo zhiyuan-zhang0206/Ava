@@ -72,7 +72,7 @@ already cover today's eight vendors — `anthropic` serves claude *and* deepseek
 already in that table costs nothing there; one shipping its own class costs an
 entry, and skipping it turns into a `ValueError` on the first turn that ends.
 
-Cosmetic and optional: `frontend/src/lib/models.ts:PROVIDER_LABELS` prettifies a
+Cosmetic and optional: `ui/web/src/lib/models.ts:PROVIDER_LABELS` prettifies a
 provider key. An unrecognized provider still renders, just capitalized.
 
 Everything else is already derived and needs no edit — this is the part worth

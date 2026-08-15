@@ -51,7 +51,7 @@ def test_shell_free_command_launches_as_argv(cmd: str, tmp_path: Path) -> None:
     "cmd",
     [
         # The frontend service (gateway-only today, but the launcher is shared).
-        'cd frontend && set "NEXT_PUBLIC_API=http://h:8000" && npm run build',
+        'cd ui/web && set "NEXT_PUBLIC_API=http://h:8000" && npm run build',
         # The agent-runner self-update chain (`ops.cluster` spawns this on Windows).
         'echo [updater] force-checkout & git fetch origin && git checkout -B "main" && ava restart || ava start',
         "python -m x | findstr ERROR",
@@ -256,7 +256,7 @@ def test_frontend_respawn_command_rewrites_in_the_shell_branch(tmp_path: Path) -
     scripts.mkdir(parents=True)
     (scripts / "python.exe").write_text("")
 
-    cmd = 'cd frontend && set "NEXT_PUBLIC_API=http://h:8000" && .venv/bin/python -m x'
+    cmd = 'cd ui/web && set "NEXT_PUBLIC_API=http://h:8000" && .venv/bin/python -m x'
     launch = winproc._plan_launch(cmd, cwd)
     assert launch.via_shell
     assert str(scripts / "python.exe") in launch.command

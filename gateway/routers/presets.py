@@ -16,7 +16,7 @@ Hand-writing a preset's `config` JSON is not a UI task — the field names and
 skill combinations that make a good preset live in ava-guide.presets, not in
 a frontend form. So creation is natural-language: the frontend composes a
 short prompt pointing a new agent at `ava.skills.ava_guide.presets` and
-spawns it via the plain `POST /api/agents` (see `frontend/src/app/control/
+spawns it via the plain `POST /api/agents` (see `ui/web/src/app/control/
 presets/page.tsx`) — no dedicated backend endpoint; the management page here
 only lists / edits label + description / deletes.
 """

@@ -23,5 +23,5 @@ Full-screen supervision plane: judge 10-20 agents without opening any conversati
 
 ## Relationship to Other Nodes
 
-- [[frontend/src/frontend-components/frontend-components.ava.okf.md|Frontend Components]] — the catalog this surface was split out of; the conversation view and settings/auth components live there.
-- [[frontend/src/frontend-state.ava.okf.md|State Management]] — where the `display.*` settings above are persisted, and which selections stay per-device instead.
+- [[ui/web/src/frontend-components/frontend-components.ava.okf.md|Frontend Components]] — the catalog this surface was split out of; the conversation view and settings/auth components live there.
+- [[ui/web/src/frontend-state.ava.okf.md|State Management]] — where the `display.*` settings above are persisted, and which selections stay per-device instead.
