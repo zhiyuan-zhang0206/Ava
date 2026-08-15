@@ -54,4 +54,4 @@ upgrades won't break the bot, because:
 - If intents are disabled, the bot connects regardless of Developer Portal settings
 - If user enables intents in Developer Portal, they must explicitly set env vars to `"0"`
 
-PR: https://github.com/<user>an-zhang0206/Ava/pull/476
+PR: #476 (internal tracker; see CONTRIBUTING.md)

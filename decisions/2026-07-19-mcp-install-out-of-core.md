@@ -5,18 +5,18 @@ Date: 2026-07-19
 > **Note (2026-08-12, user ruling):** The Discord MCP is **deleted entirely
 > and no longer maintained** — the user ruled it is not needed and Ava will
 > not maintain it. The standalone repo
-> `github.com/<user>an-zhang0206/ava-mcp-discord` (created earlier the same
+> `ava-mcp-discord` (created earlier the same
 > day) is left in place but unmaintained; this machine's installed copy,
 > registry entry and token are removed; every current-state reference is
 > cleaned up. All Discord sections
 > below are retained as history only.
 >
 > **Note (2026-08-13):** Discord was promoted to its own standalone repo
-> (`github.com/<user>an-zhang0206/ava-mcp-discord`, **private**; made public at
+> (`ava-mcp-discord`, **private**; made public at
 > the open-source day) — superseded the same day by the ruling above: the
 > MCP is no longer maintained (the repo itself was left in place, unmaintained).
 > `contrib/mcp/x` was likewise promoted the same day to its own repo
-> `github.com/<user>an-zhang0206/ava-mcp-x` — see the x externalization
+> `ava-mcp-x` — see the x externalization
 > evaluation below.
 >
 > **Note (2026-07-25):** The `contrib/mcp/` packages described below were
@@ -152,7 +152,7 @@ historical Ava commit whose `contrib/mcp/` content was deleted from `main`
 can never receive updates.
 
 **Verdict: externalize — executed 2026-08-13.** Same move as Discord: new
-private repo `github.com/<user>an-zhang0206/ava-mcp-x` (repo root = package),
+private repo `ava-mcp-x` (repo root = package),
 installed-source swapped to that URL (`path`/`ref` dropped), `ava mcp upgrade
 x` verified end-to-end (24 official tools listed through the bridge). The
 evaluation above judged it non-urgent (stdlib-only, thin, stable, frozen

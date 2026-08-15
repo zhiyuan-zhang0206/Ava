@@ -1,45 +1,56 @@
-# Going public — the public-repo CI swap
+# CI after going public — what the swap left open
 
-How the private repo's self-hosted CI lane becomes GitHub-hosted CI when the
-repo goes public, and what is still missing before that swap is safe.
+The repo is public and the CI swap is **done**: `.github/workflows/ci.yml` runs
+three jobs (backend / frontend / e2e) on GitHub-hosted `ubuntu-24.04`, and the
+self-hosted lane it replaced — the Hetzner runners, their autoscaler, and the
+`nightly.yml` / `build-image.yml` / `ghcr-retention.yml` workflows that fed
+them — is gone. Only `setup-runner-native.sh` survived the publish as dead
+weight; it was deleted 2026-08-14.
 
-## The swap
+The current surface is documented in
+[`.github/.github.ava.okf.md`](../.github/.github.ava.okf.md). What follows is
+the part that is *not* current-state: coverage the private lane had and this one
+does not.
 
-1. Copy `deploy/ci/public-ci.yml` over `.github/workflows/ci.yml` (commit the
-   replacement in the same PR that opens the repo).
-2. Delete the self-hosted provisioners and runners: `scripts/provision/` and
-   the Hetzner CI runners (`ops/ci_autoscale/`) become dead weight once the
-   private lane is gone.
-3. Re-enable the checks the public lane skips (see gaps below) and run one
-   real ubuntu-hosted workflow end-to-end before flipping the repo public.
+Note that the rest of `scripts/provision/` is **not** self-hosted-runner
+machinery and stays: `_lib.sh` / `database.sh` / `node.sh` / `toolchain.sh` are
+sourced by `scripts/install.sh` (the installer a new user runs) and the
+`Dockerfile`, and `install-playwright.sh` is the eval image's playwright layer.
+Deleting the directory wholesale, as an earlier version of this checklist said
+to, would break the installer.
 
-Why the swap at all: GitHub-hosted runners are free and unmetered for public
-repos and public forks. The self-hosted native runners exist only because the
-private repo would otherwise burn metered minutes; once public that reason is
-gone, forks get CI for free on GitHub's runners. No canonical-vs-fork gating
-is needed — one lane runs everywhere.
+## Gaps vs. the retired private lane
 
-The private `ci.yml` and the public template are kept in sync by review, not
-by tooling: the template lives under `deploy/` precisely so it cannot
-accidentally become the active workflow before the repo is public.
+These were deliberate — they keep the workflow small — and each is still open:
 
-## Known gaps vs the private lane (close before the swap)
+- **No `desktop` job.** The private lane built and tested the Electron app.
+  `desktop/` still ships; nothing in CI compiles it, so a break there is found by
+  a human.
+- **No `pre-commit` job.** The pre-commit config carries ~25 lint hooks
+  (`lint-ava-okf`, `lint-doc-symbols`, `lint-skill-*`, `lint-fail-fast`,
+  `lint-no-os-environ`, the import-linter contracts, …). CI runs only the subset
+  spelled out as its own steps — ruff, the migration + clock-lattice lints,
+  pyright. Every other hook is enforced only for contributors who ran
+  `pre-commit install`, which for an outside contributor is *nobody by default*.
+  This is the largest of the gaps: it is the one where a PR can be green and
+  still violate a rule the repo considers binding.
+- **No `check_cross_branch_migrations`.** `scripts/check_cross_branch_migrations.py`
+  exists and nothing calls it, so migration-set drift between concurrently open
+  branches is unchecked.
 
-The template is NOT validated until a real ubuntu run exercises its inline
-provisioning (PGDG pg17, setup-uv, playwright install) — the private suite
-runs on pre-provisioned native runners, so the public lane's provisioning
-steps have never executed. The gaps below are deliberate today (they keep the
-template small) and must be closed before the swap:
+Closed since the swap: **job timeouts** — all three jobs now carry
+`timeout-minutes` (2026-08-14), so a hung job stops at its cap rather than
+running to GitHub's global limit.
 
-- **No `desktop` job** — the private lane builds/tests the desktop app.
-- **No `pre-commit`** — the private lane runs the full pre-commit gate (~25
-  lint hooks); the public lane only runs the workflow's own steps.
-- **No `check_cross_branch_migrations`** — migration-set drift across branches
-  is unchecked in the template.
-- **No `merge_group` trigger** — Mergify queue events do not run the public
-  lane as written.
-- **No `timeout-minutes`** on jobs — a hung public job runs until GitHub's
-  global cap.
+Dropped as moot: **the `merge_group` trigger**. It existed for a Mergify queue
+that does not run on this repo.
 
-The template's `paths-ignore` mirrors the private lane's
-(`ava_builtins/skills/**`, `**/*.md`).
+## Why the shape is what it is
+
+Hosted minutes are free and unmetered for public repos and public forks, so the
+cost pressure that produced the private lane's whole design — commit-modulo
+sampling of full runs on main, percentage sampling of e2e on PRs, a nightly
+backstop to cover what sampling skipped — is gone. Everything runs on every PR
+instead. That is why closing the gaps above is a matter of adding steps, not of
+rebuilding a scheduling scheme: there is no budget to spend, only the wall-clock
+cost of a longer PR wait.

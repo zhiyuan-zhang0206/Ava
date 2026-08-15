@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
-# The system layer of a Linux Ava host (a CI runner / bench box): Python 3.12 +
-# build tools, then the shared provision pieces — pg17 + redis servers, node 22,
-# CLI tools. Composes scripts/provision/* so the package logic lives in one place
-# (install.sh's gateway path and this CI path draw from the same pieces).
+# The system layer of a Linux Ava host: Python 3.12 + build tools, then the
+# shared provision pieces — pg17 + redis servers, node 22, CLI tools. Composes
+# scripts/provision/* so the package logic lives in one place (install.sh's
+# gateway path and this whole-host path draw from the same pieces).
+#
+# Use it to bring a bare Debian/Ubuntu box up to "can run Ava" in one call;
+# install.sh then births the cluster on top. Not required on a host that already
+# has the toolchain — install.sh provisions what it needs on its own.
 #
 # Server binaries only, NO initdb: the test suite spins throwaway native clusters
 # (tests/_containers.py), and a gateway unit's own per-cluster instance is

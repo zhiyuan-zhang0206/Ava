@@ -23,7 +23,7 @@ Root node of the Ava project's OKF (Open Knowledge Format) knowledge graph. Each
 | [[../desktop/desktop.ava.okf.md]] | Desktop shell — the native window wrapping the frontend console |
 | [[../shared/shared.ava.okf.md]] | Shared library — lm provider abstraction, agents-contract wire protocol, migrations, logging, configuration |
 | [[../services/services.ava.okf.md]] | Background services — long-running subsystems such as browser MCP wrapper |
-| [[../.github/.github.ava.okf.md]] | GitHub Actions surface — CI workflows, CI parameter config, image build / release, issue + PR templates |
+| [[../.github/.github.ava.okf.md]] | GitHub Actions surface — the CI workflow (backend / frontend / e2e on hosted runners), tag-triggered releases, issue + PR templates |
 | [[okf/plugins.ava.okf.md]] | Plugin system — extension mechanism that can carry skills / MCP servers |
 | [[okf/skills/skills.ava.okf.md]] | Skills — pure markdown instruction bundles, lazily loaded by agents on demand |
 | [[okf/mcps/mcps.ava.okf.md]] | MCP integration — built-in chrome + external servers installed via `ava mcp install` (e.g., x), invoked via daemon subprocesses |

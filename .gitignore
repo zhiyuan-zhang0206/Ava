@@ -99,6 +99,9 @@ okf-d3.html
 /.ava/agents/
 # Scratch notes agents leave in the repo root.
 /task564-notes.md
+# PR-description drafts. Two of these shipped in the first public snapshot;
+# the body belongs in the PR, not the tree.
+/pr-body*.md
 
 # Scratch files agents write when composing a commit message. One of these
 # (.commit_msg.txt) is a transient scratch file.

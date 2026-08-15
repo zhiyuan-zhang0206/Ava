@@ -69,7 +69,7 @@ secret, and a name for this machine.
 ```powershell
 # 1. Clone to the canonical home
 mkdir $env:USERPROFILE\.ava
-git clone https://github.com/<user>an-zhang0206/Ava.git $env:USERPROFILE\.ava\source
+git clone https://github.com/zhiyuan-zhang0206/Ava.git $env:USERPROFILE\.ava\source
 cd $env:USERPROFILE\.ava\source
 
 # 2. Install deps + the `ava` CLI into .venv\Scripts\

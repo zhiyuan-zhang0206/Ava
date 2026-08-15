@@ -42,7 +42,7 @@ and re-run `ava start` so the `machines` table UPSERT overwrites the stale row.
 1. Install Tailscale, join the tailnet. (WSL2: install inside the
    distro — see above.)
 2. Clone the repo to `~/Ava` for dev work, or `~/.ava/source` for
-   agent-runner duty: `git clone https://github.com/<user>an-zhang0206/Ava.git ~/.ava/source` (the path matters
+   agent-runner duty: `git clone https://github.com/zhiyuan-zhang0206/Ava.git ~/.ava/source` (the path matters
    — see runbook §"Prod and dev clone paths").
 3. `uv sync` in the clone.
 4. Make sure the new host is joined to the tailnet (the gateway is reachable

@@ -1,24 +1,21 @@
-# Public-repo CI — GitHub-hosted ubuntu runners.
+# CI — the repo's only gate. GitHub-hosted ubuntu runners.
 #
-# NOT active here: this lives under deploy/, not .github/workflows/, so the
-# private repo's CI (the self-hosted native lane in .github/workflows/ci.yml) is
-# untouched. The publish recipe (future/going-public.md) swaps THIS file in
-# as .github/workflows/ci.yml when the repo goes public.
+# Hosted minutes are free and unmetered for public repos and public forks, so one
+# lane runs everywhere with no canonical-vs-fork gating. There is no self-hosted
+# fleet and no runner provisioner: a hosted runner starts bare, so each job
+# installs its own toolchain inline — uv, Node 22, Postgres 17 + Redis server
+# binaries on PATH (the suite self-provisions throwaway native clusters via
+# tests/_containers.py), and Playwright chromium for e2e.
 #
-# Why the swap: GitHub-hosted runners are free and unmetered for PUBLIC repos and
-# for public forks, with no per-minute billing. The self-hosted native runners
-# exist only because the private repo would otherwise burn metered minutes; once
-# public that reason is gone, forks get CI for free on GitHub's runners, and the
-# Hetzner CI runners can be retired. No canonical-vs-fork gating is needed — one
-# lane runs everywhere.
+# AVA_DB_URL / AVA_REDIS_URL are pointed at unreachable sentinel ports on
+# purpose. The suite must provision its own throwaway cluster; a sentinel turns
+# "a test quietly reached a real data plane" into a connection error rather than
+# a silent pass.
 #
-# Same three jobs and commands as the private ci.yml, but each provisions inline
-# what the self-hosted runner supplied out-of-band: uv, Node 22, Postgres 17 +
-# Redis server binaries on PATH (the suite self-provisions throwaway native
-# clusters via tests/_containers.py), and Playwright chromium for e2e.
-#
-# NOT validated until the repo is public and a real run exercises the ubuntu
-# provisioning (PGDG pg17, setup-uv, playwright install).
+# `uses:` is pinned to a commit SHA with the version in a trailing comment — a
+# floating tag (@v6) is a mutable pointer the action's owner can repoint, i.e. a
+# supply-chain write into every run. .github/dependabot.yml keeps the pins fresh
+# via reviewable PRs.
 
 name: CI
 
@@ -42,14 +39,17 @@ jobs:
   backend:
     name: backend (pytest + pyright)
     runs-on: ubuntu-24.04
+    # Generous vs. the observed run, tight vs. GitHub's 6h default: a job that
+    # blows past this is hung, not slow.
+    timeout-minutes: 45
     env:
       AVA_DB_URL: postgresql://unused@127.0.0.1:1/unused
       AVA_REDIS_URL: redis://127.0.0.1:1/0
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
 
       - name: Install Postgres 17 + Redis (server binaries on PATH)
         run: |
@@ -79,10 +79,11 @@ jobs:
 
       - name: Upload pg fixture logs on failure
         if: failure()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: pg-fixture-logs
-          # Mirror of the private CI step — see .github/workflows/ci.yml.
+          # The fixture only writes logs when it fails to bring pg up, so an
+          # empty dir is the normal case and must not fail the upload.
           if-no-files-found: ignore
           path: tmp/pg-fixture-logs/
 
@@ -101,11 +102,12 @@ jobs:
   frontend:
     name: frontend (eslint + tsc + vitest)
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
 
       - name: Install Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: npm
@@ -127,14 +129,15 @@ jobs:
   e2e:
     name: e2e (Playwright happy path)
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
     env:
       AVA_DB_URL: postgresql://unused@127.0.0.1:1/unused
       AVA_REDIS_URL: redis://127.0.0.1:1/0
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
 
       - name: Install Postgres 17 + Redis (server binaries on PATH)
         run: |
@@ -156,7 +159,7 @@ jobs:
 
       - name: Upload e2e logs on failure
         if: failure()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: e2e-logs
           path: tmp/e2e-logs/

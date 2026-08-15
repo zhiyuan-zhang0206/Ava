@@ -32,7 +32,7 @@ the entire cluster.
 ```bash
 # Clone to the canonical path
 mkdir -p ~/.ava && cd ~/.ava
-git clone https://github.com/<user>an-zhang0206/Ava.git source && cd source
+git clone https://github.com/zhiyuan-zhang0206/Ava.git source && cd source
 
 # Run the install script (single-machine deployment)
 ./scripts/install.sh --role gateway,agent-runner
@@ -208,4 +208,4 @@ See [Windows setup guide](conventions/windows-setup.md). Common issues:
 ## Getting help
 
 - Read the [full documentation](conventions/)
-- File a [GitHub Issue](https://github.com/<user>an-zhang0206/Ava/issues)
+- File a [GitHub Issue](https://github.com/zhiyuan-zhang0206/Ava/issues)

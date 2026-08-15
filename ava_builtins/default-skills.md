@@ -31,8 +31,10 @@ rest." The decision is per-pack, not global.
 
 > **Exercised 2026-07-30 by the first pack** — `ava-ui/design` +
 > `ava-ui/dataviz`, vendored from the Claude Code bundled skills
-> `artifact-design` and `dataviz`. See "First vendored pack" below for what the
-> adaptation actually cost and the conventions it established.
+> `artifact-design` and `dataviz`, and **removed again 2026-08-14** when the
+> open-source publish put its license basis under scrutiny. See "First vendored
+> pack" below for what the adaptation cost, the conventions it established, and
+> the one that cost the pack.
 
 A fresh `ava plugins install` of an upstream pack is **limited** — its skills
 carry Claude-Code-specific content (the `Skill` tool, native worktrees, the
@@ -86,15 +88,28 @@ references** — which is exactly why the settled direction is vendor-and-adapt
 raw recommend-install. Adaptation is real work, not hand-waving: quantifying it
 (links/tool-refs per skill → effort estimate) is the first implementation step.
 
-## First vendored pack (2026-07-30) — frontend design
+## First vendored pack (2026-07-30, removed 2026-08-14) — frontend design
 
 The vendor-and-adapt path is no longer theoretical. Two Anthropic-authored
-Claude Code bundled skills now live in-tree as sub-skills of `ava-ui`:
+Claude Code bundled skills lived in-tree as sub-skills of `ava-ui` for two weeks:
 `ava-ui/design` (from `artifact-design`) and `ava-ui/dataviz` (from `dataviz`).
-Provenance, upstream build markers, and the full adaptation list:
+
+**They were removed on 2026-08-14.** Both were copied out of the closed-source
+Claude Code CLI binary, and the recorded Apache-2.0 basis — a *similarly named*
+public sibling in `anthropics/skills` — did not survive checking: that repo
+carries neither skill. The mechanics below are what the exercise settled and
+still hold; the license lesson is the one that cost the pack. Detail:
 [`ava_builtins/skills/VENDORED.md`](skills/VENDORED.md).
 
 What it settled, beyond the direction:
+
+- **License is a gate, not a footnote — and it gates the *source*, not the
+  content.** Everything else on this list is about whether a pack *works* here.
+  This one decides whether it may ship at all, and it is the cheapest check to
+  run first: name the upstream repo, open its LICENSE, confirm it covers the
+  files you copied. A pack extracted from a closed-source binary has no such
+  repo to point at, which is the answer. Adjacency is not a license — the
+  strength of the adaptation, or of the content, does not enter into it.
 
 - **Adaptation cost is small when the pack is prose.** The predicted expense was
   cross-links and tool references. In practice the design content was almost
@@ -114,22 +129,27 @@ What it settled, beyond the direction:
   chain pointer from the skill that owns its job is recalled at the moment it is
   relevant. So: **vendor a pack under the skill that owns its job**, and promote
   to top-level when it has no natural parent.
-- **Soft pointers, not mandatory ones.** The chain line in `ava-ui` is advisory
+- **Soft pointers, not mandatory ones.** The chain line in `ava-ui` was advisory
   ("for a polished or user-facing page, consider loading …"). A mandatory load
-  would tax every trivial render; the vendored skill already carries its own
-  how-much-design-does-this-warrant calibration, so the judgment belongs to the
-  agent reading it.
-- **Vendored payload stays byte-identical.** Upstream files are carved out of
-  ruff/pyright in `pyproject.toml` so a future sync diffs cleanly. Reformatting
-  vendored code is what makes a fork undiffable, and it is the default outcome
-  unless explicitly prevented.
+  would tax every trivial render; the vendored skill already carried its own
+  how-much-design-does-this-warrant calibration, so the judgment belonged to the
+  agent reading it. (A side benefit only visible at removal: an advisory pointer
+  is one line to delete, so a pack that has to leave does not strand callers.)
+- **Vendored payload stays byte-identical.** Upstream files were carved out of
+  ruff/pyright in `pyproject.toml` so a future sync would diff cleanly.
+  Reformatting vendored code is what makes a fork undiffable, and it is the
+  default outcome unless explicitly prevented. It also makes provenance
+  legible after the fact — byte-identity to the closed-source original is
+  precisely what made the license question answerable rather than arguable.
 - **Vendoring bypasses the supply-chain scanner.** Anything under
   `ava_builtins/skills/` is stamped `trust="builtin"` by converge, so a vendored
   pack must be read in full before commit — the scanner will never see it.
 
 Open follow-up: `VENDORED.md` is a hand-maintained manifest. A tracker that
 diffs recorded upstream versions against current upstream is the natural next
-step, and is why the manifest records versions rather than just sources.
+step, and is why the manifest records versions rather than just sources. It was
+never built — and would not have caught this anyway: drift tracking assumes the
+vendoring was legitimate to begin with, which is the check that was missing.
 
 ## Other packs to weigh (not yet evaluated)
 
