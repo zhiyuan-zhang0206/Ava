@@ -88,9 +88,9 @@ dependencies = [
 ava = "cli.main:main"
 
 [project.urls]
-Homepage = "https://github.com/<user>an-zhang0206/Ava"
-Repository = "https://github.com/<user>an-zhang0206/Ava"
-Issues = "https://github.com/<user>an-zhang0206/Ava/issues"
+Homepage = "https://github.com/zhiyuan-zhang0206/Ava"
+Repository = "https://github.com/zhiyuan-zhang0206/Ava"
+Issues = "https://github.com/zhiyuan-zhang0206/Ava/issues"
 
 [build-system]
 # hatchling is the default minimal builder for the uv / PEP 621 stack. `[tool.uv] package
@@ -182,13 +182,12 @@ layers = [
 
 [tool.ruff]
 line-length = 100
-# Vendored third-party skill content (inventory + upstream versions in
-# ava_builtins/skills/VENDORED.md) is kept byte-identical to upstream so a future
-# sync can diff it directly. Reformatting or relinting it here would turn every
-# upstream comparison into pure noise, so it is excluded from both check and
-# format. Ava-authored SKILL.md prose beside it is still reviewed normally; only
-# the untouched upstream payload is exempt.
-extend-exclude = ["ava_builtins/skills/ava-ui/dataviz/scripts"]
+# No vendored third-party Python ships in-tree today. When some does, exclude it
+# here: vendored payload is kept byte-identical to upstream so a future sync can
+# diff it directly, and reformatting or relinting it would turn every upstream
+# comparison into pure noise. Ava-authored prose beside it is still reviewed
+# normally; only the untouched upstream payload is exempt. Inventory and the
+# license bar a pack must clear: ava_builtins/skills/VENDORED.md.
 
 [tool.ruff.lint]
 select = [
@@ -423,9 +422,6 @@ exclude = [
     # per-file-ignores for the same paths.
     "ava_builtins/skills/*/reference",
     "ava_builtins/plugins/*/skills/**/reference",
-    # Vendored upstream code, held byte-identical for upstream diffing — see the
-    # extend-exclude note under [tool.ruff] and ava_builtins/skills/VENDORED.md.
-    "ava_builtins/skills/ava-ui/dataviz/scripts",
 ]
 # Libraries with incomplete third-party stubs — temporarily lenient.
 reportMissingTypeStubs = false

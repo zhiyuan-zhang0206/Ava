@@ -188,7 +188,7 @@ would fail after the full toolchain install.
   adduser ava && echo 'ava ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/ava
   su - ava
   mkdir -p ~/.ava && cd ~/.ava
-  git clone https://github.com/<user>an-zhang0206/Ava.git source && cd source
+  git clone https://github.com/zhiyuan-zhang0206/Ava.git source && cd source
   ./scripts/install.sh --role gateway,agent-runner
 
 Runner-only hosts (--role agent-runner, no local data plane) may install as root.
@@ -226,7 +226,7 @@ than your existing prod data.
 First-time install on a fresh host:
   mkdir -p $_AVA_HOME
   cd $_AVA_HOME
-  git clone https://github.com/<user>an-zhang0206/Ava.git source
+  git clone https://github.com/zhiyuan-zhang0206/Ava.git source
   cd source
   bash scripts/install.sh${ROLE:+ --role $ROLE}
 

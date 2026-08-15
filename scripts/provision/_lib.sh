@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Shared helpers for the scripts/provision/* pieces — one OS-dispatch + logging
 # surface so the three consumers install the same way without duplicating package
-# logic: `scripts/install.sh` (a unit), the `Dockerfile` (the eval image), and the
-# CI-host provisioner. Each piece sources this, resolves the platform once, and
-# branches.
+# logic: `scripts/install.sh` (a unit), the `Dockerfile` (the eval image), and
+# `install-system.sh` (a whole bare host). Each piece sources this, resolves the
+# platform once, and branches.
 #
 # Source it from a sibling script:
 #   . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_lib.sh"

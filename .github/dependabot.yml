@@ -1,0 +1,28 @@
+# Keep the SHA-pinned GitHub Actions fresh.
+#
+# The workflows pin every `uses:` to a commit SHA (a floating @v6 tag is a
+# mutable pointer the action's owner can repoint, i.e. a supply-chain write into
+# every CI run). A pin that nobody updates is the other failure mode — it silently
+# ages out of security fixes. Dependabot closes that loop: it opens a reviewable
+# PR that bumps the SHA and the trailing `# vX.Y.Z` comment together.
+#
+# Actions only. Python deps are resolved through uv.lock and npm's through
+# package-lock.json; adding those ecosystems here would open PRs that bypass
+# `uv sync --frozen`, so they stay a deliberate manual bump.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "ci"
+    labels:
+      - ci
+      - dependencies
+    groups:
+      # One PR for all action bumps: they are reviewed as a batch and each is a
+      # one-line SHA swap, so per-action PRs are pure noise.
+      actions:
+        patterns:
+          - "*"

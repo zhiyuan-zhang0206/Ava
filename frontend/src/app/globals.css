@@ -73,7 +73,9 @@
   --chart-4: oklch(0.371 0 0);
   --chart-5: oklch(0.269 0 0);
   --radius: 0.625rem;
-  /* ops panel chart series — validated dataviz palette slots 1-5 (light) */
+  /* ops panel chart series — categorical slots, contrast-checked against the
+     light surface and distinguishable under common color-vision deficiencies.
+     Paired 1:1 with the dark block below; keep the two in sync. */
   --series-1: #2a78d6;
   --series-2: #eb6834;
   --series-3: #1baf7a;
@@ -121,7 +123,8 @@
   --chart-3: oklch(0.439 0 0);
   --chart-4: oklch(0.371 0 0);
   --chart-5: oklch(0.269 0 0);
-  /* ops panel chart series — validated dataviz palette slots 1-5 (dark) */
+  /* ops panel chart series — the dark-surface pair of the light block above
+     (same hues, re-tuned for contrast on dark). Keep the two in sync. */
   --series-1: #3987e5;
   --series-2: #d95926;
   --series-3: #199e70;

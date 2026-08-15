@@ -100,7 +100,7 @@ CONFLICTING = frozenset({"CONFLICTING"})
 # back to a hard-coded default for contexts without a git remote (watcher
 # processes run from the agent workspace, which is not a checkout).
 # Overridable with --repo.
-_FALLBACK_REPO = "<user>an-zhang0206/Ava"
+_FALLBACK_REPO = "zhiyuan-zhang0206/Ava"
 
 
 def _derive_repo() -> str:

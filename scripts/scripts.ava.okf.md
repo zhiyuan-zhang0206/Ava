@@ -38,7 +38,7 @@ Code and document structure guards, mostly invoked by `.pre-commit-config.yaml` 
 ### Installation and Provisioning
 - `install.sh` — unit scaffolding, two mutually exclusive paths: `--role gateway,agent-runner|gateway|agent-runner` (prod/host install, final step runs `cli.install_cluster` to birth the cluster — registry records + own pg/redis + create db + write `$AVA_HOME/.env`, `ava start` remains the sole bring-up); `--worktree [--path P] [--no-seed]` (dev worktree self-cluster, skips brew/apt, install-dir guard, `~/.local/bin` symlinks; identity = checkout path, home defaults to `~/.ava-<checkout dir name>`, `--path` is the sole identity override — no name flag)
 - `install-cli-tools.sh`, `setup-worktree.sh`, `worktree.sh`
-- `provision/` — `database.sh` / `node.sh` / `toolchain.sh` / `install-playwright.sh` / `setup-runner-native.sh` / `install-system.sh` (Linux Debian/Ubuntu system-level install for CI runner / bench boxes: Python 3.12 + build tools, then composes the other scripts) / `_lib.sh`
+- `provision/` — `database.sh` / `node.sh` / `toolchain.sh` / `install-playwright.sh` (the Dockerfile's eval-image layer) / `install-system.sh` (Linux Debian/Ubuntu system-level install for a bare host: Python 3.12 + build tools, then composes the other scripts) / `_lib.sh`. Consumers: `install.sh`, the `Dockerfile`, `install-cli-tools.sh`.
 - `install.sh --mirror cn` — route pip/npm/brew through CN mirrors (loads `mirrors/cn.env`, copies mirror config to `~/.ava/mirror.env` for every subsequent `ava` command); `--warm-mcp` pre-warms the MCP server
 
 ### CI / Release / Migration

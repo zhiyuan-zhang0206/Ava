@@ -16,12 +16,8 @@ Provides the agent with **frontend scaffolding** to launch a page for the user (
 - `ava.ui.serve(dir, name, port)` is a one-step static file path (start server + poll + register page); it's a **static file server**, `.md` files will be opened as **raw markdown source** (garbled) — so **never directly serve `.md`**, first run `ava.ui.serve_markdown()` or render to HTML with a markdown widget.
 - Interaction panels (choice/confirm/form/compare) relay the user's choice back to the agent — "ask the user via a page," not just "display."
 
-## Sub-skills — the design chain
-`ava-ui` is a **root skill**: it carries two nested design sub-skills, and its own SKILL.md opens with a soft pointer at them (advisory, not mandatory — a throwaway render needs neither).
-- `ava.skills.ava_ui.design` — page-level visual quality bar: how much design a request warrants, typography, neutrals, both themes, layout, copy.
-- `ava.skills.ava_ui.dataviz` — charts/dashboards: form heuristic, color formula, a runnable palette validator (`scripts/validate_palette.py`).
-
-Both are **vendored** from Claude Code bundled skills, not authored here; provenance and the adaptation list live in [VENDORED.md](../VENDORED.md). Nesting is deliberate: the system-prompt capability index is a whitelist that already contains `ava-ui`, so chaining off it is the reliable recall path for content that would otherwise need a config change on every cluster to be seen.
+## Sub-skills
+`ava-ui` has none. It carried two nested design sub-skills (`design`, `dataviz`) until 2026-08-14, when they were removed: both were copied out of the closed-source Claude Code CLI binary, and the Apache-2.0 basis recorded for them did not hold up (see [VENDORED.md](../VENDORED.md)), so they cannot be redistributed from this repo. The nesting mechanism itself is still the right shape for a future pack — the system-prompt capability index is a whitelist that already contains `ava-ui`, so chaining off it is the reliable recall path for content that would otherwise need a config change on every cluster to be seen.
 
 ## Key Dependencies
 - [[ava_builtins/skills/comms/comms.ava.okf.md|Communication & User Interaction Skills]] — parent functional group

@@ -9,12 +9,6 @@ Provides **frontend boilerplate** for the agent to spin up a page for the user t
 **No Python writing**, no Python API. Everything is HTML / JS / TSX / starter
 projects; the agent uses the file tools `read` / `cp` to fetch them, assemble and edit them, then start a server.
 
-For a polished or user-facing page, consider loading
-`ava.help(ava.skills.ava_ui.design)` before you write markup — it calibrates how
-much design the request warrants and carries the typography / color / layout
-bar. For charts and dashboards, `ava.help(ava.skills.ava_ui.dataviz)`. A
-throwaway render needs neither; judge it from the task.
-
 `ava.ui.serve(dir, name, port=None)` is the one-call path for static files: it starts
 a `ThreadingTCPServer` on `0.0.0.0:<port>` with a `/health` endpoint, polls until
 listening, and registers the page — the whole session-start + poll + show dance
