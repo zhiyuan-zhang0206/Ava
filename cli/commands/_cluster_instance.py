@@ -539,8 +539,9 @@ def ensure_cluster_instance(
             "    so it cannot carry the `gateway` capability. Run the gateway on\n"
             "    macOS/Linux — on Windows hardware, inside WSL2 — and join this host\n"
             "    to it as an agent-runner:\n"
+            "      set AVA_CLUSTER_SECRET from a non-echoing prompt, then run:\n"
             "      ava enroll --gateway <url> --machine-name <name> \\\n"
-            "                 --machine-host <this-host-private-ip> --cluster-secret <secret>\n"
+            "                 --machine-host <this-host-private-ip>\n"
             "    What a gateway would additionally require: future/infra/windows-gateway.md",
             file=sys.stderr,
         )

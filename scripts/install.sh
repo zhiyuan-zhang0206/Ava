@@ -24,14 +24,15 @@
 #     ./scripts/install.sh --role gateway,agent-runner --warm-mcp  # + warm up MCP-Atlas npx server
 #     ./scripts/install.sh --role gateway,agent-runner --mirror cn # route pip/npm/brew through CN mirrors
 #     ./scripts/install.sh --worktree [--path P] [--no-seed]       # dev worktree cluster (see below)
-#     ./scripts/install.sh --role gateway,agent-runner --cluster-secret S  # single box with auth on
+#     # For auth on: read/export AVA_INSTALL_CLUSTER_SECRET without echo first, then run:
+#     ./scripts/install.sh --role gateway,agent-runner
 #
 # The final step of every install is cluster birth (`python -m cli.install_cluster`):
 # a gateway-capable role gets its registry record + its own pg/redis instance +
 # provisioned database + `$AVA_HOME/.env`. The cluster secret follows the role:
 # a single-machine role (gateway,agent-runner) births a NO-AUTH cluster (empty
-# secret — every surface serves unauthenticated on loopback) unless
-# --cluster-secret states one; a gateway-only split host mints a fresh secret
+# secret — every surface serves unauthenticated on loopback) unless the one-shot
+# AVA_INSTALL_CLUSTER_SECRET states one; a gateway-only split host mints a fresh secret
 # (remote agent-runners depend on it); a secret already in the .env is never
 # rotated. The --role capability set is written into `.env` as the serve flags.
 # Idempotent — an already-installed home is a no-op. An agent-runner-only role
@@ -43,7 +44,7 @@
 # are refused). Identity is the path: home defaults to ~/.ava-<checkout-dir>
 # (derived from this script's checkout, never the cwd) and --path is the only
 # override — there is no name flag. Runs `uv sync --frozen`, births the cluster
-# (single-machine -> NO-AUTH, empty secret unless --cluster-secret states one;
+# (single-machine -> NO-AUTH, empty secret unless AVA_INSTALL_CLUSTER_SECRET states one;
 # never inherited from prod), writes the checkout's `.ava_home`
 # pointer, and seeds the SEED_ENV_KEYS allowlist (LLM + web-search keys) from
 # ~/.ava/.env (--no-seed skips). Start it with the worktree's own `.venv/bin/ava start`.
@@ -70,7 +71,14 @@ MIRROR=""
 WORKTREE=0
 WT_PATH=""
 SEED=1
-CLUSTER_SECRET=""
+# Capture the dedicated one-shot input into a non-exported shell variable, then
+# remove it before uv/package-manager children run. Only the final cluster-birth
+# Python child receives it. The compatibility argv flag below can override it.
+CLUSTER_SECRET="${AVA_INSTALL_CLUSTER_SECRET-}"
+# An inherited variable with this implementation-detail name would otherwise
+# retain Bash's export attribute after assignment.
+export -n CLUSTER_SECRET
+unset AVA_INSTALL_CLUSTER_SECRET
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -363,8 +371,11 @@ install_agent_runner() {
 # ===========================================================================
 birth_cluster() {
     birth_args=("--home" "$_AVA_HOME" "--role" "$ROLE")
-    if [ -n "$CLUSTER_SECRET" ]; then birth_args+=("--cluster-secret" "$CLUSTER_SECRET"); fi
-    (cd "$EXPECTED_INSTALL_DIR" && .venv/bin/python -m cli.install_cluster "${birth_args[@]}")
+    if [ -n "$CLUSTER_SECRET" ]; then
+        (cd "$EXPECTED_INSTALL_DIR" && AVA_INSTALL_CLUSTER_SECRET="$CLUSTER_SECRET" .venv/bin/python -m cli.install_cluster "${birth_args[@]}")
+    else
+        (cd "$EXPECTED_INSTALL_DIR" && .venv/bin/python -m cli.install_cluster "${birth_args[@]}")
+    fi
 }
 
 # ===========================================================================
@@ -376,11 +387,11 @@ print_next_steps() {
     case "$ROLE" in
         *gateway*)
             if [ -n "$CLUSTER_SECRET" ]; then
-                secret_line="the cluster secret you passed (--cluster-secret) in $_AVA_HOME/.env"
+                secret_line="the cluster secret you supplied for this install in $_AVA_HOME/.env"
             elif [ "$ROLE" = "gateway" ]; then
                 secret_line="a minted cluster secret in $_AVA_HOME/.env (split deployment — remote runners need it)"
             else
-                secret_line="NO cluster secret (single-box no-auth: gateway API / /ops / pg / redis all serve unauthenticated on loopback; pass --cluster-secret to turn auth on)"
+                secret_line="NO cluster secret (single-box no-auth: gateway API / /ops / pg / redis all serve unauthenticated on loopback; set AVA_INSTALL_CLUSTER_SECRET for the install to turn auth on)"
             fi
             echo "gateway install complete — cluster born under $_AVA_HOME (its own pg/redis,"
             echo "provisioned db, derived urls, $secret_line,"
@@ -392,7 +403,8 @@ print_next_steps() {
         *)
             echo "agent-runner install complete."
             echo "Next: enroll this machine with the gateway, then start it:"
-            echo "  ava enroll --gateway <url> --machine-name <name> --machine-host <this-host-addr> --cluster-secret <secret>"
+            echo "  read AVA_CLUSTER_SECRET without echo, export it, then run:"
+            echo "  ava enroll --gateway <url> --machine-name <name> --machine-host <this-host-addr>"
             echo "  ava start"
             echo "(get <url> + <secret> from the gateway operator; enroll presents the secret to the gateway's authenticated /api/bootstrap, which returns this host's config)"
             ;;
@@ -404,7 +416,7 @@ print_next_steps() {
 #   Skips brew/apt, the install-dir guard, the ~/.local/bin symlink. Does:
 #   uv sync --frozen + cluster birth (registry + its own pg/redis + .env — a
 #   single-machine birth, so NO-AUTH with an empty secret by default, or the
-#   --cluster-secret the caller states; never inherited from prod) + the
+#   AVA_INSTALL_CLUSTER_SECRET the caller states; never inherited from prod) + the
 #   checkout's .ava_home pointer + convenience-key seeding from ~/.ava/.env
 #   (--no-seed to skip). The checkout is SCRIPT_DIR/.. — never the cwd (a
 #   worktree shell's cwd can be reset elsewhere). Identity is the path: home
@@ -423,11 +435,14 @@ install_worktree() {
     (cd "$checkout_dir" && uv sync --frozen)
     wt_args=("--home" "$target_home" "--role" "gateway,agent-runner" "--worktree")
     # A worktree birth is single-machine -> NO-AUTH (empty secret) by default;
-    # --cluster-secret states one explicitly. The seed source is stated
+    # AVA_INSTALL_CLUSTER_SECRET states one explicitly. The seed source is stated
     # explicitly too (no hidden default): the prod home's .env.
-    if [ -n "$CLUSTER_SECRET" ]; then wt_args+=("--cluster-secret" "$CLUSTER_SECRET"); fi
     if [ "$SEED" = 1 ]; then wt_args+=("--seed" "--seed-source" "$HOME/.ava/.env"); fi
-    (cd "$checkout_dir" && .venv/bin/python -m cli.install_cluster "${wt_args[@]}")
+    if [ -n "$CLUSTER_SECRET" ]; then
+        (cd "$checkout_dir" && AVA_INSTALL_CLUSTER_SECRET="$CLUSTER_SECRET" .venv/bin/python -m cli.install_cluster "${wt_args[@]}")
+    else
+        (cd "$checkout_dir" && .venv/bin/python -m cli.install_cluster "${wt_args[@]}")
+    fi
     echo ""
     echo "worktree cluster installed (home: $target_home)."
     echo "Start it with this checkout's own CLI:"

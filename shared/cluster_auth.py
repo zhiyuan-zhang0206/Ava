@@ -5,7 +5,7 @@ Two auth methods for the same cluster secret:
 - Session cookie: `ava_session=<signed-token>` — browser (login flow).
 
 The secret is a single per-cluster pre-shared key (`AVA_CLUSTER_SECRET`), set on
-the gateway and handed to each agent-runner out-of-band at `ava host enroll`. It
+the gateway and handed to each agent-runner out-of-band for `ava enroll`. It
 is presented as an HTTP `Authorization: Bearer <secret>` header and verified in
 constant time. Pure stdlib (no shared.config import) so it is safe to use from
 shared.bootstrap, which runs during the Settings import.
