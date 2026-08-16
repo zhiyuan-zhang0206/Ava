@@ -94,13 +94,20 @@ of birthing one of its own — it inherits the cluster's identity (db / redis /
 channels) from the gateway:
 
 ```bash
-ava enroll --gateway <URL> --machine-name <NAME> --machine-host <HOST> --cluster-secret <S>
+printf 'Cluster secret: ' >&2
+IFS= read -rs AVA_CLUSTER_SECRET
+printf '\n' >&2
+export AVA_CLUSTER_SECRET
+ava enroll --gateway <URL> --machine-name <NAME> --machine-host <HOST>
+unset AVA_CLUSTER_SECRET
 # then: ava start
 ```
 
 Enrollment presents the cluster secret (`AVA_CLUSTER_SECRET`) to the gateway's
 authenticated `/api/bootstrap`, which returns the cluster's connection bundle
-(db / redis URLs, channels) — the same secret that authorizes the data plane.
+(db / redis URLs, channels). The runner's database URL carries a separately
+minted least-privilege `ava_runner` password; the cluster secret remains the
+HTTP bearer and the gateway/main-Postgres/Redis credential.
 `--machine-host` is the runner's own reachable address (how the gateway dials
 back to its ops server) and is **required**. The runner starts no gateway
 process of its own; it needs both network reachability to the gateway *and* the

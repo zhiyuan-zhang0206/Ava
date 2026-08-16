@@ -16,11 +16,12 @@ home's `.env` so a later `ava start` resolves them with no `--serve-*` flags.
 
 The cluster secret follows the role (user decision: off is fully off). A
 single-machine role (`gateway,agent-runner` on one box) births a NO-AUTH
-cluster: the secret stays empty unless `--cluster-secret` states one, and every
+cluster: the secret stays empty unless `AVA_INSTALL_CLUSTER_SECRET` states one, and every
 surface (gateway API, /ops, pg/redis) serves unauthenticated on loopback. A
 split `gateway`-only host mints a fresh secret (remote agent-runners depend on
-it — scram/requirepass + bearer auth), and an explicit `--cluster-secret`
-always wins. A secret already in the home's `.env` is never rotated.
+it — scram/requirepass + bearer auth). The compatibility `--cluster-secret`
+flag overrides the dedicated environment input. A secret already in the home's
+`.env` is never rotated.
 
 `--worktree` is the `install.sh --worktree` backend: births a dev worktree's
 own cluster under `--home` (install.sh derives the default
@@ -30,7 +31,7 @@ pointer, and — with `--seed --seed-source <env>` — copies the
 `shared.env_registry.seed_allowlist()` allowlist (LLM + web-search keys only) from the
 stated source. The cluster secret is never seeded or inherited: a worktree
 birth is single-machine, so it is a NO-AUTH cluster (empty secret) unless
-`--cluster-secret` states one.
+`AVA_INSTALL_CLUSTER_SECRET` states one.
 
 Settings-load bootstrap: this process may target a home with no `.env` yet,
 while Settings requires AVA_DB_URL / AVA_REDIS_URL. `main()` therefore pins
@@ -49,6 +50,18 @@ import sys
 from pathlib import Path
 
 _VALID_CAPS = frozenset({"gateway", "agent-runner"})
+_CLUSTER_BIRTH_SECRET_KEY = "AVA_INSTALL_CLUSTER_SECRET"  # noqa: S105 — key, not credential
+
+
+def _install_secret_input(explicit: str | None) -> str | None:
+    """Consume the dedicated one-shot install secret.
+
+    The compatibility argv flag wins when both are present. The generic
+    AVA_CLUSTER_SECRET is intentionally never read: a shell carrying a live
+    cluster's runtime environment must not seed a different cluster.
+    """
+    from_env = os.environ.pop(_CLUSTER_BIRTH_SECRET_KEY, None)
+    return explicit if explicit is not None else from_env
 
 
 def _checkout_root() -> Path:
@@ -123,7 +136,8 @@ def _serve_flag_env(role: frozenset[str]) -> dict[str, str]:
 def _resolve_secret(env_path: Path, *, role: frozenset[str], explicit: str | None) -> str:
     """The cluster secret, in precedence order:
 
-    1. `explicit` (`--cluster-secret`) — the operator states the secret; it is
+    1. `explicit` (preferred `AVA_INSTALL_CLUSTER_SECRET`, or the compatibility
+       `--cluster-secret`) — the operator states the secret; it is
        validated URL-safe (it lands in the pg/redis URLs, redis.conf, and HTTP
        bearer headers).
     2. The one already in this home's `.env` (a re-install must not rotate a
@@ -142,7 +156,7 @@ def _resolve_secret(env_path: Path, *, role: frozenset[str], explicit: str | Non
     if explicit is not None:
         if not _is_urlsafe_token(explicit):
             raise ValueError(
-                "--cluster-secret must be a URL-safe token (letters, digits, and "
+                "the install cluster secret must be a URL-safe token (letters, digits, and "
                 "'._~-') — it goes in the pg/redis URLs, the redis config, and a "
                 "bearer header"
             )
@@ -426,12 +440,13 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument(
         "--cluster-secret",
         default=None,
-        help="the cluster's AVA_CLUSTER_SECRET, stated explicitly (URL-safe token). "
+        help="compatibility input for the cluster secret; prefer the one-shot "
+        "AVA_INSTALL_CLUSTER_SECRET environment variable so it stays out of argv. "
         "Omitted: a single-machine role (gateway,agent-runner) births a NO-AUTH "
         "cluster (empty secret — every surface serves unauthenticated on "
         "loopback); a gateway-only split host mints a fresh one (remote "
-        "agent-runners depend on it). A secret already in the home's .env always "
-        "wins (a re-install never rotates).",
+        "agent-runners depend on it). An explicit input overrides a secret already "
+        "in the home's .env; otherwise a re-install never rotates it.",
     )
     p.add_argument(
         "--worktree",
@@ -459,6 +474,7 @@ def main(argv: list[str] | None = None) -> int:
     args = p.parse_args(argv)
 
     home = Path(args.home).expanduser()
+    cluster_secret = _install_secret_input(args.cluster_secret)
     _bootstrap_process_env(home)
     seed_source = Path(args.seed_source).expanduser() if args.seed_source else None
 
@@ -475,7 +491,7 @@ def main(argv: list[str] | None = None) -> int:
         worktree=args.worktree,
         seed=args.seed,
         seed_source=seed_source,
-        cluster_secret=args.cluster_secret,
+        cluster_secret=cluster_secret,
     )
 
 

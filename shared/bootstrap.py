@@ -223,8 +223,9 @@ def inject_config_from_gateway() -> None:
         raise BootstrapFetchError(
             "this host is a pure agent-runner but has no AVA_GATEWAY_URL — its cluster "
             "config comes from the gateway at startup. Enroll it first:\n"
+            "    set AVA_CLUSTER_SECRET from a non-echoing prompt, then run:\n"
             "    ava enroll --gateway <url> --machine-name <name> --machine-host "
-            "<this-host-addr> --cluster-secret <secret>"
+            "<this-host-addr>"
         )
     try:
         # A runner process dials as the least-privilege ava_runner role (the

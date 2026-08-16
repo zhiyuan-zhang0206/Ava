@@ -54,8 +54,8 @@ design — narrow blast radius, no new service-lifecycle coupling here):
   endpoint it would rotate it through. Each already-enrolled runner's
   `AVA_CLUSTER_SECRET` is an out-of-band credential.
   Each already-enrolled runner needs its `.env` `AVA_CLUSTER_SECRET` hand-edited
-  (or re-`ava enroll --cluster-secret <new>`'d, once the gateway itself already
-  expects the new value) and then restarted. This script prints the roster
+  (or the new value exported as `AVA_CLUSTER_SECRET` for a re-`ava enroll`, once
+  the gateway itself already expects it) and then restarted. This script prints the roster
   (name + URL, from the `machines` table) as a checklist; it never dials them.
 - **Provider API keys** (`ANTHROPIC_API_KEY` etc.) — those rotate through each
   provider's own console; this script only ever touches `AVA_CLUSTER_SECRET`.

@@ -32,7 +32,7 @@ and re-run `ava start` so the `machines` table UPSERT overwrites the stale row.
 ## First time bringing up a new dev / agent-runner
 
 0. On the **gateway**: a split deployment always has a cluster secret (a
-   gateway-only birth mints one; `--cluster-secret` states it explicitly), and
+   gateway-only birth mints one; `AVA_INSTALL_CLUSTER_SECRET` states it explicitly), and
    `/api/bootstrap` + each runner's `/ops` authenticate against it as a bearer
    token. A single-box cluster with an empty secret is fully unauthenticated on
    loopback — nothing here is conditional on
@@ -46,10 +46,10 @@ and re-run `ava start` so the `machines` table UPSERT overwrites the stale row.
    — see runbook §"Prod and dev clone paths").
 3. `uv sync` in the clone.
 4. Make sure the new host is joined to the tailnet (the gateway is reachable
-   only over it). The runner authenticates to `/api/bootstrap` with the cluster
-   secret passed in the next step.
+   only over it). Read the cluster secret without echo and export it as
+   `AVA_CLUSTER_SECRET` for the enrollment command, then unset it afterward.
 5. On the new host: `ava enroll --gateway http://<gateway-host>:8000
-   --machine-name <new-name> --machine-host <this-host-addr> --cluster-secret <secret>`. Add `--ssl-cert-file
+   --machine-name <new-name> --machine-host <this-host-addr>`. Add `--ssl-cert-file
    <ca-bundle>` if you're behind a TLS-MITM proxy. The `/api/bootstrap` response
    carries the cluster connection facts (db/redis URLs etc. — no name travels).
 6. `ava start`. Every process on the host re-fetches its config from
@@ -101,7 +101,7 @@ brings the in-place tree up as its own cluster (name defaults to the worktree di
 cd ~/Ava/.worktrees/<name>
 scripts/install.sh --worktree                # births cluster <name>: uv sync --frozen + own DB/redis/ports/home
                                              # (~/.ava-<name>), NO cluster secret by default (single-machine
-                                             # no-auth; --cluster-secret to turn auth on), seeded LLM/web
+                                             # no-auth; AVA_INSTALL_CLUSTER_SECRET to turn auth on), seeded LLM/web
                                              # keys from ~/.ava/.env, and the .ava_home pointer. --path P
                                              # overrides the home; --no-seed skips the key copy. No host-global
                                              # steps. Idempotent — re-run freely.
@@ -122,9 +122,9 @@ don't run prod-affecting commands from a worktree.)
 
 A worktree cluster is a single-machine birth, so it carries NO cluster secret
 by default — the whole cluster (gateway API, /ops, pg/redis) serves
-unauthenticated on loopback (user decision: off is fully off). `install.sh
---worktree --cluster-secret TOKEN` states one explicitly if you want auth on a
-dev cluster. The secret is never inherited from prod; this is only a manual step for a
+unauthenticated on loopback (user decision: off is fully off). Read a token without
+echo and export it as the one-shot `AVA_INSTALL_CLUSTER_SECRET` before `install.sh --worktree` if you
+want auth on a dev cluster, then unset it. The secret is never inherited from prod; this is only a manual step for a
 worktree that skipped the install.
 
 **What needs a cluster, what doesn't** (pick the lightest loop that covers the

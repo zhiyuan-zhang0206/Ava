@@ -36,13 +36,27 @@ def _scaffold(tmp_path: Path, checkout_name: str) -> tuple[Path, Path, Path]:
     stub_bin = tmp_path / "stub-bin"
     stub_bin.mkdir()
     uv = stub_bin / "uv"
-    uv.write_text(f'#!/bin/sh\necho "uv $* cwd=$PWD" >> "{log}"\n')
+    uv.write_text(
+        "#!/bin/sh\n"
+        '[ "${AVA_INSTALL_CLUSTER_SECRET+x}" = x ] && '
+        f'echo "uv-install-secret-env=present" >> "{log}"\n'
+        '[ "${CLUSTER_SECRET+x}" = x ] && '
+        f'echo "uv-shell-secret-env=present" >> "{log}"\n'
+        f'echo "uv $* cwd=$PWD" >> "{log}"\n'
+    )
     uv.chmod(0o755)
 
     venv_bin = checkout / ".venv" / "bin"
     venv_bin.mkdir(parents=True)
     python = venv_bin / "python"
-    python.write_text(f'#!/bin/sh\necho "python $* cwd=$PWD" >> "{log}"\n')
+    python.write_text(
+        "#!/bin/sh\n"
+        '[ "${AVA_INSTALL_CLUSTER_SECRET+x}" = x ] && '
+        f'echo "python-install-secret-env=present" >> "{log}"\n'
+        '[ "${CLUSTER_SECRET+x}" = x ] && '
+        f'echo "python-shell-secret-env=present" >> "{log}"\n'
+        f'echo "python $* cwd=$PWD" >> "{log}"\n'
+    )
     python.chmod(0o755)
 
     fake_home = tmp_path / "fake-home"
@@ -51,7 +65,7 @@ def _scaffold(tmp_path: Path, checkout_name: str) -> tuple[Path, Path, Path]:
 
 
 def _run_worktree(
-    tmp_path: Path, checkout_name: str, *args: str
+    tmp_path: Path, checkout_name: str, *args: str, env_extra: dict[str, str] | None = None
 ) -> tuple[subprocess.CompletedProcess[str], list[str], Path, Path]:
     checkout, log, fake_home = _scaffold(tmp_path, checkout_name)
     decoy_cwd = tmp_path / "decoy-cwd"  # NOT the checkout — proves cwd independence
@@ -60,7 +74,11 @@ def _run_worktree(
     proc = subprocess.run(  # noqa: S603 — fixed argv, test-controlled args
         ["bash", str(checkout / "scripts" / "install.sh"), "--worktree", *args],
         cwd=decoy_cwd,
-        env={"PATH": f"{stub_bin}:/usr/bin:/bin", "HOME": str(fake_home)},
+        env={
+            "PATH": f"{stub_bin}:/usr/bin:/bin",
+            "HOME": str(fake_home),
+            **(env_extra or {}),
+        },
         capture_output=True,
         text=True,
         timeout=30,
@@ -108,6 +126,26 @@ def test_worktree_path_overrides_default_home(tmp_path: Path) -> None:
     birth_call = calls[-1]
     assert f"--home {custom}" in birth_call
     assert f"{fake_home}/.ava-myclone" not in birth_call
+
+
+def test_worktree_install_secret_reaches_only_birth_child_and_never_argv(tmp_path: Path) -> None:
+    secret = "sentinel-install-secret"  # noqa: S105 — test fixture
+    proc, calls, _checkout, _fake_home = _run_worktree(
+        tmp_path,
+        "myclone",
+        env_extra={
+            "AVA_INSTALL_CLUSTER_SECRET": secret,
+            "CLUSTER_SECRET": "ambient-implementation-detail",
+        },
+    )
+    assert proc.returncode == 0, f"stderr: {proc.stderr!r}"
+    assert "uv-install-secret-env=present" not in calls
+    assert "uv-shell-secret-env=present" not in calls
+    assert "python-install-secret-env=present" in calls
+    assert "python-shell-secret-env=present" not in calls
+    birth_call = calls[-1]
+    assert secret not in birth_call
+    assert "--cluster-secret" not in birth_call
 
 
 def test_worktree_requires_uv_on_path(tmp_path: Path) -> None:

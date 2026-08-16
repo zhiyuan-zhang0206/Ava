@@ -3,8 +3,8 @@
 `ava enroll` runs on a fresh host that has no full config yet, so this module
 imports neither shared.config (building Settings would fail without the config)
 nor cli.commands. It writes the small bootstrap env and verifies connectivity by
-fetching config from the gateway, presenting the cluster secret (when given via
-`--cluster-secret`) that a multi-host gateway requires on /api/bootstrap.
+fetching config from the gateway, presenting the cluster secret from
+`AVA_CLUSTER_SECRET` (preferred) or the compatibility `--cluster-secret` flag.
 main() routes `enroll` here before the settings-gated command import.
 """
 
@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 from shared import bootstrap
@@ -24,6 +25,25 @@ from shared.env_registry import (
 )
 from shared.envfile import ENV_LOCK_TIMEOUT_S, env_lock_path, upsert_env
 from shared.platform import IS_WSL, file_lock
+
+
+def _replace_private_text(path: Path, content: str) -> None:
+    """Atomically replace ``path`` with owner-only UTF-8 text.
+
+    The temporary file is born 0600 in the target directory, so cleartext is
+    never visible under the process umask and ``os.replace`` cannot expose a
+    partial file if the process dies during the write.
+    """
+    fd, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            stream.write(content)
+            stream.flush()
+            os.fsync(stream.fileno())
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def write_bootstrap_env(
@@ -60,7 +80,26 @@ def write_bootstrap_env(
     # over a half-written file, or be written over by one. Same lock as every other
     # door (`shared.envfile.env_lock_path`).
     with file_lock(env_lock_path(path), timeout_s=ENV_LOCK_TIMEOUT_S):
-        path.write_text("\n".join(lines) + "\n")
+        _replace_private_text(path, "\n".join(lines) + "\n")
+
+
+def _enroll_cluster_secret(parser: argparse.ArgumentParser, explicit: str | None) -> str:
+    """Resolve and validate the required enrollment bearer secret.
+
+    Environment injection is the documented route because it keeps the secret
+    out of argv and shell history. The flag remains for compatibility with
+    existing automation, with explicit input taking precedence over the env.
+    """
+    secret = explicit if explicit is not None else os.environ.get("AVA_CLUSTER_SECRET", "")
+    allowed = set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._~-")
+    if not secret:
+        parser.error(
+            "set AVA_CLUSTER_SECRET in the environment (preferred), or pass "
+            "--cluster-secret for compatibility"
+        )
+    if not set(secret) <= allowed:
+        parser.error("AVA_CLUSTER_SECRET must be a URL-safe token (letters, digits, and '._~-')")
+    return secret
 
 
 def _existing_health_port_env(path: Path) -> dict[str, str]:
@@ -69,7 +108,7 @@ def _existing_health_port_env(path: Path) -> dict[str, str]:
     Must be read BEFORE `write_bootstrap_env` runs: that call replaces the whole
     file, and a bare re-enroll (no `--health-port-base` this time) has nothing
     else that would put a previously-written block back — so a re-enroll run only
-    to rotate `--cluster-secret` or `--machine-host` would otherwise silently
+    to rotate the cluster secret or `--machine-host` would otherwise silently
     strand a co-located unit back on the shared defaults. Empty when the file is
     absent or carries no health-port key.
     """
@@ -240,8 +279,10 @@ def run_enroll(argv: list[str]) -> int:
     )
     parser.add_argument(
         "--cluster-secret",
-        required=True,
-        help="the gateway cluster's secret (AVA_CLUSTER_SECRET). Required: every "
+        default=None,
+        help="compatibility input for the gateway cluster secret; prefer setting "
+        "AVA_CLUSTER_SECRET in the environment so the secret does not appear in argv. "
+        "Required by either source: every "
         "enrollable gateway is a split deployment, and a split deployment always "
         "has a secret (a gateway-only birth mints one; remote agent-runners "
         "depend on it for scram/requirepass + bearer auth). The runner presents "
@@ -265,6 +306,7 @@ def run_enroll(argv: list[str]) -> int:
         "Windows unit would; pass this flag to pick a different one instead.",
     )
     args = parser.parse_args(argv)
+    cluster_secret = _enroll_cluster_secret(parser, args.cluster_secret)
 
     # Remote enrollment requires a reachable machine-host: if the gateway is on
     # another box (non-loopback URL) but --machine-host is loopback, the gateway
@@ -305,8 +347,7 @@ def run_enroll(argv: list[str]) -> int:
 
     # The verification fetch reads AVA_CLUSTER_SECRET from os.environ (it runs
     # before this host's .env is loaded into the environment), so mirror it.
-    if args.cluster_secret:
-        os.environ["AVA_CLUSTER_SECRET"] = args.cluster_secret
+    os.environ["AVA_CLUSTER_SECRET"] = cluster_secret
 
     # Verify connectivity BEFORE any bootstrap state is written: enroll must not
     # leave a half-written home when the gateway is unreachable or the secret is
@@ -346,7 +387,7 @@ def run_enroll(argv: list[str]) -> int:
         AVA_ENV_PATH,
         gateway=args.gateway,
         machine_name=args.machine_name,
-        cluster_secret=args.cluster_secret,
+        cluster_secret=cluster_secret,
         ssl_cert_file=args.ssl_cert_file,
     )
     # machine_host is this host's stable, operator-declared reachable address — a

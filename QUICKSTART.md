@@ -34,8 +34,16 @@ the entire cluster.
 mkdir -p ~/.ava && cd ~/.ava
 git clone https://github.com/zhiyuan-zhang0206/Ava.git source && cd source
 
-# Run the install script (single-machine deployment)
+# Run the install script (single-machine deployment, no auth on loopback)
 ./scripts/install.sh --role gateway,agent-runner
+
+# To opt into auth at birth, run this secure form INSTEAD of the command above:
+printf 'Install cluster secret: ' >&2
+IFS= read -rs AVA_INSTALL_CLUSTER_SECRET
+printf '\n' >&2
+export AVA_INSTALL_CLUSTER_SECRET
+./scripts/install.sh --role gateway,agent-runner
+unset AVA_INSTALL_CLUSTER_SECRET
 ```
 
 `install.sh` automatically installs the dependencies: uv, Python 3.12,
@@ -64,8 +72,9 @@ DEEPSEEK_API_KEY=sk-your-key-here
 ```
 
 > On a single box the cluster runs unauthenticated on loopback, so
-> `AVA_CLUSTER_SECRET` is left empty by default — pass `--cluster-secret` to
-> `install.sh` to turn cluster auth on (needed for split deployments).
+> `AVA_CLUSTER_SECRET` is left empty by default. The authenticated birth form
+> in Step 1 keeps the secret out of shell history and process argv. Gateway-only
+> split deployments mint a secret automatically.
 >
 > For the full config reference, see [`.env.example`](.env.example) and the
 > [secrets reference](.agents/skills/deploy-ava-cluster/references/secrets.md).
@@ -152,9 +161,12 @@ export PATH="$HOME/.local/bin:$PATH"
 
 On a single box the cluster is deliberately unauthenticated on loopback, so a
 manually-added `AVA_CLUSTER_SECRET` that the data plane does not expect triggers
-this. Remove the line from `~/.ava/.env`, or re-run `install.sh
---cluster-secret <value>` and keep exactly that value. Split deployments
-(gateway-only birth) mint a secret automatically.
+this. Remove the line from `~/.ava/.env` and restart. To enable auth on an
+already-born no-auth cluster, provision a new authenticated cluster with the
+Step 1 birth form and migrate deliberately: an in-place no-auth-to-auth
+transition is not supported. Do not hand-edit only the secret or use the
+secret-rotation script for that posture change. Split deployments (gateway-only
+birth) mint a secret automatically.
 
 ### Postgres connection failed
 

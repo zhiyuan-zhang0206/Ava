@@ -88,8 +88,8 @@ auth, pg_hba local+loopback `trust` (no scram lines), redis without requirepass,
 every surface loopback-only. The redis instance is single-tenant: its `requirepass` IS the
 cluster secret — no separate box-level admin secret. With a secret set,
 **pg/redis always bind loopback + this host's reachable address** (`AVA_MACHINE_HOST`,
-default `localhost`), de-duplicated — never all interfaces, so the physical LAN
-cannot reach the data plane. A single box is reachable only at localhost, so the bind
+default `localhost`), de-duplicated — never all interfaces, so exposure is limited
+to networks that can route to the chosen address. A single box is reachable only at localhost, so the bind
 collapses to loopback alone (zero-config); a split deployment sets each node's real
 private-network IP, which is appended, plus the `scram-sha-256` `AVA_TRUSTED_CIDRS`
 pg_hba ranges. So a split runner needs reachability *and* the secret. `ava start`
@@ -105,7 +105,7 @@ Cluster identity is born at **install time** (`scripts/install.sh` →
 `python -m cli.install_cluster`): the install allocates the home-keyed registry
 record + port block, brings up the cluster's own pg/redis, provisions the
 database, writes the cluster `.env` (secret: single-machine = NO-AUTH empty;
-gateway-only = minted; `--cluster-secret` wins; existing secrets never rotate),
+gateway-only = minted; `AVA_INSTALL_CLUSTER_SECRET` states one; existing secrets never rotate),
 and — for a worktree — writes the checkout's `.ava_home` pointer. The home is resolved from
 the **checkout-anchored** boot (`resolve_ava_home`: `AVA_HOME` env > prod source
 → `~/.ava` > the checkout's `.ava_home` pointer; an env var CONTRADICTING the
@@ -123,9 +123,9 @@ passed on the FIRST start only and persisted to `$AVA_HOME/<field>`
 files — later runs need none of them (see `ava start --help`). Registry:
 host-level JSON `~/.ava/clusters.json` (`AVA_CLUSTER_REGISTRY`), keyed by home
 path. An enrolled agent-runner does NOT birth a cluster; its cluster identity IS
-the gateway URL + cluster secret it enrolled with (`ava enroll` materializes the
-connection facts; no name travels in the `/api/bootstrap` payload — db/role
-identifiers ride inside the URLs as data).
+the gateway URL + cluster secret it enrolled with (`ava enroll` persists only
+identity/reachability and verifies the projection; every runner process re-fetches
+connection facts, whose URLs carry db/role identifiers as data).
 
 Which cluster an `ava` acts on is fixed by **which checkout it belongs to** (where its `cli` source lives), not by the current directory. `install.sh --role gateway` symlinks the prod checkout's `ava` onto PATH at `~/.local/bin`, so a bare `ava` always means prod; dev work runs `.venv/bin/ava` inside the worktree. Idempotent host wiring (symlink, PATH, `$AVA_HOME` dirs, plugin images) plus each enabled plugin's own `scaffold()` (`setup.py` beside its `plugin.py` — this is how `ava_memory` brings up the memory pool and lays its template down) is applied by the converge phase (`cli/commands/_converge.py`), run on every `ava start` / `ava cluster update` and standalone via `ava converge` (detail in `conventions/runbook.md`). Prod upgrades go through `ava cluster update` (the CLI — the only update entry point; `ava.self.update()` was removed 2026-08), never directly `git checkout` on the prod path.
 
@@ -146,9 +146,9 @@ ava status    # check status (includes the pg/redis view)
 ava cluster update    # [cluster] upgrade: a gateway-capable host (incl. single box) orchestrates
               # the whole cluster (pause agent-runners -> local pull/sync/migrate/restart -> trigger
               # agent-runner self-updates); a pure agent-runner self-updates (git pull + uv sync + restart)
-ava enroll --gateway URL --machine-name NAME --machine-host HOST --cluster-secret S  # join a split-deployment agent-runner to a gateway
+ava enroll --gateway URL --machine-name NAME --machine-host HOST  # join after exporting AVA_CLUSTER_SECRET from a non-echoing prompt
               # (presents the cluster secret to the gateway's authenticated /api/bootstrap);
-              # materializes the cluster connection facts, then run `ava start`
+              # verifies the runner projection, which processes re-fetch at startup, then run `ava start`
 ava cluster ls                        # list all registered clusters (label = home basename)
 ava cluster status                    # full multi-machine roster
 ava cluster down --path PATH          # stop the cluster at a home path, keep its slot (data stays on disk)

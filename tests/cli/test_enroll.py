@@ -14,7 +14,7 @@ from shared.env_registry import WSL_DEFAULT_HEALTH_PORT_BASE, health_port_env_al
 
 @pytest.fixture(autouse=True)
 def _restore_cluster_secret_env() -> Iterator[None]:
-    """`run_enroll` mirrors `--cluster-secret` into os.environ for the
+    """`run_enroll` mirrors the resolved secret input into os.environ for the
     verification fetch (cli/enroll.py); undo it so the test process keeps the
     suite's pinned value (tests/conftest.py) — home_isolation guards exactly
     this class of leak."""
@@ -74,6 +74,43 @@ def test_write_bootstrap_env_required_fields(tmp_path: Path) -> None:
     assert "AVA_CONFIG_SOURCE" not in text
 
 
+def test_write_bootstrap_env_creates_owner_only_file(tmp_path: Path) -> None:
+    """The bootstrap file contains the cluster bearer secret, so it must be
+    private at creation time rather than tightened after cleartext is written."""
+    path = tmp_path / ".env"
+    enroll.write_bootstrap_env(
+        path,
+        gateway="https://cp",
+        machine_name="runner",
+        cluster_secret="sek",  # noqa: S106 — inert test credential
+    )
+    assert path.stat().st_mode & 0o777 == 0o600
+
+
+def test_write_bootstrap_env_replacement_is_atomic(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failed replacement leaves the prior enrolled state intact and does
+    not strand a cleartext temporary file beside it."""
+    path = tmp_path / ".env"
+    path.write_text("ORIGINAL=1\n")
+
+    def fail_replace(_source: Path, _target: str | Path) -> None:
+        raise OSError("simulated replace failure")
+
+    monkeypatch.setattr(Path, "replace", fail_replace)
+    with pytest.raises(OSError, match="simulated replace failure"):
+        enroll.write_bootstrap_env(
+            path,
+            gateway="https://cp",
+            machine_name="runner",
+            cluster_secret="sek",  # noqa: S106 — inert test credential
+        )
+
+    assert path.read_text() == "ORIGINAL=1\n"
+    assert list(tmp_path.glob("..env.*")) == []
+
+
 def test_write_bootstrap_env_omits_ssl_cert_when_absent(tmp_path: Path) -> None:
     p = tmp_path / ".env"
     enroll.write_bootstrap_env(p, gateway="https://cp", machine_name="n")
@@ -129,6 +166,39 @@ def test_run_enroll_writes_env_and_verifies(
     # the runner re-fetches them at every process start
     assert "AVA_DB_URL" not in env_path.read_text()
     assert "AVA_REDIS_URL" not in env_path.read_text()
+
+
+def test_run_enroll_reads_cluster_secret_from_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The documented path keeps the bearer secret out of argv and shell
+    history by injecting it through AVA_CLUSTER_SECRET."""
+    env_path = tmp_path / ".env"
+    monkeypatch.setattr(enroll, "AVA_ENV_PATH", env_path)
+    # cli.enroll intentionally reads the raw pre-Settings bootstrap environment.
+    monkeypatch.setitem(os.environ, "AVA_CLUSTER_SECRET", "from-environment")
+    monkeypatch.setattr(
+        enroll,
+        "_fetch_enroll_payload",
+        lambda *_a, **_k: {  # pyright: ignore[reportUnknownArgumentType]
+            "AVA_DB_URL": "postgresql://ava@100.64.0.5:5433/ava",
+            "AVA_REDIS_URL": "redis://ava@100.64.0.5:6380/0",
+        },
+    )
+
+    rc = enroll.run_enroll(
+        [
+            "--gateway",
+            "https://100.64.0.5:8000",
+            "--machine-name",
+            "runner",
+            "--machine-host",
+            "100.64.0.9",
+        ]
+    )
+
+    assert rc == 0
+    assert "AVA_CLUSTER_SECRET=from-environment" in env_path.read_text()
 
 
 def test_run_enroll_requires_machine_host(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -568,7 +638,7 @@ def test_run_enroll_prints_why_the_wsl_default_was_chosen(
 
 
 # ---------------------------------------------------------------------------
-# URL-anchor guard + required --cluster-secret (no default install params)
+# URL-anchor guard + required enrollment secret (environment or compatibility flag)
 # ---------------------------------------------------------------------------
 
 
@@ -643,12 +713,15 @@ def test_run_enroll_accepts_reachable_data_plane_from_remote_gateway(
 def test_run_enroll_requires_cluster_secret(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
 ) -> None:
-    """--cluster-secret is a required enroll param (no default): every enrollable
-    gateway is a split deployment, and a split deployment always has a secret."""
+    """Enrollment requires an explicit secret source: the environment is the
+    safe path and --cluster-secret remains only for compatibility."""
     monkeypatch.setattr(enroll, "AVA_ENV_PATH", tmp_path / ".env")
+    monkeypatch.delitem(os.environ, "AVA_CLUSTER_SECRET", raising=False)
     with pytest.raises(SystemExit) as exc_info:
         enroll.run_enroll(
             ["--gateway", "https://cp", "--machine-name", "n", "--machine-host", "100.64.0.9"]
         )
     assert exc_info.value.code == 2
-    assert "--cluster-secret" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
+    err = capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
+    assert "AVA_CLUSTER_SECRET" in err
+    assert "--cluster-secret" in err

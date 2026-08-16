@@ -572,7 +572,8 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
             print(f"\n→ gateway reachable at {reachable}")
             print(
                 f"  enroll an agent-runner: ava enroll --gateway {reachable} "
-                "--machine-name <name> --machine-host <runner-host> --cluster-secret <secret>"
+                "--machine-name <name> --machine-host <runner-host> "
+                "(with AVA_CLUSTER_SECRET set from a non-echoing prompt)"
             )
 
     # 8) readiness verdict, last: everything above has printed, so the caller reading

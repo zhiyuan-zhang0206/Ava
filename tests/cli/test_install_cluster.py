@@ -8,9 +8,9 @@ Verified:
   identity is the path, so ANY path works (no naming convention, no name flag)
 - secret semantics (user decision: off is fully off): a single-machine role
   (gateway,agent-runner) births a NO-AUTH cluster with an EMPTY secret unless
-  --cluster-secret states one; a gateway-only split host mints a fresh one; a
-  secret already in the .env is never rotated; the process environment is never
-  consulted
+  the one-shot AVA_INSTALL_CLUSTER_SECRET states one; a gateway-only split host
+  mints a fresh one; a secret already in the .env is never rotated; the generic
+  runtime environment is never consulted
 - idempotency: a second run is a no-op birth and keeps the secret state
 - role without `gateway`: no birth, serve flags only
 - refusals: the default home (prod) in worktree mode, and a home another
@@ -177,6 +177,24 @@ def test_secret_precedence_file_explicit_mint_never_process_env(tmp_path: Path) 
     minted_b = ic._resolve_secret(tmp_path / "absent-c" / ".env", role=gw_only, explicit=None)
     assert minted_a and minted_b and minted_a != minted_b
     assert minted_a != os.environ.get("AVA_CLUSTER_SECRET", "")
+
+
+def test_install_secret_input_prefers_compatibility_flag_and_consumes_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The dedicated install env is a one-shot input, while the argv flag is
+    retained only as a compatibility override. The generic runtime secret is
+    deliberately unrelated and must remain untouched."""
+    monkeypatch.setenv("AVA_INSTALL_CLUSTER_SECRET", "from-install-env")
+    runtime_secret = os.environ["AVA_CLUSTER_SECRET"]
+
+    assert ic._install_secret_input("from-flag") == "from-flag"
+    assert "AVA_INSTALL_CLUSTER_SECRET" not in os.environ
+    assert os.environ["AVA_CLUSTER_SECRET"] == runtime_secret
+
+    monkeypatch.setenv("AVA_INSTALL_CLUSTER_SECRET", "from-install-env")
+    assert ic._install_secret_input(None) == "from-install-env"
+    assert "AVA_INSTALL_CLUSTER_SECRET" not in os.environ
 
 
 def test_explicit_secret_validated_urlsafe(tmp_path: Path) -> None:

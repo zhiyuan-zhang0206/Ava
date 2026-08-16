@@ -231,7 +231,7 @@ def require_installed_home() -> int | None:
             f"✗ ava start: {env_path} carries no gateway URL (no AVA_GATEWAY_URL) "
             "— this agent-runner was never enrolled, or the enroll did not complete. Run:\n"
             "  ava enroll --gateway <url> --machine-name <name> --machine-host "
-            "<this-host-addr> --cluster-secret <secret>",
+            "<this-host-addr> with AVA_CLUSTER_SECRET set from a non-echoing prompt",
             file=sys.stderr,
         )
         return 1

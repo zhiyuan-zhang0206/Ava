@@ -136,10 +136,11 @@ class DataPlaneSettings(EnvSettings):
             "cluster: the gateway API and /ops serve without auth, Postgres/Redis "
             "run without scram/requirepass (loopback-trust only), and every surface "
             "binds loopback alone — the single-box no-secret posture. NON-EMPTY = "
-            "auth everywhere (current behavior): the secret is the Postgres/Redis "
-            "password and the bearer authenticating cross-machine control surfaces "
-            "(/ops dials, agent-runner /api/bootstrap). Set it on the gateway and "
-            "hand it to each runner out-of-band via `ava host enroll --cluster-secret`."
+            "the gateway/main Postgres password, every Redis password, and the bearer "
+            "authenticating cross-machine control surfaces (/ops dials and runner "
+            "/api/bootstrap). A runner's Postgres credential is separately projected "
+            "as ava_runner. Set the secret on the gateway and hand it to each runner "
+            "out-of-band as AVA_CLUSTER_SECRET for `ava enroll`."
         ),
         json_schema_extra={
             "restart_required": "all",

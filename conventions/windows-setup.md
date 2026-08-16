@@ -79,21 +79,25 @@ uv sync
 #    private network (its tailnet IP / private hostname) — the gateway dials
 #    this runner's ops server there, so localhost only works if the gateway
 #    shares this box (it cannot, on Windows).
+$env:AVA_CLUSTER_SECRET = [System.Net.NetworkCredential]::new(
+  '', (Read-Host -AsSecureString 'Cluster secret')
+).Password
 .venv\Scripts\ava enroll `
   --gateway https://<gateway-host>:8000 `
   --machine-name <this-machine> `
-  --machine-host <this-host-private-ip> `
-  --cluster-secret <secret>
+  --machine-host <this-host-private-ip>
+Remove-Item Env:AVA_CLUSTER_SECRET
 
 # 4. Bring up this host's services
 .venv\Scripts\ava start
 .venv\Scripts\ava status
 ```
 
-`ava enroll` writes the cluster's connection facts (db/redis URLs, event
-channel) into `%USERPROFILE%\.ava\.env` after verifying them against the
-gateway. It does not birth a cluster — an enrolled runner's cluster identity
-*is* the gateway URL plus the secret it enrolled with.
+`ava enroll` verifies the runner's projected connection facts (db/redis URLs,
+event channel) without caching them; every runner process re-fetches them from
+the gateway at startup. It atomically writes only its owner-readable bootstrap
+identity/reachability env. It does not birth a cluster — an enrolled runner's
+cluster identity *is* the gateway URL plus the secret it enrolled with.
 
 Daemon health ports are **not** among those facts: a port block belongs to the
 cluster, but the collision domain is one machine's localhost namespace, and the
@@ -226,8 +230,9 @@ which unit is answering. Give one of them its own block: re-run `ava enroll`
 with `--health-port-base <N>` there, then restart it.
 
 **Agents start and immediately terminate** — usually a missing model API key in
-`%USERPROFILE%\.ava\.env`. `ava enroll` carries the cluster's connection facts,
-not its model credentials.
+`%USERPROFILE%\.ava\.env`. `ava enroll` persists identity/reachability and verifies
+the cluster projection; runner processes re-fetch connection facts at startup, and
+model credentials remain local.
 
 **Scheduled jobs not firing** — `schtasks /query /tn \Ava\<home-slug>\autostart`.
 The home slug comes from the `$AVA_HOME` path; a second checkout gets its own
