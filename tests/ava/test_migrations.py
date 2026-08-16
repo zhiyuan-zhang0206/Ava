@@ -22,6 +22,7 @@ import os
 import time
 from collections.abc import Iterable, Iterator
 from pathlib import Path
+from typing import Any
 
 import psycopg
 import pytest
@@ -276,7 +277,9 @@ def test_apply_pending_nothing_when_baselined(
         assert apply_pending_migrations(fresh) == []
 
 
-def test_apply_pending_applies_post_baseline(db_conn, monkeypatch, tmp_path) -> None:
+def test_apply_pending_applies_post_baseline(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """A synthetic post-baseline migration in migrations/ is applied and stamped by
     name; a second apply is idempotent."""
     _ = db_conn
@@ -310,7 +313,10 @@ def test_apply_pending_applies_post_baseline(db_conn, monkeypatch, tmp_path) -> 
 
 
 def test_untracked_migration_is_skipped_and_warned(
-    db_conn, monkeypatch, tmp_path, loguru_records
+    db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    loguru_records: list[dict[str, Any]],
 ) -> None:
     """The regression itself: a rogue migration sitting untracked in migrations/
     must NOT be applied. The tracked migration applies normally; the untracked
@@ -382,12 +388,12 @@ def test_non_git_dir_fails_closed(monkeypatch: pytest.MonkeyPatch, tmp_path: Pat
 
 
 class TestLayoutValidation:
-    def test_dir_missing_raises(self, tmp_path, monkeypatch) -> None:
+    def test_dir_missing_raises(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr("shared.migrations.MIGRATIONS_DIR", tmp_path / "nope")
         with pytest.raises(MigrationLayoutError, match="does not exist"):
             _list_migration_files()
 
-    def test_bad_filename_raises(self, tmp_path, monkeypatch) -> None:
+    def test_bad_filename_raises(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         (tmp_path / f"{_SYN}.sql").write_text("-- noop")
         (tmp_path / "0001_legacy.sql").write_text("-- noop")  # old integer format
         _init_repo(tmp_path)  # tracked: layout validation applies to git-tracked files
@@ -395,7 +401,9 @@ class TestLayoutValidation:
         with pytest.raises(MigrationLayoutError, match="does not match"):
             _list_migration_files()
 
-    def test_readme_and_down_and_dotfiles_skipped(self, tmp_path, monkeypatch) -> None:
+    def test_readme_and_down_and_dotfiles_skipped(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         (tmp_path / f"{_SYN}.sql").write_text("-- noop")
         (tmp_path / f"{_SYN}.down.sql").write_text("-- noop")
         (tmp_path / "README.md").write_text("docs")
@@ -421,7 +429,7 @@ class TestValidateMigrationLayout:
             validate_migration_layout([f"{_SYN}.sql", "0049_event_log.sql"])
 
 
-def _git(repo, *args) -> None:
+def _git(repo: Path, *args: str) -> None:
     import subprocess
 
     subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True)  # noqa: S603 — test git fixture, fixed argv
@@ -441,7 +449,7 @@ def _init_repo(repo: Path) -> None:
 
 
 class TestValidateMigrationsAtRef:
-    def _init_repo(self, repo, names: list[str]) -> None:
+    def _init_repo(self, repo: Path, names: list[str]) -> None:
         _git(repo, "init", "-q")
         _git(repo, "config", "user.email", "t@t")
         _git(repo, "config", "user.name", "t")
@@ -451,23 +459,25 @@ class TestValidateMigrationsAtRef:
         _git(repo, "add", "-A")
         _git(repo, "commit", "-q", "-m", "init")
 
-    def test_good_ref_passes(self, tmp_path) -> None:
+    def test_good_ref_passes(self, tmp_path: Path) -> None:
         self._init_repo(tmp_path, [f"{_SYN}.sql", f"{_SYN2}.sql"])
         validate_migrations_at_ref("HEAD", repo_root=tmp_path)
 
-    def test_duplicate_in_ref_raises(self, tmp_path) -> None:
+    def test_duplicate_in_ref_raises(self, tmp_path: Path) -> None:
         self._init_repo(tmp_path, [f"{_SYN}.sql", "sub_dir_placeholder.sql"])
         # a malformed name at the ref is refused before any service is stopped
         with pytest.raises(MigrationLayoutError, match="does not match"):
             validate_migrations_at_ref("HEAD", repo_root=tmp_path)
 
-    def test_unreadable_ref_raises(self, tmp_path) -> None:
+    def test_unreadable_ref_raises(self, tmp_path: Path) -> None:
         self._init_repo(tmp_path, [f"{_SYN}.sql"])
         with pytest.raises(MigrationLayoutError, match="cannot read migrations/"):
             validate_migrations_at_ref("no-such-ref", repo_root=tmp_path)
 
 
-def test_apply_multi_statement_migration_over_prepared_conn(monkeypatch, tmp_path) -> None:
+def test_apply_multi_statement_migration_over_prepared_conn(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """A MULTI-statement migration body applies over a `prepare_threshold=0`
     connection — the posture `shared.db.connect()` uses (unconditionally, for
     PgBouncer transaction-pool safety). Regression for the main-CI breakage:
@@ -505,7 +515,9 @@ def test_apply_multi_statement_migration_over_prepared_conn(monkeypatch, tmp_pat
 # ─── apply_down / rollback_to (set-based) ─────────────────────────────────────
 
 
-def test_apply_down_round_trip(db_conn, monkeypatch, tmp_path) -> None:
+def test_apply_down_round_trip(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     (tmp_path / f"{_SYN}.down.sql").write_text("DROP TABLE dtest_t;")
     monkeypatch.setattr("shared.migrations.MIGRATIONS_DIR", tmp_path)
     with db_conn.cursor() as cur:
@@ -517,12 +529,15 @@ def test_apply_down_round_trip(db_conn, monkeypatch, tmp_path) -> None:
 
     with db_conn.cursor() as cur:
         cur.execute("SELECT to_regclass('dtest_t')")
-        assert cur.fetchone()[0] is None  # table dropped
+        dropped = cur.fetchone()
+        assert dropped is not None and dropped[0] is None  # table dropped
         cur.execute("SELECT 1 FROM schema_migrations WHERE name = %s", (_SYN,))
         assert cur.fetchone() is None  # row removed
 
 
-def test_apply_down_missing_down_raises(db_conn, monkeypatch, tmp_path) -> None:
+def test_apply_down_missing_down_raises(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     monkeypatch.setattr("shared.migrations.MIGRATIONS_DIR", tmp_path)  # no .down.sql
     with pytest.raises(MigrationLayoutError):
         _down_path(_SYN)
@@ -533,7 +548,9 @@ def test_apply_down_missing_down_raises(db_conn, monkeypatch, tmp_path) -> None:
         apply_down(db_conn, _SYN)
 
 
-def test_apply_down_atomic_on_failure(db_conn, monkeypatch, tmp_path) -> None:
+def test_apply_down_atomic_on_failure(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """A failing down SQL must NOT delete the schema_migrations row — one txn."""
     (tmp_path / f"{_SYN}.down.sql").write_text("DROP TABLE does_not_exist;")
     monkeypatch.setattr("shared.migrations.MIGRATIONS_DIR", tmp_path)
@@ -558,7 +575,9 @@ def test_rollback_to_floor_guard(db_conn: psycopg.Connection) -> None:
     db_conn.rollback()
 
 
-def test_rollback_to_descends(db_conn, monkeypatch, tmp_path) -> None:
+def test_rollback_to_descends(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """rollback_to reverses the applied names NOT in `keep`, in reverse-name order,
     keeping the baseline."""
     for stem in (_SYN, _SYN2):
@@ -584,7 +603,9 @@ def test_rollback_to_descends(db_conn, monkeypatch, tmp_path) -> None:
 def _try_lock_from_other_conn() -> bool:
     with psycopg.connect(settings.data_plane.db_url, autocommit=True) as conn, conn.cursor() as cur:
         cur.execute("SELECT pg_try_advisory_lock(%s)", (_MIGRATION_LOCK_KEY,))
-        got = cur.fetchone()[0]  # type: ignore[index]
+        row = cur.fetchone()
+        assert row is not None
+        got = row[0]
         if got:
             cur.execute("SELECT pg_advisory_unlock(%s)", (_MIGRATION_LOCK_KEY,))
         return bool(got)
@@ -605,7 +626,9 @@ def test_schema_mutation_lock_released_on_exception(db_conn: psycopg.Connection)
     db_conn.rollback()
 
 
-def test_rollback_to_holds_the_lock(db_conn: psycopg.Connection, monkeypatch, tmp_path) -> None:
+def test_rollback_to_holds_the_lock(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """rollback_to runs under the schema-mutation lock (a recovery rollback must
     not race a bootstrap forward apply)."""
     (tmp_path / f"{_SYN}.down.sql").write_text("DROP TABLE lock_t;")
@@ -696,7 +719,9 @@ def test_schema_sql_seeds_presets_without_a_skill_index() -> None:
     assert _KEY not in seed_block
 
 
-def test_apply_pending_squashes_orphaned_applied_names(db_conn, monkeypatch, tmp_path) -> None:
+def test_apply_pending_squashes_orphaned_applied_names(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """The v0.1.0 reset scenario: the DB's applied set holds pre-reset migration
     names whose files no longer exist in migrations/. apply converges them away
     (schema unchanged — the baseline already carries their effect) and then
@@ -718,7 +743,9 @@ def test_apply_pending_squashes_orphaned_applied_names(db_conn, monkeypatch, tmp
             c.execute("DELETE FROM schema_migrations WHERE name = %s", (orphan,))
 
 
-def test_apply_pending_squash_then_apply_pending(db_conn, monkeypatch, tmp_path) -> None:
+def test_apply_pending_squash_then_apply_pending(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """Squash and forward-apply compose in one call: an orphaned pre-reset name
     is converged away AND a pending migration (the v010 anchor, say) applies
     in the same run."""
@@ -745,7 +772,9 @@ def test_apply_pending_squash_then_apply_pending(db_conn, monkeypatch, tmp_path)
             c.execute("DELETE FROM schema_migrations WHERE name = %s", (orphan,))
 
 
-def test_squash_does_not_touch_baseline_or_pending(db_conn, monkeypatch, tmp_path) -> None:
+def test_squash_does_not_touch_baseline_or_pending(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """Convergence is precise: the baseline sentinel is never deleted, and a name
     that is BOTH applied and present as a file is not touched (its row stays,
     nothing to squash)."""
@@ -768,7 +797,9 @@ def test_squash_does_not_touch_baseline_or_pending(db_conn, monkeypatch, tmp_pat
             c.execute("DELETE FROM schema_migrations WHERE name = %s", (_SYN,))
 
 
-def test_squash_authority_checked_even_without_pending(db_conn, monkeypatch, tmp_path) -> None:
+def test_squash_authority_checked_even_without_pending(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """A squash is a mutation: a non-gateway checkout that would only ever
     trigger the squash path (no pending files) must still be refused."""
     _ = db_conn
@@ -807,7 +838,12 @@ def test_squash_authority_checked_even_without_pending(db_conn, monkeypatch, tmp
             c.execute("DELETE FROM machine_units WHERE machine_name = 'real-gateway'")
 
 
-def test_squash_logs_the_converged_names(db_conn, monkeypatch, tmp_path, loguru_records) -> None:
+def test_squash_logs_the_converged_names(
+    db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    loguru_records: list[dict[str, Any]],
+) -> None:
     """The convergence is loud: the log names every orphaned applied name so an
     operator can audit what the reset folded away."""
     _ = db_conn
@@ -827,7 +863,9 @@ def test_squash_logs_the_converged_names(db_conn, monkeypatch, tmp_path, loguru_
             c.execute("DELETE FROM schema_migrations WHERE name = %s", (orphan,))
 
 
-def test_squash_refuses_partial_pre_reset_history(db_conn, monkeypatch, tmp_path) -> None:
+def test_squash_refuses_partial_pre_reset_history(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """P1 guard: a DB holding only PART of the pre-v0.1.0 history must be
     refused, never silently converged — deleting its tracking rows would
     certify a schema that never ran the missing migrations."""
@@ -849,14 +887,17 @@ def test_squash_refuses_partial_pre_reset_history(db_conn, monkeypatch, tmp_path
         # nothing was deleted by the refusal
         with psycopg.connect(settings.data_plane.db_url, autocommit=True) as v, v.cursor() as cur:
             cur.execute("SELECT COUNT(*) FROM schema_migrations")
-            assert cur.fetchone()[0] == 1 + len(partial)
+            surviving = cur.fetchone()
+            assert surviving is not None and surviving[0] == 1 + len(partial)
     finally:
         with psycopg.connect(settings.data_plane.db_url, autocommit=True) as c:
             for name in partial:
                 c.execute("DELETE FROM schema_migrations WHERE name = %s", (name,))
 
 
-def test_squash_converges_full_pre_reset_history(db_conn, monkeypatch, tmp_path) -> None:
+def test_squash_converges_full_pre_reset_history(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """A DB that ran the COMPLETE pre-reset history converges cleanly: the
     baseline carries the net effect of all 47, so deleting their tracking rows
     is safe and leaves applied == required."""
@@ -881,7 +922,7 @@ def test_squash_converges_full_pre_reset_history(db_conn, monkeypatch, tmp_path)
 
 
 def test_squash_ignores_pre_reset_names_outside_the_frozen_set(
-    db_conn, monkeypatch, tmp_path
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """A pre-reset-era name NOT in the frozen set is an unknown: the guard
     ignores it (it is not part of the squashed history), and convergence still

@@ -841,8 +841,12 @@ def test_resolved_keyset_pages_back(db_conn: psycopg.Connection) -> None:
         # page two: strictly older than page one's last row
         cursor = page1[-1]
         page2 = client.get(
-            "/api/notices/resolved?limit=2"
-            f"&before_at={cursor['resolved_at']}&before_id={cursor['id']}"
+            "/api/notices/resolved",
+            params={
+                "limit": 2,
+                "before_at": cursor["resolved_at"],
+                "before_id": cursor["id"],
+            },
         ).json()
     assert [r["title"] for r in page2] == ["n1", "n0"]
 
