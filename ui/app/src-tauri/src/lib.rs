@@ -8,6 +8,7 @@
 
 #[cfg(target_os = "android")]
 mod android;
+#[cfg(desktop)]
 mod autologin;
 mod command_names;
 mod commands;
@@ -52,7 +53,6 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::shell_config,
             commands::shell_open_external,
-            commands::shell_cluster_secret,
             commands::shell_save_settings,
             commands::shell_retry_entry,
             commands::shell_open_settings,

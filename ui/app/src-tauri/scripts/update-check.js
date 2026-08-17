@@ -101,33 +101,41 @@
     }
     if (!Array.isArray(releases)) return;
 
-    // The repo also tags dated cluster releases, so "latest release" is the
-    // wrong question — find the newest shell tag specifically.
+    // GitHub orders releases by creation time, which is not version order: a
+    // later backfill can appear before a newer shell. Scan the whole response
+    // and choose the highest eligible semver that actually has an APK.
+    var candidate = null;
     for (var i = 0; i < releases.length; i += 1) {
       var release = releases[i];
       if (!release || release.draft || release.prerelease) continue;
       var tag = String(release.tag_name || "");
-      if (tag.indexOf(TAG_PREFIX) !== 0) continue;
+      if (!/^shell-v\d+\.\d+\.\d+$/.test(tag)) continue;
       var version = tag.slice(TAG_PREFIX.length);
-      if (compare(version, cfg.version) <= 0) return;
+      if (compare(version, cfg.version) <= 0) continue;
       var assets = release.assets || [];
       for (var j = 0; j < assets.length; j += 1) {
         if (/\.apk$/i.test(assets[j].name || "")) {
-          if (cfg.notifications) {
-            window.__TAURI_INTERNALS__
-              .invoke("shell_notify", {
-                title: "Ava " + version + " is available",
-                body: "Tap the download bar in the app to install it.",
-              })
-              .catch(function (error) {
-                console.error("[ava-shell] update notification failed", error);
-              });
+          if (!candidate || compare(version, candidate.version) > 0) {
+            candidate = {
+              version: version,
+              assetUrl: assets[j].browser_download_url,
+            };
           }
-          if (document.body) banner(version, assets[j].browser_download_url);
-          return;
+          break;
         }
       }
-      return;
     }
+    if (!candidate) return;
+    if (cfg.notifications) {
+      window.__TAURI_INTERNALS__
+        .invoke("shell_notify", {
+          title: "Ava " + candidate.version + " is available",
+          body: "Tap the download bar in the app to install it.",
+        })
+        .catch(function (error) {
+          console.error("[ava-shell] update notification failed", error);
+        });
+    }
+    if (document.body) banner(candidate.version, candidate.assetUrl);
   })();
 })();

@@ -33,16 +33,17 @@ desktops, then the system browser. Only HTTP(S), `mailto:`, and `tel:` may cross
 that OS-opening boundary.
 
 The bundled origin gets settings commands through `capabilities/local.json`.
-The configured remote console gets a narrower runtime capability. The cluster
-secret permission is added only on desktop when auto-login is enabled; Android
-and disabled desktop sessions cannot invoke it.
+The configured remote console gets a narrower runtime capability with no
+credential-reading command. Desktop auto-login exchanges the local cluster
+secret in native Rust and installs only the resulting HTTP-only session cookie
+in the webview.
 
 ## Desktop
 
 `src-tauri/src/desktop.rs` provides one-instance behavior, tray open/quit,
 close-to-tray, launch-at-login, and Tauri updater checks. Auto-login reads the
-local `$AVA_HOME/.env` secret and lets the webview perform the normal gateway
-login request so its own cookie store receives the session.
+local `$AVA_HOME/.env` secret, performs the gateway login outside web content,
+and reloads after its native cookie store receives the session.
 
 ## Android
 
@@ -65,7 +66,8 @@ silent installs.
 Rust format/clippy, Android-target checking, and overlay/manifest tests.
 `release-shell.yml` builds universal macOS DMG, Windows NSIS, and Android APK
 artifacts for `shell-v*` tags. OS signing and updater signing activate only for
-complete secret groups; missing groups still produce unsigned evidence.
+complete secret groups; tag releases fail closed when any required signing
+group is absent, while manual dispatch may still produce unsigned evidence.
 `scripts/build_shell_update_manifest.py` emits signed updater entries only, and
 the mutable `shell-latest` release carries the stable `latest.json` endpoint.
 

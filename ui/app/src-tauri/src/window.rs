@@ -48,11 +48,7 @@ pub fn open_entry(app: &AppHandle) {
     let state = app.state::<ShellState>();
     let endpoints = state.endpoints();
     if let Some(endpoints) = &endpoints {
-        grant_remote_ipc(
-            app,
-            &endpoints.entry,
-            cfg!(desktop) && state.settings().auto_login,
-        );
+        grant_remote_ipc(app, &endpoints.entry);
     }
 
     let target = match &endpoints {
@@ -72,6 +68,10 @@ pub fn open_entry(app: &AppHandle) {
     crate::desktop::attach_window_behavior(&window);
 
     if let Some(endpoints) = endpoints {
+        #[cfg(desktop)]
+        if state.settings().auto_login {
+            crate::autologin::start(window.clone(), endpoints.clone());
+        }
         watch_entry(window, endpoints.entry);
     }
 }
@@ -104,13 +104,6 @@ fn build(
             false
         });
 
-    #[cfg(desktop)]
-    {
-        if app.state::<ShellState>().settings().auto_login {
-            builder = builder.initialization_script(include_str!("../scripts/auto-login.js"));
-        }
-    }
-
     #[cfg(target_os = "android")]
     {
         builder = builder
@@ -137,9 +130,10 @@ fn prelude(app: &AppHandle) -> String {
 ///
 /// The gate address is user configuration, so this capability cannot be a
 /// static file; it is added at runtime for the origin actually loaded. The
-/// grant is narrow on purpose: the secret-reading command is in it, so widening
-/// the origin would hand a hostile page the cluster password.
-fn grant_remote_ipc(app: &AppHandle, entry: &Url, allow_cluster_secret: bool) {
+/// grant is narrow on purpose: the console can open external links, settings,
+/// and Android notifications, but it cannot read local credentials or persist
+/// a new server address.
+fn grant_remote_ipc(app: &AppHandle, entry: &Url) {
     use tauri::ipc::CapabilityBuilder;
 
     let origin = entry.origin().ascii_serialization();
@@ -149,9 +143,6 @@ fn grant_remote_ipc(app: &AppHandle, entry: &Url, allow_cluster_secret: bool) {
         .window(MAIN_WINDOW);
     for permission in REMOTE_PERMISSIONS {
         capability = capability.permission(*permission);
-    }
-    if allow_cluster_secret {
-        capability = capability.permission(CONDITIONAL_SECRET_PERMISSION);
     }
     if let Err(err) = app.add_capability(capability) {
         log::error!("could not grant IPC access to {origin}: {err}");
@@ -166,11 +157,6 @@ pub const REMOTE_PERMISSIONS: &[&str] = &[
     "allow-shell-open-settings",
     "allow-shell-notify",
 ];
-
-/// Only a desktop window whose persisted settings enable auto-login receives
-/// this grant. The command stays in the static handler but is unreachable from
-/// every other web origin and mode.
-pub const CONDITIONAL_SECRET_PERMISSION: &str = "allow-shell-cluster-secret";
 
 fn capability_identifier(origin: &str) -> String {
     use std::collections::hash_map::DefaultHasher;

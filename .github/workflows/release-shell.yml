@@ -5,11 +5,10 @@
 # the tag annotation. The shell versions independently of the cluster, so it
 # gets its own tag namespace and its own release.
 #
-# Signing is gated on secrets rather than assumed. Every signing step below is
-# skipped when its secret is absent, and the build still produces unsigned
-# artifacts. That is deliberate: the pipeline has to be provable before the
-# certificates exist. Unsigned artifacts remain useful CI evidence and may be
-# signed locally for installation; they are not described as production-ready.
+# A manual dispatch may omit signing secrets and produces unsigned validation
+# artifacts. A release tag fails closed unless updater, platform signing, and
+# (on macOS) notarization credentials are all present: unsigned binaries must
+# never become public release assets.
 #
 # The gating secrets are lifted into job-level `env` because a step's `if` is
 # evaluated against the job's environment, not the step's own.
@@ -37,7 +36,8 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
-  TAURI_CLI_VERSION: '^2.11'
+  # Exact pin: generated Android templates and release outputs are CLI inputs.
+  TAURI_CLI_VERSION: '2.11.4'
 
 jobs:
   prepare:
@@ -98,6 +98,7 @@ jobs:
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
       WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
       WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+      EVENT_NAME: ${{ github.event_name }}
       SHELL_VERSION: ${{ needs.prepare.outputs.version }}
       TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
@@ -141,6 +142,28 @@ jobs:
           else
             require_group "Windows code-signing" \
               "$WINDOWS_CERTIFICATE" "$WINDOWS_CERTIFICATE_PASSWORD"
+          fi
+          if [ -n "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" ] && [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            echo "Updater signing password is configured without a private key" >&2
+            exit 1
+          fi
+          if [ "$EVENT_NAME" = "push" ]; then
+            if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+              echo "Release tags require updater signing" >&2
+              exit 1
+            fi
+            if [ "$RUNNER_OS" = "macOS" ] && \
+               { [ -z "$APPLE_CERTIFICATE" ] || [ -z "$APPLE_CERTIFICATE_PASSWORD" ] || \
+                 [ -z "$APPLE_SIGNING_IDENTITY" ] || [ -z "$APPLE_ID" ] || \
+                 [ -z "$APPLE_PASSWORD" ] || [ -z "$APPLE_TEAM_ID" ]; }; then
+              echo "Release tags require Apple signing and notarization" >&2
+              exit 1
+            fi
+            if [ "$RUNNER_OS" = "Windows" ] && \
+               { [ -z "$WINDOWS_CERTIFICATE" ] || [ -z "$WINDOWS_CERTIFICATE_PASSWORD" ]; }; then
+              echo "Release tags require Windows code-signing" >&2
+              exit 1
+            fi
           fi
 
       # Without the certificate the app is built ad-hoc signed, which still
@@ -212,6 +235,7 @@ jobs:
       ANDROID_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE }}
       ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
       ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+      EVENT_NAME: ${{ github.event_name }}
       NDK_VERSION: 27.2.12479018
       SHELL_VERSION: ${{ needs.prepare.outputs.version }}
     steps:
@@ -264,6 +288,10 @@ jobs:
           done
           if [ "$present" -gt 0 ] && [ "$missing" -gt 0 ]; then
             echo "Android signing secrets are only partially configured" >&2
+            exit 1
+          fi
+          if [ "$EVENT_NAME" = "push" ] && [ "$missing" -gt 0 ]; then
+            echo "Release tags require Android signing" >&2
             exit 1
           fi
 

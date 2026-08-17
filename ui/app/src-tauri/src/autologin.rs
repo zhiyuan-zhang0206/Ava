@@ -1,19 +1,114 @@
-//! Desktop auto-login — read the local cluster secret so a machine that owns a
-//! cluster never has to type its own password.
+//! Desktop auto-login — exchange the local cluster secret for a short-lived
+//! session cookie without exposing the long-lived secret to remote web code.
 //!
-//! This module only *finds* the secret. The login itself happens in the
-//! webview, from the injected `auto-login.js`: it calls `/api/auth/check`, and
-//! when signed out POSTs `/api/auth/login` with the secret the way the console's
-//! own login form does. The browser stack then sets and persists the cookie
-//! natively, with no second cookie-jar injection path.
+//! The request runs in native Rust. Only the gateway's `Set-Cookie` result is
+//! installed in the webview store, then the console is reloaded. Consequently
+//! a compromised console origin can reach only the same seven-day HTTP-only
+//! session it already runs inside; it cannot invoke an IPC command to extract
+//! the cluster-wide credential.
 //!
 //! A machine with no local cluster (`.env` absent) simply gets the login page.
 
 use std::env;
 use std::path::PathBuf;
+use std::time::Duration;
+
+use reqwest::blocking::Client;
+use reqwest::header::SET_COOKIE;
+use reqwest::redirect::Policy;
+use tauri::webview::{cookie, Cookie};
+use tauri::{Url, WebviewWindow};
+
+use crate::urls::Endpoints;
 
 /// Env key carrying the cluster secret in `$AVA_HOME/.env`.
 const SECRET_KEY: &str = "AVA_CLUSTER_SECRET";
+
+/// Keep a stalled gateway from pinning the login helper thread indefinitely.
+const LOGIN_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Start one native login attempt and reload the console if it succeeds.
+///
+/// Transport/auth failures deliberately fall back to the ordinary login page.
+/// In particular, an invalid local secret is never retried: repeated guesses
+/// would trip the gateway's brute-force lockout.
+pub fn start(window: WebviewWindow, endpoints: Endpoints) {
+    let Some(secret) = cluster_secret() else {
+        return;
+    };
+
+    std::thread::spawn(move || match login_cookie(&endpoints.gateway, &secret) {
+        Ok(cookie) => {
+            if let Err(err) = window.set_cookie(cookie) {
+                log::error!("could not install the auto-login session: {err}");
+                return;
+            }
+            if let Err(err) = window.navigate(endpoints.entry) {
+                log::error!("could not reload the console after auto-login: {err}");
+            }
+        }
+        Err(err) => log::warn!("desktop auto-login unavailable: {err}"),
+    });
+}
+
+/// Exchange the secret for a cookie. The response body is intentionally
+/// ignored; the status and cookie header are the complete login contract.
+fn login_cookie(gateway: &Url, secret: &str) -> Result<Cookie<'static>, String> {
+    let login_url = gateway
+        .join("/api/auth/login")
+        .map_err(|err| format!("invalid gateway login URL: {err}"))?;
+    let client = Client::builder()
+        .timeout(LOGIN_TIMEOUT)
+        // Never follow a redirect with the cluster secret in the POST body.
+        // The configured gateway endpoint itself must answer the login.
+        .redirect(Policy::none())
+        .build()
+        .map_err(|err| format!("could not build login client: {err}"))?;
+    let response = client
+        .post(login_url.as_str())
+        .json(&serde_json::json!({ "password": secret }))
+        .send()
+        .map_err(|err| format!("gateway login request failed: {err}"))?;
+    if !response.status().is_success() {
+        return Err(format!("gateway rejected login ({})", response.status()));
+    }
+    let header = response
+        .headers()
+        .get(SET_COOKIE)
+        .ok_or_else(|| "gateway login returned no session cookie".to_string())?
+        .to_str()
+        .map_err(|_| "gateway login returned a non-text cookie".to_string())?;
+    cookie_for_gateway(header, gateway)
+}
+
+/// Attach the response cookie to the gateway's exact host before handing it to
+/// the native webview store. WebKit and WebView2 distinguish an exact domain
+/// (`gateway.example`) from a subdomain-matching one (`.gateway.example`); the
+/// URL host can never carry that leading dot. Cookie domains contain no port.
+fn cookie_for_gateway(header: &str, gateway: &Url) -> Result<Cookie<'static>, String> {
+    let host = gateway
+        .host_str()
+        .ok_or_else(|| "gateway URL has no host".to_string())?;
+    let parsed = cookie::Cookie::parse(header.to_string())
+        .map_err(|err| format!("gateway returned an invalid cookie: {err}"))?;
+    let mut builder =
+        cookie::Cookie::build((parsed.name().to_string(), parsed.value().to_string()))
+            .domain(host.to_string())
+            .path(parsed.path().unwrap_or("/").to_string());
+    if let Some(value) = parsed.http_only() {
+        builder = builder.http_only(value);
+    }
+    if let Some(value) = parsed.secure() {
+        builder = builder.secure(value);
+    }
+    if let Some(value) = parsed.same_site() {
+        builder = builder.same_site(value);
+    }
+    if let Some(value) = parsed.max_age() {
+        builder = builder.max_age(value);
+    }
+    Ok(builder.build().into_owned())
+}
 
 /// The `.env` the local cluster writes at install time: `$AVA_HOME/.env`,
 /// falling back to the default home `~/.ava/.env`.
@@ -68,7 +163,9 @@ fn parse_secret(text: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_secret;
+    use super::{cookie_for_gateway, parse_secret};
+    use tauri::webview::cookie::SameSite;
+    use tauri::Url;
 
     #[test]
     fn reads_the_secret_line() {
@@ -100,5 +197,27 @@ mod tests {
     #[test]
     fn absent_key_yields_nothing() {
         assert!(parse_secret("AVA_DB_URL=postgresql://x\n").is_none());
+    }
+
+    #[test]
+    fn gateway_cookie_keeps_security_flags_and_gets_the_gateway_domain() {
+        let gateway = Url::parse("https://ava.example.com:8000/").unwrap();
+        let cookie = cookie_for_gateway(
+            "ava_session=token; HttpOnly; SameSite=Lax; Secure; Path=/; Max-Age=604800",
+            &gateway,
+        )
+        .unwrap();
+        assert_eq!(cookie.name(), "ava_session");
+        assert_eq!(cookie.value(), "token");
+        assert_eq!(cookie.domain(), Some("ava.example.com"));
+        assert!(!cookie.domain().unwrap().starts_with('.'));
+        assert_eq!(cookie.path(), Some("/"));
+        assert_eq!(cookie.http_only(), Some(true));
+        assert_eq!(cookie.secure(), Some(true));
+        assert_eq!(cookie.same_site(), Some(SameSite::Lax));
+        assert_eq!(
+            cookie.max_age().map(|age| age.whole_seconds()),
+            Some(604_800)
+        );
     }
 }
