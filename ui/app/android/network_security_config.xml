@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Cleartext HTTP policy for the shell.
+
+  The cluster speaks plain HTTP on a private network, so cleartext has to be
+  permitted at all. The intent is to permit it ONLY towards private space —
+  RFC1918, CGNAT/tailnet (100.64.0.0/10) and loopback — but Android's network
+  security config has no way to say that: <domain> takes a hostname or a
+  literal IP address, never a prefix, and the private ranges cannot be
+  enumerated.
+
+  So the range policy is enforced where it CAN be expressed precisely: the
+  shell refuses to store a cleartext entry URL whose host resolves outside
+  private space (`urls::is_private_host`, applied in `shell_save_settings` on
+  Android). Since the navigation guard confines the webview to the entry and
+  gateway hosts, no other cleartext origin is reachable — which is a stronger
+  guarantee than a hostname allow-list would have given, not a weaker one.
+
+  The named entries below are still worth having: they keep the common cases
+  (loopback, the emulator's host alias, mDNS and Tailscale MagicDNS names)
+  documented in one place for anyone auditing the APK.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">localhost</domain>
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <!-- The emulator's alias for the developer machine's loopback. -->
+        <domain includeSubdomains="false">10.0.2.2</domain>
+        <!-- mDNS names (`box.local`). -->
+        <domain includeSubdomains="true">local</domain>
+        <!-- Tailscale MagicDNS names. -->
+        <domain includeSubdomains="true">ts.net</domain>
+    </domain-config>
+</network-security-config>
