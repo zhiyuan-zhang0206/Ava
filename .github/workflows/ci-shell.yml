@@ -71,5 +71,7 @@ jobs:
       - name: Overlay and updater-manifest tests
         run: |
           python3 -m pip install pytest==9.0.3
-          python3 -m pytest tests/ui/test_android_overlay.py \
+          python3 -m pytest --noconftest tests/ui/test_android_overlay.py \
+            tests/ui/test_android_update_check.py \
+            tests/ui/test_shell_release_workflow.py \
             tests/scripts/test_build_shell_update_manifest.py -q

@@ -13,7 +13,6 @@
 pub const COMMANDS: &[&str] = &[
     "shell_config",
     "shell_open_external",
-    "shell_cluster_secret",
     "shell_save_settings",
     "shell_retry_entry",
     "shell_open_settings",

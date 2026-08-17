@@ -70,5 +70,6 @@ cd ../../..
 
 Tags matching `shell-v<major>.<minor>.<patch>` drive
 `.github/workflows/release-shell.yml`. macOS/Windows updater assets are listed
-in `latest.json` only when their Tauri signatures exist; unsigned release runs
-publish an empty updater platform map rather than an unverifiable update.
+in `latest.json` only when their Tauri signatures exist. Tag builds fail unless
+updater, OS, and Android signing credentials are present; manual dispatch keeps
+the explicit unsigned validation path without publishing a GitHub Release.

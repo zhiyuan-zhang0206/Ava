@@ -8,9 +8,9 @@ alone.
 ## Signing and store distribution
 
 - Provision Apple Developer ID/notarization credentials, a Windows code-signing
-  certificate, and an Android upload keystore as GitHub secrets. The release
-  workflow already validates each group and keeps unsigned validation builds
-  available while a group is absent.
+  certificate, and an Android upload keystore as GitHub secrets. Tag releases
+  fail closed until every group exists; manual dispatch keeps unsigned
+  validation builds available without publishing them.
 - Exercise a real `shell-v*` tag with every signing group present, then verify
   installation and updater replacement on clean macOS and Windows machines.
 - Decide whether the Android APK remains a direct GitHub Release download or is

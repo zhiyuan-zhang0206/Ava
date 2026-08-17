@@ -71,19 +71,6 @@ pub fn shell_open_external(app: AppHandle, url: String) -> Result<(), String> {
     external::open_external(&app, &url)
 }
 
-/// The local cluster secret, for desktop auto-login only.
-///
-/// Returns `None` — never an error — when auto-login is off, when the platform
-/// is not a desktop, or when this machine owns no cluster. "No secret here" is
-/// the ordinary case on a console-only machine and must not look like a fault.
-#[tauri::command]
-pub fn shell_cluster_secret(state: State<'_, ShellState>) -> Option<String> {
-    if !cfg!(desktop) || !state.settings().auto_login {
-        return None;
-    }
-    crate::autologin::cluster_secret()
-}
-
 /// Refuse a cleartext server address outside private network space.
 ///
 /// This is the range policy Android's network security config is meant to
@@ -199,7 +186,7 @@ pub fn shell_notify(app: AppHandle, state: State<'_, ShellState>, title: String,
 #[cfg(test)]
 mod tests {
     use crate::command_names::COMMANDS;
-    use crate::window::{CONDITIONAL_SECRET_PERMISSION, REMOTE_PERMISSIONS};
+    use crate::window::REMOTE_PERMISSIONS;
 
     /// The static capability, read as text: a command is reachable from the
     /// shell's own pages only if its `allow-*` permission is listed there.
@@ -219,8 +206,7 @@ mod tests {
         for command in COMMANDS {
             let permission = permission_of(command);
             let granted = LOCAL_CAPABILITY.contains(&permission)
-                || REMOTE_PERMISSIONS.contains(&permission.as_str())
-                || permission == CONDITIONAL_SECRET_PERMISSION;
+                || REMOTE_PERMISSIONS.contains(&permission.as_str());
             assert!(
                 granted,
                 "{command} is registered but no capability grants it"
@@ -243,7 +229,7 @@ mod tests {
     }
 
     #[test]
-    fn the_cluster_secret_is_never_in_the_unconditional_remote_grant() {
-        assert!(!REMOTE_PERMISSIONS.contains(&CONDITIONAL_SECRET_PERMISSION));
+    fn no_ipc_command_can_read_the_cluster_secret() {
+        assert!(!COMMANDS.iter().any(|command| command.contains("secret")));
     }
 }
