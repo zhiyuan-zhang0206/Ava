@@ -34,7 +34,8 @@ tags:
 - `tests/services/` — backend services
 - `tests/ops/` — ops layer (18 files: controllers pin/schema/stranded-pause/code, updater outcomes + stall reap, manager, heal records, deploy window, spec roster, plugin services, spawn birth config, cluster ops)
 - `tests/skills/` — skills
-- `tests/scripts/` — `test_release_cut.py`, `test_check_doc_references.py`, `test_rotate_cluster_secret.py`; lint script tests at `tests/` root `test_lint_*.py`
+- `tests/scripts/` — release/docs/secret-rotation scripts plus the shell updater-manifest builder; lint script tests at `tests/` root `test_lint_*.py`
+- `tests/ui/` — deterministic tests for applying the shell's Kotlin/XML/signing overlay to Tauri's generated Android project
 - `tests/plugins/` — plugin tests (`test_ava_memory_lint.py` / `test_ava_memory_notes.py` for the ava_memory plugin, `ava_fleet/` subtree)
 - `tests/fixtures/` + `tests/factories/` — test fixture data and data factories
 

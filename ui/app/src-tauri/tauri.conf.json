@@ -1,0 +1,49 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Ava",
+  "identifier": "com.ava.shell",
+  "build": {
+    "frontendDist": "../shell-ui"
+  },
+  "app": {
+    "withGlobalTauri": false,
+    "windows": [],
+    "security": {
+      "csp": null,
+      "assetProtocol": {
+        "enable": false
+      }
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app", "dmg", "nsis"],
+    "createUpdaterArtifacts": true,
+    "category": "Productivity",
+    "shortDescription": "Ava console shell",
+    "longDescription": "Desktop and mobile shell for the Ava cluster console.",
+    "copyright": "Apache-2.0",
+    "publisher": "Ava",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "macOS": {
+      "minimumSystemVersion": "10.15"
+    },
+    "android": {
+      "minSdkVersion": 24
+    }
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/zhiyuan-zhang0206/Ava/releases/download/shell-latest/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDY5NTc0M0YzQzQwN0M3REMKUldUY3h3ZkU4ME5YYVRYZTQ3RUZJTU5sL2hDR2luNS9NSjZHV1R2SUlaYVVzOG8vK0tFR1ZBNWkK"
+    }
+  }
+}

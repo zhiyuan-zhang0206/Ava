@@ -12,9 +12,13 @@ Ava frontend subsystem—Next.js 16 web interface for fleet supervision, agent c
 
 **Role assignment**: gateway side (pure agent-runner does not run it)—Next.js server is a `frontend` session from `build_services` (not in `_AGENT_RUNNER_ONLY_SESSIONS`), roster derived by `ops/spec.py:services_for_capabilities` by capability (re-exported by `cli/commands/_repo.py`).
 
-## Desktop shell (explicitly non-core)
+## Native shell (explicitly non-core)
 
-`desktop/` is a **thin Electron wrapper** — fullscreen / Dock / tray persistence plus a web-console window, nothing more (user ruling 2026-08-04: desktop = thin wrapper, features as few as possible; web is the universal body). It renders this same frontend, carries no UI logic of its own, and is therefore **not a core subsystem** — CI treats `desktop/` as frontend (FRONTEND path filter). Node: [[../desktop/desktop.ava.okf.md]].
+`ui/app/` is a thin Tauri 2 wrapper for macOS, Windows, and Android. It loads
+this frontend from the gate and adds only platform behavior (window/tray,
+desktop auto-login/updater, Android onboarding/residency/notifications). The web
+console remains the universal body and the shell remains non-core. Node:
+[[../app/app.ava.okf.md]].
 
 ## Sub-concepts
 
