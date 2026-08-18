@@ -17,9 +17,9 @@ dashboards).
 ## Where these run (LGTM stack)
 
 Since the single-Grafana merge (Task #1264) the LGTM Grafana container
-(3003, deploy/local/lgtm) evaluates these rules: `rules.yml` and
+(3003, deploy/lgtm) evaluates these rules: `rules.yml` and
 `contact.yml` are copied to
-`deploy/local/lgtm/config/grafana/provisioning/alerting/` (mounted into the
+`deploy/lgtm/config/grafana/provisioning/alerting/` (mounted into the
 container). The copy must stay in sync — guarded by
 `tests/test_lint_lgtm_alerting_sync.py`; the only allowed divergence is the
 contact point's webhook URL (`host.docker.internal` inside the container).

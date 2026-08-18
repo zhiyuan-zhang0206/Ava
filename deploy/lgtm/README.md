@@ -1,9 +1,48 @@
-# Local LGTM trace viewer
+# LGTM observability backend
 
-A read-only **Tempo + Loki + Prometheus + Grafana** stack hosted on one machine
-as the viewer for Ava's telemetry. Decided 2026-08-11 (task #1170): no Langfuse
-machine; the most general OTel frontend, hosted locally, viewer-only and
-start/stop-able at will.
+A **Tempo + Loki + Prometheus + Grafana** stack, co-located with the gateway
+host, serving as the cluster's observability backend. Decided 2026-08-11
+(task #1170): no Langfuse machine; the most general OTel stack, self-hosted.
+
+The gateway depends on it: this stack is **required serving infrastructure
+while the gateway serves /ops and the inspect endpoints**. Live consumers:
+
+- **gateway read paths** — `gateway/loki_events.py` (event history from Loki)
+  and `gateway/prom_metrics.py` (telemetry aggregates from Prometheus) back
+  the /ops and inspect endpoints.
+- **ops alerting** — the Grafana container's embedded Alertmanager evaluates
+  the provisioned alert rules and fires the gateway webhook
+  (`gateway/routers/alerts.py`); with the stack down, no ops alert fires.
+- **events-maintenance** — the rollup aggregates from Loki.
+- **`ava cluster health`** — audits crash loops from the Loki event stream
+  (`cli/commands/_cluster_health.py`; it fails OPEN — reports healthy — when
+  Loki is unreachable, so a down stack silently blinds that audit).
+
+## Lifecycle ownership
+
+The stack is a **host singleton** (fixed host ports, one compose project per
+box), owned by the Ava lifecycle on exactly one home: the host carrying the
+**`$AVA_HOME/lgtm-host` marker file** (machine-identity-file pattern, created
+once by the operator — in practice the prod default home `~/.ava`):
+
+```bash
+touch ~/.ava/lgtm-host   # designate this host/home as the LGTM owner (once)
+```
+
+With the marker present:
+
+- **converge** (every `ava start` / `ava cluster update`, and standalone
+  `ava converge`) runs the idempotent `start.sh`;
+- the **gateway watchdog** probes the four readiness endpoints every 60s
+  (`services/healthchecks/lgtm.py`) and re-runs `start.sh` on a
+  connection-level failure — this is the restore mechanism after a
+  reboot/OrbStack crash (the compose `restart: unless-stopped` policy only
+  fires once the docker daemon itself is back up);
+- **`ava status`** shows an LGTM section (compose containers + probes).
+
+A home without the marker never touches the containers — a dev worktree
+cluster's converge/watchdog no-op here, so they cannot recreate prod's
+running containers from a dev checkout's configs.
 
 ## Why this stack
 
@@ -39,10 +78,10 @@ The sidecar buffers in a file-backed queue while this stack is down, so
 
 Data lives in docker named volumes (`tempo-data`, `loki-data`, `prom-data`,
 `grafana-data`) — `docker compose down` keeps them, `down -v` wipes them.
-`restart: on-failure:3`: a crashed/OOM-killed backend recovers by itself, while
-a clean `stop.sh` (compose down) keeps the stack off until `start.sh` — and the
-stack stays off after a reboot until `start.sh` is run (OrbStack starts at
-login, but `on-failure` does not restart cleanly-stopped containers).
+`restart: unless-stopped`: a crashed/OOM-killed backend recovers by itself and
+containers come back with the docker daemon after a reboot; a clean `stop.sh`
+(compose down) removes them, so it sticks against the restart policy — but
+see the watchdog note below.
 
 Resource + retention posture (single 16GB box shared with the prod cluster):
 every container carries explicit `cpus`/`mem_limit` caps (~5.5 cores / ~4GB
@@ -60,9 +99,18 @@ keeps the wide bind: it is the one anonymous-but-read-only surface.
 ## Start / stop
 
 ```bash
-bash deploy/local/lgtm/start.sh   # idempotent; auto-starts OrbStack if needed
-bash deploy/local/lgtm/stop.sh    # stops; data persists
+bash deploy/lgtm/start.sh   # idempotent; auto-starts OrbStack if needed (macOS)
+bash deploy/lgtm/stop.sh    # stops; data persists
 ```
+
+On the marked LGTM host the lifecycle owns the stack: converge re-runs
+`start.sh` on every `ava start`, and the gateway watchdog revives a stack
+whose probes hit connection failures within ~a minute. A deliberate stop
+there needs the keepalive out of the way first: remove `$AVA_HOME/lgtm-host`
+(full de-designation) or `ava start --disable-service lgtm` (durable skip),
+then `stop.sh`. While the stack is down the gateway's /ops + inspect reads,
+ops alerting, and the events-maintenance rollup degrade; the native sidecar
+buffers telemetry in its file-backed queue, so nothing is lost.
 
 ## Session logs in Loki (2026-08-12)
 
@@ -92,7 +140,7 @@ once; steady state adds roughly ~20MB/day.
 
 Config changes apply with `docker compose restart loki promtail` (configs are
 bind-mounted read-only; neither service reloads on its own). The prod copy of
-these files lives at `~/.ava/source/deploy/local/lgtm/` — it picks the change
+these files lives at `~/.ava/source/deploy/lgtm/` — it picks the change
 up on the next `ava cluster update`, and then needs the same restart. The
 logs-dir bind defaults to `~/.ava/logs` (the operator's `$HOME` — no
 machine-specific path is baked in); override with `AVA_LOGS_DIR=/path/to/logs
@@ -132,14 +180,19 @@ curl -G -s http://127.0.0.1:3100/loki/api/v1/query \
   `AVA_TELEMETRY_OTLP_ENDPOINT` (default http://127.0.0.1:4318) for the live
   exporters; `ava trace ship` replays straight to Tempo's 14318.
 
-## Zero-impact contract
+## Write-side contract (and what "required" means)
 
-- Nothing here writes to `~/.ava/traces` (the mirror — the sidecar does), the
-  events table, or any main-flow service. The only touch on `$AVA_HOME` is promtail's read-only
-  bind of `$AVA_HOME/logs` (session stdout → Loki).
-- When stopped (`stop.sh`), no viewer process runs at all.
-- The old Jaeger v2 experiment (same role, replaced by this stack) is archived
-  at `~/.ava/traces-viewer/` — stopped, harmless, removable.
+- **Producers are untouched**: nothing here writes to `~/.ava/traces` (the
+  mirror — the sidecar does), the events table, or any main-flow service. The
+  only touch on `$AVA_HOME` is promtail's read-only bind of `$AVA_HOME/logs`
+  (session stdout → Loki).
+- **The READ side is load-bearing**: the gateway's /ops + inspect endpoints,
+  ops alerting (Grafana's Alertmanager → gateway webhook), the
+  events-maintenance rollup, and `ava cluster health` all consume this stack
+  (see the consumer list at the top). It is not a stop-anytime viewer — on
+  the marked host the lifecycle keeps it up.
+- The old Jaeger v2 experiment (an earlier viewer-only role, replaced by this
+  stack) is archived at `~/.ava/traces-viewer/` — stopped, harmless, removable.
 
 ## Environment (optional `.env`)
 

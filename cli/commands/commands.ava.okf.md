@@ -30,7 +30,8 @@ Two kinds of module live here, distinguished by filename:
   `_update_git` /
   `_update_orchestration` / `_update_agent_runner` / `_updater_lease` / `_update_recover` /
   `_gateway_ready` (the staged upgrade), `_probe`, `_setup`, `_session_lifecycle`, `_repo`, `_warmup`,
-  `_pkg_source`, `_pgbouncer`, `_claude_code_plugin`, `_cluster_health` /
+  `_pkg_source`, `_pgbouncer`, `_lgtm`,
+  `_claude_code_plugin`, `_cluster_health` /
   `_cluster_rollback` / `_cluster_cron` / `_cluster_watchdog_probe`.
 
 `migrations.py:cmd_migrations_apply` is deliberately not a user-facing verb —

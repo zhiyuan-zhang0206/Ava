@@ -1,6 +1,6 @@
 """The LGTM Grafana alerting provisioning stays in sync with its source.
 
-`deploy/local/lgtm/config/grafana/provisioning/alerting/` is what the running
+`deploy/lgtm/config/grafana/provisioning/alerting/` is what the running
 LGTM Grafana container loads (mounted read-only into /etc/grafana/
 provisioning/alerting). The source of truth is `dashboards/ops/alerts/` (the
 3002-era home, still synced by `_sync_grafana_provisioning` until the 3002
@@ -20,9 +20,7 @@ from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _SRC = _REPO_ROOT / "dashboards" / "ops" / "alerts"
-_LGTM = (
-    _REPO_ROOT / "deploy" / "local" / "lgtm" / "config" / "grafana" / "provisioning" / "alerting"
-)
+_LGTM = _REPO_ROOT / "deploy" / "lgtm" / "config" / "grafana" / "provisioning" / "alerting"
 
 # The two allowed contact.yml divergences: the webhook URL (container -> host)
 # and the auth settings block (13.1.3 secureSettings-dropping workaround).

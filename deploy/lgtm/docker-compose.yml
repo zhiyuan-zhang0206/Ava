@@ -1,16 +1,30 @@
-# deploy/local/lgtm/docker-compose.yml — AVA local observability viewer
-# (Tempo + Loki + Prometheus + Grafana, the LGTM stack), hosted on this machine.
+# deploy/lgtm/docker-compose.yml — the cluster's observability backend
+# (Tempo + Loki + Prometheus + Grafana, the LGTM stack), hosted on the
+# designated LGTM host ($AVA_HOME/lgtm-host marker — see README.md).
 #
-# Role: read-only VIEWER for Ava's telemetry. Producers are untouched — nothing
-# here writes to ~/.ava/traces, the events table, or any main-flow service.
-# The OTLP entry is the NATIVE per-machine sidecar (ava-otel-collector session,
-# task #1266) on host 4318 (OTLP/HTTP) — this stack only hosts the backends it fans
-# out to.
+# Role: REQUIRED serving infrastructure while the gateway serves /ops and the
+# inspect endpoints — not a disposable viewer. Live consumers:
+#   - gateway Loki/Prometheus read paths (gateway/loki_events.py,
+#     gateway/prom_metrics.py — event history + telemetry aggregates)
+#   - ops alerting: Grafana's embedded Alertmanager evaluates the provisioned
+#     rules and fires the gateway webhook (gateway/routers/alerts.py)
+#   - the events-maintenance rollup aggregates from Loki
+#   - `ava cluster health` audits crash loops from the Loki event stream
+#     (cli/commands/_cluster_health.py)
+# Producers are untouched — nothing here writes to ~/.ava/traces, the events
+# table, or any main-flow service. The OTLP entry is the NATIVE per-machine
+# sidecar (ava-otel-collector session, task #1266) on host 4318 (OTLP/HTTP) —
+# this stack only hosts the backends it fans out to.
 #
-# Operations:
+# Lifecycle: converge (`ava start` / `ava cluster update` on the marker host)
+# runs start.sh idempotently; the gateway watchdog probes the four readiness
+# endpoints every 60s (services/healthchecks/lgtm.py) and re-runs start.sh on
+# connection failure; `ava status` shows the stack on the marker host.
+#
+# Operations (manual, still available):
 #   bash start.sh   # docker compose up -d, wait for health, print URL
 #   bash stop.sh    # docker compose down (data volumes persist)
-#   docker compose down -v   # wipe viewer data (traces/logs/metrics history)
+#   docker compose down -v   # WIPE data (traces/logs/metrics history)
 #
 # Ports (host):
 #   3003  Grafana UI (anonymous viewer; 3000/3002 already taken by frontend/ops Grafana)
@@ -20,10 +34,13 @@
 #   9090  Prometheus API (+ OTLP receiver /api/v1/otlp, sidecar metrics fan-out)
 #
 # Images are pinned to exact versions for reproducibility. restart:
-# on-failure:3 recovers a crashed/OOM-killed backend (the native sidecar's
-# file-backed queue + promtail positions make the restart lossless) while a
-# clean stop.sh (compose down) still keeps the stack off until start.sh —
-# deliberate stops stay deliberate.
+# unless-stopped restores containers (crashed, OOM-killed, or daemon-restarted
+# after a reboot) — the native sidecar's file-backed queue + promtail
+# positions make restarts lossless — while a deliberate stop.sh still sticks
+# (compose down removes the containers). On macOS the policy only fires once
+# OrbStack launches at login — the watchdog healthcheck
+# (services/healthchecks/lgtm.py) is the real restore mechanism; the restart
+# policy is a complement.
 #
 # Resource budget: every service carries cpus/mem_limit (+ memswap_limit ==
 # mem_limit so a capped container cannot silently take 2x in swap). Total
@@ -36,7 +53,7 @@
 # Bind address: ports bind ${LGTM_BIND_HOST:-127.0.0.1}, mirroring the
 # cluster's own data-plane posture — a single box is loopback-only with zero
 # config; a split deployment sets LGTM_BIND_HOST to this host's private
-# reachable address in deploy/local/lgtm/.env (gitignored) and remote
+# reachable address in deploy/lgtm/.env (gitignored) and remote
 # sidecars/`ava trace ship` dial that address. The backends themselves are
 # unauthenticated (Loki auth_enabled: false, Prometheus OTLP receiver), so a
 # non-loopback bind must face a trusted private network only — the same
@@ -58,7 +75,7 @@ services:
       # OTLP/HTTP intake for the native sidecar's traces pipeline + `ava trace
       # ship` replay. Non-standard host port: 4318 belongs to the sidecar.
       - "${LGTM_BIND_HOST:-127.0.0.1}:14318:4318"
-    restart: on-failure:3
+    restart: unless-stopped
     cpus: 1.0
     mem_limit: 768m
     memswap_limit: 768m
@@ -71,7 +88,7 @@ services:
       - loki-data:/loki
     ports:
       - "${LGTM_BIND_HOST:-127.0.0.1}:3100:3100"
-    restart: on-failure:3
+    restart: unless-stopped
     # 2g while the task #1281 archive stream (365d retention_stream) is
     # queryable; tighten to 1g when the archive-era loki.yaml settings go.
     cpus: 2.0
@@ -88,7 +105,7 @@ services:
       # AVA_LOGS_DIR=/path/to/logs bash start.sh
       - ${AVA_LOGS_DIR:-~/.ava/logs}:/var/log/ava:ro
       - promtail-positions:/tmp
-    restart: on-failure:3
+    restart: unless-stopped
     cpus: 0.5
     mem_limit: 256m
     memswap_limit: 256m
@@ -112,7 +129,7 @@ services:
       - prom-data:/prometheus
     ports:
       - "${LGTM_BIND_HOST:-127.0.0.1}:9090:9090"
-    restart: on-failure:3
+    restart: unless-stopped
     cpus: 1.0
     mem_limit: 1g
     memswap_limit: 1g
@@ -134,7 +151,7 @@ services:
       GF_ANALYTICS_REPORTING_ENABLED: "false"
       GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
       # Alerting webhook token (contact.yml $__env expansion). Value comes
-      # from deploy/local/lgtm/.env (gitignored) — never commit it.
+      # from deploy/lgtm/.env (gitignored) — never commit it.
       OPS_ALERTS_WEBHOOK_TOKEN: "${OPS_ALERTS_WEBHOOK_TOKEN:-}"
       # Read-only Postgres password for the grafana_ro datasource role
       # (datasources.yml $GRAFANA_PG_PASSWORD). From .env (gitignored).
@@ -144,7 +161,7 @@ services:
       - grafana-data:/var/lib/grafana
     ports:
       - "3003:3000"
-    restart: on-failure:3
+    restart: unless-stopped
     cpus: 1.0
     mem_limit: 512m
     memswap_limit: 512m

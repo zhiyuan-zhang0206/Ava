@@ -37,7 +37,7 @@ and the matching GitHub Releases, cut by `scripts/release_cut.py`.
 
 ### Removed
 - `ava logs` CLI (list live sessions / tail one session's log) — replaced by
-  the Loki query path above; see `deploy/local/lgtm/README.md`.
+  the Loki query path above; see `deploy/lgtm/README.md`.
 
 ### Security
 - Secrets no longer ride process command lines. Session env is handed to the

@@ -138,9 +138,9 @@ annotated artifact.
 | Turn content | `GET /api/agents/{id}/traces/{hex}/messages` | gateway :8000, bearer auth, pruned semantics |
 | Event stream | `GET /api/events?trace_id=<hex>&from=<ISO>` | gateway :8000, bearer auth, `items[]` + `meta.total` |
 
-The LGTM stack is `deploy/local/lgtm/` (`start.sh` / `stop.sh`); it is a
-read-only viewer — never point write paths at it, and never touch
-`~/.ava/traces` from a script.
+The LGTM stack is `deploy/lgtm/` (lifecycle-owned on the marked host — see
+its README); its ingest is the sidecar fan-out only — never point write
+paths at it directly, and never touch `~/.ava/traces` from a script.
 
 ## Pitfalls (all observed, Tempo 3.0.2)
 
@@ -162,5 +162,5 @@ read-only viewer — never point write paths at it, and never touch
 
 - Writing or auditing `traces/*.md` genre docs — use `write-a-trace`.
 - Deploying/operating the LGTM stack itself — see the memory notes and
-  `deploy/local/lgtm/README.md`.
+  `deploy/lgtm/README.md`.
 - Computer-use traces (`/api/computer/traces`) — a different subsystem.

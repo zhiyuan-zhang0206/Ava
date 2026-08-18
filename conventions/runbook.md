@@ -947,6 +947,22 @@ The whole OTLP surface (exporter + trace recording + ship) is gated by
 `AVA_TELEMETRY_OTLP_ENABLED` (default **on**); off = Postgres-only writes, one
 kill switch. Applies on the next process start.
 
+**LGTM backend lifecycle** — the Tempo/Loki/Prometheus/Grafana compose stack
+(`deploy/lgtm/`) is the cluster's observability backend, required while the
+gateway serves /ops and the inspect endpoints (consumers: the gateway
+Loki/Prometheus read paths, ops alerting via Grafana's embedded Alertmanager
+→ the gateway webhook, the events-maintenance Loki rollup, `ava cluster
+health`). It is a **host singleton** owned by the lifecycle on exactly one
+home — the one carrying the operator-created `$AVA_HOME/lgtm-host` marker
+file (in practice prod `~/.ava`; `touch ~/.ava/lgtm-host` once). On that
+host, converge runs the idempotent `deploy/lgtm/start.sh` on every `ava
+start` / `ava cluster update`, the gateway watchdog re-runs it when the
+readiness probes (Loki/Prometheus/Tempo/Grafana) hit connection failures
+(`services/healthchecks/lgtm.py`), and `ava status` shows the containers +
+probes. Unmarked homes (dev worktree clusters) never touch the containers.
+Deliberate stop: remove the marker or `ava start --disable-service lgtm`,
+then `deploy/lgtm/stop.sh` — see `deploy/lgtm/README.md`.
+
 **Recording is one local hop** (sidecar architecture, task #1266). The
 previous inline-POST design raised `Exception while exporting Span.` whenever
 the POST failed; the agent-side mirror (record/ship split 2026-06-16) fixed
@@ -1017,7 +1033,7 @@ Where to look when something went wrong on a host:
 | why did a daemon vanish | its log file: every daemon wraps `asyncio.run(main())` and logs the traceback before re-raising |
 | what did milvus say | its log file only — it is a C++ binary with no PG sink |
 | an agent | `$AVA_HOME/logs/agent-{N}.log` (kernel + its exec subprocess, both appending) |
-| raw session stdout (gateway / agents / shells / schedules) | Loki (local LGTM viewer): promtail tails every `$AVA_HOME/logs/*.out.log` plus the updater/rollout tees — label `service` = session name, 7-day retention; see `deploy/local/lgtm/README.md` |
+| raw session stdout (gateway / agents / shells / schedules) | Loki (the LGTM backend): promtail tails every `$AVA_HOME/logs/*.out.log` plus the updater/rollout tees — label `service` = session name, 7-day retention; see `deploy/lgtm/README.md` |
 
 Raw session output is queried in Loki, not tailed from a file — Grafana Explore
 (Loki datasource), `logcli`, or the HTTP API:

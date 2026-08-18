@@ -6,6 +6,7 @@ from typing import cast
 import pytest
 
 from cli.commands import _converge
+from cli.commands import _converge_frontend_env as _fe_env
 
 
 @pytest.fixture
@@ -431,10 +432,10 @@ def test_frontend_env_override_guard_passes_clean(tmp_path: Path):
     # A unit .env carrying only AVA_* vars (the legitimate case) must pass.
     (ava_home / ".env").write_text("AVA_GATEWAY_PORT=8800\nAVA_CLUSTER=main\n")
 
-    _converge._ensure_no_frontend_env_overrides(_ctx(repo, ava_home))  # must not raise
+    _fe_env.ensure_no_frontend_env_overrides(_ctx(repo, ava_home))  # must not raise
 
 
-@pytest.mark.parametrize("name", _converge._FORBIDDEN_FRONTEND_ENV_FILES)
+@pytest.mark.parametrize("name", _fe_env._FORBIDDEN_FRONTEND_ENV_FILES)
 def test_frontend_env_override_guard_rejects_build_time_files(tmp_path: Path, name):
     """`next build` bakes NEXT_PUBLIC_* from these files into the bundle,
     silently beating the runtime gateway inference (2026-06-09 prod outage)."""
@@ -443,7 +444,7 @@ def test_frontend_env_override_guard_rejects_build_time_files(tmp_path: Path, na
     (repo / "ui" / "web" / name).write_text("NEXT_PUBLIC_API_BASE=https://dead.example\n")  # pyright: ignore[reportUnknownMemberType]
 
     with pytest.raises(RuntimeError, match="build-time env override"):
-        _converge._ensure_no_frontend_env_overrides(_ctx(repo, tmp_path))
+        _fe_env.ensure_no_frontend_env_overrides(_ctx(repo, tmp_path))
 
 
 def test_frontend_env_override_guard_rejects_next_public_in_unit_env(tmp_path: Path):
@@ -458,7 +459,7 @@ def test_frontend_env_override_guard_rejects_next_public_in_unit_env(tmp_path: P
     (ava_home / ".env").write_text("AVA_GATEWAY_PORT=8000\nNEXT_PUBLIC_GATEWAY_PORT=8800\n")
 
     with pytest.raises(RuntimeError, match="NEXT_PUBLIC_GATEWAY_PORT"):
-        _converge._ensure_no_frontend_env_overrides(_ctx(repo, ava_home))
+        _fe_env.ensure_no_frontend_env_overrides(_ctx(repo, ava_home))
 
 
 @pytest.mark.parametrize(
@@ -472,7 +473,7 @@ def test_frontend_env_override_guard_rejects_next_public_in_unit_env(tmp_path: P
 def test_next_public_keys_detects_assignment_shapes(tmp_path: Path, line):
     env = tmp_path / ".env"
     env.write_text(f"AVA_CLUSTER=main\n{line}\n")
-    assert _converge._next_public_keys_in_env_file(env)
+    assert _fe_env._next_public_keys_in_env_file(env)
 
 
 def test_next_public_keys_ignores_comments_and_substrings(tmp_path: Path):
@@ -483,11 +484,11 @@ def test_next_public_keys_ignores_comments_and_substrings(tmp_path: Path):
         "MY_NEXT_PUBLIC_THING=1\n"  # substring, not a NEXT_PUBLIC_* key
         "AVA_GATEWAY_PORT=8000\n"
     )
-    assert _converge._next_public_keys_in_env_file(env) == []
+    assert _fe_env._next_public_keys_in_env_file(env) == []
 
 
 def test_next_public_keys_absent_file_is_empty(tmp_path: Path):
-    assert _converge._next_public_keys_in_env_file(tmp_path / "nope.env") == []
+    assert _fe_env._next_public_keys_in_env_file(tmp_path / "nope.env") == []
 
 
 def _pgbouncer_ctx(

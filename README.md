@@ -326,10 +326,11 @@ cluster; that has to come from outside Ava today. Full policy and reporting:
 Every agent turn records an OTel trace to a local OTLP/JSON mirror
 (`$AVA_HOME/traces/` — metadata-only by default; LLM content is stripped at the
 source), replayed to Tempo by `ava trace ship`; the unified event stream
-exports live over OTLP/HTTP to Loki (logs) and Prometheus (metrics). One
-command starts the read-only viewer — Grafana at http://localhost:3003 for
-traces, logs, and metrics in one UI:
-[`deploy/local/lgtm/README.md`](deploy/local/lgtm/README.md). See
+exports live over OTLP/HTTP to Loki (logs) and Prometheus (metrics). The
+LGTM backend (Tempo + Loki + Prometheus + Grafana, docker compose) serves
+Grafana at http://localhost:3003 — traces, logs, and metrics in one UI — and
+backs the gateway's /ops + inspect endpoints:
+[`deploy/lgtm/README.md`](deploy/lgtm/README.md). See
 [`docs/features/observability.md`](docs/features/observability.md) for the
 full design.
 
