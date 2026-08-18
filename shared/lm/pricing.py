@@ -1,32 +1,23 @@
-"""LLM pricing — bench / eval both look up cost_usd here to prevent drift.
+"""Versioned LLM pricing catalog + deterministic quote selection.
 
-The rates themselves live on each model's registry entry
-(`shared/lm/registry.py:MODELS`, the `pricing` fact); `MODEL_PRICING` below is
-the derived per-model view. Sync with provider pricing:
-- Anthropic: https://www.anthropic.com/pricing
-- DeepSeek:  https://api-docs.deepseek.com/quick_start/pricing
-- Google:    https://ai.google.dev/pricing
-- OpenAI:    https://openai.com/api/pricing
-- Xiaomi:    https://platform.xiaomimimo.com
+``pricing_catalog.json`` is the reviewed source of truth. Its effective
+intervals, input-token tiers, and recurring UTC windows select one exact rate
+triple for a call; ``quote`` returns that triple with its cost atomically.
+``cost_usd`` remains the compatibility surface for existing readers.
 
 ## Cache hit vs miss must be computed separately
 
-DeepSeek V4 Pro cache hit is 120x cheaper than cache miss; in
-multi-turn re-send same prefix the actual cache hit rate is ~98%.
+Cache-hit input can be 30-120x cheaper than cache-miss input; in
+multi-turn re-send same prefix the actual cache hit rate can be ~98%.
 Using a 2-tuple (in, out) computes the entire `in` at cache-miss rate
 and overestimates total cost by 30-50x — history: the same bug in
 bench_runner.py + evals/driver.py (both in MyAva) reported $56.38 for a 30-case
 SWE-bench, actual was $0.8; fix in PR #322 / commit 5c85b74. So the
 pricing fact is a 3-tuple `(cache_miss, cache_hit, out)` USD/M.
 
-## All cache pricing verified 2026-06-27 against provider pricing pages
-
-Claude series: cache read = 0.1x input (anthropic.com/pricing).
-DeepSeek Flash: cache hit = 50x discount (api-docs.deepseek.com).
-Google Gemini: cache read ~0.1x input across all models (ai.google.dev/pricing).
-OpenAI GPT-5.x: cached-input discount ~0.1x input.
-DeepSeek Pro / MiMo: real cache-hit discount (~120x cheaper vs miss).
-Kimi K2.7: real cache-hit discount ($0.19 vs $0.95 input).
+Every model entry carries its own official source URL and verification date.
+Providers with machine-readable pricing can be reconciled by adapters; providers
+without one remain reviewed catalog updates. Runtime never scrapes pricing pages.
 
 ## DeepSeek reasoning tokens
 
@@ -38,18 +29,224 @@ same).
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+import json
+import math
+from collections.abc import Iterator, Mapping, Sequence
+from dataclasses import dataclass
+from datetime import UTC, date, datetime, time
+from pathlib import Path
+from typing import Any, cast
 
 from langchain_core.messages import AIMessage, AnyMessage
 
-from shared.lm.registry import MODELS
 
-# Derived view over the registry: `{model id: (cache_miss, cache_hit, out)}`
-# USD/M for every model with a known rate. Rate provenance / caveats live as
-# comments on the registry entries.
-MODEL_PRICING: dict[str, tuple[float, float, float]] = {
-    model_id: spec.pricing for model_id, spec in MODELS.items() if spec.pricing is not None
-}
+@dataclass(frozen=True)
+class Rates:
+    """Cache-miss input, cache-hit input, and output USD per 1M tokens."""
+
+    cache_miss: float
+    cache_hit: float
+    output: float
+
+    def as_tuple(self) -> tuple[float, float, float]:
+        """Compatibility shape used by usage-event price snapshots."""
+        return (self.cache_miss, self.cache_hit, self.output)
+
+
+@dataclass(frozen=True)
+class CostQuote:
+    """One call's cost and the exact rates selected for it."""
+
+    cost_usd: float
+    rates: Rates
+
+
+@dataclass(frozen=True)
+class _UtcDailyOverride:
+    start: time
+    end: time
+    rates: Rates
+
+    def contains(self, instant: datetime) -> bool:
+        current = instant.astimezone(UTC).time().replace(tzinfo=None)
+        if self.start < self.end:
+            return self.start <= current < self.end
+        return current >= self.start or current < self.end
+
+
+@dataclass(frozen=True)
+class _TokenTier:
+    input_tokens_min: int
+    input_tokens_max: int | None
+    rates: Rates
+    utc_daily_overrides: tuple[_UtcDailyOverride, ...]
+
+    def contains(self, input_tokens: int | None) -> bool:
+        # A rate lookup without usage (the model picker / compatibility map)
+        # intentionally publishes the base tier.
+        if input_tokens is None:
+            return self.input_tokens_min == 0
+        return input_tokens >= self.input_tokens_min and (
+            self.input_tokens_max is None or input_tokens <= self.input_tokens_max
+        )
+
+    def rates_at(self, instant: datetime) -> Rates:
+        for override in self.utc_daily_overrides:
+            if override.contains(instant):
+                return override.rates
+        return self.rates
+
+
+@dataclass(frozen=True)
+class _EffectivePeriod:
+    effective_from: datetime | None
+    effective_until: datetime | None
+    tiers: tuple[_TokenTier, ...]
+
+    def contains(self, instant: datetime) -> bool:
+        return (self.effective_from is None or instant >= self.effective_from) and (
+            self.effective_until is None or instant < self.effective_until
+        )
+
+
+@dataclass(frozen=True)
+class _ModelPrice:
+    source_url: str
+    source_checked_at: date
+    periods: tuple[_EffectivePeriod, ...]
+
+
+def _instant(value: str | None, *, field: str) -> datetime | None:
+    if value is None:
+        return None
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.utcoffset() is None:
+        raise RuntimeError(f"pricing catalog {field} must carry a UTC offset: {value!r}")
+    return parsed.astimezone(UTC)
+
+
+def _clock(value: str) -> time:
+    parsed = time.fromisoformat(value)
+    if parsed.tzinfo is not None:
+        raise RuntimeError(f"pricing catalog UTC daily clock must be offset-free: {value!r}")
+    return parsed
+
+
+def _rates(raw: dict[str, Any]) -> Rates:
+    values = Rates(float(raw["input"]), float(raw["cache_read"]), float(raw["output"]))
+    if any(not math.isfinite(value) or value < 0 for value in values.as_tuple()):
+        raise RuntimeError(f"pricing catalog rates must be finite and non-negative: {raw!r}")
+    return values
+
+
+_DAY_MICROSECONDS = 24 * 60 * 60 * 1_000_000
+
+
+def _clock_microseconds(value: time) -> int:
+    return ((value.hour * 60 + value.minute) * 60 + value.second) * 1_000_000 + value.microsecond
+
+
+def _window_segments(window: _UtcDailyOverride) -> tuple[tuple[int, int], ...]:
+    if window.start == window.end:
+        raise RuntimeError(
+            "pricing catalog UTC daily window cannot cover zero or twenty-four hours"
+        )
+    start = _clock_microseconds(window.start)
+    end = _clock_microseconds(window.end)
+    if start < end:
+        return ((start, end),)
+    return ((0, end), (start, _DAY_MICROSECONDS))
+
+
+def _validate_windows(model: str, windows: tuple[_UtcDailyOverride, ...]) -> None:
+    segments: list[tuple[int, int]] = []
+    for window in windows:
+        for start, end in _window_segments(window):
+            if any(start < seen_end and seen_start < end for seen_start, seen_end in segments):
+                raise RuntimeError(f"pricing catalog has overlapping UTC windows for {model!r}")
+            segments.append((start, end))
+
+
+def _parse_tiers(model: str, raw_tiers: list[dict[str, Any]]) -> tuple[_TokenTier, ...]:
+    tiers: list[_TokenTier] = []
+    expected_min = 0
+    for raw in raw_tiers:
+        lower = int(raw["input_tokens_min"])
+        upper_raw = raw["input_tokens_max"]
+        upper = None if upper_raw is None else int(upper_raw)
+        if lower != expected_min or (upper is not None and upper < lower):
+            raise RuntimeError(f"pricing catalog has a gap or overlap in tiers for {model!r}")
+        windows = tuple(
+            _UtcDailyOverride(
+                start=_clock(item["start"]),
+                end=_clock(item["end"]),
+                rates=_rates(item["rates"]),
+            )
+            for item in cast(list[dict[str, Any]], raw["utc_daily_overrides"])
+        )
+        _validate_windows(model, windows)
+        tiers.append(
+            _TokenTier(
+                input_tokens_min=lower,
+                input_tokens_max=upper,
+                rates=_rates(raw["rates"]),
+                utc_daily_overrides=windows,
+            )
+        )
+        expected_min = -1 if upper is None else upper + 1
+    if not tiers or expected_min != -1:
+        raise RuntimeError(f"pricing catalog tiers for {model!r} must cover all input sizes")
+    return tuple(tiers)
+
+
+def _parse_periods(model: str, raw_periods: list[dict[str, Any]]) -> tuple[_EffectivePeriod, ...]:
+    periods: list[_EffectivePeriod] = []
+    previous_until: datetime | None = None
+    for index, raw in enumerate(raw_periods):
+        start = _instant(raw["effective_from"], field="effective_from")
+        end = _instant(raw["effective_until"], field="effective_until")
+        if end is not None and start is not None and end <= start:
+            raise RuntimeError(f"pricing catalog has an empty effective period for {model!r}")
+        if index == 0 and start is not None:
+            raise RuntimeError(f"pricing catalog must cover all history for {model!r}")
+        if index > 0 and start != previous_until:
+            raise RuntimeError(f"pricing catalog has a gap or overlap in periods for {model!r}")
+        periods.append(
+            _EffectivePeriod(
+                effective_from=start,
+                effective_until=end,
+                tiers=_parse_tiers(model, cast(list[dict[str, Any]], raw["tiers"])),
+            )
+        )
+        previous_until = end
+    if not periods:
+        raise RuntimeError(f"pricing catalog has no effective periods for {model!r}")
+    if periods[-1].effective_until is not None:
+        raise RuntimeError(f"pricing catalog must cover the present for {model!r}")
+    return tuple(periods)
+
+
+def _load_catalog() -> dict[str, _ModelPrice]:
+    path = Path(__file__).with_name("pricing_catalog.json")
+    raw = cast(dict[str, Any], json.loads(path.read_text(encoding="utf-8")))
+    if raw["schema_version"] != 1 or raw["currency"] != "USD" or raw["unit_tokens"] != 1_000_000:
+        raise RuntimeError("unsupported pricing catalog schema, currency, or token unit")
+    if not isinstance(raw["catalog_version"], str) or not raw["catalog_version"]:
+        raise RuntimeError("pricing catalog version must be a non-empty string")
+    catalog: dict[str, _ModelPrice] = {}
+    for model, entry_raw in cast(dict[str, dict[str, Any]], raw["models"]).items():
+        source_url = entry_raw["source_url"]
+        if not isinstance(source_url, str) or not source_url.startswith("https://"):
+            raise RuntimeError(f"pricing catalog source_url must be HTTPS for {model!r}")
+        catalog[model] = _ModelPrice(
+            source_url=source_url,
+            source_checked_at=date.fromisoformat(entry_raw["source_checked_at"]),
+            periods=_parse_periods(model, cast(list[dict[str, Any]], entry_raw["periods"])),
+        )
+    return catalog
+
+
+_CATALOG = _load_catalog()
 
 # Retired models — their FINAL published rate, frozen at retirement (add-only
 # ledger). A model leaves MODELS when it is replaced (fail-fast on residual
@@ -71,13 +268,60 @@ RETIRED_MODEL_PRICING: dict[str, tuple[float, float, float]] = {
 }
 
 
-def _rates_for(model: str) -> tuple[float, float, float] | None:
-    """The rate in force for `model`: the live registry first, then the
-    retired-model ledger. A model in neither has no known price."""
-    rates = MODEL_PRICING.get(model)
-    if rates is not None:
-        return rates
-    return RETIRED_MODEL_PRICING.get(model)
+def _aware_utc(instant: datetime | None) -> datetime:
+    if instant is None:
+        return datetime.now(UTC)
+    if instant.utcoffset() is None:
+        raise ValueError("pricing instant must be timezone-aware")
+    return instant.astimezone(UTC)
+
+
+def rates_at(
+    model: str,
+    at: datetime | None = None,
+    input_tokens: int | None = None,
+) -> Rates | None:
+    """Select rates for one model, instant, and total input-token tier.
+
+    Effective intervals and UTC daily windows are half-open. Token-tier
+    maxima are inclusive, mirroring provider wording such as ``<=200K``.
+    ``input_tokens=None`` selects the base tier for catalog/display callers.
+    Unknown models or an uncovered effective interval return ``None``.
+    """
+    if input_tokens is not None and input_tokens < 0:
+        raise ValueError("input_tokens must be non-negative")
+    instant = _aware_utc(at)
+    entry = _CATALOG.get(model)
+    if entry is not None:
+        for period in entry.periods:
+            if not period.contains(instant):
+                continue
+            for tier in period.tiers:
+                if tier.contains(input_tokens):
+                    return tier.rates_at(instant)
+            return None
+        return None
+    retired = RETIRED_MODEL_PRICING.get(model)
+    return Rates(*retired) if retired is not None else None
+
+
+class _CurrentPricing(Mapping[str, tuple[float, float, float]]):
+    """Compatibility mapping whose values follow the current UTC schedule."""
+
+    def __getitem__(self, model: str) -> tuple[float, float, float]:
+        selected = rates_at(model)
+        if selected is None or model not in _CATALOG:
+            raise KeyError(model)
+        return selected.as_tuple()
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(_CATALOG)
+
+    def __len__(self) -> int:
+        return len(_CATALOG)
+
+
+MODEL_PRICING: Mapping[str, tuple[float, float, float]] = _CurrentPricing()
 
 
 def tally_tokens(
@@ -115,29 +359,50 @@ def tally_tokens(
     return tok_in, tok_out, tok_cached
 
 
+def quote(
+    model: str,
+    tok_in: int | None,
+    tok_out: int | None,
+    tok_cached: int | None = None,
+    *,
+    at: datetime | None = None,
+) -> CostQuote | None:
+    """Price one call and return the selected rates with the cost.
+
+    When `tok_cached=None`, fall back to 0 (treats all as cache miss,
+    overestimate but safe); for callers with only old `(in, out)`
+    data. Unknown tokens, models, or effective intervals return ``None``.
+    """
+    if tok_in is None or tok_out is None:
+        return None
+    cache_read = 0 if tok_cached is None else tok_cached
+    if tok_in < 0 or tok_out < 0 or cache_read < 0 or cache_read > tok_in:
+        raise ValueError("token counts must be non-negative and cached tokens cannot exceed input")
+    selected = rates_at(model, at, tok_in)
+    if selected is None:
+        return None
+    cache_miss = tok_in - cache_read
+    cost = (
+        cache_miss * selected.cache_miss
+        + cache_read * selected.cache_hit
+        + tok_out * selected.output
+    ) / 1_000_000
+    return CostQuote(cost_usd=cost, rates=selected)
+
+
 def cost_usd(
     model: str,
     tok_in: int | None,
     tok_out: int | None,
     tok_cached: int | None = None,
+    *,
+    at: datetime | None = None,
 ) -> float | None:
-    """Compute via 3-tier pricing:
-    cost = miss*miss_rate + cache_hit*hit_rate + out*out_rate.
+    """Compatibility wrapper returning only ``quote(...).cost_usd``.
 
-    When `tok_cached=None`, fall back to 0 (treats all as cache miss,
-    overestimate but safe); for callers with only old `(in, out)`
-    data. New callers should pass cache_read.
-
-    Returns None when tokens are None (distinguishes "unknown" from
-    "0 tokens") or the model has no known price (neither MODEL_PRICING nor
-    the retired-model ledger — do not assume cost for an unlisted model).
+    The original four positional arguments retain their meaning. ``at`` is an
+    optional keyword-only extension for deterministic historical/boundary
+    pricing; omitting it selects the schedule at the current UTC instant.
     """
-    if tok_in is None or tok_out is None:
-        return None
-    rates = _rates_for(model)
-    if rates is None:
-        return None
-    miss_per_m, hit_per_m, out_per_m = rates
-    cache_read = tok_cached or 0
-    cache_miss = tok_in - cache_read
-    return (cache_miss * miss_per_m + cache_read * hit_per_m + tok_out * out_per_m) / 1_000_000
+    priced = quote(model, tok_in, tok_out, tok_cached, at=at)
+    return priced.cost_usd if priced is not None else None

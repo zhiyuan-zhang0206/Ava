@@ -62,7 +62,9 @@ def test_sentinelized_config_fields_default_to_none() -> None:
 
 def test_every_spawnable_model_has_core_facts() -> None:
     """Registry invariant (also enforced at import): a spawnable model must
-    carry window, cutoff, pricing, and an effort vocabulary."""
+    carry window, cutoff, an effort vocabulary, and catalog pricing."""
+    from shared.lm.pricing import rates_at
+
     for provider, model_list in SUPPORTED_MODELS.items():
         for model in model_list:
             spec = MODELS[model]
@@ -70,8 +72,8 @@ def test_every_spawnable_model_has_core_facts() -> None:
             assert spec.spawnable
             assert spec.context_window is not None
             assert spec.knowledge_cutoff is not None
-            assert spec.pricing is not None
             assert spec.effort_levels is not None
+            assert rates_at(model, input_tokens=0) is not None
 
 
 def test_model_ids_match_their_provider_prefix() -> None:
@@ -117,7 +119,6 @@ def test_per_model_default_wins_over_shared_floor(monkeypatch: pytest.MonkeyPatc
         context_window=spec.context_window,
         max_output_tokens=spec.max_output_tokens,
         knowledge_cutoff=spec.knowledge_cutoff,
-        pricing=spec.pricing,
         effort_levels=spec.effort_levels,
         tuning=ModelTuning(auto_compact_fraction=0.9, agent_communication_style="silent"),
     )
@@ -138,7 +139,6 @@ def test_explicit_setting_wins_over_per_model_default(monkeypatch: pytest.Monkey
         context_window=spec.context_window,
         max_output_tokens=spec.max_output_tokens,
         knowledge_cutoff=spec.knowledge_cutoff,
-        pricing=spec.pricing,
         effort_levels=spec.effort_levels,
         tuning=ModelTuning(auto_compact_fraction=0.9, reasoning_effort="high"),
     )
@@ -158,7 +158,6 @@ def test_explicit_empty_string_beats_per_model_effort(monkeypatch: pytest.Monkey
         context_window=spec.context_window,
         max_output_tokens=spec.max_output_tokens,
         knowledge_cutoff=spec.knowledge_cutoff,
-        pricing=spec.pricing,
         effort_levels=spec.effort_levels,
         tuning=ModelTuning(reasoning_effort="max"),
     )
@@ -217,7 +216,6 @@ def test_explain_setting_names_the_winning_layer(
             context_window=spec.context_window,
             max_output_tokens=spec.max_output_tokens,
             knowledge_cutoff=spec.knowledge_cutoff,
-            pricing=spec.pricing,
             effort_levels=spec.effort_levels,
             tuning=ModelTuning(auto_compact_fraction=tuned),
         ),

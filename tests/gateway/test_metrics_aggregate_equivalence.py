@@ -82,7 +82,7 @@ def test_equivalence_full_thread() -> None:
         fake,
         event="llm_usage",
         agent_id=aid,
-        payload={"in_total": 1000, "out_total": 200, "cache_read": 800, "model": "deepseek-v4-pro"},
+        payload={"in_total": 1000, "out_total": 200, "cache_read": 800, "model": "mimo-v2.5-pro"},
     )
     _add(fake, event="turn_end", agent_id=aid, payload={"ok": True, "duration_seconds": 4.0})
     _add(fake, event="agent_spawned", agent_id=aid, payload={"spawner": "agent:1"})
@@ -242,7 +242,7 @@ def test_equivalence_window_respects_days() -> None:
 
 # ── randomized equivalence (seeded) ─────────────────────────────────────────
 
-_MODELS = ["deepseek-v4-pro", "deepseek-v4-flash", "no-such-model", ""]
+_MODELS = ["mimo-v2.5-pro", "gpt-5.6-sol", "no-such-model", ""]
 _EXC = ["ValueError", "TypeError", "NameError", None, ""]
 _FIXES = [
     "ruff",
@@ -273,11 +273,12 @@ def _random_payload(rng: random.Random, event_name: str) -> dict[str, Any]:
             p["exc_type"] = rng.choice(_EXC)
         return p
     if event_name == "llm_usage":
+        in_total = rng.randint(0, 50_000)
         return {
             "model": rng.choice(_MODELS),
-            "in_total": rng.randint(0, 50_000),
+            "in_total": in_total,
             "out_total": rng.randint(0, 5_000),
-            "cache_read": rng.randint(0, 50_000),
+            "cache_read": rng.randint(0, in_total),
             "reasoning": rng.randint(0, 2_000),
         }
     if event_name == "turn_end":

@@ -654,7 +654,7 @@ def test_inspect_legacy_rows_estimated_at_read_time(
     db_conn: psycopg.Connection, fake_loki: _FakeLoki
 ) -> None:
     """Rows written before the snapshot shipped carry no cost_usd; the read
-    side prices exactly those rows via cost_usd (current registry + retired
+    side prices exactly those rows via cost_usd (current catalog + retired
     ledger) and counts them as estimated_calls — the honest marker for
     read-time-priced legacy rows. A mixed model: snapshot row + legacy row
     both count once, legacy priced on its own tokens only."""
@@ -665,14 +665,14 @@ def test_inspect_legacy_rows_estimated_at_read_time(
         payload={
             "in_total": 1_000_000,
             "out_total": 0,
-            "cache_read": 1_000_000,  # full cache hit → $0.003625
-            "model": "deepseek-v4-pro",
-            "cost_usd": 0.003625,
+            "cache_read": 1_000_000,  # full cache hit → $0.50
+            "model": "gpt-5.6-sol",
+            "cost_usd": 0.5,
         },
         ts_offset_hours=1,
     )
     _archive_boundary_anchor(db_conn, agent_id=aid)
-    # legacy row: in=1M, cached=1M → priced at read time: 1M * 0.003625 / 1M
+    # legacy row: in=1M, cached=1M → priced at read time: 1M * $0.50/M
     fake_loki.add(
         event="llm_usage",
         agent_id=aid,
@@ -680,7 +680,7 @@ def test_inspect_legacy_rows_estimated_at_read_time(
             "in_total": 1_000_000,
             "out_total": 0,
             "cache_read": 1_000_000,
-            "model": "deepseek-v4-pro",
+            "model": "gpt-5.6-sol",
         },
     )
     db_conn.commit()
@@ -690,9 +690,7 @@ def test_inspect_legacy_rows_estimated_at_read_time(
     assert cost["llm_calls"] == 2
     assert cost["estimated_calls"] == 1
     assert cost["unpriced_calls"] == 0
-    # the response rounds to 4dp (AgentCost); 0.003625+0.003625 floats to
-    # 0.0072500...1 and rounds UP to 0.0073
-    assert cost["cost_usd"] == pytest.approx(0.0073)  # pyright: ignore[reportUnknownMemberType]
+    assert cost["cost_usd"] == pytest.approx(1.0)  # pyright: ignore[reportUnknownMemberType]
 
 
 def test_inspect_retired_model_priced_via_ledger(

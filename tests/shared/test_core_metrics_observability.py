@@ -149,7 +149,7 @@ def test_logql_template_validation_rejects_drift() -> None:
 
 def test_cost_queries_unwrap_cost_usd() -> None:
     """Cost panels unwrap attributes_cost_usd from the payload (producer-side
-    pricing, #2626) — the SQL CASE mirroring MODEL_PRICING is gone."""
+    catalog pricing, #2626) — the SQL CASE mirroring model rates is gone."""
     _load_pack()
     specs = {m.name: m for m in core_metrics.registered_core_metrics()}
     for name in ("ava_obs_llm_cost_usd", "ava_obs_agent_llm_cost_usd"):

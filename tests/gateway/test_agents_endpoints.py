@@ -61,6 +61,11 @@ def test_get_models_returns_grouped_supported_models() -> None:
     assert "claude-sonnet-5" in flat
     assert "gpt-5.6-terra" in flat
     assert "gpt-5.6-luna" in flat
+    assert body["models"]["gpt-5.6-sol"]["pricing"] == {
+        "input": 5.0,
+        "cache_read": 0.5,
+        "output": 30.0,
+    }
     from shared.config import settings
 
     assert body["default"] == settings.lm.llm_model

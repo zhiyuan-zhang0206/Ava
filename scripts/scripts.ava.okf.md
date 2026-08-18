@@ -44,6 +44,7 @@ Code and document structure guards, mostly invoked by `.pre-commit-config.yaml` 
 ### CI / Release / Migration
 - `ci_utils.py` — polls PR CI status + merge conflict detection; separates workflow-produced checks from GitHub App ones so a suite that never ran cannot read as green (`NO_WORKFLOW_RUNS`)
 - `build_shell_update_manifest.py` — turns signed Tauri desktop archives into the shell's static `latest.json`; unsigned release runs get an empty platform map
+- `update_model_pricing.py` — fail-closed official price checks that propose reviewed catalog PRs
 - `release_cut.py`, `pre-push-check.sh`, `check_cross_branch_migrations.py`, `migration_smoke.py`, `test_migrations_apply.sh`
 
 ### Code Generation

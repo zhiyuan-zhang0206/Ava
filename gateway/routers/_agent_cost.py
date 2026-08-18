@@ -5,7 +5,7 @@ frozen PG `events` archive (pre-LGTM history) and Loki (the live tail, born
 at the cutover, ~7d retention). `_agent_cost` splits the request window at
 the archive's freeze point, aggregates each side per model, and merges —
 restoring the whole-life cumulative the Loki-only read had silently lost.
-Cost never re-prices against the current registry: rows carry their
+Cost never re-prices against the current catalog: rows carry their
 usage-time price snapshot (`cost_usd`, written by agent/observe.py), summed
 directly; pre-snapshot legacy rows price at read time via `cost_usd` (the
 retired-model ledger included) and count as `estimated_calls`.
@@ -337,7 +337,7 @@ def _agent_cost(
     aggregates per model, and the sides merge per model — restoring the
     all-time cumulative the Loki-only read had silently lost (405: ~$14.5
     history shown as $0.74 from Loki's ~2d of data). Cost never re-prices
-    against the current registry: rows carry their usage-time price snapshot
+    against the current catalog: rows carry their usage-time price snapshot
     (`cost_usd`), summed directly; pre-snapshot legacy rows price at read
     time via `cost_usd` (retired-model ledger included) and count as
     `estimated_calls`. An unpriced model contributes 0 cost and its calls

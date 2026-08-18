@@ -55,16 +55,17 @@ async def patch_agent(agent_id: int, body: LabelPatchRequest, request: Request) 
 def get_models() -> ModelsResponse:
     """List selectable LLM models (grouped by provider) + the cluster default.
 
-    Source of truth is the model registry (`shared/lm/registry.py:MODELS`);
-    the default mirrors `settings.lm.llm_model` so the UI can pre-select it.
+    Roster and tuning come from the model registry; current rates come from
+    the versioned pricing catalog. The default mirrors `settings.lm.llm_model`
+    so the UI can pre-select it.
     """
     from gateway.schemas import ModelInfo, ModelPricing
     from shared.lm.factory import SUPPORTED_MODELS
+    from shared.lm.pricing import rates_at
     from shared.lm.registry import MODELS, explain_setting
 
-    # Everything per model comes off the registry (shared/lm/registry.py) —
-    # context window, pricing, and the reasoning-effort options the spawn
-    # dialog renders. `effort_levels` is the same vocabulary the factory
+    # Stable model facts come off the registry; volatile prices come off the
+    # effective-dated catalog. `effort_levels` is the same vocabulary the factory
     # clamps onto at model build (for extended-thinking-only models like
     # claude-haiku-4-5 it is the binary thinking on/off vocabulary), so the
     # dropdown and the wire behavior cannot drift apart.
@@ -72,12 +73,13 @@ def get_models() -> ModelsResponse:
     for provider, model_list in SUPPORTED_MODELS.items():
         for model in model_list:
             spec = MODELS[model]
-            pricing = (
-                ModelPricing(
-                    input=spec.pricing[0], cache_read=spec.pricing[1], output=spec.pricing[2]
-                )
-                if spec.pricing is not None
-                else None
+            rates = rates_at(model, input_tokens=0)
+            if rates is None:
+                raise RuntimeError(f"spawnable model {model!r} has no current catalog price")
+            pricing = ModelPricing(
+                input=rates.cache_miss,
+                cache_read=rates.cache_hit,
+                output=rates.output,
             )
             # The model's default effort: the per-model tuning layer, resolved
             # through the registry's layering (NOT the raw field — same code
