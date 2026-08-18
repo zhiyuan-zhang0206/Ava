@@ -38,6 +38,13 @@ The normal PR gate reviews and tests the generated diff before it reaches `main`
 Published future rates may be checked in ahead of time and activate at their
 effective timestamp without another deployment.
 
+When a provider publishes only a calendar date for a price increase, without a
+timezone, Ava records that ambiguity in the model entry and normalizes the
+cutover to the earliest global occurrence of that date (midnight UTC+14). This
+can conservatively overestimate for part of a day, but cannot keep quoting the
+lower rate after the announced date has begun somewhere in the world. A later
+provider clarification replaces the provisional boundary through normal review.
+
 The first complete adapter is DeepSeek because its August 2026 change combines
 an effective date with two recurring UTC peak windows. Providers are added behind
 the same adapter contract; actual-cost APIs remain a separate reconciliation

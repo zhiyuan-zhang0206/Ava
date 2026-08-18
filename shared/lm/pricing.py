@@ -113,6 +113,7 @@ class _EffectivePeriod:
 class _ModelPrice:
     source_url: str
     source_checked_at: date
+    effective_time_note: str | None
     periods: tuple[_EffectivePeriod, ...]
 
 
@@ -238,9 +239,17 @@ def _load_catalog() -> dict[str, _ModelPrice]:
         source_url = entry_raw["source_url"]
         if not isinstance(source_url, str) or not source_url.startswith("https://"):
             raise RuntimeError(f"pricing catalog source_url must be HTTPS for {model!r}")
+        effective_time_note = entry_raw.get("effective_time_note")
+        if effective_time_note is not None and (
+            not isinstance(effective_time_note, str) or not effective_time_note
+        ):
+            raise RuntimeError(
+                f"pricing catalog effective_time_note must be non-empty text for {model!r}"
+            )
         catalog[model] = _ModelPrice(
             source_url=source_url,
             source_checked_at=date.fromisoformat(entry_raw["source_checked_at"]),
+            effective_time_note=effective_time_note,
             periods=_parse_periods(model, cast(list[dict[str, Any]], entry_raw["periods"])),
         )
     return catalog

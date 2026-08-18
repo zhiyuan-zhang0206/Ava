@@ -46,6 +46,7 @@ LangChain types `AIMessage(Chunk).content` weakly as `str | list[str | dict[str,
 
 ### billing (`pricing.py` + `pricing_catalog.json`)
 - The reviewed JSON catalog is the sole volatile pricing source: every model has official-source provenance plus gapless effective periods, input-token tiers, and optional recurring UTC rate windows. The registry carries no duplicate price tuples.
+- Date-only future increases with no provider timezone use the documented conservative UTC+14 boundary and carry an `effective_time_note`; exact published instants are used unchanged.
 - `rates_at(model, at, input_tokens)` selects one exact 3-rate tuple `(cache_miss, cache_hit, out)` USD/M. `quote()` returns those rates and the computed cost atomically so a scheduled boundary cannot split the event snapshot; `cost_usd()` remains the compatibility reader and returns `None` for unknown models.
 - `scripts/update_model_pricing.py` reconciles strict official-source adapters with the checked-in catalog. Automation proposes an append-only, reviewable PR; runtime pricing stays deterministic and network-free.
 

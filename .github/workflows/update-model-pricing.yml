@@ -64,12 +64,22 @@ jobs:
 
       - name: Reconcile official pricing
         env:
+          CANDIDATE: ${{ steps.candidate.outputs.path }}
           CATALOG: ${{ steps.candidate.outputs.path }}/shared/lm/pricing_catalog.json
         run: |
           if [ ! -f "$CATALOG" ] || [ -L "$CATALOG" ]; then
             echo "Candidate catalog must be a regular, non-symlink file" >&2
             exit 1
           fi
+          CANDIDATE_REAL="$(realpath "$CANDIDATE")"
+          CATALOG_REAL="$(realpath "$CATALOG")"
+          case "$CATALOG_REAL" in
+            "$CANDIDATE_REAL"/*) ;;
+            *)
+              echo "Candidate catalog resolves outside its isolated worktree" >&2
+              exit 1
+              ;;
+          esac
           uv run python scripts/update_model_pricing.py --catalog "$CATALOG" --write
 
       - name: Detect a catalog change

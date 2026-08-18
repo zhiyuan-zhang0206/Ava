@@ -94,9 +94,10 @@ def test_input_token_tier_boundary_is_inclusive() -> None:
     assert rates_at("gemini-3.1-pro-preview", at, 200_001) == Rates(4.0, 0.4, 18.0)
 
 
-def test_gemini_3_7_promotion_expires_at_the_published_boundary() -> None:
-    before = datetime(2026, 12, 31, 23, 59, 59, 999999, tzinfo=UTC)
-    after = datetime(2027, 1, 1, tzinfo=UTC)
+def test_gemini_3_7_date_only_increase_uses_earliest_global_boundary() -> None:
+    """The source omits a timezone, so UTC+14 prevents underestimating cost."""
+    before = datetime(2026, 12, 31, 9, 59, 59, 999999, tzinfo=UTC)
+    after = datetime(2026, 12, 31, 10, 0, tzinfo=UTC)
 
     assert rates_at("gemini-3.7-flash", before, _M) == Rates(0.75, 0.075, 3.75)
     assert rates_at("gemini-3.7-flash", after, _M) == Rates(1.5, 0.15, 7.5)
