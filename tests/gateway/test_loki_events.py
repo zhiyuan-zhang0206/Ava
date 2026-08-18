@@ -1,10 +1,11 @@
 """Unit tests for `gateway/loki_events.py` — the Loki read side of the
 unified event stream (task #1197, LGTM cutover).
 
-The module's only I/O is one httpx GET against Loki's query_range; these
-tests fake that client and assert on the LogQL text, the query params, and
-the parse/paging semantics (newest-first merge across streams, in-memory
-offset paging, +1 lookahead `has_more`).
+The module's only I/O is httpx GETs through the shared client accessor
+(`loki_events._client`); these tests swap the accessor for a fake and assert
+on the LogQL text, the query params, and the parse/paging semantics
+(newest-first merge across streams, in-memory offset paging, +1 lookahead
+`has_more`).
 """
 
 from __future__ import annotations
@@ -37,17 +38,12 @@ class _FakeResponse:
 
 
 class _FakeClient:
-    """Records the request, returns canned payloads; used as a context manager."""
+    """Records the request, returns canned payloads; stands in for the shared
+    client behind `loki_events._client()`."""
 
     def __init__(self, payloads: list[dict[str, Any] | _FakeResponse] | dict[str, Any]) -> None:
         self.payloads = payloads if isinstance(payloads, list) else [payloads]
         self.calls: list[tuple[str, dict[str, Any]]] = []
-
-    def __enter__(self) -> _FakeClient:
-        return self
-
-    def __exit__(self, *exc: object) -> None:
-        return None
 
     def get(self, url: str, params: dict[str, Any]) -> _FakeResponse:
         self.calls.append((url, params))
@@ -74,13 +70,13 @@ class _SeriesLimitResponse(_FakeResponse):
         )
 
 
-def _fake_client_factory(client: _FakeClient) -> object:
-    """httpx.Client replacement: returns the fake regardless of call args."""
+def _accessor(client: object) -> Any:
+    """`loki_events._client` replacement: hands back the fake."""
 
-    def _factory(*args: object, **kwargs: object) -> _FakeClient:
+    def _get() -> Any:
         return client
 
-    return _factory
+    return _get
 
 
 def _install(
@@ -88,7 +84,7 @@ def _install(
     payloads: list[dict[str, Any] | _FakeResponse] | dict[str, Any],
 ) -> _FakeClient:
     client = _FakeClient(payloads)
-    monkeypatch.setattr(loki_events.httpx, "Client", _fake_client_factory(client))
+    monkeypatch.setattr(loki_events, "_client", _accessor(client))
     return client
 
 
@@ -342,16 +338,10 @@ class TestQueryEvents:
 
     def test_http_error_propagates(self, monkeypatch: pytest.MonkeyPatch) -> None:
         class _Boom:
-            def __enter__(self) -> _Boom:
-                return self
-
-            def __exit__(self, *exc: object) -> None:  # type: ignore[no-untyped-def]
-                return None
-
             def get(self, url: str, params: dict) -> _FakeResponse:  # type: ignore[no-untyped-def]
                 return _FakeResponse({}, status=500)
 
-        monkeypatch.setattr(loki_events.httpx, "Client", _fake_client_factory(_Boom()))  # type: ignore[arg-type]
+        monkeypatch.setattr(loki_events, "_client", _accessor(_Boom()))
         with pytest.raises(RuntimeError):
             loki_events.query_events()
 
@@ -612,6 +602,84 @@ class TestAttributeAggregate:
     def test_unknown_agg_rejected(self) -> None:
         with pytest.raises(ValueError):
             loki_events.attribute_aggregate(field="x", agg="avg")
+
+
+# ─── query_projected_lines ───────────────────────────────────────────────────
+
+
+class _RepeatingClient:
+    """Serves the first payload once (the count pre-query), then the same
+    range payload for every slice fetch — bisection issues an unbounded
+    number of slice requests."""
+
+    def __init__(self, first: dict[str, Any], repeat: dict[str, Any]) -> None:
+        self.first: list[dict[str, Any]] = [first]
+        self.repeat = repeat
+        self.calls: list[tuple[str, dict[str, Any]]] = []
+
+    def get(self, url: str, params: dict[str, Any]) -> _FakeResponse:
+        self.calls.append((url, params))
+        return _FakeResponse(self.first.pop(0) if self.first else self.repeat)
+
+
+class TestQueryProjectedLines:
+    def test_returns_projected_rows_ascending(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        count_payload: dict[str, Any] = {"data": {"result": [{"metric": {}, "value": [1, "2"]}]}}
+        page: dict[str, Any] = {
+            "data": {
+                "result": [
+                    {
+                        "stream": {"agent_id": "7"},
+                        "values": [
+                            ["1723000000000000002", "b"],
+                            ["1723000000000000001", "a"],
+                        ],
+                    }
+                ]
+            }
+        }
+        _install(monkeypatch, [count_payload, page])
+        rows = loki_events.query_projected_lines(
+            fields=["name"],
+            template="{{ .name }}",
+            event_names=["service_started"],
+            from_=datetime.fromtimestamp(1_722_999_999, UTC),
+            to=datetime.fromtimestamp(1_723_000_001, UTC),
+        )
+        assert rows == [
+            (1723000000000000001, 7, "a"),
+            (1723000000000000002, 7, "b"),
+        ]
+
+    def test_bisection_floor_truncation_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A slice still filling its limit at the bisection floor (1s wide)
+        must raise instead of silently keeping a truncated slice — silent row
+        loss skews the caller's reduction (was: rows dropped with no signal)."""
+        count_payload: dict[str, Any] = {"data": {"result": [{"metric": {}, "value": [1, "4"]}]}}
+        full_page: dict[str, Any] = {
+            "data": {
+                "result": [
+                    {
+                        "stream": {},
+                        "values": [
+                            ["1723000000500000000", "x"],
+                            ["1723000000400000000", "y"],
+                        ],
+                    }
+                ]
+            }
+        }
+        client = _RepeatingClient(count_payload, full_page)
+        monkeypatch.setattr(loki_events, "_client", _accessor(client))
+        with pytest.raises(RuntimeError, match="bisection floor"):
+            loki_events.query_projected_lines(
+                fields=["name"],
+                template="{{ .name }}",
+                event_names=["service_started"],
+                from_=datetime.fromtimestamp(1_723_000_000, UTC),
+                to=datetime.fromtimestamp(1_723_000_004, UTC),
+                limit_per_slice=2,
+            )
 
 
 # ─── count_events_series / attribute_max_series (ops panel, task #1197) ─────

@@ -254,6 +254,9 @@ def _events_page(
         "to": to.isoformat(),
         "limit": _PAGE,
         "offset": 0,
+        # the exact slice count drives the bisection; total is opt-in
+        # server-side (skipped by default to spare the count aggregation)
+        "with_total": 1,
     }
     if agent_id is not None:
         params["agent_id"] = agent_id

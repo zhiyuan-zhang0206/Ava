@@ -43,6 +43,25 @@ _LEVELS = ("debug", "info", "warning", "error", "critical")
 # so it is unaffected.
 _HTTP_TIMEOUT_S = 60.0
 
+# One long-lived HTTP client for every Loki query — connection reuse across
+# the gateway's fan-out reads (an inspect poll or ops-monitor call issues
+# dozens of queries; a per-call client opened a fresh TCP connection for each).
+# The pool ceiling stays above the ops-series peak fan-out (~18 concurrent
+# queries) so pool-acquire never times out under normal load.
+_shared_client: httpx.Client | None = None
+
+
+def _client() -> httpx.Client:
+    """The module's shared Loki client, created on first use (lazy so tests
+    can swap this accessor before any real client exists)."""
+    global _shared_client  # noqa: PLW0603 — process-level singleton
+    if _shared_client is None:
+        _shared_client = httpx.Client(
+            timeout=_HTTP_TIMEOUT_S,
+            limits=httpx.Limits(max_connections=32, max_keepalive_connections=10),
+        )
+    return _shared_client
+
 
 def _escape_label(value: Any) -> str:
     """Escape a value interpolated into a LogQL label filter.
@@ -223,10 +242,9 @@ def query_events(
         "start": start_ns,
         "end": end_ns,
     }
-    with httpx.Client(timeout=_HTTP_TIMEOUT_S) as client:
-        resp = client.get(url, params=params)
-        resp.raise_for_status()
-        payload = resp.json()
+    resp = _client().get(url, params=params)
+    resp.raise_for_status()
+    payload = resp.json()
 
     raw: list[tuple[int, str]] = []
     for stream in payload.get("data", {}).get("result", []):
@@ -275,7 +293,7 @@ def count_events(
     to: datetime | None = None,
 ) -> int:
     """Exact count of event lines matching the same filters as
-    `query_events` — the `meta.total` of `/api/events`.
+    `query_events` — the opt-in (`with_total=1`) `meta.total` of `/api/events`.
 
     Loki has no cheap per-query line count that honors `| json`-parsed
     filters, so this runs `sum(count_over_time(...))` as an *instant* query
@@ -307,10 +325,9 @@ def count_events(
     logql = f"sum(count_over_time(({pipeline})[{duration_s}s]))"
     url = settings.observability.telemetry_loki_url.rstrip("/") + "/loki/api/v1/query"
     params = {"query": logql, "time": end.timestamp()}
-    with httpx.Client(timeout=_HTTP_TIMEOUT_S) as client:
-        resp = client.get(url, params=params)
-        resp.raise_for_status()
-        payload = resp.json()
+    resp = _client().get(url, params=params)
+    resp.raise_for_status()
+    payload = resp.json()
     result = payload.get("data", {}).get("result", [])
     if not result:
         return 0
@@ -665,10 +682,9 @@ def _query_instant(logql: str, at: datetime) -> list[dict[str, Any]]:
     """One Loki instant query; returns the result vectors (metric + value)."""
     url = settings.observability.telemetry_loki_url.rstrip("/") + "/loki/api/v1/query"
     params = {"query": logql, "time": at.timestamp()}
-    with httpx.Client(timeout=_HTTP_TIMEOUT_S) as client:
-        resp = client.get(url, params=params)
-        resp.raise_for_status()
-        payload = resp.json()
+    resp = _client().get(url, params=params)
+    resp.raise_for_status()
+    payload = resp.json()
     return payload.get("data", {}).get("result", [])
 
 
@@ -700,10 +716,9 @@ def metric_range(
         "step": str(step_s),
         "limit": "2000",
     }
-    with httpx.Client(timeout=_HTTP_TIMEOUT_S) as client:
-        resp = client.get(url, params=params)
-        resp.raise_for_status()
-        payload = resp.json()
+    resp = _client().get(url, params=params)
+    resp.raise_for_status()
+    payload = resp.json()
     result = payload.get("data", {}).get("result", [])
     if not result:
         return []
@@ -788,7 +803,9 @@ def query_projected_lines(
     one stage); `template` is the `| line_format` body referencing those
     labels (e.g. `"{{ len .body }}"`). Rows are fetched in time slices of
     `limit_per_slice` (Loki caps per-query limit); a slice that returns the
-    full limit is bisected until it fits. agent_id comes from the stream
+    full limit is bisected until it fits, and a slice still overflowing at
+    the bisection floor (1s / depth 8) raises instead of silently dropping
+    rows. agent_id comes from the stream
     labels ("" when absent). Duplicate boundary rows across slices are
     dropped; the result is sorted by ts_ns ascending.
     """
@@ -823,8 +840,10 @@ def query_projected_lines(
 
     out: list[tuple[int, int | None, str]] = []
 
-    def fetch(s0_ns: int, e0_ns: int, depth: int = 0) -> bool:
-        """Fetch [s0_ns, e0_ns) backward; True when it fit (no truncation)."""
+    def fetch(s0_ns: int, e0_ns: int, depth: int = 0) -> None:
+        """Fetch [s0_ns, e0_ns) backward; a slice that fills its limit is
+        bisected, and a slice still truncated at the bisection floor raises —
+        silently dropping rows would skew the caller's reduction."""
         params = {
             "query": pipeline,
             "limit": limit_per_slice,
@@ -832,13 +851,12 @@ def query_projected_lines(
             "start": s0_ns,
             "end": e0_ns,
         }
-        with httpx.Client(timeout=_HTTP_TIMEOUT_S) as client:
-            resp = client.get(
-                settings.observability.telemetry_loki_url.rstrip("/") + "/loki/api/v1/query_range",
-                params=params,
-            )
-            resp.raise_for_status()
-            payload = resp.json()
+        resp = _client().get(
+            settings.observability.telemetry_loki_url.rstrip("/") + "/loki/api/v1/query_range",
+            params=params,
+        )
+        resp.raise_for_status()
+        payload = resp.json()
         rows: list[tuple[int, int | None, str]] = []
         for stream in payload.get("data", {}).get("result", []):
             aid_raw = stream.get("stream", {}).get("agent_id", "")
@@ -846,14 +864,17 @@ def query_projected_lines(
             for ts_ns, line in stream.get("values", []):
                 rows.append((int(ts_ns), aid, line))
         rows.sort(key=lambda r: r[0], reverse=True)
-        truncated = len(rows) >= limit_per_slice
-        if truncated and depth < 8 and e0_ns - s0_ns > 1_000_000_000:
+        if len(rows) >= limit_per_slice:
+            if depth >= 8 or e0_ns - s0_ns <= 1_000_000_000:
+                raise RuntimeError(
+                    f"query_projected_lines: slice [{s0_ns}, {e0_ns}) still "
+                    f"holds >= {limit_per_slice} rows at the bisection floor"
+                )
             mid = (s0_ns + e0_ns) // 2
             fetch(s0_ns, mid, depth + 1)
             fetch(mid, e0_ns, depth + 1)
-        else:
-            out.extend(rows)
-        return not truncated
+            return
+        out.extend(rows)
 
     # Estimate slice count from an exact count (same filter set), split the
     # window evenly; a slice that returns the full limit is bisected.
@@ -995,10 +1016,9 @@ def count_events_series(
         "end": end.timestamp(),
         "step": f"{step}s",
     }
-    with httpx.Client(timeout=_HTTP_TIMEOUT_S) as client:
-        resp = client.get(url, params=params)
-        resp.raise_for_status()
-        payload = resp.json()
+    resp = _client().get(url, params=params)
+    resp.raise_for_status()
+    payload = resp.json()
     out: dict[str, list[tuple[int, int]]] = {"": []} if group_by is None else {}
     for series in payload.get("data", {}).get("result", []):
         k = str(series.get("metric", {}).get(group_by, "")) if group_by else ""
@@ -1047,10 +1067,9 @@ def attribute_max_series(
         "end": end.timestamp(),
         "step": f"{step}s",
     }
-    with httpx.Client(timeout=_HTTP_TIMEOUT_S) as client:
-        resp = client.get(url, params=params)
-        resp.raise_for_status()
-        payload = resp.json()
+    resp = _client().get(url, params=params)
+    resp.raise_for_status()
+    payload = resp.json()
     out: list[tuple[int, float]] = []
     for series in payload.get("data", {}).get("result", []):
         for ts, value in series.get("values", []):

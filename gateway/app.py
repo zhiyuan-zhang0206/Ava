@@ -231,6 +231,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # the request handler on the OS TCP-retransmit timeout.
     app.state.db_pool = shared.db.pool(max_size=8)
 
+    # Shared upstream client for the Grafana reverse proxy — one connection
+    # pool across proxied requests instead of an AsyncClient per request.
+    # Cheap when the proxy is disabled: no connection exists until the first
+    # proxied request.
+    app.state.grafana_client = grafana_router.build_proxy_client()
+
     # Register the OS-level health-probe cron (launchd plist on macOS, crontab
     # on Linux). This is the primary registration path — every gateway start
     # refreshes the plist, so an `ava cluster update` that changes the probe command
@@ -298,6 +304,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
             yield
     finally:
         app.state.mcp_manager = None
+        await app.state.grafana_client.aclose()
         app.state.latency_flusher.cancel()
         with suppress(asyncio.CancelledError):
             await app.state.latency_flusher

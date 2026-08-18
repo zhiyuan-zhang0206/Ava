@@ -2620,12 +2620,15 @@ export interface paths {
          *         always echoes the effective lower bound.
          *       - `limit` (default 100, cap 1000) / `offset`: offset paging; stable
          *         ordering across same-`ts` rows.
+         *       - `with_total=1`: also compute the exact filtered row count
+         *         (`meta.total`) via the Loki count path — one extra full-window
+         *         aggregation, so it is opt-in; without it `meta.total` is null.
          *
-         *     Response: `meta` (exact filtered `total` from the Loki count path,
-         *     effective `window_from`/`window_to`, `limit`/`offset`, `has_more`) +
-         *     `items` (the unified `EventRow` shape). `window_from` is always set —
-         *     the default 24h lower bound when the request named none. An empty
-         *     window returns `total: 0` and `items: []`.
+         *     Response: `meta` (opt-in exact filtered `total`, effective
+         *     `window_from`/`window_to`, `limit`/`offset`, `has_more` from the list
+         *     fetch's +1 lookahead) + `items` (the unified `EventRow` shape).
+         *     `window_from` is always set — the default 24h lower bound when the
+         *     request named none. An empty window returns `items: []`.
          */
         get: operations["get_events_api_events_get"];
         put?: never;
@@ -4223,17 +4226,20 @@ export interface components {
         };
         /**
          * EventsMeta
-         * @description GET /api/events response header — filtered total + effective window +
-         *     pagination state. `window_from`/`window_to` echo the applied time window
+         * @description GET /api/events response header — effective window + pagination
+         *     state. `window_from`/`window_to` echo the applied time window
          *     (`None` when unbounded high; `window_from` is never `None` — the
          *     computed `now - hours` when the request used `hours`, the explicit
          *     `from` when one was given, and otherwise the default lower bound
-         *     `now - 24h`). `has_more` tells a paging
-         *     client whether another `offset` page exists.
+         *     `now - 24h`). `has_more` (from the list fetch's +1 lookahead) tells a
+         *     paging client whether another `offset` page exists. `total` is the exact
+         *     filtered row count before paging, computed only when the request asked
+         *     for it (`with_total=1`) — `None` otherwise (it costs a full-window count
+         *     aggregation).
          */
         EventsMeta: {
             /** Total */
-            total: number;
+            total: number | null;
             /** Window From */
             window_from: string | null;
             /** Window To */
@@ -9598,6 +9604,7 @@ export interface operations {
                 hours?: number | null;
                 limit?: number;
                 offset?: number;
+                with_total?: boolean;
             };
             header?: never;
             path?: never;

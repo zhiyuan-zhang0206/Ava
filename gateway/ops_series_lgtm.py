@@ -19,10 +19,10 @@ instead of the pre-aggregated `ops_metrics` table:
   errors from the LLM error family events in Loki.
 - **restarts** — `agent_restarted` + `service_started` counts from Loki,
   plus whole-window breakdowns: services by `attributes.name` (counts from a
-  grouped count, `last_start` from the projected lines), agents by the
-  stream `agent_id` label (top 20; labels from the `agents` registry — the
-  one SQL read left, the agents table is core cluster state, not the retired
-  events storage).
+  grouped count, `last_start` from one bounded newest-first fetch of the
+  rare `service_started` events), agents by the stream `agent_id` label
+  (top 20; labels from the `agents` registry — the one SQL read left, the
+  agents table is core cluster state, not the retired events storage).
 
 Fidelity notes vs the PG reader:
 - Counter deltas (`increase`) are Prometheus extrapolations, not exact
@@ -35,13 +35,16 @@ Fidelity notes vs the PG reader:
   merged series sums); p50/p95 are histogram approximations both here and in
   the old reader.
 
-Queries run in parallel (one `ThreadPoolExecutor` per group); the panel polls
-every 60s and each query is a small range/instant call.
+Queries run in parallel on one module-level bounded executor: every group
+submits its leaf queries up front and assembles afterwards, so the whole
+fan-out runs concurrently without nested per-request pools (the old shape
+built up to 21 pool threads per call) and concurrent panel polls share —
+not multiply — the concurrency cap against the single-box LGTM stack.
 """
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -69,6 +72,12 @@ _LLM_TOKENS_OUT = "ava_llm_usage_out_total"
 _LLM_TOKENS_REASONING = "ava_llm_usage_reasoning_total"
 _LLM_LATENCY_SUM = "ava_llm_usage_latency_milliseconds_sum"
 _LLM_LATENCY_HIST = "ava_llm_usage_latency_milliseconds_bucket"
+
+# One bounded executor for every leaf query, shared across requests — 18
+# workers is the previous per-request pools' aggregate capacity (3 sse +
+# 10 llm + 5 restarts), so a single call's fan-out is no less parallel than
+# before while pool construction/teardown per request is gone.
+_POOL = ThreadPoolExecutor(max_workers=18, thread_name_prefix="ops-lgtm")
 
 
 def _bucket_starts(anchor: datetime, window_s: int, bucket_s: int) -> list[datetime]:
@@ -115,55 +124,52 @@ def _counts(values: list[float | None]) -> list[int]:
 # ── sse ────────────────────────────────────────────────────────────────────
 
 
-def _sse_series(*, bucket_starts: list[datetime], bucket_s: int) -> dict[str, Any]:
-    from_ = bucket_starts[0]
-    to = bucket_starts[-1] + timedelta(seconds=bucket_s)
+def _sse_submit(*, from_: datetime, to: datetime, bucket_s: int) -> dict[str, Future[Any]]:
+    return {
+        "sse": _POOL.submit(
+            loki_events.count_events_series,
+            event_names=["sse_drop"],
+            group_by="kind",
+            from_attributes=True,
+            from_=from_,
+            to=to,
+            step_s=bucket_s,
+        ),
+        "evlog": _POOL.submit(
+            loki_events.count_events_series,
+            event_names=["event_log_drop"],
+            from_=from_,
+            to=to,
+            step_s=bucket_s,
+        ),
+    }
 
-    def run() -> tuple[list[int], list[int], list[int]]:
-        with ThreadPoolExecutor(max_workers=3) as pool:
-            sse_f = pool.submit(
-                loki_events.count_events_series,
-                event_names=["sse_drop"],
-                group_by="kind",
-                from_attributes=True,
-                from_=from_,
-                to=to,
-                step_s=bucket_s,
-            )
-            evlog_f = pool.submit(
-                loki_events.count_events_series,
-                event_names=["event_log_drop"],
-                from_=from_,
-                to=to,
-                step_s=bucket_s,
-            )
-            grouped = sse_f.result()
-            evlog = evlog_f.result().get("", [])
-        # kind='queue_full' vs everything else; rows without a kind count
-        # toward neither (old FILTER semantics).
-        queue_full = _counts(
-            _bucket_values(
-                grouped.get("queue_full", []), bucket_starts=bucket_starts, bucket_s=bucket_s
-            )
-        )
-        publish_error = _counts(
-            _bucket_values(
-                [
-                    (ts, float(v))
-                    for k, pts in grouped.items()
-                    if k not in ("queue_full", "")
-                    for ts, v in pts
-                ],
-                bucket_starts=bucket_starts,
-                bucket_s=bucket_s,
-            )
-        )
-        event_log_drop = _counts(
-            _bucket_values(evlog, bucket_starts=bucket_starts, bucket_s=bucket_s)
-        )
-        return queue_full, publish_error, event_log_drop
 
-    queue_full, publish_error, event_log_drop = run()
+def _sse_series(
+    futs: dict[str, Future[Any]], *, bucket_starts: list[datetime], bucket_s: int
+) -> dict[str, Any]:
+    grouped = futs["sse"].result()
+    evlog = futs["evlog"].result().get("", [])
+    # kind='queue_full' vs everything else; rows without a kind count
+    # toward neither (old FILTER semantics).
+    queue_full = _counts(
+        _bucket_values(
+            grouped.get("queue_full", []), bucket_starts=bucket_starts, bucket_s=bucket_s
+        )
+    )
+    publish_error = _counts(
+        _bucket_values(
+            [
+                (ts, float(v))
+                for k, pts in grouped.items()
+                if k not in ("queue_full", "")
+                for ts, v in pts
+            ],
+            bucket_starts=bucket_starts,
+            bucket_s=bucket_s,
+        )
+    )
+    event_log_drop = _counts(_bucket_values(evlog, bucket_starts=bucket_starts, bucket_s=bucket_s))
     return {
         "series": [
             {"bucket": i, "queue_full": q, "publish_error": p, "event_log_drop": e}
@@ -182,7 +188,7 @@ def _sse_series(*, bucket_starts: list[datetime], bucket_s: int) -> dict[str, An
 # ── llm ────────────────────────────────────────────────────────────────────
 
 
-def _llm_series(*, bucket_starts: list[datetime], bucket_s: int) -> dict[str, Any]:
+def _llm_submit(*, bucket_starts: list[datetime], bucket_s: int) -> dict[str, Future[Any]]:
     from_ = bucket_starts[0]
     to = bucket_starts[-1] + timedelta(seconds=bucket_s)
     n = len(bucket_starts)
@@ -204,59 +210,67 @@ def _llm_series(*, bucket_starts: list[datetime], bucket_s: int) -> dict[str, An
         rows = prom_metrics.query(expr)
         return rows[0][1] if rows else None
 
-    with ThreadPoolExecutor(max_workers=10) as pool:
-        calls_f = pool.submit(prom_series, f"sum(increase({_LLM_CALLS}[{bucket_s}s]))")
-        tin_f = pool.submit(prom_series, f"sum(increase({_LLM_TOKENS_IN}[{bucket_s}s]))")
-        tout_f = pool.submit(prom_series, f"sum(increase({_LLM_TOKENS_OUT}[{bucket_s}s]))")
-        treason_f = pool.submit(prom_series, f"sum(increase({_LLM_TOKENS_REASONING}[{bucket_s}s]))")
-        latsum_f = pool.submit(prom_series, f"sum(increase({_LLM_LATENCY_SUM}[{bucket_s}s]))")
-        p50_f = pool.submit(
+    return {
+        "calls": _POOL.submit(prom_series, f"sum(increase({_LLM_CALLS}[{bucket_s}s]))"),
+        "tin": _POOL.submit(prom_series, f"sum(increase({_LLM_TOKENS_IN}[{bucket_s}s]))"),
+        "tout": _POOL.submit(prom_series, f"sum(increase({_LLM_TOKENS_OUT}[{bucket_s}s]))"),
+        "treason": _POOL.submit(
+            prom_series, f"sum(increase({_LLM_TOKENS_REASONING}[{bucket_s}s]))"
+        ),
+        "latsum": _POOL.submit(prom_series, f"sum(increase({_LLM_LATENCY_SUM}[{bucket_s}s]))"),
+        "p50": _POOL.submit(
             prom_series,
             f"histogram_quantile(0.5, sum by (le) (rate({_LLM_LATENCY_HIST}[{bucket_s}s])))",
-        )
-        p95_f = pool.submit(
+        ),
+        "p95": _POOL.submit(
             prom_series,
             f"histogram_quantile(0.95, sum by (le) (rate({_LLM_LATENCY_HIST}[{bucket_s}s])))",
-        )
-        max_f = pool.submit(
+        ),
+        "max": _POOL.submit(
             loki_events.attribute_max_series,
             field="latency_ms",
             event_names=["llm_usage"],
             from_=from_,
             to=to,
             step_s=bucket_s,
-        )
-        err_f = pool.submit(
+        ),
+        "err": _POOL.submit(
             loki_events.count_events_series,
             event_names=list(_LLM_ERROR_EVENTS),
             from_=from_,
             to=to,
             step_s=bucket_s,
-        )
-        total_p50_f = pool.submit(
+        ),
+        "total_p50": _POOL.submit(
             instant,
             f"histogram_quantile(0.5, sum by (le) (increase({_LLM_LATENCY_HIST}[{window_s}s])))",
-        )
-        total_p95_f = pool.submit(
+        ),
+        "total_p95": _POOL.submit(
             instant,
             f"histogram_quantile(0.95, sum by (le) (increase({_LLM_LATENCY_HIST}[{window_s}s])))",
-        )
+        ),
+    }
 
-        calls = _counts(calls_f.result())
-        tokens_in = _counts(tin_f.result())
-        tokens_out = _counts(tout_f.result())
-        tokens_reasoning = _counts(treason_f.result())
-        lat_sum = _counts(latsum_f.result())
-        p50 = p50_f.result()
-        p95 = p95_f.result()
-        lat_max = _bucket_values(max_f.result(), bucket_starts=bucket_starts, bucket_s=bucket_s)
-        errors = _counts(
-            _bucket_values(
-                err_f.result().get("", []), bucket_starts=bucket_starts, bucket_s=bucket_s
-            )
+
+def _llm_series(
+    futs: dict[str, Future[Any]], *, bucket_starts: list[datetime], bucket_s: int
+) -> dict[str, Any]:
+    n = len(bucket_starts)
+    calls = _counts(futs["calls"].result())
+    tokens_in = _counts(futs["tin"].result())
+    tokens_out = _counts(futs["tout"].result())
+    tokens_reasoning = _counts(futs["treason"].result())
+    lat_sum = _counts(futs["latsum"].result())
+    p50 = futs["p50"].result()
+    p95 = futs["p95"].result()
+    lat_max = _bucket_values(futs["max"].result(), bucket_starts=bucket_starts, bucket_s=bucket_s)
+    errors = _counts(
+        _bucket_values(
+            futs["err"].result().get("", []), bucket_starts=bucket_starts, bucket_s=bucket_s
         )
-        total_p50 = total_p50_f.result()
-        total_p95 = total_p95_f.result()
+    )
+    total_p50 = futs["total_p50"].result()
+    total_p95 = futs["total_p95"].result()
 
     series: list[dict[str, Any]] = []
     for i in range(n):
@@ -300,86 +314,82 @@ def _llm_series(*, bucket_starts: list[datetime], bucket_s: int) -> dict[str, An
 # ── restarts ───────────────────────────────────────────────────────────────
 
 
-def _restart_series(cur: Any, *, bucket_starts: list[datetime], bucket_s: int) -> dict[str, Any]:
-    from_ = bucket_starts[0]
-    to = bucket_starts[-1] + timedelta(seconds=bucket_s)
+def _restart_submit(*, from_: datetime, to: datetime, bucket_s: int) -> dict[str, Future[Any]]:
+    return {
+        "agent": _POOL.submit(
+            loki_events.count_events_series,
+            event_names=["agent_restarted"],
+            from_=from_,
+            to=to,
+            step_s=bucket_s,
+        ),
+        "service": _POOL.submit(
+            loki_events.count_events_series,
+            event_names=["service_started"],
+            from_=from_,
+            to=to,
+            step_s=bucket_s,
+        ),
+        "services_by_name": _POOL.submit(
+            loki_events.count_grouped,
+            event_names=["service_started"],
+            group_by="name",
+            from_attributes=True,
+            from_=from_,
+            to=to,
+        ),
+        "agents_by_id": _POOL.submit(
+            loki_events.count_grouped,
+            event_names=["agent_restarted"],
+            group_by="agent_id",
+            from_=from_,
+            to=to,
+        ),
+        # last_start per service: one bounded newest-first fetch of the rare
+        # service_started events (the sliced whole-window projected-line scan
+        # this replaces cost a count pre-query + up to 256 slice fetches). A
+        # name whose newest start falls off the 1000-row page keeps its
+        # grouped-count entry with last_start None.
+        "rows": _POOL.submit(
+            loki_events.query_events,
+            event_names=["service_started"],
+            from_=from_,
+            to=to,
+            limit=1000,
+        ),
+    }
 
-    def run() -> tuple[
-        list[int],
-        list[int],
-        dict[str, int],
-        dict[str, int],
-        list[tuple[int, int | None, str]],
-    ]:
-        with ThreadPoolExecutor(max_workers=5) as pool:
-            agent_f = pool.submit(
-                loki_events.count_events_series,
-                event_names=["agent_restarted"],
-                from_=from_,
-                to=to,
-                step_s=bucket_s,
-            )
-            service_f = pool.submit(
-                loki_events.count_events_series,
-                event_names=["service_started"],
-                from_=from_,
-                to=to,
-                step_s=bucket_s,
-            )
-            services_by_name_f = pool.submit(
-                loki_events.count_grouped,
-                event_names=["service_started"],
-                group_by="name",
-                from_attributes=True,
-                from_=from_,
-                to=to,
-            )
-            agents_by_id_f = pool.submit(
-                loki_events.count_grouped,
-                event_names=["agent_restarted"],
-                group_by="agent_id",
-                from_=from_,
-                to=to,
-            )
-            lines_f = pool.submit(
-                loki_events.query_projected_lines,
-                fields=["name"],
-                template="{{ .name }}",
-                event_names=["service_started"],
-                from_=from_,
-                to=to,
-            )
-            agent_restarts = _counts(
-                _bucket_values(
-                    agent_f.result().get("", []), bucket_starts=bucket_starts, bucket_s=bucket_s
-                )
-            )
-            service_starts = _counts(
-                _bucket_values(
-                    service_f.result().get("", []), bucket_starts=bucket_starts, bucket_s=bucket_s
-                )
-            )
-            services_by_name = services_by_name_f.result()
-            agents_by_id = agents_by_id_f.result()
-            lines = lines_f.result()
-        return agent_restarts, service_starts, services_by_name, agents_by_id, lines
 
-    agent_restarts, service_starts, services_by_name, agents_by_id, lines = run()
+def _restart_series(
+    futs: dict[str, Future[Any]], cur: Any, *, bucket_starts: list[datetime], bucket_s: int
+) -> dict[str, Any]:
+    agent_restarts = _counts(
+        _bucket_values(
+            futs["agent"].result().get("", []), bucket_starts=bucket_starts, bucket_s=bucket_s
+        )
+    )
+    service_starts = _counts(
+        _bucket_values(
+            futs["service"].result().get("", []), bucket_starts=bucket_starts, bucket_s=bucket_s
+        )
+    )
+    services_by_name = futs["services_by_name"].result()
+    agents_by_id = futs["agents_by_id"].result()
+    rows, _ = futs["rows"].result()
 
-    # Whole-window breakdowns.
-    last_by_name: dict[str, int] = {}
-    for ts_ns, _aid, line in lines:
-        name = line.strip()
-        if name:
-            last_by_name[name] = max(last_by_name.get(name, 0), ts_ns)
+    # Whole-window breakdowns. Rows are newest-first, so the first hit per
+    # name is its last start.
+    last_by_name: dict[str, datetime] = {}
+    for row in rows:
+        name = str(row["attributes"].get("name") or "").strip()
+        if name and name not in last_by_name:
+            last_by_name[name] = row["ts"]
     names = sorted(set(services_by_name) | set(last_by_name))
     services: list[dict[str, Any]] = [
         {
             "name": name,
             "starts": services_by_name.get(name, 0),
-            "last_start": datetime.fromtimestamp(last_by_name[name] / 1e9, tz=UTC).isoformat()
-            if name in last_by_name
-            else None,
+            "last_start": last_by_name[name].isoformat() if name in last_by_name else None,
         }
         for name in names
     ]
@@ -417,20 +427,20 @@ def fetch_ops_series(cur: Any, window: str) -> dict[str, Any]:
     Reads Loki + Prometheus (the LGTM stack); `cur` is used only for the
     agents-registry label lookup in the restarts breakdown (core cluster
     state, not the retired events storage) and may be None to skip it.
+
+    Every leaf query is submitted to the shared executor before any group is
+    assembled, so the whole fan-out runs concurrently — same parallelism as
+    the old nested pools, without building them per request.
     """
     window_s, bucket_s = WINDOWS[window]
     anchor = datetime.now(UTC)
     bucket_starts = _bucket_starts(anchor, window_s, bucket_s)
+    from_ = bucket_starts[0]
+    to = bucket_starts[-1] + timedelta(seconds=bucket_s)
 
-    with ThreadPoolExecutor(max_workers=3) as pool:
-        sse_f = pool.submit(_sse_series, bucket_starts=bucket_starts, bucket_s=bucket_s)
-        llm_f = pool.submit(_llm_series, bucket_starts=bucket_starts, bucket_s=bucket_s)
-        restarts_f = pool.submit(
-            _restart_series, cur, bucket_starts=bucket_starts, bucket_s=bucket_s
-        )
-        sse = sse_f.result()
-        llm = llm_f.result()
-        restarts = restarts_f.result()
+    sse_futs = _sse_submit(from_=from_, to=to, bucket_s=bucket_s)
+    llm_futs = _llm_submit(bucket_starts=bucket_starts, bucket_s=bucket_s)
+    restart_futs = _restart_submit(from_=from_, to=to, bucket_s=bucket_s)
 
     return {
         "meta": {
@@ -439,7 +449,9 @@ def fetch_ops_series(cur: Any, window: str) -> dict[str, Any]:
             "generated_at": anchor.isoformat(),
             "bucket_starts": [b.isoformat() for b in bucket_starts],
         },
-        "sse": sse,
-        "llm": llm,
-        "restarts": restarts,
+        "sse": _sse_series(sse_futs, bucket_starts=bucket_starts, bucket_s=bucket_s),
+        "llm": _llm_series(llm_futs, bucket_starts=bucket_starts, bucket_s=bucket_s),
+        "restarts": _restart_series(
+            restart_futs, cur, bucket_starts=bucket_starts, bucket_s=bucket_s
+        ),
     }

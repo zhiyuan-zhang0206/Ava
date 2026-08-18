@@ -136,7 +136,7 @@ annotated artifact.
 | Grafana UI | `http://100.64.0.2:3003` | Explore > Traces, anonymous viewer |
 | Ship bridge | `ava trace ship [--target tempo] [--dry-run]` | gap-replay only (sidecar fans out live); gateway schedule id=5 optional for scheduled replay |
 | Turn content | `GET /api/agents/{id}/traces/{hex}/messages` | gateway :8000, bearer auth, pruned semantics |
-| Event stream | `GET /api/events?trace_id=<hex>&from=<ISO>` | gateway :8000, bearer auth, `items[]` + `meta.total` |
+| Event stream | `GET /api/events?trace_id=<hex>&from=<ISO>` | gateway :8000, bearer auth, `items[]` + `meta.has_more` (`meta.total` opt-in via `with_total=1`) |
 
 The LGTM stack is `deploy/lgtm/` (lifecycle-owned on the marked host — see
 its README); its ingest is the sidecar fan-out only — never point write

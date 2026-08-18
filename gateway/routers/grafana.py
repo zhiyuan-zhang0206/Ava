@@ -18,7 +18,10 @@ URLs:
   calls same-origin through this proxy.
 
 The proxy streams the upstream response chunk-by-chunk (StreamingResponse) —
-SSE and large panel payloads pass through without being buffered whole.
+SSE and large panel payloads pass through without being buffered whole. All
+proxied requests share one `httpx.AsyncClient` (connection pooling instead of
+a client per request), created and closed by the gateway lifespan
+(`gateway/app.py`) and reached via `request.app.state.grafana_client`.
 
 Disabled by default (`AVA_GRAFANA_PROXY_ENABLED=false`): a cluster without a
 Grafana upstream gets 404 on `/grafana/*` and nothing else changes. WebSocket
@@ -44,6 +47,17 @@ router = APIRouter()
 # park the request forever. The read timeout is between-chunks, so a live
 # stream keeps flowing.
 _PROXY_TIMEOUT = httpx.Timeout(connect=5.0, read=120.0, write=5.0, pool=5.0)
+
+
+def build_proxy_client() -> httpx.AsyncClient:
+    """The shared upstream client — one connection pool for every proxied
+    request. Owned by the gateway lifespan (created at startup, closed at
+    shutdown); handlers reach it via `request.app.state.grafana_client`."""
+    return httpx.AsyncClient(
+        timeout=_PROXY_TIMEOUT,
+        limits=httpx.Limits(max_connections=32, max_keepalive_connections=10),
+    )
+
 
 # Response headers forwarded from Grafana; everything else (hop-by-hop,
 # server internals, Set-Cookie) is dropped. Content-Length is forwarded too
@@ -90,11 +104,10 @@ async def _iter_upstream(resp: httpx.Response) -> AsyncGenerator[bytes, None]:
         return
 
 
-async def _close_upstream(resp: httpx.Response, client: httpx.AsyncClient) -> None:
-    """Release the upstream connection + client once the streamed response
-    has been sent (or the client disconnected)."""
+async def _close_upstream(resp: httpx.Response) -> None:
+    """Release the upstream connection back to the shared pool once the
+    streamed response has been sent (or the client disconnected)."""
     await resp.aclose()
-    await client.aclose()
 
 
 @router.get("/grafana")
@@ -130,7 +143,7 @@ async def _proxy(rest: str, request: Request) -> Response:
     query = request.url.query
     if query:
         target += f"?{query}"
-    client = httpx.AsyncClient(timeout=_PROXY_TIMEOUT)
+    client: httpx.AsyncClient = request.app.state.grafana_client
     try:
         # Forward the whitelisted request headers (Content-Type matters for
         # POST /api/ds/query bodies) and ask for an uncompressed response so
@@ -150,10 +163,8 @@ async def _proxy(rest: str, request: Request) -> Response:
         )
         resp = await client.send(req, stream=True)
     except httpx.TimeoutException:
-        await client.aclose()
         raise HTTPException(status_code=504, detail=f"grafana {host}:{port} timed out") from None
     except httpx.HTTPError:
-        await client.aclose()
         raise HTTPException(status_code=502, detail=f"grafana {host}:{port} unreachable") from None
     headers = {k: v for k, v in resp.headers.items() if k.lower() in _FORWARDED_RESPONSE_HEADERS}
     # Defense in depth for an upstream that ignores Accept-Encoding: identity:
@@ -165,7 +176,7 @@ async def _proxy(rest: str, request: Request) -> Response:
         _iter_upstream(resp),
         status_code=resp.status_code,
         headers=headers,
-        background=BackgroundTask(_close_upstream, resp, client),
+        background=BackgroundTask(_close_upstream, resp),
     )
 
 

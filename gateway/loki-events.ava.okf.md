@@ -29,7 +29,7 @@ whose top-level fields ride as structured metadata.
   + 1` fetched, `has_more` from the +1 lookahead); the default window is the
   last 24h.
 - **`count_events()`** — the exact filtered line count (the `/api/events`
-  `meta.total`): `sum(count_over_time(...))` as an *instant* query at the
+  opt-in `meta.total`, `with_total=1`): `sum(count_over_time(...))` as an *instant* query at the
   window end (range vector `[to - from]`), with `| __error__=""` so count and
   row-parse semantics agree. The earlier "500-series cap" finding was a
   query-shape artifact (missing `sum()`); the sum-wrapped form counts any
@@ -70,6 +70,9 @@ whose top-level fields ride as structured metadata.
 
 - `AVA_TELEMETRY_LOKI_URL` (default `http://127.0.0.1:3100`,
   restart_required gateway) points at the single-binary Loki HTTP port.
+- Every query runs through one long-lived module-level `httpx.Client`
+  (the lazy `_client()` accessor — the seam tests swap): connection reuse
+  across the gateway's fan-out reads instead of a TCP connection per query.
 - Tests: `tests/gateway/test_loki_events.py` (httpx-faked unit tests for all
   three functions), `tests/gateway/test_agent_inspect.py` (route tests with
   an in-memory `_FakeLoki`).

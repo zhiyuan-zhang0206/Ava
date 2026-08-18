@@ -1,10 +1,10 @@
 """Unit tests for `gateway/prom_metrics.py` — the Prometheus read side of the
 LGTM cutover (task #1197).
 
-The module's only I/O is one httpx GET against Prometheus's instant-query
-API (`/api/v1/query`); these tests fake that client and assert on the query
-text, the URL, and the result parsing (labels + float values, missing-value
-rows skipped, empty result []).
+The module's only I/O is httpx GETs through the shared client accessor
+(`prom_metrics._client`); these tests swap the accessor for a fake and
+assert on the query text, the URL, and the result parsing (labels + float
+values, missing-value rows skipped, empty result []).
 """
 
 from __future__ import annotations
@@ -35,38 +35,33 @@ class _FakeResponse:
 
 
 class _FakeClient:
-    """Records the request, returns canned payloads; used as a context manager."""
+    """Records the request, returns canned payloads; stands in for the shared
+    client behind `prom_metrics._client()`."""
 
     def __init__(self, payloads: list[dict[str, Any]] | dict[str, Any], status: int = 200) -> None:
         self.payloads = payloads if isinstance(payloads, list) else [payloads]
         self.status = status
         self.calls: list[tuple[str, dict[str, Any]]] = []
 
-    def __enter__(self) -> _FakeClient:
-        return self
-
-    def __exit__(self, *exc: object) -> None:
-        return None
-
     def get(self, url: str, params: dict[str, Any]) -> _FakeResponse:
         self.calls.append((url, params))
         return _FakeResponse(self.payloads.pop(0), status=self.status)
 
 
-def _fake_client_factory(client: _FakeClient) -> object:
-    """httpx.Client replacement: returns the fake regardless of call args."""
+def _accessor(client: _FakeClient) -> object:
+    """`prom_metrics._client` replacement: hands back the fake."""
 
-    def _factory(*args: object, **kwargs: object) -> _FakeClient:
+    def _get() -> _FakeClient:
         return client
 
-    return _factory
+    return _get
 
 
 def _install(
     monkeypatch: pytest.MonkeyPatch, payloads: list[dict[str, Any]] | dict[str, Any]
 ) -> _FakeClient:
     client = _FakeClient(payloads)
-    monkeypatch.setattr(prom_metrics.httpx, "Client", _fake_client_factory(client))
+    monkeypatch.setattr(prom_metrics, "_client", _accessor(client))
     return client
 
 
@@ -112,12 +107,12 @@ class TestQuery:
 
     def test_skips_rows_without_value(self, monkeypatch: pytest.MonkeyPatch) -> None:
         client = _FakeClient({"status": "success", "data": {"result": [{"metric": {}}]}})
-        monkeypatch.setattr(prom_metrics.httpx, "Client", _fake_client_factory(client))
+        monkeypatch.setattr(prom_metrics, "_client", _accessor(client))
         assert prom_metrics.query("up") == []
 
     def test_non_2xx_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         client = _FakeClient({"status": "error"}, status=422)
-        monkeypatch.setattr(prom_metrics.httpx, "Client", _fake_client_factory(client))
+        monkeypatch.setattr(prom_metrics, "_client", _accessor(client))
         with pytest.raises(RuntimeError):
             prom_metrics.query("up")
 

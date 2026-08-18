@@ -4,9 +4,9 @@ The route is an adapter over `loki_events.query_events` / `count_events`
 (the PG `events` read was replaced by Loki). This file locks the endpoint
 contract: filter composition (category / event_name — `kind` kept as a
 legacy alias — / agent_id / trace_id / machine / level), the time window
-(`from`/`to` and `hours`), offset paging with the `meta` envelope (exact
-`total` from the Loki count path / window / has_more), the unified row
-shape, and the 422s for illegal parameters. The Loki queries are mocked;
+(`from`/`to` and `hours`), offset paging with the `meta` envelope (opt-in
+exact `total` from the Loki count path / window / lookahead has_more), the
+unified row shape, and the 422s for illegal parameters. The Loki queries are mocked;
 `tests/gateway/test_loki_events.py` covers the query building.
 """
 
@@ -59,12 +59,13 @@ def _row(**over: Any) -> dict[str, Any]:
 
 
 class _FakeEvents:
-    """Recorded loki_events calls + canned rows/total."""
+    """Recorded loki_events calls + canned rows/total/has_more."""
 
     def __init__(self) -> None:
         self.calls: list[dict[str, Any]] = []
         self.rows: list[dict[str, Any]] = []
         self.totals: list[int] = []
+        self.has_more = False
 
 
 @pytest.fixture
@@ -75,7 +76,7 @@ def fake_events(monkeypatch: pytest.MonkeyPatch) -> _FakeEvents:
 
     def _query(**kwargs: Any) -> tuple[list[dict[str, Any]], bool]:
         fake.calls.append(kwargs)
-        return fake.rows, False
+        return fake.rows, fake.has_more
 
     def _count(**kwargs: Any) -> int:
         fake.calls.append(kwargs)
@@ -93,7 +94,7 @@ class TestEventsApi:
         assert r.status_code == 200
         body = r.json()
         assert body["items"] == []
-        assert body["meta"]["total"] == 0
+        assert body["meta"]["total"] is None  # exact count is opt-in
         assert body["meta"]["has_more"] is False
         assert body["meta"]["limit"] == 100
         assert body["meta"]["offset"] == 0
@@ -193,19 +194,40 @@ class TestEventsApi:
         assert from_ is not None
         assert before - timedelta(hours=25) <= from_ <= after - timedelta(hours=23, seconds=59)
 
-    def test_meta_total_comes_from_count(self, fake_events: _FakeEvents) -> None:
+    def test_total_skipped_by_default(self, fake_events: _FakeEvents) -> None:
+        """Without with_total the count path never runs — the only loki call
+        is the list fetch, and meta.total is null."""
+        fake_events.rows.extend([_row()])
+        with TestClient(app) as client:
+            r = client.get("/api/events")
+        body = r.json()
+        assert body["meta"]["total"] is None
+        assert len(fake_events.calls) == 1  # query_events only, no count
+
+    def test_meta_total_opt_in_comes_from_count(self, fake_events: _FakeEvents) -> None:
         fake_events.rows.extend([_row()])
         fake_events.totals.append(3)
+        fake_events.has_more = True
         with TestClient(app) as client:
-            r = client.get("/api/events", params={"limit": 1})
+            r = client.get("/api/events", params={"limit": 1, "with_total": 1})
         body = r.json()
         assert body["meta"]["total"] == 3
-        assert body["meta"]["has_more"] is True  # 0 + 1 < 3
+        assert len(fake_events.calls) == 2  # count + query
+        assert body["meta"]["has_more"] is True  # the fetch's +1 lookahead
+
+    def test_has_more_from_lookahead(self, fake_events: _FakeEvents) -> None:
+        """has_more echoes query_events' +1-lookahead result — no count
+        aggregation involved."""
+        fake_events.rows.extend([_row()])
+        fake_events.has_more = True
+        with TestClient(app) as client:
+            r = client.get("/api/events")
+        assert r.json()["meta"]["has_more"] is True
 
     def test_limit_offset_paging(self, fake_events: _FakeEvents) -> None:
         with TestClient(app) as client:
             client.get("/api/events", params={"limit": 5, "offset": 10})
-        kw = fake_events.calls[1]  # the query call (count is call 0)
+        kw = fake_events.calls[0]  # the query call (no count by default)
         assert kw["limit"] == 5
         assert kw["offset"] == 10
 
@@ -233,7 +255,7 @@ class TestEventsApi:
             r = client.get("/api/events", params={"event_name": "does_not_exist"})
         body = r.json()
         assert body["items"] == []
-        assert body["meta"]["total"] == 0
+        assert body["meta"]["total"] is None
 
     def test_invalid_category_422(self, fake_events: _FakeEvents) -> None:
         with TestClient(app) as client:

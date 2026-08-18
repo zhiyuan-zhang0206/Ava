@@ -178,12 +178,12 @@ class _FakeClient:
         offset = int(cast(Any, p.get("offset", 0)))
         limit = int(cast(Any, p.get("limit", 1000)))
         page = sorted(matching, key=lambda r: str(r["ts"]), reverse=True)[offset : offset + limit]
-        return _FakeResp(
-            {
-                "items": page,
-                "meta": {"total": total, "has_more": offset + len(page) < total},
-            }
-        )
+        # meta.total is opt-in server-side (with_total=1) — mirror that here
+        # so collect's bisection provably requests it.
+        meta: dict[str, object] = {"has_more": offset + len(page) < total}
+        if p.get("with_total"):
+            meta["total"] = total
+        return _FakeResp({"items": page, "meta": meta})
 
 
 def _row(i: int, ts: datetime, category: str = "telemetry", agent_id: int = 7) -> dict[str, object]:

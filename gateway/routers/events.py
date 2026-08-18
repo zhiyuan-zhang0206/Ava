@@ -12,9 +12,11 @@ time window given either as `from`/`to`
 (ISO-8601, inclusive) or as `hours` (the last N hours — shorthand for
 `from = now - hours`; the two forms are mutually exclusive). `level` is an
 exact match (case-insensitive), the same reading as the per-agent events
-query. Pagination is `limit` + `offset`; `meta.total` is the filtered row
-count before paging and `meta.has_more` tells the client whether another
-page exists.
+query. Pagination is `limit` + `offset`; `meta.has_more` (from the list
+fetch's +1 lookahead) tells the client whether another page exists, and
+`meta.total` — the exact filtered row count before paging — is opt-in via
+`with_total=1` (it costs a full-window count aggregation, which a page flip
+does not need).
 
 Two hard contract rules keep every query bounded and unambiguous:
   - a lower bound is always in effect — absent both `from` and `hours`,
@@ -111,6 +113,7 @@ def get_events(
     hours: Annotated[float | None, Query(gt=0, le=_MAX_HOURS)] = None,
     limit: Annotated[int, Query(ge=1, le=1000)] = 100,
     offset: Annotated[int, Query(ge=0)] = 0,
+    with_total: Annotated[bool, Query()] = False,  # noqa: FBT002 — FastAPI query param
 ) -> EventsResponse:
     """Slice of the unified event stream — every event (audit / telemetry /
     log) through one query surface, the programmatic read side of the
@@ -146,12 +149,15 @@ def get_events(
         always echoes the effective lower bound.
       - `limit` (default 100, cap 1000) / `offset`: offset paging; stable
         ordering across same-`ts` rows.
+      - `with_total=1`: also compute the exact filtered row count
+        (`meta.total`) via the Loki count path — one extra full-window
+        aggregation, so it is opt-in; without it `meta.total` is null.
 
-    Response: `meta` (exact filtered `total` from the Loki count path,
-    effective `window_from`/`window_to`, `limit`/`offset`, `has_more`) +
-    `items` (the unified `EventRow` shape). `window_from` is always set —
-    the default 24h lower bound when the request named none. An empty
-    window returns `total: 0` and `items: []`.
+    Response: `meta` (opt-in exact filtered `total`, effective
+    `window_from`/`window_to`, `limit`/`offset`, `has_more` from the list
+    fetch's +1 lookahead) + `items` (the unified `EventRow` shape).
+    `window_from` is always set — the default 24h lower bound when the
+    request named none. An empty window returns `items: []`.
     """
     level = _validate(category=category, level=level, from_=from_, to=to, hours=hours)
 
@@ -174,17 +180,19 @@ def get_events(
         )
     name = event_name if event_name is not None else kind
 
-    total = loki_events.count_events(
-        agent_id=agent_id,
-        categories=[category] if category is not None else None,
-        event_names=[name] if name is not None else None,
-        trace_id=trace_id.lower() if trace_id is not None else None,
-        machine=machine,
-        level=level,
-        from_=window_from,
-        to=to,
-    )
-    rows, _ = loki_events.query_events(
+    total: int | None = None
+    if with_total:
+        total = loki_events.count_events(
+            agent_id=agent_id,
+            categories=[category] if category is not None else None,
+            event_names=[name] if name is not None else None,
+            trace_id=trace_id.lower() if trace_id is not None else None,
+            machine=machine,
+            level=level,
+            from_=window_from,
+            to=to,
+        )
+    rows, has_more = loki_events.query_events(
         agent_id=agent_id,
         categories=[category] if category is not None else None,
         event_names=[name] if name is not None else None,
@@ -221,7 +229,7 @@ def get_events(
         window_to=to,
         limit=limit,
         offset=offset,
-        has_more=offset + len(items) < total,
+        has_more=has_more,
         generated_at=now.isoformat(),
     )
     return EventsResponse(meta=meta, items=items)

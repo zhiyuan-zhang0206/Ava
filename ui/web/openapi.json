@@ -4411,7 +4411,7 @@
     "/api/events": {
       "get": {
         "summary": "Get Events",
-        "description": "Slice of the unified event stream — every event (audit / telemetry /\nlog) through one query surface, the programmatic read side of the\nunified emitter. Newest-first (`ts DESC`, `id DESC` tiebreak).\n\nFilters compose (AND):\n  - `category=<audit|telemetry|log>`: retention/alerting class (unknown\n    value 422s).\n  - `event_name=<name>`: exact event name, e.g. `llm_usage` /\n    `turn_end` / `spawn` / `send_message` (the legacy `kind=` spelling\n    is accepted as an alias; passing both with different values 422s).\n    The `kind=` alias is retired on 2026-09-30 — pre-alignment clients\n    must move to `event_name` before then, after which the alias and its\n    conflict check are removed.\n  - `agent_id=<n>`: events belonging to that agent; service-level events\n    (NULL) are excluded when set.\n  - `trace_id=<hex>`: one turn's whole call chain — every event that\n    shares the id.\n  - `machine=<name>`: the host dimension.\n  - `level=<debug|info|warning|error|critical>`: exact match,\n    case-insensitive (unknown value 422s).\n  - `from=<ISO-8601>` / `to=<ISO-8601>`: inclusive time window\n    (`ts >= from AND ts <= to`); either side may be omitted. Values\n    MUST carry a timezone offset (`Z` or `+hh:mm`) — a naive timestamp\n    is interpreted in the server's local timezone, so it 422s instead\n    of silently shifting the window.\n  - `hours=<n>`: alternative window — the last N hours\n    (`from = now - hours`). Mutually exclusive with `from`.\n  - Default window: when neither `from` nor `hours` is given, the last\n    24 hours are assumed (`from = now - 24h`) — an unbounded query\n    would scan the whole retention history (6M+ rows across every\n    month partition), so the API never runs one. `meta.window_from`\n    always echoes the effective lower bound.\n  - `limit` (default 100, cap 1000) / `offset`: offset paging; stable\n    ordering across same-`ts` rows.\n\nResponse: `meta` (exact filtered `total` from the Loki count path,\neffective `window_from`/`window_to`, `limit`/`offset`, `has_more`) +\n`items` (the unified `EventRow` shape). `window_from` is always set —\nthe default 24h lower bound when the request named none. An empty\nwindow returns `total: 0` and `items: []`.",
+        "description": "Slice of the unified event stream — every event (audit / telemetry /\nlog) through one query surface, the programmatic read side of the\nunified emitter. Newest-first (`ts DESC`, `id DESC` tiebreak).\n\nFilters compose (AND):\n  - `category=<audit|telemetry|log>`: retention/alerting class (unknown\n    value 422s).\n  - `event_name=<name>`: exact event name, e.g. `llm_usage` /\n    `turn_end` / `spawn` / `send_message` (the legacy `kind=` spelling\n    is accepted as an alias; passing both with different values 422s).\n    The `kind=` alias is retired on 2026-09-30 — pre-alignment clients\n    must move to `event_name` before then, after which the alias and its\n    conflict check are removed.\n  - `agent_id=<n>`: events belonging to that agent; service-level events\n    (NULL) are excluded when set.\n  - `trace_id=<hex>`: one turn's whole call chain — every event that\n    shares the id.\n  - `machine=<name>`: the host dimension.\n  - `level=<debug|info|warning|error|critical>`: exact match,\n    case-insensitive (unknown value 422s).\n  - `from=<ISO-8601>` / `to=<ISO-8601>`: inclusive time window\n    (`ts >= from AND ts <= to`); either side may be omitted. Values\n    MUST carry a timezone offset (`Z` or `+hh:mm`) — a naive timestamp\n    is interpreted in the server's local timezone, so it 422s instead\n    of silently shifting the window.\n  - `hours=<n>`: alternative window — the last N hours\n    (`from = now - hours`). Mutually exclusive with `from`.\n  - Default window: when neither `from` nor `hours` is given, the last\n    24 hours are assumed (`from = now - 24h`) — an unbounded query\n    would scan the whole retention history (6M+ rows across every\n    month partition), so the API never runs one. `meta.window_from`\n    always echoes the effective lower bound.\n  - `limit` (default 100, cap 1000) / `offset`: offset paging; stable\n    ordering across same-`ts` rows.\n  - `with_total=1`: also compute the exact filtered row count\n    (`meta.total`) via the Loki count path — one extra full-window\n    aggregation, so it is opt-in; without it `meta.total` is null.\n\nResponse: `meta` (opt-in exact filtered `total`, effective\n`window_from`/`window_to`, `limit`/`offset`, `has_more` from the list\nfetch's +1 lookahead) + `items` (the unified `EventRow` shape).\n`window_from` is always set — the default 24h lower bound when the\nrequest named none. An empty window returns `items: []`.",
         "operationId": "get_events_api_events_get",
         "parameters": [
           {
@@ -4599,6 +4599,16 @@
               "minimum": 0,
               "default": 0,
               "title": "Offset"
+            }
+          },
+          {
+            "name": "with_total",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "With Total"
             }
           }
         ],
@@ -7480,7 +7490,14 @@
       "EventsMeta": {
         "properties": {
           "total": {
-            "type": "integer",
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Total"
           },
           "window_from": {
@@ -7535,7 +7552,7 @@
           "generated_at"
         ],
         "title": "EventsMeta",
-        "description": "GET /api/events response header — filtered total + effective window +\npagination state. `window_from`/`window_to` echo the applied time window\n(`None` when unbounded high; `window_from` is never `None` — the\ncomputed `now - hours` when the request used `hours`, the explicit\n`from` when one was given, and otherwise the default lower bound\n`now - 24h`). `has_more` tells a paging\nclient whether another `offset` page exists."
+        "description": "GET /api/events response header — effective window + pagination\nstate. `window_from`/`window_to` echo the applied time window\n(`None` when unbounded high; `window_from` is never `None` — the\ncomputed `now - hours` when the request used `hours`, the explicit\n`from` when one was given, and otherwise the default lower bound\n`now - 24h`). `has_more` (from the list fetch's +1 lookahead) tells a\npaging client whether another `offset` page exists. `total` is the exact\nfiltered row count before paging, computed only when the request asked\nfor it (`with_total=1`) — `None` otherwise (it costs a full-window count\naggregation)."
       },
       "EventsResponse": {
         "properties": {

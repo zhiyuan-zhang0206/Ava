@@ -465,14 +465,14 @@ class _FakeLokiResponse:
         return self._payload
 
 
-def _client_factory(client: object) -> Any:
-    """Named (typed) stand-in for httpx.Client so monkeypatched lambdas
-    don't trip pyright's partially-unknown-lambda rule."""
+def _client_accessor(client: object) -> Any:
+    """Named (typed) stand-in for `loki_events._client` so monkeypatched
+    lambdas don't trip pyright's partially-unknown-lambda rule."""
 
-    def _make(*args: object, **kwargs: object) -> Any:
+    def _get() -> Any:
         return client
 
-    return _make
+    return _get
 
 
 class _FakeLokiClient:
@@ -482,12 +482,6 @@ class _FakeLokiClient:
         self.payload = payload
         self.last_params: dict[str, Any] | None = None
         self.last_url: str | None = None
-
-    def __enter__(self) -> _FakeLokiClient:
-        return self
-
-    def __exit__(self, *exc: object) -> None:
-        return None
 
     def get(self, url: str, params: dict[str, Any]) -> _FakeLokiResponse:
         self.last_url = url
@@ -521,7 +515,7 @@ def test_metrics_logql_timeseries_via_loki(
             ]
         )
     )
-    monkeypatch.setattr(loki_events.httpx, "Client", _client_factory(fake))
+    monkeypatch.setattr(loki_events, "_client", _client_accessor(fake))
     with TestClient(app) as client:
         resp = client.get(f"/api/agents/{aid}/inspect/metrics")
     assert resp.status_code == 200
@@ -563,7 +557,7 @@ def test_metrics_logql_stat_via_loki(
     fake = _FakeLokiClient(
         _loki_payload([("1786726800000000000", "0.1"), ("1786730400000000000", "0.2")])
     )
-    monkeypatch.setattr(loki_events.httpx, "Client", _client_factory(fake))
+    monkeypatch.setattr(loki_events, "_client", _client_accessor(fake))
     with TestClient(app) as client:
         resp = client.get(f"/api/agents/{aid}/inspect/metrics")
     assert resp.status_code == 200
@@ -590,18 +584,12 @@ def test_metrics_logql_loki_failure_is_per_metric(
     db_conn.commit()
 
     class _BrokenClient:
-        def __enter__(self) -> _BrokenClient:
-            return self
-
-        def __exit__(self, *exc: object) -> None:
-            return None
-
         def get(self, url: str, params: dict[str, Any]) -> _FakeLokiResponse:
             import httpx
 
             raise httpx.ConnectError("loki down", request=httpx.Request("GET", "http://loki"))
 
-    monkeypatch.setattr(loki_events.httpx, "Client", _client_factory(_BrokenClient()))
+    monkeypatch.setattr(loki_events, "_client", _client_accessor(_BrokenClient()))
     with TestClient(app) as client:
         resp = client.get(f"/api/agents/{aid}/inspect/metrics")
     assert resp.status_code == 200

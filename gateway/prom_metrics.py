@@ -33,6 +33,23 @@ from shared.config import settings
 # same generous bound the Loki read path uses.
 _HTTP_TIMEOUT_S = 60.0
 
+# One long-lived HTTP client for every Prometheus query — connection reuse
+# across the dashboard/ops fan-outs (same rationale and sizing as the shared
+# Loki client in `gateway/loki_events.py`).
+_shared_client: httpx.Client | None = None
+
+
+def _client() -> httpx.Client:
+    """The module's shared Prometheus client, created on first use (lazy so
+    tests can swap this accessor before any real client exists)."""
+    global _shared_client  # noqa: PLW0603 — process-level singleton
+    if _shared_client is None:
+        _shared_client = httpx.Client(
+            timeout=_HTTP_TIMEOUT_S,
+            limits=httpx.Limits(max_connections=32, max_keepalive_connections=10),
+        )
+    return _shared_client
+
 
 def query(expr: str) -> list[tuple[dict[str, str], float]]:
     """Run one instant query; return the `data.result` as (labels, value)
@@ -43,10 +60,9 @@ def query(expr: str) -> list[tuple[dict[str, str], float]]:
     """
     url = settings.observability.telemetry_prometheus_url.rstrip("/") + "/api/v1/query"
     params = {"query": expr}
-    with httpx.Client(timeout=_HTTP_TIMEOUT_S) as client:
-        resp = client.get(url, params=params)
-        resp.raise_for_status()
-        payload = resp.json()
+    resp = _client().get(url, params=params)
+    resp.raise_for_status()
+    payload = resp.json()
 
     rows: list[tuple[dict[str, str], float]] = []
     for item in payload.get("data", {}).get("result", []):
@@ -101,10 +117,9 @@ def query_range(
         "end": end.timestamp(),
         "step": f"{int(step_s)}s",
     }
-    with httpx.Client(timeout=_HTTP_TIMEOUT_S) as client:
-        resp = client.get(url, params=params)
-        resp.raise_for_status()
-        payload = resp.json()
+    resp = _client().get(url, params=params)
+    resp.raise_for_status()
+    payload = resp.json()
 
     rows: list[tuple[dict[str, str], list[tuple[int, float]]]] = []
     for item in payload.get("data", {}).get("result", []):

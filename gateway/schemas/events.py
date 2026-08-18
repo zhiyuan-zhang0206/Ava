@@ -74,17 +74,20 @@ class EventRow(BaseModel):
 
 
 class EventsMeta(BaseModel):
-    """GET /api/events response header — filtered total + effective window +
-    pagination state. `window_from`/`window_to` echo the applied time window
+    """GET /api/events response header — effective window + pagination
+    state. `window_from`/`window_to` echo the applied time window
     (`None` when unbounded high; `window_from` is never `None` — the
     computed `now - hours` when the request used `hours`, the explicit
     `from` when one was given, and otherwise the default lower bound
-    `now - 24h`). `has_more` tells a paging
-    client whether another `offset` page exists."""
+    `now - 24h`). `has_more` (from the list fetch's +1 lookahead) tells a
+    paging client whether another `offset` page exists. `total` is the exact
+    filtered row count before paging, computed only when the request asked
+    for it (`with_total=1`) — `None` otherwise (it costs a full-window count
+    aggregation)."""
 
     model_config = ConfigDict(frozen=True)
 
-    total: int
+    total: int | None
     window_from: datetime | None
     window_to: datetime | None
     limit: int
