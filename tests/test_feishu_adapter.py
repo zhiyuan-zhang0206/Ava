@@ -237,8 +237,12 @@ async def test_start_connects_with_credentials(
     adapter = PatchingAdapter(FakeCore(), ws_client)
     await adapter.start()
     assert adapter._ws_thread is not None
-    # lark_oapi.ws.client takes ~3s to import on a cold process (protobuf + websocket chain) before the fake's start() runs — wait well past that.
-    assert ws_client.started.wait(timeout=15)
+    # lark_oapi.ws.client takes ~3s to import on a cold process (protobuf +
+    # websocket chain) before the fake's start() runs — and on a loaded CI
+    # box (pytest -n auto, cold caches) the import alone has been measured
+    # blowing past 15s (three CI failures on 2026-08-18). The wait returns
+    # the moment the event sets, so a generous ceiling costs nothing.
+    assert ws_client.started.wait(timeout=90)
     assert adapter._ws_client is ws_client
     # Point stop() at the live pytest loop so the scheduled disconnect actually
     # executes (the fake's ws loop never runs); it must return without raising.
