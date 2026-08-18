@@ -16,6 +16,7 @@ concurrency:
 
 jobs:
   update:
+    if: github.ref == 'refs/heads/main'
     name: Check official pricing sources
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -23,6 +24,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          ref: main
 
       - uses: astral-sh/setup-uv@20cfd1b3b70a6148e8223a91374b462653c1511c # v10.0.1
         with:
@@ -32,11 +34,13 @@ jobs:
       - name: Install locked Python environment
         run: uv sync --frozen
 
-      - name: Check out the updater branch
+      - name: Prepare an isolated candidate worktree
+        id: candidate
         env:
           GH_TOKEN: ${{ github.token }}
           BRANCH: ava-bot/model-pricing
         run: |
+          CANDIDATE="$RUNNER_TEMP/model-pricing-candidate"
           OPEN_PR="$(gh pr list --head "$BRANCH" --state open --json number --jq 'length')"
           if [ "$OPEN_PR" -gt 1 ]; then
             echo "Expected at most one open pricing PR, found $OPEN_PR" >&2
@@ -52,18 +56,28 @@ jobs:
               echo "Open pricing PR has no remote head branch" >&2
               exit 1
             fi
-            git checkout -B "$BRANCH" "origin/$BRANCH"
+            git worktree add -B "$BRANCH" "$CANDIDATE" "origin/$BRANCH"
           else
-            git checkout -B "$BRANCH" origin/main
+            git worktree add -B "$BRANCH" "$CANDIDATE" origin/main
           fi
+          echo "path=$CANDIDATE" >> "$GITHUB_OUTPUT"
 
       - name: Reconcile official pricing
-        run: uv run python scripts/update_model_pricing.py --write
+        env:
+          CATALOG: ${{ steps.candidate.outputs.path }}/shared/lm/pricing_catalog.json
+        run: |
+          if [ ! -f "$CATALOG" ] || [ -L "$CATALOG" ]; then
+            echo "Candidate catalog must be a regular, non-symlink file" >&2
+            exit 1
+          fi
+          uv run python scripts/update_model_pricing.py --catalog "$CATALOG" --write
 
       - name: Detect a catalog change
         id: diff
+        env:
+          CANDIDATE: ${{ steps.candidate.outputs.path }}
         run: |
-          if git diff --quiet -- shared/lm/pricing_catalog.json; then
+          if git -C "$CANDIDATE" diff --quiet -- shared/lm/pricing_catalog.json; then
             echo 'changed=false' >> "$GITHUB_OUTPUT"
           else
             echo 'changed=true' >> "$GITHUB_OUTPUT"
@@ -73,12 +87,13 @@ jobs:
         if: steps.diff.outputs.changed == 'true'
         env:
           BRANCH: ava-bot/model-pricing
+          CANDIDATE: ${{ steps.candidate.outputs.path }}
         run: |
-          git config user.name 'ava-pricing-bot'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add shared/lm/pricing_catalog.json
-          git commit -m 'fix: update model pricing catalog'
-          git push --force-with-lease origin "HEAD:refs/heads/$BRANCH"
+          git -C "$CANDIDATE" config user.name 'ava-pricing-bot'
+          git -C "$CANDIDATE" config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git -C "$CANDIDATE" add shared/lm/pricing_catalog.json
+          git -C "$CANDIDATE" commit -m 'fix: update model pricing catalog'
+          git -C "$CANDIDATE" push --force-with-lease origin "HEAD:refs/heads/$BRANCH"
 
       - name: Open or update the pricing PR
         if: steps.diff.outputs.changed == 'true'

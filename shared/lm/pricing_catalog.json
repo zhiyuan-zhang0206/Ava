@@ -208,11 +208,11 @@
     },
     "gemini-3.7-flash": {
       "source_url": "https://ai.google.dev/gemini-api/docs/pricing",
-      "source_checked_at": "2026-08-13",
+      "source_checked_at": "2026-08-18",
       "periods": [
         {
           "effective_from": null,
-          "effective_until": null,
+          "effective_until": "2027-01-01T00:00:00Z",
           "tiers": [
             {
               "input_tokens_min": 0,
@@ -221,6 +221,22 @@
                 "input": "0.75",
                 "cache_read": "0.075",
                 "output": "3.75"
+              },
+              "utc_daily_overrides": []
+            }
+          ]
+        },
+        {
+          "effective_from": "2027-01-01T00:00:00Z",
+          "effective_until": null,
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "1.50",
+                "cache_read": "0.15",
+                "output": "7.50"
               },
               "utc_daily_overrides": []
             }

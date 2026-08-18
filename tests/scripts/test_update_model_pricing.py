@@ -39,7 +39,10 @@ _DEEPSEEK_TABLE = """
 
 
 def test_deepseek_parser_preserves_models_meters_and_decimal_units() -> None:
-    prices = pricing_updater.parse_deepseek_pricing(_DEEPSEEK_TABLE)
+    catalog = pricing_updater.parse_deepseek_pricing(_DEEPSEEK_TABLE)
+    prices = catalog.models
+
+    assert catalog.peak_windows == (("01:00:00", "04:00:00"), ("06:00:00", "10:00:00"))
 
     assert prices["deepseek-v4-flash"].peak == pricing_updater.Rates(
         input=Decimal("0.44"),
@@ -80,6 +83,36 @@ def test_deepseek_parser_rejects_an_unannounced_peak_ratio() -> None:
         pricing_updater.parse_deepseek_pricing(html)
 
 
+def test_deepseek_parser_rejects_a_missing_peak_hour_statement() -> None:
+    html = _DEEPSEEK_TABLE.replace(
+        "Peak hours are 01:00 - 04:00 and 06:00 - 10:00 UTC.",
+        "Peak hours are documented elsewhere.",
+    )
+
+    with pytest.raises(ValueError, match="peak-hour"):
+        pricing_updater.parse_deepseek_pricing(html)
+
+
+@pytest.mark.parametrize("bad_price", ["0.007", "$Infinity"])
+def test_deepseek_parser_requires_finite_dollar_prices(bad_price: str) -> None:
+    html = _DEEPSEEK_TABLE.replace("$0.007", bad_price)
+
+    with pytest.raises(ValueError, match="invalid USD"):
+        pricing_updater.parse_deepseek_pricing(html)
+
+
+def test_deepseek_parser_rejects_duplicate_meter_rows() -> None:
+    duplicate = (
+        '<tr><td rowspan="2">1M INPUT TOKENS (CACHE HIT)</td>'
+        "<td>OFF-PEAK</td><td>$0.007</td><td>$0.022</td></tr>"
+        "<tr><td>PEAK</td><td>$0.014</td><td>$0.044</td></tr>"
+    )
+    html = _DEEPSEEK_TABLE.replace("</table>", f"{duplicate}</table>")
+
+    with pytest.raises(ValueError, match="duplicate CACHE_READ"):
+        pricing_updater.parse_deepseek_pricing(html)
+
+
 def test_reconcile_is_a_noop_when_the_reviewed_catalog_matches() -> None:
     catalog = json.loads((_REPO_ROOT / "shared/lm/pricing_catalog.json").read_text())
     fetched = pricing_updater.parse_deepseek_pricing(_DEEPSEEK_TABLE)
@@ -115,3 +148,39 @@ def test_reconcile_appends_a_new_effective_period_without_rewriting_history() ->
     # Reconciliation works on a copy; a failed workflow cannot partially
     # mutate the catalog object its caller loaded.
     assert catalog["models"]["deepseek-v4-pro"]["periods"][-1]["effective_until"] is None
+
+
+def test_reconcile_appends_a_period_when_peak_windows_change() -> None:
+    catalog = json.loads((_REPO_ROOT / "shared/lm/pricing_catalog.json").read_text())
+    fetched = pricing_updater.parse_deepseek_pricing(
+        _DEEPSEEK_TABLE.replace(
+            "Peak hours are 01:00 - 04:00 and 06:00 - 10:00 UTC.",
+            "Peak hours are 02:00 - 05:00 and 07:00 - 11:00 UTC.",
+        )
+    )
+
+    updated = pricing_updater.reconcile_deepseek_catalog(
+        catalog,
+        fetched,
+        detected_at="2026-08-19T12:34:56Z",
+    )
+
+    assert updated is not None
+    overrides = updated["models"]["deepseek-v4-flash"]["periods"][-1]["tiers"][0][
+        "utc_daily_overrides"
+    ]
+    assert [(item["start"], item["end"]) for item in overrides] == [
+        ("02:00:00", "05:00:00"),
+        ("07:00:00", "11:00:00"),
+    ]
+
+
+def test_workflow_runs_only_trusted_main_code_with_write_permissions() -> None:
+    workflow = (_REPO_ROOT / ".github/workflows/update-model-pricing.yml").read_text()
+
+    assert "if: github.ref == 'refs/heads/main'" in workflow
+    assert "ref: main" in workflow
+    assert 'git worktree add -B "$BRANCH" "$CANDIDATE"' in workflow
+    assert '[ -L "$CATALOG" ]' in workflow
+    assert 'python scripts/update_model_pricing.py --catalog "$CATALOG" --write' in workflow
+    assert "git checkout" not in workflow

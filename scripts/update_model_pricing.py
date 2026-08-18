@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from copy import deepcopy
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
@@ -35,28 +36,42 @@ class DeepSeekPrices(NamedTuple):
     off_peak: Rates
 
 
+class DeepSeekCatalog(NamedTuple):
+    """All price and recurring-time facts parsed from the official page."""
+
+    models: dict[str, DeepSeekPrices]
+    peak_windows: tuple[tuple[str, str], ...]
+
+
 _METERS = {
     "1M INPUT TOKENS (CACHE MISS)": "input",
     "1M INPUT TOKENS (CACHE HIT)": "cache_read",
     "1M OUTPUT TOKENS": "output",
 }
 _DEEPSEEK_MODELS = {"deepseek-v4-flash", "deepseek-v4-pro"}
-_PEAK_WINDOWS = (("01:00:00", "04:00:00"), ("06:00:00", "10:00:00"))
+_PEAK_HOURS = re.compile(
+    r"\bPeak hours are\s+(\d{2}:\d{2})\s*-\s*(\d{2}:\d{2})\s+"
+    r"and\s+(\d{2}:\d{2})\s*-\s*(\d{2}:\d{2})\s+UTC\b"
+)
+_USD = re.compile(r"\$(?:0|[1-9]\d*)(?:\.\d+)?")
 _DEEPSEEK_PRICING_URL = "https://api-docs.deepseek.com/quick_start/pricing/"
 _CATALOG_PATH = Path(__file__).resolve().parents[1] / "shared/lm/pricing_catalog.json"
 
 
 def _usd(cell: str) -> Decimal:
+    normalized = cell.strip()
+    if _USD.fullmatch(normalized) is None:
+        raise ValueError(f"invalid USD price: {cell!r}")
     try:
-        value = Decimal(cell.removeprefix("$").strip())
+        value = Decimal(normalized[1:])
     except InvalidOperation as exc:
         raise ValueError(f"invalid USD price: {cell!r}") from exc
-    if value <= 0:
+    if not value.is_finite() or value <= 0:
         raise ValueError(f"price must be positive: {cell!r}")
     return value
 
 
-def parse_deepseek_pricing(html: str) -> dict[str, DeepSeekPrices]:
+def parse_deepseek_pricing(html: str) -> DeepSeekCatalog:
     """Parse DeepSeek's official pricing table into exact USD/M rates.
 
     The table uses rowspans, so a peak row inherits the meter named by the
@@ -64,6 +79,14 @@ def parse_deepseek_pricing(html: str) -> dict[str, DeepSeekPrices]:
     relationship are required before any value is returned.
     """
     soup = BeautifulSoup(html, "lxml")
+    page_text = soup.get_text(" ", strip=True)
+    peak_hour_matches = _PEAK_HOURS.findall(page_text)
+    if len(peak_hour_matches) != 1:
+        raise ValueError("DeepSeek must publish exactly one recognized peak-hour statement")
+    clocks = peak_hour_matches[0]
+    peak_windows = tuple(
+        (f"{clocks[index]}:00", f"{clocks[index + 1]}:00") for index in range(0, 4, 2)
+    )
     rows = [
         [cell.get_text(" ", strip=True) for cell in row.select("th,td")]
         for row in soup.select("table tr")
@@ -93,6 +116,8 @@ def parse_deepseek_pricing(html: str) -> dict[str, DeepSeekPrices]:
             raise ValueError(f"{meter_label} price coverage does not match MODEL row")
         meter = _METERS[meter_label]
         for model, off_peak_cell, peak_cell in zip(models, off_peak_cells, peak_cells, strict=True):
+            if meter in bands[model]["off_peak"] or meter in bands[model]["peak"]:
+                raise ValueError(f"DeepSeek {model} contains duplicate {meter.upper()} pricing")
             bands[model]["off_peak"][meter] = _usd(off_peak_cell)
             bands[model]["peak"][meter] = _usd(peak_cell)
 
@@ -108,7 +133,7 @@ def parse_deepseek_pricing(html: str) -> dict[str, DeepSeekPrices]:
         if any(off * 2 != on for off, on in zip(off_peak, peak, strict=True)):
             raise ValueError(f"DeepSeek {model} off-peak prices are not half of peak prices")
         parsed[model] = DeepSeekPrices(peak=peak, off_peak=off_peak)
-    return parsed
+    return DeepSeekCatalog(models=parsed, peak_windows=peak_windows)
 
 
 def _catalog_rates(raw: dict[str, str]) -> Rates:
@@ -122,7 +147,9 @@ def _catalog_rates(raw: dict[str, str]) -> Rates:
         raise ValueError("catalog rates must contain decimal input/cache_read/output") from exc
 
 
-def _current_deepseek_prices(entry: dict[str, Any]) -> DeepSeekPrices:
+def _current_deepseek_prices(
+    entry: dict[str, Any],
+) -> tuple[DeepSeekPrices, tuple[tuple[str, str], ...]]:
     current = [period for period in entry["periods"] if period["effective_until"] is None]
     if len(current) != 1:
         raise ValueError("DeepSeek catalog entry must have exactly one current period")
@@ -136,12 +163,13 @@ def _current_deepseek_prices(entry: dict[str, Any]) -> DeepSeekPrices:
     tier = tiers[0]
     overrides = tier["utc_daily_overrides"]
     windows = tuple((override["start"], override["end"]) for override in overrides)
-    if windows != _PEAK_WINDOWS:
-        raise ValueError("DeepSeek current pricing must carry both published UTC peak windows")
+    if not windows:
+        raise ValueError("DeepSeek current pricing must carry UTC peak windows")
     peak_rates = {_catalog_rates(override["rates"]) for override in overrides}
     if len(peak_rates) != 1:
         raise ValueError("DeepSeek UTC peak windows disagree on rates")
-    return DeepSeekPrices(peak=peak_rates.pop(), off_peak=_catalog_rates(tier["rates"]))
+    prices = DeepSeekPrices(peak=peak_rates.pop(), off_peak=_catalog_rates(tier["rates"]))
+    return prices, windows
 
 
 def _rates_json(rates: Rates) -> dict[str, str]:
@@ -152,7 +180,11 @@ def _rates_json(rates: Rates) -> dict[str, str]:
     }
 
 
-def _new_deepseek_period(prices: DeepSeekPrices, effective_from: str) -> dict[str, Any]:
+def _new_deepseek_period(
+    prices: DeepSeekPrices,
+    effective_from: str,
+    peak_windows: tuple[tuple[str, str], ...],
+) -> dict[str, Any]:
     return {
         "effective_from": effective_from,
         "effective_until": None,
@@ -163,7 +195,7 @@ def _new_deepseek_period(prices: DeepSeekPrices, effective_from: str) -> dict[st
                 "rates": _rates_json(prices.off_peak),
                 "utc_daily_overrides": [
                     {"start": start, "end": end, "rates": _rates_json(prices.peak)}
-                    for start, end in _PEAK_WINDOWS
+                    for start, end in peak_windows
                 ],
             }
         ],
@@ -172,7 +204,7 @@ def _new_deepseek_period(prices: DeepSeekPrices, effective_from: str) -> dict[st
 
 def reconcile_deepseek_catalog(
     catalog: dict[str, Any],
-    fetched: dict[str, DeepSeekPrices],
+    fetched: DeepSeekCatalog,
     *,
     detected_at: str,
 ) -> dict[str, Any] | None:
@@ -186,18 +218,21 @@ def reconcile_deepseek_catalog(
     instant = datetime.fromisoformat(detected_at.replace("Z", "+00:00"))
     if instant.tzinfo is None or instant.utcoffset() is None or not detected_at.endswith("Z"):
         raise ValueError("detected_at must be an ISO-8601 UTC instant ending in Z")
-    if set(fetched) != _DEEPSEEK_MODELS:
+    if set(fetched.models) != _DEEPSEEK_MODELS:
         raise ValueError(f"DeepSeek source must contain exactly {sorted(_DEEPSEEK_MODELS)}")
 
     updated = deepcopy(catalog)
     changed = False
     for model in sorted(_DEEPSEEK_MODELS):
         entry = updated["models"][model]
-        if _current_deepseek_prices(entry) == fetched[model]:
+        current_prices, current_windows = _current_deepseek_prices(entry)
+        if current_prices == fetched.models[model] and current_windows == fetched.peak_windows:
             continue
         current = next(period for period in entry["periods"] if period["effective_until"] is None)
         current["effective_until"] = detected_at
-        entry["periods"].append(_new_deepseek_period(fetched[model], detected_at))
+        entry["periods"].append(
+            _new_deepseek_period(fetched.models[model], detected_at, fetched.peak_windows)
+        )
         entry["source_checked_at"] = detected_at[:10]
         changed = True
 
