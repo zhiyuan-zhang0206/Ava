@@ -84,7 +84,7 @@ def _make_runtime(
 ) -> Runtime[AvaContext]:
     """test helper: assemble AvaContext into Runtime.
 
-    `ops_pool=None` takes the container early-return path (matching MyAva's `evals/__main__.py`);
+    `ops_pool=None` takes the container early-return path;
     `inbound_listener` is only needed when `_wait_for_batch` enters IDLING wait, most
     tests only run first-claim which goes through SELECT to get the batch without waiting,
     so default `None` is fine.

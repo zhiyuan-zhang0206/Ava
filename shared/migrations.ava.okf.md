@@ -16,7 +16,7 @@ tags:
   fresh DB bootstraps from, and the source of truth for what the schema is now.
   `shared.cluster.provision_database` applies it to each cluster's own database
   (created owned by the cluster's role, applied *as* that role so every object
-  is role-owned); tests and the eval harness (MyAva) build standalone DBs the same way. It stamps
+  is role-owned); tests build standalone DBs the same way. It stamps
   one sentinel row `00000000T000000_baseline` into `schema_migrations`.
   **A schema change must be reflected here in the same commit.**
 - **`migrations/YYYYMMDDTHHMMSS_<kebab-name>.sql`** — post-baseline deltas, each

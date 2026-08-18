@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Single install entry for system CLI tools — the main Dockerfile and MyAva's benchmarks/swe_bench/Dockerfile RUN it.
+# Single install entry for system CLI tools — the main Dockerfile RUNs it.
 #
 # Installs: apt baseline (gnupg / ca-cert / curl) + GitHub CLI keyring +
 # high-frequency CLI tools used by the agent (git / rg / jq / fd / bat /

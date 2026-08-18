@@ -135,6 +135,13 @@ _OVERSIZE_ALLOWED = frozenset(
         # the SQL-whitelist section (500+ lines) shares its helpers with the
         # render path, so a split would force a circular import.
         "shared/plugin_metrics.py",
+        # shared/migrations.py — the migration lifecycle in one module: apply
+        # (with the v0.1.0 squash auto-fold + its completeness guard, P1
+        # 2026-08-11), rollback_to/apply_down, and the applied-set bookkeeping
+        # they all share. Fold, guard, apply and rollback reason over the same
+        # applied-set model; splitting scatters an invariant that must hold
+        # across all of them (the set matches the real schema).
+        "shared/migrations.py",
     }
 )
 

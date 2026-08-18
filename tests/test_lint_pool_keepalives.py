@@ -56,7 +56,7 @@ def test_pool_unpacking_the_constant_is_clean():
 
 
 def test_async_pool_with_generic_subscript_is_seen_through():
-    # agent/loop.py's and MyAva's evals/driver.py real shape — the class is subscripted
+    # agent/loop.py's real shape — the class is subscripted
     # with a type argument, so a naive check on `node.func` being a Name misses it.
     bad = (
         "async with AsyncConnectionPool[psycopg.AsyncConnection](\n"

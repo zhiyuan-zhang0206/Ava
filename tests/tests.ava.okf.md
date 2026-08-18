@@ -1,7 +1,7 @@
 ---
 type: doc
 title: "Test Suite"
-description: "`tests/` is Ava's traditional pytest test suite, covering all modules agent / gateway / cli / shared. The eval harness (agent end-to-end behavior) lives in the private MyAva repo since 2026-08-12."
+description: "`tests/` is Ava's traditional pytest test suite, covering all modules agent / gateway / cli / shared."
 tags:
 - evaluation
 - tool
@@ -12,7 +12,7 @@ tags:
 
 ## What it is
 
-`tests/` is Ava's traditional pytest test suite, covering all modules agent / gateway / cli / shared. The eval harness (agent end-to-end behavior) lives in the private MyAva repo since 2026-08-12.
+`tests/` is Ava's traditional pytest test suite, covering all modules agent / gateway / cli / shared.
 
 ## Core responsibilities
 

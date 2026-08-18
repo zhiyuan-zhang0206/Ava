@@ -1,9 +1,8 @@
 # Release cadence: self-scheduling by Ava
 
-The dated release cadence — `scripts/release_cut.py daily|weekly`, see
-[the release cadence](../../.agents/skills/roll-out-a-cluster-update/SKILL.md) — is currently cut
-**manually** (or not at all on idle days). It is deliberately **not** wired to OS
-cron or a static `ava.watcher.cron` registration yet.
+The dated release cadence — `scripts/release_cut.py daily|weekly` — is
+currently cut **manually** (or not at all on idle days). It is deliberately
+**not** wired to OS cron or a static `ava.watcher.cron` registration yet.
 
 ## Why not just schedule it now
 

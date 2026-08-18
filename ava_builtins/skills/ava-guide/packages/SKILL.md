@@ -64,7 +64,7 @@ of an idea, nothing more.
 ### Mode 2 — canonical (a git repo path)
 
 A real skill lives **in a git repo**: a local git repo, a remote private repo
-(such as a private companion repo), or a public one. The repo is the single
+(such as a private skills repo), or a public one. The repo is the single
 source of truth for the skill's content, versions, and updates (a version is
 a git ref — tag / commit / branch). Install records the source:
 

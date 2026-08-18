@@ -88,13 +88,14 @@ and a commit that trimmed it to fix a violation that did not exist.)
 
 ## What does NOT go in the doc axes
 
-Personal, strategic, and deployment-specific material lives in the **private
-companion repo** (outside this public tree):
+Personal, strategic, and deployment-specific material does not belong in
+this public tree — keep it in your own private storage (a private skills
+repo, the cluster memory pool):
 
-- Personal skills (wechat, gmail, social-media adapters tied to user accounts)
+- Personal skills (IM, mail, social-media adapters tied to user accounts)
 - Deployment instance details (machine roster, IPs, CI fleet config)
 - Strategy/competitor notes
-- Bench result history and raw prediction data
+- Raw run/result histories of your own deployment
 
 Ava's doc axes must remain publishable as-is — no personal accounts, no internal
 strategy, no deployment secrets. Before writing: "would I be fine with a

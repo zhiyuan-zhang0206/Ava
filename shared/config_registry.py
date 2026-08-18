@@ -13,7 +13,7 @@ imports are therefore deferred into the build (first use), so importing this
 module or `shared/env_registry.py` never touches the package — the build
 completes against a partially-initialized `shared.config` when one is already
 in flight (the standalone `load_ava_env()` boot path, e.g.
-MyAva's benchmarks/swe_bench/run.py), and the double build that results is idempotent.
+and the double build that results is idempotent.
 
 **Unique declaration point** (R2 design, convergence point A): a new env key is
 declared exactly once —

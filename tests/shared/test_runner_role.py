@@ -281,7 +281,7 @@ def test_runner_grant_matrix(runner_db: str) -> None:
         ):
             saver.setup()
 
-        # ── denied: the MyAva pollution surface ──
+        # ── denied: the 2026-08-12 pollution surface ──
         with pytest.raises(psycopg.errors.InsufficientPrivilege):
             conn.execute("INSERT INTO agents (label) VALUES ('pollution')")
         with pytest.raises(psycopg.errors.InsufficientPrivilege):

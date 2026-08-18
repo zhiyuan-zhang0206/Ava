@@ -534,8 +534,8 @@ def pytest_sessionstart(session: pytest.Session) -> None:
     sentinel before any project import, so on the safe path
     ``settings.data_plane.db_url`` is the sentinel here. The guard's job is
     the path where that block did NOT run: a bootstrap that stops loading this
-    conftest (the 2026-08-12 incident class — a test run rooted at the private
-    MyAva repo resolved the operator's real ~/.ava/.env and seeded synthetic
+    conftest (the 2026-08-12 incident class — a test run rooted outside this
+    repo resolved the operator's real ~/.ava/.env and seeded synthetic
     agents into the production database) leaves settings pointing at whatever
     home the process resolves, and this hook refuses the whole session before
     any fixture or test runs.

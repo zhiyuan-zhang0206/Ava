@@ -1,5 +1,5 @@
 """Locate native Postgres binaries across the two supported host platforms,
-and spin up throwaway clusters for tests and the eval harness (MyAva).
+and spin up throwaway clusters for tests.
 
 macOS runs Homebrew's keg-only `postgresql@17` (binaries are not symlinked
 onto PATH, so the full keg path is required); Linux runs the apt
@@ -7,7 +7,7 @@ onto PATH, so the full keg path is required); Linux runs the apt
 per-cluster data-plane bring-up (`cli/commands/_cluster_instance.py`), the local
 backup path (`services/backup.py`), and the throwaway clusters the test suite
 (`tests/_containers.py`), migration smoke (`scripts/migration_smoke.py`), and eval
-driver (MyAva's `evals/driver.py`) spin up.
+fixtures spin up.
 
 Throwaway clusters are also **self-limiting when their owner is killed** — see
 the registry/sweep block below `throwaway_postgres`.

@@ -235,7 +235,7 @@ def _add_skill_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) 
     skill_update_p.set_defaults(func=_h_skill_update)
 
     # `ava skill upgrade <name>` — re-fetch a user-installed skill from its
-    # recorded git source (a private companion repo etc.). Conflict on local
+    # recorded git source (a private skills repo etc.). Conflict on local
     # edits; `--force` overwrites.
     skill_upgrade_p = skill_sub.add_parser(
         "upgrade",

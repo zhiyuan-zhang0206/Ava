@@ -268,7 +268,7 @@ def ensure_runner_role(identity: str, *, base_admin_url: str, runner_password: s
     Everything else — agents INSERT, agents_meta INSERT, any DDL, writes to
     notices / ops_alerts / cluster_* / config tables — fails with a permission
     error under this role (the runner's self-update bookkeeping is file-based,
-    so deployment_state / cluster_last_update stay gateway-only): the MyAva-class pollution (agents + agents_meta
+    so deployment_state / cluster_last_update stay gateway-only): the 2026-08-12 pollution class (agents + agents_meta
     INSERT with the full prod write credential) is structurally impossible
     once runners dial this role. (notices/agent_pages INSERTs travel over the
     gateway HTTP API as the main identity, never from the runner role.)

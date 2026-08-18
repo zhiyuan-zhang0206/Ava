@@ -20,27 +20,22 @@ scales naturally with the size of the change** — one line for a 10-line rename
 no upper or lower bound:
 
 ```
-benchmarks/            # (bench harness now lives in the private MyAva repo)
-├── _common/
-│   ├── ava_runner.py          (M)  spec.command None-fallback change
-│   └── docker_entry.py        (D)  ★ retired the bare ainvoke path
-└── swe_bench/
-    ├── adapter.py             (M)  cpu=4 mem=6g, drop user=, ENTRYPOINT
-    │                                takes over the command; pass HOST_UID/HOST_GID
-    │                                through to the container for trap chown
-    ├── bench-entrypoint.sh    (A)  ★ new container entry. Inside the container, in order: initdb +
-    │                                pg_ctl + schema.sql apply + redis +
-    │                                5 daemon sessions + wait_healthz + run
-    │                                bench_runner. EXIT trap copies logs +
-    │                                chowns /workspace to host uid.
-    ├── bench_runner.py        (A)  ★ in-container driver. POST /api/agents w/
-    │                                prompt + user source spawns agent,
-    │                                polls agents_meta.status waiting for terminated
-    │                                or idling >60s fallback, extracts patch from git diff,
-    │                                queries events for tokens, writes result.json
-    ├── run.py                 (M)  --max-workers ThreadPool concurrency
-    └── Dockerfile             (M)  ubuntu:24.04 + Layers 1-7 shared with the main Dockerfile
-                                    + Layer 8 installs pg17-server / redis-server
+services/
+├── delivery_watchdog/
+│   ├── daemon.py              (M)  split the single tick into wake-dispatch +
+│   │                                stall-alert jobs; per-job error isolation
+│   │                                so one failing job never starves the other
+│   └── wake_dispatch.py       (A)  ★ new job: re-publishes the Redis wake for
+│                                    pending inbounds of idling owners older
+│                                    than the dispatch threshold — collapses
+│                                    lost-publish recovery from 30s to ~1.5s
+├── healthchecks/
+│   └── delivery_watchdog.py   (M)  probe covers both jobs' liveness stamps
+gateway/
+└── routers/agents.py          (M)  spawn path stamps last_active_at on wake
+shared/
+└── live_events.py             (D)  ★ retired the legacy wake broadcast channel
+                                    (every consumer now rides the keyed wake)
 ```
 
 `★` marks the **critical path**: new entry point / new long-running process / removed old
@@ -48,7 +43,7 @@ entry point / new cross-boundary call (cross-process / cross-container / cross-n
 scan for ★ to pick out "what is this new entry point doing / why was that one removed" — i.e. design questions.
 
 **Prerequisite**: the codebase is organized well enough that filenames are self-documenting
-(`bench-entrypoint.sh` is obviously the container entry; no comment needed to explain it).
+(`wake_dispatch.py` is obviously the wake-dispatch job; no comment needed to explain it).
 
 ## 2. Prose data flow supplement (as needed)
 

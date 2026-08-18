@@ -23,11 +23,6 @@ across the whole roster; a pure runner self-updates on the pinned commit.
 
 <!-- TODO(image): cluster topology — gateway + N runner machines -->
 
-## Real usage
-
-- [`traces/cluster-update.md`](../../traces/cluster-update.md) — a rollout
-  trace observed across a production cluster spanning four machines.
-
 ## Design decisions
 
 - [Multi-host deployment: single-box is the N=1 case](../../decisions/2026-06-11-multihost-deployment.md)

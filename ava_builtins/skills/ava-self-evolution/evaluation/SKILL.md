@@ -9,10 +9,8 @@ This is the discipline section of the
 [`ava-self-evolution`](../SKILL.md) skill. Evaluating a skill is not a
 test-suite problem — it is a measurement problem over a real, uncontrolled
 distribution. This document states why, and the standard the parent skill's
-Evaluation Loop runs against. It applies to both evaluation paths: the
-self-evolution loop (`reference/evaluate.py`, spawning fresh agents) and the
-eval harness in the MyAva repo (`EvalCase` / `run_all`, used by
-`reference/replay.py`).
+Evaluation Loop runs against (`reference/evaluate.py`, spawning fresh
+agents).
 
 ## Real distribution, naturally scarce representativeness
 
@@ -37,10 +35,8 @@ usage is exactly what makes them valuable, and exactly what makes them hard:
 ## Eval cases are first-class citizens
 
 A case is a durable, reviewed asset with the same standing as the dataset
-itself — not a side input picked ad hoc when a run is needed. In the eval
-harness (MyAva repo) a case is an `EvalCase` (`name`, `user_msgs`, `check`,
-`ctx_builder`); in the self-evolution loop a case is a dataset record
-selected for re-running through `evaluate.launch`. Either way, case setup is
+itself — not a side input picked ad hoc when a run is needed. A case is a
+dataset record selected for re-running through `evaluate.launch`; case setup is
 the step where the loop's validity is decided, and it is deliberate.
 
 Acceptance standard — a case must be **strong**, **diverse**,
@@ -70,9 +66,7 @@ The loop runs a case set by spawning one fresh agent per case
 (`evaluate.launch`, `ava.agents.spawn`), so each agent starts from the
 current skill text with no memory of prior runs. Execution is asynchronous by
 design: spawn the whole batch up front, let the agents run, then gather
-(`evaluate.poll` → `evaluate.gather`). Replay (`replay.py --run`, via the
-MyAva harness) follows the same pattern against a disposable eval database.
-Each agent receives its case's task prompt and nothing else — no hints, no
+(`evaluate.poll` → `evaluate.gather`). Each agent receives its case's task prompt and nothing else — no hints, no
 context from the original run.
 
 ## Trace audit: fine-grained, anti-cheat by structure
@@ -112,7 +106,7 @@ Layer map — responsibility, leak boundary, and current status:
 | Layer | Responsibility | Leak boundary | Status |
 |---|---|---|---|
 | Task selection | Only side-effect-free tasks get re-run | `is_replay_safe` gate (tool-call allowlist) | Implemented |
-| Data isolation | Eval run never touches production data | Disposable eval DB (`ava_selfevo_replay`); container mode: MemorySaver, no external DB/Redis | Implemented in harness/replay; **not** in `evaluate.launch` (spawns ordinary cluster agents) |
+| Data isolation | Eval run never touches production data | **Open** — `evaluate.launch` spawns ordinary cluster agents | Planned |
 | Side-effect containment | Agent's file/OS effects stay contained | Container mode (effects die with the container) | Implemented in harness; not used by `evaluate.launch` |
 | Memory isolation | Eval agent cannot read eval-relevant pool notes | Separate memory scope for eval agents | Not enforced |
 | Network restriction | Eval agent cannot web-search the answer | Outbound allowlist / LLM proxy (harness Phase 3) | Not enforced |

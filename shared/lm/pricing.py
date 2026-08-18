@@ -11,7 +11,7 @@ Cache-hit input can be 30-120x cheaper than cache-miss input; in
 multi-turn re-send same prefix the actual cache hit rate can be ~98%.
 Using a 2-tuple (in, out) computes the entire `in` at cache-miss rate
 and overestimates total cost by 30-50x — history: the same bug in
-bench_runner.py + evals/driver.py (both in MyAva) reported $56.38 for a 30-case
+a batch run once reported $56.38 for a 30-case
 SWE-bench, actual was $0.8; fix in PR #322 / commit 5c85b74. So the
 pricing fact is a 3-tuple `(cache_miss, cache_hit, out)` USD/M.
 

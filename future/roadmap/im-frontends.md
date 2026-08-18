@@ -21,7 +21,7 @@ session routing，不含 agent 逻辑）。
 - switch 后订阅该 agent 的全部新消息（SSE `timeline_snapshot` → 过滤对话类 →
   推送），跟随模式。
 - 微信走 **iLink 官方 Bot API**（腾讯 2026-03 通过 OpenClaw 开放，bot 身份对
-  IM Bridge 场景足够）；OCR 方案保留在私有 companion repo，不进开源 repo。
+  IM Bridge 场景足够）；OCR 方案不进开源 repo。
 
 ## v1 通道（2026-08 落地中）
 
