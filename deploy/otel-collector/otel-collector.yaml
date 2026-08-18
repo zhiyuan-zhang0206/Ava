@@ -5,7 +5,7 @@
 # is static at runtime — no env substitution dependency on the session env.
 #
 # Architecture (task #1266, user ruling 2026-08-14): every agent process on
-# this host sends OTLP/HTTP to 127.0.0.1:4317/4318; this collector fans out
+# this host sends OTLP/HTTP to 127.0.0.1:4318; this collector fans out
 #   traces  -> Tempo OTLP/HTTP      (TEMPO_ENDPOINT placeholder)
 #   logs    -> Loki native OTLP     (LOKI_BASE placeholder, /v1/logs appended)
 #   metrics -> Prometheus OTLP recv (PROM_BASE placeholder, /v1/metrics appended)
@@ -16,15 +16,23 @@
 # mirror keeps everything, `ava trace ship` replays the gap straight to Tempo.
 receivers:
   otlp:
+    # OTLP/HTTP only — every Ava producer speaks OTLP/HTTP (shared/
+    # telemetry_otlp.py rejects non-http schemes); no dead gRPC receiver.
     protocols:
-      grpc:
-        endpoint: 127.0.0.1:4317
       http:
         endpoint: 127.0.0.1:4318
 
 processors:
+  # memory_limiter runs FIRST in every pipeline: under memory pressure it
+  # refuses new data (producers retry / the JSONL mirror keeps everything)
+  # instead of letting the collector balloon on a 16GB shared box.
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+    spike_limit_mib: 128
   batch:
     send_batch_size: 512
+    send_batch_max_size: 1024
     timeout: 5s
 
 extensions:
@@ -68,15 +76,18 @@ exporters:
     endpoint: $PROM_BASE
     tls:
       insecure: true
+    # Metrics differ from traces/logs: cumulative counters are self-healing —
+    # the next export carries the full cumulative value — so buffering stale
+    # datapoints on disk forever is wrong (they would land out of order and
+    # add nothing). Small in-memory queue, bounded retry, no file_storage.
     sending_queue:
       enabled: true
-      queue_size: 5000
-      storage: file_storage
+      queue_size: 1000
     retry_on_failure:
       enabled: true
       initial_interval: 5s
       max_interval: 30s
-      max_elapsed_time: 0s
+      max_elapsed_time: 15m
   # Local JSONL mirror — the grep surface (user ruling: "agent debug 时 grep
   # 最方便"). One line per export batch, each line a standard OTLP/JSON
   # ExportTraceServiceRequest. Rotation (lumberjack) gives append semantics
@@ -95,13 +106,13 @@ service:
   pipelines:
     traces:
       receivers: [otlp]
-      processors: [batch]
+      processors: [memory_limiter, batch]
       exporters: [otlphttp/tempo, file/traces]
     logs:
       receivers: [otlp]
-      processors: [batch]
+      processors: [memory_limiter, batch]
       exporters: [otlphttp/loki]
     metrics:
       receivers: [otlp]
-      processors: [batch]
+      processors: [memory_limiter, batch]
       exporters: [otlphttp/prometheus]

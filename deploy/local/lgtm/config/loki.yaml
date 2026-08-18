@@ -7,6 +7,18 @@ auth_enabled: false
 server:
   http_listen_port: 3100
 
+# No phone-home: this config ships as the open-source reference deployment;
+# downstream users must not inherit vendor telemetry silently.
+analytics:
+  reporting_enabled: false
+
+# Single-box sizing: this instance shares one 10-core/16GB host with the
+# production cluster (Postgres, Redis, gateway, agents). max_concurrent: 4 is
+# the 3.x default, pinned explicitly so it cannot drift — it is what bounds a
+# query storm to ~4 cores of the box (2026-08-18 incident).
+querier:
+  max_concurrent: 4
+
 common:
   path_prefix: /loki
   storage:
@@ -52,8 +64,50 @@ limits_config:
   # The archive spans ~83 days (05-23 -> 08-12); Loki's default
   # max_query_length (30d1h) would reject any whole-span parity/read query.
   max_query_length: 2160h
+  # Query splitting + fan-out bounds, sized for a single binary on a shared
+  # box (upstream defaults — 1h splits, parallelism 32/128 — are sized for a
+  # horizontally scaled querier fleet; here they turned one 30d instant
+  # aggregation into ~128 hourly subqueries, 2026-08-18 incident). BOTH split
+  # keys matter: the gateway's aggregations (count_events / count_grouped /
+  # attribute_aggregate in gateway/loki_events.py) are INSTANT queries
+  # governed only by the instant key; range queries (query_events,
+  # count_events_series, metric_range) follow the other.
+  split_queries_by_interval: 24h
+  split_instant_metric_queries_by_interval: 24h
+  max_query_parallelism: 4
+  tsdb_max_query_parallelism: 4
 
 compactor:
   working_directory: /loki/compactor
   retention_enabled: true
   delete_request_store: filesystem
+
+# Result caches — without them every repeated aggregation re-reads and
+# re-unwraps the same chunks (the gateway's ops panels poll on fixed
+# intervals). Two caches because the two query shapes cache separately:
+# cache_results covers metric RANGE queries (count_events_series /
+# attribute_max_series / metric_range); the instant-metric pair covers the
+# gateway's aggregations, which run against /loki/api/v1/query with end=now —
+# with split alignment the interior 24h-aligned subranges repeat across polls
+# and only the trailing partial interval recomputes. The instant-metric keys
+# are marked experimental upstream (3.x); acceptable for this single-binary
+# deployment — verify hit rate via loki_results_cache_* metrics, not by
+# assumption. Embedded caches are RAM inside the loki process: sizes stay
+# explicit and small on a 16GB box.
+query_range:
+  align_queries_with_step: true
+  cache_results: true
+  results_cache:
+    cache:
+      embedded_cache:
+        enabled: true
+        max_size_mb: 100
+        ttl: 1h
+  cache_instant_metric_results: true
+  instant_metric_query_split_align: true
+  instant_metric_results_cache:
+    cache:
+      embedded_cache:
+        enabled: true
+        max_size_mb: 100
+        ttl: 1h

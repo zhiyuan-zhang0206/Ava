@@ -31,7 +31,7 @@ log/metrics，且 UI 单独一套）；SigNoz（ClickHouse 过重）；Zipkin（
 
 No otel-collector container since task #1266: the OTLP entry is the **native
 per-machine sidecar** (`ava-otel-collector` session, supervised by the
-watchdog) on host 4317/4318. It fans out traces → Tempo (host 14318 OTLP/HTTP),
+watchdog) on host 4318 (OTLP/HTTP). It fans out traces → Tempo (host 14318 OTLP/HTTP),
 logs → Loki (3100 `/otlp/v1/logs`), metrics → Prometheus (9090 OTLP receiver),
 and mirrors traces to `$AVA_HOME/traces/spans.jsonl` (rotated) for local grep.
 The sidecar buffers in a file-backed queue while this stack is down, so
@@ -39,7 +39,23 @@ The sidecar buffers in a file-backed queue while this stack is down, so
 
 Data lives in docker named volumes (`tempo-data`, `loki-data`, `prom-data`,
 `grafana-data`) — `docker compose down` keeps them, `down -v` wipes them.
-`restart: "no"`: the stack stays off after reboot until `start.sh` is run.
+`restart: on-failure:3`: a crashed/OOM-killed backend recovers by itself, while
+a clean `stop.sh` (compose down) keeps the stack off until `start.sh` — and the
+stack stays off after a reboot until `start.sh` is run (OrbStack starts at
+login, but `on-failure` does not restart cleanly-stopped containers).
+
+Resource + retention posture (single 16GB box shared with the prod cluster):
+every container carries explicit `cpus`/`mem_limit` caps (~5.5 cores / ~4GB
+ceiling in total), Loki's query fan-out is bounded (24h splits, parallelism 4,
+embedded result caches), Prometheus retention is explicit (90d time / 8GB
+size — whichever hits first), and Tempo states its 168h block retention
+instead of inheriting the upstream default. Backend ports (Loki 3100,
+Prometheus 9090, Tempo 3200/14318) bind `${LGTM_BIND_HOST:-127.0.0.1}` —
+loopback-only on a single box; a split deployment sets `LGTM_BIND_HOST` to
+this host's private reachable address in the gitignored `.env` here (the
+backends are unauthenticated, so that address must face a trusted private
+network only — the same trust model as `AVA_TRUSTED_CIDRS`). Grafana (3003)
+keeps the wide bind: it is the one anonymous-but-read-only surface.
 
 ## Start / stop
 
@@ -127,12 +143,12 @@ curl -G -s http://127.0.0.1:3100/loki/api/v1/query \
 
 ## Environment (optional `.env`)
 
-Copy `.env.example` to `.env` (gitignored) to customize. Currently one
-variable:
+Copy `.env.example` to `.env` (gitignored) to customize:
 
 | Variable | Default | Purpose |
 |---|---|---|
 | `GRAFANA_ROOT_URL` | `http://localhost:3003` | Public URL of the Grafana UI, used for redirects |
+| `LGTM_BIND_HOST` | `127.0.0.1` | Host address the backend ports (3100/9090/3200/14318) bind; a split deployment sets the host's private reachable address |
 
 ## Verify
 

@@ -17,7 +17,7 @@ tags:
 Loki + Prometheus + Grafana stack (2026-08-11 decision). The OTLP entry on
 every machine is the **local OTel Collector sidecar** (`ava-otel-collector`
 session, task #1266 — user ruling 2026-08-14): agents export to
-127.0.0.1:4317/4318 and never dial a backend directly. The sidecar fans out
+127.0.0.1:4318 (OTLP/HTTP) and never dial a backend directly. The sidecar fans out
 traces → Tempo (OTLP/HTTP), logs → Loki (`/otlp/v1/logs`), metrics →
 Prometheus (OTLP receiver), and mirrors traces to local JSONL
 (`$AVA_HOME/traces/spans.jsonl`, rotated) via its file exporter — the grep
