@@ -53,7 +53,7 @@ onset + one recovery IM instead of one per event.
   freshness discriminator is the numeric comparison
   `| attributes_age_s < 600` on the flattened label.
 - **R4** — p95 now comes from `histogram_quantile(0.95,
-  sum by (le) (rate(ava_llm_usage_latency_ms_milliseconds_bucket[10m])))`,
+  sum by (le) (rate(ava_llm_usage_latency_milliseconds_bucket[10m])))`,
   an approximation of the exact SQL percentile (the same read the Insights
   Ops panel uses). Absent samples → NoData → OK (no spurious night fires).
 - **R6** — semantics changed with the stream: the old rule measured the

@@ -471,6 +471,15 @@ def _open_pipeline() -> _EventPipeline:
     return _EventPipeline()
 
 
+def process_name() -> str:
+    """This process's bound identity (`init_telemetry(process=...)`), the
+    bounded dimension every telemetry record carries as `process`. The OTLP
+    backend stamps it into the metrics Resource (`service.name=ava-<process>`)
+    so same-named counters from different process kinds cannot collide into
+    one Prometheus series."""
+    return str(_state["process"])
+
+
 def init_telemetry(*, process: str = "unknown", agent_id: int | None = None) -> None:
     """Bind process identity and bring up the event pipeline. Idempotent.
 

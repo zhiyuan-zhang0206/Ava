@@ -63,12 +63,12 @@ _LLM_ERROR_EVENTS = family_events(LLM_ERROR_FAMILY)
 # OTLP instrument names on the Prometheus side (see shared/telemetry_otlp):
 # int payload fields -> counters named `ava_<event>_<field>` (Prometheus
 # appends `_total`), float fields -> histograms (`_bucket`/`_sum`/`_count`).
-_LLM_CALLS = "ava_llm_usage_latency_ms_milliseconds_count"
+_LLM_CALLS = "ava_llm_usage_latency_milliseconds_count"
 _LLM_TOKENS_IN = "ava_llm_usage_in_total"
 _LLM_TOKENS_OUT = "ava_llm_usage_out_total"
 _LLM_TOKENS_REASONING = "ava_llm_usage_reasoning_total"
-_LLM_LATENCY_SUM = "ava_llm_usage_latency_ms_milliseconds_sum"
-_LLM_LATENCY_HIST = "ava_llm_usage_latency_ms_milliseconds_bucket"
+_LLM_LATENCY_SUM = "ava_llm_usage_latency_milliseconds_sum"
+_LLM_LATENCY_HIST = "ava_llm_usage_latency_milliseconds_bucket"
 
 
 def _bucket_starts(anchor: datetime, window_s: int, bucket_s: int) -> list[datetime]:

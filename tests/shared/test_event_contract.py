@@ -82,6 +82,7 @@ def test_llm_error_family_is_the_grafana_four() -> None:
 def test_payload_keys_are_the_declared_attribute_contract() -> None:
     assert payload_keys("llm_usage") == (
         "model",
+        "calls",
         "in_total",
         "out_total",
         "cache_read",
@@ -92,6 +93,7 @@ def test_payload_keys_are_the_declared_attribute_contract() -> None:
         "price_miss",
         "price_hit",
         "price_out",
+        "unpriced",
     )
     assert payload_keys("sse_drop") == ("kind", "n")
     assert payload_keys("spawn") == ("machine", "fork_from", "fork_checkpoint")

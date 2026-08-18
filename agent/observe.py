@@ -105,7 +105,9 @@ def log_llm_usage(
             "price_out": priced.rates.output,
         }
     else:
-        snapshot = {}
+        # unpriced=1 makes unpriced call volume countable in Prometheus
+        # (ava_llm_usage_unpriced_total); absent on priced calls.
+        snapshot = {"unpriced": 1}
     logger.info(
         "[llm usage] in={in_total} cached={cache_read}{cache_pct}  "
         "out={out_total} reason={reasoning}{reason_pct}",
@@ -113,6 +115,9 @@ def log_llm_usage(
         # `events.event_name='llm_usage'`; `/api/stats/dashboard` windowed
         # token aggregation filters by the event field.
         event="llm_usage",
+        # calls=1: the OTLP mapping turns this into ava_llm_usage_calls_total,
+        # the per-agent/per-model call counter (histogram counts drop agent_id).
+        calls=1,
         in_total=in_total,
         cache_read=cache_read,
         cache_pct=cache_pct,

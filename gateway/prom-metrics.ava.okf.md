@@ -16,7 +16,7 @@ tags:
 the PG `events` llm_usage reads (task #1197 — the LGTM cutover, user decision
 2026-08-12: all telemetry aggregates serve from Prometheus). The write side
 (`shared/telemetry_otlp.py`,
-[[shared/telemetry-otlp.ava.okf.md|OTLP exporter]]) maps each
+[[shared/telemetry-otlp/telemetry-otlp.ava.okf.md|OTLP exporter]]) maps each
 telemetry event's numeric payload fields to OTLP instruments — int -> Counter
 named `ava_<event_name>_<field>` (Prometheus appends `_total`), float ->
 Histogram — with machine / process / agent_id + declared payload scalars as

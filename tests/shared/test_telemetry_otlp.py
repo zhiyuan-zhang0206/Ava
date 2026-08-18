@@ -181,17 +181,79 @@ def test_metric_mapping_int_counter_float_histogram(otlp_backend) -> None:
     assert a["machine"] == "test-mac"
     assert "body" not in a
 
-    hist = metrics["ava_llm_usage_latency_ms"]
+    # Unit suffix comes off the instrument name — the OTel unit supplies it on
+    # export (latency_ms + "ms" would render ava_..._latency_ms_milliseconds_*).
+    hist = metrics["ava_llm_usage_latency"]
     assert hist.unit == "ms"
     assert hist.data.data_points[0].count == 1
     assert hist.data.data_points[0].sum == 42.5
+    assert "ava_llm_usage_latency_ms" not in metrics
 
     # turn_end's declared bool payload key rides as an attribute, not a metric.
     assert "ava_turn_end_ok" not in metrics
-    turn = _attrs_of(metrics["ava_turn_end_duration_seconds"].data.data_points[0])
+    turn = _attrs_of(metrics["ava_turn_end_duration"].data.data_points[0])
+    assert metrics["ava_turn_end_duration"].unit == "s"
     assert turn["ok"] is True
 
     assert "ava_llm_usage_ok" not in metrics  # bools are attributes, not metrics
+
+
+def test_metric_disposition_cost_counter_price_excluded(otlp_backend) -> None:
+    """The per-field disposition overrides: cost_usd (a float that is a SUM)
+    records as a float Counter; the price_* rate snapshot mints no metric at
+    all (it stays in the event body only); unpriced/calls int fields follow
+    the default int -> Counter rule."""
+    backend, _, metric_reader = otlp_backend
+    backend.export_batch(  # pyright: ignore[reportUnknownMemberType]
+        [
+            _event(
+                event_name="llm_usage",
+                attributes={
+                    "model": "claude-sonnet",
+                    "calls": 1,
+                    "in_total": 10,
+                    "cost_usd": 0.125,
+                    "price_miss": 3.0,
+                    "price_hit": 0.3,
+                    "price_out": 15.0,
+                },
+            ),
+            _event(
+                event_name="llm_usage",
+                attributes={"model": "claude-sonnet", "calls": 1, "cost_usd": 0.375},
+            ),
+        ]
+    )
+    backend.flush()  # pyright: ignore[reportUnknownMemberType]
+    metrics = _metrics(metric_reader)
+
+    cost = metrics["ava_llm_usage_cost_usd"]
+    assert cost.data.is_monotonic  # a Counter, not a Histogram
+    assert abs(cost.data.data_points[0].value - 0.5) < 1e-9
+    assert metrics["ava_llm_usage_calls"].data.data_points[0].value == 2
+    for excluded in ("price_miss", "price_hit", "price_out"):
+        assert f"ava_llm_usage_{excluded}" not in metrics
+
+
+def test_metric_views_shape_latency_histograms() -> None:
+    """The production Views: LLM-scale explicit buckets (defaults clip at 10s)
+    and no agent_id key on the latency histograms — percentiles are read per
+    model/fleet, and dropping the key removes the per-agent histogram fan-out.
+    Built with a real MeterProvider + the production views (the test seam
+    providers skip views, so this pins the view definitions themselves)."""
+    from opentelemetry.sdk.metrics import MeterProvider
+    from opentelemetry.sdk.metrics.export import InMemoryMetricReader
+
+    reader = InMemoryMetricReader()
+    provider = MeterProvider(metric_readers=[reader], views=telemetry_otlp._metric_views())
+    meter = provider.get_meter("ava.telemetry")
+    hist = meter.create_histogram("ava_llm_usage_latency", unit="ms")
+    hist.record(45000.0, {"model": "m", "agent_id": 7, "machine": "x", "process": "p"})
+
+    dp = _metrics(reader)["ava_llm_usage_latency"].data.data_points[0]
+    assert list(dp.explicit_bounds) == list(telemetry_otlp._LLM_LATENCY_BUCKETS_MS)
+    assert "agent_id" not in _attrs_of(dp)
+    assert _attrs_of(dp)["model"] == "m"
 
 
 def test_metric_mapping_skips_long_string_attributes(otlp_backend) -> None:
@@ -350,7 +412,7 @@ def test_pipeline_exports_to_otlp(otlp_backend) -> None:
 
     metrics = _metrics(metric_reader)
     assert metrics["ava_llm_usage_in_total"].data.data_points[0].value == 7
-    assert metrics["ava_llm_usage_latency_ms"].data.data_points[0].sum == 1.5
+    assert metrics["ava_llm_usage_latency"].data.data_points[0].sum == 1.5
 
 
 def test_pipeline_mirror_survives_otlp_failure(monkeypatch) -> None:

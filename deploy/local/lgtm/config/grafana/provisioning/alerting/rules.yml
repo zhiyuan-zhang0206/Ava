@@ -10,7 +10,7 @@
 # (Task #1224): rules R1-R3, R5-R7 query Loki (the events stream — every
 # event is one OTLP log line under {service_name="unknown_service"}, body =
 # the full event JSON, so `| json` flattens it to labels), and R4 queries
-# Prometheus (the ava_llm_usage_latency_ms histogram, the OTLP metric mirror
+# Prometheus (the ava_llm_usage_latency histogram, the OTLP metric mirror
 # of the llm_usage event). Datasources are provisioned beside this file in
 # datasources.yml (uids `loki` / `prometheus`). The retired Postgres events
 # read path (#1197) is gone — nothing queries `ops` from these rules.
@@ -329,7 +329,7 @@ groups:
           description: >-
             The p95 of llm_usage latency over the last 10 minutes is
             {{ $values.C }} ms, above 60s (histogram_quantile over the
-            ava_llm_usage_latency_ms histogram — an approximation of the exact
+            ava_llm_usage_latency histogram — an approximation of the exact
             SQL percentile, same as the Ops panel). Usually a provider-side
             failure or slow request pile-up. No alert fires when the metric is
             absent.
@@ -345,7 +345,7 @@ groups:
               editorMode: code
               expr: >-
                 histogram_quantile(0.95, sum by (le)
-                (rate(ava_llm_usage_latency_ms_milliseconds_bucket[10m])))
+                (rate(ava_llm_usage_latency_milliseconds_bucket[10m])))
               instant: true
               range: false
             relativeTimeRange:
