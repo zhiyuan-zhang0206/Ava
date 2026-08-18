@@ -50,9 +50,13 @@ export function useFleetGraph(opts?: { hours?: number; decayLambda?: number }): 
     queryKey: ["fleet-graph", hours ?? null, decayLambda ?? null],
     queryFn: () => api.getFleetGraph({ hours, decayLambda }),
     retry: false,
-    // Poll for fresh weights/edges — a constant interval, so a failed poll keeps
-    // retrying (the graph self-heals) instead of freezing after the first error.
-    refetchInterval: 5000,
+    // Slow reconciliation poll beneath the SSE invalidation (same pattern as
+    // use-tasks.ts). 30s matches the backend's whole-response Redis cache
+    // (_CACHE_TTL_SECONDS in gateway/routers/fleet_graph.py) — polling faster
+    // can only refetch identical cached bytes. A constant interval, so a
+    // failed poll keeps retrying (the graph self-heals) instead of freezing
+    // after the first error.
+    refetchInterval: 30_000,
   });
 
   // Liveness: the R4 fold owner (lib/fold/graph) invalidates this query on

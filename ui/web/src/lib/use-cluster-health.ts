@@ -9,20 +9,28 @@
 // that would eventually catch it — at the 45s deadline. This hook closes
 // that gap from the other side: it polls the cluster's paused flag, so when
 // a rollout finishes (`paused` flips true -> false) we reconnect SSE and
-// refetch agents *immediately* instead of waiting on the watchdog.
+// refetch agents promptly instead of waiting on the watchdog.
 //
 // It also feeds `clusterUpdating` into the store so AuthGuard can tell an
 // expected update-induced auth failure apart from a real logged-out state and
 // show the full-screen UpdatingPage instead of redirecting to /login (see
 // components/auth/auth-guard.tsx).
 //
-// A second poll hits `/api/cluster/status` — the one status path that bypasses
-// the cluster-paused 503 middleware, so it is readable *while* paused. That lets
-// us distinguish a normal in-flight rollout (paused + orchestration set) from a
-// stranded pause (paused + orchestration null — a hard-killed rollout left the
-// flag), and drive the stranded-recovery banner's affordance for the latter
-// (AppConnectionBanner). `/api/status` itself 503s during a pause, so it
-// cannot tell these apart on its own.
+// ONE poll loop, on `/api/cluster/status`: it alone carries every signal this
+// hook needs (`paused` + `current_orchestration`), and it is the one status
+// path that bypasses the cluster-paused 503 middleware, so it stays readable
+// *while* paused — which also lets it distinguish a normal in-flight rollout
+// (paused + orchestration set) from a stranded pause (paused + orchestration
+// null — a hard-killed rollout left the flag) and drive the stranded-recovery
+// banner (AppConnectionBanner). There is deliberately NO app-root observer on
+// the heavier /api/status here: its freshness belongs to the routes that
+// render it (the sidebar SpawnButton's shared ["status"] poll on Home, the
+// visibility-gated observers on Insights Status / Control Config).
+//
+// Cadence: the edge this loop exists for happens a handful of times a week,
+// so the steady state idles at 15s (the SSE watchdog still backstops at 45s)
+// and tightens to 5s only while an update is actually in flight — fast
+// polling exactly during the window it covers, near-zero cost otherwise.
 //
 // Mount this once, at the app root (components/app-connection-banner.tsx).
 
@@ -33,20 +41,21 @@ import { api } from "./api";
 import { useStore } from "./store";
 import { AGENTS_QUERY_KEY } from "./use-agents";
 
-// The single query key for GET /api/status across the whole app: this hook's
-// 5s poll, the sidebar SpawnButton (also 5s), the agent-row + fleet-graph
-// machine badges, and the settings Status + Config views. One key ⇒ TanStack
-// dedupes them into ONE poll loop instead of two independent ones hitting the
-// same endpoint (the connection-budget concern). The bare `["status"]` literal
-// in those UI components is this same key by value — keep them in sync.
+// The single query key for GET /api/status across the whole app: the sidebar
+// SpawnButton poll, the agent-row + fleet-graph machine badges, and the
+// settings Status + Config views. One key ⇒ TanStack dedupes co-mounted
+// observers into ONE poll loop instead of several independent ones hitting
+// the same endpoint (the connection-budget concern). The bare `["status"]`
+// literal in those UI components is this same key by value — keep them in
+// sync.
 export const SYSTEM_STATUS_QUERY_KEY = ["status"] as const;
 // The 503-bypassing local cluster snapshot (paused + current_orchestration),
 // readable even while the cluster is paused.
 export const CLUSTER_STATUS_QUERY_KEY = ["cluster-status"] as const;
 
-// 5s poll — fast enough to catch the end of a rollout within a few seconds
-// of the gateway coming back, cheap enough to leave running continuously.
-const POLL_MS = 5_000;
+// Steady-state / in-flight poll intervals — see the cadence note above.
+const IDLE_POLL_MS = 15_000;
+const UPDATING_POLL_MS = 5_000;
 
 /**
  * Poll cluster status, mirror `paused` into the store, and on the
@@ -60,20 +69,18 @@ export function useClusterHealth(): void {
   const bumpReconnect = useStore((s) => s.bumpReconnect);
 
   const { data } = useQuery({
-    queryKey: SYSTEM_STATUS_QUERY_KEY,
-    queryFn: api.getSystemStatus,
-    refetchInterval: POLL_MS,
-    // Tolerate fetch failures during the gateway restart window — TanStack
-    // retries on its own cadence; a missed poll just defers the edge
-    // detection by one interval (the watchdog still backstops).
-  });
-
-  // Bypass poll — readable during a pause (unlike the /api/status query above,
-  // which 503s). Sole source of the stranded-pause signal.
-  const { data: clusterStatus } = useQuery({
     queryKey: CLUSTER_STATUS_QUERY_KEY,
     queryFn: api.getClusterStatus,
-    refetchInterval: POLL_MS,
+    // Function form: tighten while an update is in flight so the finish edge
+    // lands within seconds; idle at 15s otherwise. Failed fetches during the
+    // gateway restart window are tolerated — TanStack retries on its own
+    // cadence, and a missed poll just defers the edge detection by one
+    // interval (the watchdog still backstops).
+    refetchInterval: (query) => {
+      const snap = query.state.data;
+      const updating = snap != null && (snap.paused || snap.current_orchestration != null);
+      return updating ? UPDATING_POLL_MS : IDLE_POLL_MS;
+    },
   });
 
   // Stranded = paused with no orchestration alive: a rollout was hard-killed and
@@ -81,22 +88,20 @@ export function useClusterHealth(): void {
   // finish). Undefined data (initial / fetch fail) is not stranded — never offer
   // recovery without a confirmed snapshot.
   const stranded =
-    clusterStatus != null &&
-    clusterStatus.paused &&
-    clusterStatus.current_orchestration == null;
+    data != null && data.paused && data.current_orchestration == null;
 
   useEffect(() => {
     setClusterStranded(stranded);
   }, [stranded, setClusterStranded]);
 
-  const paused = data?.cluster.current_paused ?? false;
+  const paused = data?.paused ?? false;
   // current_orchestration flips true the moment a rollout/restart's detached
   // session spawns — minutes before the gateway pauses itself — and stays
   // true for the whole run. The banner keys off it (OR paused) so it shows for
   // the entire update, matching the Settings buttons, instead of only the late
   // paused window. The reconnect edge below still keys off `paused` alone: that
   // tracks the actual gateway bounce, which is what severs the SSE socket.
-  const updating = paused || data?.cluster.current_orchestration != null;
+  const updating = paused || data?.current_orchestration != null;
 
   // Mirror the updating state into the store. Only act on successful data —
   // a failed poll (data === undefined) must not flip clusterUpdating to false,

@@ -24,13 +24,13 @@ vi.mock("@/lib/use-alerts", () => ({
 // unmocked, these are live fetches that silently "succeed" against a local
 // dev gateway but ECONNREFUSED with no gateway around (CI), the source of a
 // flaky "Unhandled Errors" vitest exit surfacing in an unrelated test file:
-//   - AppConnectionBanner's useClusterHealth() → api.getSystemStatus()
+//   - AppConnectionBanner's useClusterHealth() → api.getClusterStatus()
 //   - AuthProvider's mount-time session check → api.checkAuth()
 // Stub both to never-resolving promises: this smoke test only checks the
 // initial render, not status- or auth-driven content.
 vi.mock("@/lib/api", () => ({
   api: {
-    getSystemStatus: vi.fn(() => new Promise(() => undefined)),
+    getClusterStatus: vi.fn(() => new Promise(() => undefined)),
     checkAuth: vi.fn(() => new Promise(() => undefined)),
   },
 }));
