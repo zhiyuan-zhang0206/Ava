@@ -53,9 +53,16 @@ class LlmUsage(TypedDict):
     the three rates are USD per 1M tokens (cache miss / cache hit / output).
     All four are absent on rows written before the snapshot shipped, and on
     calls of a model with no known price (a row never carries a null cost —
-    absent means unpriced)."""
+    absent means unpriced).
+
+    ``calls`` is the constant 1 — it exists so the OTLP mapping mints
+    ``ava_llm_usage_calls_total`` (per-agent/per-model call counts come from a
+    Counter, not from a histogram's count, which drops the agent_id key).
+    ``unpriced`` is 1 exactly when the price snapshot is absent (so unpriced
+    call volume is countable in Prometheus); it is omitted on priced calls."""
 
     model: str
+    calls: int
     in_total: int
     out_total: int
     cache_read: int
@@ -66,6 +73,7 @@ class LlmUsage(TypedDict):
     price_miss: float | None
     price_hit: float | None
     price_out: float | None
+    unpriced: int | None
 
 
 class TurnEnd(TypedDict):

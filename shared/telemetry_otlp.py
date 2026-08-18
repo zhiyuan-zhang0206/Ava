@@ -100,6 +100,30 @@ _SEVERITY_NUMBERS: dict[str, int] = {
 _NO_METRIC_ATTRS = frozenset({"body"})
 _MAX_METRIC_ATTR_CHARS = 64
 
+# Per-field metric disposition overrides. The default rule (int -> Counter,
+# float -> Histogram) fits counts and durations; fields where the type is the
+# wrong signal declare themselves here. None = no metric at all (the field
+# stays in the Loki/JSONL event body — exclusion here never touches the
+# event stream).
+#   llm_usage.price_*  — the usage-time price snapshot: a RATE (USD per 1M
+#     tokens), not a measurement. As default-bucket histograms they minted
+#     ~50 series per (agent, model) and their distribution is meaningless.
+#   llm_usage.cost_usd — money is summed, never percentiled: a float Counter
+#     (OTel Counter.add takes floats; Prometheus counters are float64), so
+#     `increase(ava_llm_usage_cost_usd_total[...])` is the exact windowed
+#     spend at usage-time rates.
+_METRIC_DISPOSITION: dict[tuple[str, str], str | None] = {
+    ("llm_usage", "price_miss"): None,
+    ("llm_usage", "price_hit"): None,
+    ("llm_usage", "price_out"): None,
+    ("llm_usage", "cost_usd"): "counter",
+}
+
+# Histogram bucket boundaries for LLM-scale latencies (ms). The OTel defaults
+# top out at 10000 — every call slower than 10s fell into +Inf and clipped
+# p95/p50 at exactly 10s on the ops panels.
+_LLM_LATENCY_BUCKETS_MS = (250, 500, 1000, 2000, 4000, 8000, 15000, 30000, 60000, 120000, 300000)
+
 # Loguru extra key marking the OTLP side's own diagnostics, so they reach the
 # stderr/file sinks and never re-enter the event pipeline (same contract as
 # shared.telemetry._NO_EMITTER).
@@ -373,7 +397,10 @@ class _OtlpBackend:
         - telemetry category only — log/audit events are the event stream, not
           a measurement.
         - int payload field -> Counter (token counts, event counts: things you
-          sum). float -> Histogram (latencies/durations: things you percentile).
+          sum). float -> Histogram (latencies/durations: things you
+          percentile). `_METRIC_DISPOSITION` overrides per field: a float that
+          is really a sum (cost_usd) records as a Counter; a rate snapshot
+          (price_*) records nothing.
         - bool / short-str payload fields become datapoint attributes (model,
           ok, fn); `body` and strings over the length cap never do (content /
           cardinality guard).
@@ -384,16 +411,19 @@ class _OtlpBackend:
         attrs = self._metric_attributes(event)
         for key, value in event.attributes.items():
             # bool must be checked before int — `isinstance(True, int)` is True.
-            if isinstance(value, bool):
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
                 continue
-            if isinstance(value, int):
-                inst = self._instrument(event.event_name, key, "counter")
-                if inst is not None:
-                    inst.add(value, attrs)
-            elif isinstance(value, float):
-                inst = self._instrument(event.event_name, key, "histogram")
-                if inst is not None:
-                    inst.record(value, attrs)
+            default_kind = "counter" if isinstance(value, int) else "histogram"
+            kind = _METRIC_DISPOSITION.get((event.event_name, key), default_kind)
+            if kind is None:
+                continue
+            inst = self._instrument(event.event_name, key, kind)
+            if inst is None:
+                continue
+            if kind == "counter":
+                inst.add(value, attrs)
+            else:
+                inst.record(value, attrs)
 
     def _metric_attributes(self, event: Event) -> dict[str, Any]:
         """The datapoint attribute set: process dimensions + declared payload
@@ -431,7 +461,7 @@ class _OtlpBackend:
         inst = self._instruments.get(key)
         if inst is not None:
             return inst
-        name = f"ava_{event_name}_{field}"
+        name = f"ava_{event_name}_{_strip_unit_suffix(field)}"
         try:
             if kind == "counter":
                 inst = self._meter.create_counter(
@@ -473,6 +503,63 @@ def _unit_for(field: str) -> str:
     return "1"
 
 
+def _strip_unit_suffix(field: str) -> str:
+    """Instrument name for a payload field: the unit suffix comes off, because
+    the OTel unit supplies it on export — `latency_ms` + unit "ms" would
+    otherwise render as `ava_..._latency_ms_milliseconds_*` in Prometheus
+    (the unit stated twice)."""
+    for suffix in ("_ms", "_seconds"):
+        if field.endswith(suffix):
+            return field[: -len(suffix)]
+    return field
+
+
+def _metric_views() -> list[Any]:
+    """Views shaping the LLM latency histograms: explicit LLM-scale buckets
+    (the OTel defaults clip at 10s) and no `agent_id` attribute — latency
+    percentiles are read per model/fleet, never per agent, and dropping the
+    key removes the per-(agent, model) histogram fan-out (17 series each).
+    Views match the INSTRUMENT name (unit suffix already stripped)."""
+    from opentelemetry.sdk.metrics.view import ExplicitBucketHistogramAggregation, View
+
+    aggregation = ExplicitBucketHistogramAggregation(list(_LLM_LATENCY_BUCKETS_MS))
+    return [
+        View(
+            instrument_name=name,
+            aggregation=aggregation,
+            attribute_keys={"machine", "process", "model"},
+        )
+        for name in ("ava_llm_usage_latency", "ava_llm_usage_decode")
+    ]
+
+
+def _metrics_resource() -> Any:
+    """The metrics-side OTel Resource: `service.name=ava-<process>` (the
+    bounded process dimension) + a per-process-instance `service.instance.id`.
+    Without it every series lands as job="unknown_service" and two same-named
+    processes exporting the same counter collide into ONE series with
+    interleaved cumulative values (increase() reads garbage). Metrics only:
+    the logs Resource is deliberately untouched — Loki default-promotes
+    resource attributes to index labels, so a per-process-unique instance id
+    there would mint a new stream per process start, and the service_name
+    selector rewrite has its own coordinated change."""
+    import uuid
+    from importlib.metadata import version
+
+    from opentelemetry.sdk.resources import Resource
+
+    from shared.telemetry import process_name
+
+    return Resource.create(
+        {
+            "service.namespace": "ava",
+            "service.name": f"ava-{process_name()}",
+            "service.instance.id": str(uuid.uuid4()),
+            "service.version": version("ava"),
+        }
+    )
+
+
 def _build_providers(endpoint: str) -> tuple[Any, Any]:
     """Build the production (LoggerProvider, MeterProvider) pair exporting
     OTLP/HTTP to ``endpoint`` (signal paths /v1/logs, /v1/metrics are appended
@@ -495,7 +582,9 @@ def _build_providers(endpoint: str) -> tuple[Any, Any]:
                 OTLPMetricExporter(endpoint=f"{endpoint}/v1/metrics"),
                 export_interval_millis=_METRICS_INTERVAL_S * 1000,
             )
-        ]
+        ],
+        resource=_metrics_resource(),
+        views=_metric_views(),
     )
     return logs, metrics
 

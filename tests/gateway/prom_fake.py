@@ -57,11 +57,11 @@ class FakePrometheus:
         point: tuple[int, float],
     ) -> None:
         """One step's worth of Prometheus llm_usage series, all at `point`."""
-        self.add_range("increase(ava_llm_usage_latency_ms_milliseconds_count", [(point[0], calls)])
+        self.add_range("increase(ava_llm_usage_latency_milliseconds_count", [(point[0], calls)])
         self.add_range("increase(ava_llm_usage_in_total", [(point[0], tokens_in)])
         self.add_range("increase(ava_llm_usage_out_total", [(point[0], tokens_out)])
         self.add_range("increase(ava_llm_usage_reasoning_total", [(point[0], tokens_reasoning)])
-        self.add_range("increase(ava_llm_usage_latency_ms_milliseconds_sum", [(point[0], lat_sum)])
+        self.add_range("increase(ava_llm_usage_latency_milliseconds_sum", [(point[0], lat_sum)])
         self.add_range("histogram_quantile(0.5", [(point[0], p50)])
         self.add_range("histogram_quantile(0.95", [(point[0], p95)])
         self.add_instant("histogram_quantile(0.5", p50)

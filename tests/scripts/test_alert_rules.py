@@ -164,7 +164,7 @@ def test_latency_rule_uses_prometheus_histogram() -> None:
     assert len(exprs) == 1
     expr = exprs[0]
     assert "histogram_quantile(0.95" in expr
-    assert "ava_llm_usage_latency_ms_milliseconds_bucket" in expr
+    assert "ava_llm_usage_latency_milliseconds_bucket" in expr
     assert "[10m]" in expr
     assert _threshold_params(rules["ava-ops-llm-latency-p95"]) == [[60000]]
 

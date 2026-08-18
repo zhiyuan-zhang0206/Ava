@@ -43,14 +43,10 @@ fan-out missed data.
   as attributes; trace_id / span_id ride the LogRecord fields, so Loki
   rows correlate with Tempo spans.
   Severity mapping: debug 5 / info 9 / warning 13 / error 17 / critical 21.
-- **Metrics** (`_record_metrics`) — telemetry-category events only (log/audit
-  events are the event stream, not a measurement). Each numeric payload field
-  maps to one instrument named `ava_<event_name>_<field>`: int -> Counter,
-  float -> Histogram. bool / short-str (<= 64 chars) declared payload
-  scalars become datapoint attributes; `body` and longer strings never do
-  (content / cardinality guard); None values are skipped. Unit: `_ms` -> ms,
-  `_seconds` / `duration` / `latency` -> s, else "1". Exported every 15 s
-  (`PeriodicExportingMetricReader`).
+- **Metrics** (`_record_metrics`) — telemetry-category events only: numeric
+  payload fields become Prometheus series via a per-field disposition, a
+  per-process Resource, and latency-shaping Views — the full mapping contract
+  is its own node: [[shared/telemetry-otlp/metrics-mapping.ava.okf.md]].
 - **Traces** — exported by `shared/trace.py` to the sidecar's `/v1/traces`
   (OTLP/JSON, content-stripped before leaving the process); the sidecar's
   file exporter mirrors each batch to `$AVA_HOME/traces/spans.jsonl`
