@@ -1,6 +1,14 @@
 /**
  * card.tsx — unit tests for MessageCard, CardHeader, messageCardConfig,
  * and the rich summary components.
+ *
+ * Quarantined (this `flaky/` directory runs serially via
+ * vitest.flaky.config.ts): the live-clock renders here (useNow's 100ms
+ * setInterval) historically leaked past the file's end — no cleanup ran under
+ * `globals: false` — and a tick landing after happy-dom teardown surfaced as
+ * an Unhandled "ReferenceError: window is not defined" from react-dom's
+ * scheduler under CI's parallel forks. vitest.setup.ts now registers
+ * afterEach(cleanup), which unmounts and clears those intervals per test.
  */
 import { describe, expect, it } from "vitest";
 import { render } from "@testing-library/react";

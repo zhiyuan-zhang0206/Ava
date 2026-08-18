@@ -5,8 +5,9 @@
 // with consistent behavior (recommended by the testing-library team).
 //
 // `setupFiles`: vitest.setup.ts installs global stubs happy-dom lacks (a
-// firing IntersectionObserver — see that file). RTL default cleanup still runs
-// automatically across tests; we also import `cleanup` manually for clarity.
+// firing IntersectionObserver — see that file) and registers RTL cleanup in a
+// global afterEach — RTL's own auto-cleanup needs `afterEach` on globalThis,
+// which `globals: false` never provides.
 //
 // `globals: false`: keeps `import { describe, it, expect } from "vitest"`
 // explicit, avoids polluting globals, and improves IDE go-to-definition.
@@ -37,11 +38,12 @@ export default defineConfig({
     // tree there per e2e session); the default include would otherwise sweep
     // their copied tests and run the suite twice (and fail on the copy's
     // missing fixtures). Build artifacts are never test sources.
-    exclude: [...configDefaults.exclude, ".builds/**"],
+    // `src/**/flaky/**` is the quarantine convention: a timing-sensitive test
+    // file lives under a `flaky/` directory, which this run skips and the
+    // serial CI step (vitest.flaky.config.ts) picks up by the same pattern.
+    exclude: [...configDefaults.exclude, ".builds/**", "src/**/flaky/**"],
     // fork pool: each test file runs in its own V8 isolate (no DOM leakage).
     // fileParallelism true: files run concurrently using available CPUs.
-    // Flaky tests (timing-sensitive DOM rendering) are excluded and run serially
-    // in a separate CI step via vitest.flaky.config.ts.
     pool: "forks",
     fileParallelism: true,
     // coverage: v8 provider, json-summary for CI soft-threshold gate parsing.
