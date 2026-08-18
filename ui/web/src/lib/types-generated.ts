@@ -170,8 +170,9 @@ export interface paths {
          * Get Models
          * @description List selectable LLM models (grouped by provider) + the cluster default.
          *
-         *     Source of truth is the model registry (`shared/lm/registry.py:MODELS`);
-         *     the default mirrors `settings.lm.llm_model` so the UI can pre-select it.
+         *     Roster and tuning come from the model registry; current rates come from
+         *     the versioned pricing catalog. The default mirrors `settings.lm.llm_model`
+         *     so the UI can pre-select it.
          */
         get: operations["get_models_api_models_get"];
         put?: never;
@@ -3246,23 +3247,20 @@ export interface components {
         };
         /**
          * AgentCost
-         * @description Cumulative LLM spend + token usage for one agent over its whole life —
-         *     every `llm_usage` event under its agent_id (the agent's "session", which
-         *     spans restarts/resurrects since agent_id is stable). `cost_usd` sums the
-         *     rows' usage-time price snapshots plus read-time pricing of the legacy rows
-         *     that predate them (via `shared.lm.pricing.cost_usd`, retired-model ledger
-         *     included). Calls on an unpriced model contribute 0 to cost and are counted
-         *     in `unpriced_calls`; legacy rows priced at read time instead of from a
-         *     stored snapshot count in `estimated_calls`. `cache_hit_pct` = cache_read /
-         *     input * 100; input=0 degrades to 0.
+         * @description LLM spend + token usage for one agent over the requested window (whole
+         *     life = ledger days + today's live tail; every `llm_usage` event under its
+         *     agent_id — the agent's "session", which spans restarts/resurrects since
+         *     agent_id is stable). `cost_usd` sums the rows' usage-time price snapshots
+         *     only — never re-priced against the current registry. Calls without a
+         *     snapshot (unpriced model) contribute 0 to cost and are counted in
+         *     `unpriced_calls`. `cache_hit_pct` = cache_read / input * 100; input=0
+         *     degrades to 0.
          */
         AgentCost: {
             /** Cost Usd */
             cost_usd: number;
             /** Unpriced Calls */
             unpriced_calls: number;
-            /** Estimated Calls */
-            estimated_calls: number;
             /** Llm Calls */
             llm_calls: number;
             /** Tokens In */

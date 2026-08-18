@@ -95,7 +95,6 @@ function fixture(overrides: Partial<AgentInspect> = {}): AgentInspect {
     cost: {
       cost_usd: 0.4213,
       unpriced_calls: 1,
-      estimated_calls: 0,
       llm_calls: 142,
       tokens_in: 1_200_000,
       tokens_out: 84_000,
@@ -180,7 +179,6 @@ describe("InspectorPanel", () => {
         cost: {
           cost_usd: 0.4213,
           unpriced_calls: 0,
-          estimated_calls: 0,
           llm_calls: 142,
           tokens_in: 2_176_670_000,
           tokens_out: 3_420_000,
@@ -203,7 +201,6 @@ describe("InspectorPanel", () => {
         cost: {
           cost_usd: 0.0,
           unpriced_calls: 0,
-          estimated_calls: 0,
           llm_calls: 0,
           tokens_in: 1_500_000_000_000,
           tokens_out: 999,
@@ -219,15 +216,14 @@ describe("InspectorPanel", () => {
     expect(screen.getByText("1.50T / 999")).toBeTruthy();
   });
 
-  it("marks read-time-priced legacy rows as N est. under the cost (task #1273)", async () => {
-    // Rows written before the price snapshot shipped are priced at read time;
-    // the Cost cell's sub-line surfaces the estimate instead of hiding it.
+  it("marks snapshot-less calls as N unpriced under the cost", async () => {
+    // Calls without a stored usage-time price snapshot contribute 0 cost;
+    // the Cost cell's sub-line surfaces the count instead of hiding it.
     getAgentInspect.mockResolvedValue(
       fixture({
         cost: {
           cost_usd: 0.0073,
-          unpriced_calls: 0,
-          estimated_calls: 7,
+          unpriced_calls: 7,
           llm_calls: 8,
           tokens_in: 2_000_000,
           tokens_out: 0,
@@ -241,7 +237,7 @@ describe("InspectorPanel", () => {
 
     await waitFor(() => expect(screen.getByText("Persistent shells")).toBeTruthy());
     expect(screen.getByText("$0.0073")).toBeTruthy();
-    expect(screen.getByText("7 est.")).toBeTruthy();
+    expect(screen.getByText("7 unpriced")).toBeTruthy();
   });
 
   it("formats durations past 24h as Xd Yh (task #824): idle 24d 3h", async () => {

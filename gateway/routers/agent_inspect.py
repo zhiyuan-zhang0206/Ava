@@ -26,7 +26,7 @@ from psycopg_pool import ConnectionPool
 
 from gateway import loki_events
 from gateway.routers import _agent_cost, _plugin_metrics
-from gateway.routers._agent_cost import _from_bound
+from gateway.routers._agent_cost import window_bounds
 from gateway.schemas import (
     AgentActivity,
     AgentInspect,
@@ -157,7 +157,7 @@ def _alive_seconds(
     rows, _ = loki_events.query_events(
         agent_id=agent_id,
         event_names=["agent_spawned", "agent_resurrected", "agent_terminated"],
-        from_=_agent_cost._whole_life_start(),
+        from_=_agent_cost._retention_floor(),
         limit=1000,
     )
     lifecycle_events: list[tuple[str, datetime]] = [
@@ -196,7 +196,6 @@ def _alive_seconds(
 
 def _agent_tps(
     agent_id: int,
-    output_tokens: int,
     from_: datetime | None,
     to: datetime | None,
     spawned_at: datetime | None,
@@ -205,11 +204,24 @@ def _agent_tps(
 
     LM-stage TPS = output tokens / cumulative LLM call wall-clock (sum of
     `turn_end.duration_seconds` within the window). Isolates model generation
-    speed excluding execute_code and framework overhead.
+    speed excluding execute_code and framework overhead. Numerator and
+    denominator come from the SAME Loki window — the rate is coherent by
+    construction (and bounded by Loki retention like every event read here).
 
     Agent-lifecycle TPS = output tokens / cumulative agent alive time (whole
     life, `_alive_seconds(window_start=None)` — the window narrows only the
     numerator, so this stays a since-birth throughput)."""
+    output_tokens = int(
+        loki_events.attribute_aggregate(
+            field="out_total",
+            agg="sum",
+            event_names=["llm_usage"],
+            categories=["telemetry", "log"],
+            agent_id=agent_id,
+            from_=from_,
+            to=to,
+        )
+    )
     llm_seconds = loki_events.attribute_aggregate(
         field="duration_seconds",
         agg="sum",
@@ -330,7 +342,7 @@ def _heartbeat(
     rows, _ = loki_events.query_events(
         agent_id=agent_id,
         event_names=["heartbeat_paused"],
-        from_=_agent_cost._whole_life_start(),
+        from_=_agent_cost._retention_floor(),
         limit=1,
     )
     row = rows[0] if rows else None
@@ -496,14 +508,10 @@ def _inspect_blocking(
         # is replayed in Python). since_compact → the compact halt ts (or
         # None when never compacted); hours → now - N h; neither → None
         # (whole life).
-        from_, window_start = _from_bound(agent_id, hours, since_compact=since_compact)
-        cost_result = _agent_cost._agent_cost(pool, agent_id, from_, window_start)
-        cost = cost_result.cost
+        from_, window_start = window_bounds(agent_id, hours, since_compact=since_compact)
+        cost = _agent_cost.agent_cost(pool, agent_id, hours, since_compact=since_compact)
         stats = _agent_stats(agent_id, from_, None)
-        # TPS pairs the Loki-window tokens with the Loki-only turn-end
-        # denominator (see _CostResult); the archive side of `cost` covers
-        # tokens the turn-end denominator never sees.
-        tps = _agent_tps(agent_id, cost_result.loki_tokens_out, from_, None, spawned_at)
+        tps = _agent_tps(agent_id, from_, None, spawned_at)
         activity = _agent_activity(agent_id, from_, None, window_start, spawned_at)
     return _InspectRows(
         machine=machine,

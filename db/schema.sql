@@ -354,12 +354,16 @@ COMMENT ON COLUMN api_idempotency.status IS
 COMMENT ON COLUMN api_idempotency.op_status IS
     'Ops-channel outcome status (''completed''/''failed''); NULL for HTTP middleware rows. The HTTP channel stores its HTTP code in `status` instead.';
 
--- agent_model_tokens_daily: per agent x UTC-day x model token accumulation. Cost
--- is never stored — it is always re-derived from these tokens via cost_usd (the
--- single pricing source), so a pricing-table change never leaves a historical cost
--- wrong. model '' = an llm_usage row that carried no model field. The per-agent
--- daily token total = SUM over that day's model rows (not re-stored in
--- agent_metrics_daily).
+-- agent_model_tokens_daily: per agent x UTC-day x model token + cost ledger.
+-- cost_usd is the SUM of the day's stored usage-time price snapshots (user
+-- principle: cost is billed at the price in force at the call, never
+-- re-priced against the current registry) — costed_calls counts rows that
+-- carried a snapshot, unpriced_calls the rows without one (they contribute
+-- 0 cost). model '' = an llm_usage row that carried no model field. The
+-- per-agent daily token total = SUM over that day's model rows (not
+-- re-stored in agent_metrics_daily). Whole days land here from the
+-- events-maintenance Loki rollup pass; the cost read path is these rows +
+-- a live Loki tail for today.
 CREATE TABLE agent_model_tokens_daily (
     agent_id         BIGINT NOT NULL REFERENCES agents(id),
     day              DATE   NOT NULL,
@@ -369,6 +373,9 @@ CREATE TABLE agent_model_tokens_daily (
     tokens_out       BIGINT NOT NULL DEFAULT 0,
     tokens_cached    BIGINT NOT NULL DEFAULT 0,
     tokens_reasoning BIGINT NOT NULL DEFAULT 0,
+    cost_usd         DOUBLE PRECISION NOT NULL DEFAULT 0,
+    costed_calls     BIGINT NOT NULL DEFAULT 0,
+    unpriced_calls   BIGINT NOT NULL DEFAULT 0,
     PRIMARY KEY (agent_id, day, model)
 );
 
