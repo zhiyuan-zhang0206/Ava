@@ -186,8 +186,31 @@ def test_tree_kill_leaves_no_orphans(unit_home):  # pyright: ignore[reportMissin
     backend = _backend()
     assert backend.new_session(name, cmd, unit_home, env=dict(os.environ)) is True  # pyright: ignore[reportUnknownArgumentType]
     parent_pid = _pid(name)
-    assert _wait(lambda: psutil.Process(parent_pid).children())
-    child_pid = psutil.Process(parent_pid).children()[0].pid
+
+    # Find the `sleep` descendant in ONE snapshot, capturing its pid inside the
+    # poll. The login shell forks short-lived rc children on the way up, so
+    # "children() is non-empty" and a later children()[0] are different
+    # snapshots — the transient child can be gone in between (an empty list →
+    # IndexError, seen on CI). The sleep is a grandchild (bash → python →
+    # sleep), so search recursively for the process we actually spawned.
+    sleep_pids: list[int] = []
+
+    def _find_sleep() -> bool:
+        try:
+            descendants = psutil.Process(parent_pid).children(recursive=True)
+        except psutil.NoSuchProcess:
+            return False
+        for proc in descendants:
+            try:
+                if proc.name() == "sleep":
+                    sleep_pids.append(proc.pid)
+                    return True
+            except psutil.NoSuchProcess:
+                continue  # exited between listing and name() — keep looking
+        return False
+
+    assert _wait(_find_sleep), "spawned sleep descendant should appear"
+    child_pid = sleep_pids[-1]
 
     ok, mode = backend.kill_session(name, graceful=False)
     assert ok is True and mode == "forced"

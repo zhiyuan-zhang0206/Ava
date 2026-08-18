@@ -125,6 +125,11 @@ jobs:
       - name: Unit tests (vitest run)
         working-directory: ui/web
         run: npx vitest run --coverage
+      # Quarantined timing-sensitive tests (src/**/flaky/**) run serially in
+      # their own vitest process — see ui/web/vitest.flaky.config.ts.
+      - name: Flaky unit tests (vitest run, serial)
+        working-directory: ui/web
+        run: npx vitest run --config vitest.flaky.config.ts
 
   e2e:
     name: e2e (Playwright happy path)

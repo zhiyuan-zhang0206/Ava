@@ -233,11 +233,19 @@ async def test_start_connects_with_credentials(
 
     monkeypatch.setattr(settings.feishu, "feishu_app_id", "cli_x")
     monkeypatch.setattr(settings.feishu, "feishu_app_secret", "secret_x")
+    # The ws thread's first act is a COLD import of lark_oapi.ws.client (a
+    # protobuf + websocket import chain, seconds on a loaded CI runner) before
+    # the fake's start() can run, so the timed wait below would race that
+    # import. Warm it here — inside the running loop, so the SDK's module-level
+    # asyncio.get_event_loop() binds without a deprecation path — leaving the
+    # wait to cover only thread startup. Production is untouched: the adapter
+    # still imports lark lazily in the ws thread (see FeishuAdapter docstring).
+    import lark_oapi.ws.client  # noqa: F401  # pyright: ignore[reportUnusedImport]
+
     ws_client = FakeWsClient()
     adapter = PatchingAdapter(FakeCore(), ws_client)
     await adapter.start()
     assert adapter._ws_thread is not None
-    # lark_oapi.ws.client takes ~3s to import on a cold process (protobuf + websocket chain) before the fake's start() runs — wait well past that.
     assert ws_client.started.wait(timeout=15)
     assert adapter._ws_client is ws_client
     # Point stop() at the live pytest loop so the scheduled disconnect actually
