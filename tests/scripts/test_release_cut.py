@@ -579,6 +579,7 @@ def test_main_catchup_requires_latest_exists() -> None:
     from scripts.release_cut import main
 
     with (
+        patch("scripts.release_cut._latest_dated", return_value=None),
         patch("scripts.release_cut._latest_staging_sha", return_value=None),
         patch("scripts.release_cut._cut_catchup") as cut,
         patch("sys.argv", ["release_cut", "catchup"]),
