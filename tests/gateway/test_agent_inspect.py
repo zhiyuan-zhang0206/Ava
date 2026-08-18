@@ -30,6 +30,7 @@ from fastapi.testclient import TestClient
 from gateway import loki_events
 from gateway.app import app
 from gateway.loki_events import _weighted_quantile
+from gateway.routers import _agent_cost
 from shared.config import settings
 
 
@@ -219,12 +220,53 @@ class _FakeLoki:
 @pytest.fixture(autouse=True)
 def fake_loki(monkeypatch: pytest.MonkeyPatch) -> _FakeLoki:
     """Route all loki_events calls through an in-memory fake; each test gets
-    an empty store and adds its own rows."""
+    an empty store and adds its own rows. The cost TTL cache is cleared on
+    both sides so no test serves another test's cached AgentCost."""
     fake = _FakeLoki()
     monkeypatch.setattr(loki_events, "query_events", fake.query_events)
     monkeypatch.setattr(loki_events, "count_events", fake.count_events)
     monkeypatch.setattr(loki_events, "attribute_aggregate", fake.attribute_aggregate)
+    _agent_cost.cache_clear()
     return fake
+
+
+def _ledger_row(
+    db: psycopg.Connection,
+    *,
+    agent_id: int,
+    days_ago: int,
+    model: str = "claude-opus-4-8",
+    calls: int = 1,
+    tin: int = 0,
+    tout: int = 0,
+    tcached: int = 0,
+    treason: int = 0,
+    cost: float = 0.0,
+    costed: int | None = None,
+    unpriced: int = 0,
+) -> None:
+    """INSERT one agent_model_tokens_daily ledger row `days_ago` UTC days back
+    (the durable whole-life cost store the maintenance rollup writes)."""
+    with db.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agent_model_tokens_daily (agent_id, day, model, llm_calls, "
+            "tokens_in, tokens_out, tokens_cached, tokens_reasoning, cost_usd, "
+            "costed_calls, unpriced_calls) VALUES "
+            "(%s, (now() AT TIME ZONE 'UTC')::date - %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+            (
+                agent_id,
+                days_ago,
+                model,
+                calls,
+                tin,
+                tout,
+                tcached,
+                treason,
+                cost,
+                calls if costed is None else costed,
+                unpriced,
+            ),
+        )
 
 
 def _insert_pending_inbound(
@@ -414,21 +456,18 @@ def test_inspect_audit_rows_excluded_from_cost_and_stats(
 def test_inspect_cost_is_cumulative_no_window(
     db_conn: psycopg.Connection, fake_loki: _FakeLoki
 ) -> None:
-    """cost accumulated since spawn —— 200h old llm_usage also counted (no time window),
-    contrasting with the dashboard's 24h window. Lock field names: in_total/out_total/cache_read/reasoning."""
+    """Whole-life cost reads the daily ledger — a rolled day far older than
+    Loki retention still counts (no time window), contrasting with the
+    dashboard's 24h window. Lock field names: tokens_in/out/reasoning."""
     aid = _insert_agent(db_conn)
-    # claude-opus-4-8 (5, 5, 25) USD/M: in=1M out=1M cache=0 → 30.0, 200h ago
-    fake_loki.add(
-        event="llm_usage",
+    _ledger_row(
+        db_conn,
         agent_id=aid,
-        payload={
-            "in_total": 1_000_000,
-            "out_total": 1_000_000,
-            "cache_read": 0,
-            "reasoning": 12345,
-            "model": "claude-opus-4-8",
-        },
-        ts_offset_hours=200,
+        days_ago=10,
+        tin=1_000_000,
+        tout=1_000_000,
+        treason=12345,
+        cost=30.0,
     )
     db_conn.commit()
     with TestClient(app) as client:
@@ -442,16 +481,14 @@ def test_inspect_cost_is_cumulative_no_window(
     assert cost["unpriced_calls"] == 0
 
 
-def test_inspect_whole_life_window_bounded_to_loki_limit(
+def test_inspect_whole_life_tail_bounded_to_retention(
     db_conn: psycopg.Connection, fake_loki: _FakeLoki
 ) -> None:
-    """Regression (2026-08-12 prod inspector 500): whole-life queries used a
-    far-past sentinel (2000-01-01); real Loki rejects windows older than its
-    max_query_length guardrail (30d1h) with a 400, and the gateway surfaced
-    it as a 500. The fake models that guardrail, and whole-life windows are
-    now capped at `_whole_life_start()` (now − 30d): a no-hours inspect
-    succeeds, and rows older than the cap (which real Loki would not even
-    retain) fall outside the cumulative window."""
+    """With no rolled ledger day, the whole-life Loki tail starts at the
+    retention floor (now − 168h): a Loki row older than retention (which
+    real Loki would not even hold) falls outside; a recent snapshot row
+    counts. No far-past sentinel, no max_query_length 400 (the 2026-08-12
+    prod inspector 500)."""
     aid = _insert_agent(db_conn)
     # 40d-old llm_usage — beyond Loki's reach; must not be counted
     fake_loki.add(
@@ -473,6 +510,7 @@ def test_inspect_whole_life_window_bounded_to_loki_limit(
             "out_total": 1_000_000,
             "cache_read": 0,
             "model": "claude-opus-4-8",
+            "cost_usd": 30.0,
         },
         ts_offset_hours=1,
     )
@@ -525,67 +563,20 @@ def test_inspect_cost_scoped_to_agent(db_conn: psycopg.Connection, fake_loki: _F
     assert body["cost"]["llm_calls"] == 0
 
 
-def _insert_event(
-    db: psycopg.Connection,
-    *,
-    agent_id: int,
-    event: str = "llm_usage",
-    payload: dict | None = None,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
-    ts_offset_hours: float = 0,
-    category: str = "telemetry",
-) -> None:
-    """INSERT one event row into the PG `events` archive (the frozen
-    pre-LGTM history the inspector now reads for the pre-cutover era)."""
-    with db.cursor() as cur:
-        cur.execute(
-            "INSERT INTO events (ts, agent_id, level, event_name, attributes, "
-            "machine, process, category, source) "
-            "VALUES (now() - %s * interval '1 hour', %s, 'info', %s, %s::jsonb, "
-            "'test', 'test', %s, 'test')",
-            (ts_offset_hours, agent_id, event, json.dumps(payload or {}), category),
-        )
-
-
-def _archive_boundary_anchor(db_conn: psycopg.Connection, *, agent_id: int) -> None:
-    """Pin the archive's freeze point to ~now: the inspector partitions the
-    timeline at max(events.ts), so a test mixing archive-era rows (old ts)
-    with Loki rows (ts≈now) must insert a boundary anchor — otherwise the
-    oldest archive row would BE the boundary and sit outside its own window
-    (`ts < boundary`). A turn_end row serves as the freeze marker."""
-    _insert_event(
-        db_conn,
-        agent_id=agent_id,
-        event="turn_end",
-        payload={"ok": True, "duration_seconds": 1.0},
-        ts_offset_hours=0.1,
-    )
-
-
-def test_inspect_archive_history_counts_in_whole_life(
+def test_inspect_whole_life_ledger_plus_tail_no_double_count(
     db_conn: psycopg.Connection, fake_loki: _FakeLoki
 ) -> None:
-    """Task #1273 regression: the LGTM cutover made the inspector read Loki
-    only, and Loki's storage was born at the cutover (~7d retention) — an
-    agent's whole-life cost silently collapsed to the Loki window (405:
-    ~$14.5 history shown as $0.74). The frozen PG `events` archive now serves
-    the pre-cutover era: a 40d-old archive row (beyond Loki's reach entirely)
-    counts, and the Loki row at ts≈now counts once — no double count across
-    the boundary, both sides price the same model."""
+    """Task #1273 regression class: whole-life cost must not collapse to the
+    Loki window (405: ~$14.5 history shown as $0.74). The daily ledger
+    serves history — including days beyond Loki's reach — and the Loki tail
+    starts at the midnight AFTER the newest rolled day, so a row already
+    rolled is never counted twice and a maintenance-daemon lag widens the
+    tail instead of opening a hole: the 2-days-ago Loki row (after the
+    3-days-ago watermark) counts exactly once."""
     aid = _insert_agent(db_conn)
-    # 40d old — real Loki neither retains it nor accepts the query window
-    _insert_event(
-        db_conn,
-        agent_id=aid,
-        payload={
-            "in_total": 1_000_000,
-            "out_total": 1_000_000,
-            "cache_read": 0,
-            "model": "claude-opus-4-8",
-        },
-        ts_offset_hours=40 * 24,
-    )
-    _archive_boundary_anchor(db_conn, agent_id=aid)
-    # Loki-era row (ts≈now) — same model, priced identically
+    _ledger_row(db_conn, agent_id=aid, days_ago=40, tin=1_000_000, tout=1_000_000, cost=30.0)
+    _ledger_row(db_conn, agent_id=aid, days_ago=3, tin=500_000, tout=500_000, cost=15.0)
+    # In Loki AND after the watermark (2d < 3d) — the tail's responsibility.
     fake_loki.add(
         event="llm_usage",
         agent_id=aid,
@@ -594,16 +585,17 @@ def test_inspect_archive_history_counts_in_whole_life(
             "out_total": 500_000,
             "cache_read": 0,
             "model": "claude-opus-4-8",
+            "cost_usd": 15.0,
         },
+        ts_offset_hours=2 * 24,
     )
     db_conn.commit()
     with TestClient(app) as client:
         body = client.get(f"/api/agents/{aid}/inspect").json()
     cost = body["cost"]
-    assert cost["llm_calls"] == 2
-    assert cost["tokens_in"] == 1_500_000
-    # (1M+0.5M in, 1M+0.5M out) at claude-opus-4-8 (5, .5, 25)/M → 30 + 15
-    assert cost["cost_usd"] == pytest.approx(45.0)  # pyright: ignore[reportUnknownMemberType]
+    assert cost["llm_calls"] == 3
+    assert cost["tokens_in"] == 2_000_000
+    assert cost["cost_usd"] == pytest.approx(60.0)  # pyright: ignore[reportUnknownMemberType]
     assert cost["unpriced_calls"] == 0
 
 
@@ -616,19 +608,15 @@ def test_inspect_snapshot_cost_immune_to_registry_changes(
     registry would compute today; the response must equal the snapshots, not
     the registry math."""
     aid = _insert_agent(db_conn)
-    _insert_event(
+    _ledger_row(
         db_conn,
         agent_id=aid,
-        payload={
-            "in_total": 1_000_000,
-            "out_total": 1_000_000,
-            "cache_read": 0,
-            "model": "deepseek-v4-pro",
-            "cost_usd": 50.0,
-        },
-        ts_offset_hours=3 * 24,
+        days_ago=3,
+        model="deepseek-v4-pro",
+        tin=1_000_000,
+        tout=1_000_000,
+        cost=50.0,
     )
-    _archive_boundary_anchor(db_conn, agent_id=aid)
     fake_loki.add(
         event="llm_usage",
         agent_id=aid,
@@ -647,32 +635,29 @@ def test_inspect_snapshot_cost_immune_to_registry_changes(
     assert cost["cost_usd"] == pytest.approx(149.0)  # pyright: ignore[reportUnknownMemberType]
     # tokens still aggregate normally alongside the snapshotted cost
     assert cost["tokens_in"] == 2_000_000
-    assert cost["estimated_calls"] == 0
+    assert cost["unpriced_calls"] == 0
 
 
-def test_inspect_legacy_rows_estimated_at_read_time(
+def test_inspect_snapshotless_rows_are_unpriced(
     db_conn: psycopg.Connection, fake_loki: _FakeLoki
 ) -> None:
-    """Rows written before the snapshot shipped carry no cost_usd; the read
-    side prices exactly those rows via cost_usd (current catalog + retired
-    ledger) and counts them as estimated_calls — the honest marker for
-    read-time-priced legacy rows. A mixed model: snapshot row + legacy row
-    both count once, legacy priced on its own tokens only."""
+    """A row without a stored cost snapshot contributes 0 and counts in
+    unpriced_calls — there is no read-time re-pricing (cost is billed at
+    usage time or not at all). Mixed model: the snapshot row's cost is the
+    whole figure; both rows count as calls."""
     aid = _insert_agent(db_conn)
-    _insert_event(
-        db_conn,
+    fake_loki.add(
+        event="llm_usage",
         agent_id=aid,
         payload={
             "in_total": 1_000_000,
             "out_total": 0,
-            "cache_read": 1_000_000,  # full cache hit → $0.50
+            "cache_read": 1_000_000,
             "model": "gpt-5.6-sol",
             "cost_usd": 0.5,
         },
         ts_offset_hours=1,
     )
-    _archive_boundary_anchor(db_conn, agent_id=aid)
-    # legacy row: in=1M, cached=1M → priced at read time: 1M * $0.50/M
     fake_loki.add(
         event="llm_usage",
         agent_id=aid,
@@ -688,21 +673,18 @@ def test_inspect_legacy_rows_estimated_at_read_time(
         body = client.get(f"/api/agents/{aid}/inspect").json()
     cost = body["cost"]
     assert cost["llm_calls"] == 2
-    assert cost["estimated_calls"] == 1
-    assert cost["unpriced_calls"] == 0
-    assert cost["cost_usd"] == pytest.approx(1.0)  # pyright: ignore[reportUnknownMemberType]
+    assert cost["unpriced_calls"] == 1
+    assert cost["cost_usd"] == pytest.approx(0.5)  # pyright: ignore[reportUnknownMemberType]
 
 
-def test_inspect_retired_model_priced_via_ledger(
+def test_inspect_no_read_time_pricing_even_for_known_models(
     db_conn: psycopg.Connection, fake_loki: _FakeLoki
 ) -> None:
-    """A model removed from the registry (gemini-3.6-flash, retired 2026-08-13)
-    keeps its historical price via RETIRED_MODEL_PRICING — historical rows
-    must not silently drop out of cost when a model retires. The Grafana
-    registry-derived panels had exactly this bug (3.6 rows dropped); the
-    inspector's legacy path prices them from the ledger."""
+    """The pricing registry is never consulted at read time: a snapshot-less
+    row of a model the registry DOES know still lands as unpriced with 0
+    cost. (Usage-time billing only — the emitter stamps the snapshot or the
+    unpriced marker at the call; the read side just sums.)"""
     aid = _insert_agent(db_conn)
-    _archive_boundary_anchor(db_conn, agent_id=aid)
     fake_loki.add(
         event="llm_usage",
         agent_id=aid,
@@ -710,48 +692,51 @@ def test_inspect_retired_model_priced_via_ledger(
             "in_total": 1_000_000,
             "out_total": 1_000_000,
             "cache_read": 0,
-            "model": "gemini-3.6-flash",
+            "model": "claude-opus-4-8",
         },
     )
     db_conn.commit()
     with TestClient(app) as client:
         body = client.get(f"/api/agents/{aid}/inspect").json()
     cost = body["cost"]
-    # ledger (1.5, 0.15, 7.5)/M → 1.5 + 7.5
-    assert cost["cost_usd"] == pytest.approx(9.0)  # pyright: ignore[reportUnknownMemberType]
-    assert cost["estimated_calls"] == 1
-    assert cost["unpriced_calls"] == 0
+    assert cost["cost_usd"] == 0
+    assert cost["unpriced_calls"] == 1
+    assert cost["llm_calls"] == 1
 
 
-def test_inspect_hours_window_crosses_archive_boundary(
+def test_inspect_hours_window_is_loki_only(
     db_conn: psycopg.Connection, fake_loki: _FakeLoki
 ) -> None:
-    """An hours window that reaches into the archive era (here: the anchor
-    pins the boundary at ~now, so the whole 168h window is archive-era)
-    counts the archive rows — the window selector scopes the stitched
-    timeline, not just Loki."""
+    """An hours window (StatsWindowHours caps at 168h = Loki retention)
+    aggregates pure Loki: rolled ledger days do NOT leak into it, the
+    window scopes by event ts, and whole-life still sees both stores."""
     aid = _insert_agent(db_conn)
-    _insert_event(
-        db_conn,
+    _ledger_row(db_conn, agent_id=aid, days_ago=20, tin=1_000_000, cost=30.0)
+    fake_loki.add(
+        event="llm_usage",
         agent_id=aid,
         payload={
             "in_total": 1_000_000,
             "out_total": 1_000_000,
             "cache_read": 0,
             "model": "claude-opus-4-8",
+            "cost_usd": 2.0,
         },
         ts_offset_hours=100,
     )
-    _archive_boundary_anchor(db_conn, agent_id=aid)
     db_conn.commit()
     with TestClient(app) as client:
         body = client.get(f"/api/agents/{aid}/inspect?hours=168").json()
         body24 = client.get(f"/api/agents/{aid}/inspect?hours=24").json()
+        whole = client.get(f"/api/agents/{aid}/inspect").json()
     cost = body["cost"]
     assert cost["llm_calls"] == 1
-    assert cost["cost_usd"] == pytest.approx(30.0)  # pyright: ignore[reportUnknownMemberType]
+    assert cost["cost_usd"] == pytest.approx(2.0)  # pyright: ignore[reportUnknownMemberType]
     # 24h window: the 100h-old row is outside
     assert body24["cost"]["llm_calls"] == 0
+    # whole life: ledger day + Loki tail
+    assert whole["cost"]["llm_calls"] == 2
+    assert whole["cost"]["cost_usd"] == pytest.approx(32.0)  # pyright: ignore[reportUnknownMemberType]
 
 
 def test_inspect_turn_stats(db_conn: psycopg.Connection, fake_loki: _FakeLoki) -> None:
@@ -830,6 +815,7 @@ def test_inspect_hours_windows_cost_and_stats(
             "out_total": 1_000_000,
             "cache_read": 0,
             "model": "claude-opus-4-8",
+            "cost_usd": 30.0,
         },
         ts_offset_hours=25,
     )
@@ -848,6 +834,7 @@ def test_inspect_hours_windows_cost_and_stats(
             "out_total": 40_000,
             "cache_read": 0,
             "model": "claude-opus-4-8",
+            "cost_usd": 2.0,
         },
         ts_offset_hours=1,
     )
@@ -861,12 +848,12 @@ def test_inspect_hours_windows_cost_and_stats(
     with TestClient(app) as client:
         windowed = client.get(f"/api/agents/{aid}/inspect", params={"hours": 24}).json()
         cumulative = client.get(f"/api/agents/{aid}/inspect").json()
-    # windowed: only the 1h row. opus-4-8 (5,5,25): 0.2M*5 + 0.04M*25 = 1.0 + 1.0 = 2.0
+    # windowed: only the 1h row (its stored snapshot, 2.0)
     assert windowed["window_hours"] == 24
     assert windowed["cost"]["llm_calls"] == 1
     assert windowed["cost"]["cost_usd"] == pytest.approx(2.0)  # pyright: ignore[reportUnknownMemberType]
     assert windowed["stats"]["turn_total"] == 1
-    # cumulative: both rows. 25h: 1M*5 + 1M*25 = 30.0; 1h: 2.0 -> 32.0; turns 2
+    # cumulative (whole life, empty ledger -> full-retention tail): 30 + 2; turns 2
     assert cumulative["window_hours"] is None
     assert cumulative["cost"]["llm_calls"] == 2
     assert cumulative["cost"]["cost_usd"] == pytest.approx(32.0)  # pyright: ignore[reportUnknownMemberType]
@@ -889,6 +876,7 @@ def test_inspect_since_compact_windows_cost_and_stats(
             "out_total": 1_000_000,
             "cache_read": 0,
             "model": "claude-opus-4-8",
+            "cost_usd": 30.0,
         },
         ts_offset_hours=5,
     )
@@ -914,6 +902,7 @@ def test_inspect_since_compact_windows_cost_and_stats(
             "out_total": 40_000,
             "cache_read": 0,
             "model": "claude-opus-4-8",
+            "cost_usd": 2.0,
         },
         ts_offset_hours=2,
     )
@@ -930,7 +919,7 @@ def test_inspect_since_compact_windows_cost_and_stats(
         ).json()
     assert body["since_compact"] is True
     assert body["window_hours"] is None
-    # only the post-compact call: opus-4-8 (5,5,25): 0.2M*5 + 0.04M*25 = 2.0
+    # only the post-compact call: its stored snapshot, 2.0
     assert body["cost"]["llm_calls"] == 1
     assert body["cost"]["cost_usd"] == pytest.approx(2.0)  # pyright: ignore[reportUnknownMemberType]
     assert body["stats"]["turn_total"] == 1
@@ -942,17 +931,7 @@ def test_inspect_since_compact_never_compacted_is_cumulative(
 ) -> None:
     """Agent never compacted + since_compact=true → entire lifetime is in window."""
     aid = _insert_agent(db_conn)
-    fake_loki.add(
-        event="llm_usage",
-        agent_id=aid,
-        payload={
-            "in_total": 1_000_000,
-            "out_total": 1_000_000,
-            "cache_read": 0,
-            "model": "claude-opus-4-8",
-        },
-        ts_offset_hours=200,
-    )
+    _ledger_row(db_conn, agent_id=aid, days_ago=9, tin=1_000_000, tout=1_000_000, cost=30.0)
     db_conn.commit()
     with TestClient(app) as client:
         body = client.get(f"/api/agents/{aid}/inspect", params={"since_compact": "true"}).json()

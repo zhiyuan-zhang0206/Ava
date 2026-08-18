@@ -227,7 +227,7 @@
     "/api/models": {
       "get": {
         "summary": "Get Models",
-        "description": "List selectable LLM models (grouped by provider) + the cluster default.\n\nSource of truth is the model registry (`shared/lm/registry.py:MODELS`);\nthe default mirrors `settings.lm.llm_model` so the UI can pre-select it.",
+        "description": "List selectable LLM models (grouped by provider) + the cluster default.\n\nRoster and tuning come from the model registry; current rates come from\nthe versioned pricing catalog. The default mirrors `settings.lm.llm_model`\nso the UI can pre-select it.",
         "operationId": "get_models_api_models_get",
         "responses": {
           "200": {
@@ -5624,11 +5624,6 @@
             "minimum": 0.0,
             "title": "Unpriced Calls"
           },
-          "estimated_calls": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Estimated Calls"
-          },
           "llm_calls": {
             "type": "integer",
             "minimum": 0.0,
@@ -5665,7 +5660,6 @@
         "required": [
           "cost_usd",
           "unpriced_calls",
-          "estimated_calls",
           "llm_calls",
           "tokens_in",
           "tokens_out",
@@ -5674,7 +5668,7 @@
           "cache_hit_pct"
         ],
         "title": "AgentCost",
-        "description": "Cumulative LLM spend + token usage for one agent over its whole life —\nevery `llm_usage` event under its agent_id (the agent's \"session\", which\nspans restarts/resurrects since agent_id is stable). `cost_usd` sums the\nrows' usage-time price snapshots plus read-time pricing of the legacy rows\nthat predate them (via `shared.lm.pricing.cost_usd`, retired-model ledger\nincluded). Calls on an unpriced model contribute 0 to cost and are counted\nin `unpriced_calls`; legacy rows priced at read time instead of from a\nstored snapshot count in `estimated_calls`. `cache_hit_pct` = cache_read /\ninput * 100; input=0 degrades to 0."
+        "description": "LLM spend + token usage for one agent over the requested window (whole\nlife = ledger days + today's live tail; every `llm_usage` event under its\nagent_id — the agent's \"session\", which spans restarts/resurrects since\nagent_id is stable). `cost_usd` sums the rows' usage-time price snapshots\nonly — never re-priced against the current registry. Calls without a\nsnapshot (unpriced model) contribute 0 to cost and are counted in\n`unpriced_calls`. `cache_hit_pct` = cache_read / input * 100; input=0\ndegrades to 0."
       },
       "AgentEventRow": {
         "properties": {

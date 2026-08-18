@@ -20,21 +20,19 @@ from shared.agent_snapshot import OpenNotice
 
 
 class AgentCost(BaseModel):
-    """Cumulative LLM spend + token usage for one agent over its whole life —
-    every `llm_usage` event under its agent_id (the agent's "session", which
-    spans restarts/resurrects since agent_id is stable). `cost_usd` sums the
-    rows' usage-time price snapshots plus read-time pricing of the legacy rows
-    that predate them (via `shared.lm.pricing.cost_usd`, retired-model ledger
-    included). Calls on an unpriced model contribute 0 to cost and are counted
-    in `unpriced_calls`; legacy rows priced at read time instead of from a
-    stored snapshot count in `estimated_calls`. `cache_hit_pct` = cache_read /
-    input * 100; input=0 degrades to 0."""
+    """LLM spend + token usage for one agent over the requested window (whole
+    life = ledger days + today's live tail; every `llm_usage` event under its
+    agent_id — the agent's "session", which spans restarts/resurrects since
+    agent_id is stable). `cost_usd` sums the rows' usage-time price snapshots
+    only — never re-priced against the current registry. Calls without a
+    snapshot (unpriced model) contribute 0 to cost and are counted in
+    `unpriced_calls`. `cache_hit_pct` = cache_read / input * 100; input=0
+    degrades to 0."""
 
     model_config = ConfigDict(frozen=True)
 
     cost_usd: float = Field(ge=0)
     unpriced_calls: NonNegativeInt
-    estimated_calls: NonNegativeInt
     llm_calls: NonNegativeInt
     tokens_in: NonNegativeInt
     tokens_out: NonNegativeInt

@@ -1,103 +1,252 @@
-# ruff: noqa: S608 — SQL constants interpolate only registry-derived key fragments (shared/events/contract.py); all values ride %(name)s placeholders
-"""Since-Birth rollup — recompute the day-grain aggregates from `events`.
+"""Since-Birth rollup — day-grain aggregates, sourced from Loki.
 
-The single source of truth for the rollup aggregation SQL (backfill and
-steady-state are the same code path — a fresh cluster whose rollup tables are
-empty backfills all history; a live cluster re-rolls only the recent tail). The
-daemon (`services.events_maintenance.daemon`) calls `compute_rollup` on its poll
-loop; tests call it directly against a testcontainers DB.
+The unified event stream lives in Loki since the LGTM cutover (the PG
+`events` copy is a frozen archive; its last-ever code read was the
+llm-cost-rollup-columns migration backfill). Each maintenance pass rolls
+whole UTC days up to yesterday into:
 
-Day boundary is UTC midnight. The rollup covers only *whole* days up to
-yesterday — today is still being written, so the since-birth readers serve it
-live and stitch `rollup WHERE day < today` + `raw rows WHERE ts >= today 00:00
-UTC` (PR3). The two upserts must therefore stop exactly at today's UTC midnight,
-which is why the input window's exclusive upper bound is `today 00:00 UTC`.
+- ``agent_model_tokens_daily`` — per (agent, day, model): calls, token sums,
+  and the cost ledger columns (cost_usd = summed usage-time price snapshots,
+  costed_calls / unpriced_calls). Money is summed at usage-time rates, never
+  re-priced.
+- ``agent_metrics_daily`` — per (agent, day): turn totals/ok/durations and
+  the exec ok/failed split.
 
-The upsert is a **full-day overwrite recompute** keyed on the PK — it re-derives
-each day's aggregate from the raw rows and overwrites, so a re-run never
-double-counts (unlike an incremental accumulate). The `events` stream is append-only, so
-a recompute can only add rows or raise a group's totals, never orphan a stale
-rollup row; upsert-without-delete is therefore complete. Each run also re-rolls
-the last `lookback_days` already-rolled days so a late write into a closed day is
-picked up.
+Same idempotence contract as the PG-sourced predecessor: a **full-day
+overwrite recompute** keyed on the PK — re-running a day re-derives and
+overwrites, never double-counts. Each run re-rolls the last
+``lookback_days`` already-rolled days so a late OTLP write into a closed
+day is picked up.
 
-Field extraction mirrors the live readers exactly (so PR3 can diff the rollup
-against the pre-change numbers):
-  - tokens  ← llm_usage payload: model / in_total / out_total / cache_read /
-              reasoning   (see agent_inspect._agent_cost, fleet_graph total_tokens)
-  - turns   ← turn_end payload: ok / duration_seconds
-  - exec_ok ← event_name = 'exec'; exec_failed ← event_name LIKE 'exec_%' / 'exec(%'
-              (see agent_inspect._agent_stats, the metrics report's exec split)
+Loki bounds what is recoverable: retention is 7d
+(deploy/local/lgtm/config/loki.yaml `retention_period: 168h`), so the
+recompute window clamps to the first FULLY-retained day — a maintenance
+outage longer than retention loses those days' aggregates (logged loudly;
+the JSONL mirror remains the manual recovery source). The clamp also
+protects history: a day at/below the floor is never recomputed, so
+archive-backfilled rows cannot be overwritten with zeros.
+
+Day boundary is UTC midnight; each day aggregates as Loki instant queries
+evaluated at day end over a 24h range vector (Loki's (start, end] vs the
+old SQL's [start, end) differ only at the exact midnight nanosecond).
+
+Test seam: ``_day_aggregates`` is the single Loki-facing function — tests
+monkeypatch it and drive the watermark/clamp/upsert logic against a real
+throwaway Postgres; the LogQL builders have their own string-shape tests.
 """
 
 from __future__ import annotations
 
+import json
+import urllib.parse
+import urllib.request
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
-from typing import LiteralString, cast
 
 import psycopg
 from psycopg import sql
 
-from shared.events.contract import LLM_USAGE_KEYS, TURN_END_KEYS
+from shared.log import logger
 
-# tokens: per (agent, UTC-day, model). model '' folds the llm_usage rows with no
-# model field (COALESCE), matching how the cost reader groups the `model` key.
-# Bounded by ts (sargable on the (event, ts DESC) index) then grouped by UTC day.
-_TOKENS_UPSERT: LiteralString = cast(
-    LiteralString,
-    f"""
+# First fully-retained day: Loki prunes past retention_period (168h), so a
+# day is recomputable only when its 00:00 start is still inside retention.
+_LOKI_RETENTION = timedelta(hours=168)
+
+# The OTLP log stream selector. Single catch-all until the logs-side OTel
+# Resource lands (its coordinated change rewrites every selector site).
+_SELECTOR = '{service_name="unknown_service"}'
+
+_HTTP_TIMEOUT_S = 60.0
+
+
+@dataclass(frozen=True)
+class TokensRow:
+    """One (agent, model) group of one day's llm_usage aggregation."""
+
+    agent_id: int
+    model: str
+    calls: int
+    costed_calls: int
+    unpriced_calls: int
+    tokens_in: int
+    tokens_out: int
+    tokens_cached: int
+    tokens_reasoning: int
+    cost_usd: float
+
+
+@dataclass(frozen=True)
+class MetricsRow:
+    """One agent's turn/exec aggregates for one day."""
+
+    agent_id: int
+    turn_total: int
+    turn_ok: int
+    turn_dur_sum: float
+    turn_dur_min: float | None
+    turn_dur_max: float | None
+    exec_ok: int
+    exec_failed: int
+
+
+@dataclass(frozen=True)
+class RollupResult:
+    """What one `compute_rollup` run covered. `start_day`/`end_day` are the
+    inclusive UTC-day range recomputed (None when the run was a no-op — no
+    whole retained day to roll yet); `*_rows` are the upsert row counts."""
+
+    start_day: date | None
+    end_day: date | None
+    metrics_rows: int
+    tokens_rows: int
+
+
+# ── LogQL builders ───────────────────────────────────────────────────────────
+
+_LLM_PIPE = f'{_SELECTOR} | agent_id!="" | category=~"telemetry|log" | event_name="llm_usage"'
+_TURN_PIPE = f'{_SELECTOR} | agent_id!="" | category=~"telemetry|log" | event_name="turn_end"'
+_EXEC_OK_PIPE = f'{_SELECTOR} | agent_id!="" | event_name="exec"'
+# exec_failed = every exec outcome other than plain 'exec' (exec_failed /
+# exec_thread_stuck / exec(timeout)) — mirrors the old SQL LIKE pair.
+_EXEC_FAILED_PIPE = f'{_SELECTOR} | agent_id!="" | event_name=~"exec_.+|exec\\\\(.*"'
+
+_DAY_S = 86400
+
+
+def _tokens_queries() -> dict[str, str]:
+    """The per-(agent, model) instant queries for one day's tokens/cost row.
+
+    Structured-metadata dims (agent_id / event_name / category) filter
+    directly; `model` and each numeric field need their own single-extraction
+    `| json` stage (multiple extractions in one stage are a parse error)."""
+    model = ' | json model="attributes.model"'
+    out = {
+        "calls": f"sum by (agent_id, model) (count_over_time(({_LLM_PIPE}{model})[{_DAY_S}s]))",
+        "costed_calls": (
+            f"sum by (agent_id, model) (count_over_time(({_LLM_PIPE}{model}"
+            f' | json cost_usd="attributes.cost_usd" | cost_usd!="")[{_DAY_S}s]))'
+        ),
+    }
+    for name, field in (
+        ("tokens_in", "in_total"),
+        ("tokens_out", "out_total"),
+        ("tokens_cached", "cache_read"),
+        ("tokens_reasoning", "reasoning"),
+        ("cost_usd", "cost_usd"),
+    ):
+        out[name] = (
+            f"sum by (agent_id, model) (sum_over_time(({_LLM_PIPE}{model}"
+            f' | json {field}="attributes.{field}" | __error__="" | unwrap {field})'
+            f"[{_DAY_S}s]))"
+        )
+    return out
+
+
+def _metrics_queries() -> dict[str, str]:
+    """The per-agent instant queries for one day's turn/exec metrics row."""
+    dur = ' | json duration_seconds="attributes.duration_seconds" | __error__="" | unwrap duration_seconds'
+    return {
+        "turn_total": f"sum by (agent_id) (count_over_time(({_TURN_PIPE})[{_DAY_S}s]))",
+        "turn_ok": (
+            f"sum by (agent_id) (count_over_time(({_TURN_PIPE}"
+            f' | json ok="attributes.ok" | ok="true")[{_DAY_S}s]))'
+        ),
+        "turn_dur_sum": f"sum by (agent_id) (sum_over_time(({_TURN_PIPE}{dur})[{_DAY_S}s]))",
+        "turn_dur_min": f"min by (agent_id) (min_over_time(({_TURN_PIPE}{dur})[{_DAY_S}s]))",
+        "turn_dur_max": f"max by (agent_id) (max_over_time(({_TURN_PIPE}{dur})[{_DAY_S}s]))",
+        "exec_ok": f"sum by (agent_id) (count_over_time(({_EXEC_OK_PIPE})[{_DAY_S}s]))",
+        "exec_failed": f"sum by (agent_id) (count_over_time(({_EXEC_FAILED_PIPE})[{_DAY_S}s]))",
+    }
+
+
+# ── Loki I/O ─────────────────────────────────────────────────────────────────
+
+
+def _query_instant(logql: str, at: datetime) -> list[tuple[dict[str, str], float]]:
+    """One Loki instant query; returns [(labels, value)]. Raises on transport
+    or HTTP failure — the daemon pass reports and retries next round (a
+    silently-zero day would be worse than a loud skip)."""
+    from shared.config import settings
+
+    base = settings.observability.telemetry_loki_url.rstrip("/")
+    params = urllib.parse.urlencode({"query": logql, "time": at.timestamp()})
+    req = urllib.request.Request(f"{base}/loki/api/v1/query?{params}")  # noqa: S310 — settings-derived http(s) base
+    with urllib.request.urlopen(req, timeout=_HTTP_TIMEOUT_S) as resp:  # noqa: S310
+        payload = json.loads(resp.read())
+    out: list[tuple[dict[str, str], float]] = []
+    for vec in payload["data"]["result"]:
+        out.append((dict(vec["metric"]), float(vec["value"][1])))
+    return out
+
+
+def _day_aggregates(day: date) -> tuple[list[TokensRow], list[MetricsRow]]:
+    """Aggregate one whole UTC day from Loki (the test seam — patch me)."""
+    day_end = datetime.combine(day + timedelta(days=1), time.min, tzinfo=UTC)
+
+    tok: dict[tuple[int, str], dict[str, float]] = {}
+    for name, logql in _tokens_queries().items():
+        for labels, value in _query_instant(logql, day_end):
+            key = (int(labels["agent_id"]), labels.get("model", ""))
+            tok.setdefault(key, {})[name] = value
+    tokens_rows = [
+        TokensRow(
+            agent_id=agent_id,
+            model=model,
+            calls=int(v.get("calls", 0)),
+            costed_calls=int(v.get("costed_calls", 0)),
+            unpriced_calls=int(v.get("calls", 0)) - int(v.get("costed_calls", 0)),
+            tokens_in=int(v.get("tokens_in", 0)),
+            tokens_out=int(v.get("tokens_out", 0)),
+            tokens_cached=int(v.get("tokens_cached", 0)),
+            tokens_reasoning=int(v.get("tokens_reasoning", 0)),
+            cost_usd=float(v.get("cost_usd", 0.0)),
+        )
+        for (agent_id, model), v in tok.items()
+    ]
+
+    met: dict[int, dict[str, float]] = {}
+    for name, logql in _metrics_queries().items():
+        for labels, value in _query_instant(logql, day_end):
+            met.setdefault(int(labels["agent_id"]), {})[name] = value
+    metrics_rows = [
+        MetricsRow(
+            agent_id=agent_id,
+            turn_total=int(v.get("turn_total", 0)),
+            turn_ok=int(v.get("turn_ok", 0)),
+            turn_dur_sum=float(v.get("turn_dur_sum", 0.0)),
+            turn_dur_min=v.get("turn_dur_min"),
+            turn_dur_max=v.get("turn_dur_max"),
+            exec_ok=int(v.get("exec_ok", 0)),
+            exec_failed=int(v.get("exec_failed", 0)),
+        )
+        for agent_id, v in met.items()
+    ]
+    return tokens_rows, metrics_rows
+
+
+# ── upserts ──────────────────────────────────────────────────────────────────
+
+_TOKENS_UPSERT = """
     INSERT INTO agent_model_tokens_daily
-        (agent_id, day, model, llm_calls, tokens_in, tokens_out, tokens_cached, tokens_reasoning)
-    SELECT agent_id,
-           (ts AT TIME ZONE 'UTC')::date AS day,
-           COALESCE({LLM_USAGE_KEYS["model"]}, '') AS model,
-           COUNT(*),
-           COALESCE(SUM(({LLM_USAGE_KEYS["in_total"]})::bigint), 0),
-           COALESCE(SUM(({LLM_USAGE_KEYS["out_total"]})::bigint), 0),
-           COALESCE(SUM(({LLM_USAGE_KEYS["cache_read"]})::bigint), 0),
-           COALESCE(SUM(({LLM_USAGE_KEYS["reasoning"]})::bigint), 0)
-    FROM events
-    WHERE event_name = 'llm_usage'
-      AND agent_id IS NOT NULL
-      AND ts >= %(start_ts)s AND ts < %(end_ts)s
-    GROUP BY agent_id, (ts AT TIME ZONE 'UTC')::date, COALESCE({LLM_USAGE_KEYS["model"]}, '')
+        (agent_id, day, model, llm_calls, tokens_in, tokens_out, tokens_cached,
+         tokens_reasoning, cost_usd, costed_calls, unpriced_calls)
+    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
     ON CONFLICT (agent_id, day, model) DO UPDATE SET
         llm_calls        = EXCLUDED.llm_calls,
         tokens_in        = EXCLUDED.tokens_in,
         tokens_out       = EXCLUDED.tokens_out,
         tokens_cached    = EXCLUDED.tokens_cached,
-        tokens_reasoning = EXCLUDED.tokens_reasoning
-""",
-)
+        tokens_reasoning = EXCLUDED.tokens_reasoning,
+        cost_usd         = EXCLUDED.cost_usd,
+        costed_calls     = EXCLUDED.costed_calls,
+        unpriced_calls   = EXCLUDED.unpriced_calls
+"""
 
-# metrics: per (agent, UTC-day). One scan over turn_end + exec-family rows, split
-# by conditional FILTER. exec_failed = every exec outcome other than plain 'exec'
-# (exec_failed / exec_thread_stuck / exec(timeout)); `\_` escapes LIKE's `_`
-# wildcard and `%%` is a literal `%` (psycopg placeholder escaping). Raw string so
-# Python does not choke on `\_`.
-_METRICS_UPSERT: LiteralString = cast(
-    LiteralString,
-    rf"""
+_METRICS_UPSERT = """
     INSERT INTO agent_metrics_daily
-        (agent_id, day, turn_total, turn_ok, turn_dur_sum, turn_dur_min, turn_dur_max,
-         exec_ok, exec_failed)
-    SELECT agent_id,
-           (ts AT TIME ZONE 'UTC')::date AS day,
-           COUNT(*) FILTER (WHERE event_name = 'turn_end'),
-           COUNT(*) FILTER (WHERE event_name = 'turn_end' AND {TURN_END_KEYS["ok"]} = 'true'),
-           COALESCE(SUM(({TURN_END_KEYS["duration_seconds"]})::float)
-                    FILTER (WHERE event_name = 'turn_end'), 0),
-           MIN(({TURN_END_KEYS["duration_seconds"]})::float) FILTER (WHERE event_name = 'turn_end'),
-           MAX(({TURN_END_KEYS["duration_seconds"]})::float) FILTER (WHERE event_name = 'turn_end'),
-           COUNT(*) FILTER (WHERE event_name = 'exec'),
-           COUNT(*) FILTER (WHERE event_name LIKE 'exec\_%%' OR event_name LIKE 'exec(%%')
-    FROM events
-    WHERE agent_id IS NOT NULL
-      AND (event_name = 'turn_end' OR event_name = 'exec'
-           OR event_name LIKE 'exec\_%%' OR event_name LIKE 'exec(%%')
-      AND ts >= %(start_ts)s AND ts < %(end_ts)s
-    GROUP BY agent_id, (ts AT TIME ZONE 'UTC')::date
+        (agent_id, day, turn_total, turn_ok, turn_dur_sum, turn_dur_min,
+         turn_dur_max, exec_ok, exec_failed)
+    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
     ON CONFLICT (agent_id, day) DO UPDATE SET
         turn_total   = EXCLUDED.turn_total,
         turn_ok      = EXCLUDED.turn_ok,
@@ -106,41 +255,13 @@ _METRICS_UPSERT: LiteralString = cast(
         turn_dur_max = EXCLUDED.turn_dur_max,
         exec_ok      = EXCLUDED.exec_ok,
         exec_failed  = EXCLUDED.exec_failed
-""",
-)
-
-
-@dataclass(frozen=True)
-class RollupResult:
-    """What one `compute_rollup` run covered. `start_day`/`end_day` are the
-    inclusive UTC-day range recomputed (None when the run was a no-op — no whole
-    day to roll yet); `*_rows` are the upsert row counts (inserted + updated)."""
-
-    start_day: date | None
-    end_day: date | None
-    metrics_rows: int
-    tokens_rows: int
+"""
 
 
 def _max_rolled_day(cur: psycopg.Cursor, table: str) -> date | None:
-    """The newest `day` already rolled into `table` (None = empty). `table` is a
-    fixed internal literal; composed via sql.Identifier for safety + typing."""
+    """The newest `day` already rolled into `table` (None = empty). `table` is
+    a fixed internal literal; composed via sql.Identifier for safety."""
     cur.execute(sql.SQL("SELECT max(day) FROM {}").format(sql.Identifier(table)))
-    row = cur.fetchone()
-    assert row is not None  # noqa: S101 — aggregate without GROUP BY always returns one row
-    return row[0]
-
-
-def _earliest_event_day(cur: psycopg.Cursor) -> date | None:
-    """The earliest UTC day carrying an agent-scoped rollup-relevant event
-    (None = no such rows). Used only for the empty-table backfill lower bound so
-    the first run does not scan from an arbitrary epoch."""
-    cur.execute(
-        r"SELECT MIN((ts AT TIME ZONE 'UTC')::date) FROM events "
-        r"WHERE agent_id IS NOT NULL "
-        r"  AND (event_name = 'llm_usage' OR event_name = 'turn_end' OR event_name = 'exec' "
-        r"       OR event_name LIKE 'exec\_%%' OR event_name LIKE 'exec(%%')"
-    )
     row = cur.fetchone()
     assert row is not None  # noqa: S101 — aggregate without GROUP BY always returns one row
     return row[0]
@@ -149,54 +270,89 @@ def _earliest_event_day(cur: psycopg.Cursor) -> date | None:
 def compute_rollup(
     conn: psycopg.Connection, *, now_utc: datetime, lookback_days: int
 ) -> RollupResult:
-    """Recompute the rollup tables for the whole days up to yesterday (UTC).
+    """Recompute the rollup tables for the whole retained days up to yesterday.
 
-    Range: `[start_day, yesterday]` where yesterday = `now_utc`'s UTC date minus
-    one day, and `start_day` is either the earliest event day (empty tables →
-    full backfill) or `min(max rolled day) - lookback_days` (steady state). The
-    end is always yesterday and the start is anchored to the last rolled day, so a
-    downtime gap of any length is fully recovered on the next run — the lookback
-    only adds slack for late writes into already-closed days.
+    Range: `[start_day, yesterday]` where `start_day` =
+    max(last-rolled-day - lookback, first fully-retained Loki day). An empty
+    table starts at the retention floor (nothing older is aggregatable from
+    Loki; older history arrives via the archive-backfill migration on
+    upgraded clusters and simply does not exist on fresh ones). A gap wider
+    than retention is reported loudly and skipped — those days are lost to
+    the rollup unless recovered manually from the JSONL mirror.
 
-    The watermark reads and both upserts run in one transaction (atomic
-    maintenance run), which also guarantees a clean commit independent of the
-    connection's autocommit mode — the caller passes a connection with no open
-    transaction (a fresh pool connection; the daemon's contract). Idempotent.
+    Watermark read + all upserts run in one transaction (atomic pass);
+    re-running is idempotent (full-day overwrite). Loki I/O happens BEFORE
+    the transaction opens so a slow Loki never holds locks.
     """
-    today = now_utc.astimezone(UTC).date()
+    now = now_utc.astimezone(UTC)
+    today = now.date()
     yesterday = today - timedelta(days=1)
+    floor_day = (now - _LOKI_RETENTION).date() + timedelta(days=1)
 
-    with conn.transaction(), conn.cursor() as cur:
+    with conn.cursor() as cur:
         max_metrics = _max_rolled_day(cur, "agent_metrics_daily")
         max_tokens = _max_rolled_day(cur, "agent_model_tokens_daily")
-        # Progress marker = the furthest day either table has reached. Both upserts
-        # run over the SAME range in ONE transaction, so a lower max in one table
-        # reflects that family's data sparsity (a day with llm_usage but no turns,
-        # or vice versa), NOT an unprocessed gap — the days were processed, they
-        # just produced no row for that family. So a table that is legitimately
-        # empty forever (a tokens-only / metrics-only workload) must not drag us
-        # back into a full-history rescan every run: take the max, not the min.
-        processed = [d for d in (max_metrics, max_tokens) if d is not None]
-        if not processed:
-            # Nothing processed yet → initial backfill from the earliest event day.
-            start_day = _earliest_event_day(cur)
-            if start_day is None:
-                return RollupResult(None, None, 0, 0)
-        else:
-            start_day = max(processed) - timedelta(days=lookback_days)
+    # Progress marker = the furthest day either table has reached (both roll
+    # over the same range each pass; a lower max means data sparsity for that
+    # family, not an unprocessed gap).
+    processed = [d for d in (max_metrics, max_tokens) if d is not None]
+    start_day = max(processed) - timedelta(days=lookback_days) if processed else floor_day
+    if start_day < floor_day:
+        if processed and max(processed) < floor_day - timedelta(days=1):
+            logger.warning(
+                "[events-maintenance] rollup gap exceeds Loki retention: "
+                f"last rolled day {max(processed)}, retention floor {floor_day} — "
+                "the days between are not aggregatable and stay missing "
+                "(manual recovery source: the JSONL telemetry mirror)"
+            )
+        start_day = floor_day
+    if start_day > yesterday:
+        return RollupResult(None, None, 0, 0)
 
-        if start_day > yesterday:
-            # Nothing has completed a whole day yet (brand-new cluster / only
-            # today's data), so there is nothing to roll.
-            return RollupResult(None, None, 0, 0)
+    # Loki I/O outside the transaction.
+    per_day: list[tuple[date, list[TokensRow], list[MetricsRow]]] = []
+    day = start_day
+    while day <= yesterday:
+        tokens_rows, metrics_rows = _day_aggregates(day)
+        per_day.append((day, tokens_rows, metrics_rows))
+        day += timedelta(days=1)
 
-        start_ts = datetime.combine(start_day, time.min, tzinfo=UTC)
-        end_ts = datetime.combine(today, time.min, tzinfo=UTC)  # exclusive: today 00:00 UTC
-        params = {"start_ts": start_ts, "end_ts": end_ts}
+    tokens_count = metrics_count = 0
+    with conn.transaction(), conn.cursor() as cur:
+        for day, tokens_rows, metrics_rows in per_day:
+            for t in tokens_rows:
+                cur.execute(
+                    _TOKENS_UPSERT,
+                    (
+                        t.agent_id,
+                        day,
+                        t.model,
+                        t.calls,
+                        t.tokens_in,
+                        t.tokens_out,
+                        t.tokens_cached,
+                        t.tokens_reasoning,
+                        t.cost_usd,
+                        t.costed_calls,
+                        t.unpriced_calls,
+                    ),
+                )
+                tokens_count += cur.rowcount
+            for m in metrics_rows:
+                cur.execute(
+                    _METRICS_UPSERT,
+                    (
+                        m.agent_id,
+                        day,
+                        m.turn_total,
+                        m.turn_ok,
+                        m.turn_dur_sum,
+                        m.turn_dur_min,
+                        m.turn_dur_max,
+                        m.exec_ok,
+                        m.exec_failed,
+                    ),
+                )
+                metrics_count += cur.rowcount
 
-        cur.execute(_TOKENS_UPSERT, params)
-        tokens_rows = cur.rowcount
-        cur.execute(_METRICS_UPSERT, params)
-        metrics_rows = cur.rowcount
-
-    return RollupResult(start_day, yesterday, metrics_rows, tokens_rows)
+    return RollupResult(start_day, yesterday, metrics_count, tokens_count)

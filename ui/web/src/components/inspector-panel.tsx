@@ -465,15 +465,14 @@ function ConfigOverlaySection({ inspect }: { inspect: AgentInspect }) {
 
 function CostSection({ inspect }: { inspect: AgentInspect }) {
   const { cost } = inspect;
-  // Legacy rows (written before the usage-time price snapshot shipped) are
-  // priced at read time; the sub-line keeps that estimate visible instead of
-  // presenting it as a stored figure. `unpriced_calls` (no known price at
-  // all) stays unshown like before.
-  const estimatedSub = cost.estimated_calls > 0 ? `${cost.estimated_calls} est.` : undefined;
+  // Cost is the sum of stored usage-time price snapshots; calls without one
+  // (unpriced model) contribute 0 and surface as the sub-line so the figure
+  // is never silently partial.
+  const unpricedSub = cost.unpriced_calls > 0 ? `${cost.unpriced_calls} unpriced` : undefined;
   return (
     <Section icon={<DollarSign className="size-3" />} title="Cost">
       <div className="grid grid-cols-2 gap-1">
-        <Metric label="Cost" value={`$${cost.cost_usd.toFixed(4)}`} sub={estimatedSub} />
+        <Metric label="Cost" value={`$${cost.cost_usd.toFixed(4)}`} sub={unpricedSub} />
         <Metric label="LLM calls" value={String(cost.llm_calls)} />
         <Metric
           label="Tokens"
