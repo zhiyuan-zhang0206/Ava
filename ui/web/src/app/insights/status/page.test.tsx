@@ -568,9 +568,25 @@ describe("StatusPage Services block", () => {
     });
     wrap(<StatusPage />);
     const restartBtn = await screen.findByRole("button", { name: /Restart/i });
-    const updateBtn = await screen.findByRole("button", { name: /Update/i });
+    // `Update (2)` exactly — a bare /Update/i would also match the
+    // "Check for updates" re-check icon button.
+    const updateBtn = await screen.findByRole("button", { name: /Update \(2\)/ });
     expect((restartBtn as HTMLButtonElement).disabled).toBe(true);
     expect((updateBtn as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("re-check button re-fires the update check (no poll interval behind it)", async () => {
+    const checkSpy = vi.spyOn(api, "checkClusterUpdate").mockResolvedValue({
+      behind: 0,
+      frontend_changed: false,
+      backend_changed: false,
+    });
+    wrap(<StatusPage />);
+    await waitFor(() => screen.getByText("Services"));
+    const recheckBtn = await screen.findByRole("button", { name: "Check for updates" });
+    expect(checkSpy).toHaveBeenCalledTimes(1);
+    fireEvent.click(recheckBtn);
+    await waitFor(() => expect(checkSpy).toHaveBeenCalledTimes(2));
   });
 
   it("current_orchestration=rollout disables both + shows Updating… before paused flips", async () => {

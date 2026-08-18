@@ -10,8 +10,11 @@
 //      A first poll that is already unpaused (false -> false) must NOT fire,
 //      and an orchestration-only change (paused never flips) must NOT fire —
 //      the reconnect edge tracks the gateway bounce, which is `paused`.
+//   3. The hook polls ONLY /api/cluster/status (the 503-bypassing snapshot) —
+//      it must never touch the heavier /api/status, whose freshness belongs
+//      to route-level observers.
 //
-// api.getSystemStatus is mocked; a real QueryClient is used so the
+// api.getClusterStatus is mocked; a real QueryClient is used so the
 // refetchQueries call is observable via a spy.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -22,7 +25,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "./api";
 import { useStore } from "./store";
 import { AGENTS_QUERY_KEY } from "./use-agents";
-import { SYSTEM_STATUS_QUERY_KEY, useClusterHealth } from "./use-cluster-health";
+import { CLUSTER_STATUS_QUERY_KEY, useClusterHealth } from "./use-cluster-health";
 
 vi.mock("./api", () => ({
   api: {
@@ -34,18 +37,9 @@ vi.mock("./api", () => ({
 const getSystemStatus = vi.mocked(api.getSystemStatus);
 const getClusterStatus = vi.mocked(api.getClusterStatus);
 
-// Minimal SystemStatus shaped enough for the hook (it reads only
-// data.cluster.current_paused + current_orchestration). Cast through unknown —
-// the rest of the SystemStatus shape is irrelevant to this hook.
-function status(paused: boolean, orchestration: string | null = null) {
-  return {
-    cluster: { current_paused: paused, current_orchestration: orchestration },
-  } as unknown as Awaited<ReturnType<typeof api.getSystemStatus>>;
-}
-
-// Minimal ClusterStatus for the bypass poll (the hook reads paused +
-// current_orchestration). Default: idle (not paused) so existing tests that
-// don't care about the stranded signal stay unaffected.
+// Minimal ClusterStatus shaped enough for the hook (it reads only
+// paused + current_orchestration). Cast through unknown — the rest of the
+// ClusterStatus shape is irrelevant to this hook.
 function clusterStatus(paused: boolean, orchestration: string | null = null) {
   return {
     paused,
@@ -68,9 +62,6 @@ function freshClient(): QueryClient {
 beforeEach(() => {
   getSystemStatus.mockReset();
   getClusterStatus.mockReset();
-  // Default the bypass poll to idle so tests that only exercise the /api/status
-  // behavior don't accidentally trip the stranded signal.
-  getClusterStatus.mockResolvedValue(clusterStatus(false));
   // Reset the slices this hook writes to.
   act(() => {
     useStore.setState({ clusterUpdating: false, clusterStranded: false, reconnectNonce: 0 });
@@ -81,7 +72,7 @@ afterEach(cleanup);
 
 describe("useClusterHealth", () => {
   it("mirrors paused=true into store.clusterUpdating", async () => {
-    getSystemStatus.mockResolvedValue(status(true));
+    getClusterStatus.mockResolvedValue(clusterStatus(true, "rollout"));
     const client = freshClient();
 
     renderHook(() => useClusterHealth(), { wrapper: withClient(client) });
@@ -92,7 +83,7 @@ describe("useClusterHealth", () => {
   it("current_orchestration set while not paused still drives clusterUpdating", async () => {
     // The early-rollout window: the orchestration session is alive but the
     // gateway has not paused itself yet. The banner must still show.
-    getSystemStatus.mockResolvedValue(status(false, "rollout"));
+    getClusterStatus.mockResolvedValue(clusterStatus(false, "rollout"));
     const client = freshClient();
 
     renderHook(() => useClusterHealth(), { wrapper: withClient(client) });
@@ -106,15 +97,15 @@ describe("useClusterHealth", () => {
 
     // Orchestration in flight (banner on), then it ends — but paused never
     // flipped, so the gateway never bounced and SSE was never severed.
-    getSystemStatus.mockResolvedValueOnce(status(false, "rollout"));
-    getSystemStatus.mockResolvedValue(status(false, null));
+    getClusterStatus.mockResolvedValueOnce(clusterStatus(false, "rollout"));
+    getClusterStatus.mockResolvedValue(clusterStatus(false, null));
 
     renderHook(() => useClusterHealth(), { wrapper: withClient(client) });
 
     await waitFor(() => expect(useStore.getState().clusterUpdating).toBe(true));
 
     await act(async () => {
-      await client.refetchQueries({ queryKey: SYSTEM_STATUS_QUERY_KEY });
+      await client.refetchQueries({ queryKey: CLUSTER_STATUS_QUERY_KEY });
     });
 
     await waitFor(() => expect(useStore.getState().clusterUpdating).toBe(false));
@@ -129,8 +120,8 @@ describe("useClusterHealth", () => {
     const refetchSpy = vi.spyOn(client, "refetchQueries");
 
     // First resolve while paused, then flip to unpaused on the next poll.
-    getSystemStatus.mockResolvedValueOnce(status(true));
-    getSystemStatus.mockResolvedValue(status(false));
+    getClusterStatus.mockResolvedValueOnce(clusterStatus(true, "rollout"));
+    getClusterStatus.mockResolvedValue(clusterStatus(false));
 
     renderHook(() => useClusterHealth(), { wrapper: withClient(client) });
 
@@ -141,7 +132,7 @@ describe("useClusterHealth", () => {
 
     // Force the next poll (the mock now returns unpaused).
     await act(async () => {
-      await client.refetchQueries({ queryKey: SYSTEM_STATUS_QUERY_KEY });
+      await client.refetchQueries({ queryKey: CLUSTER_STATUS_QUERY_KEY });
     });
 
     await waitFor(() => expect(useStore.getState().clusterUpdating).toBe(false));
@@ -152,13 +143,13 @@ describe("useClusterHealth", () => {
   });
 
   it("a cold start that is already unpaused does NOT bump reconnect (false -> false)", async () => {
-    getSystemStatus.mockResolvedValue(status(false));
+    getClusterStatus.mockResolvedValue(clusterStatus(false));
     const client = freshClient();
     const refetchSpy = vi.spyOn(client, "refetchQueries");
 
     renderHook(() => useClusterHealth(), { wrapper: withClient(client) });
 
-    await waitFor(() => expect(getSystemStatus).toHaveBeenCalled());
+    await waitFor(() => expect(getClusterStatus).toHaveBeenCalled());
     // Let any effects settle.
     await act(async () => {
       await Promise.resolve();
@@ -169,8 +160,7 @@ describe("useClusterHealth", () => {
     expect(refetchSpy).not.toHaveBeenCalledWith({ queryKey: AGENTS_QUERY_KEY });
   });
 
-  it("bypass poll paused + no orchestration sets clusterStranded", async () => {
-    getSystemStatus.mockResolvedValue(status(false));
+  it("paused + no orchestration sets clusterStranded", async () => {
     getClusterStatus.mockResolvedValue(clusterStatus(true, null));
     const client = freshClient();
 
@@ -180,17 +170,26 @@ describe("useClusterHealth", () => {
   });
 
   it("paused WITH a live orchestration is NOT stranded (normal rollout)", async () => {
-    getSystemStatus.mockResolvedValue(status(false));
     getClusterStatus.mockResolvedValue(clusterStatus(true, "rollout"));
     const client = freshClient();
 
     renderHook(() => useClusterHealth(), { wrapper: withClient(client) });
 
-    // Give the bypass poll a chance to land + effects to settle.
+    // Give the poll a chance to land + effects to settle.
     await waitFor(() => expect(getClusterStatus).toHaveBeenCalled());
     await act(async () => {
       await Promise.resolve();
     });
     expect(useStore.getState().clusterStranded).toBe(false);
+  });
+
+  it("never touches /api/status — that key's freshness belongs to route-level observers", async () => {
+    getClusterStatus.mockResolvedValue(clusterStatus(false));
+    const client = freshClient();
+
+    renderHook(() => useClusterHealth(), { wrapper: withClient(client) });
+
+    await waitFor(() => expect(getClusterStatus).toHaveBeenCalled());
+    expect(getSystemStatus).not.toHaveBeenCalled();
   });
 });

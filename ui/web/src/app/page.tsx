@@ -131,24 +131,12 @@ function HomeShell({ showError }: HomeShellProps) {
     if (newId !== null) focusComposer();
   }, [activeId, fork, focusComposer]);
 
-  // Preload inspector data when an agent is selected so the Inspector Panel
-  // opens instantly — same query keys as InspectorPanel, React Query cache
-  // deduplicates and serves cached data on mount. Without this, the panel
-  // fires getAgentInspect + listPages only when it mounts, causing a 1-2s
-  // loading spinner on first open.
-  useQuery({
-    queryKey: ["agent-inspect", activeId, null] as const,
-    queryFn: () => {
-      if (activeId == null) throw new Error("inspector preload: activeId is null");
-      return api.getAgentInspect(activeId, null, false);
-    },
-    enabled: activeId != null,
-    // Keep data fresh for 10s after the last observer unmounts. InspectorPanel
-    // adds its own refetchInterval:5000 observer when open, which takes over
-    // the refresh cadence. When the panel closes, the data stays warm for the
-    // next open within the stale window.
-    staleTime: 10_000,
-  });
+  // Preload the open-pages list when an agent is selected (cheap DB read;
+  // useAgentPages folds SSE into this cache). The expensive /inspect endpoint
+  // is deliberately NOT preloaded here — selecting an agent must not fire a
+  // ~25-Loki-aggregation call the user may never look at. Instant panel open
+  // is covered by the InspectorToggle's prefetch-on-intent (pointerenter/
+  // focus) instead — see inspector-panel.tsx.
   useQuery({
     queryKey: ["agent-pages", activeId] as const,
     queryFn: () => {
@@ -401,7 +389,7 @@ function HomeContent({
               details={<ContentToggle />}
               inspect={
                 <>
-                  <InspectorToggle />
+                  <InspectorToggle agentId={activeId} />
                   {inspectorOpen && activeId != null && (
                     <InspectorPanel agentId={activeId} />
                   )}

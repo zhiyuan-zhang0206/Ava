@@ -9,6 +9,7 @@ import {
   HeartPulse,
   LayoutPanelTop,
   PanelTopClose,
+  RefreshCw,
   SlidersHorizontal,
   Terminal,
   Timer,
@@ -50,10 +51,15 @@ const WINDOWS: { label: string; value: number | null }[] = [
 /**
  * Right-side inspector panel for the active agent — the single-agent
  * counterpart to the sidebar's fleet-wide stats card. Sections include
- * persistent shells, the frozen config overlay, and LLM cost. Polls
- * GET /api/agents/{id}/inspect every few seconds while open (the cost/shells
- * all drift as the agent runs). The header window selector re-scopes cost
- * (default: cumulative since spawn).
+ * persistent shells, the frozen config overlay, and LLM cost.
+ *
+ * Fetch discipline (2026-08-18 incident: this endpoint's 5s poll pinned the
+ * prod box — GET /api/agents/{id}/inspect runs ~25 whole-life Loki
+ * aggregations plus a cross-machine shell probe per call): data loads when
+ * the panel OPENS (refetchOnMount:"always"), refreshes on the header's
+ * manual refresh button, and drifts on a slow 60s background interval while
+ * the panel stays open. Notice SSE events invalidate immediately. The header
+ * window selector re-scopes cost (default: cumulative since spawn).
  *
  * Responsive: on desktop (≥ lg) it's a side panel; on mobile (< lg) it
  * becomes a full-screen overlay with a backdrop — same pattern as the
@@ -104,7 +110,7 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
     };
   }, [open, toggle]);
 
-  const { data, error, isLoading } = useQuery({
+  const { data, error, isLoading, refetch, isFetching } = useQuery({
     queryKey: ["agent-inspect", agentId, hours],
     queryFn: () =>
       api.getAgentInspect(
@@ -112,11 +118,17 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
         hours === COMPACT_WINDOW ? null : hours,
         hours === COMPACT_WINDOW,
       ),
-    refetchInterval: 5000,
+    // Slow background drift only — the endpoint is expensive (~25 Loki
+    // aggregations + a shell-probe RPC per call), so the interval is a floor
+    // for "numbers don't rot while the panel sits open", not the freshness
+    // mechanism. Freshness comes from refetchOnMount on open, the header's
+    // manual refresh, and SSE-driven invalidation (notices below).
+    refetchInterval: 60_000,
     // Fetch once on open, not just cold. The global 5min staleTime otherwise
-    // treats preloaded/cached inspect data as fresh, so opening the panel shows
-    // stale numbers until the next 5s poll; "always" pulls immediately (cached
-    // data stays on screen meanwhile via placeholderData) and the poll continues.
+    // treats cached inspect data (from the toggle's intent prefetch or a
+    // previous open) as fresh, so opening the panel would show stale numbers;
+    // "always" pulls immediately (cached data stays on screen meanwhile via
+    // placeholderData).
     refetchOnMount: "always",
     // Changing the window (`hours` is in the key) mints a fresh cache entry
     // with no data yet; without this the whole panel — including the
@@ -132,8 +144,8 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
   const queryClient = useQueryClient();
 
   // Keep the inspect query fresh on notice events — notice_posted/notice_resolved
-  // SSE arrive before the next 5s poll, so the notice section updates in real
-  // time (same pattern as useInboxFeed).
+  // SSE arrive long before the slow 60s interval, so the notice section updates
+  // in real time (same pattern as useInboxFeed).
   const onSystemEvent = useCallback(
     (ev: SystemEvent) => {
       if (ev.agent_id !== agentId) return;
@@ -171,8 +183,8 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
 
   // Renders nothing while closed — the panel floats above the layout (fixed),
   // so it leaves the flex column entirely instead of reserving width. All
-  // hooks run regardless (rules-of-hooks); the queries stay warm for the
-  // next open via the page-level preload.
+  // hooks run regardless (rules-of-hooks); the toggle's intent prefetch keeps
+  // the cache warm for the next open.
   if (!open) return null;
 
   // Context-bar style floating panel (user ruling 2026-08-05 21:50):
@@ -196,6 +208,15 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
             Inspector
           </span>
           {error && effectiveData ? <StaleDot /> : null}
+          <button
+            type="button"
+            onClick={() => void refetch()}
+            disabled={isFetching}
+            aria-label="Refresh inspector data"
+            className="shrink-0 rounded p-1 text-muted-foreground hover:bg-sidebar-accent hover:text-foreground disabled:opacity-50"
+          >
+            <RefreshCw className={cn("size-3.5", isFetching && "animate-spin")} />
+          </button>
           <select
             value={hours ?? "all"}
             onChange={(e) => setHours(e.target.value === "all" ? null : Number(e.target.value))}
@@ -237,13 +258,33 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
 }
 
 /** Header toggle button — opens/closes the inspector. Rendered in the
- *  composer's top-right corner (user ruling 2026-08-05). */
-export function InspectorToggle() {
+ *  composer's top-right corner (user ruling 2026-08-05).
+ *
+ *  Prefetch-on-intent: hovering/focusing the toggle prefetches the default
+ *  inspect window so the panel opens populated — this replaces the old
+ *  selection-time preload, which fired the expensive /inspect call for every
+ *  agent clicked in the sidebar whether or not the panel ever opened. Intent
+ *  (pointer on the toggle) is the earliest signal that the data will actually
+ *  be looked at. */
+export function InspectorToggle({ agentId = null }: { agentId?: number | null }) {
   const { open, toggle } = useInspectorOpen();
+  const queryClient = useQueryClient();
+  const prefetch = useCallback(() => {
+    if (agentId == null) return;
+    void queryClient.prefetchQuery({
+      queryKey: ["agent-inspect", agentId, null],
+      queryFn: () => api.getAgentInspect(agentId, null, false),
+      // Don't re-fire on every pointer wiggle; the panel's own
+      // refetchOnMount:"always" pulls a fresh snapshot when it opens.
+      staleTime: 10_000,
+    });
+  }, [agentId, queryClient]);
   return (
     <button
       type="button"
       onClick={toggle}
+      onPointerEnter={prefetch}
+      onFocus={prefetch}
       data-inspector-toggle=""
       aria-label={open ? "Close inspector" : "Open inspector"}
       className={cn(
@@ -332,7 +373,8 @@ function PageSection({ pages }: { pages: PageRow[] }) {
 // interactive reply surface (mirrors the fleet "waiting on you" queue): a
 // require_response notice gets a reply box + Dismiss, an FYI gets Mark read.
 // Resolving invalidates the inspect query so the notice clears without waiting
-// out the 5s poll. `notice == null` → the quiet "No open notice" line.
+// out the slow background interval. `notice == null` → the quiet "No open
+// notice" line.
 
 function NoticeReplySection({
   agentId,

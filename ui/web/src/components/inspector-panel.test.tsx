@@ -727,6 +727,34 @@ describe("InspectorToggle", () => {
     expect(chevrons).toContain("m9 16 3-3 3 3");
     expect(chevrons).not.toContain("m15 14-3 3-3-3");
   });
+
+  it("prefetches the inspect data on pointer intent (replaces the selection-time preload)", async () => {
+    getAgentInspect.mockResolvedValue(fixture());
+    render(<InspectorToggle agentId={7} />);
+    const btn = screen.getByRole("button", { name: "Close inspector" });
+    expect(getAgentInspect).not.toHaveBeenCalled();
+    fireEvent.pointerEnter(btn);
+    await waitFor(() => expect(getAgentInspect).toHaveBeenCalledWith(7, null, false));
+  });
+
+  it("does not prefetch without an agent selected", () => {
+    render(<InspectorToggle agentId={null} />);
+    fireEvent.pointerEnter(screen.getByRole("button", { name: "Close inspector" }));
+    expect(getAgentInspect).not.toHaveBeenCalled();
+  });
+});
+
+describe("InspectorPanel manual refresh", () => {
+  it("the header refresh button re-fires the inspect fetch (no fast poll behind it)", async () => {
+    getAgentInspect.mockResolvedValue(fixture());
+    render(<InspectorPanel agentId={1} />);
+    await waitFor(() => expect(screen.getByText("Persistent shells")).toBeTruthy());
+    const callsAfterOpen = getAgentInspect.mock.calls.length;
+    fireEvent.click(screen.getByRole("button", { name: "Refresh inspector data" }));
+    await waitFor(() =>
+      expect(getAgentInspect.mock.calls.length).toBe(callsAfterOpen + 1),
+    );
+  });
 });
 
 

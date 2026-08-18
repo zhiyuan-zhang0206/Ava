@@ -10,10 +10,13 @@
 // health now.)
 //
 // Rendered as a section of the vertical Insights page; `useSectionVisible`
-// starts the 10s status poll and the 30s update-check poll on first paint and
-// pauses them once the Status section scrolls off-screen, so it doesn't keep
-// hitting the gateway while unseen. Also usable as the bare `/insights/status`
-// route (no provider ⇒ visible defaults true).
+// starts the 10s status poll on first paint and pauses it once the Status
+// section scrolls off-screen, so it doesn't keep hitting the gateway while
+// unseen. The update check (a remote `git fetch` on the gateway) is NOT on an
+// interval: it fetches when the section comes on screen and on the explicit
+// re-check button — an update is a human-paced action, not a live signal.
+// Also usable as the bare `/insights/status` route (no provider ⇒ visible
+// defaults true).
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2, RefreshCw, RotateCcw, Server } from "lucide-react";
@@ -33,7 +36,7 @@ import { api } from "@/lib/api";
 import { errMsg } from "@/lib/errors";
 import { useStore } from "@/lib/store";
 import type { ClusterPanel, ClusterUpdateCheck, MachineStatus, SystemStatus } from "@/lib/types";
-import { SYSTEM_STATUS_QUERY_KEY } from "@/lib/use-cluster-health";
+import { CLUSTER_STATUS_QUERY_KEY, SYSTEM_STATUS_QUERY_KEY } from "@/lib/use-cluster-health";
 
 import { useSectionVisible } from "@/app/control/_visibility";
 import { FLEX } from "@/lib/layout";
@@ -41,11 +44,12 @@ import { cn } from "@/lib/utils";
 
 export default function StatusPage() {
   const visible = useSectionVisible();
-  // Shares SYSTEM_STATUS_QUERY_KEY with the app-root health poll + the sidebar
-  // badges — one query, one poll for /api/status app-wide. The interval stays
-  // because the app-root health poll (5s) only mounts on the conversation route,
-  // not here; on /control this observer is what keeps Status fresh (gated to
-  // on-screen time).
+  // Shares SYSTEM_STATUS_QUERY_KEY with the other /api/status observers (the
+  // sidebar SpawnButton, machine badges, Config) — one key, one poll loop per
+  // route. The app root deliberately does NOT poll /api/status (the health
+  // hook watches /api/cluster/status only — see use-cluster-health.ts), so
+  // this visibility-gated 10s interval is what keeps the Status view fresh
+  // on this route.
   const { data, isLoading, error } = useQuery({
     queryKey: SYSTEM_STATUS_QUERY_KEY,
     queryFn: api.getSystemStatus,
@@ -221,13 +225,17 @@ function ServicesPanel({ data }: { data: ClusterPanel }) {
   const queryClient = useQueryClient();
   const isGateway = data.current_serve_gateway;
 
-  // Preflight poll — drives the Update button's "no updates" state. Gateway
+  // Preflight check — drives the Update button's "no updates" state. Gateway
   // only (the endpoint 400s elsewhere); the frontend always runs on the
-  // gateway, but gate defensively.
+  // gateway, but gate defensively. No interval: each call runs a remote
+  // `git fetch` on the gateway, and "commits behind origin" only changes at
+  // human pace — so fetch when the section comes on screen (staleTime bounds
+  // re-entry churn), on the explicit re-check button below, and via the
+  // invalidation after an update is triggered.
   const check = useQuery({
     queryKey: ["cluster-update-check"],
     queryFn: api.checkClusterUpdate,
-    refetchInterval: 30_000,
+    staleTime: 5 * 60_000,
     enabled: isGateway && visible,
   });
   const behind = check.data?.behind;
@@ -243,11 +251,12 @@ function ServicesPanel({ data }: { data: ClusterPanel }) {
   // `current_orchestration` and disables the actions with no poll-interval gap a
   // second click could slip through.
   const refreshClusterState = () => {
-    // One key now backs both this view's roster and the app-root "updating"
-    // banner (SYSTEM_STATUS_QUERY_KEY = the shared /api/status key), so a single
-    // invalidate refreshes both at once — no poll-interval gap a second click
-    // could slip through.
+    // Refresh this view's roster (/api/status) AND the app-root "updating"
+    // banner's snapshot (/api/cluster/status — the health hook's only poll)
+    // so both pick up `current_orchestration` immediately, with no
+    // poll-interval gap a second click could slip through.
     void queryClient.invalidateQueries({ queryKey: SYSTEM_STATUS_QUERY_KEY });
+    void queryClient.invalidateQueries({ queryKey: CLUSTER_STATUS_QUERY_KEY });
     void queryClient.invalidateQueries({ queryKey: ["cluster-update-check"] });
   };
 
@@ -409,6 +418,21 @@ function ServicesPanel({ data }: { data: ClusterPanel }) {
                 {restartSidesLabel(check.data)}
               </span>
             ) : null}
+            {/* Explicit re-check — the update check has no poll interval
+                (it runs a remote `git fetch`), so this button is how the
+                verdict refreshes without leaving the section. */}
+            {!orchestration && (
+              <button
+                type="button"
+                onClick={() => void check.refetch()}
+                disabled={check.isFetching}
+                aria-label="Check for updates"
+                title="Check for updates now"
+                className="ml-1 inline-flex rounded p-0.5 align-middle text-muted-foreground hover:text-foreground disabled:opacity-50"
+              >
+                <RefreshCw className={cn("size-3", check.isFetching && "animate-spin")} />
+              </button>
+            )}
           </span>
         )}
       </div>

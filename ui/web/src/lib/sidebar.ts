@@ -152,14 +152,16 @@ export function useStatsWindow(): {
   return { windowHours, setWindowHours };
 }
 
-// `/api/stats/dashboard` 5s polling — data source for the sidebar stat
-// cards. Same 5s cadence as `useAgents`, no extra backend hit rate.
-// `error` is exposed to callers so "DB down / endpoint 500" is visually
-// distinguishable from "first load hasn't completed" (StatsCards
+// `/api/stats/dashboard` polling — data source for the sidebar stat cards.
+// 30s, not the 5s the cheap polls use: each call runs 4 windowed Loki
+// aggregations on the gateway (request COUNT is not request COST), and stat
+// cards do not need 5s freshness — keepPreviousData already prevents
+// flicker. `error` is exposed to callers so "DB down / endpoint 500" is
+// visually distinguishable from "first load hasn't completed" (StatsCards
 // renders them differently). `windowHours` is part of the query key, so
 // switching the window refetches immediately instead of waiting out the
 // poll interval.
-const STATS_POLL_MS = 5000;
+const STATS_POLL_MS = 30_000;
 
 export function useStatsDashboard(windowHours: StatsWindowHours): {
   stats: StatsDashboard | undefined;
