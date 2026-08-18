@@ -27,7 +27,7 @@ datasources:
   # is the authoritative live source, so the panel stays SQL instead of an
   # event-stream approximation. The role is grafana_ro — a dedicated read-only
   # role (SELECT on agents_meta/events only, no writes), password injected via
-  # the container env ($GRAFANA_PG_PASSWORD from deploy/local/lgtm/.env,
+  # the container env ($GRAFANA_PG_PASSWORD from deploy/lgtm/.env,
   # gitignored — never in this repo).
   - name: Postgres (ava read-only)
     uid: ops

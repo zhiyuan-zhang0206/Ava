@@ -1,6 +1,6 @@
 # Ava alerts — webhook contact point (as code, Task #1224).
 #
-# LGTM-stack copy (deploy/local/lgtm/config/grafana/provisioning/alerting/):
+# LGTM-stack copy (deploy/lgtm/config/grafana/provisioning/alerting/):
 # the ONLY difference from dashboards/ops/alerts/contact.yml is the webhook
 # URL — the Grafana container reaches the gateway on the host via
 # host.docker.internal instead of localhost. Keep the two files otherwise
@@ -25,7 +25,7 @@
 #   value into encrypted secureSettings in the DB, which the notifier DOES
 #   read (verified end-to-end: header on the wire, gateway 200).
 # - The value comes from the container env (OPS_ALERTS_WEBHOOK_TOKEN,
-#   injected via docker-compose from deploy/local/lgtm/.env — gitignored).
+#   injected via docker-compose from deploy/lgtm/.env — gitignored).
 #   It must match the gateway's webhook token (AVA_ALERTS_WEBHOOK_TOKEN);
 #   the gateway accepts it both as X-Alerts-Token and as a Bearer
 #   credential (the only form the Grafana-13 notifier can send without

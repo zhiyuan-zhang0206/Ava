@@ -226,11 +226,11 @@ Each session's record (pid, start time) lives at `<ava_home>/run/sessions/
 `<ava_home>/logs/<session-name>.out.log` (orchestration sessions additionally
 tee to `<ava_home>/logs/{updater,rollout,cluster-restart}-<epoch>.log` on
 POSIX). `ava cluster status` enumerates the same sessions. Raw session
-output is queried in Loki, not tailed by a CLI: the local LGTM viewer
+output is queried in Loki, not tailed by a CLI: the LGTM stack's promtail
 scrapes `<ava_home>/logs/*.out.log` (plus updater/rollout tees) with label
 `service` = session name — query via Grafana Explore (LogQL), `logcli
 --addr http://127.0.0.1:3100`, or the Loki HTTP API; see
-`deploy/local/lgtm/README.md`.
+`deploy/lgtm/README.md`.
 
 ### Environment forwarding
 

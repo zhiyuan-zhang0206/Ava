@@ -9,8 +9,9 @@ propagate on the next `ava start`.
 
 The CONTRIB distribution is required, not core: the file exporter (JSONL
 mirror) and the file_storage extension (persistent sending queue) live in
-contrib. The version is pinned to match the LGTM stack's collector image
-(deploy/local/lgtm) and each platform's release tarball is SHA256-pinned.
+contrib. The version is pinned to the collector release the LGTM stack
+(deploy/lgtm) was validated with, and each platform's release tarball is
+SHA256-pinned.
 """
 
 from __future__ import annotations
@@ -27,8 +28,8 @@ from string import Template
 
 from cli.commands._converge_spec import ConvergeCtx
 
-# Pinned contrib version — bump together with deploy/local/lgtm's pinned
-# otel/opentelemetry-collector image.
+# Pinned contrib version — re-validate against the deploy/lgtm backends
+# (Tempo/Loki/Prometheus OTLP intake) when bumping.
 OTELCOL_CONTRIB_VERSION = "0.155.0"
 
 # SHA256 of each supported platform's release tarball

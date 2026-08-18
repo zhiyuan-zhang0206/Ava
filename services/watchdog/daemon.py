@@ -72,13 +72,14 @@ from ops.manager import ControllerManager
 from services._pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from services.backup import maybe_run_daily_backup
 
-# The two data-plane healthchecks are the only ones imported statically: neither
-# redis nor pgbouncer has a ServiceSpec in build_services() (they are native
-# per-cluster processes, not sessions), so they are not part of the
-# build_services-derived roster — they are prepended by hand. Every other
-# healthcheck is resolved from its ServiceSpec.healthcheck_module via importlib
-# (see _checks_for_capability), so build_services() stays the single source of the
-# keepalive roster.
+# The statically imported healthchecks are the ones with NO ServiceSpec in
+# build_services(): redis/pgbouncer are native per-cluster processes (not
+# sessions) and the LGTM stack is a docker compose project, so they are not
+# part of the build_services-derived roster — they are added by hand. Every
+# other healthcheck is resolved from its ServiceSpec.healthcheck_module via
+# importlib (see _checks_for_capability), so build_services() stays the single
+# source of the keepalive roster.
+from services.healthchecks.lgtm import main as lgtm_healthcheck
 from services.healthchecks.pgbouncer import main as pgbouncer_healthcheck
 from services.healthchecks.redis_acl import main as redis_acl_healthcheck
 from shared.config import settings
@@ -198,6 +199,12 @@ def _checks_for_capability(role: MachineRole) -> list[_Check]:
             )
         )
     if role == "gateway":
+        # lgtm: the observability-backend compose stack (deploy/lgtm) — no
+        # ServiceSpec (docker containers, not a session). The check gates itself
+        # on the $AVA_HOME/lgtm-host marker, so on every unmarked host it is a
+        # no-op. The stack needs no Postgres: `requires_db=False` — the
+        # observability read path must not be held hostage by a DB outage.
+        checks.append(_Check("lgtm", lgtm_healthcheck, requires_db=False))
         checks.append(_Check("pg-backup", maybe_run_daily_backup, requires_db=True))
 
     # Honor an operator's durable `ava start --disable-service X`: `_gate_reason`

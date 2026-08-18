@@ -18,6 +18,7 @@ import sys
 from pathlib import Path
 
 from cli.commands._converge_firewall import ensure_firewall_allowlist
+from cli.commands._converge_frontend_env import ensure_no_frontend_env_overrides
 from cli.commands._converge_gate import ensure_gate
 from cli.commands._converge_os_jobs import (
     ensure_cluster_autostart,
@@ -31,6 +32,7 @@ from cli.commands._converge_os_jobs import (
 # test reaches for `cli.commands._converge.ConvergeCtx` / `ALL_ROLES`.
 from cli.commands._converge_spec import ALL_ROLES, ConvergeCtx, ConvergeStep
 from cli.commands._health_preflight import ensure_health_preflight as _ensure_health_preflight
+from cli.commands._lgtm import ensure_lgtm_stack_step
 from cli.commands._otel_collector import ensure_otel_collector_step
 from cli.commands._pgbouncer import _ensure_pgbouncer_step
 from cli.commands._port_preflight import ensure_port_preflight as _ensure_port_preflight
@@ -160,64 +162,6 @@ def _ensure_redis_url_identity_step(ctx: ConvergeCtx) -> None:
         identity = DATA_PLANE_IDENTITY
     upsert_env(env_path, {"AVA_REDIS_URL": url_with_userinfo(raw, identity, secret)})
     print(f"  · backfilled AVA_REDIS_URL username {identity!r} (legacy URL carried none)")
-
-
-# `next build` / `next start` load these env files; an untracked override here
-# bakes NEXT_PUBLIC_* into the JS bundle and silently beats the runtime gateway
-# inference in ui/web/src/lib/api.ts — a leftover Vercel-era .env.production
-# pointed every browser at a retired host's API (a past prod outage). Only the
-# tracked .env.development is legitimate; it affects `next dev` only.
-_FORBIDDEN_FRONTEND_ENV_FILES = (".env", ".env.local", ".env.production", ".env.production.local")
-
-_NEXT_PUBLIC_ENV_LINE = re.compile(
-    r"^\s*(?:export\s+)?(NEXT_PUBLIC_[A-Za-z0-9_]+)\s*=", re.MULTILINE
-)
-
-
-def _next_public_keys_in_env_file(path: Path) -> list[str]:
-    """NEXT_PUBLIC_* var names assigned in a dotenv-style file (empty if absent)."""
-    if not path.exists():
-        return []
-    return _NEXT_PUBLIC_ENV_LINE.findall(path.read_text())
-
-
-def _ensure_no_frontend_env_overrides(ctx: ConvergeCtx) -> None:
-    """Block any NEXT_PUBLIC_* build-time override that could poison the bundle.
-
-    Two sources are scanned, both of which `next build` would inline into the JS
-    bundle, silently beating the runtime gateway inference (ui/web/src/lib/api.ts):
-
-    - Forbidden env FILES under `ui/web/` (`.env.production` etc.) — `next build`
-      loads them directly.
-    - NEXT_PUBLIC_* lines in the unit `$AVA_HOME/.env` — `load_ava_env` loads the
-      WHOLE unit .env into os.environ at process start, so a stray
-      NEXT_PUBLIC_GATEWAY_PORT there leaks into the build subprocess env (and into
-      every service session's inherited env, where a watchdog respawn picks it
-      up again). These
-      vars belong nowhere in the unit .env: NEXT_PUBLIC_GATEWAY_PORT is derived
-      from AVA_GATEWAY_PORT and injected on the build command line
-      (shared.cluster.fe_build_env), never read from .env.
-    """
-    frontend = ctx.repo / "ui" / "web"
-    present = [name for name in _FORBIDDEN_FRONTEND_ENV_FILES if (frontend / name).exists()]
-    if present:
-        raise RuntimeError(
-            f"build-time env override(s) under {frontend}: {', '.join(present)} — "
-            "these bake NEXT_PUBLIC_* into the frontend bundle and override the "
-            "runtime gateway inference (ui/web/src/lib/api.ts). Move them aside "
-            "(e.g. add a .bak suffix) and rerun."
-        )
-    unit_env = ctx.ava_home / ".env"
-    leaked = _next_public_keys_in_env_file(unit_env)
-    if leaked:
-        raise RuntimeError(
-            f"NEXT_PUBLIC_* override(s) in {unit_env}: {', '.join(leaked)} — the whole "
-            "unit .env loads into os.environ at process start, so these bake into the "
-            "frontend bundle (and every service session's inherited env) and override the runtime "
-            "gateway inference (ui/web/src/lib/api.ts). NEXT_PUBLIC_GATEWAY_PORT is "
-            "derived from AVA_GATEWAY_PORT and injected on the build command line — it "
-            "must not live in .env. Delete the NEXT_PUBLIC_* line(s) and rerun."
-        )
 
 
 # --- unit-state steps (need a configured unit) ----------------------------
@@ -567,7 +511,7 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
     # the guard gates exactly the hosts whose bundle could go stale.
     ConvergeStep(
         "no frontend build-time env overrides",
-        _ensure_no_frontend_env_overrides,
+        ensure_no_frontend_env_overrides,
         roles=frozenset({"gateway"}),
     ),
     # Retire this machine's per-machine host override file into its .env (file-only,
@@ -605,6 +549,11 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
         requires_unit_config=True,
     ),
     ConvergeStep("otel collector sidecar", ensure_otel_collector_step, requires_unit_config=True),
+    # The LGTM observability backend (deploy/lgtm compose stack) — a host
+    # singleton, so the step is gated on the $AVA_HOME/lgtm-host marker file
+    # inside, not on roles: only the one home the operator marked brings it up;
+    # every other cluster on the box (dev worktrees included) no-ops.
+    ConvergeStep("lgtm observability stack", ensure_lgtm_stack_step),
     # Plugin-owned host state. ava_memory's scaffold brings up this cluster's
     # memory pool checkouts and lays its template down inside them — a step the
     # framework used to carry for it. A disabled plugin is skipped, so turning it

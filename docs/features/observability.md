@@ -1,7 +1,8 @@
 # Observability
 
-Every agent turn is a trace, every event is one stream, and one read-only
-viewer stack shows traces, logs, and metrics in a single UI.
+Every agent turn is a trace, every event is one stream, and one backend
+stack (LGTM) serves traces, logs, and metrics in a single UI — and backs the
+gateway's /ops + inspect endpoints.
 
 ## Why it matters
 
@@ -16,7 +17,7 @@ viewer stack shows traces, logs, and metrics in a single UI.
 agent process ── OTel spans ──▶ local OTLP/JSON mirror ($AVA_HOME/traces/*.jsonl)
 agent process ── events ──────▶ OTLP/HTTP (protobuf) ──▶ Loki (logs) + Prometheus (metrics)
 ava trace ship ── replay mirror ──▶ OTLP/HTTP ──▶ Tempo (traces)
-Grafana ◀── Tempo + Loki + Prometheus ── one read-only UI (deploy/local/lgtm/)
+Grafana ◀── Tempo + Loki + Prometheus ── one UI + gateway read paths (deploy/lgtm/)
 ```
 
 - **Traces** — OpenLLMetry auto-instruments the LLM SDKs; every span is
@@ -28,9 +29,12 @@ Grafana ◀── Tempo + Loki + Prometheus ── one read-only UI (deploy/loca
   each event becomes a LogRecord (Loki), telemetry events become metrics
   (Prometheus), with `trace_id`/`span_id` riding along so logs correlate with
   traces.
-- **Viewer** — `../../deploy/local/lgtm/` starts a read-only Tempo + Loki +
-  Prometheus + Grafana stack with one command. Viewer-only by design: nothing
-  it runs touches the mirror or the main flow.
+- **Backend** — `../../deploy/lgtm/` runs the Tempo + Loki + Prometheus +
+  Grafana stack (lifecycle-owned on the marked host — see its README). It
+  writes nothing to the mirror or the main flow, but the gateway's /ops +
+  inspect endpoints, ops alerting, and the events-maintenance rollup read
+  from it, so it is required serving infrastructure, not a stop-anytime
+  viewer.
 
 ## Trace format — why JSONL, and is it required?
 
@@ -86,5 +90,5 @@ limitation." — and the full three-question analysis of the mirror, its
 ## Design decisions
 
 - Unified event model: `../../decisions/2026-08-04-event-system-design.md`
-- Tempo-only viewer (Jaeger dropped): `../../deploy/local/lgtm/README.md`
+- Tempo-only viewer (Jaeger dropped): `../../deploy/lgtm/README.md`
 - Trace v2 content stripping: `../../shared/trace.py` module docstring

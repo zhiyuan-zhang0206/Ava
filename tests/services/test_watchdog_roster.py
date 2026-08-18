@@ -76,6 +76,6 @@ def test_derived_roster_covers_all_role_healthchecks(
     got = {c.name for c in wd._checks_for_capability(role)}
     # The roster is the derived set plus the gateway-only pseudo-checks (no
     # ServiceSpec: redis and pgbouncer are native per-cluster data-plane processes,
-    # pg-backup is a scheduled job).
-    pseudo = {"redis-acl", "pgbouncer", "pg-backup"} if role == "gateway" else set()  # pyright: ignore[reportUnknownVariableType]
+    # lgtm is a docker compose stack, pg-backup is a scheduled job).
+    pseudo = {"redis-acl", "pgbouncer", "lgtm", "pg-backup"} if role == "gateway" else set()  # pyright: ignore[reportUnknownVariableType]
     assert got == expected | pseudo

@@ -110,6 +110,16 @@ def cmd_status() -> int:
     else:
         print("\ninfra (pg/redis): skipped (agent-runner uses central node)")
 
+    # lgtm section: the observability-backend compose stack (deploy/lgtm) —
+    # shown only on the host the operator designated via the $AVA_HOME/lgtm-host
+    # marker (a host singleton, not a per-cluster service, so the marker — not
+    # the role — decides).
+    from cli.commands._lgtm import is_lgtm_host, print_lgtm_status
+
+    if is_lgtm_host():
+        print("\nlgtm (observability backend):")
+        print_lgtm_status()
+
     # gate section: the fleet UI entry port. Its own section rather than a row in
     # the table above, because the gate is not a session service — it is a launchd
     # KeepAlive job (a pidfile-backed detached process off macOS), so the session
