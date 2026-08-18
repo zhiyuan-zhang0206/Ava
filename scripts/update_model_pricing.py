@@ -103,15 +103,14 @@ def parse_deepseek_pricing(html: str) -> DeepSeekCatalog:
     }
     for index, row in enumerate(rows):
         known_meters = [label for label in _METERS if label in row]
-        if "OFF-PEAK" not in row:
-            if known_meters:
-                raise ValueError(f"{known_meters[0]} row has no OFF-PEAK band")
+        token_cells = [cell for cell in row if "TOKEN" in cell.upper()]
+        if token_cells and len(known_meters) != 1:
+            raise ValueError(f"unknown DeepSeek pricing meter: {token_cells!r}")
+        if not known_meters:
             continue
-        if len(known_meters) != 1:
-            token_cells = [cell for cell in row if "TOKEN" in cell.upper()]
-            detail = token_cells or row
-            raise ValueError(f"unknown DeepSeek pricing meter: {detail!r}")
         meter_label = known_meters[0]
+        if "OFF-PEAK" not in row:
+            raise ValueError(f"{meter_label} row has no OFF-PEAK band")
         if index + 1 >= len(rows) or not rows[index + 1] or rows[index + 1][0] != "PEAK":
             raise ValueError(f"{meter_label} row has no following PEAK band")
 
