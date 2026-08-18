@@ -113,10 +113,11 @@ def test_deepseek_parser_rejects_duplicate_meter_rows() -> None:
         pricing_updater.parse_deepseek_pricing(html)
 
 
-def test_deepseek_parser_rejects_an_unknown_pricing_meter() -> None:
+@pytest.mark.parametrize("band", ["OFF-PEAK", "STANDARD", "FLAT PRICE"])
+def test_deepseek_parser_rejects_an_unknown_pricing_meter(band: str) -> None:
     unknown = (
         '<tr><td rowspan="2">1M REASONING TOKENS</td>'
-        "<td>OFF-PEAK</td><td>$0.10</td><td>$0.20</td></tr>"
+        f"<td>{band}</td><td>$0.10</td><td>$0.20</td></tr>"
         "<tr><td>PEAK</td><td>$0.20</td><td>$0.40</td></tr>"
     )
     html = _DEEPSEEK_TABLE.replace("</table>", f"{unknown}</table>")
