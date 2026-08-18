@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Compare</title>
+<!--
+  compare widget (vanilla, single-file, zero build).
+
+  The reduce-point panel: show N candidate artifacts side by side, the user picks
+  one and confirms, and the choice goes back to the agent via the ava_reply spine.
+  This is "choice" with each option rendered as a full pane. Each pane's body is
+  HTML you fill (paste a rendered diff / markdown / summary); it is rendered as
+  DOMPurify-sanitized HTML (rich formatting kept; <script> / event handlers
+  stripped), so artifact content carrying untrusted text is safe by default.
+
+  Fill in when you write the page:
+  - TITLE: the decision being made.
+  - PANES: [{ label, html }] -- label is the pick value, html is the pane body.
+  - The three AVA_* placeholders (see widgets/ava_reply).
+
+  On confirm the page calls avaReply("picked: <label>").
+-->
+<style>
+  :root {
+    --bg: #ffffff;
+    --bg-secondary: #f6f8fa;
+    --text: #1a1a1a;
+    --border: #dddddd;
+    --border-light: #eeeeee;
+    --primary: #2563eb;
+    --primary-light: #2563eb33;
+    --success: #15803d;
+    --error: #b91c1c;
+    --disabled-bg: #99aabb;
+    color-scheme: light dark;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d1117;
+      --bg-secondary: #161b22;
+      --text: #c9d1d9;
+      --border: #30363d;
+      --border-light: #21262d;
+      --primary: #58a6ff;
+      --primary-light: #58a6ff33;
+      --success: #3fb950;
+      --error: #f85149;
+      --disabled-bg: #484f58;
+    }
+  }
+
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin: 2em auto; padding: 0 1em; max-width: 1200px; background: var(--bg); color: var(--text); }
+  h1 { font-size: 1.25rem; }
+  #panes { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(280px, 1fr); gap: 1em; overflow-x: auto; align-items: start; }
+  .pane { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+  .pane.sel { border-color: var(--primary); box-shadow: 0 0 0 2px var(--primary-light); }
+  .pane header { display: flex; gap: 0.5em; align-items: center; padding: 0.6em 0.9em; background: var(--bg-secondary); border-bottom: 1px solid var(--border-light); cursor: pointer; font-weight: 600; }
+  .pane .body { padding: 0.9em; overflow-x: auto; }
+  .pane .body pre { white-space: pre-wrap; }
+  #submit { margin-top: 1em; padding: 0.6em 1.4em; font-size: 1rem; border: 0; border-radius: 8px; background: var(--primary); color: #fff; cursor: pointer; }
+  #submit:disabled { background: var(--disabled-bg); cursor: default; }
+  #status { margin-top: 1em; color: var(--success); font-weight: 600; }
+  #status.err { color: var(--error); }
+</style>
+</head>
+<body>
+
+<h1 id="title"></h1>
+<div id="panes"></div>
+<button id="submit" disabled>Confirm choice</button>
+<div id="status"></div>
+
+<script>
+  // --- fill these in ---
+  const TITLE = "Pick the artifact to keep";
+  const PANES = [
+    { label: "A", html: "<pre>candidate A body — paste a diff / summary / markdown</pre>" },
+    { label: "B", html: "<pre>candidate B body</pre>" },
+  ];
+</script>
+
+<!-- pane bodies are sanitized before insertion (rich HTML kept, scripts stripped).
+     DOMPurify loaded from local vendor (no CDN). -->
+<script src="../vendor/purify.min.js"></script>
+<script>
+  // --- ava_reply spine (see widgets/ava_reply); template the three values ---
+  const AVA_GATEWAY_URL = "__GATEWAY_URL__";
+  const AVA_AGENT_ID = "__AGENT_ID__";
+  const AVA_PAGE_NAME = "__PAGE_NAME__";
+  async function avaReply(content) {
+    const res = await fetch(`${AVA_GATEWAY_URL}/api/agents/${AVA_AGENT_ID}/messages`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content, source: `ui:page:${AVA_PAGE_NAME}` }),
+    });
+    if (!res.ok) throw new Error(`avaReply failed: HTTP ${res.status}`);
+    return res.json();
+  }
+
+  // --- render + submit ---
+  document.getElementById("title").textContent = TITLE;
+  const panesEl = document.getElementById("panes");
+  const submit = document.getElementById("submit");
+  const statusEl = document.getElementById("status");
+  let picked = null;
+  PANES.forEach((p, idx) => {
+    const pane = document.createElement("div");
+    pane.className = "pane";
+    const header = document.createElement("header");
+    const radio = document.createElement("input");
+    radio.type = "radio";
+    radio.name = "pane";
+    radio.value = p.label;
+    radio.id = `pane_${idx}`;
+    const lab = document.createElement("label");
+    lab.htmlFor = `pane_${idx}`;
+    lab.textContent = p.label;
+    lab.style.cursor = "pointer";
+    header.appendChild(radio);
+    header.appendChild(lab);
+    const body = document.createElement("div");
+    body.className = "body";
+    body.innerHTML = DOMPurify.sanitize(p.html); // rich HTML kept, scripts/handlers stripped
+    pane.appendChild(header);
+    pane.appendChild(body);
+    function select() {
+      radio.checked = true;
+      picked = p.label;
+      submit.disabled = false;
+      [...panesEl.children].forEach((c) => c.classList.remove("sel"));
+      pane.classList.add("sel");
+    }
+    header.addEventListener("click", select);
+    radio.addEventListener("change", select);
+    panesEl.appendChild(pane);
+  });
+  submit.addEventListener("click", async () => {
+    if (picked == null) return;
+    submit.disabled = true;
+    try {
+      await avaReply(`picked: ${picked}`);
+      statusEl.className = "";
+      panesEl.style.pointerEvents = "none";
+      panesEl.style.opacity = "0.6";
+      statusEl.textContent = "✓ Sent. You can close this tab.";
+    } catch (e) {
+      statusEl.className = "err";
+      statusEl.textContent = `Failed to send: ${e.message}. Retry?`;
+      submit.disabled = false;
+    }
+  });
+</script>
+</body>
+</html>

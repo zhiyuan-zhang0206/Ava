@@ -1,0 +1,61 @@
+# Ava alerts — webhook contact point (as code, Task #1224).
+#
+# LGTM-stack copy (deploy/lgtm/config/grafana/provisioning/alerting/):
+# the ONLY difference from dashboards/ops/alerts/contact.yml is the webhook
+# URL — the Grafana container reaches the gateway on the host via
+# host.docker.internal instead of localhost. Keep the two files otherwise
+# in sync (guarded by tests/test_lint_lgtm_alerting_sync.py).
+#
+# Routes every fired alert to the gateway's alert ingest endpoint
+# (POST /api/alerts), which stores the instance in `alerts` (Alertmanager
+# webhook shape), publishes it on the SSE stream, and fans IM notifications
+# out via the im_bridge daemon (Telegram / WeChat / Feishu — whichever
+# channels the user has connected). Alert is fully separate from Notice —
+# nothing here enters the notices queue.
+#
+# Auth (Grafana 13.1.3 quirks, verified 2026-08-14 by #3012):
+# - The webhook token rides as `Authorization: Bearer <cluster secret>` via
+#   the notifier's native authorization_scheme/authorization_credentials
+#   fields — NOT a custom header.
+# - DO NOT put credentials under `secureSettings:` in this file: the
+#   provisioning import silently DROPS secureSettings (Grafana 13.1.3 bug —
+#   the value never reaches the wire, gateway answers 401).
+# - Instead put `authorization_credentials` in `settings:` with a $__env{}
+#   reference: provisioning expands it, and the schema layer migrates the
+#   value into encrypted secureSettings in the DB, which the notifier DOES
+#   read (verified end-to-end: header on the wire, gateway 200).
+# - The value comes from the container env (OPS_ALERTS_WEBHOOK_TOKEN,
+#   injected via docker-compose from deploy/lgtm/.env — gitignored).
+#   It must match the gateway's webhook token (AVA_ALERTS_WEBHOOK_TOKEN);
+#   the gateway accepts it both as X-Alerts-Token and as a Bearer
+#   credential (the only form the Grafana-13 notifier can send without
+#   plaintext storage).
+#
+# disableResolveMessage: false — resolution webhooks ARE wanted: the ingest
+# flips the row to resolved and sends the recovery IM line.
+apiVersion: 1
+
+contactPoints:
+  - orgId: 1
+    name: ava-alerts-webhook
+    receivers:
+      - uid: ava-alerts-webhook
+        type: webhook
+        disableResolveMessage: false
+        settings:
+          url: http://host.docker.internal:8000/api/alerts
+          httpMethod: POST
+          authorization_scheme: Bearer
+          authorization_credentials: $__env{OPS_ALERTS_WEBHOOK_TOKEN}
+
+# Root notification policy: everything -> the webhook. group_by: [] batches
+# all firing instances into one POST (the ingest dedups by fingerprint x
+# starts_at, so any grouping is safe); matchers: [] catches every rule.
+policies:
+  - orgId: 1
+    receiver: ava-alerts-webhook
+    group_by: []
+    matchers: []
+    group_wait: 30s
+    group_interval: 5m
+    repeat_interval: 4h

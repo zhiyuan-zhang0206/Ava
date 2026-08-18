@@ -1,0 +1,878 @@
+"""ava.watcher unit tests — launch writes the agent's script verbatim plus a
+generated bootstrap file (identity + watchdog + runpy), and runs them in a
+PTY session whose command line redirects output to a log file and ends with
+the CLI completion notice (`ava agents send ... --source watcher:N`); cron/at
+build a script then spawn.
+
+The `_pty_sessions_env` fixture (session-scoped, tests/ava/conftest.py) runs the
+real supervisor daemon under the tmp test home; the session tests are
+POSIX-only (skip on Windows — the PTY supervisor is POSIX-only)."""
+
+import datetime
+import os
+import pathlib
+import subprocess
+import sys
+import time
+from collections.abc import Iterator
+from typing import Any
+
+import pytest
+
+import ava
+from ava import watcher
+from ava.shell import _background
+from shared.platform import IS_WINDOWS
+
+pytestmark = [
+    pytest.mark.skipif(IS_WINDOWS, reason="PTY supervisor is POSIX-only"),
+    # `_isolated_agent` is opt-in (mutates global ava.self.AGENT_ID); apply it
+    # module-wide here since every watcher session test needs the fake-id +
+    # pty cleanup isolation. `_pty_sessions_env` first — the isolation fixture's
+    # own kill_all/list calls hit the daemon.
+    pytest.mark.usefixtures("_pty_sessions_env", "_isolated_agent"),
+]
+
+
+def _is_live_watcher(wid: int, name: str = "test-watcher") -> bool:
+    return ava.shell.list().get(wid) == name
+
+
+def _boot_text(wid: int) -> str:
+    return (watcher._watchers_dir() / f"watcher_{wid}_boot.py").read_text()
+
+
+def test_validate_message_rejects_empty() -> None:
+    with pytest.raises(ValueError, match="message cannot be empty"):
+        watcher.at("2030-01-01T00:00:00Z", "   ", name="test-empty")
+
+
+@pytest.mark.parametrize(
+    "value, expected",
+    [
+        (90, 90.0),
+        (datetime.timedelta(minutes=2), 120.0),
+        ("30m", 1800.0),
+        ("2h", 7200.0),
+        ("1d", 86400.0),
+        ("45s", 45.0),
+    ],
+)
+def test_parse_timeout_accepts_forms(
+    value: int | datetime.timedelta | str, expected: float
+) -> None:
+    assert watcher._parse_timeout(value) == expected
+
+
+@pytest.mark.parametrize("bad", ["", "5x", "later", "-3"])
+def test_parse_timeout_rejects_bad_strings(bad: str) -> None:
+    with pytest.raises(ValueError):
+        watcher._parse_timeout(bad)
+
+
+def test_parse_timeout_rejects_nonpositive_and_bool() -> None:
+    with pytest.raises(ValueError, match="positive"):
+        watcher._parse_timeout(0)
+    with pytest.raises(TypeError):
+        watcher._parse_timeout(True)
+
+
+def test_watcher_script_dir_is_tmp_per_agent(_agent_row: int) -> None:
+    # Generated watcher scripts live under the system temp dir, scoped per
+    # cluster + agent — NOT in $AVA_HOME (the old global `watchers/` dir there
+    # accumulated 180+ files and let co-agents overwrite each other's scripts)
+    # and NOT in the workspace. Session ids are per-agent counters, so a
+    # per-agent subdir makes cross-agent collision impossible.
+    import tempfile
+
+    from shared.paths import ava_home
+
+    d = watcher._watchers_dir()
+    td = pathlib.Path(tempfile.gettempdir())
+    assert d.is_relative_to(td / "ava")  # under $TMPDIR/ava/<cluster>/<agent>/
+    assert str(ava_home()) not in str(d)  # never under $AVA_HOME
+    assert d.name == "watchers"
+    # cluster segment: the home basename heads the per-cluster dir
+    slug = ava_home().name.lstrip(".") or "cluster"
+    assert any(part == slug or part.startswith(f"{slug}-") for part in d.parts)
+    assert d.is_dir()
+
+
+def test_spawn_prunes_stale_watcher_files(_agent_row: int, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Every launch deletes generated watcher files from earlier watchers: a
+    # hard-killed watcher cannot self-clean, and its pair would otherwise
+    # accumulate forever. Non-generated files are left alone.
+    from ava.shell import sessions as _sessions
+
+    monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
+    d = watcher._watchers_dir()
+    stale_script = d / "watcher_999.py"
+    stale_boot = d / "watcher_999_boot.py"
+    stale_script.write_text("old")
+    stale_boot.write_text("old boot")
+    keep = d / "keep_me.py"
+    keep.write_text("not generated")
+
+    wid = watcher.launch("import ava\n", timeout="1h", name="test-prune")
+
+    assert not stale_script.exists()
+    assert not stale_boot.exists()
+    assert keep.exists()  # non-generated files survive
+    assert (d / f"watcher_{wid}.py").exists()  # the new pair is there
+    assert (d / f"watcher_{wid}_boot.py").exists()
+
+
+def test_prune_does_not_touch_other_agents_files(
+    _agent_row: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Isolation is per-agent: pruning this agent's stale files must never
+    # reach into another agent's subdir (the old global dir let agents
+    # overwrite each other — that is the bug this layout exists to prevent).
+    from ava.shell import sessions as _sessions
+
+    monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
+    d = watcher._watchers_dir()
+    other = d.parent / str(ava.self.AGENT_ID + 1) / "watchers"
+    other.mkdir(parents=True, exist_ok=True)
+    foreign = other / "watcher_999.py"
+    foreign.write_text("someone else's")
+
+    watcher.launch("import ava\n", timeout="1h", name="test-isolation")
+
+    assert foreign.exists()  # untouched
+
+
+def test_launch_creates_watcher_session(_agent_row: int) -> None:
+    # A long-running watcher keeps its session alive and listed under its name.
+    code = "import time\ntime.sleep(60)\n"
+    wid = watcher.launch(code, timeout="1h", name="test-launch")
+    try:
+        assert isinstance(wid, int)
+        assert _is_live_watcher(wid, "test-launch")
+    finally:
+        ava.shell.kill(wid)
+
+
+def test_launch_requires_timeout_and_name() -> None:
+    # Both timeout and name are required
+    with pytest.raises(TypeError):
+        watcher.launch("import ava\n")  # type: ignore[call-arg]
+    with pytest.raises(TypeError):
+        watcher.launch("import ava\n", timeout="1h")  # type: ignore[call-arg]
+    with pytest.raises(TypeError):
+        watcher.launch("import ava\n", name="test")  # type: ignore[call-arg]
+
+
+def test_launch_arms_watchdog_in_boot_file(
+    _agent_row: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The generated bootstrap must arm a daemon timer that hard-exits with
+    # code 124 at the deadline — that is what bounds a custom watcher's
+    # lifetime. The timeout reason is printed so it lands in the log file.
+    from ava.shell import sessions as _sessions
+
+    monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
+    wid = watcher.launch("import ava\n", timeout=120, name="test-watchdog")
+    boot = _boot_text(wid)
+    assert "threading.Timer(120.0" in boot
+    assert "os._exit(124)" in boot
+    assert "120s limit" in boot
+
+
+def test_watchdog_message_formats_fractional_seconds(
+    _agent_row: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from ava.shell import sessions as _sessions
+
+    monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
+    wid = watcher.launch("import ava\n", timeout=0.5, name="test-fractional")
+    assert "0.5s limit" in _boot_text(wid)
+
+
+def test_boot_without_watchdog_has_no_timer(tmp_path: pathlib.Path) -> None:
+    # at/cron scripts self-terminate, so their bootstrap arms no watchdog.
+    boot = watcher._build_boot(tmp_path / "x.py", None, 42)
+    assert "Timer" not in boot
+    assert "os._exit" not in boot
+
+
+def test_boot_loads_plugins_before_running_script(tmp_path: pathlib.Path) -> None:
+    # A fresh child's `import ava` is the factory module without the agent
+    # process's plugin setattrs, so the bootstrap must load plugin namespaces
+    # (ava.tasks etc.) before it runpys the watcher script — otherwise the script
+    # AttributeErrors on any plugin namespace. Order matters: load then run.
+    boot = watcher._build_boot(tmp_path / "x.py", None, 42)
+    assert "ava._ensure_plugins_loaded()" in boot
+    assert boot.index("ava._ensure_plugins_loaded()") < boot.index("runpy.run_path")
+    compile(boot, "<boot>", "exec")  # must be valid Python
+
+
+def test_boot_propagates_failures_without_catching(tmp_path: pathlib.Path) -> None:
+    # try/finally around runpy only cleans up the generated files — no except
+    # anywhere, so a crash still prints its traceback into the log and exits
+    # non-zero; the shell-level notice reports the code. Only the cleanup's
+    # own OSError is swallowed (unlink failure is harmless).
+    boot = watcher._build_boot(tmp_path / "x.py", 60.0, 42)
+    assert "try:" in boot
+    assert "finally:" in boot
+    # The runpy try has NO except — a crash propagates (R1-8: only the
+    # finally's own cleanup — file unlink + registry-row delete — is
+    # fail-soft, and that except lives AFTER the finally:).
+    assert "except Exception" not in boot.split("finally:")[0]
+    assert "except BaseException" not in boot
+    assert "runpy.run_path" in boot
+    compile(boot, "<boot>", "exec")  # must be valid Python
+
+
+def test_boot_self_cleans_generated_files(tmp_path: pathlib.Path) -> None:
+    # The finally block deletes the script + the bootstrap itself — a watcher
+    # reads them exactly once at launch, so normal exits leave the watchers
+    # dir empty instead of accumulating a script graveyard.
+    script = tmp_path / "watcher_3.py"
+    boot = watcher._build_boot(script, None, 42)
+    assert "finally:" in boot
+    assert "os.unlink(_p)" in boot
+    assert "except OSError" in boot
+    assert str(script) in boot  # the script path is unlinked too
+    assert "__file__" in boot  # and the bootstrap deletes itself
+    compile(boot, "<boot>", "exec")
+
+
+@pytest.mark.flaky  # real watcher session + time.sleep polling (5s deadline)
+def test_shell_kill_stops_watcher(_agent_row: int) -> None:
+    # A watcher is an ordinary session — the generic session kill stops it.
+    code = "import time\ntime.sleep(60)\n"
+    wid = watcher.launch(code, timeout="1h", name="test-launch")
+    ava.shell.kill(wid)
+    # Poll instead of a fixed sleep: session teardown latency varies under CPU
+    # contention (audit round-2 cc-docs-tests P2).
+    deadline = time.time() + 5
+    while time.time() < deadline and _is_live_watcher(wid, "test-launch"):
+        time.sleep(0.05)
+    assert not _is_live_watcher(wid, "test-launch")
+
+
+def test_at_builds_and_spawns_without_watchdog(
+    _agent_row: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # at/cron scripts self-terminate, so they spawn with no watchdog (None).
+    captured: dict[str, Any] = {}
+
+    def fake_spawn(code: str, watchdog_secs: float | None, name: str, **kw: object) -> int:
+        captured["code"] = code
+        captured["watchdog_secs"] = watchdog_secs
+        captured["name"] = name
+        captured["kind"] = kw.get("kind")
+        return 7
+
+    monkeypatch.setattr(watcher, "_spawn", fake_spawn)
+    # Derived, not a literal year: `at` rejects a past `when`, so a pinned date
+    # silently becomes a failing test the moment the clock passes it. Keeps the
+    # trailing-Z ISO shape, which is the parse path this test exercises.
+    when = (datetime.datetime.now(datetime.UTC) + datetime.timedelta(days=365)).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
+    wid = watcher.at(when, "ping later", name="test-at")
+    assert wid == 7
+    assert captured["watchdog_secs"] is None
+    assert "_wake(_MESSAGE)" in captured["code"]
+    assert "ping later" in captured["code"]
+
+
+def test_cron_invalid_expr_raises(_agent_row: int) -> None:
+    from shared.watcher import CronExprError
+
+    with pytest.raises(CronExprError):
+        watcher.cron("not a cron", "msg", name="test-bad-cron")
+
+
+def test_cron_spawns_without_watchdog(_agent_row: int, monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_spawn(code: str, watchdog_secs: float | None, name: str, **kw: object) -> int:
+        captured.update(
+            code=code,
+            watchdog_secs=watchdog_secs,
+            name=name,
+            kind=kw.get("kind"),
+            expr=kw.get("cron_expr"),
+        )
+        return 3
+
+    monkeypatch.setattr(watcher, "_spawn", fake_spawn)
+    watcher.cron("0 3 * * *", "daily", name="test-cron")
+    assert captured["watchdog_secs"] is None
+
+
+def test_launch_carries_agent_and_session_to_child(
+    _agent_row: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Identity crosses the process boundary inlined into the generated
+    # bootstrap (the session env allowlist does NOT forward AVA_AGENT_ID —
+    # Task #856/#964): the child must see its agent id as AVA_AGENT_ID.
+    # The watcher's session id rides as an env var on the run command so the
+    # time watchers can tag their wake-ups.
+    from ava.shell import sessions as _sessions
+
+    captured: dict[str, Any] = {}
+    monkeypatch.setattr(_sessions, "send", lambda _id, cmd: captured.update(cmd=cmd))  # pyright: ignore[reportUnknownArgumentType]
+    wid = watcher.launch("import ava\n", timeout="1h", name="test-watcher")
+    assert f"AVA_WATCHER_SESSION_ID={wid} " in captured["cmd"]
+    boot = _boot_text(wid)
+    # Identity is inlined; ava is imported for init_globals
+    assert f'os.environ["AVA_AGENT_ID"] = "{_agent_row}"' in boot
+    assert "ava._boot.establish" not in boot
+    assert "import ava" in boot
+    assert "runpy.run_path" in boot
+    assert "init_globals" in boot
+
+
+def test_launch_writes_script_verbatim_and_runs_via_runpy(
+    _agent_row: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The script file is the agent's code unchanged — nothing prepended — so a
+    # leading `from __future__` import (must be the first statement of a file)
+    # stays valid. Watchdog and runpy live in the separate generated bootstrap
+    # file; identity is inlined there (the session env allowlist does not
+    # forward AVA_AGENT_ID — Task #856/#964).
+    from ava.shell import sessions as _sessions
+
+    captured: dict[str, Any] = {}
+    monkeypatch.setattr(_sessions, "send", lambda id, cmd: captured.update(id=id, cmd=cmd))  # pyright: ignore[reportUnknownArgumentType]
+
+    code = "from __future__ import annotations\nimport ava\n"
+    wid = watcher.launch(code, timeout="1h", name="test-launch")
+
+    script = watcher._watchers_dir() / f"watcher_{wid}.py"
+    assert script.read_text() == code  # verbatim, no bootstrap prepended
+    boot = _boot_text(wid)
+    assert "runpy.run_path" in boot
+    # Identity is inlined into the bootstrap
+    assert f'os.environ["AVA_AGENT_ID"] = "{_agent_row}"' in boot
+    assert "ava._boot.establish" not in boot
+    assert "import ava" in boot
+    assert "init_globals" in boot
+    assert f"watcher_{wid}.py" in boot
+    assert f"watcher_{wid}_boot.py" in captured["cmd"]
+
+
+# -- Completion notice (shell-level, fires on every exit path) -----------------
+
+
+def test_spawn_line_redirects_and_notifies(
+    _agent_row: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The command line must redirect the child's output to the per-agent log
+    # file and end with the CLI completion notice + session close: the notice
+    # is sent from the shell level so a crashed or hard-killed child cannot
+    # skip it, and `; exit $_ec` closes the session even when delivery fails —
+    # a lingering shell is what reconcile reads as alive (Task #1115 bug B).
+    from ava.shell import sessions as _sessions
+
+    captured: dict[str, Any] = {}
+    monkeypatch.setattr(_sessions, "send", lambda _id, cmd: captured.update(cmd=cmd))  # pyright: ignore[reportUnknownArgumentType]
+    wid = watcher.launch("import ava\n", timeout="1h", name="test-notice")
+
+    cmd = captured["cmd"]
+    assert ".shell_logs" in cmd  # output redirected to the workspace log dir
+    assert "2>&1; _ec=$?;" in cmd
+    assert "agents send" in cmd
+    assert f"--source watcher:{wid}" in cmd
+    assert "exited with code ${_ec}" in cmd
+    assert "--tail-file" in cmd
+    assert cmd.endswith("; exit $_ec")
+
+
+@pytest.mark.flaky  # real pty watcher session + time.sleep polling (15s deadline)
+def test_watcher_completion_notice_e2e(
+    _agent_row: int, monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+) -> None:
+    """End-to-end through a real pty session: when the watcher child exits, the
+    completion notice fires (CLI invoked with the watcher source) and the
+    session closes itself. The CLI is faked with a script that records its
+    argv, so no gateway is needed."""
+    argv_file = tmp_path / "argv.txt"
+    fake_cli = tmp_path / "fake-ava"
+    fake_cli.write_text(f"#!/bin/sh\nprintf '%s\\n' \"$@\" > {argv_file}\n")
+    fake_cli.chmod(0o755)
+    monkeypatch.setattr(_background, "cli_path", lambda: fake_cli)  # pyright: ignore[reportUnknownArgumentType]
+
+    # `exit 7` exits the shell subshell wrapping the python command — use a
+    # python-level SystemExit instead so the exit code flows through the child.
+    wid = watcher.launch("raise SystemExit(7)\n", timeout="1h", name="test-e2e")
+
+    deadline = time.time() + 15
+    while time.time() < deadline and not argv_file.exists():
+        time.sleep(0.3)
+    assert argv_file.exists(), "completion notice never fired"
+    argv = argv_file.read_text().splitlines()
+    assert argv[0] == "agents"
+    assert argv[1] == "send"
+    assert argv[2] == str(ava.self.AGENT_ID)
+    assert "exited with code" in argv[3]  # ${_ec} expanded by the session shell
+    assert "--source" in argv
+    assert f"watcher:{wid}" in argv
+
+    # The session closes itself after the notice is delivered.
+    deadline = time.time() + 10
+    while time.time() < deadline and wid in ava.shell.list():
+        time.sleep(0.3)
+    assert wid not in ava.shell.list()
+
+
+def test_cron_invalid_timezone_raises(_agent_row: int) -> None:
+    with pytest.raises(ValueError, match="timezone"):
+        watcher.cron("0 3 * * *", "daily", timezone="Not/A/Real/Timezone", name="test-bad-tz")
+
+
+def test_at_past_time_raises(_agent_row: int) -> None:
+    """at() with a past datetime raises ValueError."""
+    from datetime import UTC, datetime, timedelta
+
+    past = datetime(2020, 1, 1, tzinfo=UTC)
+    with pytest.raises(ValueError, match="past"):
+        watcher.at(past, "too late", name="test-past")
+
+    # timedelta going backwards should also fail
+    with pytest.raises(ValueError):
+        watcher.at(timedelta(days=-1), "negative delta", name="test-neg-delta")
+
+
+def test_at_future_time_ok(_agent_row: int, monkeypatch: pytest.MonkeyPatch) -> None:
+    """at() with a future time should not raise about the past."""
+    from datetime import timedelta
+
+    captured: dict[str, Any] = {}
+    monkeypatch.setattr(
+        watcher,
+        "_spawn",
+        lambda code, _wd, name, **_kw: captured.update(code=code, name=name) or 7,  # pyright: ignore[reportUnknownArgumentType]
+    )
+
+    # Far future
+    watcher.at("2099-01-01T00:00:00Z", "far future", name="test-future")
+    assert "far future" in captured["code"]
+
+    # timedelta from now
+    watcher.at(timedelta(hours=1), "one hour", name="test-delta")
+    assert "one hour" in captured["code"]
+
+
+# -- Agent identity in the child (Task #964 regression) ----------------------
+
+
+def test_boot_inlines_agent_identity(tmp_path: pathlib.Path) -> None:
+    """The bootstrap must set AVA_AGENT_ID itself: the session env allowlist
+    (shared/env_registry.py child_env, Task #856) deliberately does
+    not forward agent-scope knobs to session children, so a child that relied
+    on inheritance would see ava.self.AGENT_ID=None and its wake-up
+    send_message would 422 on /api/agents/None/messages (Task #964). The
+    inline assignment must run before any SDK use — including `import ava`
+    itself: a stale AVA_AGENT_ID in the session env (a server freezes
+    its first session's env) would otherwise establish the WRONG identity at
+    import time (2026-08-09: every watcher child on the shared server woke
+    agent 2959 instead of its owner)."""
+    boot = watcher._build_boot(tmp_path / "x.py", None, 42)
+    assert 'os.environ["AVA_AGENT_ID"] = "42"' in boot
+    env_line = boot.index('os.environ["AVA_AGENT_ID"]')
+    assert env_line < boot.index("import ava")  # before the ava import, not just before use
+    assert env_line < boot.index("ava._ensure_plugins_loaded()")
+    assert env_line < boot.index("runpy.run_path")
+    compile(boot, "<boot>", "exec")  # must be valid Python
+
+
+@pytest.mark.flaky  # real pty watcher session + file-polling (15s deadline)
+def test_watcher_child_sees_agent_identity(
+    _agent_row: int, monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+) -> None:
+    """End-to-end regression (Task #964): a real watcher child must see its
+    agent id via ava.self.AGENT_ID — the wake-up send_message depends on it.
+    Before the fix the child had no AVA_AGENT_ID (None) and every scheduled
+    watcher died with a 422 on /api/agents/None/messages."""
+    from ava.shell import sessions as _sessions
+
+    out = tmp_path / "identity.txt"
+    code = (
+        "import ava\n"
+        "import pathlib\n"
+        f"pathlib.Path({str(out)!r}).write_text(str(ava.self.AGENT_ID))\n"
+    )
+    # Fake the completion-notice CLI so no gateway is needed.
+    fake_cli = tmp_path / "fake-ava"
+    fake_cli.write_text("#!/bin/sh\nexit 0\n")
+    fake_cli.chmod(0o755)
+    monkeypatch.setattr(_background, "cli_path", lambda: fake_cli)  # pyright: ignore[reportUnknownArgumentType]
+
+    wid = watcher.launch(code, timeout="1h", name="test-identity")
+
+    deadline = time.time() + 15
+    while time.time() < deadline and not out.exists():
+        time.sleep(0.3)
+    assert out.exists(), "watcher child never wrote its identity"
+    assert out.read_text() == str(_agent_row)  # NOT the stale session-env id
+    # The watcher self-terminates and the session closes itself after the
+    # completion notice; if the child is somehow still alive, clean it up but
+    # tolerate an already-closed session (the kill path resolves by name).
+    from contextlib import suppress
+
+    # Tolerate every "session is already gone" failure mode: `_resolve` raises
+    # ValueError for a session that is not ours, and the pty kill path
+    # raises subprocess.CalledProcessError when the session vanished mid-kill
+    # (exit 1 from kill-session) — a teardown must not fail on a corpse.
+    with suppress(ValueError, subprocess.CalledProcessError):
+        _sessions.kill(wid)
+
+
+def test_boot_overrides_stale_env_identity(tmp_path: pathlib.Path) -> None:
+    """The generated bootstrap must override a stale AVA_AGENT_ID in the
+    environment: `import ava` establishes identity FROM THE ENV at import
+    time, so a session whose env carries another agent's id (a server
+    freezes the env of its first session) would otherwise bind the WRONG
+    identity and every wake-up send_message would route there. Regression for
+    2026-08-09 — every watcher child on the shared server woke agent 2959
+    instead of its owner. Runs the boot file in a real subprocess with the
+    env poisoned; the child must report the INLINED id, not the stale one."""
+    script = tmp_path / "probe.py"
+    out = tmp_path / "identity.txt"
+    script.write_text(
+        "import ava\n"
+        "import pathlib\n"
+        f"pathlib.Path({str(out)!r}).write_text(str(ava.self.AGENT_ID))\n"
+    )
+    boot_path = tmp_path / "probe_boot.py"
+    boot_path.write_text(watcher._build_boot(script, None, 4242))
+
+    env = {**os.environ, "AVA_AGENT_ID": "9999"}  # stale/wrong identity
+    res = subprocess.run(  # noqa: S603 — repo-internal generated boot file
+        [sys.executable, str(boot_path)],
+        cwd=pathlib.Path(__file__).resolve().parents[2],  # repo root: `import ava` resolves
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert res.returncode == 0, f"boot failed: {res.stderr}"
+    assert out.read_text() == "4242", "the stale env identity won over the inline id"
+
+
+def test_watcher_child_overrides_stale_session_identity(
+    _agent_row: int, monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+) -> None:
+    """A stale AVA_AGENT_ID in the session env must NOT win: the bootstrap
+    inlines the spawning agent's id BEFORE `import ava`. Regression for
+    2026-08-09 — every watcher child on the shared supervisor woke agent 2959
+    instead of its owner, because the server's frozen env carried 2959 and
+    `import ava` established it before the inline assignment ran. Here the
+    session env is poisoned with a wrong id (via the backend's envfile); the
+    child must still report the real agent id."""
+    from ava.shell import sessions as _sessions
+
+    out = tmp_path / "identity.txt"
+    code = (
+        "import ava\n"
+        "import pathlib\n"
+        f"pathlib.Path({str(out)!r}).write_text(str(ava.self.AGENT_ID))\n"
+    )
+    fake_cli = tmp_path / "fake-ava"
+    fake_cli.write_text("#!/bin/sh\nexit 0\n")
+    fake_cli.chmod(0o755)
+    monkeypatch.setattr(_background, "cli_path", lambda: fake_cli)  # pyright: ignore[reportUnknownArgumentType]
+
+    stale = _agent_row + 1  # a WRONG identity, as if frozen into the session env
+    monkeypatch.setattr(_sessions, "forward_env_dict", lambda: {"AVA_AGENT_ID": str(stale)})  # pyright: ignore[reportUnknownArgumentType]
+
+    wid = watcher.launch(code, timeout="1h", name="test-stale-id")
+
+    deadline = time.time() + 15
+    while time.time() < deadline and not out.exists():
+        time.sleep(0.3)
+    assert out.exists(), "watcher child never wrote its identity"
+    assert out.read_text() == str(_agent_row), "the stale session identity won"
+    from contextlib import suppress
+
+    # Tolerate every "session is already gone" failure mode: `_resolve` raises
+    # ValueError for a session that is not ours, and the pty kill path
+    # raises subprocess.CalledProcessError when the session vanished mid-kill
+    # (exit 1 from kill-session) — a teardown must not fail on a corpse.
+    with suppress(ValueError, subprocess.CalledProcessError):
+        _sessions.kill(wid)
+
+
+# ─── R1-8: the watcher registry (Task #1021) ─────────────────────────────────
+
+
+@pytest.fixture(autouse=True)
+def _clean_registry_rows(_isolated_agent: None) -> Iterator[None]:
+    """Drop this worker's watcher-registry rows after each test — the table is
+    not in conftest's TRUNCATE list (it is a registry, not business data), and
+    the reconcile tests leave marked rows behind by design."""
+    import psycopg
+
+    from shared.config import settings
+
+    yield
+    with psycopg.connect(settings.data_plane.db_url, autocommit=True) as conn:
+        conn.execute(
+            "DELETE FROM agent_watchers WHERE agent_id = %s",
+            (ava.self.AGENT_ID,),
+        )
+
+
+def _registry_rows(agent_id: int) -> list[dict[str, Any]]:
+    from shared.watcher_registry import watcher_rows
+
+    return watcher_rows(agent_id=agent_id)
+
+
+def test_launch_registers_and_kill_unregisters(
+    _agent_row: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A launch watcher writes a registry row at spawn; killing its session
+    drops the row, so the boot reconcile will not resurrect a deliberately
+    killed watcher."""
+    from ava.shell import sessions as _sessions
+
+    monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
+    wid = watcher.launch("import ava\n", timeout=120, name="test-registry")
+    try:
+        rows = _registry_rows(_agent_row)
+        assert next(r for r in rows if r["session_id"] == wid)["kind"] == "launch"
+        assert next(r for r in rows if r["session_id"] == wid)["timeout_secs"] == 120.0
+    finally:
+        ava.shell.kill(wid)
+    assert all(r["session_id"] != wid for r in _registry_rows(_agent_row))
+
+
+def test_cron_registers_rebuild_payload(_agent_row: int, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The registry row carries everything the boot reconcile needs to
+    re-spawn a killed cron watcher: expression, timezone, message."""
+    from ava.shell import sessions as _sessions
+
+    monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
+    wid = watcher.cron("0 9 * * *", "daily", timezone="America/Los_Angeles", name="test-cron-reg")
+    try:
+        rows = [r for r in _registry_rows(_agent_row) if r["session_id"] == wid]
+        assert rows and rows[0]["kind"] == "cron"
+        assert rows[0]["cron_expr"] == "0 9 * * *"
+        assert rows[0]["cron_timezone"] == "America/Los_Angeles"
+        assert rows[0]["message"] == "daily"
+        assert rows[0]["status"] == "running"
+    finally:
+        ava.shell.kill(wid)
+
+
+def test_reconcile_rebuilds_missing_cron(_agent_row: int, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A cron row whose session is gone is re-spawned from the stored payload
+    (the #1014 fix: a rollout reaped the session; the registry is what knows
+    the schedule should exist) and the old row is marked 'rebuilt'."""
+    from ava.shell import sessions as _sessions
+
+    monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
+    calls: list[tuple[Any, ...]] = []
+    monkeypatch.setattr(watcher, "cron", lambda *a, **k: calls.append((a, k)) or 999)  # pyright: ignore[reportUnknownArgumentType]
+    from shared.watcher_registry import register_watcher
+
+    register_watcher(
+        _agent_row,
+        424242,
+        kind="cron",
+        name="daily",
+        message="stand-up",
+        cron_expr="0 9 * * *",
+        cron_timezone="UTC",
+    )
+    actions = watcher.reconcile()
+    assert any("rebuilt" in a for a in actions)
+    assert calls and calls[0][0][0] == "0 9 * * *"  # positional expr
+    assert calls[0][0][1] == "stand-up"  # positional message
+    # old row marked rebuilt
+    rows = [r for r in _registry_rows(_agent_row) if r["session_id"] == 424242]
+    assert rows and rows[0]["status"] == "rebuilt"
+
+
+def test_reconcile_marks_missed_one_shot_and_alerts(
+    _agent_row: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An at-watcher whose moment passed while its session was gone is marked
+    'missed' and the agent is told (the wake it was scheduled for is lost)."""
+    from ava.shell import sessions as _sessions
+
+    monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
+    sent: list[str] = []
+    monkeypatch.setattr("ava.agents.send_message", lambda _aid, content: sent.append(content))  # pyright: ignore[reportUnknownArgumentType]
+    from shared.watcher_registry import register_watcher
+
+    past = datetime.datetime.now(datetime.UTC) - datetime.timedelta(minutes=5)
+    register_watcher(_agent_row, 424243, kind="at", name="once", message="go", fires_at=past)
+    actions = watcher.reconcile()
+    assert any("missed" in a for a in actions)
+    rows = [r for r in _registry_rows(_agent_row) if r["session_id"] == 424243]
+    assert rows and rows[0]["status"] == "missed"
+    assert sent and "once" in sent[0]
+
+
+def test_reconcile_leaves_alive_watchers_alone(
+    _agent_row: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A row whose session still exists is untouched — the watcher is running."""
+    from ava.shell import sessions as _sessions
+    from shared.watcher_registry import register_watcher
+
+    monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_sessions, "list", lambda: {555555: "test-alive"})  # pyright: ignore[reportUnknownArgumentType]
+    register_watcher(_agent_row, 555555, kind="cron", name="alive", cron_expr="* * * * *")
+    assert watcher.reconcile() == []
+    rows = [r for r in _registry_rows(_agent_row) if r["session_id"] == 555555]
+    assert rows and rows[0]["status"] == "running"
+
+
+def test_reconcile_never_reruns_launch(_agent_row: int, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A launch watcher whose session died is marked 'missed' + the agent is
+    told — but NEVER re-run at boot: launch scripts may carry side effects
+    (send a message, call an external API), and blindly re-running one whose
+    death circumstances are unknown could double-fire them (user ruling
+    2026-08-08: the registry rebuilds at/cron only)."""
+    from ava.shell import sessions as _sessions
+
+    monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
+    sent: list[str] = []
+    monkeypatch.setattr("ava.agents.send_message", lambda _aid, content: sent.append(content))  # pyright: ignore[reportUnknownArgumentType]
+    calls: list[tuple[Any, ...]] = []
+    monkeypatch.setattr(watcher, "launch", lambda *a, **k: calls.append((a, k)) or 999)  # pyright: ignore[reportUnknownArgumentType]
+    from shared.watcher_registry import register_watcher
+
+    register_watcher(
+        _agent_row,
+        424244,
+        kind="launch",
+        name="side-effecty",
+        message="",
+        timeout_secs=3600,
+    )
+    actions = watcher.reconcile()
+
+    # marked missed + alerted, never re-launched
+    assert calls == []  # launch() was NOT called
+    assert any("missed" in a for a in actions)
+    rows = [r for r in _registry_rows(_agent_row) if r["session_id"] == 424244]
+    assert rows and rows[0]["status"] == "missed"
+    assert sent and "side-effecty" in sent[0]
+
+
+def test_spawn_keeps_sibling_files_while_session_alive(
+    _agent_row: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Bug A (task #1116): a generated pair whose SESSION still exists must
+    not be pruned — launch is asynchronous (the command is sent into a fresh
+    session whose shell takes a moment to come up), so a back-to-back sibling
+    launch deleting it would make that watcher's python start fail with
+    "can't open file ... _boot.py". Only provably-dead pairs (session gone)
+    are pruned."""
+    from ava.shell import sessions as _sessions
+
+    monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_sessions, "list", lambda: {4242: "test-sibling"})  # pyright: ignore[reportUnknownArgumentType]
+    d = watcher._watchers_dir()
+    live_script = d / "watcher_4242.py"
+    live_boot = d / "watcher_4242_boot.py"
+    live_script.write_text("still needed")
+    live_boot.write_text("still needed boot")
+    dead_script = d / "watcher_4243.py"
+    dead_boot = d / "watcher_4243_boot.py"
+    dead_script.write_text("dead")
+    dead_boot.write_text("dead boot")
+
+    wid = watcher.launch("import ava\n", timeout="1h", name="test-prune-live")
+
+    # live sibling's pair survives (session 4242 exists); dead pair is pruned
+    assert live_script.exists() and live_boot.exists()
+    assert not dead_script.exists() and not dead_boot.exists()
+    assert (d / f"watcher_{wid}.py").exists()
+
+
+def test_spawn_back_to_back_keeps_all_files(
+    _agent_row: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Bug A acceptance (task #1116): creating several watchers back-to-back
+    must not delete any sibling's not-yet-read boot file — the exact sequence
+    that killed watcher_0/3_boot.py. The fake session registry reports every
+    created session live immediately (as the real backend does), so each
+    launch's prune must leave its siblings' pairs on disk."""
+    from ava.shell import sessions as _sessions
+
+    monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
+    alive: set[int] = set()
+    counter = iter(range(1000, 1003))
+
+    def _fake_create(name: str) -> tuple[int, str]:
+        sid = next(counter)
+        alive.add(sid)
+        return sid, name
+
+    monkeypatch.setattr(_sessions, "_create_session", _fake_create)
+    monkeypatch.setattr(_sessions, "list", lambda: dict.fromkeys(alive, "w"))  # pyright: ignore[reportUnknownArgumentType]
+    d = watcher._watchers_dir()
+
+    ids: list[int] = []
+    for name in ("b2b-1", "b2b-2", "b2b-3"):
+        wid = watcher.launch("import ava\n", timeout="1h", name=name)
+        ids.append(wid)
+
+    # all three pairs on disk — none pruned while its session is live
+    for wid in ids:
+        assert (d / f"watcher_{wid}.py").exists(), f"watcher_{wid}.py pruned"
+        assert (d / f"watcher_{wid}_boot.py").exists(), f"watcher_{wid}_boot.py pruned"
+    assert len(ids) == 3 and len(set(ids)) == 3
+
+
+def test_reconcile_skips_rebuilt_rows(_agent_row: int, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A 'rebuilt' row is terminal history — the rebuild already happened and
+    its new running row owns the watcher now. Re-processing it would re-spawn
+    a duplicate on every boot (observed 2026-08-09: each cron came back twice
+    after one rollout). 'missed' rows are terminal too (already alerted)."""
+    from ava.shell import sessions as _sessions
+
+    monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_sessions, "list", dict)
+    calls: list[tuple[Any, ...]] = []
+    monkeypatch.setattr(watcher, "cron", lambda *a, **k: calls.append((a, k)) or 999)  # pyright: ignore[reportUnknownArgumentType]
+    from shared.watcher_registry import mark_status, register_watcher
+
+    # a rebuilt row (session 424250 was rebuilt into a new session long ago)
+    register_watcher(
+        _agent_row,
+        424250,
+        kind="cron",
+        name="dup-guard",
+        message="x",
+        cron_expr="0 9 * * *",
+        cron_timezone="UTC",
+    )
+    mark_status(_agent_row, 424250, "rebuilt")
+    # a missed row (one-shot already marked + alerted)
+    register_watcher(
+        _agent_row,
+        424251,
+        kind="at",
+        name="gone-once",
+        message="x",
+        fires_at=datetime.datetime.now(datetime.UTC) - datetime.timedelta(hours=1),
+    )
+    mark_status(_agent_row, 424251, "missed")
+    # a running row with a dead session — must still rebuild
+    register_watcher(
+        _agent_row,
+        424252,
+        kind="cron",
+        name="real-dead",
+        message="x",
+        cron_expr="0 9 * * *",
+        cron_timezone="UTC",
+    )
+
+    actions = watcher.reconcile()
+
+    assert calls and len(calls) == 1  # only the running row rebuilt
+    assert any("real-dead" in a for a in actions)
+    assert not any("dup-guard" in a or "gone-once" in a for a in actions)

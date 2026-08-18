@@ -1,0 +1,22 @@
+{
+  "agent_id": 7,
+  "role": "agent_spawned",
+  "snapshot": {
+    "agent_id": 7,
+    "spawner": "user",
+    "fork_source_agent_id": null,
+    "fork_source_checkpoint_id": null,
+    "status": "allocated",
+    "pid": null,
+    "spawned_at": "2026-01-01T00:00:00Z",
+    "started_at": null,
+    "last_active_at": "2026-01-01T00:00:00Z",
+    "label": null,
+    "machine": "test-host",
+    "notices_awaiting_response": [],
+    "unread_notice_count": 0,
+    "heartbeat_paused_until": null,
+    "liveness_state": "online",
+    "last_probe_at": null
+  }
+}

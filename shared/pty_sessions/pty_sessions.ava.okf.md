@@ -1,0 +1,105 @@
+---
+type: doc
+title: "PTY sessions — one detached host process per agent interactive shell"
+description: "Each agent shell/watcher session runs in its own detached host process: a pty.fork() bash -l -i, a pyte screen model + raw byte ring buffer for captures, and a per-session unix-socket JSON protocol the SDK's PtySessionBackend consumes. No supervisor daemon — sessions structurally survive every service stop, cluster update, and respawn."
+tags:
+- shared
+- pty
+- sessions
+---
+
+# PTY sessions
+
+## What it is
+
+`shared/pty_sessions/` hosts every agent interactive shell — **one detached
+host process per session**, no supervisor daemon. The SDK keeps its
+named-session surface (`ava.shell.sessions`, watchers, schedules) unchanged.
+
+Three modules:
+
+- `host.py` — the per-session host: the `pty.fork()` shell, a reader thread
+  feeding a pyte screen model + raw byte ring buffer + byte transcript, and
+  the session's own unix socket answering `send` / `send_keys` / `capture` /
+  `resize` / `kill` / `ping` as JSON lines. Exits when its session dies.
+- `cli.py` — the transport contract the SDK consumes (`has` / `new` / `send` /
+  `send_keys` / `capture` / `resize` / `kill` / `list` / `started-at` /
+  `list-started-at`), the send-keys key table, and the 0600 envfile writer.
+  `new` spawns a host; enumeration reads the records — no process to dial.
+- `screen.py` — the pyte wrapper: incremental UTF-8 decode, raw ring buffer,
+  screen-parity capture rendering.
+
+## Why per-session hosts (the load-bearing shape)
+
+A host is spawned through `shared._reparent` and **reparents to init at
+birth**: it is nobody's child, appears in no service roster, and is probed by
+no watchdog. Every mass-teardown channel that used to kill shells —
+`ava cluster update`'s service stop, `ava stop`'s tree kill, a healthcheck
+`respawn_and_verify` — reaches processes by service identity or process
+tree, and a session host has neither. That is what makes the SDK's promise
+"sessions persist across terminate/restart/update" **structural**: a session
+ends only through its own `kill` op, its shell exiting, that one host
+crashing (blast radius: one session), or a machine reboot.
+Decision: [2026-08-13-per-session-pty-hosts](../../decisions/2026-08-13-per-session-pty-hosts.md).
+
+The pty master fd lives in the host, so host death IS session death (the
+slave hangs up) — the per-session equivalent of closing one terminal window,
+and exactly the accepted semantics the 2026-05 session server had for ALL
+sessions at once. Sovereignty was moved down to the unit that owns one
+terminal.
+
+## Namespace + records
+
+Everything per-session lives under `$AVA_HOME/run/pty/`:
+
+- `<name>.json` — the record: a `SessionRecord` (shell pid + create_time =
+  the liveness key; "session alive" MEANS the shell is alive) plus
+  `host_pid` / `host_create_time` so a kill can reach a wedged host.
+  `SessionRecord.read` ignores the extras.
+- `<name>.sock` — the session's socket (sun_path-bounded names fall back to
+  a hashed tempdir path, computed identically by host and CLI).
+
+Deliberately NOT `run/sessions/` (the posixproc/winproc dir): the record
+scan IS the session listing (`list`, `list-started-at`, and the backend's
+in-process enumeration — task #1200's snapshot cost, now zero round-trips),
+and sharing the dir would force every lister to regex-filter the other
+side's records. A record whose shell is dead is a crashed host's leftover
+and is swept lazily as enumeration discovers it. Transcripts stay at
+`$AVA_HOME/logs/<name>.out.log`; host diagnostics at `<name>.host.log`.
+
+## Lifecycle
+
+- **create** — CLI `new`: idempotent (`has` first), then `_reparent` →
+  `host.py <name> <cwd> <envfile> [cmd_b64]`. The host consumes the 0600
+  envfile (values never on argv, #974), binds its socket, forks the shell
+  (child drops `AVA_PROCESS_PROFILE`, overlays the envfile), writes the
+  record, and answers `ping`; the CLI waits for readiness and fails fast
+  with the host log tail if the host dies pre-socket.
+- **death** — the reader reaps the child (waitpid on every pass) and on EOF
+  or reap closes the master (hanging up the slave's foreground group),
+  unlinks record + socket, and exits the process after a short drain.
+- **kill** — the host signals the shell's group AND the tty's foreground
+  group (`tcgetpgrp`), graceful SIGTERM first when asked, then SIGKILL +
+  psutil-walk backstop. A host that stops answering is killed straight from
+  the record (`_kill_by_record`), so `kill` stays authoritative.
+- **signals** — the host SIG_IGNs SIGHUP/SIGTERM/SIGPIPE: a stray hangup or
+  a TERM aimed at the shell's tree must not take the session down; ending a
+  session is the kill op's job. SIGKILL ends host + session.
+
+## Consumers
+
+`shared/session_backend.PtySessionBackend` (`get_shell_backend()` on POSIX)
+— mutating ops via CLI subprocess, enumeration via the in-process record
+scan. Above it: `ava.shell.sessions`, `ava.watcher`, the gateway
+ScheduleManager, `ops.ops_cluster.capture_shell`, `ava stop`'s shell reap.
+
+## Boundaries
+
+- POSIX-only (`pty.fork`; Windows has no pty backend —
+  [conventions/windows-setup.md](../../conventions/windows-setup.md)).
+- One pty per session counts against the host-wide `kern.tty.ptmx_max`
+  ceiling (macOS default 511) — see `shared/platform.py`.
+- A machine reboot ends every session (hosts are processes, not state);
+  the watcher registry ([[shared/watcher_registry.ava.okf.md]]) is the
+  rebuild net for watchers, and page servers self-heal via the heartbeat
+  probe.

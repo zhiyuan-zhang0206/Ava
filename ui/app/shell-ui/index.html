@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Ava</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0e0e12;
+        --fg: #f4f4f5;
+        --muted: #a1a1aa;
+        --line: #2a2a33;
+        --accent: #4f46e5;
+        --danger: #f87171;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+        background: var(--bg);
+        color: var(--fg);
+        font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
+      }
+      main { width: 100%; max-width: 26rem; }
+      h1 { margin: 0 0 6px; font-size: 1.35rem; }
+      p { margin: 0 0 20px; color: var(--muted); }
+      label { display: block; margin-bottom: 6px; font-size: 0.85rem; color: var(--muted); }
+      input[type="text"] {
+        width: 100%;
+        padding: 11px 12px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #16161c;
+        color: var(--fg);
+        font: inherit;
+      }
+      input[type="text"]:focus {
+        outline: 2px solid var(--accent);
+        outline-offset: 1px;
+      }
+      button {
+        width: 100%;
+        margin-top: 14px;
+        padding: 11px 12px;
+        border: 0;
+        border-radius: 8px;
+        background: var(--accent);
+        color: #fff;
+        font: inherit;
+        font-weight: 600;
+      }
+      button.secondary { background: transparent; color: var(--muted); font-weight: 400; }
+      button:disabled { opacity: 0.55; }
+      .error { color: var(--danger); font-size: 0.85rem; min-height: 1.2em; }
+      .hint { font-size: 0.8rem; color: var(--muted); margin-top: 14px; }
+      .toggle {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-top: 14px;
+        color: var(--fg);
+      }
+      .toggle input { width: 18px; height: 18px; accent-color: var(--accent); }
+      .spinner {
+        width: 26px;
+        height: 26px;
+        margin-bottom: 16px;
+        border: 3px solid var(--line);
+        border-top-color: var(--accent);
+        border-radius: 50%;
+        animation: spin 0.9s linear infinite;
+      }
+      @keyframes spin { to { transform: rotate(360deg); } }
+      [hidden] { display: none !important; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <!-- First run (Android) / "change server": ask where the cluster is. -->
+      <section id="setup" hidden>
+        <h1>Connect to Ava</h1>
+        <p>Enter the address of your cluster's console — the gate, normally port 3000.</p>
+        <form id="setup-form">
+          <label for="server">Server address</label>
+          <input
+            id="server"
+            name="server"
+            type="text"
+            inputmode="url"
+            autocapitalize="none"
+            autocorrect="off"
+            spellcheck="false"
+            placeholder="http://192.168.1.10:3000"
+            required
+          />
+          <label for="gateway" style="margin-top: 14px">Gateway address (optional)</label>
+          <input
+            id="gateway"
+            name="gateway"
+            type="text"
+            inputmode="url"
+            autocapitalize="none"
+            autocorrect="off"
+            spellcheck="false"
+            placeholder="Derived from the server address"
+          />
+          <label class="toggle">
+            <input id="background-service" type="checkbox" />
+            Keep Ava connected in the background
+          </label>
+          <label class="toggle">
+            <input id="notifications" type="checkbox" />
+            Notify when an agent finishes or needs input
+          </label>
+          <p class="error" id="setup-error"></p>
+          <button type="submit" id="setup-submit">Connect</button>
+          <button type="button" class="secondary" id="setup-cancel" hidden>Cancel</button>
+        </form>
+        <p class="hint">
+          A bare host works too — <code>box.local</code> becomes
+          <code>http://box.local:3000</code>. The gateway is assumed to be the same host on
+          port 8000 unless you enter one above.
+        </p>
+      </section>
+
+      <!-- The gate is down (a rollout, usually): the retry loop is running. -->
+      <section id="connecting" hidden style="text-align: center">
+        <div class="spinner" style="margin-inline: auto"></div>
+        <h1>Connecting…</h1>
+        <p id="connecting-target"></p>
+      </section>
+
+      <!-- The retry budget ran out. -->
+      <section id="unreachable" hidden style="text-align: center">
+        <h1>Cannot reach Ava</h1>
+        <p id="unreachable-target"></p>
+        <button type="button" id="retry">Try again</button>
+        <button type="button" class="secondary" id="change-server">Change server</button>
+      </section>
+    </main>
+
+    <script>
+      const invoke = (cmd, args) => window.__TAURI_INTERNALS__.invoke(cmd, args);
+      const show = (id) => {
+        for (const section of document.querySelectorAll("main > section")) {
+          section.hidden = section.id !== id;
+        }
+      };
+
+      /** The Rust side picks the screen by fragment; setup is the fallback. */
+      const screenFromHash = () => {
+        const hash = window.location.hash.replace("#", "");
+        return ["setup", "connecting", "unreachable"].includes(hash) ? hash : "setup";
+      };
+
+      async function render() {
+        const config = await invoke("shell_config");
+        const target = config.entryUrl || "";
+        document.getElementById("connecting-target").textContent = target;
+        document.getElementById("unreachable-target").textContent = target;
+        document.getElementById("server").value = target;
+        document.getElementById("gateway").value = config.gatewayUrl || "";
+        document.getElementById("background-service").checked = config.backgroundService;
+        document.getElementById("notifications").checked = config.notifications;
+        document.getElementById("setup-cancel").hidden = !target;
+        document.getElementById("setup-submit").textContent = target ? "Save" : "Connect";
+        show(screenFromHash());
+      }
+
+      document.getElementById("setup-form").addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const submit = document.getElementById("setup-submit");
+        const error = document.getElementById("setup-error");
+        error.textContent = "";
+        submit.disabled = true;
+        try {
+          await invoke("shell_save_settings", {
+            patch: {
+              entryUrl: document.getElementById("server").value,
+              gatewayUrl: document.getElementById("gateway").value,
+              backgroundService: document.getElementById("background-service").checked,
+              notifications: document.getElementById("notifications").checked,
+            },
+          });
+        } catch (err) {
+          error.textContent = String(err);
+          submit.disabled = false;
+        }
+      });
+
+      document.getElementById("retry").addEventListener("click", () => invoke("shell_retry_entry"));
+      document
+        .getElementById("setup-cancel")
+        .addEventListener("click", () => invoke("shell_retry_entry"));
+      document.getElementById("change-server").addEventListener("click", () => {
+        window.location.hash = "setup";
+        show("setup");
+      });
+
+      window.addEventListener("hashchange", () => show(screenFromHash()));
+      render();
+    </script>
+  </body>
+</html>

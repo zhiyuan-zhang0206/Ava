@@ -1,0 +1,160 @@
+"""`agent.observe.log_llm_usage` field format guard.
+
+Blows up here when LangChain changes the usage_metadata shape — caught earlier than
+missing numbers on the dashboard. Consistent across providers: langchain-deepseek /
+langchain-anthropic / langchain-openai all plumb cache + reasoning figures into
+usage_metadata.{input,output}_token_details.
+"""
+
+from datetime import UTC, datetime
+
+import pytest
+from langchain_core.messages import AIMessage
+
+from agent.observe import log_llm_usage
+
+
+def _msgs(records: list[dict]) -> str:
+    return "\n".join(r["message"] for r in records)  # pyright: ignore[reportUnknownArgumentType]
+
+
+def test_deepseek_shape_logs(loguru_records):
+    msg = AIMessage(
+        content="",
+        usage_metadata={
+            "input_tokens": 1000,
+            "output_tokens": 100,
+            "total_tokens": 1100,
+            "input_token_details": {"cache_read": 800},
+            "output_token_details": {"reasoning": 70},
+        },
+    )
+    log_llm_usage(msg, model="deepseek-v4-pro")
+    out = _msgs(loguru_records)  # pyright: ignore[reportUnknownArgumentType]
+    assert "in=1000 cached=800" in out
+    assert "(80%)" in out
+    assert "out=100 reason=70" in out
+    assert "(70%)" in out
+    # model goes into extra (not the message string) → PostgresSink writes payload->>'model',
+    # dashboard 24h cost groups/prices by it. If the field name drifts, this test goes red.
+    assert loguru_records[0]["extra"]["model"] == "deepseek-v4-pro"
+
+
+def test_anthropic_shape_logs(loguru_records):
+    """When usage_metadata has no output_token_details (e.g. no thinking
+    enabled), reason=0 is still logged. With ThinkingTokensChatAnthropic,
+    thinking-enabled calls surface thinking_tokens as output_token_details.reasoning."""
+    msg = AIMessage(
+        content="",
+        usage_metadata={
+            "input_tokens": 2000,
+            "output_tokens": 50,
+            "total_tokens": 2050,
+            "input_token_details": {"cache_read": 1500, "cache_creation": 500},
+            # no output_token_details
+        },
+    )
+    log_llm_usage(msg, model="claude-opus-4-7")
+    out = _msgs(loguru_records)  # pyright: ignore[reportUnknownArgumentType]
+    assert "in=2000 cached=1500" in out
+    assert "out=50 reason=0" in out
+
+
+def test_zero_input_no_pct(loguru_records):
+    msg = AIMessage(
+        content="",
+        usage_metadata={
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "total_tokens": 0,
+        },
+    )
+    log_llm_usage(msg, model="claude-opus-4-7")
+    out = _msgs(loguru_records)  # pyright: ignore[reportUnknownArgumentType]
+    assert "in=0" in out
+    assert "%" not in out
+
+
+def test_latency_ms_rides_payload(loguru_records):
+    """latency_ms goes into the event payload (extra) so the ops monitor panel
+    can read it back — not into the message string. None -> payload null."""
+    msg = AIMessage(
+        content="",
+        usage_metadata={"input_tokens": 100, "output_tokens": 10, "total_tokens": 110},
+    )
+    log_llm_usage(msg, model="deepseek-v4-pro", latency_ms=1234.5)
+    out = _msgs(loguru_records)  # pyright: ignore[reportUnknownArgumentType]
+    assert "in=100" in out
+    assert "latency" not in out  # never in the human-readable line
+    assert loguru_records[0]["extra"]["latency_ms"] == 1234.5
+    loguru_records.clear()  # pyright: ignore[reportUnknownMemberType]
+    log_llm_usage(msg, model="deepseek-v4-pro")
+    assert loguru_records[0]["extra"]["latency_ms"] is None
+
+
+def test_decode_ms_rides_payload(loguru_records):
+    """decode_ms goes into the event payload (extra) — the generation-stage
+    TPS panel sums it per bucket — never into the human-readable line.
+    None -> payload null (non-streaming fallback / pre-instrumentation rows)."""
+    msg = AIMessage(
+        content="",
+        usage_metadata={"input_tokens": 100, "output_tokens": 10, "total_tokens": 110},
+    )
+    log_llm_usage(msg, model="deepseek-v4-pro", latency_ms=1234.5, decode_ms=800.0)
+    out = _msgs(loguru_records)  # pyright: ignore[reportUnknownArgumentType]
+    assert "in=100" in out
+    assert "decode" not in out  # never in the human-readable line
+    assert loguru_records[0]["extra"]["decode_ms"] == 800.0
+    assert loguru_records[0]["extra"]["latency_ms"] == 1234.5
+    loguru_records.clear()  # pyright: ignore[reportUnknownMemberType]
+    log_llm_usage(msg, model="deepseek-v4-pro", latency_ms=1234.5)
+    assert loguru_records[0]["extra"]["decode_ms"] is None
+
+
+def test_no_usage_metadata_silent(loguru_records):
+    msg = AIMessage(content="")
+    log_llm_usage(msg, model="claude-opus-4-7")
+    assert loguru_records == []
+
+
+def test_price_snapshot_rides_payload(loguru_records):
+    """The usage-time price snapshot (user principle, task #1273): cost_usd
+    plus the three per-1M rates ride the event payload at write time, so the
+    read side never re-prices against the current catalog. At the fixed
+    off-peak instant deepseek-v4-pro is 0.66 / 0.022 / 1.98 USD/M: in=1000
+    cached=800 out=100 -> $0.0003476."""
+    msg = AIMessage(
+        content="",
+        usage_metadata={
+            "input_tokens": 1000,
+            "output_tokens": 100,
+            "total_tokens": 1100,
+            "input_token_details": {"cache_read": 800},
+        },
+    )
+    log_llm_usage(
+        msg,
+        model="deepseek-v4-pro",
+        priced_at=datetime(2026, 8, 17, 0, 0, tzinfo=UTC),
+    )
+    extra = loguru_records[0]["extra"]  # pyright: ignore[reportUnknownArgumentType]
+    assert extra["cost_usd"] == pytest.approx(0.0003476)  # pyright: ignore[reportUnknownMemberType]
+    assert extra["price_miss"] == 0.66
+    assert extra["price_hit"] == 0.022
+    assert extra["price_out"] == 1.98
+    # never in the human-readable line
+    assert "cost" not in loguru_records[0]["message"]  # pyright: ignore[reportUnknownArgumentType]
+
+
+def test_price_snapshot_absent_for_unpriced_model(loguru_records):
+    """A model with no known price emits NO snapshot fields — absent means
+    unpriced (the readers count such calls as unpriced_calls instead of
+    billing them at 0). A null cost_usd would be ambiguous with a $0 call."""
+    msg = AIMessage(
+        content="",
+        usage_metadata={"input_tokens": 100, "output_tokens": 10, "total_tokens": 110},
+    )
+    log_llm_usage(msg, model="no-such-model")
+    extra = loguru_records[0]["extra"]  # pyright: ignore[reportUnknownArgumentType]
+    assert "cost_usd" not in extra
+    assert "price_miss" not in extra

@@ -1,0 +1,17 @@
+-- v0.1.0 — public release baseline.
+--
+-- This file is intentionally EMPTY: the complete v0.1.0 schema lives in
+-- db/schema.sql (the squashed baseline every fresh DB bootstraps from, stamped
+-- as '00000000T000000_baseline' in schema_migrations).
+--
+-- On 2026-08-14 the pre-release migration history (59 timestamped deltas) was
+-- squashed into db/schema.sql and reset; this file is the single migration
+-- anchor that history collapses to. It exists so that:
+--   * the applied-set floor above the baseline is explicit ("v0.1.0 = nothing
+--     after the baseline"), and
+--   * future deltas sort after it in name order.
+--
+-- Applying it is a no-op: it only records the name in schema_migrations.
+-- The convergence gate (scripts/test_migrations_apply.sh) verifies
+-- db/schema.sql == net effect of every file in this directory, so the schema
+-- can never drift from the baseline while this stays empty.

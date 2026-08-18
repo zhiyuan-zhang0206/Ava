@@ -1,0 +1,34 @@
+---
+type: doc
+title: ava.shell — Shell Operations
+description: "Interface for executing shell commands. Three modes: one-shot run(), background run_background() (auto-report on completion), persistent sessions."
+tags: []
+---
+
+# ava.shell — Shell Operations
+
+## What it is
+
+Interface for executing shell commands. Three modes: one-shot `run()`, background `run_background()`, persistent sessions `sessions`.
+
+## Core API
+
+### One-shot
+- `run(cmd, *, cwd=None, timeout=30.0) → str` — Run command, return stdout. Non-zero exit does not raise an exception; after `timeout` seconds kill the command and raise `subprocess.TimeoutExpired`. Default working directory is agent's workspace.
+
+### Background (auto-report on completion)
+- `run_background(cmd, *, name, cwd=None, keep=False) → BackgroundRun` — Run a long command in a new persistent session, return immediately, send you a message when the command exits (exit code + log path + output tail), then the session auto-closes. Output is streamed to `.shell_logs/<sid>_<name>.log` in workspace (relative path, can read/grep to view progress). `keep=True` retains the session after command ends. Use for one-shot long tasks like build/test/download; interactive programs still use `sessions`. Returns `BackgroundRun(session_id, output_path)`.
+
+### Persistent Sessions (`ava.shell.sessions`)
+- `new(name: str) → int` — Create a named session (name is a lowercase slug), return session ID.
+- `send(id, cmd, *, enter=True)` — Send command to session. Asynchronous—returns without waiting for command completion. `enter=False` only types without submitting.
+- `send_keys(id, *keys)` — Send raw keystrokes (e.g., `C-c`, `Escape`, `Up`, `Enter`).
+- `capture(id, lines=200, *, scrollback=True) → str` — Read the last N lines of output. `scrollback=False` only captures the currently visible screen (for full-screen TUI programs, `lines` is ignored).
+- `kill(id)` — Terminate session.
+- `list() → dict[int, str | None]` — List your sessions (id → name, unnamed as None).
+
+## Key Dependencies
+- [[sessions.ava.okf.md]] — the session backend is the underlying implementation of sessions
+
+## Notes
+Sessions retain cwd, environment variables, and background processes, used to drive interactive CLI tools like Claude Code, Codex. Sessions survive after the agent process exits (not reclaimed with the process) and across cluster restarts/updates — each runs in its own detached host process, so only its own `kill`, its shell exiting, or a machine reboot ends it; watchers are also special sessions and appear in `sessions.list()`.

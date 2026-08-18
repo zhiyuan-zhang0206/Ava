@@ -1,0 +1,749 @@
+"""Idempotent host convergence for the ava lifecycle.
+
+Bring a machine to the host-level state the current code expects: the `ava`
+symlink on PATH, ~/.local/bin on PATH, the $AVA_HOME dir skeleton, fresh plugin
+config images, and the memory pool. Run by `cmd_start` (so `ava cluster update` inherits
+it via its trailing start), and standalone via `ava converge`.
+"""
+
+# Host setup that used to live only in install.sh never reached already-deployed
+# hosts on upgrade. Folding it into the lifecycle makes one `ava cluster update` converge
+# the fleet. Each step is idempotent + fail-fast; `roles` / `requires_unit_config`
+# are declarative filters mirroring ServiceSpec's role-scoping.
+from __future__ import annotations
+
+import os
+import re
+import sys
+from pathlib import Path
+
+from cli.commands._converge_firewall import ensure_firewall_allowlist
+from cli.commands._converge_frontend_env import ensure_no_frontend_env_overrides
+from cli.commands._converge_gate import ensure_gate
+from cli.commands._converge_os_jobs import (
+    ensure_cluster_autostart,
+    ensure_health_probe_cron,
+    ensure_watchdog_probe,
+    reap_stale_schtasks,
+)
+
+# The step contract lives in _converge_spec so step implementations can span
+# modules without an import cycle; re-exported here because every caller and
+# test reaches for `cli.commands._converge.ConvergeCtx` / `ALL_ROLES`.
+from cli.commands._converge_spec import ALL_ROLES, ConvergeCtx, ConvergeStep
+from cli.commands._health_preflight import ensure_health_preflight as _ensure_health_preflight
+from cli.commands._lgtm import ensure_lgtm_stack_step
+from cli.commands._otel_collector import ensure_otel_collector_step
+from cli.commands._pgbouncer import _ensure_pgbouncer_step
+from cli.commands._port_preflight import ensure_port_preflight as _ensure_port_preflight
+from shared.cluster import is_default_home
+from shared.config import settings
+from shared.machine import MachineRoles
+from shared.platform_backend import get_backend
+from shared.runtime_config import migrate_permissions_helper_env_keys
+from shared.screen_capture import clear_status, write_status
+
+__all__ = [
+    "ALL_ROLES",
+    "CONVERGE_STEPS",
+    "ConvergeCtx",
+    "ConvergeStep",
+    "cmd_converge",
+    "converge_host",
+]
+
+
+# --- host-wiring steps (no preconditions) ---------------------------------
+
+
+def _ensure_ava_symlink(ctx: ConvergeCtx) -> None:
+    # On Windows the `ava` entry point is `.venv\Scripts\ava.exe`, reached via the
+    # uv/venv on PATH (or the install.ps1 shim) — there is no `~/.local/bin/ava`
+    # symlink model, and symlink creation needs admin/dev-mode. Skip.
+    if not get_backend().supports_ava_symlink():
+        return
+    target = ctx.repo / ".venv" / "bin" / "ava"
+    link = Path.home() / ".local" / "bin" / "ava"
+    link.parent.mkdir(parents=True, exist_ok=True)
+    if link.is_symlink() and link.readlink() == target:
+        return
+    link.unlink(missing_ok=True)
+    link.symlink_to(target)
+
+
+_PATH_BEGIN = "# >>> ava path >>>"
+_PATH_END = "# <<< ava path <<<"
+
+
+def _shell_rc_path() -> Path:
+    return Path.home() / (".zshrc" if os.environ.get("SHELL", "").endswith("zsh") else ".bashrc")
+
+
+def _ensure_local_bin_on_path(ctx: ConvergeCtx) -> None:  # noqa: ARG001
+    # POSIX shell-rc PATH wiring; Windows uses a different PATH model (the
+    # install.ps1 shim / venv Scripts on PATH), so there is no .bashrc to edit.
+    if not get_backend().supports_shell_rc():
+        return
+    local_bin = Path.home() / ".local" / "bin"
+    rc = _shell_rc_path()
+    line = f'case ":$PATH:" in *":{local_bin}:"*) ;; *) export PATH="{local_bin}:$PATH" ;; esac'
+    block = f"{_PATH_BEGIN}\n{line}\n{_PATH_END}"
+    existing = rc.read_text() if rc.exists() else ""
+    pattern = re.compile(re.escape(_PATH_BEGIN) + r".*?" + re.escape(_PATH_END), re.DOTALL)
+    if pattern.search(existing):
+        new = pattern.sub(block, existing)
+    else:
+        sep = "" if existing == "" or existing.endswith("\n") else "\n"
+        new = f"{existing}{sep}{block}\n"
+    if new != existing:
+        rc.write_text(new)
+
+
+def _ensure_ava_home_dirs(ctx: ConvergeCtx) -> None:
+    for sub in ("logs", "configs", "secrets"):
+        (ctx.ava_home / sub).mkdir(parents=True, exist_ok=True)
+    (ctx.ava_home / "logs" / ".metadata_never_index").touch(exist_ok=True)
+
+
+def _ensure_pg_binaries_step(ctx: ConvergeCtx) -> None:  # noqa: ARG001
+    """Fetch the vendored relocatable Postgres (idempotent — a no-op once the
+    host-level `~/.ava/runtime/` tree exists), so a gateway host needs no
+    `brew install postgresql@17` before the data plane comes up."""
+    if not get_backend().supports_data_plane():
+        return  # Platform uses container-based pg, not vendored binaries
+    from shared.runtime_binaries import ensure_pg_binaries
+
+    ensure_pg_binaries()
+
+
+def _ensure_redis_url_identity_step(ctx: ConvergeCtx) -> None:
+    """Backfill the data-plane identity (username) into a legacy AVA_REDIS_URL.
+
+    Gateway-only (the redis instance and its ACL user are the gateway box's data
+    plane). A cluster born before the names-as-data ACL model carries
+    `redis://:<secret>@host/0` — no username — so its runtime dials as the redis
+    `default` admin user and the gateway watchdog's redis-acl healthcheck (which
+    reads the identity from the URL as data) had nothing to re-affirm. The
+    identity is read from the cluster's own db_url (`identity_from_url` —
+    names-as-data; db/role/ACL share one identifier), falling back to the fixed
+    birth identifier only when db_url carries no username either. Safe to write
+    mid-flight: Settings re-applies the cluster secret as the password on every
+    load, and `ava start` re-affirms the ACL user under this same identity
+    (ensure_cluster_instance takes it from db_identity) before daemons dial with
+    the new URL.
+
+    The URL is read from the .env FILE, never from settings — the in-memory dial
+    value is host-rewritten (loopback self-dial), and persisting that would
+    clobber the reachable host. Idempotent: a URL already carrying a username is
+    left byte-identical.
+    """
+    from urllib.parse import urlsplit
+
+    from shared.cluster import DATA_PLANE_IDENTITY, identity_from_url
+    from shared.envfile import upsert_env
+    from shared.url_secret import url_with_userinfo
+
+    env_path = ctx.ava_home / ".env"
+    if not env_path.exists():
+        return
+    raw = ""
+    for line in env_path.read_text().splitlines():
+        if line.split("=", 1)[0].strip() == "AVA_REDIS_URL" and "=" in line:
+            raw = line.split("=", 1)[1].strip()
+            break
+    if not raw or urlsplit(raw).username:
+        return
+    secret = settings.data_plane.cluster_secret
+    if not secret:
+        return  # no-secret test/unprovisioned homes: userinfo cannot be minted
+    try:
+        identity = identity_from_url(settings.data_plane.db_url)
+    except ValueError:
+        identity = DATA_PLANE_IDENTITY
+    upsert_env(env_path, {"AVA_REDIS_URL": url_with_userinfo(raw, identity, secret)})
+    print(f"  · backfilled AVA_REDIS_URL username {identity!r} (legacy URL carried none)")
+
+
+# --- unit-state steps (need a configured unit) ----------------------------
+
+
+def _migrate_host_config_to_env(ctx: ConvergeCtx) -> None:
+    """One-time .env hygiene migrations (host-override file, inverted legacy
+    AVA_SKIP_* keys, AVA_PRIMARY_GATEWAY_URL rename) — idempotent, file-only."""
+    from shared import runtime_config
+
+    runtime_config.migrate_host_json_to_env()
+    if changed := runtime_config.migrate_skip_alias_env_keys(ctx.ava_home / ".env"):
+        print(f"  · legacy AVA_SKIP_* env keys migrated: {', '.join(changed)}", file=sys.stderr)
+    runtime_config.migrate_primary_gateway_url_key(ctx.ava_home / ".env")
+
+
+def _ensure_plugin_config_images(ctx: ConvergeCtx) -> None:  # noqa: ARG001
+    from shared.plugins_config import update_all_disk_images
+
+    update_all_disk_images()
+
+
+def _converge_skills_step(ctx: ConvergeCtx) -> None:
+    """Sync repo + plugin skills into `$AVA_HOME/skills/` — the single dir the
+    skill scanner loads (see `cli/commands/_converge_skills.py`)."""
+    from cli.commands._converge_skills import converge_skills
+
+    result = converge_skills(ctx.repo, ctx.ava_home)
+    for kind, names in (
+        ("copied", result.copied),
+        ("updated", result.updated),
+        ("removed", result.removed),
+    ):
+        if names:
+            print(f"    {kind}: {', '.join(names)}")
+    for warning in result.warnings:
+        print(f"  ! skills: {warning}", file=sys.stderr)
+
+
+def _plugin_scaffold_step(ctx: ConvergeCtx) -> None:  # noqa: ARG001
+    """Run each enabled plugin's `scaffold()` — see `_converge_plugins.py`."""
+    from cli.commands._converge_plugins import run_plugin_scaffolds
+
+    run_plugin_scaffolds()
+
+
+def _ensure_browser(ctx: ConvergeCtx) -> None:
+    """Preflight the shared headed Chrome and shed the legacy plugin file.
+
+    chrome's MCP config now ships in `<repo>/ava_builtins/mcps/chrome/.mcp.json` (a built-in
+    source the loader scans), so this step no longer writes a plugin `.mcp.json`;
+    it just removes the one earlier versions wrote. When the browser is enabled,
+    probe host capability; on a headless machine warn instead of failing so the
+    rest of converge (and ava start) can proceed.
+    """
+    (ctx.ava_home / "plugins" / "ava_chrome" / ".mcp.json").unlink(missing_ok=True)
+    if not settings.services.browser_enabled:
+        return
+    from services.browser.daemon import assert_browser_capable
+
+    try:
+        assert_browser_capable()
+    except RuntimeError as e:
+        print(f"  ! browser: {e}", file=sys.stderr)
+        print("    (ava-browser will not start on this host)", file=sys.stderr)
+        return
+    # Host is browser-capable. Offer, once, to seed the dedicated Chrome profile
+    # from the operator's daily Chrome — a security-gated choice that only fires
+    # when the profile is still absent/empty AND a human is at the TTY. Watchdog
+    # respawns and rollout-driven starts have no TTY, so they take the fresh
+    # default and never block.
+    from services.browser.profile import ensure_browser_profile
+
+    ensure_browser_profile(interactive=sys.stdin.isatty() and sys.stdout.isatty())
+
+
+def _ensure_permissions_helper(ctx: ConvergeCtx) -> None:
+    """Build, sign, and launchd-load the macOS permissions helper.
+
+    Idempotent bring-up (stable cert, compile + sign, load the LaunchAgent);
+    an incapable host warns and skips, and so does a process that cannot reach
+    the signing key, while a failure that is neither propagates (fail-fast).
+    Desktop permissions stay a one-time manual operator step.
+    Renames pre-rename env keys first so this unit's .env stays canonical.
+    """
+    if changed := migrate_permissions_helper_env_keys(ctx.ava_home / ".env"):
+        print(f"  · permissions-helper env keys migrated: {', '.join(changed)}", file=sys.stderr)
+    if not settings.services.permissions_helper_enabled:
+        return
+    from shared.platform_probes import permissions_helper_incapability
+
+    reason = permissions_helper_incapability()
+    if reason is not None:
+        print(f"  ! permissions-helper: {reason}", file=sys.stderr)
+        print("    (ava-permissions-helper will not start on this host)", file=sys.stderr)
+        return
+    # Capability is a property of the host; reaching the signing key is a
+    # property of THIS process, so the probe above cannot answer it and the
+    # attempt is what reports it. Both are environment limits and skip; anything
+    # else is a real defect and propagates.
+    from services.permissions_helper import converge
+    from services.permissions_helper.lifecycle import PermissionsHelperSigningUnavailableError
+
+    try:
+        converge()
+    except PermissionsHelperSigningUnavailableError as exc:
+        print(f"  ! permissions-helper: {exc}", file=sys.stderr)
+        print(
+            "    (keeping the existing build; converge continues so the cluster starts)",
+            file=sys.stderr,
+        )
+
+
+def _ensure_google_drive(ctx: ConvergeCtx) -> None:
+    """Fail fast when this agent-runner has no writable Google Drive synced folder.
+
+    Cross-machine file transfer drops files into a shared Google Drive folder
+    that mirrors to every machine; a host that cannot read/write its local Drive
+    folder cannot participate, so block start rather than fail silently later.
+
+    Only enforced on a split deployment: a single box (this unit also carries
+    'gateway') has no peer to transfer to, so the requirement is skipped. A split
+    agent-runner that does not use the shared drive can opt out with
+    AVA_REQUIRE_GOOGLE_DRIVE=false.
+    """
+    if ctx.roles and "gateway" in ctx.roles:
+        return
+    if not settings.general.require_google_drive:
+        return
+    from shared.google_drive import candidate_drive_dirs, find_writable_google_drive
+
+    if find_writable_google_drive() is None:
+        looked = ", ".join(str(p) for p in candidate_drive_dirs()) or "(no candidate paths)"
+        raise RuntimeError(
+            "no writable Google Drive synced folder found on this agent-runner. "
+            "Cross-machine file transfer relies on a shared Google Drive: install "
+            "Google Drive for Desktop (macOS, or on the Windows side of a WSL host "
+            "-- it then appears under /mnt/<letter>) or mount Drive on native Linux "
+            "(e.g. via rclone), sign in, and make sure the synced 'My Drive' area is "
+            f"writable, then retry. Looked in: {looked}"
+        )
+
+
+def _ensure_github_pr(ctx: ConvergeCtx) -> None:
+    """Fail fast when this agent-runner cannot open+merge PRs on the memory repo.
+
+    The memory pool is consolidated nightly by agents that push their machine
+    branch and open a PR, which an arbiter merges into main. A host missing the
+    GitHub CLI, not authenticated, or lacking write access silently breaks that
+    sync, so block start rather than fail silently later.
+
+    Only enforced on a split deployment: a single box (this unit also carries
+    'gateway') consolidates locally with no PR round-trip, so the requirement is
+    skipped. Also skipped when AVA_MEMORY_KEEP_LOCAL is set (the pool is
+    local-only and never pushed off-box). A split agent-runner that does not
+    consolidate via PRs can opt out with AVA_REQUIRE_GITHUB_PR=false.
+    """
+    if ctx.roles and "gateway" in ctx.roles:
+        return
+    if settings.general.memory_keep_local:
+        return
+    if not settings.general.require_github_pr:
+        return
+    from shared.github_pr import github_pr_blocker
+
+    reason = github_pr_blocker()
+    if reason is not None:
+        raise RuntimeError(
+            f"this agent-runner cannot open+merge GitHub PRs on the memory repo: {reason}. "
+            "The memory pool is consolidated nightly by agents that push their machine "
+            "branch and open/merge PRs: install the GitHub CLI (`gh`), run `gh auth login`, "
+            "and grant the account write access to the memory repo, then retry."
+        )
+
+
+# Services that were renamed; the old `ava-<old>` session lingers after an
+# upgrade because `_do_stop` only knows the current name. Reaped by converge so the
+# rename never strands the old daemon.
+# - `runner` -> `ops` (2026-06-05 direct-dial).
+# - `watchdog` -> `gateway-watchdog` + `agent-runner-watchdog` (2026-06-20
+#   per-capability split). The two replacements are in `build_services()` so they
+#   land in `current` and are NOT reaped; only the retired single name is.
+# - `pty-supervisor` -> nothing (2026-08-13 per-session pty hosts): agent
+#   shells run in their own detached host processes now (shared/pty_sessions);
+#   the supervisor daemon is gone. Reaping the old service session kills the
+#   shells of that final pre-host era — the one transition where they were
+#   still its children.
+_RENAMED_AWAY_SERVICES: frozenset[str] = frozenset({"runner", "watchdog", "pty-supervisor"})
+
+
+def _reap_legacy_sessions() -> None:
+    """Migration cleanup: kill daemon sessions left under an OLDER naming scheme so a
+    scheme change never strands a daemon (its pidfile would then block the new-named
+    one from starting). New code only ever creates `ava-<service>` on this home's
+    own session backend.
+
+    Reaped here: `ava-<renamed-away-service>` — the service was renamed (e.g.
+    `runner` -> `ops`), so the old session is no longer in `build_services()` and
+    nothing else stops it. Enumerated and killed through the session backend
+    (native supervisor on POSIX, winproc on Windows).
+
+    Runs in converge (every `ava start`), so a stranded daemon is reaped on the next
+    start, then `_launch_sessions` brings up the current-named one (the reaped
+    process's pidfile is now free).
+    """
+    # Windows has no legacy naming schemes to reap (winproc named sessions
+    # identically from the start).
+    if not get_backend().is_posix():
+        return
+    # Method-local import: the self-update's in-process stop must load the
+    # session backend post-checkout (tests/cli/test_update_import_timing.py).
+    from cli.commands._repo import build_services, session_name
+    from shared.session_backend import get_backend as _sess_backend
+
+    current = {session_name(spec.session) for spec in build_services()}
+    renamed_away = {session_name(svc) for svc in _RENAMED_AWAY_SERVICES} - current
+    for name in _sess_backend().list_sessions():
+        if name in renamed_away:
+            _sess_backend().kill_session(name, graceful=False)
+
+
+def _reap_legacy_sessions_step(ctx: ConvergeCtx) -> None:  # noqa: ARG001
+    _reap_legacy_sessions()
+
+
+def _migrate_registry_keys_step(ctx: ConvergeCtx) -> None:  # noqa: ARG001
+    """Idempotently normalize `clusters.json` to the migration-window form
+    (name-keyed, compat name/db_name preserved). Reads already re-key by home;
+    this repairs a file a buggy path-only build rewrote without the compat
+    fields (which would crash a box-shared pre-cutover reader). See
+    shared.cluster.migrate_registry_keys."""
+    from shared.cluster import migrate_registry_keys
+
+    if migrate_registry_keys():
+        print("  · normalized clusters.json to the backward-compatible window form")
+
+
+def _migrate_legacy_disabled_marker(ctx: ConvergeCtx) -> None:
+    """Carry a pre-rename `$AVA_HOME/skipped_services` over to the name the
+    current code reads (`disabled_services`), so an operator's durable
+    `--disable-service` intent recorded before the rename is honored instead of
+    silently ignored. One-shot: after it runs there is no legacy file left, so
+    every later converge is a no-op. See shared.disabled_services.migrate_legacy_marker
+    for the both-files-exist rule."""
+    from shared.disabled_services import migrate_legacy_marker
+
+    summary = migrate_legacy_marker(ctx.ava_home)
+    if summary is not None:
+        print(f"  · {summary}")
+
+
+def _ensure_screen_capture(ctx: ConvergeCtx) -> None:  # noqa: ARG001
+    """Preflight OS-level screen capture on agent-runner hosts.
+
+    Asks the permissions helper — the process that actually performs
+    ``screencapture_region`` — whether it holds the Screen Recording grant, and
+    records the answer for the next agent startup to report. Runs after the
+    helper's own bring-up step, and only where a helper can exist at all: on a
+    host that cannot run one, that step already said so, and a derived second
+    complaint here would be noise rather than news.
+    """
+    from shared.platform_probes import permissions_helper_incapability
+
+    if (
+        not settings.services.permissions_helper_enabled
+        or permissions_helper_incapability() is not None
+    ):
+        clear_status()
+        return
+
+    from services.permissions_helper.client import check_screen_capture
+
+    status = check_screen_capture()
+    if status.available:
+        # Drop any stale "unavailable" file so a fixed host does not fire a
+        # false notification on the next agent startup.
+        clear_status()
+        return
+    write_status(status)
+    print(f"  ! {status.headline}: {status.diagnostic}", file=sys.stderr)
+
+
+def _warn_untracked_migrations(ctx: ConvergeCtx) -> None:  # noqa: ARG001
+    """Operator-visible warning when migrations/ holds files git does not track.
+
+    The applier skips untracked migrations with a log warning (Task #998); this
+    surfaces the same fact on the console every `ava start` / `ava cluster update`
+    converge runs, so an operator who wrote a migration into the prod checkout
+    without committing it is told it will NOT be applied — the silent no-op
+    would otherwise read as "my migration ran". Gateway-only: the gateway is the
+    single schema writer (e9d51acea).
+    """
+    from shared.migrations import untracked_migration_files
+
+    names = untracked_migration_files()
+    if names:
+        print(
+            f"⚠ [migration] {len(names)} untracked file(s) in migrations/ are NOT "
+            f"in git and will NOT be applied: {', '.join(names)}"
+        )
+
+
+CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
+    ConvergeStep("ava symlink on PATH", _ensure_ava_symlink, host_global=True),
+    ConvergeStep("~/.local/bin on PATH", _ensure_local_bin_on_path, host_global=True),
+    ConvergeStep("$AVA_HOME dir skeleton", _ensure_ava_home_dirs),
+    # Warning-only port preflight: bind-check the cluster's port block + this
+    # unit's health ports before anything is launched; foreign occupants are
+    # printed and logged, never blocking (the blocking health-port gate is
+    # start._refuse_occupied_health_ports, which runs later with the roster).
+    ConvergeStep(
+        "port conflict preflight",
+        _ensure_port_preflight,
+        requires_unit_config=True,
+    ),
+    # Warning-only health preflight: data-plane reachability (pg/redis, local on
+    # gateway / remote on runner) + checkout state (HEAD vs cluster pin, dirty
+    # marker). Findings are printed and appended to $AVA_HOME/logs/health_preflight.log,
+    # never blocking — the same contract as the port preflight above.
+    ConvergeStep(
+        "health preflight",
+        _ensure_health_preflight,
+        requires_unit_config=True,
+    ),
+    # Fetch the vendored relocatable Postgres ahead of the data-plane bring-up, so a
+    # clean gateway host needs no `brew install postgresql@17`. Gateway-only.
+    ConvergeStep(
+        "vendored Postgres binaries",
+        _ensure_pg_binaries_step,
+        roles=frozenset({"gateway"}),
+    ),
+    # Reconcile the one DB URL (AVA_DB_URL) with the pooler toggle + preflight the
+    # PgBouncer binary when the pooler is enabled (gateway box's data plane).
+    ConvergeStep(
+        "one DB URL + pgbouncer binary (when enabled)",
+        _ensure_pgbouncer_step,
+        roles=frozenset({"gateway"}),
+    ),
+    # Legacy clusters carry a username-less AVA_REDIS_URL; backfill the identity
+    # so the redis-acl healthcheck has an ACL user to re-affirm. Gateway-only.
+    ConvergeStep(
+        "redis URL identity backfill",
+        _ensure_redis_url_identity_step,
+        roles=frozenset({"gateway"}),
+    ),
+    # The frontend session (and its `npm run build`) runs on gateway hosts, so
+    # the guard gates exactly the hosts whose bundle could go stale.
+    ConvergeStep(
+        "no frontend build-time env overrides",
+        ensure_no_frontend_env_overrides,
+        roles=frozenset({"gateway"}),
+    ),
+    # Retire this machine's per-machine host override file into its .env (file-only,
+    # no DB — safe to run here before Postgres is up). The cluster DB-row migration
+    # needs Postgres + schema, so it runs later in `ava start` (after migrations
+    # apply, before the gateway session starts), not here. Idempotent.
+    ConvergeStep(
+        "migrate legacy env keys -> .env",
+        _migrate_host_config_to_env,
+        requires_unit_config=True,
+    ),
+    # Warning-only: untracked `.sql` files in migrations/ are never applied
+    # (Task #998) — say so on the console instead of letting the log warning be
+    # the only trace. Gateway-only: the gateway is the single schema writer.
+    ConvergeStep(
+        "untracked migrations warning",
+        _warn_untracked_migrations,
+        roles=frozenset({"gateway"}),
+    ),
+    # Plugin config images are read only by agent processes, which run on
+    # agent-runners. The gateway never loads a plugin, so materializing its
+    # disk images there is dead work (and feeds the inventory leak).
+    ConvergeStep(
+        "plugin config images",
+        _ensure_plugin_config_images,
+        roles=frozenset({"agent-runner"}),
+        requires_unit_config=True,
+    ),
+    # Skills load in agent processes only, from the single $AVA_HOME/skills/
+    # dir this step keeps in sync with the repo + plugin source trees.
+    ConvergeStep(
+        "skills sync -> $AVA_HOME/skills",
+        _converge_skills_step,
+        roles=frozenset({"agent-runner"}),
+        requires_unit_config=True,
+    ),
+    ConvergeStep("otel collector sidecar", ensure_otel_collector_step, requires_unit_config=True),
+    # The LGTM observability backend (deploy/lgtm compose stack) — a host
+    # singleton, so the step is gated on the $AVA_HOME/lgtm-host marker file
+    # inside, not on roles: only the one home the operator marked brings it up;
+    # every other cluster on the box (dev worktrees included) no-ops.
+    ConvergeStep("lgtm observability stack", ensure_lgtm_stack_step),
+    # Plugin-owned host state. ava_memory's scaffold brings up this cluster's
+    # memory pool checkouts and lays its template down inside them — a step the
+    # framework used to carry for it. A disabled plugin is skipped, so turning it
+    # off leaves nothing of its behind.
+    ConvergeStep(
+        "plugin scaffolds",
+        _plugin_scaffold_step,
+        requires_unit_config=True,
+    ),
+    ConvergeStep(
+        "browser capability + plugin",
+        _ensure_browser,
+        roles=frozenset({"agent-runner"}),
+        requires_unit_config=True,
+    ),
+    ConvergeStep(
+        "permissions helper build + sign + load",
+        _ensure_permissions_helper,
+        roles=frozenset({"agent-runner"}),
+        requires_unit_config=True,
+    ),
+    ConvergeStep(
+        "google drive sync area",
+        _ensure_google_drive,
+        roles=frozenset({"agent-runner"}),
+        requires_unit_config=True,
+    ),
+    ConvergeStep(
+        "github PR capability",
+        _ensure_github_pr,
+        roles=frozenset({"agent-runner"}),
+        requires_unit_config=True,
+    ),
+    # macOS Application Firewall allow rules for the binaries this host serves
+    # off-box ports from. Read-only (the repair needs root — issue #949), both
+    # capabilities (a gateway serves HTTP, a runner serves its ops port), and
+    # silent on every host that cannot have the defect.
+    ConvergeStep("macOS firewall allow list", ensure_firewall_allowlist),
+    ConvergeStep("reap legacy-named sessions", _reap_legacy_sessions_step),
+    ConvergeStep("registry home-path keys", _migrate_registry_keys_step),
+    # Pure file work under this cluster's home, so it needs no unit config and no
+    # capability: both roles read the marker (the watchdog runs on either), and a
+    # standalone `ava converge` on a not-yet-configured host must still repair it.
+    # Position is only required to be inside converge — `cmd_start` runs converge
+    # (step 1) well before it resolves the launch skip set (step 4), so a
+    # migration lands in time for the very start that performs it.
+    ConvergeStep("legacy disabled-services marker", _migrate_legacy_disabled_marker),
+    ConvergeStep(
+        "screen capture availability",
+        _ensure_screen_capture,
+        roles=frozenset({"agent-runner"}),
+        requires_unit_config=True,
+    ),
+    # Windows-only: reclaim \Ava\* tasks under a retired home slug (task #1196).
+    ConvergeStep("reap stale Windows tasks", reap_stale_schtasks, requires_unit_config=True),
+    ConvergeStep(
+        "health probe cron job",
+        ensure_health_probe_cron,
+        roles=frozenset({"gateway"}),
+        requires_unit_config=True,
+    ),
+    # The always-up fleet UI entry: owns the frontend port, proxies the app,
+    # survives updates by construction (not a service session). Gateway-only.
+    ConvergeStep(
+        "fleet UI gate (always-up entry)",
+        ensure_gate,
+        roles=frozenset({"gateway"}),
+        requires_unit_config=True,
+    ),
+    # The watchdog keeps the services alive; this keeps the WATCHDOG alive.
+    # Runs on any serving role — an agent-runner-only box needs it just as much
+    # (that is where the gap was observed), and the step itself fans out over
+    # whichever capabilities the unit carries.
+    ConvergeStep(
+        "watchdog probe job",
+        ensure_watchdog_probe,
+        requires_unit_config=True,
+    ),
+    # Boot-time autostart of the whole cluster. host_global so only the prod
+    # install registers it (a dev worktree cluster must not auto-start on reboot);
+    # runs on any serving role since an agent-runner-only box must self-restart too.
+    ConvergeStep(
+        "cluster boot autostart",
+        ensure_cluster_autostart,
+        host_global=True,
+        requires_unit_config=True,
+    ),
+)
+
+
+def converge_host(
+    repo: Path,
+    roles: MachineRoles | None,
+    *,
+    ava_home: Path | None = None,
+    steps: tuple[ConvergeStep, ...] = CONVERGE_STEPS,
+) -> None:
+    """Run the applicable converge steps in order; idempotent, fail-fast.
+
+    `roles is None` means the unit is not configured yet (fresh install): steps
+    with requires_unit_config=True are skipped with a printed notice. A
+    configured host runs a step when it carries any capability the step is scoped
+    to (`roles & step.roles`), so a single-box gateway,agent-runner host runs
+    both the gateway and agent-runner steps.
+    """
+    resolved_home = (
+        ava_home if ava_home is not None else Path(settings.general.ava_home).expanduser()
+    )
+    ctx = ConvergeCtx(repo=repo, ava_home=resolved_home, roles=roles)
+
+    # Host-global steps belong to the host's prod install (the default home
+    # `~/.ava`), not to a dev cluster spun up from a worktree — a dev cluster must
+    # not repoint `~/.local/bin/ava` or rewrite the shell rc.
+    #
+    # Identity is the home path, so the criterion is direct: this unit's resolved
+    # home must BE the default home. An uninstalled dev worktree resolves its home
+    # to `~/.ava` too (the unanchored fallback), so additionally require a repo
+    # that is not a dev worktree (`.worktrees/...` or `.claude/worktrees/...`) —
+    # host-global wiring runs only for a genuine prod-install checkout.
+    repo_resolved = str(ctx.repo.resolve())
+    repo_is_worktree = ".claude/worktrees" in repo_resolved or "/.worktrees/" in repo_resolved
+    is_prod_install = is_default_home(ctx.ava_home) and not repo_is_worktree
+
+    print("\n→ converge host")
+    for step in steps:
+        if step.host_global and not is_prod_install:
+            print(
+                f"  · {step.name}: skipped (dev cluster/worktree — host-global wiring is prod-install only)"
+            )
+            continue
+        # When roles is None (unconfigured host) the capability filter is
+        # skipped; every role-scoped step in CONVERGE_STEPS is also
+        # requires_unit_config=True, so it is caught by the next guard. A
+        # role-scoped step that is NOT requires_unit_config would run on an
+        # unconfigured host — give such a step requires_unit_config=True or
+        # extend this guard.
+        if roles is not None and not (roles & step.roles):
+            print(f"  · {step.name}: skipped (roles {','.join(sorted(roles))})")
+            continue
+        if roles is None and step.requires_unit_config:
+            print(f"  · {step.name}: deferred to first `ava start` (unit not configured yet)")
+            continue
+        try:
+            step.apply(ctx)
+        except Exception as e:
+            print(f"  ✗ {step.name}: {e}", file=sys.stderr)
+            raise
+        print(f"  ✓ {step.name}")
+
+
+def cmd_converge() -> int:
+    """`ava converge` — bring this host to the state the current code expects (idempotent)."""
+    import cli.commands as _ns
+    from shared.platform import raise_fd_limit
+
+    raise_fd_limit(65536)  # converge spawns services + frontend deps; children inherit
+    repo = _ns._repo_root()
+    roles = _ns._roles_or_none()
+    print(f"[ava converge] cwd = {repo}  roles = {','.join(sorted(roles)) if roles else 'unknown'}")
+
+    # Source-integrity guard: detect manual git operations in the source tree.
+    # Converge does not launch services, so the guard only warns — it does not
+    # auto-heal (uv sync) or block. The full guard (with auto-heal) runs at
+    # `ava start` time; this is an early-warning check for standalone converge.
+    import contextlib
+    import subprocess as _sp
+
+    with contextlib.suppress(Exception):
+        _head = _sp.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+        if _head.returncode == 0:
+            _head_sha = _head.stdout.strip()
+            with contextlib.suppress(Exception):
+                from shared.source_integrity import get as _get_installed
+
+                _installed = _get_installed()
+                if _installed is not None and _head_sha != _installed:
+                    print(
+                        f"\n⚠  SOURCE INTEGRITY: HEAD ({_head_sha[:7]}) != "
+                        f"installed ({_installed[:7]})\n"
+                        f"   The source tree changed outside of `ava cluster update`. "
+                        f"Run `ava cluster update` or `ava start` to auto-heal.\n",
+                        file=sys.stderr,
+                    )
+
+    _ns.converge_host(repo, roles)
+    return 0

@@ -1,0 +1,276 @@
+"""Gateway reverse-proxy tests for agent page servers.
+
+The new page data path: browser -> gateway -> agent page server. The
+registered PageRow.url is the gateway's own /api/agents/<id>/pages/<name>/,
+auth-gated like every API route; the gateway forwards GETs to the page
+server's registered host:port. Covers:
+- proxy serves page content (root + nested path + query string)
+- trailing-slash canonicalization
+- 404: unknown page / closed page / missing agent
+- path-traversal rejection (encoded dot segments, backslashes)
+- 502: page server unreachable
+- auth required (middleware on: 401 without credentials)
+"""
+
+from __future__ import annotations
+
+import http.server
+import socket
+import socketserver
+import threading
+from collections.abc import Iterator
+from pathlib import Path
+
+import pytest
+from fastapi.testclient import TestClient
+
+from gateway.app import app
+from shared import config
+from shared.db import create_agent
+
+_SECRET = "test-cluster-secret"  # noqa: S105 — test fixture
+
+
+class _QuietHandler(http.server.SimpleHTTPRequestHandler):
+    def log_message(self, format: str, *args: object) -> None:
+        pass
+
+
+class _SSEHandler(http.server.BaseHTTPRequestHandler):
+    """Streams two SSE events with a delay between them — proves the proxy
+    forwards a chunked, non-buffered response (content-type preserved, both
+    events arrive)."""
+
+    def do_GET(self) -> None:
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.end_headers()
+        self.wfile.write(b"data: first\n\n")
+        self.wfile.flush()
+        import time
+
+        time.sleep(0.2)
+        self.wfile.write(b"data: second\n\n")
+        self.wfile.flush()
+
+    def log_message(self, format: str, *args: object) -> None:
+        pass
+
+
+@pytest.fixture
+def page_server(tmp_path: Path) -> Iterator[int]:
+    """A real static page server (what ava.ui.serve launches), serving
+    tmp_path on 127.0.0.1. Returns its port."""
+    (tmp_path / "index.html").write_text("<h1>hello</h1>", encoding="utf-8")
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "sub" / "file.txt").write_text("nested", encoding="utf-8")
+    # A file OUTSIDE the served directory — the traversal tests prove the
+    # proxy cannot reach it. Distinctive content so an assertion can tell
+    # "file served" apart from the 400 detail echoing the rejected path.
+    outside = tmp_path.parent / "outside-secret.txt"
+    outside.write_text("TOP-SECRET-OUTSIDE-CONTENT", encoding="utf-8")
+
+    # SimpleHTTPRequestHandler takes directory as a constructor arg (a class
+    # attribute is ignored — __init__ falls back to cwd).
+    handler = lambda *args, **kwargs: _QuietHandler(  # noqa: E731 — factory for ThreadingTCPServer  # pyright: ignore[reportUnknownLambdaType, reportUnknownVariableType]
+        *args,  # pyright: ignore[reportUnknownArgumentType]
+        directory=str(tmp_path),
+        **kwargs,  # pyright: ignore[reportUnknownArgumentType]
+    )
+    server = socketserver.ThreadingTCPServer(("127.0.0.1", 0), handler)  # pyright: ignore[reportUnknownArgumentType]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield server.server_address[1]
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def _register(client: TestClient, agent_id: int, name: str, port: int) -> None:
+    resp = client.post(
+        f"/api/agents/{agent_id}/pages",
+        json={"name": name, "port": port, "host": "127.0.0.1"},
+    )
+    assert resp.status_code == 201
+
+
+def test_proxy_serves_page_content(db_conn, page_server: int) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    """GET through the gateway returns the page server's content — root,
+    nested path, and query string all work."""
+    aid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
+    with TestClient(app) as client:
+        resp = client.post(
+            f"/api/agents/{aid}/pages",
+            json={"name": "p", "port": page_server, "host": "127.0.0.1"},
+        )
+    assert resp.status_code == 201
+    # The registered URL is the gateway's own — no host:port leak.
+    assert resp.json()["url"] == f"http://test-gateway.invalid:8000/api/pages/{aid}-p/"
+
+    with TestClient(app) as client:
+        root = client.get(f"/api/pages/{aid}-p/")
+        assert root.status_code == 200
+        assert root.headers["content-type"].startswith("text/html")
+        assert "<h1>hello</h1>" in root.text
+
+        nested = client.get(f"/api/pages/{aid}-p/sub/file.txt")
+        assert nested.status_code == 200
+        assert nested.text == "nested"
+
+        with_qs = client.get(f"/api/pages/{aid}-p/?v=2")
+        assert with_qs.status_code == 200
+        assert "<h1>hello</h1>" in with_qs.text
+
+
+def test_proxy_redirects_root_without_trailing_slash(db_conn, page_server: int) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    """/pages/{name} (no slash) redirects to /pages/{name}/ so relative asset
+    links inside the page resolve against the page directory."""
+    aid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
+    with TestClient(app) as client:
+        _register(client, aid, "p", page_server)
+        resp = client.get(f"/api/pages/{aid}-p", follow_redirects=False)
+    assert resp.status_code == 307
+    assert resp.headers["location"] == f"/api/pages/{aid}-p/"
+
+
+def test_proxy_404_unknown_page(db_conn) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    """A never-registered page name is a 404, not a proxy attempt."""
+    aid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
+    with TestClient(app) as client:
+        resp = client.get(f"/api/pages/{aid}-never/")
+    assert resp.status_code == 404
+
+
+def test_proxy_404_closed_page(db_conn, page_server: int) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    """close() removes the reverse-proxy route: a closed page 404s."""
+    aid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
+    with TestClient(app) as client:
+        _register(client, aid, "p", page_server)
+        client.delete(f"/api/agents/{aid}/pages/p")
+        resp = client.get(f"/api/pages/{aid}-p/")
+    assert resp.status_code == 404
+
+
+def test_proxy_404_missing_agent(db_conn, page_server: int) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    with TestClient(app) as client:
+        resp = client.get("/api/pages/99999-p/")
+    assert resp.status_code == 404
+
+
+@pytest.mark.parametrize(
+    "bad_path",
+    [
+        "%2e%2e/outside-secret.txt",  # ../
+        "sub/%2e%2e/%2e%2e/outside-secret.txt",  # ../../
+        "%2e%2e%2foutside-secret.txt",  # encoded ../ without slash split
+        "%2e%2e%5coutside-secret.txt",  # ..\ (Windows separator)
+        "sub/..%5coutside-secret.txt",
+    ],
+)
+def test_proxy_rejects_traversal(db_conn, page_server: int, bad_path: str) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    """Encoded dot-segments and backslashes are rejected with 400 — the
+    gateway never forwards a path that could escape the page directory."""
+    aid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
+    with TestClient(app) as client:
+        _register(client, aid, "p", page_server)
+        resp = client.get(f"/api/pages/{aid}-p/{bad_path}")
+    assert resp.status_code == 400
+    # The outside file's content never crossed the proxy (the 400 detail may
+    # echo the rejected path, but not the file itself).
+    assert "TOP-SECRET-OUTSIDE-CONTENT" not in resp.text
+
+
+def test_proxy_502_when_page_server_unreachable(db_conn) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    """A registered page whose server is down surfaces as 502."""
+    aid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
+    # Grab a free port and release it — nothing will be listening there.
+    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    probe.bind(("127.0.0.1", 0))
+    free_port = probe.getsockname()[1]
+    probe.close()
+    with TestClient(app) as client:
+        resp = client.post(
+            f"/api/agents/{aid}/pages",
+            json={"name": "p", "port": free_port, "host": "127.0.0.1"},
+        )
+        assert resp.status_code == 201
+        resp = client.get(f"/api/pages/{aid}-p/")
+    assert resp.status_code == 502
+
+
+def test_proxy_streams_sse_chunked_content(db_conn) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    """A chunked upstream (SSE) passes through with its content-type and all
+    events — the proxy streams instead of buffering."""
+    sse_server = socketserver.ThreadingTCPServer(("127.0.0.1", 0), _SSEHandler)
+    thread = threading.Thread(target=sse_server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        port = sse_server.server_address[1]
+        aid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
+        with TestClient(app) as client:
+            _register(client, aid, "sse", port)
+            resp = client.get(f"/api/pages/{aid}-sse/")
+        assert resp.status_code == 200
+        assert resp.headers["content-type"] == "text/event-stream"
+        assert "data: first" in resp.text
+        assert "data: second" in resp.text
+    finally:
+        sse_server.shutdown()
+        sse_server.server_close()
+
+
+def test_proxy_requires_auth(monkeypatch: pytest.MonkeyPatch, db_conn) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    """The reverse proxy is auth-gated like every other API route: no
+    credentials -> 401; a valid bearer passes the middleware (404 here
+    because the page was never registered, proving it reached the route)."""
+    monkeypatch.setattr(config.settings.gateway, "auth_middleware_enabled", True)
+    monkeypatch.setattr(config.settings.data_plane, "cluster_secret", _SECRET)
+    aid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
+    with TestClient(app) as client:
+        no_auth = client.get(f"/api/pages/{aid}-p/")
+        assert no_auth.status_code == 401
+
+        with_auth = client.get(
+            f"/api/pages/{aid}-p/",
+            headers={"Authorization": f"Bearer {_SECRET}"},
+        )
+        assert with_auth.status_code == 404
+
+
+# --- New URL shape: /api/pages/<agent_id>-<name>/ ---
+
+
+def test_new_url_parses_page_key_with_dashes_in_name() -> None:
+    """Name charset allows dashes; the composite key splits on the FIRST
+    dash only (agent_id is numeric), so `12-my-page` parses to
+    (12, "my-page"). The proxy then serves that page."""
+    from gateway.routers.pages import _parse_page_key
+
+    assert _parse_page_key("12-my-page") == (12, "my-page")
+    assert _parse_page_key("7-page") == (7, "page")
+    assert _parse_page_key("nope") is None
+    assert _parse_page_key("12-") == (12, "")
+    assert _parse_page_key("12") is None
+
+
+def test_legacy_page_url_still_proxies(db_conn, page_server) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    """Links already handed out (/api/agents/<id>/pages/<name>/...) keep
+    working after the URL shape change."""
+    port = page_server  # pyright: ignore[reportUnknownVariableType]
+    aid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
+    with TestClient(app) as client:
+        resp = client.post(
+            f"/api/agents/{aid}/pages",
+            json={"name": "p", "port": port, "host": "127.0.0.1"},
+        )
+        assert resp.status_code == 201
+        legacy = client.get(f"/api/agents/{aid}/pages/p/")
+        assert legacy.status_code == 200
+        assert legacy.text == "<h1>hello</h1>"
+        # nested + query still work on the legacy path
+        nested = client.get(f"/api/agents/{aid}/pages/p/sub/file.txt")
+        assert nested.status_code == 200
+        assert nested.text == "nested"
+        with_qs = client.get(f"/api/agents/{aid}/pages/p/?v=2")
+        assert with_qs.status_code == 200

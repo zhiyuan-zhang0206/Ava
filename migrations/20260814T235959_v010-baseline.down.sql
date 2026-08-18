@@ -1,0 +1,6 @@
+-- v0.1.0 baseline down — intentionally empty.
+--
+-- The baseline is the rollback floor: db/schema.sql is the squashed full
+-- schema and carries no reversible history. This down exists only to satisfy
+-- the up/down pairing rule (scripts/lint_migrations.py); rolling it back is
+-- a no-op.

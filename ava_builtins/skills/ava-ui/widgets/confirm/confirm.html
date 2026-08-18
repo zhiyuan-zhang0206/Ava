@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Confirm</title>
+<!--
+  confirm widget (vanilla, single-file, zero build).
+
+  A judgment gate: show some context, the user approves or rejects (with an
+  optional note), and the decision goes back to the agent via the ava_reply
+  spine. Use when a reduce point / an irreversible step needs a human yes/no.
+
+  Fill in when you write the page:
+  - TITLE / BODY_HTML: the context to judge. BODY_HTML is rendered as
+    DOMPurify-sanitized HTML (rich formatting kept; <script> / event handlers
+    stripped), so artifact content carrying untrusted text is safe by default.
+  - APPROVE_LABEL / REJECT_LABEL: button text.
+  - The three AVA_* placeholders (see widgets/ava_reply).
+
+  On click the page calls avaReply("approved: <note>" | "rejected: <note>").
+-->
+<style>
+  :root {
+    --bg: #ffffff;
+    --bg-tertiary: #fafafa;
+    --text: #1a1a1a;
+    --border: #dddddd;
+    --border-light: #eeeeee;
+    --approve: #15803d;
+    --reject: #b91c1c;
+    --success: #15803d;
+    --error: #b91c1c;
+    color-scheme: light dark;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d1117;
+      --bg-tertiary: #21262d;
+      --text: #c9d1d9;
+      --border: #30363d;
+      --border-light: #21262d;
+      --approve: #3fb950;
+      --reject: #f85149;
+      --success: #3fb950;
+      --error: #f85149;
+    }
+  }
+
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 640px; margin: 2em auto; padding: 0 1em; background: var(--bg); color: var(--text); }
+  h1 { font-size: 1.25rem; }
+  #body { border: 1px solid var(--border-light); border-radius: 8px; padding: 0.5em 1em; background: var(--bg-tertiary); }
+  textarea { width: 100%; box-sizing: border-box; margin-top: 1em; padding: 0.5em; border: 1px solid var(--border); border-radius: 6px; font: inherit; }
+  .row { margin-top: 1em; display: flex; gap: 0.6em; }
+  button { padding: 0.6em 1.4em; font-size: 1rem; border: 0; border-radius: 8px; cursor: pointer; }
+  #approve { background: var(--approve); color: #fff; }
+  #reject { background: var(--reject); color: #fff; }
+  button:disabled { opacity: 0.5; cursor: default; }
+  #status { margin-top: 1em; color: var(--success); font-weight: 600; }
+  #status.err { color: var(--error); }
+</style>
+</head>
+<body>
+
+<div id="confirm">
+  <h1 id="title"></h1>
+  <div id="body"></div>
+  <textarea id="note" rows="2" placeholder="Optional note…"></textarea>
+  <div class="row">
+    <button id="approve"></button>
+    <button id="reject"></button>
+  </div>
+  <div id="status"></div>
+</div>
+
+<script>
+  // --- fill these in ---
+  const TITLE = "Approve this step?";
+  const BODY_HTML = "<p>Describe what is about to happen, or paste the artifact to judge.</p>";
+  const APPROVE_LABEL = "Approve";
+  const REJECT_LABEL = "Reject";
+</script>
+
+<!-- BODY_HTML is sanitized before insertion (rich HTML kept, scripts stripped).
+     DOMPurify loaded from local vendor (no CDN). -->
+<script src="../vendor/purify.min.js"></script>
+<script>
+  // --- ava_reply spine (see widgets/ava_reply); template the three values ---
+  const AVA_GATEWAY_URL = "__GATEWAY_URL__";
+  const AVA_AGENT_ID = "__AGENT_ID__";
+  const AVA_PAGE_NAME = "__PAGE_NAME__";
+  async function avaReply(content) {
+    const res = await fetch(`${AVA_GATEWAY_URL}/api/agents/${AVA_AGENT_ID}/messages`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content, source: `ui:page:${AVA_PAGE_NAME}` }),
+    });
+    if (!res.ok) throw new Error(`avaReply failed: HTTP ${res.status}`);
+    return res.json();
+  }
+
+  // --- render + submit ---
+  document.getElementById("title").textContent = TITLE;
+  document.getElementById("body").innerHTML = DOMPurify.sanitize(BODY_HTML);
+  const approve = document.getElementById("approve");
+  const reject = document.getElementById("reject");
+  const note = document.getElementById("note");
+  const statusEl = document.getElementById("status");
+  approve.textContent = APPROVE_LABEL;
+  reject.textContent = REJECT_LABEL;
+  async function send(verdict) {
+    approve.disabled = reject.disabled = true;
+    const n = note.value.trim();
+    try {
+      await avaReply(`${verdict}${n ? `: ${n}` : ""}`);
+      statusEl.className = "";
+      statusEl.textContent = "✓ Sent. You can close this tab.";
+    } catch (e) {
+      statusEl.className = "err";
+      statusEl.textContent = `Failed to send: ${e.message}. Retry?`;
+      approve.disabled = reject.disabled = false;
+    }
+  }
+  approve.addEventListener("click", () => send("approved"));
+  reject.addEventListener("click", () => send("rejected"));
+</script>
+</body>
+</html>

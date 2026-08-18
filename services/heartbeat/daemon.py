@@ -1,0 +1,384 @@
+"""Heartbeat daemon — gateway-owned idle-agent check-in dispatcher.
+
+It selects idle agents that have been parked past `AVA_HEARTBEAT_IDLE_THRESHOLD_SECONDS`
+(default 5 min) and have not paused their heartbeat, and INSERTs a `heartbeat`
+check-in inbound to each. The inbound-insert trigger wakes the agent (on any
+machine — this is cluster-wide, not machine-scoped: unlike the restarter it never
+touches local sessions). Runs on the gateway, one per cluster.
+
+Dispatch is paced for fleet scale: rather than checking in on every due agent in
+one batch per idle window (which would wake 100-300 idle agents simultaneously —
+a decompression + LLM thundering herd, self-perpetuating because the check-in
+resets each agent's idle clock in lockstep), it polls on a fine cadence (min of
+`AVA_HEARTBEAT_INTERVAL_SECONDS` and `_DISPATCH_STEP_S`), de-phases due-times with a
+deterministic per-agent jitter, and caps check-ins per step for a hard global
+wake-rate ceiling. See the "Wakeup-storm flattening" note below.
+
+Usage:
+    .venv/bin/python -m services.heartbeat.daemon
+
+Kept alive via `services/healthchecks/heartbeat.py` (the gateway watchdog).
+"""
+
+import asyncio
+import contextlib
+import logging
+import os
+import sys
+
+import psycopg
+from psycopg_pool import ConnectionPool
+
+import shared.db
+from services._pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
+from services.heartbeat.liveness import _PASS_INTERVAL_S, run_liveness_pass
+from shared import telemetry
+from shared.config import settings
+from shared.daemon_health import Liveness, health_port, start_health_server, stop_health_server
+from shared.daemon_shutdown import install_graceful_shutdown
+from shared.log import init_gateway_process
+from shared.paths import legacy_pid_path
+
+_log = logging.getLogger("services.heartbeat.daemon")
+
+_PIDFILE = settings.services.heartbeat_pidfile
+# Liveness staleness ceiling. The loop sleeps a long inter-poll interval (default
+# 300s), so `_sleep_with_liveness` beats every _LIVENESS_BEAT_STEP_S during that
+# wait; the ceiling only has to exceed that step, not the whole interval. A
+# genuinely wedged loop (a beat step that never returns) still trips /healthz 503
+# -> watchdog respawn.
+_LIVENESS_TIMEOUT_S = 60.0
+_LIVENESS_BEAT_STEP_S = 30.0
+
+# ── Wakeup-storm flattening (density hardening) ──
+# A check-in wakes an idle agent: its ~90MB compressed heap decompresses (~25-40ms
+# of CPU on Apple Silicon) and it opens an LLM turn. Firing every due agent in one
+# tight loop therefore triggers a simultaneous decompression + LLM burst; worse,
+# the woken agent runs a turn, which resets its `last_active_at` (the idle clock),
+# so a batch woken together comes due together next cycle — the fleet
+# self-synchronizes into a
+# recurring spike. Three coupled defenses keep the wake rate bounded at fleet
+# scale (100-300 idle agents):
+#   * poll on a fine cadence (_DISPATCH_STEP_S), not once per idle window, so due
+#     agents are noticed in small time-slices instead of one 300s batch;
+#   * de-phase each agent's due-time by a deterministic per-agent jitter
+#     (_JITTER_SPAN_S) so a fleet that went idle together does not come due
+#     together — this breaks the self-synchronization;
+#   * cap check-ins per dispatch step (_MAX_CHECKINS_PER_STEP) for a hard global
+#     wake-rate ceiling (~_MAX_CHECKINS_PER_STEP / _DISPATCH_STEP_S per second),
+#     draining even a fully-synchronized backlog (e.g. after a mass restart)
+#     smoothly instead of in one instantaneous spike.
+# Steady-state at 300 idle agents (idle_threshold 300s) the natural due-rate is
+# ~1/s, under the ~1.7/s ceiling, so jitter alone carries it; the cap only bites
+# on a synchronized burst. Trade-off: a fully-synchronized backlog's tail agents
+# wait longer for their first check-in (backlog / ceiling seconds) — acceptable
+# for a liveness check-in that is a safety net, not a latency-sensitive signal.
+_DISPATCH_STEP_S = 15.0
+_JITTER_SPAN_S = 300.0
+# Freshness window for the "no pending inbound" guard (seconds): a pending
+# inbound older than this no longer counts as "about to wake" — the check-in
+# goes out anyway. Same value as `ops.controllers.hibernate`'s
+# _PENDING_FRESH_WINDOW_S (the two guards are two sides of the same
+# wake/swap decision); deliberately NOT shared.deploy_timing.NO_PROGRESS_TIMEOUT_S,
+# which is a deployment-progress judgment (2026-08-08 audit, P3-5).
+_STALE_PENDING_S = 900.0
+_MAX_CHECKINS_PER_STEP = 25
+
+# Heartbeat note delivered as a system note (kind='heartbeat') so the
+# agent sees it as a framework-level marker, not an ordinary chat message.
+# The claim node wraps it via system_note_message(tag=NoteTag.HEARTBEAT).
+
+
+def _select_idle_agents_needing_heartbeat(
+    pool: ConnectionPool,
+    idle_threshold_s: float,
+    *,
+    jitter_span_s: float = 0.0,
+    limit: int | None = None,
+) -> list[tuple[int, float]]:
+    """Cluster-wide idle agents due for a heartbeat check-in, each as
+    `(agent_id, idle_minutes)`, oldest-idle first.
+
+    The idle clock is `last_active_at` — the timestamp of the agent's last
+    completed LLM turn (real work), NOT `status_changed_at`. status_changed_at is
+    bumped by every status flip including ops lifecycle churn (rollout quiesce /
+    respawn / update cycles an agent idling -> restarting -> ... -> idling),
+    so keying idle time off it let an ops restart reset the whole fleet's idle
+    timers. last_active_at is written only by a real turn and is untouched by that
+    cycle (an idle agent runs no LLM turn through it), so an ops event never resets
+    an agent's idle timer.
+
+    An agent is due when it is `idling` or `hibernating` (the ops-layer memory
+    swap-out state — a parked agent whose process was killed to free RAM), has no
+    pending inbound already queued to wake it (one about to wake on a real message
+    does not also need a check-in), and `now()` has reached its next check-in
+    time. Including `hibernating` is deliberate: the heartbeat is the liveness
+    signal, so a swapped-out agent must still be woken. For a hibernating agent
+    the inbound this check-in inserts has no live process listening; the
+    hibernation controller on the agent's home machine polls for a hibernating
+    row with a pending inbound and relaunches it (clean restart), after which the
+    woken process claims the check-in — identical to how a never-swapped idle
+    agent handles it. That time has two mutually exclusive regimes:
+
+    - Not paused — `heartbeat_paused_until` NULL, or set no later than the last
+      real turn: next check-in is `last_active_at + idle_threshold_s` plus a
+      per-agent jitter offset (see `jitter_span_s`). Every real turn (a genuine
+      wake — chat, or a check-in the agent actually processes) bumps
+      `last_active_at`, restarting the idle clock; a continually-active agent
+      never gets one.
+    - Paused — `heartbeat_paused_until` strictly later than `last_active_at`:
+      next check-in is exactly `heartbeat_paused_until` (never jittered — the
+      pause window is absolute from the `pause_heartbeat()` call). A real turn
+      during the window still bumps `last_active_at`, but while it stays before
+      the window's end it cannot push the check-in out — only another
+      `pause_heartbeat()` moves it. Once a real turn (or the check-in itself)
+      lands after the window expires, `last_active_at` overtakes
+      `heartbeat_paused_until` and the normal idle clock resumes.
+
+    `jitter_span_s` de-phases the unpaused due-time by a deterministic per-agent
+    offset `id mod jitter_span_s` seconds, spreading a fleet that went idle
+    together across a `jitter_span_s`-wide window so it does not come due (and
+    wake) in one batch. Deterministic on `id`, so it survives across cycles and
+    breaks the self-synchronization the check-in itself would otherwise induce. `0`
+    (the default) disables jitter — the `NULLIF` guards the `mod` against a
+    divide-by-zero and collapses the offset to 0. `limit` caps the batch (the
+    hard per-step wake-rate ceiling); with oldest-idle-first ordering the most
+    overdue agents drain first. Both default to the un-jittered, unlimited
+    behaviour so existing timing tests read the raw predicate.
+
+    No machine filter: the inbound-insert trigger wakes the agent wherever it
+    runs.
+
+    R1 (Task #1021): an *idling* nudge target must hold an unexpired lease — an
+    idling row whose lease expired is a zombie the reaper is collecting, and
+    nudging it would only keep a corpse busy. *Hibernating* stays nudgeable
+    with no lease at all: it has no process by design (swapped out), and the
+    nudge is exactly how it wakes.
+    """
+    sql = (
+        "SELECT id, EXTRACT(EPOCH FROM (now() - last_active_at)) / 60.0 AS idle_minutes "
+        "FROM agents_meta "
+        "WHERE (status = 'hibernating' OR (status = 'idling' AND lease_expires_at > now())) "
+        "AND now() >= CASE "
+        "    WHEN heartbeat_paused_until IS NOT NULL "
+        "         AND heartbeat_paused_until > last_active_at "
+        "      THEN heartbeat_paused_until "
+        "    ELSE last_active_at "
+        "         + make_interval(secs => %s + COALESCE(mod(id, NULLIF(%s, 0)::int), 0)) "
+        "  END "
+        "AND NOT EXISTS ("
+        "  SELECT 1 FROM inbound_messages im "
+        "  WHERE im.agent_id = agents_meta.id AND im.status = 'pending' "
+        "    AND im.created_at >= now() - make_interval(secs => %s) "
+        ") "
+        "ORDER BY last_active_at ASC"
+    )
+    params: list[object] = [idle_threshold_s, jitter_span_s, _STALE_PENDING_S]
+    if limit is not None:
+        sql += " LIMIT %s"
+        params.append(limit)
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(sql, params)
+        return cur.fetchall()
+
+
+def _send_heartbeat_checkin(pool: ConnectionPool, agent_id: int, idle_minutes: float) -> None:
+    """INSERT one `heartbeat` inbound for `agent_id`, then publish a Redis wake so
+    the (idle-by-selection) target picks it up now instead of at its next inbound-
+    wait SELECT recheck. Delivered as a system note (kind='heartbeat') — the claim
+    node wraps it via system_note_message(tag=NoteTag.HEARTBEAT). `idle_minutes`
+    rides the telemetry event only; the inbound content is the plain check-in."""
+    content = "Heartbeat."
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO inbound_messages (agent_id, content, kind, source) "
+            "VALUES (%s, %s, 'heartbeat', 'system')",
+            (agent_id, content),
+        )
+        # The event name 'heartbeat_nudged' is stored row data in the events
+        # table — renaming it would strand the existing history. Emit through
+        # the unified pipeline (the events table).
+        #
+        # ts time-source note: the emitter stamps datetime.now(UTC) at ENQUEUE
+        # time (process clock, one time source for the whole stream) — the old
+        # direct agent_events INSERT used DB now() (transaction time). The two
+        # can differ by the drain interval (≤0.5s) plus any queue backlog;
+        # historical rows keep their original DB-clock ts (W7 rewiring).
+        telemetry.emit(
+            "telemetry",
+            "heartbeat_nudged",
+            level="info",
+            agent_id=agent_id,
+            source="system",
+            attributes={"idle_minutes": round(idle_minutes)},
+        )
+    # The inbound is committed on `with` exit (the emit above is enqueued and
+    # lands on the emitter's next batch — best-effort, JSONL-mirrored). The wake
+    # is published after the inbound row is durable. Best-effort wake (see
+    # shared.db.publish_inbound_wake); heartbeat carries no user-facing inbound
+    # id, so "0".
+    shared.db.publish_inbound_wake(agent_id, "0")
+
+
+def _write_pidfile() -> None:
+    if not acquire_pidfile(_PIDFILE, "services.heartbeat.daemon"):
+        _log.info("[heartbeat] daemon already running (pidfile=%s), exiting", _PIDFILE)
+        sys.exit(1)
+
+
+def _remove_pidfile() -> None:
+    remove_pidfile(_PIDFILE)
+
+
+def _is_running() -> bool:
+    """Whether a daemon is already running (via pidfile, new + legacy paths).
+
+    Pid-reuse-safe: a live pid whose argv does not name this daemon's module
+    is a recycled pid, not a running instance (audit round 2, P1)."""
+    return pidfile_holds_daemon(_PIDFILE, "services.heartbeat.daemon") or pidfile_holds_daemon(
+        legacy_pid_path("heartbeat"), "services.heartbeat.daemon"
+    )
+
+
+async def _sleep_with_liveness(liveness: Liveness, total_s: float) -> None:
+    """Sleep `total_s`, beating liveness every `_LIVENESS_BEAT_STEP_S` so a long
+    inter-poll wait keeps /healthz fresh instead of reading as a wedged loop."""
+    remaining = total_s
+    while remaining > 0:
+        liveness.beat()
+        step = min(_LIVENESS_BEAT_STEP_S, remaining)
+        await asyncio.sleep(step)
+        remaining -= step
+
+
+async def _dispatch_loop(pool: ConnectionPool, liveness: Liveness) -> None:
+    """Main loop: every interval, send a check-in to idle agents that have not
+    paused.
+
+    Idle agents that ignore the check-in keep getting one each cycle — it is the
+    safety net; an agent that is truly waiting opts out with
+    `ava.self.pause_heartbeat()`, and one that is truly done terminates.
+
+    Dispatch runs on a fine `step` cadence (min of the configured
+    `heartbeat_interval_seconds` and `_DISPATCH_STEP_S`) so due agents drain in
+    small time-slices; each step checks in on at most `_MAX_CHECKINS_PER_STEP` of
+    them, and the due-time carries a per-agent jitter (`_JITTER_SPAN_S`).
+    Together these keep the fleet-wide wake rate bounded and de-synchronized —
+    see the module-level "Wakeup-storm flattening" note.
+    """
+    idle_threshold = settings.daemon.heartbeat_idle_threshold_seconds
+    step = min(settings.daemon.heartbeat_interval_seconds, _DISPATCH_STEP_S)
+    _log.info(
+        "[heartbeat] daemon started, pid=%s, step=%.0fs, idle_threshold=%.0fs, "
+        "jitter_span=%.0fs, max_checkins_per_step=%d (wake-rate ceiling ~%.2f/s)",
+        os.getpid(),
+        step,
+        idle_threshold,
+        _JITTER_SPAN_S,
+        _MAX_CHECKINS_PER_STEP,
+        _MAX_CHECKINS_PER_STEP / step,
+    )
+    while True:
+        try:
+            await _sleep_with_liveness(liveness, step)
+            rows = _select_idle_agents_needing_heartbeat(
+                pool,
+                idle_threshold,
+                jitter_span_s=_JITTER_SPAN_S,
+                limit=_MAX_CHECKINS_PER_STEP,
+            )
+            for agent_id, idle_minutes in rows:
+                try:
+                    _send_heartbeat_checkin(pool, agent_id, idle_minutes)
+                    _log.info(
+                        "[heartbeat] checked in on idle agent %s (idle %.0f min)",
+                        agent_id,
+                        idle_minutes,
+                    )
+                except Exception as exc:
+                    _log.error("[heartbeat] check-in for agent %s failed: %r", agent_id, exc)
+        except asyncio.CancelledError:
+            raise
+        except psycopg.ProgrammingError:
+            _log.critical(
+                "[heartbeat] schema / syntax error — code<->DB drift; retry will not self-heal, daemon exiting, restart after fix",
+                exc_info=True,
+            )
+            raise
+        except Exception:
+            _log.exception("[heartbeat] poll iteration failed")
+
+
+async def _liveness_loop(pool: ConnectionPool, liveness: Liveness) -> None:
+    """Slow loop running the agent-liveness pass (Task #1174) — see
+    `services.heartbeat.liveness`. Catches per-pass failures so one bad pass
+    (e.g. a DB blip) never takes down the daemon; the next pass retries."""
+    while True:
+        try:
+            await _sleep_with_liveness(liveness, _PASS_INTERVAL_S)
+            await run_liveness_pass(pool)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            _log.exception("[heartbeat] liveness pass failed")
+
+
+async def run() -> None:
+    """Start the daemon: healthz server -> write pidfile -> connect DB -> enter main loop."""
+    if _is_running():
+        _log.info("[heartbeat] daemon already running (pidfile=%s), exiting", _PIDFILE)
+        sys.exit(1)
+
+    # Pidfile before the healthz bind — see services/restarter/daemon.py:run().
+    _write_pidfile()
+    _log.info("[heartbeat] pidfile written: %s", _PIDFILE)
+
+    liveness = Liveness(_LIVENESS_TIMEOUT_S)
+    health = await start_health_server("heartbeat", liveness=liveness)
+    _log.info("[heartbeat] healthz listening on :%s", health_port("heartbeat"))
+
+    pool = shared.db.pool()
+    # Liveness pass (Task #1174): a slow independent task alongside the check-in
+    # loop, so a stalled probe fan-out (bounded by _PROBE_TIMEOUT_S) can never
+    # delay a check-in. One pass per _PASS_INTERVAL_S, first pass after one full
+    # interval (the DB merge is cheap; there is nothing to judge before the
+    # first probe anyway).
+    liveness_task = asyncio.create_task(_liveness_loop(pool, liveness))
+    try:
+        await _dispatch_loop(pool, liveness)
+    finally:
+        liveness_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await liveness_task
+        pool.close()
+        await stop_health_server(health)
+        _remove_pidfile()
+        _log.info("[heartbeat] daemon stopped")
+
+
+def main() -> None:
+    """Entry point: init logger + run asyncio loop.
+
+    SIGTERM (the graceful stop `ava cluster update` sends) and Ctrl-C converge on
+    the same `KeyboardInterrupt` unwind — see `shared.daemon_shutdown`. `ava stop`
+    default force-kill does not reach this.
+    """
+    from shared.migrations import assert_schema_current
+
+    # Pre-startup sanity: schema version must match code; raises SchemaVersionMismatch if not.
+    assert_schema_current(settings.data_plane.db_url)
+    init_gateway_process(name="heartbeat")
+    install_graceful_shutdown("heartbeat")
+    try:
+        asyncio.run(run())
+    except KeyboardInterrupt:
+        _log.info("[heartbeat] interrupted, shutting down")
+    except Exception:
+        _log.exception("[heartbeat] daemon crashed — uncaught exception escaped run()")
+        raise
+    finally:
+        _remove_pidfile()
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,55 @@
+# Ava alerts — webhook contact point (as code, Task #1224).
+#
+# Routes every fired alert to the gateway's alert ingest endpoint
+# (POST /api/alerts), which stores the instance in `alerts` (Alertmanager
+# webhook shape), publishes it on the SSE stream, and fans IM notifications
+# out via the im_bridge daemon (Telegram / WeChat / Feishu — whichever
+# channels the user has connected). Alert is fully separate from Notice —
+# nothing here enters the notices queue.
+#
+# Copy this file to ~/.ava/grafana/provisioning/alerting/contact.yml and
+# restart Grafana (`launchctl kickstart -k gui/$(id -u)/com.ava.grafana`).
+# Unlike alert-rule provisioning, contact-point/policy provisioning DOES
+# hot-reload (Grafana watches the provisioning dir) — restarting is still the
+# deterministic path.
+#
+# Secret handling: the webhook token rides as a custom header whose VALUE is
+# stored in Grafana's secureSettings, expanded from the process environment
+# via $__env{...}. Set it before restart:
+#   launchctl setenv OPS_ALERTS_WEBHOOK_TOKEN "$(grep AVA_OPS_ALERTS_WEBHOOK_TOKEN ~/.ava/.env | cut -d= -f2-)"
+# (or add EnvironmentVariables to the com.ava.grafana plist). The header
+# NAME stays the legacy X-Ops-Alerts-Token so the existing host-side
+# launchctl env keeps working across the cutover — the gateway accepts both
+# X-Alerts-Token and X-Ops-Alerts-Token. When the token
+# is unset on the gateway side, the ingest endpoint falls back to loopback
+# trust — the single-box default where Grafana is the only caller.
+#
+# disableResolveMessage: false — resolution webhooks ARE wanted: the ingest
+# flips the row to resolved and sends the recovery IM line.
+apiVersion: 1
+
+contactPoints:
+  - orgId: 1
+    name: ava-alerts-webhook
+    receivers:
+      - uid: ava-alerts-webhook
+        type: webhook
+        disableResolveMessage: false
+        settings:
+          url: http://localhost:8000/api/alerts
+          httpMethod: POST
+          httpHeaderName1: X-Ops-Alerts-Token
+        secureSettings:
+          httpHeaderValue1: $__env{OPS_ALERTS_WEBHOOK_TOKEN}
+
+# Root notification policy: everything -> the webhook. group_by: [] batches
+# all firing instances into one POST (the ingest dedups by fingerprint x
+# starts_at, so any grouping is safe); matchers: [] catches every rule.
+policies:
+  - orgId: 1
+    receiver: ava-alerts-webhook
+    group_by: []
+    matchers: []
+    group_wait: 30s
+    group_interval: 5m
+    repeat_interval: 4h

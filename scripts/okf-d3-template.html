@@ -1,0 +1,1115 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OKF Knowledge Graph — D3 Force</title>
+<style>
+  :root{
+    --bg-page:#0d0d0d;
+    --bg-surface:#1a1a19;
+    --bg-surface-2:#212120;
+    --ink-primary:#ffffff;
+    --ink-secondary:#c3c2b7;
+    --ink-muted:#898781;
+    --gridline:#2c2c2a;
+    --border:rgba(255,255,255,0.10);
+    --tree-edge:rgba(225,224,214,0.75);
+    --cross-edge:#d95926;
+    --accent-blue:#3987e5;
+    --accent-green:#199e70;
+    --popover-bg:rgba(26,26,25,0.97);
+    --legend-bg:rgba(26,26,25,0.92);
+    --card-shadow:0 3px 10px rgba(0,0,0,0.45);
+    --selection-ring:#fff;
+    --pill-bg:rgba(255,255,255,0.08);
+    --code-bg:rgba(255,255,255,0.08);
+    --code-bg-block:rgba(0,0,0,0.35);
+  }
+  @media (prefers-color-scheme: light){
+    :root{
+      --bg-page:#f5f5f5;
+      --bg-surface:#ffffff;
+      --bg-surface-2:#f0f0f0;
+      --ink-primary:#1a1a1a;
+      --ink-secondary:#555555;
+      --ink-muted:#888888;
+      --gridline:#e0e0e0;
+      --border:rgba(0,0,0,0.10);
+      --tree-edge:rgba(60,60,60,0.65);
+      --cross-edge:#c4451a;
+      --accent-blue:#2979cc;
+      --accent-green:#16875c;
+      --popover-bg:rgba(255,255,255,0.97);
+      --legend-bg:rgba(255,255,255,0.92);
+      --card-shadow:0 3px 10px rgba(0,0,0,0.12);
+      --selection-ring:#2979cc;
+      --pill-bg:rgba(0,0,0,0.06);
+      --code-bg:rgba(0,0,0,0.06);
+      --code-bg-block:rgba(0,0,0,0.06);
+    }
+  }
+  *{box-sizing:border-box;}
+  html,body{height:100%;margin:0;padding:0;background:var(--bg-page);color:var(--ink-primary);
+    font-family:system-ui,-apple-system,"Segoe UI",sans-serif;overflow:hidden;}
+  #app{display:flex;flex-direction:column;height:100%;}
+
+  /* toolbar */
+  #toolbar{display:flex;align-items:center;gap:10px;padding:8px 14px;background:var(--bg-surface);
+    border-bottom:1px solid var(--border);flex:0 0 auto;z-index:20;flex-wrap:wrap;}
+  #toolbar h1{font-size:14px;font-weight:600;margin:0;color:var(--ink-primary);white-space:nowrap;}
+  #toolbar .sub{font-size:11px;color:var(--ink-muted);margin-right:8px;white-space:nowrap;}
+  #toolbar .spacer{flex:1;}
+  #toolbar label{font-size:11px;color:var(--ink-secondary);display:flex;align-items:center;gap:4px;}
+  #toolbar .sep{width:1px;height:18px;background:var(--border);margin:0 2px;}
+  select,button,.tag-btn{
+    background:var(--bg-surface-2);color:var(--ink-primary);border:1px solid var(--border);
+    border-radius:5px;padding:5px 9px;font-size:12px;cursor:pointer;font-family:inherit;
+  }
+  select:hover,button:hover,.tag-btn:hover{border-color:var(--ink-muted);}
+  button:active,.tag-btn:active{transform:translateY(1px);}
+  .tag-btn{display:flex;align-items:center;gap:4px;}
+  .tag-btn .count{font-size:10px;color:var(--ink-muted);background:var(--pill-bg);padding:0 5px;border-radius:8px;}
+
+  /* force-layout settings popover */
+  #force-settings-wrap{position:relative;}
+  #btn-force-settings{display:flex;align-items:center;justify-content:center;padding:5px 7px;}
+  #btn-force-settings svg{width:14px;height:14px;display:block;}
+  #forcePopover{position:absolute;top:calc(100% + 6px);left:0;z-index:30;width:230px;
+    background:var(--popover-bg);border:1px solid var(--border);border-radius:8px;
+    padding:10px 12px;box-shadow:0 10px 28px rgba(0,0,0,0.5);backdrop-filter:blur(4px);}
+  #forcePopover[hidden]{display:none;}
+  .force-popover-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;}
+  .force-popover-head span{font-size:11px;font-weight:600;color:var(--ink-muted);text-transform:uppercase;letter-spacing:.04em;}
+  #btn-force-reset{background:none;border:none;padding:0;font-size:10px;color:var(--ink-muted);
+    text-decoration:underline dotted;cursor:pointer;}
+  #btn-force-reset:hover{color:var(--ink-primary);}
+  .force-group{margin-bottom:10px;}
+  .force-group:last-child{margin-bottom:0;}
+  .force-group-label{font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;
+    color:var(--ink-muted);opacity:.75;margin-bottom:5px;}
+  .force-slider-row{display:flex;flex-direction:column;gap:2px;margin-bottom:7px;}
+  .force-slider-row:last-child{margin-bottom:0;}
+  .force-slider-row .row-top{display:flex;align-items:center;justify-content:space-between;font-size:10px;color:var(--ink-muted);}
+  .force-slider-row .row-top .val{color:var(--ink-primary);font-variant-numeric:tabular-nums;}
+  .force-slider-row input[type=range]{width:100%;accent-color:var(--accent-blue);height:14px;cursor:pointer;}
+
+  /* tags popover */
+  #tags-wrap{position:relative;}
+  #tagsPopover{position:absolute;top:calc(100% + 6px);left:0;z-index:30;width:260px;max-height:360px;
+    background:var(--popover-bg);border:1px solid var(--border);border-radius:8px;
+    padding:10px 12px;box-shadow:0 10px 28px rgba(0,0,0,0.5);backdrop-filter:blur(4px);
+    overflow-y:auto;}
+  #tagsPopover[hidden]{display:none;}
+  .tags-popover-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;
+    position:sticky;top:0;background:var(--popover-bg);padding-bottom:6px;z-index:2;}
+  .tags-popover-head span{font-size:11px;font-weight:600;color:var(--ink-muted);text-transform:uppercase;letter-spacing:.04em;}
+  #btn-tags-clear{background:none;border:none;padding:0;font-size:10px;color:var(--ink-muted);
+    text-decoration:underline dotted;cursor:pointer;}
+  #btn-tags-clear:hover{color:var(--ink-primary);}
+  .tag-check-row{display:flex;align-items:center;gap:7px;padding:3px 4px;border-radius:4px;cursor:pointer;font-size:11.5px;}
+  .tag-check-row:hover{background:rgba(255,255,255,0.06);}
+  .tag-check-row input[type=checkbox]{accent-color:var(--accent-blue);cursor:pointer;flex:0 0 auto;}
+  .tag-check-row .tag-label{color:var(--ink-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;}
+  .tag-check-row .tag-count{color:var(--ink-muted);font-size:10px;flex:0 0 auto;}
+
+  /* graph area */
+  #graph-wrap{position:relative;flex:1;min-height:0;display:flex;flex-direction:row;}
+  svg#graph{flex:1;min-width:0;height:100%;display:block;background:var(--bg-page);cursor:grab;}
+  svg#graph:active{cursor:grabbing;}
+
+  .edge-tree{stroke:var(--tree-edge);stroke-width:1.4px;}
+  .edge-cross{stroke:var(--cross-edge);stroke-dasharray:5,4;opacity:0.30;display:none;}
+  .edge-cross.visible{display:inline;}
+  .edge-tree.is-dimmed{opacity:0.12;}
+  .edge-cross.is-dimmed{opacity:0.12;}
+  .edge-label{font-size:9px;fill:var(--cross-edge);text-anchor:middle;dominant-baseline:middle;font-weight:600;}
+  .edge-label-bg{fill:var(--bg-page);opacity:0.88;}
+
+  .node{cursor:pointer;}
+  .node .card{
+    width:100%;height:100%;background:var(--bg-surface);border:1px solid var(--border);
+    border-left:4px solid var(--accent-blue);border-radius:7px;padding:7px 9px;
+    box-shadow:var(--card-shadow);overflow:hidden;transition:opacity .15s ease;
+  }
+  .node.is-dimmed .card{opacity:0.55;}
+  .node.is-selected .card{outline:2.5px dashed var(--selection-ring);outline-offset:3px;box-shadow:var(--card-shadow);}  .node.depth-0 .card,.node.depth-1 .card{border-left-width:6px;}
+  .node.depth-0 .card-title{font-size:14.5px;}
+  .node.depth-1 .card-title{font-size:13.5px;}
+
+  .card-row{display:flex;align-items:center;gap:4px;flex-wrap:wrap;margin-bottom:4px;}
+  .pill{font-size:9px;line-height:14px;padding:1px 6px;border-radius:8px;background:var(--pill-bg);
+    color:var(--ink-secondary);white-space:nowrap;max-width:110px;overflow:hidden;text-overflow:ellipsis;}
+  .card-toggle{margin-left:auto;font-size:10px;color:var(--ink-muted);white-space:nowrap;padding-left:4px;}
+  .card-title{font-size:12.5px;font-weight:600;line-height:1.28;margin-bottom:3px;
+    display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
+  .card-desc{font-size:10.5px;color:var(--ink-secondary);line-height:1.32;
+    display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;}
+
+  /* legend */
+  #legend{position:absolute;top:12px;left:12px;background:var(--legend-bg);border:1px solid var(--border);
+    border-radius:8px;padding:10px 12px;max-height:calc(100% - 24px);overflow-y:auto;min-width:130px;
+    backdrop-filter:blur(3px);}
+  #legend-title{font-size:11px;font-weight:600;color:var(--ink-muted);text-transform:uppercase;
+    letter-spacing:.04em;margin-bottom:6px;}
+  .legend-item{display:flex;align-items:center;gap:7px;padding:3px 4px;border-radius:4px;cursor:pointer;font-size:11.5px;}
+  .legend-item:hover{background:rgba(255,255,255,0.06);}
+  .legend-item.active{background:rgba(255,255,255,0.12);}
+  .legend-item .swatch{width:10px;height:10px;border-radius:3px;flex:0 0 auto;}
+  .legend-item .legend-label{color:var(--ink-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .legend-item .legend-count{margin-left:auto;color:var(--ink-muted);font-size:10px;}
+  #legend-hint{font-size:10px;color:var(--ink-muted);margin-top:6px;padding-top:6px;border-top:1px solid var(--border);}
+
+  /* detail panel */
+  #detail{position:relative;flex:0 0 auto;width:400px;min-width:260px;max-width:92vw;height:100%;background:var(--bg-surface);
+    border-left:1px solid var(--border);display:none;
+    overflow-y:auto;padding:16px 18px 40px;}
+  #detail.open{display:block;}
+  #detail-resize-handle{position:absolute;top:0;left:-4px;width:8px;height:100%;cursor:col-resize;z-index:10;}
+  #detail-resize-handle:hover,#detail-resize-handle:active{background:var(--accent-blue);opacity:0.4;}
+  #detail-close{position:absolute;top:12px;right:12px;background:transparent;border:none;color:var(--ink-muted);
+    font-size:18px;cursor:pointer;padding:2px 8px;}
+  #detail-close:hover{color:var(--ink-primary);}
+  #detail-path{font-size:10.5px;color:var(--ink-muted);font-family:ui-monospace,monospace;margin-bottom:10px;}
+  #detail-title{font-size:18px;font-weight:700;margin:2px 0 8px;padding-right:28px;}
+  #detail-pills{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:14px;}
+  #detail-pills .pill{max-width:none;}
+  #detail-pills .pill.clickable{cursor:pointer;}
+  #detail-pills .pill.clickable:hover{background:var(--code-bg);opacity:0.6;}
+  .detail-section{margin-bottom:16px;}
+  .detail-section h3{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--ink-muted);
+    margin:0 0 6px;font-weight:600;}
+  .detail-section .body{font-size:12.5px;line-height:1.55;color:var(--ink-secondary);}
+  .detail-section .body p{margin:0 0 8px;}
+  .detail-section .body ul{margin:0 0 8px;padding-left:18px;}
+  .detail-section .body li{margin-bottom:3px;}
+  .detail-section .body code{background:var(--code-bg);padding:1px 4px;border-radius:3px;
+    font-family:ui-monospace,monospace;font-size:11.5px;color:var(--ink-primary);}
+  .detail-section .body pre.code-block{background:var(--code-bg-block);border:1px solid var(--border);
+    border-radius:6px;padding:8px 10px;font-family:ui-monospace,monospace;font-size:11px;
+    color:var(--ink-secondary);overflow-x:auto;white-space:pre;}
+  .detail-section .body b{color:var(--ink-primary);}
+  .detail-section .body table{width:100%;border-collapse:collapse;margin:8px 0;font-size:12px;}
+  .detail-section .body th,.detail-section .body td{border:1px solid var(--border);padding:4px 8px;text-align:left;}
+  .detail-section .body th{background:var(--bg-surface-2);color:var(--ink-primary);font-weight:600;}
+  .detail-section .body td{color:var(--ink-secondary);}
+  .relation-group-label{font-size:10.5px;color:var(--ink-muted);margin:8px 0 4px;}
+  .relation-list{display:flex;flex-direction:column;gap:4px;}
+  .relation-btn{width:100%;text-align:left;background:var(--bg-surface-2);border:1px solid var(--border);
+    border-radius:5px;padding:6px 9px;font-size:11.5px;color:var(--ink-primary);cursor:pointer;}
+  .relation-btn:hover{border-color:var(--ink-muted);}
+
+  ::-webkit-scrollbar{width:9px;height:9px;}
+  ::-webkit-scrollbar-thumb{background:var(--gridline);border-radius:5px;}
+  ::-webkit-scrollbar-track{background:transparent;}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="toolbar">
+    <h1>OKF Knowledge Graph</h1>
+    <span class="sub">D3 force layout — Ava Project Concept Map</span>
+    <div class="spacer"></div>
+    <label>Type
+      <select id="typeFilter">
+        <option value="">All</option>
+        <option value="doc">doc</option>
+        <option value="memory">memory</option>
+      </select>
+    </label>
+    <div class="sep"></div>
+    <div id="tags-wrap">
+      <button id="btn-tags" class="tag-btn" type="button">Tags <span class="count" id="tag-count">0</span></button>
+      <div id="tagsPopover" hidden>
+        <div class="tags-popover-head">
+          <span>Tag Filter</span>
+          <button id="btn-tags-clear" type="button">Clear</button>
+        </div>
+        <div id="tags-list"></div>
+      </div>
+    </div>
+    <div class="sep"></div>
+    <div id="force-settings-wrap">
+      <button id="btn-force-settings" type="button" title="Layout settings" aria-label="Layout settings" aria-haspopup="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 0 0-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 0 0-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 0 0-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 0 0-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 0 0 1.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065Z"/>
+          <circle cx="12" cy="12" r="3"/>
+        </svg>
+      </button>
+      <div id="forcePopover" hidden>
+        <div class="force-popover-head">
+          <span>Layout</span>
+          <button id="btn-force-reset" type="button">reset all</button>
+        </div>
+        <div id="forceGroups"></div>
+      </div>
+    </div>
+    <button id="btn-toggle-cross" title="Toggle cross-reference links">Cross</button>
+    <button id="btn-expand-all">Expand All</button>
+    <button id="btn-collapse-domains">Collapse to Domains</button>
+    <button id="btn-fit">Fit</button>
+  </div>
+  <div id="graph-wrap">
+    <svg id="graph"></svg>
+    <div id="legend" style="display:none">
+      <div id="legend-title">Tags</div>
+      <div id="legend-list"></div>
+      <div id="legend-hint">Click legend to highlight by tag · Double-click node to expand/collapse · Click to view details</div>
+    </div>
+    <div id="detail"><div id="detail-resize-handle"></div>
+      <button id="detail-close">✕</button>
+      <div id="detail-path"></div>
+      <div id="detail-title"></div>
+      <div id="detail-pills"></div>
+      <div class="detail-section">
+        <h3>Content</h3>
+        <div class="body" id="detail-body"></div>
+      </div>
+      <div class="detail-section">
+        <h3>Relations</h3>
+        <div id="detail-relations"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// Parsed from node and edge data from build_okf_data.py (v2 format).
+window.GRAPH_DATA = /*__GRAPH_DATA_JSON__*/;
+</script>
+
+<script src="https://unpkg.com/d3@7.9.0/dist/d3.min.js"></script>
+
+<script>
+(function () {
+  'use strict';
+  const DATA = window.GRAPH_DATA;
+
+  // Tag -> color mapping (20-color palette, circular usage)
+  const TAG_PALETTE_20 = [
+    '#4e79a7', '#f28e2b', '#e15759', '#76b7b2', '#59a14f',
+    '#edc948', '#b07aa1', '#ff9da7', '#9c755f', '#bab0ac',
+    '#d37295', '#8cd17d', '#b6992d', '#499894', '#86bcb6',
+    '#f1ce63', '#d4a6c8', '#9d7660', '#cf6761', '#6689bf'
+  ];
+  const TAG_COLORS = {};
+  DATA.tags.forEach((t, i) => { TAG_COLORS[t] = TAG_PALETTE_20[i % TAG_PALETTE_20.length]; });
+  const TAG_FALLBACK = '#777777';
+  function tagColor(tag) { return TAG_COLORS[tag] || TAG_FALLBACK; }
+  function nodeTagColor(d) {
+    if (d.tags && d.tags.length > 0) return tagColor(d.tags[0]);
+    return TAG_FALLBACK;
+  }
+
+  // Adjustable d3-force layout parameters
+  const FORCE_STORAGE_KEY = 'okf.forceParams';
+  const FORCE_DEFAULTS = {
+    nodeSizeMin: 18,
+    nodeSizeMax: 26,
+    treeDistance: 120,
+    crossDistance: 480,
+    treeStrength: 0.85,
+    crossStrength: 0,
+    repulsion: 1100,
+    gravity: 0,
+    centerStrength: 1,
+    collidePadding: 8,
+    alphaDecay: 0.02,
+    zoomFitRatio: 1,
+    zoomPadding: 24,
+  };
+  const FORCE_GROUPS = [
+    { label: 'Node', sliders: [
+      { key: 'nodeSizeMin', label: 'Min size', min: 4, max: 30, step: 1 },
+      { key: 'nodeSizeMax', label: 'Max size', min: 8, max: 60, step: 1 },
+    ] },
+    { label: 'Edge', sliders: [
+      { key: 'treeDistance', label: 'Tree distance', min: 20, max: 500, step: 5 },
+      { key: 'crossDistance', label: 'Cross distance', min: 20, max: 500, step: 5 },
+      { key: 'treeStrength', label: 'Tree strength', min: 0, max: 1, step: 0.02 },
+      { key: 'crossStrength', label: 'Cross strength', min: 0, max: 0.3, step: 0.005 },
+    ] },
+    { label: 'Layout', sliders: [
+      { key: 'repulsion', label: 'Repulsion', min: 0, max: 100000, step: 500 },
+      { key: 'centerStrength', label: 'Center pull', min: 0, max: 10, step: 0.1 },
+      { key: 'gravity', label: 'Node gravity', min: 0, max: 500, step: 10 },
+      { key: 'collidePadding', label: 'Node spacing', min: 0, max: 80, step: 2 },
+      { key: 'alphaDecay', label: 'Cool speed', min: 0.001, max: 0.2, step: 0.001 },
+    ] },
+    { label: 'Zoom', sliders: [
+      { key: 'zoomFitRatio', label: 'Fill ratio', min: 0.1, max: 1, step: 0.05 },
+      { key: 'zoomPadding', label: 'Padding', min: 0, max: 120, step: 4 },
+    ] },
+  ];
+
+  function loadForceParams() {
+    const params = Object.assign({}, FORCE_DEFAULTS);
+    try {
+      const raw = localStorage.getItem(FORCE_STORAGE_KEY);
+      if (raw) Object.assign(params, JSON.parse(raw));
+    } catch (e) { /* ignore */ }
+    return params;
+  }
+  function saveForceParams() {
+    try { localStorage.setItem(FORCE_STORAGE_KEY, JSON.stringify(forceParams)); } catch (e) { /* ignore */ }
+  }
+  const forceParams = loadForceParams();
+
+  const nodeById = new Map(DATA.nodes.map(n => [n.id, n]));
+  const childrenOf = new Map(DATA.nodes.map(n => [n.id, []]));
+  DATA.treeEdges.forEach(e => { const arr = childrenOf.get(e.source); if (arr) arr.push(e.target); });
+
+  function depthOf(id) {
+    let d = 0, cur = nodeById.get(id);
+    while (cur && cur.parent) {
+      d++;
+      const p = nodeById.get(cur.parent);
+      if (!p) break;  // virtual parent — stop here
+      cur = p;
+    }
+    return d;
+  }
+  DATA.nodes.forEach(n => { n.depth = depthOf(n.id); });
+
+  function descendantCount(id) {
+    let count = 0;
+    const stack = (childrenOf.get(id) || []).slice();
+    while (stack.length) {
+      const c = stack.pop();
+      count++;
+      stack.push(...childrenOf.get(c));
+    }
+    return count;
+  }
+
+  function computeNodeSizes() {
+    let maxDesc = 1;
+    const counts = new Map(DATA.nodes.map(n => [n.id, descendantCount(n.id)]));
+    counts.forEach(c => { if (c > maxDesc) maxDesc = c; });
+    DATA.nodes.forEach(n => {
+      const ratio = counts.get(n.id) / maxDesc;
+      const r = forceParams.nodeSizeMin + (forceParams.nodeSizeMax - forceParams.nodeSizeMin) * Math.sqrt(ratio);
+      n.r = r;
+      n.cardW = r * CARD_W_PER_R;
+      n.cardH = r * CARD_H_PER_R;
+    });
+  }
+
+  const collapsed = new Set();
+  const domainIds = [...new Set(DATA.treeEdges.map(e => e.source))];
+
+  function isVisible(id) {
+    let cur = nodeById.get(id).parent;
+    while (cur) {
+      if (collapsed.has(cur)) return false;
+      const p = nodeById.get(cur);
+      cur = p ? p.parent : null;
+    }
+    return true;
+  }
+
+  const treeLinksAll = DATA.treeEdges.map(e => ({ source: e.source, target: e.target }));
+  const crossLinksAll = DATA.crossEdges.map(e => ({ source: e.source, target: e.target, weight: e.weight }));
+  const idOf = x => (typeof x === 'object' ? x.id : x);
+  const nodeOf = x => (typeof x === 'object' ? x : nodeById.get(x));
+
+  const CARD_W = 210, CARD_H = 104;
+  const CARD_W_PER_R = CARD_W / FORCE_DEFAULTS.nodeSizeMax;
+  const CARD_H_PER_R = CARD_H / FORCE_DEFAULTS.nodeSizeMax;
+  const ARROW_PAD = 3;
+
+  const svgEl = document.getElementById('graph');
+  function viewportSize() { return [svgEl.clientWidth || 1200, svgEl.clientHeight || 800]; }
+  let [W, H] = viewportSize();
+
+  DATA.nodes.forEach((n, i) => {
+    const angle = i * 2.399963;
+    const r = 30 + Math.sqrt(i) * 55;
+    n.x = W / 2 + r * Math.cos(angle);
+    n.y = H / 2 + r * Math.sin(angle);
+  });
+
+  const svg = d3.select('#graph');
+  const root = svg.append('g').attr('class', 'root');
+  const gCrossLinks = root.append('g').attr('class', 'layer-cross-links');
+  const gTreeLinks = root.append('g').attr('class', 'layer-tree-links');
+  const gEdgeLabels = root.append('g').attr('class', 'layer-edge-labels');
+  const gNodes = root.append('g').attr('class', 'layer-nodes');
+
+  svg.append('defs').html(
+    '<marker id="arrow-cross" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">' +
+    '<path d="M0,0L10,5L0,10z" fill="#d95926"></path></marker>'
+  );
+
+  const zoomBehavior = d3.zoom().scaleExtent([0.08, 4]).on('zoom', (event) => {
+    root.attr('transform', event.transform);
+  });
+  svg.call(zoomBehavior);
+  svg.on('click', () => closeDetail());
+
+  const CROSS_WEIGHT_RATIO = 320 / 480;
+  const centerForce = d3.forceCenter(W / 2, H / 2).strength(forceParams.centerStrength);
+  const simulation = d3.forceSimulation()
+    .force('charge', d3.forceManyBody().strength(() => forceParams.gravity - forceParams.repulsion))
+    .force('collide', d3.forceCollide()
+      .radius(d => Math.hypot(d.cardW / 2, d.cardH / 2) + forceParams.collidePadding)
+      .strength(0.9).iterations(3))
+    .force('center', centerForce)
+    .force('treeLink', d3.forceLink().id(d => d.id)
+      .distance(() => forceParams.treeDistance).strength(() => forceParams.treeStrength))
+    .force('crossLink', d3.forceLink().id(d => d.id)
+      .distance(d => d.weight > 1 ? forceParams.crossDistance * CROSS_WEIGHT_RATIO : forceParams.crossDistance)
+      .strength(() => forceParams.crossStrength))
+    .alphaDecay(forceParams.alphaDecay)
+    .alphaMin(0.001)
+    .on('tick', ticked);
+
+  function ticked() {
+    if (treeLinkSelection) {
+      treeLinkSelection
+        .attr('x1', d => d.source.x).attr('y1', d => d.source.y)
+        .attr('x2', d => d.target.x).attr('y2', d => d.target.y);
+    }
+    if (crossLinkSelection) {
+      crossLinkSelection
+        .attr('x1', d => d.source.x).attr('y1', d => d.source.y)
+        .attr('x2', d => d.target.x).attr('y2', d => d.target.y);
+    }
+    if (edgeLabelSelection) {
+      edgeLabelSelection.attr('transform', d => {
+        const mx = (d.source.x + d.target.x) / 2;
+        const my = (d.source.y + d.target.y) / 2;
+        return 'translate(' + mx + ',' + my + ')';
+      });
+    }
+    if (nodeSelection) {
+      nodeSelection.attr('transform', d => 'translate(' + d.x + ',' + d.y + ')');
+    }
+  }
+
+  // ── Filter state ──
+  let selectedTags = new Set();   // selected tag set
+
+  let nodeSelection, treeLinkSelection, crossLinkSelection, edgeLabelSelection;
+  let selectedId = null;
+  let _resizing = false, _resizeStartX = 0, _resizeStartW = 0;
+
+  function escapeHtml(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[c]));
+  }
+
+  // ── Node excluded by current filter? ──
+  function isFilteredOut(d) {
+    if (selectedTags.size > 0 && !d.tags.some(t => selectedTags.has(t))) return true;
+    return false;
+  }
+
+  // ── Visible subgraph ──
+  function visibleGraph() {
+    const nodes = DATA.nodes.filter(n => isVisible(n.id));
+    const vis = new Set(nodes.map(n => n.id));
+    const treeLinks = treeLinksAll.filter(l => vis.has(idOf(l.source)) && vis.has(idOf(l.target)));
+    const crossLinks = crossLinksAll.filter(l => vis.has(idOf(l.source)) && vis.has(idOf(l.target)));
+    return { nodes, treeLinks, crossLinks };
+  }
+
+  // Node dragging removed intentionally: a plain click used to reheat the
+  // simulation (alphaTarget on drag-start) and jolt the whole graph.
+
+  function restart() {
+    computeNodeSizes();
+    const { nodes, treeLinks, crossLinks } = visibleGraph();
+    const linkKey = d => idOf(d.source) + '->' + idOf(d.target);
+
+    treeLinkSelection = gTreeLinks.selectAll('line.edge-tree')
+      .data(treeLinks, linkKey)
+      .join('line')
+      .attr('class', 'edge-tree');
+
+    crossLinkSelection = gCrossLinks.selectAll('line.edge-cross')
+      .data(crossLinks, linkKey)
+      .join('line')
+      .attr('class', 'edge-cross')
+      .attr('marker-end', 'url(#arrow-cross)');
+    crossLinkSelection.classed('visible', _showCross);
+
+    edgeLabelSelection = gEdgeLabels.selectAll('g.edge-label-group')
+      .data(crossLinks.filter(l => l.weight > 1), linkKey)
+      .join(enter => {
+        const g = enter.append('g').attr('class', 'edge-label-group');
+        g.append('rect').attr('class', 'edge-label-bg')
+          .attr('x', -11).attr('y', -8).attr('width', 22).attr('height', 16).attr('rx', 3);
+        g.append('text').attr('class', 'edge-label');
+        return g;
+      });
+    edgeLabelSelection.select('text.edge-label').text(d => '\u00d7' + d.weight);
+    edgeLabelSelection.style('display', _showCross ? null : 'none');
+
+    nodeSelection = gNodes.selectAll('g.node')
+      .data(nodes, d => d.id)
+      .join(enter => {
+        const g = enter.append('g').attr('class', 'node');
+        g.append('foreignObject').append('xhtml:div').attr('class', 'card');
+        g.on('click', (event, d) => {
+          event.stopPropagation();
+          showDetail(d);
+        });
+        g.on('dblclick', (event, d) => {
+          event.stopPropagation();
+          if (!(childrenOf.get(d.id) || []).length) return;
+          if (collapsed.has(d.id)) collapsed.delete(d.id); else collapsed.add(d.id);
+          restart();
+        });
+        return g;
+      });
+
+    simulation.nodes(nodes);
+    simulation.force('treeLink').links(treeLinks);
+    simulation.force('crossLink').links(crossLinks);
+    simulation.alpha(0.5).restart();
+
+    applyCardContent();
+  }
+
+  function cardHtml(d) {
+    const kids = (childrenOf.get(d.id) || []).length;
+    const toggle = kids
+      ? (collapsed.has(d.id) ? '\u25b8 ' + descendantCount(d.id) : '\u25be')
+      : '';
+    // First tag uses colored pill, others use normal pill (up to 2 shown)
+    const primaryTag = d.tags.length > 0 ? d.tags[0] : null;
+    const otherTags = primaryTag ? d.tags.slice(1, 2) : d.tags.slice(0, 2);
+    let tagsHtml = '';
+    if (primaryTag) {
+      const tc = tagColor(primaryTag);
+      tagsHtml += '<span class="pill" style="background:' + tc + '33;color:' + tc + '">' + escapeHtml(primaryTag) + '</span>';
+    }
+    tagsHtml += otherTags.map(t => '<span class="pill">' + escapeHtml(t) + '</span>').join('');
+    return '<div class="card-row">'
+      + tagsHtml
+      + (toggle ? '<span class="card-toggle">' + toggle + '</span>' : '')
+      + '</div>'
+      + '<div class="card-title">' + escapeHtml(d.title) + '</div>'
+      + '<div class="card-desc">' + escapeHtml(truncate(d.description, 140)) + '</div>';
+  }
+
+  function neighborhoodOf(id) {
+    const hood = new Set([id]);
+    for (const e of treeLinksAll) {
+      if (e.source === id && nodeById.has(e.target)) hood.add(e.target);
+      if (e.target === id && nodeById.has(e.source)) hood.add(e.source);
+    }
+    for (const e of crossLinksAll) {
+      const s = typeof e.source === 'object' ? e.source.id : e.source;
+      const t = typeof e.target === 'object' ? e.target.id : e.target;
+      if (s === id && nodeById.has(t)) hood.add(t);
+      if (t === id && nodeById.has(s)) hood.add(s);
+    }
+    return hood;
+  }
+
+  function applyHighlight() {
+    if (!nodeSelection) return;
+    const hasSelection = selectedId !== null;
+    const hood = hasSelection ? neighborhoodOf(selectedId) : null;
+    nodeSelection.attr('class', d =>
+      'node depth-' + Math.min(d.depth, 2)
+      + (isFilteredOut(d) || (hasSelection && !hood.has(d.id)) ? ' is-dimmed' : '')
+      + (d.id === selectedId ? ' is-selected' : ''));
+    const dimEdge = l => {
+      if (hasSelection) {
+        const s = typeof l.source === 'object' ? l.source.id : l.source;
+        const t = typeof l.target === 'object' ? l.target.id : l.target;
+        return s !== selectedId && t !== selectedId;
+      }
+      return isFilteredOut(nodeOf(l.source)) || isFilteredOut(nodeOf(l.target));
+    };
+    if (treeLinkSelection) treeLinkSelection.classed('is-dimmed', dimEdge);
+    if (crossLinkSelection) crossLinkSelection.classed('is-dimmed', dimEdge);
+  }
+
+  function applyCardContent() {
+    if (!nodeSelection) return;
+    nodeSelection.select('foreignObject')
+      .attr('x', d => -d.cardW / 2).attr('y', d => -d.cardH / 2)
+      .attr('width', d => d.cardW).attr('height', d => d.cardH);
+    nodeSelection.select('div.card')
+      .style('border-left-color', d => nodeTagColor(d))
+      .html(d => cardHtml(d));
+    applyHighlight();
+  }
+
+  function renderLegend() {
+    const list = document.getElementById('legend-list');
+    list.innerHTML = '';
+    DATA.tags.forEach(t => {
+      const count = DATA.nodes.filter(n => n.tags.includes(t)).length;
+      const color = tagColor(t);
+      const item = document.createElement('div');
+      item.className = 'legend-item' + (selectedTags.has(t) ? ' active' : '');
+      item.innerHTML = '<span class="swatch" style="background:' + color + '"></span>'
+        + '<span class="legend-label">' + t + '</span>'
+        + '<span class="legend-count">' + count + '</span>';
+      item.addEventListener('click', () => {
+        if (selectedTags.has(t)) selectedTags.delete(t);
+        else selectedTags.add(t);
+        applyHighlight();
+        renderLegend();
+        renderTagsPopover();
+        updateTagCountBadge();
+      });
+      list.appendChild(item);
+    });
+  }
+
+  function showDetail(n) {
+    selectedId = n.id;
+    document.getElementById('detail-path').textContent = n.id;
+    document.getElementById('detail-title').textContent = n.title;
+    const pills = document.getElementById('detail-pills');
+    pills.innerHTML = '';
+
+    // tag pills — first tag with color
+    const uniqueTags = [...new Set(n.tags)];
+    uniqueTags.forEach((t, i) => {
+      const el = document.createElement('span');
+      el.className = 'pill clickable';
+      if (i === 0) {
+        const tc = tagColor(t);
+        el.style.background = tc + '33';
+        el.style.color = tc;
+      }
+      el.textContent = t;
+      el.addEventListener('click', () => {
+        if (selectedTags.has(t)) {
+          selectedTags.delete(t);
+        } else {
+          selectedTags.add(t);
+        }
+        renderTagsPopover();
+        renderLegend();
+        applyHighlight();
+        updateTagCountBadge();
+      });
+      if (selectedTags.has(t)) el.style.outline = '1px solid currentColor';
+      pills.appendChild(el);
+    });
+
+    // body full text
+    document.getElementById('detail-body').innerHTML = mdLite(n.body);
+    renderRelations(n);
+    document.getElementById('detail').classList.add('open');
+    applyHighlight();
+    onPanelResize();
+  }
+
+  function closeDetail() {
+    if (selectedId === null && !document.getElementById('detail').classList.contains('open')) return;
+    selectedId = null;
+    document.getElementById('detail').classList.remove('open');
+    applyHighlight();
+    onPanelResize();
+  }
+
+  // The detail panel is in normal flow (flex sibling of the svg), so its
+  // open/close/resize changes the graph viewport width. Re-read the size,
+  // re-center the simulation, and re-fit so the graph adapts immediately.
+  function onPanelResize() {
+    [W, H] = viewportSize();
+    centerForce.x(W / 2).y(H / 2);
+    fit();
+  }
+
+  function truncate(s, n) {
+    if (!s) return '';
+    const clean = s.replace(/\s+/g, ' ').trim();
+    return clean.length > n ? clean.slice(0, n - 1) + '\u2026' : clean;
+  }
+
+  function inlineMd(s) {
+    let t = escapeHtml(s);
+    // Wikilinks: [[target.ava.okf.md|display]] or [[target.ava.okf.md]]
+    t = t.replace(/\[\[([^\]|]+?)(?:\|([^\]]+?))?\]\]/g, (match, target, display) => {
+      const targetId = resolveWikilinkId(target.trim());
+      const label = display ? escapeHtml(display.trim()) : escapeHtml(target.trim());
+      if (targetId) {
+        return '<button class="wikilink-btn" onclick="event.stopPropagation();focusNode(\'' + targetId + '\');return false;" title="' + escapeHtml(target.trim()) + '">' + label + '</button>';
+      }
+      return '<span class="wikilink-broken" title="Not found: ' + escapeHtml(target.trim()) + '">' + label + '</span>';
+    });
+    t = t.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
+    t = t.replace(/`([^`]+)`/g, '<code>$1</code>');
+    return t;
+  }
+
+  function resolveWikilinkId(target) {
+    // Exact match on node id
+    if (nodeById.has(target)) return target;
+    // Try basename match
+    const base = target.split('/').pop();
+    for (const [id] of nodeById) {
+      if (id.endsWith('/' + base) || id === base) return id;
+    }
+    // Try without .ava.okf.md
+    const alt = target.replace(/\.ava\.okf\.md$/, '.ava.okf.md');
+    if (alt !== target && nodeById.has(alt)) return alt;
+    return null;
+  }
+
+  function tableHtml(rows) {
+    const parseRow = r => r.replace(/^\|/, '').replace(/\|$/, '').split('|').map(c => c.trim());
+    const isSep = r => /-/.test(r) && /^[|\s:\-]+$/.test(r);
+    let html = '<table>';
+    let start = 0;
+    if (rows.length > 1 && isSep(rows[1])) {
+      html += '<thead><tr>' + parseRow(rows[0]).map(c => '<th>' + inlineMd(c) + '</th>').join('') + '</tr></thead>';
+      start = 2;
+    }
+    html += '<tbody>';
+    for (let k = start; k < rows.length; k++) {
+      if (isSep(rows[k])) continue;
+      html += '<tr>' + parseRow(rows[k]).map(c => '<td>' + inlineMd(c) + '</td>').join('') + '</tr>';
+    }
+    return html + '</tbody></table>';
+  }
+
+  function mdLite(text) {
+    if (!text) return '<p class="empty">(None)</p>';
+    const blocks = text.split('```');
+    let html = '';
+    for (let i = 0; i < blocks.length; i++) {
+      const block = blocks[i];
+      if (i % 2 === 1) {
+        html += '<pre class="code-block">' + escapeHtml(block.trim()) + '</pre>';
+        continue;
+      }
+      const lines = block.split('\n');
+      let inList = false;
+      let para = [];
+      const flushPara = () => { if (para.length) { html += '<p>' + inlineMd(para.join(' ')) + '</p>'; para = []; } };
+      let j = 0;
+      while (j < lines.length) {
+        const raw = lines[j];
+        const trimmed = raw.trim();
+        if (!trimmed) { flushPara(); inList = false; j++; continue; }
+        const h = trimmed.match(/^(#{1,3})\s+(.+)/);
+        if (h && !inList) { flushPara(); html += '<h' + h[1].length + '>' + inlineMd(h[2]) + '</h' + h[1].length + '>'; j++; continue; }
+        const li = trimmed.match(/^[-*]\s+(.+)/);
+        if (li) { if (!inList) { flushPara(); html += '<ul>'; inList = true; } html += '<li>' + inlineMd(li[1]) + '</li>'; j++; continue; }
+        if (inList) { html += '</ul>'; inList = false; }
+        if (trimmed.startsWith('|')) {
+          flushPara();
+          const tbl = [];
+          while (j < lines.length && lines[j].trim().startsWith('|')) { tbl.push(lines[j].trim()); j++; }
+          html += tableHtml(tbl);
+          continue;
+        }
+        para.push(raw);
+        j++;
+      }
+      flushPara();
+      if (inList) html += '</ul>';
+    }
+    return html || '<p class="empty">(None)</p>';
+  }
+
+  function renderRelations(n) {
+    const wrap = document.getElementById('detail-relations');
+    wrap.innerHTML = '';
+    const addGroup = (label, items) => {
+      if (!items.length) return;
+      const h = document.createElement('div');
+      h.className = 'relation-group-label';
+      h.textContent = label + ' (' + items.length + ')';
+      wrap.appendChild(h);
+      const list = document.createElement('div');
+      list.className = 'relation-list';
+      items.forEach(({ id, extra }) => {
+        const btn = document.createElement('button');
+        btn.className = 'relation-btn';
+        btn.textContent = (nodeById.get(id) ? nodeById.get(id).title : id) + (extra || '');
+        btn.addEventListener('click', () => focusNode(id));
+        list.appendChild(btn);
+      });
+      wrap.appendChild(list);
+    };
+    const parent = n.parent ? [{ id: n.parent }] : [];
+    const kids = (childrenOf.get(n.id) || []).map(id => ({ id }));
+    const crossRefs = crossLinksAll
+      .filter(l => idOf(l.source) === n.id || idOf(l.target) === n.id)
+      .map(l => {
+        const other = idOf(l.source) === n.id ? idOf(l.target) : idOf(l.source);
+        return { id: other, extra: l.weight > 1 ? ' (\u00d7' + l.weight + ')' : '' };
+      });
+    addGroup('Parent', parent);
+    addGroup('Child', kids);
+    addGroup('Cross References', crossRefs);
+  }
+
+  function focusNode(id) {
+    // Expand collapsed ancestors
+    let cur = nodeById.get(id).parent;
+    let changed = false;
+    while (cur) {
+      if (collapsed.has(cur)) { collapsed.delete(cur); changed = true; }
+      const p = nodeById.get(cur);
+      cur = p ? p.parent : null;
+    }
+    if (changed) restart();
+    const n = nodeById.get(id);
+    showDetail(n);
+
+    // Collect the neighborhood: selected node + direct neighbors (via tree & cross edges)
+    const hood = new Set([id]);
+    for (const e of treeLinksAll) {
+      if (e.source === id && nodeById.has(e.target)) hood.add(e.target);
+      if (e.target === id && nodeById.has(e.source)) hood.add(e.source);
+    }
+    for (const e of crossLinksAll) {
+      const s = typeof e.source === 'object' ? e.source.id : e.source;
+      const t = typeof e.target === 'object' ? e.target.id : e.target;
+      if (s === id && nodeById.has(t)) hood.add(t);
+      if (t === id && nodeById.has(s)) hood.add(s);
+    }
+
+    // Compute bounding box of the neighborhood
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    let count = 0;
+    for (const nid of hood) {
+      const nd = nodeById.get(nid);
+      if (!nd || nd.x == null) continue;
+      const w = nd._cardW || 210;
+      const h = nd._cardH || 104;
+      minX = Math.min(minX, nd.x - w / 2);
+      maxX = Math.max(maxX, nd.x + w / 2);
+      minY = Math.min(minY, nd.y - h / 2);
+      maxY = Math.max(maxY, nd.y + h / 2);
+      count++;
+    }
+    if (count === 0) return;
+
+    const [vw, vh] = viewportSize();
+    const pad = 60;
+    const bw = maxX - minX + pad * 2;
+    const bh = maxY - minY + pad * 2;
+    let scale = Math.min(vw / bw, vh / bh, 10); // max zoom 10x
+    scale = Math.max(scale, 0.15); // min zoom 0.15x
+    const cx = (minX + maxX) / 2;
+    const cy = (minY + maxY) / 2;
+    svg.transition().duration(600).call(
+      zoomBehavior.transform,
+      d3.zoomIdentity.translate(vw / 2 - scale * cx, vh / 2 - scale * cy).scale(scale)
+    );
+  }
+
+  function fit() {
+    const nodes = simulation.nodes();
+    if (!nodes.length) return;
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+    nodes.forEach(d => {
+      x0 = Math.min(x0, d.x - d.cardW / 2); x1 = Math.max(x1, d.x + d.cardW / 2);
+      y0 = Math.min(y0, d.y - d.cardH / 2); y1 = Math.max(y1, d.y + d.cardH / 2);
+    });
+    x0 -= forceParams.zoomPadding; x1 += forceParams.zoomPadding;
+    y0 -= forceParams.zoomPadding; y1 += forceParams.zoomPadding;
+    const w = x1 - x0, h = y1 - y0;
+    const [vw, vh] = viewportSize();
+    const scale = Math.min(2.5, forceParams.zoomFitRatio / Math.max(w / vw, h / vh));
+    const tx = vw / 2 - scale * (x0 + x1) / 2;
+    const ty = vh / 2 - scale * (y0 + y1) / 2;
+    svg.transition().duration(600).call(zoomBehavior.transform, d3.zoomIdentity.translate(tx, ty).scale(scale));
+  }
+
+  // Tag filter popover
+  function renderTagsPopover() {
+    const list = document.getElementById('tags-list');
+    list.innerHTML = '';
+    DATA.tags.forEach(t => {
+      const count = DATA.nodes.filter(n => n.tags.includes(t)).length;
+      const row = document.createElement('label');
+      row.className = 'tag-check-row';
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = selectedTags.has(t);
+      cb.addEventListener('change', () => {
+        if (cb.checked) selectedTags.add(t);
+        else selectedTags.delete(t);
+        renderLegend();
+        applyHighlight();
+        updateTagCountBadge();
+      });
+      row.appendChild(cb);
+      const label = document.createElement('span');
+      label.className = 'tag-label';
+      label.textContent = t;
+      row.appendChild(label);
+      const cnt = document.createElement('span');
+      cnt.className = 'tag-count';
+      cnt.textContent = count;
+      row.appendChild(cnt);
+      list.appendChild(row);
+    });
+  }
+
+  function updateTagCountBadge() {
+    document.getElementById('tag-count').textContent = selectedTags.size;
+  }
+
+  document.getElementById('btn-tags').addEventListener('click', (e) => {
+    e.stopPropagation();
+    const pop = document.getElementById('tagsPopover');
+    pop.hidden = !pop.hidden;
+    if (!pop.hidden) {
+      document.getElementById('forcePopover').hidden = true;
+      renderTagsPopover();
+    }
+  });
+  document.getElementById('tagsPopover').addEventListener('click', (e) => e.stopPropagation());
+  document.getElementById('btn-tags-clear').addEventListener('click', () => {
+    selectedTags.clear();
+    renderTagsPopover();
+    applyHighlight();
+    updateTagCountBadge();
+  });
+
+  // ── Cross-link toggle ──
+  let _showCross = false;
+  document.getElementById('btn-toggle-cross').addEventListener('click', () => {
+    _showCross = !_showCross;
+    d3.selectAll('.edge-cross').classed('visible', _showCross);
+    d3.selectAll('.edge-label-group').style('display', _showCross ? null : 'none');
+    document.getElementById('btn-toggle-cross').textContent = _showCross ? 'Cross \u2713' : 'Cross';
+  });
+
+  document.getElementById('btn-expand-all').addEventListener('click', () => {
+    collapsed.clear();
+    restart();
+    setTimeout(fit, 500);
+  });
+  document.getElementById('btn-collapse-domains').addEventListener('click', () => {
+    collapsed.clear();
+    domainIds.forEach(id => collapsed.add(id));
+    restart();
+    setTimeout(fit, 500);
+  });
+  document.getElementById('btn-fit').addEventListener('click', fit);
+  document.getElementById('detail-close').addEventListener('click', (e) => { e.stopPropagation(); closeDetail(); });
+  const rh = document.getElementById('detail-resize-handle');
+  rh.addEventListener('mousedown', (e) => {
+    _resizing = true; _resizeStartX = e.clientX;
+    _resizeStartW = document.getElementById('detail').offsetWidth;
+    e.preventDefault();
+  });
+  document.addEventListener('mousemove', (e) => {
+    if (!_resizing) return;
+    const dw = _resizeStartX - e.clientX;
+    const panel = document.getElementById('detail');
+    panel.style.width = Math.max(260, Math.min(window.innerWidth * 0.92, _resizeStartW + dw)) + 'px';
+    [W, H] = viewportSize();
+    centerForce.x(W / 2).y(H / 2);
+  });
+  document.addEventListener('mouseup', () => { if (_resizing) { _resizing = false; fit(); } });
+
+  window.addEventListener('resize', () => {
+    [W, H] = viewportSize();
+    centerForce.x(W / 2).y(H / 2);
+  });
+
+  // ── Layout settings panel ──
+  function decimalsOf(step) {
+    const s = String(step);
+    const i = s.indexOf('.');
+    return i === -1 ? 0 : s.length - i - 1;
+  }
+  function formatVal(v, step) { return Number(v).toFixed(decimalsOf(step)); }
+
+  function onForceParamChange() {
+    centerForce.strength(forceParams.centerStrength);
+    simulation.alphaDecay(forceParams.alphaDecay);
+    restart();
+    saveForceParams();
+  }
+
+  function renderForceGroups() {
+    const wrap = document.getElementById('forceGroups');
+    wrap.innerHTML = '';
+    FORCE_GROUPS.forEach(group => {
+      const g = document.createElement('div');
+      g.className = 'force-group';
+      const label = document.createElement('div');
+      label.className = 'force-group-label';
+      label.textContent = group.label;
+      g.appendChild(label);
+      group.sliders.forEach(s => {
+        const row = document.createElement('div');
+        row.className = 'force-slider-row';
+        const top = document.createElement('div');
+        top.className = 'row-top';
+        top.innerHTML = '<span>' + s.label + '</span><span class="val"></span>';
+        const valEl = top.querySelector('.val');
+        valEl.textContent = formatVal(forceParams[s.key], s.step);
+        row.appendChild(top);
+        const input = document.createElement('input');
+        input.type = 'range';
+        input.min = s.min; input.max = s.max; input.step = s.step;
+        input.value = forceParams[s.key];
+        input.setAttribute('aria-label', group.label + ' ' + s.label);
+        input.addEventListener('input', () => {
+          forceParams[s.key] = Number(input.value);
+          valEl.textContent = formatVal(forceParams[s.key], s.step);
+          onForceParamChange();
+        });
+        row.appendChild(input);
+        g.appendChild(row);
+      });
+      wrap.appendChild(g);
+    });
+  }
+
+  document.getElementById('btn-force-settings').addEventListener('click', (e) => {
+    e.stopPropagation();
+    const pop = document.getElementById('forcePopover');
+    pop.hidden = !pop.hidden;
+    if (!pop.hidden) document.getElementById('tagsPopover').hidden = true;
+  });
+  document.getElementById('forcePopover').addEventListener('click', (e) => e.stopPropagation());
+  document.getElementById('btn-force-reset').addEventListener('click', () => {
+    Object.assign(forceParams, FORCE_DEFAULTS);
+    renderForceGroups();
+    onForceParamChange();
+  });
+  document.addEventListener('click', () => {
+    document.getElementById('forcePopover').hidden = true;
+    document.getElementById('tagsPopover').hidden = true;
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      document.getElementById('forcePopover').hidden = true;
+      document.getElementById('tagsPopover').hidden = true;
+    }
+  });
+
+  // Initial state: collapse to domain level
+  domainIds.forEach(id => collapsed.add(id));
+  renderForceGroups();
+  renderTagsPopover();
+  restart();
+  renderLegend();
+  // Hide the old type filter dropdown, use tag multi-select instead
+  const _tfEl = document.getElementById('typeFilter');
+  if (_tfEl && _tfEl.parentElement) _tfEl.parentElement.style.display = 'none';
+  // Hide the following separator
+  const _sepEl = _tfEl ? _tfEl.parentElement && _tfEl.parentElement.nextElementSibling : null;
+  if (_sepEl && _sepEl.classList.contains('sep')) _sepEl.style.display = 'none';
+  // Change legend title to "Tags"
+  const _ltEl = document.getElementById('legend-title');
+  if (_ltEl) _ltEl.textContent = 'Tags';
+  setTimeout(fit, 450);
+  window.focusNode = focusNode;
+  window._nodeById = nodeById;
+})();
+</script>
+</body>
+</html>

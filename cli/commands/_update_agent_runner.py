@@ -1,0 +1,402 @@
+"""Agent-runner leg of `ava cluster update` — the local self-update an agent-runner runs.
+
+Split out of `cli/commands/update.py` to keep that module within the file-size
+budget. This is the in-process self-update an *operator* triggers with `ava cluster update`
+on an agent-runner (the rollout's Phase B uses the detached `spawn_update` shell
+instead). Re-imported by `cli/commands/update.py` (and re-exported through
+`cli.commands`) so `cli.commands(.update)._run_agent_runner_self_update` keeps
+resolving for the dispatch in `cmd_update` and the test seams.
+"""
+
+from __future__ import annotations
+
+import contextlib
+import os
+import subprocess
+import sys
+from collections.abc import Generator
+from pathlib import Path
+
+from cli.commands._repo import _repo_root
+from cli.commands._update_git import GitPullFailed, git_checkout_sha, git_resolve_origin_main
+from shared.exit_codes import RESTART_DECLINED_EXIT_CODE
+from shared.migrations import MigrationLayoutError, validate_migrations_at_ref
+from shared.platform_backend import get_backend as platform_backend
+
+
+def _run_agent_runner_self_update(
+    repo: Path,
+    *,
+    target_sha: str | None = None,
+    restart_only: bool = False,
+    mode: str = "smooth",
+    force_reap: bool = False,
+) -> int:
+    """`ava cluster update` implementation on an agent-runner — local self-update.
+
+    Flow: force-checkout the pinned target / uv sync / vet the new tree's
+    migrations/ layout (validate-before-kill: revert + abort on a broken layout
+    rather than stop into a boot that can't migrate) / graceful stop / a fresh
+    `ava start` subprocess (see step 4 for why start runs in a child process).
+    Does not run migrations itself; the gateway is the single schema writer.
+
+    `target_sha` is the pinned rollout commit: a direct operator `ava cluster update`
+    leaves it None and this resolves origin/main itself. Either way the checkout is
+    forced (lands from any branch / dirty state — see git_checkout_sha).
+
+    `restart_only=True` skips the checkout + uv sync — bounce services on the
+    current code. (The normal agent-runner leg of a cluster restart arrives as a
+    `cluster_update` work row with `restart_only` payload → `ava restart`, not
+    through here; this branch covers an operator running `ava cluster update
+    --restart-only` directly on an agent-runner.)
+
+    The child `ava start` returns the posture row to idle at the end, pulling
+    this host back from paused to serving. When invoked via the ava-updater session
+    session (spawned by spawn_update()), this function runs in a detached pane so
+    a mid-flow `ava stop` does not take itself out.
+    """
+    from shared.host_deploy_state import (
+        clear_updater_lease,
+        release_updater_lock,
+        touch_updater_lease,
+        try_acquire_updater_lock,
+    )
+
+    # Mutual exclusion first: two concurrent updaters on one host race each
+    # other's checkout/converge writes (win 2026-08-11, task #1181 — a second
+    # updater tore the schtasks XML mid-write and converge failed with
+    # WinError 87, leaving the host offline). The loser declines like any other
+    # preflight refusal; Phase B / the watchdog self-heal read that as
+    # "provably stopped" and move on. Fail-soft: try_acquire returns False only
+    # for a genuine concurrent holder, never for a filesystem quirk.
+    if not try_acquire_updater_lock():
+        print(
+            "[updater] another self-update is already running on this host — declining "
+            "(concurrent updaters race the checkout/converge writes)"
+        )
+        return RESTART_DECLINED_EXIT_CODE
+
+    try:
+        # R1 (Task #1021): this process IS the updater — its lease says "this host's
+        # updater is alive" to the stalled-updater controller and Phase B. Written on
+        # entry, cleared in the finally below (a crash leaves it to expire on the TTL).
+
+        # Fail-soft: the lease is a liveness signal, not a gate — an unwritable lease
+        # must not abort an update. The consequence of a lost lease is the safe
+        # direction: stalled-updater and Phase B read "no lease" as not-hung (never a
+        # provable stop), so this update simply is not reaped mid-flight.
+        with contextlib.suppress(Exception):
+            touch_updater_lease()
+
+        try:
+            return _run_agent_runner_self_update_inner(
+                repo,
+                target_sha=target_sha,
+                restart_only=restart_only,
+                mode=mode,
+                force_reap=force_reap,
+            )
+        finally:
+            with contextlib.suppress(Exception):
+                clear_updater_lease()
+    finally:
+        release_updater_lock()
+
+
+@contextlib.contextmanager
+def _source_switch_window() -> Generator[None, None, None]:
+    """Open the source-switch window around an update leg that writes the tree.
+
+    The checkout replaces the tree file by file while the old daemons are still
+    running, so a healthcheck respawn inside the window could import a
+    half-written module (the win 2026-08-12/13 restart failure class).
+    `respawn_service` holds back while the window is open
+    (``shared/source_switch`` + ``shared.service_respawn``); the update's own
+    `ava start` runs on the verified, complete tree and relaunches everything.
+    The window closes on every exit path; a crashed process leaves the marker
+    to expire on its TTL (``shared/source_switch`` fails open after 900s).
+    """
+    from shared.source_switch import clear_switching, mark_switching
+
+    mark_switching()
+    try:
+        yield
+    finally:
+        clear_switching()
+
+
+def _run_agent_runner_self_update_inner(
+    repo: Path,
+    *,
+    target_sha: str | None = None,
+    restart_only: bool = False,
+    mode: str = "smooth",
+    force_reap: bool = False,
+) -> int:
+    """The body of `_run_agent_runner_self_update` (lease wrapper above)."""
+    # Lazy `cli.commands` for `_do_stop` (and so tests can stub it); avoids a
+    # top-level cycle (cli.commands imports this module via update.py's re-export).
+    #
+    # This is also where the stop's import closure is fixed: everything reachable
+    # from here at module scope becomes PRE-checkout code, since step 4's stop runs
+    # in-process. `shared.session_backend` and the platform supervisors under it are
+    # deliberately NOT in that closure (see step 4 and
+    # tests/cli/test_update_import_timing.py).
+    import cli.commands as _ns
+
+    if restart_only:
+        print("\n→ restart-only: skip git checkout / uv sync (bounce on current code)")
+    else:
+        # 1+2) force-checkout the pinned target + uv sync, inside the
+        # source-switch window. Phase B passes target_sha; a direct operator
+        # `ava cluster update` resolves origin/main itself. The checkout lands on
+        # the exact commit from any branch/dirty state. The window exists because
+        # the checkout replaces the tree file by file while the old daemons are
+        # still running, and a healthcheck respawn in that window could import a
+        # half-written module — the defect class of win's 2026-08-12/13 restart
+        # failures ('.venv' is not recognized / torn imports; see
+        # shared/source_switch.py). `respawn_service` holds back while the window
+        # is open; the update's own `ava start` (step 5) runs on the verified,
+        # complete tree and relaunches everything.
+        with _source_switch_window():
+            sha = target_sha if target_sha is not None else git_resolve_origin_main()
+            print(f"\n→ git checkout {sha[:7]} (pinned rollout target)")
+            try:
+                from_sha = git_checkout_sha(sha)
+            except GitPullFailed as e:
+                print(f"  ✗ {e}", file=sys.stderr)
+                return 1
+            print(f"  ✓ {from_sha[:7]} → {sha[:7]}")
+
+            print("\n→ uv sync")
+            sync_result = subprocess.run(
+                ["uv", "sync"],
+                cwd=repo,
+                capture_output=False,
+                check=False,
+            )
+            if sync_result.returncode != 0:
+                print("  ✗ uv sync failed", file=sys.stderr)
+                return 1
+
+        # Record the just-installed commit so the source-integrity guard at
+        # `ava start` can detect future manual git operations. (Outside the
+        # window: the tree is complete by now, and the bookmark is a file under
+        # $AVA_HOME, not the tree.)
+        try:
+            from shared.source_integrity import set_installed
+
+            set_installed(sha)
+        except Exception as exc:
+            print(f"  · installed_sha update failed (non-fatal): {exc}", file=sys.stderr)
+
+        # 2.5) validate-before-kill: the just-checked-out tree's `ava start` (step 4)
+        #    fails its migrate / schema-assert on a broken migrations/ layout
+        #    (duplicate / non-contiguous version) — but only after the stop below has
+        #    already taken this host down. Vet the new tree now; on a broken layout
+        #    revert to the prior commit and abort with this host still serving.
+        try:
+            validate_migrations_at_ref(sha, repo_root=repo)
+        except MigrationLayoutError as e:
+            print(
+                f"  ✗ refusing self-update: {sha[:7]} has a broken migration layout "
+                f"({e}); reverting to {from_sha[:7]}",
+                file=sys.stderr,
+            )
+            # The revert is another source switch — same window, same reason.
+            with _source_switch_window():
+                git_checkout_sha(from_sha)
+                subprocess.run(["uv", "sync"], cwd=repo, capture_output=False, check=False)
+            return 1
+
+    # 3) preflight: probe gateway + register machine BEFORE stopping services.
+    #    A transient gateway outage or network blip at this point would otherwise
+    #    leave the host in "services dead, can't start" after the stop below.
+    #    On failure the host keeps serving — abort without stopping.
+    print("\n→ preflight probes (validate-before-kill)")
+    rc = _ns._preflight_probes()
+    if rc != 0:
+        print(
+            "  ✗ refusing self-update: preflight probes failed — host still serving",
+            file=sys.stderr,
+        )
+        # Same contract as `ava restart`: a refusal before the stop is reported as
+        # RESTART_DECLINED so a caller can tell "still serving" from "may be down".
+        _ns._release_self_heal_pause()
+        return RESTART_DECLINED_EXIT_CODE
+
+    # 3.5) resolve + vet the `ava` launcher BEFORE the stop, for the same reason
+    #    as every other gate above: step 5 is the only thing that brings this host
+    #    back up, and a missing launcher there raises FileNotFoundError out of a
+    #    host whose services are already down, with nothing left to restart them.
+    #    The venv bin dir is platform-named (`bin` / `Scripts`), so the hardcoded
+    #    POSIX path this used to build never existed on a Windows agent-runner —
+    #    exactly the host least able to be rescued by hand.
+    ava_bin = platform_backend().venv_launcher("ava", root=repo)
+    if not ava_bin.exists():
+        print(
+            f"  ✗ refusing self-update: {ava_bin} is missing — `uv sync` did not "
+            f"install the launcher, and stopping now would leave this host with "
+            f"nothing able to start it. Host still serving.",
+            file=sys.stderr,
+        )
+        return 1
+
+    # 3.75) quiesce this host's agents BEFORE the stop — the per-host analogue of
+    #    the rollout's stop-the-world. A standalone self-update (operator `ava
+    #    cluster update` on a runner, watchdog pin/code self-heal, the management
+    #    endpoint) used to skip this entirely: no signal, no wait, no kill — every
+    #    agent rode the whole update on old code until the next rollout. Now:
+    #    signal each live agent to restart (system:update + Redis wake), wait per
+    #    mode (smooth: out-waits the longest single execute_code; force: idle
+    #    drain only), and force-reap stragglers on timeout — marked 'restarting'
+    #    so the restarter respawns them on the new code once `ava start` unpauses.
+    #    `mode='none'` (the rollout's Phase B) skips this: the gateway-side
+    #    quiesce already drained the fleet; only `force_reap` (the quiesce-timeout
+    #    backstop) applies there.
+    if mode != "none":
+        _ns._quiesce_local_agents(mode)
+    if force_reap or mode == "force":
+        _ns._force_reap_local_agents()
+
+    # 4) graceful stop. keep_infra=True: an internal self-update bounces this
+    #    host's service sessions, never the shared pg/redis — on a co-located
+    #    gateway,agent-runner box stopping the data plane kills the rollout
+    #    orchestrator's own DB polling mid-Phase-B (it dies before releasing
+    #    the cluster update lock, blocking further rollouts for the lock TTL).
+    #
+    #    In-process, and deliberately so: it must NOT be a subprocess through the
+    #    `ava` launcher, because a mid-flow `ava stop` would then take the updater
+    #    itself out. The consequence is that this stop runs whatever `sys.modules`
+    #    already holds — which is why the session-kill chain is kept out of the
+    #    closure above. It is not yet loaded here, so `_do_stop` imports it now and
+    #    reads the code the checkout just wrote: a `kill_session` fix (PR #932's
+    #    Windows session-boundary fix, say) applies on the rollout that ships it
+    #    rather than one rollout late. `shared/session_backend.py`'s method-local
+    #    imports are what make that true; `tests/cli/test_update_import_timing.py`
+    #    fails if either end of the arrangement is broken.
+    _ns._do_stop(repo, graceful=True, require_confirmation=False, keep_infra=True)
+
+    # 5) start in a FRESH process so it loads the just-synced new code. Calling
+    #    cmd_start() in-process would mix already-imported old modules with the
+    #    new ones imported lazily after the checkout (e.g. a stale shared.paths
+    #    against a fresh shared.memory_repo) and crash on a large version jump. The
+    #    child `ava start` still returns the posture row to idle at the end, pulling
+    #    this host back from paused to serving.
+    print("\n→ ava start (fresh process, new code)")
+    # --persist-services: an internal restart must not rewrite the operator's
+    # durable --disable-service marker (a no-flag start would re-enable everything).
+    # Strip the settings-lite opt-out before spawning `ava start`: the
+    # caller (`ava cluster update`) is a lite verb and runs with
+    # AVA_CONFIG_FETCH=skip, but `start` must build full Settings —
+    # otherwise the child inherits the opt-out, plants the unanchored
+    # DB sentinel, and fails on a pure agent-runner that has no local
+    # .env DB URL (s3-2).
+    start_env = os.environ.copy()
+    for _key in ("AVA_CONFIG_FETCH", "AVA_CONFIG_SOURCE"):
+        start_env.pop(_key, None)
+    try:
+        return subprocess.run(
+            [str(ava_bin), "start", "--persist-services"],
+            cwd=repo,
+            env=start_env,
+            check=False,
+        ).returncode
+    except OSError as exc:
+        # Vetted as present in step 3.5, so reaching here means it vanished (or is
+        # not executable) inside the stop window. Services are already down: say so
+        # loudly with the path, rather than surfacing a bare traceback on a host
+        # that is now silent.
+        print(
+            f"  ✗ {ava_bin} failed to launch ({exc}) — this host is STOPPED and "
+            f"cannot restart itself; run `ava start` on it manually.",
+            file=sys.stderr,
+        )
+        return 1
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Module entry for the detached updater session — `python -m cli.commands._update_agent_runner`.
+
+    The one CLI surface `ops.cluster_deploy.spawn_update`'s POSIX chain invokes,
+    so the detached `ava-updater` session runs the same in-process self-update as
+    an operator's `ava cluster update` on a runner instead of a hand-built shell
+    ladder (R1-6, Task #1021: execution-shape convergence). Flags mirror the
+    `ClusterOpPayload` the ops server forwards to `spawn_update`:
+
+    - `--target-sha <sha>` — the rollout's pinned commit; absent resolves
+      origin/main itself (a watchdog self-heal catching the host up).
+    - `--restart-only` — bounce services on the current code, no checkout/sync.
+    - `--mode <smooth|force|none>` — the agent-drain policy; `none` (the
+      rollout's Phase B) skips quiesce entirely.
+    - `--force-reap` — kill still-live agents before the bounce (Phase B's
+      quiesce-timeout backstop).
+
+    The repo resolves from this module's own location (`_repo_root`), not the
+    session's cwd, so the `if cd <repo>` guard in the wrapper is belt-and-braces
+    rather than load-bearing.
+
+    Returns the self-update's rc — the same verdict `[session-exit] rc=` carries
+    into the updater log for `ops.updater_outcome` (a preflight refusal is
+    `RESTART_DECLINED_EXIT_CODE`, telling the reader "still serving" from "may be
+    down").
+    """
+    # The updater runs as `python -m cli.commands._update_agent_runner`, which
+    # bypasses cli/main.py, so loguru never gets a sink here (shared.log's
+    # module-level logger.remove() stripped the default) and every logger.error
+    # inside converge — e.g. the schtasks /Create failure detail behind
+    # "watchdog-probe registration failed on Windows" (#885, #1117) — was
+    # silently dropped. Attach the CLI sink set (stderr + <name>.log + events
+    # pipeline) so a failed self-update's last steps are visible in the updater
+    # log and on the cluster admin events surface without ssh. The postgres
+    # sink raises when the DB is unreachable — a real scenario on the recovery
+    # path this process exists for (gateway mid-restart) — so tolerate that:
+    # the stderr + file sinks attach before it, and stderr is captured into the
+    # updater log by the spawn wrapper, so the details still land somewhere.
+    import shared.log as _log
+
+    # Silence is deliberate: the stderr + file sinks attach before the postgres
+    # sink, so an init failure still leaves the stderr sink live (captured into
+    # the updater log by the spawn wrapper) — nothing diagnosable is lost.
+    with contextlib.suppress(Exception):
+        _log.init_cli_process(name="updater")
+
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        prog="python -m cli.commands._update_agent_runner",
+        description="In-process agent-runner self-update, invoked by the detached ava-updater session.",
+    )
+    parser.add_argument(
+        "--target-sha",
+        default=None,
+        help="pinned rollout commit (default: resolve the track ref itself)",
+    )
+    parser.add_argument(
+        "--restart-only",
+        action="store_true",
+        help="bounce services on current code (no checkout / uv sync)",
+    )
+    parser.add_argument(
+        "--mode",
+        choices=("smooth", "force", "none"),
+        default="smooth",
+        help="agent-drain policy (default: smooth)",
+    )
+    parser.add_argument(
+        "--force-reap",
+        action="store_true",
+        help="kill still-live agents before the bounce (Phase-B backstop)",
+    )
+    args = parser.parse_args(argv)
+    return _run_agent_runner_self_update(
+        _repo_root(),
+        target_sha=args.target_sha,
+        restart_only=args.restart_only,
+        mode=args.mode,
+        force_reap=args.force_reap,
+    )
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

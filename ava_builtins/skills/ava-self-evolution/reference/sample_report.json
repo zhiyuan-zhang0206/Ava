@@ -1,0 +1,107 @@
+{
+  "_description": "Sample self_evolution report JSON. This is the data schema consumed by render_report.py + report_template.html.",
+  "week": "2025-06-30",
+  "generated_at": "2025-07-01 10:15 UTC",
+  "skill_count": 3,
+  "total_runs": 156,
+  "changes_count": 2,
+  "overall_delta": "+0.087",
+  "tasks_replayed": 28,
+  "improved": 5,
+  "regressed": 1,
+  "cluster_count": 3,
+  "cluster_skills": 3,
+  "changes": [
+    {
+      "skill": "gmail",
+      "summary": "Added IMAP timeout handling with exponential backoff",
+      "pr": "142",
+      "pr_url": "https://github.com/example/ava/pull/142"
+    },
+    {
+      "skill": "goal",
+      "summary": "Clarified completion criteria — distinguish 'done' from 'stuck'",
+      "pr": "143",
+      "pr_url": "https://github.com/example/ava/pull/143"
+    }
+  ],
+  "score_skills": [
+    {
+      "skill": "gmail",
+      "dimensions": [
+        {"label": "completion", "before": 0.72, "after": 0.85, "before_pct": 72, "after_pct": 85, "delta": 0.13, "delta_pct": 13, "delta_str": "+0.13", "delta_class": "delta-up"},
+        {"label": "efficiency", "before": 0.65, "after": 0.78, "before_pct": 65, "after_pct": 78, "delta": 0.13, "delta_pct": 13, "delta_str": "+0.13", "delta_class": "delta-up"},
+        {"label": "overall", "before": 0.70, "after": 0.83, "before_pct": 70, "after_pct": 83, "delta": 0.13, "delta_pct": 13, "delta_str": "+0.13", "delta_class": "delta-up"}
+      ]
+    },
+    {
+      "skill": "goal",
+      "dimensions": [
+        {"label": "completion", "before": 0.80, "after": 0.88, "before_pct": 80, "after_pct": 88, "delta": 0.08, "delta_pct": 8, "delta_str": "+0.08", "delta_class": "delta-up"},
+        {"label": "efficiency", "before": 0.55, "after": 0.60, "before_pct": 55, "after_pct": 60, "delta": 0.05, "delta_pct": 5, "delta_str": "+0.05", "delta_class": "delta-up"},
+        {"label": "overall", "before": 0.73, "after": 0.80, "before_pct": 73, "after_pct": 80, "delta": 0.07, "delta_pct": 7, "delta_str": "+0.07", "delta_class": "delta-up"}
+      ]
+    },
+    {
+      "skill": "sweeper",
+      "dimensions": [
+        {"label": "completion", "before": 0.88, "after": 0.87, "before_pct": 88, "after_pct": 87, "delta": -0.01, "delta_pct": -1, "delta_str": "-0.01", "delta_class": "delta-down"},
+        {"label": "efficiency", "before": 0.70, "after": 0.72, "before_pct": 70, "after_pct": 72, "delta": 0.02, "delta_pct": 2, "delta_str": "+0.02", "delta_class": "delta-up"},
+        {"label": "overall", "before": 0.83, "after": 0.83, "before_pct": 83, "after_pct": 83, "delta": 0.0, "delta_pct": 0, "delta_str": "0.000", "delta_class": "delta-flat"}
+      ]
+    }
+  ],
+  "failure_clusters": [
+    {
+      "skill": "gmail",
+      "count": 12,
+      "failed": 5,
+      "fumbled": 7,
+      "top_signals": ["ended-on-exec-fail", "reprompts=3", "breached"],
+      "runs": [
+        {"agent_id": 1205, "label": "failed", "task_snippet": "Check today's emails and summarize..."},
+        {"agent_id": 1208, "label": "failed", "task_snippet": "Send reply to recent thread about..."},
+        {"agent_id": 1211, "label": "fumbled", "task_snippet": "Archive old newsletters and clean up inbox..."},
+        {"agent_id": 1214, "label": "fumbled", "task_snippet": "Search for receipts from last month..."},
+        {"agent_id": 1217, "label": "failed", "task_snippet": "Forward attachment to accounting team..."},
+        {"agent_id": 1220, "label": "fumbled", "task_snippet": "Check spam folder for missing invoice..."}
+      ]
+    },
+    {
+      "skill": "goal",
+      "count": 8,
+      "failed": 2,
+      "fumbled": 6,
+      "top_signals": ["compactions=2", "exec_failed=3", "reprompts=2"],
+      "runs": [
+        {"agent_id": 1301, "label": "failed", "task_snippet": "Supervise agent #1205 on email triage task..."},
+        {"agent_id": 1303, "label": "fumbled", "task_snippet": "Watch worker on data extraction..."},
+        {"agent_id": 1306, "label": "fumbled", "task_snippet": "Drive PR review process to completion..."},
+        {"agent_id": 1309, "label": "failed", "task_snippet": "Monitor multi-agent sweep operation..."}
+      ]
+    },
+    {
+      "skill": "(unattributed)",
+      "count": 4,
+      "failed": 1,
+      "fumbled": 3,
+      "top_signals": ["ended-on-exec-fail", "breached"],
+      "runs": [
+        {"agent_id": 1401, "label": "failed", "task_snippet": "Analyze recent logs for error patterns..."},
+        {"agent_id": 1404, "label": "fumbled", "task_snippet": "Generate weekly activity summary..."}
+      ]
+    }
+  ],
+  "eval_results": {
+    "replayed": 28,
+    "old_ok": 22,
+    "new_ok": 27,
+    "improved": 5,
+    "regressed": 1,
+    "per_skill": [
+      {"skill": "gmail", "replayed": 12, "improved": 3, "regressed": 0, "verdict": "better"},
+      {"skill": "goal", "replayed": 10, "improved": 2, "regressed": 0, "verdict": "better"},
+      {"skill": "sweeper", "replayed": 6, "improved": 0, "regressed": 1, "verdict": "slightly worse"}
+    ]
+  }
+}

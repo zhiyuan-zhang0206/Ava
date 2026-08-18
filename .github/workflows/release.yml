@@ -1,0 +1,43 @@
+# Create a GitHub Release whenever a dated version tag is pushed.
+#
+# release_cut.py creates annotated tags whose messages carry the day's PR summary
+# (categorized by conventional-commit type). This workflow turns each tag push
+# into a GitHub Release with that same annotation as the body — no separate
+# release-notes authoring step needed.
+#
+# Triggers on dated three-segment tags only (v<major>.<minor>.<patch>-<YYYYMMDD>),
+# not legacy two-segment milestone tags (v0.1-kernel etc.).
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+-[0-9]*'  # dated three-segment tags only
+
+permissions:
+  contents: write  # create releases
+
+jobs:
+  release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0  # full history needed for tag annotation
+
+      - name: Create GitHub Release from tag annotation
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          echo "Creating release for $TAG"
+
+          # Extract the annotated tag message as the release body.
+          git tag -l --format='%(contents)' "$TAG" > /tmp/release-notes.md
+
+          # If a release for this tag already exists, gh prints a warning and
+          # exits 0 — idempotent, safe for re-pushes.
+          gh release create "$TAG"             --title "$TAG"             --notes-file /tmp/release-notes.md

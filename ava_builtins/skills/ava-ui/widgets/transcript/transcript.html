@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Transcript</title>
+<!--
+  Transcript widget (vanilla HTML).
+
+  Displays a clickable, scrolling transcript synced with an <audio> or
+  <video> element. Click a line → seeks the media to that timestamp.
+  As the media plays, the active line auto-highlights and auto-scrolls
+  into view.
+
+  Input: SRT or VTT cues (parsed inline below). Replace `__CUES_JSON__`
+  with a JSON array of `{start, end, text}` objects (seconds floats):
+    [{"start": 0.0, "end": 2.5, "text": "Hello world"}, ...]
+
+  Or write your own loader: keep the cues = [...] line and replace
+  with whatever you parsed (SRT, VTT, custom JSON, WhisperX timestamps).
+
+  Media element id is `media` — point an audio/video tag at your file.
+
+  Usage:
+  - Whole file as `index.html`: keep DOCTYPE+html wrap, replace
+    `__CUES_JSON__` and point `<source>` at your media file.
+  - Embedding into your own page: drop DOCTYPE+html wrap; copy the
+    `<style>` / `<video>` / `<div>` / `<script>` blocks.
+-->
+
+<style>
+  :root {
+    --bg: #ffffff;
+    --text: #1a1a1a;
+    --text-muted: #888888;
+    --border: #dddddd;
+    --hover-bg: #f0f0f0;
+    --active-cue: #fff9c4;
+    color-scheme: light dark;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d1117;
+      --text: #c9d1d9;
+      --text-muted: #6e7681;
+      --border: #30363d;
+      --hover-bg: #1c2128;
+      --active-cue: #3d3520;
+    }
+  }
+
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 900px; margin: 1em auto; padding: 0 1em; background: var(--bg); color: var(--text); }
+  .transcript { max-height: 60vh; overflow-y: auto; border: 1px solid var(--border); padding: 1em; border-radius: 6px; margin-top: 1em; }
+  .cue { padding: 0.4em 0.5em; cursor: pointer; border-radius: 4px; line-height: 1.4; }
+  .cue:hover { background: var(--hover-bg); }
+  .cue.active { background: var(--active-cue); }
+  .cue .ts { color: var(--text-muted); font-size: 0.85em; font-variant-numeric: tabular-nums; margin-right: 0.6em; }
+</style>
+</head>
+<body>
+
+<video id="media" controls style="width: 100%; max-height: 50vh;">
+  <source src="video.mp4">
+</video>
+
+<div class="transcript" id="transcript"></div>
+
+<script>
+  // Replace __CUES_JSON__ with your parsed SRT/VTT cues:
+  // each cue: {start: secondsFloat, end: secondsFloat, text: string}
+  const cues = __CUES_JSON__;
+
+  function fmtTime(s) {
+    const m = Math.floor(s / 60);
+    const sec = (s - m * 60).toFixed(1);
+    return `${m}:${sec.padStart(4, '0')}`;
+  }
+
+  const tEl = document.getElementById('transcript');
+  // Use textContent (not innerHTML) for cue text — transcripts often come
+  // from scraped / user-supplied sources and can contain HTML or <script>
+  // that would otherwise execute on the gateway origin.
+  const cueEls = cues.map((cue, i) => {
+    const div = document.createElement('div');
+    div.className = 'cue';
+    div.dataset.idx = i;
+    const tsSpan = document.createElement('span');
+    tsSpan.className = 'ts';
+    tsSpan.textContent = fmtTime(cue.start);
+    const textNode = document.createTextNode(cue.text);
+    div.appendChild(tsSpan);
+    div.appendChild(textNode);
+    div.onclick = () => {
+      document.getElementById('media').currentTime = cue.start;
+      document.getElementById('media').play();
+    };
+    tEl.appendChild(div);
+    return div;
+  });
+
+  let activeIdx = -1;
+  document.getElementById('media').addEventListener('timeupdate', (e) => {
+    const t = e.target.currentTime;
+    // linear scan — fine up to a few thousand cues; switch to binary
+    // search if you have a long-form transcript.
+    let idx = -1;
+    for (let i = 0; i < cues.length; i++) {
+      if (cues[i].start <= t && t < cues[i].end) { idx = i; break; }
+    }
+    if (idx !== activeIdx) {
+      if (activeIdx >= 0) cueEls[activeIdx].classList.remove('active');
+      if (idx >= 0) {
+        cueEls[idx].classList.add('active');
+        cueEls[idx].scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      }
+      activeIdx = idx;
+    }
+  });
+</script>
+</body>
+</html>

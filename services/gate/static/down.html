@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Ava — Service unavailable</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="refresh" content="4">
+<script>/*__THEME_JS__*/</script>
+<style>
+/*__THEME_CSS__*/
+
+/* The gate's own "machine unreachable" screen — sibling of updating.html
+   (same tokens, same auto-refresh + elapsed line), deliberately NOT the
+   updating screen: the posture mirror is idle/absent, so this is a machine that
+   is off / crashed / partitioned, and the copy has to say that plainly
+   instead of promising a reconnecting rollout. */
+
+.screen {
+  align-items: center;
+  gap: 1rem;
+  text-align: center;
+}
+
+.icon {
+  width: 2rem;
+  height: 2rem;
+  color: var(--muted-foreground);
+}
+
+.headline {
+  gap: 0.25rem;
+}
+
+.headline h1 {
+  font-size: 1.25rem;
+  line-height: 1.75rem;
+}
+
+.waiting {
+  font-size: 0.75rem;
+  line-height: 1rem;
+  color: color-mix(in oklab, var(--muted-foreground) 60%, transparent);
+}
+</style>
+</head>
+<body>
+  <main class="screen stack">
+    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+         stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"></path>
+      <path d="M12 9v4"></path>
+      <path d="M12 17h.01"></path>
+    </svg>
+    <div class="headline stack">
+      <h1>Service unavailable</h1>
+      <p class="muted">This machine is not reachable — no update is in progress. It may be powered off, asleep, or crashed. Retrying automatically…</p>
+    </div>
+    <p class="waiting" id="waiting" hidden></p>
+  </main>
+  <script>
+    // Elapsed-time line, same contract as updating.html: the meta refresh
+    // reloads every 4s, so the start instant lives in sessionStorage and a gap
+    // longer than a few refresh cycles restarts the clock. Sharing the storage
+    // key with the updating page is deliberate — the two pages never coexist,
+    // and a wait that crosses an update boundary keeps its elapsed time.
+    (function () {
+      var KEY = "ava-gate-waiting-since";
+      var STALE_MS = 30000;
+      var line = document.getElementById("waiting");
+      var now = Date.now();
+      var since = now;
+
+      try {
+        var saved = JSON.parse(sessionStorage.getItem(KEY) || "null");
+        if (saved && now - saved.seen < STALE_MS) since = saved.since;
+        sessionStorage.setItem(KEY, JSON.stringify({ since: since, seen: now }));
+      } catch (e) {
+        // Storage blocked — the counter still runs, just from this load.
+      }
+
+      function tick() {
+        var total = Math.floor((Date.now() - since) / 1000);
+        var minutes = Math.floor(total / 60);
+        var seconds = total % 60;
+        line.textContent = "Waiting " + (minutes > 0 ? minutes + "m " + seconds + "s" : seconds + "s");
+        line.hidden = false;
+      }
+
+      tick();
+      setInterval(tick, 1000);
+    })();
+  </script>
+</body>
+</html>

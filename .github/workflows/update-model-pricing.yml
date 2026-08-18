@@ -1,0 +1,145 @@
+name: Update model pricing
+
+on:
+  schedule:
+    - cron: '17 0 * * *'
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: update-model-pricing
+  cancel-in-progress: false
+
+jobs:
+  update:
+    if: github.ref == 'refs/heads/main'
+    name: Check official pricing sources
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          ref: main
+
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: '0.10.12'
+          enable-cache: true
+
+      - name: Install locked Python environment
+        run: uv sync --frozen
+
+      - name: Prepare an isolated candidate worktree
+        id: candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ava-bot/model-pricing
+        run: |
+          CANDIDATE="$RUNNER_TEMP/model-pricing-candidate"
+          OPEN_PR="$(gh pr list --head "$BRANCH" --state open --json number --jq 'length')"
+          if [ "$OPEN_PR" -gt 1 ]; then
+            echo "Expected at most one open pricing PR, found $OPEN_PR" >&2
+            exit 1
+          fi
+          REMOTE_EXISTS=0
+          if git ls-remote --exit-code --heads origin "refs/heads/$BRANCH"; then
+            git fetch origin "refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"
+            REMOTE_EXISTS=1
+          fi
+          if [ "$OPEN_PR" -eq 1 ]; then
+            if [ "$REMOTE_EXISTS" -ne 1 ]; then
+              echo "Open pricing PR has no remote head branch" >&2
+              exit 1
+            fi
+            git worktree add -B "$BRANCH" "$CANDIDATE" "origin/$BRANCH"
+          else
+            git worktree add -B "$BRANCH" "$CANDIDATE" origin/main
+          fi
+          echo "path=$CANDIDATE" >> "$GITHUB_OUTPUT"
+
+      - name: Reconcile official pricing
+        env:
+          CANDIDATE: ${{ steps.candidate.outputs.path }}
+          CATALOG: ${{ steps.candidate.outputs.path }}/shared/lm/pricing_catalog.json
+        run: |
+          if [ ! -f "$CATALOG" ] || [ -L "$CATALOG" ]; then
+            echo "Candidate catalog must be a regular, non-symlink file" >&2
+            exit 1
+          fi
+          CANDIDATE_REAL="$(realpath "$CANDIDATE")"
+          CATALOG_REAL="$(realpath "$CATALOG")"
+          case "$CATALOG_REAL" in
+            "$CANDIDATE_REAL"/*) ;;
+            *)
+              echo "Candidate catalog resolves outside its isolated worktree" >&2
+              exit 1
+              ;;
+          esac
+          uv run python scripts/update_model_pricing.py --catalog "$CATALOG" --write
+
+      - name: Detect a catalog change
+        id: diff
+        env:
+          CANDIDATE: ${{ steps.candidate.outputs.path }}
+        run: |
+          if git -C "$CANDIDATE" diff --quiet -- shared/lm/pricing_catalog.json; then
+            echo 'changed=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'changed=true' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Push a review branch
+        if: steps.diff.outputs.changed == 'true'
+        env:
+          BRANCH: ava-bot/model-pricing
+          CANDIDATE: ${{ steps.candidate.outputs.path }}
+        run: |
+          git -C "$CANDIDATE" config user.name 'ava-pricing-bot'
+          git -C "$CANDIDATE" config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git -C "$CANDIDATE" add shared/lm/pricing_catalog.json
+          git -C "$CANDIDATE" commit -m 'fix: update model pricing catalog'
+          git -C "$CANDIDATE" push --force-with-lease origin "HEAD:refs/heads/$BRANCH"
+
+      - name: Open or update the pricing PR
+        if: steps.diff.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ava-bot/model-pricing
+        run: |
+          PR_NUMBER="$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')"
+          if [ -z "$PR_NUMBER" ]; then
+            gh pr create \
+              --base main \
+              --head "$BRANCH" \
+              --title 'fix: update model pricing catalog' \
+              --body '## Summary
+
+          An official provider pricing source differs from Ava’s reviewed catalog.
+          The source adapter appended a new period; its provisional
+          `effective_from` is the detection time and must be checked against the
+          provider announcement before merge.
+
+          ## File tree
+
+          ```text
+          shared/lm/pricing_catalog.json  (M) ★ effective-dated rates and provenance
+          ```
+
+          ## Data flow
+
+          Official source → strict provider adapter → normalized rate invariants
+          → append-only catalog period → CI + human review → runtime `quote()`.
+
+          ## Not tested automatically
+
+          The provider announcement’s exact effective instant still requires
+          human verification; detection time is deliberately only provisional.
+
+          This PR is never auto-merged.'
+          fi
+          gh workflow run ci.yml --ref "$BRANCH"

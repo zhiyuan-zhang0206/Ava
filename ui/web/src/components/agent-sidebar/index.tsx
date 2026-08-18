@@ -1,0 +1,287 @@
+"use client";
+
+// Agent / thread sidebar — agent_id == agent_id 1:1, each row = one agent.
+//
+// Desktop: persistent aside on the left with a FIXED width (task #750 —
+//   drag resize was removed on user ruling; the width constant lives in
+//   lib/sidebar.ts and is sized so the spawn/toolbar rows never wrap).
+// Mobile (< md): fully hidden by default; the header hamburger opens a
+//   full-screen overlay. Tapping a row to select an agent auto-closes
+//   it back to the timeline.
+//
+// Content is a unified spawn tree (no spawner group header) — top level
+// flattens all non-sub-agents (triggered by user / claude-code / any
+// external spawner), sub-agents indent under their spawner. Terminated
+// agents are hidden by default; a toggle above the tree reveals them
+// (when shown they keep their lineage position via buildAgentTree).
+//
+// Two view modes (a DB-backed user setting, display.sidebar_view_mode):
+//   tree — spawn lineage tree (default)
+//   flat — sortable flat list (by ID, last active, or status)
+//
+// Redesign (2026-07): view/terminated/sort controls consolidated into a single
+// toolbar row. #723: search moved OUT of the sidebar body into a floating
+// overlay (header / collapsed-rail search button), so it stays reachable even
+// when the sidebar is collapsed; entering the app resets to an expanded
+// sidebar + inspector (user ruling).
+//
+// Quiet by default (RCS): collapsed = a completely blank rail (no mini list,
+// no badges, no counts — only the expand affordance); expanded shows static
+// presence (agent ID / label roster) in a stable ID order. Dynamic signals are
+// opt-in: status colors behind display.show_agent_status (quick toggle in the
+
+import { useQueryClient } from "@tanstack/react-query";
+import { ChevronLeft, Search, X } from "lucide-react";
+import { useTranslations } from "next-intl";
+import { useCallback, useEffect, useState } from "react";
+
+import { api } from "@/lib/api";
+import { useBreakpoint } from "@/lib/breakpoint";
+import { errMsg } from "@/lib/errors";
+import { SIDEBAR_WIDE_THRESHOLD, useSidebarWidth, useSidebarViewMode } from "@/lib/sidebar";
+import { useStore } from "@/lib/store";
+import { useUserSettings } from "@/lib/use-user-settings";
+
+import { SidebarBody } from "./body";
+import { SidebarFooter } from "./footer";
+import { CollapsedSidebar, SidebarHeader } from "./header";
+import { SearchOverlay } from "./search-overlay";
+import type { DesktopProps, MobileProps, Props } from "./types";
+import { FLEX, FLEX_COL } from "@/lib/layout";
+import { cn } from "@/lib/utils";
+
+export function AgentSidebar(props: Props) {
+  // R4 layer 4: one responsive mechanism — breakpoint + conditional render.
+  // The desktop rail and the mobile drawer are mutually exclusive surfaces;
+  // only the active one mounts (the old always-mounted pair hid the inactive
+  // one with CSS media queries). Switch point preserved from the old CSS
+  // `md` rule: the rail shows at >= 768px, the drawer below it.
+  const { isNarrow } = useBreakpoint();
+  const { width, collapsed, setCollapsed } = useSidebarWidth();
+  const { viewMode, setViewMode } = useSidebarViewMode();
+  // Show-terminated is a DB-backed user setting (display.show_terminated), the
+  // single source of truth shared with the Display settings page — toggling
+  // either place updates the same ["user-settings"] cache, so they stay in
+  // lockstep across the sidebar and settings. Default true (USER_SETTING_DEFAULTS).
+  const { settings: userSettings, setSetting, isLoading: settingsLoading } = useUserSettings();
+  const showTerminated = userSettings["display.show_terminated"] !== false;
+  const setShowTerminated = (v: boolean) => setSetting("display.show_terminated", v);
+  const queryClient = useQueryClient();
+
+  // The one-time migration of legacy localStorage preferences (including
+  // ava.sidebar.showTerminated) into user_settings lives in one place:
+  // lib/settings-migration.ts, mounted by <SettingsMigration/> in providers.
+
+  // -- Read UI state from the store --
+  const activeId = useStore((s) => s.activeId);
+  const setActiveId = useStore((s) => s.setActiveId);
+  const mobileSidebarOpen = useStore((s) => s.mobileSidebarOpen);
+  const setMobileSidebarOpen = useStore((s) => s.setMobileSidebarOpen);
+  const searchQuery = useStore((s) => s.searchQuery);
+  const setSearchQuery = useStore((s) => s.setSearchQuery);
+  const showToast = useStore((s) => s.showToast);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const openSearch = useCallback(() => setSearchOpen(true), []);
+  const closeSearch = useCallback(() => setSearchOpen(false), []);
+
+  const { agents, pendingActions, pendingSpawnCount } = props;
+
+  // #723 (user ruling): entering the app always starts with the sidebar
+  // expanded — a previously persisted collapsed state (display.sidebar_collapsed
+  // === true) is reset on entry. The user can still collapse during the
+  // session; the next entry expands again. The reset must WAIT for the
+  // settings to load: a mount-only effect ran against the pre-load defaults
+  // (collapsed=false), saw nothing to reset and never re-ran when the
+  // persisted `true` arrived — cold loads silently stayed collapsed
+  // (Task #1051). Once settings have landed, the dep never flips again, so
+  // mid-session collapses are untouched.
+  useEffect(() => {
+    if (!settingsLoading && collapsed) setCollapsed(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- one-time entry reset, after settings land
+  }, [settingsLoading]);
+
+
+  // Mobile: auto-close the drawer after selecting an agent.
+  const handleSelect = useCallback(
+    (id: number) => {
+      setActiveId(id);
+      setMobileSidebarOpen(false);
+    },
+    [setActiveId, setMobileSidebarOpen],
+  );
+
+  const handleRename = (id: number, label: string) => {
+    api
+      .patchAgentLabel(id, label)
+      .then(() => queryClient.invalidateQueries({ queryKey: ["agents"] }))
+      .catch((err: unknown) => {
+        // Rename is a user-initiated action — a silent console.error left the
+        // user thinking the new label stuck (Task #1051).
+        showToast(`Failed to rename agent: ${errMsg(err)}`);
+      });
+  };
+
+  return (
+    <>
+      {!isNarrow ? (
+      <DesktopSidebar
+        agents={agents}
+        activeId={activeId}
+        onSelect={handleSelect}
+        onSpawn={props.onSpawn}
+        onTerminate={props.onTerminate}
+        onRestart={props.onRestart}
+        onResurrect={props.onResurrect}
+        onFork={props.onFork}
+        onCompact={props.onCompact}
+        pendingActions={pendingActions}
+        pendingSpawnCount={pendingSpawnCount}
+        isLoading={props.isLoading}
+        onRename={handleRename}
+        showTerminated={showTerminated}
+        onToggleTerminated={() => setShowTerminated(!showTerminated)}
+        collapsed={collapsed}
+        onToggleCollapsed={() => setCollapsed(!collapsed)}
+        onSearchOpen={openSearch}
+        setCollapsed={setCollapsed}
+        width={width}
+        viewMode={viewMode}
+        onToggleViewMode={() => setViewMode(viewMode === "tree" ? "flat" : "tree")}
+      />
+      ) : (
+      <MobileSidebar
+        agents={agents}
+        activeId={activeId}
+        onSelect={handleSelect}
+        onSpawn={props.onSpawn}
+        onTerminate={props.onTerminate}
+        onRestart={props.onRestart}
+        onResurrect={props.onResurrect}
+        onFork={props.onFork}
+        onCompact={props.onCompact}
+        pendingActions={pendingActions}
+        pendingSpawnCount={pendingSpawnCount}
+        isLoading={props.isLoading}
+        onRename={handleRename}
+        showTerminated={showTerminated}
+        onToggleTerminated={() => setShowTerminated(!showTerminated)}
+        viewMode={viewMode}
+        onToggleViewMode={() => setViewMode(viewMode === "tree" ? "flat" : "tree")}
+        mobileOpen={mobileSidebarOpen}
+        onMobileClose={() => setMobileSidebarOpen(false)}
+        onSearchOpen={openSearch}
+      />
+      )}
+      {/* Floating search overlay — search lives here, not inline in the
+          sidebar (#723); the query filters the sidebar list in sync. */}
+      <SearchOverlay
+        open={searchOpen}
+        onClose={closeSearch}
+        searchQuery={searchQuery}
+        onSearchQueryChange={setSearchQuery}
+        agents={agents}
+        onSelect={handleSelect}
+      />
+    </>
+  );
+}
+
+function DesktopSidebar(props: DesktopProps) {
+  const t = useTranslations("sidebar");
+  const { width, collapsed, setCollapsed, onSearchOpen } = props;
+
+  if (collapsed) {
+    return <CollapsedSidebar {...props} />;
+  }
+
+  return (
+    <aside
+      // FLEX + FLEX_COL: this aside is the I6-class vertical chain's sidebar
+      // member — display:flex (R4-PR3 regression, Task #1053: `hidden md:flex`
+      // was removed and only flex-col survived, so the aside fell back to
+      // block layout, the agent-list ScrollArea's flex-1/min-h-0 stopped
+      // bounding, and the WHOLE aside — header, spawn/toolbar bars and the
+      // fixed footer — scrolled together). overflow-x-hidden is a hard
+      // backstop: SidebarBody's own controls (spawn selects, sort buttons)
+      // truncate to fit the fixed width, but this guarantees no horizontal
+      // scrollbar can ever appear even if a control slips past that.
+      className={cn("relative border-r border-border bg-sidebar shrink-0 overflow-x-hidden", FLEX, FLEX_COL)}
+      style={{ width }}
+    >
+      <SidebarHeader
+        trailing={
+          <>
+            {/* Search in the header (not inline in the body) — opens the
+                floating overlay, #723. */}
+            <button
+              onClick={onSearchOpen}
+              className="p-1 rounded hover:bg-sidebar-accent shrink-0"
+              aria-label={t("searchAgents")}
+            >
+              <Search className="size-4" />
+            </button>
+            <button
+              onClick={() => setCollapsed(true)}
+              className="p-1 rounded hover:bg-sidebar-accent shrink-0"
+              aria-label={t("collapseSidebar")}
+            >
+              <ChevronLeft className="size-4" />
+            </button>
+          </>
+        }
+      />
+      <SidebarBody {...props} wide={width >= SIDEBAR_WIDE_THRESHOLD} />
+      {/* Fixed bottom strip (user ruling 2026-08-05): Statistics popover +
+          the four nav shortcuts (Memory Graph / Fleet / Insights / Control)
+          live here — the spot an app's avatar row would occupy. */}
+      <SidebarFooter />
+    </aside>
+  );
+}
+
+
+function MobileSidebar(props: MobileProps) {
+  const t = useTranslations("sidebar");
+  const { mobileOpen, onMobileClose, onSearchOpen } = props;
+  if (!mobileOpen) return null;
+  return (
+    <div className={cn("fixed inset-0 z-50", FLEX)}>
+      <div
+        className="absolute inset-0 bg-black/40"
+        onClick={onMobileClose}
+        aria-hidden="true"
+      />
+      <aside className={cn("relative w-full bg-sidebar", FLEX, FLEX_COL)}>
+        <SidebarHeader
+          trailing={
+            <>
+              <button
+                onClick={onSearchOpen}
+                className="p-1 rounded hover:bg-sidebar-accent shrink-0"
+                aria-label={t("searchAgents")}
+              >
+                <Search className="size-4" />
+              </button>
+              <button
+                onClick={onMobileClose}
+                className="p-1 rounded hover:bg-sidebar-accent shrink-0"
+                aria-label={t("closeSidebar")}
+              >
+                <X className="size-5" />
+              </button>
+            </>
+          }
+        />
+        <SidebarBody {...props} wide />
+        <SidebarFooter />
+      </aside>
+    </div>
+  );
+}
+
+
+// ── Collapsed sidebar: a completely blank rail ──
+//
+// Collapsed means "I looked away — tell me nothing": no mini agent list, no
+// status dots, no spinners, no badges. The only affordance is expanding —
+// static presence (and any opted-in signals) live behind that deliberate pull.

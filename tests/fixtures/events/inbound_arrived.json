@@ -1,0 +1,8 @@
+{
+  "agent_id": 7,
+  "role": "inbound_arrived",
+  "inbound_id": 42,
+  "kind": "chat",
+  "source": "user",
+  "content": "hello agent"
+}

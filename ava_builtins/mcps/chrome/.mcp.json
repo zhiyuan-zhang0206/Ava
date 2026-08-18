@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "chrome": {
+      "command": ".venv/bin/python",
+      "args": [
+        "-m",
+        "services.browser.mcp_wrapper"
+      ],
+      "requires": {
+        "display": true,
+        "unix_socket": true
+      },
+      "description": "drive a logged-in Chrome browser: navigate pages, take snapshots and screenshots, click elements, fill forms, run JavaScript, read console logs",
+      "shared": "browser"
+    }
+  }
+}

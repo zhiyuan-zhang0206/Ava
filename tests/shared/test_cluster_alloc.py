@@ -1,0 +1,48 @@
+import pytest
+
+from shared import cluster
+from shared.port_block import PORT_OFFSETS
+
+
+def test_legacy_ava_ports():
+    assert cluster.LEGACY_AVA_PORTS["gateway"] == 8000
+    assert cluster.LEGACY_AVA_PORTS["milvus"] == 19530
+    # `main` owns its data plane too, so LEGACY_AVA_PORTS carries every per-cluster
+    # service port including pg/redis (its own fixed instance ports).
+    assert set(cluster.LEGACY_AVA_PORTS) == set(PORT_OFFSETS)
+
+
+def test_per_cluster_pg_redis_ports():
+    """Every cluster carries its own Postgres+Redis port, so two co-located clusters
+    never share a data plane. `main` gets fixed 5433/6380 (its own instance, off the
+    default 5432/6379); allocated dev clusters get pg/redis inside their block."""
+    assert "postgres" in PORT_OFFSETS
+    assert "redis" in PORT_OFFSETS
+    assert cluster.LEGACY_AVA_PORTS["postgres"] == 5433
+    assert cluster.LEGACY_AVA_PORTS["redis"] == 6380
+
+
+def test_allocated_block_includes_pg_redis(monkeypatch: pytest.MonkeyPatch):
+    """A freshly allocated (non-main) block gives pg/redis their own ports inside
+    the block, distinct from every other service and from each other."""
+    monkeypatch.setattr(cluster, "_port_free", lambda _: True)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    ports = cluster.allocate_ports(existing_bases=set())
+    assert ports["postgres"] == 18011
+    assert ports["redis"] == 18012
+    assert len(set(ports.values())) == len(ports)
+
+
+def test_allocate_ports_first_block(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(cluster, "_port_free", lambda _: True)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    ports = cluster.allocate_ports(existing_bases=set())
+    assert ports["gateway"] == 18000
+    assert ports["milvus"] == 18008
+
+
+def test_allocate_ports_skips_used_base(monkeypatch: pytest.MonkeyPatch):
+    """An existing record's exact base is skipped; with BLOCK_SIZE=19 the next
+    candidate is 18019 (the R3 pass grew the block to carry page_server;
+    overlap-aware skipping lives in test_cluster_env)."""
+    monkeypatch.setattr(cluster, "_port_free", lambda _: True)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    ports = cluster.allocate_ports(existing_bases={18000})
+    assert ports["gateway"] == 18019

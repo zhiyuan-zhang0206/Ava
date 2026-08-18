@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Form</title>
+<!--
+  form widget (vanilla, single-file, zero build).
+
+  Collect structured input: a list of labeled fields, the user fills and submits,
+  and the values go back to the agent via the ava_reply spine as a "label: value"
+  block. Use when you need more than a single choice (e.g. a few parameters).
+
+  Fill in when you write the page:
+  - TITLE: the form heading.
+  - FIELDS: [{ name, label, type, options?, required?, placeholder? }]
+      type is "text" | "textarea" | "select" (options=[{value,label}] for select).
+  - SUBMIT_LABEL: button text.
+  - The three AVA_* placeholders (see widgets/ava_reply).
+
+  On submit the page calls avaReply with one "label: value" line per field.
+-->
+<style>
+  :root {
+    --bg: #ffffff;
+    --text: #1a1a1a;
+    --border: #dddddd;
+    --primary: #2563eb;
+    --success: #15803d;
+    --error: #b91c1c;
+    --disabled-bg: #99aabb;
+    color-scheme: light dark;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d1117;
+      --text: #c9d1d9;
+      --border: #30363d;
+      --primary: #58a6ff;
+      --success: #3fb950;
+      --error: #f85149;
+      --disabled-bg: #484f58;
+    }
+  }
+
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 640px; margin: 2em auto; padding: 0 1em; background: var(--bg); color: var(--text); }
+  h1 { font-size: 1.25rem; }
+  .field { margin: 0.9em 0; }
+  .field label { display: block; font-weight: 600; margin-bottom: 0.3em; }
+  .field input, .field textarea, .field select { width: 100%; box-sizing: border-box; padding: 0.5em; border: 1px solid var(--border); border-radius: 6px; font: inherit; }
+  #submit { margin-top: 0.5em; padding: 0.6em 1.4em; font-size: 1rem; border: 0; border-radius: 8px; background: var(--primary); color: #fff; cursor: pointer; }
+  #submit:disabled { background: var(--disabled-bg); cursor: default; }
+  #status { margin-top: 1em; color: var(--success); font-weight: 600; }
+  #status.err { color: var(--error); }
+</style>
+</head>
+<body>
+
+<form id="form">
+  <h1 id="title"></h1>
+  <div id="fields"></div>
+  <button id="submit" type="submit"></button>
+  <div id="status"></div>
+</form>
+
+<script>
+  // --- fill these in ---
+  const TITLE = "Provide details";
+  const FIELDS = [
+    { name: "summary", label: "One-line summary", type: "text", required: true },
+    { name: "notes", label: "Notes", type: "textarea", placeholder: "optional" },
+    { name: "priority", label: "Priority", type: "select", options: [
+      { value: "low", label: "Low" }, { value: "high", label: "High" },
+    ] },
+  ];
+  const SUBMIT_LABEL = "Submit";
+</script>
+
+<script>
+  // --- ava_reply spine (see widgets/ava_reply); template the three values ---
+  const AVA_GATEWAY_URL = "__GATEWAY_URL__";
+  const AVA_AGENT_ID = "__AGENT_ID__";
+  const AVA_PAGE_NAME = "__PAGE_NAME__";
+  async function avaReply(content) {
+    const res = await fetch(`${AVA_GATEWAY_URL}/api/agents/${AVA_AGENT_ID}/messages`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content, source: `ui:page:${AVA_PAGE_NAME}` }),
+    });
+    if (!res.ok) throw new Error(`avaReply failed: HTTP ${res.status}`);
+    return res.json();
+  }
+
+  // --- render + submit ---
+  document.getElementById("title").textContent = TITLE;
+  document.getElementById("submit").textContent = SUBMIT_LABEL;
+  const fieldsEl = document.getElementById("fields");
+  for (const f of FIELDS) {
+    const wrap = document.createElement("div");
+    wrap.className = "field";
+    const label = document.createElement("label");
+    label.textContent = f.label + (f.required ? " *" : "");
+    label.htmlFor = `f_${f.name}`;
+    let input;
+    if (f.type === "textarea") {
+      input = document.createElement("textarea");
+      input.rows = 3;
+    } else if (f.type === "select") {
+      input = document.createElement("select");
+      for (const o of f.options ?? []) {
+        const opt = document.createElement("option");
+        opt.value = o.value;
+        opt.textContent = o.label;
+        input.appendChild(opt);
+      }
+    } else {
+      input = document.createElement("input");
+      input.type = "text";
+    }
+    input.id = `f_${f.name}`;
+    input.name = f.name;
+    if (f.placeholder) input.placeholder = f.placeholder;
+    if (f.required) input.required = true;
+    wrap.appendChild(label);
+    wrap.appendChild(input);
+    fieldsEl.appendChild(wrap);
+  }
+  const statusEl = document.getElementById("status");
+  const submit = document.getElementById("submit");
+  document.getElementById("form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    submit.disabled = true;
+    const lines = FIELDS.map((f) => {
+      const v = document.getElementById(`f_${f.name}`).value.trim();
+      return `${f.label}: ${v}`;
+    });
+    try {
+      await avaReply(lines.join("
+"));
+      statusEl.className = "";
+      fieldsEl.style.pointerEvents = "none";
+      fieldsEl.style.opacity = "0.6";
+      statusEl.textContent = "✓ Sent. You can close this tab.";
+    } catch (err) {
+      statusEl.className = "err";
+      statusEl.textContent = `Failed to send: ${err.message}. Retry?`;
+      submit.disabled = false;
+    }
+  });
+</script>
+</body>
+</html>

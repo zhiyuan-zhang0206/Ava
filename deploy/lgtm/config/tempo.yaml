@@ -1,0 +1,32 @@
+# Tempo 3.x single-binary config — local block storage on disk.
+server:
+  http_listen_port: 3200
+
+# No phone-home in the reference deployment.
+usage_report:
+  reporting_enabled: false
+
+distributor:
+  receivers:
+    otlp:
+      # OTLP/HTTP only — every producer in this deployment (the native
+      # collector sidecar, `ava trace ship`) speaks OTLP/HTTP; one wire
+      # protocol, no dead gRPC receiver.
+      protocols:
+        http:
+          endpoint: 0.0.0.0:4318
+
+# Retention stated explicitly (the upstream default silently applies 14d):
+# 168h matches the write-side JSONL mirror retention (AVA_TRACE_RETENTION_DAYS
+# default) and Loki's documented 7d, so all three stores carry one horizon.
+compactor:
+  compaction:
+    block_retention: 168h
+
+storage:
+  trace:
+    backend: local
+    local:
+      path: /var/tempo/blocks
+    wal:
+      path: /var/tempo/wal

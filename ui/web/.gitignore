@@ -1,0 +1,49 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+/node_modules
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# testing
+/coverage
+
+# next.js
+# no trailing slash: also ignore .next as a symlink/file, not only as a
+# directory (a committed self-referencing .next symlink once broke the prod
+# frontend build on rollout checkout)
+/.next
+/out/
+
+# production
+/build
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# env files (can opt-in for committing if needed)
+.env*
+# Exception: .env.development is force-tracked. No sensitive info inside (just
+# the dev API base URL); going through a .env.development.example template would
+# mean a fresh clone's first EventSource hits a same-origin 404 / buffer. Track
+# it directly to avoid the onboarding trap.
+!.env.development
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts

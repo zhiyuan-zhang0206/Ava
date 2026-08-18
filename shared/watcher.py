@@ -1,0 +1,238 @@
+"""Watcher shared helpers — cron validation / next-fire, `when` normalization,
+and watcher-script generation.
+
+Used by the `ava.watcher` SDK. A time watcher is just a normal session running a
+generated Python script that sleeps until its target time(s) and delivers its
+message back to the launching agent (a `watcher:N`-tagged chat inbound via the
+gateway client); the builders here produce those scripts. The cron math
+(`validate_cron` / `next_fire`) and the `when` normalization were previously in
+`shared/schedule.py` / `ava/schedule.py`, relocated here when the central
+scheduler was removed.
+"""
+
+from __future__ import annotations
+
+import datetime as _dt
+import textwrap as _tw
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+from croniter import croniter
+
+
+class CronExprError(Exception):
+    """Invalid cron expression."""
+
+
+__all__ = [
+    "CronExprError",
+    "build_at_script",
+    "build_cron_script",
+    "next_fire",
+    "normalize_end_time",
+    "normalize_when",
+    "validate_cron",
+    "validate_timezone",
+]
+
+
+# Cron
+
+
+def validate_timezone(tz: str) -> None:
+    """Validate an IANA timezone string (e.g. ``"America/Los_Angeles"``).
+
+    Raises ValueError when the timezone name is not recognized.
+    """
+    try:
+        ZoneInfo(tz)
+    except (ZoneInfoNotFoundError, KeyError) as exc:
+        raise ValueError(f"invalid IANA timezone: {tz!r}") from exc
+
+
+def validate_cron(expr: str) -> None:
+    """Validate a 5-field cron expression; raises CronExprError on invalid."""
+    try:
+        croniter(expr, _dt.datetime.now(_dt.UTC))
+    except (ValueError, KeyError) as exc:
+        raise CronExprError(f"invalid cron expression: {expr!r}") from exc
+
+
+def next_fire(
+    expr: str,
+    after: _dt.datetime | None = None,
+    timezone: str | None = None,
+    tolerance: _dt.timedelta | None = None,
+) -> _dt.datetime:
+    """Given a cron expression + base time (default now UTC), return the next
+    fire time (UTC).
+
+    ``timezone`` is an IANA timezone string (e.g. ``"Asia/Shanghai"``). None ->
+    compute in UTC. croniter parses the cron expression in this timezone.
+
+    ``tolerance`` widens the match window for resumable sleep loops. croniter's
+    ``get_next`` is strictly greater than the base, so a loop that sleeps until
+    the fire minute wakes a few milliseconds past it and the next fire jumps a
+    whole period (deterministic miss — Task #958). Passing e.g.
+    ``timedelta(minutes=2)`` backs the base up by that much, so a wake within
+    the tolerance of the fire time still resolves to the current period's fire
+    (the returned instant may then be slightly in the past; callers treat
+    ``wait <= threshold`` as "fire now").
+
+    Raises:
+        CronExprError: invalid cron expression.
+    """
+    base = after if after is not None else _dt.datetime.now(_dt.UTC)
+    if base.tzinfo is None:
+        base = base.replace(tzinfo=_dt.UTC)
+    if tolerance is not None:
+        base = base - tolerance
+
+    compute_tz = ZoneInfo(timezone) if timezone else _dt.UTC
+    base_in_tz = base.astimezone(compute_tz)
+
+    try:
+        it = croniter(expr, base_in_tz)
+    except (ValueError, KeyError) as exc:
+        raise CronExprError(f"invalid cron expression: {expr!r}") from exc
+    nxt: _dt.datetime = it.get_next(_dt.datetime)
+    if nxt.tzinfo is None:
+        nxt = nxt.replace(tzinfo=compute_tz)
+    return nxt.astimezone(_dt.UTC)
+
+
+# `when` normalization
+
+
+def normalize_when(when: _dt.datetime | _dt.timedelta | str) -> _dt.datetime:
+    """Normalize datetime / timedelta / ISO str to a TZ-aware UTC datetime.
+
+    Naive datetime / ISO string without tz → ValueError.
+    """
+    if isinstance(when, _dt.datetime):
+        if when.tzinfo is None:
+            raise ValueError(
+                "datetime must carry tzinfo (use datetime.UTC or ZoneInfo); naive datetime is ambiguous"
+            )
+        return when.astimezone(_dt.UTC)
+    if isinstance(when, _dt.timedelta):
+        return _dt.datetime.now(_dt.UTC) + when
+    if isinstance(when, str):
+        parsed = _dt.datetime.fromisoformat(when)
+        if parsed.tzinfo is None:
+            raise ValueError(
+                f"ISO string must include timezone: {when!r} (e.g. '...+00:00' or '...Z')"
+            )
+        return parsed.astimezone(_dt.UTC)
+    raise TypeError(f"when must be datetime / timedelta / str, got {type(when).__name__}")
+
+
+def normalize_end_time(
+    end_time: _dt.datetime | _dt.timedelta | str | None,
+) -> _dt.datetime | None:
+    """Normalize end_time — same as normalize_when, but allows None."""
+    if end_time is None:
+        return None
+    return normalize_when(end_time)
+
+
+# Script generation
+
+# Shared preamble for both generated scripts: `_wake(message)` delivers a
+# `watcher:N`-tagged chat inbound to the launching agent (identity comes from
+# the bootstrap's inlined AVA_AGENT_ID — `_boot.agent_id()` reads it lazily;
+# N from the session-id env var the run command sets). Inlined into the
+# generated script — the SDK deliberately has no public remind primitive, and
+# a generated script may use internal plumbing.
+# Must stay free of literal braces: the templates below go through .format().
+_WAKE_HELPER = """\
+import os as _os
+
+import ava._boot as _boot
+from ava import _gateway_client as _gateway_client
+
+
+def _wake(message):
+    _gateway_client.send_message(
+        _boot.agent_id(),
+        content=message,
+        source="watcher:" + _os.environ["AVA_WATCHER_SESSION_ID"],
+    )
+"""
+
+_AT_TEMPLATE = """\
+# Auto-generated time watcher (one-shot). Do not edit manually.
+import datetime as _dt
+import time as _time
+
+{wake_helper}
+_WHEN = _dt.datetime.fromisoformat({when_iso!r})
+_MESSAGE = {message!r}
+
+_delay = (_WHEN - _dt.datetime.now(_dt.UTC)).total_seconds()
+if _delay > 0:
+    _time.sleep(_delay)
+_wake(_MESSAGE)
+"""
+
+_CRON_TEMPLATE = """\
+# Auto-generated time watcher (recurring cron). Do not edit manually.
+import datetime as _dt
+import time as _time
+from zoneinfo import ZoneInfo
+
+from croniter import croniter
+
+{wake_helper}
+_EXPR = {expr!r}
+_MESSAGE = {message!r}
+_TZ = ZoneInfo({timezone!r})
+_END = _dt.datetime.fromisoformat({end_time_iso!r}) if {end_time_iso!r} else None
+
+
+def _next() -> _dt.datetime:
+    base = _dt.datetime.now(_dt.UTC).astimezone(_TZ)
+    nxt = croniter(_EXPR, base).get_next(_dt.datetime)
+    if nxt.tzinfo is None:
+        nxt = nxt.replace(tzinfo=_TZ)
+    return nxt.astimezone(_dt.UTC)
+
+
+while True:
+    _fire = _next()
+    if _END is not None and _fire > _END:
+        # end_time means "no more fires past this point": the next scheduled fire
+        # is outside the window, so stop silently. Do NOT wake here — that would
+        # emit a duplicate right after the last in-window fire.
+        break
+    _delay = (_fire - _dt.datetime.now(_dt.UTC)).total_seconds()
+    if _delay > 0:
+        _time.sleep(_delay)
+    _wake(_MESSAGE)
+"""
+
+
+def build_at_script(*, when_iso: str, message: str) -> str:
+    """Build a one-shot time-watcher script that sleeps until ``when_iso`` (an
+    ISO-8601 UTC string) then wakes the launching agent once and exits."""
+    return _tw.dedent(_AT_TEMPLATE).format(
+        wake_helper=_WAKE_HELPER, when_iso=when_iso, message=message
+    )
+
+
+def build_cron_script(
+    *,
+    expr: str,
+    message: str,
+    timezone: str,
+    end_time_iso: str | None,
+) -> str:
+    """Build a recurring cron-watcher script that wakes the launching agent on
+    each cron fire, evaluated in ``timezone``, stopping after ``end_time_iso``
+    (ISO-8601 string or None for forever)."""
+    return _tw.dedent(_CRON_TEMPLATE).format(
+        wake_helper=_WAKE_HELPER,
+        expr=expr,
+        message=message,
+        timezone=timezone,
+        end_time_iso=end_time_iso,
+    )

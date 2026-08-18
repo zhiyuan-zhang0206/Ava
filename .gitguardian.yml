@@ -1,0 +1,26 @@
+# GitGuardian secret-scan configuration
+# Schema: https://docs.gitguardian.com/ggshield-docs/reference/config
+#
+# The Ava project's dev / test / e2e Postgres containers all use `ava_dev_only` as the default password —
+# this is a fixed development constant that appears in multiple places (docker-compose.yml /
+# shared/config.py / ci.yml), not a leaked production secret. GitGuardian's static scan flags
+# it as a generic password; this ignore keeps PR status clean and avoids manually dismissing
+# every time ci.yml changes.
+#
+# Any string containing it (connection strings / container env / PGPASSWORD etc.) will be matched as a substring.
+# To actually rotate the password, do a global replace; keeping this rule is harmless (new strings will no longer match).
+
+version: 2
+secret:
+  ignored_matches:
+    - name: ava_dev_only — Postgres dev/test default password (fixed project convention)
+      match: ava_dev_only
+    # `pw123` appears only in tests/gateway/test_login_endpoint.py as the fixture
+    # password for the in-test app_user row. No real account exists with this
+    # password (it is set + verified within a per-session ava_test_<...> DB and
+    # discarded on session end). GitGuardian's generic Username/Password detector
+    # flags the inline json={"username": "daisy", "password": "pw123"} pair on
+    # the historical commit that introduced the file (rewriting history to
+    # avoid one detector hit is not worth a 37-commit force-rebase).
+    - name: pw123 — test-only login fixture in tests/gateway/test_login_endpoint.py
+      match: pw123

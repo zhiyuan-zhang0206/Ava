@@ -1,0 +1,615 @@
+# Ava ops alert rules — Grafana Alerting, provisioned as code.
+#
+# Source of truth: this file (dashboards/ops/alerts/rules.yml). The running
+# Grafana (gateway host, 127.0.0.1:3002) loads it from
+# ~/.ava/grafana/provisioning/alerting/ — _update_local.py copies it there on
+# rollout and restarts Grafana (`launchctl kickstart -k gui/$(id -u)/com.ava.grafana`):
+# alert-rule provisioning does NOT hot-reload file changes (verified 2026-08-04).
+#
+# Evaluation engine: Grafana Unified Alerting over the LGTM read side
+# (Task #1224): rules R1-R3, R5-R7 query Loki (the events stream — every
+# event is one OTLP log line under {service_name="unknown_service"}, body =
+# the full event JSON, so `| json` flattens it to labels), and R4 queries
+# Prometheus (the ava_llm_usage_latency histogram, the OTLP metric mirror
+# of the llm_usage event). Datasources are provisioned beside this file in
+# datasources.yml (uids `loki` / `prometheus`). The retired Postgres events
+# read path (#1197) is gone — nothing queries `ops` from these rules.
+#
+# LogQL notes:
+# - The OTel-detected labels (event_name, level, category, ...) are
+#   structured metadata, NOT stream labels: {…} selectors cannot match them
+#   (verified against the live cluster) — every rule pipelines `| json`
+#   before any event-field filter.
+# - `| json` flattens nested objects with underscore joins:
+#   attributes.n -> attributes_n, attributes.age_s -> attributes_age_s,
+#   attributes.action -> attributes_action. Numbers parse as numbers, so
+#   `| attributes_age_s < 600` is a numeric comparison.
+# - Every count wraps in sum(...) — the unknown_service family has >500
+#   streams over a day, and an unaggregated count_over_time hits Loki's
+#   per-query series cap.
+#
+# Threshold calibration (unchanged from the Postgres rules — the data is the
+# same stream):
+#   WARNING+ERROR+CRITICAL      ~5-19 / 5m normally, one 54/5m spike in 2h
+#   sse_drop+event_log_drop     SUM(payload.n) — real dropped events, not
+#                               report rows (2026-08-08: the rules + rollup
+#                               counted report rows, understating the backlog
+#                               by the 5s aggregation factor). 7d live data:
+#                               p95 ~13 / 10m chronic drip; real degradations
+#                               160-342 / 10m. Threshold 100 sits in the gap.
+#   agent_restarted             bursts of ~15 / 15m, worst 54 / 15m
+#   llm_usage.latency_ms p95    ~13s / 10m typical, worst bucket 158s
+#   delivery_stalled fresh      (age_s < 600) 0 / 10m in the last 24h — any
+#                               sustained fresh-stall burst means the delivery
+#                               pipeline is newly stuck (the old-age backlog is
+#                               chronic and not alert-worthy)
+#   trace_degraded              any occurrence of
+#                               recording_disabled_disk_watermark in 24h — a
+#                               chronic-condition alert (disk over watermark),
+#                               not a rate rule; fires once per episode,
+#                               resolves 24h after the last event.
+#
+# The `for` field keeps short evaluation windows from flapping: the condition
+# must hold for the whole `for` duration before the alert fires.
+#
+# Severity follows the alert-system vocabulary (Task #1224): critical /
+# warning / error — all three push to IM, no gate. R4's Prometheus query
+# returns no data during quiet periods (no llm_usage samples), so
+# noDataState/execErrState stay pinned to OK — a datasource outage during
+# maintenance must not fire every rule at once.
+#
+# The ruleUID label pins parse_rule_uid to the stable rule uid so synthetic
+# DatasourceNoData/DatasourceError instances never collide on the
+# alertname-derived dedup key.
+apiVersion: 1
+groups:
+  - orgId: 1
+    name: ava-ops
+    folder: Ava
+    interval: 1m
+    rules:
+      # ── R1: WARNING+ERROR spike (current 5m count > 3x the prior-15m rate, and ≥ 30) ──
+      - uid: ava-ops-warning-error-spike
+        title: "Event health: WARNING+ERROR+CRITICAL spike"
+        condition: F
+        for: 5m
+        noDataState: OK
+        execErrState: OK
+        labels:
+          severity: error
+          ruleUID: ava-ops-warning-error-spike
+          metric: warn_error_rate
+          team: ava-ops
+        annotations:
+          summary: "WARNING+ERROR+CRITICAL event spike (current 5m count {{ $values.C }}, prior-15m expectation ≤ {{ $values.D }})"
+          description: >-
+            Events with level ∈ warning/error/critical reached {{ $values.C }} in
+            the last 5 minutes, over 3x the prior-15m average rate ({{ $values.D }}
+            per 5m). Likely a service failure or error loop. See the Grafana panel
+            /grafana/d/ava-ops-main to locate the source.
+        data:
+          - refId: A
+            datasourceUid: loki
+            queryType: ""
+            model:
+              refId: A
+              datasource:
+                type: loki
+                uid: loki
+              editorMode: code
+              expr: >-
+                sum(count_over_time({service_name="unknown_service"} | json |
+                category=~"telemetry|log" | level=~"warning|error|critical" [5m]))
+              instant: true
+              queryType: instant
+            relativeTimeRange:
+              from: 300
+              to: 0
+          - refId: B
+            datasourceUid: loki
+            queryType: ""
+            model:
+              refId: B
+              datasource:
+                type: loki
+                uid: loki
+              editorMode: code
+              expr: >-
+                sum(count_over_time({service_name="unknown_service"} | json |
+                category=~"telemetry|log" | level=~"warning|error|critical" [15m] offset 5m))
+              instant: true
+              queryType: instant
+            relativeTimeRange:
+              from: 1200
+              to: 300
+          - refId: C
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: C
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: reduce
+              expression: A
+              reducer: mean
+          - refId: D
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: D
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: reduce
+              expression: B
+              reducer: mean
+          - refId: E
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: E
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: math
+              expression: "$C > $D && $C >= 30"
+          - refId: F
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: F
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: threshold
+              expression: E
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+                  operator:
+                    type: and
+                  query:
+                    params: [E]
+
+      # ── R2: SSE / event-log drop backlog (real drops in 10m > 100; p95≈13, degraded 160-342) ──
+      - uid: ava-ops-sse-drop-backlog
+        title: "Event-pipeline drop backlog (sse_drop / event_log_drop)"
+        condition: D
+        for: 5m
+        noDataState: OK
+        execErrState: OK
+        labels:
+          severity: warning
+          ruleUID: ava-ops-sse-drop-backlog
+          metric: event_drop_rate
+          team: ava-ops
+        annotations:
+          summary: "{{ $values.C }} real SSE/event-log drops in 10 minutes (threshold 100)"
+          description: >-
+            Events with event_name ∈ sse_drop / event_log_drop summed payload.n to
+            {{ $values.C }} in the last 10 minutes (real drops; each report row
+            carries the real drop count n since the previous report). SSE drops =
+            degraded live view; event_log_drop = lost DB write-queue rows. Check
+            the affected agent's event publisher / log-sink queue.
+        data:
+          - refId: A
+            datasourceUid: loki
+            queryType: ""
+            model:
+              refId: A
+              datasource:
+                type: loki
+                uid: loki
+              editorMode: code
+              expr: >-
+                sum(sum_over_time({service_name="unknown_service"} | json |
+                category="telemetry" | event_name=~"sse_drop|event_log_drop" |
+                unwrap attributes_n [10m]))
+              instant: true
+              queryType: instant
+            relativeTimeRange:
+              from: 600
+              to: 0
+          - refId: C
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: C
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: reduce
+              expression: A
+              reducer: mean
+          - refId: D
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: D
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: threshold
+              expression: C
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [100]
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+
+      # ── R3: agent_restarted spike (>30 restarts in 15m, above the 7-day observed p95≈20) ──
+      - uid: ava-ops-agent-restart-spike
+        title: "Agent restart spike (agent_restarted)"
+        condition: D
+        for: 5m
+        noDataState: OK
+        execErrState: OK
+        labels:
+          severity: warning
+          ruleUID: ava-ops-agent-restart-spike
+          metric: agent_restart_rate
+          team: ava-ops
+        annotations:
+          summary: "{{ $values.C }} agent restarts in 15 minutes (threshold 30)"
+          description: >-
+            Events with event_name=agent_restarted reached {{ $values.C }} in the
+            last 15 minutes. A restart loop leaves agents unable to serve; check
+            the restart cause (OOM / crash / manual restart).
+        data:
+          - refId: A
+            datasourceUid: loki
+            queryType: ""
+            model:
+              refId: A
+              datasource:
+                type: loki
+                uid: loki
+              editorMode: code
+              expr: >-
+                sum(count_over_time({service_name="unknown_service"} | json |
+                category="telemetry" | event_name="agent_restarted" [15m]))
+              instant: true
+              queryType: instant
+            relativeTimeRange:
+              from: 900
+              to: 0
+          - refId: C
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: C
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: reduce
+              expression: A
+              reducer: mean
+          - refId: D
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: D
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: threshold
+              expression: C
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [30]
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+
+      # ── R4: LLM latency p95 above threshold (10m window p95 > 60s; typical observed 13s, worst bucket 158s) ──
+      # The p95 now comes from the OTLP metric mirror (Prometheus histogram),
+      # not a SQL percentile — histogram_quantile over the latency buckets is
+      # the same read the Insights Ops panel uses. The histogram only exists
+      # while processes export OTLP metrics; absent data means NoData -> OK.
+      - uid: ava-ops-llm-latency-p95
+        title: "LLM latency p95 above threshold"
+        condition: D
+        for: 10m
+        noDataState: OK
+        execErrState: OK
+        labels:
+          severity: error
+          ruleUID: ava-ops-llm-latency-p95
+          metric: llm_latency_p95
+          team: ava-ops
+        annotations:
+          summary: "LLM call latency p95 at {{ $values.C }} ms (threshold 60000 ms)"
+          description: >-
+            The p95 of llm_usage latency over the last 10 minutes is
+            {{ $values.C }} ms, above 60s (histogram_quantile over the
+            ava_llm_usage_latency histogram — an approximation of the exact
+            SQL percentile, same as the Ops panel). Usually a provider-side
+            failure or slow request pile-up. No alert fires when the metric is
+            absent.
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            queryType: ""
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              editorMode: code
+              expr: >-
+                histogram_quantile(0.95, sum by (le)
+                (rate(ava_llm_usage_latency_milliseconds_bucket[10m])))
+              instant: true
+              range: false
+            relativeTimeRange:
+              from: 600
+              to: 0
+          - refId: C
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: C
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: reduce
+              expression: A
+              reducer: mean
+          - refId: D
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: D
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: threshold
+              expression: C
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [60000]
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+
+      # ── R5: delivery_stalled fresh backlog (>50 fresh stalls in 10m; current baseline 0) ──
+      - uid: ava-ops-delivery-stalled-backlog
+        title: "Delivery fresh backlog (delivery_stalled fresh)"
+        condition: D
+        for: 5m
+        noDataState: OK
+        execErrState: OK
+        labels:
+          severity: warning
+          ruleUID: ava-ops-delivery-stalled-backlog
+          metric: delivery_stall_rate
+          team: ava-ops
+        annotations:
+          summary: "{{ $values.C }} fresh delivery stalls in 10 minutes (age_s < 600, threshold 50)"
+          description: >-
+            Events with event_name=delivery_stalled and age_s < 600 (fresh, not
+            historical) reached {{ $values.C }} in the last 10 minutes. Old stalls
+            (age_s in days) do not indicate a new failure; fresh stalls mean the
+            delivery pipeline just got blocked.
+        data:
+          - refId: A
+            datasourceUid: loki
+            queryType: ""
+            model:
+              refId: A
+              datasource:
+                type: loki
+                uid: loki
+              editorMode: code
+              expr: >-
+                sum(count_over_time({service_name="unknown_service"} | json |
+                category="telemetry" | event_name="delivery_stalled" |
+                attributes_age_s < 600 [10m]))
+              instant: true
+              queryType: instant
+            relativeTimeRange:
+              from: 600
+              to: 0
+          - refId: C
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: C
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: reduce
+              expression: A
+              reducer: mean
+          - refId: D
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: D
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: threshold
+              expression: C
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [50]
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+
+      # ── R6: event stream stalled (no events at all in 5m; meta-observability) ──
+      # Semantics change with the LGTM cutover (Task #1224): the Postgres rule
+      # measured the events TABLE's write freshness; that table is retired
+      # (#1197), so the rule now probes the live stream in Loki with
+      # absent_over_time — fires when NO event of any kind reached Loki in 5m.
+      # That covers the emitter stall AND a broken OTLP export path (the
+      # 2026-08-12 incident class), at the cost of no longer distinguishing
+      # them. When the stream flows, the query returns no data (NoData -> OK).
+      - uid: ava-ops-events-freshness
+        title: "Event stream stalled (no events in Loki)"
+        condition: D
+        for: 5m
+        noDataState: OK
+        execErrState: OK
+        labels:
+          severity: error
+          ruleUID: ava-ops-events-freshness
+          metric: events_freshness
+          team: ava-ops
+        annotations:
+          summary: "No events reached Loki in the last 5 minutes"
+          description: >-
+            absent_over_time reports the events stream
+            ({service_name="unknown_service"}) produced no log lines in the
+            last 5 minutes. The largest measured silent gap over 7d was 60s
+            (the events_maintenance fast loop + agent activity are structural
+            periodic writers), so 5m has 5x headroom. A stalled stream means
+            the emitter/export path is down — the exact outage that made Loki
+            go dark on 2026-08-12 (OTLP preflight bug). When the stream flows
+            the query returns no data (NoData -> OK). If Loki itself is down,
+            the rule errors (execErrState OK is silent) and the health-probe
+            chain covers it.
+        data:
+          - refId: A
+            datasourceUid: loki
+            queryType: ""
+            model:
+              refId: A
+              datasource:
+                type: loki
+                uid: loki
+              editorMode: code
+              expr: >-
+                absent_over_time({service_name="unknown_service"}[5m])
+              instant: true
+              queryType: instant
+            relativeTimeRange:
+              from: 300
+              to: 0
+          - refId: C
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: C
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: reduce
+              expression: A
+              reducer: mean
+          - refId: D
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: D
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: threshold
+              expression: C
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+
+      # ── R7: trace recording auto-degraded (disk over watermark; ANY occurrence in 24h) ──
+      # The 2026-08-07..10 incident class: 207 recording_disabled_disk_watermark
+      # events over 3 days, nobody noticed — the drip sat under R1's spike
+      # threshold forever. This rule is a chronic-condition alert, not a rate
+      # rule: any occurrence in the trailing 24h means the observability
+      # pipeline is degraded RIGHT NOW (every event = one agent start that
+      # skipped span recording). The 24h window keeps it firing across the
+      # event drip (observed 1-3h gaps while a machine is over watermark) and
+      # resolves 24h after the last event — one onset + one recovery IM per
+      # episode instead of one per event. error severity: silently-off
+      # observability is the incident class this alert exists to end.
+      - uid: ava-ops-trace-disk-watermark
+        title: "Trace recording disabled (data disk over watermark)"
+        condition: D
+        for: 5m
+        noDataState: OK
+        execErrState: OK
+        labels:
+          severity: error
+          ruleUID: ava-ops-trace-disk-watermark
+          metric: trace_degraded
+          team: ava-ops
+        annotations:
+          summary: "Trace recording auto-disabled — data disk over watermark ({{ $values.C }} degradation events in 24h)"
+          description: >-
+            Events with attributes.action=recording_disabled_disk_watermark
+            (event_name=trace, category=telemetry) reached {{ $values.C }} in
+            the last 24 hours. Each event = one agent start that skipped span
+            recording because its data disk is over AVA_TRACE_DISK_WATERMARK
+            (default 0.9): the mirror can never fill the disk, but spans are
+            not recorded — an observability blind spot (2026-08-07..10: 207
+            events over 3 days, unnoticed). Triage: `df -h` on the affected
+            machine (the event carries usage_fraction/free_gb), free space,
+            then confirm the events stop. Resolves automatically 24h after the
+            last degradation event. If the export path fails, new events stop
+            landing and this rule goes quiet with them — that outage class is
+            covered by R6 (event stream stalled) + the health-probe chain.
+        data:
+          - refId: A
+            datasourceUid: loki
+            queryType: ""
+            model:
+              refId: A
+              datasource:
+                type: loki
+                uid: loki
+              editorMode: code
+              expr: >-
+                sum(count_over_time({service_name="unknown_service"} | json |
+                category="telemetry" | event_name="trace" |
+                attributes_action="recording_disabled_disk_watermark" [24h]))
+              instant: true
+              queryType: instant
+            relativeTimeRange:
+              from: 1440
+              to: 0
+          - refId: C
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: C
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: reduce
+              expression: A
+              reducer: mean
+          - refId: D
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: D
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: threshold
+              expression: C
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+                  operator:
+                    type: and
+                  query:
+                    params: [C]

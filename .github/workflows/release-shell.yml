@@ -1,0 +1,371 @@
+# Build and publish the Ava shell (`ui/app`) for a `shell-v*` tag.
+#
+# The tag prefix keeps this workflow off release.yml's trigger: that one fires
+# on dated cluster tags (`v0.1.2-20260816`) and turns them into releases from
+# the tag annotation. The shell versions independently of the cluster, so it
+# gets its own tag namespace and its own release.
+#
+# A manual dispatch may omit signing secrets and produces unsigned validation
+# artifacts. A release tag fails closed unless updater, platform signing, and
+# (on macOS) notarization credentials are all present: unsigned binaries must
+# never become public release assets.
+#
+# The gating secrets are lifted into job-level `env` because a step's `if` is
+# evaluated against the job's environment, not the step's own.
+#
+# Secrets, all optional:
+#   TAURI_SIGNING_PRIVATE_KEY[_PASSWORD]  updater signatures + latest.json
+#   APPLE_CERTIFICATE[_PASSWORD], APPLE_SIGNING_IDENTITY,
+#     APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID    Developer ID + notarization
+#   WINDOWS_CERTIFICATE[_PASSWORD]               Authenticode
+#   ANDROID_KEYSTORE, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD
+#
+# `uses:` is pinned to a commit SHA with the version in a trailing comment, for
+# the same supply-chain reason as ci.yml.
+
+name: Release shell
+
+on:
+  push:
+    tags:
+      - 'shell-v[0-9]+.[0-9]+.[0-9]+'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  # Exact pin: generated Android templates and release outputs are CLI inputs.
+  TAURI_CLI_VERSION: '2.11.4'
+
+jobs:
+  prepare:
+    name: Resolve shell version
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Resolve and validate version
+        id: version
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          python3 - <<'PY'
+          import os, pathlib, re, tomllib
+
+          if os.environ["EVENT_NAME"] == "push":
+              match = re.fullmatch(r"shell-v(\d+\.\d+\.\d+)", os.environ["REF_NAME"])
+              if match is None:
+                  raise SystemExit(f"invalid shell release tag: {os.environ['REF_NAME']}")
+              version = match.group(1)
+          else:
+              cargo = tomllib.loads(pathlib.Path("ui/app/src-tauri/Cargo.toml").read_text())
+              version = cargo["package"]["version"]
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"version={version}\n")
+          PY
+
+  desktop:
+    name: ${{ matrix.label }}
+    needs: prepare
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: macOS (universal dmg)
+            runner: macos-14
+            target: universal-apple-darwin
+            rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
+            bundles: app,dmg
+          - label: Windows (NSIS)
+            runner: windows-2022
+            target: x86_64-pc-windows-msvc
+            rust-targets: x86_64-pc-windows-msvc
+            bundles: nsis
+    env:
+      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+      WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+      EVENT_NAME: ${{ github.event_name }}
+      SHELL_VERSION: ${{ needs.prepare.outputs.version }}
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        with:
+          toolchain: stable
+          targets: ${{ matrix.rust-targets }}
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: ui/app/src-tauri
+
+      - name: Install the Tauri CLI
+        run: cargo install tauri-cli --version "$TAURI_CLI_VERSION" --locked
+        shell: bash
+
+      - name: Validate optional signing secret groups
+        shell: bash
+        run: |
+          require_group() {
+            local label="$1"
+            shift
+            local present=0 missing=0
+            for value in "$@"; do
+              if [ -n "$value" ]; then present=$((present + 1)); else missing=$((missing + 1)); fi
+            done
+            if [ "$present" -gt 0 ] && [ "$missing" -gt 0 ]; then
+              echo "$label secrets are only partially configured" >&2
+              exit 1
+            fi
+          }
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            require_group "Apple code-signing" \
+              "$APPLE_CERTIFICATE" "$APPLE_CERTIFICATE_PASSWORD" "$APPLE_SIGNING_IDENTITY"
+            require_group "Apple notarization" "$APPLE_ID" "$APPLE_PASSWORD" "$APPLE_TEAM_ID"
+          else
+            require_group "Windows code-signing" \
+              "$WINDOWS_CERTIFICATE" "$WINDOWS_CERTIFICATE_PASSWORD"
+          fi
+          if [ -n "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" ] && [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            echo "Updater signing password is configured without a private key" >&2
+            exit 1
+          fi
+          if [ "$EVENT_NAME" = "push" ]; then
+            if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+              echo "Release tags require updater signing" >&2
+              exit 1
+            fi
+            if [ "$RUNNER_OS" = "macOS" ] && \
+               { [ -z "$APPLE_CERTIFICATE" ] || [ -z "$APPLE_CERTIFICATE_PASSWORD" ] || \
+                 [ -z "$APPLE_SIGNING_IDENTITY" ] || [ -z "$APPLE_ID" ] || \
+                 [ -z "$APPLE_PASSWORD" ] || [ -z "$APPLE_TEAM_ID" ]; }; then
+              echo "Release tags require Apple signing and notarization" >&2
+              exit 1
+            fi
+            if [ "$RUNNER_OS" = "Windows" ] && \
+               { [ -z "$WINDOWS_CERTIFICATE" ] || [ -z "$WINDOWS_CERTIFICATE_PASSWORD" ]; }; then
+              echo "Release tags require Windows code-signing" >&2
+              exit 1
+            fi
+          fi
+
+      # Without the certificate the app is built ad-hoc signed, which still
+      # runs locally (Gatekeeper prompts on first open).
+      - name: Import the Apple Developer ID certificate
+        if: runner.os == 'macOS' && env.APPLE_CERTIFICATE != ''
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/build.keychain"
+          security create-keychain -p "" "$KEYCHAIN"
+          security default-keychain -s "$KEYCHAIN"
+          security unlock-keychain -p "" "$KEYCHAIN"
+          security set-keychain-settings -t 3600 -u "$KEYCHAIN"
+          echo "$APPLE_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+          security import "$RUNNER_TEMP/certificate.p12" -k "$KEYCHAIN" \
+            -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "" "$KEYCHAIN"
+          rm "$RUNNER_TEMP/certificate.p12"
+
+      # Tauri signs Windows bundles by thumbprint from the machine's cert store,
+      # so the PFX is imported and the thumbprint handed to the build below.
+      - name: Import the Windows signing certificate
+        if: runner.os == 'Windows' && env.WINDOWS_CERTIFICATE != ''
+        shell: pwsh
+        run: |
+          $pfx = Join-Path $env:RUNNER_TEMP "certificate.pfx"
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
+          $password = ConvertTo-SecureString -String $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force
+          $cert = Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\CurrentUser\My -Password $password
+          "WINDOWS_CERTIFICATE_THUMBPRINT=$($cert.Thumbprint)" | Out-File -FilePath $env:GITHUB_ENV -Append
+          Remove-Item $pfx
+
+      - name: Build
+        working-directory: ui/app
+        shell: bash
+        run: |
+          EXTRA=(--config "{\"version\":\"$SHELL_VERSION\"}")
+          # With a configured public key Tauri otherwise fails when the private
+          # key is absent. --no-sign is the explicit unsigned-build path.
+          if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            EXTRA+=(--no-sign)
+          fi
+          if [ -n "${WINDOWS_CERTIFICATE_THUMBPRINT:-}" ]; then
+            EXTRA+=(--config "{\"bundle\":{\"windows\":{\"certificateThumbprint\":\"$WINDOWS_CERTIFICATE_THUMBPRINT\",\"timestampUrl\":\"http://timestamp.digicert.com\"}}}")
+          fi
+          cargo tauri build --target "${{ matrix.target }}" \
+            --bundles "${{ matrix.bundles }}" "${EXTRA[@]}"
+
+      - name: Collect artifacts
+        shell: bash
+        run: |
+          mkdir -p dist
+          find ui/app/src-tauri/target -path '*/release/bundle/*' \
+            \( -name '*.dmg' -o -name '*-setup.exe' -o -name '*.app.tar.gz' \
+               -o -name '*.nsis.zip' -o -name '*.sig' \) -exec cp {} dist/ \;
+          ls -l dist
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: shell-${{ matrix.target }}
+          path: dist/
+          if-no-files-found: error
+
+  android:
+    name: Android (APK)
+    needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      ANDROID_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+      EVENT_NAME: ${{ github.event_name }}
+      NDK_VERSION: 27.2.12479018
+      SHELL_VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Java
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install the Android SDK
+        uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
+
+      - name: Install the Android NDK
+        run: |
+          sdkmanager --install "ndk;$NDK_VERSION" "platforms;android-36" "build-tools;36.0.0"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        with:
+          toolchain: stable
+          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: ui/app/src-tauri
+
+      - name: Install the Tauri CLI
+        run: cargo install tauri-cli --version "$TAURI_CLI_VERSION" --locked
+
+      # `gen/android` is a build output (see ui/app/android/apply_overlay.py):
+      # generated from the current Tauri version's templates, then patched with
+      # the shell's manifest edits, network security config and Kotlin service.
+      - name: Generate the Android project
+        working-directory: ui/app
+        run: cargo tauri android init --skip-targets-install
+
+      - name: Apply the Android overlay
+        run: python3 ui/app/android/apply_overlay.py
+
+      - name: Validate optional Android signing secrets
+        run: |
+          present=0
+          missing=0
+          for value in "$ANDROID_KEYSTORE" "$ANDROID_KEY_ALIAS" "$ANDROID_KEY_PASSWORD"; do
+            if [ -n "$value" ]; then present=$((present + 1)); else missing=$((missing + 1)); fi
+          done
+          if [ "$present" -gt 0 ] && [ "$missing" -gt 0 ]; then
+            echo "Android signing secrets are only partially configured" >&2
+            exit 1
+          fi
+          if [ "$EVENT_NAME" = "push" ] && [ "$missing" -gt 0 ]; then
+            echo "Release tags require Android signing" >&2
+            exit 1
+          fi
+
+      - name: Import the Android keystore
+        if: env.ANDROID_KEYSTORE != ''
+        run: |
+          echo "$ANDROID_KEYSTORE" | base64 --decode > "$RUNNER_TEMP/upload.jks"
+          cat > ui/app/src-tauri/gen/android/keystore.properties <<EOF
+          storeFile=$RUNNER_TEMP/upload.jks
+          keyAlias=$ANDROID_KEY_ALIAS
+          password=$ANDROID_KEY_PASSWORD
+          EOF
+
+      - name: Build the APK
+        working-directory: ui/app
+        run: cargo tauri android build --apk --config "{\"version\":\"$SHELL_VERSION\"}"
+
+      - name: Collect artifacts
+        run: |
+          mkdir -p dist
+          find ui/app/src-tauri/gen/android -name '*.apk' -exec cp {} dist/ \;
+          ls -l dist
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: shell-android
+          path: dist/
+          if-no-files-found: error
+
+  publish:
+    name: Publish the release
+    needs: [prepare, desktop, android]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write # create the release and upload its assets
+    # A manual dispatch is a build check; only a tag produces a release.
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      # The updater reads latest.json to decide whether to update and which
+      # archive to fetch; without it the desktop feed is dead even though the
+      # bundles uploaded fine.
+      - name: Build latest.json
+        run: |
+          python3 scripts/build_shell_update_manifest.py \
+            --tag "${GITHUB_REF#refs/tags/}" \
+            --artifacts artifacts \
+            --repo "$GITHUB_REPOSITORY" \
+            --out artifacts/latest.json
+          cat artifacts/latest.json
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --title "Ava shell $TAG" --generate-notes
+          fi
+          gh release upload "$TAG" artifacts/* --clobber
+
+          # The repo also publishes dated cluster releases, so GitHub's
+          # /releases/latest alias cannot be the shell update channel. Keep one
+          # prerelease asset endpoint stable and replace only latest.json.
+          if ! gh release view shell-latest >/dev/null 2>&1; then
+            gh release create shell-latest --target "$GITHUB_SHA" --prerelease \
+              --title "Ava shell updater feed" \
+              --notes "Mutable feed asset for the desktop shell updater."
+          fi
+          gh release upload shell-latest artifacts/latest.json --clobber

@@ -1,0 +1,341 @@
+/* 周计划 — 本地单文件应用样式（无外部资源） */
+
+:root {
+  --bg: #f6f5f1;
+  --surface: #ffffff;
+  --ink: #35322e;
+  --ink-soft: #77716a;
+  --line: #e5e1da;
+  --line-strong: #d8d3ca;
+  --accent: #67786d;        /* 灰调鼠尾草绿，安静不甜腻 */
+  --accent-strong: #4e5f54;
+  --accent-wash: #eef1ec;
+  --today-wash: #f2f4ef;
+  --danger: #9c5140;
+  --danger-wash: #faf1ee;
+  --focus: #4e6b57;
+  --radius: 10px;
+  --shadow: 0 1px 2px rgba(53, 50, 46, 0.06);
+}
+
+* { box-sizing: border-box; }
+
+html, body { margin: 0; padding: 0; }
+
+body {
+  font-family: system-ui, -apple-system, "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  background: var(--bg);
+  color: var(--ink);
+  font-size: 15px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+
+[hidden] { display: none !important; }
+
+/* 屏幕阅读器专用文本 */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* 所有可交互元素都有清晰可见的焦点 */
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+.page-header {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 26px 28px 6px;
+}
+.page-header h1 {
+  margin: 0;
+  font-size: 21px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+}
+.page-sub {
+  margin: 4px 0 0;
+  color: var(--ink-soft);
+  font-size: 13px;
+}
+
+.app-main { max-width: 1400px; margin: 0 auto; padding: 0 20px 48px; }
+
+.week-grid {
+  display: flex;
+  flex-direction: column;
+  margin-top: 14px;
+}
+
+/* 表头行：竖向滚动时吸顶 */
+.grid-head-row {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: var(--bg);
+  border-bottom: 1px solid var(--line-strong);
+  padding-bottom: 8px;
+}
+
+.grid-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 10px 12px 4px;
+}
+.grid-head .day-name { font-weight: 650; font-size: 13.5px; }
+.grid-head .day-date {
+  color: var(--ink-soft);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+.grid-head.today .day-name { color: var(--accent-strong); }
+
+.today-badge {
+  font-size: 11px;
+  line-height: 1.7;
+  color: var(--accent-strong);
+  background: var(--accent-wash);
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  padding: 0 7px;
+}
+.day-count {
+  margin-left: auto;
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.grid-body-row {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  align-items: start;
+}
+.day-cell {
+  min-width: 0;
+  padding: 10px 12px;
+}
+.day-cell.today {
+  background: var(--today-wash);
+  border-radius: var(--radius);
+}
+
+/* 移动端（<=860px）把表头行隐藏，每列变成整宽卡片 */
+.mobile-head { display: none; }
+
+.add-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.add-input {
+  flex: 1 1 140px;
+  min-width: 0;
+  font: inherit;
+  font-size: 14px;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  padding: 7px 10px;
+}
+.add-input::placeholder { color: #a49d94; }
+.add-input:hover { border-color: #c8c2b8; }
+
+.add-btn {
+  font: inherit;
+  font-size: 14px;
+  color: #fff;
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  padding: 7px 14px;
+  cursor: pointer;
+}
+.add-btn:hover { background: var(--accent-strong); border-color: var(--accent-strong); }
+
+.form-error {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--danger);
+  font-size: 13px;
+}
+
+.task-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.task {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 9px 10px;
+  box-shadow: var(--shadow);
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+.task:hover { border-color: var(--line-strong); }
+.task-added { animation: task-in 180ms ease-out; }
+@keyframes task-in {
+  from { opacity: 0; transform: translateY(-3px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.task-main {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.task-title {
+  font-size: 14px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.task-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.move-select {
+  font: inherit;
+  font-size: 13px;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  padding: 4px 6px;
+  max-width: 120px;
+  cursor: pointer;
+}
+
+.delete-btn {
+  font: inherit;
+  font-size: 13px;
+  color: var(--danger);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+.delete-btn:hover {
+  background: var(--danger-wash);
+  border-color: #e3c4ba;
+}
+
+.confirming {
+  border-color: #e0b8ab;
+  background: #fdf9f7;
+}
+.confirm-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--line-strong);
+}
+.confirm-msg {
+  font-size: 13px;
+  color: var(--ink-soft);
+  margin-right: auto;
+}
+.confirm-yes,
+.confirm-no {
+  font: inherit;
+  font-size: 13px;
+  border-radius: 7px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+.confirm-yes {
+  color: #fff;
+  background: var(--danger);
+  border: 1px solid var(--danger);
+}
+.confirm-no {
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+}
+.confirm-no:hover { border-color: #b9b2a7; }
+
+.more-btn {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--accent-strong);
+  background: var(--accent-wash);
+  border: 1px dashed var(--accent);
+  border-radius: 8px;
+  padding: 7px 10px;
+  cursor: pointer;
+}
+.more-btn:hover { background: #e4eae3; }
+
+/* 移动端：每天一列整宽卡片，375px 也完全可用 */
+@media (max-width: 860px) {
+  .page-header { padding: 20px 16px 4px; }
+  .app-main { padding: 0 14px 36px; }
+  .grid-head-row { display: none; }
+  .grid-body-row { display: block; }
+  .day-cell {
+    display: block;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    margin: 0 0 14px;
+    padding: 12px 14px 14px;
+  }
+  .day-cell.today { background: #fbfcf9; border-color: var(--line-strong); }
+  .mobile-head {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin: 0 0 10px;
+    font-size: 15px;
+    font-weight: 650;
+  }
+  .mobile-head .day-date { color: var(--ink-soft); font-size: 13px; }
+  .mobile-head .today-badge { margin-left: 2px; }
+  .mobile-head .day-count { margin-left: auto; }
+}
+
+/* 系统开启“减弱动态效果”时，动画基本消失 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  .task-added { animation: none; }
+}

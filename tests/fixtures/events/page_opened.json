@@ -1,0 +1,9 @@
+{
+  "agent_id": 7,
+  "role": "page_opened",
+  "page_id": 3,
+  "name": "cleanup",
+  "port": 8765,
+  "title": "Cleanup picker",
+  "url": "http://localhost:8000/api/pages/7-cleanup/"
+}

@@ -1,0 +1,52 @@
+# GitHub auto-generated release notes configuration.
+#
+# When `generate_release_notes: true` is passed to `gh release create` or the
+# Releases API, GitHub groups merged PRs by label. This file maps labels to the
+# sections that appear in the generated notes.
+#
+# The primary release-notes path is the annotated tag message (written by
+# release_cut.py and consumed by the release workflow). This file is a fallback
+# for any release that opts into auto-generation instead.
+
+changelog:
+  categories:
+    - title: '🚀 Features'
+      labels:
+        - 'feat'
+        - 'feature'
+        - 'enhancement'
+    - title: '🐛 Bug Fixes'
+      labels:
+        - 'fix'
+        - 'bug'
+        - 'bugfix'
+    - title: '⚡ Performance'
+      labels:
+        - 'perf'
+        - 'performance'
+    - title: '🔄 Refactoring'
+      labels:
+        - 'refactor'
+        - 'refactoring'
+    - title: '🧪 Tests'
+      labels:
+        - 'test'
+        - 'tests'
+        - 'testing'
+    - title: '📚 Documentation'
+      labels:
+        - 'docs'
+        - 'documentation'
+    - title: '🔧 CI / Infrastructure'
+      labels:
+        - 'ci'
+        - 'infra'
+        - 'infrastructure'
+    - title: '🧹 Chores'
+      labels:
+        - 'chore'
+        - 'deps'
+        - 'dependencies'
+    - title: 'Other Changes'
+      labels:
+        - '*'

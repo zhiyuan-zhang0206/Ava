@@ -1,0 +1,28 @@
+# Prometheus — scrapes only the viewer's own components (zero impact on the
+# main flow). Extend with node_exporter later if host metrics are wanted.
+# Ava's own series arrive by OTLP push (--web.enable-otlp-receiver in the
+# compose command); retention is set there too (90d time / 8GB size).
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+# Companion setting for the OTLP receiver: pushed samples can arrive out of
+# order (collector retries after a backend outage replay queued batches), and
+# without a window Prometheus drops them silently.
+storage:
+  tsdb:
+    out_of_order_time_window: 30m
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+  - job_name: tempo
+    static_configs:
+      - targets: ["tempo:3200"]
+  - job_name: loki
+    static_configs:
+      - targets: ["loki:3100"]
+  - job_name: grafana
+    static_configs:
+      - targets: ["grafana:3000"]

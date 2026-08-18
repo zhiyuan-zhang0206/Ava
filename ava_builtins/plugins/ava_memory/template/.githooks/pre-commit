@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# Memory-pool commit guard: character caps + OKF format validation.
+set -euo pipefail
+
+memory_cap="${AVA_MEMORY_INDEX_CAP:-2000}"
+note_cap="${AVA_MEMORY_NOTE_CAP:-8000}"
+
+fail=0
+
+while IFS= read -r f || [ -n "$f" ]; do
+    case "$f" in
+        *.md) ;;
+        *) continue ;;
+    esac
+    [ -f "$f" ] || continue
+
+    chars=$(wc -m <"$f" | tr -d ' ')
+    if [ "$f" = "MEMORY.md" ]; then cap="$memory_cap"; else cap="$note_cap"; fi
+    if [ "$chars" -gt "$cap" ]; then
+        echo "memory: $f is $chars chars, over the $cap cap." >&2
+        fail=1
+    fi
+
+    case "$(basename "$f")" in
+        index.md|log.md|AGENTS.md) continue ;;
+    esac
+
+    first_line=$(head -1 "$f")
+    if [ "$first_line" != "---" ]; then
+        echo "okf: $f missing YAML frontmatter" >&2
+        fail=1
+        continue
+    fi
+
+    type_val=$(sed -n '/^---$/,/^---$/p' "$f" | grep '^type:' | head -1 | sed 's/^type:[[:space:]]*//' || true)
+    if [ -z "$type_val" ]; then
+        echo "okf: $f missing or empty 'type' field" >&2
+        fail=1
+    fi
+
+    if ! grep -q '^ava_agent:' "$f"; then
+        echo "okf: $f missing required 'ava_agent' field" >&2
+        fail=1
+    fi
+
+done < <(git diff --cached --name-only --diff-filter=ACM)
+
+# Full pool validation (OKF + type tags + descriptions + directory
+# structure). Fails loud if the interpreter is missing — a commit guard that
+# silently passes is worse than one that checks less.
+if ! python3 "$(dirname "$0")/../validate.py" >/dev/null 2>&1; then
+    echo "okf: pool validation failed — run: python3 validate.py" >&2
+    fail=1
+fi
+
+exit "$fail"
