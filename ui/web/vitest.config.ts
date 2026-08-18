@@ -28,6 +28,11 @@ export default defineConfig({
     environment: "happy-dom",
     globals: false,
     setupFiles: ["./vitest.setup.ts"],
+    // Pin the timezone: timestamp-rendering tests (timeline.test.tsx) assert
+    // on formatted output, and `Intl` renders "GMT+8"-style zone names on
+    // non-UTC dev machines that the assertions (written against CI's UTC)
+    // reject. One deterministic zone everywhere ends the local-vs-CI split.
+    env: { TZ: "UTC" },
     // `.builds/` holds the e2e frontend build dirs (frontend_proc copies the
     // tree there per e2e session); the default include would otherwise sweep
     // their copied tests and run the suite twice (and fail on the copy's

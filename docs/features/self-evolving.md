@@ -27,12 +27,6 @@ Phase B: bring every runner back on the new commit, canary first, holdout last
 The release agent waits on the old code as the rollback executor (a timeout
 escalates to a human), then switches itself over once the canary is healthy.
 
-## Real usage
-
-- [`traces/cluster-update.md`](../../traces/cluster-update.md) — a rollout
-  trace with four evidence runs, including a production roll across the whole
-  cluster.
-
 ## Design decisions
 
 - [Self-rolling release via canary-and-holdout](../../decisions/2026-05-09-self-rolling-release.md)

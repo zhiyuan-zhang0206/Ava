@@ -757,7 +757,7 @@ def checkpoint_msgpack_allowlist() -> frozenset[tuple[str, str]]:
     the allowlist replaces the permissive default.
 
     Consumers: `agent/_process_boot.py::_build_checkpointer` (prod agent saver) and
-    MyAva's `evals/driver.py` (eval saver, moved 2026-08-12).
+    any embedding checkpoint saver.
     """
     entries: set[tuple[str, str]] = set(STATIC_CHECKPOINT_MSGPACK_TYPES)
     for cls in _PLUGIN_STATE_CLASSES:

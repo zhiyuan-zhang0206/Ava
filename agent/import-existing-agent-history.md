@@ -31,6 +31,6 @@ the SDK it already has, so the whole thing reads as an example of what Ava is.
 Not a general-purpose sync, not a live bridge, not a supported import format with a
 compatibility contract. One direction, run once, at onboarding.
 
-Prior art: this deployment's own one-off migration (done by hand, recorded in the
-private companion repo) is the same operation without the packaging. Whatever it
-learns about *what is worth keeping* is the input to this script.
+Prior art: a one-off migration of this shape has been done by hand before —
+the same operation without the packaging. Whatever it learns about *what is
+worth keeping* is the input to this script.

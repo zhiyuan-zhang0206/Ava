@@ -98,12 +98,11 @@ sockets under `$AVA_HOME/run/pty/` (agent shells / watchers), so the home
 already scopes every session). Every cluster produces e.g.
 `ava-gateway`; two clusters are two homes, never one namespace.
 
-**Bench / CI are a separate hosting surface.** The SWE-bench harness
-(MyAva's `scripts/cloud-bench-bootstrap.sh`, `benchmarks/*`) and the CI image
-(`Dockerfile`) install their own session tooling inside bench containers /
-runner images — an isolated surface that has nothing to do with the cluster
-runtime described here. Changes to the cluster's session handling never touch
-them, and their tooling never reaches a cluster home.
+**CI is a separate hosting surface.** The CI image (`Dockerfile`) installs
+its own session tooling inside runner images — an isolated surface that has
+nothing to do with the cluster runtime described here. Changes to the
+cluster's session handling never touch it, and its tooling never reaches a
+cluster home.
 
 **Migration note (session rename)**: this naming dropped the machine segment and
 added the `ava-` prefix (old convention was `<cluster>-<machine>-<service>`). After
@@ -230,7 +229,7 @@ server dedupes /ops calls), INSERT/UPDATE on `agent_tasks` (`ava.tasks`) and
 `agent_watchers` (`ava.watcher`), UPDATE on `agent_pages` (page close at
 exit), and full CRUD on the LangGraph checkpoint tables. `agents` INSERT,
 `agents_meta` INSERT, notices writes, the cluster deploy-state tables and any
-DDL fail under it by construction — the MyAva-class pollution (full write
+DDL fail under it by construction — the 2026-08-12 pollution class (full write
 credential on the runner) is structurally impossible. Its password (`AVA_RUNNER_DB_PASSWORD`) is minted
 at install (or by `ava cluster ensure-runner-role` on pre-cutover clusters),
 kept in the gateway's `.env`, and travels only inside the projected URL —

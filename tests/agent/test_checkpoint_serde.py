@@ -4,8 +4,8 @@ LangGraph's `JsonPlusSerializer` deserializes pydantic-v2 channel values through
 an explicit type allowlist. Without one it runs permissive and warns on **every**
 checkpoint load for each unregistered type ("Deserializing unregistered type
 agent.state.* from checkpoint... This will be blocked in a future version") —
-one line per type per process start. The framework's saver (`agent/loop.py`,
-MyAva's `evals/driver.py`) now passes `allowed_msgpack_modules=checkpoint_msgpack_allowlist()`.
+one line per type per process start. The framework's saver (`agent/loop.py`)
+now passes `allowed_msgpack_modules=checkpoint_msgpack_allowlist()`.
 
 Guards:
 - the four nested sub-states round-trip silently under the allowlist serde

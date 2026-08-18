@@ -1,7 +1,7 @@
 """shared.test_db_guard — the fail-fast non-test-DB rule.
 
-Covers the rule added after the 2026-08-12 incident (a test run rooted at the
-private MyAva repo resolved the operator's real ~/.ava/.env and seeded
+Covers the rule added after the 2026-08-12 incident (a test run rooted
+outside this repo resolved the operator's real ~/.ava/.env and seeded
 synthetic agents 900002-900010 into the production agents table). The rule is
 the single source of truth for "is this database one a test process may
 write"; every pytest bootstrap calls it at session start and the DB-seeding

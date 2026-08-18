@@ -151,8 +151,8 @@ historical Ava commit whose `contrib/mcp/` content was deleted from `main`
 (2026-07-25, #861) — so `ava mcp upgrade x` re-fetches a frozen snapshot that
 can never receive updates.
 
-**Verdict: externalize — executed 2026-08-13.** Same move as Discord: new
-private repo `ava-mcp-x` (repo root = package),
+**Verdict: externalize — executed 2026-08-13.** Same move as Discord: the
+package moved to its own external repo (repo root = package),
 installed-source swapped to that URL (`path`/`ref` dropped), `ava mcp upgrade
 x` verified end-to-end (24 official tools listed through the bridge). The
 evaluation above judged it non-urgent (stdlib-only, thin, stable, frozen

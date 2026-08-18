@@ -60,6 +60,6 @@ stranger clone and run*:
 - A clear first-run path for the LLM API key + config.
 - README must state the hard macOS constraint for desktop skills: a live,
   **unlocked** GUI session (synthetic input / capture are dropped on a locked
-  screen — see `skills/wechat-ocr` in the private repo).
+  screen).
 - Windows ships the agent-runner half only; a Windows box cannot be a
   self-contained install ([`../gateway/windows-gateway.md`](../gateway/windows-gateway.md)).

@@ -3,7 +3,7 @@ LangChain and below the agent kernel, consolidated into one package.
 
 LangChain normalizes tool calls (`tool_calls`), usage, and content blocks, but
 not everything; the rest is collected here so the kernel, gateway, and the
-eval harness (MyAva) stay provider-agnostic. Plan for onboarding providers as
+callers stay provider-agnostic. Plan for onboarding providers as
 plugins: `shared/lm/model-providers-as-plugins.md`.
 - `factory`   — `build_chat_model` (prefix dispatch to the provider SDK) + the
                 model catalog (`SUPPORTED_MODELS`, `MODEL_CONTEXT_WINDOW`).

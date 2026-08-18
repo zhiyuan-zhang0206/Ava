@@ -33,7 +33,6 @@ tests/conftest.py plants for unprovisioned test runs.
 Callers:
     shared/config.py            - before importing Settings
     scripts/start_agent.py      - bootstrap root agent
-    MyAva's benchmarks/<bench>/run.py   - host adapter, before passing LLM key to docker
 
 `load_dotenv` itself is idempotent + does not overwrite already-set
 os.environ keys; repeated calls have no side effects.

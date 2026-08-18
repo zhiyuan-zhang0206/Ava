@@ -5,9 +5,9 @@ Why this exists
 2026-08-12 17:57 incident: a pytest run of the (then in-repo) benchmark stats
 tests wrote 8 synthetic agents (ids 900002-900010, labels ``test-agent-<id>``)
 into the production ``agents`` / ``agents_meta`` tables. The run's rootdir was
-the private MyAva companion repo (benchmarks/ had just been migrated there), so
-Ava's ``tests/conftest.py`` — whose import-time env block redirects AVA_HOME to
-a tmp home and pins ``AVA_DB_URL`` to an unreachable sentinel — never loaded.
+outside this repo, so Ava's ``tests/conftest.py`` — whose import-time env
+block redirects AVA_HOME to a tmp home and pins ``AVA_DB_URL`` to an
+unreachable sentinel — never loaded.
 ``shared.config.settings`` then resolved the operator's real ``~/.ava/.env``,
 and the test helper that seeds agent rows wrote straight into the main
 cluster's database. The per-helper guard that existed
@@ -15,9 +15,9 @@ cluster's database. The per-helper guard that existed
 path in a different conftest tree and never ran.
 
 The rule below is the single source of truth for "is this database one a test
-process may write". Every pytest bootstrap in the ecosystem calls it at session
-start — Ava's ``tests/conftest.py`` (pytest_sessionstart, before any fixture)
-and MyAva's ``tests/conftest.py`` — and the DB-seeding test helpers call it
+process may write". Every pytest bootstrap that embeds this codebase calls it at
+session start — ``tests/conftest.py`` (pytest_sessionstart, before any
+fixture) — and the DB-seeding test helpers call it
 before touching a connection. Fail-closed: a URL that is neither a known
 throwaway test database nor explicitly marked resolves to a refusal, so a
 bootstrap that stops loading a conftest (or a new harness that never had one)

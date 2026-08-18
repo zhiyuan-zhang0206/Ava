@@ -7,10 +7,10 @@ it is itself a major build, not a checkbox.
 
 ## What exists today
 
-SWE-bench is wired — the coding line has a scorecard. The harness lives in
-the private MyAva repo's `benchmarks/` + `evals/` (moved 2026-08-12; conventions in
-[`.agents/skills/run-swe-bench/SKILL.md`](../../.agents/skills/run-swe-bench/SKILL.md));the containerized substrate that runs it is [`docker-sandbox.md`](docker-sandbox.md).
-That is the solved part.
+The containerized substrate a coding scorecard would run on is
+[`docker-sandbox.md`](docker-sandbox.md). The scorecard itself (SWE-bench or
+similar) is not wired in this repo — it is part of the build this entry
+scopes.
 
 ## The hard part: task sourcing beyond SWE-bench
 

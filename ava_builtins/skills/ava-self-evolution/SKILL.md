@@ -114,24 +114,18 @@ Write each confirmed finding to
 `$AVA_HOME/self_evolution/proposals/<week>-<skill>.md`:
 phenomenon, the real run ids, root cause, and the concrete fix.
 
-### 4. Replay to verify (optional, off by default)
+### 4. Re-run to verify (optional, off by default)
 
 Only when a specific proposal is worth confirming empirically. The dataset's
-recorded outcome is the "old" baseline; replaying the same task under the
-current tree is the "new" side.
+recorded outcome is the "old" baseline; re-running the same task under the
+current tree is the "new" side — via the Evaluation Loop's spawn path
+(`reference/evaluate.py`: `launch` -> `poll` -> `gather`).
 
-```
-$AVA_HOME/source/.venv/bin/python $AVA_HOME/skills/ava-self-evolution/reference/replay.py            # dry-run: what is safe to replay
-$AVA_HOME/source/.venv/bin/python $AVA_HOME/skills/ava-self-evolution/reference/replay.py --run      # actually re-run the safe subset
-$AVA_HOME/source/.venv/bin/python $AVA_HOME/skills/ava-self-evolution/reference/compare.py           # old-vs-new counts for the report
-```
-
-`replay.py` re-runs only the **replay-safe subset** — tasks whose tool calls
-are pure read/compute. It runs each in a fresh agent against a disposable eval
-database (production data is untouched), but the OS/network are not sandboxed,
-so tasks that ran a shell command, sent a message, edited files, or hit an
-external API are deliberately skipped. `compare.py` renders the plain-count
-old-vs-new block. Skip this whole step unless a proposal earns the cost.
+Only the **replay-safe subset** is ever re-run — tasks whose tool calls are
+pure read/compute (the `is_replay_safe` gate in `evaluate.py`). The OS and
+network are not sandboxed, so tasks that ran a shell command, sent a message,
+edited files, or hit an external API are deliberately skipped. Skip this
+whole step unless a proposal earns the cost.
 
 ### 5. Report
 
@@ -140,7 +134,7 @@ Write `$AVA_HOME/self_evolution/reports/<week>.md`:
 1. **Dataset** — runs collected this week (ok / fumbled / failed), weeks accrued.
 2. **Changes** — skills/plugins that changed this week.
 3. **Findings** — per confirmed regression: the skill, the real run ids, root
-   cause, the fix, and (if run) replay counts. Mark the fixes you are opening
+   cause, the fix, and (if run) re-run scores. Mark the fixes you are opening
    as PRs.
 4. **No-signal changes** — changes with no related regression, so next week
    knows they were checked.

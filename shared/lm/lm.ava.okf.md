@@ -66,4 +66,4 @@ LangChain types `AIMessage(Chunk).content` weakly as `str | list[str | dict[str,
 - **model identity** (`ModelSpec.model_identity` → `MODEL_IDENTITY`): per-model note injected before knowledge cutoff in the system prompt (deepseek-v4-pro/flash, kimi-k3).
 - **Anthropic prompt caching**: claude branch passes `cache_control: ephemeral`; system + eligible blocks cached 5 min server-side. No facade — submodules imported directly.
 
-- Key deps: [[llm.ava.okf.md]] (agent/graph/_llm.py calls `build_chat_model`) — the eval harness (MyAva) reuses the factory too
+- Key deps: [[llm.ava.okf.md]] (agent/graph/_llm.py calls `build_chat_model`)

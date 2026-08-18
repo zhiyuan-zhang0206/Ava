@@ -20,7 +20,7 @@ read the database, so they work from anywhere.
 
 SAFETY: only tasks that are safe to re-run are spawned — spawning replays the
 task for real, so a task that sent a message or hit an external API is skipped
-(same `is_replay_safe` gate as replay.py). Do not evaluate on side-effecting
+(the `is_replay_safe` gate below). Do not evaluate on side-effecting
 tasks.
 
 Import it from an agent's code (the skill directory name has a hyphen, so add
@@ -36,12 +36,39 @@ from pathlib import Path
 from typing import Any
 
 from collect import collect_one
-from replay import is_replay_safe
 from rubric import scores
 
 import ava
 from shared.db import connect
 from shared.paths import ava_home
+
+# Tool-call prefixes that make a run unsafe to re-run: fleet/user-facing side
+# effects, process lifecycle, arbitrary OS (shell can rm / curl / git push),
+# scheduling, and real file writes. A run is replay-safe iff NONE of its
+# tools_called match these — leaving pure read/compute tasks.
+UNSAFE_PREFIXES = (
+    "ava.agents.",
+    "ava.ui.",
+    "ava.self.",
+    "ava.shell.",
+    "ava.watcher.",
+    "ava.files.edit",
+    "ava.files.write",
+    "ava.files.delete",
+    "ava.mcps.",
+)
+
+
+def is_replay_safe(rec: dict[str, Any]) -> tuple[bool, str]:
+    """Return (safe, reason). A run is safe to re-run only if every tool it
+    called is pure read/compute and it actually carries a task prompt."""
+    if not rec["task_prompt"].strip():
+        return False, "no task prompt"
+    hits = sorted({tool for tool in rec["tools_called"] if tool.startswith(UNSAFE_PREFIXES)})
+    if hits:
+        return False, "side-effect tools: " + ", ".join(hits)
+    return True, "pure read/compute"
+
 
 # A spawned eval agent is finished once it stops working: it either idled after
 # delivering, or terminated.

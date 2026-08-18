@@ -3,7 +3,7 @@
 Used in two layered roles:
 
 1. **LangGraph node DI** (`Runtime[AvaContext]`). `agent/loop.py` and
-   MyAva's `evals/driver.py` build an `AvaContext` and pass it via
+   any embedding driver build an `AvaContext` and pass it via
    `graph.ainvoke(input, context=ctx)`. Graph nodes have signature
    `(state, runtime: Runtime[AvaContext], config: RunnableConfig)` and
    access deps as `runtime.context.X`.

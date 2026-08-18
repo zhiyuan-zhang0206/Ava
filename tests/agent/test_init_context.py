@@ -29,7 +29,7 @@ def _config(tid: int) -> RunnableConfig:
 
 
 def _runtime(ops_pool: AsyncConnectionPool | None) -> Runtime[AvaContext]:
-    """`ops_pool=None` takes the container path (matching MyAva's `evals/__main__.py`)."""
+    """`ops_pool=None` takes the container path."""
     return Runtime(
         context=AvaContext(ops_pool=ops_pool, llm=AsyncMock(), event_publisher=MagicMock())
     )

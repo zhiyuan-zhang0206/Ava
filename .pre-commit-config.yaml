@@ -182,21 +182,6 @@ repos:
         files: ^(conventions/.*\.md|\.agents/skills/.*\.md|ava/__init__\.py)$
         pass_filenames: false
 
-      # Every `path/to/file.py:symbol` anchor in traces/ must still resolve
-      # (file exists; for Python, the symbol is AST-*defined* in it, not merely
-      # mentioned). A trace's claim is that it is evidence rather than
-      # architecture fiction, and a renamed function silently turns a step into a
-      # plausible-reading lie — the one drift class the genre cannot survive.
-      # Anchors are only read inside code spans, so prose is never flagged; see
-      # scripts/lint_trace_anchors.py header. Gated on the docs + any source file
-      # an anchor could point at, so a rename is caught at the rename.
-      - id: lint-trace-anchors
-        name: lint trace anchors (every file:symbol in traces resolves)
-        language: system
-        entry: .venv/bin/python scripts/lint_trace_anchors.py
-        files: ^(traces/.*\.md$|.*\.(py|ts|tsx|sql|sh)$)
-        pass_filenames: false
-
       # Every CLI flag written as a command invocation, and every relative
       # markdown link, across all tracked docs — checked against the live
       # argparse tree / scripts/*.sh case arms / the tree on disk. Runs the

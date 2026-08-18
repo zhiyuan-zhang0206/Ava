@@ -120,7 +120,7 @@ disqualifying.
    plugins at all: the gateway spawn boundary (`validate_model_config` behind
    `POST /api/agents`), the labeler daemon (`services/labeler/labeler.py`
    imports `build_chat_model` directly), and the eval harness
-   (MyAva's `evals/driver.py`). A
+   (any embedding driver). A
    separate import-linter contract forbids `services` from importing `agent` at
    all, so the labeler cannot be fixed by loading agent plugins there.
 3. **Wrong altitude.** Both primitives operate on the agent-facing SDK —

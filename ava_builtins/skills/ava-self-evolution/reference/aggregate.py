@@ -4,7 +4,6 @@
 Reads:
   - A changes manifest (hand-written or tool-generated): [{skill, summary, pr, pr_url}, ...]
   - evaluate.py `gather` output (one JSON file per skill)
-  - compare.py output (markdown or structured JSON)
 
 Produces:
   - A single JSON file ready for `render_report.py` → `ava.ui.serve()`
@@ -37,38 +36,6 @@ def load_json_maybe(path: Path) -> dict[str, Any] | None:
         return load_json(path)
     except (FileNotFoundError, json.JSONDecodeError):
         return None
-
-
-def parse_compare_md(text: str) -> dict[str, Any] | None:
-    """Parse compare.py's markdown output back into a structured dict.
-
-    The markdown format is:
-        Replayed N safe tasks: old X/N completed, new Y/N completed -> verdict.
-        | run | original | replay | verdict |
-        ...
-    """
-    import re
-
-    header = re.match(
-        r"Replayed (\d+) safe tasks: old (\d+)/\1 completed, new (\d+)/\1 completed",
-        text,
-    )
-    if not header:
-        return None
-    replayed = int(header.group(1))
-    old_ok = int(header.group(2))
-    new_ok = int(header.group(3))
-
-    improved = text.count("| improved ")
-    regressed = text.count("| regressed ")
-
-    return {
-        "replayed": replayed,
-        "old_ok": old_ok,
-        "new_ok": new_ok,
-        "improved": improved,
-        "regressed": regressed,
-    }
 
 
 def parse_failure_md(text: str) -> list[dict[str, Any]]:
@@ -153,7 +120,6 @@ def main() -> None:
     p.add_argument("--changes", required=True, help="JSON list of {skill, summary, pr, pr_url}")
     p.add_argument("--eval-dir", help="directory containing evaluate.py gather outputs")
     p.add_argument("--failure-md", help="mine.py markdown output file")
-    p.add_argument("--compare-md", help="compare.py markdown output file")
     p.add_argument("--week", required=True, help="ISO week label e.g. 2025-06-30")
     p.add_argument("--total-runs", type=int, default=0, help="total runs in dataset")
     p.add_argument("--out", default="report.json", help="output path")
@@ -189,11 +155,7 @@ def main() -> None:
         md_text = Path(args.failure_md).read_text(encoding="utf-8")
         failure_clusters = parse_failure_md(md_text)
 
-    # Compare results
     eval_results: dict[str, Any] | None = None
-    if args.compare_md:
-        md_text = Path(args.compare_md).read_text(encoding="utf-8")
-        eval_results = parse_compare_md(md_text)
 
     # Build report data (uses the convenience builder from render_report)
     sys.path.insert(0, str(Path(__file__).resolve().parent))

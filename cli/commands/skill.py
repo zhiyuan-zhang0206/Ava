@@ -502,7 +502,7 @@ def cmd_skill_update(
 
 def cmd_skill_upgrade(name: str, *, force: bool = False) -> int:
     """`ava skill upgrade <name> [--force]` — re-fetch an installed skill package
-    from its recorded git source (a private companion repo and other user
+    from its recorded git source (a private skills repo and other user
     installs).
 
     A locally edited copy (content differs from what the last install/upgrade
