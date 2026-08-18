@@ -8,6 +8,8 @@ call `logger.info("[label] ...")` to log phase markers; the `[bracket]`
 prefix is kept as a convention for grep-friendliness.)
 """
 
+from datetime import datetime
+
 from langchain_core.messages import AIMessage
 
 from shared.log import logger
@@ -19,6 +21,7 @@ def log_llm_usage(
     *,
     latency_ms: float | None = None,
     decode_ms: float | None = None,
+    priced_at: datetime | None = None,
 ) -> None:
     """Log LangChain standardized usage fields from `usage_metadata`.
 
@@ -40,10 +43,10 @@ def log_llm_usage(
     The payload also carries the **usage-time price snapshot** — `cost_usd`
     (the call's USD cost) plus the three per-1M rates used
     (`price_miss`/`price_hit`/`price_out`) — computed here via
-    `shared.lm.pricing.cost_usd` with the registry price in force at the
-    call. Cost is billed incrementally at usage time (user principle): the
+    `shared.lm.pricing.quote` with the catalog price in force at the call.
+    Cost is billed incrementally at usage time (user principle): the
     read side sums the stored snapshot and never re-prices against the
-    current registry, so a later price or model change rewrites no history.
+    current catalog, so a later price or model change rewrites no history.
     Rows of a model with no known price carry no snapshot fields (absent =
     unpriced, counted as `unpriced_calls` by the readers).
 
@@ -63,6 +66,10 @@ def log_llm_usage(
     window — never a fake number); the ops panel guards with
     `attributes ? 'decode_ms'` and buckets stay blank until the
     2026-08-04 instrumentation ships.
+
+    `priced_at` is an optional timezone-aware instant for deterministic replay
+    and boundary tests. Production callers omit it and select the current UTC
+    catalog interval exactly once inside `quote()`.
 
     Post single-tool execute_code refactor, the core metric is `reason`
     monotonically decreasing across turns — the previous turn's thinking
@@ -84,20 +91,18 @@ def log_llm_usage(
     cache_pct = f" ({cache_read / in_total * 100:.0f}%)" if in_total else ""
     reason_pct = f" ({reasoning / out_total * 100:.0f}%)" if out_total else ""
     # Usage-time price snapshot (user principle: cost is billed at usage
-    # time, never re-priced against the current registry). Unpriced models
+    # time, never re-priced against the current catalog). Unpriced models
     # emit no snapshot fields — absent means unpriced, and the read side
     # counts those calls as unpriced instead of billing them at 0.
-    from shared.lm.pricing import MODEL_PRICING, RETIRED_MODEL_PRICING
-    from shared.lm.pricing import cost_usd as _cost_usd
+    from shared.lm.pricing import quote
 
-    cost = _cost_usd(model, in_total, out_total, cache_read)
-    rates = MODEL_PRICING.get(model) or RETIRED_MODEL_PRICING.get(model)
-    if cost is not None and rates is not None:
+    priced = quote(model, in_total, out_total, cache_read, at=priced_at)
+    if priced is not None:
         snapshot = {
-            "cost_usd": cost,
-            "price_miss": rates[0],
-            "price_hit": rates[1],
-            "price_out": rates[2],
+            "cost_usd": priced.cost_usd,
+            "price_miss": priced.rates.cache_miss,
+            "price_hit": priced.rates.cache_hit,
+            "price_out": priced.rates.output,
         }
     else:
         snapshot = {}

@@ -1976,7 +1976,7 @@
       },
       "title": "LLM cost (USD)",
       "type": "timeseries",
-      "description": "LLM call cost per bucket — unwrap of the cost_usd field every llm_usage payload carries (task #2626; the producer computes it from MODEL_PRICING in shared/lm/pricing.py, unpriced models carry no cost_usd and are skipped). event_name='llm_usage', category='telemetry'.",
+      "description": "LLM call cost per bucket — unwrap of the cost_usd field every llm_usage payload carries (task #2626; the producer computes it from one versioned-catalog quote in shared/lm/pricing.py, unpriced models carry no cost_usd and are skipped). event_name='llm_usage', category='telemetry'.",
       "targets": [
         {
           "datasource": {

@@ -101,7 +101,7 @@ core_metrics.register_core_metric(
         description=(
             "LLM call cost per bucket — unwrap of the cost_usd field every "
             "llm_usage payload carries (task #2626; the producer computes it "
-            "from MODEL_PRICING in shared/lm/pricing.py, unpriced models "
+            "from one versioned-catalog quote in shared/lm/pricing.py, unpriced models "
             "carry no cost_usd and are skipped). "
             "event_name='llm_usage', category='telemetry'."
         ),

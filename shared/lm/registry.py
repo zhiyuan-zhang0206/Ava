@@ -2,13 +2,15 @@
 default lives in one ``MODELS: dict[id, ModelSpec]`` table.
 
 Replaces the parallel per-model-id tables that had accumulated across
-``factory.py`` / ``_effort.py`` / ``pricing.py`` (``SUPPORTED_MODELS``,
+``factory.py`` / ``_effort.py`` (``SUPPORTED_MODELS``,
 ``MODEL_CONTEXT_WINDOW``, ``MODEL_KNOWLEDGE_CUTOFF``, ``_MODEL_DEFAULT_STREAMING``,
 ``_CLAUDE_MAX_TOKENS``, ``_DEEPSEEK_MAX_TOKENS``, ``_CLAUDE_EFFORT_LEVELS``,
-``_CLAUDE_EXTENDED_THINKING_ONLY``, ``_CLAUDE_EXTENDED_THINKING_EFFORT_LEVELS``,
-``MODEL_PRICING``) — their membership had drifted apart because adding a model
+``_CLAUDE_EXTENDED_THINKING_ONLY``, ``_CLAUDE_EXTENDED_THINKING_EFFORT_LEVELS``)
+— their membership had drifted apart because adding a model
 meant editing up to a dozen dicts. Here a model is one entry; the legacy table
 names survive as derived views (below) so existing import sites keep working.
+Externally mutable prices live separately in ``pricing_catalog.json`` and are
+selected through ``shared.lm.pricing``.
 Per-PROVIDER tables (prefix → API key, wire effort vocabularies for the
 OpenAI-style endpoints, vision prefixes) are *not* per-model facts and stay in
 ``factory.py`` / ``_effort.py``.
@@ -150,7 +152,7 @@ DEFAULT_TUNING = ModelTuning(
 class ModelSpec:
     """Everything the framework knows about one concrete model id.
 
-    Facts (windows, caps, pricing, effort vocabulary) drive the factory, the
+    Facts (windows, caps, effort vocabulary) drive the factory, the
     compact machinery, and the UI catalog; ``tuning`` carries the per-model
     settings defaults resolved by ``resolve_setting``. A fact left ``None``
     means "unknown / not applicable" and keeps the model out of the
@@ -168,8 +170,6 @@ class ModelSpec:
     model_identity: str | None = (
         None  # per-model identity note, injected before cutoff in system prompt
     )
-    pricing: tuple[float, float, float] | None = None  # (cache_miss, cache_hit, out) USD/M —
-    # 3-tuple because cache-hit rates differ from miss by up to 120x (see pricing.py)
     effort_levels: tuple[str, ...] | None = None  # the effort vocabulary this model's knob
     # accepts (wire `output_config.effort` levels for adaptive claude; the binary
     # thinking on/off vocabulary for extended-thinking-only models; the provider's
@@ -196,9 +196,6 @@ MODELS: dict[str, ModelSpec] = {
         max_output_tokens=384_000,
         knowledge_cutoff="2026-04",
         model_identity="You are running on DeepSeek V4 Pro.",
-        # Standing post-promo price (75% launch promo expired 2026-05-31);
-        # real cache discount (~120x cheaper on hit).
-        pricing=(0.435, 0.003625, 0.87),
         effort_levels=("high", "max"),
         tuning=ModelTuning(
             # DeepSeek defaults to `high` and only auto-promotes to `max` for
@@ -229,7 +226,6 @@ MODELS: dict[str, ModelSpec] = {
         max_output_tokens=384_000,
         knowledge_cutoff="2026-04",
         model_identity="You are running on DeepSeek V4 Flash.",
-        pricing=(0.14, 0.0028, 0.28),  # cache hit 50x discount (api-docs.deepseek.com)
         effort_levels=("high", "max"),
         tuning=ModelTuning(
             reasoning_effort="max",  # same as pro: Ava is not an auto-promoted harness
@@ -247,8 +243,6 @@ MODELS: dict[str, ModelSpec] = {
         context_window=1_000_000,
         max_output_tokens=128_000,
         knowledge_cutoff="2026-01",
-        # Sonnet 5 intro pricing ($2/$10) through Aug 31, 2026, then $3/$15 standard.
-        pricing=(2.0, 0.20, 10.0),  # cache read 0.20/M; re-check after Aug 31
         effort_levels=_CLAUDE_ADAPTIVE_EFFORT,
         tuning=ModelTuning(
             # Pinned 2026-08-01 (user decision, task #568): the picker must
@@ -265,7 +259,6 @@ MODELS: dict[str, ModelSpec] = {
         context_window=200_000,
         max_output_tokens=64_000,
         knowledge_cutoff="2025-10",
-        pricing=(1.0, 0.10, 5.0),  # cache read 0.10/M (10x vs input)
         # No wire `effort` field (server 400) — the cross-provider knob clamps
         # onto the manual-thinking on/off binary instead.
         effort_levels=("none", "high"),
@@ -282,7 +275,6 @@ MODELS: dict[str, ModelSpec] = {
         context_window=1_000_000,
         max_output_tokens=128_000,
         knowledge_cutoff="2026-01",
-        pricing=(5.0, 0.50, 25.0),  # cache read 0.50/M (10x vs input)
         effort_levels=_CLAUDE_ADAPTIVE_EFFORT,
         tuning=ModelTuning(
             # Pinned 2026-08-01 (task #568): Anthropic documents `high` as the
@@ -296,8 +288,6 @@ MODELS: dict[str, ModelSpec] = {
         context_window=1_000_000,
         max_output_tokens=128_000,
         knowledge_cutoff="2026-01",
-        # Fable 5 — Mythos-class frontier model, 2x Opus cost.
-        pricing=(10.0, 1.0, 50.0),  # cache read 1.00/M
         effort_levels=_CLAUDE_ADAPTIVE_EFFORT,
         tuning=ModelTuning(
             # Pinned 2026-08-01 (task #568): Anthropic documents `high` as the
@@ -323,9 +313,6 @@ MODELS: dict[str, ModelSpec] = {
         # Google does not publish a cutoff for 3.7 Flash; carries the 3.6
         # estimate forward (3.6 GA'd 2026-07-21, 3.7 GA'd 2026-08-13).
         knowledge_cutoff="2026-03",
-        # Intro pricing ($0.75/$3.75) through 2026-12-31, then the standard
-        # $1.50/$7.50 — same standard rate as 3.6. Cache read ~0.1x input.
-        pricing=(0.75, 0.075, 3.75),
         effort_levels=("minimal", "low", "medium", "high"),  # thinking_level vocabulary
         tuning=ModelTuning(
             # Pinned 2026-08-01 (task #568): Gemini flash default thinking_level
@@ -338,7 +325,6 @@ MODELS: dict[str, ModelSpec] = {
         spawnable=True,
         context_window=1_048_576,
         knowledge_cutoff="2025-01",
-        pricing=(1.5, 0.15, 9.0),
         effort_levels=("minimal", "low", "medium", "high"),
         tuning=ModelTuning(
             # Pinned 2026-08-01 (task #568): flash default thinking_level is
@@ -354,9 +340,6 @@ MODELS: dict[str, ModelSpec] = {
         # claim traces back to speculative blogs about a rumored Ultra tier.
         context_window=1_048_576,
         knowledge_cutoff="2025-01",
-        # Also has a >200K-context tier (4.0 / 0.4 / 18.0); the flat tuple
-        # encodes the <=200K base tier, so large-context calls are under-priced.
-        pricing=(2.0, 0.2, 12.0),
         effort_levels=("minimal", "low", "medium", "high"),
         tuning=ModelTuning(
             # Pinned 2026-08-01 (task #568): this model defaults to
@@ -387,7 +370,6 @@ MODELS: dict[str, ModelSpec] = {
         knowledge_cutoff="2026-02",
         # Flagship tier (explicit id; the bare gpt-5.6 alias also routes here,
         # but the catalog pins the explicit tier id like terra/luna).
-        pricing=(5.0, 0.5, 30.0),  # cached-input discount ~0.1x
         effort_levels=_GPT_EFFORT,
         tuning=ModelTuning(
             # Pinned 2026-08-01 (task #568): OpenAI documents `medium` as the
@@ -401,11 +383,6 @@ MODELS: dict[str, ModelSpec] = {
         spawnable=True,
         context_window=1_050_000,
         knowledge_cutoff="2026-02",
-        # Balanced tier. 2026-07-30 OpenAI cut Terra 20% (was 2.50/0.25/15.0
-        # at the 2026-07-09 launch) — verified against the live model card
-        # (developers.openai.com/api/docs/models/gpt-5.6-terra); Sol's price
-        # is unchanged by this cut.
-        pricing=(2.0, 0.20, 12.0),
         effort_levels=_GPT_EFFORT,
         # Same window, same effort ladder across all three tiers — OpenAI
         # documents no per-tier difference in anything Ava tunes.
@@ -416,10 +393,6 @@ MODELS: dict[str, ModelSpec] = {
         spawnable=True,
         context_window=1_050_000,
         knowledge_cutoff="2026-02",
-        # Cost-optimized tier. 2026-07-30 OpenAI cut Luna 80% (was
-        # 1.0/0.10/6.0 at the 2026-07-09 launch) — verified against the live
-        # model card (developers.openai.com/api/docs/models/gpt-5.6-luna).
-        pricing=(0.20, 0.02, 1.20),
         effort_levels=_GPT_EFFORT,
         tuning=ModelTuning(reasoning_effort="medium"),  # OpenAI default (see gpt-5.6-sol)
     ),
@@ -434,8 +407,6 @@ MODELS: dict[str, ModelSpec] = {
         context_window=1_000_000,
         max_output_tokens=128_000,
         knowledge_cutoff="2024-12",
-        # Benchmarked to the DeepSeek V4 Pro tier (3 / 0.025 / 6 RMB/M).
-        pricing=(0.435, 0.0036, 0.87),
         effort_levels=("none", "high"),  # body-level thinking on/off only
         tuning=ModelTuning(
             # Pinned 2026-08-01 (task #568): the "high" rung IS the provider
@@ -452,11 +423,6 @@ MODELS: dict[str, ModelSpec] = {
         context_window=1_000_000,
         max_output_tokens=128_000,
         knowledge_cutoff="2024-12",
-        # ultraspeed = 3x standard across all tiers. Still application-gated
-        # beta: the 2026-06-09..06-23 trial window was extended indefinitely
-        # (end date "to be announced"), so this is the standing rate, not a
-        # trial rate.
-        pricing=(1.305, 0.0108, 2.61),
         effort_levels=("none", "high"),
         tuning=ModelTuning(
             # Pinned 2026-08-01 (task #568): "high" = provider default (see
@@ -475,9 +441,6 @@ MODELS: dict[str, ModelSpec] = {
         context_window=1_048_576,
         knowledge_cutoff="2025-12",
         model_identity="You are running on Kimi K3 (Moonshot).",
-        # Official pricing: https://platform.moonshot.ai/docs/pricing
-        # (cache miss / cache hit / output, USD per 1M tokens)
-        pricing=(3.0, 0.30, 15.0),
         effort_levels=("low", "high", "max"),
         # Streams (the registry default). The former streaming=False carried
         # "streaming returns ~40% 429" — no incident record backs the asymmetry,
@@ -510,9 +473,6 @@ MODELS: dict[str, ModelSpec] = {
         spawnable=True,
         context_window=1_000_000,
         knowledge_cutoff="2025-12",
-        # ¥8/M input, ¥28/M output (~$1.10/$3.86 USD at Jul 2026 rate).
-        # Cache-hit discount: unverified; conservative 0.5x input placeholder.
-        pricing=(1.10, 0.55, 3.86),
         effort_levels=("high", "max"),
         tuning=ModelTuning(
             # Pinned 2026-08-01 (task #568): Z.ai documents GLM-5.2's default
@@ -533,7 +493,6 @@ MODELS: dict[str, ModelSpec] = {
         spawnable=True,
         context_window=500_000,
         knowledge_cutoff="2026-02",
-        pricing=(2.00, 0.50, 6.0),  # $2.00/$6.00 short-context, $0.50 cached input
         effort_levels=("low", "medium", "high"),
         tuning=ModelTuning(
             # Pinned 2026-08-01 (task #568): xAI documents `high` as the
@@ -541,13 +500,12 @@ MODELS: dict[str, ModelSpec] = {
             reasoning_effort="high",
         ),
     ),
-    # -- legacy / non-spawnable (facts kept for cost attribution + old agents) --
+    # -- legacy / non-spawnable (facts kept for old agents) --
     "claude-opus-4-8": ModelSpec(
         provider="claude",
         context_window=200_000,
         max_output_tokens=128_000,
         knowledge_cutoff="2026-01",
-        pricing=(5.0, 0.50, 25.0),
         effort_levels=_CLAUDE_ADAPTIVE_EFFORT,
     ),
     "claude-sonnet-4-6": ModelSpec(
@@ -555,48 +513,39 @@ MODELS: dict[str, ModelSpec] = {
         context_window=200_000,
         max_output_tokens=128_000,
         knowledge_cutoff="2025-08",
-        pricing=(3.0, 0.30, 15.0),
         effort_levels=("low", "medium", "high", "max"),  # xhigh arrived with opus-4-7
     ),
     "claude-opus-4-7": ModelSpec(
         provider="claude",
         max_output_tokens=128_000,
-        pricing=(5.0, 0.50, 25.0),
         effort_levels=_CLAUDE_ADAPTIVE_EFFORT,
     ),
     "claude-opus-4-6": ModelSpec(
         provider="claude",
-        pricing=(5.0, 0.50, 25.0),
     ),
-    # Bare alias of the dated snapshot above — pricing-only so historical cost
-    # lookups keyed by the dateless convenience id still resolve. Carries the
-    # same extended-thinking-only flag as the dated entry: without it the
-    # factory's adaptive-thinking default would send `type: "adaptive"`, which
-    # this model 400s on.
+    # Bare alias of the dated snapshot above, kept for old agent configs.
+    # Carries the same extended-thinking-only flag as the dated entry: without
+    # it the factory's adaptive-thinking default would send `type: "adaptive"`,
+    # which this model 400s on.
     "claude-haiku-4-5": ModelSpec(
         provider="claude",
-        pricing=(1.0, 0.10, 5.0),
         extended_thinking_only=True,
     ),
     "gemini-2.5-pro": ModelSpec(
         provider="gemini",
-        pricing=(1.25, 0.125, 10.0),  # ≤200K standard tier (ai.google.dev/pricing)
     ),
     "gemini-2.5-flash": ModelSpec(
         provider="gemini",
-        pricing=(0.30, 0.03, 2.50),  # ≤200K standard tier
     ),
     "gpt-5.5": ModelSpec(
         provider="gpt",
         context_window=256_000,
         knowledge_cutoff="2025-12",
-        pricing=(5.0, 0.5, 30.0),
     ),
     "gpt-5.4-mini": ModelSpec(
         provider="gpt",
         context_window=256_000,
         knowledge_cutoff="2025-08",
-        pricing=(0.75, 0.075, 4.5),
     ),
 }
 
@@ -654,18 +603,28 @@ def _validate_registry() -> None:
                 f"DEFAULT_TUNING.{tuning_field.name} is None — the shared-default floor "
                 f"must be fully populated (it is the last resort of resolve_setting)"
             )
+    # Function-local import keeps the roster independent of catalog storage at
+    # module definition time. `pricing` no longer imports this registry, so
+    # validation can ask its public selector without forming a cycle.
+    from shared.lm.pricing import rates_at
+
     for model_id, spec in MODELS.items():
         if not spec.spawnable:
             continue
         missing = [
             fact
-            for fact in ("context_window", "knowledge_cutoff", "pricing", "effort_levels")
+            for fact in ("context_window", "knowledge_cutoff", "effort_levels")
             if getattr(spec, fact) is None
         ]
         if missing:
             raise RuntimeError(
                 f"spawnable model {model_id!r} is missing registry facts {missing} — "
                 f"fill them in shared/lm/registry.py:MODELS"
+            )
+        if rates_at(model_id, input_tokens=0) is None:
+            raise RuntimeError(
+                f"spawnable model {model_id!r} has no current price in "
+                "shared/lm/pricing_catalog.json"
             )
         # The spawn picker pre-selects each model's default effort
         # (GET /api/models reasoning_effort_default) — without a concrete

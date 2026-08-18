@@ -44,9 +44,10 @@ LangChain types `AIMessage(Chunk).content` weakly as `str | list[str | dict[str,
 ### stop classification (`stop.py`)
 - `classify_stop()` → `StopCategory` (NORMAL/TRUNCATED/UNEXPECTED/CORRUPTED) by `model_provider`; `_BY_PROVIDER` has five keys for eight providers (anthropic ← claude+deepseek, openai ← gpt+mimo+glm, google_genai, moonshot, xai). TRUNCATED retries with raised max_tokens; unknown provider fail-fast.
 
-### billing (`pricing.py`)
-- `MODEL_PRICING` is a 3-tuple `(cache_miss, cache_hit, out)` USD/M — 2-tuple overstates DeepSeek 30–50× under high cache-hit rates (PR#322).
-- `tally_tokens()` → `(in, out, cached)`; `cost_usd()` three-tier, `None` for unknown (no guessing).
+### billing (`pricing.py` + `pricing_catalog.json`)
+- The reviewed JSON catalog is the sole volatile pricing source: every model has official-source provenance plus gapless effective periods, input-token tiers, and optional recurring UTC rate windows. The registry carries no duplicate price tuples.
+- `rates_at(model, at, input_tokens)` selects one exact 3-rate tuple `(cache_miss, cache_hit, out)` USD/M. `quote()` returns those rates and the computed cost atomically so a scheduled boundary cannot split the event snapshot; `cost_usd()` remains the compatibility reader and returns `None` for unknown models.
+- `scripts/update_model_pricing.py` reconciles strict official-source adapters with the checked-in catalog. Automation proposes an append-only, reviewable PR; runtime pricing stays deterministic and network-free.
 
 ### context budget (`context_budget.py`)
 - `resolve_context_budget(model)` → `ContextBudget(max_context_tokens, soft_compact_tokens, hard_compact_tokens)`: hard = `min(auto_compact_fraction × window, auto_compact_ceiling_tokens)`; soft = `compact_reminder_fraction × window` (scaled down when the ceiling bites). One flat rule for the whole roster — soft 30% / hard 40% of each model's own window (`DEFAULT_TUNING` 0.3/0.4, ceiling 0 = no cap, no per-model compact override), per-agent overridable; registry entry ⇒ correct thresholds, no parallel table. Unregistered models raise `UnknownModelWindowError` (compact hook bubbles it; gateway display degrades to 0/0/0).

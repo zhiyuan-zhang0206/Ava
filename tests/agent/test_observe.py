@@ -6,6 +6,8 @@ langchain-anthropic / langchain-openai all plumb cache + reasoning figures into
 usage_metadata.{input,output}_token_details.
 """
 
+from datetime import UTC, datetime
+
 import pytest
 from langchain_core.messages import AIMessage
 
@@ -118,9 +120,9 @@ def test_no_usage_metadata_silent(loguru_records):
 def test_price_snapshot_rides_payload(loguru_records):
     """The usage-time price snapshot (user principle, task #1273): cost_usd
     plus the three per-1M rates ride the event payload at write time, so the
-    read side never re-prices against the current registry. deepseek-v4-pro
-    (0.435 / 0.003625 / 0.87 USD/M): in=1000 cached=800 out=100 ->
-    (200 * 0.435 + 800 * 0.003625 + 100 * 0.87) / 1e6 = 0.0001769."""
+    read side never re-prices against the current catalog. At the fixed
+    off-peak instant deepseek-v4-pro is 0.66 / 0.022 / 1.98 USD/M: in=1000
+    cached=800 out=100 -> $0.0003476."""
     msg = AIMessage(
         content="",
         usage_metadata={
@@ -130,12 +132,16 @@ def test_price_snapshot_rides_payload(loguru_records):
             "input_token_details": {"cache_read": 800},
         },
     )
-    log_llm_usage(msg, model="deepseek-v4-pro")
+    log_llm_usage(
+        msg,
+        model="deepseek-v4-pro",
+        priced_at=datetime(2026, 8, 17, 0, 0, tzinfo=UTC),
+    )
     extra = loguru_records[0]["extra"]  # pyright: ignore[reportUnknownArgumentType]
-    assert extra["cost_usd"] == pytest.approx(0.0001769)  # pyright: ignore[reportUnknownMemberType]
-    assert extra["price_miss"] == 0.435
-    assert extra["price_hit"] == 0.003625
-    assert extra["price_out"] == 0.87
+    assert extra["cost_usd"] == pytest.approx(0.0003476)  # pyright: ignore[reportUnknownMemberType]
+    assert extra["price_miss"] == 0.66
+    assert extra["price_hit"] == 0.022
+    assert extra["price_out"] == 1.98
     # never in the human-readable line
     assert "cost" not in loguru_records[0]["message"]  # pyright: ignore[reportUnknownArgumentType]
 

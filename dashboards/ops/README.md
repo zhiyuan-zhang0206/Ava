@@ -121,8 +121,8 @@ the dashboard; the restart-spike alert rule (R3) still exists.)
 ### The observability core pack (core_metrics_observability.py)
 
 The former `ava_observability` plugin pack (W18), promoted to core
-2026-08-06: **LLM cost (USD)** (generated from `shared.lm.pricing.MODEL_PRICING`
-with a drift-lock test), **LLM errors**, **Turn success rate**, **Turn
+2026-08-06: **LLM cost (USD)** (usage-time quotes from the versioned pricing
+catalog, with a drift-lock test), **LLM errors**, **Turn success rate**, **Turn
 duration (p50/p90/max)** (`percentile_cont` / `WITHIN GROUP` whitelist
 extension), **Exec outcomes**, **Syntax fix triggers (by kind)**, **Agent
 spawns (by source)**, **Agent lifecycle counts**, **SDK calls (Top 20)**

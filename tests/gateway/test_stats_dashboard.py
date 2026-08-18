@@ -223,26 +223,26 @@ def test_dashboard_cost_aggregates_per_model(
     contribute 0 (unknown cost is treated as 0, not free)."""
     # claude-opus-4-8 (5, 5, 25) USD/M: in=1M out=1M cache=0 →
     # (1M*5 + 0 + 1M*25)/1e6 = 30.0
-    # deepseek-v4-pro (0.435, 0.003625, 0.87): in=1M out=1M cache=1M (full hit) →
-    # (0 + 1M*0.003625 + 1M*0.87)/1e6 = 0.873625
+    # mimo-v2.5-pro (0.435, 0.0036, 0.87): in=1M out=1M cache=1M (full hit) →
+    # (0 + 1M*0.0036 + 1M*0.87)/1e6 = 0.8736
     _install_prom(
         monkeypatch,
         windowed={
             _IN_METRIC: {
                 "claude-opus-4-8": 1_000_000.0,
-                "deepseek-v4-pro": 1_000_000.0,
+                "mimo-v2.5-pro": 1_000_000.0,
                 "no-such-model": 999.0,
                 "": 999.0,
             },
             _OUT_METRIC: {
                 "claude-opus-4-8": 1_000_000.0,
-                "deepseek-v4-pro": 1_000_000.0,
+                "mimo-v2.5-pro": 1_000_000.0,
                 "no-such-model": 999.0,
                 "": 999.0,
             },
             _CACHED_METRIC: {
                 "claude-opus-4-8": 0.0,
-                "deepseek-v4-pro": 1_000_000.0,
+                "mimo-v2.5-pro": 1_000_000.0,
                 "no-such-model": 0.0,
                 "": 0.0,
             },
@@ -251,7 +251,7 @@ def test_dashboard_cost_aggregates_per_model(
     db_conn.commit()
     with TestClient(app) as client:
         body = client.get("/api/stats/dashboard").json()
-    assert body["cost_usd"] == pytest.approx(30.0 + 0.873625)  # pyright: ignore[reportUnknownMemberType]
+    assert body["cost_usd"] == pytest.approx(30.0 + 0.8736)  # pyright: ignore[reportUnknownMemberType]
 
 
 def test_dashboard_aggregates_turn_end_filters_ok(
