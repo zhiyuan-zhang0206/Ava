@@ -1,7 +1,7 @@
 """OTel Collector sidecar install — pinned binary download + config generation.
 
 One collector per machine (task #1266): every agent on the host sends OTLP to
-its 127.0.0.1:4317/4318; the collector fans out to Tempo/Loki/Prometheus and
+its 127.0.0.1:4318 (OTLP/HTTP); the collector fans out to Tempo/Loki/Prometheus and
 mirrors traces to local JSONL. This module is the converge step's engine —
 idempotent: an already-installed, version-matching binary is a no-op; the
 config is regenerated on every converge so fan-out/retention setting changes
