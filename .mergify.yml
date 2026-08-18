@@ -1,0 +1,42 @@
+# Mergify merge queue — this repo's PR merge automation.
+#
+# Flow: CI green → post `@mergifyio queue` as a PR comment → Mergify rebases
+# the PR onto the latest main (update_method: rebase) → the normal
+# pull_request event re-runs CI on the rebased head → once merge_conditions
+# are green the PR lands with a rebase merge (linear history).
+#
+# queue_conditions: intentionally empty — entry is explicit (the comment
+# command), CI-gated by the caller before enqueuing. merge_conditions are
+# the real gate and mirror the branch-protection required checks. All three
+# CI jobs run on every PR (no diff-driven skipping in ci.yml), so the gate
+# is a plain success-only list.
+#
+# branch_protection_injection_mode: none — the explicit merge_conditions
+# below already carry the same gate as branch protection; injection would
+# only duplicate it.
+
+merge_queue:
+  # Cap parallel speculative combos so the queue cannot grow unbounded and
+  # stall on busy CI: speculative runs are re-runs of CI on rebased heads, so
+  # one speculative slot keeps the queue moving without multiplying CI load.
+  max_parallel_checks: 1
+
+queue_rules:
+  - name: default
+    # Mergify merges as the repo owner (admin). Branch protection enforces
+    # `enforce_admins`, so the required checks (backend, frontend, e2e) must
+    # be genuinely green for ANY merge, admin or not.
+    # Must be a GitHub user account logged into Mergify.
+    merge_bot_account: zhiyuan-zhang0206
+    # Without checks_timeout Mergify waits only the auto-derived 18m; on a
+    # busy queue every rebase re-runs CI and PRs get dequeued mid-run.
+    # 3600s = comfortable headroom over the full suite.
+    checks_timeout: 3600s
+    queue_conditions: []
+    merge_conditions:
+      - check-success=backend (pytest + pyright)
+      - check-success=frontend (eslint + tsc + vitest)
+      - check-success=e2e (Playwright happy path)
+    merge_method: rebase
+    update_method: rebase
+    branch_protection_injection_mode: none
