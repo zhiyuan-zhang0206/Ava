@@ -405,21 +405,27 @@ def flat_dump(mode: str = "python") -> dict[str, Any]:
 def format_timestamp(dt: datetime) -> str:
     """Render a TZ-aware datetime as the agent-facing timestamp string.
 
-    Format: ``[YYYY-MM-DD HH:MM:SS TZ]``, e.g. ``[2026-05-06 14:32:05 PDT]``. When
+    Format: ``[YYYY-MM-DD HH:MM:SS]``, e.g. ``[2026-05-06 14:32:05]``. When
     ``settings.general.message_timestamp_weekday`` is enabled the weekday
     abbreviated name is included between date and time. `dt` is converted to
     ``settings.general.timezone`` (default ``America/Los_Angeles``) first, so
     values read back from the database (TIMESTAMPTZ / UTC) render in the same
     wall clock as current-time stamps.
 
+    No timezone suffix: ``settings.general.timezone`` is cluster-pinned, so the
+    suffix was a constant string repeated on every timestamp — and an ambiguous
+    one (``%Z`` gives ``PDT``/``PST`` across a DST boundary, and ``CST`` names
+    two different zones). The agent is told the timezone once instead, by the
+    standing context note in `agent/graph/_context_notes.py`.
+
     This is the single agent-facing timestamp representation: every producer
-    goes through here, so the weekday flag can never apply to some of an
-    agent's timestamps and not others.
+    goes through here, so a format change can never apply to some of an agent's
+    timestamps and not others.
     """
     local = dt.astimezone(ZoneInfo(settings.general.timezone))
     if settings.general.message_timestamp_weekday:
-        return local.strftime("[%Y-%m-%d %a %H:%M:%S %Z]")
-    return local.strftime("[%Y-%m-%d %H:%M:%S %Z]")
+        return local.strftime("[%Y-%m-%d %a %H:%M:%S]")
+    return local.strftime("[%Y-%m-%d %H:%M:%S]")
 
 
 def now_timestamp() -> str:

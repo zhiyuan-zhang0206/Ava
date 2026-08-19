@@ -304,6 +304,10 @@ class TestAiMessageItems:
             NoteTag.PRELOADED_SKILLS,
             NoteTag.AGENT_MEMORY,
             NoteTag.EXEC_TIMEOUT,
+            # Standing head content, like the exec timeout beside it: its ts
+            # would only say when the window opened, and the note's whole point
+            # is that the timezone does not change.
+            NoteTag.TIMEZONE,
         }
         # Every NoteTag is classified — a new member added without a decision
         # here fails this, forcing the show/hide call to be made explicitly.

@@ -32,6 +32,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from langchain_core.messages import HumanMessage
 
@@ -43,12 +44,22 @@ from shared.log import logger
 NoteBuilder = Callable[[], HumanMessage | None]
 
 # The rank scale for the standing head — the reading order, lowest first:
-# the operational constraint (exec timeout), then the shared world (cluster
-# memory index), then identity (agent id), then the personal store (per-agent
-# memory index), then preloaded skill bodies. The ava_memory plugin pins the
-# two memory ranks; everything else registered without a rank defaults to
-# `DEFAULT_RANK` and renders after all ranked notes.
+# the operational constants (exec timeout, then the cluster clock), then the
+# shared world (cluster memory index), then identity (agent id), then the
+# personal store (per-agent memory index), then preloaded skill bodies. The
+# ava_memory plugin pins the two memory ranks; everything else registered
+# without a rank defaults to `DEFAULT_RANK` and renders after all ranked notes.
+#
+# Ranks 10-19 are the stable band, and that is a prompt-cache decision, not a
+# reading-order one. Both providers cache on a byte prefix, so what a note costs
+# depends on what sits in front of it: everything from rank 20 on is behind the
+# cluster memory index, which is re-read off disk at every window establishment
+# and changes whenever any agent writes memory. A note placed after it re-caches
+# on someone else's memory write. The 10-19 band is cluster-identical (same
+# bytes for every agent on the API key, so they share one cached prefix) and
+# changes only on a config edit that already forces an agent restart.
 RANK_EXEC_TIMEOUT = 10
+RANK_TIMEZONE = 15
 RANK_CLUSTER_MEMORY = 20
 RANK_AGENT_ID = 30
 RANK_PER_AGENT_MEMORY = 40
@@ -162,6 +173,53 @@ def exec_timeout_note() -> HumanMessage | None:
             timeout_display=_format_timeout_display(timeout_s),
         ),
         tag=NoteTag.EXEC_TIMEOUT,
+        created_at=datetime.now(UTC),
+    )
+
+
+_TIMEZONE_FRAMING = (
+    "Current timezone: {name} (UTC{offset}). All timestamps you see are in "
+    "this timezone — they carry no timezone suffix of their own. When you "
+    "record a time anywhere outside this conversation (a file, a memory note, "
+    "a message to another machine), write ISO-8601 with an offset instead."
+)
+
+
+def _utc_offset(moment: datetime) -> str:
+    """`moment`'s UTC offset as ``+08:00`` / ``-07:00`` (strftime gives ``+0800``)."""
+    raw = moment.strftime("%z")
+    return f"{raw[:3]}:{raw[3:]}"
+
+
+@register_context_note(rank=RANK_TIMEZONE)
+def timezone_note() -> HumanMessage | None:
+    """A context note declaring the cluster's timezone once, so the timestamps
+    themselves don't have to carry it.
+
+    `settings.general.timezone` is cluster-pinned, so the timezone is a
+    constant across every timestamp an agent will ever see — repeating it on
+    each one bought nothing and cost ambiguity (`%Z` renders `PDT` in June and
+    `PST` in December for one unchanged setting, and `CST` names two different
+    zones). Declared here, the IANA name is unambiguous and the numeric offset
+    is spelled out beside it.
+
+    Not an `on_fork` note: a fork inherits its source agent's history, and both
+    agents are in the same cluster, so the inherited declaration is correct.
+
+    The offset is resolved when the window is established. Across a DST
+    boundary within one long-lived window the numeric half can go stale; the
+    IANA name beside it stays authoritative, and a `AVA_TIMEZONE` edit is
+    `restart_required: agent`, which re-establishes the head.
+
+    Returns ``None`` when this process has no established agent identity."""
+    from ava._boot import _agent_id as _raw_aid
+
+    if _raw_aid is None:
+        return None
+    now = datetime.now(ZoneInfo(settings.general.timezone))
+    return system_note_message(
+        content=_TIMEZONE_FRAMING.format(name=settings.general.timezone, offset=_utc_offset(now)),
+        tag=NoteTag.TIMEZONE,
         created_at=datetime.now(UTC),
     )
 

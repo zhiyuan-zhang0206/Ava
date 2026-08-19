@@ -17,7 +17,9 @@ life — first wake, and the turn after any compaction — and by one owner.
 
 ### Standing Context Notes (`_context_notes.py`, laid down by the `init_context` node)
 - One ordered registry, one owner: `init_context` runs before `claim` and lays down the head — SystemMessage + every registered note — whenever `messages` is empty. A compaction empties the window, parks the tail in `state.context_reset`, and routes back here, so cold start and post-compact are one code path.
-- Framework notes: agent id (`on_fork`), exec timeout, preloaded skills. Plugins append at load; `clear_plugin_registrations` truncates to `_FRAMEWORK_NOTE_COUNT`. `on_fork` = the subset grafted onto a fork's inherited history (`fork_notes`).
+- Framework notes: agent id (`on_fork`), exec timeout, cluster timezone, preloaded skills. Plugins append at load; `clear_plugin_registrations` truncates to `_FRAMEWORK_NOTE_COUNT`. `on_fork` = the subset grafted onto a fork's inherited history (`fork_notes`).
+- Rank is a prompt-cache decision as much as a reading-order one. Ranks 10-19 are the stable band: cluster-identical bytes (one cached prefix shared by every agent on the API key) that change only on a config edit already requiring an agent restart. Rank 20 — the shared memory index — is re-read off disk at every establishment, so anything behind it re-caches whenever any agent writes memory. The cluster-timezone note sits at rank 15 for exactly this reason.
+- **Cluster timezone** (rank 15): states `settings.general.timezone` by IANA name plus its current numeric offset. It exists so the timestamps do not have to carry one — the setting is cluster-pinned, so the suffix was a constant repeated on every stamp, and an ambiguous constant at that (`%Z` is `PDT` in June and `PST` in December for one unchanged setting; `CST` names two zones). Not `on_fork`: a fork stays in the same cluster, so the inherited declaration is still true.
 
 ### Memory Injection (`plugins/ava_memory/notes.py`, registered by the plugin)
 - Both stores belong to `ava_memory`; disabling it removes stores, SDK surface, notes, and discipline section together.
@@ -35,7 +37,7 @@ life — first wake, and the turn after any compaction — and by one owner.
 
 ### Context Structure
 - System prompt (fixed, included in every LLM call)
-- Standing context notes (agent id / exec timeout / preloaded skills / the two memory indexes) laid down behind the system prompt whenever the window is established
+- Standing context notes (exec timeout / cluster timezone / agent id / preloaded skills / the two memory indexes) laid down behind the system prompt whenever the window is established
 - Message history (user messages + agent replies + tool call results)
 - Current turn input
 

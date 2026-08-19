@@ -78,6 +78,7 @@ class NoteTag(StrEnum):
     PRELOADED_SKILLS = "preloaded_skills"
     NEW_SKILLS = "new_skills"
     EXEC_TIMEOUT = "exec_timeout"
+    TIMEZONE = "timezone"
 
 
 class AvaMessageKwargs(TypedDict, total=False):

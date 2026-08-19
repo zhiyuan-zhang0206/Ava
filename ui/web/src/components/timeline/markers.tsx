@@ -54,6 +54,7 @@ export const NOTE_SOURCES = new Set([
   "context",
   "agent_id",
   "exec_timeout",
+  "timezone",
   "project_skills",
   "preloaded_skills",
   "new_skills",
