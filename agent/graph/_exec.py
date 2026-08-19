@@ -31,7 +31,11 @@ Core mechanisms:
     cannot clobber a newer exec's streams); the main task polls every 50ms and
     pushes the new accumulated chunk to redis (frontend streaming display).
     The same stream catches stdout+stderr to preserve chronological order —
-    same as what running Python in a terminal shows.
+    same as what running Python in a terminal shows. Accumulation is bounded
+    by `exec_output_accumulation_max_chars`: past it the middle is dropped as
+    it streams and a `StreamCap` rides the result to the envelope, so a
+    runaway print loop is truncated rather than left to OOM the process —
+    the run itself is not killed.
   - `_exec_with_cancel_event` returns a sum type (`_ExecDone | _ExecCancelled |
     _ExecTimedOut | _ExecLifecycle | _ExecCrashed`); exec_node dispatches via
     `match`, illegal state combinations are unrepresentable. Ordinary exception
@@ -99,7 +103,7 @@ from ._agent_traceback import (
 )
 from ._context import AvaContext, agent_id_from_config
 from ._exec_output import wrap_code_output
-from ._exec_stream import ExecOutputChunkPublisher, StreamingTextIO
+from ._exec_stream import ExecOutputChunkPublisher, StreamCap, StreamingTextIO
 from ._exec_threads import _async_raise_in_thread, _reap_orphaned_thread
 from ._interrupt import subscribe_interrupt
 from ._node_log import node_lifecycle
@@ -141,11 +145,17 @@ _thread_stuck_times: deque[float] = deque(maxlen=_THREAD_STUCK_WARN_THRESHOLD)
 # has to consider the race.
 
 
+# Every variant carries `stream_cap`: set when the accumulation budget dropped
+# the middle of `output` mid-run (see `_exec_stream.StreamingTextIO`). Every
+# outcome can be capped — a runaway loop can also time out or be cancelled — so
+# the field rides the whole sum type rather than one branch, and
+# `_dispatch_exec_result` hands it to the envelope uniformly.
 @dataclass(frozen=True)
 class _ExecDone:
     """Worker thread completed, no exception."""
 
     output: str
+    stream_cap: StreamCap | None = None
 
 
 @dataclass(frozen=True)
@@ -154,6 +164,7 @@ class _ExecCancelled:
     thread exits; `output` contains accumulated partial + KeyboardInterrupt traceback."""
 
     output: str
+    stream_cap: StreamCap | None = None
 
 
 @dataclass(frozen=True)
@@ -161,6 +172,7 @@ class _ExecTimedOut:
     """60s deadline → main task ctypes-injects TimeoutError → thread exits."""
 
     output: str
+    stream_cap: StreamCap | None = None
 
 
 @dataclass(frozen=True)
@@ -173,6 +185,7 @@ class _ExecLifecycle:
 
     output: str
     exc: _LifecycleExit  # _SystemHalt | AgentTermination | AgentRestart
+    stream_cap: StreamCap | None = None
 
 
 @dataclass(frozen=True)
@@ -184,6 +197,7 @@ class _ExecCrashed:
 
     output: str
     exc: BaseException
+    stream_cap: StreamCap | None = None
 
 
 @dataclass(frozen=True)
@@ -321,7 +335,12 @@ async def _await_worker_exit(
 
 
 def _construct_exec_result(
-    output: str, exc: BaseException | None, *, cancelled: bool, timed_out: bool
+    output: str,
+    exc: BaseException | None,
+    *,
+    cancelled: bool,
+    timed_out: bool,
+    stream_cap: StreamCap | None,
 ) -> _ExecResult:
     """Dispatch priority: lifecycle > cancel > timeout > crashed > done.
 
@@ -330,14 +349,14 @@ def _construct_exec_result(
     inbound). Cancel > timeout (CLAUDE design: cancel always wins).
     """
     if isinstance(exc, _LifecycleExit):
-        return _ExecLifecycle(output=output, exc=exc)
+        return _ExecLifecycle(output=output, exc=exc, stream_cap=stream_cap)
     if cancelled:
-        return _ExecCancelled(output=output)
+        return _ExecCancelled(output=output, stream_cap=stream_cap)
     if timed_out:
-        return _ExecTimedOut(output=output)
+        return _ExecTimedOut(output=output, stream_cap=stream_cap)
     if exc is not None:
-        return _ExecCrashed(output=output, exc=exc)
-    return _ExecDone(output=output)
+        return _ExecCrashed(output=output, exc=exc, stream_cap=stream_cap)
+    return _ExecDone(output=output, stream_cap=stream_cap)
 
 
 async def _run_in_thread(
@@ -385,7 +404,11 @@ async def _run_in_thread(
             chunk_publisher.publish(pending)
 
     return _construct_exec_result(
-        stream.getvalue(), result_holder["exc"], cancelled=cancelled, timed_out=timed_out
+        stream.getvalue(),
+        result_holder["exc"],
+        cancelled=cancelled,
+        timed_out=timed_out,
+        stream_cap=stream.cap(),
     )
 
 
@@ -577,6 +600,10 @@ def _dispatch_exec_result(
     consumes the sum type. Exhaustiveness: pyright strict + match narrowing make
     a forgotten variant a static error (replaces the hand-written fallthrough).
     """
+    # Present on every variant (see the sum-type definitions): when the
+    # accumulation budget dropped the middle mid-run, the envelope needs it to
+    # report the true produced length and to stop calling the archive complete.
+    stream_cap = result.stream_cap
     match result:
         case _ExecLifecycle(output=output, exc=_SystemHalt()):
             # ava.self.compact already INSERTed compact_summary inbound; append
@@ -584,7 +611,7 @@ def _dispatch_exec_result(
             halted = True
             extra = "[system halt] You just called ava.self.compact; your context has been compacted and you will continue as the same agent\n"
             output = (output if not output or output.endswith("\n") else output + "\n") + extra
-            result_text = wrap_code_output(output)
+            result_text = wrap_code_output(output, stream_cap=stream_cap)
             exit_code_for_msg = SYSTEM_HALT_EXIT_CODE
             logger.info("[{label}] {body}", label="exec", body=result_text)
             logger.info("[{label}] {body}", label="halt", body="system_halt (compact)")
@@ -592,7 +619,7 @@ def _dispatch_exec_result(
             # SDK already INSERTed the inbound; the claim side writes the
             # lifecycle marker — no "[halt]" annotation (duplication is noise).
             halted = True
-            result_text = wrap_code_output(output)
+            result_text = wrap_code_output(output, stream_cap=stream_cap)
             exit_code_for_msg = IDLE_EXIT_CODE
             logger.info("[{label}] {body}", label="exec", body=result_text)
             logger.info(
@@ -611,7 +638,7 @@ def _dispatch_exec_result(
             )
         case _ExecCancelled(output=output):
             halted = True
-            result_text = wrap_code_output(output, cancelled=True)
+            result_text = wrap_code_output(output, cancelled=True, stream_cap=stream_cap)
             exit_code_for_msg = -1
             logger.info(
                 "[{label}] {body}", label="exec-cancelled", body=result_text, event="exec_cancelled"
@@ -624,7 +651,7 @@ def _dispatch_exec_result(
             # Timeout is ordinary feedback, not a stop-turn signal: the envelope
             # hints at long-running primitives; the next LLM round adapts.
             halted = False
-            result_text = wrap_code_output(output, timed_out=True)
+            result_text = wrap_code_output(output, timed_out=True, stream_cap=stream_cap)
             exit_code_for_msg = -1
             logger.info(
                 "[{label}] {body}", label="exec-timeout", body=result_text, event="exec_timeout"
@@ -636,7 +663,7 @@ def _dispatch_exec_result(
             # event=exec_failed — trial-and-error is the normal dev loop, not
             # an operator alert (metrics still aggregate by event name).
             halted = False
-            result_text = wrap_code_output(output)
+            result_text = wrap_code_output(output, stream_cap=stream_cap)
             exit_code_for_msg = 0
             logger.info(
                 "[{label}] {body}\n[full traceback]\n{full_traceback}",
@@ -648,7 +675,7 @@ def _dispatch_exec_result(
             )
         case _ExecDone(output=output):
             halted = False
-            result_text = wrap_code_output(output)
+            result_text = wrap_code_output(output, stream_cap=stream_cap)
             exit_code_for_msg = 0
             logger.info("[{label}] {body}", label="exec", body=result_text)
     return halted, result_text, exit_code_for_msg
