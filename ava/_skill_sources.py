@@ -27,6 +27,16 @@ _PROVIDERS: list[Callable[[], list[Path]]] = []
 def register(provider: Callable[[], list[Path]]) -> None:
     """Append a skill-root provider. Called via `ava.skills.register_skill_source`."""
     _PROVIDERS.append(provider)
+    # Attribution for `ava plugins inspect`; lazy import keeps this leaf free of
+    # an ava -> shared load-order dependency, and it is a no-op outside a plugin
+    # import.
+    from shared import plugin_contributions
+
+    plugin_contributions.record(
+        "skillSources",
+        getattr(provider, "__name__", repr(provider)),
+        detail=getattr(provider, "__module__", "?"),
+    )
 
 
 def clear() -> None:

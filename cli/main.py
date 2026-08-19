@@ -104,6 +104,7 @@ from cli.parsers.mcp import (
 from cli.parsers.plugins import (
     _h_plugins_disable,
     _h_plugins_enable,
+    _h_plugins_inspect,
     _h_plugins_install,
     _h_plugins_installed,
     _h_plugins_uninstall,
@@ -166,6 +167,7 @@ __all__ = [
     "_h_notices_resolve",
     "_h_plugins_disable",
     "_h_plugins_enable",
+    "_h_plugins_inspect",
     "_h_plugins_install",
     "_h_plugins_installed",
     "_h_plugins_uninstall",

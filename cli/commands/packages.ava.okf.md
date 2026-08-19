@@ -29,12 +29,34 @@ which is the reason an agent is in the loop at all.
 ```bash
 ava plugins install <git-url> [--path <subdir>] [--ref <tag|commit|branch>] [--accept-risk]
 ava plugins installed | upgrade <name> | uninstall <name>
+ava plugins inspect [<name>]                  # the extension-surface catalog (read-only)
 ava skill install <src> [--path <subdir>] [--ref <ref>] [--accept-risk]
 ava skill enable <name> | disable <name>      # toggle a tracked package in the scanner
 ava skill register <name> [--accept-risk]     # adopt a hand-copied dir in $AVA_HOME/skills/
 ava skill scan <name-or-path>                 # re-run the supply-chain scan (exit 2 on criticals)
 ava skill trust <name> [--revoke]             # record that a human read it (trust=reviewed)
 ```
+
+## `ava plugins inspect` — the catalog
+
+The only verb here that installs, removes, or rewrites nothing. Bare, it prints the framework's
+extension surfaces — each one's `register_*` signature rendered from the live
+object, the contract a contributor must satisfy, and who is using it — then one
+line per installed plugin. With a name, it prints that plugin's every
+registration as a fact (surface, identifier, the class or function behind it) and
+diffs those against its `ava-plugin.json` declarations when it ships one.
+
+It answers two questions nothing else could: *what can a plugin extend* (for an
+agent writing one, which otherwise means reading framework source) and *what is
+this machine's agent actually composed of*. Both halves read the attribution
+ledger (`shared/plugin_contributions.py`) that every `register_*` entry point
+writes, so nothing here is transcribed. [[okf/plugins/plugins.ava.okf.md|Detail]].
+
+Reading registrations means loading the plugins, which means importing them — so
+a **disabled** plugin is listed with its enable-state and nothing else, rather
+than with a guess read off its source, and the load carries an agent boot's own
+side effects (a plugin's missing config image is written from defaults, exactly
+as a boot would write it).
 
 ## The install gate
 
