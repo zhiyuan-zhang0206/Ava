@@ -18,7 +18,7 @@ The root is an index; the real content lives in seven sub-skills: `ops` (start/s
 ## Design Intent (Operate Along the Grain)
 - **One tool = one namespace**: the agent has only one action, `execute_code`; each capability is a Python name under `ava.*`. The CLI is the **operator's** surface to the same system.
 - **Core is destined to shrink**: as models get stronger, remove scaffolding — log reading, plugin-config merge, Telegram push are *skill/CLI*, not persistent SDK functions; a capability has to be used frequently enough to deserve a short SDK name.
-- **Modifying its own code is not a CLI op**: never edit the running source and reload; code changes go through the full workflow of [[ava_builtins/skills/self_improvement/ava-self-development.ava.okf.md|ava-self-development]]. ava-guide = operations system, ava-self-development = development system.
+- **Modifying its own code is not a CLI op**: never edit the running source and reload; kernel-code changes go through the full L4 workflow of the `ava-self-development` skill (`.agents/skills/ava-self-development/`; layer routing = the `ava-modification-layers` skill). ava-guide = operations system, ava-self-development = development system.
 
 ## Key Dependencies
 - [[ava_builtins/skills/ops_lifecycle/ops_lifecycle.ava.okf.md|Ops, Scheduling & Lifecycle Skills]] — parent functional group

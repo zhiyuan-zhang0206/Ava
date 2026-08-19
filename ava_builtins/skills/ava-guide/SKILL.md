@@ -54,9 +54,9 @@ When you face a task related to Ava itself, first determine which category it fa
 | If you want to… | Read this skill |
 |---|---|
 | Run the cluster, update code, switch tracks, manage MCP servers, install skills/plugins | **ava-guide** (this skill) |
-| Modify Ava source code, write SDK changes, change prompts, change skills, submit PRs | **ava-self-development** |
+| Change the deployment itself — edit a skill, develop a plugin, or modify kernel source | **ava-modification-layers** (pick the layer L1–L4; L3 continues into **develop-a-plugin**, L4 into **ava-self-development**) |
 
-Simply put: **Ava Guide = operating system**, **Ava Self-development = development system**.
+Simply put: **Ava Guide = operating system**, **the modification layers = development system**.
 
 Things not handled by this skill:
 - Modifying a line of SDK code and then making the cluster take effect → this is the full process of ava-self-development (PR → CI → merge → `ava cluster update`)
