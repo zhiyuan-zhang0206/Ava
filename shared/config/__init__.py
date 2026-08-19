@@ -82,7 +82,7 @@ Resolution + stamping mechanics: `shared/birth_config.py`.
 from __future__ import annotations
 
 import os
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, cast
 from zoneinfo import ZoneInfo
 
@@ -402,19 +402,32 @@ def flat_dump(mode: str = "python") -> dict[str, Any]:
 # scopes are distributed; host / agent fields are not.
 
 
-def now_timestamp() -> str:
-    """Return the current-time agent-facing timestamp string.
+def format_timestamp(dt: datetime) -> str:
+    """Render a TZ-aware datetime as the agent-facing timestamp string.
 
     Format: ``[YYYY-MM-DD HH:MM:SS TZ]``, e.g. ``[2026-05-06 14:32:05 PDT]``. When
     ``settings.general.message_timestamp_weekday`` is enabled the weekday
-    abbreviated name is included between date and time. Timezone from
-    ``settings.general.timezone``, defaults to ``America/Los_Angeles``.
+    abbreviated name is included between date and time. `dt` is converted to
+    ``settings.general.timezone`` (default ``America/Los_Angeles``) first, so
+    values read back from the database (TIMESTAMPTZ / UTC) render in the same
+    wall clock as current-time stamps.
+
+    This is the single agent-facing timestamp representation: every producer
+    goes through here, so the weekday flag can never apply to some of an
+    agent's timestamps and not others.
     """
-    tz = ZoneInfo(settings.general.timezone)
-    now = datetime.now(tz)
+    local = dt.astimezone(ZoneInfo(settings.general.timezone))
     if settings.general.message_timestamp_weekday:
-        return now.strftime("[%Y-%m-%d %a %H:%M:%S %Z]")
-    return now.strftime("[%Y-%m-%d %H:%M:%S %Z]")
+        return local.strftime("[%Y-%m-%d %a %H:%M:%S %Z]")
+    return local.strftime("[%Y-%m-%d %H:%M:%S %Z]")
+
+
+def now_timestamp() -> str:
+    """Return the current time as an agent-facing timestamp string.
+
+    Thin wrapper over `format_timestamp`; see there for the format.
+    """
+    return format_timestamp(datetime.now(UTC))
 
 
 # ── Re-exports of the split-out consumer modules (import sites unchanged) ──

@@ -277,3 +277,53 @@ class TestCreatedAtWithTimestampsOff:
 
         created = datetime(2026, 6, 21, 10, 0, 0, tzinfo=UTC)
         assert wrap_inbound("hi", "agent:5", created_at=created) == "Agent 5:\n\nhi"
+
+
+class TestWeekdayFlag:
+    """`message_timestamp_weekday` reaches the `created_at` path too.
+
+    Production inbound rows always carry a creation time, so that path — not
+    the `now_timestamp` fallback — is the one every user message takes. A flag
+    honoured only by `now_timestamp` gave the agent two timestamp formats in
+    one conversation: no weekday on inbound, weekday on exec output and
+    lifecycle markers.
+    """
+
+    @staticmethod
+    def _wrap(monkeypatch: pytest.MonkeyPatch, *, weekday: bool) -> str:
+        from datetime import datetime
+
+        from shared.config import settings
+
+        monkeypatch.setattr(settings.general, "message_timestamp_weekday", weekday)
+        # UTC 10:30 on a Sunday = PDT 03:30
+        created = datetime(2026, 6, 21, 10, 30, 0, tzinfo=UTC)
+        return wrap_inbound("hi", "user", created_at=created)
+
+    def test_weekday_on(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        assert self._wrap(monkeypatch, weekday=True) == "User [2026-06-21 Sun 03:30:00 PDT]:\n\nhi"
+
+    def test_weekday_off(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        assert self._wrap(monkeypatch, weekday=False) == "User [2026-06-21 03:30:00 PDT]:\n\nhi"
+
+    def test_created_at_and_now_agree(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Both producers render one shape — the docstring claim, enforced.
+
+        `now_timestamp` is unmocked here (the autouse freeze is undone) so the
+        two real code paths are compared against each other.
+        """
+        import re
+        from datetime import datetime
+
+        from shared.config import now_timestamp, settings
+
+        monkeypatch.setattr("shared.envelope.now_timestamp", now_timestamp)
+        for weekday in (True, False):
+            monkeypatch.setattr(settings.general, "message_timestamp_weekday", weekday)
+            day = r"[A-Z][a-z]{2} " if weekday else ""
+            shape = rf"^User \[\d{{4}}-\d{{2}}-\d{{2}} {day}\d{{2}}:\d{{2}}:\d{{2}} \S+\]:$"
+            for out in (
+                wrap_inbound("hi", "user"),
+                wrap_inbound("hi", "user", created_at=datetime.now(UTC)),
+            ):
+                assert re.match(shape, out.split("\n")[0]), out

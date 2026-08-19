@@ -32,7 +32,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from shared.config import now_timestamp, settings
+from shared.config import format_timestamp, now_timestamp, settings
 
 _AGENT_PREFIX = "agent:"
 _PAGE_PREFIX = "ui:page:"
@@ -50,21 +50,6 @@ def _check_positive_int_id(value: str, source: str) -> None:
         raise ValueError(f"source must carry <non-negative-int> id, got {source!r}") from e
     if n < 0 or str(n) != value:
         raise ValueError(f"source must carry <non-negative-int> id, got {source!r}")
-
-
-def _format_ts(dt: datetime) -> str:
-    """Format a TZ-aware datetime using the same representation as `now_timestamp`.
-
-    Converts to the configured timezone before formatting so timestamps from
-    the database (stored as TIMESTAMPTZ / UTC) display in the agent's local
-    timezone, matching the format `now_timestamp` produces for current-time
-    stamps.
-    """
-    from zoneinfo import ZoneInfo
-
-    tz = ZoneInfo(settings.general.timezone)
-    local = dt.astimezone(tz)
-    return local.strftime("[%Y-%m-%d %H:%M:%S %Z]")
 
 
 def validate_source(source: str) -> None:
@@ -113,7 +98,7 @@ def wrap_inbound(content: str, source: str, *, created_at: datetime | None = Non
     # `ts` carries its own leading space so the off-state leaves no stray
     # space before the colon (gated by settings.general.message_timestamps).
     if settings.general.message_timestamps:
-        formatted = _format_ts(created_at) if created_at is not None else now_timestamp()
+        formatted = format_timestamp(created_at) if created_at is not None else now_timestamp()
         ts = f" {formatted}"
     else:
         ts = ""
