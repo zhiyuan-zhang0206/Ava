@@ -325,6 +325,7 @@ def test_cmd_converge_unconfigured_returns_zero(
     home, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     import cli.commands as _ns
+    from shared import runtime_binaries as rb
     from shared.config import settings
 
     repo = tmp_path / "repo"
@@ -333,6 +334,13 @@ def test_cmd_converge_unconfigured_returns_zero(
     # settings is an import-time singleton, so patch the attribute directly
     # (setenv("AVA_HOME") would not be re-read).
     monkeypatch.setattr(settings.general, "ava_home", home / "avahome")  # pyright: ignore[reportUnknownArgumentType]
+    # A unit test must not reach Maven Central: seed the vendored Postgres tree so
+    # the vendored-binaries step takes ensure_pg_binaries()'s idempotent early
+    # return (the real download is covered by tests/integration/test_vendored_binaries.py).
+    monkeypatch.setattr(settings.general, "cluster_registry", str(tmp_path / "clusters.json"))
+    seeded_bin = rb.vendored_pg_dir() / "bin"
+    seeded_bin.mkdir(parents=True)
+    (seeded_bin / "initdb").write_text("#!/bin/sh\n")
     monkeypatch.setattr(_ns, "_repo_root", lambda: repo)
     monkeypatch.setattr(_ns, "_roles_or_none", lambda: None)
     # host-global wiring (the ava symlink) is prod-install only, so this test must

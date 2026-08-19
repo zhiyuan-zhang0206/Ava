@@ -8,7 +8,9 @@ a brew-free machine.
 
 from __future__ import annotations
 
+import email.message
 import subprocess
+import urllib.error
 from pathlib import Path
 
 import pytest
@@ -35,6 +37,78 @@ def test_pg_tool_prefers_vendored_dir(isolated_runtime: None) -> None:
     (bin_dir / "initdb").write_text("#!/bin/sh\n")
     assert pg_tools.pg_tool("initdb") == bin_dir / "initdb"
     assert rb.vendored_pg_bin_dir() == bin_dir
+
+
+class _FakeResponse:
+    def __init__(self, body: bytes) -> None:
+        self._body = body
+
+    def __enter__(self) -> _FakeResponse:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        return None
+
+    def read(self) -> bytes:
+        return self._body
+
+
+def _http_error(status: int) -> urllib.error.HTTPError:
+    return urllib.error.HTTPError(
+        "https://repo1.invalid/x.jar", status, "boom", email.message.Message(), None
+    )
+
+
+def _patch_urlopen(
+    monkeypatch: pytest.MonkeyPatch, answers: list[urllib.error.URLError | _FakeResponse]
+) -> tuple[list[str], list[float]]:
+    """urlopen pops `answers` (an exception raises); returns (calls, recorded sleeps)."""
+    calls: list[str] = []
+    sleeps: list[float] = []
+
+    def fake_urlopen(url: str, timeout: float) -> _FakeResponse:
+        calls.append(url)
+        answer = answers.pop(0)
+        if isinstance(answer, urllib.error.URLError):
+            raise answer
+        return answer
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr("time.sleep", sleeps.append)
+    return calls, sleeps
+
+
+def test_download_retries_transient_answers_then_succeeds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """429/5xx from the mirror and socket-level failures back off and retry; the
+    sha256 pin makes the eventual bytes trustworthy regardless of which attempt won."""
+    calls, sleeps = _patch_urlopen(
+        monkeypatch,
+        [_http_error(429), _http_error(503), urllib.error.URLError("reset"), _FakeResponse(b"jar")],
+    )
+    assert rb._download("https://repo1.invalid/x.jar") == b"jar"
+    assert len(calls) == 4
+    assert sleeps == [2, 4, 8]
+
+
+def test_download_fails_fast_on_a_permanent_http_answer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A non-transient 4xx (bad pin/artifact) is a permanent answer — no retry."""
+    calls, sleeps = _patch_urlopen(monkeypatch, [_http_error(404)])
+    with pytest.raises(RuntimeError, match="404"):
+        rb._download("https://repo1.invalid/x.jar")
+    assert len(calls) == 1
+    assert sleeps == []
+
+
+def test_download_gives_up_after_bounded_retries(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls, sleeps = _patch_urlopen(monkeypatch, [_http_error(429)] * rb._DOWNLOAD_ATTEMPTS)
+    with pytest.raises(RuntimeError, match="429"):
+        rb._download("https://repo1.invalid/x.jar")
+    assert len(calls) == rb._DOWNLOAD_ATTEMPTS
+    assert sleeps == [2, 4, 8]
 
 
 def test_ensure_pg_binaries_real_download(isolated_runtime: None) -> None:
