@@ -3,7 +3,7 @@
 How documentation is structured and maintained. Read when writing or maintaining
 project docs.
 
-## Four axes, one fact per place
+## Five axes, one fact per place
 
 Every documented fact belongs to exactly one axis, and the axis is identifiable
 from the path alone:
@@ -14,6 +14,7 @@ from the path alone:
 | `decisions/` | **why** it was chosen this way — rejected alternatives, trade-offs | past, never rewritten |
 | `future/` | what we **plan** to do | future |
 | `conventions/` | **how** to work — rules, processes, operations | now |
+| `postmortems/` | **why a failure escaped** — what broke, why every safety net missed it, what guardrail now prevents the class | past, never rewritten |
 
 A fact carried on two axes will drift. When you find a duplicate, keep the copy
 on the axis that owns the question and replace the other with a pointer.
@@ -32,6 +33,42 @@ that run — `.agents/skills/inspect-a-trace/SKILL.md` is the know-how for doing
 so across checkpoints, Loki, and Tempo. What generalizes out of a run belongs
 on an axis: a structural fact in the co-located OKF node, a rule in
 `conventions/`, a rejected alternative in `decisions/`.
+
+## Postmortems and defensive patterns
+
+`decisions/` and `postmortems/` are both past-tense and both frozen, and they are
+easy to confuse. The split is the question, not the tense: a decision is a
+point-in-time **choice** with alternatives rejected; a postmortem is an **escape
+analysis** — the safety nets that should have caught something and did not. A
+change that rejected an option is a decision even if it followed an incident; an
+incident whose value is "here is why nothing caught it" is a postmortem even if
+no alternative was ever on the table.
+
+**Entry bar — all three at once:** subtle (the mechanism had to be re-derived the
+hard way), systemic (it escaped through a gap in tests, tooling, or conventions,
+not one person's slip), and costly to rediscover (hours, or a production
+incident). A routine bug that a test caught stays in git history.
+
+**Shape.** `postmortems/NNNN-<kebab-title>.md`, numbered, executive-summary
+first. Copy `postmortems/_template.md`, which carries the sections: summary,
+timeline, root cause (mechanism *plus* the per-safety-net escape analysis),
+guardrails added, lessons. Postmortems are the one tier where war-story
+chronology belongs — current-state facts stay on the other axes, cited by link.
+
+**The pipeline.** A postmortem produces guardrails; the guardrails that
+generalize condense into one 3–6 line rule in
+[`defensive-patterns.md`](defensive-patterns.md), which is the page people
+re-read. Neither half works alone: the rules without the stories lose their
+evidence and decay into vibes, and the stories without the page never compress
+into anything anyone reads twice. A postmortem whose lesson generalizes and does
+not appear on that page is only half filed.
+
+Like `decisions/`, `postmortems/` is skipped entirely by
+`scripts/check_doc_references.py` — naming the flag or file that existed at
+incident time is the record working as intended. Nothing checks those links, so
+mark what a reader cannot open; commits and PR numbers predating the 2026-08-18
+public-repo cutover are not reachable from public `main` and are labelled
+`(pre-cutover)`.
 
 ## OKF is the source of truth for structure
 
@@ -153,10 +190,16 @@ Process, rule, and observed-behaviour changes → the doc that owns them:
 | SDK docstrings (`ava/*.py` public API) | `sdk-docstring-discipline.md` |
 | Lint vs sweeper boundary | `lint-vs-sweeper.md` |
 | Observability surfaces (event fields, span attributes, query recipes) | `.agents/skills/inspect-a-trace/` — the skill IS the reconcile target, since nothing else records what a run looks like |
+| A bug class that already shipped here | `defensive-patterns.md` — plus a `postmortems/` entry when it clears the entry bar |
 
 A directional decision — one that rejected alternatives — also gets a new
 `decisions/YYYY-MM-DD-<topic>.md`. Superseding one means writing a new file
 and forward-linking from the old, never editing the old.
+
+A failure that cleared the entry bar above also gets a new
+`postmortems/NNNN-<kebab-title>.md`, and its generalizable lesson an entry in
+`defensive-patterns.md`. Same freeze rule: a postmortem is never rewritten to
+match today's code.
 
 ## Doc language
 

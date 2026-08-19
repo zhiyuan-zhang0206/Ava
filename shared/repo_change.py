@@ -13,6 +13,7 @@ from __future__ import annotations
 
 _DOC_ROOTS = (
     "decisions/",  # the why axis — never-rewritten ADRs
+    "postmortems/",  # the why-it-escaped axis — frozen incident narratives
     "future/",  # the plans axis
     "conventions/",  # the how-to-work axis
     "okf/",  # the OKF index layer
