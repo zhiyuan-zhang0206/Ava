@@ -12,7 +12,7 @@ import pytest
 
 _ref_dir = (
     Path(__file__).resolve().parents[2]
-    / "ava_builtins"
+    / ".agents"
     / "skills"
     / "ava-self-development"
     / "reference"

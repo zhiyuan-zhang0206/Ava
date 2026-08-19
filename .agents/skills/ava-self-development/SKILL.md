@@ -1,9 +1,16 @@
 ---
 name: ava-self-development
-description: How Ava changes its own code and makes it take effect — develop via PR, then `ava cluster update` (the CLI; `ava.self.update()` was removed 2026-08). Triggered when modifying Ava's source / SDK / prompts / skills, or on self-roll / upgrade mentions.
+description: L4 kernel-contributor discipline — how a change to Ava's own code takes effect (worktree → PR → CI → merge, then `ava cluster update`). Read before touching kernel source; install/skill/plugin changes (L1–L3) never need this pipeline — see ava-modification-layers.
 ---
 
-# Ava Self-Development
+# Ava Self-Development (L4 — changing the kernel)
+
+This is the **L4** manual of the four-layer modification model
+(`decisions/2026-08-19-four-layer-modification-model.md`): changing the kernel
+repo itself. Installing extensions (L1), editing skills (L2), and developing
+plugins (L3) are cheaper layers with their own apply mechanisms — the
+`ava-modification-layers` skill routes between them; `develop-a-plugin` covers
+L3. Reach for this manual only when the change belongs in the kernel repo.
 
 ## §0 How a change to Ava takes effect (read this first)
 
@@ -280,17 +287,9 @@ The script is idempotent — re-running for the same version label replaces that
 label's previous entry instead of appending a duplicate block.
 
 ```bash
-# Generate the entry since the latest dated tag through HEAD.
+# Since the latest dated tag through HEAD (--since/--until override the range;
+# --stdout previews without updating the file; --version sets a custom label).
 .venv/bin/python reference/generate_sdk_changelog.py
-
-# Specify the range explicitly.
-.venv/bin/python reference/generate_sdk_changelog.py --since v0.10.0 --until HEAD
-
-# Print to stdout (preview, does not update the file).
-.venv/bin/python reference/generate_sdk_changelog.py --stdout
-
-# Custom version label.
-.venv/bin/python reference/generate_sdk_changelog.py --version v0.11.0-20260626
 ```
 
 The script is self-contained (stdlib only — `ast`, `subprocess`, `argparse`,
