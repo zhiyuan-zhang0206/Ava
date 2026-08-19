@@ -178,14 +178,14 @@ This `AGENTS.md` is this repo's entry point for all AI coding agents.
 
 ## Key docs — read on demand
 
-Four axes, one fact per place: `*.ava.okf.md` next to the code = what the system **is**; `decisions/` = **why**
-(never rewritten); `future/` = **plans**; `conventions/` = **how to work**. What the system **does in time** is not an
-axis — no run is committed; query the live one ([`.agents/skills/inspect-a-trace/`](.agents/skills/inspect-a-trace/SKILL.md)).
+Five axes, one fact per place: `*.ava.okf.md` next to the code = what the system **is**; `decisions/` = **why** (never rewritten); `future/` = **plans**; `conventions/` = **how to work**;
+`postmortems/` = **why a failure escaped** — frozen incident narratives, each naming the guardrail it bought, distilled into [`conventions/defensive-patterns.md`](conventions/defensive-patterns.md)
+(read before lifecycle / release / infra work). What the system **does in time** is not an axis — no run is committed; query the live one ([`.agents/skills/inspect-a-trace/`](.agents/skills/inspect-a-trace/SKILL.md)).
 [Doc maintenance →](conventions/doc-maintenance.md)
 
 | When you need to… | Read |
 |---|---|
-| Understand architecture | [`okf/index.ava.okf.md`](okf/index.ava.okf.md) |
+| Understand architecture | [`okf/index.ava.okf.md`](okf/index.ava.okf.md) (domain overviews + the node graph) |
 | Set up dev environment | [`conventions/dev-setup.md`](conventions/dev-setup.md) |
 | Run ops / deploy | [`conventions/runbook.md`](conventions/runbook.md) |
 | Write a PR | **[`.agents/skills/write-a-pr-description/SKILL.md`](.agents/skills/write-a-pr-description/SKILL.md)** |
@@ -194,7 +194,7 @@ axis — no run is committed; query the live one ([`.agents/skills/inspect-a-tra
 | Write SDK docstrings | [`conventions/sdk-docstring-discipline.md`](conventions/sdk-docstring-discipline.md) |
 | Maintain docs | [`conventions/doc-maintenance.md`](conventions/doc-maintenance.md) |
 | Know what NOT to do | [`conventions/non-goals.md`](conventions/non-goals.md) |
-| OKF index | [`okf/index.ava.okf.md`](okf/index.ava.okf.md) (domain overviews + the node graph) |
+| Avoid a bug class that already bit us | [`conventions/defensive-patterns.md`](conventions/defensive-patterns.md) (stories behind it: `postmortems/`) |
 
 ## Change discipline
 

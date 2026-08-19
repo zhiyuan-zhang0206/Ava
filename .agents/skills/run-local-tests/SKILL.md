@@ -16,6 +16,16 @@ description: Use before pushing, to run the Python, frontend, and e2e suites for
   Failures must be fixed before pushing; do not rely on CI to catch them.
   A new test must be **shown to fail without the fix** — run it against the
   stashed pre-change code, or invert its assertion momentarily.
+- **Pick the areas by dependency, not by directory.** "Touched areas" means the
+  areas a change can break, and for anything in `shared/` that is the whole
+  suite: `shared/` sits at the bottom of the import layering, and the repo
+  deliberately places exhaustiveness assertions over enums and field sets in the
+  *consumer's* test file as review forcing functions — so a `shared/` edit is
+  asserted over in `tests/gateway/`, where edit-adjacency will never look. Run
+  `pytest tests -q --ignore=tests/e2e`. Cheap narrowing aid for a new enum
+  member, not a substitute: `grep -rn "set(<EnumName>)\|list(<EnumName>)" tests/`.
+  ([postmortem](../../../postmortems/0003-touched-areas-is-not-the-blast-radius.md))
+
 - **Every pre-commit lint hook also runs in CI**, so a locally skipped hook is
   still caught before merge: the backend job runs `pre-commit run --all-files`,
   and a markdown-only PR (which skips backend by the path filter) gets the same
@@ -31,6 +41,29 @@ description: Use before pushing, to run the Python, frontend, and e2e suites for
 - **Full non-e2e + e2e + coverage threshold runs in CI** — it's the merge gate.
 - **Optional pre-push hook**: `ln -s ../../scripts/pre-push-check.sh .git/hooks/pre-push`
   to auto-run tests for changed areas before every push.
+
+## Two rules for the tests themselves
+
+Both are guardrails from real escapes; the rules are condensed in
+[`conventions/defensive-patterns.md`](../../../conventions/defensive-patterns.md).
+
+- **A guard only guards if the regression actually fails it.** When you add a
+  protective test, lint, or assertion, introduce the regression it targets, watch
+  it go red, and revert — in the same PR. For a test written against a fix that
+  already landed: `git stash push <implementation file>`, re-run, confirm *that*
+  test fails, `git stash pop`. A green result from a test that cannot go red is
+  indistinguishable from a green result that means something. This suite makes it
+  easy to get wrong: it provisions a real throwaway Postgres, so a "dependency is
+  down" fixture that patches only the seam today's code calls leaves every other
+  route live and the test passes against the bug it was written to catch — patch
+  **every** route (`shared.db.connect` *and* `shared.db.pool`), and prove it red.
+  ([postmortem](../../../postmortems/0002-db-down-tests-pass-for-the-wrong-reason.md))
+- **Verify the world, not the self-report.** An end-to-end assertion re-runs the
+  command or re-reads the file **externally**, and asserts that untouched files
+  are byte-identical. Never grep an agent's own output for success claims: an
+  agent that merely *says* it did the thing passes a keyword probe, and so does
+  one that did it wrong and narrated it well. The report is the thing under test,
+  not the evidence.
 
 ## E2E tests (tests/e2e/)
 
