@@ -23,7 +23,7 @@ from shared.env_registry import (
     health_port_env,
     health_port_env_aliases,
 )
-from shared.envfile import ENV_LOCK_TIMEOUT_S, env_lock_path, upsert_env
+from shared.envfile import ENV_LOCK_TIMEOUT_S, env_lock_path, snapshot_env, upsert_env
 from shared.platform import IS_WSL, file_lock
 
 
@@ -46,6 +46,34 @@ def _replace_private_text(path: Path, content: str) -> None:
         temporary.unlink(missing_ok=True)
 
 
+def _preserved_env_lines(path: Path, dropped_keys: frozenset[str]) -> list[str]:
+    """The existing `.env` lines this enroll must carry forward, verbatim.
+
+    Everything survives except `dropped_keys` — the keys the bootstrap block
+    rewrites plus the cluster config keys enroll deliberately does not persist.
+    Comments and blank lines are kept as-is: the file is operator-editable
+    (windows-setup.md sends people here for model keys), so a re-enroll must not
+    eat their notes along with their keys.
+    """
+    if not path.exists():
+        return []
+    kept: list[str] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#"):
+            key = stripped.split("=", 1)[0].strip()
+            if key in dropped_keys:
+                continue
+        kept.append(line)
+    # Trim the edges so the block separator this writer adds is not itself
+    # preserved and re-added on the next rewrite (byte-idempotence).
+    while kept and not kept[0].strip():
+        kept.pop(0)
+    while kept and not kept[-1].strip():
+        kept.pop()
+    return kept
+
+
 def write_bootstrap_env(
     path: Path,
     *,
@@ -53,15 +81,30 @@ def write_bootstrap_env(
     machine_name: str,
     cluster_secret: str | None = None,
     ssl_cert_file: str | None = None,
+    cluster_keys: frozenset[str] = frozenset(),
 ) -> None:
-    """Write the minimal bootstrap env for a gateway-sourced agent-runner.
+    """Write the bootstrap env for a gateway-sourced agent-runner, preserving
+    every machine-local key it does not own.
 
-    Identity + reachability only — deliberately no cluster connection facts: the
-    runner fetches those from the gateway at every process start (see the module
-    docstring). The config source is role-derived (AVA_CONFIG_SOURCE is gone):
-    a unit that does not serve the gateway fetches, so this file needs no source
-    marker.
+    The bootstrap block is identity + reachability only — deliberately no
+    cluster connection facts: the runner fetches those from the gateway at every
+    process start (see the module docstring). The config source is role-derived
+    (AVA_CONFIG_SOURCE is gone): a unit that does not serve the gateway fetches,
+    so this file needs no source marker.
+
+    `cluster_keys` is the key set the gateway's /api/bootstrap serves — the
+    caller just fetched it to verify connectivity. Those keys are dropped from
+    the existing file (a runner must not cache cluster facts: dotenv_boot's env
+    authority would force a stale cached value, and a settings-lite process
+    would dial it). Everything else — model API keys, AVA_REQUIRE_* opt-outs,
+    a prior enroll's health-port block or SSL bundle — survives verbatim: a
+    re-enroll used to REPLACE the whole file, which silently wiped this unit's
+    model credentials and machine-scope opt-outs (fleet Windows box,
+    2026-08-19). A key is only rewritten when this call restates it (the SSL
+    pair, like the health-port block, keeps a prior explicit choice on a bare
+    re-enroll).
     """
+    owned = {"AVA_GATEWAY_URL", "AVA_MACHINE_NAME", "AVA_MACHINE_SERVE_AGENT_RUNNER"}
     lines = [
         f"AVA_GATEWAY_URL={gateway}",
         f"AVA_MACHINE_NAME={machine_name}",
@@ -71,15 +114,22 @@ def write_bootstrap_env(
         # The runner presents this on GET /api/bootstrap (the gateway requires it
         # when multi-host is on) and on its own authenticated /ops.
         lines.append(f"AVA_CLUSTER_SECRET={cluster_secret}")
+        owned.add("AVA_CLUSTER_SECRET")
     if ssl_cert_file:
         lines.append(f"SSL_CERT_FILE={ssl_cert_file}")
         lines.append(f"REQUESTS_CA_BUNDLE={ssl_cert_file}")
+        owned.update({"SSL_CERT_FILE", "REQUESTS_CA_BUNDLE"})
     path.parent.mkdir(parents=True, exist_ok=True)
-    # The fourth door onto `.env`, and the bluntest: this REPLACES the whole file.
-    # An enroll landing while converge is mid-`upsert_env` would otherwise write
-    # over a half-written file, or be written over by one. Same lock as every other
-    # door (`shared.envfile.env_lock_path`).
+    # The fourth door onto `.env`: it rewrites the bootstrap block and drops the
+    # cluster keys, carrying every other existing line forward. An enroll landing
+    # while converge is mid-`upsert_env` would otherwise write over a half-written
+    # file, or be written over by one. Same lock as every other door
+    # (`shared.envfile.env_lock_path`).
     with file_lock(env_lock_path(path), timeout_s=ENV_LOCK_TIMEOUT_S):
+        preserved = _preserved_env_lines(path, frozenset(owned) | cluster_keys)
+        if preserved:
+            lines += ["", *preserved]
+        snapshot_env(path)
         _replace_private_text(path, "\n".join(lines) + "\n")
 
 
@@ -105,11 +155,10 @@ def _enroll_cluster_secret(parser: argparse.ArgumentParser, explicit: str | None
 def _existing_health_port_env(path: Path) -> dict[str, str]:
     """The `AVA_*_HEALTH_PORT` keys already present in this unit's `.env`, if any.
 
-    Must be read BEFORE `write_bootstrap_env` runs: that call replaces the whole
-    file, and a bare re-enroll (no `--health-port-base` this time) has nothing
-    else that would put a previously-written block back — so a re-enroll run only
-    to rotate the cluster secret or `--machine-host` would otherwise silently
-    strand a co-located unit back on the shared defaults. Empty when the file is
+    `write_bootstrap_env` carries these forward (host-scope keys it does not
+    own), so their survival across a bare re-enroll is structural; this read
+    exists to RESOLVE the base — an existing block means "keep as-is" beats the
+    WSL2 auto-default — and to report the outcome. Empty when the file is
     absent or carries no health-port key.
     """
     if not path.exists():
@@ -338,10 +387,9 @@ def run_enroll(argv: list[str]) -> int:
             print(f"enroll FAILED: {exc}", file=sys.stderr)
             return 1
 
-    # Read any health-port block THIS unit already carries before
-    # write_bootstrap_env replaces the whole file below — otherwise a bare
-    # re-enroll (no --health-port-base this time) silently drops a block a
-    # prior explicit choice or a prior WSL2 auto-default wrote.
+    # Any health-port block THIS unit already carries: an existing block wins
+    # over the WSL2 auto-default on a bare re-enroll (no --health-port-base this
+    # time). write_bootstrap_env preserves the keys themselves.
     existing_health_ports = _existing_health_port_env(AVA_ENV_PATH)
     health_port_base = _resolve_health_port_base(args.health_port_base, existing_health_ports)
 
@@ -389,11 +437,14 @@ def run_enroll(argv: list[str]) -> int:
         machine_name=args.machine_name,
         cluster_secret=cluster_secret,
         ssl_cert_file=args.ssl_cert_file,
+        # The keys the gateway serves ARE the cluster config a runner must not
+        # cache — drop them from the existing file; everything else survives.
+        cluster_keys=frozenset(payload),
     )
     # machine_host is this host's stable, operator-declared reachable address — a
     # local identity, not gateway-sourced config. It lives in the
-    # `$AVA_HOME/machine_host` file that reachable_host() reads, NOT the .env that
-    # write_bootstrap_env replaces on every enroll, so a re-enroll cannot wipe it.
+    # `$AVA_HOME/machine_host` file that reachable_host() reads, not the .env,
+    # so it is independent of any .env writer.
     # Without it the agent-runner registers its ops endpoint at localhost and the
     # gateway dials itself instead of the runner.
     (AVA_ENV_PATH.parent / "machine_host").write_text(args.machine_host + "\n")
@@ -404,11 +455,6 @@ def run_enroll(argv: list[str]) -> int:
         machine_name=args.machine_name,
         health_port_base=health_port_base,
     )
-    if health_port_base is None and existing_health_ports:
-        # No explicit or auto-derived base this call, but a block already
-        # existed before write_bootstrap_env's full replace wiped it above —
-        # restore it verbatim instead of losing it to a bare re-enroll.
-        upsert_env(AVA_ENV_PATH.parent / ".env", existing_health_ports)
     print(
         f"verified gateway connectivity: fetched {len(payload)} cluster config values from "
         f"{args.gateway} (the runner re-fetches them at every process start — nothing is cached)."
