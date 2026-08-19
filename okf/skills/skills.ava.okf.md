@@ -24,21 +24,16 @@ Each skill in the install registry (`shared/install_registry.py`) carries an `or
 - **instance / marketplace side** (`origin=user`): installed from marketplace / git URL (`source` records origin), or carried by an operator's own private repo; converge does not touch; **not enumerated in this core tree** — an instance-only skill has no node here by construction.
 
 ## Functional Groups (core built-in skills)
-- [[self_improvement.ava.okf.md|Self-development and Evolution]] — ava-self-development / ava-self-evolution / skill-creator / sweeper / auto-review
+- [[self_improvement.ava.okf.md|Self-development and Evolution]] — ava-self-evolution / skill-creator / sweeper / auto-review
 - [[ops_lifecycle.ava.okf.md|Operations, Scheduling, and Lifecycle]] — ava-guide / ava-schedule-writer / ava-watcher / ava-being-a-long-running-agent / ava-ultra-speed / ava_memory
 - [[comms.ava.okf.md|Communications and User Interaction]] — ava-ui / sms / gmail (telegram skill removed 2026-08-03)
 - [[orchestration.ava.okf.md|Workflow Orchestration]] — ava-workflow / ava-dynamic-workflow / ava-goal / ava-use-claude-code-and-codex
 - [[web_media.ava.okf.md|Web and Multimodal]] — web-ai / web-sources / audio-transcribe
 
-Two further core built-in skills live at the top level without a group: **ava-package-installer** (a verified skill / plugin / MCP installer) and **ava-qa-inspection** (sweep the rendered frontend over the chrome MCP for visual/structural defects). Both are origin=repo skills loaded into every agent's capabilities index; neither has an OKF node yet.
+Four further core built-in skills live at the top level without a group: **ava-package-installer** (a verified skill / plugin / MCP installer), **ava-qa-inspection** (sweep the rendered frontend over the chrome MCP for visual/structural defects), **ava-modification-layers** (pick the right layer L1–L4 before changing a deployment; `decisions/2026-08-19-four-layer-modification-model.md`) and **develop-a-plugin** (the L3 plugin ladder, applied at `self.restart`, decoupled from `ava cluster update`). All are origin=repo skills in every agent's capabilities index; none has an OKF node yet.
 
 ## Skill Sources (Load Directory Sync)
-One load directory: `~/.ava/skills/` (gated by the install registry's enabled flag). Converge (`cli/commands/_converge_skills.py`, on `ava start`/`ava cluster update`/`ava converge`) syncs three source types into it:
-1. **Repo built-in** (origin=repo): `<repo>/ava_builtins/skills/` → `~/.ava/skills/<name>/`
-2. **Plugin-carried** (origin=plugin): `<repo>/ava_builtins/plugins/<p>/skills/` and `~/.ava/plugins/<p>/skills/` → `~/.ava/skills/<p>/`
-3. **User-installed** (origin=user): `ava skill install` drops directly into `~/.ava/skills/` (untouched by converge); a hand-placed dir needs `ava skill register`.
-
-Project-local: [[okf/skills/project-local.ava.okf.md]].
+One load directory: `~/.ava/skills/`; converge syncs three source types into it — repo built-ins (`ava_builtins/skills/` plus the repo's `.agents/skills/` project skills), plugin-carried, user-installed: [[okf/skills/load-directory-sync.ava.okf.md]]. Project-local mounts: [[okf/skills/project-local.ava.okf.md]].
 
 ## Skill Structure
 `SKILL.md` = frontmatter (`name` + `description`) + a markdown body; `description` is the capabilities line in the system prompt. This format **is** the [Agent Skills](https://agentskills.io) open standard — a Claude Code skill folder installs unmodified: [[okf/skills/agent-skills-standard.ava.okf.md]].

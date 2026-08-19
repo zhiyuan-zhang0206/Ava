@@ -257,6 +257,9 @@ ignore = [
 # adapts, not the maintained live path, so the subprocess/security heuristics,
 # bugbear, pylint-refactor and naming nits are noise here.
 "ava_builtins/skills/*/reference/*.py" = ["ERA001", "T20", "B904", "F841", "RUF059", "PLW1510", "S110", "S112", "S603", "C401", "PLR0915", "N806"]
+# .agents/skills (the kernel-contributor project skills) carry the same kind of
+# runnable reference CLIs (e.g. ava-self-development's changelog generator).
+".agents/skills/*/reference/*.py" = ["ERA001", "T20", "B904", "F841", "RUF059", "PLW1510", "S110", "S112", "S603", "C401", "PLR0915", "N806"]
 # Skill scripts are runnable CLIs the agent invokes via bash: print() is their
 # stdout contract (T20); they drive the OS through hardcoded subprocess commands
 # (open / screencapture / osascript / pbcopy) writing to a /tmp scratch dir, so
