@@ -44,6 +44,7 @@ from cli.commands._gateway_ready import (
 from cli.commands._gateway_ready import (
     await_gateway_serving as _await_gateway_serving,
 )
+from cli.commands._lgtm import cmd_lgtm_off, cmd_lgtm_on, cmd_lgtm_status
 from cli.commands._probe import (
     OccupiedPort,
     ReadinessWait,
@@ -282,6 +283,9 @@ __all__ = [
     "cmd_firewall_status",
     "cmd_firewall_sync",
     "cmd_health_probe",
+    "cmd_lgtm_off",
+    "cmd_lgtm_on",
+    "cmd_lgtm_status",
     "cmd_mcp_add",
     "cmd_mcp_disable",
     "cmd_mcp_enable",

@@ -27,6 +27,7 @@ from cli.parsers.computer import _add_computer_parser
 from cli.parsers.host import (
     _add_converge_parser,
     _add_firewall_parser,
+    _add_lgtm_parser,
     _add_restart_parser,
     _add_start_parser,
     _add_status_parser,
@@ -60,6 +61,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_status_parser(sub)
     _add_converge_parser(sub)
     _add_firewall_parser(sub)
+    _add_lgtm_parser(sub)
     _add_cluster_parser(sub)
     _add_computer_parser(sub)
     _add_trace_parser(sub)

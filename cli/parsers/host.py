@@ -1,6 +1,7 @@
 """`ava` host-level lifecycle verbs — argparse builders + their `_h_*` handlers.
 
-`start` / `stop` / `restart` / `status` / `converge` / `firewall` / `trace` act
+`start` / `stop` / `restart` / `status` / `converge` / `firewall` / `trace` /
+`lgtm` act
 on THIS host (or the unit this checkout owns), as opposed to the cluster-wide
 verbs in ``cli.parsers.cluster``. Handlers stay thin: each lazy-imports its
 `cmd_*` implementation from ``cli.commands`` so building the parser never loads
@@ -269,6 +270,36 @@ def _add_firewall_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser
         "sudoers grant from scripts/install-firewall-sudoers.sh)",
     )
     firewall_sync_p.set_defaults(func=_h_firewall_sync)
+
+
+def _h_lgtm(args: argparse.Namespace) -> int:
+    from cli.commands import cmd_lgtm_off, cmd_lgtm_on, cmd_lgtm_status
+
+    if args.lgtm_cmd == "on":
+        return cmd_lgtm_on()
+    if args.lgtm_cmd == "off":
+        return cmd_lgtm_off()
+    return cmd_lgtm_status()
+
+
+def _add_lgtm_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    # `ava lgtm on|off|status` — the observability-stack toggle on THIS host.
+    # One command each way so observability's own overhead is measurable:
+    # `off` removes the $AVA_HOME/lgtm-host marker (converge + watchdog stop
+    # touching the stack) and compose-downs the containers (volumes persist);
+    # `on` restores marker + stack with history intact.
+    lgtm_p = sub.add_parser(
+        "lgtm",
+        help="observability stack (Loki/Grafana/Tempo/Prometheus) on/off/status on this host",
+    )
+    lgtm_sub = lgtm_p.add_subparsers(dest="lgtm_cmd", required=True)
+    for name, help_text in (
+        ("on", "designate this host as the LGTM host + bring the stack up (idempotent)"),
+        ("off", "take the stack down + stop being the LGTM host (volumes persist)"),
+        ("status", "marker + containers + readiness probes"),
+    ):
+        p = lgtm_sub.add_parser(name, help=help_text)
+        p.set_defaults(func=_h_lgtm)
 
 
 def _add_trace_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:

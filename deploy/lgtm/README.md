@@ -26,8 +26,13 @@ box), owned by the Ava lifecycle on exactly one home: the host carrying the
 once by the operator — in practice the prod default home `~/.ava`):
 
 ```bash
-touch ~/.ava/lgtm-host   # designate this host/home as the LGTM owner (once)
+ava lgtm on   # designate this host/home as the LGTM owner + bring the stack up
 ```
+
+(`ava lgtm on` writes the marker and runs `start.sh`; `ava lgtm off` removes
+it and takes the stack down — volumes persist, so on/off is a clean A/B for
+measuring observability's own overhead. `ava lgtm status` shows marker +
+containers + readiness probes.)
 
 With the marker present:
 
@@ -106,9 +111,9 @@ bash deploy/lgtm/stop.sh    # stops; data persists
 On the marked LGTM host the lifecycle owns the stack: converge re-runs
 `start.sh` on every `ava start`, and the gateway watchdog revives a stack
 whose probes hit connection failures within ~a minute. A deliberate stop
-there needs the keepalive out of the way first: remove `$AVA_HOME/lgtm-host`
-(full de-designation) or `ava start --disable-service lgtm` (durable skip),
-then `stop.sh`. While the stack is down the gateway's /ops + inspect reads,
+there is `ava lgtm off` (removes the marker, then runs `stop.sh`);
+`ava start --disable-service lgtm` remains the durable skip that keeps the
+designation. While the stack is down the gateway's /ops + inspect reads,
 ops alerting, and the events-maintenance rollup degrade; the native sidecar
 buffers telemetry in its file-backed queue, so nothing is lost.
 
