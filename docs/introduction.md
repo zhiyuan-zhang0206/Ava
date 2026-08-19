@@ -17,14 +17,14 @@ PR → CI → merge and then rolling the new code across the running cluster wit
 The core is deliberately small. From day one every layer is built asking *can
 this scaffolding be stripped once the model is strong enough to not need it?* —
 so the stronger the model gets, the less of Ava there is. (The design thread is
-in [`conventions/philosophy.md`](conventions/philosophy.md).)
+in [`conventions/philosophy.md`](../conventions/philosophy.md).)
 
 ---
 
 ## 🚀 Quickstart
 
 From zero to your first agent in about 15 minutes — full install guide with
-screenshots, Windows notes, and FAQ: **[QUICKSTART.md](QUICKSTART.md)**.
+screenshots, Windows notes, and FAQ: **[QUICKSTART.md](../QUICKSTART.md)**.
 
 ---
 
@@ -40,7 +40,7 @@ self-supervised: a canary runs the new code under observation while a holdout
 on the old code watches, and rolls back on regression. No maintenance windows,
 no babysitting — the cluster works by day and updates itself by night.
 
-→ [How self-evolution works](docs/features/self-evolving.md)
+→ [How self-evolution works](features/self-evolving.md)
 
 ### 2. CodeAct — one tool, the whole Python namespace
 
@@ -65,7 +65,7 @@ research goal into three waves of 18 workers by itself — wave split,
 checkpoint placement, and model tiering were all its own choices — and the
 orchestrator was woken only six times.
 
-→ [How CodeAct works](docs/features/code-act.md)
+→ [How CodeAct works](features/code-act.md)
 
 ### 3. Fleet — a graph of peers, not a chain
 
@@ -90,7 +90,7 @@ FYIs, decisions that need your call — converge into **one aggregated
 notification queue**, and agents organize across conversations through a
 **shared persistent task graph** (parent/child trees, owners, reminders).
 
-→ [How the fleet works](docs/features/fleet.md)
+→ [How the fleet works](features/fleet.md)
 
 ### 4. Anti-RL-Bias — first-class verbs for intent
 
@@ -102,7 +102,7 @@ offers idle agents three honest options (working / waiting / done), and
 mechanisms nudge agents that stall, reach for the wrong SDK idiom, or miss a
 newly installed skill. Ambiguous silence becomes supervisable state.
 
-→ [All anti-RL-bias mechanisms](docs/features/anti-rl-bias.md)
+→ [All anti-RL-bias mechanisms](features/anti-rl-bias.md)
 
 ### 5. Observability — every turn is a trace
 
@@ -112,7 +112,7 @@ Prometheus + Grafana stack where traces, logs, and metrics share a single UI.
 Underneath, every signal is one unified event stream carrying a trace_id, so
 logs and traces correlate; alerts reach chat end to end.
 
-→ [How observability works](docs/features/observability.md)
+→ [How observability works](features/observability.md)
 
 ### 6. Multi-Machine — a single box is the N=1 case
 
@@ -123,7 +123,7 @@ form a cluster**. Authentication is always on and fail-closed. macOS, Linux,
 and Windows are all supported — Windows joins natively as an agent-runner, no
 WSL, no Docker. A single box is just the N=1 case: no flag, no opt-in.
 
-→ [How multi-machine deployment works](docs/features/multi-machine.md)
+→ [How multi-machine deployment works](features/multi-machine.md)
 
 ### 7. Plugins — typed extension points in the runtime
 
@@ -134,7 +134,7 @@ model that becomes a private channel in the agent's state graph — typed
 read/write handles, fail-fast on conflicts, persisted with the framework
 checkpoint. Write a `plugin.py`, drop it in a directory, done.
 
-→ [How plugins work](docs/features/plugins.md)
+→ [How plugins work](features/plugins.md)
 
 ### 8. Skills — the open Agent Skills standard, zero rewrite
 
@@ -144,7 +144,7 @@ folder installs unmodified: from a git URL or straight off disk, no manifest,
 no conversion. A hundred installed skills cost a hundred description lines in
 the prompt, not a hundred bodies — full text loads on demand.
 
-→ [How skills work](docs/features/skills.md)
+→ [How skills work](features/skills.md)
 
 ### 9. Memory — a shared pool that outlives any conversation
 
@@ -155,7 +155,7 @@ taking over loses nothing. A steward agent consolidates, health-checks, and
 commits the pool daily; the index is injected at cold start and after each
 compaction, so standing rules stay in front of the agent.
 
-→ [How memory works](docs/features/memory.md)
+→ [How memory works](features/memory.md)
 
 ---
 
@@ -163,7 +163,7 @@ compaction, so standing rules stay in front of the agent.
 
 A quick comparison against other open agent frameworks (full
 ten-product × fifteen-dimension matrix with per-cell evidence:
-[`assets/agent-landscape-2026.html`](assets/agent-landscape-2026.html)):
+[`assets/agent-landscape-2026.html`](../assets/agent-landscape-2026.html)):
 
 | Dimension | Ava | OpenCode | Hermes Agent | OpenClaw | DeepSeek Harness |
 |---|---|---|---|---|---|
@@ -176,7 +176,7 @@ ten-product × fifteen-dimension matrix with per-cell evidence:
 
 > **Testing status**: completion-judged goal mode is a candidate — it ships
 > (`ava_goal`) with one recorded real run so far, recorded in the
-> [demo + test record](demos/goal-mode/goal-mode-code-review.md).
+> [demo + test record](../demos/goal-mode/goal-mode-code-review.md).
 > The IM reach is one channel (Telegram via the IM bridge) with a web-console
 > UI; there is no TUI, by design.
 
@@ -264,14 +264,14 @@ flowchart LR
 The `gateway` and `agent-runner` capabilities can live on **one box** or be
 **split** across machines. Full component breakdown, data-flow walkthrough, and
 the agent graph topology are in the OKF knowledge graph, rooted at
-[`okf/index.ava.okf.md`](okf/index.ava.okf.md).
+[`okf/index.ava.okf.md`](../okf/index.ava.okf.md).
 
 **No terminal UI, by design.** The Next.js console above is the only
 supervision surface — plus chat channels (e.g. X, via `ava mcp install`)
 for talking to individual agents. An always-on fleet's state (many concurrent
 agents, the spawn/fork/message graph, task tracking) doesn't compress into a
 terminal's single-pane model without losing most of what supervision needs;
-see [`conventions/non-goals.md`](conventions/non-goals.md).
+see [`conventions/non-goals.md`](../conventions/non-goals.md).
 
 ### Deployment footprint & memory
 
@@ -284,7 +284,7 @@ message, reclaiming its full resident footprint between wakes. A warm-pool
 floor keeps the most-recently-active agents resident regardless of idle time,
 so the reclaim never costs a cold start on the agents actually likely to be
 reused. Full verified breakdown:
-[`conventions/runbook.md#deployment-footprint--memory`](conventions/runbook.md#deployment-footprint--memory).
+[`conventions/runbook.md#deployment-footprint--memory`](../conventions/runbook.md#deployment-footprint--memory).
 
 ---
 
@@ -293,7 +293,7 @@ reused. Full verified breakdown:
 Ava does not sandbox model-authored code. `execute_code` runs the agent's
 generated Python directly in the agent process, on the host, with the
 permissions of whichever user started it. The `before_exec` hook
-([`demos/permission-hooks/`](demos/permission-hooks/)) can intercept dangerous
+([`demos/permission-hooks/`](../demos/permission-hooks/)) can intercept dangerous
 patterns before they run, but it is a mitigation layer, not a boundary.
 
 The isolation Ava relies on is **where you deploy the cluster** — a dedicated
@@ -301,7 +301,7 @@ OS user, machine, or VM per cluster — not a sandbox drawn around any single
 agent's code. If you need a boundary the model's code cannot cross (untrusted
 input, unattended automation), put a container or VM around the whole
 cluster; that has to come from outside Ava today. Full policy and reporting:
-[`SECURITY.md`](SECURITY.md).
+[`SECURITY.md`](../SECURITY.md).
 
 ---
 
@@ -313,13 +313,13 @@ cluster; that has to come from outside Ava today. Full policy and reporting:
 | Cache | Redis 8.8 |
 | Framework | LangGraph (8-node self-looping graph) |
 | SDK | `ava` (this repo) |
-| Models | 8 providers side by side (DeepSeek, Claude, Gemini, GPT, MiMo, Kimi, GLM, Grok) — picked once per agent at spawn, never routed at runtime ([why](conventions/non-goals.md)) |
+| Models | 8 providers side by side (DeepSeek, Claude, Gemini, GPT, MiMo, Kimi, GLM, Grok) — picked once per agent at spawn, never routed at runtime ([why](../conventions/non-goals.md)) |
 | Package manager | uv |
 | Frontend | Next.js 16 + React 19 + Tailwind 4 + shadcn/ui |
 
-[Frontend stack →](ui/web/web.ava.okf.md)
-[Connection budget →](agent/db.ava.okf.md)
-[Model registry →](shared/lm/registry.py)
+[Frontend stack →](../ui/web/web.ava.okf.md)
+[Connection budget →](../agent/db.ava.okf.md)
+[Model registry →](../shared/lm/registry.py)
 
 ### Observability (OTel + LGTM)
 
@@ -330,24 +330,24 @@ exports live over OTLP/HTTP to Loki (logs) and Prometheus (metrics). The
 LGTM backend (Tempo + Loki + Prometheus + Grafana, docker compose) serves
 Grafana at http://localhost:3003 — traces, logs, and metrics in one UI — and
 backs the gateway's /ops + inspect endpoints:
-[`deploy/lgtm/README.md`](deploy/lgtm/README.md). See
-[`docs/features/observability.md`](docs/features/observability.md) for the
+[`deploy/lgtm/README.md`](../deploy/lgtm/README.md). See
+[`features/observability.md`](features/observability.md) for the
 full design.
 
 ## Key docs — read on demand
 
 | When you need to… | Read |
 |---|---|
-| Get started | **[QUICKSTART.md](QUICKSTART.md)** |
-| Understand a feature | [`docs/features/`](docs/features/) (self-evolving, code-act, fleet, anti-rl-bias, observability, multi-machine, plugins, skills, memory) |
-| Understand architecture | [`okf/index.ava.okf.md`](okf/index.ava.okf.md) |
-| Install / deploy | [`.agents/skills/deploy-ava-cluster/SKILL.md`](.agents/skills/deploy-ava-cluster/SKILL.md) |
-| Set up dev environment | [`conventions/dev-setup.md`](conventions/dev-setup.md) |
-| Run ops / troubleshoot | [`conventions/runbook.md`](conventions/runbook.md) |
-| Write a PR | **[`.agents/skills/write-a-pr-description/SKILL.md`](.agents/skills/write-a-pr-description/SKILL.md)** |
-| Follow coding conventions | [`conventions/python-conventions.md`](conventions/python-conventions.md) |
-| Know what NOT to do | [`conventions/non-goals.md`](conventions/non-goals.md) |
-| See glossary | [`okf/index.ava.okf.md`](okf/index.ava.okf.md) (OKF terminology sections) |
+| Get started | **[QUICKSTART.md](../QUICKSTART.md)** |
+| Understand a feature | [`features/`](features/) (self-evolving, code-act, fleet, anti-rl-bias, observability, multi-machine, plugins, skills, memory) |
+| Understand architecture | [`okf/index.ava.okf.md`](../okf/index.ava.okf.md) |
+| Install / deploy | [`.agents/skills/deploy-ava-cluster/SKILL.md`](../.agents/skills/deploy-ava-cluster/SKILL.md) |
+| Set up dev environment | [`conventions/dev-setup.md`](../conventions/dev-setup.md) |
+| Run ops / troubleshoot | [`conventions/runbook.md`](../conventions/runbook.md) |
+| Write a PR | **[`.agents/skills/write-a-pr-description/SKILL.md`](../.agents/skills/write-a-pr-description/SKILL.md)** |
+| Follow coding conventions | [`conventions/python-conventions.md`](../conventions/python-conventions.md) |
+| Know what NOT to do | [`conventions/non-goals.md`](../conventions/non-goals.md) |
+| See glossary | [`okf/index.ava.okf.md`](../okf/index.ava.okf.md) (OKF terminology sections) |
 
 ## Agent instruction files
 
@@ -356,11 +356,11 @@ full design.
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the fork-and-PR flow and the
+See [CONTRIBUTING.md](../CONTRIBUTING.md) for the fork-and-PR flow and the
 coding conventions. Maintainers additionally follow the internal conventions
-in [`AGENTS.md`](AGENTS.md).
+in [`AGENTS.md`](../AGENTS.md).
 
 ## License
 
-[Apache-2.0](LICENSE). Third-party component notices are in
-[`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md).
+[Apache-2.0](../LICENSE). Third-party component notices are in
+[`THIRD-PARTY-NOTICES.md`](../THIRD-PARTY-NOTICES.md).
