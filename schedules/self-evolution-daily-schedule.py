@@ -1,4 +1,4 @@
-"""self-evolution daily incremental scan — daily 00:00 (timezone below).
+"""self-evolution daily incremental scan — daily 00:00 cluster time.
 
 Runs daily_scan.py (collect --days 1 + metrics + threshold alerts).
 - exit code 2 (ALERT) -> wakes the self-evolution agent to act
@@ -15,6 +15,7 @@ from datetime import UTC, datetime, timedelta
 
 import ava
 from ava.agents import AgentStatus as S
+from shared.config import settings
 from shared.watcher import next_fire
 
 # daily_scan.py ships with the ava-self-evolution skill, so it arrives with
@@ -27,8 +28,12 @@ DAILY = os.path.join(
     "reference",
     "daily_scan.py",
 )
-CRON = "0 0 * * *"  # 00:00 in TZ below — DeepSeek trough for Beijing deployments
-TZ = "Asia/Shanghai"  # embedded per deployment — adjust for your cluster
+CRON = "0 0 * * *"  # 00:00 cluster time — the off-peak trough of a cluster workday
+# Cluster wall clock (`AVA_TIMEZONE`, cluster-pinned), never the host's OS
+# timezone: the whole fleet fires at one instant regardless of where each
+# machine sits. Read at process start — `ava schedules restart <id>` to adopt a
+# changed AVA_TIMEZONE.
+TZ = settings.general.timezone
 # Optional daily report recipient (an agent id); unset to skip the report.
 REPORT_AGENT = os.environ.get("AVA_SELF_EVOLUTION_DAILY_REPORT_AGENT")
 

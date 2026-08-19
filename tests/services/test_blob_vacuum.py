@@ -2,7 +2,7 @@
 
 Pins (Task #1130): a plain VACUUM (never FULL — FULL's ACCESS EXCLUSIVE lock
 would stall agents, ruled out by the user); only inside the measured
-agent-lowest window (05:00-08:00 America/Los_Angeles); each run logs the
+agent-lowest window (05:00-08:00 cluster time — `AVA_TIMEZONE`); each run logs the
 physical size + dead-tuple count so the reclamation trend is observable.
 
 The window boundary is the load-bearing part (the daemon calls this hourly, so
@@ -15,6 +15,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from typing import Any, cast
+from zoneinfo import ZoneInfo
 
 import psycopg
 import pytest
@@ -25,6 +26,7 @@ from services.events_maintenance.blob_vacuum import (
     run_blob_vacuum,
     vacuum_checkpoint_tables,
 )
+from shared.config import settings
 
 _SCHEMA = """
 CREATE TABLE checkpoints (
@@ -82,21 +84,21 @@ def pool(db_conn: psycopg.Connection) -> Iterator[ConnectionPool[Any]]:
         gen.close()
 
 
+@pytest.fixture
+def cluster_tz(monkeypatch: pytest.MonkeyPatch) -> str:
+    """Pin the cluster timezone so the window is not read off the CI host."""
+    monkeypatch.setattr(settings.general, "timezone", "America/Los_Angeles")
+    return "America/Los_Angeles"
+
+
 def _pdt(hour: int, minute: int = 0, second: int = 0) -> datetime:
     """A tz-aware datetime at the given PDT wall-clock time."""
-    return datetime(
-        2026,
-        8,
-        10,
-        hour,
-        minute,
-        second,
-        tzinfo=__import__("zoneinfo").ZoneInfo("America/Los_Angeles"),
-    )
+    return datetime(2026, 8, 10, hour, minute, second, tzinfo=ZoneInfo("America/Los_Angeles"))
 
 
-def test_window_boundaries() -> None:
-    """05:00-08:00 PDT inclusive start, exclusive end."""
+def test_window_boundaries(cluster_tz: str) -> None:
+    """05:00-08:00 cluster time, inclusive start, exclusive end."""
+    _ = cluster_tz
     assert in_low_traffic_window(_pdt(5, 0))
     assert in_low_traffic_window(_pdt(7, 59, 59))
     assert not in_low_traffic_window(_pdt(4, 59, 59))
@@ -105,7 +107,26 @@ def test_window_boundaries() -> None:
     assert not in_low_traffic_window(_pdt(23, 0))
 
 
-def test_run_skips_outside_window(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_window_follows_cluster_timezone(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The window is cluster wall clock, not a hard-coded fleet's timezone.
+
+    Same instant, two cluster timezones: 13:00 UTC is 06:00 in Los Angeles
+    (inside) and 21:00 in Shanghai (outside). Before this was configurable a
+    Shanghai cluster vacuumed at 20:00-23:00 local — its evening, not its
+    trough.
+    """
+    instant = datetime(2026, 8, 10, 13, 0, tzinfo=UTC)
+
+    monkeypatch.setattr(settings.general, "timezone", "America/Los_Angeles")
+    assert in_low_traffic_window(instant)
+
+    monkeypatch.setattr(settings.general, "timezone", "Asia/Shanghai")
+    assert not in_low_traffic_window(instant)
+    # ...and Shanghai's own 06:00 (22:00 UTC the day before) is now inside.
+    assert in_low_traffic_window(datetime(2026, 8, 9, 22, 0, tzinfo=UTC))
+
+
+def test_run_skips_outside_window(monkeypatch: pytest.MonkeyPatch, cluster_tz: str) -> None:
     """Outside the window the daemon entry point no-ops without dialing.
 
     The clock is frozen to 03:00 America/Los_Angeles (10:00 UTC): the suite
@@ -115,6 +136,7 @@ def test_run_skips_outside_window(monkeypatch: pytest.MonkeyPatch) -> None:
     merge-queue CI at 12:13Z). The gate itself is locked by
     test_window_boundaries.
     """
+    _ = cluster_tz
 
     class _Frozen(datetime):
         @classmethod
