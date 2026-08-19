@@ -655,7 +655,7 @@
     "to": "now"
   },
   "timepicker": {},
-  "timezone": "",
+  "timezone": "browser",
   "title": "Ava Ops \u2014 Plugin Metrics",
   "uid": "ava-ops-plugins",
   "version": 1

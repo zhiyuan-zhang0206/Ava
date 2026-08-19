@@ -40,6 +40,7 @@ import {
 import { api } from "@/lib/api";
 import { errMsg } from "@/lib/errors";
 import { useStore } from "@/lib/store";
+import { formatRelative } from "@/lib/time";
 import type { ScheduleCreate, ScheduleSummary, ScheduleUpdate } from "@/lib/types";
 
 import { useSectionVisible } from "../_visibility";
@@ -312,7 +313,7 @@ function ScheduleRow({
           {schedule.description ?? "—"}
         </TableCell>
         <TableCell className="text-xs text-muted-foreground">
-          {relativeTime(schedule.updated_at)}
+          {formatRelative(schedule.updated_at)}
         </TableCell>
         <TableCell>
           <div className={cn("items-center gap-0.5", FLEX)}>
@@ -490,7 +491,7 @@ function ScheduleDetail({
               <ul className="mt-1 space-y-0.5 text-muted-foreground">
                 {runs.data.map((r) => (
                   <li key={r.id}>
-                    {relativeTime(r.ran_at)} · {r.ok === null ? "…" : r.ok ? "✓" : "✗"}
+                    {formatRelative(r.ran_at)} · {r.ok === null ? "…" : r.ok ? "✓" : "✗"}
                     {r.note ? ` · ${r.note}` : ""}
                   </li>
                 ))}
@@ -601,15 +602,4 @@ function IconButton({
       {icon}
     </Button>
   );
-}
-
-function relativeTime(iso: string): string {
-  const t = Date.parse(iso);
-  if (isNaN(t)) return iso;
-  const diffSec = Math.floor((Date.now() - t) / 1000);
-  if (diffSec < 60) return "just now";
-  if (diffSec < 3600) return `${Math.floor(diffSec / 60)}m ago`;
-  if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}h ago`;
-  if (diffSec < 86400 * 30) return `${Math.floor(diffSec / 86400)}d ago`;
-  return iso.slice(0, 10);
 }
