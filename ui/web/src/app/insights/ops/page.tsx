@@ -4,7 +4,7 @@
 // (user pivot 2026-08-03: the self-made SVG panel from #672 is replaced by a
 // Grafana single-iframe embed (the ops dashboard is the only iframe).
 //
-// The iframe loads the "Ava Ops" dashboard (dashboards/ops/ava-ops-main.json)
+// The iframe loads the "Ava Ops" dashboard (deploy/lgtm dashboards ava-ops-main.json)
 // through the gateway's /grafana reverse proxy — same origin family as
 // API_BASE, auth-gated by the cluster middleware like every other route, so
 // the browser's session cookie applies. The theme follows next-themes;
@@ -14,7 +14,7 @@
 // per user ruling — the iframe URL carries no from/to, the dashboard's
 // defaults apply). autofitpanels stays off: on Grafana 13.1.1 it collapses
 // every panel to a 30px title bar at embed widths (see
-// dashboards/ops/README.md).
+// deploy/lgtm/config/grafana/provisioning/dashboards/README.md).
 //
 // The frame is full-height, no inner scrollbar: EMBED_HEIGHT equals the
 // dashboard's fixed rendered height (panels are gridPos-sized, so the
@@ -37,7 +37,7 @@ import { API_BASE } from "@/lib/api";
 import { OVERFLOW_HIDDEN } from "@/lib/layout";
 import { cn } from "@/lib/utils";
 
-// Fixed uid of the embedded dashboard (dashboards/ops/ava-ops-main.json) —
+// Fixed uid of the embedded dashboard (deploy/lgtm dashboards ava-ops-main.json) —
 // the gateway reverse proxy maps /grafana/d/<uid> onto the Grafana instance.
 // Core metrics (row header "core") + plugin metrics (one row per plugin) are
 // rendered into this one dashboard by scripts/gen_plugin_dashboard.py (core
@@ -46,7 +46,7 @@ const DASHBOARD_UID = "ava-ops-main";
 
 // Full-height embed (see header comment): 138 grid rows → 5352px on
 // Grafana 13.1.1 (4 frontend-telemetry panels added 2026-08-09). Bump when
-// dashboards/ops/ava-ops-main.json panels change — page.test.tsx derives the
+// deploy/lgtm dashboards ava-ops-main.json panels change — page.test.tsx derives the
 // expected value from the dashboard's gridPos and fails when the two drift
 // apart.
 export const EMBED_HEIGHT = 5770;
