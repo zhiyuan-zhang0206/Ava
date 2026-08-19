@@ -39,14 +39,7 @@ Each tick runs three machine-scoped, non-blocking (`blocks` always `BlockScope.N
 - Both scans run every reconcile (1s) via one indexed SELECT (probe + `os.kill` only on hits). Swap-out is idempotent *when the signal lands*: the signaled agent leaves 'idling' within ms, so the next tick skips it. A pid that fails the identity probe draws no signal at all, and the reaper clears the row within its 30s pass — which is what ends the re-selection (#1123).
 
 ### CrashResurrectController (`ops/controllers/resurrect.py`) — Auto-Resurrect on Crash
-- **Criteria**: local `terminated` agents with `termination_source ∈ {'reaper','launch-confirm'}` (involuntary death), pending inbound in the workload allowlist (`chat`/`compact_request`), past per-agent backoff (`auto_resurrect_backoff_seconds`; one UPDATE atomically claims + stamps `last_resurrect_at`) → `ops.agents.resurrect_agent`.
-- **Never resurrect**: `'user'` (force-kill) / `'exit'` (self-exit) — explicit intent; `'integrity'` (row state self-inconsistent — ops looks first); NULL (pre-column legacy) — only post-change rows eligible, rollout-safe.
-- **The allowlist is the whole safety model**, so the stamp is enforced, not just documented: an unstamped write leaves NULL, which this scan can never claim — the queued inbound strands silently. `scripts/lint_termination_source.py` fails any terminated-write that omits its source; `TerminationSource.resurrectable()` is what `_RESURRECTABLE_SOURCES` reads. `'launch-confirm'` also covers the child's early-boot schema/placement rejection (`agent/_starting.py`).
-- **Why needed**: Gateway's `resurrect_if_terminated` fires only on new inbound; already-queued inbound after a crash gets no wake event → indefinite stall. This controller is the persistent fallback.
-- **Gateway health gate**: same as RespawnController; unhealthy → postpone round (no backoff stamp, retry next round).
-- 30s cadence; a single resurrection failure is only logged, the round continues.
-
-## Key Dependencies
+The 30s auto-resurrect scan — criteria, never-resurrect set, enforced stamp, health gate: [[services/agent_runner_side/restarter/crash-resurrect.ava.okf.md]].## Key Dependencies
 - [[db.ava.okf.md]] — reads/writes `agents_meta` (restarting requests + orphan status + termination_source)
 - [[loop.ava.okf.md]] — respawn/resurrect result = agent process re-entering the main loop
 - [[gateway-cli.ava.okf.md]] — probes gateway health endpoint before respawn/resurrect
