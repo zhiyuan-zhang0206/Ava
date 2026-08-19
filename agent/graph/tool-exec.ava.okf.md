@@ -19,6 +19,7 @@ The agent's sole tool—`execute_code(code: str)`—executes Python code in a sa
 - Double-layered hard timeout: per-code `exec_timeout_seconds` (default 300s) + graph-level `exec_node_timeout_seconds` (default 1200s, defense in depth); both inject `TimeoutError` via ctypes `PyThreadState_SetAsyncExc`
 - **Orphan reaper** (`_exec_threads.py`, Task #1058): a thread that survives the injection — stuck in a native call like `time.sleep`, or code that swallows `Exception` (TimeoutError is one) — is orphaned after the 2s join grace; a bounded daemon reaper then re-injects `KeyboardInterrupt` every 1s for up to 60s. It is a `BaseException`, so `except Exception` swallow loops cannot survive it; only infinite native loops / `except BaseException` loops leak to process exit (daemon, freed at exit)
 - stdout+stderr are combined into the same `StreamingTextIO` (`_exec_stream.py`), preserving order; streamed to Redis in real-time, finally returned to the LLM
+- **Accumulation cap** (`exec_output_accumulation_max_chars`, default 1,000,000): the accumulator pins its first half and rolls its last half, dropping the middle **as the code runs**, so a runaway `print` loop cannot grow the agent process until it is OOM-killed (the process hosts the whole agent, not just the exec). Execution is **not** killed — the output is truncated with an explicit marker and the model self-corrects; the result taxonomy is unchanged. Redis pushes come off the same accumulator so they inherit the bound: past the budget the retained text is a rolling window with no append-only increment, so one notice goes out and streaming stops until the final `ExecOutput` upsert
 
 ### Sandbox Environment
 - Each execution uses a fresh `fresh_globals` (`__name__="__agent_code__"`)
@@ -28,6 +29,7 @@ The agent's sole tool—`execute_code(code: str)`—executes Python code in a sa
 ### Output Handling
 - `_exec_output.py:wrap_code_output()` wraps the result (cancelled/timed_out markers)
 - Long output `_exec_output.py:truncate_both_ends` **keeps the head and tail, drops the middle** (each half `max_chars//2`); the full text is saved to a workspace `.exec_output/` file ring (keeping the last 20 copies, `_OVERFLOW_KEEP=20`) for grep
+- The two caps are compatible by construction: `exec_output_accumulation_max_chars >= exec_output_max_chars` is validated at startup, so `truncate_both_ends` always slices its head out of the accumulator's kept head and its tail out of the kept tail. When the accumulation cap fired, a `StreamCap` rides the `_ExecResult` into `wrap_code_output`, which reports the **true produced length** (banner + the `[exec output chars]` instrumentation line) and headers the archive with "this file is NOT the full output" instead of pretending — the dropped middle was never stored anywhere
 - Results are dispatched by sum type (`_ExecDone|_ExecCancelled|_ExecTimedOut|_ExecLifecycle|_ExecCrashed`): user code exceptions **do not** raise; they are returned as tracebacks for the agent to judge; lifecycle exceptions (terminate/restart/compact) take highest priority
 
 ### In-memory system-note injection (`_exec_notes.py`, user ruling 2026-08-11)

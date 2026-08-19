@@ -11,6 +11,14 @@ ring of files under `.exec_output/` in the agent's workspace, so the agent can
 still read / grep the complete output via its shell / files tools — the
 workspace is their default base, and unlike the system temp dir it is neither
 reaped by the OS nor lost on reboot.
+
+This is the SECOND of two caps. The first (`_exec_stream.StreamingTextIO`)
+bounds accumulation while the code is still running; when it fired, its
+`StreamCap` travels here so this layer reports the true produced length and
+stops promising the archive holds the full text — the middle was dropped before
+the archive was ever written. The accumulation budget is validated to be >=
+`exec_output_max_chars`, so `truncate_both_ends` always slices its head out of
+the accumulator's kept head and its tail out of the kept tail.
 """
 
 from __future__ import annotations
@@ -24,6 +32,8 @@ import ava._boot
 from shared.config import now_timestamp, settings
 from shared.log import logger
 from shared.paths import workspace_dir
+
+from ._exec_stream import StreamCap
 
 # Marker for exec cancel — thread really ran and was interrupted by user pressing Stop;
 # wrap_code_output adds "Code execution output [cancelled by user]:" prefix to the envelope,
@@ -55,6 +65,7 @@ def wrap_code_output(
     timed_out: bool = False,
     timeout_seconds: float | None = None,
     max_chars: int | None = None,
+    stream_cap: StreamCap | None = None,
 ) -> str:
     """Generate the code execution output envelope fed to the LLM.
 
@@ -68,6 +79,11 @@ def wrap_code_output(
 
     timeout_seconds / max_chars default to settings.sandbox.exec_timeout_seconds /
     settings.sandbox.exec_output_max_chars. Explicit params let tests override.
+
+    `stream_cap` is set when the accumulation cap already dropped the middle of
+    `output` mid-run: it carries the true produced length for the
+    instrumentation log line, and tells the overflow archive to stop claiming
+    it holds the full text.
 
     Format (double \n after header, same contract as wrap_inbound; the
     frontend splitEnvelope uses this to split header / body):
@@ -98,10 +114,13 @@ def wrap_code_output(
     else:
         # Log the true (pre-truncation) length on every exec — instrumentation
         # for tuning max_chars from a real distribution (the stored output is
-        # capped, so length can't be recovered from history afterwards).
-        logger.info("[exec output chars] {n}", n=len(output))
+        # capped, so length can't be recovered from history afterwards). When
+        # the accumulation cap fired, `len(output)` is already the capped
+        # length; the StreamCap carries what the code actually produced.
+        produced = stream_cap.produced_chars if stream_cap is not None else len(output)
+        logger.info("[exec output chars] {n}", n=produced)
         if len(output) > max_chars:
-            output = truncate_both_ends(output, max_chars)
+            output = truncate_both_ends(output, max_chars, stream_cap=stream_cap)
         body = output if output.endswith("\n") else output + "\n"
     if timed_out:
         # The envelope is the agent's only cue to change strategy — the better
@@ -115,10 +134,14 @@ def wrap_code_output(
     return header + "\n\n" + body
 
 
-def truncate_both_ends(output: str, max_chars: int) -> str:
+def truncate_both_ends(output: str, max_chars: int, *, stream_cap: StreamCap | None = None) -> str:
     """Keep the first + last `max_chars // 2` chars (head carries an overview /
     a help() listing, tail carries the result / traceback), drop the middle,
-    and write the full output to a file the agent can read or grep.
+    and write the archived text to a file the agent can read or grep.
+
+    With `stream_cap` set, `output` is itself the accumulation-capped text: the
+    archive holds only what survived that first cap, so the banner says exactly
+    that instead of promising the full output.
 
     Public because the ava_code plugin reuses the same truncate-and-archive
     logic for oversized context files (AGENTS.md / CLAUDE.md) — the user
@@ -127,18 +150,32 @@ def truncate_both_ends(output: str, max_chars: int) -> str:
     half = max_chars // 2
     head, tail = output[:half], output[-half:]
     omitted = len(output) - 2 * half
-    path = _write_overflow_file(output)
+    path = _write_overflow_file(output, stream_cap=stream_cap)
+    if stream_cap is None:
+        total = f"{len(output):,} chars total"
+        source = f"full output at {path}"
+    else:
+        total = (
+            f"{stream_cap.produced_chars:,} chars produced, capped to "
+            f"{stream_cap.budget_chars:,} during execution — the dropped middle "
+            f"is unrecoverable"
+        )
+        source = f"surviving output at {path}"
     banner = (
-        f"[output truncated: {len(output):,} chars total; full output at {path} "
+        f"[output truncated: {total}; {source} "
         f"(read or grep it); showing first {half:,} + last {half:,} chars]"
     )
-    mid = f"\n\n[... {omitted:,} chars omitted — full output at {path} ...]\n\n"
+    mid = f"\n\n[... {omitted:,} chars omitted — {source} ...]\n\n"
     return banner + "\n\n" + head + mid + tail
 
 
-def _write_overflow_file(output: str) -> Path:
+def _write_overflow_file(output: str, *, stream_cap: StreamCap | None = None) -> Path:
     """Write `output` to a timestamped file under the workspace overflow dir,
     prune old ones, and return its path.
+
+    A `stream_cap` means the text was already truncated at accumulation time,
+    so the file gets a header saying it is not the full output — the agent
+    grepping it must not read a miss as "the string was never printed".
 
     The workspace is per-agent, so no agent-id prefix is needed; the
     microsecond timestamp makes names sortable by exec time and unique within
@@ -150,6 +187,13 @@ def _write_overflow_file(output: str) -> Path:
     # envelope timestamps the agent sees.
     now = datetime.now(ZoneInfo(settings.general.timezone))
     path = d / f"exec_{now.strftime('%Y%m%d_%H%M%S_%f')}.txt"
+    if stream_cap is not None:
+        output = (
+            f"[archive note: {stream_cap.produced_chars:,} chars were produced; the "
+            f"{stream_cap.budget_chars:,}-char accumulation budget kept the first + last "
+            f"halves and dropped the middle DURING execution — this file is NOT the "
+            f"full output]\n\n"
+        ) + output
     path.write_text(output, encoding="utf-8")
     existing = sorted(d.glob("exec_*.txt"), key=lambda p: p.stat().st_mtime)
     for old in existing[:-_OVERFLOW_KEEP]:
