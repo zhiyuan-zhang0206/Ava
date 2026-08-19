@@ -34,8 +34,11 @@ def _probe() -> DaemonProbe:
 
 def _restart_daemon() -> DaemonProbe:
     project_root = settings.services.project_root or Path(__file__).resolve().parent.parent.parent
+    # The respawn session name MUST match ServiceSpec.session ("page-server",
+    # kebab-case) — see Task #1291: the module name ("page_server") differs and
+    # a respawn under it strands the session where the CLI cannot see or kill it.
     return respawn_and_verify(
-        "page_server",
+        "page-server",
         ".venv/bin/python -m services.page_server.daemon",
         project_root,
         extra_env={"AVA_PROCESS_PROFILE": "runner"},
