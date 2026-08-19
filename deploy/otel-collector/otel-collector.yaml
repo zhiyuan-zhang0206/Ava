@@ -187,6 +187,13 @@ exporters:
   # across collector restarts: the ACTIVE file is never truncated, and
   # max_days / max_backups bound the directory. `spans.jsonl` -> rotated
   # `spans-<ISO-timestamp>.jsonl` on rotation.
+  #
+  # No `localtime` key below — lumberjack's default (false) stamps the
+  # rotated filename's timestamp in UTC. `shared/trace.py`'s `_prune_old_mirror`
+  # parses that embedded timestamp and treats it as UTC explicitly
+  # (`tzinfo=UTC`); setting `localtime: true` here would silently break that
+  # parse (retention would prune the wrong files, or none) without either
+  # side signaling the mismatch (tz audit, 2026-08, PR-6).
   file/traces:
     path: $AVA_HOME/traces/spans.jsonl
     rotation:

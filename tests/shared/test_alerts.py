@@ -9,6 +9,7 @@ copy is translated — alert labels/annotations data passes through verbatim.
 
 from __future__ import annotations
 
+import datetime
 from pathlib import Path
 from typing import Any
 
@@ -18,7 +19,7 @@ from psycopg.types.json import Jsonb
 
 import shared.alerts as shared_alerts
 from services.im_bridge import copy
-from shared.alerts import display_language, frontend_base_url, notify_text
+from shared.alerts import display_language, format_local, frontend_base_url, notify_text
 
 
 def _alert(*, status: str = "firing", severity: str = "error") -> dict[str, Any]:
@@ -111,6 +112,30 @@ def test_notify_text_language_variants() -> None:
 
     # unknown lang falls back to the default
     assert notify_text(_alert(), "fr") == zh_firing
+
+
+# -- format_local (tz audit, 2026-08, PR-6) ----------------------------------
+
+
+def test_format_local_carries_year_and_zone() -> None:
+    """The IM-push timestamp used to be bare `%m-%d %H:%M` — no year (an
+    alert near New Year's read as an unstated year), no zone abbreviation (no
+    way to tell which machine's local clock a multi-machine cluster's reader
+    was looking at). Both must be present now."""
+
+    ts = datetime.datetime(2026, 1, 3, 9, 5, tzinfo=datetime.UTC)
+    text = format_local(ts)
+    assert text.startswith("2026-01-03 ")
+    # A trailing zone abbreviation/offset token after "HH:MM " — the exact
+    # spelling depends on the runner's local zone (UTC in CI, per
+    # vitest.config.ts-style TZ pinning is a frontend-only convention; the
+    # backend suite runs whatever TZ the host provides), so assert presence
+    # rather than a specific string.
+    assert text.split(" ")[-1] != ""
+
+
+def test_format_local_empty_for_none() -> None:
+    assert format_local(None) == ""
 
 
 def test_display_language_defaults_to_zh(db_conn: psycopg.Connection) -> None:

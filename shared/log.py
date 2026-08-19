@@ -256,20 +256,27 @@ def _rotate_by_size_or_day(message: Any, file: Any) -> bool:
     drifting apart. The rename race itself (one process writing while the
     other rotates) is unchanged from the pure-size design and stays accepted:
     the window is a single write and the lines land in the rotated file.
+
+    The day boundary is UTC midnight, not the host's local midnight (tz
+    audit, 2026-08, PR-6): the record's own tzinfo used to decide this
+    (`message.record["time"].tzinfo`, which loguru stamps from the machine's
+    local zone) made the split point drift per host — a Beijing gateway and
+    a Pacific agent-runner rotated their files ~15-16 hours apart for what is
+    otherwise the same calendar day everywhere else in this codebase. This
+    shifts existing clusters' logfile split points to UTC midnight — ops-
+    visible, but only at the moment a file happens to rotate.
     """
     with contextlib.suppress(OSError, ValueError):
         file.seek(0, 2)
         if file.tell() > _FILE_SINK_SIZE_LIMIT:
             return True
     try:
-        # Same tz as the record so the day boundary is consistent between
-        # the size check's file and the time check's message.
         created = datetime.datetime.fromtimestamp(
-            Path(file.name).stat().st_ctime, tz=message.record["time"].tzinfo
+            Path(file.name).stat().st_ctime, tz=datetime.UTC
         ).date()
     except (OSError, ValueError, TypeError):
         return False
-    return message.record["time"].date() > created
+    return message.record["time"].astimezone(datetime.UTC).date() > created
 
 
 def _add_file_sink(path: Path) -> int:
