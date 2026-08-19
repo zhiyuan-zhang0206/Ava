@@ -283,9 +283,12 @@ def _fetch_events_window(
 
     Offset-free by construction: Loki offset paging is both O(n^2) and
     timeout-prone (gateway's 60s Loki budget — 2026-08-14 observed), so
-    every request is offset=0 with limit=_PAGE, and any slice whose exact
-    `meta.total` exceeds _PAGE is bisected in time until each half fits one
-    page. Rows are deduped by surrogate row id across slice boundaries (the
+    every request is offset=0 with limit=_PAGE, and any slice whose
+    `meta.has_more` says the page overflowed is bisected in time until each
+    half fits one page. Requests are count-free by design — `meta.total` is
+    opt-in (with_total=1) and its count aggregation is exactly the Loki load
+    the gateway shed (2026-08-18 change) — so this function reads `has_more`
+    only, and a missing `has_more` raises instead of silently truncating. Rows are deduped by surrogate row id across slice boundaries (the
     API window is inclusive on both ends) and sorted by `ts` (the API
     returns newest-first). Raises on persistent HTTP errors — a partial
     window must not silently become a partial dataset.
@@ -301,7 +304,11 @@ def _fetch_events_window(
             batch, meta = _events_page(
                 client, category=category, from_=start, to=end, agent_id=agent_id
             )
-            has_more = bool(meta.get("has_more"))
+            # has_more is a required, non-nullable EventsMeta field — index it,
+            # not .get(): a silent False here would accept an oversized slice
+            # without bisection and quietly truncate the dataset (the exact
+            # quiet-failure class the 2026-08-14 outage was). KeyError = loud.
+            has_more = meta["has_more"]
             if not batch and not has_more:
                 return  # empty slice
             if not has_more or end - start <= _MIN_SLICE:

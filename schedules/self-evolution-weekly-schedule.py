@@ -67,10 +67,11 @@ def count_events(since: datetime) -> int:
     }
     resp = httpx.get(f"{base}/api/events", params=params, headers=headers, timeout=120.0)
     resp.raise_for_status()
-    total = resp.json().get("meta", {}).get("total")
+    payload = resp.json()
+    total = payload.get("meta", {}).get("total")
     if total is None:
         raise RuntimeError(
-            f"/api/events returned no total despite with_total=1: {str(resp.json())[:300]}"
+            f"/api/events returned no total despite with_total=1: {str(payload)[:300]}"
         )
     return int(total)
 
@@ -141,51 +142,62 @@ def should_fire_thursday() -> bool:
 
 # ── Main loop ──────────────────────────────────────────────────────────────
 
-_thursday_enabled = False
 
-while True:
-    now = datetime.now(UTC)
+def _main_loop() -> None:
+    """The gateway runs this file as `python self-evolution-weekly-schedule.py`
+    (never imports it); the guard keeps the loop out of import, so tests can
+    load the module and call count_events directly."""
+    _thursday_enabled = False
 
-    # after=now-2min gives trigger tolerance: sleep precision delay can land `now`
-    # a fraction of a second past the hour; croniter get_next (strictly > base)
-    # would then jump to the next day (deterministic miss, observed 2026-08-06).
-    # Tolerance window = [-120s, +90s].
-    nxt_monday = next_fire(MONDAY_CRON, after=now - timedelta(minutes=2), timezone=TIMEZONE)
-    wait_monday = (nxt_monday - now).total_seconds()
+    while True:
+        now = datetime.now(UTC)
 
-    if _thursday_enabled:
-        nxt_thursday = next_fire(THURSDAY_CRON, after=now - timedelta(minutes=2), timezone=TIMEZONE)
-        wait_thursday = (nxt_thursday - now).total_seconds()
-    else:
-        wait_thursday = float("inf")
+        # after=now-2min gives trigger tolerance: sleep precision delay can land `now`
+        # a fraction of a second past the hour; croniter get_next (strictly > base)
+        # would then jump to the next day (deterministic miss, observed 2026-08-06).
+        # Tolerance window = [-120s, +90s].
+        nxt_monday = next_fire(MONDAY_CRON, after=now - timedelta(minutes=2), timezone=TIMEZONE)
+        wait_monday = (nxt_monday - now).total_seconds()
 
-    wait = min(wait_monday, wait_thursday)
+        if _thursday_enabled:
+            nxt_thursday = next_fire(
+                THURSDAY_CRON, after=now - timedelta(minutes=2), timezone=TIMEZONE
+            )
+            wait_thursday = (nxt_thursday - now).total_seconds()
+        else:
+            wait_thursday = float("inf")
 
-    if wait > 90:
-        time.sleep(min(wait, 3600))
-        continue
+        wait = min(wait_monday, wait_thursday)
 
-    if wait_monday <= 90:
-        if should_fire_monday():
-            fire(PROMPT)
-            week_ago = now - timedelta(days=7)
-            total = count_events(week_ago)
-            _thursday_enabled = total >= HIGH_WEEKLY_EVENTS
-            if _thursday_enabled:
-                print(
-                    f"[{now.isoformat()}] self-evolution: "
-                    f"Thursday follow-up enabled ({total} >= {HIGH_WEEKLY_EVENTS})"
-                )
+        if wait > 90:
+            time.sleep(min(wait, 3600))
+            continue
+
+        if wait_monday <= 90:
+            if should_fire_monday():
+                fire(PROMPT)
+                week_ago = now - timedelta(days=7)
+                total = count_events(week_ago)
+                _thursday_enabled = total >= HIGH_WEEKLY_EVENTS
+                if _thursday_enabled:
+                    print(
+                        f"[{now.isoformat()}] self-evolution: "
+                        f"Thursday follow-up enabled ({total} >= {HIGH_WEEKLY_EVENTS})"
+                    )
+                else:
+                    _thursday_enabled = False
             else:
                 _thursday_enabled = False
-        else:
-            _thursday_enabled = False
-        time.sleep(120)
-        continue
+            time.sleep(120)
+            continue
 
-    if wait_thursday <= 90:
-        if should_fire_thursday():
-            fire(f"{PROMPT} (mid-week follow-up)")
-        _thursday_enabled = False
-        time.sleep(120)
-        continue
+        if wait_thursday <= 90:
+            if should_fire_thursday():
+                fire(f"{PROMPT} (mid-week follow-up)")
+            _thursday_enabled = False
+            time.sleep(120)
+            continue
+
+
+if __name__ == "__main__":
+    _main_loop()
