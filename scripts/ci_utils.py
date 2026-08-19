@@ -36,12 +36,16 @@ Usage as CLI:
     with the monitor contract — 0 green, 1 not green (or timed out), 3
     persistent gh/network errors, 4 enqueue failed. `--merge` implies `--wait`
     and enqueues the PR once green (Mergify merge queue — posts `@mergifyio
-    queue` on the PR; Mergify rebases onto latest main, re-runs CI on the
-    rebased head, and rebase-merges it once .mergify.yml merge_conditions
-    are green), then waits for the queue to finish merging. This is the
-    canonical CI watcher: launch it with ava.shell.run_background, and the
-    completion notice delivers the exit code + verdict to the agent
-    automatically.
+    queue` on the PR, or `@mergifyio requeue` if the Mergify check shows the PR
+    was previously queued and dequeued, e.g. by a force-push; Mergify rebases
+    onto latest main, re-runs CI on the rebased head, and rebase-merges it
+    once .mergify.yml merge_conditions are green), then waits for the queue to
+    finish merging. The all-green predicate excludes checks named "Mergify
+    Merge Queue" — that check reports queue state, not a CI result, and sits
+    pending forever after a dequeue, which used to deadlock this wait (issue
+    #98). This is the canonical CI watcher: launch it with
+    ava.shell.run_background, and the completion notice delivers the exit
+    code + verdict to the agent automatically.
 """
 
 from __future__ import annotations
@@ -137,7 +141,13 @@ class CIResult:
     passed: list[str] = field(default_factory=list)
     failed: list[dict] = field(default_factory=list)  # {name, conclusion}
     workflow_checks: list[str] = field(default_factory=list)  # checks a workflow run produced
+    # Checks whose name starts with "Mergify" (issue #98): queue state, not a
+    # CI result — excluded from completed/pending/passed/failed so a check
+    # that sits pending forever after a dequeue can never block the all-green
+    # wait. Kept here so `--merge` can inspect queue state separately.
+    mergify_checks: list[dict] = field(default_factory=list)
     mergeable: str = ""  # MERGEABLE / CONFLICTING / UNKNOWN
+    head_sha: str = ""
     error_detail: str = ""
 
     def summary(self) -> str:
@@ -176,6 +186,9 @@ def _repo_has_workflows() -> bool:
     return any(wf_dir.glob("*.yml")) or any(wf_dir.glob("*.yaml"))
 
 
+MERGIFY_CHECK_PREFIX = "Mergify"
+
+
 def _partition_checks(checks: list[dict], result: CIResult) -> None:
     """Sort each rollup check into completed / passed / failed / pending on
     `result`, and record which of them a workflow produced.
@@ -183,11 +196,22 @@ def _partition_checks(checks: list[dict], result: CIResult) -> None:
     Only COMPLETED checks are judged: a QUEUED / IN_PROGRESS one is pending, and
     so is a COMPLETED one whose conclusion is unrecognized — guessing there is
     how a false "all green" gets reported.
+
+    A check named "Mergify Merge Queue" reports queue state, not a CI result
+    (issue #98) — it sits pending indefinitely once a PR is dequeued (e.g. a
+    force-push knocks it out of the queue), which would otherwise deadlock
+    `--wait --merge` forever waiting for a check that only queuing itself can
+    turn green. Routed to `result.mergify_checks` instead, so it never enters
+    completed/pending/passed/failed/workflow_checks.
     """
     for c in checks:
         name = c.get("name", "?")
         status = c.get("status", "")
         conclusion = c.get("conclusion", "")
+
+        if name.startswith(MERGIFY_CHECK_PREFIX):
+            result.mergify_checks.append(c)
+            continue
 
         # A check produced by a workflow run carries the workflow's name; checks
         # posted by a GitHub App (GitGuardian, coverage bots) leave it empty.
@@ -251,6 +275,63 @@ def _runs_not_yet_reporting(head_sha: str, repo: str | None) -> list[str]:
     return [str(n) for n in names] if isinstance(names, list) else []
 
 
+# ---- Dequeue detection (issue #98) ----
+# `gh pr view --json statusCheckRollup` only exposes name/status/conclusion for
+# a check — not the human-readable text Mergify writes explaining queue state
+# (e.g. "removed from the queue"). The REST check-runs API carries that text as
+# `output.title`, so a dequeue is read from there instead of guessed from the
+# rollup.
+
+_MERGIFY_CHECK_NAME = "Mergify Merge Queue"
+_DEQUEUE_TITLE_MARKERS = ("removed from the queue", "dequeued", "unqueued")
+
+
+def _fetch_mergify_check_title(head_sha: str, repo: str | None) -> str | None:
+    """Best-effort read of the Mergify Merge Queue check-run's `output.title`
+    for `head_sha`. Returns None on any error, empty result, or missing
+    head_sha — the caller then defaults to `queue`, the safe choice for
+    "state unknown"."""
+    if not head_sha:
+        return None
+    r = subprocess.run(  # noqa: S603
+        [
+            "gh",
+            "api",
+            f"repos/{repo}/commits/{head_sha}/check-runs"
+            if repo
+            else f"repos/{{owner}}/{{repo}}/commits/{head_sha}/check-runs",
+            "--jq",
+            f'[.check_runs[] | select(.name=="{_MERGIFY_CHECK_NAME}")][0].output.title',
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if r.returncode != 0:
+        return None
+    title = r.stdout.strip()
+    return title if title and title != "null" else None
+
+
+def _mergify_was_dequeued(title: str | None) -> bool:
+    """True when the Mergify check's output title reads as a dequeue (a PR
+    that was queued and got knocked out — e.g. by a force-push) rather than
+    "never queued" or "currently queued / merged"."""
+    if not title:
+        return False
+    lowered = title.lower()
+    return any(marker in lowered for marker in _DEQUEUE_TITLE_MARKERS)
+
+
+def _queue_command(repo: str, head_sha: str) -> str:
+    """`@mergifyio queue` for a PR entering the queue fresh, `@mergifyio
+    requeue` for one that was already queued and got dequeued (issue #98: a
+    force-push after queuing auto-dequeues the PR, and `queue` cannot recover
+    it — `requeue` is the verb Mergify defines for that case)."""
+    title = _fetch_mergify_check_title(head_sha, repo)
+    return "@mergifyio requeue" if _mergify_was_dequeued(title) else "@mergifyio queue"
+
+
 def check_ci(pr_number: str | int, *, repo: str | None = None) -> CIResult:
     """Poll one PR's CI status and mergeability via `gh pr view --json`.
 
@@ -294,6 +375,8 @@ def check_ci(pr_number: str | int, *, repo: str | None = None) -> CIResult:
     except json.JSONDecodeError as e:
         result.error_detail = f"JSON parse error: {e}"
         return result
+
+    result.head_sha = data.get("headRefOid", "")
 
     # --- Merge conflict detection ---
     result.mergeable = data.get("mergeable", "UNKNOWN")
@@ -400,22 +483,23 @@ def _deadline_hit(deadline: float | None, pr: str, timeout: int) -> bool:
     return False
 
 
-def _enqueue_pr(pr: str, repo: str) -> int:
+def _enqueue_pr(pr: str, repo: str, command: str = "@mergifyio queue") -> int:
     """--merge: enqueue the PR once CI is green.
 
     Mergify drives this repo's merge queue (GitHub's own queue does not
-    support personal private repos). Enqueuing = posting the `@mergifyio
-    queue` command as a PR comment; Mergify then rebases the PR onto latest
-    main, re-runs CI on the rebased head via the ordinary pull_request
-    event, and lands it with a rebase merge (linear history) once its
-    merge_conditions (see .mergify.yml) are green — replacing the old
-    manual rebase-and-repoll loop. The remote branch is NOT deleted
-    automatically; clean up with `git push origin --delete <branch>`.
+    support personal private repos). Enqueuing = posting `command` (`@mergifyio
+    queue` for a PR entering fresh, `@mergifyio requeue` for one that was
+    dequeued — see `_queue_command`, issue #98) as a PR comment; Mergify then
+    rebases the PR onto latest main, re-runs CI on the rebased head via the
+    ordinary pull_request event, and lands it with a rebase merge (linear
+    history) once its merge_conditions (see .mergify.yml) are green —
+    replacing the old manual rebase-and-repoll loop. The remote branch is NOT
+    deleted automatically; clean up with `git push origin --delete <branch>`.
 
     The gh call carries --repo explicitly (same reason as check_ci — no cwd
     dependency)."""
     r = subprocess.run(  # noqa: S603
-        ["gh", "pr", "comment", pr, "--repo", repo, "--body", "@mergifyio queue"],
+        ["gh", "pr", "comment", pr, "--repo", repo, "--body", command],
         capture_output=True,
         text=True,
         check=False,
@@ -423,7 +507,7 @@ def _enqueue_pr(pr: str, repo: str) -> int:
     if r.returncode != 0:
         print(f"PR #{pr} enqueue failed: {r.stderr.strip()}", file=sys.stderr, flush=True)
         return 4
-    print(f"PR #{pr} enqueued with Mergify: {r.stdout.strip()}")
+    print(f"PR #{pr} enqueued with Mergify ({command}): {r.stdout.strip()}")
     return 0
 
 
@@ -538,7 +622,8 @@ def _wait_for_verdict(pr: str, repo: str, every: int, timeout: int, *, merge: bo
         if verdict is CIStatus.ALL_PASSED:
             print(f"PR #{pr} CI green: {result.summary()}")
             if merge:
-                rc = _enqueue_pr(pr, repo)
+                command = _queue_command(repo, result.head_sha)
+                rc = _enqueue_pr(pr, repo, command)
                 if rc != 0:
                     return rc
                 return _wait_for_merge(pr, repo, every, timeout)
