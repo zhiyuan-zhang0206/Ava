@@ -9,6 +9,8 @@ Wrap primitive:
   the inherited one, function-attached members carry through
 - control flow: short-circuit (skip inner) + retry (call inner twice)
 - plugin attribution via PluginContext
+- activation telemetry: a plugin layer that does not call inner exactly once
+  records one `plugin_activation`; a transparent or unattributed layer does not
 - clear_wraps restores originals + empties the registry (the reload-free teardown)
 - target errors: malformed dotted path, non-callable target
 
@@ -30,6 +32,7 @@ import pytest
 import ava
 from ava import _extend
 from ava._extend import scan_and_load, wrap
+from shared import plugin_activation
 from shared.plugin_context import PluginContext
 
 
@@ -185,6 +188,115 @@ def test_retry_calls_inner_twice(probe: tuple[Any, Any]):
 
     wrap("probe.fn", double)  # pyright: ignore[reportUnknownArgumentType]
     assert ns.fn(1) == "fn(1,1,2)|fn(1,1,2)"
+
+
+# ── activation telemetry (issue #40) ────────────────────────────────────────
+
+
+@pytest.fixture
+def activations(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str, str, str]]:
+    """Capture (plugin, surface, identifier, detail) per recorded activation.
+
+    Keeps the real `record`'s attribution gate — an unattributed firing is
+    dropped rather than captured — so these tests read the emitted stream, not
+    the call log."""
+    recorded: list[tuple[str, str, str, str]] = []
+
+    def spy(plugin: str | None, surface: str, identifier: str, *, detail: str = "") -> None:
+        if plugin is not None:
+            recorded.append((plugin, surface, identifier, detail))
+
+    monkeypatch.setattr(plugin_activation, "record", spy)
+    return recorded
+
+
+def test_short_circuit_records_an_activation(
+    probe: tuple[Any, Any], activations: list[tuple[str, str, str, str]]
+):
+    """A plugin layer that skipped inner changed control flow — that is the fact
+    philosophy §6 measures, keyed by the ledger's own surface/identifier."""
+    ns, _ = probe
+    with PluginContext("myplugin"):
+        wrap("probe.fn", lambda _inner, *_a, **_k: "blocked")  # pyright: ignore[reportUnknownArgumentType]
+
+    assert ns.fn(1) == "blocked"
+    assert activations == [("myplugin", "sdkWraps", "probe.fn", "inner_calls=0")]
+
+
+def test_retry_records_an_activation(
+    probe: tuple[Any, Any], activations: list[tuple[str, str, str, str]]
+):
+    ns, _ = probe
+
+    def double(inner, *a, **k):
+        return f"{inner(*a, **k)}|{inner(*a, **k)}"
+
+    with PluginContext("myplugin"):
+        wrap("probe.fn", double)  # pyright: ignore[reportUnknownArgumentType]
+
+    ns.fn(1)
+    assert activations == [("myplugin", "sdkWraps", "probe.fn", "inner_calls=2")]
+
+
+def test_transparent_wrap_records_nothing(
+    probe: tuple[Any, Any], activations: list[tuple[str, str, str, str]]
+):
+    """A layer that calls inner exactly once always runs once installed, so
+    counting it would measure the installation rather than the shim."""
+    ns, _ = probe
+    with PluginContext("myplugin"):
+        wrap("probe.fn", lambda inner, *a, **k: inner(*a, **k))  # pyright: ignore[reportUnknownArgumentType]
+
+    ns.fn(1)
+    assert activations == []
+
+
+def test_unattributed_wrap_records_nothing(
+    probe: tuple[Any, Any], activations: list[tuple[str, str, str, str]]
+):
+    """A wrap installed outside a PluginContext is nobody's contribution — it
+    stays in `stack()` but is absent from the ledger and from telemetry."""
+    ns, _ = probe
+    wrap("probe.fn", lambda _inner, *_a, **_k: "blocked")  # pyright: ignore[reportUnknownArgumentType]
+
+    assert ns.fn(1) == "blocked"
+    assert activations == []
+
+
+def test_counting_proxy_keeps_inner_transparent(probe: tuple[Any, Any]):
+    """The activation counter hands the wrapper a proxy for `inner`; it must
+    present as the callable it replaces, or a wrapper that introspects `inner`
+    (signature, attached members) would break under telemetry."""
+    ns, _ = probe
+    seen: dict[str, Any] = {}
+
+    def w(inner: Any, *a: Any, **k: Any) -> Any:
+        seen["signature"] = str(inspect.signature(inner))
+        seen["marker"] = inner.MARKER
+        return inner(*a, **k)
+
+    with PluginContext("myplugin"):
+        wrap("probe.fn", w)  # pyright: ignore[reportUnknownArgumentType]
+
+    assert ns.fn(1) == "fn(1,1,2)"
+    assert seen == {"signature": "(x, y=1, *, z=2)", "marker": "attached"}
+
+
+def test_activation_recording_never_perturbs_the_call(
+    probe: tuple[Any, Any], monkeypatch: pytest.MonkeyPatch
+):
+    """Side-channel contract: a broken event sink must not change what the
+    wrapped call returns."""
+    ns, _ = probe
+
+    def boom(*_a: Any, **_k: Any) -> None:
+        raise RuntimeError("sink down")
+
+    monkeypatch.setattr(plugin_activation, "emit", boom)
+    with PluginContext("myplugin"):
+        wrap("probe.fn", lambda _inner, *_a, **_k: "blocked")  # pyright: ignore[reportUnknownArgumentType]
+
+    assert ns.fn(1) == "blocked"
 
 
 def test_clear_wraps_restores_and_empties(probe: tuple[Any, Any]):

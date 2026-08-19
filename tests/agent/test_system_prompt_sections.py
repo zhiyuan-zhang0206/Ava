@@ -336,3 +336,44 @@ def test_cross_machine_delegation_hint_absent_from_full_prompt_when_off(
     prompt = build_system_prompt()
 
     assert _CROSS_MACHINE_DELEGATION_SENTENCE not in prompt
+
+
+# ── activation telemetry (issue #40) ────────────────────────────────────────
+
+
+def test_plugin_prompt_section_records_an_activation(monkeypatch: pytest.MonkeyPatch):
+    """A plugin section that rendered text is prompt real estate the plugin is
+    spending — recorded with its length + digest, so which variant landed is
+    identifiable without storing the text. A section returning "" contributed
+    nothing and records nothing."""
+    from agent.graph import _system_prompt
+    from shared import plugin_activation
+    from shared.plugin_context import PluginContext
+
+    recorded: list[tuple[str, str, str, str]] = []
+
+    def spy(plugin: str | None, surface: str, identifier: str, *, detail: str = "") -> None:
+        if plugin is not None:
+            recorded.append((plugin, surface, identifier, detail))
+
+    monkeypatch.setattr(plugin_activation, "record", spy)
+
+    def loud_section() -> str:
+        return "## Loud\n\nsomething."
+
+    def silent_section() -> str:
+        return ""
+
+    saved = list(_system_prompt._SYSTEM_PROMPT_SECTIONS)
+    try:
+        with PluginContext("myplugin"):
+            _system_prompt.register_system_prompt_section(loud_section)
+            _system_prompt.register_system_prompt_section(silent_section)
+        _system_prompt.build_system_prompt()
+    finally:
+        _system_prompt._SYSTEM_PROMPT_SECTIONS[:] = saved
+
+    assert [(p, s, i) for p, s, i, _d in recorded] == [
+        ("myplugin", "systemPromptSections", "loud_section")
+    ]
+    assert recorded[0][3].startswith(f"chars={len('## Loud\n\nsomething.')} sha=")

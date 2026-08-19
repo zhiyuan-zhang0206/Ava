@@ -89,8 +89,13 @@ dataset grew and stop early.
 $AVA_HOME/source/.venv/bin/python $AVA_HOME/skills/ava-self-evolution/reference/mine.py
 ```
 
-Clusters this week's `failed`/`fumbled` runs by the skill they touched and
-prints a markdown digest: which skill, which run ids, what went wrong.
+Clusters this week's `failed`/`fumbled` runs and prints a markdown digest —
+which run ids, what went wrong — in two passes: by the skill they touched, and
+by the plugin contribution (`<plugin>/<surface>/<identifier>`) that fired in
+them. The plugin pass reads `plugins_activated`, which counts each time a
+plugin hook, wrap, or system-prompt section actually acted in the run, so a
+regression caused by a silently-firing hook is attributable to the exact
+contribution rather than invisible.
 
 For each cluster that (a) has several bad runs AND (b) overlaps a skill/plugin
 that changed this week, ask the original agents directly with `evaluate.debrief()` (80% of signal), then spawn one deep-dive worker with `ava.agents.spawn` for the remaining 20%:

@@ -45,6 +45,9 @@ _SQL_OR_DYNAMIC_KINDS = frozenset(
         "frontend_interaction",  # gateway/routers/frontend_telemetry.py telemetry.emit("telemetry", ...)
         "pgbouncer_repaired",  # services/healthchecks/pgbouncer.py:_emit_repaired
         "sdk_call",  # agent/sdk_metering.py recorder（经 shared/sdk_telemetry）
+        # shared/plugin_activation.py:emit binds event=PLUGIN_ACTIVATION_EVENT (a
+        # module constant, like sdk_call), so the literal scan cannot see it.
+        "plugin_activation",
         "gateway_latency",  # gateway/_latency.py:emit_bucket telemetry.emit("telemetry", ...)
         # 历史括号名：W8 改名前的旧值，仍是 migrate_events.py 的映射目标且
         # DB 有存量行。新代码禁止产生，保留注册只为回填口径。

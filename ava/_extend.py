@@ -45,6 +45,13 @@ keep a stack composable and are checked in review:
    `inner`. The next author reading the stack must be able to reason about
    control flow from the docstring.
 
+Rule 3's cases are also the ones worth measuring, so a plugin layer that calls
+`inner` anything other than exactly once emits one `plugin_activation` event
+(`shared/plugin_activation.py`) — the runtime half of the attribution ledger,
+and philosophy §6's obsolescence gauge for wrap-shaped shims. A layer that
+passes straight through records nothing: it always runs once installed, so
+counting it would measure the installation rather than the shim.
+
 Plugin loading: at main-process startup `agent/graph/_build.py:_load_extensions`
 imports each enabled plugin inside `with PluginContext(name):`, so a wrap
 registered at plugin import time is attributed to its plugin without the author
@@ -55,6 +62,7 @@ the one plugin-extension surface.
 
 from __future__ import annotations
 
+import functools
 import importlib.util
 import inspect
 import sys
@@ -79,7 +87,7 @@ class WrapLayer:
     """One installed wrap layer, in registration order.
 
     - target: dotted `ava` path, e.g. `"files.read"`.
-    - plugin: the plugin that registered it (`"<unknown>"` when wrapped outside
+    - plugin: the plugin that registered it (`UNATTRIBUTED` when wrapped outside
       a `PluginContext`, e.g. a direct test call).
     - wrapper: the author's `wrapper(inner, *args, **kwargs)` function — the
       introspectable artifact (`wrapper.__module__` / source say who and what).
@@ -101,14 +109,32 @@ _ORIGINALS: dict[str, Callable[..., Any]] = {}
 _LAYERS: dict[str, list[WrapLayer]] = {}
 
 
+# `WrapLayer.plugin` for a wrap installed outside a plugin import (the framework
+# itself, or a test calling `wrap` directly). Such a layer is real machinery and
+# still shows up in `stack(target)`, but it is nobody's contribution, so it is
+# neither in the attribution ledger nor in activation telemetry.
+UNATTRIBUTED = "<unknown>"
+
+
 def _current_plugin_name() -> str:
-    """The plugin importing right now, or `"<unknown>"`. Lazy import keeps this
+    """The plugin importing right now, or `UNATTRIBUTED`. Lazy import keeps this
     leaf module free of an `ava -> shared` load-order dependency."""
     try:
         from shared.plugin_context import current_plugin_name
     except ImportError:
-        return "<unknown>"
-    return current_plugin_name() or "<unknown>"
+        return UNATTRIBUTED
+    return current_plugin_name() or UNATTRIBUTED
+
+
+def _record_activation(target: str, plugin: str, inner_calls: int) -> None:
+    """Report one non-transparent firing of this layer — see `chained`. Lazy
+    import for the same reason `_current_plugin_name` is lazy; the emit path
+    itself swallows its own failures."""
+    try:
+        from shared import plugin_activation
+    except ImportError:
+        return
+    plugin_activation.record(plugin, "sdkWraps", target, detail=f"inner_calls={inner_calls}")
 
 
 def _record_contribution(target: str, wrapper: Callable[..., Any]) -> None:
@@ -205,15 +231,40 @@ def wrap(target: str, wrapper: Callable[..., Any]) -> Callable[..., Any]:
             f"ava.{target} is {type(current).__name__}, not callable — wrap targets are functions."
         )
 
+    plugin = _current_plugin_name()
+
     def chained(*args: Any, **kwargs: Any) -> Any:
-        return wrapper(current, *args, **kwargs)
+        if plugin == UNATTRIBUTED:
+            return wrapper(current, *args, **kwargs)
+        # Activation telemetry (philosophy §6). A wrapper that calls `inner`
+        # exactly once left control flow alone; a short-circuit (0 calls) or a
+        # retry (>1) is the layer actually changing what happened, and that is
+        # the fact issue #40 wants attributed. `counted` carries `current`'s
+        # metadata so a wrapper that introspects `inner` (signature, attached
+        # members) sees no difference — the same transparency contract
+        # `agent/sdk_metering.py` keeps.
+        # A one-element list rather than `nonlocal`: pyright cannot see the
+        # nested increment and narrows a rebound local to the literal 0, which
+        # makes the read below an "unnecessary comparison" error.
+        calls = [0]
+
+        @functools.wraps(current)
+        def counted(*inner_args: Any, **inner_kwargs: Any) -> Any:
+            calls[0] += 1
+            return current(*inner_args, **inner_kwargs)
+
+        try:
+            return wrapper(counted, *args, **kwargs)
+        finally:
+            if calls[0] != 1:
+                _record_activation(target, plugin, calls[0])
 
     _install_metadata(chained, wrapper, current)
     setattr(parent, attr, chained)
 
     _ORIGINALS.setdefault(target, current)
     _LAYERS.setdefault(target, []).append(
-        WrapLayer(target=target, plugin=_current_plugin_name(), wrapper=wrapper, chained=chained)
+        WrapLayer(target=target, plugin=plugin, wrapper=wrapper, chained=chained)
     )
     _record_contribution(target, wrapper)
     return wrapper

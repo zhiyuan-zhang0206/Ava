@@ -24,7 +24,7 @@ generated from it and never hand-synced. event_names that violate the naming rul
 | mechanism | table/channel | registered event_names | destination | retention |
 |------|------|-------------|------|------|
 | audit (category=audit) | `events` | 20 | events table | 365d+ |
-| telemetry (category=telemetry) | `events` | 89 | events table | 90d |
+| telemetry (category=telemetry) | `events` | 90 | events table | 90d |
 | log (category=log) | `events` | 3 | events table | 30d |
 | file-only (destination=file) | file log | 1 | file only (not the events table) | — |
 | SSE live | Redis → frontend (not persisted) | 27 role | live projection | ephemeral |
@@ -87,7 +87,7 @@ Emit sites and consumers: see the comments at each emit point.
 | `computer_session_end` | computer-use task session closed (idle timeout) | task_id, action_count, first_action_at, last_action_at, outcome | 365d | events |
 | `mcp_tool_call` | MCP tool invoked through the gateway /mcp endpoint (agent_id NULL — external client) | — | 365d | events |
 
-## 3. Telemetry events (category=telemetry, 89)
+## 3. Telemetry events (category=telemetry, 90)
 
 Telemetry-side event name resolution (`shared/log.py`): **explicit `event=` →
 `label=` fallback → default `"log"`**. Payload = logger extra fields + `msg`
@@ -150,6 +150,7 @@ consumers: see the comments at each emit point.
 | `launch_force_terminated_skipped` | launch force-terminate skipped | — | — | 90d | events |
 | `launch_retry` | launch retried | — | — | 90d | events |
 | `sdk_call` | SDK call metering | fn, duration | — | 90d | events |
+| `plugin_activation` | a plugin injection surface fired (hook / wrap / prompt section) | plugin, surface, identifier, detail, model | — | 90d | events |
 | `sse_drop` | SSE event dropped | kind, n | — | 90d | events |
 | `event_log_drop` | event-pipeline row shed | n | — | 90d | events |
 | `heartbeat_paused` | heartbeat paused | duration_s | — | 90d | events |

@@ -1,11 +1,18 @@
 #!/usr/bin/env python3
-"""Cluster a week's failed / fumbled runs by the skill they touched.
+"""Cluster a week's failed / fumbled runs by what acted in them.
 
 Reads a dataset file written by `collect.py`, keeps only the records labeled
-`failed` or `fumbled`, and groups them by each skill in `skills_touched`
-(records with no attributed skill land in an `(unattributed)` bucket). The
-output is a compact markdown digest: one section per skill, each listing its
-bad runs with the concrete failure signals.
+`failed` or `fumbled`, and groups them twice: by each skill in `skills_touched`
+(records with no attributed skill land in an `(unattributed)` bucket), and by
+each plugin contribution in `plugins_activated`. The output is a compact
+markdown digest: one section per bucket, each listing its bad runs with the
+concrete failure signals.
+
+The plugin half exists because hooks and wraps used to act silently — a plugin
+that rewrote state or short-circuited an SDK call in a bad run was invisible
+here, so plugin-caused regressions could not be mined at all (issue #40). It
+has no `(unattributed)` bucket: most runs legitimately have no plugin
+activation, so the bucket would hold the whole week and say nothing.
 
 This digest is what a deep-dive worker reads in step 3 of the weekly flow —
 it points the worker at "these runs, this skill" instead of the whole dataset.
@@ -46,6 +53,23 @@ def cluster_by_skill(records: list[dict[str, Any]]) -> dict[str, list[dict[str, 
         skills = rec["skills_touched"] or [UNATTRIBUTED]
         for skill in skills:
             clusters[skill].append(rec)
+    return clusters
+
+
+def cluster_by_plugin(records: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    """Bucket the bad runs under each plugin contribution that fired in them.
+
+    Keys are `plugins_activated`'s `"<plugin>/<surface>/<identifier>"` — the
+    specific hook / wrap / prompt section, not merely the plugin, so a digest
+    points at the thing to read. `.get` because datasets collected before the
+    field existed simply have no plugin attribution (same tolerance
+    `exec_duration_stats` shows for `exec_duration_s`)."""
+    clusters: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for rec in records:
+        if rec["label"] not in BAD_LABELS:
+            continue
+        for contribution in rec.get("plugins_activated", {}):
+            clusters[contribution].append(rec)
     return clusters
 
 
@@ -96,14 +120,14 @@ def exec_duration_stats(records: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
-def render(clusters: dict[str, list[dict[str, Any]]]) -> str:
+def render(clusters: dict[str, list[dict[str, Any]]], empty: str = "") -> str:
     if not clusters:
-        return "No failed or fumbled runs this week.\n"
+        return (empty or "No failed or fumbled runs this week.") + "\n"
     lines: list[str] = []
-    for skill, recs in sorted(clusters.items(), key=lambda kv: -len(kv[1])):
+    for bucket, recs in sorted(clusters.items(), key=lambda kv: -len(kv[1])):
         failed = sum(1 for r in recs if r["label"] == "failed")
         fumbled = sum(1 for r in recs if r["label"] == "fumbled")
-        lines.append(f"## {skill} — {len(recs)} bad runs ({failed} failed, {fumbled} fumbled)")
+        lines.append(f"## {bucket} — {len(recs)} bad runs ({failed} failed, {fumbled} fumbled)")
         for r in recs:
             lines.append(
                 f"- run #{r['agent_id']} [{r['label']}] "
@@ -134,9 +158,16 @@ def main() -> None:
     args = parse_args()
     path = Path(args.dataset) if args.dataset else _default_dataset()
     records = load_records(path)
-    clusters = cluster_by_skill(records)
     print(f"# Failure clusters — {path.name} ({len(records)} runs total)\n")
-    print(render(clusters))
+    print("# By skill\n")
+    print(render(cluster_by_skill(records)))
+    print("# By plugin contribution\n")
+    print(
+        render(
+            cluster_by_plugin(records),
+            empty="No plugin hook, wrap, or prompt section fired in a bad run this week.",
+        )
+    )
     dur_stats = exec_duration_stats(records)
     if dur_stats:
         print(dur_stats)

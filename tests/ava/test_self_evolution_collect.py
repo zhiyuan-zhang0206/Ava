@@ -286,3 +286,63 @@ def test_fetch_raises_on_http_error(collect_mod: Any, monkeypatch: pytest.Monkey
 
     with pytest.raises(httpx.HTTPStatusError):
         collect_mod._fetch_events_window("telemetry", _ts_after(0), _ts_after(3600))
+
+
+# ── plugin attribution (issue #40) ──────────────────────────────────────────
+
+
+def test_plugins_activated_counts_per_contribution(collect_mod: Any) -> None:
+    """The plugin-side counterpart of `skills_touched`: hooks and wraps act
+    silently, so without this the dataset carried no evidence that a plugin
+    touched a bad run. Keyed per contribution, not per plugin, so a regression
+    points at the hook to read."""
+    events = [
+        (
+            "plugin_activation",
+            {
+                "plugin": "ava_syntax_fix",
+                "surface": "hooks",
+                "identifier": "before_exec",
+                "detail": "_SyntaxFixHook wrote messages",
+                "model": "m",
+            },
+        ),
+        (
+            "plugin_activation",
+            {
+                "plugin": "ava_syntax_fix",
+                "surface": "hooks",
+                "identifier": "before_exec",
+                "detail": "",
+                "model": "m",
+            },
+        ),
+        (
+            "plugin_activation",
+            {
+                "plugin": "ava_code",
+                "surface": "sdkWraps",
+                "identifier": "files.read",
+                "detail": "inner_calls=0",
+                "model": "m",
+            },
+        ),
+        ("turn_end", {"ok": True}),
+    ]
+
+    assert collect_mod._plugins_activated(events) == {
+        "ava_code/sdkWraps/files.read": 1,
+        "ava_syntax_fix/hooks/before_exec": 2,
+    }
+
+
+def test_plugins_activated_skips_malformed_rows(collect_mod: Any) -> None:
+    """Graceful drift: a row missing part of the key is dropped rather than
+    crashing the weekly collect."""
+    events = [
+        ("plugin_activation", {"plugin": "ava_code", "surface": "hooks"}),
+        ("plugin_activation", None),
+        ("plugin_activation", {}),
+    ]
+
+    assert collect_mod._plugins_activated(events) == {}
