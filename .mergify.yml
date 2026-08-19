@@ -5,20 +5,20 @@
 # pull_request event re-runs CI on the rebased head → once merge_conditions
 # are green the PR lands with a rebase merge (linear history).
 #
-# queue_conditions: intentionally empty — entry is explicit (the comment
-# command), CI-gated by the caller before enqueuing. merge_conditions are
-# the real gate and mirror the branch-protection required checks. All three
-# CI jobs run on every PR (no diff-driven skipping in ci.yml), so the gate
-# is a plain success-only list.
+# In-place checks, required by the `Require branches to be up to date before
+# merging` branch protection (draft-PR speculative checks are incompatible
+# with it): max_parallel_checks 1 + batch_size 1 + queue_conditions identical
+# to merge_conditions. The queue therefore re-verifies each PR on its own
+# rebased head, one at a time — exactly the manual update-branch → CI → merge
+# train, automated.
 #
-# branch_protection_injection_mode: none — the explicit merge_conditions
-# below already carry the same gate as branch protection; injection would
-# only duplicate it.
+# branch_protection_injection_mode: none — the explicit conditions below
+# already carry the same gate as branch protection; injection would only
+# duplicate it.
 
 merge_queue:
-  # Cap parallel speculative combos so the queue cannot grow unbounded and
-  # stall on busy CI: speculative runs are re-runs of CI on rebased heads, so
-  # one speculative slot keeps the queue moving without multiplying CI load.
+  # In-place checks require a single queue slot; one slot also keeps the
+  # queue from multiplying CI load on busy days.
   max_parallel_checks: 1
 
 queue_rules:
@@ -28,11 +28,19 @@ queue_rules:
     # be genuinely green for ANY merge, admin or not.
     # Must be a GitHub user account logged into Mergify.
     merge_bot_account: zhiyuan-zhang0206
+    # In-place checks (see header): no batching.
+    batch_size: 1
     # Without checks_timeout Mergify waits only the auto-derived 18m; on a
     # busy queue every rebase re-runs CI and PRs get dequeued mid-run.
     # 3600s = comfortable headroom over the full suite.
     checks_timeout: 3600s
-    queue_conditions: []
+    # Identical to merge_conditions (single-step CI, required for in-place
+    # checks): a PR must already be green to enter the queue, matching the
+    # workflow's "CI to green, then enqueue".
+    queue_conditions:
+      - check-success=backend (pytest + pyright)
+      - check-success=frontend (eslint + tsc + vitest)
+      - check-success=e2e (Playwright happy path)
     merge_conditions:
       - check-success=backend (pytest + pyright)
       - check-success=frontend (eslint + tsc + vitest)
