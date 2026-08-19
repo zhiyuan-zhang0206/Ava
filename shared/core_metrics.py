@@ -13,7 +13,7 @@ Two-tier metric architecture since 2026-08-06 (user ruling):
   external plugins, registered under their plugin name.
 
 The generator (``scripts/gen_plugin_dashboard.py``) renders the single
-dashboard (``dashboards/ops/ava-ops-main.json``) with the **core section
+dashboard (``deploy/lgtm/config/grafana/provisioning/dashboards/ava-ops-main.json``) with the **core section
 first** — row header ``core``, then one row per plugin — and exports both
 registries into the state snapshot
 ($AVA_HOME/state/plugin_metrics.json) for the inspector surface.

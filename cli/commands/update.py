@@ -170,9 +170,6 @@ from cli.commands._update_local import (
 from cli.commands._update_local import (
     _snapshot_known_good as _snapshot_known_good,
 )
-from cli.commands._update_local import (
-    _sync_grafana_provisioning as _sync_grafana_provisioning,
-)
 from cli.commands._update_orchestration import (
     _classify_rollout as _classify_rollout,
 )

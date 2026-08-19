@@ -1,4 +1,4 @@
-"""Validation for dashboards/ops/alerts/rules.yml — the Grafana alert rules.
+"""Validation for deploy/lgtm/config/grafana/provisioning/alerting/rules.yml — the Grafana alert rules.
 
 The rules moved from the retired Postgres events read path to the LGTM read
 side (Task #1224): R1-R3, R5-R7 query Loki (the events stream as OTLP logs
@@ -16,7 +16,14 @@ import pytest
 import yaml
 
 _RULES = (
-    Path(__file__).resolve().parent.parent.parent / "dashboards" / "ops" / "alerts" / "rules.yml"
+    Path(__file__).resolve().parent.parent.parent
+    / "deploy"
+    / "lgtm"
+    / "config"
+    / "grafana"
+    / "provisioning"
+    / "alerting"
+    / "rules.yml"
 )
 
 _EXPECTED_UIDS = {

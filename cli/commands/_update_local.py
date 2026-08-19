@@ -9,9 +9,11 @@ frontend-only fast path and the frontend session relaunch it shares:
   quiesce, no migration, no backend restart, no fan-out).
 - `_snapshot_known_good` — HEAD + applied-migration set, taken BEFORE anything
   is stopped (the recovery anchor for `_update_recover`).
-- `_sync_grafana_provisioning` — refresh Grafana provisioning copies from the
-  just-checked-out dashboard sources (non-fatal).
 - `_checkout_and_sync` — force-checkout the pinned rollout commit + `uv sync`.
+  Grafana provisioning needs no copy step: the LGTM Grafana container mounts
+  `deploy/lgtm/config/grafana/provisioning/` read-only straight from the
+  checkout, so the checkout IS the dashboard/alert refresh (Grafana's file
+  provider hot-reloads within ~30s).
 - `_boot_gateway_fresh` — `ava start` in a fresh subprocess so start loads the
   synced revision, not this stale interpreter (start applies pending migrations
   itself early in boot).
@@ -20,14 +22,13 @@ frontend-only fast path and the frontend session relaunch it shares:
 
 Re-imported by `cli/commands/update.py` (and re-exported through `cli.commands`)
 so `cli.commands(.update)._run_gateway_local_update` / `._run_frontend_only_update`
-/ `._restart_frontend_session` / `._sync_grafana_provisioning` keep resolving.
+/ `._restart_frontend_session` keep resolving.
 
 """
 
 from __future__ import annotations
 
 import shlex
-import shutil
 import sys
 from pathlib import Path
 
@@ -35,7 +36,6 @@ from cli.commands._repo import session_name
 from cli.commands._update_git import GitPullFailed, GitPullResult
 from cli.commands._update_recover import _recover_rc
 from cli.commands._update_report import _print_local_launch_failure_block
-from shared.paths import ava_home
 
 # `ava cluster update` restarts only the side that actually changed. A frontend-only
 # pull just rebuilds the ava-frontend session — no agent quiesce, no migration,
@@ -139,68 +139,6 @@ def _snapshot_known_good(*, pull: bool, target_sha: str | None) -> tuple[str, se
     return (_up_mod.git_head_sha(), _up_mod.current_schema_state())
 
 
-def _sync_grafana_provisioning(repo: Path) -> None:
-    """After checkout+sync: refresh the Grafana provisioning copies from the
-    newly-checked-out dashboard sources.
-
-    #975: the term-alignment batch updated `dashboards/ops/*.json` +
-    `dashboards/ops/alerts/rules.yml` to `event_name`, but nothing refreshed the
-    runtime copies under `$AVA_HOME/grafana/provisioning/` — the dashboards had
-    been generated at an earlier deploy and the alert rules written even
-    earlier, so after the `events.kind` column rename every panel died with a
-    db query error. Grafana's file provider reloads a changed file within
-    ~30s, so a rollout now carries its dashboard refresh with it.
-
-    Only the Grafana host has the provisioning dir; agent-runners skip via the
-    directory check. Non-fatal by design: a failure here must not roll a
-    healthy rollout back — it only delays the dashboard refresh (warned).
-    """
-    provisioning = ava_home() / "grafana" / "provisioning"
-    if not (provisioning / "dashboards").is_dir():
-        return  # not the Grafana host
-    from cli.commands import update as _up_mod
-
-    try:
-        print("\n→ sync Grafana dashboards + alert rules (provisioning as code)")
-        gen = _up_mod.subprocess.run(
-            [
-                str(repo / ".venv" / "bin" / "python"),
-                "scripts/gen_plugin_dashboard.py",
-            ],
-            cwd=repo,
-            capture_output=False,
-            check=False,
-        )
-        if gen.returncode != 0:
-            print("  ⚠ gen_plugin_dashboard.py failed — dashboards stay stale", file=sys.stderr)
-            return
-        rules_src = repo / "dashboards" / "ops" / "alerts" / "rules.yml"
-        rules_dst = provisioning / "alerting" / "rules.yml"
-        if rules_src.is_file() and rules_dst.parent.is_dir():
-            shutil.copy2(rules_src, rules_dst)
-            print("  ✓ alert rules → provisioning/alerting/rules.yml")
-        contact_src = repo / "dashboards" / "ops" / "alerts" / "contact.yml"
-        contact_dst = provisioning / "alerting" / "contact.yml"
-        if contact_src.is_file() and contact_dst.parent.is_dir():
-            # The webhook contact point rides the rollout too (Task #1224):
-            # contact-point provisioning hot-reloads, so the endpoint cutover
-            # lands with the gateway code that serves it — never a window
-            # where Grafana posts the new /api/alerts to old gateway code.
-            shutil.copy2(contact_src, contact_dst)
-            print("  ✓ alert contact point → provisioning/alerting/contact.yml")
-        datasources_src = repo / "dashboards" / "ops" / "alerts" / "datasources.yml"
-        datasources_dst = provisioning / "datasources" / "datasources.yml"
-        if datasources_src.is_file() and datasources_dst.parent.is_dir():
-            # The Loki + Prometheus datasources the migrated R1-R7 rules
-            # query (Task #1224). Datasource provisioning hot-reloads, and
-            # the rules.yml copy above lands in the same rollout — the
-            # datasources must never arrive after the rules that use them.
-            shutil.copy2(datasources_src, datasources_dst)
-            print("  ✓ alert datasources → provisioning/datasources/datasources.yml")
-    except Exception as exc:
-        print(f"  ⚠ Grafana provisioning sync failed (non-fatal): {exc}", file=sys.stderr)
-
-
 def _checkout_and_sync(
     repo: Path,
     target_sha: str,
@@ -240,25 +178,6 @@ def _checkout_and_sync(
     if sync_result.returncode != 0:
         print("  ✗ uv sync failed", file=sys.stderr)
         return _recover_rc(repo, pull_recover, preserve_frontend)
-
-    # 3.5) dashboard sources live in the just-checked-out tree — refresh the
-    # runtime Grafana provisioning copies now (see _sync_grafana_provisioning;
-    # #975: stale kind-era dashboards died after the events column rename).
-    # Run via a subprocess of the NEW tree's venv: this updater process
-    # executes the PRE-checkout module, so copy blocks added by the very
-    # rollout being deployed would otherwise take effect one rollout late
-    # (prod 2026-08-13: #2509's contact.yml + #2515's datasources.yml never
-    # copied while rules.yml did — the old module ran the sync).
-    _up_mod.subprocess.run(
-        [
-            str(repo / ".venv" / "bin" / "python"),
-            "scripts/sync_grafana_provisioning.py",
-            str(repo),
-        ],
-        cwd=repo,
-        capture_output=False,
-        check=False,
-    )
 
     # Record the just-installed commit so the source-integrity guard at
     # `ava start` can detect future manual git operations.

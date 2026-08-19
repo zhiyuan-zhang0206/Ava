@@ -2,7 +2,7 @@
 
 The system→human alert store + notification knobs. Alert is fully separate
 from Notice. Grafana owns rule evaluation (rules as code in
-dashboards/ops/alerts/rules.yml, delivered through the embedded Alertmanager);
+deploy/lgtm/config/grafana/provisioning/alerting/rules.yml, delivered through the embedded Alertmanager);
 the gateway receives webhook POSTs on /api/alerts, stores them in ``alerts``,
 publishes them on the SSE stream, and fans firing/resolved notifications out
 to the IM channels the user has connected (services/im_bridge daemon) — every

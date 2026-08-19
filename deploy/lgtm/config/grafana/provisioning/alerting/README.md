@@ -1,4 +1,4 @@
-# dashboards/ops/alerts — Ava ops alert rules (as code)
+# Grafana alerting — Ava ops alert rules (as code)
 
 Grafana Alerting rules for the Ava event system, provisioned as code. Since
 the LGTM cutover (Task #1224) they evaluate against the **LGTM read side**:
@@ -17,14 +17,11 @@ dashboards).
 ## Where these run (LGTM stack)
 
 Since the single-Grafana merge (Task #1264) the LGTM Grafana container
-(3003, deploy/lgtm) evaluates these rules: `rules.yml` and
-`contact.yml` are copied to
-`deploy/lgtm/config/grafana/provisioning/alerting/` (mounted into the
-container). The copy must stay in sync — guarded by
-`tests/test_lint_lgtm_alerting_sync.py`; the only allowed divergence is the
-contact point's webhook URL (`host.docker.internal` inside the container).
-The 3002-era provisioning copy (`~/.ava/grafana/provisioning/alerting/`,
-synced by `_sync_grafana_provisioning`) is retired with 3002.
+(host port 3003, `deploy/lgtm` compose) evaluates these rules. This
+directory is mounted read-only into the container at
+`/etc/grafana/provisioning/alerting` — it is the ONLY copy; the contact
+point's webhook URL uses `host.docker.internal` because the container
+reaches the gateway on the host.
 
 ## Rules (7, 2026-08-12)
 
@@ -70,17 +67,12 @@ onset + one recovery IM instead of one per event.
 
 ## Sync to the live Grafana
 
-The running Grafana (on the gateway host, `127.0.0.1:3002`, launchd
-`com.ava.grafana`) reads alert-rule provisioning from
-`~/.ava/grafana/provisioning/alerting/`. `_update_local.py` copies
-`rules.yml` + `contact.yml` (alerting/) and `datasources.yml`
-(datasources/) there on every rollout and restarts Grafana
-(`launchctl kickstart -k gui/$(id -u)/com.ava.grafana`) — alert-rule
-provisioning does **not** hot-reload file changes (verified 2026-08-04);
-datasource and contact-point provisioning do.
-
-Requires Grafana Unified Alerting enabled — `[unified_alerting] enabled =
-true` in `~/.ava/grafana/grafana.ini` (flipped on 2026-08-04 by the W3 PR).
+There is no sync step: the container mounts this directory directly, so a
+git checkout on the LGTM host is the deployment. Caveat: alert-RULE
+provisioning does **not** hot-reload file changes (verified 2026-08-04) —
+restart the grafana container (`docker compose restart grafana` under
+`deploy/lgtm`) after editing `rules.yml`; datasource and contact-point
+provisioning do hot-reload.
 
 ## How to add a rule
 
@@ -90,10 +82,10 @@ true` in `~/.ava/grafana/grafana.ini` (flipped on 2026-08-04 by the W3 PR).
    and wrap every count in `sum(...)` — the unknown_service family has >500
    streams over a day and an unaggregated count hits Loki's per-query
    series cap.
-2. Copy to `~/.ava/grafana/provisioning/alerting/rules.yml` (or wait for
-   the next rollout's sync).
-3. Verify via admin API: `GET /api/v1/provisioning/alert-rules` (password in
-   `~/.ava/grafana/admin_password`). Synthetic events are no longer SQL
+2. Land the change; on the LGTM host restart the grafana container
+   (rule provisioning does not hot-reload).
+3. Verify via the container Grafana's admin API:
+   `GET /api/v1/provisioning/alert-rules`. Synthetic events are no longer SQL
    inserts — push a test event through the emitter (any Ava process emits
    on activity; e.g. trigger a real event or use the Loki push API), then
    watch `GET /api/prometheus/grafana/api/v1/rules` for the state
