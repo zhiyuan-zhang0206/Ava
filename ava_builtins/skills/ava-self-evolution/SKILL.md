@@ -75,9 +75,35 @@ even in a quiet week.
 
 ### 2. Detect what changed
 
+Kernel-resident skills and plugins (L4 of the four-layer modification model —
+`decisions/2026-08-19-four-layer-modification-model.md`):
+
 ```
 git -C ~/.ava/source log --since='7 days ago' --name-only --pretty='%h %cI %s' -- ava_builtins/skills/ ava_builtins/plugins/ .agents/skills/
 ```
+
+External extensions (L1–L3) never appear in the kernel repo's log — a plugin
+developed in its own repo would otherwise be invisible to this loop exactly
+where user modification concentrates. Sweep them too:
+
+```python
+import json, os, subprocess
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+home = Path(os.environ.get("AVA_HOME") or Path.home() / ".ava")
+cutoff = (datetime.now(UTC) - timedelta(days=7)).isoformat()
+reg = json.loads((home / "installed.json").read_text())  # install registry
+print([p["name"] for p in reg["packages"] if (p.get("updated_at") or "") >= cutoff])
+for d in (home / "plugins").iterdir():                    # hand-cloned plugin repos
+    if (d / ".git").is_dir():
+        log = subprocess.run(["git", "-C", str(d), "log", "--since=7 days ago",
+                              "--pretty=%h %cI %s"], capture_output=True, text=True).stdout
+        if log.strip():
+            print(d.name, "\n", log)
+```
+
+(When issue #39's cluster registry lands, its version-change feed replaces
+this per-machine sweep.)
 
 List the skills/plugins whose files changed this week, with dates. These are
 your suspects. If nothing changed, you can still write a short report noting the
@@ -207,7 +233,7 @@ scores two dimensions in [0, 1]: **completion** (output produced, no breach,
 clean exec) and **efficiency** (few tokens/turns, no exec failures, no
 compaction, no re-prompts); `overall` weights completion higher.
 
-## Daily incremental scan
+## Data source
 
 Events come from **Loki** via the gateway `/api/events` endpoint — PG `events`
 is a frozen archive since 2026-08-12 (Task #1197 LGTM cutover); `collect.py`
