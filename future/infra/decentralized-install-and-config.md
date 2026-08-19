@@ -18,6 +18,13 @@
 > Original 2026-05-30 framing kept for rationale: it supersedes an earlier
 > "capability-gating central distribution" framing — the gating problem dissolves
 > once install is a local operation.
+>
+> **Proposed partial reversal (issue #39)**: the "install is a local operation"
+> half is proposed to change — install would write cluster registry rows + blobs,
+> per-machine enable files would demote to materialized caches, and enable state
+> would return to the cluster. The agent-driven-imperative-install and
+> single-source-`.env` rulings stand. See
+> [`extension-ownership.md`](extension-ownership.md).
 
 ## The reframe
 
