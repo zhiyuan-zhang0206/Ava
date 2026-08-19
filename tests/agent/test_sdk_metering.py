@@ -232,3 +232,37 @@ def test_install_wraps_and_restores_mcp_call_funnel() -> None:
     finally:
         sdk_metering.uninstall()
     assert ava.mcps._call_raw is before
+
+
+def test_a_plugin_load_is_undone_by_the_autouse_teardown(request: pytest.FixtureRequest) -> None:
+    """Issue #83: `_load_extensions()` meters the process-global `ava` singleton as a
+    side effect and nothing used to put it back, so one plugin-loading test silently
+    rewrote the callables every later test in that xdist worker saw.
+
+    The autouse `_restore_sdk_metering` in `tests/conftest.py` is what closes that.
+    It runs after this test body, where a self-test cannot observe it, so the two
+    halves are pinned separately: the fixture is wired onto every test, and its one
+    action reverses a *real* `_load_extensions()` — not just the hand-built
+    `install()` the test above covers.
+    """
+    import ava.mcps
+    from agent.graph import _build
+    from agent.sdk_metering import _RECORDERS
+
+    assert "_restore_sdk_metering" in request.fixturenames
+
+    sdk_metering.uninstall()
+    bare_funnel = ava.mcps._call_raw
+
+    _build._load_extensions()
+    metered = {fq for p, a, fq in sdk_metering._instrument_targets() if getattr(p, a) in _RECORDERS}
+    assert metered, "the leak this guards is gone"
+    assert ava.mcps._call_raw in _RECORDERS
+
+    sdk_metering.uninstall()  # the fixture's action, made observable
+    assert ava.mcps._call_raw is bare_funnel
+    # The whole surface, not just the funnel: a later test asserting on identity or
+    # on call counts through a wrapped path must see no recorder anywhere.
+    assert not [
+        fq for p, a, fq in sdk_metering._instrument_targets() if getattr(p, a) in _RECORDERS
+    ]
