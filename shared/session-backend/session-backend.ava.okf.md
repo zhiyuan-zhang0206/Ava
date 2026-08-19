@@ -39,7 +39,9 @@ Three entry points, three session classes:
 `kill_session(name, graceful=...)` → `(ok, mode)`, and the platform-neutral `process_alive` / `request_stop` / `force_kill` trio for the processes that are not sessions, live in [[stopping.ava.okf.md|stopping]].
 
 ### macOS firewall audit
-The read-only Application Firewall allow-list audit (issue #949, converge report + OFF_BOX_UNREACHABLE attribution): [[shared/session-backend/firewall-audit.ava.okf.md]].## Entry points
+The read-only Application Firewall allow-list audit (issue #949, converge report + OFF_BOX_UNREACHABLE attribution): [[shared/session-backend/firewall-audit.ava.okf.md]].
+
+## Entry points
 
 - `shared/session_backend.py:get_backend()` / `get_shell_backend()` / `native_proc()` — the three dispatch points
 - `shared/posixproc.py` / `shared/winproc.py` — the native supervisors (agent processes + services)

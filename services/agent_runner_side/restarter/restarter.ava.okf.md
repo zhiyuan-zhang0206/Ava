@@ -39,7 +39,9 @@ Each tick runs three machine-scoped, non-blocking (`blocks` always `BlockScope.N
 - Both scans run every reconcile (1s) via one indexed SELECT (probe + `os.kill` only on hits). Swap-out is idempotent *when the signal lands*: the signaled agent leaves 'idling' within ms, so the next tick skips it. A pid that fails the identity probe draws no signal at all, and the reaper clears the row within its 30s pass — which is what ends the re-selection (#1123).
 
 ### CrashResurrectController (`ops/controllers/resurrect.py`) — Auto-Resurrect on Crash
-The 30s auto-resurrect scan — criteria, never-resurrect set, enforced stamp, health gate: [[services/agent_runner_side/restarter/crash-resurrect.ava.okf.md]].## Key Dependencies
+The 30s auto-resurrect scan — criteria, never-resurrect set, enforced stamp, health gate: [[services/agent_runner_side/restarter/crash-resurrect.ava.okf.md]].
+
+## Key Dependencies
 - [[db.ava.okf.md]] — reads/writes `agents_meta` (restarting requests + orphan status + termination_source)
 - [[loop.ava.okf.md]] — respawn/resurrect result = agent process re-entering the main loop
 - [[gateway-cli.ava.okf.md]] — probes gateway health endpoint before respawn/resurrect
