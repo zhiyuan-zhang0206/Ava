@@ -272,7 +272,11 @@ dimensions that today are scattered (D13), one concept.
    (user ruling 2026-08-12: generic MCP servers are user-installed and
    user-maintained; a store is infra a single-user deployment does not need).
 2. **UI contribution surfaces (menus/views/themes)** — Ava plugins have no UI
-   surface today; `contributions` grows a key if that ever changes.
+   surface today; the key that grows when that changes is designed in
+   [`future/frontend-plugin-contributions.md`](../future/frontend-plugin-contributions.md)
+   (`contributions.ui`: declarative inspect sections / nav pages / theme token
+   packs — the declarative *shape* is borrowed, runtime component composition
+   still is not).
 3. **Auto-generated activation event sets** — activation surface = agent
    process start; no workspace/language/command triggers.
 

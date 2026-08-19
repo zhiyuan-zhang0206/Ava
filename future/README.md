@@ -52,6 +52,7 @@ These four plans co-locate with the code they plan for, per the 2026-08-12 doc r
 |------|------|
 | [**Roadmap**](roadmap/README.md) | ★ The live, ordered list of what Ava builds next. Buckets: **now**, **north star**, gated-on-sandbox, open-source prerequisites, low-priority, deliberate-no list |
 | [Distribution form: one core, packaging is a gated outer layer](distribution-form.md) | Distribution architecture |
+| [Frontend plugin contributions](frontend-plugin-contributions.md) | **All of it** (design settled, issue #57): `contributions.ui` manifest key + validator, theme token packs, plugin page mount + nav, agent-inspect sections, blessing the gateway API for alternative frontends — slices U1–U5 |
 | [web-ai — drive frontier-model web apps](web-ai.md) | Driving ChatGPT / Gemini / Claude through a logged-in browser |
 
 > **Cleaned up 2026-07-28.** Deleted as fully landed with no load-bearing decision
