@@ -462,7 +462,7 @@ def _skills_touched(log_events: list[tuple]) -> list[str]:
     return sorted(loaded)
 
 
-def _plugins_activated(events: list[tuple]) -> dict[str, int]:
+def _plugins_activated(events: list[tuple]) -> tuple[dict[str, int], int]:
     """Plugin injection surfaces that fired during the run -> how many times.
 
     The plugin-side counterpart of `_skills_touched`. Hooks and wraps used to
@@ -474,19 +474,27 @@ def _plugins_activated(events: list[tuple]) -> dict[str, int]:
 
     Keyed `"<plugin>/<surface>/<identifier>"` so a regression can be attributed
     to the specific contribution, not merely to the plugin. A malformed row is
-    skipped rather than crashing the weekly collect — same graceful-drift
-    tolerance `_skills_touched` applies.
+    dropped rather than crashing the weekly collect — same graceful-drift
+    tolerance `_skills_touched` applies — but the drop is counted and returned
+    alongside the fired counts (issue #92) so `build_record` can surface it on
+    the run record instead of letting the dataset quietly thin out with no
+    signal that the event contract drifted.
+
+    Returns (fired counts, count of rows dropped for missing plugin/surface/
+    identifier).
     """
     fired: Counter[str] = Counter()
+    skipped = 0
     for event_type, payload in events:
         if event_type != "plugin_activation":
             continue
         p = payload or {}
         plugin, surface, identifier = p.get("plugin"), p.get("surface"), p.get("identifier")
         if not (plugin and surface and identifier):
+            skipped += 1
             continue
         fired[f"{plugin}/{surface}/{identifier}"] += 1
-    return dict(sorted(fired.items()))
+    return dict(sorted(fired.items())), skipped
 
 
 # ─────────────── per-agent assembly ───────────────
@@ -582,6 +590,16 @@ def build_record(
 
     transcript = _transcript(agent_id)
 
+    plugins_activated, plugins_activated_skipped = _plugins_activated(events)
+    if plugins_activated_skipped:
+        # Loud but tolerant (issue #92): the row is still dropped, but the
+        # drop is visible instead of silently thinning the plugin-attribution
+        # dimension out to empty.
+        print(
+            f"warning: agent {agent_id}: skipped {plugins_activated_skipped} "
+            "malformed plugin_activation row(s)"
+        )
+
     rec: dict[str, Any] = {
         "agent_id": agent_id,
         "week": week,
@@ -598,7 +616,8 @@ def build_record(
         "tokens_out": tokens_out,
         "tools_called": count_tool_calls(code_bodies),
         "skills_touched": _skills_touched(log_events),
-        "plugins_activated": _plugins_activated(events),
+        "plugins_activated": plugins_activated,
+        "plugins_activated_skipped": plugins_activated_skipped,
         "exec_ok": exec_ok,
         "exec_failed": exec_failed,
         "last_exec_failed": last_exec_failed,

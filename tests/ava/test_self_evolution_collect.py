@@ -314,7 +314,7 @@ def test_plugins_activated_counts_per_contribution(collect_mod: Any) -> None:
     """The plugin-side counterpart of `skills_touched`: hooks and wraps act
     silently, so without this the dataset carried no evidence that a plugin
     touched a bad run. Keyed per contribution, not per plugin, so a regression
-    points at the hook to read."""
+    points at the hook to read. Well-formed rows produce a zero skip count."""
     events = [
         (
             "plugin_activation",
@@ -349,19 +349,84 @@ def test_plugins_activated_counts_per_contribution(collect_mod: Any) -> None:
         ("turn_end", {"ok": True}),
     ]
 
-    assert collect_mod._plugins_activated(events) == {
+    fired, skipped = collect_mod._plugins_activated(events)
+    assert fired == {
         "ava_code/sdkWraps/files.read": 1,
         "ava_syntax_fix/hooks/before_exec": 2,
     }
+    assert skipped == 0
 
 
-def test_plugins_activated_skips_malformed_rows(collect_mod: Any) -> None:
-    """Graceful drift: a row missing part of the key is dropped rather than
-    crashing the weekly collect."""
+def test_plugins_activated_counts_and_reports_malformed_rows(collect_mod: Any) -> None:
+    """Issue #92: a row missing part of the key is still dropped (graceful
+    drift — it never crashes the weekly collect), but the drop is now counted
+    instead of vanishing silently, so an event-contract drift is visible on
+    the run record rather than quietly thinning the dataset to empty."""
     events = [
         ("plugin_activation", {"plugin": "ava_code", "surface": "hooks"}),
         ("plugin_activation", None),
         ("plugin_activation", {}),
     ]
 
-    assert collect_mod._plugins_activated(events) == {}
+    fired, skipped = collect_mod._plugins_activated(events)
+    assert fired == {}
+    assert skipped == 3
+
+
+def _fake_transcript(_agent_id: int) -> list[dict[str, str]]:
+    return []
+
+
+def _build_minimal_record(
+    collect_mod: Any, monkeypatch: pytest.MonkeyPatch, events: list[tuple]
+) -> dict[str, Any]:
+    """build_record with every other input reduced to its empty case, so the
+    test isolates the plugins_activated_skipped wiring."""
+    monkeypatch.setattr(collect_mod, "_transcript", _fake_transcript)
+    return collect_mod.build_record(
+        agent_id=1,
+        week="2026-W99",
+        events=events,
+        log_events=[],
+        inbounds=[],
+        meta=("user", "completed", "done"),
+    )
+
+
+def test_build_record_surfaces_plugins_activated_skipped(
+    collect_mod: Any, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Issue #92: the skip count must land on the run record (not just the
+    private counter), and a nonzero count must print a visible warning."""
+    events = [
+        ("plugin_activation", {"plugin": "ava_code", "surface": "hooks"}),  # malformed
+        (
+            "plugin_activation",
+            {"plugin": "ava_code", "surface": "hooks", "identifier": "before_exec"},
+        ),
+    ]
+
+    rec = _build_minimal_record(collect_mod, monkeypatch, events)
+
+    assert rec["plugins_activated_skipped"] == 1
+    assert rec["plugins_activated"] == {"ava_code/hooks/before_exec": 1}
+    assert "skipped 1" in capsys.readouterr().out
+
+
+def test_build_record_well_formed_rows_report_zero_skipped(
+    collect_mod: Any, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Well-formed rows must not be affected by the loud-skip change: zero
+    skipped, no warning printed."""
+    events = [
+        (
+            "plugin_activation",
+            {"plugin": "ava_code", "surface": "hooks", "identifier": "before_exec"},
+        ),
+    ]
+
+    rec = _build_minimal_record(collect_mod, monkeypatch, events)
+
+    assert rec["plugins_activated_skipped"] == 0
+    assert rec["plugins_activated"] == {"ava_code/hooks/before_exec": 1}
+    assert capsys.readouterr().out == ""
