@@ -190,7 +190,9 @@ def _fetch_content(gateway: str, agent_id: str, trace_id: str) -> dict:
 def _fetch_events(gateway: str, trace_id: str, from_iso: str) -> dict:
     import urllib.parse
 
-    params = urllib.parse.urlencode({"trace_id": trace_id, "from": from_iso, "limit": "1000"})
+    params = urllib.parse.urlencode(
+        {"trace_id": trace_id, "from": from_iso, "limit": "1000", "with_total": "1"}
+    )
     return _gateway_get(gateway, f"/api/events?{params}")
 
 

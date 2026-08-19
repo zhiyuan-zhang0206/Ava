@@ -60,10 +60,19 @@ def count_events(since: datetime) -> int:
         "to": datetime.now(UTC).isoformat(),
         "limit": 1,
         "offset": 0,
+        # 2026-08-18 contract change: meta.total is opt-in; without this flag
+        # the gateway returns total=None and int(None) crashes the weekly
+        # trigger (and a silent 0 would skip the week's deep run).
+        "with_total": 1,
     }
     resp = httpx.get(f"{base}/api/events", params=params, headers=headers, timeout=120.0)
     resp.raise_for_status()
-    return int(resp.json().get("meta", {}).get("total", 0))
+    total = resp.json().get("meta", {}).get("total")
+    if total is None:
+        raise RuntimeError(
+            f"/api/events returned no total despite with_total=1: {str(resp.json())[:300]}"
+        )
+    return int(total)
 
 
 def ensure_agent(label: str, prompt: str) -> int:
