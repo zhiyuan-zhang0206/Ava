@@ -30,8 +30,14 @@ def _probe() -> DaemonProbe:
 
 def _restart_daemon() -> DaemonProbe:
     project_root = settings.services.project_root or Path(__file__).resolve().parent.parent.parent
+    # The respawn session name MUST match ServiceSpec.session ("im-bridge",
+    # kebab-case) — respawn_service composes the session name from it, and
+    # `ava status` / `ava stop` / `ava restart` look up the same name. The
+    # module name ("im_bridge") differs from the session name for this service,
+    # and a respawn under the module name strands the session where the CLI
+    # cannot see or kill it (Task #1291).
     return respawn_and_verify(
-        "im_bridge",
+        "im-bridge",
         ".venv/bin/python -m services.im_bridge.daemon",
         project_root,
         extra_env={"AVA_PROCESS_PROFILE": "gateway"},
