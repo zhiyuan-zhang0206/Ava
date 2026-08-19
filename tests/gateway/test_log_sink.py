@@ -46,7 +46,7 @@ def _last_event() -> tuple[str, int | None, str, dict]:  # pyright: ignore[repor
     agent_id, level, attributes). Fail loud on an empty mirror."""
     from shared.paths import logs_dir
 
-    telemetry.flush()
+    telemetry.sync()
     day = datetime.now(UTC).strftime("%Y%m%d")
     path = logs_dir() / f"events-{day}.jsonl"
     if not path.exists():

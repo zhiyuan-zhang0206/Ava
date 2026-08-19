@@ -235,7 +235,7 @@ def test_mcp_requires_auth_when_middleware_is_on(monkeypatch: pytest.MonkeyPatch
 def test_tool_call_is_audited() -> None:
     with TestClient(app) as client:
         _tool_call(client, "list_agents", {}, req_id=7)
-    telemetry.flush()
+    telemetry.sync()
     from shared.paths import logs_dir
 
     day = datetime.now(UTC).strftime("%Y%m%d")
