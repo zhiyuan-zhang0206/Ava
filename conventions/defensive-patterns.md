@@ -3,8 +3,8 @@
 Hard-won bug-class rules. Every pattern here is a class of defect that actually
 shipped, or nearly shipped, in this repo — not a general best-practices list.
 
-**Read before** writing lifecycle, release, or infrastructure-touching code, and
-before adding a protective test or lint.
+**Read before** writing lifecycle, release, or infrastructure-touching code,
+before adding a protective test or lint, and before acting on a diagnosis.
 
 Each entry is a rule plus a pointer to the evidence. The narrative — what broke,
 why every safety net missed it — lives in `postmortems/`; this page is the
@@ -97,3 +97,21 @@ pre-commit failure; derived sets (`agent/state.py:_BASE_STATE_FIELDS`, from
 `model_fields`) need no guard at all because they cannot go stale. Reach for the
 written rule only where the boundary genuinely resists naming.
 Evidence: [`postmortems/0003`](../postmortems/0003-touched-areas-is-not-the-blast-radius.md).
+
+## Debugging
+
+### A mechanism that predicts the symptom is a hypothesis, not a diagnosis
+
+A causal story that accounts for what you observed is not thereby the cause —
+several will. Before acting on one, name the cheapest experiment whose outcome
+differs between your mechanism and the alternatives, and run it. It is usually one
+command: set the variable, start the missing daemon, shorten the path. The tell
+that you have skipped this step is a fix justified by "this would explain it"
+rather than by an observation. Same discipline as *a guard only guards if the
+regression actually fails it*, applied to diagnosis rather than to test-writing.
+Evidence: issue #77 — two mechanisms proposed for one failing test, both
+predicting the symptom, both wrong. "It needs a tmux server" was disproved by
+starting one (the module under test contains no tmux at all); "the pytest tmp
+counter reached three digits" was true and still incomplete, since `TMPDIR` is a
+second, independent input — `TMPDIR=/tmp pytest ...::test_new_honors_cwd` passes
+(69-character path) where the default per-session `TMPDIR` fails (121).
