@@ -18,11 +18,7 @@ allocated → starting → running ⇄ idling → terminated
 - **boot deadline** (`agent/_boot_deadline.py`): what makes the liveness answer above worth reading. The child arms a watchdog before its import chain and exits on whichever bound trips first — stall (30s, reset by every `_boot_timing` phase) or budget (90s, never reset) — so in the pre-flip window **alive ⇒ progressing**. The bounds arrive as `--boot-stall-seconds` / `--boot-budget-seconds` **argv**; the `AVA_AGENT_BOOT_*` env names are launcher-side settings aliases — setting them on the agent process env has no effect. Ordering pinned in `tests/shared/test_config.py`: stall (30) < confirm (45) < budget (90) < reap grace (120); the first makes the launcher's probe decisive, the last keeps the reaper from ever meeting a live child (its clock `status_changed_at` resets only on a status flip, so pre-flip progress cannot hold it off). The child does **not** write its own row on overrun — a boot wedged on the data plane cannot be relied on to reach it.
 - `starting → terminated`: boot-stage failure
 - `running/idling → terminated`: signal / exit (gateway `/exited` finalize, `WHERE status IN ('starting','running','idling')`)
-- **restart**: `running ─CAS→ restarting ─respawn→ allocated → starting → running` — never enters terminated (`agent/graph/_claim.py` CAS-flips running→restarting, `/exited` skips 'restarting' rows, restarter daemon calls `ops/agent_wake.py:respawn_agent`)
-- **resurrect**: `terminated → allocated → starting → running`. ① **on-delivery**: inbound (chat/compact_request) to terminated row → gateway `resurrect_if_terminated` ② **crash-resurrect** (`ops/controllers/resurrect.py:CrashResurrectController`, 30s scan): local agents with `termination_source ∈ {reaper, launch-confirm}` and `pending` **or `claimed`** work-type inbound, past backoff. Only **involuntary deaths** (reaper=process reclaimed, launch-confirm=startup unconfirmed); never `user` (force-kill) or `exit` (self-exit). `claimed` covers in-progress-only rows: startup reconcile adjudicates (submitted→done; else→pending, redelivered). Both paths hit `ops/agent_wake.py:resurrect_agent` and inject `resurrect` marker ("resurrected by {resurrected_by}"), resurrected_by = initiator / `"system"`.
-- **hibernate**: `idling ─SIGUSR1→ (running finalize) → hibernating ─swap-in→ allocated → starting → running`. After `AVA_HIBERNATE_IDLE_THRESHOLD_SECONDS` (default 450s, above heartbeat 300s — targets `pause_heartbeat` agents), `ops/controllers/hibernate.py:HibernateController` sends SIGUSR1; agent exits cleanly, row stays hibernating (gateway `/hibernating`, `WHERE status IN ('running','idling')` — on SIGUSR1 `_wait_for_batch`'s finally flips idling→running; **no page close or exit events**). Swap-in via `ops/agent_wake.py:swap_in_agent`, **no lifecycle marker** — agent has zero trace of swap. **Projected as idling** (`ava/_gateway_client.py:_project_ops_status` / `ui/web/src/lib/types.ts:projectAgentStatus`); reaper scans exclude hibernating.
-
-## Signal Handling (`agent/lifecycle.py:_install_lifecycle_signal_handlers()`)
+- **re-entry paths** (restart / resurrect / hibernate) — the three ways a row re-enters the running state, plus the operation-by-operation comparison table: [[agent/process-lifecycle/reentry-paths.ava.okf.md]].## Signal Handling (`agent/lifecycle.py:_install_lifecycle_signal_handlers()`)
 - **SIGHUP** → `SystemExit("signal:SIGHUP")`: kept as a **defensive** catch — agents are detached native processes, so the old session-close SIGHUP no longer exists; a stray one still exits cleanly through the normal tracking path
 - **SIGTERM** → `SystemExit("signal:SIGTERM")`: external kill
 - **SIGUSR1** → hibernation: handler **sets `_hibernate_requested=True` synchronously** then raises `SystemExit`. Flag needed: asyncio converts handler's SystemExit to `CancelledError`; by `main()` finally, `sys.exc_info()` is CancelledError. `_exit_reason()` uses flag → `"hibernate"` → finally routes to `/hibernating` not `/exited`.
@@ -41,15 +37,7 @@ Notifies gateway on exit: gateway updates agents_meta to 'terminated', closes ag
 Shell sub-sessions (`ava-agent-<id>-shell-<n>[-<name>]`) survive lifecycles; the **main process is a plain native process** (native supervisor) — retention rules + the session-record model live in [[sessions.ava.okf.md]]. Silent death = wedged/killed process, reaped by the restarter and crash-resurrected.
 
 ## Restart vs Terminate vs Resurrect vs Hibernate
-| Operation | Process | Agent ID | main session record | shell sub-session | Status | agent visible |
-|------|------|----------|-----------|-----------------|------|-----------|
-| `terminate()` | exit | retained | destroyed | retained | terminated | yes (marker) |
-| `restart()` | replace | retained | rebuilt | retained | running (new) | yes (marker) |
-| `resurrect()` | new process | retained | rebuilt | retained | running | yes (marker) |
-| `update()` | replace | retained | rebuilt | retained | running (new code) | yes (marker) |
-| hibernate swap | kill→new process | retained | rebuilt | retained | hibernating→running | **no trace** |
-
-## Key Dependencies
+The operation-by-operation comparison table: [[agent/process-lifecycle/reentry-paths.ava.okf.md]].## Key Dependencies
 - [[sessions.ava.okf.md]] — session retention
 - [[db.ava.okf.md]] — agents_meta updates
 - [[loop.ava.okf.md]] — main() finally calls lifecycle hooks

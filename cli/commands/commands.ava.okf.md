@@ -43,7 +43,7 @@ schema change catches the DB up on its own.
 - Which cluster a command acts on comes from `_repo.py:_repo_root` — the
   checkout the running `ava` belongs to — never the current directory.
 - What `ava start` treats as already-up, what it waits for, and when an unready
-  service becomes exit code 4 are one subject, in [[cli/commands/start-readiness.ava.okf.md]].
+  service becomes exit code 4 are one subject, in [[start-readiness.ava.okf.md]].
 - `update.py`'s Phase-B poll answers a `PollVerdict` per host — the stall verdict reads the host's `host_deploy_state` row (idle → OK; live lease → working; paused+expired / converging+no-lease → STALLED ×2). A POLL_* status plus
   the `last_updater_outcome` the runner reported on the probe that settled it
   (`ops.updater_outcome`, read off that host's own updater log and anchored to its

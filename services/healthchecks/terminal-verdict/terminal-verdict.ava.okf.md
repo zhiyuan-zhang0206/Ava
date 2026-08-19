@@ -16,7 +16,7 @@ tags:
 
 ## Where the line is: can this unit's own kill-session free the port?
 
-A respawn kills `ava-<svc>` on **this unit's** session backend first, then re-spawns it. The session records live under `$AVA_HOME/run/sessions` (`shared.session_backend`), so the reach is scoped to the UNIT, not the cluster: two agent-runners of one cluster sharing a machine's localhost namespace are as unkillable to each other as two clusters would be. That is why the `home` row below says *unit* — reading it as *cluster* is what sent the 2026-07-26 diagnosis after port allocation, which was never the mechanism ([[cli/commands/start-readiness.ava.okf.md]] for the pre-bind gate that now stops it).
+A respawn kills `ava-<svc>` on **this unit's** session backend first, then re-spawns it. The session records live under `$AVA_HOME/run/sessions` (`shared.session_backend`), so the reach is scoped to the UNIT, not the cluster: two agent-runners of one cluster sharing a machine's localhost namespace are as unkillable to each other as two clusters would be. That is why the `home` row below says *unit* — reading it as *cluster* is what sent the 2026-07-26 diagnosis after port allocation, which was never the mechanism ([[cli/commands/start-readiness/start-readiness.ava.okf.md]] for the pre-bind gate that now stops it).
 
 | probe result | verdict | why |
 |---|---|---|
