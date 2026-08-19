@@ -313,7 +313,7 @@ def test_pause_sets_latch_and_excludes_from_fanout(_machine_setup) -> None:  # p
 
 def test_register_self_does_not_clear_pause(_machine_setup) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
     """THE pause invariant: a paused machine that re-registers (its `ava start`
-    after a reboot, or a Tailscale IP change while it is away) stays paused —
+    after a reboot, or a reachable-address change while it is away) stays paused —
     only `resume` clears the latch. register_self still clears the unit's
     stopped_at latch (normal comeback semantics) and refreshes the URL."""
     _machine_setup(name="away", role="agent-runner", home="~/.ava")

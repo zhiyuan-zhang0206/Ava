@@ -2,8 +2,8 @@
 rollout for it.
 
 The 2026-08-03 incident (rollout log `rollout-1785804160.log`): a rollout pinned
-e83c545b3 was aborted at Phase 0 because laptop-host was unreachable (tailscale
-down) — `_run_preflight_fetch` treated "unreachable" and "fatal" identically and
+e83c545b3 was aborted at Phase 0 because laptop-host was unreachable (the private
+network was down) — `_run_preflight_fetch` treated "unreachable" and "fatal" identically and
 aborted the whole rollout over one host that was never going to be touched by it.
 The user ruling behind this change (Task #679): ignore an offline machine, roll
 out the rest; the machine's watchdog pin-drift self-heal converges it to the pin

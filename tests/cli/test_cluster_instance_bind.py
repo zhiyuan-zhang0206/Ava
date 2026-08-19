@@ -1,6 +1,6 @@
-"""Bounded wait for the reachable (tailscale) bind address before starting pg/redis.
+"""Bounded wait for the reachable (private-network) bind address before starting pg/redis.
 
-On reboot brew/launchd can start `ava` before tailscale has assigned its address;
+On reboot brew/launchd can start `ava` before the private network has assigned its address;
 binding pg/redis to a not-yet-present address fails and takes the whole autostart
 down. `_wait_for_reachable_bind` blocks (bounded) until the address is assigned, and
 fails fast on timeout. A loopback-only single box never waits.
@@ -35,7 +35,7 @@ def test_wait_returns_immediately_for_loopback_only_host(monkeypatch: pytest.Mon
 
 def test_wait_returns_true_once_address_appears(monkeypatch: pytest.MonkeyPatch) -> None:
     """The reachable address is absent on the first probe, present on the next — the
-    tailscale-coming-up-late case — so the wait resolves True after retrying."""
+    private-network-coming-up-late case — so the wait resolves True after retrying."""
     monkeypatch.setattr(_ci, "reachable_host", lambda: "100.64.0.5")
     monkeypatch.setattr(_ci.time, "sleep", lambda _s: None)  # pyright: ignore[reportUnknownArgumentType]
     seen: list[int] = []

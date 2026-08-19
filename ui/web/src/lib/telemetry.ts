@@ -83,7 +83,7 @@ function newSessionId(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
     return crypto.randomUUID();
   }
-  // Non-secure-context fallback (plain-HTTP tailnet): randomUUID is
+  // Non-secure-context fallback (plain-HTTP private network): randomUUID is
   // secure-context-only; uniqueness is all that matters here.
   const rnd = () => Math.random().toString(16).slice(2);
   return `${Date.now().toString(16)}-${rnd()}${rnd()}`;

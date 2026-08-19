@@ -100,7 +100,7 @@ class _TransportAwareAsyncConnection(aredis.Connection):
     """`aredis.Connection` whose `is_connected` also sees a dead asyncio transport.
 
     redis-py's own `is_connected` only checks that `_reader` / `_writer` are
-    non-None. When the peer / network kills the socket (outage, tailscale blip),
+    non-None. When the peer / network kills the socket (outage, private-network blip),
     asyncio fires `connection_lost` on the transport — which nulls
     `_SelectorSocketTransport._write_ready` — but the redis Connection object
     is never told: `_writer` still references the dead transport, so

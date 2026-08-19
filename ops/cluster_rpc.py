@@ -163,8 +163,8 @@ async def _dispatch_once(
     url = f"{ops_url.rstrip('/')}/ops"
     started = time.monotonic()
     try:
-        # connect is capped by timeout_s: a blackholed host (powered-off tailnet
-        # peer) hangs in connect, so a connect floor above timeout_s would defeat
+        # connect is capped by timeout_s: a blackholed host (powered-off private-
+        # network peer) hangs in connect, so a connect floor above timeout_s would defeat
         # short probe timeouts like the roster's 3s probe.
         # Present the cluster secret so the runner's authenticated /ops accepts
         # the dial. When the secret is empty (tests, unprovisioned checkout), skip

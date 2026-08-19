@@ -174,7 +174,7 @@ curl -G -s http://127.0.0.1:3100/loki/api/v1/query \
 
 - Grafana: http://localhost:3003 (anonymous viewer, no login; set
   `GRAFANA_ROOT_URL` in `.env` when the UI is reached through a different
-  host, e.g. a tailnet address)
+  host, e.g. a VPN overlay address)
   - Tempo datasource (default) — Explore > Traces: search/waterfall once the
     exporter ships traces
   - Loki datasource — Explore > Logs

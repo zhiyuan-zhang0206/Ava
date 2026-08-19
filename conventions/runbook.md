@@ -259,7 +259,7 @@ real posture; Task #1113). `ava start`
 is a *consumer*: it skips the bring-up when this cluster's pg/redis are already up
 (`pg_isready` + a redis PING), and on a fresh start first waits (bounded, ~60s) for the
 reachable bind address to appear on an interface — so a reboot that starts `ava` before
-the tailscale interface exists retries rather than dying on an un-bindable address. So a
+the private-network interface exists retries rather than dying on an un-bindable address. So a
 (re)start never disrupts a running cluster's data plane. `ava stop` tears this cluster's
 own instance down (data persists on disk); `ava cluster update` keeps it up (`--keep-infra`) for
 the migrate step.
@@ -821,9 +821,9 @@ as a bearer token (agent-runner / `/api/bootstrap`
 (explicitly flags its own §4/§5/§9 "no auth" description as superseded history)
 and [`Cluster secret rotation`](#cluster-secret-rotation) below for the secret
 itself. The user opens the UI / API at the gateway's private-network
-address (on this deployment's tailnet, prefer the MagicDNS name over a raw
-`100.x` IP — IPv6-only carrier networks NAT64-synthesize IPv4 literals and the
-request never enters the tunnel):
+address (on a VPN overlay, prefer its DNS name over a raw
+`100.x`-style IP where the overlay offers one — IPv6-only carrier networks
+NAT64-synthesize IPv4 literals and the request never enters the tunnel):
 
 - `http://<gateway-host>:8000` — gateway (API + SSE)
 - `http://<gateway-host>:3000` — frontend

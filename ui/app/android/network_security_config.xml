@@ -4,10 +4,10 @@
 
   The cluster speaks plain HTTP on a private network, so cleartext has to be
   permitted at all. The intent is to permit it ONLY towards private space —
-  RFC1918, CGNAT/tailnet (100.64.0.0/10) and loopback — but Android's network
-  security config has no way to say that: <domain> takes a hostname or a
-  literal IP address, never a prefix, and the private ranges cannot be
-  enumerated.
+  RFC1918, CGNAT/VPN-overlay ranges (100.64.0.0/10) and loopback — but
+  Android's network security config has no way to say that: <domain> takes a
+  hostname or a literal IP address, never a prefix, and the private ranges
+  cannot be enumerated.
 
   So the range policy is enforced where it CAN be expressed precisely: the
   shell refuses to store a cleartext entry URL whose host resolves outside
@@ -17,8 +17,16 @@
   guarantee than a hostname allow-list would have given, not a weaker one.
 
   The named entries below are still worth having: they keep the common cases
-  (loopback, the emulator's host alias, mDNS and Tailscale MagicDNS names)
-  documented in one place for anyone auditing the APK.
+  (loopback, the emulator's host alias, mDNS names) documented in one place
+  for anyone auditing the APK. A VPN overlay that assigns its nodes a fixed
+  DNS suffix (some overlays offer a MagicDNS-style `*.<suffix>` name) is
+  deliberately NOT listed here — the repo cannot enumerate every overlay's
+  suffix, and this
+  domain-config is not the actual security boundary anyway: base-config above
+  already permits cleartext for every domain, so a per-domain entry here is
+  pure documentation, never a widening of what's allowed. An operator whose
+  overlay uses such a suffix can add their own <domain> entry to this file for
+  their deployment; nothing else in the app depends on it.
 -->
 <network-security-config>
     <base-config cleartextTrafficPermitted="true">
@@ -34,7 +42,5 @@
         <domain includeSubdomains="false">10.0.2.2</domain>
         <!-- mDNS names (`box.local`). -->
         <domain includeSubdomains="true">local</domain>
-        <!-- Tailscale MagicDNS names. -->
-        <domain includeSubdomains="true">ts.net</domain>
     </domain-config>
 </network-security-config>

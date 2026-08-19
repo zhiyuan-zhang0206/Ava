@@ -114,7 +114,7 @@ def _client_singleton() -> httpx.Client:  # noqa: F821  # pyright: ignore[report
             timeout=httpx.Timeout(settings.gateway.gateway_client_http_timeout_seconds),
             headers=headers,
             # Pins the dial when GATEWAY_URL's host is an IPv4 literal (e.g. a
-            # tailscale address) — see shared/http_dial.py. None (a hostname
+            # private-network address) — see shared/http_dial.py. None (a hostname
             # target) is httpx's own default transport, unchanged.
             transport=transport_for_url(ava.GATEWAY_URL),
         )

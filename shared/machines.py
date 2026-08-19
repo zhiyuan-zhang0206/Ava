@@ -569,8 +569,8 @@ def pause(name: str, reason: str | None = None) -> bool:
     (migration 20260814T182039). The latch is operator-only — the gateway
     pause endpoint calls this AFTER it has terminated the machine's agents and
     drained its tasks; `register_self` and the ops daemon never write it, so a
-    paused machine that runs `ava start` (or re-registers after a Tailscale IP
-    change) stays paused until an explicit `ava cluster resume`.
+    paused machine that runs `ava start` (or re-registers after its reachable
+    address changes) stays paused until an explicit `ava cluster resume`.
 
     Consequences of the latch (each one a separate reader of this column):
     `list_agent_runners()` drops the row, so the heartbeat liveness pass does
@@ -611,7 +611,7 @@ def resume(name: str) -> bool:
     The machine itself needs no action on the gateway side — when it is back
     online it re-runs `ava start`, whose `register_self()` clears its
     `stopped_at` latch and refreshes `gateway_url` (which may have changed
-    with a new Tailscale IP).
+    with a new reachable address).
 
     Idempotent: resuming a machine that is not paused changes nothing and
     returns False (the CLI reports it as a no-op, not an error).

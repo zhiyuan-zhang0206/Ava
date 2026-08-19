@@ -99,7 +99,7 @@ pub fn resolve_checked(settings: &Settings, private_cleartext_only: bool) -> Opt
 }
 
 /// Whether a cleartext URL points somewhere it is safe to send a session
-/// cookie: RFC1918, CGNAT/tailnet (100.64.0.0/10), link-local, or loopback.
+/// cookie: RFC1918, CGNAT/VPN-overlay (100.64.0.0/10), link-local, or loopback.
 ///
 /// This is the policy Android's network security config is meant to carry but
 /// cannot — `<domain>` takes a hostname or an IP literal, never a prefix — so
@@ -134,7 +134,7 @@ pub fn is_private_host(url: &Url) -> bool {
                     || v4.is_private()
                     || v4.is_link_local()
                     // 100.64.0.0/10 — carrier-grade NAT, which is also the
-                    // range Tailscale hands out.
+                    // range some VPN overlays hand out to their nodes.
                     || (v4.octets()[0] == 100 && (64..128).contains(&v4.octets()[1]))
             }
             // Loopback, link-local (fe80::/10) and unique-local (fc00::/7).
@@ -331,7 +331,7 @@ mod tests {
         assert!(is_private_host(&url("http://192.168.1.10:3000/")));
         assert!(is_private_host(&url("http://10.1.2.3:3000/")));
         assert!(is_private_host(&url("http://172.16.0.9:3000/")));
-        // 100.64.0.0/10 — the tailnet range.
+        // 100.64.0.0/10 — the CGNAT / VPN-overlay range.
         assert!(is_private_host(&url("http://100.101.102.103:3000/")));
     }
 

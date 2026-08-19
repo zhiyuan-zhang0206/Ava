@@ -111,17 +111,21 @@ The one thing still missing from the vision: browser ↔ gateway and browser ↔
 frontend are plain HTTP, relying on the encrypting overlay (WireGuard) for
 confidentiality.
 
-- **Option 3a — Tailscale Serve (chosen direction).**
-  `tailscale serve --bg --https=443 http://localhost:3000` gives each node a
-  `https://<hostname>.<tailnet>.ts.net` domain with a valid Let's Encrypt cert
-  terminated at the Tailscale client. Zero-config, no cert management, already on the
-  tailnet. Cost: reachable only within the tailnet.
+- **Option 3a — the VPN overlay's own TLS-termination feature (chosen
+  direction).** Several overlays ship a `serve`-style subcommand that fronts a
+  local port with a valid Let's Encrypt cert under the node's overlay-assigned
+  hostname (`https://<hostname>.<overlay-domain>`), terminated by the overlay's
+  own client — e.g. `<overlay-cli> serve --bg --https=443 http://localhost:3000`.
+  Zero-config, no cert management, already on the private network. Cost:
+  reachable only within that network, and it's specific to whichever overlay the
+  operator runs.
 - **Option 3b — Caddy reverse proxy** with auto Let's Encrypt. Overkill for a
   private-network-only deployment; keep as the answer if a genuinely public edge is
   ever wanted.
 
-Shape of the work: a converge step that registers `tailscale serve`, made optional
-(HTTP on loopback must keep working where `tailscale serve` is unavailable). Phase 2
+Shape of the work: a converge step that registers the overlay's serve-style
+feature where the operator's overlay offers one, made optional (HTTP on
+loopback must keep working where it's unavailable). Phase 2
 already leaves the seam — the per-request credential is transport-independent, so
 TLS is "add a cert + switch the scheme", not a re-architecture.
 

@@ -1,9 +1,9 @@
 # Dev setup
 
 Generic dev procedures that sit on top of [`runbook.md`](runbook.md): the
-platform-specific traps (WSL2 Tailscale), the first-time agent-runner enrollment
-flow, and the per-worktree cluster dev loop. The runbook stays role-agnostic;
-this doc covers the per-developer setup steps.
+platform-specific traps (WSL2's private-network identity), the first-time
+agent-runner enrollment flow, and the per-worktree cluster dev loop. The
+runbook stays role-agnostic; this doc covers the per-developer setup steps.
 
 A specific deployment's concrete machine roster, SSH access pattern, cloud-host
 access, gateway-host layout, and which local files hold which credentials are
@@ -12,22 +12,21 @@ notes, not here. The placeholders to fill in: a gateway is reached at
 `http://<gateway-host>:8000`, secrets live in per-machine `~/.ava/.env` +
 `~/.ava/secrets/*.env`, and SSH keys are per dev machine.
 
-## WSL2 Tailscale must be installed inside WSL
+## WSL2 needs its own private-network identity
 
 Runbook §"WSL agent-runner host bring-up notes" point 3 mentions "WSL2 IP
-drift"; the trap underneath is that WSL2 does **not** share the
-Windows-host Tailscale identity. `tailscale ip` run from WSL with no
-in-distro Tailscale returns the Windows host's `100.x` address, which
-WSL itself cannot reach. Install Tailscale into the distro:
+drift"; the trap underneath is that WSL2 does **not** share the Windows
+host's private-network client identity (VPN overlay, LAN, whatever the
+deployment uses). Querying the private-network IP from WSL with no
+in-distro client joined returns the Windows host's address (e.g. a
+`100.x`-style CGNAT address), which WSL itself cannot reach. Install and
+join your private-network client inside the distro itself, following that
+client's own setup docs.
 
-```bash
-curl -fsSL https://tailscale.com/install.sh | sh
-sudo tailscale up
-```
-
-After that the distro gets its own Tailscale identity and IP. If you've already
-brought the agent-runner up with a wrong `AVA_GATEWAY_URL`, edit `~/.ava/.env`
-and re-run `ava start` so the `machines` table UPSERT overwrites the stale row.
+After that the distro gets its own identity and IP on the private network.
+If you've already brought the agent-runner up with a wrong
+`AVA_GATEWAY_URL`, edit `~/.ava/.env` and re-run `ava start` so the
+`machines` table UPSERT overwrites the stale row.
 
 ## First time bringing up a new dev / agent-runner
 
@@ -39,14 +38,15 @@ and re-run `ava start` so the `machines` table UPSERT overwrites the stale row.
    the cluster being multi-host. The agent-facing machine surface (`spawn(machine=)`,
    `list_machines`, the roster) is always present too; a single box just sees one
    machine.
-1. Install Tailscale, join the tailnet. (WSL2: install inside the
+1. Join this host to the deployment's private network (VPN overlay, LAN, or
+   whatever the deployment uses). (WSL2: install and join inside the
    distro — see above.)
 2. Clone the repo to `~/Ava` for dev work, or `~/.ava/source` for
    agent-runner duty: `git clone https://github.com/zhiyuan-zhang0206/Ava.git ~/.ava/source` (the path matters
    — see runbook §"Prod and dev clone paths").
 3. `uv sync` in the clone.
-4. Make sure the new host is joined to the tailnet (the gateway is reachable
-   only over it). Read the cluster secret without echo and export it as
+4. Make sure the new host is joined to the private network (the gateway is
+   reachable only over it). Read the cluster secret without echo and export it as
    `AVA_CLUSTER_SECRET` for the enrollment command, then unset it afterward.
 5. On the new host: `ava enroll --gateway http://<gateway-host>:8000
    --machine-name <new-name> --machine-host <this-host-addr>`. Add `--ssl-cert-file

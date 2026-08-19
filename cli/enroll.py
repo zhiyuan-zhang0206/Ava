@@ -323,7 +323,7 @@ def run_enroll(argv: list[str]) -> int:
         "--machine-host",
         required=True,
         help="this host's reachable address on the cluster's private network (e.g. its "
-        "tailnet IP / private hostname) — the gateway dials this agent-runner's ops server "
+        "VPN overlay IP / private hostname) — the gateway dials this agent-runner's ops server "
         "here. localhost only works when the gateway shares this box.",
     )
     parser.add_argument(
@@ -372,7 +372,7 @@ def run_enroll(argv: list[str]) -> int:
             f"enroll FAILED: remote enrollment requires a reachable machine-host, but "
             f"--machine-host {args.machine_host!r} is loopback. The gateway at {args.gateway} "
             f"must dial this runner over the network — pass this host's private-network "
-            f"address (tailnet IP / private hostname) as --machine-host.",
+            f"address (VPN overlay IP / private hostname) as --machine-host.",
             file=sys.stderr,
         )
         return 1
