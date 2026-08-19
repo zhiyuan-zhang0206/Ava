@@ -3,7 +3,7 @@
 How documentation is structured and maintained. Read when writing or maintaining
 project docs.
 
-## Five axes, one fact per place
+## Four axes, one fact per place
 
 Every documented fact belongs to exactly one axis, and the axis is identifiable
 from the path alone:
@@ -14,10 +14,24 @@ from the path alone:
 | `decisions/` | **why** it was chosen this way — rejected alternatives, trade-offs | past, never rewritten |
 | `future/` | what we **plan** to do | future |
 | `conventions/` | **how** to work — rules, processes, operations | now |
-| `traces/` | what the system **does**, in time — one scenario end to end | now, dated to its evidence run — a CLI verb/flag rename is a behavior change: add a record-time CLI-shape disclaimer header and re-verify runnable command blocks |
 
 A fact carried on two axes will drift. When you find a duplicate, keep the copy
 on the axis that owns the question and replace the other with a pointer.
+
+### What the system *does* is not an axis
+
+There was a fifth axis, `traces/` — one real recorded run, annotated. It is
+retired ([why](../decisions/2026-08-19-retire-the-traces-doc-axis.md)) and
+nothing trace-shaped is committed to this repo. A committed run is a fact about
+a version that has already moved: it rots on every CLI rename and behavior
+change, and the evidence it copied is still queryable, and current, in the
+checkpoints table and the observability stack.
+
+Do not re-create it. A question about what a run did is answered by querying
+that run — `.agents/skills/inspect-a-trace/SKILL.md` is the know-how for doing
+so across checkpoints, Loki, and Tempo. What generalizes out of a run belongs
+on an axis: a structural fact in the co-located OKF node, a rule in
+`conventions/`, a rejected alternative in `decisions/`.
 
 ## OKF is the source of truth for structure
 
@@ -138,7 +152,7 @@ Process, rule, and observed-behaviour changes → the doc that owns them:
 | Design philosophy / deliberate omissions | `philosophy.md` + `non-goals.md` |
 | SDK docstrings (`ava/*.py` public API) | `sdk-docstring-discipline.md` |
 | Lint vs sweeper boundary | `lint-vs-sweeper.md` |
-| Behaviour on a path a trace documents | that trace in `traces/` — re-verify against a fresh run and re-date its Evidence, per `.agents/skills/write-a-trace/` |
+| Observability surfaces (event fields, span attributes, query recipes) | `.agents/skills/inspect-a-trace/` — the skill IS the reconcile target, since nothing else records what a run looks like |
 
 A directional decision — one that rejected alternatives — also gets a new
 `decisions/YYYY-MM-DD-<topic>.md`. Superseding one means writing a new file

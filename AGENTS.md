@@ -178,9 +178,9 @@ This `AGENTS.md` is this repo's entry point for all AI coding agents.
 
 ## Key docs — read on demand
 
-Five axes, one fact per place: `*.ava.okf.md` next to the code = what the system **is**; `decisions/` = **why**
-(never rewritten); `future/` = **plans**; `conventions/` = **how to work**; `traces/` = what it **does**
-in time — one real recorded run, annotated, every step anchored (write or audit one: `.agents/skills/write-a-trace/`).
+Four axes, one fact per place: `*.ava.okf.md` next to the code = what the system **is**; `decisions/` = **why**
+(never rewritten); `future/` = **plans**; `conventions/` = **how to work**. What the system **does in time** is not an
+axis — no run is committed; query the live one ([`.agents/skills/inspect-a-trace/`](.agents/skills/inspect-a-trace/SKILL.md)).
 [Doc maintenance →](conventions/doc-maintenance.md)
 
 | When you need to… | Read |

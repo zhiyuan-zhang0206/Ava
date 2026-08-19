@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Render a read trace (trace_read.json) as a self-contained HTML report.
 
-Output: `<out>/index.html` — inline CSS and JS, no CDN, no build step. The
-report opens from the tailnet link offline. Serve it with
+Output: `<out>/index.html` — inline CSS and JS, no CDN, no build step, so the
+served page opens offline. Serve it with
 `ava.ui.serve(<out>, name="trace-<agent>-<short-id>")`.
 
 Sections: header, waterfall timeline (click a bar for its attributes), node
@@ -14,9 +14,13 @@ from __future__ import annotations
 import argparse
 import html
 import json
+import os
 from pathlib import Path
 
-_GRAFANA = "http://100.64.0.2:3003"
+# The LGTM host's Grafana. Loopback is the single-box default; set
+# AVA_GRAFANA_URL when the stack lives on another machine, so the link in the
+# report is one the reader can actually open.
+_GRAFANA = os.environ.get("AVA_GRAFANA_URL", "http://localhost:3003")
 
 
 def _esc(text: object) -> str:

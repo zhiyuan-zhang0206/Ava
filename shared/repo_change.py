@@ -15,7 +15,6 @@ _DOC_ROOTS = (
     "decisions/",  # the why axis — never-rewritten ADRs
     "future/",  # the plans axis
     "conventions/",  # the how-to-work axis
-    "traces/",  # the runtime-record axis
     "okf/",  # the OKF index layer
     "assets/",  # README-embedded artifacts
     "schedules/",  # version-controlled schedule templates (provisioned, not imported)
