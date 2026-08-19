@@ -58,6 +58,7 @@ from pydantic.fields import FieldInfo
 
 from agent.messages_guard import guarded_add_messages
 from agent.nodes import CLAIM, NodeName
+from shared import plugin_contributions
 from shared.checkpoint_serde import STATIC_CHECKPOINT_MSGPACK_TYPES
 from shared.plugin_context import current_plugin_name
 
@@ -486,6 +487,13 @@ class PluginStateHandle[T: BaseModel]:
                 ava.state_update[channel_key] = new
 
 
+def _annotation_text(annotation: Any) -> str:
+    """`str` / `set[str]` / `str | None` — an annotation spelled the way its
+    author wrote it, for the contribution ledger's one-line detail (a bare class
+    reprs as `<class 'str'>`, which is noise in a catalog)."""
+    return annotation.__name__ if isinstance(annotation, type) else repr(annotation)
+
+
 def register_plugin_state[T: BaseModel](cls: type[T]) -> PluginStateHandle[T]:
     """Register plugin state and return a typed read/write handle.
 
@@ -582,6 +590,9 @@ def register_plugin_state[T: BaseModel](cls: type[T]) -> PluginStateHandle[T]:
             # treats this base channel as a legal write target (writing base
             # fields without declaration is still rejected as typo).
             _BASE_FIELD_DECLARED.add(name)
+            plugin_contributions.record(
+                "state", name, detail=f"{cls.__name__}.{name}: base channel, co-written"
+            )
             continue
 
         prefixed = f"{current}__{name}" if current else name
@@ -594,6 +605,11 @@ def register_plugin_state[T: BaseModel](cls: type[T]) -> PluginStateHandle[T]:
                 )
         else:
             _EXTRA_FIELDS[prefixed] = (raw_annotation, model_field)
+            plugin_contributions.record(
+                "state",
+                prefixed,
+                detail=f"{cls.__name__}.{name}: {_annotation_text(raw_annotation)}",
+            )
 
         if current is not None:
             _PLUGIN_NAMESPACE_FIELDS.setdefault(current, set()).add(name)
@@ -613,11 +629,9 @@ def clear_plugin_registrations() -> None:
     """Reset all plugin-registered state fields — called by
     `_load_extensions` on entry to ensure that multiple reloads (test
     fixture / dev hot-reload) don't accumulate ghost state from previous
-    registrations. Also clears system prompt sections, hook registrations,
-    and SDK namespaces (cross-module import) at the same point.
-
-    Also clears system prompt sections, context notes, hook registrations,
-    and SDK namespaces (cross-module import) at the same point.
+    registrations. Also clears system prompt sections, context notes, hook
+    registrations, SDK namespaces, plugin configs (cross-module import), and the
+    attribution ledger those registrations write to at the same point.
 
     `_BASE_FIELDS` untouched (BaseAgentState is framework-fixed).
     """
@@ -640,6 +654,7 @@ def clear_plugin_registrations() -> None:
     for hook_list in HOOKS.values():
         hook_list.clear()
     clear_plugin_configs()
+    plugin_contributions.clear()
     ava.clear_registered_namespaces()
     ava._extend.clear_wraps()
     ava._skill_sources.clear()

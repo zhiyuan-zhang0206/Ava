@@ -34,6 +34,15 @@ def _h_plugins_installed(_args: argparse.Namespace) -> int:
     return cmd_plugins_installed()
 
 
+def _h_plugins_inspect(args: argparse.Namespace) -> int:
+    # Imported from its own module rather than the `cli.commands` package: the
+    # catalog reaches into the agent layer, and routing it through the package
+    # export would pull `agent` into every other CLI verb's import.
+    from cli.commands.plugins_inspect import cmd_plugins_inspect
+
+    return cmd_plugins_inspect(args.name)
+
+
 def _h_plugins_upgrade(args: argparse.Namespace) -> int:
     from cli.commands import cmd_plugins_upgrade
 
@@ -104,6 +113,7 @@ def _add_plugins_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
     from cli.main import (
         _h_plugins_disable,
         _h_plugins_enable,
+        _h_plugins_inspect,
         _h_plugins_install,
         _h_plugins_installed,
         _h_plugins_uninstall,
@@ -154,6 +164,23 @@ def _add_plugins_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
         "installed", aliases=["ls"], help="list install-registry entries"
     )
     plugins_installed_p.set_defaults(func=_h_plugins_installed)
+
+    # `ava plugins inspect [name]` — the read-only catalog: what a plugin CAN
+    # extend (surfaces + live signatures) and what each installed plugin DID
+    # (registration facts, read off the attribution ledger). Loads this
+    # machine's enabled plugins to read them, so it is a query, not a lifecycle
+    # verb.
+    plugins_inspect_p = plugins_sub.add_parser(
+        "inspect",
+        help="show the framework's extension surfaces + what each installed plugin registered",
+    )
+    plugins_inspect_p.add_argument(
+        "name",
+        nargs="?",
+        default=None,
+        help="plugin name — omit for the surface reference + one line per plugin",
+    )
+    plugins_inspect_p.set_defaults(func=_h_plugins_inspect)
 
     plugins_upgrade_p = plugins_sub.add_parser(
         "upgrade", help="re-fetch an installed plugin from its recorded source"

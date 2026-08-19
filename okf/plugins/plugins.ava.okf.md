@@ -1,14 +1,14 @@
 ---
 type: doc
 title: Plugin System
-description: Plugins are Ava's primary extension mechanism—inserting custom behavior into the agent runtime through multiple injection points. Each plugin is a directory containing a `plugin.py` entry point, loaded at agent process startup by `_load_extensions()`. Plugins can use all five injection mechanisms simultaneously.
+description: Plugins are Ava's primary extension mechanism—inserting custom behavior into the agent runtime through multiple injection points. Each plugin is a directory containing a `plugin.py` entry point, loaded at agent process startup by `_load_extensions()`. A plugin may use every injection surface at once; `agent/plugin_catalog.py:SURFACES` is the enumeration, and `ava plugins inspect` renders it.
 tags: []
 ---
 
 # Plugin System
 
 ## What It Is
-Plugins are Ava's primary extension mechanism—inserting custom behavior into the agent runtime through multiple injection points. Each plugin is a directory containing a `plugin.py` entry point, loaded at agent process startup by `_load_extensions()`. Plugins can use all five injection mechanisms simultaneously.
+Plugins are Ava's primary extension mechanism—inserting custom behavior into the agent runtime through multiple injection points. Each plugin is a directory containing a `plugin.py` entry point, loaded at agent process startup by `_load_extensions()`. A plugin may use every injection surface at once; `agent/plugin_catalog.py:SURFACES` is the enumeration, and `ava plugins inspect` renders it.
 
 ## Core Responsibilities
 
@@ -31,6 +31,23 @@ Two-phase design:
 
 Config instances are frozen (`ConfigDict(frozen=True)`) and cannot be modified by agents. Fields marked `json_schema_extra={"per_agent": True}` allow per-agent CLI overlay.
 
+## The surface catalog + registration attribution
+Every `register_*` entry point above also writes one record to the attribution
+ledger (`shared/plugin_contributions.py`): which surface, what identifier
+(the hook point, the `ava` namespace, the wrap target, the state channel key —
+spelled the way `ava-plugin.json` declares it), and which plugin, read off the
+`PluginContext` the loader opens. Only registrations made inside that context are
+recorded, so the ledger holds plugin contributions alone and
+`clear_plugin_registrations` clears it with the registries it shadows.
+
+`agent/plugin_catalog.py:SURFACES` is the enumeration of the injection surfaces —
+the ones above, plus SDK wraps (`ava.extend.wrap`, [[extensions.ava.okf.md]]),
+context notes (`agent/graph/_context_notes.py:register_context_note`) and skill
+sources (`ava/skills.py:register_skill_source`) — each carrying the live
+signature of its entry point rather than a transcribed one. `ava plugins inspect`
+renders both halves, and `declared_vs_registered` is the read-only form of the
+plugin-spec-v2 S3 gate. [[cli/commands/packages.ava.okf.md|The verb]].
+
 ## Key Dependencies
 - [[agent/graph/graph.ava.okf.md]] — hook container nodes call `make_hook_runner` at graph build time
 - [[state.ava.okf.md]] — state field registration
@@ -43,6 +60,7 @@ Config instances are frozen (`ConfigDict(frozen=True)`) and cannot be modified b
 - `agent/graph/_build.py:_load_extensions()` — imports plugins according to the enabled set (each `plugin.py` import wrapped with `with PluginContext(name):`), after which `bind_from_disk()` uniformly instantiates configs
 - `agent/graph/_build.py:build_graph()` — at build time calls `make_hook_runner` to snapshot hook lists
 - `agent/state.py:build_agent_state()` — at build time merges all plugins' state fields
+- `agent/plugin_catalog.py:build_catalog()` — loads this machine's enabled plugins and reads back what they registered (`ava plugins inspect`)
 
 ## Built-in Plugins
 | Plugin | Responsibility |
