@@ -67,7 +67,9 @@ every time:
    shims (rule 4); a shim that pays for itself today lives in a plugin,
    removable, maintained at full standard while alive, and measures its own
    obsolescence (activation telemetry per model) — "removable" as a gauge, not
-   a vibe.
+   a vibe. The gauge is `shared/plugin_activation.py`: every plugin hook, wrap,
+   and prompt section that fires emits one event carrying the model in force,
+   counted per contribution by the `plugin_activation` metric.
 
 In one line: every design choice asks *"can a stronger invariant make this
 problem not exist?"* Strong model + strong invariants = the least scaffolding.

@@ -21,8 +21,11 @@ the ledger exactly parallel to the plugin tails of the registries it shadows:
 `agent.state.clear_plugin_registrations` clears it, and the plugin imports that
 follow rebuild it.
 
-The ledger is a record of what was REGISTERED, never of what ran — activation
-counts (issue #40) hang off these records rather than replacing them.
+The ledger is a record of what was REGISTERED, never of what ran. What ran is
+`shared/plugin_activation.py`, which hangs off these records rather than
+replacing them: it emits one event per firing keyed by the same
+`(plugin, surface, identifier)` triple, under the same
+only-inside-a-`PluginContext` gate, so the two views join on three strings.
 """
 
 from __future__ import annotations

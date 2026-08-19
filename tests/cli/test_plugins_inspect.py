@@ -108,6 +108,9 @@ def test_detail_lists_every_registered_fact(
     assert "hooks                before_llm                demo.plugin._DemoHook" in out
     assert "state                demo__counter             DemoState.counter: int" in out
     assert "(no manifest — a plugin without ava-plugin.json declares nothing)" in out
+    # The catalog reports what registered; it points at where "how often did it
+    # actually fire" lives rather than pretending to know (issue #40).
+    assert "plugin_activation" in out
 
 
 def test_detail_renders_the_diff_and_what_is_not_drift(

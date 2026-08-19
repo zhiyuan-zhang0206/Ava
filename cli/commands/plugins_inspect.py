@@ -164,6 +164,19 @@ def _print_plugin_detail(view: PluginView) -> None:
         print("  (none — the plugin loaded but called no register_* entry point)")
     for c in view.contributions:
         print(f"  {_cell(c.surface, 21)}{_cell(c.identifier, 26)}{c.detail}")
+    # This catalog is built by importing the plugin, so it can only report what
+    # was REGISTERED. How often each of these rows actually FIRED — philosophy
+    # §6's obsolescence gauge — lives in the event stream, keyed by the same
+    # surface/identifier; point the reader at it rather than dialing Loki from
+    # a catalog command.
+    if view.contributions:
+        print(
+            _wrapped(
+                "note",
+                "counts of how often each row fired (per model) come from `plugin_activation` "
+                "events — see the metrics report's plugin_activation section",
+            )
+        )
 
     _print_diff(view)
 

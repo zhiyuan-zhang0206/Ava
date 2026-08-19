@@ -48,6 +48,9 @@ signature of its entry point rather than a transcribed one. `ava plugins inspect
 renders both halves, and `declared_vs_registered` is the read-only form of the
 plugin-spec-v2 S3 gate. [[cli/commands/packages.ava.okf.md|The verb]].
 
+The ledger records what was REGISTERED; what actually FIRED is the runtime half,
+keyed by the same triple: [[activation-telemetry.ava.okf.md]].
+
 ## Key Dependencies
 - [[agent/graph/graph.ava.okf.md]] — hook container nodes call `make_hook_runner` at graph build time
 - [[state.ava.okf.md]] — state field registration

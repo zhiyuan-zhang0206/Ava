@@ -14,17 +14,20 @@ Usage (in plugin's plugin.py):
 """
 
 import contextlib
+import hashlib
 import inspect
 import io
 import logging
+import weakref
 from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import Any
 
-from shared import plugin_contributions
+from shared import plugin_activation, plugin_contributions
 from shared.config import settings
 from shared.paths import workspace_dir
+from shared.plugin_context import current_plugin_name
 
 from ._capabilities import (
     _CAPABILITY_SURFACES,
@@ -49,6 +52,12 @@ def _resolved(setting: str) -> Any:
 
 _SYSTEM_PROMPT_SECTIONS: list[Callable[[], str]] = []
 
+# section fn -> the plugin that registered it, read by `build_system_prompt` to
+# attribute a section that actually contributed text. Weak keys so an entry dies
+# with the function object; framework sections are absent (they register outside
+# a `PluginContext`) and therefore stay untelemetered.
+_SECTION_PLUGIN: weakref.WeakKeyDictionary[Callable[[], str], str] = weakref.WeakKeyDictionary()
+
 
 def register_system_prompt_section(fn: Callable[[], str]) -> Callable[[], str]:
     """Register a system prompt section contributor — spliced into the system prompt at boot.
@@ -58,6 +67,9 @@ def register_system_prompt_section(fn: Callable[[], str]) -> Callable[[], str]:
     """
     _SYSTEM_PROMPT_SECTIONS.append(fn)
     plugin_contributions.record("systemPromptSections", fn.__name__, detail=fn.__module__)
+    plugin = current_plugin_name()
+    if plugin is not None:
+        _SECTION_PLUGIN[fn] = plugin
     return fn
 
 
@@ -712,6 +724,19 @@ tool calls. Before using any `ava.*` function, you must explicitly `import ava` 
         contribution = section_fn()
         if contribution:
             parts.append(contribution)
+            # Activation telemetry (philosophy §6): a plugin section that
+            # rendered text is prompt real estate the plugin is spending. Length
+            # + digest identify *which* variant landed without storing the text;
+            # this runs at spawn/compact only, so there is no per-turn cost.
+            plugin_activation.record(
+                _SECTION_PLUGIN.get(section_fn),
+                "systemPromptSections",
+                section_fn.__name__,
+                detail=(
+                    f"chars={len(contribution)} "
+                    f"sha={hashlib.sha256(contribution.encode()).hexdigest()[:12]}"
+                ),
+            )
     # Model identity — per-model note telling the model what it runs on.
     from shared.lm.factory import MODEL_IDENTITY
 

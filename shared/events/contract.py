@@ -130,6 +130,22 @@ class SdkCall(TypedDict):
     duration: float
 
 
+class PluginActivation(TypedDict):
+    """`plugin_activation` payload — shared/plugin_activation.py.
+
+    ``plugin`` / ``surface`` / ``identifier`` are the same triple
+    ``shared.plugin_contributions.Contribution`` stores, so the registration
+    ledger and these runtime records join on three strings. ``detail`` is free
+    text about the one firing; ``model`` is the model in force, which is what
+    makes philosophy §6's per-model obsolescence gauge answerable."""
+
+    plugin: str
+    surface: str
+    identifier: str
+    detail: str
+    model: str
+
+
 class ServiceStarted(TypedDict):
     """`service_started` payload — shared/log.py."""
 
@@ -512,6 +528,11 @@ EVENTS: dict[str, EventSpec] = {
     "launch_retry": _telemetry("launch_retry", "launch retried"),
     # sdk / channel health
     "sdk_call": _telemetry("sdk_call", "SDK call metering", payload=SdkCall),
+    "plugin_activation": _telemetry(
+        "plugin_activation",
+        "a plugin injection surface fired (hook / wrap / prompt section)",
+        payload=PluginActivation,
+    ),
     "sse_drop": _telemetry("sse_drop", "SSE event dropped", payload=SseDrop),
     "event_log_drop": _telemetry("event_log_drop", "event-pipeline row shed", payload=EventLogDrop),
     "heartbeat_paused": _telemetry("heartbeat_paused", "heartbeat paused", payload=HeartbeatPaused),

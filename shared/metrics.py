@@ -165,6 +165,30 @@ def _render_sdk_usage(data: dict[str, Any]) -> str:
     return text
 
 
+def _render_plugin_activation(data: dict[str, Any]) -> str:
+    """Which plugin injection surfaces actually fired in the window.
+
+    Philosophy §6 asks a shim to measure its own obsolescence, so the block
+    leads with the per-contribution counts (the same
+    `<plugin>/<surface>/<identifier>` key `ava plugins inspect` lists as
+    registered) and closes with the per-model cut: a contribution sitting at
+    zero for a model across successive windows is the removal evidence.
+    """
+    text = (
+        f"plugin activations: {data['total_activations']} "
+        f"across {data['distinct_plugins']} plugins\n"
+    )
+    if data["by_contribution"]:
+        max_c = int(data["by_contribution"][0]["count"])
+        for item in data["by_contribution"][:20]:
+            bar = render_bar(int(item["count"]), max_c)
+            text += f"  {item['contribution']:<46} {item['count']:>6}  {bar}\n"
+        text += render_counts("by plugin x model:", data["by_plugin_model"])
+    else:
+        text += "  (none — no plugin hook, wrap, or prompt section fired)\n"
+    return text
+
+
 def _fix_kinds(fixes: str) -> list[str]:
     """Parse a syntax_fix `fixes` payload, e.g. "ruff,chinese_punct(3)".
 
