@@ -39,7 +39,7 @@ def _mirror(aid: int) -> list[dict]:
     """Every mirror line for `aid`, oldest first — fail loud on absence."""
     from shared.paths import logs_dir
 
-    telemetry.flush()
+    telemetry.sync()
     day = datetime.now(UTC).strftime("%Y%m%d")
     path = logs_dir() / f"events-{day}.jsonl"
     if not path.exists():

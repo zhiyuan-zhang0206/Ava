@@ -191,7 +191,7 @@ class TestPauseHeartbeat:
         ava.self.pause_heartbeat(1800)
         from shared import telemetry
 
-        telemetry.flush()  # the event lands via the unified emitter's drain
+        telemetry.sync()  # the event lands via the unified emitter's drain
         db_conn.rollback()  # fresh snapshot — the emitter wrote on its own connection
         with db_conn.cursor() as cur:
             cur.execute(
