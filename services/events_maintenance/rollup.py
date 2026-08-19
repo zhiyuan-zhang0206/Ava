@@ -19,7 +19,7 @@ overwrites, never double-counts. Each run re-rolls the last
 day is picked up.
 
 Loki bounds what is recoverable: retention is 7d
-(deploy/local/lgtm/config/loki.yaml `retention_period: 168h`), so the
+(deploy/lgtm/config/loki.yaml `retention_period: 168h`), so the
 recompute window clamps to the first FULLY-retained day — a maintenance
 outage longer than retention loses those days' aggregates (logged loudly;
 the JSONL mirror remains the manual recovery source). The clamp also

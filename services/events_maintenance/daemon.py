@@ -118,21 +118,23 @@ def _retention_policy() -> dict[str, int]:
 
 def _run_maintenance(pool: ConnectionPool) -> None:
     """One hourly pass. The events-archive slices — partition rolling, events
-    retention (drop/prune expired months), table retention, rollup recompute,
-    index-bloat governance (audit M2), resolved-marker consumption — run only
-    when `AVA_EVENTS_MAINTENANCE_ENABLED` is set; since the LGTM cutover (task
+    retention (drop/prune expired months), table retention, index-bloat
+    governance (audit M2), resolved-marker consumption — run only when
+    `AVA_EVENTS_MAINTENANCE_ENABLED` is set; since the LGTM cutover (task
     #1197) the PG `events` copy is a read-only archive that nothing writes or
-    reads, so those slices are dead weight on every cluster. The Rule B
-    checkpoint reaper (terminated / inactive agents to keep=1) and the blob
-    VACUUM are NOT gated: checkpoint_blobs growth is independent of the events
-    pipeline, and the reaper is the only thing that bounds it — gating the
-    daemon off (the 2026-08-12 design regression) let blobs grow ~150MB/h
-    unbounded. One `now` drives the time-based steps.
+    reads, so those slices are dead weight on every cluster. Three steps are
+    NOT gated: the cost-ledger rollup (Loki → `agent_model_tokens_daily` —
+    Loki only retains 168h, so skipping passes permanently loses days), the
+    Rule B checkpoint reaper (terminated / inactive agents to keep=1), and the
+    blob VACUUM — checkpoint_blobs growth is independent of the events
+    pipeline, and the reaper is the only thing that bounds it (gating the
+    daemon off, the 2026-08-12 design regression, let blobs grow ~150MB/h
+    unbounded). One `now` drives the time-based steps.
     Logs what each step did; a no-op pass logs nothing.
 
     Each step runs on a SEPARATE pool connection so the partition DDL commits
-    (and releases its locks) before the potentially long rollup/backfill starts
-    — sharing one non-autocommit connection would hold the CREATE PARTITION /
+    (and releases its locks) before the potentially long rollup starts —
+    sharing one non-autocommit connection would hold the CREATE PARTITION /
     DROP PARTITION locks through the whole rollup (blocking event-table
     writes) and let a rollup failure roll back the just-created partitions. The
     retention step runs AFTER partition creation so months stranded in DEFAULT
@@ -146,8 +148,6 @@ def _run_maintenance(pool: ConnectionPool) -> None:
             retention = apply_retention(conn, now_utc=now, retention_days=_retention_policy())
         with pool.connection() as conn:
             table_retention = apply_table_retention(conn, now_utc=now)
-        with pool.connection() as conn:
-            result = compute_rollup(conn, now_utc=now, lookback_days=_LOOKBACK_DAYS)
         # Index-bloat governance (audit M2 / P1-2 ①): REINDEX CONCURRENTLY the hot
         # events partition indexes past their bytes/row threshold. Runs LAST and on
         # its own DIRECT autocommit connection — CONCURRENTLY cannot run in a
@@ -163,14 +163,16 @@ def _run_maintenance(pool: ConnectionPool) -> None:
             _log.info("[events-maintenance] table retention: %s", table_retention.summary())
         if reindex_result.summary():
             _log.info("[events-maintenance] index governance: %s", reindex_result.summary())
-        if result.start_day is not None:
-            _log.info(
-                "[events-maintenance] rolled %s..%s — %d metric rows, %d token rows",
-                result.start_day,
-                result.end_day,
-                result.metrics_rows,
-                result.tokens_rows,
-            )
+    with pool.connection() as conn:
+        result = compute_rollup(conn, now_utc=now, lookback_days=_LOOKBACK_DAYS)
+    if result.start_day is not None:
+        _log.info(
+            "[events-maintenance] rolled %s..%s — %d metric rows, %d token rows",
+            result.start_day,
+            result.end_day,
+            result.metrics_rows,
+            result.tokens_rows,
+        )
     reaped = reap_stale_checkpoints(pool)
     # Incremental physical reclamation: a plain VACUUM (no lock) over the
     # checkpoint tables, only inside the measured agent-lowest window

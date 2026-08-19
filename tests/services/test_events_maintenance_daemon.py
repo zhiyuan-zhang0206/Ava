@@ -138,20 +138,24 @@ def _instrument_maintenance_slices(
     return rec
 
 
-_EVENTS_SLICES = ("partitions", "retention", "table_retention", "rollup", "reindex", "resolved")
+_EVENTS_SLICES = ("partitions", "retention", "table_retention", "reindex", "resolved")
 
 
 def test_maintenance_pass_reaps_when_events_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
     """The design-regression lock (task #1257): with
     `events_maintenance_enabled=False` — the default since the LGTM cutover —
-    the hourly pass skips every events-archive slice but still runs the Rule B
-    checkpoint reaper and the blob vacuum. Before the fix the whole daemon was
-    gated off and checkpoint_blobs grew ~150MB/h unbounded."""
+    the hourly pass skips every events-archive slice but still runs the
+    cost-ledger rollup, the Rule B checkpoint reaper and the blob vacuum. The
+    rollup must not sit behind the archive flag: Loki only retains 168h, so a
+    cluster without the flag would silently stop writing the durable cost
+    ledger (and the reaper regression before it grew checkpoint_blobs
+    ~150MB/h unbounded)."""
     monkeypatch.setattr(daemon.settings.daemon, "events_maintenance_enabled", False)
     rec = _instrument_maintenance_slices(monkeypatch)
 
     daemon._run_maintenance(cast(ConnectionPool, _FakePool()))  # every slice faked
 
+    assert rec["rollup"].calls == 1
     assert rec["reap"].calls == 1
     assert rec["vacuum"].calls == 1
     for name in _EVENTS_SLICES:
@@ -162,13 +166,14 @@ def test_maintenance_pass_runs_events_slices_when_enabled(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The flag on (clusters that still maintain the archive) restores the full
-    pre-cutover pass — every events slice plus the reaper and vacuum."""
+    pass — every events slice plus the unconditional rollup, reaper and
+    vacuum."""
     monkeypatch.setattr(daemon.settings.daemon, "events_maintenance_enabled", True)
     rec = _instrument_maintenance_slices(monkeypatch)
 
     daemon._run_maintenance(cast(ConnectionPool, _FakePool()))  # every slice faked
 
-    for name in (*_EVENTS_SLICES, "reap", "vacuum"):
+    for name in (*_EVENTS_SLICES, "rollup", "reap", "vacuum"):
         assert rec[name].calls == 1, name
 
 
