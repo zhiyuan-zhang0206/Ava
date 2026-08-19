@@ -12,7 +12,7 @@ tags:
 
 ## What it is
 
-The **lease half of the registry × lease frame** ([[okf/design/r1-state-liveness.ava.okf.md|R1 design]]) for agent processes: `agents_meta.lease_expires_at` is the liveness authority — a row with an unexpired lease IS a live process. The registry row ("should it exist?") and the lease ("is it alive?") answer separate questions; status carries lifecycle intent, the lease carries the process-level fact. A process that died without writing `terminated` leaves its status behind and the lease expires; a process that cannot renew (wedged, pre-lease code) is a zombie the reaper collects.
+The **lease half of the registry × lease frame** ([[okf/design/r1-state-liveness/r1-state-liveness.ava.okf.md|R1 design]]) for agent processes: `agents_meta.lease_expires_at` is the liveness authority — a row with an unexpired lease IS a live process. The registry row ("should it exist?") and the lease ("is it alive?") answer separate questions; status carries lifecycle intent, the lease carries the process-level fact. A process that died without writing `terminated` leaves its status behind and the lease expires; a process that cannot renew (wedged, pre-lease code) is a zombie the reaper collects.
 
 **The single alive predicate** lives in `shared/db.py`, one definition imported everywhere:
 
@@ -40,7 +40,7 @@ The **lease half of the registry × lease frame** ([[okf/design/r1-state-livenes
 - [[startup.ava.okf.md]] — the claim is Stage 2 of the startup sequence
 - [[loop.ava.okf.md]] — the renewal task runs for the whole graph lifetime
 - [[db.ava.okf.md]] — `renew_agent_lease` on the kernel DB layer
-- [[okf/design/r1-state-liveness.ava.okf.md|R1 state & liveness design]] — the registry × lease frame
+- [[okf/design/r1-state-liveness/r1-state-liveness.ava.okf.md|R1 state & liveness design]] — the registry × lease frame
 - `shared/deploy_timing.py` — `AGENT_LEASE_TTL_S` / `AGENT_LEASE_RENEW_INTERVAL_S` / `AGENT_LEASE_ZOMBIE_GRACE_S` / `AGENT_LEASE_SUSPEND_GAP_S`
 
 ## Entry Points

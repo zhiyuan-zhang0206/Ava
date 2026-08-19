@@ -13,26 +13,7 @@ Plugins are Ava's primary extension mechanism—inserting custom behavior into t
 ## Core Responsibilities
 
 ### 1. Graph-Edge Hooks (`agent/hooks/_registry.py`)
-Four hook container nodes sit in the LangGraph execution graph (topology: START → after_init → init_context → claim → before_llm → llm → before_exec → exec → after_exec → claim):
-- `after_init` — runs once after the checkpoint is loaded, before `claim` (e.g., restores `os.chdir` on agent restart; introduced 2026-07-23, used by ava_code's `register_after_init(sync_cwd_after_init)`)
-- `before_llm` — after claim completion, before LLM invocation
-- `before_exec` — after LLM completion, before code execution
-- `after_exec` — after code execution completion, before the next node
-
-Plugins register an **instance** of a `Hook` ABC subclass (PyTorch `nn.Module` shape—base class locks the signature, subclasses fill the body), rather than a bare async function + decorator:
-```python
-from agent.hooks import Hook, register_before_llm
-
-class MyHook(Hook):
-    async def __call__(self, state, runtime, config, /) -> dict | None:
-        return None  # or return a dict for state update
-
-register_before_llm(MyHook())
-```
-
-The signature is inherited and checked by pyright strict's `reportIncompatibleMethodOverride`—narrowing parameter types / widening return value / missing parameters are caught at type-checking time, no longer just a convention described in a Protocol. The four hook points share the same `Hook` base class (same signature); the only difference is which list they are registered into. Instances can carry per-hook state in `__init__`. Returning a dict can modify state; returning None is a no-op. When two hooks write the same key in the same round, the merge is **reducer-aware** (`agent/hooks/_registry.py:202-229`): keys with reducers (e.g., `messages`→`add_messages`) merge both values; **only keys without reducers raise RuntimeError** (avoiding silent overwrites).
-
-### 2. State Field Extension (`agent/state.py`)
+The four hook container nodes (after_init / before_llm / before_exec / after_exec), the `Hook` ABC instance-registration contract, and reducer-aware state merge: [[okf/plugins/graph-edge-hooks.ava.okf.md]].### 2. State Field Extension (`agent/state.py`)
 `register_plugin_state(Cls)` — pass a Pydantic `BaseModel` subclass (e.g., `AvaCodeState`, `AvaSdkReminderState`), and its fields are merged into `AgentState`, returning a `PluginStateHandle` for the plugin to `read()` / `update()` within a turn. Fields are isolated with a namespace prefix (`<plugin>__<field>`) and persisted to checkpoints via LangGraph reducers.
 
 **Core-key contract (writable = private fields + `messages` only).** A plugin's own `BaseModel` fields are always private and plugin-writable. Among the framework core keys (`BaseAgentState` fields: messages / halted / update_initiated / compact / memory / context_reset / capabilities), only **`messages`** may be declared and written — with the exact base annotation (`Annotated[list[AnyMessage], add_messages]`); the exec node merges the plugin's messages delta with its own ToolMessage delta, so both reach the checkpoint. Declaring any other core key raises at registration; writing one via `ava.state_update` raises at turn end. Plugins that want to surface notes do it through the after-exec hook — `ava_code`'s AGENTS.md / security-findings injection (`system_note_message`, `NoteTag`) is the model use case — never by touching core lifecycle keys.
@@ -79,7 +60,7 @@ Packages may ship an `ava-plugin.json` at their root declaring identity
 `pythonPackages` / `hostCapabilities`), contribution surfaces, and lifecycle
 shape. Install paths validate it via `shared/plugin_manifest.py`; runtime
 loading, lifecycle states, and context gates land post-open-source. Full
-contract: [conventions/plugin-spec-v2.md](../conventions/plugin-spec-v2.md).
+contract: [conventions/plugin-spec-v2.md](../../conventions/plugin-spec-v2.md).
 ## Notes
 - Plugins can carry **skills** (`ava_builtins/plugins/<p>/skills/`, converge syncs them with the plugin name as the top-level directory; nodes hang under each plugin subtree) and **MCP server definitions** (`.mcp.json`), and can also register **ops services** (`services.py` declaring `ServiceSpec`, e.g., ava_fleet's task-maintenance).
 - All hooks share a single global HOOKS list—`make_hook_runner` snapshots the reference, not a copy.

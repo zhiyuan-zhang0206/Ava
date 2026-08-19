@@ -25,7 +25,7 @@ Skills can be nested — displayed as `ava.skills.ava-code:pr` (loadable as `ava
 
 
 ## See Also
-- [[okf/plugins.ava.okf.md|Plugin System]] — skills vs plugins distinction
+- [[okf/plugins/plugins.ava.okf.md|Plugin System]] — skills vs plugins distinction
 
 # ava.skills — Skill Registry
 

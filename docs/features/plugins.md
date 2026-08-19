@@ -32,6 +32,6 @@ surface: labels, notification queue, task registry).
 
 ## Design decisions
 
-- [Plugin and hook layers](../../okf/plugins.ava.okf.md)
+- [Plugin and hook layers](../../okf/plugins/plugins.ava.okf.md)
 - [Plugin & hook layers decision](../../decisions/2026-05-13-plugin-and-hook-layers.md)
 - [Plugin-core-boundary-wrapper-extension](../../decisions/2026-07-19-plugin-core-boundary-wrapper-extension.md)

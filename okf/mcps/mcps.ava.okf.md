@@ -35,13 +35,8 @@ agent process ←─Unix socket─→ shared MCP daemon (per machine) ←─stdi
 ## Configuration Sources (four layers merged, later overrides earlier)
 The four `.mcp.json` layers, `~/.ava/mcp_enabled.json` enable control, `requires` preconditions, and remote-server auth (headers / OAuth 2.1) are documented in [[okf/mcps/configuration.ava.okf.md]]; the flow itself (discovery → browser → callback → token storage) in [[okf/mcps/oauth.ava.okf.md]].
 
-## Startup Form: relative paths, never uv run
-For own server layers, `.mcp.json` uses a **relative** interpreter path `.venv/bin/python`. Spawn cwd comes from `ava/_mcp_config.py:server_cwd(name)` by **effective layer**: installed → its package directory (own isolated venv); built-in → **repo root** (repo venv, `-m <pkg>` finds the top-level package); plugin/machine → None (third-party command line, not reinterpreted).
-**Why not `uv run`**: it is a persistent wrapper process; at the 100-300 agent density target every agent×server would hang a wrapper — pure overhead. Pinning cwd for built-in also removes the old dependency on the agent's incidental cwd.
-
-## Installation Mechanism (native vs installed, mirroring skills)
-- **native**: `<repo>/ava_builtins/mcps/*/.mcp.json`, directory-scan discovered, unregistered.
-- **installed**: `ava mcp install <source>` (git URL or local path, `--path` selects a subdirectory) places a self-contained package into `$AVA_HOME/mcps/<name>/`, runs `uv sync` once to create an isolated `.venv`, registers `type="mcp"`. The daemon spawns with `cwd=installed_mcp_dir(name)` so the relative `.venv/bin/python -m <module>` resolves to the package's own venv → dependencies isolated from core. Managed via `ava mcp uninstall/upgrade/ls`.
+## Installation & Startup Form
+Native vs installed (mirroring skills), the relative-path `.mcp.json` startup form, per-layer `server_cwd`, and why not `uv run`: [[okf/mcps/installation-startup.ava.okf.md]].
 
 ## Key Dependencies
 - [[cli/mcp_server.ava.okf.md]] — the inbound direction: this cluster AS an MCP server

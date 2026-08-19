@@ -37,7 +37,7 @@ This row is the cluster's single **"intentionally mid-transition" signal, not ju
 ## Key Dependencies
 
 - [[host_deploy_state.ava.okf.md|Host Deploy State]] — the host-level half of the model
-- [[okf/design/r1-state-liveness.ava.okf.md|R1 state & liveness design]] — the deployment-state model
+- [[okf/design/r1-state-liveness/r1-state-liveness.ava.okf.md|R1 state & liveness design]] — the deployment-state model
 - `shared/deploy_timing.py` — `NO_PROGRESS_TIMEOUT_S`, the family's one no-progress definition (settle TTL, Phase-B poll, updater stall)
 - `shared/last_update.py` — the `last_outcome` dual-writer
 - `cli.ava.okf.md` — `ava cluster update` orchestration (the lease's main holder)
