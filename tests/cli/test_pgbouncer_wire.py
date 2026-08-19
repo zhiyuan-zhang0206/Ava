@@ -264,6 +264,6 @@ def test_admin_probe_reaches_the_bound_address_only() -> None:
         postgres() as pg_url,
         _pgbouncer_in_front(pg_url, listen_addr="127.0.0.2") as pooled,
     ):
-        listen_port = int(conninfo_to_dict(pooled)["port"])
+        listen_port = int(str(conninfo_to_dict(pooled)["port"]))
         assert _admin_reachable(listen_port, "ava_citest", _SECRET, host="127.0.0.2") is True
         assert _admin_reachable(listen_port, "ava_citest", _SECRET, host="127.0.0.1") is False
