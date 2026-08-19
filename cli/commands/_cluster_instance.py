@@ -53,7 +53,7 @@ from shared.cluster import ensure_cluster_redis_acl
 from shared.config import settings
 from shared.machine import reachable_host
 from shared.paths import ava_home
-from shared.pg_tools import PG_BIN_LINUX, brew_prefix, is_macos, pg_shm_args, pg_tool
+from shared.pg_tools import PG_BIN_LINUX, brew_prefix, is_macos, pg_shm_args, pg_tool, pg_tz_args
 from shared.platform_backend import get_backend
 
 _LOOPBACK_ALIASES = frozenset({"127.0.0.1", "::1", "localhost", "ip6-localhost"})
@@ -319,7 +319,7 @@ def _start_pg(pg_port: int, cluster_secret: str) -> int:
             f"-p {pg_port} -c listen_addresses={listen} "
             f"-c unix_socket_directories={_pg_socket_dir()} "
             f"-c max_connections={_PG_MAX_CONNECTIONS} "
-            f"{pg_shm_args()}",
+            f"{pg_tz_args()} {pg_shm_args()}",
         ],
         check=False,
         capture_output=True,

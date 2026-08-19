@@ -234,6 +234,30 @@ def test_metrics_timeseries_series(db_conn: psycopg.Connection) -> None:
     datetime.fromisoformat(point["ts"])
 
 
+def test_metrics_timeseries_bucket_is_utc_hour_with_offset(
+    db_conn: psycopg.Connection,
+) -> None:
+    """tz audit PR-1 behavior lock: the inspector's `date_trunc` bucket lands
+    on the UTC hour (not the host OS timezone's hour) and the JSON-serialized
+    `ts` carries a UTC offset — both follow from pinning the PG session
+    timezone to UTC (shared/pg_tools.py: pg_tz_args), independent of the
+    machine this test runs on. (`MetricPoint.ts` is a pydantic `datetime`
+    field — pydantic-core's JSON mode renders a zero UTC offset as `Z`, unlike
+    Python's own `.isoformat()`, which writes `+00:00`; see
+    TestTimestampOffset in tests/gateway/test_tasks_router.py for that form.)"""
+    aid = _insert_agent(db_conn)
+    _write_registry(_metric(name="bucket_check"))
+    _insert_event(db_conn, agent_id=aid, payload={"status": "done"})
+    db_conn.commit()
+    expected_bucket = datetime.now(UTC).replace(minute=0, second=0, microsecond=0)
+    with TestClient(app) as client:
+        resp = client.get(f"/api/agents/{aid}/inspect/metrics")
+    assert resp.status_code == 200
+    point_ts = resp.json()[0]["series"][0]["ts"]
+    assert point_ts.endswith("Z")
+    assert datetime.fromisoformat(point_ts) == expected_bucket
+
+
 def test_metrics_agent_id_placeholder_filters(db_conn: psycopg.Connection) -> None:
     """{{agent_id}} renders to `agent_id = <n>`: the metric counts only the
     requested agent's events, not the fleet's."""
@@ -264,7 +288,9 @@ def test_metrics_macro_translation_unit() -> None:
         "FROM events WHERE event_name = 'k' AND $__timeFilter(ts) "
         "AND $__timeFilter(ts, 'extra')"
     )
-    assert "date_trunc('hour', ts)" in sql
+    # the double AT TIME ZONE round-trip truncates in UTC while keeping the
+    # bucket column a tz-aware timestamptz (see _MACRO_TIMEGROUP)
+    assert "date_trunc('hour', ts AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'" in sql
     assert "ts >= now() - interval '24 hours'" in sql
     assert "$__" not in sql
     # a weird argument inside the macro parens is discarded, not echoed
