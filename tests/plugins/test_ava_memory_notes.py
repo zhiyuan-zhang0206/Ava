@@ -62,16 +62,23 @@ def test_plugin_registers_both_index_notes(memory_plugin: Any) -> None:
 
 
 def test_notes_render_in_the_documented_rank_order(memory_plugin: Any) -> None:
-    """The reading order the user pinned — exec timeout, shared memory index,
-    agent id, per-agent memory index, preloaded skills — holds across the
-    framework/plugin registration boundary: the two memory notes are
-    plugin-registered, the other three are framework-registered, and the
-    registry alone (registration order) cannot express the interleave."""
+    """The reading order the user pinned — exec timeout, cluster timezone,
+    shared memory index, agent id, per-agent memory index, preloaded skills —
+    holds across the framework/plugin registration boundary: the two memory
+    notes are plugin-registered, the other four are framework-registered, and
+    the registry alone (registration order) cannot express the interleave.
+
+    The two stable-band notes lead for prompt-cache reasons, not taste: they
+    are cluster-identical and change only on a restart-forcing config edit,
+    while the shared memory index behind them is re-read at every window
+    establishment. A note placed after it re-caches on another agent's memory
+    write."""
     names = [e.build.__name__ for e in _CONTEXT_NOTES]
     ranks = [e.rank for e in _CONTEXT_NOTES]
     by_rank = [n for _, n in sorted(zip(ranks, names, strict=True))]
     assert by_rank == [
         "exec_timeout_note",
+        "timezone_note",
         "memory_index_note",
         "agent_id_note",
         "per_agent_memory_note",
@@ -90,6 +97,9 @@ def test_only_the_shared_index_is_grafted_onto_a_fork(memory_plugin: Any) -> Non
     on_fork = {e.build.__name__ for e in _CONTEXT_NOTES if e.on_fork}
     assert "memory_index_note" in on_fork
     assert "per_agent_memory_note" not in on_fork
+    # Nor the cluster timezone: a fork stays in the cluster it forked from, so
+    # the declaration it inherited is still true.
+    assert "timezone_note" not in on_fork
 
 
 def test_discipline_names_every_type_in_the_vocabulary(memory_plugin: Any) -> None:

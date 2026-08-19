@@ -26,6 +26,7 @@ from gateway.schemas import (
 )
 from shared import machines
 from shared.machine import machine_name
+from shared.task_notes import task_note_line
 
 router = APIRouter()
 
@@ -54,13 +55,13 @@ def _drain_tasks_blocking(pool: ConnectionPool, name: str) -> int:
     to the drain owner (#405), appending a note on each so the new owner knows
     why it landed on their board.
 
-    The note mirrors the task registry's own format
-    (`_append_note_to_results`), and the write resets the reminder clock like
-    a normal update would. Agents already terminated before the pause own
-    nothing that this pause needs to rescue (their tasks are another
+    The note goes through `shared.task_notes.task_note_line`, the same builder
+    the SDK task registry uses, so the two writers into one `results` column
+    cannot drift apart on format or timezone; the write resets the reminder
+    clock like a normal update would. Agents already terminated before the
+    pause own nothing that this pause needs to rescue (their tasks are another
     cleanup's business).
     """
-    stamp = datetime.now(UTC).astimezone().strftime("%Y-%m-%d %H:%M")
     with pool.connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -72,8 +73,8 @@ def _drain_tasks_blocking(pool: ConnectionPool, name: str) -> int:
             )
             rows = cur.fetchall()
         for task_id, owner_id in rows:
-            note = (
-                f"[{stamp}] machine {name} paused \u2014 owner agent #{owner_id} "
+            note = task_note_line(
+                f"machine {name} paused \u2014 owner agent #{owner_id} "
                 f"terminated; task reassigned to drain owner #{_MACHINE_PAUSE_DRAIN_OWNER} "
                 f"(see `ava cluster resume {name}`)"
             )

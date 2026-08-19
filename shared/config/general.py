@@ -32,7 +32,7 @@ class GeneralSettings(EnvSettings):
     timezone: str = Field(
         default="America/Los_Angeles",
         alias="AVA_TIMEZONE",
-        description="Timezone for the timestamp on the agent message envelope. Defaults to Los Angeles time (PST/PDT auto-switch).",
+        description="Timezone every agent-facing timestamp is rendered in, and the default for schedules an agent creates. Declared to the agent once as a standing context note, so the timestamps themselves carry no timezone suffix. Defaults to Los Angeles time.",
         json_schema_extra={
             "restart_required": "agent",
             "writable": True,

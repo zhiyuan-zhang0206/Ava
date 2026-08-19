@@ -21,7 +21,7 @@ import pytest
 
 from shared.envelope import validate_source, wrap_inbound
 
-_TIMESTAMP = "[2026-05-06 14:32:05 PDT]"
+_TIMESTAMP = "[2026-05-06 14:32:05]"
 _TS = _TIMESTAMP  # shorthand
 
 
@@ -223,8 +223,8 @@ class TestCreatedAtParameter:
         created = datetime(2026, 6, 21, 10, 30, 0, tzinfo=UTC)
         # created_at is UTC 10:30, which is PDT 03:30
         out = wrap_inbound("hi", "user", created_at=created)
-        assert "[2026-06-21 03:30:00 PDT]" in out
-        assert out == "User [2026-06-21 03:30:00 PDT]:\n\nhi"
+        assert "[2026-06-21 03:30:00]" in out
+        assert out == "User [2026-06-21 03:30:00]:\n\nhi"
 
     def test_agent_with_created_at(self) -> None:
         from datetime import datetime
@@ -232,8 +232,8 @@ class TestCreatedAtParameter:
         created = datetime(2026, 6, 21, 14, 0, 0, tzinfo=UTC)
         # UTC 14:00 = PDT 07:00
         out = wrap_inbound("hey", "agent:5", created_at=created)
-        assert "[2026-06-21 07:00:00 PDT]" in out
-        assert out == "Agent 5 [2026-06-21 07:00:00 PDT]:\n\nhey"
+        assert "[2026-06-21 07:00:00]" in out
+        assert out == "Agent 5 [2026-06-21 07:00:00]:\n\nhey"
 
     def test_without_created_at_uses_now(self) -> None:
         """When created_at is None, fallback to now_timestamp (existing behavior)."""
@@ -254,7 +254,7 @@ class TestCreatedAtParameter:
         created = datetime(2026, 6, 21, 20, 0, 0, tzinfo=UTC)
         # UTC 20:00 = PDT 13:00
         out = wrap_inbound("alert", "watcher:7", created_at=created)
-        assert "[2026-06-21 13:00:00 PDT]" in out
+        assert "[2026-06-21 13:00:00]" in out
 
 
 class TestCreatedAtWithTimestampsOff:
@@ -301,10 +301,21 @@ class TestWeekdayFlag:
         return wrap_inbound("hi", "user", created_at=created)
 
     def test_weekday_on(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        assert self._wrap(monkeypatch, weekday=True) == "User [2026-06-21 Sun 03:30:00 PDT]:\n\nhi"
+        assert self._wrap(monkeypatch, weekday=True) == "User [2026-06-21 Sun 03:30:00]:\n\nhi"
 
     def test_weekday_off(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        assert self._wrap(monkeypatch, weekday=False) == "User [2026-06-21 03:30:00 PDT]:\n\nhi"
+        assert self._wrap(monkeypatch, weekday=False) == "User [2026-06-21 03:30:00]:\n\nhi"
+
+    def test_no_timezone_suffix_either_way(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """No `%Z` in either shape — the timezone is declared once, in the
+        standing context note (`agent.graph._context_notes.timezone_note`),
+        not repeated on every stamp. `settings.general.timezone` is
+        cluster-pinned, so the suffix was a constant, and an ambiguous one
+        (`PDT` vs `PST` for one unchanged setting; `CST` for two zones)."""
+        for weekday in (True, False):
+            out = self._wrap(monkeypatch, weekday=weekday)
+            assert "PDT" not in out and "PST" not in out
+            assert out.endswith(":00]:\n\nhi")
 
     def test_created_at_and_now_agree(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Both producers render one shape — the docstring claim, enforced.
@@ -321,7 +332,7 @@ class TestWeekdayFlag:
         for weekday in (True, False):
             monkeypatch.setattr(settings.general, "message_timestamp_weekday", weekday)
             day = r"[A-Z][a-z]{2} " if weekday else ""
-            shape = rf"^User \[\d{{4}}-\d{{2}}-\d{{2}} {day}\d{{2}}:\d{{2}}:\d{{2}} \S+\]:$"
+            shape = rf"^User \[\d{{4}}-\d{{2}}-\d{{2}} {day}\d{{2}}:\d{{2}}:\d{{2}}\]:$"
             for out in (
                 wrap_inbound("hi", "user"),
                 wrap_inbound("hi", "user", created_at=datetime.now(UTC)),

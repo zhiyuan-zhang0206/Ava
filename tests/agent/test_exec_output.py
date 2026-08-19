@@ -16,7 +16,7 @@ import pytest
 
 from agent.graph._exec_output import wrap_code_output
 
-_TIMESTAMP = "[2026-05-06 14:32:05 PDT]"
+_TIMESTAMP = "[2026-05-06 14:32:05]"
 _TS = _TIMESTAMP  # shorthand
 
 
