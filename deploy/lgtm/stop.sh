@@ -5,10 +5,10 @@
 #
 # On the designated LGTM host ($AVA_HOME/lgtm-host marker) the gateway
 # watchdog re-runs start.sh within ~a minute of the probes failing — for a
-# deliberate stop there, remove the marker or run
-# `ava start --disable-service lgtm` first (see README.md). While the stack
-# is down the gateway's /ops + inspect reads, ops alerting, and the
-# events-maintenance rollup degrade.
+# deliberate stop there use `ava lgtm off`, which removes the marker before
+# calling this script (see README.md). While the stack is down the gateway's
+# /ops + inspect reads, ops alerting, and the events-maintenance rollup
+# degrade.
 #
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
