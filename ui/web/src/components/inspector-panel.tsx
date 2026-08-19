@@ -30,6 +30,7 @@ import type {
   ShellInfo,
   SystemEvent,
 } from "@/lib/types";
+import { formatAbsolute, formatRelative, formatShort } from "@/lib/time";
 import { useEventStream } from "@/lib/useEventStream";
 import { cn } from "@/lib/utils";
 import { BAR_HEIGHT_CLASS, FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0, OVERFLOW_HIDDEN } from "@/lib/layout";
@@ -628,7 +629,7 @@ function LivenessSection({ inspect }: { inspect: AgentInspect }) {
 function nextHeartbeatCell(hb: HeartbeatInfo): { value: string } {
   if (hb.paused_until) {
     return {
-      value: formatClock(hb.paused_until),
+      value: formatShort(hb.paused_until, { includeDate: false }),
     };
   }
   if (hb.heartbeat_pending) {
@@ -702,45 +703,6 @@ function formatInterval(seconds: number): string {
   const d = Math.floor(h / 24);
   const remH = h % 24;
   return remH ? `${d}d ${remH}h` : `${d}d`;
-}
-
-// Wall-clock HH:MM in the viewer's local timezone — used during heartbeat pause.
-function formatClock(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
-}
-
-// Signed relative time, both directions: `in 4m` (future) / `5m ago` (past) /
-// `now` within a minute. Seconds through years.
-function formatRelative(iso: string, now: Date = new Date()): string {
-  const t = new Date(iso).getTime();
-  if (!Number.isFinite(t)) return "—";
-  const deltaSec = Math.round((t - now.getTime()) / 1000);
-  const mag = Math.abs(deltaSec);
-  if (mag < 60) return "now";
-  const min = Math.floor(mag / 60);
-  let span: string;
-  if (min < 60) span = `${min}m`;
-  else if (min < 60 * 24) span = `${Math.floor(min / 60)}h`;
-  else if (min < 60 * 24 * 30) span = `${Math.floor(min / 60 / 24)}d`;
-  else if (min < 60 * 24 * 365) span = `${Math.floor(min / 60 / 24 / 30)}mo`;
-  else span = `${Math.floor(min / 60 / 24 / 365)}y`;
-  return deltaSec > 0 ? `in ${span}` : `${span} ago`;
-}
-
-// Full datetime with seconds, in the viewer's local timezone: "2026-07-25 02:53:29 PDT"
-function formatAbsolute(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "—";
-  const y = d.getFullYear();
-  const mo = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  const wd = d.toLocaleDateString("en-US", { weekday: "short" });
-  const h = String(d.getHours()).padStart(2, "0");
-  const mi = String(d.getMinutes()).padStart(2, "0");
-  const s = String(d.getSeconds()).padStart(2, "0");
-  return `${y}-${mo}-${day} ${wd} ${h}:${mi}:${s}`;
 }
 
 function formatValue(v: unknown): string {

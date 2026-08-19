@@ -178,22 +178,10 @@ export function useStatsDashboard(windowHours: StatsWindowHours): {
   return { stats, error };
 }
 
-// Relative time formatting — `just now` / `5m` / `2h` / `3d`. Concise,
-// for sidebar rows. The exact date is in the hover tooltip (ISO string
-// passed as title).
-export function formatRelativeTime(iso: string, now: Date = new Date()): string {
-  const t = new Date(iso).getTime();
-  const elapsedMs = now.getTime() - t;
-  if (!Number.isFinite(elapsedMs) || elapsedMs < 0) return "Just now";
-  const sec = Math.floor(elapsedMs / 1000);
-  if (sec < 60) return "Just now";
-  const min = Math.floor(sec / 60);
-  if (min < 60) return `${min}m`;
-  const hour = Math.floor(min / 60);
-  if (hour < 24) return `${hour}h`;
-  const day = Math.floor(hour / 24);
-  if (day < 30) return `${day}d`;
-  const month = Math.floor(day / 30);
-  if (month < 12) return `${month}mo`;
-  return `${Math.floor(month / 12)}y`;
-}
+// Relative time formatting for sidebar rows (and, transitively, every other
+// consumer of this re-export — alerts, inbox-queue). The exact date is in
+// the hover tooltip (ISO string passed as title). Delegates to the shared
+// helper (`@/lib/time`) so this and every other relative-time surface in the
+// app read the same wording scheme (tz audit, 2026-08: this used to be one
+// of 5 independently-drifted implementations).
+export { formatRelative as formatRelativeTime } from "./time";

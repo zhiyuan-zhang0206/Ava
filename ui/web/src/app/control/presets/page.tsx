@@ -37,6 +37,7 @@ import { Input } from "@/components/ui/input";
 import { api } from "@/lib/api";
 import { errMsg } from "@/lib/errors";
 import { useStore } from "@/lib/store";
+import { formatRelative } from "@/lib/time";
 import type { PresetUpdate, PresetView } from "@/lib/types";
 
 import { PRESETS_QUERY_KEY, presetAnchorId } from "../_sections";
@@ -222,7 +223,7 @@ function PresetCard({
             <p className="mt-1.5 text-xs text-muted-foreground">{preset.description}</p>
           )}
           <div className="mt-auto pt-2 text-[11px] text-muted-foreground">
-            Updated {relativeTime(preset.updated_at)}
+            Updated {formatRelative(preset.updated_at)}
           </div>
         </div>
         <pre className={cn("whitespace-pre-wrap break-words rounded-r-md border-l border-border bg-muted/50 px-3 py-2.5 font-mono text-[11px] leading-relaxed", MIN_W_0, FLEX_1)}>
@@ -292,15 +293,4 @@ function IconButton({
       {icon}
     </Button>
   );
-}
-
-function relativeTime(iso: string): string {
-  const t = Date.parse(iso);
-  if (isNaN(t)) return iso;
-  const diffSec = Math.floor((Date.now() - t) / 1000);
-  if (diffSec < 60) return "just now";
-  if (diffSec < 3600) return `${Math.floor(diffSec / 60)}m ago`;
-  if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}h ago`;
-  if (diffSec < 86400 * 30) return `${Math.floor(diffSec / 86400)}d ago`;
-  return iso.slice(0, 10);
 }

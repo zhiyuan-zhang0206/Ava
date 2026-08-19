@@ -8,11 +8,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { api } from "@/lib/api";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0 } from "@/lib/layout";
+import { formatAbsolute } from "@/lib/time";
 
 function fmt(ts: string | null | undefined): string {
   if (!ts) return "—";
-  const d = new Date(ts);
-  return Number.isNaN(d.getTime()) ? ts : d.toLocaleString();
+  return formatAbsolute(ts) || ts;
 }
 
 function outcomeBadge(outcome: string | undefined): string {
