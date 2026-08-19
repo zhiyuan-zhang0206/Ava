@@ -62,9 +62,28 @@ as before.
   only the on-disk copy is overwritten at the next launch/restart. Change a
   schedule through `ava schedules update` / the API, never by editing the
   materialized file.
-- **Timezones are embedded per deployment.** Schedule scripts carry their own
-  `TIMEZONE` / `TZ` constant (and cron expressions) — adjust for your cluster;
-  there is no cluster-wide timezone setting.
+- **Cron expressions are cluster wall clock.** The built-in scripts read
+  `settings.general.timezone` (`AVA_TIMEZONE`, scope `cluster-pinned`) and pass
+  it to `next_fire`, so `0 4 * * *` means 04:00 cluster time on every host in
+  the fleet — the host's OS timezone never enters. `AVA_TIMEZONE` is read once
+  at process start, so a changed value needs `ava schedules restart <id>`.
+  A one-off schedule you write yourself should do the same rather than
+  hard-coding an IANA name; `next_fire(expr, timezone=None)` computes in UTC.
+- **A template change does not reach a running cluster on its own.** The DB is
+  authoritative and `provision_builtin_schedules` only inserts rows that are
+  missing — it never rewrites one that exists — so `ava cluster update` refreshes
+  the checkout without touching the script any cluster is actually running.
+  Push it explicitly, once per changed built-in:
+
+  ```bash
+  ava schedules update memory-arbiter        --script-file schedules/memory-steward-schedule.py
+  ava schedules update self-evolution-daily  --script-file schedules/self-evolution-daily-schedule.py
+  ava schedules update self-evolution-weekly --script-file schedules/self-evolution-weekly-schedule.py
+  ```
+
+  An **enabled** schedule is relaunched onto the new script by that call alone;
+  a disabled one picks it up when it is next started. `ava schedules get <name>`
+  confirms which script the row holds.
 - Deploy a one-off schedule with:
 
 ```bash

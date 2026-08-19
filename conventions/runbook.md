@@ -297,6 +297,11 @@ is gone, and bootstrapping into that window fails with `Bootstrap failed: 5: Inp
 error`, which on 2026-08-01 left :3000 with no listener for the rest of the rollout. A load
 that still never lands now **raises**, so the start / rollout fails instead of reporting
 success over a dark entry port.
+**A rollout does not update built-in schedule scripts.** The `schedules` table is
+authoritative and boot-time provisioning only inserts rows that are missing, so a changed
+template in `schedules/` reaches a running cluster only through an explicit
+`ava schedules update <name> --script-file <template>` (which relaunches an enabled
+schedule on the spot) — see [`schedules/README.md`](../schedules/README.md).
 On agent-runners it also runs capability preflights that fail loud rather than letting
 a missing capability surface later: a headed Chrome (when the browser is enabled, see
 below), a **writable shared Google Drive folder**, and **the ability to open and merge

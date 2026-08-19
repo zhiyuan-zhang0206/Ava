@@ -243,7 +243,9 @@ ignore = [
 # schedules/* are version-controlled deployment templates (runnable scripts
 # referenced by the ops docs), not runtime source: exempt them from source-level
 # rules (typing, ambiguous unicode, security heuristics) so they stay readable.
-"schedules/*" = ["ANN", "RUF003", "S", "DTZ", "PTH", "TID", "I", "UP", "ERA", "Q", "RET", "ARG", "PLR2004", "T201"]
+# DTZ is deliberately NOT exempt: these scripts decide when things fire, so a
+# naive datetime here is a scheduling bug, not a style nit.
+"schedules/*" = ["ANN", "RUF003", "S", "PTH", "TID", "I", "UP", "ERA", "Q", "RET", "ARG", "PLR2004", "T201"]
 # FBT: a boolean positional in a test is the value-under-test (e.g.
 # `validate("browser_enabled", True)`), not a real boolean-trap call site.
 # Skill reference snippets are agent-facing examples the agent reads and adapts;

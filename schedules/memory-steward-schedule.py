@@ -12,18 +12,24 @@
 """Memory Arbiter schedule — 4AM consolidation, 7AM health check.
 
 Gateway-hosted, resumable. Reuses the Memory Arbiter agent by label.
-Timezone is embedded per deployment (Asia/Shanghai here; both fire times sit
-in the DeepSeek trough — Beijing peak = workdays 9-12 / 14-18).
+Fire times are CLUSTER wall clock (`AVA_TIMEZONE`, `cluster-pinned`), not the
+host's OS timezone: every machine in the fleet fires at the same instant, and
+moving a laptop across timezones does not move the schedule. Both hours sit in
+the off-peak trough of a workday whose peak is 9-12 / 14-18 cluster time.
+`AVA_TIMEZONE` is read at process start, so changing it needs
+`ava schedules restart <id>`.
 """
 
 import time
 from datetime import UTC, datetime
 import ava
 from ava.agents import AgentStatus as S
+from shared.config import settings
 from shared.watcher import next_fire
 
 
 MEMORY_ARBITRATOR_LABEL = "memory-arbiter"
+TIMEZONE = settings.general.timezone
 
 TRIGGERS = [
     ("0 4 * * *", "Daily consolidation (commit + push + PR merge)"),
@@ -64,7 +70,7 @@ def main():
         now = datetime.now(UTC)
         next_times = []
         for cron_expr, message in TRIGGERS:
-            nxt = next_fire(cron_expr, after=now, timezone="Asia/Shanghai")
+            nxt = next_fire(cron_expr, after=now, timezone=TIMEZONE)
             next_times.append((nxt, cron_expr, message))
 
         # Pick the earliest

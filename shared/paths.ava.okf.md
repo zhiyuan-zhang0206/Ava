@@ -35,7 +35,7 @@ $AVA_HOME/
 ├── logs/                       # <daemon>.log, agent-{N}.out.log / .stderr.log, rollout-<ts>.log
 ├── traces/                     # spans.jsonl + rotated spans-<ISO>.jsonl (collector mirror) + .ship-watermark.json
 ├── otel-collector/             # otelcol-contrib binary + config.yaml + queue/ (sidecar, task #1266)
-├── backups/db/                 # daily pg_dump --format=custom, newest 1 kept
+├── backups/db/                 # daily pg_dump --format=custom, UTC-stamped, newest 7 kept
 ├── backups/env/                # .env snapshot taken before each config write
 ├── memory/                     # the memory pool git repo
 ├── milvus-data/                # milvus-lite data dir

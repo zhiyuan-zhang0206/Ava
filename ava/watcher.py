@@ -412,7 +412,8 @@ def cron(
         expr: 5-field cron expression (`minute hour day-of-month month
             day-of-week`).
         timezone: IANA name (e.g. `"America/Los_Angeles"`); defaults to your
-            local timezone.
+            configured timezone — the same wall clock your message timestamps
+            are shown in.
         end_time: a TZ-aware datetime, a timedelta from now (UTC), or an
             ISO-8601 string with timezone.
         name: a lowercase slug like `"daily-check-in"`.

@@ -4,9 +4,25 @@ One `pg_dump --format=custom` per day into `$AVA_HOME/backups/db/`,
 keeping the newest BACKUP_KEEP dumps. The watchdog runs
 `maybe_run_daily_backup` every tick on gateway-capable hosts (registered like
 a healthcheck, so `ava start --disable-service pg-backup` disables it); the
-function is a no-op until the first tick at/after BACKUP_HOUR local time with
-no dump for the current day — a host that was down at 03:00 catches up on its
-next tick instead of skipping the day.
+function is a no-op until the first tick at/after BACKUP_HOUR CLUSTER time with
+no dump for the current cluster day — a host that was down at 03:00 catches up
+on its next tick instead of skipping the day.
+
+Two clocks, deliberately different ones:
+
+- **When to run** is the cluster wall clock (`AVA_TIMEZONE`, cluster-pinned):
+  "03:00" means the same instant for every gateway in the fleet, and it does
+  not move when a machine does. Reading the host's OS timezone instead used to
+  skip backups outright — carry a laptop from Asia/Shanghai to US/Pacific and
+  the newest dump's local date sits ahead of the new local date, so `is_due`
+  returned False (silently, with no error to notice) until the calendar caught
+  up.
+- **What a dump is called** is UTC, stamped `Z`: `<db>-YYYYMMDDTHHMMSSZ.dump`.
+  Prune deletes the oldest dumps by this stamp, so the ordering must be a
+  total order over real instants. A local-time name is not: in the DST fall-back
+  hour the same wall clock names two instants an hour apart, and re-parsing it
+  as naive-then-local made "which backup do we delete" depend on which offset
+  the parse happened to pick.
 
 Local dumps guard against bad migrations / accidental deletes / DB
 corruption — not against the host's disk dying. Storage interface:
@@ -14,9 +30,12 @@ corruption — not against the host's disk dying. Storage interface:
 (R2 / GCS) slots in as an upload step between the two — tracked in
 future/infra/pg-backup.md.
 
-Only files matching this module's `<dbname>-YYYYMMDD-HHMMSS.dump` naming are
-managed (counted for due-ness, pruned); a hand-made dump parked in the same
-directory is never touched.
+Only files matching this module's naming are managed (counted for due-ness,
+pruned); a hand-made dump parked in the same directory is never touched. Dumps
+written before the UTC naming (`<dbname>-YYYYMMDD-HHMMSS.dump`, host wall
+clock) stay managed so they still prune out instead of stranding a week of
+files: their stamp is read in cluster time, which is the closest well-defined
+reading of a name that never recorded an offset.
 
 Restore (replaces the live DB's contents):
     pg_restore --clean --if-exists -d "<db_url>" <dump-file>
@@ -28,8 +47,9 @@ import logging
 import re
 import subprocess
 from contextlib import suppress
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from psycopg.conninfo import conninfo_to_dict
 
@@ -39,7 +59,7 @@ from shared.pg_tools import pg_tool
 
 _log = logging.getLogger(__name__)
 
-BACKUP_HOUR = 3  # local time; the first tick at/after this hour runs the day's backup
+BACKUP_HOUR = 3  # cluster time; the first tick at/after this hour runs the day's backup
 BACKUP_KEEP = 7  # a week of daily dumps: a bad migration found a day later must not have overwritten the last good copy
 # Generous ceiling for one dump (the DB is far smaller); see the comment at the
 # subprocess.run call for why an unbounded pg_dump is not acceptable here.
@@ -59,8 +79,34 @@ _DUMP_TIMEOUT_S = 60 * 60
 # not the conversation history.
 _EXCLUDE_TABLES = ("checkpoint_blobs", "checkpoints", "checkpoint_writes")
 
-_NAME_RE = re.compile(r"^(?P<db>.+)-(?P<ts>\d{8}-\d{6})\.dump$")
-_TS_FORMAT = "%Y%m%d-%H%M%S"
+_NAME_RE = re.compile(r"^(?P<db>.+)-(?P<ts>\d{8}T\d{6}Z|\d{8}-\d{6})\.dump$")
+_TS_FORMAT = "%Y%m%dT%H%M%SZ"  # UTC, offset-bearing by construction
+_LEGACY_TS_FORMAT = "%Y%m%d-%H%M%S"  # pre-cutover names: wall clock, no offset
+
+
+def _cluster_tz() -> ZoneInfo:
+    """The cluster wall clock every scheduling decision here is made in."""
+    return ZoneInfo(settings.general.timezone)
+
+
+def _require_aware(now: datetime) -> datetime:
+    """A naive datetime is rejected rather than read as host-local: silently
+    adopting the host's timezone is the exact failure this module was carrying."""
+    if now.tzinfo is None:
+        raise ValueError(f"backup needs a TZ-aware datetime, got naive {now!r}")
+    return now
+
+
+def _parse_stamp(stamp: str) -> datetime:
+    """A managed dump's filename stamp as an aware UTC instant."""
+    if stamp.endswith("Z"):
+        return datetime.strptime(stamp, _TS_FORMAT).replace(tzinfo=UTC)
+    # Legacy name: no offset was ever recorded, so read it in cluster time.
+    # `.replace(tzinfo=...)` (fold=0) keeps the reading deterministic through
+    # the DST fall-back hour, where `.astimezone()` on a naive value used to
+    # pick an offset out of the host's clock.
+    legacy = datetime.strptime(stamp, _LEGACY_TS_FORMAT).replace(tzinfo=_cluster_tz())
+    return legacy.astimezone(UTC)
 
 
 def backup_dir() -> Path:
@@ -72,20 +118,24 @@ def backup_dir() -> Path:
 
 
 def _managed_dumps(directory: Path) -> list[tuple[datetime, Path]]:
-    """This module's dumps in `directory`, oldest first."""
+    """This module's dumps in `directory`, oldest first, keyed by UTC instant."""
     dumps: list[tuple[datetime, Path]] = []
     for path in directory.glob("*.dump"):
         m = _NAME_RE.match(path.name)
         if m:
-            dumps.append((datetime.strptime(m["ts"], _TS_FORMAT).astimezone(), path))
+            dumps.append((_parse_stamp(m["ts"]), path))
     return sorted(dumps)
 
 
 def is_due(now: datetime) -> bool:
-    if now.hour < BACKUP_HOUR:
+    """True once the cluster clock has passed BACKUP_HOUR with no dump for the
+    current cluster day. `now` must be TZ-aware."""
+    local_now = _require_aware(now).astimezone(_cluster_tz())
+    if local_now.hour < BACKUP_HOUR:
         return False
     dumps = _managed_dumps(backup_dir())
-    return not dumps or dumps[-1][0].date() < now.date()
+    tz = _cluster_tz()
+    return not dumps or dumps[-1][0].astimezone(tz).date() < local_now.date()
 
 
 def _prune(directory: Path) -> list[Path]:
@@ -104,7 +154,7 @@ def run_backup(now: datetime | None = None, *, db_url: str | None = None) -> Pat
     success, so a crash mid-dump never leaves a file that the prune/due logic
     (or a human restoring) would mistake for a complete backup.
     """
-    now = now if now is not None else datetime.now().astimezone()
+    now = _require_aware(now) if now is not None else datetime.now(UTC)
     # direct_db_url() (the admin-plane direct URL, derived from the
     # registry record): pg_dump needs a real Postgres session (it holds a consistent
     # snapshot across many statements); running it through a transaction pooler is
@@ -120,7 +170,7 @@ def run_backup(now: datetime | None = None, *, db_url: str | None = None) -> Pat
         with suppress(OSError):
             stale.unlink()
     dbname = conninfo_to_dict(db_url)["dbname"]
-    target = directory / f"{dbname}-{now.strftime(_TS_FORMAT)}.dump"
+    target = directory / f"{dbname}-{now.astimezone(UTC).strftime(_TS_FORMAT)}.dump"
     partial = target.with_name(target.name + ".partial")
     cmd = [
         str(pg_tool("pg_dump")),
@@ -163,6 +213,6 @@ def maybe_run_daily_backup() -> None:
     Raises on pg_dump failure — the watchdog tick logs it like any failing
     check and retries next tick (is_due stays true until a dump succeeds).
     """
-    now = datetime.now().astimezone()
+    now = datetime.now(UTC)
     if is_due(now):
         run_backup(now)

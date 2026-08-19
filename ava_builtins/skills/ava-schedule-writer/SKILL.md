@@ -46,12 +46,18 @@ loop**, recomputing the next fire from the wall clock every iteration. **Never a
 on startup** and never rely on an in-memory counter — both re-fire on every
 restart. A resumable loop naturally skips a fire missed during downtime.
 
-**Time** — use `next_fire` (evaluated in an explicit timezone):
+**Time** — use `next_fire`, and pass the **cluster** timezone, not a literal zone
+name: a hard-coded zone pins one deployment's clock onto every cluster that ever
+runs the schedule (a 04:00 maintenance window becomes 13:00 mid-peak nine hours
+west, and a weekly cron lands on the wrong calendar day). `next_fire` with
+`timezone=None` computes in UTC, which is the right choice only for a pure
+period like `*/5 * * * *`.
 
 ```python
 from datetime import UTC, datetime
+from shared.config import settings
 from shared.watcher import next_fire
-nxt = next_fire("0 3 * * *", after=datetime.now(UTC), timezone="America/Los_Angeles")
+nxt = next_fire("0 3 * * *", after=datetime.now(UTC), timezone=settings.general.timezone)
 ```
 
 **Event / threshold** — read the cluster's own state. All events live in the
@@ -104,6 +110,7 @@ import time
 from datetime import UTC, datetime
 import ava
 from ava.agents import AgentStatus as S
+from shared.config import settings
 from shared.watcher import next_fire
 
 def ensure_agent(label, prompt):
@@ -128,7 +135,7 @@ def consolidate(reason):
         print(f"consolidate failed ({reason}): {e}")   # lands in the schedule's logs
 
 while True:                             # resumable: recomputes from the clock each loop
-    nxt = next_fire("0 3 * * *", after=datetime.now(UTC), timezone="America/Los_Angeles")
+    nxt = next_fire("0 3 * * *", after=datetime.now(UTC), timezone=settings.general.timezone)
     fired = False
     while datetime.now(UTC) < nxt:
         if pool_growth() >= 500:
