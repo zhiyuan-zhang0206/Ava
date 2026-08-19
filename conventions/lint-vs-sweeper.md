@@ -80,12 +80,13 @@ now graduated to a lint as well.
 | 8 | `import-lint` | ✓ but **already the `lint-imports` hook** | local | **DELETE from sweeper** (pure redundancy) |
 | NEW | `doc-roster` | ✓ parse runbook table vs `build_services()` | <3 files | **Lint (new, flagship)** |
 | NEW | `doc-symbols` (docs ↔ deleted SDK symbol) | ✓ once restricted to code spans + non-symbol guards | 1–2 files | **Lint (new)** — `scripts/lint_doc_symbols.py` |
+| NEW | `doc-anchors` (docs ↔ renamed code symbol) | ✓ same code-span restriction, resolved against the AST | 1–2 files | **Lint (new)** — `scripts/lint_doc_anchors.py` |
 | NEW | `docstring-budget` (agent-visible docstring verbosity) | ✓ scan cheap BUT keep/trim is judgement (a long Args block can be all format contracts) | 1–2 files | **SPLIT** (2026-06-10): zero-FP core (CJK / impl keywords / module-doc child restating / SDK↔skill coupling) → the `lint-docstrings` hook; Raises-section + soft-length residue → Sweeper class 8, reusing the lint's scope helpers |
 
 Net: **8 → 7 → 8 sweeper classes** (`deps`, `docs-aging`, `fail-fast`
 [narrowed], `inline-marker`, `dead-code`, `boundary`, `skill-desc`,
-`docstring-budget` [added 2026-06-10]). Two new lints
-(`doc-roster`, `doc-symbols`).
+`docstring-budget` [added 2026-06-10]). Three new lints
+(`doc-roster`, `doc-symbols`, `doc-anchors`).
 
 The `doc-symbols` zero-FP form is the worked precedent for "restrict the scan
 until the false positives vanish": `ava.<name>` references are validated only

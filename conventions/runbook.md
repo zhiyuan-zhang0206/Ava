@@ -91,7 +91,7 @@ boot policy retries `ava start`; the OS watchdog probe revives a daemon that
 died at boot).
 
 **Session names** are `ava-<service>` (composed via
-`cli/commands/_repo.py:session_name()`; neither machine nor cluster is encoded —
+`shared/cluster/derive.py:session_name()`; neither machine nor cluster is encoded —
 session hosting is host-local AND per-home: native session records under `$AVA_HOME/run/sessions/`
 (services / orchestration / agent processes), pty session records + per-session
 sockets under `$AVA_HOME/run/pty/` (agent shells / watchers), so the home
@@ -461,7 +461,7 @@ shells (`ava.shell`, `…-agent-{N}-shell-{n}`) each run in their own detached p
 (`shared/pty_sessions/`).
 
 Session names follow the pattern `ava-<service>` (composed by
-`cli/commands/_repo.py:session_name()`; neither machine nor cluster is encoded —
+`shared/cluster/derive.py:session_name()`; neither machine nor cluster is encoded —
 per-home hosting scopes them: the `$AVA_HOME/run/sessions/` records for native ones, the PTY
 supervisor socket for agent shells / watchers).
 
@@ -498,7 +498,7 @@ Terminal.app; the change is load-bearing only for Linux / WSL agent-runners.
 
 Agent process sessions are named `ava-agent-{N}` (N == agent_id) — the record/session
 name `ops/agent_launch.py:_launch_agent_process` keys by; all daemon services follow the same
-`ava-<service>` convention (`cli/commands/_repo.py:session_name()`). Agent processes, daemon
+`ava-<service>` convention (`shared/cluster/derive.py:session_name()`). Agent processes, daemon
 services, and agent shells / watchers are native-style sessions, so none of them are shell
 panes; enumerate live agents via the native-supervisor records
 (`native_proc().list_sessions()`) or `agents_meta` — both surfaced in `ava status` /
