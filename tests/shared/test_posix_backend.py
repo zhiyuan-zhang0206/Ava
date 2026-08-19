@@ -277,10 +277,11 @@ def test_login_shell_rebuilds_path_with_venv_prefix(unit_home):  # pyright: igno
     # forwarded prefix (it rebuilds PATH from scratch) while bash stays findable.
     env["PATH"] = "/custom-only/bin:" + os.environ["PATH"]
     name = "ava-test-posixbe-path1"
-    assert (
-        backend.new_session(name, f'echo "$PATH" > {shlex.quote(str(out))}', unit_home, env=env)  # pyright: ignore[reportUnknownArgumentType]
-        is True
-    )
+    # Write via tmp + rename: `>` creates the file empty before echo fills it,
+    # so a bare redirect lets _wait(out.exists) observe an empty window.
+    tmp = out.with_suffix(".tmp")  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType]
+    cmd = f'echo "$PATH" > {shlex.quote(str(tmp))} && exec /bin/mv {shlex.quote(str(tmp))} {shlex.quote(str(out))}'  # pyright: ignore[reportUnknownArgumentType]
+    assert backend.new_session(name, cmd, unit_home, env=env) is True  # pyright: ignore[reportUnknownArgumentType]
     try:
         assert _wait(out.exists)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
         path = out.read_text().strip()  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
@@ -303,10 +304,13 @@ def test_no_login_shell_preserves_env_path_exactly(unit_home):  # pyright: ignor
     env = dict(os.environ)
     env["PATH"] = "/custom-only/bin"
     name = "ava-test-posixbe-path2"
+    # tmp + rename for the same empty-window reason as the login-shell test
+    tmp = out.with_suffix(".tmp")  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType]
+    cmd = f'echo "$PATH" > {shlex.quote(str(tmp))} && exec /bin/mv {shlex.quote(str(tmp))} {shlex.quote(str(out))}'  # pyright: ignore[reportUnknownArgumentType]
     assert (
         backend.new_session(
             name,
-            f'echo "$PATH" > {shlex.quote(str(out))}',  # pyright: ignore[reportUnknownArgumentType]
+            cmd,
             unit_home,  # pyright: ignore[reportUnknownArgumentType]
             env=env,
             login_shell=False,  # pyright: ignore[reportUnknownArgumentType]
