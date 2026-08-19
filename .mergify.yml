@@ -1,50 +1,64 @@
 # Mergify merge queue — this repo's PR merge automation.
 #
-# Flow: CI green → post `@mergifyio queue` as a PR comment → Mergify rebases
-# the PR onto the latest main (update_method: rebase) → the normal
-# pull_request event re-runs CI on the rebased head → once merge_conditions
-# are green the PR lands with a rebase merge (linear history).
+# Flow: CI green → post `@mergifyio queue` as a PR comment → Mergify batches
+# queued PRs (batch_size 5) into one speculative draft PR, re-runs CI on the
+# combined tree, and lands every PR in the batch on green (rebase merges,
+# linear history). A red batch is bisected automatically to evict the culprit.
+# The speculative draft PRs ride branches under mergify/merge-queue/ — ci.yml's
+# draft-skip explicitly exempts that prefix, so batches always verify fully.
 #
-# In-place checks, required by the `Require branches to be up to date before
-# merging` branch protection (draft-PR speculative checks are incompatible
-# with it): max_parallel_checks 1 + batch_size 1 + queue_conditions identical
-# to merge_conditions. The queue therefore re-verifies each PR on its own
-# rebased head, one at a time — exactly the manual update-branch → CI → merge
-# train, automated.
+# Batching requires draft-PR checks, which are incompatible with the
+# `Require branches to be up to date before merging` branch protection —
+# that protection is OFF (the queue's own verification of the combined tree
+# is what replaces it; every landed commit was still verified in a tree that
+# includes everything landing with or before it).
+#
+# check-success OR check-skipped: ci.yml's change-class gating legitimately
+# skips a suite whose side the diff does not touch (docs-only skips all
+# three); a skipped required check satisfies branch protection and must
+# satisfy the queue the same way.
 #
 # branch_protection_injection_mode: none — the explicit conditions below
 # already carry the same gate as branch protection; injection would only
 # duplicate it.
 
 merge_queue:
-  # In-place checks require a single queue slot; one slot also keeps the
-  # queue from multiplying CI load on busy days.
   max_parallel_checks: 1
 
 queue_rules:
   - name: default
     # Mergify merges as the repo owner (admin). Branch protection enforces
     # `enforce_admins`, so the required checks (backend, frontend, e2e) must
-    # be genuinely green for ANY merge, admin or not.
+    # be genuinely green-or-skipped for ANY merge, admin or not.
     # Must be a GitHub user account logged into Mergify.
     merge_bot_account: zhiyuan-zhang0206
-    # In-place checks (see header): no batching.
-    batch_size: 1
+    # Batch queued PRs into one speculative verification (draft PR); a red
+    # batch bisects automatically.
+    batch_size: 5
     # Without checks_timeout Mergify waits only the auto-derived 18m; on a
-    # busy queue every rebase re-runs CI and PRs get dequeued mid-run.
+    # busy queue every batch re-runs CI and PRs get dequeued mid-run.
     # 3600s = comfortable headroom over the full suite.
     checks_timeout: 3600s
-    # Identical to merge_conditions (single-step CI, required for in-place
-    # checks): a PR must already be green to enter the queue, matching the
-    # workflow's "CI to green, then enqueue".
     queue_conditions:
-      - check-success=backend (pytest + pyright)
-      - check-success=frontend (eslint + tsc + vitest)
-      - check-success=e2e (Playwright happy path)
+      - or:
+          - check-success=backend (pytest + pyright)
+          - check-skipped=backend (pytest + pyright)
+      - or:
+          - check-success=frontend (eslint + tsc + vitest)
+          - check-skipped=frontend (eslint + tsc + vitest)
+      - or:
+          - check-success=e2e (Playwright happy path)
+          - check-skipped=e2e (Playwright happy path)
     merge_conditions:
-      - check-success=backend (pytest + pyright)
-      - check-success=frontend (eslint + tsc + vitest)
-      - check-success=e2e (Playwright happy path)
+      - or:
+          - check-success=backend (pytest + pyright)
+          - check-skipped=backend (pytest + pyright)
+      - or:
+          - check-success=frontend (eslint + tsc + vitest)
+          - check-skipped=frontend (eslint + tsc + vitest)
+      - or:
+          - check-success=e2e (Playwright happy path)
+          - check-skipped=e2e (Playwright happy path)
     merge_method: rebase
     update_method: rebase
     branch_protection_injection_mode: none
