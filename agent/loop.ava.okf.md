@@ -9,14 +9,14 @@ tags: []
 
 ## What it is
 
-Thin launcher for Ava agent processes. Each OS process is permanently bound to an `agent_id`, started via `.venv/bin/python -m agent --agent-id N`. After startup, it enters the LangGraph graph loop and never returns — until it receives a `terminate` inbound message and exits normally.
+Thin launcher for Ava agent processes. Each OS process is permanently bound to an `agent_id`, started via `.venv/bin/python -m agent --agent-id N`. After startup, it enters the per-turn graph run loop and never returns — until it receives a `terminate` inbound message and exits normally.
 
 ## Core Responsibilities
 
-- **Process entry point**: `main()` parses `--agent-id`, initializes DB/Redis/LLM/Saver, starts infinite loop with `graph.ainvoke()`
+- **Process entry point**: `main()` parses `--agent-id`, initializes DB/Redis/LLM/Saver, starts the per-turn run loop (`agent/_runloop.py`): one `graph.ainvoke()` per TURN, each wrapped in its own `turn_span` root span (one trace = one turn); claim ends an invocation at the turn boundary (goto END, `exit_requested=False`) and the loop re-invokes on the same checkpointer thread
 - **State transitions**: `allocated → starting → running` (`_starting.py` declares `starting` before heavy imports, claim_node transitions to `running` on first run)
 - **Inbound messages**: waits for messages via Redis pub/sub channel, `await listener.wait_one()` in claim_node
-- **Normal exit**: receives terminate inbound → claim_node goto END → `ainvoke` returns → `_notify_exit()` → process exits
+- **Normal exit**: receives terminate inbound → claim_node goto END with `exit_requested=True` → the run loop returns → `_notify_exit()` → process exits
 - **Lifecycle signals**: SIGHUP/SIGTERM → SystemExit → `_notify_exit()` in finally block
 - **DB-outage pause** (laptop sleep/network change/tailscale blackhole): `main()`'s `while True` catches `PoolTimeout` / `psycopg.OperationalError` and **does not exit** — backoff + probe until DB recovers, re-runs the same startup reconciliation as a fresh process in-process (two-phase claimed-inbound repair + dangling tool_use repair), then re-enters `ainvoke` graph. Single branch handles DB disconnection for idle-recheck / mid-turn / LLM envelope exhaustion; process survives throughout, reaper won't kill by mistake, gateway view unchanged (row remains running/idling)
 

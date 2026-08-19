@@ -8,15 +8,18 @@ Entry point `python -m agent --agent-id N`:
    started_at) → 0-row affected raises (does not exist / not allocated state /
    claimed by another process). 'starting' = process started but still in
    setup phase.
-3. ainvoke graph forever — graph self-cycles (claim → before_llm → llm →
-   before_exec → exec → after_exec). claim_node idempotently bumps 'starting'
-   → 'running' at the top (init done, entering graph); subsequent long
-   awaits on Redis pub/sub for inbound flip agents_meta.status from
+3. ainvoke graph once per TURN — the graph self-cycles within a turn (claim →
+   before_llm → llm → before_exec → exec → after_exec), and claim ends the
+   invocation at the turn boundary (goto END, `exit_requested=False`); the
+   runloop re-invokes on the same checkpointer thread, so each turn gets its
+   own root span/trace. claim_node idempotently bumps 'starting' → 'running'
+   at the top (init done, entering graph); the fresh invocation's claim
+   long-awaits on Redis pub/sub for inbound, flipping agents_meta.status from
    'running' to 'idling', back to 'running' after claiming a batch.
 4. On receiving a `terminate` kind inbound (unless a newer/unseen message
    vetoes it — see the veto block in `agent/graph/_claim.py`), claim → goto
-   END → ainvoke returns.
-5. After ainvoke returns, notify the gateway (`POST /api/agents/{id}/exited`)
+   END with `exit_requested=True` → the runloop returns instead of re-invoking.
+5. After the runloop returns, notify the gateway (`POST /api/agents/{id}/exited`)
    to finalize status='terminated' + close pages; process exits naturally.
 
 New processes don't start directly — always go through gateway route
@@ -226,12 +229,13 @@ async def main(
                 mcp="shared" if Path(mcp_daemon.socket_path).exists() else "local-fallback",
             )
 
-            # Single ainvoke runs forever — graph self-cycles until a terminate
-            # inbound causes claim node to goto END and ainvoke returns. The
-            # input is the empty state update {} (see the comment at the
-            # ainvoke call site for why it must not be a full AgentState()).
-            # The claim node itself long-awaits inbound, so no initial
-            # messages need to be stuffed in from outside.
+            # One ainvoke per turn — the graph self-cycles within a turn and
+            # claim ends the invocation at the turn boundary; the runloop
+            # re-invokes until claim requests process exit (terminate/restart).
+            # Each invocation's input is a minimal state update (see the
+            # comment at the ainvoke call site for why it must not be a full
+            # AgentState()). The claim node itself long-awaits inbound, so no
+            # initial messages need to be stuffed in from outside.
             _boot_timing.mark("graph_build")
             _boot_timing.emit()
 

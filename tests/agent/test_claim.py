@@ -814,7 +814,8 @@ async def test_claim_terminate_kind_appends_lifecycle_marker_and_routes_to_end(
 ):
     """terminate inbound → claim appends lifecycle marker (HumanMessage containing
     'You are terminated by {source}' text + ava_msg_type='lifecycle' metadata)
-    + goto END, graph.ainvoke returns + process exits naturally."""
+    + goto END with exit_requested=True, so the per-turn runloop returns
+    (instead of re-invoking) and the process exits naturally."""
     tid = create_agent(db_conn)
     _insert_inbound_kind(db_conn, tid, "", "terminate", source="user")
 
@@ -824,6 +825,7 @@ async def test_claim_terminate_kind_appends_lifecycle_marker_and_routes_to_end(
         _config(tid),
     )
     assert cmd.goto == END
+    assert cmd.update["exit_requested"] is True  # type: ignore[index]
     msgs = cmd.update["messages"]  # type: ignore[index]
     # Claim appends the lifecycle marker alone; the head belongs to `init_context`.
     assert len(msgs) == 1  # pyright: ignore[reportUnknownArgumentType]
@@ -840,6 +842,61 @@ async def test_claim_terminate_kind_appends_lifecycle_marker_and_routes_to_end(
     assert "[system [" not in content  # anti-regression: double bracket bug
     assert lifecycle.additional_kwargs.get("ava_msg_type") == "system_note"  # pyright: ignore[reportUnknownMemberType]
     assert lifecycle.additional_kwargs.get("ava_note_tag") == "lifecycle_terminate"  # pyright: ignore[reportUnknownMemberType]
+
+
+async def test_claim_turn_boundary_ends_invocation_instead_of_waiting(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    aredis_inbound_listener: RedisInboundListener,
+):
+    """One graph invocation = one TURN: a claim pass that finds nothing to do
+    AFTER this invocation already routed work (turn_active=True) ends the
+    invocation (goto END, exit_requested stays False → the runloop re-invokes)
+    instead of blocking in _wait_for_batch — that is what closes the per-turn
+    root span at the turn boundary. Would hang here if it blocked, so a plain
+    return IS the lock."""
+    tid = create_agent(db_conn)
+
+    cmd = await claim_node(
+        AgentState(messages=[SystemMessage(content="sys")], halted=True, turn_active=True),
+        _make_runtime(ops_pool=aops_pool, inbound_listener=aredis_inbound_listener),
+        _config(tid),
+    )
+    assert cmd.goto == END
+    # Turn boundary only: no process exit, no other state touched.
+    assert cmd.update == {"turn_active": False}
+
+
+async def test_claim_fresh_invocation_waits_then_runs_turn(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    aredis_inbound_listener: RedisInboundListener,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """A fresh invocation's claim (turn_active=False) still does the long wait
+    — the claim long-await works on re-entry after a turn-boundary END. The
+    wait is faked to return a chat batch; claim must dispatch it and route to
+    before_llm with turn_active=True so the NEXT idle pass ends the turn."""
+    from agent.db import ClaimedInbound
+
+    tid = create_agent(db_conn)
+    waited: list[int] = []
+
+    async def fake_wait(_ctx: object, agent_id: int) -> list[ClaimedInbound]:
+        waited.append(agent_id)
+        return [ClaimedInbound(id=1, agent_id=tid, content="hi", kind="chat", source="user")]
+
+    monkeypatch.setattr("agent.graph._claim._wait_for_batch", fake_wait)  # pyright: ignore[reportUnknownArgumentType]
+
+    cmd = await claim_node(
+        AgentState(messages=[SystemMessage(content="sys")], halted=True, turn_active=False),
+        _make_runtime(ops_pool=aops_pool, inbound_listener=aredis_inbound_listener),
+        _config(tid),
+    )
+    assert waited == [tid], "fresh invocation must enter the long wait, not END"
+    assert cmd.goto == "before_llm"
+    assert cmd.update["turn_active"] is True  # type: ignore[index]
+    assert cmd.update["exit_requested"] is False  # type: ignore[index]
 
 
 async def test_claim_cancel_kind_halts_to_idle_without_marker(
@@ -1330,8 +1387,11 @@ async def test_claim_cas_loss_on_wake_flip_exits_cleanly(
     finally:
         await listener.close()
 
-    # clean END, no crash — the row stays terminated (another op owns it)
+    # clean END, no crash — the row stays terminated (another op owns it).
+    # exit_requested=True: this END means process exit, so the per-turn
+    # runloop must NOT re-invoke.
     assert cmd.goto == END
+    assert cmd.update["exit_requested"] is True  # type: ignore[index]
     with db_conn.cursor() as cur:
         cur.execute("SELECT status FROM agents_meta WHERE id = %s", (tid,))
         row = cur.fetchone()

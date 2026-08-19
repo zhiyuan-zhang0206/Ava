@@ -5,7 +5,7 @@ lives in the checkpoints table. `attach_trace_checkpoint_ref` stamps the
 two one-way links that make either direction resolvable, right after the
 turn's ainvoke commits its checkpoint:
 
-- the root span (still current — the caller runs inside `session_span`)
+- the root span (still current — the caller runs inside `turn_span`)
   gains `ava.checkpoint_id=<checkpoint_id>`, so any OTel viewer can jump
   from a trace to its checkpoint;
 - the checkpoint row's metadata gains `trace_id=<trace_id>`, so the

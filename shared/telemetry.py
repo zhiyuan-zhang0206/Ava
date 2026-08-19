@@ -32,7 +32,7 @@ former loguru Postgres sink had.
 
 `trace_id` / `span_id` are captured from the active OTel span at *enqueue* time
 (the drain thread runs outside the span context), so every event emitted inside
-`session_span()` — llm_usage, turn_end, exec, sdk_call, business events — auto-
+`turn_span()` — llm_usage, turn_end, exec, sdk_call, business events — auto-
 carries its turn's trace id with no per-callsite plumbing. Events emitted
 outside any span (gateway/daemon paths) get NULL.
 

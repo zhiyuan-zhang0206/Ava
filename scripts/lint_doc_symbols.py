@@ -106,9 +106,10 @@ _EXEMPT: set[str] = {
     "git",  # the clone URL's `.../ava.git` (install / dev-setup / windows-setup)
     "fleet",  # localStorage key prefix "ava.fleet.*" (conventions/frontend-stack.md), not an SDK member
     "active",  # localStorage key prefix "ava.active.*" (same doc), not an SDK member
-    # The OTel root-span attribute key "ava.checkpoint_id" (shared/trace.py) — a span
-    # attribute name, not an SDK member.
+    # The OTel root-span attribute keys "ava.checkpoint_id" / "ava.turn"
+    # (shared/trace.py) — span attribute names, not SDK members.
     "checkpoint_id",
+    "turn",
 }
 
 
