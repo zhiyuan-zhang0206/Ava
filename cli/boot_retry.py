@@ -26,8 +26,10 @@ from __future__ import annotations
 import subprocess
 import sys
 import time
+from typing import IO
 
 from shared.boot_policy import BOOT_RETRY_INTERVAL_S
+from shared.dotenv_boot import resolve_ava_home
 
 
 def _start_command(start_args: list[str]) -> list[str]:
@@ -53,6 +55,31 @@ def _start_command(start_args: list[str]) -> list[str]:
     return [sys.executable, "-m", "cli.main", "start", *start_args, "--no-readiness-gate"]
 
 
+def _open_boot_log() -> IO[bytes] | int:
+    """Where each child `ava start`'s output goes — never the inherited handles.
+
+    The Windows boot task runs this loop under `pythonw`, whose stdio handles
+    are invalid; a child that inherits them dies at its FIRST print with
+    `OSError: [Errno 22]` (measured on the fleet Windows box: `cmd_start`'s
+    opening banner), so every retry failed identically and the loop never
+    exited — while the same start from a console succeeded. Routing the child's
+    output explicitly makes the child's stdio valid on every platform and keeps
+    it diagnosable: `$AVA_HOME/logs/boot.log`, truncated per attempt, holds the
+    one attempt a diagnostician needs (the current failing one) at bounded size.
+
+    Falls back to DEVNULL when the log cannot be opened: this loop is the
+    recovery path of last resort (see `run_boot`), so it must survive even a
+    home whose logs dir is unwritable — the child's `ava start` will then fail
+    loudly on that same broken home, which is the diagnosable signal.
+    """
+    log = resolve_ava_home()[0] / "logs" / "boot.log"
+    try:
+        log.parent.mkdir(parents=True, exist_ok=True)
+        return log.open("wb")
+    except OSError:
+        return subprocess.DEVNULL
+
+
 def run_boot(argv: list[str]) -> int:
     """Run `ava start` until it exits 0. Returns 0; does not give up before that.
 
@@ -69,7 +96,14 @@ def run_boot(argv: list[str]) -> int:
     attempt = 0
     while True:
         attempt += 1
-        rc = subprocess.run(command, check=False).returncode  # noqa: S603 — fixed argv, no shell
+        out = _open_boot_log()
+        try:
+            rc = subprocess.run(  # noqa: S603 — fixed argv, no shell
+                command, check=False, stdout=out, stderr=out
+            ).returncode
+        finally:
+            if not isinstance(out, int):
+                out.close()
         if rc == 0:
             return 0
         print(

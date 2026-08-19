@@ -561,7 +561,7 @@ def test_boot_retry_loops_on_step_failure_and_stops_on_success(
     codes = iter([1, 1, 0])
     attempts = {"n": 0}
 
-    def _fake_run(_cmd, check=False):
+    def _fake_run(_cmd, check=False, **_kw):
         attempts["n"] += 1
         return _FakeResult(returncode=next(codes))
 

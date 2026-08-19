@@ -6,8 +6,10 @@ cluster or waits a real minute.
 
 from __future__ import annotations
 
+import subprocess
 import sys
 import types
+from pathlib import Path
 
 import pytest
 
@@ -100,6 +102,59 @@ def test_start_flags_are_forwarded(monkeypatch: pytest.MonkeyPatch, runs: list[l
         # non-zero forever. tests/cli/test_start_readiness_gate.py owns the why.
         "--no-readiness-gate",
     ]
+
+
+def _stub_run_capturing_stdio(
+    monkeypatch: pytest.MonkeyPatch, stdio_seen: list[tuple[object, object]]
+) -> None:
+    """Stub `subprocess.run` recording each call's stdout/stderr wiring."""
+
+    def fake_run(cmd: list[str], **kw: object) -> types.SimpleNamespace:
+        stdio_seen.append((kw.get("stdout"), kw.get("stderr")))
+        return types.SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(boot_retry.subprocess, "run", fake_run)
+
+
+def test_the_child_never_inherits_the_parents_stdio_handles(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The Windows boot task runs this loop under pythonw, whose stdio handles
+    are invalid — a child that inherited them died at its FIRST print with
+    OSError 22 before starting anything, so every retry failed identically and
+    the loop never exited. The child's output must be routed explicitly:
+    to `$AVA_HOME/logs/boot.log`, truncated per attempt (bounded size — a
+    wedged host retrying for days keeps only the attempt a diagnostician
+    needs), and closed once the attempt returns."""
+    monkeypatch.setattr(boot_retry, "resolve_ava_home", lambda: (tmp_path, True))
+    stdio_seen: list[tuple[object, object]] = []
+    _stub_run_capturing_stdio(monkeypatch, stdio_seen)
+
+    assert boot_retry.run_boot([]) == 0
+
+    assert len(stdio_seen) == 1
+    stdout, stderr = stdio_seen[0]
+    assert stdout is not None and stderr is not None  # inheriting is the bug
+    assert stderr is stdout  # one interleaved stream, like a console would be
+    assert getattr(stdout, "name", None) == str(tmp_path / "logs" / "boot.log")
+    assert getattr(stdout, "mode", None) == "wb"  # "wb" = truncate per attempt
+    assert getattr(stdout, "closed", False)  # closed once the attempt returned
+
+
+def test_an_unwritable_home_degrades_to_devnull_not_a_crash(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """This loop is the recovery path of last resort, so it must survive a home
+    whose logs dir cannot even be created — the child still gets valid stdio."""
+    not_a_dir = tmp_path / "occupied"
+    not_a_dir.write_text("a file where the home should be")
+    monkeypatch.setattr(boot_retry, "resolve_ava_home", lambda: (not_a_dir, True))
+    stdio_seen: list[tuple[object, object]] = []
+    _stub_run_capturing_stdio(monkeypatch, stdio_seen)
+
+    assert boot_retry.run_boot([]) == 0
+
+    assert stdio_seen == [(subprocess.DEVNULL, subprocess.DEVNULL)]
 
 
 def test_cli_main_dispatches_boot_before_the_settings_gated_import(
