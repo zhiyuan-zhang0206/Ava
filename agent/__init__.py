@@ -2,8 +2,9 @@
 
 Separate from the `ava` SDK package: the SDK is the layer agent code (in the
 subprocess) *sees*, this package is the layer that *hosts* the agent.
-`agent/loop.py` degenerates into a 5-10 line launcher (one graph.ainvoke
-runs forever), all dispatch / cancel logic lives in graph nodes (claim node
+`agent/loop.py` degenerates into a thin launcher (one graph.ainvoke per
+turn, driven by `agent/_runloop.py` until claim requests process exit),
+all dispatch / cancel logic lives in graph nodes (claim node
 pulls inbound + dispatches by kind; llm/exec node uses RAII cancel; exec
 spawns subprocess to execute agent code).
 

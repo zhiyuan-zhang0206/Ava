@@ -34,10 +34,11 @@ queue had to shed can be replayed from the mirror with `ava trace ship`.
   the sidecar architecture this also stops recording, since recording IS the
   OTLP export).
 
-session_span() in agent/loop.py wraps the whole graph.ainvoke in a native OTel
-root span so every LLM/tool child span nests under it; the root carries the
-vendor-neutral `session.id` (Tempo/Grafana group one agent's spans into a
-session by it).
+turn_span() in agent/_runloop.py wraps each graph.ainvoke — one invocation =
+one agent TURN — in a native OTel root span so every LLM/tool child span of
+that turn nests under it and the trace exports the moment the turn ends. The
+root carries the vendor-neutral `session.id` (Tempo/Grafana group one agent's
+turns into a session by it) plus `ava.turn` (the per-process turn counter).
 
 Idempotent: the _initialized guard prevents a second init.
 
@@ -72,6 +73,11 @@ from shared.telemetry_otlp import endpoint_reachable
 # `session.id` — vendor-neutral session grouping key (emerging GenAI semantic
 # convention); the consumer groups one agent's spans into a session by it.
 _ATTR_NEUTRAL_SESSION_ID = "session.id"
+
+# `ava.turn` — the per-process turn counter on each turn's root span; orders
+# an agent's turns within one process lifetime (it restarts at 1 on respawn;
+# cross-process ordering comes from timestamps / checkpoint refs).
+_ATTR_TURN = "ava.turn"
 
 
 # ── LLM content stripping (trace v2) ─────────────────────────────────────────
@@ -436,8 +442,8 @@ def initialize_tracing() -> None:
     OtlpJsonHttpSpanExporter (pointed at the local OTel Collector sidecar) and
     hands it to Traceloop.init as the sole exporter — the explicit
     `instruments=` set covers Anthropic + OpenAI + LangChain + Google GenAI so
-    all LLM call paths produce spans that nest under the per-agent root span
-    (see session_span()). LangGraph is instrumented through the LangChain
+    all LLM call paths produce spans that nest under the per-turn root span
+    (see turn_span()). LangGraph is instrumented through the LangChain
     instrumentor (callback handler), not a separate one.
 
     Recording is one OTLP/HTTP hop to the LOCAL sidecar; the sidecar fans out
@@ -550,13 +556,17 @@ def initialize_tracing() -> None:
 
 
 @contextlib.contextmanager
-def session_span(*, name: str, session_id: str) -> Generator[None, None, None]:
-    """Wrap a code block in an OTel root span tagged with session_id.
+def turn_span(*, name: str, session_id: str, turn: int) -> Generator[None, None, None]:
+    """Wrap ONE graph invocation (= one agent turn) in an OTel root span.
 
-    All child spans (LangGraph nodes, Anthropic calls, etc.) inherit the OTel
-    context and become children of this root, so the recorded mirror shows a
-    proper span tree; the session_id attribute groups them into one session on
-    the viewer after shipping.
+    The trace boundary is the turn: the runloop invokes the graph once per
+    turn, so this span opens when the invocation starts — including claim's
+    long wait for the turn's inbound — and closes (and exports) when the
+    turn's work is done. All child spans (LangGraph nodes, Anthropic calls,
+    etc.) inherit the OTel context and become children of this root, so the
+    recorded mirror shows a proper span tree per turn. The session_id
+    attribute groups one agent's turns into a session on the viewer; the turn
+    attribute orders them within a process lifetime.
 
     No-op when trace_enabled=False or initialize_tracing hasn't run yet.
     """
@@ -568,4 +578,5 @@ def session_span(*, name: str, session_id: str) -> Generator[None, None, None]:
     tracer = otel_trace.get_tracer("ava.session")
     with tracer.start_as_current_span(name) as span:
         span.set_attribute(_ATTR_NEUTRAL_SESSION_ID, session_id)
+        span.set_attribute(_ATTR_TURN, turn)
         yield

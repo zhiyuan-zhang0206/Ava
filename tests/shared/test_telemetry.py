@@ -123,7 +123,7 @@ def test_telemetry_and_log_events_land_in_mirror() -> None:
 
 def test_trace_ids_captured_from_active_otel_span() -> None:
     """Events emitted inside an OTel span carry its trace_id/span_id — the
-    session_span() correlation contract, read from context not passed by hand."""
+    turn_span() correlation contract, read from context not passed by hand."""
     span_ctx = SpanContext(
         trace_id=0x1234567890ABCDEF1234567890ABCDEF,
         span_id=0x1234567890ABCDEF,

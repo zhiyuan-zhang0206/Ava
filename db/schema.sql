@@ -502,7 +502,7 @@ CREATE TRIGGER agents_meta_status_changed_at
 -- and those tables are frozen (see their sections above).
 --
 -- `trace_id`/`span_id` are the OTel correlation keys captured from the active
--- span (session_span) at emit time — one turn = one trace, every event in it
+-- span (turn_span) at emit time — one turn = one trace, every event in it
 -- carries the same trace_id. `machine` is the required multi-host dimension,
 -- bound at process start. `category` drives retention and alerting: the
 -- events-maintenance daemon prunes/drops `events` month partitions by

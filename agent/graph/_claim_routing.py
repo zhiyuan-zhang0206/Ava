@@ -42,11 +42,13 @@ from agent.graph._context import AvaContext
 from shared.inbound import InboundKind
 
 # The four targets claim itself routes to: BEFORE_LLM (has work), END
-# (terminate), back to CLAIM (cancel/pause -> re-enter with halted=True so the
-# empty batch drops into the idle wait), or INIT_CONTEXT (a compaction emptied
-# the history; that node re-establishes the standing head, then resumes where
-# this batch was headed). Narrower than `NodeName` on purpose, so pyright
-# catches a goto claim has no business making.
+# (terminate/restart with exit_requested=True, or the turn boundary with it
+# False — the runloop re-invokes and the fresh invocation's claim waits), back
+# to CLAIM (cancel/pause -> re-enter with halted=True; the re-entered pass
+# hits the turn boundary and ends the invocation), or INIT_CONTEXT (a
+# compaction emptied the history; that node re-establishes the standing head,
+# then resumes where this batch was headed). Narrower than `NodeName` on
+# purpose, so pyright catches a goto claim has no business making.
 ClaimGoto = Literal["before_llm", "claim", "__end__", "init_context"]
 
 # Kinds whose dispatch is gated on the routing winner.
