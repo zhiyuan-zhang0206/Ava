@@ -34,6 +34,9 @@ fan-out missed data.
 - `ava trace ship` (`cli/commands/trace.py`) — recovery replay of the mirror
   straight to Tempo (`AVA_TELEMETRY_TEMPO_ENDPOINT`), bypassing the sidecar
   (replaying through it would loop the watermark).
+- The sidecar also **scrapes** the traditional SRE layer — host, Postgres,
+  Redis — into the same metrics fan-out, with no producer code involved:
+  [[infra-metrics.ava.okf.md|Infrastructure metrics]].
 
 ## Core responsibilities
 

@@ -6971,13 +6971,15 @@
             "title": "Agent Groups",
             "default": []
           },
-          "resource_history": {
-            "items": {
-              "$ref": "#/components/schemas/ResourcePoint"
-            },
-            "type": "array",
-            "title": "Resource History",
-            "default": []
+          "resource": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResourceSample"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -8788,13 +8790,15 @@
             "title": "Agent Groups",
             "default": []
           },
-          "resource_history": {
-            "items": {
-              "$ref": "#/components/schemas/ResourcePoint"
-            },
-            "type": "array",
-            "title": "Resource History",
-            "default": []
+          "resource": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResourceSample"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -10280,7 +10284,7 @@
         "title": "ResolvedFieldView",
         "description": "One per-model-defaultable setting resolved for a specific model.\n\nThe read-only mirror of `shared/lm/registry.py:explain_setting`: the value an\nagent on this model boots with, plus every candidate layer and the name of\nthe one that won. There is no write path here — an explicit value is edited\nas the normal config field of the same `name`, so the panel links back to\nthat row rather than growing a second store."
       },
-      "ResourcePoint": {
+      "ResourceSample": {
         "properties": {
           "ts": {
             "type": "number",
@@ -10326,8 +10330,8 @@
           "disk_total_gb",
           "disk_pct"
         ],
-        "title": "ResourcePoint",
-        "description": "One resource sample — CPU / memory / disk at a point in time."
+        "title": "ResourceSample",
+        "description": "This machine's CPU / memory / disk at the moment it was read."
       },
       "RestartAgentRequest": {
         "properties": {

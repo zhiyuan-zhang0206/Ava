@@ -3004,3 +3004,54 @@ def test_cmd_status_gateway_unreachable_is_inline_not_fatal(
     rc = _cli.cmd_status()
     assert rc == 0
     assert "gateway unreachable" in capsys.readouterr().out
+
+
+# ─── `ava status` keeps a live host reading with no observability backend ─────
+
+
+def test_status_prints_a_live_host_reading(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
+    """`ava status` reads CPU/memory/disk straight from psutil.
+
+    Since issue #46 the host HISTORY is Prometheus's; this line is the answer
+    that must survive a deployment whose LGTM backend is down or was never
+    deployed, so it must not go through the observability stack at all.
+    """
+    from cli.commands import status as status_mod
+
+    monkeypatch.setattr(status_mod, "_repo_root", lambda: "/repo")
+    monkeypatch.setattr(status_mod, "_cluster_pin_status", lambda: ("aaaaaaa", "aaaaaaa"))
+    monkeypatch.setattr(status_mod, "prod_source_pin_relation", lambda _p, _h: "aligned")  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(status_mod, "_detect_prod_source_drift", lambda: None)
+    monkeypatch.setattr(status_mod, "_print_gateway_cluster_status", lambda: None)
+    monkeypatch.setattr(status_mod, "print_data_plane_status", lambda: None)
+    monkeypatch.setattr(status_mod, "_print_service_row", lambda *_a: None)  # pyright: ignore[reportUnknownArgumentType]
+
+    assert status_mod.cmd_status() == 0
+    out = cast(str, capsys.readouterr().out)  # pyright: ignore[reportUnknownMemberType]
+    assert "host (live cpu/memory/disk):" in out
+    assert re.search(r"cpu \d+%\s+memory \d+% \([\d.]+/[\d.]+ GB\)\s+disk \d+%", out)
+
+
+def test_status_host_reading_failure_does_not_hide_the_rest(
+    monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    """A host without psutil still gets the service table and the pin section —
+    the reading degrades to its own reason line, it does not abort the verb."""
+    from cli.commands import status as status_mod
+
+    monkeypatch.setattr(status_mod, "_repo_root", lambda: "/repo")
+    monkeypatch.setattr(status_mod, "_cluster_pin_status", lambda: ("aaaaaaa", "aaaaaaa"))
+    monkeypatch.setattr(status_mod, "prod_source_pin_relation", lambda _p, _h: "aligned")  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(status_mod, "_detect_prod_source_drift", lambda: None)
+    monkeypatch.setattr(status_mod, "_print_gateway_cluster_status", lambda: None)
+    monkeypatch.setattr(status_mod, "print_data_plane_status", lambda: None)
+    monkeypatch.setattr(status_mod, "_print_service_row", lambda *_a: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(
+        "shared.resource_sample.resource_sample",
+        lambda: (_ for _ in ()).throw(RuntimeError("no psutil here")),
+    )
+
+    assert status_mod.cmd_status() == 0
+    out = cast(str, capsys.readouterr().out)  # pyright: ignore[reportUnknownMemberType]
+    assert "unavailable (no psutil here)" in out
+    assert "[ava status]" in out

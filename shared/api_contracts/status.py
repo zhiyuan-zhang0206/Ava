@@ -17,7 +17,7 @@ from pydantic import (
 )
 
 from shared.last_update import LastUpdate
-from shared.resource_monitor import ResourcePoint
+from shared.resource_sample import ResourceSample
 
 
 class MachineStatus(BaseModel):
@@ -134,6 +134,8 @@ class MachineStatus(BaseModel):
     session_count: int = 0
     # Sessions grouped by agent for hierarchical display.
     agent_groups: list[dict[str, object]] = []
-    # Per-machine resource history — CPU / memory / disk time series (newest last).
-    # Collected by shared.resource_monitor; empty when psutil is unavailable.
-    resource_history: list[ResourcePoint] = []
+    # This machine's LIVE CPU / memory / disk reading (shared.resource_sample) —
+    # one sample, not a series: the history lives in Prometheus (issue #46) and
+    # this is the degraded answer for a deployment without the LGTM backend.
+    # None when psutil could not read the machine.
+    resource: ResourceSample | None = None

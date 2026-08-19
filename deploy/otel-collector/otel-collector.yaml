@@ -14,6 +14,13 @@
 # fan-out exporter's sending queue: a backend outage buffers on disk (the
 # queue survives collector restarts), and only a queue overflow sheds — the
 # mirror keeps everything, `ava trace ship` replays the gap straight to Tempo.
+#
+# The sidecar also scrapes the traditional SRE layer (issue #46) into the same
+# metrics fan-out: `host_metrics` on every machine, plus `postgresql` + `redis`
+# against this cluster's OWN data plane on a gateway-capable unit (a pure
+# agent-runner dials the gateway's pg/redis remotely, so scraping from there
+# would only duplicate the gateway's series — those two receivers are omitted
+# from a runner's rendered config entirely).
 receivers:
   otlp:
     # OTLP/HTTP only — every Ava producer speaks OTLP/HTTP (shared/
@@ -22,6 +29,66 @@ receivers:
       http:
         endpoint: 127.0.0.1:4318
 
+  # ── The traditional SRE layer (issue #46) ────────────────────────────────
+  # Host metrics come from the collector's own receiver, not a node_exporter
+  # sidecar: the contrib distribution is already pinned and supervised here, so
+  # this is zero additional binaries. Prometheus is then the ONE time-series
+  # store for host data — there is no second retained history anywhere (the
+  # status surfaces keep a live one-shot psutil reading and nothing more).
+  host_metrics:
+    collection_interval: 30s
+    scrapers:
+      cpu:
+        metrics:
+          # system.cpu.time is a per-core cumulative counter in 8 states; the
+          # utilization ratio is what an operator reads and what the alert
+          # rules evaluate, so only that one is enabled.
+          system.cpu.time:
+            enabled: false
+          system.cpu.utilization:
+            enabled: true
+      load:
+      memory:
+        metrics:
+          system.memory.utilization:
+            enabled: true
+      disk:
+      filesystem:
+        metrics:
+          system.filesystem.utilization:
+            enabled: true
+        # Synthetic mounts carry no operator signal and dominate the series
+        # count on macOS (a dozen /System/Volumes/* entries). What survives is
+        # the real root volume plus, on macOS, the data volume that actually
+        # holds $AVA_HOME — the two the disk watermark alert is about.
+        exclude_fs_types:
+          fs_types: [autofs, devfs, nullfs, overlay, squashfs, tmpfs]
+          match_type: strict
+        exclude_mount_points:
+          mount_points:
+            - /dev
+            - /private/var/vm
+            - /System/Volumes/Hardware
+            - /System/Volumes/iSCPreboot
+            - /System/Volumes/Preboot
+            - /System/Volumes/Update
+            - /System/Volumes/VM
+            - /System/Volumes/xarts
+          match_type: strict
+      network:
+        # macOS carries ~30 virtual interfaces (awdl/llw/utun/bridge/anpi/…)
+        # and each one multiplies four per-direction counters: unfiltered, the
+        # network scraper alone was 248 of this machine's ~350 series and none
+        # of them describes a link an operator can act on. Physical + tunnel
+        # interfaces survive; on Linux the exclusion list simply matches
+        # nothing.
+        # (the doubled dollar is the string.Template escape for a literal
+        # end-anchor — this file goes through Template.substitute at converge.)
+        exclude:
+          interfaces:
+            ["^(awdl|llw|utun|bridge|gif|stf|ap|anpi|p2p|vmenet|XHC)[0-9]*$$"]
+          match_type: regexp
+$DATA_PLANE_RECEIVERS
 processors:
   # memory_limiter runs FIRST in every pipeline: under memory pressure it
   # refuses new data (producers retry / the JSONL mirror keeps everything)
@@ -34,6 +101,32 @@ processors:
     send_batch_size: 512
     send_batch_max_size: 1024
     timeout: 5s
+
+  # The infra pipeline's extra processors. host_metrics/postgresql/redis
+  # carry no host identity of their own, so detection supplies host.name and
+  # the transform copies it onto every datapoint: a resource attribute would
+  # land in Prometheus's `target_info` instead of on the series, which no
+  # alert expression can select on. The label is `host` (the OS hostname) —
+  # deliberately NOT `machine` (the Ava machine name that app metrics carry),
+  # because the two can differ and one label with two meanings is worse than
+  # two labels.
+  resource_detection/host:
+    detectors: [system]
+    system:
+      hostname_sources: [os]
+  # Prometheus's OTLP receiver derives `job` from service.name; without one the
+  # infra series would land under a synthesized unknown_service job. Pinning it
+  # makes `{job="ava-infra"}` the one selector for everything on this layer.
+  resource/infra:
+    attributes:
+      - key: service.name
+        value: ava-infra
+        action: upsert
+  transform/host_label:
+    metric_statements:
+      - context: datapoint
+        statements:
+          - set(attributes["host"], resource.attributes["host.name"])
 
 extensions:
   file_storage:
@@ -115,4 +208,18 @@ service:
     metrics:
       receivers: [otlp]
       processors: [memory_limiter, batch]
+      exporters: [otlphttp/prometheus]
+    # Infra metrics ride their own pipeline so the host-identity processors
+    # touch only them: app metrics already carry `machine`/`agent_id`
+    # datapoint attributes from the emitter and must not be relabelled.
+    metrics/infra:
+      receivers: [host_metrics$DATA_PLANE_PIPELINE_RECEIVERS]
+      processors:
+        [
+          memory_limiter,
+          resource_detection/host,
+          resource/infra,
+          transform/host_label,
+          batch,
+        ]
       exporters: [otlphttp/prometheus]

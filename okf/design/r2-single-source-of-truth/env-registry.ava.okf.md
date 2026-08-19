@@ -20,4 +20,3 @@ Every env key is declared exactly once: Settings fields declare metadata at the 
 Pure test-fixture sets are deleted outright. The authority for derivation is the **consumption matrix** (which process kind actually reads which keys — #1570's lesson); capability/scope metadata only validates.
 
 Invariants: A1 every key registered exactly once (no duplicates, no orphans); A2 every projection is a pure function of the registry; A3 **one metadata line = every projection updates** (the six-gap class becomes structurally impossible).
-

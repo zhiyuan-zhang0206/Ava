@@ -204,6 +204,38 @@ Release cut tags `main` at milestone points. Tool: `scripts/release_cut.py`.
 The full release strategy (versioning scheme, cadence, digest handling) is the
 module docstring of `scripts/release_cut.py`.
 
+## Resource Oversight (the SRE loop)
+
+Every machine's OTel Collector sidecar scrapes the traditional SRE layer into
+Prometheus: host CPU / memory / load / disk / filesystem / network everywhere,
+plus `postgresql` and `redis` against the cluster's own data plane on a
+gateway-capable unit. They live under `job="ava-infra"` with a `host` label
+(the OS hostname), and the Grafana dashboard `ava-host-dataplane` is the view.
+
+**There are no resource limits in the code, deliberately.** A saturated box
+may be a runaway loop or a training job doing exactly what it was asked; which
+one it is depends on machine specs and co-tenancy, which the framework cannot
+know. So the operator's job is judgment over the data, not enforcement of a
+constant:
+
+1. Watch the axes — latency percentiles (LLM, gateway, turn), error and
+   warning volume, host utilization, data-plane saturation.
+2. When something is out of band, identify the consumer before acting.
+3. Then choose: investigate, hibernate idle agents to shed load, tell the
+   user, or decide the machine is legitimately busy and leave it.
+
+Alert rules (R8-R12: sustained CPU, memory pressure, per-volume disk
+watermark, Postgres connection saturation, Redis memory) fire into the same
+alerts table and IM pipeline as the application rules. Their thresholds are
+deployment facts living in
+`deploy/lgtm/config/grafana/provisioning/alerting/rules.yml` — a box whose
+normal state trips a rule wants that file edited, never a special case in
+framework code.
+
+`ava status` still answers on a cluster with no LGTM backend: each machine row
+carries one live CPU / memory / disk reading. That is a current value, not a
+history — the history is Prometheus's, and there is exactly one of it.
+
 ## Sessions
 
 Ava's long-running processes (gateway, agent-runners, services, agent shells)
