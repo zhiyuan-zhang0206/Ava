@@ -49,17 +49,39 @@ def check(*, listen_port: int, pg_port: int, identity: str, cluster_secret: str)
     keeps failing is a real "the pooler cannot start here" and belongs on the
     operator's screen every round.
     """
-    from cli.commands._pgbouncer import ensure_pgbouncer, pgbouncer_listener_reachable
+    from cli.commands._pgbouncer import (
+        ensure_pgbouncer,
+        pgbouncer_listener_reachable,
+        pgbouncer_public_listener_reachable,
+    )
 
-    if pgbouncer_listener_reachable(listen_port, identity, cluster_secret):
+    listener_ok = pgbouncer_listener_reachable(listen_port, identity, cluster_secret)
+    # Evaluated lazily: when the pooler is fully dead, skip the extra dial to the
+    # reachable address (paid in full when it is firewalled rather than refused)
+    # so the repair starts as fast as possible.
+    public_ok = listener_ok and pgbouncer_public_listener_reachable(
+        listen_port, identity, cluster_secret
+    )
+    if listener_ok and public_ok:
         _log.debug("[pgbouncer healthcheck] pooler answering on :%d, no-op", listen_port)
         return
 
-    _log.warning(
-        "[pgbouncer healthcheck] pooler not answering on :%d — every consumer's "
-        "AVA_DB_URL points here; restarting",
-        listen_port,
-    )
+    if not listener_ok:
+        _log.warning(
+            "[pgbouncer healthcheck] pooler not answering on :%d — every consumer's "
+            "AVA_DB_URL points here; restarting",
+            listen_port,
+        )
+    else:
+        # The pooler is up on loopback but NOT on the reachable address remote
+        # agent-runners dial — a silently degraded double bind (task #1288).
+        # ensure_pgbouncer restarts (not reloads) a degraded pooler: a SIGHUP reload
+        # never retries a listen_addr that failed to bind.
+        _log.warning(
+            "[pgbouncer healthcheck] pooler on :%d missing its public (reachable) "
+            "listener — remote AVA_DB_URL consumers are cut off; restarting",
+            listen_port,
+        )
     rc = ensure_pgbouncer(
         pg_port=pg_port,
         listen_port=listen_port,
@@ -67,7 +89,11 @@ def check(*, listen_port: int, pg_port: int, identity: str, cluster_secret: str)
         role=identity,
         cluster_secret=cluster_secret,
     )
-    if rc != 0 or not pgbouncer_listener_reachable(listen_port, identity, cluster_secret):
+    if (
+        rc != 0
+        or not pgbouncer_listener_reachable(listen_port, identity, cluster_secret)
+        or not pgbouncer_public_listener_reachable(listen_port, identity, cluster_secret)
+    ):
         raise RuntimeError(
             f"pgbouncer restart did not bring the pooler back on :{listen_port} "
             f"(ensure_pgbouncer rc={rc}); the cluster has no pooled database front door"

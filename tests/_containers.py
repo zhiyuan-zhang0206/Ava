@@ -56,14 +56,14 @@ def _free_port() -> int:
         return s.getsockname()[1]
 
 
-def _wait_port(port: int, timeout: float = 30.0) -> None:
+def _wait_port(port: int, timeout: float = 30.0, host: str = "127.0.0.1") -> None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as s:
-            if s.connect_ex(("127.0.0.1", port)) == 0:
+            if s.connect_ex((host, port)) == 0:
                 return
         time.sleep(0.05)
-    raise RuntimeError(f"server on 127.0.0.1:{port} did not become ready in {timeout}s")
+    raise RuntimeError(f"server on {host}:{port} did not become ready in {timeout}s")
 
 
 @contextmanager

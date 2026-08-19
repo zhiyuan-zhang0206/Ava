@@ -50,9 +50,15 @@ import sys
 import time
 from pathlib import Path
 
-from cli.commands._cluster_instance import _bind_addrs, _live_pg_socket_dir
+from cli.commands._cluster_instance import (
+    _BIND_WAIT_TIMEOUT_S,
+    _bind_addrs,
+    _live_pg_socket_dir,
+    _wait_for_reachable_bind,
+)
 from cli.commands._converge_spec import ConvergeCtx
 from shared.cluster.derive import RUNNER_ROLE
+from shared.machine import reachable_host
 from shared.paths import ava_home
 from shared.pg_tools import brew_prefix, is_macos
 from shared.proc import process_alive
@@ -339,7 +345,9 @@ def _running_pid() -> int | None:
     return None
 
 
-def _admin_reachable(listen_port: int, role: str, cluster_secret: str) -> bool:
+def _admin_reachable(
+    listen_port: int, role: str, cluster_secret: str, host: str = "127.0.0.1"
+) -> bool:
     """Readiness probe that authenticates the client (scram) WITHOUT a server hop.
 
     Connects to PgBouncer's virtual `pgbouncer` admin database — a successful open
@@ -349,19 +357,43 @@ def _admin_reachable(listen_port: int, role: str, cluster_secret: str) -> bool:
     first, then provision), so a probe that dialed the real db would fail with `role
     "ava_<cluster>" does not exist` and hang the bring-up. The admin console speaks
     only the simple query protocol, so we open + close without a query (psycopg's
-    extended-protocol execute is rejected there)."""
+    extended-protocol execute is rejected there).
+
+    `host` defaults to loopback — the listener that is always up once the pooler
+    runs. Probing a non-loopback host answers "is the pooler actually listening on
+    the address remote consumers dial" (the configured reachable bind, `reachable_host()`),
+    which a loopback probe cannot see: pgbouncer logs a WARNING and keeps running
+    when one `listen_addr` entry fails to bind, so a loopback-only probe reads a
+    silently degraded pooler as healthy (task #1288)."""
     import psycopg
 
     from shared.url_secret import url_with_userinfo
 
-    url = url_with_userinfo(
-        f"postgresql://@127.0.0.1:{listen_port}/pgbouncer", role, cluster_secret
-    )
+    url = url_with_userinfo(f"postgresql://@{host}:{listen_port}/pgbouncer", role, cluster_secret)
     try:
         with psycopg.connect(url, connect_timeout=3, autocommit=True, prepare_threshold=None):
             return True
     except Exception:
         return False
+
+
+def pgbouncer_public_listener_reachable(listen_port: int, role: str, cluster_secret: str) -> bool:
+    """True when the pooler listens on the address remote consumers actually dial.
+
+    The loopback probe (`pgbouncer_listener_reachable`) proves "the pooler process
+    is there"; this one proves "the PUBLIC front door is open". A pooler whose
+    `listen_addr` includes the reachable address but failed to bind it
+    keeps running on loopback alone — pgbouncer treats a failed bind as a WARNING,
+    not an error — and a loopback-only probe cannot tell the difference, so
+    `AVA_DB_URL`'s public path stays silently dead for every enrolled agent-runner
+    (task #1288: 2026-08-16 a boot-time address race left the pooler loopback-only
+    for two days).
+
+    A no-secret cluster's pooler binds loopback only by design (`_bind_addrs`), so
+    there is no public listener to check — returns True without probing."""
+    if _bind_addrs(cluster_secret) == ["127.0.0.1"]:
+        return True
+    return _admin_reachable(listen_port, role, cluster_secret, host=reachable_host())
 
 
 def _reachable(listen_port: int, db_name: str, role: str, cluster_secret: str) -> bool:
@@ -384,6 +416,23 @@ def _reachable(listen_port: int, db_name: str, role: str, cluster_secret: str) -
         return False
 
 
+def _wait_for_reachable_bind_gated(cluster_secret: str) -> bool:
+    """Bounded wait for the configured reachable bind address — only when needed.
+
+    A secret-set cluster's pooler binds loopback + the reachable address
+    (`_bind_addrs`), so a boot that races the private network must wait for the
+    address before starting. A no-secret cluster binds loopback ONLY, whatever
+    `AVA_MACHINE_HOST` says — waiting on it would let a stray ambient
+    `AVA_MACHINE_HOST` hold a warm `ava start` hostage for a bind that never
+    happens (the same ambient-leak class `_bind_addrs` documents, task #1113).
+
+    Returns True immediately when no wait is needed (loopback-only bind, or the
+    address already assigned); False on timeout so the caller fails fast."""
+    if _bind_addrs(cluster_secret) == ["127.0.0.1"]:
+        return True
+    return _wait_for_reachable_bind()
+
+
 def ensure_pgbouncer(
     *,
     pg_port: int,
@@ -396,10 +445,29 @@ def ensure_pgbouncer(
     """Bring up (or reload) this cluster's PgBouncer on `listen_port`, pooling in
     front of the local Postgres on `pg_port`. Idempotent. Returns 0 on success.
 
-    Config + userlist are rewritten every call; a running pooler is reloaded
-    (SIGHUP re-reads auth_file + settings) rather than restarted, so enabling never
-    bounces live connections. Only called when AVA_PGBOUNCER_ENABLED (gated by the
-    caller in `ensure_cluster_instance`)."""
+    Three outcomes for a running pooler, only one of which touches its sockets:
+
+    - **Healthy + fully bound** (verified on the reachable address too) — SIGHUP
+      reload (re-reads auth_file + settings), live connections never bounce.
+    - **Degraded** (answering on loopback but missing the reachable listener) —
+      RESTARTED, not reloaded: a SIGHUP reload does not retry a listen_addr that
+      failed to bind at startup (verified on pgbouncer 1.25.2), so only a process
+      restart re-binds it. The restart waits (bounded) for the reachable address
+      first, and a terminate that did not take is reported, not papered over.
+    - **Not running** — started fresh.
+
+    Boot-time address race (task #1288): pgbouncer treats a failed bind on one
+    `listen_addr` entry as a WARNING and keeps running on the rest, so a pooler
+    born before the private network assigned the reachable address degrades to
+    loopback-only while a loopback-only probe reads it as healthy — the pooled
+    `AVA_DB_URL` public path stays silently dead for every remote agent-runner.
+    The wait guards ONLY the paths that (re)start a pooler; a running pooler
+    whose public listener verifies reloads without ever consulting the address,
+    so a transient network blip cannot hold `ava start` hostage. After any
+    (re)start the pooler must prove it listens on the reachable address too.
+
+    Only called when AVA_PGBOUNCER_ENABLED (gated by the caller in
+    `ensure_cluster_instance`)."""
     binary = pgbouncer_bin()
     if not Path(binary).exists() and shutil.which(binary) is None:
         # Enabled but pgbouncer is not installed. Fail fast (do NOT silently fall back
@@ -422,16 +490,64 @@ def ensure_pgbouncer(
     )
     pid = _running_pid()
     if pid is not None:
-        # Raw SIGHUP is safe HERE and nowhere else in this file: `signal.SIGHUP` is
-        # undefined on Windows, but a pooler only exists on a gateway unit and the
-        # gateway capability is POSIX-only (no native Windows redis to drive), so
-        # this line is unreachable there. `_terminate_verified` below had the same
-        # shape and was NOT unreachable — it is called from `_do_stop` on every
-        # platform — which is why it goes through `shared.proc` now.
-        os.kill(pid, signal.SIGHUP)  # online reload of ini + userlist
-        print(f"  ✓ pgbouncer already running (127.0.0.1:{listen_port}), reloaded")
-        _report_backend_verification(listen_port, db_name, role, cluster_secret)
-        return 0
+        # A running pooler whose public listener verifies is reloaded, never waited
+        # on: a transient blip on the private network must not hold `ava start`
+        # hostage behind an already-serving pooler (P1).
+        if pgbouncer_public_listener_reachable(listen_port, role, cluster_secret):
+            # Raw SIGHUP is safe HERE and nowhere else in this file: `signal.SIGHUP`
+            # is undefined on Windows, but a pooler only exists on a gateway unit and
+            # the gateway capability is POSIX-only (no native Windows redis to drive),
+            # so this line is unreachable there. `_terminate_verified` below had the
+            # same shape and was NOT unreachable — it is called from `_do_stop` on
+            # every platform — which is why it goes through `shared.proc` now.
+            os.kill(pid, signal.SIGHUP)  # online reload of ini + userlist
+            print(f"  ✓ pgbouncer already running (127.0.0.1:{listen_port}), reloaded")
+            _report_backend_verification(listen_port, db_name, role, cluster_secret)
+            return 0
+        # A running pooler that is not on the reachable address is a degraded one
+        # (born in a boot-time address race). Reload cannot fix it — pgbouncer
+        # never retries a listen_addr that failed to bind — so tear it down and
+        # restart below. Wait for the address first; the terminate result is
+        # checked so a survivor is reported as the real cause, not a generic
+        # start failure (P7).
+        if not _wait_for_reachable_bind_gated(cluster_secret):
+            print(
+                f"  ✗ reachable bind address {reachable_host()!r} is not assigned to any "
+                f"local interface after {int(_BIND_WAIT_TIMEOUT_S)}s — the degraded "
+                "pgbouncer cannot be restarted into a healthy double bind. On reboot "
+                "this means the private network has not come up yet; retry `ava start` "
+                "once it is.",
+                file=sys.stderr,
+            )
+            return 1
+        print(
+            f"  ✗ pgbouncer is NOT listening on the reachable address "
+            f"{reachable_host()!r} — it degraded to loopback-only (task #1288) and "
+            "remote agent-runners cannot reach the pooled AVA_DB_URL. Reload cannot "
+            "re-bind it; restarting the pooler",
+            file=sys.stderr,
+        )
+        if not _terminate_verified(pid, label="pgbouncer"):
+            print(
+                f"  ✗ could not stop the degraded pooler (pid {pid}) — it survived the "
+                "force kill; not starting a second pooler on the same port",
+                file=sys.stderr,
+            )
+            return 1
+    if not _wait_for_reachable_bind_gated(cluster_secret):
+        # Fail fast BEFORE starting: a pooler born now would degrade to loopback-only
+        # and the public AVA_DB_URL path would be silently dead (the 2026-08-16
+        # outage shape). The boot retry keeps re-running `ava start`, so this only
+        # needs to be true once the private network is actually up.
+        print(
+            f"  ✗ reachable bind address {reachable_host()!r} is not assigned to any "
+            f"local interface after {int(_BIND_WAIT_TIMEOUT_S)}s — pgbouncer would "
+            "silently degrade to loopback-only and every remote agent-runner would "
+            "lose the pooled AVA_DB_URL. On reboot this means the private network has "
+            "not come up yet; retry `ava start` once it is.",
+            file=sys.stderr,
+        )
+        return 1
     result = subprocess.run(
         [pgbouncer_bin(), "-d", str(_ini_path())],
         check=False,
@@ -449,15 +565,31 @@ def ensure_pgbouncer(
     # client (admin console — no backend, since the cluster role is provisioned later).
     for _ in range(60):
         if _admin_reachable(listen_port, role, cluster_secret):
-            print(f"  ✓ pgbouncer started (127.0.0.1:{listen_port}, transaction pooling)")
-            _report_backend_verification(listen_port, db_name, role, cluster_secret)
-            return 0
+            break
         time.sleep(0.1)
-    print(
-        f"  ✗ pgbouncer did not become ready on :{listen_port}; see {_logfile_path()}",
-        file=sys.stderr,
-    )
-    return 1
+    else:
+        print(
+            f"  ✗ pgbouncer did not become ready on :{listen_port}; see {_logfile_path()}",
+            file=sys.stderr,
+        )
+        return 1
+    if not pgbouncer_public_listener_reachable(listen_port, role, cluster_secret):
+        # The pooler is up on loopback but NOT on the address consumers dial — the
+        # silent degradation this whole function exists to never ship. Loud failure:
+        # the boot retry / watchdog keeps re-running, and once the private network
+        # is up the next pass restarts the pooler into a healthy double bind.
+        print(
+            f"  ✗ pgbouncer started but is NOT listening on the reachable address "
+            f"{reachable_host()!r} — it degraded to loopback-only (see "
+            f"{_logfile_path()}). Every remote agent-runner's pooled AVA_DB_URL is "
+            "dead. Retry `ava start` once the private network is up; the watchdog "
+            "healthcheck will keep re-attempting.",
+            file=sys.stderr,
+        )
+        return 1
+    print(f"  ✓ pgbouncer started (127.0.0.1:{listen_port}, transaction pooling)")
+    _report_backend_verification(listen_port, db_name, role, cluster_secret)
+    return 0
 
 
 def _report_backend_verification(

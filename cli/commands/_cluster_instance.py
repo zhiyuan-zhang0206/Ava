@@ -402,6 +402,20 @@ def _start_redis(redis_port: int, cluster_secret: str, identity: str) -> int:
         # the in-memory ACL) — including no-secret clusters, whose identity
         # user is created with `nopass` (see _ensure_redis_acl).
         return _ensure_redis_acl(redis_port, cluster_secret, identity)
+    # Same boot race as Postgres: binding the reachable address before it is on an
+    # interface fails (redis exits outright — loud, but it takes the whole start down
+    # pointlessly). Wait bounded for it first (task #1288) — but only when this
+    # cluster actually binds it: a no-secret cluster binds loopback alone
+    # (`_bind_addrs`), so a stray AVA_MACHINE_HOST must not hold a warm start hostage.
+    if _bind_addrs(cluster_secret) != ["127.0.0.1"] and not _wait_for_reachable_bind():
+        print(
+            f"  ✗ reachable bind address {reachable_host()!r} is not assigned to any "
+            f"local interface after {int(_BIND_WAIT_TIMEOUT_S)}s — redis cannot bind "
+            f"it. On reboot this means the private network has not come "
+            f"up yet; retry `ava start` once it is.",
+            file=sys.stderr,
+        )
+        return 1
     data = _redis_data_dir()
     data.mkdir(parents=True, exist_ok=True)
     args = [
