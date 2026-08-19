@@ -13,7 +13,9 @@ Plugins are Ava's primary extension mechanism—inserting custom behavior into t
 ## Core Responsibilities
 
 ### 1. Graph-Edge Hooks (`agent/hooks/_registry.py`)
-The four hook container nodes (after_init / before_llm / before_exec / after_exec), the `Hook` ABC instance-registration contract, and reducer-aware state merge: [[okf/plugins/graph-edge-hooks.ava.okf.md]].### 2. State Field Extension (`agent/state.py`)
+The four hook container nodes (after_init / before_llm / before_exec / after_exec), the `Hook` ABC instance-registration contract, and reducer-aware state merge: [[okf/plugins/graph-edge-hooks.ava.okf.md]].
+
+### 2. State Field Extension (`agent/state.py`)
 `register_plugin_state(Cls)` — pass a Pydantic `BaseModel` subclass (e.g., `AvaCodeState`, `AvaSdkReminderState`), and its fields are merged into `AgentState`, returning a `PluginStateHandle` for the plugin to `read()` / `update()` within a turn. Fields are isolated with a namespace prefix (`<plugin>__<field>`) and persisted to checkpoints via LangGraph reducers.
 
 **Core-key contract (writable = private fields + `messages` only).** A plugin's own `BaseModel` fields are always private and plugin-writable. Among the framework core keys (`BaseAgentState` fields: messages / halted / update_initiated / compact / memory / context_reset / capabilities), only **`messages`** may be declared and written — with the exact base annotation (`Annotated[list[AnyMessage], add_messages]`); the exec node merges the plugin's messages delta with its own ToolMessage delta, so both reach the checkpoint. Declaring any other core key raises at registration; writing one via `ava.state_update` raises at turn end. Plugins that want to surface notes do it through the after-exec hook — `ava_code`'s AGENTS.md / security-findings injection (`system_note_message`, `NoteTag`) is the model use case — never by touching core lifecycle keys.

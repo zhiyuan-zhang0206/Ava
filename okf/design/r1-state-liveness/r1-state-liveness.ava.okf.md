@@ -38,7 +38,9 @@ tags:
 
 ### Liveness: registry × lease, one mechanism, many objects
 
-The registry×lease frame for every managed object, watcher rebuild, and the single `alive` predicate: [[okf/design/r1-state-liveness/liveness.ava.okf.md]].### Agent state machine: one matrix
+The registry×lease frame for every managed object, watcher rebuild, and the single `alive` predicate: [[okf/design/r1-state-liveness/liveness.ava.okf.md]].
+
+### Agent state machine: one matrix
 
 Seven states (`allocated`/`starting`/`running`/`idling`/`restarting`/`terminated`/`hibernating`, matching [[shared/agents-contract.ava.okf.md]]) with one transition matrix: each transition is one row (from-set → to → allowed writer → side effects); all writers go through the single entry `agent_state.transition()`. Batch-adjudication edge conditions move from comments into the state graph + tests.
 
