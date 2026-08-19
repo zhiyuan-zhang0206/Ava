@@ -19,7 +19,7 @@ def test_loopback_hosts(host: str) -> None:
 
 @pytest.mark.parametrize(
     "host",
-    ["100.64.0.87", "10.0.0.5", "runner.tailnet.ts.net", "example.com", "", "128.0.0.1"],
+    ["100.64.0.87", "10.0.0.5", "runner.overlay.example.net", "example.com", "", "128.0.0.1"],
 )
 def test_non_loopback_hosts(host: str) -> None:
     assert is_loopback_host(host) is False
@@ -56,7 +56,7 @@ def test_ipv4_literal_hosts(host: str) -> None:
     [
         "localhost",
         "example.com",
-        "runner.tailnet.ts.net",
+        "runner.overlay.example.net",
         "",
         "::1",
         "[::1]",

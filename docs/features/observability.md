@@ -66,8 +66,8 @@ No — JSONL is not required, and the standard network form is in use today.
 
 ### Why record+ship instead of live export (documented)
 
-`../../conventions/runbook.md` / `../../shared/trace.py`: "a tailnet blip can no longer
-error mid-run or drop spans — the previous design pushed every span inline
+`../../conventions/runbook.md` / `../../shared/trace.py`: "a private-network blip can no
+longer error mid-run or drop spans — the previous design pushed every span inline
 over OTLP and raised `Exception while exporting Span.` whenever the POST
 failed." Motivations, all documented: backend-outage degradation, no agent
 hot-path blocking, resumable/backfillable shipping.

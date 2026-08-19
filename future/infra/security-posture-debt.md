@@ -13,9 +13,9 @@
 One `AVA_CLUSTER_SECRET` (43-char high-entropy) = all trust: gateway API bearer +
 ops RPC + pg scram + redis requirepass. No per-agent identity inside the cluster;
 every agent process env carries the secret + all 11 provider keys. Data plane:
-pg/redis bind loopback + the machine's Tailscale IP only; `pg_hba` allows the
-whole tailnet (100.64.0.0/10) with scram; unix-socket local trust (OS user is
-the trust root).
+pg/redis bind loopback + the machine's reachable private-network address only;
+`pg_hba` allows the whole private network (100.64.0.0/10) with scram;
+unix-socket local trust (OS user is the trust root).
 
 ## User rulings (do NOT "fix")
 
@@ -27,9 +27,9 @@ the trust root).
 1. **POST /api/auth/login has no rate limit** — user-classified as a bug, wants
    it fixed. No owner yet.
 2. **`ava.ui` page servers bind `("", port)` (0.0.0.0) unauthenticated** —
-   pure static content, no auth, reachable from LAN/tailnet (ALF has a rule for
-   it). Fix direction pending user decision: bind loopback / route via the
-   gateway reverse proxy / tailnet-only.
+   pure static content, no auth, reachable from LAN/private network (ALF has a
+   rule for it). Fix direction pending user decision: bind loopback / route via
+   the gateway reverse proxy / private-network-only.
 3. **macOS ALF firewall rules stale** — 9/17 manifest binaries lack rules (uv
    3.11.14/3.12.11, Chrome Helper, etc.), 5 obsolete rules; `/etc/sudoers.d/
    ava-firewall` not installed, so the auto-repair path is inert.

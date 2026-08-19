@@ -173,8 +173,8 @@ def test_gateway_api_base_resolves_configured_url_role_blind(
     # Rung 0.A / §2 rule 4: a gateway-capable host resolves the SAME configured
     # gateway_url as any other caller — no localhost shortcut, role is not read.
     monkeypatch.setattr(settings.general, "machine_serve_gateway", True)
-    monkeypatch.setattr(settings.gateway, "gateway_url", "http://gw.tailnet:8000/")
-    assert _machine.gateway_api_base() == "http://gw.tailnet:8000"
+    monkeypatch.setattr(settings.gateway, "gateway_url", "http://gw.vpn:8000/")
+    assert _machine.gateway_api_base() == "http://gw.vpn:8000"
 
 
 def test_gateway_api_base_agent_runner_uses_gateway_url(

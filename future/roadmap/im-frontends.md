@@ -14,7 +14,7 @@ session routing，不含 agent 逻辑）。
   `im-bridge`）：每个 IM 一个 adapter（service），共享核心（消息信封、命令路由、
   per-channel 内存会话状态、gateway REST + SSE 客户端）。
 - 所有通道**主动出站**（Telegram 长轮询 / 微信 iLink 长轮询 / 飞书 WS 长连接），
-  零端口暴露——用户不在 tailnet 时也能用。
+  零端口暴露——用户不在私有网络 / VPN overlay 上时也能用。
 - 命令集（v1 → shipped）：`/list` `/switch <id|label>`（自动拉最近 5 条 timeline 过滤推送）
   `/status` `/help`（已 shipped 版本另有 `/spawn` `/commands` `/notice`，加 spawn
   菜单与通知按钮/回复模式）；普通文本转发给当前 agent；未 switch 报错，无 fallback。

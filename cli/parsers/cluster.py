@@ -204,7 +204,7 @@ def _add_cluster_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
             "resume",
             "[cluster] restore a paused machine as a normal cluster member (clears the "
             "pause latch; probing/roster/rollout/spawn resume immediately). Prints the "
-            "machine-side checklist (re-`ava start`, pg_hba if the Tailscale IP changed)",
+            "machine-side checklist (re-`ava start`, pg_hba if the reachable address changed)",
             False,
         ),
     ):

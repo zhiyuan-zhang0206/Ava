@@ -29,7 +29,7 @@ not as a larger retry loop in the shell.
 ## Network hardening
 
 Android network-security configuration accepts domain names but not RFC1918 or
-tailnet CIDR ranges. The current shell therefore checks every resolved address
+VPN-overlay CIDR ranges. The current shell therefore checks every resolved address
 before persisting a cleartext endpoint. A stronger future boundary would pin a
 private TLS origin or enforce destination IPs in a native request layer; either
 choice needs a certificate/provisioning design for private clusters.

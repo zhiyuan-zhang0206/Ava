@@ -226,7 +226,7 @@ class DataPlaneSettings(EnvSettings):
         `127.0.0.1`. Isomorphic with the uniform network posture — a single box is
         just the case where the reachable address is loopback — so dialing yourself
         never leaves the box: it must not route through the NIC or a VPN's network
-        extension (a userspace VPN like Tailscale can transiently black-hole a
+        extension (a userspace VPN overlay can transiently black-hole a
         self-connect to its own IP: the TCP handshake completes but the forwarding
         leg is dead). The data plane always binds `127.0.0.1` first
         (`_bind_addrs`), so the loopback dial is always valid on the host that

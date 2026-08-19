@@ -112,7 +112,7 @@ def cmd_cluster_resume(name: str) -> int:
     which clears the pause latch; probing, the roster, rollout and spawn
     acceptance resume immediately. Exit 1 when the gateway reports no such
     machine. Prints the ops checklist for the machine's own side (it is away,
-    and its Tailscale IP may have changed while it was out).
+    and its reachable address may have changed while it was out).
     """
     from shared.http_dial import post as dial_post
     from shared.machine import gateway_api_base, gateway_auth_headers
@@ -136,8 +136,8 @@ def cmd_cluster_resume(name: str) -> int:
     print(
         f"  machine-side checklist (run ON {name} when it is back online):\n"
         "    1. `ava start` on the machine — register_self refreshes its dial URL "
-        "(a Tailscale IP may have changed) and clears its stopped_at latch.\n"
-        "    2. If its Tailscale IP changed, the gateway's pg_hba must cover the new IP: "
+        "(the reachable address may have changed) and clears its stopped_at latch.\n"
+        "    2. If its reachable address changed, the gateway's pg_hba must cover the new IP: "
         "on the gateway host set AVA_TRUSTED_CIDRS in ~/.ava/.env to the machine's new "
         "IP/CIDR, then `ava cluster update --restart-only` (regenerates + reloads pg_hba).\n"
         "    3. Respawn the agents that lived on it (pause terminated them); "

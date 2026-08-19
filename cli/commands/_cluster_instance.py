@@ -65,8 +65,8 @@ _PG_MAX_CONNECTIONS = 500
 
 # Bounded wait for this host's non-loopback bind address (AVA_MACHINE_HOST) to
 # appear on a local interface before binding pg/redis to it. On reboot brew /
-# launchd can start `ava` before tailscale (or the private network) has assigned
-# the address, so binding it fails and the whole autostart dies.
+# launchd can start `ava` before the private network has assigned the address,
+# so binding it fails and the whole autostart dies.
 _BIND_WAIT_TIMEOUT_S = 60.0
 _BIND_WAIT_INTERVAL_S = 2.0
 
@@ -127,7 +127,7 @@ def _bind_addrs(cluster_secret: str) -> list[str]:
 def _addr_assigned(addr: str) -> bool:
     """True if `addr` is currently assigned to a local interface (bindable). A pg /
     redis listener can only bind an address the kernel has on an interface; before
-    tailscale brings its interface up, binding the tailscale IP fails with
+    the private-network interface comes up, binding its address fails with
     EADDRNOTAVAIL. Probing with a throwaway bind is the portable check."""
     family = socket.AF_INET6 if ":" in addr else socket.AF_INET
     try:
@@ -298,7 +298,7 @@ def _start_pg(pg_port: int, cluster_secret: str) -> int:
         print(
             f"  ✗ reachable bind address {reachable_host()!r} is not assigned to any "
             f"local interface after {int(_BIND_WAIT_TIMEOUT_S)}s — postgres cannot bind "
-            f"it. On reboot this means tailscale (or the private network) has not come "
+            f"it. On reboot this means the private network has not come "
             f"up yet; retry `ava start` once it is.",
             file=sys.stderr,
         )

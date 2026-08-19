@@ -397,7 +397,7 @@ def build_manager(pool: Any) -> StreamableHTTPSessionManager:
     # host="" skips the SDK's auto DNS-rebinding guard, which is for standalone
     # loopback servers: this endpoint is embedded in the gateway and sits
     # behind the cluster auth middleware, and real clients dial it at the
-    # machine's reachable hostname (Host: <tailnet ip>), which the loopback
+    # machine's reachable hostname (Host: <private-network ip>), which the loopback
     # allowlist would reject with 421.
     server.streamable_http_app(streamable_http_path="/mcp", stateless_http=True, host="")
     return server.session_manager

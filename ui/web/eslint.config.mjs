@@ -28,7 +28,6 @@ const SENTENCE_CASE_ALLOW = [
   "Slack",
   "Chrome",
   "Safari",
-  "Tailscale",
   "Postgres",
   "Redis",
   "Pydantic",

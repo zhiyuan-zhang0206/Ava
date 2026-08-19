@@ -76,7 +76,7 @@ cd $env:USERPROFILE\.ava\source
 uv sync
 
 # 3. Join the cluster. --machine-host is THIS host's address on the cluster's
-#    private network (its tailnet IP / private hostname) — the gateway dials
+#    private network (its VPN overlay IP / private hostname) — the gateway dials
 #    this runner's ops server there, so localhost only works if the gateway
 #    shares this box (it cannot, on Windows).
 $env:AVA_CLUSTER_SECRET = [System.Net.NetworkCredential]::new(

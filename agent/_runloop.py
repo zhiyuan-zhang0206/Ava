@@ -52,7 +52,7 @@ from .state import BaseAgentState
 # rail").
 _RECURSION_LIMIT_INF = 2**31 - 1
 
-# DB-outage pause backoff (the laptop-sleep / network-change / tailscale
+# DB-outage pause backoff (the laptop-sleep / network-change / private-network
 # black-hole case). When the graph raises a PoolTimeout / OperationalError, the
 # process backs off and re-probes the cluster DB until it answers rather than
 # dying (a mid-turn death is not auto-resurrected). Exponential from 1s to a 30s
@@ -249,7 +249,7 @@ async def _invoke_graph_with_lifecycle_logging(
       agent stays alive and the Error event explains the abort instead of the
       process dying into a non-resurrectable 'exit' (2026-08-08 audit P1-1).
     - PoolTimeout / psycopg.OperationalError: the cluster DB went unreachable
-      (laptop asleep / network change / tailscale black-hole). NOT an exit path
+      (laptop asleep / network change / private-network black-hole). NOT an exit path
       either — historically this bubbled to `except Exception` and killed the
       process (a mid-turn death is not auto-resurrected). Instead PAUSE: back off
       + probe until the DB answers, re-run the startup reconciliation in-process
@@ -366,7 +366,7 @@ async def _invoke_graph_with_lifecycle_logging(
             )
             raise
         except (PoolTimeout, psycopg.OperationalError) as exc:
-            # DB unreachable (laptop asleep / network change / tailscale
+            # DB unreachable (laptop asleep / network change / private-network
             # black-hole): a borrowed-conn PoolTimeout, or a mid-flight
             # OperationalError on a half-dead socket. Pause instead of dying —
             # the process must outlive the outage so no work is lost and the

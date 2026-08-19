@@ -246,9 +246,9 @@ def resume_cluster_machine(name: str, request: Request) -> MachineResumeResponse
     / role / description) was never touched, so probing, the roster, rollout and
     spawn acceptance all resume immediately. The machine's own side needs no
     gateway action: when it is back online it re-runs `ava start`, whose
-    `register_self()` refreshes its dial URL (a Tailscale IP may have changed)
-    and clears its `stopped_at` latch. If the machine's Tailscale IP changed,
-    the gateway's pg_hba must cover the new IP — see the ops checklist in the
+    `register_self()` refreshes its dial URL (its reachable address may have
+    changed) and clears its `stopped_at` latch. If the machine's reachable
+    address changed, the gateway's pg_hba must cover the new IP — see the ops checklist in the
     CLI output (`AVA_TRUSTED_CIDRS` + `ava cluster update --restart-only`).
 
     404 when the row does not exist; idempotent (resumed=False) when the

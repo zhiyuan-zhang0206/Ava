@@ -315,7 +315,7 @@ def frontend_base_url() -> str:
     The user reaches the fleet UI at the always-up gate's entry port on the
     gateway host (the Next.js app itself binds another port and is proxied).
     Derived from the two existing settings: the HOST of ``AVA_GATEWAY_URL``
-    (tailnet-reachable, never localhost in prod) and the PORT of
+    (reachable over the private network, never localhost in prod) and the PORT of
     ``AVA_FRONTEND_HEALTHCHECK_URL`` (the fleet UI entry the user reaches).
     """
 

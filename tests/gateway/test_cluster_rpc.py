@@ -227,7 +227,7 @@ async def test_default_timeout_comes_from_settings(
 @pytest.mark.asyncio
 async def test_connect_timeout_capped_by_timeout_s(monkeypatch: pytest.MonkeyPatch) -> None:
     """A short probe timeout_s bounds the connect phase too. The connect floor
-    used to be a flat 10s, so a blackholed host (powered-off tailnet peer)
+    used to be a flat 10s, so a blackholed host (powered-off private-network peer)
     stretched every 3s roster probe to ~10s and /api/status with it."""
     monkeypatch.setattr(cluster_rpc, "lookup_machine_url", lambda _n: "http://host:8106")  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     real_client = httpx.AsyncClient

@@ -78,7 +78,7 @@ def _absolute_url(request: Request, path: str) -> str:
     against the request would hand every SDK caller a `localhost` link that
     is unreachable from the user's other devices. The Gateway URL variable is
     the single source of truth for how the gateway is reached from outside —
-    whatever the caller's dial address is (localhost / tailnet / LAN), the
+    whatever the caller's dial address is (localhost / VPN overlay / LAN), the
     delivered URL is the same for everyone.
 
     Falls back to the request base when no Gateway URL is configured (tests /

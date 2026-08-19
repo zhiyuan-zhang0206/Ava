@@ -33,7 +33,7 @@ def is_ipv4_literal(host: str) -> bool:
     CLAT) synthesize an AAAA answer even for a `getaddrinfo` call on a plain
     IPv4 literal, routing the connection through the carrier's own NAT64
     gateway; when the literal is CGNAT/private space (this cluster's
-    tailscale 100.64.0.0/10 addresses), that gateway has no route back and
+    VPN-overlay 100.64.0.0/10 addresses), that gateway has no route back and
     the dial hangs or times out. `shared/http_dial.py` (httpx) and
     `shared/config/data_plane.py` (`hostaddr=`, for Postgres) use this
     predicate to bypass resolution for exactly the hosts where it can never

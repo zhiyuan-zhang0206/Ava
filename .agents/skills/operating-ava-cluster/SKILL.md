@@ -88,10 +88,12 @@ from real incidents; the concrete sizes and dates are illustrative.
 ### Connectivity / port conflicts
 
 - Symptoms: service won't start ("another unit answers on this daemon's
-  health ports"), healthz refused, host shows offline while tailscale is up.
+  health ports"), healthz refused, host shows offline while the private
+  network is up.
 - Checks: `netstat`/`lsof` for the port; identity mismatch message tells you
-  which *other* unit holds it; `tailscale status` for the machine; machines
-  table `last_seen_at`.
+  which *other* unit holds it; verify the private network / the machine's
+  reachable address is up (whatever the operator's VPN overlay client
+  reports); machines table `last_seen_at`.
 - Causes: two units on one host sharing a default health port (the 8100s are
   a shared segment — pin per-unit ports in `.env`); a Windows system service
   (iphlpsvc) grabbing 8106; an orphaned Chrome holding CDP 9222; stale
