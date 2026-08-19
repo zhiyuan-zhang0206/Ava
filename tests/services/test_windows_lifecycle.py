@@ -200,3 +200,48 @@ def test_build_retries_once_when_first_compile_fails(
     assert csc_calls["n"] == 2
     stops = [c for c in recorded if c[0] in ("schtasks", "taskkill")]
     assert len(stops) == 4  # two stop rounds (schtasks /End + taskkill each)
+
+
+def test_build_rebuilds_when_compile_options_drift(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A fleet exe whose helper.cs is current must still be rebuilt when the
+    compile options change — the mtime check alone kept a console-subsystem
+    helper (visible terminal window in the interactive session, Task #1095)
+    alive forever once /target:winexe was added, because nothing ever touched
+    helper.cs. The options fingerprint written after each successful compile is
+    the rebuild trigger, and the compile argv must carry /target:winexe."""
+    src = tmp_path / "helper.cs"
+    src.write_text("// helper")
+    monkeypatch.setattr(lifecycle, "_SOURCE", src)
+    monkeypatch.setattr(lifecycle, "_CSC_CANDIDATES", (str(tmp_path / "csc.exe"),))
+    (tmp_path / "csc.exe").write_bytes(b"")
+    _patch_uia_gac(monkeypatch, tmp_path)
+    app_dir = tmp_path / "app"
+    exe = app_dir / "AvaPermissionsHelper.exe"
+    recorded: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+        recorded.append(list(cmd))  # pyright: ignore[reportUnknownArgumentType]
+        if cmd[0] == str(tmp_path / "csc.exe"):
+            exe.parent.mkdir(parents=True, exist_ok=True)
+            exe.write_bytes(b"\x00")
+        return subprocess.CompletedProcess(cmd, 0, b"", b"")  # pyright: ignore[reportUnknownArgumentType]
+
+    monkeypatch.setattr(lifecycle.subprocess, "run", fake_run)  # pyright: ignore[reportUnknownArgumentType]
+
+    # A pre-existing exe, newer than the source, from a build with OLD options.
+    exe.parent.mkdir(parents=True)
+    exe.write_bytes(b"\x00")
+    os.utime(exe, (time.time() + 60, time.time() + 60))
+    lifecycle._fingerprint_path(exe).write_text("/nologo\n")
+
+    built, rebuilt = lifecycle.build(app_dir)
+    assert rebuilt is True and built == exe
+    csc_calls = [c for c in recorded if c and c[0] == str(tmp_path / "csc.exe")]
+    assert csc_calls and "/target:winexe" in csc_calls[0]
+    fingerprint = lifecycle._fingerprint_path(exe).read_text().strip()
+    assert fingerprint == " ".join(lifecycle._COMPILE_OPTIONS)
+
+    _, rebuilt2 = lifecycle.build(app_dir)
+    assert rebuilt2 is False
