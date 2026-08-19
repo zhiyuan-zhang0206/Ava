@@ -54,13 +54,42 @@ def _csc() -> str | None:
     return None
 
 
+# /target:winexe: the helper is a logon scheduled task in the interactive
+# session, so a console-subsystem exe opens a visible terminal window that sits
+# on the desktop for the whole session — the zero-visible-windows invariant
+# (Task #1095) applies to it like to every other background process. Nothing
+# needs the console: the transport is a named pipe and logging goes to a file
+# (helper.cs). Recorded in the build fingerprint so changing options rebuilds
+# fleet exes whose helper.cs is otherwise current (see `build`).
+_COMPILE_OPTIONS = ("/nologo", "/target:winexe")
+
+
 def _compile(csc: str, exe: Path) -> subprocess.CompletedProcess[bytes]:
     refs = [f"/r:{dll}" for dll in (_uia_ref("UIAutomationClient"), _uia_ref("UIAutomationTypes"))]
     return subprocess.run(  # noqa: S603 — fixed csc.exe path, literal args
-        [csc, "/nologo", *refs, "/out:" + str(exe), str(_SOURCE)],
+        [csc, *_COMPILE_OPTIONS, *refs, "/out:" + str(exe), str(_SOURCE)],
         capture_output=True,
         check=False,
     )
+
+
+def _fingerprint_path(exe: Path) -> Path:
+    return exe.with_suffix(".buildargs")
+
+
+def _exe_is_current(exe: Path) -> bool:
+    """Whether the built exe matches both the source and the compile options.
+
+    The mtime check alone kept stale binaries alive across option changes: a
+    fleet machine whose helper.cs never changed would keep its old
+    console-subsystem exe forever, so a compile-option fix could never land
+    without a manual rebuild. The options fingerprint written after each
+    successful compile closes that: options drift ⇒ rebuild.
+    """
+    if not exe.exists() or exe.stat().st_mtime < _SOURCE.stat().st_mtime:
+        return False
+    fingerprint = _fingerprint_path(exe)
+    return fingerprint.exists() and fingerprint.read_text().strip() == " ".join(_COMPILE_OPTIONS)
 
 
 def _stop_running_helper() -> None:
@@ -93,7 +122,7 @@ def build(app_dir: Path) -> tuple[Path, bool]:
         raise RuntimeError(
             "no csc.exe found (no .NET Framework?) — cannot build the permissions helper"
         )
-    if exe.exists() and exe.stat().st_mtime >= _SOURCE.stat().st_mtime:
+    if _exe_is_current(exe):
         return exe, False
     # A rebuild overwrites the exe, and Windows locks a running executable's
     # file — a helper live in the user's session from the previous converge
@@ -113,6 +142,7 @@ def build(app_dir: Path) -> tuple[Path, bool]:
         raise RuntimeError(
             f"csc failed ({proc.returncode}): {proc.stderr.decode(errors='replace').strip()}"
         )
+    _fingerprint_path(exe).write_text(" ".join(_COMPILE_OPTIONS) + "\n")
     return exe, True
 
 
