@@ -111,6 +111,75 @@ def test_write_bootstrap_env_replacement_is_atomic(
     assert list(tmp_path.glob("..env.*")) == []
 
 
+def test_write_bootstrap_env_preserves_machine_local_keys(tmp_path: Path) -> None:
+    """A re-enroll rewrites the bootstrap block and drops cluster facts, and
+    NOTHING else: model API keys, AVA_REQUIRE_* opt-outs, a prior health-port
+    block, and operator comments all survive verbatim. The old whole-file
+    replace silently wiped this unit's model credentials and machine-scope
+    opt-outs on every re-enroll (fleet Windows box, 2026-08-19)."""
+    p = tmp_path / ".env"
+    p.write_text(
+        "AVA_GATEWAY_URL=http://old-gateway:8000\n"
+        "# model credentials stay local (windows-setup.md)\n"
+        "ANTHROPIC_API_KEY=sk-local\n"
+        "AVA_REQUIRE_GOOGLE_DRIVE=false\n"
+        "AVA_DB_URL=postgresql://stale@old:5433/ava\n"
+        "AVA_RESTARTER_HEALTH_PORT=18117\n"
+    )
+    enroll.write_bootstrap_env(
+        p,
+        gateway="https://cp",
+        machine_name="n",
+        cluster_secret="sek",  # noqa: S106 — inert test credential
+        cluster_keys=frozenset({"AVA_DB_URL", "AVA_REDIS_URL"}),
+    )
+    text = p.read_text()
+    assert "ANTHROPIC_API_KEY=sk-local" in text
+    assert "AVA_REQUIRE_GOOGLE_DRIVE=false" in text
+    assert "# model credentials stay local (windows-setup.md)" in text
+    assert "AVA_RESTARTER_HEALTH_PORT=18117" in text
+    assert "AVA_DB_URL" not in text  # a cluster fact the runner must not cache
+    assert text.count("AVA_GATEWAY_URL=") == 1  # owned: rewritten, not duplicated
+    assert "AVA_GATEWAY_URL=https://cp" in text
+
+
+def test_write_bootstrap_env_rewrite_is_idempotent(tmp_path: Path) -> None:
+    p = tmp_path / ".env"
+    p.write_text("ANTHROPIC_API_KEY=sk-local\n")
+    enroll.write_bootstrap_env(
+        p,
+        gateway="https://cp",
+        machine_name="n",
+        cluster_secret="sek",  # noqa: S106 — inert test credential
+    )
+    first = p.read_text()
+    enroll.write_bootstrap_env(
+        p,
+        gateway="https://cp",
+        machine_name="n",
+        cluster_secret="sek",  # noqa: S106 — inert test credential
+    )
+    assert p.read_text() == first
+    assert first.count("ANTHROPIC_API_KEY=") == 1
+
+
+def test_bare_reenroll_keeps_a_prior_ssl_bundle(tmp_path: Path) -> None:
+    """Like the health-port block: a prior explicit --ssl-cert-file survives a
+    bare re-enroll, and only a restated one replaces it."""
+    p = tmp_path / ".env"
+    enroll.write_bootstrap_env(
+        p, gateway="https://cp", machine_name="n", ssl_cert_file="/etc/ssl/cert.pem"
+    )
+    enroll.write_bootstrap_env(p, gateway="https://cp", machine_name="n")
+    assert "SSL_CERT_FILE=/etc/ssl/cert.pem" in p.read_text()
+    enroll.write_bootstrap_env(
+        p, gateway="https://cp", machine_name="n", ssl_cert_file="/etc/ssl/other.pem"
+    )
+    text = p.read_text()
+    assert text.count("SSL_CERT_FILE=") == 1
+    assert "SSL_CERT_FILE=/etc/ssl/other.pem" in text
+
+
 def test_write_bootstrap_env_omits_ssl_cert_when_absent(tmp_path: Path) -> None:
     p = tmp_path / ".env"
     enroll.write_bootstrap_env(p, gateway="https://cp", machine_name="n")
