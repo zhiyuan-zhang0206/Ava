@@ -15,6 +15,10 @@
 > in an MCP entry, so a server cannot *declare* that it is a machine-level singleton;
 > the one real machine-scope consumer (the shared headed browser) is hard-wired as a
 > bespoke service rather than expressed through the model below — see "Open".
+> [`extension-ownership.md`](extension-ownership.md) (issue #39) proposes
+> dissolving the `scope: machine` field into host-capability requirements
+> (`display`, `login-session:*`) matched against the machine's capability set —
+> if that lands, this open item closes without a scope field.
 >
 > This doc captures the model that must hold for the rest of Layer I; the "plugin =
 > bundle skills + MCP + hooks" gap is in
