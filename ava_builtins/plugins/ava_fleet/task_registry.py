@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import builtins
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import TypeGuard
 
 import psycopg
@@ -18,6 +18,7 @@ import ava.agents
 from shared.audit_events import insert_event_log
 from shared.live_announce import publish_task_created_sync, publish_task_updated_sync
 from shared.priority import validate_priority
+from shared.task_notes import task_note_line
 from shared.task_reparent import resolve_reparent
 
 # `list` / `get` shadow builtins intentionally: these are the agent-facing names
@@ -311,8 +312,7 @@ def create_and_assign(
 def _append_note_to_results(cur, task_id: int, note: str) -> None:  # noqa: ANN001
     """Append a timestamped note line to a task's results within the
     current transaction.  Caller must hold FOR UPDATE on the row."""
-    stamp = datetime.now(UTC).astimezone().strftime("%Y-%m-%d %H:%M")
-    line = f"[{stamp}] {note}\n"
+    line = task_note_line(note)
     cur.execute(
         "SELECT results FROM agent_tasks WHERE id = %s FOR UPDATE",
         (task_id,),

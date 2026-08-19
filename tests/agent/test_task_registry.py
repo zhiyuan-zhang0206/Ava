@@ -235,7 +235,35 @@ def test_log_appends_timestamped_lines(db_conn: psycopg.Connection) -> None:
         assert lines[0].endswith("first note")
         assert lines[1].endswith("second note")
         for line in lines:
-            assert re.match(r"\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}\] ", line)
+            assert re.match(r"\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\] ", line)
+    finally:
+        ava._boot._agent_id = original
+
+
+def test_log_stamps_in_the_cluster_timezone(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A task note is stamped in `settings.general.timezone`, not the writing
+    machine's local timezone. A fleet spans machines and one task's notes are
+    appended by several of them, so host-local stamps put unmarked, mutually
+    inconsistent wall clocks in one column of text."""
+    from shared.config import settings
+
+    agent_id = _seed_agent(db_conn)
+    original = ava._boot._agent_id
+    ava._boot._agent_id = agent_id
+    try:
+        stamps: dict[str, str] = {}
+        for tz in ("Asia/Shanghai", "Pacific/Honolulu"):
+            monkeypatch.setattr(settings.general, "timezone", tz)
+            task = task_registry.create(f"stamped in {tz}", "detail")
+            task_registry.log(task.id, "note")
+            results = task_registry.get(task.id).results
+            assert results is not None
+            stamps[tz] = results.split("]")[0]
+        # Honolulu is UTC-10 year-round, Shanghai UTC+8: 18 hours apart, so two
+        # stamps taken seconds apart cannot agree unless the setting is read.
+        assert stamps["Asia/Shanghai"] != stamps["Pacific/Honolulu"]
     finally:
         ava._boot._agent_id = original
 
@@ -1193,7 +1221,7 @@ def test_update_note_with_cancel_appends_to_results(db_conn: psycopg.Connection)
         assert len(lines) == 2
         assert lines[0].endswith("work started")
         assert lines[1].endswith("no longer needed")
-        assert re.match(r"\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}\] ", lines[1])
+        assert re.match(r"\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\] ", lines[1])
     finally:
         ava._boot._agent_id = original
 

@@ -148,6 +148,7 @@ _NO_TIMESTAMP_NOTE_TAGS = frozenset(
         NoteTag.PRELOADED_SKILLS,
         NoteTag.AGENT_MEMORY,
         NoteTag.EXEC_TIMEOUT,
+        NoteTag.TIMEZONE,
     }
 )
 # Deliberately absent: NoteTag.NEW_SKILLS. Its siblings PROJECT_SKILLS /

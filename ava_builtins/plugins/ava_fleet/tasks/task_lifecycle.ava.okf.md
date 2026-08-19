@@ -67,14 +67,14 @@ Modify task fields, **pass only what you want to change**—omitted fields remai
 - `owner`: pass an agent id to transfer/claim; **not passing or passing `None` both mean "unchanged"**—a task always has an owner, `owner=None` no longer releases a task.
 - `remind_interval_seconds`: **not passing or passing `None` both mean "unchanged"**—reminders cannot be disabled; only passing a positive integer (≤24h) changes it, exceeding raises `ValueError`.
 - `priority`: `None` (default) means "unchanged"; passing `"P0"`..`"P3"` writes it, illegal value raises `ValueError` (#663).
-- `note`: appends a line `[YYYY-MM-DD HH:MM] <note>` to `results`, can be used alongside any status change or alone as a substitute for `log()`.
+- `note`: appends a line `[YYYY-MM-DD HH:MM:SS] <note>` to `results`, can be used alongside any status change or alone as a substitute for `log()`. The stamp is built by `shared.task_notes.task_note_line` — the same agent-facing representation and the same timezone as every other timestamp an agent reads, shared with the gateway's drain writer so the two cannot drift.
 - Any write resets the reminder counter (`last_reminded_at` / `reminder_count` zeroed).
 - Each successful write publishes `task_updated` (SSE, board invalidates and refetches).
 - Old parameter names `content` (= `results`), `create`'s `brief` (= `description`) are kept as deprecated aliases.
 
 ### `log(task_id, message) -> None`
 
-Append a line `[YYYY-MM-DD HH:MM] message` to `results`—**delegates to `update(task_id, note=message)`**, same timestamped append, same reminder counter reset.
+Append a line `[YYYY-MM-DD HH:MM:SS] message` to `results`—**delegates to `update(task_id, note=message)`**, same timestamped append, same reminder counter reset.
 
 **Common operation patterns**:
 
