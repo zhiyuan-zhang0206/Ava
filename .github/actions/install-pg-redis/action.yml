@@ -1,38 +1,133 @@
 name: Install Postgres 17 + Redis
 description: >
   Server binaries on PATH for the self-provisioned test clusters
-  (tests/_containers.py). The .deb downloads are cached (the apt fetch is the
-  step that has hung runners for 45 minutes — cached archives turn it into a
-  local install), and every network command is wrapped in timeout+retry:
-  CI *infrastructure* legitimately retries, the test suite itself never does.
+  (tests/_containers.py). Every network phase degrades instead of failing: the
+  index refresh narrows to pgdg when an Ubuntu mirror stalls, the .deb download
+  is allowed to fail when the archive cache is already warm, and the install
+  falls back to dpkg over the cached archives when apt cannot resolve at all.
+  Every network command carries a per-connection timeout, an outer timeout and
+  a retry that announces its own exhaustion: CI *infrastructure* legitimately
+  retries, the test suite itself never does.
 runs:
   using: composite
   steps:
-    - name: Cache apt archives
-      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+    # restore/save split rather than the combined `actions/cache`: the combined
+    # action's post step saves on cache miss even when the job failed, so a run
+    # that died during the fetch would persist an empty /tmp/apt-archives under
+    # this key and permanently defeat the warm cache that exists precisely to
+    # survive the next outage. Saving only after a green install keeps the key
+    # pointing at a complete dependency closure.
+    - name: Restore apt archive cache
+      id: apt-archives
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: /tmp/apt-archives
-        key: apt-pg17-redis-${{ runner.os }}-v1
+        key: apt-pg17-redis-${{ runner.os }}-v2
 
     - name: Install (pgdg repo, cached archives, timeout+retry)
       shell: bash
       run: |
         set -euo pipefail
-        retry() { local n=0; until "$@"; do n=$((n+1)); [ "$n" -ge 3 ] && return 1; echo "retry $n: $*"; sleep 5; done; }
+
+        # Announce exhaustion by name. A bare `return 1` under `set -e` kills the
+        # step with nothing on stdout, and `timeout` SIGTERMs apt before apt can
+        # print its own `E: Failed to fetch` — so without this line the log ends
+        # having explained nothing. Deliberately a plain line, not `::error::`:
+        # most exhaustions here are recoverable by the next tier, and an error
+        # annotation on a run that goes on to pass is its own kind of lie. The
+        # call sites that really are fatal add their own.
+        retry() {
+          local label="$1"; shift
+          local n=1
+          while true; do
+            if "$@"; then return 0; fi
+            if [ "$n" -ge 3 ]; then
+              echo "${label}: FAILED after ${n} attempts: $*" >&2
+              return 1
+            fi
+            echo "${label}: attempt ${n} failed, retrying in $((n * 10))s: $*"
+            sleep $((n * 10))
+            n=$((n + 1))
+          done
+        }
+
+        # Per-connection timeout so one stalled mirror fails in seconds instead
+        # of eating a whole 120s attempt. Without it the three attempts all land
+        # inside a single outage window and sample one moment, not three.
+        net=(-o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o Acquire::Retries=3)
+        # Refresh ONLY apt.postgresql.org, leaving the runner image's existing
+        # Ubuntu lists in place (List-Cleanup=0 stops apt pruning them, and
+        # sourceparts=/dev/null hides sources.list.d/*). pgdg is the only repo
+        # this action actually adds, so a dead Ubuntu mirror is irrelevant here.
+        pgdg_only=(
+          -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/pgdg.list
+          -o Dir::Etc::sourceparts=/dev/null
+          -o APT::Get::List-Cleanup=0
+        )
+        archives=(-o Dir::Cache::archives=/tmp/apt-archives)
+        pkgs=(postgresql-17 redis-server)
 
         sudo sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
-        retry timeout 60 sh -c 'curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --yes --dearmor -o /etc/apt/trusted.gpg.d/pgdg.gpg'
-        retry sudo timeout 120 apt-get update
+        # Fatal with no weaker tier: without the key every pgdg index is
+        # unverifiable, so there is nothing to degrade to.
+        if ! retry "pgdg signing key" timeout 60 sh -c 'curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --yes --dearmor -o /etc/apt/trusted.gpg.d/pgdg.gpg'; then
+          echo "::error::could not fetch or dearmor the pgdg signing key after 3 attempts" >&2
+          exit 1
+        fi
+
+        # Index phase. Each tier is weaker than the last; only a total failure
+        # is carried forward, and even then as a warning, because the archive
+        # cache below may still hold everything we need.
+        if retry "apt-get update (all sources)" sudo timeout 120 apt-get update "${net[@]}"; then
+          :
+        elif retry "apt-get update (pgdg only)" sudo timeout 120 apt-get update "${net[@]}" "${pgdg_only[@]}"; then
+          echo "::warning::full apt index refresh failed; refreshed pgdg only and continuing on the image's existing Ubuntu lists"
+        else
+          echo "::warning::apt index refresh failed entirely; continuing on the indexes and cached archives already on disk"
+        fi
 
         sudo mkdir -p /tmp/apt-archives
         sudo chown -R root:root /tmp/apt-archives
-        # Download into the cached dir first, install from it: a warm cache
-        # makes the network phase a no-op.
-        retry sudo timeout 300 apt-get install -y --download-only \
-          -o Dir::Cache::archives=/tmp/apt-archives postgresql-17 redis-server
-        sudo timeout 300 apt-get install -y \
-          -o Dir::Cache::archives=/tmp/apt-archives postgresql-17 redis-server
-        # The cache action needs the dir readable by the runner user.
-        sudo chmod -R a+r /tmp/apt-archives
+
+        # Fetch phase — non-fatal. `--download-only` pulls the full dependency
+        # closure into the cached dir; a warm cache makes it a no-op, and a cold
+        # one that cannot reach the network is still worth attempting the
+        # install after, so a failure here only warns.
+        if ! retry "apt-get download" sudo timeout 300 apt-get install -y --download-only "${archives[@]}" "${net[@]}" "${pkgs[@]}"; then
+          echo "::warning::package download failed; falling back to whatever the archive cache already holds"
+        fi
+
+        # Install phase. With a warm cache this is local work; apt still needs a
+        # usable index to resolve the names, which is the one thing an index
+        # outage takes away.
+        if ! retry "apt-get install" sudo timeout 300 apt-get install -y "${archives[@]}" "${net[@]}" "${pkgs[@]}"; then
+          # Last resort: no index, but the cached closure is on disk as .debs.
+          # dpkg needs neither an index nor the network — it unpacks all of them
+          # and configures in dependency order, and exits non-zero (failing the
+          # step loudly) if the cache is too incomplete to satisfy them.
+          shopt -s nullglob
+          debs=(/tmp/apt-archives/*.deb)
+          shopt -u nullglob
+          if [ "${#debs[@]}" -eq 0 ]; then
+            echo "::error::apt-get install failed and the archive cache is empty — no offline fallback available" >&2
+            exit 1
+          fi
+          echo "::warning::apt-get install failed; installing ${#debs[@]} cached .deb(s) directly with dpkg"
+          if ! sudo dpkg -i "${debs[@]}"; then
+            echo "::error::the cached archives could not satisfy the install either — the closure is incomplete" >&2
+            exit 1
+          fi
+        fi
+
+        # The cache save step reads the dir as the runner user: `X` grants the
+        # traverse bit on directories only, leaving file modes alone.
+        sudo chmod -R a+rX /tmp/apt-archives
 
         echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
+
+    - name: Save apt archive cache
+      if: success() && steps.apt-archives.outputs.cache-hit != 'true'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: /tmp/apt-archives
+        key: apt-pg17-redis-${{ runner.os }}-v2
