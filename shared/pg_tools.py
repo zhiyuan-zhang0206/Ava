@@ -75,6 +75,23 @@ def pg_shm_args() -> str:
     return _PG_SHM_ARGS
 
 
+# Postgres session timezone, pinned to UTC. psycopg3 returns aware datetimes in
+# the SESSION timezone (never pinned before this), so without this every
+# timestamptz the gateway/tests see round-trips with an offset that drifts
+# with the host OS timezone instead of being a stable `+00:00`. Same splice
+# points as `pg_shm_args` above: the per-cluster data plane and the throwaway
+# test/eval clusters.
+_PG_TZ_ARGS = "-c timezone=UTC"
+
+
+def pg_tz_args() -> str:
+    """The `pg_ctl -o` fragment that pins the Postgres session timezone to UTC.
+
+    See `_PG_TZ_ARGS` above for why. Unlike `pg_shm_args`, this one has no
+    platform exception — every PG startup path in this codebase sets it."""
+    return _PG_TZ_ARGS
+
+
 # Prefix of every throwaway instance directory this module creates. Load-bearing:
 # the sweep below reaps ONLY `<throwaway root>/<this prefix>*` directories.
 _THROWAWAY_PREFIX = "ava-pg-"
@@ -612,7 +629,7 @@ def throwaway_postgres(schema_sql: str | None = None) -> Generator[str]:
                         f"-p {port} -c listen_addresses=127.0.0.1 "
                         f"-c unix_socket_directories={tmp} "
                         "-c fsync=off -c full_page_writes=off -c synchronous_commit=off "
-                        f"{pg_shm_args()}",
+                        f"{pg_tz_args()} {pg_shm_args()}",
                     ],
                     check=True,
                     capture_output=True,

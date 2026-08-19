@@ -281,3 +281,22 @@ class TestParent:
             resp = client.patch(f"/api/tasks/{a}", json={"parent_id": c})
         assert resp.status_code == 422
         assert "descendant" in resp.json()["detail"]
+
+
+class TestTimestampOffset:
+    """tz audit PR-1 behavior lock. `_row_to_task` builds `created_at`/
+    `updated_at` with a bare `.isoformat()` on the value psycopg3 read back —
+    the offset it carries is whatever the PG SESSION timezone was, not a
+    fixed one. Pinning that session timezone to UTC (shared/pg_tools.py:
+    pg_tz_args, cli/commands/_cluster_instance.py) is what makes this `+00:00`
+    instead of drifting with the host OS timezone."""
+
+    def test_get_created_at_has_utc_offset(self, db_conn: psycopg.Connection) -> None:
+        owner = _make_agent(db_conn)
+        tid = _make_task(db_conn, owner=owner)
+        with TestClient(app) as client:
+            resp = client.get("/api/tasks")
+        assert resp.status_code == 200
+        row = next(t for t in resp.json()["tasks"] if t["id"] == tid)
+        assert row["created_at"].endswith("+00:00")
+        assert row["updated_at"].endswith("+00:00")

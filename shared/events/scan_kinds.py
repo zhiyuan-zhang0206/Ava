@@ -124,7 +124,8 @@ def scan_db(db_url: str) -> None:
     print("\n===== agent_events.event top 40 (current month) =====")
     cur.execute(
         "SELECT event, COUNT(*) FROM agent_events "
-        "WHERE ts >= date_trunc('month', now()) GROUP BY event ORDER BY 2 DESC LIMIT 40"
+        "WHERE ts >= date_trunc('month', now() AT TIME ZONE 'UTC') "
+        "GROUP BY event ORDER BY 2 DESC LIMIT 40"
     )
     for ev, n in cur.fetchall():
         print(f"  {n:8d}  {ev}")
