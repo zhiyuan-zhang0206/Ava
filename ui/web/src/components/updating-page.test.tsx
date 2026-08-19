@@ -130,7 +130,11 @@ describe("UpdatingPage", () => {
     expect(reloadMock).toHaveBeenCalledTimes(1);
   });
 
-  it("does not reload when auth returns not authenticated", async () => {
+  it("reloads when auth answers not-authenticated (expired session)", async () => {
+    // A successful not-authenticated answer means the gateway is serving
+    // again (a paused gateway 503s /api/auth/check) with the session expired
+    // — e.g. across a host crash. The reload lands on the login page;
+    // waiting for `authenticated: true` would spin here forever.
     checkAuthMock.mockRejectedValueOnce(new Error("unreachable"));
     render(<UpdatingPage />);
     checkAuthMock.mockResolvedValueOnce({ authenticated: false });
@@ -138,6 +142,6 @@ describe("UpdatingPage", () => {
       vi.advanceTimersByTime(5_000);
     });
     await vi.runOnlyPendingTimersAsync();
-    expect(reloadMock).not.toHaveBeenCalled();
+    expect(reloadMock).toHaveBeenCalledTimes(1);
   });
 });
