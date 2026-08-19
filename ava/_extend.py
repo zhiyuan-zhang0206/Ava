@@ -111,6 +111,22 @@ def _current_plugin_name() -> str:
     return current_plugin_name() or "<unknown>"
 
 
+def _record_contribution(target: str, wrapper: Callable[..., Any]) -> None:
+    """Mirror the layer into the plugin attribution ledger `ava plugins inspect`
+    reads. Lazy import for the same reason `_current_plugin_name` is lazy; a
+    no-op outside a plugin import (a test's direct wrap keeps showing up in
+    `stack(target)`, which is the whole-machine view)."""
+    try:
+        from shared import plugin_contributions
+    except ImportError:
+        return
+    plugin_contributions.record(
+        "sdkWraps",
+        target,
+        detail=f"{getattr(wrapper, '__module__', '?')}.{getattr(wrapper, '__qualname__', wrapper)}",
+    )
+
+
 def _locate(target: str) -> tuple[Any, str]:
     """Resolve a dotted `ava` path to `(parent_object, attr_name)`.
 
@@ -199,6 +215,7 @@ def wrap(target: str, wrapper: Callable[..., Any]) -> Callable[..., Any]:
     _LAYERS.setdefault(target, []).append(
         WrapLayer(target=target, plugin=_current_plugin_name(), wrapper=wrapper, chained=chained)
     )
+    _record_contribution(target, wrapper)
     return wrapper
 
 

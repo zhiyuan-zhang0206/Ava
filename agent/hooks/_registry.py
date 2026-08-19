@@ -63,6 +63,7 @@ from langgraph.types import Command
 
 from agent import state as _state
 from agent.nodes import NodeName
+from shared import plugin_contributions
 from shared.context import AvaContext, agent_id_from_config
 
 HookName = Literal["before_llm", "before_exec", "after_exec", "after_init"]
@@ -114,24 +115,35 @@ HOOKS: dict[HookName, list[Hook]] = {
 }
 
 
+def _register(hook_name: HookName, hook: Hook) -> None:
+    """Append to the hook point's list and attribute the registration to the
+    importing plugin (a no-op outside a `PluginContext`, i.e. for the framework's
+    own hooks) — `HOOKS` holds bare instances, so `ava plugins inspect` reads the
+    attribution off the ledger."""
+    HOOKS[hook_name].append(hook)
+    plugin_contributions.record(
+        "hooks", hook_name, detail=f"{type(hook).__module__}.{type(hook).__qualname__}"
+    )
+
+
 def register_before_llm(hook: Hook) -> None:
     """Register a before_llm hook — runs after claim completes, before calling LLM."""
-    HOOKS["before_llm"].append(hook)
+    _register("before_llm", hook)
 
 
 def register_before_exec(hook: Hook) -> None:
     """Register a before_exec hook — runs after LLM completes, before subprocess exec."""
-    HOOKS["before_exec"].append(hook)
+    _register("before_exec", hook)
 
 
 def register_after_exec(hook: Hook) -> None:
     """Register an after_exec hook — runs after subprocess exec completes, before moving to the next node."""
-    HOOKS["after_exec"].append(hook)
+    _register("after_exec", hook)
 
 
 def register_after_init(hook: Hook) -> None:
     """Register an after_init hook — runs once after state is loaded from checkpoint, before claim."""
-    HOOKS["after_init"].append(hook)
+    _register("after_init", hook)
 
 
 def make_hook_runner(

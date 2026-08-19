@@ -47,7 +47,7 @@ from typing import Any, Literal, cast, overload
 from pydantic import BaseModel, ValidationError
 from pydantic.fields import FieldInfo
 
-from shared import paths
+from shared import paths, plugin_contributions
 from shared.plugin_context import current_plugin_name
 
 
@@ -134,6 +134,9 @@ def register_plugin_config(cls: type[BaseModel]) -> None:
         )
 
     _PLUGIN_CONFIG_CLASSES[plugin] = cls
+    plugin_contributions.record(
+        "config", cls.__name__, detail=f"fields: {', '.join(cls.model_fields) or '<none>'}"
+    )
 
 
 def bind_from_disk() -> None:

@@ -8,7 +8,7 @@ registrations land exactly where they did before the split.
 """
 
 from types import ModuleType, SimpleNamespace
-from typing import Any
+from typing import Any, Literal
 
 from . import ava_module
 
@@ -122,6 +122,22 @@ def _current_plugin_name() -> str:
     return _cp() or "<unknown>"
 
 
+def _record(
+    surface: Literal["sdkNamespaces", "sdkMembers", "sdkExpansions"],
+    identifier: str,
+    *,
+    detail: str = "",
+) -> None:
+    """Attribute this registration to the importing plugin, for
+    `ava plugins inspect`. Lazily imported for the same reason
+    `_current_plugin_name` is, and a no-op outside a plugin import."""
+    try:
+        from shared import plugin_contributions
+    except ImportError:
+        return
+    plugin_contributions.record(surface, identifier, detail=detail)
+
+
 def register_namespace(name: str, module: Any) -> None:
     """Plugin actively adds a submodule to the ava top level; agent accesses via `ava.{name}.foo()`.
 
@@ -174,6 +190,7 @@ def register_namespace(name: str, module: Any) -> None:
     # attr by child discovery.
     module._qualname = f"ava.{name}"  # type: ignore[attr-defined]
     _REGISTERED_NAMESPACES[name] = _current_plugin_name()
+    _record("sdkNamespaces", name, detail=getattr(module, "__name__", type(module).__name__))
     if name not in pkg.__all_for_ava__:
         pkg.__all_for_ava__.append(name)
 
@@ -206,6 +223,7 @@ def register_sdk_expand(*paths: str) -> None:
             )
         if path not in _REGISTERED_SDK_EXPANSIONS:
             _REGISTERED_SDK_EXPANSIONS.append(path)
+            _record("sdkExpansions", path, detail="expanded ahead of the framework list")
 
 
 def register_namespace_member(namespace: str, name: str, fn: Any) -> None:
@@ -266,6 +284,11 @@ def register_namespace_member(namespace: str, name: str, fn: Any) -> None:
     setattr(parent, name, fn)
     parent.__all_for_ava__.append(name)
     _REGISTERED_MEMBERS.append((namespace, name))
+    _record(
+        "sdkMembers",
+        f"{namespace}.{name}",
+        detail=f"{getattr(fn, '__module__', '?')}.{getattr(fn, '__qualname__', fn)}",
+    )
 
 
 def clear_registered_namespaces() -> None:

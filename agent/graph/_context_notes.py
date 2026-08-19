@@ -36,6 +36,7 @@ from pathlib import Path
 from langchain_core.messages import HumanMessage
 
 from agent.messages import NoteTag, system_note_message
+from shared import plugin_contributions
 from shared.config import settings
 from shared.log import logger
 
@@ -94,6 +95,9 @@ def register_context_note(
 
     def decorate(fn: NoteBuilder) -> NoteBuilder:
         _CONTEXT_NOTES.append(ContextNote(build=fn, on_fork=on_fork, rank=rank))
+        plugin_contributions.record(
+            "contextNotes", fn.__name__, detail=f"rank={rank} on_fork={on_fork}"
+        )
         return fn
 
     return decorate

@@ -22,6 +22,7 @@ from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import Any
 
+from shared import plugin_contributions
 from shared.config import settings
 from shared.paths import workspace_dir
 
@@ -56,6 +57,7 @@ def register_system_prompt_section(fn: Callable[[], str]) -> Callable[[], str]:
     `build_system_prompt()` runs them in registration order when called.
     """
     _SYSTEM_PROMPT_SECTIONS.append(fn)
+    plugin_contributions.record("systemPromptSections", fn.__name__, detail=fn.__module__)
     return fn
 
 
