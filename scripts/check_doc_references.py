@@ -26,16 +26,12 @@ Runs the full doc tree on every commit and in CI (any PR touching a tracked
 stale from a move anywhere else). ~0.1s over ~430 docs, so `--all-files` on
 every job is free.
 
-Three doc axes get exemptions, not a blanket skip:
+Two doc axes get exemptions, not a blanket skip:
 
 - `decisions/` is skipped entirely (flags and links both). A decision
   record legitimately names the flag it removed or the file it deleted (see
   `decisions/2026-07-20-path-only-cluster-identity.md`) and history is
   never rewritten to satisfy a linter.
-- `traces/` is skipped entirely, for the same reason: a trace is a
-  point-in-time record of one real run, and the command it names was the
-  command that run used. A CLI rename must not force historical traces to
-  be rewritten (2026-08-02: `ava update` → `ava cluster update`).
 - `future/` skips CLI-flag checks only — a plan may propose a flag that
   does not exist yet — but its relative links resolve like any other doc's. A
   link to a file that exists-but-moved is rot, not a plan (issue #1045: two
@@ -439,13 +435,12 @@ def main() -> int:
     problems: list[str] = []
     for doc in docs:
         rel = doc.relative_to(REPO)
-        # decisions/ and traces/ — point-in-time records and never rewritten,
-        # so citing the flag or file that existed THEN is the record working as
-        # intended (2026-07-22-telegram-out-of-core.md names the files it
-        # deleted; a trace names the command its run actually used). Fully
-        # exempt: neither axis describes what IS true now — a CLI rename must
-        # not force historical runs to be re-written to satisfy the linter.
-        if rel.parts[0] in ("decisions", "traces"):
+        # decisions/ — point-in-time records and never rewritten, so citing the
+        # flag or file that existed THEN is the record working as intended
+        # (2026-07-22-telegram-out-of-core.md names the files it deleted).
+        # Fully exempt: the axis does not describe what IS true now, and a CLI
+        # rename must not force history to be re-written to satisfy the linter.
+        if rel.parts[0] == "decisions":
             continue
         # future/ — plans. A flag it proposes may not exist yet (skip_flags),
         # but a link it names must resolve UNLESS marked `(planned)`
