@@ -24,6 +24,7 @@ import io
 import platform
 import shutil
 import tarfile
+import time
 from pathlib import Path
 
 from shared.config import settings
@@ -111,15 +112,35 @@ def ensure_pg_binaries() -> Path:
     return bin_dir
 
 
+# Maven Central rate-limits bursts (HTTP 429); with the jar sha256-pinned, a bounded
+# backoff on transient answers is safe. Any other 4xx is a permanent answer about the
+# pinned artifact and still fails fast.
+_DOWNLOAD_ATTEMPTS = 4
+_TRANSIENT_HTTP = frozenset({429, 500, 502, 503, 504})
+
+
 def _download(url: str) -> bytes:
     import urllib.error
     import urllib.request
 
-    try:
-        with urllib.request.urlopen(url, timeout=120) as resp:  # noqa: S310 — pinned https Maven Central URL
-            return resp.read()
-    except urllib.error.URLError as exc:
-        raise RuntimeError(f"failed to download vendored Postgres from {url}: {exc}") from exc
+    for attempt in range(1, _DOWNLOAD_ATTEMPTS + 1):
+        try:
+            with urllib.request.urlopen(url, timeout=120) as resp:  # noqa: S310 — pinned https Maven Central URL
+                return resp.read()
+        except urllib.error.URLError as exc:
+            status = exc.code if isinstance(exc, urllib.error.HTTPError) else None
+            transient = status is None or status in _TRANSIENT_HTTP
+            if not transient or attempt == _DOWNLOAD_ATTEMPTS:
+                raise RuntimeError(
+                    f"failed to download vendored Postgres from {url}: {exc}"
+                ) from exc
+            delay = 2**attempt
+            logger.warning(
+                f"[runtime] transient error fetching {url} ({exc}); "
+                f"retry {attempt}/{_DOWNLOAD_ATTEMPTS - 1} in {delay}s"
+            )
+            time.sleep(delay)
+    raise AssertionError("unreachable: the last attempt either returned or raised")
 
 
 def _extract_pg(jar_bytes: bytes, target: Path) -> None:
