@@ -218,7 +218,7 @@ def _print_summary(out: dict) -> None:
     if out["content"] is not None:
         print(
             f"content: pruned={out['content']['pruned']}  "
-            f"messages={len(out['content'].get('messages', []))}"
+            f"messages={len(out['content']['messages'])}"
         )
     if out["events"] is not None:
         print(f"events: {len(out['events'])} rows")
@@ -297,8 +297,13 @@ def main() -> int:
         from_iso = (datetime.fromtimestamp(start_ns / 1e9, tz=UTC) - timedelta(hours=1)).isoformat()
         try:
             resp = _fetch_events(args.gateway, out["trace_id"], from_iso)
-            out["events"] = resp.get("items", [])
-            out["events_total"] = resp.get("meta", {}).get("total")
+            # `items` and `meta.total` are required EventsResponse/EventsMeta
+            # fields — index them. `.get()` would turn a future contract change
+            # into a silent empty list / null in the written JSON instead of a
+            # loud KeyError here. (`total` is int|None: present, null unless
+            # with_total=1 — which the request above passes.)
+            out["events"] = resp["items"]
+            out["events_total"] = resp["meta"]["total"]
         except urllib.error.HTTPError as exc:
             print(f"--with-events failed: HTTP {exc.code}")
 
