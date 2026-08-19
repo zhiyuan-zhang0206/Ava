@@ -39,10 +39,7 @@ Three entry points, three session classes:
 `kill_session(name, graceful=...)` → `(ok, mode)`, and the platform-neutral `process_alive` / `request_stop` / `force_kill` trio for the processes that are not sessions, live in [[stopping.ava.okf.md|stopping]].
 
 ### macOS firewall audit
-
-`shared/macos_firewall.py` is a **read-only** audit of the macOS Application Firewall's per-binary allow list, and read-only by necessity rather than by taste: mutating it needs root, which Ava does not have (see the module's own docstring for how that was established). It exists because every binary Ava serves an off-box port from lives at a version-stamped path, so a `uv python` / vendored-Postgres bump orphans its allow rule while loopback keeps answering — issue #949. Membership is read from `--listapps`, never `--getappblocked`: the latter reports "permitted" for a path with no rule at all, so it cannot see the defect. Consumed by `cli/commands/_converge_firewall.py` (proactive report) and `_gateway_ready.py`'s `OFF_BOX_UNREACHABLE` verdict (post-hoc attribution) — see [[cli/commands/commands.ava.okf.md]].
-
-## Entry points
+The read-only Application Firewall allow-list audit (issue #949, converge report + OFF_BOX_UNREACHABLE attribution): [[shared/session-backend/firewall-audit.ava.okf.md]].## Entry points
 
 - `shared/session_backend.py:get_backend()` / `get_shell_backend()` / `native_proc()` — the three dispatch points
 - `shared/posixproc.py` / `shared/winproc.py` — the native supervisors (agent processes + services)

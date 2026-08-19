@@ -47,7 +47,7 @@ Only applies to **crashes** (not clean exits) looping—clean exits go to `compl
 
 - [[db.ava.okf.md]] — reads/writes the `schedules` table
 - `shared.cluster.session_name()` — generates the session name `ava-schedule-<id>`
-- [[services/agent_runner_side/restarter.ava.okf.md]] — similar session management pattern, but schedules do tasks rather than guarding agents
+- [[services/agent_runner_side/restarter/restarter.ava.okf.md]] — similar session management pattern, but schedules do tasks rather than guarding agents
 
 ## Entry Points
 
