@@ -61,13 +61,13 @@ a linear history.
 PRs merge through the **Mergify** merge queue (`.mergify.yml`) — not by
 direct merge. Enqueuing is commenting `@mergifyio queue` on the PR (or
 `.venv/bin/python scripts/ci_utils.py <PR#> --wait --merge`, which posts that
-comment for you once CI is green). Mergify then rebases the PR onto the
-latest `main` and re-runs CI on the rebased head via the normal
-`pull_request` event, and lands it with a rebase merge (linear history)
-once its `merge_conditions` are green. **You no longer rebase-and-repoll
-when `main` moves**: the queue re-verifies on the tree that actually lands.
-(The `merge_group` trigger in `.github/workflows/ci.yml` is inert — GitHub's
-own queue does not run on personal private repos, which is why Mergify.)
+comment for you once CI is green). Mergify batches queued PRs into one
+speculative draft verification: a `mergify/merge-queue/*` branch carrying the
+combined tree, CI running on it via the normal `pull_request` event (ci.yml's
+draft-skip exempts that branch prefix). On green every PR in the batch lands
+as a rebase merge (linear history); a red batch auto-bisects to evict the
+culprit. **You no longer rebase-and-repoll when `main` moves**: the queue
+verifies the combined tree that actually lands.
 
 Still on you:
 - **Conflicts** — the queue cannot rebase a conflicting PR. Resolve locally

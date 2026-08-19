@@ -11,7 +11,16 @@
 # starts bare, so each job installs its own toolchain inline — uv, Node 22,
 # Postgres 17 + Redis server binaries on PATH (the suite self-provisions
 # throwaway native clusters via tests/_containers.py), and Playwright chromium
-# for e2e.
+# for e2e (browser dir cached; system deps installed per run).
+#
+# CHANGE-CLASS GATING (the CI pyramid's top): the `classify` job maps the PR
+# diff through shared/repo_change.py — the same classifier `ava cluster update`
+# uses for selective restart — and suites skip when their side is untouched:
+# docs-only skips everything, frontend-only skips the backend suite,
+# backend-only skips the frontend suite. e2e runs whenever EITHER side changed
+# (it is the integration net). Draft PRs skip CI entirely until
+# ready_for_review. Skipped required checks satisfy branch protection; the
+# Mergify conditions accept success-or-skipped for the same reason.
 #
 # Branch protection and the Mergify queue key on exactly three check names —
 # "backend (pytest + pyright)", "frontend (eslint + tsc + vitest)",
@@ -38,6 +47,7 @@ on:
       - 'ava_builtins/skills/**'
       - '**/*.md'
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
 
 permissions:
@@ -48,10 +58,53 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  classify:
+    # Which sides does this diff touch? Runs shared/repo_change.py (stdlib-only,
+    # exec'd directly — no venv) over the PR's changed paths. push/dispatch
+    # events always report both sides changed: main must always verify fully.
+    name: classify change
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    # Draft PRs skip CI — EXCEPT Mergify's speculative batch drafts
+    # (mergify/merge-queue/*), which are exactly the runs that must verify.
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false || startsWith(github.head_ref, 'mergify/merge-queue') }}
+    outputs:
+      frontend: ${{ steps.decide.outputs.frontend }}
+      backend: ${{ steps.decide.outputs.backend }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Classify changed paths
+        id: decide
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [ "$EVENT" != "pull_request" ]; then
+            echo "frontend=true" >> "$GITHUB_OUTPUT"
+            echo "backend=true"  >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git diff --name-only "$(git merge-base "$BASE_SHA" HEAD)"...HEAD > /tmp/changed.txt
+          python3 - <<'EOF' >> "$GITHUB_OUTPUT"
+          from pathlib import Path
+          ns: dict[str, object] = {}
+          exec(Path("shared/repo_change.py").read_text(), ns)
+          paths = Path("/tmp/changed.txt").read_text().splitlines()
+          frontend, backend = ns["classify_change"](paths)
+          print(f"frontend={str(frontend).lower()}")
+          print(f"backend={str(backend).lower()}")
+          EOF
+          cat "$GITHUB_OUTPUT"
+
   backend-static:
     name: backend static (ruff + pyright + migration smoke)
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    needs: [classify]
+    if: ${{ needs.classify.outputs.backend == 'true' }}
     env:
       AVA_DB_URL: postgresql://unused@127.0.0.1:1/unused
       AVA_REDIS_URL: redis://127.0.0.1:1/0
@@ -62,12 +115,7 @@ jobs:
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
 
       - name: Install Postgres 17 + Redis (server binaries on PATH)
-        run: |
-          sudo sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
-          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/pgdg.gpg
-          sudo apt-get update
-          sudo apt-get install -y postgresql-17 redis-server
-          echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
+        uses: ./.github/actions/install-pg-redis
 
       - name: Install Python deps
         run: uv sync --frozen
@@ -86,13 +134,15 @@ jobs:
         run: uv run pyright
 
   backend-shard:
-    name: backend shard (${{ matrix.group }}/4)
+    name: backend shard (${{ matrix.group }}/8)
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 20
+    needs: [classify]
+    if: ${{ needs.classify.outputs.backend == 'true' }}
     strategy:
       fail-fast: false
       matrix:
-        group: [1, 2, 3, 4]
+        group: [1, 2, 3, 4, 5, 6, 7, 8]
     env:
       AVA_DB_URL: postgresql://unused@127.0.0.1:1/unused
       AVA_REDIS_URL: redis://127.0.0.1:1/0
@@ -105,12 +155,7 @@ jobs:
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
 
       - name: Install Postgres 17 + Redis (server binaries on PATH)
-        run: |
-          sudo sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
-          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/pgdg.gpg
-          sudo apt-get update
-          sudo apt-get install -y postgresql-17 redis-server
-          echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
+        uses: ./.github/actions/install-pg-redis
 
       - name: Install Python deps
         run: uv sync --frozen
@@ -118,7 +163,7 @@ jobs:
       - name: Run pytest shard
         run: >
           uv run pytest tests/ -q --ignore=tests/e2e -n 4
-          --splits 4 --group ${{ matrix.group }}
+          --splits 8 --group ${{ matrix.group }}
           --cov=agent --cov=ava --cov=gateway --cov=shared --cov=ui
 
       - name: Upload coverage data
@@ -139,16 +184,17 @@ jobs:
 
   backend:
     # The aggregator carrying the branch-protection / Mergify check name:
-    # green iff the static job and every pytest shard are green AND the
-    # combined coverage clears the gate.
+    # skipped (= satisfied) when the diff has no backend side; otherwise green
+    # iff the static job and every pytest shard are green AND the combined
+    # coverage clears the gate.
     name: backend (pytest + pyright)
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    needs: [backend-static, backend-shard]
-    if: ${{ always() }}
+    needs: [classify, backend-static, backend-shard]
+    if: ${{ always() && needs.classify.result == 'success' && needs.classify.outputs.backend == 'true' }}
     steps:
       - name: Verify shard results
-        if: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped') }}
+        if: ${{ needs.backend-static.result != 'success' || needs.backend-shard.result != 'success' }}
         run: |
           echo "a backend job did not succeed: static=${{ needs.backend-static.result }} shards=${{ needs.backend-shard.result }}"
           exit 1
@@ -185,6 +231,8 @@ jobs:
     name: frontend (eslint + tsc + vitest)
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    needs: [classify]
+    if: ${{ needs.classify.outputs.frontend == 'true' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -214,13 +262,16 @@ jobs:
         run: npx vitest run --config vitest.flaky.config.ts
 
   e2e-shard:
-    name: e2e shard (${{ matrix.group }}/2)
+    name: e2e shard (${{ matrix.group }}/4)
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    needs: [classify]
+    # e2e is the integration net: it runs whenever EITHER side changed.
+    if: ${{ needs.classify.outputs.frontend == 'true' || needs.classify.outputs.backend == 'true' }}
     strategy:
       fail-fast: false
       matrix:
-        group: [1, 2]
+        group: [1, 2, 3, 4]
     env:
       AVA_DB_URL: postgresql://unused@127.0.0.1:1/unused
       AVA_REDIS_URL: redis://127.0.0.1:1/0
@@ -230,28 +281,39 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
 
+      - name: Install Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ui/web/package-lock.json
+
       - name: Install Postgres 17 + Redis (server binaries on PATH)
-        run: |
-          sudo sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
-          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/pgdg.gpg
-          sudo apt-get update
-          sudo apt-get install -y postgresql-17 redis-server
-          echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
+        uses: ./.github/actions/install-pg-redis
 
       - name: Install Python deps
         run: uv sync --frozen
       - name: Install frontend deps
         working-directory: ui/web
         run: npm ci
+
+      - name: Cache Playwright chromium
+        id: playwright-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('uv.lock') }}
       - name: Install Playwright chromium
+        # Cached browser -> only the system deps apt pass runs.
         run: uv run playwright install --with-deps chromium
+
       - name: Run e2e tests
         # tests/e2e has no entries in .test_durations (it is generated from the
         # backend suite), so pytest-split estimates them at the file average —
-        # effectively an even split by count, which is fine at 2 shards.
+        # effectively an even split by count.
         run: >
           uv run pytest tests/e2e/ -v -n 2
-          --splits 2 --group ${{ matrix.group }}
+          --splits 4 --group ${{ matrix.group }}
 
       - name: Upload e2e logs on failure
         if: failure()
@@ -261,12 +323,13 @@ jobs:
           path: tmp/e2e-logs/
 
   e2e:
-    # Aggregator carrying the branch-protection / Mergify check name.
+    # Aggregator carrying the branch-protection / Mergify check name; skipped
+    # (= satisfied) on docs-only diffs.
     name: e2e (Playwright happy path)
     runs-on: ubuntu-24.04
     timeout-minutes: 5
-    needs: [e2e-shard]
-    if: ${{ always() }}
+    needs: [classify, e2e-shard]
+    if: ${{ always() && needs.classify.result == 'success' && (needs.classify.outputs.frontend == 'true' || needs.classify.outputs.backend == 'true') }}
     steps:
       - name: Verify shard results
         run: |

@@ -1,0 +1,38 @@
+name: Install Postgres 17 + Redis
+description: >
+  Server binaries on PATH for the self-provisioned test clusters
+  (tests/_containers.py). The .deb downloads are cached (the apt fetch is the
+  step that has hung runners for 45 minutes — cached archives turn it into a
+  local install), and every network command is wrapped in timeout+retry:
+  CI *infrastructure* legitimately retries, the test suite itself never does.
+runs:
+  using: composite
+  steps:
+    - name: Cache apt archives
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: /tmp/apt-archives
+        key: apt-pg17-redis-${{ runner.os }}-v1
+
+    - name: Install (pgdg repo, cached archives, timeout+retry)
+      shell: bash
+      run: |
+        set -euo pipefail
+        retry() { local n=0; until "$@"; do n=$((n+1)); [ "$n" -ge 3 ] && return 1; echo "retry $n: $*"; sleep 5; done; }
+
+        sudo sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
+        retry timeout 60 sh -c 'curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --yes --dearmor -o /etc/apt/trusted.gpg.d/pgdg.gpg'
+        retry sudo timeout 120 apt-get update
+
+        sudo mkdir -p /tmp/apt-archives
+        sudo chown -R root:root /tmp/apt-archives
+        # Download into the cached dir first, install from it: a warm cache
+        # makes the network phase a no-op.
+        retry sudo timeout 300 apt-get install -y --download-only \
+          -o Dir::Cache::archives=/tmp/apt-archives postgresql-17 redis-server
+        sudo timeout 300 apt-get install -y \
+          -o Dir::Cache::archives=/tmp/apt-archives postgresql-17 redis-server
+        # The cache action needs the dir readable by the runner user.
+        sudo chmod -R a+r /tmp/apt-archives
+
+        echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
