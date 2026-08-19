@@ -242,7 +242,13 @@ if _cli_log_name:
 _LITE_VERBS = frozenset(
     {
         "stop",
-        "restart",
+        # `restart` is deliberately NOT here: its preflight registers this
+        # machine in the central DB and its start leg needs the cluster config
+        # regardless, so on a pure runner a lite restart could only ever hit
+        # the never-dialed placeholder DB URL (UnanchoredHomeError, observed on
+        # the fleet Windows box). With the gateway down, restart now fails at
+        # the fetch with the actionable BootstrapFetchError — `stop` stays lite
+        # and remains the recovery verb.
         "status",
         "cluster",
         "agents",
