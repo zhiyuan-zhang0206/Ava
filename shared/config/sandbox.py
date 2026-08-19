@@ -34,6 +34,26 @@ class SandboxSettings(EnvSettings):
             )
         return self
 
+    @model_validator(mode="after")
+    def _check_exec_output_cap_relation(self) -> Self:
+        """The accumulation budget must not sit below the inline envelope cap.
+
+        The accumulator keeps half its budget at each end; the envelope's
+        `truncate_both_ends` then slices `exec_output_max_chars // 2` off each
+        end. A budget below the inline cap would hand the envelope less than it
+        slices, so its "head" would reach into the accumulator's dropped middle
+        and the two layers would disagree about what survived. A violated
+        relation is a config error the operator must fix.
+        """
+        if self.exec_output_accumulation_max_chars < self.exec_output_max_chars:
+            raise ValueError(
+                f"exec_output_accumulation_max_chars "
+                f"({self.exec_output_accumulation_max_chars}) must be >= "
+                f"exec_output_max_chars ({self.exec_output_max_chars}) — the inline "
+                f"envelope must still have both ends of the accumulated output to render"
+            )
+        return self
+
     exec_timeout_seconds: float = Field(
         default=300.0,
         alias="AVA_EXEC_TIMEOUT_SECONDS",
@@ -66,6 +86,18 @@ class SandboxSettings(EnvSettings):
         default=30_000,
         alias="AVA_EXEC_OUTPUT_MAX_CHARS",
         description="Inline character cap on a single exec's output fed back to the LLM. On overflow, keep the first + last half, drop the middle, and write the full output to a tmp file whose path is reported.",
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    exec_output_accumulation_max_chars: int = Field(
+        default=1_000_000,
+        alias="AVA_EXEC_OUTPUT_ACCUMULATION_MAX_CHARS",
+        description="Character budget the exec output accumulator holds in memory WHILE code runs. Past it the first half + last half are kept and the middle is dropped as it streams, so a runaway print loop cannot pressure the agent process; execution continues and the agent sees the drop marker. Must be >= exec_output_max_chars (validated at startup).",
         json_schema_extra={
             "restart_required": "agent",
             "writable": True,
