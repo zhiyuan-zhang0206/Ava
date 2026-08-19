@@ -55,7 +55,7 @@ Overview of the Agent subsystem.
 - [[agent/message-format.ava.okf.md|Message Format]]
 - [[agent/messages.ava.okf.md|Messages]]
 - [[agent/observe.ava.okf.md|Observe]]
-- [[agent/process-lifecycle.ava.okf.md|Process Lifecycle]]
+- [[agent/process-lifecycle/process-lifecycle.ava.okf.md|Process Lifecycle]]
 - [[agent/startup.ava.okf.md|Startup]]
 - [[agent/state.ava.okf.md|State]]
 - [[agent/sessions.ava.okf.md|Sessions]]
