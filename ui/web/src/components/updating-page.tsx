@@ -5,10 +5,10 @@
 // Replaces the login page to avoid confusing users with a password prompt
 // during planned downtime.
 //
-// Polls the auth endpoint every 5s; when the backend comes back and the
-// session cookie is still valid, reloads the page to transition to the
-// normal app. If the session expired during the update, the reload will
-// naturally land on the login page.
+// Polls the auth endpoint every 5s; when the backend answers again (any
+// response — a paused gateway 503s the check), reloads the page: a valid
+// session transitions to the normal app, an expired one lands on the login
+// page.
 
 import { Loader2 } from "lucide-react";
 import { useTranslations } from "next-intl";
@@ -29,11 +29,16 @@ export function UpdatingPage() {
     return () => clearInterval(timer);
   }, []);
 
-  // Periodically retry auth — when the backend comes back and the session is
-  // still valid, reload the page to transition to the normal app. A full reload
-  // is the simplest reliable recovery: AuthProvider re-checks auth on mount,
-  // and it either sees "authenticated" (renders app) or "unauthenticated"
-  // (renders login page).
+  // Periodically retry auth — when the backend answers again, reload the page.
+  // A full reload is the simplest reliable recovery: AuthProvider re-checks
+  // auth on mount, and it either sees "authenticated" (renders app) or
+  // "unauthenticated" (renders login page). ANY successful response triggers
+  // the reload, `authenticated: false` included: /api/auth/check has no
+  // control-plane pause exemption, so a paused (mid-update) gateway 503s it
+  // (the catch below) — an answer means the gateway is serving again, and if
+  // the session expired meanwhile (e.g. across a host crash) the reload lands
+  // on the login page. Reloading only on `authenticated: true` left an
+  // expired session stuck on this page forever (2026-08-19 incident).
   useEffect(() => {
     let mounted = true;
     // In-flight guard: if a checkAuth hangs (a half-dead backend accepts the
@@ -46,8 +51,8 @@ export function UpdatingPage() {
       if (inFlight) return;
       inFlight = true;
       try {
-        const res = await api.checkAuth();
-        if (res.authenticated && mounted) {
+        await api.checkAuth();
+        if (mounted) {
           window.location.reload();
         }
       } catch {
