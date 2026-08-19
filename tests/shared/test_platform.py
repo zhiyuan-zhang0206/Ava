@@ -1,7 +1,7 @@
 """Unit tests for shared.platform — host detection + the disk-path probe.
 
-The WSL-marker and primary-disk-path logic used to live in shared.resource_monitor
-(as `_is_wsl` / `_disk_usage_path`); it now lives here as the canonical
+The WSL-marker and primary-disk-path logic used to live in the retired
+shared.resource_monitor (as `_is_wsl` / `_disk_usage_path`); it now lives here as the canonical
 `_detect_wsl` / `primary_disk_path`, so these tests followed it.
 """
 

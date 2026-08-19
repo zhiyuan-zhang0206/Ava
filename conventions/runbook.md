@@ -942,6 +942,43 @@ dial a backend directly. The sidecar fans out:
   (Prometheus): int -> counter, float -> histogram, named `ava_<event>_<field>`;
   sidecar → Prometheus OTLP receiver (`AVA_TELEMETRY_PROMETHEUS_URL` base,
   `/api/v1/otlp` appended).
+- **infrastructure metrics** — the sidecar SCRAPES as well as forwards
+  (issue #46): `host_metrics` on every machine (cpu / memory / load / disk /
+  filesystem / network) plus, on a gateway-capable unit only, `postgresql`
+  and `redis` against **this cluster's own** data plane. Zero extra binaries —
+  no node_exporter / postgres_exporter / redis_exporter — because the pinned
+  contrib collector already carries the receivers. They ride their own
+  `metrics/infra` pipeline (host identity attached there, app metrics
+  untouched) and land in Prometheus under `job="ava-infra"` with a `host`
+  label = the OS hostname. A pure agent-runner's DB/Redis URLs point at the
+  gateway's data plane, so its config omits those two receivers entirely
+  rather than duplicating the gateway's series.
+
+**One time-series store.** Prometheus holds the host history; nothing else
+retains one. `ava status` and the status page carry a single LIVE psutil
+reading per machine (`shared/resource_sample.py`) — the degraded answer for a
+deployment whose LGTM backend is down or was never deployed — and link to the
+Grafana host dashboard for the trend. The retired `shared/resource_monitor.py`
+kept a 300-sample ring buffer per process; two samplers meant two answers to
+"what was the CPU on machine X" that drift apart, and its history evaporated
+on every restart anyway.
+
+`AVA_TELEMETRY_OTLP_ENABLED` does **not** gate these. That flag is
+producer-scoped — the event dual-write, trace recording and ship, all things
+Ava processes do — and the sidecar has always run ungated by it. Infra metrics
+are the collector's own scrapes, so a machine can report host health while the
+event stream is Postgres-only. To silence them, stop the sidecar
+(`ava start --disable-service otel-collector`) or the stack (`ava lgtm off`);
+with no backend reachable the Prometheus exporter's bounded retry drops them
+the same way it already drops app metrics.
+
+**Not covered.** PgBouncer has no OTel contrib receiver (its `SHOW STATS`
+admin protocol is not the Postgres wire protocol), so pool saturation is
+watched at Postgres — backends against `max_connections`. Per-process
+attribution ("which agent is eating the box") is also absent: the
+`host_metrics` process scraper is unsupported on macOS, which is what prod
+runs, and it filters by process NAME, which cannot separate an Ava agent from
+any other `python3.12` on the box.
 
 The whole OTLP surface (exporter + trace recording + ship) is gated by
 `AVA_TELEMETRY_OTLP_ENABLED` (default **on**); off = Postgres-only writes, one
@@ -1020,6 +1057,32 @@ session_id=str(agent_id))`, a native OTel root span stamped with the neutral
 `session.id` (the viewer groups one agent's spans into a session by it). All
 child spans (LLM calls, tool execs, retries) share that root's trace_id +
 parent; without the wrap each LLM call is an orphan.
+
+### The operator's SRE loop
+
+Resource oversight is the **cluster-operator agent's judgment over LGTM data**
+(user ruling 2026-08-19), never a hardcoded limit in framework code: whether a
+saturated box is a runaway or a PyTorch job doing exactly what it was asked
+depends on machine specs and co-tenancy, which the kernel cannot know. The
+same boundary is why `execute_code` has no compute budget (issue #45).
+
+What the operator watches, and where it reads:
+
+| Axis | Read | Alert |
+|---|---|---|
+| LLM / gateway / turn latency p95-p99 | Grafana `ava-ops-main`, Prometheus `ava_*` histograms | R4 (LLM p95) |
+| Error and warning volume | Loki event stream | R1, R6 |
+| Delivery and event-pipeline health | Loki | R2, R5 |
+| Host CPU / memory / load | Grafana `ava-host-dataplane`, `job="ava-infra"` | R8, R9 |
+| Per-volume disk | same, `system_filesystem_utilization_ratio` | R10 (and R7, its trace-recording consequence) |
+| Data-plane saturation | same, `postgresql_*` / `redis_*` | R11, R12 |
+
+The response is judgment, not a runbook branch: identify the consumer, then
+investigate, hibernate idle agents to shed load, or tell the user — and
+sometimes conclude the machine is busy for a good reason and do nothing. The
+thresholds live in `deploy/lgtm/config/grafana/provisioning/alerting/rules.yml`
+as deployment-tunable rule config; a box whose normal state trips a rule wants
+its threshold edited there, not a special case in code.
 
 ## Logging / diagnostics
 

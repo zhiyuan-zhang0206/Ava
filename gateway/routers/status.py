@@ -43,7 +43,7 @@ from shared.last_update import LastUpdate
 from shared.lm.pricing import cost_usd
 from shared.machine import is_agent_runner, is_gateway, machine_name
 from shared.paths import ava_home
-from shared.resource_monitor import ResourcePoint
+from shared.resource_sample import ResourceSample
 
 router = APIRouter()
 _log = logging.getLogger(__name__)
@@ -395,7 +395,7 @@ async def _probe_agent_runner(
         agent_count=status.agent_count,
         session_count=status.session_count,
         agent_groups=status.agent_groups,
-        resource_history=status.resource_history,
+        resource=status.resource,
     )
 
 
@@ -508,14 +508,14 @@ def _read_last_update() -> LastUpdate | None:
         return None
 
 
-def _local_resource_history() -> list[ResourcePoint]:
-    """Resource history for the gateway's own machine (no status_snapshot call)."""
+def _local_resource_sample() -> ResourceSample | None:
+    """One live resource reading for the gateway's own machine (no status_snapshot call)."""
     try:
-        from shared.resource_monitor import resource_snapshot
+        from shared.resource_sample import resource_sample
 
-        return resource_snapshot()
+        return resource_sample()
     except Exception:  # fail-fast-ok: psutil may not be installed; degrade gracefully
-        return []
+        return None
 
 
 def _local_machine_status_blocking(
@@ -547,7 +547,7 @@ def _local_machine_status_blocking(
         is_staging=is_staging,
         head_sha=prod_source_head_sha(),
         running_sha=_process_sha.get(),
-        resource_history=_local_resource_history(),
+        resource=_local_resource_sample(),
     )
 
 
