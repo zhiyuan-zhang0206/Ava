@@ -46,6 +46,11 @@ class TestClassifyChange:
     def test_docs_only_is_neither(self) -> None:
         assert _up._classify_change(["conventions/runbook.md", "README.md"]) == (False, False)
 
+    def test_postmortems_is_a_doc_axis(self) -> None:
+        # a frozen incident narrative restarts nothing; without postmortems/ in
+        # _DOC_ROOTS it falls through to "anything else" and reads as backend.
+        assert _up._classify_change(["postmortems/0001-a-rollout.md"]) == (False, False)
+
     def test_docs_do_not_count_as_backend(self) -> None:
         # a frontend change + a top-level doc → frontend only, not backend
         assert _up._classify_change(["ui/web/x.tsx", "CLAUDE.md"]) == (True, False)

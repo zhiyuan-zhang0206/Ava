@@ -17,7 +17,7 @@ Scans `.py` under the in-scope dirs (`_SCAN_DIRS`): the agent + backend layers.
 Deliberate-UX surfaces are exempt and NOT scanned (`_EXEMPT_PREFIXES`):
 
 - `cli/` — terminal output where emoji are intentional UX.
-- `ava_builtins/skills/`, the doc axes (`decisions/`, `future/`, `conventions/`, `okf/`), `ui/web/`, `migrations/` — prose / generated / content.
+- `ava_builtins/skills/`, the doc axes (`decisions/`, `postmortems/`, `future/`, `conventions/`, `okf/`), `ui/web/`, `migrations/` — prose / generated / content.
 - `tests/cli/` — tests that mirror (and assert) the exempt surfaces.
 ## What counts as emoji
 
@@ -68,6 +68,7 @@ _EXEMPT_PREFIXES = (
     "ui/",
     "ava_builtins/skills/",
     "decisions/",
+    "postmortems/",
     "future/",
     "conventions/",
     "okf/",
