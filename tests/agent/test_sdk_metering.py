@@ -218,6 +218,12 @@ def test_install_wraps_and_restores_mcp_call_funnel() -> None:
     calls are metered, and restore it on teardown."""
     import ava.mcps
 
+    # `ava` is a process-global singleton and `_load_extensions` installs the
+    # recorders as a side effect, so any earlier test in this xdist worker that
+    # loaded plugins leaves the funnel already wrapped — install() then correctly
+    # no-ops and the wrap assertion below reads as a failure. Which tests share a
+    # worker is not deterministic under `-n`, so take a clean baseline first.
+    sdk_metering.uninstall()
     before = ava.mcps._call_raw
     sdk_metering.install()
     try:
