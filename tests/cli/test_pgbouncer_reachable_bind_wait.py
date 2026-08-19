@@ -44,9 +44,7 @@ def _noop_write(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     # pgbouncer_bin shells out (`brew --prefix pgbouncer` on macOS); stub it so the
     # fake start path never touches subprocess.
-    monkeypatch.setattr(
-        _pb, "pgbouncer_bin", lambda: "/opt/homebrew/bin/pgbouncer"
-    )  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(_pb, "pgbouncer_bin", lambda: "/opt/homebrew/bin/pgbouncer")  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
 
 
 def _fake_start(monkeypatch: pytest.MonkeyPatch, *, rc: int = 0) -> list[list[str]]:
@@ -177,7 +175,8 @@ def test_fresh_start_with_public_listener_is_success(
 
 
 def test_running_pooler_is_reloaded_when_public_listener_is_healthy(
-    monkeypatch: pytest.MonkeyPatch, _noop_write: None,
+    monkeypatch: pytest.MonkeyPatch,
+    _noop_write: None,
 ) -> None:
     """A running, fully-bound pooler keeps the cheap reload path — never bounce
     live connections for nothing, and never wait on the reachable address."""
@@ -186,10 +185,14 @@ def test_running_pooler_is_reloaded_when_public_listener_is_healthy(
 
     monkeypatch.setattr(_pb, "_running_pid", lambda: 4242)
     monkeypatch.setattr(
-        _pb, "_terminate_verified", lambda pid, **_: killed.append(pid) or True  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        _pb,
+        "_terminate_verified",
+        lambda pid, **_: killed.append(pid) or True,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     )
     monkeypatch.setattr(
-        _pb, "os", type("_OS", (), {"kill": staticmethod(lambda pid, _sig: sighups.append(pid))})()  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType, reportUnknownVariableType]
+        _pb,
+        "os",
+        type("_OS", (), {"kill": staticmethod(lambda pid, _sig: sighups.append(pid))})(),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType, reportUnknownVariableType]
     )
     monkeypatch.setattr(_pb, "pgbouncer_public_listener_reachable", lambda *_a, **_kw: True)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType, reportUnknownVariableType]
     monkeypatch.setattr(
@@ -197,7 +200,9 @@ def test_running_pooler_is_reloaded_when_public_listener_is_healthy(
         "_wait_for_reachable_bind_gated",
         lambda _secret: pytest.fail("a healthy running pooler must never wait"),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     )
-    monkeypatch.setattr(_pb, "subprocess", type("_SP", (), {"run": staticmethod(lambda *_a, **_kw: None)})())
+    monkeypatch.setattr(
+        _pb, "subprocess", type("_SP", (), {"run": staticmethod(lambda *_a, **_kw: None)})()
+    )
     rc = _pb.ensure_pgbouncer(
         pg_port=5433,
         listen_port=6433,
@@ -223,10 +228,14 @@ def test_running_degraded_pooler_is_restarted_not_reloaded(
 
     monkeypatch.setattr(_pb, "_running_pid", lambda: 4242)
     monkeypatch.setattr(
-        _pb, "_terminate_verified", lambda pid, **_: killed.append(pid) or True  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        _pb,
+        "_terminate_verified",
+        lambda pid, **_: killed.append(pid) or True,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     )
     monkeypatch.setattr(
-        _pb, "os", type("_OS", (), {"kill": staticmethod(lambda pid, _sig: sighups.append(pid))})()  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType, reportUnknownVariableType]
+        _pb,
+        "os",
+        type("_OS", (), {"kill": staticmethod(lambda pid, _sig: sighups.append(pid))})(),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType, reportUnknownVariableType]
     )
     monkeypatch.setattr(
         _pb,
@@ -292,7 +301,9 @@ def test_public_probe_is_a_noop_for_loopback_only_bind(
     monkeypatch.setattr(_pb, "_bind_addrs", lambda _secret: ["127.0.0.1"])  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     monkeypatch.setattr(_pb, "reachable_host", lambda: "100.64.0.5")
     monkeypatch.setattr(
-        _pb, "_admin_reachable", lambda *_a, host="127.0.0.1", **_kw: probed.append(host) or True  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        _pb,
+        "_admin_reachable",
+        lambda *_a, host="127.0.0.1", **_kw: probed.append(host) or True,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     )
 
     assert _pb.pgbouncer_public_listener_reachable(6433, "ava_main", "") is True
@@ -308,7 +319,8 @@ def test_public_probe_dials_the_reachable_host(
     monkeypatch.setattr(_pb, "_bind_addrs", lambda _secret: ["127.0.0.1", "100.64.0.5"])  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     monkeypatch.setattr(_pb, "reachable_host", lambda: "100.64.0.5")
     monkeypatch.setattr(
-        _pb, "_admin_reachable",
+        _pb,
+        "_admin_reachable",
         lambda *_a, host="127.0.0.1", **_kw: seen.append(host) or True,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     )
 

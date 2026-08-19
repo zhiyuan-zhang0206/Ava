@@ -158,7 +158,9 @@ def test_start_redis_loopback_only_bind_never_waits(
     redis_answers = iter([False, True])  # not running before start, up after
 
     monkeypatch.setattr(
-        _ci, "_redis_running", lambda *_a, **_kw: next(redis_answers)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        _ci,
+        "_redis_running",
+        lambda *_a, **_kw: next(redis_answers),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     )  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     started: list[list[str]] = []
 
@@ -213,7 +215,9 @@ def test_start_redis_waits_for_reachable_bind_before_starting(
         lambda: waited.append(True) or True,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     )
     monkeypatch.setattr(
-        _ci, "_redis_running", lambda *_a, **_kw: next(redis_answers)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        _ci,
+        "_redis_running",
+        lambda *_a, **_kw: next(redis_answers),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     )  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     started: list[list[str]] = []
 
