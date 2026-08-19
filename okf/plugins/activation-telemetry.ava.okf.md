@@ -32,4 +32,8 @@ plugin × model — a contribution that registers but never fires is the removal
 evidence [`philosophy.md` §6](../../conventions/philosophy.md) asks for. The
 weekly self-evolution collector puts the same counts on each run record as
 `plugins_activated`, so `mine.py` can cluster bad runs by the contribution that
-acted in them.
+acted in them. A row missing part of the `(plugin, surface, identifier)` key
+is dropped rather than crashing the collect, but the drop is counted and
+surfaced on the run record as `plugins_activated_skipped` (and a `print`
+warning) so an event-contract drift thins the dataset loudly instead of
+silently (issue #92).
