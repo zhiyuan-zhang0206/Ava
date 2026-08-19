@@ -304,7 +304,12 @@ jobs:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('uv.lock') }}
       - name: Install Playwright chromium
-        # Cached browser -> only the system deps apt pass runs.
+        # Cached browser -> only the system deps apt pass runs. That apt pass is
+        # the same class of hang install-pg-redis is hardened against, but it is
+        # playwright's own and takes no timeout options, so cap the step: a stall
+        # here otherwise holds the job (and with it the whole run's rerun
+        # eligibility) for the full 30-minute ceiling.
+        timeout-minutes: 10
         run: uv run playwright install --with-deps chromium
 
       - name: Run e2e tests
