@@ -39,7 +39,7 @@ from gateway.schemas import AgentCost, StatsWindowHours
 # mirrors `HALT_KEYS` in shared/events/contract.py.
 HALT_EVENT = "halt"
 
-# Loki holds 168h (deploy/local/lgtm/config/loki.yaml retention_period); the
+# Loki holds 168h (deploy/lgtm/config/loki.yaml retention_period); the
 # lookup window for compact markers and the pure-Loki path bound.
 _LOKI_RETENTION = timedelta(hours=168)
 

@@ -334,7 +334,7 @@ class DaemonSettings(EnvSettings):
     events_maintenance_enabled: bool = Field(
         default=False,
         alias="AVA_EVENTS_MAINTENANCE_ENABLED",
-        description="Run the events-archive maintenance slices (partition rolling + retention + rollup) inside the events-maintenance daemon. The daemon itself always runs on the gateway: its checkpoint reaper (Rule A/B) and blob vacuum are unconditional — gating the daemon off stopped the reaper and checkpoint_blobs grew ~150MB/h (2026-08-12 design regression). Off by default since the LGTM cutover (task #1197): the PG events copy is a read-only archive and nothing rolls it up.",
+        description="Run the events-archive maintenance slices (partition rolling + retention + index governance) inside the events-maintenance daemon. The daemon itself always runs on the gateway: the cost-ledger rollup (Loki -> agent_model_tokens_daily), the checkpoint reaper (Rule A/B) and the blob vacuum are unconditional — the rollup must outlive Loki's 168h retention, and gating the daemon off stopped the reaper and checkpoint_blobs grew ~150MB/h (2026-08-12 design regression). Off by default since the LGTM cutover (task #1197): the PG events copy is a read-only archive.",
         json_schema_extra={
             "restart_required": "",
             "writable": False,
