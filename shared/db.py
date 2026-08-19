@@ -142,10 +142,13 @@ def _guard_db_url(url: str) -> str:
     """
     if url == UNANCHORED_DB_SENTINEL:
         raise UnanchoredHomeError(
-            "refusing to open a DB connection: this checkout resolved no AVA_HOME "
-            "(not the prod source, no .ava_home pointer, AVA_HOME unset), so it has "
-            "no cluster database. Run `ava start` in this worktree (writes its "
-            ".ava_home pointer) or export AVA_HOME=<unit home>."
+            "refusing to open a DB connection: AVA_DB_URL is the never-dialed "
+            "placeholder. Two ways to land here: this checkout resolved no AVA_HOME "
+            "(not the prod source, no .ava_home pointer, AVA_HOME unset) — run "
+            "`ava start` in this worktree (writes its .ava_home pointer) or export "
+            "AVA_HOME=<unit home>; or this process built settings-lite "
+            "(AVA_CONFIG_FETCH=skip, the maintenance verbs' gateway-down mode) and "
+            "this operation needs the cluster config a fetch would have provided."
         )
     return url
 
