@@ -12,6 +12,12 @@ repos:
       - id: trailing-whitespace
       - id: end-of-file-fixer
       - id: check-yaml
+        # deploy/otel-collector/otel-collector.yaml is a string.Template
+        # SOURCE, not YAML: $DATA_PLANE_RECEIVERS stands where a whole receiver
+        # block is spliced in, which no YAML parser can accept. The rendered
+        # output is what must parse, and tests/cli/test_converge_otel_collector.py
+        # parses it for every role combination — a stricter gate than this hook.
+        exclude: ^deploy/otel-collector/otel-collector\.yaml$
       - id: check-toml
       - id: check-merge-conflict
       - id: check-added-large-files
@@ -346,7 +352,7 @@ repos:
         name: "types-generated.ts in sync with Pydantic schema (drift: run ./scripts/codegen-types.sh)"
         entry: ./scripts/check-types-fresh.sh
         language: system
-        files: ^(gateway/schemas/.*\.py$|gateway/app\.py$|gateway/routers/.*\.py$|shared/agents\.py$|shared/api_contracts/.*\.py$|shared/timeline\.py$|shared/agent_snapshot\.py$|shared/resource_monitor\.py$|ops/rpc_schemas\.py$|ops/cluster\.py$|ui/web/src/lib/types-generated\.ts$|ui/web/openapi\.json$)
+        files: ^(gateway/schemas/.*\.py$|gateway/app\.py$|gateway/routers/.*\.py$|shared/agents\.py$|shared/api_contracts/.*\.py$|shared/timeline\.py$|shared/agent_snapshot\.py$|shared/resource_sample\.py$|ops/rpc_schemas\.py$|ops/cluster\.py$|ui/web/src/lib/types-generated\.ts$|ui/web/openapi\.json$)
         pass_filenames: false
       - id: constants-codegen-fresh
         name: "constants-generated.ts in sync with shared/live_events.py (drift: run ./scripts/dump_frontend_constants.py)"

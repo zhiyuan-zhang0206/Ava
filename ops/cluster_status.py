@@ -25,7 +25,7 @@ from ops.rpc_schemas import AgentSessionGroup, SessionInfo, ShellInfo
 from ops.updater_outcome import UpdaterOutcome, last_updater_outcome
 from shared.machine import is_agent_runner, is_gateway, machine_name
 from shared.proc import process_alive
-from shared.resource_monitor import ResourcePoint
+from shared.resource_sample import ResourceSample
 
 _log = logging.getLogger(__name__)
 
@@ -97,10 +97,9 @@ class ClusterStatus(BaseModel):
     # The agents' shell/watcher sessions grouped by agent for hierarchical
     # display (the agent process itself is not a session, so it is not a group entry).
     agent_groups: list[dict[str, object]] = []
-    # Per-machine resource history — CPU / memory / disk time series (newest last).
-    # Collected by the shared.resource_monitor singleton; each poll appends one
-    # data point. Empty list when psutil is unavailable.
-    resource_history: list[ResourcePoint] = []
+    # This machine's live CPU / memory / disk reading — one sample, no history
+    # (Prometheus holds the series). None when psutil is unavailable.
+    resource: ResourceSample | None = None
 
 
 def _check_pidfile(pidfile_path: str) -> tuple[bool, int | None]:
@@ -341,18 +340,18 @@ def status_snapshot() -> ClusterStatus:
     # an open dict list so the frontend-facing status schema (and its generated TS
     # types) is unchanged — serialize the models to JSON dicts at the boundary.
     agent_groups = [g.model_dump(mode="json") for g in _group_agent_sessions(sessions)]
-    # Resource history from the per-process collector (CPU/memory/disk time series).
-    # Wrapped in try/except so a missing psutil does not take down the status probe.
-    resource_history: list[ResourcePoint] = []
+    # One live CPU/memory/disk reading. Wrapped in try/except so a missing
+    # psutil does not take down the status probe.
+    resource: ResourceSample | None = None
     try:
-        from shared.resource_monitor import resource_snapshot
+        from shared.resource_sample import resource_sample
 
-        resource_history = resource_snapshot()
+        resource = resource_sample()
     except Exception:  # fail-fast-ok: psutil may not be installed; degrade gracefully
         import logging
 
         logging.getLogger(__name__).warning(
-            "resource_snapshot failed (psutil missing?)", exc_info=True
+            "resource_sample failed (psutil missing?)", exc_info=True
         )
     return ClusterStatus(
         machine_name=machine_name(),
@@ -369,5 +368,5 @@ def status_snapshot() -> ClusterStatus:
         agent_count=agent_count,
         session_count=session_total,
         agent_groups=agent_groups,
-        resource_history=resource_history,
+        resource=resource,
     )

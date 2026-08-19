@@ -25,8 +25,10 @@ import tempfile
 import urllib.request
 from pathlib import Path
 from string import Template
+from urllib.parse import unquote, urlsplit
 
 from cli.commands._converge_spec import ConvergeCtx
+from shared.machine import MachineRoles
 
 # Pinned contrib version — re-validate against the deploy/lgtm backends
 # (Tempo/Loki/Prometheus OTLP intake) when bumping.
@@ -81,19 +83,102 @@ def _config_template(repo: Path) -> str:
     return (repo / "deploy/otel-collector/otel-collector.yaml").read_text(encoding="utf-8")
 
 
-def generate_config(repo: Path, ava_home: Path) -> str:
+def _yaml_quote(value: str) -> str:
+    """A single-quoted YAML scalar — the form that needs no escaping but ''."""
+    return "'" + value.replace("'", "''") + "'"
+
+
+# The data-plane receiver block, rendered into $DATA_PLANE_RECEIVERS. Scrape
+# interval is 60s (not host_metrics' 30s): connection counts and redis memory
+# are slow-moving pressure gauges, and each scrape opens a real backend
+# session on a pooler-fronted Postgres.
+_DATA_PLANE_BLOCK = """
+  # This cluster's OWN Postgres — dialed DIRECT, never through PgBouncer: the
+  # receiver reads pg_stat_* views, which a transaction-pooled session cannot
+  # be trusted to serve consistently. The role is the cluster's NOSUPERUSER
+  # owner, so the receiver collects what that role can see (its own database's
+  # stats); metrics needing pg_monitor are simply absent rather than fatal.
+  postgresql:
+    endpoint: {pg_endpoint}
+    transport: tcp
+    username: {pg_user}
+    password: {pg_password}
+    databases: [{pg_database}]
+    collection_interval: 60s
+    tls:
+      insecure: true
+
+  # This cluster's OWN Redis. Password is the cluster secret (requirepass ==
+  # the secret); an empty secret is the no-auth single-box default and the
+  # receiver simply skips AUTH.
+  redis:
+    endpoint: {redis_endpoint}
+    transport: tcp
+    password: {redis_password}
+    collection_interval: 60s
+"""
+
+
+def _endpoint(url: str, what: str) -> str:
+    """`host:port` for a receiver, or an explosion naming what to fix.
+
+    A connection URL with no port cannot be scraped, and guessing the default
+    would point the receiver at whatever else listens there.
+    """
+    parts = urlsplit(url)
+    if parts.hostname is None or parts.port is None:
+        raise RuntimeError(
+            f"cannot build the otel-collector {what} receiver: {what} URL has no "
+            f"host:port (got {parts.scheme}://{parts.netloc!r})"
+        )
+    return f"{parts.hostname}:{parts.port}"
+
+
+def _data_plane_receivers(roles: MachineRoles | None) -> tuple[str, str]:
+    """(receiver block, pipeline-list fragment) for this unit's own data plane.
+
+    Empty pair on anything that does not own Postgres+Redis: a pure
+    agent-runner's URLs point at the GATEWAY's data plane, so scraping from
+    there would duplicate the gateway's own series under a second `host`
+    label. An unconfigured unit (roles None) has no URLs to read at all.
+    """
+    if roles is None or "gateway" not in roles:
+        return "", ""
+    from shared.config import settings
+    from shared.db import UNANCHORED_DB_SENTINEL, direct_db_url
+
+    db_url = direct_db_url()
+    if db_url == UNANCHORED_DB_SENTINEL:
+        return "", ""
+    pg = urlsplit(db_url)
+    redis_url = settings.data_plane.redis_url
+    block = _DATA_PLANE_BLOCK.format(
+        pg_endpoint=_endpoint(db_url, "postgres"),
+        pg_user=_yaml_quote(unquote(pg.username or "")),
+        pg_password=_yaml_quote(unquote(pg.password or "")),
+        pg_database=_yaml_quote(pg.path.lstrip("/")),
+        redis_endpoint=_endpoint(redis_url, "redis"),
+        redis_password=_yaml_quote(unquote(urlsplit(redis_url).password or "")),
+    )
+    return block, ", postgresql, redis"
+
+
+def generate_config(repo: Path, ava_home: Path, roles: MachineRoles | None) -> str:
     """Render the sidecar config from the repo template + this unit's settings."""
     from shared.config import settings
 
     obs = settings.observability
     loki_base = obs.telemetry_loki_url.rstrip("/") + "/otlp"
     prom_base = obs.telemetry_prometheus_url.rstrip("/") + "/api/v1/otlp"
+    data_plane_block, data_plane_pipeline = _data_plane_receivers(roles)
     return Template(_config_template(repo)).substitute(
         AVA_HOME=str(ava_home),
         TEMPO_ENDPOINT=obs.telemetry_tempo_endpoint.rstrip("/"),
         LOKI_BASE=loki_base,
         PROM_BASE=prom_base,
         RETENTION_DAYS=str(obs.trace_retention_days),
+        DATA_PLANE_RECEIVERS=data_plane_block,
+        DATA_PLANE_PIPELINE_RECEIVERS=data_plane_pipeline,
     )
 
 
@@ -124,7 +209,7 @@ def _download_and_verify(tag: str, dest_dir: Path) -> None:
     (dest_dir / _VERSION_MARKER).write_text(OTELCOL_CONTRIB_VERSION + "\n", encoding="utf-8")
 
 
-def ensure_otel_collector(repo: Path, ava_home: Path) -> None:
+def ensure_otel_collector(repo: Path, ava_home: Path, roles: MachineRoles | None) -> None:
     """Idempotent install: pinned binary present + config regenerated.
 
     Binary download is skipped when the version marker matches. Config is
@@ -153,9 +238,13 @@ def ensure_otel_collector(repo: Path, ava_home: Path) -> None:
     else:
         print(f"  · otel-collector: otelcol-contrib {OTELCOL_CONTRIB_VERSION} present")
     config = dest_dir / "config.yaml"
-    config.write_text(generate_config(repo, ava_home), encoding="utf-8")
+    config.write_text(generate_config(repo, ava_home, roles), encoding="utf-8")
+    # On a gateway unit the rendered config carries the cluster secret (the
+    # pg/redis receiver credentials), same as the cluster .env beside it.
+    if platform.system() != "Windows":
+        config.chmod(0o600)
 
 
 def ensure_otel_collector_step(ctx: ConvergeCtx) -> None:
     """Converge step: install the pinned sidecar binary + config (every machine)."""
-    ensure_otel_collector(ctx.repo, ctx.ava_home)
+    ensure_otel_collector(ctx.repo, ctx.ava_home, ctx.roles)
