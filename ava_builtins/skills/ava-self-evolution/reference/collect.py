@@ -254,9 +254,6 @@ def _events_page(
         "to": to.isoformat(),
         "limit": _PAGE,
         "offset": 0,
-        # the exact slice count drives the bisection; total is opt-in
-        # server-side (skipped by default to spare the count aggregation)
-        "with_total": 1,
     }
     if agent_id is not None:
         params["agent_id"] = agent_id
@@ -286,9 +283,12 @@ def _fetch_events_window(
 
     Offset-free by construction: Loki offset paging is both O(n^2) and
     timeout-prone (gateway's 60s Loki budget — 2026-08-14 observed), so
-    every request is offset=0 with limit=_PAGE, and any slice whose exact
-    `meta.total` exceeds _PAGE is bisected in time until each half fits one
-    page. Rows are deduped by surrogate row id across slice boundaries (the
+    every request is offset=0 with limit=_PAGE, and any slice whose
+    `meta.has_more` says the page overflowed is bisected in time until each
+    half fits one page. Requests are count-free by design — `meta.total` is
+    opt-in (with_total=1) and its count aggregation is exactly the Loki load
+    the gateway shed (2026-08-18 change) — so this function reads `has_more`
+    only, and a missing `has_more` raises instead of silently truncating. Rows are deduped by surrogate row id across slice boundaries (the
     API window is inclusive on both ends) and sorted by `ts` (the API
     returns newest-first). Raises on persistent HTTP errors — a partial
     window must not silently become a partial dataset.
@@ -304,14 +304,18 @@ def _fetch_events_window(
             batch, meta = _events_page(
                 client, category=category, from_=start, to=end, agent_id=agent_id
             )
-            total = int(meta.get("total", 0))
-            if total == 0:
-                return
-            if total <= _PAGE or end - start <= _MIN_SLICE:
-                if total > _PAGE:
+            # has_more is a required, non-nullable EventsMeta field — index it,
+            # not .get(): a silent False here would accept an oversized slice
+            # without bisection and quietly truncate the dataset (the exact
+            # quiet-failure class the 2026-08-14 outage was). KeyError = loud.
+            has_more = meta["has_more"]
+            if not batch and not has_more:
+                return  # empty slice
+            if not has_more or end - start <= _MIN_SLICE:
+                if has_more:
                     print(
-                        f"warning: {category} slice [{start}, {end}] has {total} rows "
-                        f"over the page budget ({_PAGE}) — tail may be truncated"
+                        f"warning: {category} slice [{start}, {end}] has more than "
+                        f"{_PAGE} rows in under {_MIN_SLICE} — tail may be truncated"
                     )
                 for r in batch:
                     rid = r.get("id")
@@ -352,10 +356,12 @@ def _group_by_agent(
 # (2026-08-14: the daily scan produced empty datasets for 36 hours).
 #
 # Paging discipline: every request is offset=0, limit=_PAGE; slices whose
-# exact total exceeds _PAGE are bisected in time. Loki's default
-# max_entries_limit_per_query is 5000 — /api/events offset paging silently
-# drops rows once limit+offset+1 exceeds it (2026-08-14, agent 3012) and is
-# timeout-prone, so offsets are never used.
+# page overflows (has_more) are bisected in time. No count aggregation is
+# requested — /api/events meta.total is opt-in (with_total=1, 2026-08-18
+# change) and the count path is exactly the Loki load the gateway was
+# shedding. Loki's default max_entries_limit_per_query is 5000 — offset
+# paging silently drops rows once limit+offset+1 exceeds it (2026-08-14,
+# agent 3012) and is timeout-prone, so offsets are never used.
 _PAGE = 1000  # /api/events limit cap — each slice fits exactly one page
 _HTTP_TIMEOUT_S = 120.0
 _RETRIES = 2

@@ -178,12 +178,15 @@ class _FakeClient:
         offset = int(cast(Any, p.get("offset", 0)))
         limit = int(cast(Any, p.get("limit", 1000)))
         page = sorted(matching, key=lambda r: str(r["ts"]), reverse=True)[offset : offset + limit]
-        # meta.total is opt-in server-side (with_total=1) — mirror that here
-        # so collect's bisection provably requests it.
-        meta: dict[str, object] = {"has_more": offset + len(page) < total}
-        if p.get("with_total"):
-            meta["total"] = total
-        return _FakeResp({"items": page, "meta": meta})
+        # 2026-08-18 contract: meta.total is opt-in (with_total=1) and the
+        # gateway shed the count aggregation — collect paging must not depend
+        # on it, so the fake omits `total` entirely. has_more drives bisection.
+        return _FakeResp(
+            {
+                "items": page,
+                "meta": {"has_more": offset + len(page) < total},
+            }
+        )
 
 
 def _row(i: int, ts: datetime, category: str = "telemetry", agent_id: int = 7) -> dict[str, object]:
@@ -286,6 +289,22 @@ def test_fetch_raises_on_http_error(collect_mod: Any, monkeypatch: pytest.Monkey
 
     with pytest.raises(httpx.HTTPStatusError):
         collect_mod._fetch_events_window("telemetry", _ts_after(0), _ts_after(3600))
+
+
+def test_fetch_requests_are_count_free(collect_mod: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """2026-08-18 contract lock: /api/events meta.total is opt-in behind
+    with_total=1 because the count aggregation is exactly the Loki load the
+    gateway shed. Paging decisions use has_more; no request may ask for the
+    count (a re-introduced with_total=1 would silently re-add that load)."""
+    rows = [_row(i, _ts_after(i * 2)) for i in range(2500)]
+    client = _FakeClient(rows)
+    _patch_client(collect_mod, monkeypatch, client)
+
+    collect_mod._fetch_events_window("telemetry", _ts_after(0), _ts_after(7200))
+
+    assert client.requests
+    for _, p, _h in client.requests:
+        assert "with_total" not in p
 
 
 # ── plugin attribution (issue #40) ──────────────────────────────────────────
