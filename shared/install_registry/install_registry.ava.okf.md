@@ -73,28 +73,7 @@ reads the registry on every call, and `ava plugins install|upgrade` runs the
 converge pass inline.
 
 ## One way to write it
-
-Every change goes through `shared/install_registry.py:mutate()`, which loads the
-registry, hands it over for edits, and saves it back under `registry_lock` — a
-bounded advisory lock on the sibling `installed.json.lock`. `register` /
-`deregister` are thin wrappers over it, and the three cycles that edit rows in
-bulk — the gateway's skills-toggle handler, `ava skill update`, and skills
-converge — open it directly. `scripts/migrate_skill_identity.py --apply` cannot
-use `mutate` (it rewrites a registry under an arbitrary `--ava-home`), so it
-takes `registry_lock` explicitly; that is the only writer outside this module.
-
-The lock is what the file needs that atomic saving does not give it: `save` is a
-full replace, so two writers in different processes (an agent running
-`ava skill install`, a restart running converge, the panel toggling a skill) each
-publish a registry read before the other's rows existed, and one side's packages
-stop being tracked while their directories sit on disk. `save` also stages
-through ONE fixed temp name, so two overlapping saves corrupt each other's
-staging outright rather than merely losing a row.
-
-A `mutate` body must not open a second cycle — the lock is not re-entrant, so a
-nested one contends with its own outer take. It raises `LockTimeoutError` rather
-than deadlocking, but only after waiting out the full 30s bound: the failure is
-bounded and loud, not fast. Catch it in review or a test, not by watching prod.
+The single write path — `mutate()` under `registry_lock`, its wrappers, and the three bulk-edit cycles: [[shared/install_registry/write-path.ava.okf.md]].
 
 ## Installable shapes
 
@@ -127,8 +106,8 @@ it on demand (exit 2 on criticals).
 A **mitigation layer, not a boundary**: known shapes of known attacks, in text
 it can read. A clean report means "no rule matched", never "safe". Rationale +
 rejected alternatives:
-[the decision record](../decisions/2026-07-29-skill-trust-tiers-and-install-scan.md);
-open gaps: [what's left](../future/infra/skill-supply-chain-trust.md).
+[the decision record](../../decisions/2026-07-29-skill-trust-tiers-and-install-scan.md);
+open gaps: [what's left](../../future/infra/skill-supply-chain-trust.md).
 
 Beyond the load dir, a plugin can contribute skill roots at scan time via
 `ava/skills.py:register_skill_source` — the `ava_code` plugin uses it to surface
