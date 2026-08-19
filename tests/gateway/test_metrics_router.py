@@ -18,7 +18,14 @@ from fastapi.testclient import TestClient
 from gateway.app import app
 from tests.gateway.loki_fake import FakeLoki
 
-_UNITS = {"syntax_fix", "exec", "llm_turns", "agent_activity", "sdk_usage"}
+_UNITS = {
+    "syntax_fix",
+    "exec",
+    "llm_turns",
+    "agent_activity",
+    "sdk_usage",
+    "plugin_activation",
+}
 
 
 @pytest.fixture

@@ -53,6 +53,7 @@ up the dynamic class rebound by build_agent_state.
 
 from __future__ import annotations
 
+import weakref
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
 from typing import Any, Literal
@@ -63,8 +64,9 @@ from langgraph.types import Command
 
 from agent import state as _state
 from agent.nodes import NodeName
-from shared import plugin_contributions
+from shared import plugin_activation, plugin_contributions
 from shared.context import AvaContext, agent_id_from_config
+from shared.plugin_context import current_plugin_name
 
 HookName = Literal["before_llm", "before_exec", "after_exec", "after_init"]
 
@@ -115,15 +117,27 @@ HOOKS: dict[HookName, list[Hook]] = {
 }
 
 
+# hook instance -> the plugin that registered it, so the runner can attribute a
+# firing without `HOOKS` (or the `Hook` protocol) growing a field. Weak keys:
+# an entry disappears with the hook instance, so a plugin reload that rebuilds
+# its hooks does not accumulate dead attributions. Framework hooks register
+# outside a `PluginContext` and are absent here — which is exactly the gate
+# `plugin_activation.record` applies, so framework hooks stay untelemetered.
+_HOOK_PLUGIN: weakref.WeakKeyDictionary[Hook, str] = weakref.WeakKeyDictionary()
+
+
 def _register(hook_name: HookName, hook: Hook) -> None:
     """Append to the hook point's list and attribute the registration to the
     importing plugin (a no-op outside a `PluginContext`, i.e. for the framework's
     own hooks) — `HOOKS` holds bare instances, so `ava plugins inspect` reads the
-    attribution off the ledger."""
+    attribution off the ledger and the runner reads it off `_HOOK_PLUGIN`."""
     HOOKS[hook_name].append(hook)
     plugin_contributions.record(
         "hooks", hook_name, detail=f"{type(hook).__module__}.{type(hook).__qualname__}"
     )
+    plugin = current_plugin_name()
+    if plugin is not None:
+        _HOOK_PLUGIN[hook] = plugin
 
 
 def register_before_llm(hook: Hook) -> None:
@@ -183,6 +197,10 @@ def make_hook_runner(
       node sequence the collision themselves (the sibling defers when the
       other will write).
     - Each hook returning None → skip
+    - A **plugin** hook returning a non-empty dict also emits one
+      `plugin_activation` event naming the keys it wrote
+      (`shared.plugin_activation`) — a pure side channel, and silent for
+      framework hooks and for `None` returns.
     - Final return Command(update=update_minus_goto, goto=next_node)
     """
     # node_lifecycle wraps with enter/exit events + publish a timeline snapshot —
@@ -222,6 +240,17 @@ def make_hook_runner(
                 result = await hook(state, runtime, config)
                 if not result:
                     continue
+                # Activation telemetry (philosophy §6): a plugin hook that
+                # returned a state update did something to this turn — record
+                # which keys it touched. A None / {} return is pure observation
+                # and stays free. Plugin state-field writes travel through this
+                # dict, so the `state` surface needs no separate probe.
+                plugin_activation.record(
+                    _HOOK_PLUGIN.get(hook),
+                    "hooks",
+                    hook_name,
+                    detail=f"{hook.name} wrote {','.join(sorted(result))}",  # pyright: ignore[reportUnknownArgumentType]
+                )
                 for key, value in result.items():
                     if key in update:
                         prior = key_writer[key]

@@ -22,6 +22,8 @@ from agent.hooks import (
     register_before_llm,
 )
 from agent.state import AgentState
+from shared import plugin_activation, plugin_contributions
+from shared.plugin_context import PluginContext
 from tests.agent._fakes import make_fake_ops_pool
 
 
@@ -255,3 +257,84 @@ async def test_hook_can_read_agent_id_from_config():
     runner = make_hook_runner("before_llm", default_next="llm")
     await runner(_empty_state(), _empty_runtime(), {"configurable": {"thread_id": "42"}})
     assert seen == [42]
+
+
+# ── activation telemetry (issue #40) ────────────────────────────────────────
+
+
+@pytest.fixture
+def activations(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str, str, str]]:
+    """Capture (plugin, surface, identifier, detail) per recorded activation.
+
+    Keeps the real `record`'s attribution gate — an unattributed firing is
+    dropped rather than captured — so these tests read the emitted stream, not
+    the call log."""
+    recorded: list[tuple[str, str, str, str]] = []
+
+    def spy(plugin: str | None, surface: str, identifier: str, *, detail: str = "") -> None:
+        if plugin is not None:
+            recorded.append((plugin, surface, identifier, detail))
+
+    monkeypatch.setattr(plugin_activation, "record", spy)
+    return recorded
+
+
+async def test_plugin_hook_state_update_records_activation(
+    activations: list[tuple[str, str, str, str]],
+):
+    """A plugin hook that returned a state update acted on the turn — the record
+    names the keys it wrote, which is also how the `state` surface is covered
+    (plugin state writes travel through hook returns)."""
+    with PluginContext("myplugin"):
+        register_before_llm(_ReturnHook({"halted": True}))
+
+    await make_hook_runner("before_llm", default_next="llm")(
+        _empty_state(), _empty_runtime(), _empty_config()
+    )
+    assert activations == [("myplugin", "hooks", "before_llm", "_ReturnHook wrote halted")]
+
+
+async def test_plugin_hook_returning_none_records_nothing(
+    activations: list[tuple[str, str, str, str]],
+):
+    """Pure observation stays free — a None return is not an activation."""
+    with PluginContext("myplugin"):
+        register_before_llm(_ReturnHook(None))
+
+    await make_hook_runner("before_llm", default_next="llm")(
+        _empty_state(), _empty_runtime(), _empty_config()
+    )
+    assert activations == []
+
+
+async def test_framework_hook_records_nothing(activations: list[tuple[str, str, str, str]]):
+    """Framework hooks register outside a PluginContext, so they are absent from
+    the attribution ledger and from activation telemetry alike."""
+    register_before_llm(_ReturnHook({"halted": True}))
+
+    await make_hook_runner("before_llm", default_next="llm")(
+        _empty_state(), _empty_runtime(), _empty_config()
+    )
+    assert activations == []
+
+
+async def test_activation_key_matches_the_ledger_entry(monkeypatch: pytest.MonkeyPatch):
+    """The whole point of reusing `(plugin, surface, identifier)`: an activation
+    joins onto the `Contribution` the same registration wrote, with no second
+    identifier space to keep in sync."""
+    recorded: list[tuple[str, str, str]] = []
+
+    def spy(plugin: str | None, surface: str, identifier: str, *, detail: str = "") -> None:
+        if plugin is not None:
+            recorded.append((plugin, surface, identifier))
+
+    monkeypatch.setattr(plugin_activation, "record", spy)
+    before = len(plugin_contributions.contributions())
+    with PluginContext("myplugin"):
+        register_before_exec(_ReturnHook({"halted": True}))
+    ledger = plugin_contributions.contributions()[before:]
+
+    await make_hook_runner("before_exec", default_next="exec")(
+        _empty_state(), _empty_runtime(), _empty_config()
+    )
+    assert [(c.plugin, c.surface, c.identifier) for c in ledger] == recorded

@@ -456,6 +456,33 @@ def _skills_touched(log_events: list[tuple]) -> list[str]:
     return sorted(loaded)
 
 
+def _plugins_activated(events: list[tuple]) -> dict[str, int]:
+    """Plugin injection surfaces that fired during the run -> how many times.
+
+    The plugin-side counterpart of `_skills_touched`. Hooks and wraps used to
+    run silently, so a plugin that rewrote state or short-circuited an SDK call
+    in a bad run left no trace in this dataset and plugin-caused regressions
+    could not be mined. `plugin_activation` telemetry (issue #40) closes that:
+    one event per firing, carrying the same `(plugin, surface, identifier)`
+    triple `ava plugins inspect` shows as a registered contribution.
+
+    Keyed `"<plugin>/<surface>/<identifier>"` so a regression can be attributed
+    to the specific contribution, not merely to the plugin. A malformed row is
+    skipped rather than crashing the weekly collect — same graceful-drift
+    tolerance `_skills_touched` applies.
+    """
+    fired: Counter[str] = Counter()
+    for event_type, payload in events:
+        if event_type != "plugin_activation":
+            continue
+        p = payload or {}
+        plugin, surface, identifier = p.get("plugin"), p.get("surface"), p.get("identifier")
+        if not (plugin and surface and identifier):
+            continue
+        fired[f"{plugin}/{surface}/{identifier}"] += 1
+    return dict(sorted(fired.items()))
+
+
 # ─────────────── per-agent assembly ───────────────
 
 
@@ -565,6 +592,7 @@ def build_record(
         "tokens_out": tokens_out,
         "tools_called": count_tool_calls(code_bodies),
         "skills_touched": _skills_touched(log_events),
+        "plugins_activated": _plugins_activated(events),
         "exec_ok": exec_ok,
         "exec_failed": exec_failed,
         "last_exec_failed": last_exec_failed,

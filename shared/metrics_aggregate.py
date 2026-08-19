@@ -42,6 +42,7 @@ from shared.metrics import (
     _render_agent_activity,
     _render_exec,
     _render_llm_turns,
+    _render_plugin_activation,
     _render_sdk_usage,
     _render_syntax_fix,
     pctiles,
@@ -126,6 +127,8 @@ class EventAggregate:
     idle_halts: int
     # sdk usage
     sdk_fns: list[str]  # stream order
+    # plugin activation
+    plugin_acts: list[tuple[str, str, str, str]]  # (plugin, surface, identifier, model)
 
 
 _MAX_WORKERS = 4
@@ -230,6 +233,7 @@ _T_EVENT_EXC = "{{.event_name}}" + _SEP + "{{.exc_type}}"
 _T_EVENT_FIXES = "{{.event_name}}" + _SEP + "{{.fixes}}"
 _T_SPAWNER = "{{.spawner}}"
 _T_BODY = "{{.body}}"
+_T_PLUGIN_ACT = _SEP.join(f"{{{{.{f}}}}}" for f in ("plugin", "surface", "identifier", "model"))
 
 _EXEC_FAIL_NAMES = ["^exec_", "^exec\\("]  # mirrors _AGG_EXEC_FAIL: exec_* or exec(..., excl 'exec'
 _LIFECYCLE_NAMES = ["agent_spawned", "agent_terminated", "agent_restarted", "agent_resurrected"]
@@ -295,6 +299,12 @@ def _aggregate_tasks(loki: LokiBackend) -> dict[str, Callable[[dict[str, Any]], 
             fields=["fixes"],
             template=_T_EVENT_FIXES,
             event_names=["code", "syntax_fix"],
+            **p,
+        ),
+        "plugin_act": lambda p: loki.query_projected_lines(
+            fields=["plugin", "surface", "identifier", "model"],
+            template=_T_PLUGIN_ACT,
+            event_names=["plugin_activation"],
             **p,
         ),
     }
@@ -416,6 +426,7 @@ def fetch_aggregate(
         lifecycle=counts["lifecycle"],
         idle_halts=counts["idle_halts"],
         sdk_fns=counts["sdk_fns"],
+        plugin_acts=rows["plugin_acts"],
     )
 
 
@@ -516,9 +527,22 @@ def _row_reductions(results: dict[str, list[Any]]) -> dict[str, Any]:
         elif ev == "syntax_fix":
             fix_events.append((aid, blk.get(aid, 0), fixes if sep else ""))
 
+    # plugin activations: (plugin, surface, identifier, model) per firing, in
+    # stream order. Kept as rows rather than pre-counted so the section can
+    # slice the same stream by plugin, by contribution, and by plugin x model —
+    # the last one being philosophy §6's obsolescence gauge.
+    plugin_acts: list[tuple[str, str, str, str]] = []
+    for _ts_ns, _aid, line in _sort_rows(_merge_rows(results["plugin_act"])):
+        parts_p = line.split("\x1f")
+        if len(parts_p) != 4 or not parts_p[0]:
+            continue
+        plugin, surface, identifier, model = parts_p
+        plugin_acts.append((plugin, surface, identifier, model))
+
     return {
         "fail_rows": fail_rows,
         "exec_failed": len(fail_rows),
+        "plugin_acts": plugin_acts,
         "code_len": [_num(line) for _t, _a, line in _merge_rows(results["code_len"])],
         "output_len": [_num(line) for _t, _a, line in _merge_rows(results["output_len"])],
         "turn_durations": [_num(line) for _t, _a, line in _merge_rows(results["turn_dur"])],
@@ -753,12 +777,35 @@ def _sections_from_aggregate(agg: EventAggregate) -> list[MetricSection]:
         "by_namespace": dict(ns_counts),
     }
 
+    # plugin_activation — philosophy §6's "removable as a gauge, not a vibe".
+    # `by_contribution` is keyed the way `ava plugins inspect` spells a
+    # registered contribution, so a row with no counterpart here is a
+    # contribution that registered and never fired; `by_plugin_model` is the
+    # per-model cut that answers "does model X still need this shim".
+    act_plugin: Counter[str] = Counter()
+    act_contribution: Counter[str] = Counter()
+    act_plugin_model: Counter[str] = Counter()
+    for plugin, surface, identifier, model in agg.plugin_acts:
+        act_plugin[plugin] += 1
+        act_contribution[f"{plugin}/{surface}/{identifier}"] += 1
+        act_plugin_model[f"{plugin}@{model or '?'}"] += 1
+    data_plugin = {
+        "total_activations": len(agg.plugin_acts),
+        "distinct_plugins": len(act_plugin),
+        "by_plugin": dict(act_plugin),
+        "by_contribution": [
+            {"contribution": c, "count": n} for c, n in act_contribution.most_common()
+        ],
+        "by_plugin_model": dict(act_plugin_model),
+    }
+
     return [
         MetricSection("syntax_fix", _render_syntax_fix(data_syntax), data_syntax),
         MetricSection("exec", _render_exec(data_exec), data_exec),
         MetricSection("llm_turns", _render_llm_turns(data_llm), data_llm),
         MetricSection("agent_activity", _render_agent_activity(data_activity), data_activity),
         MetricSection("sdk_usage", _render_sdk_usage(data_sdk), data_sdk),
+        MetricSection("plugin_activation", _render_plugin_activation(data_plugin), data_plugin),
     ]
 
 

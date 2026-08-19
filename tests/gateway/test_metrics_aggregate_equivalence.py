@@ -123,6 +123,65 @@ def test_equivalence_full_thread() -> None:
     assert roll2[aid]["events"] == 8
 
 
+def test_plugin_activation_section_is_the_obsolescence_gauge() -> None:
+    """Philosophy §6 asks a shim to measure its own obsolescence. The section
+    counts activations per contribution (the `<plugin>/<surface>/<identifier>`
+    key `ava plugins inspect` lists as registered) and per plugin x model, so a
+    shim that fired under one model and never under another is visible as data
+    rather than as an opinion."""
+    fake = FakeLoki()
+
+    def _act(plugin: str, surface: str, identifier: str, model: str) -> None:
+        _add(
+            fake,
+            event="plugin_activation",
+            agent_id=1,
+            payload={
+                "plugin": plugin,
+                "surface": surface,
+                "identifier": identifier,
+                "detail": "",
+                "model": model,
+            },
+        )
+
+    _act("ava_syntax_fix", "hooks", "before_exec", "old-model")
+    _act("ava_syntax_fix", "hooks", "before_exec", "old-model")
+    _act("ava_code", "sdkWraps", "files.read", "new-model")
+
+    text, data, _roll = _run_aggregate(fake)
+    section = data["metrics"]["plugin_activation"]
+    assert section["total_activations"] == 3
+    assert section["distinct_plugins"] == 2
+    assert section["by_contribution"] == [
+        {"contribution": "ava_syntax_fix/hooks/before_exec", "count": 2},
+        {"contribution": "ava_code/sdkWraps/files.read", "count": 1},
+    ]
+    assert section["by_plugin_model"] == {
+        "ava_syntax_fix@old-model": 2,
+        "ava_code@new-model": 1,
+    }
+    assert "plugin activations: 3 across 2 plugins" in text
+    assert "ava_syntax_fix/hooks/before_exec" in text
+
+
+def test_plugin_activation_section_empty_when_nothing_fired() -> None:
+    """A window in which no plugin surface fired renders the zero state — the
+    other half of the gauge: silence is the removal evidence."""
+    fake = FakeLoki()
+    _add(fake, event="code", agent_id=1, payload={"body": "print(1)"})
+
+    text, data, _roll = _run_aggregate(fake)
+    assert data["metrics"]["plugin_activation"] == {
+        "total_activations": 0,
+        "distinct_plugins": 0,
+        "by_plugin": {},
+        "by_contribution": [],
+        "by_plugin_model": {},
+    }
+    assert "no plugin hook, wrap, or prompt section fired" in text
+
+
 def test_equivalence_multi_agent_service_and_ties() -> None:
     """Two agents + service-level rows (agent_id None) — the NULL group feeds
     turns_per_agent / agent_lifetime_s in both paths."""
@@ -339,6 +398,7 @@ def test_equivalence_randomized() -> None:
             "llm_turns",
             "agent_activity",
             "sdk_usage",
+            "plugin_activation",
         }
         assert data["meta"]["total_events"] >= 0
         _run_aggregate(fake, days=days, since_compact=True)
