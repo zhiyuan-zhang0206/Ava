@@ -2,7 +2,7 @@ name: Update model pricing
 
 on:
   schedule:
-    - cron: '17 0 * * *'
+    - cron: '17 0 * * *'  # UTC — GitHub Actions schedule cron is always UTC
   workflow_dispatch:
 
 permissions:

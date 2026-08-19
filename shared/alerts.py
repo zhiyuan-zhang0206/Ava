@@ -293,11 +293,20 @@ def notify_im(text: str) -> bool:
 
 
 def format_local(ts: datetime | None) -> str:
-    """Machine-local wall-clock string for the IM message ('' when None)."""
+    """Machine-local wall-clock string for the IM message ('' when None).
+
+    Carries year + zone abbreviation (tz audit, 2026-08, PR-6): the prior
+    `%m-%d %H:%M` gave no way to tell which year an alert near New Year's
+    fired in, and no way to tell which machine's local zone the reader was
+    looking at on a multi-machine cluster. Minimal fix — stays on the
+    gateway machine's local zone (`.astimezone()` with no explicit tz) rather
+    than switching to the cluster's `AVA_TIMEZONE`, since that would need a
+    settings read this module doesn't otherwise take a dependency on.
+    """
 
     if ts is None:
         return ""
-    return ts.astimezone().strftime("%m-%d %H:%M")
+    return ts.astimezone().strftime("%Y-%m-%d %H:%M %Z")
 
 
 def frontend_base_url() -> str:
