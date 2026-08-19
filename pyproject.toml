@@ -2,7 +2,7 @@
 name = "ava"
 version = "0.1.5"
 description = "minimal code-as-action agent"
-readme = "README.md"
+readme = "docs/introduction.md"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 authors = [{ name = "Ava contributors" }]
