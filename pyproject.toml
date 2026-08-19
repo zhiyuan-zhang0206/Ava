@@ -125,6 +125,7 @@ dev = [
     # (the SDKs + bootstrap fetch); httpx2 is test-only.
     "httpx2>=2.3.0",
     "mutmut>=3.5.0",
+    "pytest-split",
 ]
 
 # Import-direction contract: lock the layering the sink refactors established
