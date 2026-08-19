@@ -48,6 +48,7 @@ import { useUserSettings } from "@/lib/use-user-settings";
 import type { TimeMode, DateFormat } from "@/lib/types";
 import { PRIORITY_BG, topNoticePriority } from "@/lib/notices";
 import { formatRelativeTime } from "@/lib/sidebar";
+import { formatShort } from "@/lib/time";
 import type { AgentRow, AgentStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { FLEX, FLEX_1, FLEX_COL, MIN_W_0 } from "@/lib/layout";
@@ -166,16 +167,6 @@ function TreeGuides({
 }
 
 
-/** Format an ISO timestamp as a short absolute time string, e.g. "7/12 15:45". */
-function formatAbsoluteTime(iso: string): string {
-  const d = new Date(iso);
-  const month = d.getMonth() + 1;
-  const day = d.getDate();
-  const hour = d.getHours().toString().padStart(2, "0");
-  const min = d.getMinutes().toString().padStart(2, "0");
-  return `${month}/${day} ${hour}:${min}`;
-}
-
 export function AgentRow({
   agent,
   label,
@@ -247,7 +238,7 @@ const dateFormat: DateFormat = rawDateFormat === "absolute" || rawDateFormat ===
   const showTime = timeMode !== "hidden";
   const timeIso = timeMode === "spawned" ? agent.spawned_at : agent.last_active_at;
   const absTime = dateFormat === "absolute"
-    ? formatAbsoluteTime(timeIso)
+    ? formatShort(timeIso)
     : formatRelativeTime(timeIso);
   const indentPx = depth * INDENT;
 

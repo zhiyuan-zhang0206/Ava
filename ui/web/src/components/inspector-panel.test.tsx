@@ -15,6 +15,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { InspectorPanel, InspectorToggle } from "./inspector-panel";
+import { formatAbsolute, formatRelative } from "@/lib/time";
 import type { AgentInspect } from "@/lib/types";
 
 // vi.hoisted so the mock fn is initialized before the hoisted vi.mock factory
@@ -588,35 +589,6 @@ describe("InspectorPanel heartbeat cells (merged into Liveness, Task #1195)", ()
   });
 });
 
-// Local-timezone replicas of the component's formatters — pin the Birth
-// section to spawned_at without depending on the test runner's TZ.
-function formatRelativeLocal(iso: string, now: Date = new Date()): string {
-  const t = new Date(iso).getTime();
-  const deltaSec = Math.round((t - now.getTime()) / 1000);
-  const mag = Math.abs(deltaSec);
-  if (mag < 60) return "now";
-  const min = Math.floor(mag / 60);
-  let span: string;
-  if (min < 60) span = `${min}m`;
-  else if (min < 60 * 24) span = `${Math.floor(min / 60)}h`;
-  else if (min < 60 * 24 * 30) span = `${Math.floor(min / 60 / 24)}d`;
-  else if (min < 60 * 24 * 365) span = `${Math.floor(min / 60 / 24 / 30)}mo`;
-  else span = `${Math.floor(min / 60 / 24 / 365)}y`;
-  return deltaSec > 0 ? `in ${span}` : `${span} ago`;
-}
-
-function formatAbsoluteLocal(iso: string): string {
-  const d = new Date(iso);
-  const y = d.getFullYear();
-  const mo = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  const wd = d.toLocaleDateString("en-US", { weekday: "short" });
-  const h = String(d.getHours()).padStart(2, "0");
-  const mi = String(d.getMinutes()).padStart(2, "0");
-  const s = String(d.getSeconds()).padStart(2, "0");
-  return `${y}-${mo}-${day} ${wd} ${h}:${mi}:${s}`;
-}
-
 describe("InspectorPanel birth (cell in the merged Liveness section, Task #1195)", () => {
   it("birth cell shows relative + absolute, anchored to spawned_at", async () => {
     // spawned_at is the agent's true birth (written once at spawn); started_at
@@ -634,11 +606,15 @@ describe("InspectorPanel birth (cell in the merged Liveness section, Task #1195)
       await waitFor(() => expect(screen.getByText("Birth")).toBeTruthy());
       // Two lines inside the cell: relative on the value line, absolute below
       // (the old single-line "1mo ago, 2026-06-14 Sun 12:00:00" moved into
-      // the 2×2 grid, Task #1195).
-      expect(screen.getByText(formatRelativeLocal(spawned))).toBeTruthy();
-      expect(screen.getByText(formatAbsoluteLocal(spawned))).toBeTruthy();
+      // the 2×2 grid, Task #1195). Assert against the shared helper's own
+      // output — not a reimplementation of it (tz audit, 2026-08: the prior
+      // version of this test re-derived the formatting and asserted against
+      // itself, so a regression in the component's actual formatting call
+      // would never fail it).
+      expect(screen.getByText(formatRelative(spawned))).toBeTruthy();
+      expect(screen.getByText(formatAbsolute(spawned))).toBeTruthy();
       // …anchored to the spawn time, not the (possibly refreshed) started_at.
-      expect(screen.queryByText(formatAbsoluteLocal(started))).toBeNull();
+      expect(screen.queryByText(formatAbsolute(started))).toBeNull();
     }
   });
 });

@@ -35,6 +35,7 @@ import {
 import { api } from "@/lib/api";
 import { errMsg } from "@/lib/errors";
 import { useStore } from "@/lib/store";
+import { formatRelative } from "@/lib/time";
 import type { ClusterPanel, ClusterUpdateCheck, MachineStatus, SystemStatus } from "@/lib/types";
 import { CLUSTER_STATUS_QUERY_KEY, SYSTEM_STATUS_QUERY_KEY } from "@/lib/use-cluster-health";
 
@@ -199,22 +200,9 @@ function daemonMark(ok: boolean | null | undefined): string {
 // only ever rendered, never freshness-tested (see MachineStatus.up_since_at). An
 // offline host's row states the stop instead, which IS a "last seen".
 function upSinceLabel(m: MachineStatus): string {
-  if (m.online) return relativeTime(m.up_since_at);
-  if (m.stopped_at != null) return `stopped ${relativeTime(m.stopped_at)}`;
+  if (m.online) return formatRelative(m.up_since_at);
+  if (m.stopped_at != null) return `stopped ${formatRelative(m.stopped_at)}`;
   return "—";
-}
-
-function relativeTime(iso: string): string {
-  // Short relative time — "just now / 3 minutes ago / 2 hours ago / 3 days ago / iso date".
-  const now = Date.now();
-  const t = Date.parse(iso);
-  if (isNaN(t)) return iso;
-  const diffSec = Math.floor((now - t) / 1000);
-  if (diffSec < 60) return "just now";
-  if (diffSec < 3600) return `${Math.floor(diffSec / 60)} min ago`;
-  if (diffSec < 86400) return `${Math.floor(diffSec / 3600)} h ago`;
-  if (diffSec < 86400 * 30) return `${Math.floor(diffSec / 86400)} d ago`;
-  return iso.slice(0, 10);
 }
 
 // ── Services: gateway card + agent-runner table + cluster-wide actions ──
@@ -464,20 +452,13 @@ function ServicesPanel({ data }: { data: ClusterPanel }) {
 // wrote, and says nothing at all when the last update succeeded: a permanent
 // "last update: ok" line is one people stop reading, and this is the line that has
 // to be read the one time it appears.
-function relativeAge(from: Date): string {
-  const seconds = (Date.now() - from.getTime()) / 1000;
-  if (seconds < 3600) return `${Math.round(seconds / 60)}m`;
-  if (seconds < 86400) return `${Math.round(seconds / 3600)}h`;
-  return `${Math.round(seconds / 86400)}d`;
-}
-
 function LastUpdateBanner({ record }: { record: ClusterPanel["last_update"] }) {
   if (!record?.failed) return null;
   const target = record.target_sha ? ` to ${record.target_sha.slice(0, 7)}` : "";
   const when = record.started_at ? new Date(record.started_at).toLocaleString() : null;
   // How stale the failure is changes what to do with it: minutes old is a live
   // incident, days old is a cluster nobody has updated since.
-  const age = record.started_at ? relativeAge(new Date(record.started_at)) : null;
+  const age = record.started_at ? formatRelative(record.started_at) : null;
   // A recovered update failed and then put the cluster back on a commit that
   // works. It still has to be stated — 2026-07-30 is the incident where a silent
   // recovery left the operator reading a sha mismatch as a live fault — but it is
@@ -496,7 +477,7 @@ function LastUpdateBanner({ record }: { record: ClusterPanel["last_update"] }) {
       <p className={recovered ? "font-semibold text-amber-600" : "font-semibold text-destructive"}>
         Last update{target} failed
         {recovered ? " — the cluster recovered" : ""}
-        {when ? ` (started ${when}${age ? `, ${age} ago` : ""})` : ""}
+        {when ? ` (started ${when}${age ? `, ${age}` : ""})` : ""}
       </p>
       <p className="mt-1 text-muted-foreground">
         {record.outcome === "orphaned"
