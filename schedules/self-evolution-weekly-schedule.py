@@ -1,8 +1,8 @@
 """self-evolution-weekly — dynamic trigger based on weekly event volume.
 
-Fires the self-evolution agent on Tuesday 00:00 Beijing (= Monday 9am PT), but only when the past week's
-agent event volume exceeds a minimum threshold. Busy weeks also get a Thursday
-mid-week follow-up trigger.
+Fires the self-evolution agent on Tuesday 00:00 cluster time, but only when the
+past week's agent event volume exceeds a minimum threshold. Busy weeks also get
+a Thursday mid-week follow-up trigger.
 
 Resumable: recomputes on every iteration, acts only when the window is open.
 """
@@ -13,17 +13,22 @@ from pathlib import Path
 
 import ava
 from ava.agents import AgentStatus as S
+from shared.config import settings
 from shared.watcher import next_fire
 
 # ── Configuration ──────────────────────────────────────────────────────────
 
 LABEL = "self-evolution"
 PROMPT = "Read and run $AVA_HOME/skills/ava-self-evolution/SKILL.md for this week."
-TIMEZONE = "Asia/Shanghai"  # embedded per deployment — adjust for your cluster
+# Cluster wall clock (`AVA_TIMEZONE`, cluster-pinned), never the host's OS
+# timezone — a weekly cron is the case where a host-local reading lands the run
+# on the wrong CALENDAR DAY, not merely at the wrong hour. Read at process
+# start; `ava schedules restart <id>` adopts a changed AVA_TIMEZONE.
+TIMEZONE = settings.general.timezone
 
-# Main weekly check: Tuesday 00:00 Beijing (= Monday 9am PT)
+# Main weekly check: Tuesday 00:00 cluster time
 MONDAY_CRON = "0 0 * * 2"
-# Mid-week follow-up for busy weeks: Friday 00:00 Beijing (= Thursday 9am PT)
+# Mid-week follow-up for busy weeks: Friday 00:00 cluster time
 THURSDAY_CRON = "0 0 * * 5"
 
 # Minimum weekly events to trigger self-evolution (~4K/day floor).
@@ -118,7 +123,7 @@ def should_fire_monday() -> bool:
 
 
 def should_fire_thursday() -> bool:
-    """Check whether the mid-week follow-up (Friday 00:00 Beijing) should fire."""
+    """Check whether the mid-week follow-up (Friday 00:00 cluster time) should fire."""
     monday = datetime.now(UTC) - timedelta(days=4)
     count = count_events(monday)
     bar = HIGH_WEEKLY_EVENTS // 2

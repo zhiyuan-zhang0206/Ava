@@ -25,6 +25,16 @@
 > The remaining DB dumps in ~1 min at ~0.7 GB; `_DUMP_TIMEOUT_S` is 60 min of
 > pure headroom. The excluded tables' unbounded growth (18 GB and counting,
 > no retention) is a separate open item — a checkpoint retention policy.
+>
+> **Update 2026-08-19: the two clocks are pinned.** `BACKUP_HOUR = 3` is read
+> on the **cluster** wall clock (`AVA_TIMEZONE`), and dumps are named in UTC
+> (`<db>-YYYYMMDDTHHMMSSZ.dump`). Reading the host's clock had made a machine
+> that changed timezone see its newest dump as dated in the future and skip the
+> daily backup silently; the local filename had no offset, so prune's
+> oldest-first ordering was ambiguous across the DST fall-back hour — the hour
+> in which two dumps also collided on one name. Retention is `BACKUP_KEEP = 7`
+> (raised from the 1 quoted above), so the off-site leg is no longer the only
+> history.
 
 ## Future work
 

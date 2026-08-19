@@ -14,8 +14,12 @@ on the checkpoint tables during the measured agent-lowest window. Each run is
 small and lock-free (VACUUM allows concurrent reads and writes), matching the
 "little and often, never blocking agents" retention philosophy.
 
-Window: 05:00-08:00 America/Los_Angeles — the measured agent-lowest hours
-(turn_end/1h: 150-528 vs 6.8k peak at 11:00, 7-day sample, 2026-08-10).
+Window: 05:00-08:00 CLUSTER time (`AVA_TIMEZONE`, cluster-pinned). The hours
+themselves were measured on one fleet in America/Los_Angeles (turn_end/1h:
+150-528 vs 6.8k peak at 11:00, 7-day sample, 2026-08-10) and are now read as
+cluster wall clock — the same clock the built-in schedules fire on, so
+"off-peak" means one thing across the fleet instead of three. A cluster whose
+real trough sits elsewhere retunes the hours below, not the timezone.
 """
 
 from __future__ import annotations
@@ -28,9 +32,9 @@ from zoneinfo import ZoneInfo
 import psycopg
 
 import shared.db
+from shared.config import settings
 from shared.log import logger
 
-_WINDOW_TZ = ZoneInfo("America/Los_Angeles")
 _WINDOW_START_HOUR = 5
 _WINDOW_END_HOUR = 8  # exclusive
 
@@ -59,10 +63,15 @@ def _mb(b: int) -> float:
 
 
 def in_low_traffic_window(now: datetime | None = None) -> bool:
-    """True inside 05:00-08:00 America/Los_Angeles (agent-lowest hours)."""
+    """True inside 05:00-08:00 cluster time (agent-lowest hours).
+
+    Resolved per call rather than at import so a config write plus a daemon
+    restart is enough to move the window; the daemon is long-lived and would
+    otherwise hold a timezone captured at boot.
+    """
     if now is None:
         now = datetime.now(UTC)
-    local = now.astimezone(_WINDOW_TZ)
+    local = now.astimezone(ZoneInfo(settings.general.timezone))
     return _WINDOW_START_HOUR <= local.hour < _WINDOW_END_HOUR
 
 

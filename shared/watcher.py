@@ -69,6 +69,12 @@ def next_fire(
     ``timezone`` is an IANA timezone string (e.g. ``"Asia/Shanghai"``). None ->
     compute in UTC. croniter parses the cron expression in this timezone.
 
+    The UTC default is the primitive staying neutral: it has no opinion about
+    which wall clock a caller means, and UTC is the only reading that cannot
+    silently pick up the host's OS timezone. Callers that mean "the cluster's
+    wall clock" — the built-in schedules, ``ava.watcher.cron`` — pass
+    ``settings.general.timezone`` explicitly; nothing here reaches for config.
+
     ``tolerance`` widens the match window for resumable sleep loops. croniter's
     ``get_next`` is strictly greater than the base, so a loop that sleeps until
     the fire minute wakes a few milliseconds past it and the next fire jumps a
