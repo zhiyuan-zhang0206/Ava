@@ -18,7 +18,7 @@ tags:
 
 ### Status and result enums
 - `AgentStatus` (StrEnum) lifecycle six states: `ALLOCATED` (slot allocated, process not started) → `STARTING` → `RUNNING` (executing turn) → `IDLING` (waiting for wakeup between turns) → `RESTARTING` (process replacement in progress) → `TERMINATED`.
-- `TerminationSource` (StrEnum) — who wrote `status='terminated'`: `USER`/`EXIT`/`REAPER`/`LAUNCH_CONFIRM`/`INTEGRITY`, stamped by EVERY terminated-write in the same statement (NULL is permanently unresurrectable — `scripts/lint_termination_source.py` enforces it). `resurrectable()` feeds the crash-resurrect allowlist ([[services/agent_runner_side/restarter.ava.okf.md]]).
+- `TerminationSource` (StrEnum) — who wrote `status='terminated'`: `USER`/`EXIT`/`REAPER`/`LAUNCH_CONFIRM`/`INTEGRITY`, stamped by EVERY terminated-write in the same statement (NULL is permanently unresurrectable — `scripts/lint_termination_source.py` enforces it). `resurrectable()` feeds the crash-resurrect allowlist ([[services/agent_runner_side/restarter/restarter.ava.okf.md]]).
 - Operation result enums: `TerminateResult` / `RestartResult` / `ResurrectResult` — encode idempotent operation outcomes (enqueued / already_terminated / force_killed / already_alive …) as wire strings.
 
 ### Wire error protocol
@@ -33,7 +33,7 @@ tags:
 
 - [[message_kwargs.ava.okf.md]] — the sibling contract module: the message-level half, typing the `ava_*` metadata inside a message's `additional_kwargs` where this module types the HTTP wire between the two processes
 - [[gateway-cli.ava.okf.md]] — spawn/respawn/launch/fork/resurrect implementations live behind `ops/agents.py` (`ops/agent_spawn.py` birth + `ops/agent_wake.py` wake); this module provides only types
-- [[services/agent_runner_side/restarter.ava.okf.md]] — the restarter daemon **does not** import `AgentStatus`: it uses SQL literal `status='restarting'` (`daemon.py:111`) to select rows + calls `ops.agents.respawn_agent`
+- [[services/agent_runner_side/restarter/restarter.ava.okf.md]] — the restarter daemon **does not** import `AgentStatus`: it uses SQL literal `status='restarting'` (`daemon.py:111`) to select rows + calls `ops.agents.respawn_agent`
 
 ## Entry points
 
