@@ -5,6 +5,13 @@ side (Task #1224): R1-R3, R5-R7 query Loki (the events stream as OTLP logs
 under {service_name="unknown_service"}; `| json` flattens each line to
 labels), R4 queries Prometheus (the ava_llm_usage_latency_ms histogram).
 Keeps the rules in sync with the emitter's LogQL/OTLP contract.
+
+R8-R12 (issue #46) are the infrastructure layer and query a DIFFERENT
+Prometheus family: series the per-machine OTel Collector sidecar scrapes
+(host_metrics / postgresql / redis), labelled `host`, not `machine`. The metric
+names asserted below were read off a live Prometheus 3.13.2 — the OTLP-to-
+Prometheus translation adds unit suffixes (`_ratio`, `_bytes`) and `_total` on
+monotonic counters, so they cannot be derived from the OTLP names by eye.
 """
 
 from __future__ import annotations
@@ -27,6 +34,7 @@ _RULES = (
 )
 
 _EXPECTED_UIDS = {
+    # application layer — Loki event stream + the LLM latency histogram
     "ava-ops-warning-error-spike",
     "ava-ops-sse-drop-backlog",
     "ava-ops-agent-restart-spike",
@@ -34,6 +42,24 @@ _EXPECTED_UIDS = {
     "ava-ops-delivery-stalled-backlog",
     "ava-ops-events-freshness",
     "ava-ops-trace-disk-watermark",
+    # infrastructure layer (issue #46) — the sidecar's own scrapes
+    "ava-ops-host-cpu-saturated",
+    "ava-ops-host-memory-pressure",
+    "ava-ops-host-disk-watermark",
+    "ava-ops-pg-connection-saturation",
+    "ava-ops-redis-memory",
+}
+
+# The infra rules and the metric each one is built on. A rename on the
+# collector side (a receiver swap, a unit change that moves the Prometheus
+# suffix) silently turns a rule into a permanent NoData — which is invisible,
+# because noDataState is OK by design.
+_INFRA_RULE_METRICS = {
+    "ava-ops-host-cpu-saturated": "system_cpu_utilization_ratio",
+    "ava-ops-host-memory-pressure": "system_memory_utilization_ratio",
+    "ava-ops-host-disk-watermark": "system_filesystem_utilization_ratio",
+    "ava-ops-pg-connection-saturation": "postgresql_backends",
+    "ava-ops-redis-memory": "redis_memory_used_bytes",
 }
 
 
@@ -58,14 +84,16 @@ def _exprs(rule: dict[str, Any], datasource_uid: str) -> list[str]:
 
 
 def _threshold_params(rule: dict[str, Any]) -> list[list[Any]]:
+    """Keyed on the node TYPE, not on a refId letter — the threshold node is
+    not always `D` and a letter-keyed lookup silently returns nothing."""
     return [
         d["model"]["conditions"][0]["evaluator"]["params"]
         for d in rule["data"]
-        if d.get("refId") == "D"
+        if d["model"].get("type") == "threshold"
     ]
 
 
-def test_seven_rules_with_expected_uids() -> None:
+def test_rules_have_expected_uids() -> None:
     rules = _load_rules()
     assert {r["uid"] for r in rules} == _EXPECTED_UIDS
 
@@ -195,3 +223,77 @@ def test_delivery_stalled_rule_filters_fresh_by_age() -> None:
     rules = {r["uid"]: r for r in _load_rules()}
     exprs = _exprs(rules["ava-ops-delivery-stalled-backlog"], "loki")
     assert any("attributes_age_s < 600" in e for e in exprs)
+
+
+# ─── infrastructure rules (issue #46) ────────────────────────────────────────
+
+
+@pytest.mark.parametrize(("uid", "metric"), sorted(_INFRA_RULE_METRICS.items()))
+def test_infra_rule_queries_its_scraped_metric(uid: str, metric: str) -> None:
+    """Each infra rule reads Prometheus, and reads the series name the sidecar
+    actually produces."""
+    rules = {r["uid"]: r for r in _load_rules()}
+    exprs = _exprs(rules[uid], "prometheus")
+    assert len(exprs) == 1, f"{uid}: expected exactly one Prometheus query"
+    assert metric in exprs[0], f"{uid}: does not read {metric}:\n{exprs[0]}"
+    assert not _exprs(rules[uid], "loki"), f"{uid}: infra rules never query Loki"
+
+
+@pytest.mark.parametrize("uid", sorted(_INFRA_RULE_METRICS))
+def test_infra_rule_groups_by_host(uid: str) -> None:
+    """Aggregation must keep `host`, so one saturated machine produces one
+    alert instance naming it rather than a cluster-wide average that hides
+    which box is in trouble. `host` is the sidecar's label — deliberately not
+    `machine`, which application metrics use for the Ava machine name."""
+    rules = {r["uid"]: r for r in _load_rules()}
+    expr = _exprs(rules[uid], "prometheus")[0]
+    assert "by (host" in expr, f"{uid}: aggregates away the host:\n{expr}"
+    assert "{{ $labels.host }}" in rules[uid]["annotations"]["summary"]
+
+
+def test_disk_watermark_rule_is_per_mountpoint() -> None:
+    """The volume is the actionable unit: pg data, the traces mirror and the
+    LGTM volumes can sit on different filesystems, and a max over all of them
+    would name no path to clear."""
+    rules = {r["uid"]: r for r in _load_rules()}
+    expr = _exprs(rules["ava-ops-host-disk-watermark"], "prometheus")[0]
+    assert "by (host, mountpoint)" in expr
+    assert (
+        "{{ $labels.mountpoint }}" in rules["ava-ops-host-disk-watermark"]["annotations"]["summary"]
+    )
+
+
+def test_infra_ratio_rules_round_for_readability() -> None:
+    """The value is interpolated into the summary that reaches IM, and a raw
+    float renders as 0.927223987411. Rounding to 0.001 cannot flip a verdict:
+    every ratio threshold is two decimals wide."""
+    rules = {r["uid"]: r for r in _load_rules()}
+    for uid in (
+        "ava-ops-host-cpu-saturated",
+        "ava-ops-host-memory-pressure",
+        "ava-ops-host-disk-watermark",
+        "ava-ops-pg-connection-saturation",
+    ):
+        expr = _exprs(rules[uid], "prometheus")[0]
+        assert "round(" in expr and "0.001)" in expr, f"{uid} is unrounded:\n{expr}"
+        threshold: float = _threshold_params(rules[uid])[0][0]
+        assert threshold == round(threshold, 2), f"{uid}: threshold finer than the rounding"
+
+
+def test_infra_rule_thresholds() -> None:
+    """The shipped defaults, in one place: they are deployment-tunable rule
+    config, so a change here should be a deliberate edit, not a drift."""
+    rules = {r["uid"]: r for r in _load_rules()}
+    assert _threshold_params(rules["ava-ops-host-cpu-saturated"]) == [[0.9]]
+    assert _threshold_params(rules["ava-ops-host-memory-pressure"]) == [[0.9]]
+    assert _threshold_params(rules["ava-ops-host-disk-watermark"]) == [[0.9]]
+    assert _threshold_params(rules["ava-ops-pg-connection-saturation"]) == [[0.8]]
+    assert _threshold_params(rules["ava-ops-redis-memory"]) == [[2147483648]]
+
+
+def test_every_rule_is_silent_on_no_data_and_datasource_error() -> None:
+    """A backend outage during maintenance must not fire every rule at once —
+    the health-probe chain covers a dead datasource, not these."""
+    for rule in _load_rules():
+        assert rule["noDataState"] == "OK", rule["uid"]
+        assert rule["execErrState"] == "OK", rule["uid"]

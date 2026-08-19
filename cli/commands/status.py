@@ -110,6 +110,14 @@ def cmd_status() -> int:
     else:
         print("\ninfra (pg/redis): skipped (agent-runner uses central node)")
 
+    # host section: ONE live CPU / memory / disk reading, read straight from
+    # psutil and never from the observability stack — this is precisely the
+    # answer that must survive an LGTM backend that is down or was never
+    # deployed. The HISTORY lives in Prometheus (issue #46, the Grafana
+    # `ava-host-dataplane` dashboard); nothing here retains a series.
+    print("\nhost (live cpu/memory/disk):")
+    _print_host_resources()
+
     # lgtm section: the observability-backend compose stack (deploy/lgtm) —
     # shown only on the host the operator designated via the $AVA_HOME/lgtm-host
     # marker (a host singleton, not a per-cluster service, so the marker — not
@@ -176,6 +184,27 @@ def cmd_status() -> int:
 
     _print_gateway_cluster_status()
     return 0
+
+
+def _print_host_resources() -> None:
+    """One live reading, or the reason there is none (psutil absent on this host).
+
+    A read failure prints and returns: the resource line is one section of
+    `ava status`, and losing it must not cost the operator the service table
+    and the data-plane view below it.
+    """
+    try:
+        from shared.resource_sample import resource_sample
+
+        s = resource_sample()
+    except Exception as e:  # fail-fast-ok: psutil may be absent; the rest of status still prints
+        print(f"  unavailable ({e})")
+        return
+    print(
+        f"  cpu {s.cpu_pct:.0f}%   "
+        f"memory {s.mem_pct:.0f}% ({s.mem_used_gb:.1f}/{s.mem_total_gb:.1f} GB)   "
+        f"disk {s.disk_pct:.0f}% ({s.disk_used_gb:.0f}/{s.disk_total_gb:.0f} GB)"
+    )
 
 
 def _print_gateway_cluster_status() -> None:

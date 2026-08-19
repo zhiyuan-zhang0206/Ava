@@ -3926,11 +3926,7 @@ export interface components {
             agent_groups: {
                 [key: string]: unknown;
             }[];
-            /**
-             * Resource History
-             * @default []
-             */
-            resource_history: components["schemas"]["ResourcePoint"][];
+            resource?: components["schemas"]["ResourceSample"] | null;
         };
         /**
          * CommandItem
@@ -4838,11 +4834,7 @@ export interface components {
             agent_groups: {
                 [key: string]: unknown;
             }[];
-            /**
-             * Resource History
-             * @default []
-             */
-            resource_history: components["schemas"]["ResourcePoint"][];
+            resource?: components["schemas"]["ResourceSample"] | null;
         };
         /**
          * MemoryGraphEdge
@@ -5559,10 +5551,10 @@ export interface components {
             restart_required: string;
         };
         /**
-         * ResourcePoint
-         * @description One resource sample — CPU / memory / disk at a point in time.
+         * ResourceSample
+         * @description This machine's CPU / memory / disk at the moment it was read.
          */
-        ResourcePoint: {
+        ResourceSample: {
             /** Ts */
             ts: number;
             /** Cpu Pct */

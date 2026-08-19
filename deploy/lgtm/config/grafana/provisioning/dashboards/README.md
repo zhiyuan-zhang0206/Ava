@@ -34,6 +34,18 @@ one iframe.)
 - `ava-ops-plugins.json` — the **plugin-only intermediate**, generated in
   the same run. It is *not* embedded anywhere — kept for tests / standalone
   use (uid `ava-ops-plugins`).
+- `ava-host-dataplane.json` — the **traditional SRE layer** (issue #46),
+  hand-written against the Prometheus datasource: a `host` row (CPU,
+  memory, load, filesystem, disk and network throughput) and a `data plane`
+  row (Postgres connections / transactions / database size, Redis memory /
+  clients / evictions / throughput). Its series come from each machine's
+  OTel Collector sidecar (`host_metrics` + `postgresql` + `redis`
+  receivers), not from a node_exporter, and carry `job="ava-infra"` plus a
+  `host` label = the OS hostname — deliberately not `machine`, which app
+  metrics use for the Ava machine name. uid `ava-host-dataplane`; the status
+  page's Resources section links to it, so the uid is load-bearing. Every
+  expression in it was evaluated against a live Prometheus 3.13.2 before it
+  landed.
 - Datasource is a **PostgreSQL datasource pointing at the cluster's own
   Postgres** (the DB that owns the unified `events` stream — now a read-only
   archive since the LGTM cutover, task #1197). The dashboard's SQL reads
@@ -312,11 +324,12 @@ deployment (W1) must also provide:
 ## Alerting
 
 **Live** (2026-08-04): Grafana Alerting rules, as code in
-[`../alerting/rules.yml`](../alerting/rules.yml) — seven rules evaluated every minute
-against this dashboard's datasource (`ops` → `events`): WARNING+ERROR
+[`../alerting/rules.yml`](../alerting/rules.yml) — twelve rules evaluated every minute
+over Loki and Prometheus: WARNING+ERROR
 spike, sse_drop/event_log_drop backlog, agent_restarted spike, LLM latency
 p95, delivery_stalled fresh-backlog, events-table freshness, trace-disk
-watermark. Synced to
+watermark, and the infrastructure five (issue #46 — host CPU, host memory,
+per-volume disk watermark, Postgres connection saturation, Redis memory). Synced to
 `~/.ava/grafana/provisioning/alerting/`; see `alerts/README.md` for the rule
 table, threshold calibration, and the notification-channel follow-up. The
 reserved `ops_alert_rules` config store is

@@ -22,7 +22,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2, RefreshCw, RotateCcw, Server } from "lucide-react";
 import { type ComponentType, type ReactNode } from "react";
 
-import { ResourceChart } from "@/components/metrics/resource-chart";
+import { ResourceReadout } from "@/components/metrics/resource-readout";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -32,7 +32,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { api } from "@/lib/api";
+import { API_BASE, api } from "@/lib/api";
 import { errMsg } from "@/lib/errors";
 import { useStore } from "@/lib/store";
 import type { ClusterPanel, ClusterUpdateCheck, MachineStatus, SystemStatus } from "@/lib/types";
@@ -41,6 +41,12 @@ import { CLUSTER_STATUS_QUERY_KEY, SYSTEM_STATUS_QUERY_KEY } from "@/lib/use-clu
 import { useSectionVisible } from "@/app/control/_visibility";
 import { FLEX } from "@/lib/layout";
 import { cn } from "@/lib/utils";
+
+// The host/data-plane dashboard the sidecar's host_metrics + postgresql +
+// redis receivers feed (deploy/lgtm/config/grafana/provisioning/dashboards/
+// ava-host-dataplane.json), reached through the gateway's /grafana proxy. The
+// readout below is the live value; the trend lives there.
+const HOST_DASHBOARD_URL = `${API_BASE}/grafana/d/ava-host-dataplane?from=now-6h&to=now`;
 
 export default function StatusPage() {
   const visible = useSectionVisible();
@@ -652,22 +658,37 @@ function GatewayDaemonsSection({ data }: { data: SystemStatus }) {
 }
 
 function ResourcesSection({ data }: { data: ClusterPanel }) {
-  // One chart row per online machine that has resource data.
+  // One readout row per online machine that reported a reading.
   // Machine dedup is inherent: the roster is already per-machine-name.
-  const machinesWithData = data.machines.filter(
-    (m) => m.online && m.resource_history.length > 0,
+  const machinesWithData = data.machines.flatMap((m) =>
+    m.online && m.resource ? [{ name: m.name, sample: m.resource }] : [],
   );
   if (machinesWithData.length === 0) return null;
 
   return (
-    <StatusSection id="status-resources" icon={Server} title="Resources" subtitle="(CPU / memory / disk)">
+    <StatusSection
+      id="status-resources"
+      icon={Server}
+      title="Resources"
+      subtitle="(live — CPU / memory / disk)"
+      action={
+        <a
+          href={HOST_DASHBOARD_URL}
+          target="_blank"
+          rel="noreferrer"
+          className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2"
+        >
+          History
+        </a>
+      }
+    >
       <div className="space-y-3">
         {machinesWithData.map((m) => (
           <div key={m.name}>
             {machinesWithData.length > 1 && (
               <div className="text-xs text-muted-foreground mb-1.5 font-medium">{m.name}</div>
             )}
-            <ResourceChart history={m.resource_history} />
+            <ResourceReadout sample={m.sample} />
           </div>
         ))}
       </div>

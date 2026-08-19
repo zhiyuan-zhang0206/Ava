@@ -92,7 +92,7 @@ function statusWith(
         agent_count: 0,
         session_count: 0,
         agent_groups: [],
-        resource_history: [],
+        resource: null,
       })),
     },
     services: { items: [] },
