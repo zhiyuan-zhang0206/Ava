@@ -12,7 +12,7 @@ tags:
 The Alert system (user design 2026-08-12): Alert is fully separate from
 Notice — own table, own UI section, own IM channel; nothing here touches
 `agent_notices`. Grafana's embedded Alertmanager evaluates the alert rules
-(`dashboards/ops/alerts/rules.yml` as code) and delivers the Alertmanager
+(`deploy/lgtm/config/grafana/provisioning/alerting/rules.yml` as code) and delivers the Alertmanager
 standard webhook payload to the gateway; this router is the other half of
 the loop. The cluster health probe (`cli/commands/_health_alerts.py`) posts
 its edge-triggered health alerts through the same endpoint with
@@ -24,7 +24,7 @@ store/IM core lives in `shared/alerts.py` (this router is one caller; the
 probes run the same functions locally). Four surfaces:
 
 - `POST /api/alerts` — the webhook (Grafana embedded-Alertmanager contact
-  point, `dashboards/ops/alerts/contact.yml`). Upserts each alert instance
+  point, `deploy/lgtm/config/grafana/provisioning/alerting/contact.yml`). Upserts each alert instance
   into `alerts`, publishes it on the SSE channel, and fans firing/recovery
   IM notifications out via the im_bridge daemon — every severity pushes
   (critical/warning/error, no gate).

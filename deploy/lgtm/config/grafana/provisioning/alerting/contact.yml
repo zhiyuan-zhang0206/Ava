@@ -1,10 +1,7 @@
 # Ava alerts — webhook contact point (as code, Task #1224).
 #
-# LGTM-stack copy (deploy/lgtm/config/grafana/provisioning/alerting/):
-# the ONLY difference from dashboards/ops/alerts/contact.yml is the webhook
-# URL — the Grafana container reaches the gateway on the host via
-# host.docker.internal instead of localhost. Keep the two files otherwise
-# in sync (guarded by tests/test_lint_lgtm_alerting_sync.py).
+# The webhook URL uses host.docker.internal — the Grafana container
+# reaches the gateway on the host, not on the container loopback.
 #
 # Routes every fired alert to the gateway's alert ingest endpoint
 # (POST /api/alerts), which stores the instance in `alerts` (Alertmanager

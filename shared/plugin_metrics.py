@@ -4,7 +4,7 @@ Two output surfaces (user-approved design, 2026-08-04, event-system W13):
 
 - ``grafana`` (this wave): ``scripts/gen_plugin_dashboard.py`` imports every
   plugin's ``*metrics*.py`` module to collect registrations, then renders
-  ``dashboards/ops/ava-ops-plugins.json`` (independent uid, provisioner reloads
+  ``deploy/lgtm/config/grafana/provisioning/dashboards/ava-ops-plugins.json`` (independent uid, provisioner reloads
   within 30s).
 - ``inspector`` (reserved for W13b): the gateway reads the registry snapshot
   the generator exports (``$AVA_HOME/state/plugin_metrics.json``) to build
@@ -74,7 +74,7 @@ class ThresholdStep(BaseModel):
 
     ``value: None`` is the base step (covers everything below the next step);
     a non-None value flips the color at that point. Mirrors the steps shape in
-    ``dashboards/ops/ava-ops-main.json``.
+    ``deploy/lgtm/config/grafana/provisioning/dashboards/ava-ops-main.json``.
     """
 
     model_config = ConfigDict(frozen=True)

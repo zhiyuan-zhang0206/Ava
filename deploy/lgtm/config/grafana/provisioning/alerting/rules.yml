@@ -1,6 +1,6 @@
 # Ava ops alert rules — Grafana Alerting, provisioned as code.
 #
-# Source of truth: this file (dashboards/ops/alerts/rules.yml). The running
+# Source of truth: this file. The running
 # Grafana (gateway host, 127.0.0.1:3002) loads it from
 # ~/.ava/grafana/provisioning/alerting/ — _update_local.py copies it there on
 # rollout and restarts Grafana (`launchctl kickstart -k gui/$(id -u)/com.ava.grafana`):

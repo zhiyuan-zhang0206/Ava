@@ -1,6 +1,6 @@
 # ruff: noqa: RUF001 — RUF001: Chinese UI text uses full-width punctuation; S608: query templates interpolate only registry-derived key fragments (shared/events/contract.py SQL constants), never user input
 """Core ops-dashboard panels — the hand-written core section of
-``dashboards/ops/ava-ops-main.json``, migrated to core-metric registrations
+``deploy/lgtm/config/grafana/provisioning/dashboards/ava-ops-main.json``, migrated to core-metric registrations
 (Task #882) and from Postgres-event SQL to Loki LogQL (Task #1280).
 
 The 16 hand-written core panels (ids < 1000) of the ops dashboard are
