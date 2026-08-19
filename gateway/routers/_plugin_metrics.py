@@ -67,7 +67,14 @@ _MAX_METRIC_ROWS = 500
 # constants (trusted gateway code); the macro *arguments* from the registry
 # file are consumed by the regex and never reach the DB — a tampered file can
 # put anything whitelisted inside the parens, it is discarded wholesale.
-_MACRO_TIMEGROUP = f"date_trunc('{_INSPECTOR_BUCKET_UNIT}', ts)"
+# The double `AT TIME ZONE 'UTC'` round-trip (timestamptz -> naive UTC wall
+# clock -> back to timestamptz) truncates the bucket in UTC while keeping the
+# result a tz-aware timestamptz: `MetricPoint.ts` (gateway/schemas/inspect.py)
+# is fed this column directly, and a naive result would silently serialize
+# without a UTC offset.
+_MACRO_TIMEGROUP = (
+    f"date_trunc('{_INSPECTOR_BUCKET_UNIT}', ts AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'"
+)
 _MACRO_TIMEFILTER = f"ts >= now() - interval '{_INSPECTOR_WINDOW_HOURS} hours'"
 _MACRO_INTERVAL = f"interval '{_INSPECTOR_BUCKET}'"
 _MACRO_INTERVAL_MS = str(3600 * 1000)  # 1 hour in ms
