@@ -114,6 +114,15 @@ Write each confirmed finding to
 `$AVA_HOME/self_evolution/proposals/<week>-<skill>.md`:
 phenomenon, the real run ids, root cause, and the concrete fix.
 
+**Optional deep dive.** The dataset's transcript is usually enough. When a
+finding hinges on something a transcript cannot show — where the time went, why
+an exec died, which langgraph path the turn took, what the agent's history
+looked like before a compaction — read the run itself:
+`ava.help(ava.skills.inspect_a_trace)` is the correlation know-how across the
+checkpoints table, the Loki event river, and the Tempo spans. This complements
+`evaluate.debrief()` with evidence the agent's own account does not carry; it
+costs a few queries, so reach for it per finding, not per run.
+
 ### 4. Re-run to verify (optional, off by default)
 
 Only when a specific proposal is worth confirming empirically. The dataset's
