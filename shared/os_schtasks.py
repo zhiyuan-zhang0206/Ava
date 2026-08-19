@@ -112,6 +112,11 @@ NO_TIME_LIMIT_S = 0
 # `StartWhenAvailable` the tick the grid says was just missed can run promptly
 # after registration, which is what a `/Create /SC MINUTE` (start time = now) did
 # too.
+# No `Z`/offset suffix — Task Scheduler interprets a bare `<StartBoundary>`
+# in the MACHINE'S LOCAL timezone, not UTC (tz audit, 2026-08, PR-6). Harmless
+# for this specific value: a MINUTE-repetition trigger's phase only cares
+# about the boundary's second-of-minute, which is 0 in every timezone. A task
+# anchored on a sub-minute-significant field would need to account for this.
 _START_BOUNDARY = "2000-01-01T00:00:00"
 
 
