@@ -36,17 +36,21 @@ Everything hangs off these. Get one, and the rest follows.
 - **`agent_id`** — the agent. It is also the LangGraph `thread_id`, as a decimal
   string (`checkpoints.thread_id = '3048'`), the Loki line field
   (`| agent_id="3048"`), and the root span's `session.id`.
-- **`trace_id`** — one unit of graph work, lowercase 32-hex. It is the Loki line
-  field (`| trace_id="<hex>"`), the Tempo trace id, and — stamped onto the
-  checkpoint the work committed — `checkpoints.metadata->>'trace_id'`. The
+- **`trace_id`** — one turn of graph work, lowercase 32-hex. It is the Loki line
+  field (`| trace_id="<hex>"`), the Tempo trace id, and — stamped per turn onto
+  the checkpoint the turn committed — `checkpoints.metadata->>'trace_id'`. The
   reverse link is the root span's `ava.checkpoint_id` attribute.
 
-**How much is "one unit" is the thing to check.** The root span
-(`shared/trace.py:session_span`) wraps one `graph.ainvoke`, and the graph runs
-until it reaches END — so today a trace can cover an agent's whole session, not
-a single turn, and the checkpoint stamped is the one at the end of it. A
-per-turn root span narrows this. Before reasoning about a trace's span count or
-duration, look at what its root actually spans.
+**One trace is exactly one turn.** The root span (`shared/trace.py:turn_span`)
+wraps one `graph.ainvoke`, and the runloop invokes the graph once per turn —
+the claim node ends the invocation at the turn boundary, so the trace exports
+when the turn ends. The root keeps the name `ava-agent-{agent_id}` and the
+`session.id` attribute, and carries `ava.turn` (int, from 1, **per process** —
+it repeats across restarts; order turns across processes by timestamp or
+`ava.checkpoint_id`, never by `ava.turn`). Runs recorded before 2026-08-20
+used a session-scoped root (`session_span`) that wrapped the whole process
+life — an old run in the mirror or Tempo can span many turns, so check the
+root's bounds before reasoning about its span count or duration.
 
 The checkpoint stamp is deliberately failure-tolerant
 (`agent/_trace_checkpoint.py`), so **not every checkpoint carries a

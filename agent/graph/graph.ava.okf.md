@@ -9,14 +9,15 @@ tags: []
 
 ## What it is
 
-Ava agent's core execution engine—a **8-Node self-looping directed graph** based on LangGraph, entirely routed via `Command(goto=)` for explicit routing. The graph compiles into a `CompiledStateGraph`, and each turn goes through the full pipeline.
+Ava agent's core execution engine—a **8-Node self-looping directed graph** based on LangGraph, entirely routed via `Command(goto=)` for explicit routing. The graph compiles into a `CompiledStateGraph`; **one invocation = one turn**: the runloop (`agent/_runloop.py`) invokes the graph once per turn, and claim ends the invocation at the turn boundary (goto END with `exit_requested=False` — nothing left to do but wait) so the per-turn root span/trace closes; the runloop re-invokes on the same checkpointer thread and the fresh invocation's claim does the long wait. `exit_requested=True` (terminate/restart winner, lost lifecycle CAS) is what makes the runloop return and the process exit.
 
 ```
 after_init → init_context → claim → before_llm → llm → before_exec → exec → after_exec
                   ↑           │                                                     │
                   │           └─────────────────────────────────────────────────────┘
                   │           (after_exec always returns to claim; claim decides
-                  │            wait or continue based on halted + pending)
+                  │            end-turn or continue based on halted + pending +
+                  │            turn_active)
                   └── compaction routes claim → init_context to re-establish the
                       standing message head (post-compact tail parked in context_reset)
 ```

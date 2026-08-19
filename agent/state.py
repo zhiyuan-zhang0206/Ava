@@ -3,6 +3,8 @@
 BaseAgentState (framework layer, static):
     messages         — cross-turn LLM history (guarded add_messages reducer: append-only invariant, task #1256)
     halted           — whether the current turn has ended
+    turn_active      — the current graph invocation is mid-turn (claim's turn boundary)
+    exit_requested   — claim's END means process exit, not just turn over
     update_initiated — this agent kicked off a cluster self-update
     compact          — nested compaction bookkeeping (CompactState)
     memory           — nested passive-recall bookkeeping (MemoryState)
@@ -172,6 +174,16 @@ class BaseAgentState(BaseModel):
     # commit time.
     messages: Annotated[list[AnyMessage], guarded_add_messages] = Field(default_factory=list)
     halted: bool = False
+    turn_active: bool = False
+    """This invocation is mid-turn (claim routed work). One invocation = one
+    turn: a claim pass that finds nothing to do with this set ends the
+    invocation (goto END) instead of blocking, so the runloop can close the
+    turn's root span and re-invoke."""
+    exit_requested: bool = False
+    """Claim's END means the PROCESS should exit (terminate/restart winner or
+    a lost lifecycle CAS); the turn-boundary END leaves it False so the
+    runloop re-invokes. Both flags reset in every invocation's input — a
+    stale checkpointed True (a resurrect) cannot kill the new process."""
     update_initiated: bool = False
     """Set by self-initiated restarts (`ava.self.restart()`); the historical
     `ava.self.update()` initiator path that introduced it is removed, but
@@ -215,8 +227,9 @@ _PLUGIN_NAMESPACE_FIELDS: dict[str, set[str]] = {}
 # reducer defines the merge contract; _exec_notes.merge_exec_notes combines a
 # plugin's messages delta with the exec ToolMessage — tool result first,
 # notes after, per the Anthropic-compat adjacency constraint). Every other
-# BaseAgentState field is framework-managed per turn (halted /
-# update_initiated / compact / memory / context_reset / capabilities):
+# BaseAgentState field is framework-managed per turn (halted / turn_active /
+# exit_requested / update_initiated / compact / memory / context_reset /
+# capabilities):
 # declaring one is rejected at register_plugin_state, and a direct
 # ava.state_update write to one is rejected by _validate_plugin_state_keys.
 _PLUGIN_WRITABLE_BASE_FIELDS: frozenset[str] = frozenset({"messages"})
@@ -231,9 +244,10 @@ _BASE_FIELD_DECLARED: set[str] = set()
 # BaseAgentState built-in fields — plugins can modify exactly one of them:
 # `messages` (only when the plugin declares it in its own BaseModel with the
 # exact BaseAgentState annotation, including the add_messages reducer;
-# register_plugin_state checks). Every other core key (halted /
-# update_initiated / compact / memory / context_reset / capabilities) is
-# framework-managed every turn: declaring one raises at registration, and
+# register_plugin_state checks). Every other core key (halted / turn_active /
+# exit_requested / update_initiated / compact / memory / context_reset /
+# capabilities) is framework-managed every turn: declaring one raises at
+# registration, and
 # _BASE_FIELD_DECLARED tracks the declared (messages-only) set so a direct
 # write to any other base channel = plugin missing a prefix typo (writing
 # "compact" instead of "ava_myplugin__compact"), which would silent-clobber

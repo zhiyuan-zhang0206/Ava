@@ -10,7 +10,7 @@ from typing import Any
 import pytest
 
 from shared import trace as trace_mod
-from shared.trace import OtlpJsonHttpSpanExporter, initialize_tracing, session_span
+from shared.trace import OtlpJsonHttpSpanExporter, initialize_tracing, turn_span
 
 
 @pytest.fixture(autouse=True)
@@ -215,14 +215,14 @@ def test_prune_old_mirror_disabled_when_nonpositive(
     assert old.exists()
 
 
-# --- session_span -----------------------------------------------------------
+# --- turn_span -----------------------------------------------------------
 
 
 class _FakeSpan:
     def __init__(self):
-        self.attributes: dict[str, str] = {}
+        self.attributes: dict[str, object] = {}
 
-    def set_attribute(self, key: str, value: str) -> None:
+    def set_attribute(self, key: str, value: object) -> None:
         self.attributes[key] = value
 
 
@@ -237,8 +237,8 @@ class _FakeTracer:
         yield self._span
 
 
-def test_session_span_noop_when_disabled(monkeypatch: pytest.MonkeyPatch):
-    """When trace_enabled=False, session_span is a pass-through — does not open a span."""
+def test_turn_span_noop_when_disabled(monkeypatch: pytest.MonkeyPatch):
+    """When trace_enabled=False, turn_span is a pass-through — does not open a span."""
     monkeypatch.setattr("shared.config.settings.observability.trace_enabled", False)
 
     def _explode(*_a, **_kw):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
@@ -246,13 +246,13 @@ def test_session_span_noop_when_disabled(monkeypatch: pytest.MonkeyPatch):
 
     monkeypatch.setattr("opentelemetry.trace.get_tracer", _explode)  # pyright: ignore[reportUnknownArgumentType]
 
-    with session_span(name="root", session_id="agent-42"):
+    with turn_span(name="root", session_id="agent-42", turn=1):
         pass
 
 
-def test_session_span_noop_when_initialize_skipped(monkeypatch: pytest.MonkeyPatch):
+def test_turn_span_noop_when_initialize_skipped(monkeypatch: pytest.MonkeyPatch):
     """Even with trace_enabled=True, if initialize_tracing hasn't run yet,
-    session_span stays no-op — otherwise it opens a span against an
+    turn_span stays no-op — otherwise it opens a span against an
     uninitialized provider."""
     monkeypatch.setattr("shared.config.settings.observability.trace_enabled", True)
     assert trace_mod._state["initialized"] is False
@@ -262,13 +262,13 @@ def test_session_span_noop_when_initialize_skipped(monkeypatch: pytest.MonkeyPat
 
     monkeypatch.setattr("opentelemetry.trace.get_tracer", _explode)  # pyright: ignore[reportUnknownArgumentType]
 
-    with session_span(name="root", session_id="agent-42"):
+    with turn_span(name="root", session_id="agent-42", turn=1):
         pass
 
 
-def test_session_span_opens_root_with_session_id(monkeypatch: pytest.MonkeyPatch):
-    """When enabled and initialized, session_span opens an OTel root span with
-    the given name and stamps both the viewer and neutral session attributes."""
+def test_turn_span_opens_root_with_session_id(monkeypatch: pytest.MonkeyPatch):
+    """When enabled and initialized, turn_span opens an OTel root span with
+    the given name and stamps the session and turn attributes."""
     monkeypatch.setattr("shared.config.settings.observability.trace_enabled", True)
     trace_mod._state["initialized"] = True
 
@@ -276,12 +276,13 @@ def test_session_span_opens_root_with_session_id(monkeypatch: pytest.MonkeyPatch
     tracer = _FakeTracer(span)
     monkeypatch.setattr("opentelemetry.trace.get_tracer", lambda _name: tracer)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
 
-    with session_span(name="ava-agent-42", session_id="42"):
+    with turn_span(name="ava-agent-42", session_id="42", turn=3):
         pass
 
     assert tracer.opened == ["ava-agent-42"]
     assert span.attributes == {
         "session.id": "42",
+        "ava.turn": 3,
     }
 
 

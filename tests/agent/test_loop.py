@@ -226,7 +226,7 @@ class TestInvokeGraphLifecycleLogging:
         respawns)."""
         graph = MagicMock()
         graph.ainvoke = AsyncMock(
-            side_effect=[FatalLLMStreamError("retry cap (3) exhausted"), None]
+            side_effect=[FatalLLMStreamError("retry cap (3) exhausted"), {"exit_requested": True}]
         )
         pub = MagicMock()
         ctx = AvaContext(
@@ -261,7 +261,10 @@ class TestInvokeGraphLifecycleLogging:
         every agent needing a manual revive."""
         graph = MagicMock()
         graph.ainvoke = AsyncMock(
-            side_effect=[FatalProviderError("provider permanently rejected (HTTP 402)"), None]
+            side_effect=[
+                FatalProviderError("provider permanently rejected (HTTP 402)"),
+                {"exit_requested": True},
+            ]
         )
         pub = MagicMock()
         ctx = AvaContext(
@@ -296,7 +299,10 @@ class TestInvokeGraphLifecycleLogging:
         (one crash per incoming message while the cause persisted)."""
         graph = MagicMock()
         graph.ainvoke = AsyncMock(
-            side_effect=[CompactionFailedError("no usable summary across 3 attempts"), None]
+            side_effect=[
+                CompactionFailedError("no usable summary across 3 attempts"),
+                {"exit_requested": True},
+            ]
         )
         pub = MagicMock()
         ctx = AvaContext(
@@ -338,7 +344,7 @@ class TestInvokeGraphLifecycleLogging:
         tool_use) in-process, then re-invokes the graph. The agent pauses and
         resumes instead of dying — a mid-turn death is not auto-resurrected."""
         graph = MagicMock()
-        graph.ainvoke = AsyncMock(side_effect=[outage_exc, None])
+        graph.ainvoke = AsyncMock(side_effect=[outage_exc, {"exit_requested": True}])
         wait = AsyncMock(name="_wait_for_db_recovery")
         reconcile = AsyncMock(name="_reconcile_claimed_inbounds_at_startup")
         repair = AsyncMock(name="_repair_dangling_tool_use_at_startup")
@@ -359,9 +365,10 @@ class TestInvokeGraphLifecycleLogging:
         # two-phase claim/repair a fresh process runs.
         reconcile.assert_awaited_once()
         repair.assert_awaited_once()
-        # The re-invoke is a fresh run {} (not halted=True — that is the fatal-LLM
-        # guard against re-entering a failing turn; a DB outage leaves it resumable).
-        assert graph.ainvoke.await_args.args[0] == {}
+        # The re-invoke is a fresh run (not halted=True — that is the fatal-LLM
+        # guard against re-entering a failing turn; a DB outage leaves it
+        # resumable), carrying only the per-invoke turn/exit flag resets.
+        assert graph.ainvoke.await_args.args[0] == {"turn_active": False, "exit_requested": False}
         # Exactly one Error event, naming the recoverable-pause semantics.
         error_emits = [c for c in pub.emit.call_args_list if '"role":"error"' in c.args[0]]
         assert len(error_emits) == 1, (
@@ -382,7 +389,7 @@ class TestInvokeGraphLifecycleLogging:
             side_effect=[
                 psycopg.OperationalError("gone"),
                 psycopg.OperationalError("gone again"),
-                None,
+                {"exit_requested": True},
             ]
         )
         monkeypatch.setattr("agent._runloop._wait_for_db_recovery", AsyncMock())
@@ -405,7 +412,9 @@ class TestInvokeGraphLifecycleLogging:
         parks again. This is the death the branch exists to prevent, so the
         reconcile step itself must not be the one exit that reintroduces it."""
         graph = MagicMock()
-        graph.ainvoke = AsyncMock(side_effect=[psycopg.OperationalError("outage"), None])
+        graph.ainvoke = AsyncMock(
+            side_effect=[psycopg.OperationalError("outage"), {"exit_requested": True}]
+        )
         wait = AsyncMock()
         monkeypatch.setattr("agent._runloop._wait_for_db_recovery", wait)
         # reconcile hits another outage on the first try, then succeeds.
@@ -447,7 +456,7 @@ class TestInvokeGraphLifecycleLogging:
     async def test_normal_completion_no_log(self, loguru_records) -> None:
         """ainvoke returns normally → helper does not log error (only ERROR level traces represent exception paths)."""
         graph = MagicMock()
-        graph.ainvoke = AsyncMock(return_value=None)
+        graph.ainvoke = AsyncMock(return_value={"exit_requested": True})
 
         await _invoke_graph_with_lifecycle_logging(graph, agent_id=42, ctx=_fake_ctx())
 
@@ -462,13 +471,40 @@ class TestInvokeGraphLifecycleLogging:
         empty update {} (non-None input still kicks off a new run; None means "resume only unfinished
         work" semantics). Passing a full AgentState() is equivalent to an "all-fields reset to defaults"
         update; each respawn would wipe halted + all plugin state fields
-        (ava_code cwd / built-in compact/memory sub-states)."""
+        (ava_code cwd / built-in compact/memory sub-states). The only keys each
+        invocation carries are the per-invoke turn/exit flag resets."""
         graph = MagicMock()
-        graph.ainvoke = AsyncMock(return_value=None)
+        graph.ainvoke = AsyncMock(return_value={"exit_requested": True})
 
         await _invoke_graph_with_lifecycle_logging(graph, agent_id=42, ctx=_fake_ctx())
 
-        assert graph.ainvoke.call_args.args[0] == {}
+        assert graph.ainvoke.call_args.args[0] == {"turn_active": False, "exit_requested": False}
+
+    async def test_turn_boundary_reinvokes_until_exit_requested(self) -> None:
+        """One ainvoke = one TURN: a turn-boundary END (exit_requested=False in
+        the returned state) re-invokes the graph on the same thread instead of
+        exiting; only exit_requested=True (claim's terminate/restart winner or
+        a lost lifecycle CAS) ends the loop. Every invocation's input resets
+        both flags, so a stale checkpointed True (a resurrect onto the same
+        thread) cannot kill the new process."""
+        graph = MagicMock()
+        graph.ainvoke = AsyncMock(
+            side_effect=[
+                {"exit_requested": False},
+                {"exit_requested": False},
+                {"exit_requested": True},
+            ]
+        )
+
+        await _invoke_graph_with_lifecycle_logging(graph, agent_id=42, ctx=_fake_ctx())
+
+        assert graph.ainvoke.call_count == 3, (
+            "loop must re-invoke on each turn-boundary END and stop on exit_requested=True"
+        )
+        for call in graph.ainvoke.call_args_list:
+            assert call.args[0] == {"turn_active": False, "exit_requested": False}, (
+                "every invocation's input must reset the per-invoke turn/exit flags"
+            )
 
 
 class TestDbRecoveryWait:

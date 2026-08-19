@@ -157,7 +157,9 @@ def _after_exec_default_next(_state: BaseAgentState) -> NodeName:
 
     Claim node behavior:
     - Pending inbound → dispatch, goto before_llm
-    - No pending + halted=True / messages empty → wait (IDLING)
+    - No pending + halted=True / messages empty → turn boundary: goto END with
+      exit_requested=False (one invocation = one turn); the runloop re-invokes
+      and the fresh invocation's claim does the long wait (IDLING)
     - No pending + halted=False + messages non-empty → immediately goto before_llm (no block)
     """
     return CLAIM

@@ -100,6 +100,15 @@ async def _claim_node_impl(
     batch = await claim_inbound_batch(ctx.ops_pool, agent_id)
     if not batch:
         if state.halted or not has_conversation(state.messages):
+            if state.turn_active:
+                # Turn boundary: one graph invocation = one turn. This
+                # invocation already routed work (turn_active), and the next
+                # thing to do is block for the next inbound — end the
+                # invocation instead, so the runloop closes this turn's root
+                # span and re-invokes on the same thread; the fresh
+                # invocation's claim does the long wait. exit_requested stays
+                # False: this END means "turn over", not "process exit".
+                return Command[ClaimGoto](update={"turn_active": False}, goto=END)
             try:
                 batch = await _wait_for_batch(ctx, agent_id)
             except LifecycleCasLostError as exc:
@@ -116,10 +125,10 @@ async def _claim_node_impl(
                     agent_id=agent_id,
                     reason=str(exc),
                 )
-                return Command[ClaimGoto](goto=END)
+                return Command[ClaimGoto](update={"exit_requested": True}, goto=END)
         else:
             return Command[ClaimGoto](
-                update={"halted": False},
+                update={"halted": False, "turn_active": True},
                 goto=BEFORE_LLM,
             )
 
@@ -140,7 +149,18 @@ async def _claim_node_impl(
     if outcome.publish_end_snapshot:
         await publish_end_timeline_snapshot(ctx, state, agent_id, st.new_msgs)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
 
-    return outcome.command
+    # ── Turn/exit stamping (once, for every decide outcome) ──
+    # A dispatched batch means this invocation is mid-turn: stamp turn_active
+    # so a later claim pass that finds nothing to do ends the invocation (the
+    # turn boundary above) instead of blocking. exit_requested carries the
+    # process-exit intent to the runloop; it keys on the dispatch verdict
+    # (st.next_goto == END: a terminate/restart won the batch), not on the
+    # command's own goto — a compact co-batched with a terminate routes
+    # through INIT_CONTEXT first and only then reaches END via reset.resume.
+    update = dict(outcome.command.update or {})  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+    update["turn_active"] = True
+    update["exit_requested"] = st.next_goto == END
+    return Command[ClaimGoto](update=update, goto=outcome.command.goto)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType, reportArgumentType]
 
 
 async def claim_node(

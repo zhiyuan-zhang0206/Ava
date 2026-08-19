@@ -1,10 +1,15 @@
-"""Agent graph run loop — the long-lived ainvoke driver.
+"""Agent graph run loop — the per-turn ainvoke driver.
 
-The self-cycling LangGraph runs in a loop until a terminate inbound makes the
-claim node goto END; split out of `agent/loop.py` (which keeps `main()`
-orchestration + the `run()` entry). This module owns:
+The self-cycling LangGraph is invoked once per TURN: the claim node ends each
+invocation at the turn boundary (goto END with `exit_requested=False`) and
+this loop re-invokes on the same checkpointer thread, until claim requests
+process exit (`exit_requested=True`: terminate / restart winner, or a lost
+lifecycle CAS). Each invocation runs under its own per-turn root span
+(`shared.trace.turn_span`), so one trace = one turn. Split out of
+`agent/loop.py` (which keeps `main()` orchestration + the `run()` entry).
+This module owns:
 
-- `_invoke_graph_with_lifecycle_logging`: the ainvoke loop with the
+- `_invoke_graph_with_lifecycle_logging`: the per-turn ainvoke loop with the
   fail-loud / fatal-LLM / DB-outage branches;
 - `_graph_config`: the LangGraph invoke config (thread_id, infinite recursion
   limit, trace fields);
@@ -39,10 +44,12 @@ from .startup import (
 )
 from .state import BaseAgentState
 
-# LangGraph recursion_limit defaults to 25 — a self-cycling graph must override
-# to a large number. `int` has no inf; using 2**31-1 (~2.1G) in practice is
-# enough for the agent to run for years without hitting it. The spec calls
-# this `recursion_limit=∞` ("widest possible runaway protection rail").
+# LangGraph recursion_limit defaults to 25 — far too low for this graph even
+# per-turn: one invocation is one TURN, and a turn is a whole work bout (the
+# claim → llm → exec cycle repeats until the agent halts), which can run for
+# days. `int` has no inf; 2**31-1 keeps the rail effectively unbounded. The
+# spec calls this `recursion_limit=∞` ("widest possible runaway protection
+# rail").
 _RECURSION_LIMIT_INF = 2**31 - 1
 
 # DB-outage pause backoff (the laptop-sleep / network-change / tailscale
@@ -206,7 +213,20 @@ async def _invoke_graph_with_lifecycle_logging(
     agent_id: int,
     ctx: AvaContext,
 ) -> None:
-    """Run graph.ainvoke until a terminate inbound causes claim node to goto END (process exits normally).
+    """Run graph.ainvoke once per TURN in a loop, until claim requests process exit.
+
+    One invocation = one turn: the claim node ends the invocation (goto END)
+    when the turn's work is done and the next thing to do is block for
+    inbound; this loop then re-invokes on the same checkpointer thread
+    (thread_id), so state carries across turns and the fresh invocation's
+    claim does the long wait. Each invocation is wrapped in its own per-turn
+    root span (`turn_span`), so a trace = a turn and the root span exports
+    when the turn ends. The loop exits only when the returned state has
+    `exit_requested=True` — claim's terminate/restart winner or a lost
+    lifecycle CAS — which is what "process exits normally" means now; the
+    turn-boundary END leaves it False. Both flags are reset in every
+    invocation's input, so a stale checkpointed True (a resurrect onto the
+    same thread) cannot kill the new process.
 
     fail-loud guard — all ainvoke exit paths leave a traceback in the file
     sink, avoiding session teardown dropping stderr and leaving
@@ -260,10 +280,11 @@ async def _invoke_graph_with_lifecycle_logging(
     if settings.observability.trace_tags:
         tags.extend(t.strip() for t in settings.observability.trace_tags.split(",") if t.strip())
 
-    # Wrap the entire run in a root span tagged with session_id so all
-    # LangGraph node + Anthropic SDK child spans inherit the OTel context and
-    # group together into one session on the viewer.
-    from shared.trace import session_span
+    # Wrap each invocation (= one turn) in its own root span tagged with
+    # session_id + the turn counter, so all LangGraph node + Anthropic SDK
+    # child spans of that turn inherit the OTel context and the trace exports
+    # the moment the turn ends; session.id groups an agent's turns on the viewer.
+    from shared.trace import turn_span
 
     # Track the input update to pass to graph.ainvoke. Starts empty; after
     # a FatalLLMStreamError / FatalProviderError we set halted=True so the claim
@@ -271,16 +292,19 @@ async def _invoke_graph_with_lifecycle_logging(
     # with the same messages and hitting the same fatal error in an infinite loop
     # (agent #1581 incident — DeepSeek stream stall with 616 messages).
     input_update: dict[str, object] = {}
+    turn = 0
     while True:
+        turn += 1
         try:
-            with session_span(name=f"ava-agent-{agent_id}", session_id=str(agent_id)):
+            with turn_span(name=f"ava-agent-{agent_id}", session_id=str(agent_id), turn=turn):
                 # The input is a state UPDATE, not a full state — same semantics
                 # as a node's Command(update=...): each key present is folded into
                 # its channel (messages through its add_messages reducer, plain
                 # fields by last-value replacement); keys absent are untouched,
-                # the state itself is loaded from the thread_id's checkpoint. We
-                # have no update to apply at process start, so pass the empty
-                # update {} — any non-None input kicks a fresh run (None means
+                # the state itself is loaded from the thread_id's checkpoint.
+                # Every invocation resets the two turn/exit flags (see the
+                # docstring); beyond that we have no update to apply at process
+                # start — any non-None input kicks a fresh run (None means
                 # "resume pending work only" and no-ops on a completed thread).
                 # After a FatalLLMStreamError / FatalProviderError we pass
                 # halted=True so the claim node blocks waiting for the next
@@ -293,13 +317,20 @@ async def _invoke_graph_with_lifecycle_logging(
                 # respawn. On a fresh thread, unwritten channels read as the
                 # schema defaults.
                 # Dict-update input form is runtime-valid but absent from the input type.
-                await graph.ainvoke(  # pyright: ignore[reportUnknownMemberType]
-                    input_update,  # pyright: ignore[reportArgumentType, reportUnknownMemberType]
+                result: dict[str, object] = await graph.ainvoke(  # pyright: ignore[reportUnknownMemberType, reportAssignmentType]
+                    {"turn_active": False, "exit_requested": False, **input_update},  # pyright: ignore[reportArgumentType, reportUnknownMemberType]
                     config=_graph_config(agent_id, tags, metadata),
                     context=ctx,
                 )
                 await _trace_checkpoint.attach_trace_checkpoint_ref(graph, ctx, agent_id)
-            return
+            # exit_requested is guaranteed present: this invocation's input
+            # wrote the channel. [] not .get() — a missing key is a bug.
+            if result["exit_requested"]:
+                return
+            # Turn over — re-invoke on the same thread; the fresh invocation's
+            # claim blocks for the next inbound.
+            input_update = {}
+            continue
         except (FatalLLMStreamError, FatalProviderError) as exc:
             # Retry cap fired, or the provider permanently rejected the request
             # (402/401/403) — abort this turn but keep the agent alive. The

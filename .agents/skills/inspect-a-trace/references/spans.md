@@ -4,13 +4,15 @@ Spans give you what the event stream cannot — the tree, the durations, the
 langgraph node path, and the shape of each LLM call. Come here once you already
 have a `trace_id`.
 
-**Check the trace's scope first.** The root span
-(`shared/trace.py:session_span`) wraps one `graph.ainvoke`, and the graph runs
-until it reaches END (terminate, restart, idle exit) — so a trace covers an
-agent *session*, which may be many turns, rather than one turn. A per-turn root
-span narrows that boundary; until you have confirmed which shape the run you
-are reading was recorded under, read the root's start and end times rather than
-assuming a turn.
+**Check the trace's scope first.** The root span (`shared/trace.py:turn_span`)
+wraps one `graph.ainvoke` = one **turn**: the runloop invokes the graph once
+per turn and claim ends the invocation at the turn boundary, so a trace is one
+turn. Two duration caveats: the root span opens when the invocation starts —
+it *includes claim's idle wait for the turn's inbound* (OTel context cannot
+cross into LangGraph's per-node task), so a turn's wall-clock span duration
+can be far longer than the work in it; and runs recorded before 2026-08-20
+used a session-scoped root (`session_span`) that could span many turns — for
+an old run, read the root's start and end times rather than assuming a turn.
 
 Three sources, in the order you should reach for them:
 
@@ -34,6 +36,8 @@ All verified against Tempo 3.0.2.
 | All traces | `{ resource.service.name = "ava" }` |
 | One trace | `{ trace:id = "<hex-32>" }` |
 | Spans of one agent | `{ span.traceloop.association.properties.agent_id = "3048" }` |
+| All of one agent's turn roots | `{ span.session.id = "3048" }` |
+| One specific turn | `{ span.session.id = "3048" && span.ava.turn = 17 }` |
 | Spans in one langgraph node | `{ span.traceloop.association.properties.langgraph_node = "after_exec" }` |
 | Spans by operation | `{ span.gen_ai.operation.name = "goto" }` |
 | Exact span name | `{ name = "goto exec" }` |
@@ -41,8 +45,9 @@ All verified against Tempo 3.0.2.
 Search parameters: `limit` (traces), `spss` (spans per span set, max 100),
 `start`/`end` (unix seconds). Dotted attribute names work inside `span.*`.
 
-Span attributes worth knowing: the root carries `session.id` (the agent id) and
-`ava.checkpoint_id` (the checkpoint it committed); children carry
+Span attributes worth knowing: the root carries `session.id` (the agent id),
+`ava.turn` (the per-process turn counter) and `ava.checkpoint_id` (the
+checkpoint the turn committed); children carry
 `traceloop.association.properties.langgraph_node` / `.langgraph_step` /
 `.langgraph_path`, `traceloop.association.properties.ls_model_name`, and
 `gen_ai.operation.name`. These come from OpenLLMetry's auto-instrumentation of

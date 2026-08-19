@@ -1053,15 +1053,20 @@ windowed mode. (Bench containers record to their ephemeral-FS mirror, which
 dies with the container — a host that wants bench traces in Tempo ships its
 own mirror after the run.)
 
-**Explicit instruments + per-agent session_span**: `Traceloop.init` is called
+**Explicit instruments + per-turn turn_span**: `Traceloop.init` is called
 with `instruments={ANTHROPIC, OPENAI, LANGCHAIN, GOOGLE_GENERATIVEAI}` —
 LangGraph nests through the LANGCHAIN instrumentor (its callback handler), so
-there is no separate LANGGRAPH instrument. Around `graph.ainvoke`,
-`agent/loop.py` opens `session_span(name="ava-agent-N",
-session_id=str(agent_id))`, a native OTel root span stamped with the neutral
-`session.id` (the viewer groups one agent's spans into a session by it). All
-child spans (LLM calls, tool execs, retries) share that root's trace_id +
-parent; without the wrap each LLM call is an orphan.
+there is no separate LANGGRAPH instrument. Around each per-turn
+`graph.ainvoke`, `agent/_runloop.py` opens `turn_span(name="ava-agent-N",
+session_id=str(agent_id), turn=N)`, a native OTel root span stamped with the
+neutral `session.id` (the viewer groups one agent's turns into a session by
+it) and `ava.turn`. One trace = one turn: the root span closes and exports
+when the turn's work is done. All child spans (LLM calls, tool execs,
+retries) share that root's trace_id + parent; without the wrap each LLM call
+is an orphan. Positioning: traces are a **drill-down tool for bounded units**
+— a finished turn rendered as a waterfall. The primary observation surface
+for long-running agents is the unified event river (the `events` table + its
+Loki dual-write above), not Tempo.
 
 ### The operator's SRE loop
 
