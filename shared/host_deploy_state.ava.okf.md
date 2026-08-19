@@ -47,7 +47,7 @@ tags:
 ## Key Dependencies
 
 - [[shared.ava.okf.md|Shared Libraries]] — layering: `shared` must not import `cli`/`gateway`; identity from `shared.machine`, DB from `shared.db`
-- [[okf/design/r1-state-liveness.ava.okf.md|R1 state & liveness design]] — the two-table deployment-state model
+- [[okf/design/r1-state-liveness/r1-state-liveness.ava.okf.md|R1 state & liveness design]] — the two-table deployment-state model
 - `shared/deploy_timing.py` — `NO_PROGRESS_TIMEOUT_S` as the lease TTL
 
 ## Entry Points

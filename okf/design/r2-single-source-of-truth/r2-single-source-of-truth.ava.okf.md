@@ -36,17 +36,7 @@ The pattern is uniform across four convergence points, but **the mechanism is in
 
 ### A. Env keys — `EnvRegistry` (declaration registry, see [[okf/design/design.ava.okf.md|lexicon]])
 
-Every env key is declared exactly once: Settings fields declare metadata at the class declaration (`json_schema_extra`); passthrough keys (PATH/TMPDIR/VIRTUAL_ENV/DISPLAY/HOME/Windows system keys) are registered rows. The registry builds from pydantic **class metadata only** (no Settings instantiation — decoupled from `dotenv_boot` timing). Three operation families become **projections** of the registry:
-
-- **Forwarding** (`child_env(role, platform)`) — the parent→child env view. `role` reuses the existing `AVA_PROCESS_PROFILE` (gateway/agent/runner) — no new enum. POSIX delivery stays the 0600 env-file prefix; Windows delivers a dict. argv env-splices stay forbidden (secrets never ride argv).
-- **Keep/drop** (`env_authority_drop_set(role)` / `env_keep_set(role)`) — dotenv_boot's own-environ surgery, as set-membership queries.
-- **Seed allowlist** (`seed_allowlist()`) — the install-time file-copy whitelist.
-
-Pure test-fixture sets are deleted outright. The authority for derivation is the **consumption matrix** (which process kind actually reads which keys — #1570's lesson); capability/scope metadata only validates.
-
-Invariants: A1 every key registered exactly once (no duplicates, no orphans); A2 every projection is a pure function of the registry; A3 **one metadata line = every projection updates** (the six-gap class becomes structurally impossible).
-
-### B. Skill names — `SkillIdentity` (an entity, not a string)
+Moved to [[okf/design/r2-single-source-of-truth/env-registry.ava.okf.md|R2 Env Registry]] — every env key declared exactly once; forwarding/keep-drop/seed-allowlist are pure projections; invariants A1–A3.### B. Skill names — `SkillIdentity` (an entity, not a string)
 
 A skill's identity is one entity: constructed from any surface (`from_dir`/`from_frontmatter`/`from_cli`), all folding (dash↔underscore) in the constructor, `display_name()` renders. **The install directory is the source of identity; frontmatter `name` is the display declaration** — folded they must be equal, else fail-fast (isomorphic to "cluster identity IS home path"). Registry key = match_key; two directories folding to the same key → `SkillNameCollision` fail-fast. All boundaries accept or produce the entity; bare strings are constructed explicitly at boundaries — forgetting to fold becomes structurally impossible.
 
@@ -78,4 +68,4 @@ Invariants: D1 exactly one retry loop in the repo (grep-provable); D2 one error-
 
 ## Related as-is nodes
 
-[[../../shared/shared.ava.okf.md]] · [[../../ava/ava.ava.okf.md]] · [[okf/skills/skills.ava.okf.md]]
+[[../../../shared/shared.ava.okf.md]] · [[../../../ava/ava.ava.okf.md]] · [[okf/skills/skills.ava.okf.md]]

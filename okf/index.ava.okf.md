@@ -24,7 +24,7 @@ Root node of the Ava project's OKF (Open Knowledge Format) knowledge graph. Each
 | [[../shared/shared.ava.okf.md]] | Shared library — lm provider abstraction, agents-contract wire protocol, migrations, logging, configuration |
 | [[../services/services.ava.okf.md]] | Background services — long-running subsystems such as browser MCP wrapper |
 | [[../.github/.github.ava.okf.md]] | GitHub Actions surface — backend/frontend/e2e and shell CI, cluster/app releases, issue + PR templates |
-| [[okf/plugins.ava.okf.md]] | Plugin system — extension mechanism that can carry skills / MCP servers |
+| [[okf/plugins/plugins.ava.okf.md]] | Plugin system — extension mechanism that can carry skills / MCP servers |
 | [[okf/skills/skills.ava.okf.md]] | Skills — pure markdown instruction bundles, lazily loaded by agents on demand |
 | [[okf/mcps/mcps.ava.okf.md]] | MCP integration — built-in chrome + external servers installed via `ava mcp install` (e.g., x), invoked via daemon subprocesses |
 | [[../tests/tests.ava.okf.md]] | Test suite — pytest unit / integration / e2e tests covering all modules |

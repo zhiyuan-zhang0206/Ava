@@ -119,7 +119,7 @@ directory) when the domain's shape changed:
 | Shared library / LM providers / config / migrations | `shared/shared.ava.okf.md` |
 | Background services | `services/services.ava.okf.md` |
 | GitHub Actions / CI workflows | `.github/.github.ava.okf.md` |
-| Plugins / extension points | `okf/plugins.ava.okf.md` |
+| Plugins / extension points | `okf/plugins/plugins.ava.okf.md` |
 | Skills | `okf/skills/skills.ava.okf.md` |
 | MCP integrations | `okf/mcps/mcps.ava.okf.md` |
 | Test suite | `tests/tests.ava.okf.md` |
