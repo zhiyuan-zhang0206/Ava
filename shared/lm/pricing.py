@@ -26,27 +26,29 @@ output rate; no separation between reasoning vs answer
 (usage_metadata reports separately but the underlying rate is the
 same).
 
-## Qwen: why the roster is one flat-tier model
+## Qwen: flat tiers only, and never derive a USD rate
 
-A tier boundary here is an exact token count, and the catalog validates that the
-tiers cover every input size with no gap. Alibaba publishes its Qwen boundaries
-only as `Input<=256k` / `256k<Input<=1m` — **the token value of "256K" appears
-nowhere** (verified 2026-08-20 against the qwen3.7-plus and qwen3.6-flash model
-pages). Writing one means guessing 262,144 against 256,000, and whichever is
-wrong silently misprices by ~3x every call landing in the band between them.
+A tier boundary here is an exact token count and the catalog validates gapless
+coverage, but Alibaba's docs express Qwen boundaries only as `Input<=256k` /
+`256k<Input<=1m` — the token value of "256K" is published nowhere. Guessing
+262,144 against 256,000 misprices ~3x in the band between them, so a
+length-tiered Qwen must not be registered off the docs website alone. Both
+registered models sidestep this: an account's own `GET /api/v1/models` reports
+`"range_name": "Default"` for each, i.e. a single flat tier with no boundary to
+guess. That endpoint, not the docs prose, is the authority on tiering.
 
-That is the real reason the registry seeds `qwen3.8-max` alone: it is the only
-current Qwen priced as a single flat tier (0-1M), so it needs no boundary. The
-cheaper tiers are otherwise ready — qwen3.7-plus publishes a full Beijing table
-including its implicit-cache column — and **resolving the token value of "256K"
-is the one thing standing between them and a catalog entry**. qwen3.6-flash needs
-a second fact too: its page lists only the explicit cache tier, and Ava never
-sends `cache_control`, so its implicit rate would have to be derived.
+**Do not convert CNY prices.** Alibaba publishes USD per model rather than
+converting at one rate, and the implied rates diverge — qwen3.8-max's USD works
+out to ~7.27 CNY/USD while qwen3.8-27b's is ~7.08. Deriving 27b from its CNY
+figures at max's rate produced 0.4125/1.65/0.0825 against the published
+0.424/1.696/0.085, a ~3% error baked permanently into every cost row. Read the
+model page's own USD column.
 
-Rates are region-specific: `shared/lm/_providers.py` binds Beijing, and the
-Singapore endpoint prices the same model differently (qwen3.8-max: $2.00/$0.25/
-$6.00 against Beijing's $1.65/$0.206/$4.951). Switching region is a catalog
-change, not just a URL change.
+Rates are also region-specific, and the endpoint is configurable
+(`AVA_DASHSCOPE_BASE_URL`): these entries are Beijing, and Singapore prices the
+same models differently (qwen3.8-max $2.00/$0.25/$6.00 against Beijing's
+$1.65/$0.206/$4.951). Repointing the base URL at another region means
+re-checking this catalog, not just the URL.
 """
 
 from __future__ import annotations

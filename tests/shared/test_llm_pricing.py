@@ -54,6 +54,21 @@ def test_qwen_implicit_cache_hit_is_the_registered_rate() -> None:
     assert cost_usd("qwen3.8-max", _M, _M, 0) == pytest.approx(1.65 + 4.951)  # pyright: ignore[reportUnknownMemberType]
 
 
+def test_qwen_27b_uses_its_own_published_usd_not_a_derived_rate() -> None:
+    """Locks the published Beijing USD column, because the tempting shortcut is
+    wrong. Alibaba prices per model rather than converting at one rate: 27b's
+    CNY (3 / 0.6 / 12) at qwen3.8-max's implied ~7.2727 gives 0.4125 / 0.0825 /
+    1.65, but the page publishes 0.424 / 0.085 / 1.696 — its own rate is ~7.08.
+    A derived catalog would carry that ~3% error on every 27b cost row forever."""
+    assert cost_usd("qwen3.8-27b", _M, _M, 0) == pytest.approx(0.424 + 1.696)  # pyright: ignore[reportUnknownMemberType]
+    assert cost_usd("qwen3.8-27b", _M, 0, _M) == pytest.approx(0.085)  # pyright: ignore[reportUnknownMemberType]
+    # and it is genuinely cheaper than the flagship, the reason it is registered
+    cheap = cost_usd("qwen3.8-27b", _M, _M, 0)
+    flagship = cost_usd("qwen3.8-max", _M, _M, 0)
+    assert cheap is not None and flagship is not None
+    assert cheap < flagship
+
+
 def test_cost_usd_unknown_model_is_none() -> None:
     """A model absent from MODEL_PRICING returns None (unpriced), never a
     fabricated $0 — the caller counts it as unpriced rather than free."""

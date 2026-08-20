@@ -592,11 +592,15 @@ def _build_qwen_model(
     from shared.lm._reasoning_compat import ReasoningContentChatModel
 
     # Alibaba Cloud Model Studio (DashScope) serves Qwen on an OpenAI-compatible
-    # endpoint with standard `Authorization: Bearer` auth. Ava binds the Beijing
-    # region — the deployment this roster is priced for (the Singapore endpoint
-    # `dashscope-intl.aliyuncs.com` serves the same models at a different tariff,
-    # so switching regions means re-pricing pricing_catalog.json, not just this
-    # URL). Qwen streams its thinking in the delta's `reasoning_content` field,
+    # endpoint with standard `Authorization: Bearer` auth. The host is CONFIG,
+    # not a constant: a dedicated Model Studio workspace serves the same API on
+    # its own `<workspace-id>.cn-beijing.maas.aliyuncs.com` host, which the
+    # public default cannot reach at all, so a hardcoded URL locks those accounts
+    # out entirely (`AVA_DASHSCOPE_BASE_URL`). The `/compatible-mode/v1` suffix is
+    # the load-bearing part — `/api/v1` on the same host is DashScope's native
+    # protocol and 404s this client's paths. Regions price differently, so
+    # repointing it means re-checking pricing_catalog.json too.
+    # Qwen streams its thinking in the delta's `reasoning_content` field,
     # which ReasoningContentChatModel recovers into canonical thinking blocks —
     # the same reason glm / mimo use it rather than bare ChatOpenAI.
     if settings.lm.dashscope_api_key is None:
@@ -609,7 +613,9 @@ def _build_qwen_model(
     # (declared on BaseChatOpenAI; model_kwargs would collide). DashScope's
     # graded knob is a token budget (`thinking_budget`), not a level enum, so
     # the cross-provider effort maps onto the same on/off switch — see
-    # shared/lm/_effort.py:qwen_extra_body.
+    # shared/lm/_effort.py:qwen_extra_body. Verified live 2026-08-20 on both
+    # registered models: `enable_thinking: false` returns 200 with empty
+    # reasoning, not the 400 the undocumented switch risked.
     qwen_kwargs: dict[str, Any] = {}
     extra_body = qwen_extra_body(thinking=thinking, reasoning_effort=resolved_effort)
     if extra_body:
@@ -618,11 +624,15 @@ def _build_qwen_model(
     # stream carries no final usage frame — and DashScope reports its implicit
     # context-cache hits in that frame's `prompt_tokens_details.cached_tokens`,
     # which langchain-openai maps onto usage_metadata's `cache_read` and the
-    # cost ledger prices at the catalog's cache_read rate.
+    # cost ledger prices at the catalog's cache_read rate. Verified live
+    # 2026-08-20 on both registered models: the streamed terminal frame does
+    # carry the details object (cold call cached_tokens 0; warm repeat of a
+    # ~2.7k-token prefix 2048 on max, 1664 on 27b), so the ledger reads a real
+    # number rather than silently billing every turn as a full cache miss.
     return ReasoningContentChatModel(
         model=model,  # type: ignore[call-arg]
         api_key=settings.lm.dashscope_api_key.get_secret_value(),  # type: ignore[arg-type]
-        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        base_url=settings.lm.dashscope_base_url,
         stream_usage=True,
         disable_streaming=disable_streaming,
         timeout=timeout,

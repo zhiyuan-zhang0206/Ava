@@ -584,3 +584,30 @@ class LmSettings(EnvSettings):
             "seed": True,
         },
     )
+
+    dashscope_base_url: str = Field(
+        default="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        alias="AVA_DASHSCOPE_BASE_URL",
+        description=(
+            "OpenAI-compatible endpoint qwen* models dial. Defaults to Alibaba's "
+            "public Beijing endpoint; a dedicated Model Studio workspace serves the "
+            "same API on its own host "
+            "(https://<workspace-id>.cn-beijing.maas.aliyuncs.com/compatible-mode/v1), "
+            "which the default cannot reach. Keep the `/compatible-mode/v1` suffix — "
+            "`/api/v1` on those hosts is the native protocol, not this one. Regions "
+            "price differently, so pointing this at another region also means "
+            "re-checking shared/lm/pricing_catalog.json."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            # Seeded despite not being a secret: it is the other half of
+            # DASHSCOPE_API_KEY, which IS seeded. A workspace key is minted for
+            # one host and means nothing to the public default, so copying the
+            # key alone into a fresh worktree cluster hands it a key it cannot
+            # spend — the same lockout this field exists to fix.
+            "seed": True,
+            "scope": "cluster-pinned",
+        },
+    )

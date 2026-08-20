@@ -155,6 +155,11 @@ class TestConsumptionMatrixDeclarations:
         assert derived_env_keys() == expected
 
     def test_seed_allowlist_is_the_provider_keys(self) -> None:
+        """Pinned as an exact set, so widening it is a decision someone makes on
+        purpose. AVA_DASHSCOPE_BASE_URL is the one member that is not a
+        credential: a dedicated Model Studio workspace mints its key for its own
+        host, so seeding DASHSCOPE_API_KEY without it hands a fresh worktree a
+        key it cannot spend."""
         from shared.env_registry import seed_allowlist
 
         expected = {
@@ -167,6 +172,7 @@ class TestConsumptionMatrixDeclarations:
             "GLM_API_KEY",
             "XAI_API_KEY",
             "DASHSCOPE_API_KEY",
+            "AVA_DASHSCOPE_BASE_URL",
             "BRAVE_API_KEY",
             "JINA_API_KEY",
         }
