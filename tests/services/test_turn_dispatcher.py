@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -367,6 +368,106 @@ class TestUncancellableTurn:
 
         assert [r for r in records if r.get("event") == "host_turn_uncancellable"] == []
 
+    async def test_the_report_carries_the_real_activity_clock(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A wedge report has to answer "how long has this agent actually been
+        silent", or a slow shutdown and a genuine wedge look identical.
+
+        The clock is `agents_meta.last_active_at` — written on every completed
+        LLM step — NOT the `/api/agents` field of the same name, which is
+        `MAX(inbound_messages.created_at)` and goes stale during exactly the long
+        turns where the question is real (issue #183).
+        """
+        monkeypatch.setattr(dispatcher, "_CANCEL_UNWIND_TIMEOUT_S", 0.05)
+        records: list[dict[str, object]] = []
+
+        def _capture(_msg: str, **kw: object) -> None:
+            records.append(kw)
+
+        monkeypatch.setattr(dispatcher.logger, "error", _capture)
+        silent_since = datetime.now(UTC) - timedelta(minutes=20)
+
+        async def _clock(_agent_id: int) -> datetime:
+            return silent_since
+
+        turn = _StuckTurn()
+        sched = TurnScheduler(turn, activity_clock=_clock)
+        sched.wake(5)
+        await asyncio.wait_for(turn.entered.wait(), 2)
+
+        assert await _aclose_without_hanging(sched, turn), "aclose never returned"
+
+        report = next(r for r in records if r.get("event") == "host_turn_uncancellable")
+        assert report["last_active_at"] == silent_since.isoformat()
+        idle_s = report["idle_s"]
+        assert isinstance(idle_s, float)
+        assert idle_s > 1000, "a 20-minute-silent agent must not read as freshly active"
+
+    async def test_a_failing_clock_read_still_reports_the_wedge(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The clock is an enrichment; the agent id and pending duration are the
+        part that cannot be reconstructed later. A DB that is unreachable — quite
+        possibly what the turn is stuck on — must not cost the whole report."""
+        monkeypatch.setattr(dispatcher, "_CANCEL_UNWIND_TIMEOUT_S", 0.05)
+        records: list[dict[str, object]] = []
+
+        def _capture(_msg: str, **kw: object) -> None:
+            records.append(kw)
+
+        monkeypatch.setattr(dispatcher.logger, "error", _capture)
+
+        async def _broken_clock(_agent_id: int) -> datetime:
+            raise RuntimeError("db unreachable")
+
+        turn = _StuckTurn()
+        sched = TurnScheduler(turn, activity_clock=_broken_clock)
+        sched.wake(9)
+        await asyncio.wait_for(turn.entered.wait(), 2)
+
+        assert await _aclose_without_hanging(sched, turn), "aclose never returned"
+
+        report = next(r for r in records if r.get("event") == "host_turn_uncancellable")
+        assert report["agent_id"] == 9
+        assert isinstance(report["waited_s"], float)
+        assert report["last_active_at"] is None, "an unreadable clock reports as absent"
+        assert report["idle_s"] is None
+
+    async def test_a_hanging_clock_read_does_not_delay_shutdown(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Same reasoning one step further: a clock read that never returns is
+        the shutdown-hang this whole class exists to prevent, reintroduced
+        through the diagnostic. It is bounded too."""
+        monkeypatch.setattr(dispatcher, "_CANCEL_UNWIND_TIMEOUT_S", 0.05)
+        monkeypatch.setattr(dispatcher, "_CLOCK_READ_TIMEOUT_S", 0.05)
+        records: list[dict[str, object]] = []
+
+        def _capture(_msg: str, **kw: object) -> None:
+            records.append(kw)
+
+        def _swallow(_msg: str, **_kw: object) -> None:
+            """The clock-read failure warning; not what this test is asserting."""
+
+        monkeypatch.setattr(dispatcher.logger, "error", _capture)
+        monkeypatch.setattr(dispatcher.logger, "warning", _swallow)
+
+        async def _hanging_clock(_agent_id: int) -> datetime:
+            await asyncio.sleep(3600)
+            raise AssertionError("unreachable")
+
+        turn = _StuckTurn()
+        sched = TurnScheduler(turn, activity_clock=_hanging_clock)
+        sched.wake(12)
+        await asyncio.wait_for(turn.entered.wait(), 2)
+
+        assert await _aclose_without_hanging(sched, turn), "a hanging clock read blocked shutdown"
+
+        report = next(r for r in records if r.get("event") == "host_turn_uncancellable")
+        assert report["agent_id"] == 12
+        assert report["last_active_at"] is None
+
     def test_the_unwind_bound_fits_inside_the_stop_paths_kill_window(self) -> None:
         """The bound is only useful if the host survives long enough to emit the
         report. `ava stop` SIGTERMs each agent process and force-kills after
@@ -386,8 +487,16 @@ class TestUncancellableTurn:
             f"the stop path force-kills after {kill_window}s — the uncancellable-turn report "
             "would never be emitted"
         )
-        assert kill_window > dispatcher._CANCEL_UNWIND_TIMEOUT_S * 2, (
-            "leave room for the rest of shutdown (pool, healthz, pidfile), not just the wait"
+        # Both waits, summed — the cancel wait, and then the activity-clock read
+        # that enriches the report. This replaces a `2 *` proxy for "leave room
+        # for the rest of shutdown" now that there is a real second term; the
+        # remaining headroom covers closing the pool, the healthz server and the
+        # pidfile.
+        total_wait = dispatcher._CANCEL_UNWIND_TIMEOUT_S + dispatcher._CLOCK_READ_TIMEOUT_S
+        assert kill_window > total_wait * 2, (
+            f"the host can wait {total_wait}s before it even starts closing its handles, "
+            f"against a {kill_window}s force-kill window — too little headroom for the "
+            "rest of shutdown"
         )
 
 

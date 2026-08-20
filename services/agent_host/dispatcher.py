@@ -49,6 +49,7 @@ import asyncio
 import contextlib
 import time
 from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
 
 from shared.log import logger
 
@@ -77,6 +78,27 @@ _INBOUND_PATTERN_SUFFIX = ":inbound:*"
 # path's actual default rather than against this comment.
 _CANCEL_UNWIND_TIMEOUT_S = 5.0
 
+# Ceiling on reading the stuck agents' activity clocks, on the shutdown path.
+# Small on purpose: this is a diagnostic enrichment of a report already worth
+# emitting without it, and the DB may be exactly what a wedged turn is stuck on.
+# Spent once for all stragglers (one concurrent gather), not per agent, so it
+# adds a flat 2s to the shutdown budget the cancel wait above already bounds —
+# `test_the_unwind_bound_fits_inside_the_stop_paths_kill_window` asserts the SUM
+# of the two against the stop path's force-kill window.
+_CLOCK_READ_TIMEOUT_S = 2.0
+
+
+def _age_seconds(moment: datetime) -> float:
+    """Seconds since `moment`, tolerating a naive timestamp.
+
+    psycopg returns `TIMESTAMPTZ` as aware, but this runs on a shutdown path
+    where a wrong assumption would raise inside the very report that exists to
+    explain what went wrong. A naive value is read as UTC, which is what the
+    column stores."""
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=UTC)
+    return (datetime.now(UTC) - moment).total_seconds()
+
 
 class TurnScheduler:
     """Per-agent turn-task registry with wake coalescing.
@@ -90,8 +112,18 @@ class TurnScheduler:
     event loop.
     """
 
-    def __init__(self, run_turn: Callable[[int], Awaitable[None]]) -> None:
+    def __init__(
+        self,
+        run_turn: Callable[[int], Awaitable[None]],
+        *,
+        activity_clock: Callable[[int], Awaitable[datetime | None]] | None = None,
+    ) -> None:
         self._run_turn = run_turn
+        # Optional, and INJECTED rather than read here, for the same reason
+        # `run_turn` is: this class is the correctness story in pure asyncio and
+        # owns no database handle. The host supplies a reader; without one the
+        # uncancellable-turn report simply omits the clock (see `_await_unwind`).
+        self._activity_clock = activity_clock
         self._tasks: dict[int, asyncio.Task[None]] = {}
         # Agents with a wake no turn has consumed yet. Membership, not a count:
         # see the module docstring.
@@ -198,16 +230,68 @@ class TurnScheduler:
         if not pending:
             return
         waited = time.monotonic() - started
-        for agent_id, task in tasks.items():
-            if task in pending:
-                logger.error(
-                    "hosted turn for agent {agent_id} did not unwind {waited:.1f}s after cancel "
-                    "— it is blocked somewhere asyncio cannot interrupt (a C call); the host is "
-                    "exiting anyway and this agent's turn resumes from its checkpoint on restart",
-                    event="host_turn_uncancellable",
-                    agent_id=agent_id,
-                    waited_s=round(waited, 1),
-                )
+        stuck = [agent_id for agent_id, task in tasks.items() if task in pending]
+        clocks = await self._activity_clocks(stuck)
+        for agent_id in stuck:
+            last_active = clocks.get(agent_id)
+            idle_s = None if last_active is None else round(_age_seconds(last_active), 1)
+            logger.error(
+                "hosted turn for agent {agent_id} did not unwind {waited:.1f}s after cancel "
+                "— it is blocked somewhere asyncio cannot interrupt (a C call); the host is "
+                "exiting anyway and this agent's turn resumes from its checkpoint on restart "
+                "(last completed LLM step: {idle_s}s ago)",
+                event="host_turn_uncancellable",
+                agent_id=agent_id,
+                waited_s=round(waited, 1),
+                # The agent's REAL activity clock (agents_meta.last_active_at),
+                # not the `/api/agents` field of the same name — that one is
+                # MAX(inbound_messages.created_at) and goes stale during exactly
+                # the long turns where "is it wedged?" is a real question
+                # (issue #183). Reported so a reader can tell a slow shutdown
+                # (cancel pending 5s, last step 2s ago) from a genuine wedge
+                # (cancel pending 5s, last step 20 minutes ago) — see
+                # `_activity_clocks` for what the signal does and does not mean.
+                last_active_at=None if last_active is None else last_active.isoformat(),
+                idle_s=idle_s,
+            )
+
+    async def _activity_clocks(self, agent_ids: list[int]) -> dict[int, datetime]:
+        """Each stuck agent's real activity clock — best-effort, bounded, never raises.
+
+        `agents_meta.last_active_at` is written on every COMPLETED LLM step
+        (`agent/graph/_llm.py:_persist_last_active`), so a stale value means "no
+        LLM step has completed since then". That is the best wedge discriminator
+        available and it is **not an oracle**: a turn sitting in one long exec,
+        or one long model stream, also reads stale without being wedged. It
+        separates a slow shutdown from a turn that has been silent for minutes;
+        it does not by itself prove a wedge.
+
+        Deliberately reported rather than acted on. Everything here runs while
+        the host is already shutting down, so a read that fails or hangs must
+        cost the REPORT nothing — an omitted clock still leaves the agent id and
+        the pending duration, which is the part that cannot be reconstructed
+        later.
+        """
+        if self._activity_clock is None or not agent_ids:
+            return {}
+
+        async def _one(agent_id: int) -> tuple[int, datetime | None]:
+            try:
+                return agent_id, await self._activity_clock(agent_id)  # pyright: ignore[reportOptionalCall]
+            except Exception:
+                return agent_id, None
+
+        try:
+            pairs = await asyncio.wait_for(
+                asyncio.gather(*(_one(a) for a in agent_ids)), _CLOCK_READ_TIMEOUT_S
+            )
+        except (TimeoutError, Exception):
+            logger.warning(
+                "could not read the activity clock for {n} stuck agent(s) — reporting without it",
+                n=len(agent_ids),
+            )
+            return {}
+        return {agent_id: value for agent_id, value in pairs if value is not None}
 
 
 def agent_id_from_channel(channel: str) -> int | None:

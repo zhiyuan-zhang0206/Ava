@@ -103,6 +103,7 @@ import json
 import time
 from collections import OrderedDict
 from dataclasses import dataclass, field
+from datetime import datetime
 
 import psycopg
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -422,6 +423,28 @@ class AgentHost:
                 break
             if agent_id not in self._in_flight:
                 del self._runtimes[agent_id]
+
+    async def last_active_at(self, agent_id: int) -> datetime | None:
+        """This agent's real activity clock — `agents_meta.last_active_at`.
+
+        Handed to `TurnScheduler` so an uncancellable-turn report can say how
+        long the agent has actually been silent. Deliberately THIS column and not
+        the `/api/agents` field of the same name: that one is
+        `MAX(inbound_messages.created_at)` (`shared/agent_snapshot.py`) and goes
+        stale during exactly the long turns where "is it wedged?" is a real
+        question — issue #183. This column is written on every completed LLM step
+        (`agent/graph/_llm.py:_persist_last_active`).
+
+        Returns None when the row is gone; raising is left to the caller's
+        best-effort wrapper, which runs on the shutdown path.
+        """
+        async with self._pool.connection() as conn:
+            row = await (
+                await conn.execute(
+                    "SELECT last_active_at FROM agents_meta WHERE id = %s", (agent_id,)
+                )
+            ).fetchone()
+        return None if row is None else row[0]
 
     def drop_agent(self, agent_id: int) -> None:
         """Forget an agent's cached runtime — the hosted equivalent of the
