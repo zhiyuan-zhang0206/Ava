@@ -109,6 +109,19 @@ async def _claim_node_impl(
                 # invocation's claim does the long wait. exit_requested stays
                 # False: this END means "turn over", not "process exit".
                 return Command[ClaimGoto](update={"turn_active": False}, goto=END)
+            if ctx.hosted:
+                # Hosted: there is no process to park. `_wait_for_batch` would
+                # flip the row to `idling` and block this task on the inbound
+                # pub/sub forever — which is exactly the idle half the hosted
+                # runner exists to delete (future/infra/agent-runner-as-server.md).
+                # End the turn instead and let the host drop the task; its
+                # dispatcher holds one subscription for every local agent and
+                # creates a fresh task when a wake lands. Note this returns
+                # BEFORE the idle flip, so a hosted agent never enters IDLING —
+                # idle is the absence of a task, not a status.
+                return Command[ClaimGoto](
+                    update={"turn_active": False, "turn_idle": True}, goto=END
+                )
             try:
                 batch = await _wait_for_batch(ctx, agent_id)
             except LifecycleCasLostError as exc:

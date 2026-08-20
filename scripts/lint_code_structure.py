@@ -93,6 +93,19 @@ _OVERSIZE_ALLOWED = frozenset(
         # reconcile logic shares the claim/status machinery it would have to
         # import back if split out.
         "agent/db.py",
+        # agent/state.py — the LangGraph state schema AND the plugin-state
+        # registry, which cannot be separated: `register_plugin_state` fills
+        # `_EXTRA_FIELDS`, `build_agent_state` composes those INTO the
+        # BaseAgentState subclass, and `PluginStateHandle` validates writes
+        # against `_BASE_FIELDS` derived back from that schema — a split forces
+        # the circular import (same argument as shared/plugin_metrics.py).
+        # The one clean-looking cut, lifting the four nested channel models out,
+        # is the one actively unsafe move: `JsonPlusSerializer` serializes them
+        # as ext objects carrying `(module, name)` and
+        # `shared/checkpoint_serde.py` allowlists them as `("agent.state", ...)`,
+        # so relocating them changes `__module__` and stops existing checkpoints
+        # deserializing.
+        "agent/state.py",
         # cli/commands/update.py was split out of the exemption list with the
         # 2101-line -> 13-module refactor (2026-08): the orchestration core now
         # fits the 800-line ceiling on its own, and the `_update_*` helpers each

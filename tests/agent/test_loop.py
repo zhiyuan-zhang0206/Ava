@@ -367,8 +367,12 @@ class TestInvokeGraphLifecycleLogging:
         repair.assert_awaited_once()
         # The re-invoke is a fresh run (not halted=True — that is the fatal-LLM
         # guard against re-entering a failing turn; a DB outage leaves it
-        # resumable), carrying only the per-invoke turn/exit flag resets.
-        assert graph.ainvoke.await_args.args[0] == {"turn_active": False, "exit_requested": False}
+        # resumable), carrying only the per-invoke turn/exit/idle flag resets.
+        assert graph.ainvoke.await_args.args[0] == {
+            "turn_active": False,
+            "exit_requested": False,
+            "turn_idle": False,
+        }
         # Exactly one Error event, naming the recoverable-pause semantics.
         error_emits = [c for c in pub.emit.call_args_list if '"role":"error"' in c.args[0]]
         assert len(error_emits) == 1, (
@@ -472,21 +476,27 @@ class TestInvokeGraphLifecycleLogging:
         work" semantics). Passing a full AgentState() is equivalent to an "all-fields reset to defaults"
         update; each respawn would wipe halted + all plugin state fields
         (ava_code cwd / built-in compact/memory sub-states). The only keys each
-        invocation carries are the per-invoke turn/exit flag resets."""
+        invocation carries are the per-invoke turn/exit/idle flag resets."""
         graph = MagicMock()
         graph.ainvoke = AsyncMock(return_value={"exit_requested": True})
 
         await _invoke_graph_with_lifecycle_logging(graph, agent_id=42, ctx=_fake_ctx())
 
-        assert graph.ainvoke.call_args.args[0] == {"turn_active": False, "exit_requested": False}
+        assert graph.ainvoke.call_args.args[0] == {
+            "turn_active": False,
+            "exit_requested": False,
+            "turn_idle": False,
+        }
 
     async def test_turn_boundary_reinvokes_until_exit_requested(self) -> None:
         """One ainvoke = one TURN: a turn-boundary END (exit_requested=False in
         the returned state) re-invokes the graph on the same thread instead of
         exiting; only exit_requested=True (claim's terminate/restart winner or
         a lost lifecycle CAS) ends the loop. Every invocation's input resets
-        both flags, so a stale checkpointed True (a resurrect onto the same
-        thread) cannot kill the new process."""
+        all three flags, so a stale checkpointed True — a resurrect onto the
+        same thread, or a rollback from hosted mode replaying a thread that
+        checkpointed turn_idle=True — cannot kill or short-circuit the new
+        process."""
         graph = MagicMock()
         graph.ainvoke = AsyncMock(
             side_effect=[
@@ -502,9 +512,11 @@ class TestInvokeGraphLifecycleLogging:
             "loop must re-invoke on each turn-boundary END and stop on exit_requested=True"
         )
         for call in graph.ainvoke.call_args_list:
-            assert call.args[0] == {"turn_active": False, "exit_requested": False}, (
-                "every invocation's input must reset the per-invoke turn/exit flags"
-            )
+            assert call.args[0] == {
+                "turn_active": False,
+                "exit_requested": False,
+                "turn_idle": False,
+            }, "every invocation's input must reset the per-invoke turn/exit/idle flags"
 
 
 class TestDbRecoveryWait:
