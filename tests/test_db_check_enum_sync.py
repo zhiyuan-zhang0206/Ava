@@ -28,7 +28,9 @@ from typing import get_args
 import pytest
 
 from shared.agents import AgentStatus, TerminationSource
+from shared.extension_registry import ExtensionKind
 from shared.inbound import InboundKind
+from shared.install_registry import TrustTier
 from shared.machine import MachineRole
 
 # Strip `-- ...` line comments first: the CHECK value lists carry inline comments
@@ -49,6 +51,13 @@ _CASES: dict[tuple[str, str], set[str]] = {
     ("agents_meta", "termination_source"): {s.value for s in TerminationSource},
     ("inbound_messages", "kind"): {s.value for s in InboundKind},
     ("machines", "role"): set(get_args(MachineRole)),
+    # The cluster extension registry (issue #39 S2). `kind` decides which
+    # materializer handles a row, so a value the DB refuses is an install that
+    # fails after the scan has already run; `trust` is the same tier the
+    # per-machine registry records, moved up with the row — two Literals for one
+    # fact is exactly what this test exists to stop.
+    ("extensions", "kind"): set(get_args(ExtensionKind)),
+    ("extensions", "trust"): set(get_args(TrustTier)),
 }
 
 
