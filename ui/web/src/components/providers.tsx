@@ -5,6 +5,7 @@ import { ThemeProvider } from "next-themes";
 import { useState } from "react";
 
 import { AppConnectionBanner } from "@/components/app-connection-banner";
+import { ThemePackTokens } from "@/components/theme-pack-tokens";
 import { ToastHost } from "@/components/toast";
 import { LanguageProvider } from "@/i18n/language-provider";
 import { AuthProvider } from "@/lib/auth-context";
@@ -76,6 +77,9 @@ export function Providers({ children }: { children: React.ReactNode }) {
               disableTransitionOnChange
             >
               <LanguageProvider>
+                {/* Applies the selected plugin skin's tokens over the active
+                    light/dark palette; renders nothing. */}
+                <ThemePackTokens />
                 <AppConnectionBanner />
                 {children}
                 {/* The toast renderer is root-level so error toasts reach the

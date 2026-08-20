@@ -2,9 +2,10 @@
 
 Design for issue #57. Evidence base: the DeepSeek Harness plugin-ecosystem
 survey (2026-08-19; 1849 npm packages / 1569 curated entries within 6 days of
-their plugin platform shipping). Status: **U1 shipped** (the `contributions.ui`
-manifest key + validator — declaration only); everything else here is design.
-The slices at the bottom are the implementation that remains.
+their plugin platform shipping). Status: **U1 + U2 shipped** — the
+`contributions.ui` manifest key + validator, and themes end to end (aggregation
+endpoint, settings picker, root-element token application). The remaining
+slices are at the bottom.
 
 ## Why now
 
@@ -251,10 +252,27 @@ value is validated as a CSS color literal.
   zero runtime change. `--radius` is deliberately non-themable — a theme pack
   is colors, and re-valuing the radius is a layout change in a theme's
   clothes.
-- **U2 — themes end-to-end**: aggregation endpoint (themes subset) + settings
-  theme picker + `user_settings` persistence + root-element token application.
-  The smallest slice that exercises the whole declaration→aggregation→render
-  chain, with no proxy or iframe involved.
+- **U2 — themes end-to-end** — **shipped**: `GET /api/ui/contributions`
+  (`gateway/routers/ui_contributions.py` — the enabled plugins' manifests,
+  merged and plugin-attributed; themes today, the other two arrays land with
+  their slices, which is additive) + the Display-settings picker + the
+  `display.theme_pack` `user_settings` key + `ui/web/src/components/theme-pack-tokens.tsx`,
+  which writes the declared tokens as inline custom properties on the root
+  element.
+
+  Two things the design did not settle, decided here:
+  - **A theme id is `<plugin>/<theme>`.** A theme name is unique only inside
+    its plugin, and the stored preference must not silently switch palettes
+    when a second plugin ships the same name.
+  - **A pack applies over whichever of light/dark is active** — an inline
+    custom property outranks both the `:root` and `.dark` rules, and tokens the
+    pack does not name keep following the mode. A plugin that skins both ships
+    one pack per mode. Growing the entry to a light/dark pair stays possible;
+    it was not invented ahead of a plugin that needs it.
+
+  The picker section is absent until a plugin contributes a pack, and a stored
+  id whose plugin is gone resolves to the console's own palette rather than to
+  whatever else is installed.
 - **U3 — plugin page mount + nav**: `/api/plugin-ui/<plugin>/…` reverse-proxy
   (static-dir and ops-service backends) + sandboxed-iframe page component +
   nav entries from the aggregation endpoint.

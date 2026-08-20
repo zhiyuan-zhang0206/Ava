@@ -20,6 +20,17 @@ desktop auto-login/updater, Android onboarding/residency/notifications). The web
 console remains the universal body and the shell remains non-core. Node:
 [[../app/app.ava.okf.md]].
 
+## Plugin contributions
+
+The console renders what the cluster's enabled plugins declare under
+`contributions.ui` (`GET /api/ui/contributions`) — never plugin JavaScript.
+Today that is theme packs: a named set of values for the `globals.css` `:root`
+color tokens, applied as inline custom properties on the root element by
+`components/theme-pack-tokens.tsx` and chosen in Display settings
+(`display.theme_pack`, stored `<plugin>/<theme>`). A pack applies over
+whichever of light/dark is active; unset tokens keep following the mode.
+Design: [[future/frontend-plugin-contributions.md]].
+
 ## Sub-concepts
 
 - [[ui/web/src/src.ava.okf.md|Src]]

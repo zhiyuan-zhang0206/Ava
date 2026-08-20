@@ -1,0 +1,51 @@
+"use client";
+
+// Applies the selected plugin skin to the root element — the render half of
+// `contributions.ui.themes`.
+//
+// Renders nothing. The declared tokens are written as inline custom properties
+// on <html>, which is the same layer next-themes' light/dark class switch
+// targets, one step more specific: an inline property wins over both the
+// `:root` and `.dark` rules, so a pack applies over whichever mode is active
+// and the tokens it does NOT name keep following that mode. A plugin that
+// wants a light and a dark skin ships two packs.
+//
+// The tokens come back off the wire already validated as color literals
+// against a closed vocabulary (`shared/plugin_ui_contributions.py`), so there
+// is nothing to sanitize here — an unknown token or a `var(...)` value could
+// not have reached a manifest that loads.
+
+import { useEffect } from "react";
+
+import { useThemePacks, themePackId } from "@/lib/use-theme-packs";
+import { useUserSettings } from "@/lib/use-user-settings";
+
+export function ThemePackTokens() {
+  const { packs } = useThemePacks();
+  const { settings } = useUserSettings();
+  const selected = settings["display.theme_pack"] as string | null;
+  // A stored id whose plugin was since disabled or uninstalled resolves to no
+  // pack: the console falls back to its own palette rather than to whatever
+  // else is installed, and the picker shows Default.
+  const pack = packs.find((p) => themePackId(p) === selected) ?? null;
+
+  // Serialized so the effect keys on the token VALUES: a refetch hands back
+  // structurally identical objects with new identities, and re-running on
+  // those would clear and re-set every property for nothing.
+  const tokensJson = pack ? JSON.stringify(pack.tokens) : "";
+
+  useEffect(() => {
+    if (!tokensJson) return;
+    const root = document.documentElement;
+    const tokens = Object.entries(JSON.parse(tokensJson) as Record<string, string>);
+    for (const [token, value] of tokens) root.style.setProperty(token, value);
+    // Removing on cleanup is what makes switching packs and clearing the
+    // choice both work: the previous pack's properties go before the next
+    // pack's arrive, so a token only the old pack named does not linger.
+    return () => {
+      for (const [token] of tokens) root.style.removeProperty(token);
+    };
+  }, [tokensJson]);
+
+  return null;
+}

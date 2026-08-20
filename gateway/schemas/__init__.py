@@ -134,6 +134,10 @@ from gateway.schemas.tasks import (
     TaskRow,
     TaskUpdateRequest,
 )
+from gateway.schemas.ui_contributions import (
+    UiContributionsResponse,
+    UiThemeContribution,
+)
 from gateway.schemas.uploads import (
     UploadedBatch,
     UploadedFile,
@@ -252,6 +256,8 @@ __all__ = [
     "TaskUpdateRequest",
     "TokenUsageResponse",
     "TraceCheckpointMessagesResponse",
+    "UiContributionsResponse",
+    "UiThemeContribution",
     "UploadedBatch",
     "UploadedFile",
     "UserMessageIn",
