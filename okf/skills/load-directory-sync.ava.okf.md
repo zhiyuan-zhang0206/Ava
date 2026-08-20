@@ -17,10 +17,12 @@ flag). Converge (`cli/commands/_converge_skills.py`, on `ava start` /
    `~/.ava/skills/<name>/`, plus the **non-symlink entries of
    `<repo>/.agents/skills/`** (the R5 design, task #1013). The latter means
    kernel-contributor project skills (ship-a-change, ava-self-development, …)
-   also land fleet-wide, not only when working inside the repo — whether they
-   should is an open point recorded in
-   `decisions/2026-08-19-four-layer-modification-model.md` (family placement
-   is taxonomy, not distribution). Repo-native sources are bootstrap-only:
+   also land fleet-wide, not only when working inside the repo. Ruled to stop
+   (`decisions/2026-08-20-stop-fleet-distributing-kernel-contributor-skills.md`,
+   resolving the open point in
+   `decisions/2026-08-19-four-layer-modification-model.md`), sequenced after
+   issue #39's S2 registry slice lands (tracked in issue #146) — until then
+   this is current behavior. Repo-native sources are bootstrap-only:
    converge lands a missing copy and never updates one; the explicit update is
    `ava skill update`.
 2. **Plugin-carried** (origin=plugin): `<repo>/ava_builtins/plugins/<p>/skills/`
