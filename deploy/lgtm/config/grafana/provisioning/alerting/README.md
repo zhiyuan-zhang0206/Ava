@@ -2,7 +2,7 @@
 
 Grafana Alerting rules for the Ava event system, provisioned as code. Since
 the LGTM cutover (Task #1224) they evaluate against the **LGTM read side**:
-R1-R3, R5-R7 query **Loki** (every event is one OTLP log line under
+R1-R3, R5-R7 and R13 query **Loki** (every event is one OTLP log line under
 `{service_name="unknown_service"}`, body = the full event JSON, so `| json`
 flattens each line to labels — the OTel-detected labels are structured
 metadata and cannot be matched by `{…}` selectors), and R4 queries
@@ -23,7 +23,9 @@ directory is mounted read-only into the container at
 point's webhook URL uses `host.docker.internal` because the container
 reaches the gateway on the host.
 
-## Rules (7, 2026-08-12)
+## Rules (13)
+
+Application layer — the Loki event stream plus the LLM latency histogram:
 
 | uid | Metric | Condition | `for` | Severity |
 |-----|--------|-----------|-------|----------|
@@ -34,6 +36,21 @@ reaches the gateway on the host.
 | `ava-ops-delivery-stalled-backlog` | delivery_stalled fresh backlog | fresh (age_s<600) count in 10m > 50 (Loki) | 5m | warning |
 | `ava-ops-events-freshness` | event stream stalled | no events in Loki for 5m (absent_over_time) | 5m | error |
 | `ava-ops-trace-disk-watermark` | trace recording auto-degraded | recording_disabled_disk_watermark count in 24h > 0 (Loki) | 5m | error |
+| `ava-ops-llm-billing-quota` | LLM key out of credit / quota | llm_provider_error with billing=true in 15m > 0 (Loki) | 0m | critical |
+
+Infrastructure layer (issue #46) — the per-machine OTel Collector sidecar's
+own scrapes, labelled `host` (deliberately not `machine`: the two names can
+differ, and one label with two meanings is worse than two labels). These
+thresholds are deployment facts, not framework constants — what counts as
+"too much CPU" depends on box specs and co-tenancy:
+
+| uid | Metric | Condition | `for` | Severity |
+|-----|--------|-----------|-------|----------|
+| `ava-ops-host-cpu-saturated` | non-idle CPU | avg by host > 0.90 (Prometheus) | 15m | warning |
+| `ava-ops-host-memory-pressure` | memory utilization | avg by host > 0.90 (Prometheus) | 15m | warning |
+| `ava-ops-host-disk-watermark` | filesystem utilization | max by host+mountpoint > 0.90 (Prometheus) | 15m | warning |
+| `ava-ops-pg-connection-saturation` | Postgres backends vs max | ratio > 0.80 (Prometheus) | 15m | warning |
+| `ava-ops-redis-memory` | Redis resident set | > 2 GiB (Prometheus) | 15m | warning |
 
 Severity follows the alert-system vocabulary (Task #1224):
 critical/warning/error — all three push to IM, no gate. Thresholds are
@@ -41,6 +58,14 @@ calibrated against live data (2026-08-04, see header comment in
 `rules.yml`). R7 (trace-disk-watermark) is a chronic-condition alert: any
 degradation event in the trailing 24h keeps it firing, so one episode = one
 onset + one recovery IM instead of one per event.
+
+R13 (llm-billing-quota) is the one rule with no threshold and no `for`
+window: an out-of-credit API key fails every turn in the fleet and only a
+human spending money clears it, so the first rejection is already the whole
+incident. Its discriminator is the `billing` field the emitter writes from
+`shared/lm/errors.py`'s cross-provider predicate (HTTP 402 plus the
+per-vendor `error.type` vocabulary) — a new provider is covered by adding
+its string there, with no edit to `rules.yml`.
 
 ### Migration notes (Postgres → LGTM, 2026-08-12)
 
@@ -62,7 +87,7 @@ onset + one recovery IM instead of one per event.
   flows the query returns no data (NoData → OK).
 - **R4/R6 data-source caveat** — every rule reads Loki/Prometheus now; if
   the OTLP export path fails (as it did 2026-08-12), new events stop
-  landing and R1-R5, R7 go quiet with them — R6 exists exactly to scream
+  landing and R1-R5, R7, R13 go quiet with them — R6 exists exactly to scream
   about that outage class, and the health-probe chain covers the rest.
 
 ## Sync to the live Grafana

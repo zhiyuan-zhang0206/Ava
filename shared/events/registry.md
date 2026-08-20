@@ -104,7 +104,7 @@ consumers: see the comments at each emit point.
 | `turn_end` | one turn finished | ok, duration_seconds | — | 90d | events |
 | `llm_turn_aborted` | turn aborted after retries | — | LLM_ERROR | 90d | events |
 | `compact_turn_aborted` | turn aborted because compaction failed | — | — | 90d | events |
-| `llm_provider_error` | LLM provider failure | — | LLM_ERROR | 90d | events |
+| `llm_provider_error` | LLM provider failure | error_class, provider, status, error_type, fatal, billing, vendor, model | LLM_ERROR | 90d | events |
 | `stream_stalled_retry` | stream stalled, retried | — | LLM_ERROR | 90d | events |
 | `stream_overloaded_retry` | stream overloaded, retried | — | LLM_ERROR | 90d | events |
 | `thinking_block_sanitized` | thinking block sanitized | — | — | 90d | events |
