@@ -111,6 +111,63 @@ def _retry_phase_jitter() -> float:
     return _RETRY_JITTER_SPAN_S * (ident % 1000) / 1000.0
 
 
+class _TurnScopedRetryPolicy(RetryPolicy):
+    """A `RetryPolicy` whose two per-agent fields resolve when they are READ.
+
+    In process mode the graph is built once per agent, so baking the per-agent
+    values in at build time is exact. The hosted agent-runner
+    (`future/infra/agent-runner-as-server.md`) builds ONE graph for every local
+    agent — it has to, because `build_graph` mutates process-global plugin
+    registration — so a baked value would give every hosted agent whichever
+    agent's context happened to be current at daemon boot. That silently costs
+    the two things this policy exists to make per-agent:
+
+    - `max_attempts`, resolved per MODEL, so an agent whose overlay pins a
+      different model gets that model's cap;
+    - the `_retry_phase_jitter()` term in `initial_interval`, whose only job is
+      de-phasing fleet-wide retry waves. Collapsed to one shared value, a
+      correlated 429 burst makes every agent retry at the same instant and
+      re-synchronises the burst — the exact failure the offset was added to
+      prevent (LangGraph's own `jitter=True` adds only uniform(0,1)s, a rounding
+      error at a 30s initial interval).
+
+    Both properties read the turn contextvars, so under the host's per-turn bind
+    they resolve to the running agent's values, and in process mode — where
+    nothing binds them — they read exactly what the build-time call would have.
+
+    ## Why this works, and what would break it
+
+    LangGraph reads every policy field by ATTRIBUTE, at retry time, never by
+    unpacking or copying the tuple: `pregel/_retry.py` (sync 660-672, async
+    816-828) reads `.max_attempts` / `.initial_interval` / `.max_interval` /
+    `.backoff_factor` / `.jitter`, and `_should_retry_on` reads `.retry_on`.
+    `graph/state.py` passes the object through by reference, and
+    `pregel/_read.py:173` wraps a lone policy as `(policy,)` behind an
+    `isinstance(..., RetryPolicy)` check that a subclass satisfies — so it is
+    never iterated field-wise.
+
+    That is a dependency's internal read timing, so it is pinned by
+    `tests/agent/test_turn_scoped_retry.py`, which drives LangGraph's real retry
+    loop rather than asserting on this class alone. If a future version snapshots
+    the policy instead, that test fails loudly — and the constructor below still
+    fills the underlying tuple slots with the build-time values, so even an
+    unnoticed snapshot degrades to today's behaviour rather than to LangGraph's
+    defaults.
+    """
+
+    __slots__ = ()
+
+    @property
+    def max_attempts(self) -> int:  # pyright: ignore[reportIncompatibleVariableOverride]
+        from shared.lm.registry import resolve_setting
+
+        return resolve_setting("llm_retry_max_attempts", model=turn_settings.lm.llm_model)
+
+    @property
+    def initial_interval(self) -> float:  # pyright: ignore[reportIncompatibleVariableOverride]
+        return settings.lm.llm_retry_initial_interval_seconds + _retry_phase_jitter()
+
+
 def _build_llm_retry() -> RetryPolicy:
     """LLM node retry policy — reads params from settings, covers DeepSeek streaming drift.
 
@@ -119,6 +176,9 @@ def _build_llm_retry() -> RetryPolicy:
     (402/401/403), are both deterministic — they must propagate to the ERROR
     event path immediately rather than waste remaining retries on a failure that
     cannot flip.
+
+    Returns a `_TurnScopedRetryPolicy`: the two per-agent fields resolve per read
+    so one shared graph still retries each hosted agent on its own schedule.
     """
     from agent.graph._llm import (
         FatalLLMStreamError,
@@ -134,7 +194,11 @@ def _build_llm_retry() -> RetryPolicy:
 
     from shared.lm.registry import resolve_setting
 
-    return RetryPolicy(
+    return _TurnScopedRetryPolicy(
+        # These two are shadowed by the properties above for every attribute
+        # read; they fill the underlying tuple slots so that a consumer which
+        # ever reads the policy POSITIONALLY sees this graph's build-time values
+        # — today's behaviour — rather than LangGraph's own defaults.
         # Per-model default with shared fallback; an explicit
         # AVA_LLM_RETRY_MAX_ATTEMPTS / per-agent overlay wins.
         max_attempts=resolve_setting("llm_retry_max_attempts", model=turn_settings.lm.llm_model),
