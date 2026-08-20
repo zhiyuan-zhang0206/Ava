@@ -201,6 +201,45 @@ def _converge_skills_step(ctx: ConvergeCtx) -> None:
         print(f"  ! skills: {warning}", file=sys.stderr)
 
 
+def _materialize_extensions_step(ctx: ConvergeCtx) -> None:  # noqa: ARG001
+    """Land the cluster's installed skills onto this machine.
+
+    Runs AFTER the repo/plugin skills sync, not instead of it: repo-shipped
+    content keeps converging from the checkout (a `source='repo'` row carries no
+    blob — the schema enforces it), and this step adds the names that arrived by
+    `ava skill install` on any machine of the cluster. That is what makes a
+    freshly enrolled runner fungible: no "did we remember to install the skills
+    here" step.
+
+    Failures are reported, not raised. A cluster DB that is down should not stop
+    the rest of converge — the machine is then simply not caught up, which the
+    next `ava start` fixes, and which is strictly better than a host that will
+    not converge at all. This is the opposite of the install path's fail-fast,
+    and deliberately so: install is the moment a fact is CREATED, where a
+    silent local-only result is drift; materialization is the moment a machine
+    catches up, where being behind is a recoverable state that already has a
+    retry.
+    """
+    from shared import db, extension_materialize, paths
+
+    try:
+        with db.pool().connection() as conn:
+            result = extension_materialize.materialize_skills(conn, dest_root=paths.skills_dir())
+    except Exception as exc:  # see the docstring: report, never block converge
+        print(f"  ! extensions: cluster registry unreachable ({exc}); skipping", file=sys.stderr)
+        return
+    for kind, names in (
+        ("landed", result.landed),
+        ("updated", result.updated),
+    ):
+        if names:
+            print(f"    {kind}: {', '.join(names)}")
+    for name in result.kept_local_edits:
+        print(f"  ! extensions: kept local edits to {name} (not overwritten)", file=sys.stderr)
+    for name in result.missing_blob:
+        print(f"  ! extensions: {name} has no stored content — reinstall it", file=sys.stderr)
+
+
 def _plugin_scaffold_step(ctx: ConvergeCtx) -> None:  # noqa: ARG001
     """Run each enabled plugin's `scaffold()` — see `_converge_plugins.py`."""
     from cli.commands._converge_plugins import run_plugin_scaffolds
@@ -545,6 +584,14 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
     ConvergeStep(
         "skills sync -> $AVA_HOME/skills",
         _converge_skills_step,
+        roles=frozenset({"agent-runner"}),
+        requires_unit_config=True,
+    ),
+    # After the repo/plugin sync: the cluster registry owns what arrived by
+    # INSTALL, the checkout still owns what arrives by release.
+    ConvergeStep(
+        "cluster extensions -> $AVA_HOME/skills",
+        _materialize_extensions_step,
         roles=frozenset({"agent-runner"}),
         requires_unit_config=True,
     ),

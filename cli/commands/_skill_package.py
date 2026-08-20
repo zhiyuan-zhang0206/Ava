@@ -200,6 +200,42 @@ def scan_report(root: Path, name: str, *, accept_risk: bool) -> tuple[str, list[
     return report, skill_scan.rule_ids(critical)
 
 
+def _register_in_cluster(
+    packages: list[SkillPackage], *, source: str | None, ref: str | None
+) -> None:
+    """Write every package to the cluster extension registry, or raise.
+
+    Deliberately NOT best-effort. The cluster row is the authority the whole
+    ownership model rests on (`decisions/2026-08-21-extension-ownership-three-tiers.md`),
+    so an install that cannot reach the cluster must not quietly become a
+    machine-local one — that is the drift, not a degraded mode of avoiding it.
+    The operator's fix is to bring the cluster up and re-run, and the error says
+    so.
+
+    `source=None` means a local path was installed in place. That is recorded as
+    `local:<machine>` rather than as a repo row, because the content DID arrive
+    by install and must ride the data plane for other machines to get it.
+
+    `path` is not carried: it locates the package WITHIN a source repo, which is
+    a fact about how this machine fetched it, and the cluster row is keyed by
+    name and addressed by content.
+    """
+    from shared import db, extension_registry
+    from shared.machine import machine_name
+
+    origin = source if source else f"local:{machine_name()}"
+    pool = db.pool()
+    for pkg in packages:
+        extension_registry.register_tree(
+            pool,
+            root=pkg.root,
+            name=pkg.name,
+            kind="skill",
+            source=origin,
+            source_ref=ref,
+        )
+
+
 def install(
     packages: list[SkillPackage],
     *,
@@ -230,6 +266,14 @@ def install(
             "`ava plugins uninstall <name>` first, or `ava plugins upgrade <name>` to re-fetch."
         )
     scanned = [scan_report(pkg.root, pkg.name, accept_risk=accept_risk) for pkg in packages]
+    # The CLUSTER row lands before anything touches this machine's disk, and the
+    # whole batch lands before the first copy. Ordering is the point: a failure
+    # here leaves nothing installed anywhere, whereas registering after the copy
+    # would leave a machine holding a skill the cluster has never heard of —
+    # exactly the drift the registry exists to delete. The reverse gap (a row
+    # whose content is not on this machine yet) is not a gap at all: it is what
+    # materialization is for, on every machine including this one.
+    _register_in_cluster(packages, source=source, ref=ref)
     dest_root.mkdir(parents=True, exist_ok=True)
     installed: list[tuple[Path, str]] = []
     for pkg, (report, accepted) in zip(packages, scanned, strict=True):
