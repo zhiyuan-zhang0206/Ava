@@ -42,7 +42,7 @@ rendering) lives in agent/graph/_memory_recall.py; this plugin is just the
 before_llm wiring plus its firing gates.
 
 Firing gates:
-- Feature gate: no-op unless `settings.agent.passive_memory_recall_enabled`.
+- Feature gate: no-op unless `turn_settings.agent.passive_memory_recall_enabled`.
 - Trigger gate: fire when the message tail carries fresh inbound from a real
   source — user chat, a peer agent (`agent:`), a scheduled turn (`schedule:`),
   or a system notice — and skip machine-originated wake-ups (`watcher:` /
@@ -92,6 +92,7 @@ from agent.state import AgentState, MemoryState
 from ava import _gateway_client as _client
 from shared.agents import IndexerUnavailable as IndexerUnavailable
 from shared.config import settings
+from shared.config.turn_view import turn_settings
 from shared.log import logger
 from shared.paths import ava_home as _ava_home
 
@@ -275,7 +276,7 @@ def memory_discipline_section() -> str:
     deliberately does not repeat them."""
     from shared.lm.registry import resolve_setting
 
-    if not resolve_setting("prompt_memory_behavior_enabled", model=settings.lm.llm_model):
+    if not resolve_setting("prompt_memory_behavior_enabled", model=turn_settings.lm.llm_model):
         return ""
     if not (
         settings.agent.memory_index_inject_enabled or settings.agent.memory_per_agent_inject_enabled
@@ -305,7 +306,7 @@ class _PassiveMemoryRecallHook(Hook):
         _config: RunnableConfig,
         /,
     ) -> dict | None:
-        if not settings.agent.passive_memory_recall_enabled:
+        if not turn_settings.agent.passive_memory_recall_enabled:
             return None
 
         if not tail_has_recallable_inbound(state.messages):

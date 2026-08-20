@@ -38,7 +38,7 @@ from dataclasses import dataclass
 
 from langchain_core.messages import HumanMessage
 
-from shared.config import settings
+from shared.config.turn_view import turn_settings
 from shared.log import logger
 
 _LABEL = "recall-filter"
@@ -146,8 +146,8 @@ async def filter_candidates(query: str, candidates: list[Candidate]) -> list[str
     a filter that cannot judge must not smuggle in the unfiltered top-k it
     exists to reject.
     """
-    inject_k = settings.agent.memory_recall_inject_k
-    if not settings.agent.memory_recall_filter_enabled or not candidates:
+    inject_k = turn_settings.agent.memory_recall_inject_k
+    if not turn_settings.agent.memory_recall_filter_enabled or not candidates:
         return [c.path for c in candidates[:inject_k]]
 
     import asyncio
@@ -162,10 +162,10 @@ async def filter_candidates(query: str, candidates: list[Candidate]) -> list[str
     # is worth a warning — a single flake is routine, three in a row is not
     # (user ruling 2026-08-05: retry x3, warn only when all attempts fail).
     model = build_chat_model(
-        settings.agent.memory_recall_filter_model, reasoning_effort=ReasoningEffort.NONE
+        turn_settings.agent.memory_recall_filter_model, reasoning_effort=ReasoningEffort.NONE
     )
     last_failure: str | None = None
-    for attempt in range(1, settings.agent.memory_recall_filter_max_retries + 1):
+    for attempt in range(1, turn_settings.agent.memory_recall_filter_max_retries + 1):
         try:
             # The filter is a latency-critical background path judging names
             # and one-line descriptions only, so its model is built with
@@ -178,7 +178,7 @@ async def filter_candidates(query: str, candidates: list[Candidate]) -> list[str
             # top-3 the filter exists to reject.
             reply = await asyncio.wait_for(
                 model.ainvoke([HumanMessage(content=prompt)]),
-                timeout=settings.agent.memory_recall_filter_timeout_seconds,
+                timeout=turn_settings.agent.memory_recall_filter_timeout_seconds,
             )
             # `.text` is a property on current langchain messages and a method
             # on older ones. Read it first and only call what is not already a
@@ -213,7 +213,7 @@ async def filter_candidates(query: str, candidates: list[Candidate]) -> list[str
     logger.warning(
         "[{label}] {body}",
         label=_LABEL,
-        body=f"all {settings.agent.memory_recall_filter_max_retries} attempts failed ({last_failure}), injecting nothing",
+        body=f"all {turn_settings.agent.memory_recall_filter_max_retries} attempts failed ({last_failure}), injecting nothing",
         event="recall_filter",
     )
     return []

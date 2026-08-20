@@ -47,6 +47,7 @@ import psycopg
 from psycopg_pool import AsyncConnectionPool
 
 from shared.config import settings
+from shared.config.turn_view import turn_settings
 from shared.db import PG_KEEPALIVE_KWARGS
 from shared.log import logger
 
@@ -224,7 +225,7 @@ async def main(
             # socket exists (the SDK connects lazily either way).
             logger.info(
                 "ava starting — model={model} pid={pid} mcp_daemon={mcp}",
-                model=settings.lm.llm_model,
+                model=turn_settings.lm.llm_model,
                 pid=os.getpid(),
                 mcp="shared" if Path(mcp_daemon.socket_path).exists() else "local-fallback",
             )

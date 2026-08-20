@@ -60,6 +60,16 @@ repos:
         types: [python]
         pass_filenames: false
 
+      # per_agent config fields read through the bare settings singleton in
+      # turn-scoped code silently ignore the agent's overlay in hosted-runner
+      # mode — force the per-turn view (shared/config/turn_view.py).
+      - id: lint-turn-scoped-config
+        name: lint per-agent config reads (force turn_settings)
+        entry: .venv/bin/python scripts/lint_turn_scoped_config.py
+        language: system
+        types: [python]
+        pass_filenames: false
+
       # A fixture whose scope outlives the blast radius of the process global it
       # mutates. A session-scoped fixture in a SUBDIRECTORY conftest restores env in
       # a teardown that fires at end-of-session, so every test collected after that

@@ -59,6 +59,7 @@ from agent.messages import NoteTag, system_note_message
 from agent.state import AgentState, register_plugin_state
 from ava.security import scan_content
 from shared.config import settings
+from shared.config.turn_view import turn_settings
 from shared.log import logger
 from shared.paths import workspace_dir
 
@@ -547,7 +548,7 @@ def _coding_tools_section() -> str:
 @register_system_prompt_section
 def _engineering_workflow_section() -> str:
     """Loose bug-fix-workflow advice, gated by system_prompt_extra=ava_code_workflow."""
-    if "ava_code_workflow" not in settings.agent.system_prompt_extra:
+    if "ava_code_workflow" not in turn_settings.agent.system_prompt_extra:
         return ""
     return (
         "## Resolving issues and debugging\n\n"

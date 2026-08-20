@@ -77,6 +77,16 @@ one is a category error and the registry rejects it. Plugin `Config` fields
 the frozen set; they behave as `live` and only an explicit overlay pins them.
 
 Resolution + stamping mechanics: `shared/birth_config.py`.
+
+## Reading per-agent fields from turn-scoped code
+
+Turn-scoped code (`agent/`, `ava/`, `ava_builtins/`, `shared/lm/`) reads
+`per_agent` fields through the per-turn view — `turn_settings.<domain>.<field>`
+(`shared/config/turn_view.py`) — never the bare singleton. In process mode the
+view IS the singleton (boot applies the overlay onto it); in the hosted runner
+(future/infra/agent-runner-as-server.md) the view resolves the agent's
+contextvar-bound pins while the singleton holds only the cluster default.
+Enforced by `scripts/lint_turn_scoped_config.py`.
 """
 
 from __future__ import annotations
@@ -457,4 +467,13 @@ from shared.config.service_read import (  # noqa: E402
 )
 from shared.config.service_read import (  # noqa: E402
     current_field_values as current_field_values,
+)
+from shared.config.turn_view import (  # noqa: E402
+    bind_agent_config as bind_agent_config,
+)
+from shared.config.turn_view import (  # noqa: E402
+    resolve_agent_config_pins as resolve_agent_config_pins,
+)
+from shared.config.turn_view import (  # noqa: E402
+    turn_settings as turn_settings,
 )

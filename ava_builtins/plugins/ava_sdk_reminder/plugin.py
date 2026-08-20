@@ -19,7 +19,7 @@ aside rather than mistaking it for the code cell's stdout:
 
 The four code categories each fire at most once per context window; a
 compaction re-arms them. The agent_reply category's cadence is config-driven
-(`settings.agent.agent_reply_reminder_cadence`): `once_per_compaction` (the same
+(`turn_settings.agent.agent_reply_reminder_cadence`): `once_per_compaction` (the same
 once-per-window re-arm, default) or `every_time` (every agent inbound).
 
 Mechanics:
@@ -46,6 +46,8 @@ Mechanics:
 
 from __future__ import annotations
 
+from typing import Literal
+
 __description__ = "Surface the matching ava SDK primitive the first time the agent uses a native-Python equivalent (subprocess / time.sleep / file ops / http) or replies to another agent in plain text"
 
 from datetime import UTC, datetime
@@ -60,7 +62,7 @@ from agent.hooks import Hook, register_after_exec, register_before_llm
 from agent.hooks.compact import auto_compact_will_fire
 from agent.messages import NoteTag, system_note_message, tail_has_agent_inbound
 from agent.state import AgentState, register_plugin_state
-from shared.config import settings
+from shared.config.turn_view import turn_settings
 from shared.log import logger
 
 from ._state import (
@@ -202,7 +204,7 @@ class _SdkReminderAgentReplyHook(Hook):
     incoming batch holds a message from another agent.
 
     Runs before the reply is produced (a plain text reply runs no code). The
-    firing cadence is `settings.agent.agent_reply_reminder_cadence`:
+    firing cadence is `turn_settings.agent.agent_reply_reminder_cadence`:
     - `once_per_compaction` (default): fire at most once per context window; a
       compaction re-arms it (the shared `reminded` set / bookmark, same as the
       code categories).
@@ -244,8 +246,12 @@ class _SdkReminderAgentReplyHook(Hook):
         # The Literal config validates at Settings construction (an unknown value
         # fails fast there), so the match is exhaustive — a new cadence added to the
         # Literal turns this into a static non-exhaustive error rather than a silent
-        # fall-through.
-        match settings.agent.agent_reply_reminder_cadence:
+        # fall-through. The turn view reads as Any, so re-assert the field's
+        # Literal here to keep that static exhaustiveness check alive.
+        cadence: Literal["once_per_compaction", "every_time"] = (
+            turn_settings.agent.agent_reply_reminder_cadence
+        )
+        match cadence:
             case "every_time":
                 return {"messages": [_agent_reply_note()]}
             case "once_per_compaction":

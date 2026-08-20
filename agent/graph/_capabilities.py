@@ -15,7 +15,7 @@ same thing.
 import logging
 from typing import Any, NamedTuple
 
-from shared.config import settings
+from shared.config.turn_view import turn_settings
 from shared.skill_names import match_key
 
 # A description is free-form text from a SKILL.md frontmatter block — including
@@ -28,11 +28,11 @@ _DESC_MAX_CHARS = 300
 
 def _disabled_by_sdk_config(path: str) -> bool:
     """True when `path` or one of its dotted parents is listed in
-    settings.agent.sdk_disable (AVA_SDK_DISABLE). Checked before any resolution
+    turn_settings.agent.sdk_disable (AVA_SDK_DISABLE). Checked before any resolution
     attempt: the operator removed the path from the SDK on purpose, so it must
     never be expanded into the prompt regardless of what still resolves."""
     return any(
-        path == entry or path.startswith(entry + ".") for entry in settings.agent.sdk_disable
+        path == entry or path.startswith(entry + ".") for entry in turn_settings.agent.sdk_disable
     )
 
 
@@ -153,7 +153,7 @@ def indexed_skills() -> list[Any]:
     preloaded-skills note via `resolve_prompt_skills`. Empty when nothing is
     configured, `skills` is SDK-disabled, or nothing resolves."""
     return resolve_prompt_skills(
-        settings.agent.skills_to_inject_into_system_prompt,
+        turn_settings.agent.skills_to_inject_into_system_prompt,
         config_field="skills_to_inject_into_system_prompt",
     )
 
