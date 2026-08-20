@@ -40,8 +40,8 @@ tags:
 - [[shared/live_events.ava.okf.md]] — `ava:events` live pub/sub payload union
 - [[shared/machine.ava.okf.md]] — machine name + capability set, `machines` table, spawn-target invariant
 - [[shared/migrations.ava.okf.md]] — baseline + delta schema model, applied set, version assertion
-- [[shared/paths.ava.okf.md]] — `$AVA_HOME` layout
-- [[shared/install_registry.ava.okf.md]] — `installed.json` + the skill-scanner gate
+- [[paths.ava.okf.md]] — `$AVA_HOME` layout
+- [[install_registry.ava.okf.md]] — `installed.json` + the skill-scanner gate
 - [[shared/plugins_config.ava.okf.md]] — per-machine plugin enable state
 - [[cluster_lock.ava.okf.md]] — the cluster deploy lease
 - [[host_deploy_state.ava.okf.md]] — per-host deploy posture + updater lease

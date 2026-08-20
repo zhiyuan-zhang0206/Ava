@@ -418,9 +418,9 @@ nodes co-located with their code:
 
 | What | Node |
 |---|---|
-| `$AVA_HOME` layout, what derives from the home | `shared/paths.ava.okf.md` |
+| `$AVA_HOME` layout, what derives from the home | `shared/paths/paths.ava.okf.md` |
 | plugin enable config (`plugins_config.json`) | `shared/plugins_config.ava.okf.md` |
-| `installed.json` schema, installable shapes, the scanner gate | `shared/install_registry.ava.okf.md` |
+| `installed.json` schema, installable shapes, the scanner gate | `shared/install_registry/install_registry.ava.okf.md` |
 | `ava plugins` / `skill` / `mcp` verbs, MCP merge layers, secret channel | `cli/commands/packages.ava.okf.md` |
 | machine name, capability set, `machines` table, spawn-target 400 invariant | `shared/machine.ava.okf.md` |
 | which services each capability contributes | `services/services.ava.okf.md` |
