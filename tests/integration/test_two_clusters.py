@@ -49,7 +49,7 @@ def test_two_clusters_disjoint_ports_db(monkeypatch: pytest.MonkeyPatch, tmp_pat
     assert p1["postgres"] != p2["postgres"]
     assert p1["redis"] != p2["redis"]
 
-    # Port blocks differ by exactly BLOCK_SIZE (19): t1 gets base 18000, t2 gets 18019.
+    # Port blocks differ by exactly BLOCK_SIZE (20): t1 gets base 18000, t2 gets 18020.
     base1 = min(p1.values())
     base2 = min(p2.values())
     assert base2 - base1 == BLOCK_SIZE, f"expected block gap {BLOCK_SIZE}, got {base2 - base1}"

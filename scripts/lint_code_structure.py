@@ -87,6 +87,12 @@ _OVERSIZE_ALLOWED = frozenset(
         # original single-file Settings schema (decomposed into this package,
         # 2026-08) — the cohesion rationale outlives the file.
         "shared/config/agent.py",
+        # Per-domain config schema block (ServiceSettings) — the same cohesive
+        # pydantic class as agent.py above, one Field per service port / health
+        # port / pidfile. It crossed 800 when the hosted agent-runner's two
+        # fields landed; splitting it would either break `settings.services.*`
+        # aggregation or scatter one service's three fields across files.
+        "shared/config/services.py",
         # agent/db.py — kernel inbound-queue SQL module: inbound CRUD, claim,
         # two-phase reconcile + the stale-claimed dead-letter cutoff (Task
         # #654). One cohesive data-plane surface at the 800-line ceiling; the

@@ -198,6 +198,12 @@ class TestConsumptionMatrixDeclarations:
             "delivery_watchdog",
             "im_bridge",
             "page_server",
+            # The hosted agent-runner (future/infra/agent-runner-as-server.md).
+            # Listed even though the service only starts under AVA_RUNNER_MODE
+            # hosted: the alias must exist for every declared health-port
+            # service, gated or not, or the runner projection has no key to
+            # carry when a cluster does flip the mode.
+            "agent_host",
         }
         meta = _fields()  # pyright: ignore[reportUnknownVariableType]
         for svc, alias in aliases.items():
