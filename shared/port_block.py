@@ -75,6 +75,18 @@ BLOCK_MAX = 20000
 # block. Lives here, dependency-free, so the settings-free installed-home gate
 # (cli/preflight.py) can derive a record's pgbouncer port without importing
 # shared.cluster (which imports shared.config).
+#
+# ADDING A SLOT: this table is NOT in offset order and never has been — `ops`
+# sits at 8113 because it moved off 8106 to dodge a Windows service that
+# permanently holds that port. So "the next number after the last line" is a
+# booby trap: it produced 8113 for `agent_host`, which `ops` already held, and
+# the whole suite passed because nothing checked this table for duplicates.
+# These are the ports a unit whose `.env` predates a key ACTUALLY BINDS
+# (`daemon_health.DEFAULT_PORTS` is derived from here), so a duplicate is two
+# daemons fighting over one socket on every existing unit — and that collision
+# would have taken the ops server's port, which the gateway dials for every
+# runner RPC. Pick a number no other entry holds; `test_legacy_ports_are_unique`
+# now fails the run if you don't.
 LEGACY_AVA_PORTS: dict[str, int] = {
     "gateway": 8000,
     "frontend": 3000,

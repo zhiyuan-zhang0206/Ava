@@ -105,6 +105,33 @@ pre-commit failure; derived sets (`agent/state.py:_BASE_STATE_FIELDS`, from
 written rule only where the boundary genuinely resists naming.
 Evidence: [`postmortems/0003`](../postmortems/0003-touched-areas-is-not-the-blast-radius.md).
 
+### A guard that looks redundant is the one that catches the fix
+
+Two producers of the same fact, pinned against each other, feel like a test of
+something nobody would get wrong. `tests/shared/test_cluster_env.py:test_health_port_env_matches_derive_env_for_the_same_base`
+pins `derive_env` (install-time) against `health_port_env` (enroll-time) for one
+base — and what it caught was not the original bug but the FIX for it: adding
+`agent_host` to `_LATE_HEALTH_SLOTS` made the two producers disagree, and the
+guard said so immediately.
+
+Two lessons, and the second is the load-bearing one:
+
+- A table that is not derived needs a guard for its own internal invariants, not
+  just for agreement with its consumers. `LEGACY_AVA_PORTS` is not in offset
+  order (`ops` moved off 8106 to dodge a Windows service), so "next number after
+  the last line" put `agent_host` on a port `ops` already held; the entire suite
+  passed, because nothing asserted the table had no duplicates. That collision
+  surfaced from reading a boot log, not from a test —
+  `test_legacy_ports_are_unique` exists now so the next one does not need a
+  careful reader.
+- The value of a cross-producer guard is highest exactly when you are changing
+  the thing it guards. Deleting one because "both sides obviously agree" removes
+  it at the moment before it would have earned its keep.
+
+Evidence: PRs #169 and its follow-up fix, where a port-offset addition produced
+three distinct collision classes — a derive escaping its own record's block, an
+overlap with the next cluster's block, and a duplicate legacy port.
+
 ## Debugging
 
 ### A mechanism that predicts the symptom is a hypothesis, not a diagnosis

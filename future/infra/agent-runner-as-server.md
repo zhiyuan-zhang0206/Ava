@@ -16,7 +16,19 @@
 > host builds ONE compiled graph per process, because `build_graph` mutates
 > process-global plugin registration. `_build_llm_retry()` is evaluated at build
 > time, so the per-model retry cap and the per-agent retry-wave de-phasing
-> offset become cluster-level in hosted mode.
+> offset become cluster-level in hosted mode (issue #174).
+>
+> **Where the host lives, and the alternative rejected.** `services/agent_host/`
+> imports the agent kernel, which the `services must not import the agent kernel`
+> import-linter contract otherwise forbids; the exemption is enumerated per
+> target module in `pyproject.toml`. The alternative considered was relocating
+> the host under `agent/` so no exemption were needed. It was rejected because it
+> trades one boundary problem for a worse one: `agent/` would then contain a
+> supervised service daemon — pidfile, healthz, watchdog respawn — and start
+> knowing about process supervision, which is the direction the layering exists
+> to prevent. Every other service reaches agents by SPAWNING them; the hosted
+> runner is the one whose job description is to BE the kernel, so the exemption
+> names a real distinction rather than papering over a violation.
 
 ## The invariant
 

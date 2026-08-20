@@ -170,7 +170,21 @@ name = "services must not import the agent kernel"
 type = "forbidden"
 source_modules = ["services"]
 forbidden_modules = ["agent"]
-ignore_imports = ["services.agent_host.* -> agent.**"]
+# The exemption is enumerated per target module rather than written as
+# `agent.**`, so importing anything NEW from the kernel is a contract failure
+# that has to be argued for rather than a line someone slips under an existing
+# blanket. `unmatched_ignore_imports_alerting` defaults to "error", so an entry
+# that stops matching fails the run too — the list cannot rot in either
+# direction, and its diff is the review signal.
+ignore_imports = [
+    "services.agent_host.* -> agent._process_boot",
+    "services.agent_host.* -> agent._runloop",
+    "services.agent_host.* -> agent.db",
+    "services.agent_host.* -> agent.graph",
+    "services.agent_host.* -> agent.lifecycle",
+    "services.agent_host.* -> agent.startup",
+    "services.agent_host.* -> agent.state",
+]
 
 # Ops layer: shared < ops < {gateway, cli}. The ops module (Spec / Status /
 # controllers) sits above shared and is consumed by gateway + cli (and by the
