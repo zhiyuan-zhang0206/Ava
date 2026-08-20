@@ -24,6 +24,16 @@
 > homes one PG* — is exercised by
 > `tests/cli/test_extension_two_home_chain.py`.
 >
+> A prerequisite the slice walked into rather than introduced: the `extensions`
+> migration is the first post-baseline one to CREATE a table, and a cluster's
+> `ava_runner` read grant is a point-in-time loop issued once at install birth.
+> So on a SPLIT deployment — the only posture where this slice's claim is
+> non-trivial — the materializer hit `permission denied` and reported it as an
+> unreachable registry. Fixed in `shared/cluster/provision.py` (standing
+> `ALTER DEFAULT PRIVILEGES` + a re-affirm from `ava start` after a migration
+> applies); the two-home fixture cannot see it, because it models two homes
+> sharing one connection identity, not two credentials.
+>
 > **Still open in S2**: process-boot materialization (`ava start` covers the
 > restart path today), the adoption sweep for names already installed on a
 > machine before the registry existed, and the sync event. S3 onward is

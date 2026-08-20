@@ -230,7 +230,13 @@ server dedupes /ops calls), INSERT/UPDATE on `agent_tasks` (`ava.tasks`) and
 exit), and full CRUD on the LangGraph checkpoint tables. `agents` INSERT,
 `agents_meta` INSERT, notices writes, the cluster deploy-state tables and any
 DDL fail under it by construction — the 2026-08-12 pollution class (full write
-credential on the runner) is structurally impossible. Its password (`AVA_RUNNER_DB_PASSWORD`) is minted
+credential on the runner) is structurally impossible. That table-wide SELECT is
+granted per object rather than as a standing policy, so a migration that CREATES
+a table would otherwise leave the new table unreadable to every runner for the
+life of the cluster: `ava start` on a gateway host re-affirms the grants whenever
+it actually applied a migration, and an `ALTER DEFAULT PRIVILEGES` declared FOR
+the cluster's main identity (the role migrations run as) covers everything
+created after that first re-affirm. Its password (`AVA_RUNNER_DB_PASSWORD`) is minted
 at install (or by `ava cluster ensure-runner-role` on pre-cutover clusters),
 kept in the gateway's `.env`, and travels only inside the projected URL —
 never as a standalone bootstrap field. The pooler's userlist carries the
