@@ -14,6 +14,8 @@ tags:
 
 `shared/log.py` is the single structural logging **module** (not a package) spanning kernel / gateway / SDK subprocesses / all daemons. A global loguru logger singleton, with per-process entry `init_*` called once to bind process-level fields (`agent_id`) and assemble sinks. All `from shared.log import logger` get the same logger that automatically carries these fields.
 
+`agent_id` is the one field bound **deferred** rather than frozen: `init_agent_process` binds `shared/turn_identity.py:TURN_SCOPED_AGENT_ID`, which resolves per record — turn contextvar, else this process's agent, else the `-` sentinel (an explicit `logger.bind(agent_id=N)` still wins outright). Identical to a fixed binding with one agent per process; it is what lets a process hosting several agents' turns attribute each record to the turn that wrote it. `shared/telemetry.py:emit` applies the same order.
+
 Every log line is also an **event** in the unified event stream (event-system design §1): the loguru side derives `(ts, agent_id, level, event, payload, source)` and enqueues into `shared/telemetry` — the unified emitter — which batch-writes the `events` table (the legacy `agent_events` mirror was removed with the migration window). Business (audit) events flow through the same emitter via `shared/audit_events.py`.
 
 ## Core Responsibilities
