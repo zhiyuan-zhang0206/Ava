@@ -600,6 +600,7 @@ async def test_llm_node_permanent_provider_error_fails_fast_with_structured_fiel
     The RetryPolicy excludes FatalProviderError, so the agent idles instead of
     burning the ~16-min backoff budget and dying."""
     from agent.graph._llm import FatalProviderError, _consecutive_errors
+    from shared.config import settings
 
     _consecutive_errors.pop("7", None)
     fake_llm = MagicMock()
@@ -616,6 +617,43 @@ async def test_llm_node_permanent_provider_error_fails_fast_with_structured_fiel
     assert classify_logs[0]["extra"]["error_class"] == "permanent"
     assert classify_logs[0]["extra"]["status"] == 400
     assert classify_logs[0]["extra"]["fatal"] is True
+    # Every classification log carries the billing verdict and the model that
+    # failed, not only the billing ones — the alert filters on billing=true, so
+    # an ordinary failure must state False rather than omit the key.
+    assert classify_logs[0]["extra"]["billing"] is False
+    assert classify_logs[0]["extra"]["model"] == settings.lm.llm_model
+
+
+async def test_llm_node_billing_error_logs_billing_vendor_and_model(loguru_records) -> None:
+    """A 402 (DeepSeek's `Insufficient Balance`) lands billing=True plus the
+    vendor + model on the `llm_provider_error` log — the three fields the
+    ava-ops-llm-billing-quota rule filters and groups on, and the ones its IM
+    message interpolates. Without them an out-of-credit key is indistinguishable
+    from any other permanent rejection in the event stream."""
+    from agent.graph._llm import FatalProviderError, _consecutive_errors
+    from shared.config import settings
+
+    _consecutive_errors.pop("7", None)
+    fake_llm = MagicMock()
+    fake_llm.astream.return_value = _astream_raising(_FakeProviderStatusError(402))
+    state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
+
+    original = settings.lm.llm_model
+    try:
+        settings.lm.llm_model = "deepseek-v4-flash"
+        with pytest.raises(FatalProviderError) as exc_info:
+            await llm_node(state, _make_runtime(llm=fake_llm, event_publisher=MagicMock()), _CONFIG)
+    finally:
+        settings.lm.llm_model = original
+
+    assert "out of credit or quota" in str(exc_info.value)
+    classify_logs = [r for r in loguru_records if r["extra"].get("event") == "llm_provider_error"]  # pyright: ignore[reportUnknownMemberType]
+    assert len(classify_logs) == 1  # pyright: ignore[reportUnknownArgumentType]
+    extra = classify_logs[0]["extra"]
+    assert extra["billing"] is True
+    assert extra["status"] == 402
+    assert extra["vendor"] == "deepseek"
+    assert extra["model"] == "deepseek-v4-flash"
 
 
 async def test_llm_node_transient_provider_error_propagates_for_retry() -> None:

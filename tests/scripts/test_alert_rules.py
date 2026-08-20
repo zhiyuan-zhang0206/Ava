@@ -42,6 +42,7 @@ _EXPECTED_UIDS = {
     "ava-ops-delivery-stalled-backlog",
     "ava-ops-events-freshness",
     "ava-ops-trace-disk-watermark",
+    "ava-ops-llm-billing-quota",
     # infrastructure layer (issue #46) — the sidecar's own scrapes
     "ava-ops-host-cpu-saturated",
     "ava-ops-host-memory-pressure",
@@ -143,6 +144,7 @@ def test_loki_rules_pipeline_json_before_filters() -> None:
         ("ava-ops-agent-restart-spike", 'event_name="agent_restarted"'),
         ("ava-ops-delivery-stalled-backlog", 'event_name="delivery_stalled"'),
         ("ava-ops-trace-disk-watermark", 'event_name="trace"'),
+        ("ava-ops-llm-billing-quota", 'event_name="llm_provider_error"'),
     ],
 )
 def test_event_name_rules_filter_by_event_name(uid: str, event_filter: str) -> None:
@@ -215,6 +217,45 @@ def test_trace_watermark_rule_filters_degradation_action() -> None:
     assert any('category="telemetry"' in e for e in exprs)
     assert any("[24h]" in e for e in exprs)
     assert _threshold_params(rules["ava-ops-trace-disk-watermark"]) == [[0]]
+
+
+def test_billing_rule_fires_on_the_first_occurrence() -> None:
+    """R13 is the one rule with no spike threshold: an out-of-credit key fails
+    every turn and only a human can clear it, so `> 0` over a 15m window and
+    `for: 0m` are the point of the rule, not an oversight. A threshold or a
+    `for` window creeping in here would re-hide the incident R1 already hides."""
+    rules = {r["uid"]: r for r in _load_rules()}
+    rule = rules["ava-ops-llm-billing-quota"]
+    assert _threshold_params(rule) == [[0]]
+    assert rule["for"] == "0m"
+    assert rule["labels"]["severity"] == "critical"
+    assert any("[15m]" in e for e in _exprs(rule, "loki"))
+
+
+def test_billing_rule_keys_on_the_billing_flag_not_a_status_list() -> None:
+    """The discriminator is the emitted `billing` verdict
+    (shared/lm/errors.py's cross-provider predicate), never a status list
+    re-spelled in LogQL: a provider added to that vocabulary must be covered
+    here without touching this file."""
+    rules = {r["uid"]: r for r in _load_rules()}
+    expr = _exprs(rules["ava-ops-llm-billing-quota"], "loki")[0]
+    assert 'attributes_billing="true"' in expr
+    assert "402" not in expr, "the rule must not enumerate provider statuses itself"
+
+
+def test_billing_rule_names_vendor_and_model_in_the_notification() -> None:
+    """The IM message is one line and has to be self-explanatory, so the alert
+    instance is grouped by (vendor, model) and both are interpolated into the
+    summary — a bare count would not say whose key to top up."""
+    rules = {r["uid"]: r for r in _load_rules()}
+    rule = rules["ava-ops-llm-billing-quota"]
+    assert "sum by (attributes_vendor, attributes_model)" in _exprs(rule, "loki")[0]
+    summary = rule["annotations"]["summary"]
+    assert "{{ $labels.attributes_vendor }}" in summary
+    assert "{{ $labels.attributes_model }}" in summary
+    # shared/alerts.py:notify_text truncates the summary at 200 chars; the
+    # template must still say what happened once the labels expand.
+    assert len(summary) <= 200, f"summary is {len(summary)} chars, IM truncates at 200"
 
 
 def test_delivery_stalled_rule_filters_fresh_by_age() -> None:

@@ -83,6 +83,37 @@ class TurnEnd(TypedDict):
     duration_seconds: float
 
 
+class LlmProviderError(TypedDict):
+    """`llm_provider_error` payload — agent/graph/_llm_errors.py.
+
+    One row per classified provider failure — every class, so a postmortem sees
+    the retried transients too; ``fatal`` says whether this one aborted the turn.
+
+    ``billing`` is the discriminator the billing/quota alert keys on: True when
+    the provider said the key is out of credit or its quota is exhausted (HTTP
+    402, or a per-vendor ``error.type`` — the vocabulary lives in
+    ``shared/lm/errors.py``, so a new provider plugs in there and this key and
+    the alert follow with no further wiring). It is deliberately independent of
+    ``error_class``: one vendor says it with a permanent 402, another with a
+    transient 429, and a human has to clear it either way.
+
+    ``vendor`` is the model's provider key (deepseek / claude / …, None for an
+    unregistered prefix) and ``model`` the model in force at the call — the
+    alert names both. ``provider`` is only the SDK package that raised
+    (anthropic / openai), which DeepSeek and Claude share, so it cannot answer
+    "whose key is dead".
+    """
+
+    error_class: str  # transient | permanent | unknown
+    provider: str
+    status: int | None
+    error_type: str | None
+    fatal: bool
+    billing: bool
+    vendor: str | None
+    model: str
+
+
 class ExecPayload(TypedDict):
     """`exec` / `code` payload — agent/graph/_exec.py."""
 
@@ -446,7 +477,10 @@ EVENTS: dict[str, EventSpec] = {
         "compact_turn_aborted", "turn aborted because compaction failed"
     ),
     "llm_provider_error": _telemetry(
-        "llm_provider_error", "LLM provider failure", family=LLM_ERROR_FAMILY
+        "llm_provider_error",
+        "LLM provider failure",
+        payload=LlmProviderError,
+        family=LLM_ERROR_FAMILY,
     ),
     "stream_stalled_retry": _telemetry(
         "stream_stalled_retry", "stream stalled, retried", family=LLM_ERROR_FAMILY

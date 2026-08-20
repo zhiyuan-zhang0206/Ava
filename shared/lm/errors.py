@@ -29,6 +29,10 @@ Three classes, fail-fast:
   either bucket: it propagates through the node's normal path (retried like a
   transient by the `RetryPolicy`, then surfaced if it persists) and is logged as
   `unknown` so a postmortem can spot a gap to close here.
+
+Crossing all three, `ErrorClassification.billing` answers a different question —
+"is this the key running out of money?" — because that is the one failure no
+retry policy can clear, and it is what the billing/quota alert fires on.
 """
 
 from __future__ import annotations
@@ -56,6 +60,30 @@ _PERMANENT_STATUSES: frozenset[int] = frozenset({400, 401, 402, 403, 404, 422})
 # conflict, 425 too-early). 5xx is caught by the `>= 500` range, not this set.
 _TRANSIENT_STATUSES: frozenset[int] = frozenset({408, 409, 425, 429})
 
+# "The key is out of credit / its quota is exhausted" — a cross-cutting FACT
+# about a failure, not a fourth ErrorClass: it is orthogonal to retryability
+# (DeepSeek says it with a PERMANENT 402, OpenAI with a TRANSIENT 429), and it
+# is the one failure a human, not a retry, has to clear. Classified here so the
+# operator-facing consumers (the `llm_provider_error` billing field, the Grafana
+# billing alert) read one predicate instead of each re-deriving a status set.
+#
+# HTTP 402 Payment Required is the unambiguous signal — DeepSeek returns it for
+# `Insufficient Balance`. Providers that reuse a generic 4xx say it in the
+# response body's `error.type` instead, so those strings are matched too,
+# case-folded because the vocabularies are not consistently cased across
+# vendors. A new provider adds its string here and nothing else: the emit site,
+# the event payload and the alert rule all key off this one predicate.
+_BILLING_STATUS = 402
+_BILLING_ERROR_TYPES: frozenset[str] = frozenset(
+    {
+        "insufficient_quota",  # OpenAI — credit exhausted (arrives as a 429)
+        "billing_not_active",  # OpenAI — account not billable
+        "insufficient_balance",  # DeepSeek + the OpenAI-compatible CN endpoints
+        "exceeded_current_quota_error",  # Moonshot / Kimi
+        "arrearage",  # Alibaba DashScope (Qwen) — account in arrears
+    }
+)
+
 
 def _is_transport_error(exc: BaseException) -> bool:
     """True for transport-layer failures (no HTTP status).
@@ -80,6 +108,22 @@ class ErrorClassification(NamedTuple):
     provider: str  # top-level package that raised: anthropic / openai / httpx / builtins / ...
     status: int | None  # HTTP status_code when the SDK carries one, else None
     error_type: str | None  # provider body `error.type` (e.g. engine_overloaded_error), else None
+
+    @property
+    def billing(self) -> bool:
+        """True when the provider refused because the key is out of credit or
+        its quota is exhausted (`_BILLING_STATUS` / `_BILLING_ERROR_TYPES`).
+
+        A derived view, not a field: it is a reading of the same
+        (status, error_type) the classifier already carries, so it cannot drift
+        out of sync with them, and every tuple-shaped construction site stays
+        untouched. Deliberately independent of `error_class` — an out-of-credit
+        key arrives as a PERMANENT 402 from one vendor and a TRANSIENT 429 from
+        another, and the operator has to top the key up either way.
+        """
+        if self.status == _BILLING_STATUS:
+            return True
+        return self.error_type is not None and self.error_type.lower() in _BILLING_ERROR_TYPES
 
 
 def _provider_of(exc: BaseException) -> str:
