@@ -9,12 +9,18 @@ their own entry points.
 from __future__ import annotations
 
 
-def cmd_migrations_apply() -> int:
+def cmd_migrations_apply() -> list[str]:
     """Apply pending migrations in order; called as a step of `ava start`.
 
     Each migration runs in a single transaction; on failure all roll back
     together. `ava start` invokes this after pg is ready; on the gateway
     `ava cluster update` reaches it through the trailing `ava start`.
+
+    Returns the names applied, NOT an exit code — the `cmd_` prefix is
+    vestigial here (see the module docstring: there is no `ava migrations`
+    verb, and this is never wired to a parser). Its caller needs the set,
+    because a migration that created a table is the moment `ava_runner`'s
+    point-in-time read grant went stale; failure is raised, not returned.
     """
     import shared.db
     from shared.migrations import apply_pending_migrations
@@ -34,4 +40,4 @@ def cmd_migrations_apply() -> int:
     with shared.db.connect(direct=True, unbounded=True) as conn:
         done = apply_pending_migrations(conn)
     print(f"applied {len(done)} migration(s): {done}")
-    return 0
+    return done
