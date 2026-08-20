@@ -521,6 +521,26 @@ EVENTS: dict[str, EventSpec] = {
     "exec_thread_unreapable": _telemetry(
         "exec_thread_unreapable", "orphan exec thread survived the reap window"
     ),
+    # hosted runner (future/infra/agent-runner-as-server.md) — the dispatcher
+    # that turns an inbound wake into a turn task, and the turn tasks it runs
+    "host_dispatcher_subscribed": _telemetry(
+        "host_dispatcher_subscribed",
+        "hosted dispatcher subscribed to the inbound wake pattern",
+    ),
+    "host_dispatcher_reconnect": _telemetry(
+        "host_dispatcher_reconnect",
+        "hosted dispatcher's wake subscription dropped — reconnecting (wakes published "
+        "while down are lost; the delivery watchdog re-publish covers them)",
+    ),
+    "host_dispatcher_bad_channel": _telemetry(
+        "host_dispatcher_bad_channel",
+        "hosted dispatcher ignored a wake whose channel name carried no agent id",
+    ),
+    "host_turn_crashed": _telemetry(
+        "host_turn_crashed",
+        "a hosted turn task raised — the task is dropped and the next wake retries "
+        "from the checkpoint; neighbours are unaffected",
+    ),
     # node / process lifecycle
     "node_enter": _telemetry(
         "node_enter",

@@ -43,16 +43,19 @@ def test_dual_category_status_change() -> None:
 
 def test_category_projection_matches_telemetry_whitelist() -> None:
     """The derived `_TELEMETRY_KINDS` (telemetry.py) must equal the registry's
-    telemetry projection — 90 names (82 baseline + frontend_interaction
+    telemetry projection — 94 names (82 baseline + frontend_interaction
     2026-08-09 + gateway_latency Task #1091 + exec_thread_unreapable
     Task #1058 + the three CAS-race kinds from Task #688: claim_cas_lost,
     claim_cas_lost_exit, idle_cas_lost + history_dump Task #1249 +
-    plugin_activation issue #40). Bump deliberately when adding a telemetry
-    event, never to silence a drift."""
+    plugin_activation issue #40 + the four hosted-runner kinds
+    (future/infra/agent-runner-as-server.md): host_dispatcher_subscribed,
+    host_dispatcher_reconnect, host_dispatcher_bad_channel, host_turn_crashed).
+    Bump deliberately when adding a telemetry event, never to silence a
+    drift."""
     from shared.telemetry import _TELEMETRY_KINDS
 
     assert telemetry_events() == frozenset(_TELEMETRY_KINDS)
-    assert len(_TELEMETRY_KINDS) == 90
+    assert len(_TELEMETRY_KINDS) == 94
 
 
 def test_category_for_kind() -> None:
