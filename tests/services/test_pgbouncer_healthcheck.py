@@ -187,7 +187,7 @@ def test_event_is_emitted_only_after_the_verified_repair(monkeypatch: pytest.Mon
 def test_degraded_pooler_missing_its_public_listener_is_restarted(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Task #1288: the pooler answers on loopback but its reachable (tailscale)
+    """Task #1288: the pooler answers on loopback but its reachable-address
     listener is missing — a boot-time bind race degraded it, and a loopback-only
     probe would read it as healthy forever. The check must treat the missing
     public listener as a repair condition."""
@@ -206,9 +206,9 @@ def test_degraded_pooler_missing_its_public_listener_is_restarted(
 
 
 def test_degraded_repair_that_did_not_take_raises(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Still missing the public listener after the restart (e.g. tailscale still
-    down): the watchdog must keep reporting the failure, not settle for a pooler
-    that only half serves."""
+    """Still missing the public listener after the restart (e.g. the private
+    network still down): the watchdog must keep reporting the failure, not
+    settle for a pooler that only half serves."""
     calls = _Calls(listener=[True], public=[False, False])
     _wire(monkeypatch, calls)
 
