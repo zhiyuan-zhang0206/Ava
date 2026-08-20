@@ -88,6 +88,18 @@ red-before" while proving the opposite, which is worse than no proof because it
 manufactures confidence. Use `git checkout <sha-before-the-fix> -- <file>`, re-run,
 then `git checkout HEAD -- <file>`; confirm the revert actually landed (`git diff`,
 or grep the file for a token from the fix) rather than trusting the command.
+**The same failure has a second door: the code under test never runs.** A guard
+whose trigger the framework silently declines is as green and as worthless as one
+whose revert never landed. Two live examples: a retry test raising `ValueError`,
+which `langgraph.types.default_retry_on` explicitly REFUSES to retry — the node
+ran once and the attempt-count assertion measured nothing; and a test asserting a
+bounded shutdown where the code under test suppressed `CancelledError`, so the
+`asyncio.wait_for` meant to bound it was swallowed and the run HUNG rather than
+failing. The tell is the same in both directions — ask what would have to execute
+for this assertion to be meaningful, then confirm it did (count the calls, assert
+the elapsed time, watch it go red) rather than inferring it from a pass. A test
+that hangs instead of failing is the worst of the three: it reads as
+infrastructure flakiness, not as a caught regression.
 Evidence: [`postmortems/0002`](../postmortems/0002-db-down-tests-pass-for-the-wrong-reason.md);
 procedure in [`.agents/skills/run-local-tests/SKILL.md`](../.agents/skills/run-local-tests/SKILL.md).
 

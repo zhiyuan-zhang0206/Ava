@@ -180,7 +180,10 @@ async def run() -> None:
         # than one per agent (services/agent_host/host.py explains the cost).
         graph = build_graph(checkpointer)
         host = AgentHost(pool=pool, checkpointer=checkpointer, graph=graph)
-        scheduler = TurnScheduler(host.run_turn)
+        # The clock reader is injected, not imported by the scheduler: it owns no
+        # pool, and this keeps the uncancellable-turn report able to say how long
+        # a stuck agent has really been silent.
+        scheduler = TurnScheduler(host.run_turn, activity_clock=host.last_active_at)
 
         health = await start_health_server(
             "agent_host",
