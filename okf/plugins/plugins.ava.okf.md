@@ -78,12 +78,10 @@ keyed by the same triple: [[activation-telemetry.ava.okf.md]].
 | ava_syntax_fix | deterministic syntax fixes for agent code |
 
 ## Package Manifest (spec v2)
-Packages may ship an `ava-plugin.json` at their root declaring identity
-(name/version/`engines.ava` range), dependencies (`plugins` /
-`pythonPackages` / `hostCapabilities`), contribution surfaces, and lifecycle
-shape. Install paths validate it via `shared/plugin_manifest.py`; runtime
-loading, lifecycle states, and context gates land post-open-source. Full
-contract: [conventions/plugin-spec-v2.md](../../conventions/plugin-spec-v2.md).
+The `ava-plugin.json` a package may ship — identity, dependencies, declared
+contribution surfaces (including the console's `contributions.ui`), lifecycle
+shape — and where each is validated: [[okf/plugins/package-manifest.ava.okf.md]].
+
 ## Notes
 - Plugins can carry **skills** (`ava_builtins/plugins/<p>/skills/`, converge syncs them with the plugin name as the top-level directory; nodes hang under each plugin subtree) and **MCP server definitions** (`.mcp.json`), and can also register **ops services** (`services.py` declaring `ServiceSpec`, e.g., ava_fleet's task-maintenance).
 - All hooks share a single global HOOKS list—`make_hook_runner` snapshots the reference, not a copy.

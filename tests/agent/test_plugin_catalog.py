@@ -234,12 +234,15 @@ def test_a_plugin_without_a_manifest_has_no_diff():
 
 def test_install_time_manifest_keys_have_no_runtime_registry():
     """`skills` / `commands` / `mcpServers` / `opsServices` settle on disk at
-    install time; the diff must not be able to call them missing."""
+    install time and `ui` is read straight from the manifest by the console;
+    none of them reach a `register_*` call, so the diff must not be able to
+    call them missing."""
     assert {
         "skills",
         "commands",
         "mcpServers",
         "opsServices",
+        "ui",
     } == plugin_catalog.DECLARATION_ONLY_KEYS
 
 
