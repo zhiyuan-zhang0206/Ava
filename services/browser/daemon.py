@@ -36,6 +36,7 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from loguru import logger
 
@@ -142,13 +143,20 @@ def _frontend_url() -> str | None:
     The tab is the Next.js app port (AVA_APP_PORT), not the gate's entry port:
     the entry is the always-up static gate, while the app port is the frontend
     itself. The port is only set by converge on gateway-capable hosts, so an
-    agent-runner-only unit (no local frontend) gets no first tab instead of a
-    dead localhost URL.
+    agent-runner-only unit (no local frontend) gets no first tab.
+
+    The host comes from AVA_GATEWAY_URL (the cluster's private-network
+    address, never localhost) — same derivation as
+    shared.alerts.frontend_base_url; a missing gateway URL means no first tab
+    rather than a dead loopback URL.
     """
     port = settings.services.app_port
     if port is None:
         return None
-    return f"http://localhost:{port}"
+    host = urlsplit(settings.gateway.gateway_url or "").hostname
+    if not host:
+        return None
+    return f"http://{host}:{port}"
 
 
 def _chrome_args(
