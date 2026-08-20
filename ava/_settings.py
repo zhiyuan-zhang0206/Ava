@@ -161,21 +161,23 @@ REDIS = _LazyConnection(_connect_redis, "REDIS")
 
 # ── Plugin config hierarchical view ──
 #
-# `ava._settings.plugins.<plugin_name>` dynamically reads
-# `shared.plugin_config_registry._PLUGIN_CONFIGS` and returns the frozen Pydantic BaseModel
-# instance (bound in by this PR's `register_plugin_config`).
+# `ava._settings.plugins.<plugin_name>` dynamically resolves the frozen Pydantic
+# BaseModel instance for the current turn's agent (bound in by
+# `register_plugin_config` + `bind_from_disk`, agent-scoped by
+# `shared/plugin_config_view.py`).
 #
 # Design:
 # - Private module (underscore prefix) → not in `ava.help()`, for plugin authors not the agent
-# - lazy attribute access → no cache, so restart / test monkeypatch changes
-#   to _PLUGIN_CONFIGS are immediately visible
+# - lazy attribute access → no cache here, so restart / test monkeypatch changes
+#   to the registry are immediately visible
 # - lazy import shared.plugin_config_registry → avoids ava module load triggering agent
 #   module import (test fixture / container mode can still import ava
 #   without connecting agent)
 
 
 class _PluginsView:
-    """`ava._settings.plugins` — attribute access routes to `_PLUGIN_CONFIGS[name]`.
+    """`ava._settings.plugins` — attribute access routes to the turn's config
+    for that plugin (`shared/plugin_config_view.py`).
 
     Plugins not registered raise AttributeError listing known plugin names,
     so typos / "bind hasn't run yet" are immediately visible.
@@ -185,6 +187,7 @@ class _PluginsView:
         if name.startswith("_"):
             raise AttributeError(name)
         from shared.plugin_config_registry import _PLUGIN_CONFIGS
+        from shared.plugin_config_view import turn_plugin_config
 
         if name not in _PLUGIN_CONFIGS:
             known = sorted(_PLUGIN_CONFIGS.keys())
@@ -193,7 +196,10 @@ class _PluginsView:
                 f"register_plugin_config, or framework `bind_from_disk` hasn't run yet. "
                 f"Known plugins: {known or '<empty>'}"
             )
-        return _PLUGIN_CONFIGS[name]
+        # Agent-scoped read: the turn's config_overlay is layered over the disk
+        # image, so in the hosted runner two agents sharing this process see
+        # their own overrides. Unbound (process mode) = the registry instance.
+        return turn_plugin_config(name)
 
 
 plugins = _PluginsView()

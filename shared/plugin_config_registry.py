@@ -300,17 +300,25 @@ def get_plugin_config(plugin: str, cls: type[BaseModel] | None = None) -> BaseMo
     CompactConfig).auto_compact_tokens`). Runtime does not validate cls matches
     actual instance — caller's responsibility.
 
+    Agent-scoped: the read goes through `shared/plugin_config_view.py`, which
+    layers the current turn's `config_overlay` over the bound disk image. With
+    nothing bound (process mode) that is `_PLUGIN_CONFIGS[plugin]` verbatim.
+
     Raises:
         KeyError: plugin has no register_plugin_config or bind hasn't run — typo / wrong ordering.
     """
+    from shared.plugin_config_view import turn_plugin_config
+
     _ = cls
-    return _PLUGIN_CONFIGS[plugin]
+    return turn_plugin_config(plugin)
 
 
 def all_plugin_configs() -> dict[str, BaseModel]:
-    """Shallow copy of all bound plugin config instances — used to build
-    `ava._settings.plugins` namespace."""
-    return dict(_PLUGIN_CONFIGS)
+    """All bound plugin config instances, agent-scoped — used to build the
+    `ava._settings.plugins` namespace. See `get_plugin_config` on scoping."""
+    from shared.plugin_config_view import turn_plugin_configs
+
+    return turn_plugin_configs()
 
 
 def all_plugin_config_classes() -> dict[str, type[BaseModel]]:

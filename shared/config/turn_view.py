@@ -34,7 +34,8 @@ were already validated by `validate_config_overlay` before they reached
 
 Scope: framework `Settings` fields only. Plugin-scope config
 (`shared/plugin_config_registry._PLUGIN_CONFIGS`) is a separate process-global
-with the same problem; it is scoped in a later Phase 1 PR, not here.
+with the same problem, scoped the same way by its own view —
+`shared/plugin_config_view.py`.
 
 Enforcement: `scripts/lint_turn_scoped_config.py` forbids reading a
 `per_agent` field through the bare singleton from turn-scoped packages —
