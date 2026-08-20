@@ -121,19 +121,19 @@ markdown task file that exercises every core SDK surface. An agent reads it
 and executes each test, producing a pass/fail report.
 
 ```bash
-# Run the validation suite (spawns a validation agent, polls for the report)
-bash scripts/preview/validate.sh
+bash scripts/preview/validate.sh   # returns once delivered; the agent notifies when done
 ```
 
 The suite covers: spawn, terminate, resurrect, restart, fork, send_message,
 get_neighbors, files, shell, web.search, and notices. Each test is independent;
-failures do not block subsequent tests. The agent writes a summary report to
-`preview-validation-report.md` in the repo root.
+failures do not block subsequent tests. The agent writes the report into the
+cluster's own home (path printed by `validate.sh`), outside the checkout, so a
+run cannot dirty the git tree.
 
-After validation, read the report:
+After validation, read it:
 
 ```bash
-cat preview-validation-report.md
+cat ~/.ava-<worktree-dir>/preview-validation-report.md
 ```
 
 ### Step 3: Promote or destroy
@@ -161,14 +161,14 @@ For CI/CD or pre-release gating, chain the three steps:
 
 ```bash
 scripts/install.sh --worktree && uv sync && .venv/bin/ava start \
-  && bash scripts/preview/validate.sh \
-  && grep -q "PASS" preview-validation-report.md \
-  || echo "Validation FAILED"
+  && bash scripts/preview/validate.sh
+# validate.sh returns before the agent finishes — wait for the report, then gate on it:
+grep -q "FAIL" ~/.ava-<worktree-dir>/preview-validation-report.md && echo "Validation FAILED"
 .venv/bin/ava cluster destroy --path ~/.ava-<worktree-dir> --drop-db
 ```
 
-The validation report's exit code (0 = all pass) makes it usable as a gate in
-release automation before cutting to main.
+The report is the gate: it exists only once the suite finishes, and a `FAIL`
+line in it blocks the promotion.
 
 ### Sample agents
 
@@ -178,7 +178,7 @@ To populate the preview cluster with visible activity (for manual UI review):
 bash scripts/preview/spawn-samples.sh
 ```
 
-This spawns coding, chat, notice, and UI agents with mock tasks — useful for
+This spawns coding, chat, and notice agents with mock tasks — useful for
 eyeballing the FleetView before approving a release.
 ## §2 Failure modes + human intervention recovery
 

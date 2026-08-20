@@ -1,92 +1,77 @@
-# Preview Cluster
+# Preview cluster
 
-The **preview** cluster is the pre-release validation environment for `main`.
-It runs **co-located with the production `main` cluster on the gateway host**
-(the WSL physical-isolation plan in `future/infra/preview-cluster.md` is
-not the current reality — that host is offline). Co-location is exactly why the
-discipline below exists: most of the infrastructure you can see from inside the
-preview cluster is *shared with production*.
+The **preview** cluster is the pre-release validation environment for `main`:
+a full Ava cluster running the commit that is about to be promoted, so a
+release is exercised end-to-end before production sees it.
 
-## What is shared, what is yours
+## Where it lives
 
-Per the current shared-instance model (`ava-guide` → `ops/SKILL.md`), a box runs
-**one** Postgres and **one** Redis as native services, shared by every cluster on
-it. What belongs to one cluster is logical: a database name (`ava_preview`), a
-Redis logical-DB index + channel prefix, a port block, session homes, and
-`$AVA_HOME` (`~/.ava-preview`).
+| Fact | Value |
+|---|---|
+| Host | its own machine — **not** the production gateway host. Which machine, and how it is reached, is deployment inventory, not repo content ([`dev-setup.md`](../../conventions/dev-setup.md)) |
+| Home (`$AVA_HOME`) | `~/.ava-preview` |
+| Checkout | `~/.ava-preview/source`, anchored to that home by its `.ava_home` pointer |
+| Data plane | its **own** Postgres + Redis + PgBouncer under `~/.ava-preview`, on its own port block |
+| Auth | preview runs **with** a cluster secret, so every gateway route except `/api/health` and `/api/auth/*` requires `Authorization: Bearer $AVA_CLUSTER_SECRET` |
 
-| Layer | Scope | Restart blast radius |
-|---|---|---|
-| `brew services restart redis` / `postgresql@17` | **the whole box — every cluster, including prod `main`** | outage for all clusters |
-| `ava stop` / `ava start` (from preview's own checkout) | the preview cluster only (`ava stop` on a gateway role still touches shared pg/redis — read its prompt) | preview only |
-| `ava-*` sessions on preview's own home | one preview service | that service |
+Preview shares nothing with production — not a Postgres instance, not a Redis
+instance, not a port, not a session. Isolation is home-directory isolation
+([AGENTS.md → Running](../../AGENTS.md)): there is no box-level Postgres or
+Redis for two clusters to collide in, and no box-level admin credential either
+— a cluster's Redis instance is single-tenant and its `requirepass` **is** that
+cluster's secret.
 
-**Never restart a shared service to fix a cluster-level problem.** On
-2026-07-14 an agent ran `brew services restart redis` to "fix" a preview auth
-error; the restart wiped every cluster's in-memory Redis ACL user and took
-down all of production `main` (agents crashed, SSE dead) for ~15 minutes. The
-auth error it was fixing was a wrong password, not a broken server — see
-"Redis identities" below. (The gateway watchdog now re-affirms the ACL within
-60s, but that is damage control, not permission.)
+> History, not current advice: before the per-cluster data plane, every cluster
+> on a host shared one Postgres and one Redis, and restarting the box's Redis to
+> "fix" one cluster's wrong password took every cluster on that box down with it
+> (2026-07-14). The shared instance that made that possible no longer exists.
 
-## Redis identities — the two-layer model
+## Operate it
 
-Redis auth on a shared box has exactly two layers. Confusing them produces
-`WRONGPASS invalid username-password pair`, which is **your credentials being
-wrong, not the server's password having rotated**:
-
-| Identity | Username | Password | Used for |
-|---|---|---|---|
-| Box admin | `default` | box-level admin secret (`~/.ava/redis_admin_secret`, = `requirepass` in redis.conf) | provisioning per-cluster ACL users; never a cluster's runtime identity |
-| Cluster runtime | `ava_preview` | the **preview cluster secret** (`AVA_CLUSTER_SECRET` in `~/.ava-preview/.env`) | everything the cluster does at runtime |
-
-A cluster secret is never the admin password. If `default` + cluster-secret
-fails, that is expected. You never need to authenticate as admin by hand:
-`ava start` provisions the ACL user through the admin identity itself.
-
-## Operating the cluster
-
-All provisioning and auth repair goes through the one idempotent verb — it
-creates/affirms the DB role, the Redis ACL user, and the session stack, and it is
-safe to re-run:
+Always through the cluster's **own** `ava`. A bare `ava` on that host's PATH
+belongs to a different checkout and acts on a different home, and
+`AVA_HOME=~/.ava-preview` does not redirect it — the boot refuses an env var
+that contradicts the checkout's own claim
+(`shared/dotenv_boot.py:_assert_env_agrees_with_checkout`).
 
 ```bash
-# Run from preview's OWN checkout — identity is the home path, so the install
-# births the cluster at ~/.ava-preview (secret minted into its .env) and anchors
-# this checkout to it via the .ava_home pointer; `ava start` is then a pure
-# bring-up with no identity flags.
 cd ~/.ava-preview/source
-scripts/install.sh --worktree --path ~/.ava-preview
-.venv/bin/ava start --machine-name <host>
+.venv/bin/ava status           # sessions + probes + this cluster's pg/redis view
+.venv/bin/ava start            # pure bring-up; ensures preview's own pg/redis is up (skip-if-running)
+.venv/bin/ava cluster update   # pull main -> uv sync -> migrate -> restart, preview only
 ```
 
-Status / teardown:
+A cron registered for this home runs `ava cluster health-probe --auto-rollback`,
+so a cluster that stays unhealthy for `--threshold` consecutive probes (default
+3) rolls itself back with no operator in the loop.
+
+## Blast radius
+
+| Command (as `~/.ava-preview/source/.venv/bin/ava`) | Touches |
+|---|---|
+| `start` / `stop` / `restart` | preview only, **including its own pg/redis** — `stop` takes preview's data plane down with it |
+| `cluster update` / `cluster rollback` | preview only: its checkout, its database, its sessions |
+| `cluster down --path ~/.ava-preview` | stops preview's sessions; its pg/redis instance and its registry slot stay up |
+| `cluster destroy --path ~/.ava-preview` | the above, plus frees its port block and deregisters its OS-scheduled jobs (`--drop-db` also drops its data) |
+
+Nothing in that table can reach production. What still can: the host itself
+(reboot, disk, network), and anything run against `~/.ava` on the same machine —
+that is a **different** cluster, not preview.
+
+## Validate a release
+
+`ava cluster update` rolls the code; validation is a separate, agent-driven
+suite:
 
 ```bash
-AVA_HOME=~/.ava-preview ava status
-ava cluster status
-ava cluster down --path ~/.ava-preview      # stop it, keep its slot; shared pg/redis untouched
-ava cluster destroy --path ~/.ava-preview --drop-db   # free the slot too
+cd ~/.ava-preview/source
+bash scripts/preview/validate.sh        # one validation agent runs validate-tasks/suite.md
+bash scripts/preview/spawn-samples.sh   # optional: mock agents from mock-tasks/, to eyeball FleetView
 ```
 
-If auth to Redis fails from inside preview: check which identity you are using
-against the table above, then re-run `ava start` (it re-affirms the ACL user).
-If that does not converge, **stop and escalate to the user** — do not
-experiment on shared services.
-
-## Known drift (read before touching the data plane)
-
-The preview `.env` currently records a per-cluster data plane
-(`AVA_DB_URL` → :18043, `AVA_REDIS_URL` → :18044) per the *planned*
-embedded-per-cluster-data-plane design. Reality: preview Postgres does run as
-its own instance on 18043, but **no Redis listens on 18044 — preview Redis is
-the shared instance on 6379, logical DB 3**. Until the embedded design lands,
-treat 6379 as shared-with-prod (all discipline above applies) and expect the
-`.env` Redis line to disagree with the wire.
-
-## Validation & samples
-
-```bash
-bash scripts/preview/validate.sh        # spawn/terminate/resurrect/fork/messaging/files/shell/web/notices
-bash scripts/preview/spawn-samples.sh   # sample agents from scripts/preview/mock-tasks/
-```
+Both resolve the repo from their own location and dial the gateway through
+`shared/machine.py:gateway_api_base` + `shared/machine.py:gateway_auth_headers`,
+so they carry no hardcoded path or port and work whether or not the cluster has
+a secret. `validate.sh` returns once the task is delivered; the agent writes its
+report to `$AVA_HOME/preview-validation-report.md` — outside the checkout, so a
+validation run can never dirty the git tree — and notifies when it is done.
