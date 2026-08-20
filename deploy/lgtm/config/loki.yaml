@@ -68,6 +68,24 @@ limits_config:
   # The archive spans ~83 days (05-23 -> 08-12); Loki's default
   # max_query_length (30d1h) would reject any whole-span parity/read query.
   max_query_length: 2160h
+  # Kill a query that runs longer than this server-side. Deliberately just
+  # under the gateway's 60s httpx timeout (gateway/loki_events.py): a hung
+  # query then dies here with a clean error the gateway maps to a 503
+  # (plus a loki_query_failed event with the query shape) instead of
+  # holding a querier slot until the client abandons it — the failure mode
+  # behind the task #1289 dense-window /api/events 500s. Loki's default is
+  # 1m, which raced the client timeout and left cancelled-query noise in
+  # the logs with no record of what stalled.
+  query_timeout: 50s
+  # Output series cap per query. The default (500) forced the gateway's
+  # aggregations to defensively topk(500) their results (see the
+  # _bucketed_distribution_logql note in gateway/loki_events.py) — the
+  # events stream's aggregation shapes legitimately exceed 500 series.
+  max_query_series: 2000
+  # Line cap per query. The default (5000) truncates the raw-line range
+  # queries the 100MiB gRPC cap (server.grpc_server_max_recv_msg_size) was
+  # raised for; 20k lines is a few MB, well inside it.
+  max_entries_limit_per_query: 20000
   # Query splitting + fan-out bounds, sized for a single binary on a shared
   # box (upstream defaults — 1h splits, parallelism 32/128 — are sized for a
   # horizontally scaled querier fleet; here they turned one 30d instant
