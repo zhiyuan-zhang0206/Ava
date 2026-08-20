@@ -1,13 +1,20 @@
 # Extension ownership: cluster content, machine capabilities, agent activation
 
-> **Status: design for issue #39 — nothing implemented.** The issue sets the
-> direction (three ownership tiers, five slices); this doc is the buildable
+> **Status: S1 landed (decision + spec revision); no code yet.** The issue sets
+> the direction (three ownership tiers, five slices); this doc is the buildable
 > elaboration: data model, capability vocabulary, resolution semantics, the
 > fail-fast edge, executor semantics under both process models, migration from
-> today's per-machine state, and per-slice test locks. Slice S1 (the
-> `decisions/` entry + the `conventions/plugin-spec-v2.md` S5 revision) is
-> written from this doc when implementation starts; until then this doc is the
-> single place the design lives.
+> today's per-machine state, and per-slice test locks.
+>
+> **S1 is done**: the ownership model is recorded durably in
+> [`decisions/2026-08-21-extension-ownership-three-tiers.md`](../../decisions/2026-08-21-extension-ownership-three-tiers.md),
+> and `conventions/plugin-spec-v2.md` S5 now says `machine` = capability set,
+> `enabled_set` = cluster default + per-agent overlay, and splits
+> `dependencies.hostCapabilities` into host requirements (matched for placement)
+> versus resource access (context-gated at injection). **S2 onward is unbuilt** —
+> no `extensions` / `extension_blobs` tables, no migrations, no materialization.
+> This doc remains where the buildable detail lives; the decision entry holds
+> only what is durable (the tiers, the invariants, what was rejected).
 
 ## The problem, in one sentence
 
@@ -351,7 +358,7 @@ Adoption, not flag-day:
 
 | Slice | What lands | Test locks |
 |---|---|---|
-| **S1 — decision + spec** | `decisions/` entry (three tiers; machine demoted to derived constraint; version-canary non-goal) + the plugin-spec-v2 S5 revision above. No code. | — |
+| **S1 — decision + spec** (landed) | `decisions/2026-08-21-extension-ownership-three-tiers.md` (three tiers; machine demoted to derived constraint; version-canary non-goal) + the plugin-spec-v2 S5 revision above, incl. the `hostCapabilities` split. No code. | — |
 | **S2 — skills first** | `extensions`/`extension_blobs` migrations; `ava skill install` writes row + blob; converge + boot materialization for `kind='skill'`; adoption sweep; the sync event. Skills are pure text, no runtime, no requirements — validates the whole chain at minimum risk. | install on home A materializes on home B (two homes, one PG); adoption conflict refused with both machines named; user-edit hash guard survives the source change |
 | **S3 — per-agent activation** | `agents_meta.extension_overlay` migration; spawn API + preset + `ava.agents.spawn` field; resolution in `_load_extensions()` (or the turn boundary, per PR #49 ordering); event-trail recording. | overlay survives restart and hibernation swap-in; overlay-disabled plugin has zero import side effects (process mode); unknown name refused at spawn |
 | **S4 — plugins + capability matching** | plugin rows to the registry; `shared/capabilities.py` + probes + `machine_capabilities` registration; the matcher; placement constraint + boot re-check; `plugins_config.json` demoted to cache; not-runnable rows in status/inventory/inspect. | requirement-missing machine is refused as placement for a requiring agent; a default-enabled-but-not-runnable pair is queryable, not silent; cache rewrite is idempotent |
