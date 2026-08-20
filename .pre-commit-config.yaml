@@ -198,6 +198,21 @@ repos:
         files: ^(conventions/.*\.md|\.agents/skills/.*\.md|ava/__init__\.py)$
         pass_filenames: false
 
+      # The other half of the same guard: every `path/to/file.py:symbol` anchor
+      # in those same procedural docs (inside a code span) must resolve against
+      # the AST of the file it names. lint-doc-symbols validates the `ava.*` SDK
+      # namespace and never sees this shape. Triggered by ANY .py change, not
+      # just a doc edit — a rename is what dangles an anchor, and it happens in
+      # the code, in a file the citing doc never mentions. Whole-corpus scan
+      # (pass_filenames: false): 265 files, ~0.3s — only the ~20 distinct
+      # anchored targets are parsed, and each is parsed once.
+      - id: lint-doc-anchors
+        name: lint-doc-anchors
+        language: system
+        entry: .venv/bin/python scripts/lint_doc_anchors.py
+        files: ^(conventions/.*|\.agents/skills/.*|.*\.py)$
+        pass_filenames: false
+
       # Every CLI flag written as a command invocation, and every relative
       # markdown link, across all tracked docs — checked against the live
       # argparse tree / scripts/*.sh case arms / the tree on disk. Runs the
