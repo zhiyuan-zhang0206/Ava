@@ -55,6 +55,7 @@ from agent.graph._exec import (
     _ExecLifecycle,
     _ExecTimedOut,
 )
+from agent.graph._exec_capture import current_capture
 from agent.state import AgentState
 from shared.live_events import EVENT_ADAPTER, Cancelled
 from tests.agent._fakes import make_fake_ops_pool
@@ -73,7 +74,7 @@ def fast_join_grace(monkeypatch: pytest.MonkeyPatch):
     orphans — so a shorter grace only declares the orphan sooner without changing
     any outcome. Partial output is captured before the sleep, independent of
     grace. (Mirrors the inline pattern already used by
-    test_orphaned_exec_thread_restores_global_streams.)"""
+    test_orphaned_exec_thread_leaves_process_streams_usable.)"""
     import agent.graph._exec as _exec_mod
 
     monkeypatch.setattr(_exec_mod, "_THREAD_JOIN_GRACE_S", 0.25)
@@ -195,20 +196,20 @@ async def test_run_in_thread_cancel_preserves_partial_output(fast_join_grace) ->
     assert "warn" in output, f"stderr (merged) lost: {output!r}"
 
 
-async def test_orphaned_exec_thread_restores_global_streams(
+async def test_orphaned_exec_thread_leaves_process_streams_usable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A Stop while the worker is stuck in code that swallows the injected
-    interrupt orphans the thread before its stdout/stderr redirect unwinds. That
-    redirect mutates the process-global sys.stdout/sys.stderr, so an orphan would
-    otherwise leave them pointed at the fileno-less capture stream for the rest
-    of the process — and the next node's faulthandler stall dump would fault on
-    that stream, killing the agent. `_run_in_thread` restores the streams when it
-    gives up on the thread, so the process keeps its real stderr."""
+    interrupt orphans the thread before its capture binding unwinds. The
+    binding is context-scoped (`agent/graph/_exec_capture.py`), so the
+    process's own sys.stdout/sys.stderr keep resolving to the real streams —
+    the next node's faulthandler stall dump still finds a usable fd. Before
+    the per-context capture landed this was a process-global assignment, and
+    an orphan left sys.stderr pointed at the fileno-less capture buffer for
+    the rest of the process."""
     import agent.graph._exec as _exec_mod
 
     monkeypatch.setattr(_exec_mod, "_THREAD_JOIN_GRACE_S", 0.1)
-    pre_stdout, pre_stderr = sys.stdout, sys.stderr
 
     cancel_event = asyncio.Event()
     trigger = asyncio.create_task(_set_after(cancel_event, 0.1))
@@ -232,8 +233,12 @@ async def test_orphaned_exec_thread_restores_global_streams(
     await trigger
 
     assert isinstance(result, _ExecCancelled)
-    assert sys.stdout is pre_stdout, "orphaned thread leaked the process-global sys.stdout"
-    assert sys.stderr is pre_stderr, "orphaned thread leaked the process-global sys.stderr"
+    # The orphan is still running and still holds its capture in its own
+    # context. From here — the framework's context — both streams must resolve
+    # to something with a real fd, which the capture buffer does not have.
+    sys.stdout.fileno()
+    sys.stderr.fileno()
+    assert current_capture() is None, "orphaned thread's capture leaked into the caller"
 
 
 async def test_timeout_orphan_is_reaped(monkeypatch: pytest.MonkeyPatch) -> None:

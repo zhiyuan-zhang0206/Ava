@@ -26,10 +26,11 @@ Core mechanisms:
     `_LifecycleExit` (AgentTermination / AgentRestart / _SystemHalt) → captured
     in result_holder["lifecycle"] → exec_node decides halted + writes marker
     based on isinstance.
-  - stdout/stderr is redirected to `StreamingTextIO` (manual assignment +
-    a conditional restore in `finally`, so a reaped orphan's late unwind
-    cannot clobber a newer exec's streams); the main task polls every 50ms and
-    pushes the new accumulated chunk to redis (frontend streaming display).
+  - stdout/stderr is captured into a `StreamingTextIO` bound to the worker's
+    own context (`_exec_capture`): `sys.stdout`/`sys.stderr` are stable routers
+    that resolve per context, so concurrent execs cannot cross-capture and an
+    orphan's abandoned binding cannot clobber anyone; the main task polls every
+    50ms and pushes the new accumulated chunk to redis (frontend streaming).
     The same stream catches stdout+stderr to preserve chronological order —
     same as what running Python in a terminal shows. Accumulation is bounded
     by `exec_output_accumulation_max_chars`: past it the middle is dropped as
@@ -62,13 +63,12 @@ from __future__ import annotations
 
 import asyncio
 import contextvars
-import sys
 import threading
 import time
 from collections import deque
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, Literal, TextIO
+from typing import Any, Literal
 
 from langchain_core.messages import AIMessage, AnyMessage
 from langchain_core.runnables import RunnableConfig
@@ -103,6 +103,7 @@ from ._agent_traceback import (
     register_agent_source,
 )
 from ._context import AvaContext, agent_id_from_config
+from ._exec_capture import capture_output, install_capture_routers
 from ._exec_output import wrap_code_output
 from ._exec_stream import ExecOutputChunkPublisher, StreamCap, StreamingTextIO
 from ._exec_threads import _async_raise_in_thread, _reap_orphaned_thread
@@ -226,35 +227,31 @@ def _exec_worker(
         "__name__": "__agent_code__",
         "__builtins__": __builtins__,
     }
-    pre_stdout, pre_stderr = sys.stdout, sys.stderr
-    sys.stdout = sys.stderr = stream
-    try:
-        # `recording()` arms SDK-usage metering for exactly this agent-authored
-        # code, so framework-internal ava.* calls (prompt rendering, hooks) that
-        # run outside it are never counted (see shared/sdk_telemetry.py).
-        with sdk_telemetry.recording():
-            exec(compile(code, "<agent_code>", "exec"), fresh_globals)
-    except _LifecycleExit as e:
-        # Lifecycle (terminate/restart/halt): SDK already INSERTed the
-        # inbound; don't print a traceback (not an error).
-        result_holder["exc"] = e
-    except BaseException as e:
-        # Ordinary exceptions / SystemExit / KeyboardInterrupt (cancel
-        # injection) / TimeoutError (timeout injection) — exec_node dispatches
-        # by cancelled/timed_out flag + exc type. Only the agent's own
-        # `<agent_code>` frames go into the stream (agent-facing surface);
-        # the full traceback reaches the logs via the _ExecCrashed branch.
-        result_holder["exc"] = e
-        stream.write(format_agent_traceback(e))
-    finally:
-        # A reaped orphan unwinds this redirect long after the framework has
-        # already restored the process-global streams — and possibly a newer
-        # exec has replaced them again. Restore only what this thread itself
-        # still owns, so a late unwind cannot clobber a live exec's streams.
-        if sys.stdout is stream:
-            sys.stdout = pre_stdout
-        if sys.stderr is stream:
-            sys.stderr = pre_stderr
+    # Capture is bound in THIS context only (see agent/graph/_exec_capture.py):
+    # concurrent execs in one hosted process never see each other's output, and
+    # an orphaned worker that never unwinds cannot leave the process-global
+    # streams pointed at its own buffer.
+    with capture_output(stream):
+        try:
+            # `recording()` arms SDK-usage metering for exactly this
+            # agent-authored code, so framework-internal ava.* calls (prompt
+            # rendering, hooks) that run outside it are never counted (see
+            # shared/sdk_telemetry.py).
+            with sdk_telemetry.recording():
+                exec(compile(code, "<agent_code>", "exec"), fresh_globals)
+        except _LifecycleExit as e:
+            # Lifecycle (terminate/restart/halt): SDK already INSERTed the
+            # inbound; don't print a traceback (not an error).
+            result_holder["exc"] = e
+        except BaseException as e:
+            # Ordinary exceptions / SystemExit / KeyboardInterrupt (cancel
+            # injection) / TimeoutError (timeout injection) — exec_node
+            # dispatches by cancelled/timed_out flag + exc type. Only the
+            # agent's own `<agent_code>` frames go into the stream
+            # (agent-facing surface); the full traceback reaches the logs via
+            # the _ExecCrashed branch.
+            result_holder["exc"] = e
+            stream.write(format_agent_traceback(e))
 
 
 async def _poll_worker_loop(
@@ -294,14 +291,9 @@ async def _poll_worker_loop(
     return cancelled, timed_out
 
 
-async def _await_worker_exit(
-    t: threading.Thread,
-    agent_id: str,
-    pre_stdout: TextIO,
-    pre_stderr: TextIO,
-) -> None:
+async def _await_worker_exit(t: threading.Thread, agent_id: str) -> None:
     """Join the worker with a grace period; a thread still alive past it is
-    stuck in native code — log, orphan (daemon=True), restore the streams."""
+    stuck in native code — log it and orphan it (daemon=True)."""
     if not t.is_alive():
         return
     await asyncio.to_thread(t.join, _THREAD_JOIN_GRACE_S)
@@ -318,11 +310,10 @@ async def _await_worker_exit(
             event="exec_thread_stuck",
             agent_id=agent_id,
         )
-    # The orphaned thread never ran its redirect's __exit__, so restore
-    # the process-global streams here. Otherwise sys.stderr stays the
-    # fileno-less capture buffer and the next node's stall-dump
-    # diagnostic (faulthandler) would fault on it, killing the agent.
-    sys.stdout, sys.stderr = pre_stdout, pre_stderr
+    # Nothing to restore: the orphan's capture binding lives in its own
+    # context (agent/graph/_exec_capture.py), so the process's sys.stdout /
+    # sys.stderr keep resolving to the real streams for everyone else — the
+    # next node's faulthandler stall dump still finds a real fd.
     # Hand the orphan to the bounded reaper (Task #1058): the one-shot
     # injection cannot kill a thread inside a native call or one that
     # swallows Exception, so re-inject KeyboardInterrupt on a cadence until
@@ -380,10 +371,10 @@ async def _run_in_thread(
     # in tracebacks (exec'd code is invisible to linecache).
     register_agent_source(code)
 
-    # Captured before the worker redirects them: an orphaned thread (stuck in
-    # native code) never unwinds its redirect, so the orphan branch restores
-    # the process-global streams here.
-    pre_stdout, pre_stderr = sys.stdout, sys.stderr
+    # Point the process streams at the routers before the worker binds its
+    # capture. Idempotent and one-way — a router with nothing bound in the
+    # calling context writes straight through to the real stream.
+    install_capture_routers()
     # Run the worker under a copy of the creating context: threads do NOT
     # inherit contextvars, and in the hosted runner the turn identity
     # (shared/turn_identity.py) and the per-turn config view
@@ -403,7 +394,7 @@ async def _run_in_thread(
     cancelled, timed_out = await _poll_worker_loop(
         t, stream, chunk_publisher, cancel_event, deadline
     )
-    await _await_worker_exit(t, agent_id, pre_stdout, pre_stderr)
+    await _await_worker_exit(t, agent_id)
 
     # Wrap up: publish remaining chunks from the stream (thread post-cleanup may still write traceback)
     if chunk_publisher is not None:
