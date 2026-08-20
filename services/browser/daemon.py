@@ -145,9 +145,10 @@ def _frontend_url() -> str | None:
     itself. The port is only set by converge on gateway-capable hosts, so an
     agent-runner-only unit (no local frontend) gets no first tab.
 
-    The host comes from AVA_GATEWAY_URL (tailnet / private-network address,
-    never localhost) — same derivation as shared.alerts.frontend_base_url; a
-    missing gateway URL means no first tab rather than a dead loopback URL.
+    The host comes from AVA_GATEWAY_URL (the cluster's private-network
+    address, never localhost) — same derivation as
+    shared.alerts.frontend_base_url; a missing gateway URL means no first tab
+    rather than a dead loopback URL.
     """
     port = settings.services.app_port
     if port is None:
