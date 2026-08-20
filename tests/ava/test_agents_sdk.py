@@ -103,6 +103,7 @@ def _sdk_via_inprocess_gateway(monkeypatch: pytest.MonkeyPatch):
         "moonshot_api_key",
         "zhipu_api_key",
         "xai_api_key",
+        "dashscope_api_key",
     ):
         monkeypatch.setattr(_settings.lm, _attr, SecretStr("sk-test"))
 

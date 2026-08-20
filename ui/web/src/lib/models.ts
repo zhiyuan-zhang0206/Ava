@@ -21,6 +21,7 @@ const PROVIDER_LABELS: Record<string, string> = {
   kimi: "Kimi",
   glm: "GLM",
   grok: "Grok",
+  qwen: "Qwen",
 };
 
 export function providerLabel(provider: string): string {

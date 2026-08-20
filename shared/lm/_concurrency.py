@@ -18,9 +18,9 @@ Two acquire flavors, both pass-through when the provider is unconfigured:
   agent path (`agent/graph/_llm.py` `_stream_with_cache_retry`); created
   lazily on first use so no event-loop binding happens at import time.
 
-Provider keys are the model-prefix keys of `shared/lm/factory.py` with the
+Provider keys are the model-prefix keys of `shared/lm/factory.py` with any
 trailing dash stripped (`deepseek` / `claude` / `gpt` / `gemini` / `mimo` /
-`kimi` / `glm` / `grok`); the config rejects unknown keys at parse time
+`kimi` / `glm` / `grok` / `qwen`); the config rejects unknown keys at parse time
 (fail fast). `None` as a provider key is always a pass-through, so call
 sites that cannot resolve a provider degrade to unlimited rather than
 crash.
@@ -46,7 +46,7 @@ from contextlib import asynccontextmanager, contextmanager
 
 def known_provider_keys() -> frozenset[str]:
     """The provider keys `AVA_LLM_MAX_CONCURRENT` accepts — DERIVED from
-    `shared/lm/factory.py:_MODEL_KEY_MAP` prefixes (trailing dash stripped), the
+    `shared/lm/factory.py:_MODEL_KEY_MAP` prefixes (any trailing dash stripped), the
     model catalog's single source (audit 2026-08-08 P2: the old explicit list
     drifted in exactly the one direction a config parse cannot catch — factory
     gained a provider and the limiter silently passed it through).
@@ -59,7 +59,7 @@ def known_provider_keys() -> frozenset[str]:
     def _keys() -> frozenset[str]:
         from shared.lm.factory import _MODEL_KEY_MAP
 
-        return frozenset(prefix[:-1] for prefix in _MODEL_KEY_MAP)
+        return frozenset(prefix.rstrip("-") for prefix in _MODEL_KEY_MAP)
 
     return _keys()
 

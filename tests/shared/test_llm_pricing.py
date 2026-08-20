@@ -44,6 +44,16 @@ def test_cost_usd_cache_read_discount() -> None:
     assert cost_usd("mimo-v2.5-pro", _M, 0, _M) == pytest.approx(0.0036)  # pyright: ignore[reportUnknownMemberType]
 
 
+def test_qwen_implicit_cache_hit_is_the_registered_rate() -> None:
+    """Ava never sends DashScope's explicit `cache_control` block, so every qwen
+    cache hit is an IMPLICIT one — the catalog's cache_read must therefore be
+    Alibaba's published implicit rate ($0.206/M for qwen3.8-max in Beijing), not
+    the cheaper explicit-read rate ($0.137/M) the same page also lists. A fully
+    cached 1M input bills 1M * 0.206/M."""
+    assert cost_usd("qwen3.8-max", _M, 0, _M) == pytest.approx(0.206)  # pyright: ignore[reportUnknownMemberType]
+    assert cost_usd("qwen3.8-max", _M, _M, 0) == pytest.approx(1.65 + 4.951)  # pyright: ignore[reportUnknownMemberType]
+
+
 def test_cost_usd_unknown_model_is_none() -> None:
     """A model absent from MODEL_PRICING returns None (unpriced), never a
     fabricated $0 — the caller counts it as unpriced rather than free."""

@@ -68,15 +68,28 @@ def test_parse_limits_missing_colon_fails_fast() -> None:
 
 def test_known_provider_keys_derive_from_factory_prefixes() -> None:
     """The accepted keys DERIVE from the factory's model-prefix map (minus
-    the dash) — single source, so a new provider is accepted by the limiter
-    the moment the catalog knows it (audit 2026-08-08 P2: the old explicit
-    list drifted in the one direction parse_limits cannot catch)."""
+    any trailing dash) — single source, so a new provider is accepted by the
+    limiter the moment the catalog knows it (audit 2026-08-08 P2: the old
+    explicit list drifted in the one direction parse_limits cannot catch)."""
     from shared.lm.factory import _MODEL_KEY_MAP
 
-    assert known_provider_keys() == {p[:-1] for p in _MODEL_KEY_MAP}
+    assert known_provider_keys() == {p.rstrip("-") for p in _MODEL_KEY_MAP}
     # and the parse path accepts exactly those
     csv = ",".join(f"{k}:1" for k in sorted(known_provider_keys()))
     assert set(parse_limits(csv)) == known_provider_keys()
+
+
+def test_dashless_prefix_keeps_its_last_letter() -> None:
+    """`qwen` is the one prefix with no trailing dash (Alibaba versions inside
+    the family name: qwen3.8-max), so the key derivation must strip a dash only
+    where there is one — a blanket `[:-1]` would publish `qwe`, and a cap the
+    operator wrote as `qwen:8` would then fail to parse."""
+    from shared.lm.factory import provider_key_of_model
+
+    assert "qwen" in known_provider_keys()
+    assert "qwe" not in known_provider_keys()
+    assert provider_key_of_model("qwen3.8-max") == "qwen"
+    assert parse_limits("qwen:8") == {"qwen": 8}
 
 
 # ─── disabled pass-through ────────────────────────────────────────────────

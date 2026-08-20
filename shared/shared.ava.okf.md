@@ -16,7 +16,7 @@ tags:
 
 ## Core responsibilities
 
-- **LLM provider abstraction** (`shared/lm/`): unifies model construction, token billing, inference content normalization, and stop reason classification for eight providers — Anthropic / DeepSeek / Google / OpenAI / Xiaomi / Moonshot / Zhipu / xAI. Also performs model/key validation at spawn boundaries.
+- **LLM provider abstraction** (`shared/lm/`): unifies model construction, token billing, inference content normalization, and stop reason classification for nine providers — Anthropic / DeepSeek / Google / OpenAI / Xiaomi / Moonshot / Zhipu / xAI / Alibaba. Also performs model/key validation at spawn boundaries.
 - **Agent cross-process contract** (`shared/agents.py`): AgentStatus enum, exception hierarchy, wire error protocol (HTTP error transmission between gateway ↔ agent SDK).
 - **Message-level contract** (`shared/message_kwargs.py`): supplements the above — `AvaMsgType`/`AvaMessageKwargs` (strongly-typed view of `ava_*` metadata in `additional_kwargs`).
 - **Structured logging + metrics** (`shared/log.py`, `shared/metrics.py`): one loguru singleton over three sink types (stderr / JSONL file / unified event pipeline), plus the metrics core (`shared/metrics_aggregate.py`) — the digest behind `/api/metrics` reads Loki aggregates via `gateway.loki_events` since the LGTM cutover (task #1197; the PG read path was retired). The unified emitter (`shared/telemetry.py`) is the single event-write entry: it batch-writes the `events` table (the one DB copy; legacy dual-write mirrors removed 2026-08) and dual-writes each batch to OTLP ([[shared/telemetry-otlp/telemetry-otlp.ava.okf.md|OTLP exporter]] — Loki logs + Prometheus metrics, 2026-08-11 stack); `shared/audit_events.py` is the audit entry point.

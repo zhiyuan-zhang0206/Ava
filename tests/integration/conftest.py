@@ -60,6 +60,7 @@ def _mock_api_keys(monkeypatch: pytest.MonkeyPatch) -> None:
         "moonshot_api_key",
         "zhipu_api_key",
         "xai_api_key",
+        "dashscope_api_key",
     ):
         monkeypatch.setattr(_settings.lm, attr, SecretStr("sk-test"))
 

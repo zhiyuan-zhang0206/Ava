@@ -45,7 +45,7 @@ plugin API shaped as above does not accidentally deliver it.
 
 ## What a provider costs today
 
-Read off the roster as it stands (eight providers), file by file. The last real
+Read off the roster as it stands (nine providers), file by file. The last real
 vendor addition — `69514272` "feat: add Kimi K3, GLM 5.2, Grok 4.5 model support
 (#485)", 2026-07-16 — is deliberately *not* cited as corroboration: it predates
 `_effort.py` (2026-07-23), `registry.py` (2026-07-24) and `_providers.py`
@@ -61,13 +61,13 @@ grew after that commit, not before it.
 | Vision gate | `shared/lm/factory.py` — `_VISION_MODEL_PREFIXES`, only if the endpoint accepts images | The message endpoint 422s an image addressed to a text-only agent up front instead of letting the LLM call fail after the inbound is queued |
 | Effort vocabulary | `shared/lm/_effort.py` — a `_PROVIDER_EFFORT_LEVELS` entry | OpenAI-style branches only; the claude branch clamps per model off `ModelSpec.effort_levels` instead |
 | Terminal-reason vocabulary | `shared/lm/stop.py` — a `ProviderKey` member plus its `_BY_PROVIDER` spec (`stop.py:36`, `:52`) | LangChain standardizes tool calls and usage metadata but *not* the finish/stop reason, so `classify_stop` carries each vendor's key and word list — and raises on a `model_provider` it does not know, mid-turn |
-| Dependency | `pyproject.toml` — the vendor's LangChain package | Skipped when the endpoint is OpenAI-compatible enough for `shared/lm/_reasoning_compat.py:ReasoningContentChatModel`; glm and mimo take that path and add no dependency |
+| Dependency | `pyproject.toml` — the vendor's LangChain package | Skipped when the endpoint is OpenAI-compatible enough for `shared/lm/_reasoning_compat.py:ReasoningContentChatModel`; glm, mimo and qwen take that path and add no dependency |
 
 The `stop.py` row is the one keyed by something other than the model prefix: its
 key is the `model_provider` string the LangChain client emits, so five entries
-already cover today's eight vendors — `anthropic` serves claude *and* deepseek
+already cover today's nine vendors — `anthropic` serves claude *and* deepseek
 (deepseek binds `ChatAnthropic` against an anthropic-compatible endpoint), and
-`openai` serves gpt, mimo *and* glm (`ReasoningContentChatModel` subclasses
+`openai` serves gpt, mimo, glm *and* qwen (`ReasoningContentChatModel` subclasses
 `ChatOpenAI`). So it is a conditional cost: a vendor bound through a client class
 already in that table costs nothing there; one shipping its own class costs an
 entry, and skipping it turns into a `ValueError` on the first turn that ends.

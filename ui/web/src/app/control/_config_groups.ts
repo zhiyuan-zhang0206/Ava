@@ -151,6 +151,7 @@ export const GROUP_ENV_VARS: Record<string, string[]> = {
     "MOONSHOT_API_KEY",
     "GLM_API_KEY",
     "XAI_API_KEY",
+    "DASHSCOPE_API_KEY",
   ],
   "config-general": [
     "AVA_HOME",
