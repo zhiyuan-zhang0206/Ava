@@ -173,10 +173,11 @@ def _add_stop_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -
     stop_p.add_argument(
         "--keep-infra",
         action="store_true",
-        help="do not stop the shared Postgres/Redis. Used by the internal "
-        "cluster-down helper (reached via `ava cluster destroy`), which is "
-        "cluster-scoped — stopping one cluster's gateway must not tear down the "
-        "infra other clusters share.",
+        help="do not stop THIS cluster's own Postgres/Redis instance (every "
+        "cluster owns one, under its $AVA_HOME). Used by the `ava cluster update` "
+        "orchestrator: the migrate step that follows still needs the database, so "
+        "tearing the data plane down first would give it connect-refused. A plain "
+        "`ava stop` means 'fully stop' and leaves this off.",
     )
     stop_p.add_argument(
         "-y",
