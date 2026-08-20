@@ -749,7 +749,11 @@ def cmd_converge() -> int:
     # After the steps, not inside them: standalone converge runs against a
     # cluster that is already up, which is the precondition this needs and which
     # a CONVERGE_STEPS entry would not have on the `ava start` path.
-    from cli.commands._converge_extensions import materialize_cluster_extensions
+    from cli.commands._converge_extensions import (
+        adopt_local_extensions,
+        materialize_cluster_extensions,
+    )
 
+    adopt_local_extensions()
     materialize_cluster_extensions()
     return 0

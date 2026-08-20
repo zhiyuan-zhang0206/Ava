@@ -15,9 +15,12 @@ from __future__ import annotations
 
 import pathlib
 import subprocess
-from collections.abc import Iterator
+from collections.abc import Callable, Generator, Iterator
+from contextlib import AbstractContextManager, contextmanager
 
 import pytest
+
+from shared.config import settings
 
 
 @pytest.fixture(autouse=True)
@@ -95,3 +98,40 @@ def _installed_machine_identity(unit_home: pathlib.Path) -> Iterator[None]:
     reset_identity()
     yield
     reset_identity()
+
+
+@pytest.fixture
+def as_machine(
+    monkeypatch: pytest.MonkeyPatch,
+) -> Callable[[pathlib.Path], AbstractContextManager[pathlib.Path]]:
+    """Run a block as the machine whose `$AVA_HOME` is the given directory.
+
+    A "machine" in these tests IS its `$AVA_HOME`: `skills_dir()`, the
+    `installed.json` install registry and `machine_name` all hang off it, so
+    pointing `settings.general.ava_home` at a second directory gives a genuinely
+    distinct machine to every path under test while the Postgres URL is
+    untouched. Two homes, one PG.
+
+    `reset_identity()` on BOTH edges is the load-bearing part, not the home
+    swap: `machine_name()` caches, and a stale cache would let the second home
+    claim to be the first — which would make a cross-machine test pass for the
+    wrong reason, since rows record `local:<machine>`.
+
+    Shared rather than copied because it is exactly the kind of helper whose
+    subtle half (the cache reset) gets dropped in the copy.
+    """
+    from shared.machine import reset_identity
+
+    @contextmanager
+    def _enter(home: pathlib.Path) -> Generator[pathlib.Path]:
+        home.mkdir(parents=True, exist_ok=True)
+        (home / "machine_name").write_text(home.name, encoding="utf-8")
+        with monkeypatch.context() as m:
+            m.setattr(settings.general, "ava_home", home)
+            reset_identity()
+            try:
+                yield home
+            finally:
+                reset_identity()
+
+    return _enter

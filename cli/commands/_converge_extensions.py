@@ -60,3 +60,41 @@ def materialize_cluster_extensions() -> None:
         print(f"  ! extensions: kept local edits to {name} (not overwritten)", file=sys.stderr)
     for name in result.missing_blob:
         print(f"  ! extensions: {name} has no stored content — reinstall it", file=sys.stderr)
+
+
+def adopt_local_extensions() -> None:
+    """Upload this machine's pre-registry skill installs into the cluster.
+
+    Runs BEFORE `materialize_cluster_extensions` on the same converge. Either
+    order is correct — an unclaimed name is invisible to the materializer and an
+    adopted one hashes as `unchanged` — but sweeping first means one pass leaves
+    the machine and the cluster agreeing, instead of two.
+
+    Same failure stance as its sibling and for the same reason: a machine that
+    cannot reach the cluster is behind, not broken, and the next converge
+    retries. The one thing worth being loud about is a name two machines
+    disagree on, which `shared.extension_adopt` logs and this reports again on
+    the operator's terminal — it is the only outcome here that needs a person.
+    """
+    from shared import db, extension_adopt, paths
+
+    try:
+        result = extension_adopt.adopt_local_installs(db.pool(), skills_root=paths.skills_dir())
+    except Exception as exc:  # see the docstring: report, never block converge
+        print(f"  ! extensions: could not adopt local installs ({exc}); skipping", file=sys.stderr)
+        return
+    if result.adopted:
+        print(f"    adopted into the cluster: {', '.join(result.adopted)}")
+    for name in result.missing_tree:
+        print(
+            f"  ! extensions: {name} is tracked locally but missing from disk — "
+            "reinstall it or deregister it",
+            file=sys.stderr,
+        )
+    for clash in result.conflicts:
+        print(
+            f"  ! extensions: {clash.name} is claimed by {clash.claimed_by} with different "
+            "content than this machine holds — NOT adopted, both copies intact; install "
+            "whichever is right over the other",
+            file=sys.stderr,
+        )

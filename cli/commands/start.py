@@ -466,8 +466,15 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
     # data plane is up and known-current, which is the precondition
     # materialization actually has. Reports and continues on failure — a machine
     # that is behind catches up on the next start.
-    from cli.commands._converge_extensions import materialize_cluster_extensions
+    from cli.commands._converge_extensions import (
+        adopt_local_extensions,
+        materialize_cluster_extensions,
+    )
 
+    # Adopt first: a name this machine installed before the registry existed is
+    # invisible to the materializer until it has a row, and sweeping first means
+    # one pass leaves machine and cluster agreeing rather than two.
+    adopt_local_extensions()
     materialize_cluster_extensions()
 
     # 3) UPSERT this host into the machines table. The table is informational

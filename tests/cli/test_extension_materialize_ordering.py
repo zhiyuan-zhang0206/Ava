@@ -82,3 +82,26 @@ def test_the_materializer_lives_beside_its_siblings() -> None:
     from cli.commands import _converge_extensions
 
     assert hasattr(_converge_extensions, "materialize_cluster_extensions")
+
+
+def test_start_adopts_before_it_materializes() -> None:
+    """Both orders are correct, and one of them is tidier.
+
+    An unclaimed local name is invisible to the materializer (it has no row) and
+    a freshly adopted one hashes as `unchanged`, so neither order can produce a
+    wrong result. Sweeping first means a single pass leaves this machine and the
+    cluster agreeing; materializing first leaves the machine one converge behind
+    on the names it just uploaded.
+    """
+    from cli.commands.start import _cmd_start_body
+
+    src = inspect.getsource(_cmd_start_body)
+    assert src.index("adopt_local_extensions()") < src.index("materialize_cluster_extensions()")
+
+
+def test_standalone_converge_adopts_too() -> None:
+    """`ava converge` is what an operator runs to make a machine correct without
+    restarting it, and a machine holding un-adopted installs is not correct."""
+    from cli.commands._converge import cmd_converge
+
+    assert "adopt_local_extensions()" in inspect.getsource(cmd_converge)

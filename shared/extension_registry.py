@@ -362,12 +362,20 @@ def register_tree(
     source_ref: str | None = None,
     version: str | None = None,
     manifest: dict[str, Any] | None = None,
+    default_enabled: bool | None = None,
 ) -> str:
     """Pack `root`, store the blob and upsert the row — one transaction.
 
     The whole install-side entry point. One transaction because a row pointing
     at a blob that is not there is the state the FK exists to make impossible;
     committing them separately would leave a window where it is merely unlikely.
+
+    `default_enabled` passes straight through to `upsert`, so None keeps a
+    stored policy value on an update and means "enabled" on a fresh insert. An
+    install never passes it — installing IS enabling. The adoption sweep does,
+    because a name it is uploading may be one this machine has switched OFF, and
+    that has to land in the same transaction as the row rather than as a second
+    write somebody could observe between.
 
     Returns the content hash the row now points at.
     """
@@ -391,5 +399,6 @@ def register_tree(
             source_ref=source_ref,
             version=version,
             manifest=manifest,
+            default_enabled=default_enabled,
         )
     return digest
