@@ -118,7 +118,7 @@ Example (the shape `ava_code` would declare):
 | `engines.ava` (semver range) | Host compatibility interval (npm `engines` / VS Code `engines.vscode` shape); checked at install/upgrade | framework evolution silently breaking plugins (A3) |
 | `dependencies.plugins` | Plugin-to-plugin dependencies `{"other": ">=1.0"}`; resolved before load, missing → `failed`, never silently skipped (resolution lands S3) | load order by luck (A8) |
 | `dependencies.pythonPackages` | The Python dependency ranges this package is known to work with. For MCP packages this is the **mirror / validation anchor** of `pyproject.toml` dependencies. **Hard enforcement** (user ruling 2026-08-13): a declared range without an upper bound is a validator error, and an install/upgrade whose pyproject range falls outside the declared range is refused | **#1198, permanently**: unbounded or drifting pyproject ranges are stopped at install time |
-| `dependencies.hostCapabilities` | Host capability declarations — `db: none|ro|rw`, `network: none|local|any`, `shell: none|any`, `display: none|required`, `unixSocket: none|required`. The execution side (capability gates on resource injection) lands with the context model (S5); today the manifest only declares, and MCP runtime keeps its existing `requires` check | context/capability declarations unified (D12/D13); generalizes the MCP `requires` keys |
+| `dependencies.hostCapabilities` | Host capability declarations — `db: none|ro|rw`, `network: none|local|any`, `shell: none|any`, `display: none|required`, `unixSocket: none|required`. **Two kinds of claim in one object** (S5): `display` / `unixSocket` are HOST REQUIREMENTS matched against the machine's capability set to decide placement, while `db` / `network` / `shell` are RESOURCE ACCESS gated by the context at injection time. The execution side of both lands with the context model (S5); today the manifest only declares, and MCP runtime keeps its existing `requires` check | context/capability declarations unified (D12/D13); generalizes the MCP `requires` keys |
 | `contributions.*` | Declared contribution surfaces (VS Code `contributes` analog). **The declaration is documentation; registration is fact.** The diff between the two is already computed and readable — `ava plugins inspect <name>` reports it (`agent/plugin_catalog.py:declared_vs_registered`, over the attribution ledger every `register_*` writes); S3 turns that same computation into the load-time gate (declared-but-not-registered = warning, registered-but-not-declared = fail-fast) | surfaces pre-checkable, listable, auditable |
 | `contributions.ui` | The console surfaces this package contributes, as data: `agentInspect` sections, `nav` entries, `themes` token packs. Closed type set, closed icon vocabulary, and a theme token vocabulary that is the console's own `:root` custom properties — validated by `shared/plugin_ui_contributions.py`. No registration side: the console reads the declaration itself. Design + the runtime slices: [`future/frontend-plugin-contributions.md`](../future/frontend-plugin-contributions.md) | a plugin can put a panel, a page, or a skin in front of the user without a frontend fork |
 | `config.schema` / `config.perAgentFields` | Pointer to the config schema (the Pydantic model, or a declarative schema) + which fields per-agent overlays may override | PR-E; pre-install config validation without importing plugin code |
@@ -215,6 +215,26 @@ stated rule.
 `Context = {ava_home, db_role, cluster_scope, machine, enabled_set}` — five
 dimensions that today are scattered (D13), one concept.
 
+Two of the five mean something narrower than the names suggest, per
+[`decisions/2026-08-21-extension-ownership-three-tiers.md`](../decisions/2026-08-21-extension-ownership-three-tiers.md):
+
+- **`machine` is a capability set, not an install location.** Nothing resolves
+  "is this extension present here". The machine owns only what it *can do* (os,
+  arch, display, docker, login-session state, …), probed and declared, and
+  "can this run here" is computed by matching manifest requirements against
+  that set. A machine is a constraint tier, never an authoring tier.
+- **`enabled_set` is the cluster default plus this agent's overlay**, not a
+  per-machine file. `plugins_config.json` and `mcp_enabled.json` are demoted to
+  materialized caches of cluster rows. The per-agent delta
+  (`agents_meta.extension_overlay`) is what makes a one-agent canary
+  expressible; side-by-side *versions* of one extension are an explicit
+  non-goal.
+
+The edge this creates is load-bearing: "cluster-enabled but not runnable on
+machine M" is a real reachable state and must never be a silent skip — it is
+queryable, and an agent whose overlay *requires* an extension only boots on a
+machine satisfying it.
+
 - **Instance binding**: each extension instance resolves its context at
   creation and receives it explicitly; the loader refuses cross-context
   references (the worktree guard generalizes: no extension materializes
@@ -224,6 +244,18 @@ dimensions that today are scattered (D13), one concept.
   loaders default to `db: none` + `cluster_scope: throwaway` — dangerous
   resources are unreachable by default, the 2026-08-12 17:57 lesson made
   structural instead of a testing-hygiene habit.
+- **`dependencies.hostCapabilities` splits into two kinds of claim**, which it
+  currently conflates:
+
+  | Kind | Keys | Answers | Enforced by |
+  |---|---|---|---|
+  | **Host requirement** | `display`, `unixSocket` | *Where* can this run | matched against the machine's capability set; decides placement, and a mismatch is a queryable not-runnable state |
+  | **Resource access** | `db`, `network`, `shell` | *What* may it touch once running | gated by this context at injection time |
+
+  One bag made placement matching read like a permission system and permissions
+  read like hardware detection. They are declared in the same manifest object
+  and consumed by two different mechanisms at two different moments — install /
+  placement versus injection.
 - **Test context rules** (specifying existing discipline): env block before
   project imports; derived keys to a tmp-home `.env`; `shared/test_db_guard.py`
   fail-closed validation remains the single rule source.
