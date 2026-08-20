@@ -65,10 +65,17 @@ Evidence: [`postmortems/0002`](../postmortems/0002-db-down-tests-pass-for-the-wr
 ### A guard only guards if the regression actually fails it
 
 When adding a protective test, lint, or assertion, introduce the regression it
-targets, watch it go red, and revert — in the same PR. For a test written against
-an existing fix: `git stash push <implementation file>`, re-run, confirm *that*
-test fails, `git stash pop`. A green result from a test that cannot go red is
-indistinguishable from a green result that means something.
+targets, watch it go red, and revert — in the same PR. A green result from a test
+that cannot go red is indistinguishable from a green result that means something.
+
+**Revert by sha, not by stash.** `git stash push <implementation file>` stashes
+only *uncommitted* changes, so once the fix is committed — the usual case for a
+test written against a fix that already landed — it silently stashes nothing, the
+implementation stays in place, and the test passes. That reads as "I proved it
+red-before" while proving the opposite, which is worse than no proof because it
+manufactures confidence. Use `git checkout <sha-before-the-fix> -- <file>`, re-run,
+then `git checkout HEAD -- <file>`; confirm the revert actually landed (`git diff`,
+or grep the file for a token from the fix) rather than trusting the command.
 Evidence: [`postmortems/0002`](../postmortems/0002-db-down-tests-pass-for-the-wrong-reason.md);
 procedure in [`.agents/skills/run-local-tests/SKILL.md`](../.agents/skills/run-local-tests/SKILL.md).
 
