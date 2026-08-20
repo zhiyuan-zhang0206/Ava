@@ -68,8 +68,8 @@ def test_chrome_args_has_no_first_tab_without_url(tmp_path: Path) -> None:
 
 def test_frontend_url_reads_app_port_from_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     """The first-tab URL is the configured app port on the gateway's host
-    (tailnet address, never localhost); an agent-runner-only host (app_port
-    unset) or a host with no gateway URL gets no first tab."""
+    (its private-network address, never localhost); an agent-runner-only
+    host (app_port unset) or a host with no gateway URL gets no first tab."""
     monkeypatch.setattr(settings.services, "app_port", 3001)
     monkeypatch.setattr(settings.gateway, "gateway_url", "http://100.103.96.72:8000")
     assert bd._frontend_url() == "http://100.103.96.72:3001"
