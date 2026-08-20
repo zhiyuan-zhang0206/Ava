@@ -36,6 +36,11 @@ _AGENT_RUNNER_SESSIONS = {
     "page-server",
     "agent-runner-watchdog",
     "ops",
+    # The hosted agent-runner. On the roster unconditionally — membership is a
+    # capability fact, and AVA_RUNNER_MODE gates it out of the START roster
+    # separately (`_gate_reason`), which is what these ungated views deliberately
+    # do not see.
+    "agent-host",
     "browser",
     "browser-mcp",
     "mcp-daemon",

@@ -1,0 +1,541 @@
+"""The hosted agent-runner's turn runner — one process, every local agent's turns.
+
+Phase 1 of `future/infra/agent-runner-as-server.md`. `dispatcher.py` decides
+WHEN an agent runs (one wake -> one turn task, never two at once for the same
+agent); this module decides WHAT running means: resolve the agent's stored
+config, bind it for the turn, and drive `graph.ainvoke` until the agent has
+nothing left to claim.
+
+## What is shared and what is per-agent
+
+Shared for the whole daemon, built once at boot and handed in:
+
+- **the Postgres pool** — sized against `AVA_HOST_MAX_CONCURRENT_TURNS` plus
+  headroom. Deliberately NOT per agent: the hosted model's invariant is "an idle
+  agent is no task at all", and a pool that outlives the turn is exactly a
+  per-idle-agent cost, which is the thing this design exists to delete.
+- **the checkpointer** — one `AsyncPostgresSaver` over that pool. Agents are
+  already separated inside it by `thread_id`, which is the agent id; a saver per
+  agent would separate nothing further.
+- **the compiled graph.** This one is not a preference. `agent.graph.build_graph`
+  calls `_load_extensions`, which calls `clear_plugin_registrations()`,
+  re-executes every builtin plugin module, and rebinds `agent.state.AgentState`
+  — all process-global. Building a graph per agent inside one process would
+  therefore clear plugin hooks out from under every OTHER agent's in-flight
+  turn. One graph per process is the only safe shape until that loader is
+  re-entrant, and the per-agent behaviour that matters (identity, config, plugin
+  config) rides the contextvars bound below rather than the graph object.
+
+  What that costs, precisely: `_build_llm_retry()` is evaluated at build time and
+  reads two per-agent things — the per-model `llm_retry_max_attempts`, and
+  `_retry_phase_jitter()`, the per-agent offset that de-phases fleet-wide retry
+  waves. Under one shared graph both become cluster-level in hosted mode, so a
+  correlated 429 burst retries in near-lockstep (LangGraph's own uniform(0,1)s
+  jitter remains). Fixing it means either making the plugin loader re-entrant or
+  deferring retry-policy resolution to run time; neither belongs here, and both
+  are weighed in issue #174, which must be resolved before a hosted cluster
+  carries enough agents for a correlated provider failure to matter.
+
+Per agent, cached in `_AgentRuntime` and rebuilt when the agent's stored config
+changes:
+
+- **the chat model** — `build_chat_model(turn_settings.lm.llm_model)`, so an
+  agent whose overlay pins a different model gets that model.
+- **the startup reconcile** — the claimed-inbound two-phase resolve and the
+  dangling-tool_use repair that a fresh process runs at boot. A cold cache entry
+  IS the hosted equivalent of "this agent's process just started", so that is
+  exactly where they belong; a crashed turn drops the entry so its retry gets
+  them again, matching what a process crash + respawn does today.
+
+## Why the cache key is the config itself
+
+A cached runtime carries a model built from this agent's config, so a stale
+entry would keep an agent on its old model while the DB says otherwise — the
+same class of lie 3a refused when it kept hosted agents out of IDLING. The key
+is a fingerprint of the agent's `(config_overlay, birth_config)`, which
+`run_turn` must read every turn anyway to bind the pins, so the invalidation
+cannot be forgotten: there is no second call site that has to remember it.
+
+(The obvious alternative, an `agents_meta.updated_at`, does not exist — and
+would be the wrong key if it did: that row is written by lease renewal every 60s
+and by every status flip, so it would evict on churn that has nothing to do with
+config.)
+
+## Why the binds happen where they do
+
+`bind_turn_identity` / `bind_agent_config` / `bind_agent_plugin_config` wrap the
+`ainvoke` call, not any code inside a node. LangGraph runs each node in its own
+asyncio task that copies the *loop-level* context, so a contextvar bound inside
+a node does not reach the next one, while one bound around the invocation
+propagates into every node task — and into the exec worker thread, which is
+already started under `contextvars.copy_context()`.
+
+Deliberately NOT done: `ava._boot.establish(agent_id)` and
+`os.environ["AVA_AGENT_ID"]`. Both are process-wide, and in a process serving
+many agents they would be a lie. p1b already routes `ava._boot.agent_id()`,
+`require_agent_id()` and the `ava.self` lifecycle gate through the turn
+contextvar, so binding the turn is sufficient and establishing would be strictly
+worse than doing nothing.
+
+## What is NOT wired yet
+
+This module runs turns. The rest of the agent lifecycle still assumes a process
+per agent, and hosted mode does not change it here:
+
+- **spawn** — `POST /api/agents` still forks `python -m agent`, so a hosted
+  runner serves agents that something else created as processes.
+- **restart** — an `exit_requested` restart ends the turn task and notifies the
+  gateway (which leaves the row `restarting` for the restarter); the restarter
+  then respawns a PROCESS.
+- **hibernation, the lease renewer, and the lease-zombie reaper** are untouched.
+
+That is the migration path the design doc plans (Phase 1 behind the flag, then
+deletions), not an oversight — but it does mean `AVA_RUNNER_MODE=hosted` is not
+an end-to-end usable cluster mode yet. The flag stays off by default and the
+service is gated out of the roster until it is set.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import hashlib
+import json
+import time
+from collections import OrderedDict
+from dataclasses import dataclass, field
+
+import psycopg
+from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.runnables import RunnableConfig
+from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+from langgraph.graph.state import CompiledStateGraph
+from psycopg_pool import AsyncConnectionPool
+
+from agent._process_boot import boot_agent_scope
+from agent._runloop import _graph_config
+from agent.db import LoggingConnectionPool
+from agent.lifecycle import _notify_exit
+from agent.startup import (
+    _reconcile_claimed_inbounds_at_startup,
+    _repair_dangling_tool_use_at_startup,
+)
+from agent.state import BaseAgentState
+from shared.config import settings
+from shared.config.turn_view import bind_agent_config, resolve_agent_config_pins
+from shared.context import AvaContext
+from shared.db import PG_KEEPALIVE_KWARGS
+from shared.event_publisher import AgentEventPublisher
+from shared.log import logger
+from shared.machine import machine_name
+from shared.plugin_config_view import bind_agent_plugin_config, resolve_agent_plugin_pins
+from shared.redis_client import get_async_redis
+from shared.trace import turn_span
+from shared.turn_identity import bind_turn_identity
+
+_HostGraph = CompiledStateGraph[BaseAgentState, AvaContext, BaseAgentState, BaseAgentState]
+
+# Statuses whose owner must not be handed a turn. `terminated` is the real one:
+# a wake for a dead agent is the delivery watchdog's resurrect business, and
+# running a turn would revive it behind the gateway's back. `allocated` and
+# `restarting` belong to the boot / respawn path, which owns the row until it
+# reaches a running state.
+_UNRUNNABLE_STATUSES = frozenset({"terminated", "allocated", "restarting"})
+
+# Spare connections above the concurrent-turn bound. Every running turn may hold
+# one for its checkpoint writes and kernel SQL; the spares cover the wake reads
+# of turns still waiting on a slot, so a full host never deadlocks its own
+# admission check against its own running turns.
+_POOL_HEADROOM = 4
+
+
+def _config_fingerprint(
+    config_overlay: dict[str, object] | None, birth_config: dict[str, object] | None
+) -> str:
+    """A stable digest of the two stored config maps — the runtime cache key.
+
+    `sort_keys` makes it independent of JSONB key order, so re-reading the same
+    unchanged row never looks like a change. `default=str` keeps a value psycopg
+    decoded into something non-JSON (a Decimal, a datetime) from raising here: a
+    fingerprint that cannot be computed would be a hard failure on the turn path,
+    while a coerced one at worst compares two odd values by their repr — and
+    these maps hold validated Settings scalars.
+    """
+    blob = json.dumps(
+        {"overlay": config_overlay, "birth": birth_config}, sort_keys=True, default=str
+    )
+    return hashlib.sha256(blob.encode()).hexdigest()
+
+
+@dataclass
+class _StoredConfig:
+    """One agent's row as the host needs it: where it lives, whether it may run,
+    and the two config maps that decide what running means."""
+
+    machine: str
+    status: str
+    config_overlay: dict[str, object] | None
+    birth_config: dict[str, object] | None
+
+    @property
+    def fingerprint(self) -> str:
+        return _config_fingerprint(self.config_overlay, self.birth_config)
+
+
+@dataclass
+class _AgentRuntime:
+    """The per-agent half of a turn, cached across turns.
+
+    `fingerprint` is what makes the cache honest: it records the config this
+    runtime was built FROM, so a turn whose freshly-read config disagrees
+    rebuilds instead of running the old model.
+    """
+
+    fingerprint: str
+    llm: BaseChatModel
+    last_used: float = field(default_factory=time.monotonic)
+
+
+@dataclass
+class HostStats:
+    """Counters the /healthz payload exposes — the cheap half of the cold-build
+    observability, whose expensive half is the `host_agent_prepared` event.
+
+    `wakes_skipped` is the one to read on a multi-runner cluster: the dispatcher
+    pattern is cluster-wide, so every runner sees every agent's wake and each
+    skips the ones it does not own.
+    """
+
+    cache_hits: int = 0
+    cache_misses: int = 0
+    turns_started: int = 0
+    wakes_skipped: int = 0
+
+    def as_payload(self) -> dict[str, int]:
+        return {
+            "cache_hits": self.cache_hits,
+            "cache_misses": self.cache_misses,
+            "turns_started": self.turns_started,
+            "wakes_skipped": self.wakes_skipped,
+        }
+
+
+class AgentHost:
+    """Runs one agent's turns on demand, over process-wide shared machinery.
+
+    `run_turn` is what `TurnScheduler` calls; the scheduler guarantees at most
+    one concurrent call per agent, so nothing here needs a per-agent lock.
+    """
+
+    def __init__(
+        self,
+        *,
+        pool: AsyncConnectionPool[psycopg.AsyncConnection],
+        checkpointer: AsyncPostgresSaver,
+        graph: _HostGraph,
+        machine: str | None = None,
+    ) -> None:
+        self._pool = pool
+        self._checkpointer = checkpointer
+        self._graph = graph
+        self._machine = machine if machine is not None else machine_name()
+        self._runtimes: OrderedDict[int, _AgentRuntime] = OrderedDict()
+        # Agents with a turn in flight right now. Eviction skips them: a running
+        # turn holds its own reference, so dropping the entry would not break it
+        # — it would just throw the work away and make that agent's NEXT turn
+        # pay a cold build, which is the opposite of what a cache is for.
+        self._in_flight: set[int] = set()
+        self._turn_slots = asyncio.Semaphore(settings.daemon.host_max_concurrent_turns)
+        self.stats = HostStats()
+
+    # ── the scheduler's entry point ──────────────────────────────────────────
+
+    async def run_turn(self, agent_id: int) -> None:
+        """Run `agent_id` until it has nothing left to claim, then return.
+
+        One read decides everything: whether this agent is ours to run, and what
+        config the turn runs under. Re-read every turn rather than cached with
+        the runtime — that is what makes `ava.self.restart(config_overlay)` land
+        at the next turn boundary, the hosted replacement for "the process exits
+        and boots with the merged config".
+        """
+        stored = await self._read_stored_config(agent_id)
+        if stored is None or not self._is_runnable(agent_id, stored):
+            self.stats.wakes_skipped += 1
+            return
+
+        async with self._turn_slots:
+            self.stats.turns_started += 1
+            pins = resolve_agent_config_pins(stored.config_overlay, stored.birth_config)
+            plugin_pins = resolve_agent_plugin_pins(stored.config_overlay)
+            # All three binds wrap the whole turn, so every node task and the
+            # exec worker thread copy them (see the module docstring). The
+            # runtime build is INSIDE them on purpose: build_chat_model reads
+            # `turn_settings.lm.llm_model`, which is only this agent's model
+            # while the config bind is in effect.
+            with (
+                bind_turn_identity(agent_id),
+                bind_agent_config(pins),
+                bind_agent_plugin_config(plugin_pins),
+            ):
+                self._in_flight.add(agent_id)
+                try:
+                    runtime = await self._runtime_for(agent_id, stored.fingerprint)
+                    await self._drive_turns(agent_id, runtime)
+                except Exception:
+                    # The scheduler logs and drops the task; dropping the runtime
+                    # too is what makes the retry equivalent to process mode's
+                    # crash + respawn, where the new process re-runs the startup
+                    # reconcile. Keeping it would let a half-finished turn's
+                    # claimed rows sit unresolved until an unrelated eviction.
+                    self.drop_agent(agent_id)
+                    raise
+                finally:
+                    self._in_flight.discard(agent_id)
+
+    # ── locality / runnability ───────────────────────────────────────────────
+
+    def _is_runnable(self, agent_id: int, stored: _StoredConfig) -> bool:
+        """Whether this host should hand `agent_id` a turn right now.
+
+        Two rejections, deliberately quiet rather than WARNING: a foreign
+        agent's wake is normal cross-talk (the dispatcher's pattern subscription
+        is cluster-wide, so every runner sees every wake), and a terminated
+        agent's wake is the delivery watchdog's resurrect path doing its job.
+        Neither is a fault of this host.
+        """
+        if stored.machine != self._machine:
+            logger.debug(
+                "hosted wake for agent {agent_id} belongs to machine {owner} — not ours",
+                agent_id=agent_id,
+                owner=stored.machine,
+            )
+            return False
+        if stored.status in _UNRUNNABLE_STATUSES:
+            logger.info(
+                "hosted wake for agent {agent_id} ignored — status {status} is not runnable",
+                agent_id=agent_id,
+                status=stored.status,
+            )
+            return False
+        return True
+
+    async def _read_stored_config(self, agent_id: int) -> _StoredConfig | None:
+        """This agent's machine, status and two config maps in one round trip.
+
+        None = the row is gone, which is a real anomaly (a wake was published for
+        an agent that does not exist) and says so, unlike the two ordinary
+        rejections above.
+        """
+        async with self._pool.connection() as conn:
+            row = await (
+                await conn.execute(
+                    "SELECT machine, status, config_overlay, birth_config "
+                    "FROM agents_meta WHERE id = %s",
+                    (agent_id,),
+                )
+            ).fetchone()
+        if row is None:
+            logger.warning(
+                "hosted wake for agent {agent_id} has no agents_meta row — ignoring",
+                agent_id=agent_id,
+            )
+            return None
+        return _StoredConfig(
+            machine=row[0], status=row[1], config_overlay=row[2], birth_config=row[3]
+        )
+
+    # ── the per-agent runtime cache ──────────────────────────────────────────
+
+    async def _runtime_for(self, agent_id: int, fingerprint: str) -> _AgentRuntime:
+        """This agent's prepared runtime, building it when absent or stale.
+
+        Called with the turn's three binds already in effect, so a cold build
+        reads this agent's config rather than the cluster default.
+        """
+        cached = self._runtimes.get(agent_id)
+        if cached is not None and cached.fingerprint == fingerprint:
+            cached.last_used = time.monotonic()
+            self._runtimes.move_to_end(agent_id)
+            self.stats.cache_hits += 1
+            return cached
+
+        reason = "cold" if cached is None else "config_changed"
+        self.stats.cache_misses += 1
+        started = time.monotonic()
+        runtime = await self._build_runtime(agent_id, fingerprint)
+        self._runtimes[agent_id] = runtime
+        self._runtimes.move_to_end(agent_id)
+        logger.info(
+            "hosted runtime for agent {agent_id} built ({reason})",
+            event="host_agent_prepared",
+            agent_id=agent_id,
+            reason=reason,
+            duration_ms=round((time.monotonic() - started) * 1000),
+        )
+        self._evict()
+        return runtime
+
+    async def _build_runtime(self, agent_id: int, fingerprint: str) -> _AgentRuntime:
+        """Build one agent's runtime: the startup reconcile, then the chat model.
+
+        The reconcile pair is what a fresh agent PROCESS runs at boot: resolve
+        any `claimed` inbound rows a previous turn left behind (committed ->
+        done, else back to pending) and repair a tool_use whose paired
+        tool_result a hard cancel dropped. Both are per-agent and both read the
+        checkpoint, so they belong on this cold path and not in the daemon's
+        process-scope boot.
+        """
+        await _reconcile_claimed_inbounds_at_startup(self._pool, self._checkpointer, agent_id)
+        await _repair_dangling_tool_use_at_startup(self._graph, agent_id)
+        llm = await boot_agent_scope(agent_id)
+        return _AgentRuntime(fingerprint=fingerprint, llm=llm)
+
+    def _evict(self) -> None:
+        """Drop runtimes past the idle TTL and past the size cap (LRU first).
+
+        Two bounds because they answer different questions: the cap keeps a
+        fleet-wide wake burst from holding one runtime per local agent, and the
+        TTL keeps a lightly loaded runner from holding a long-silent agent's
+        runtime forever. Eviction is pure bookkeeping — a dropped runtime costs
+        its agent one rebuild on its next wake, nothing more.
+
+        Agents with a turn in flight are skipped by BOTH bounds. `last_used` is
+        stamped when a turn starts, so a turn that runs longer than the TTL —
+        an autonomous loop, which the design explicitly allows to run for days —
+        would otherwise evict its own runtime while still using it. The cap
+        therefore behaves as a soft bound whenever more turns are in flight than
+        it allows; the concurrency semaphore is what keeps that from being
+        unbounded, and a cache smaller than `host_max_concurrent_turns` is a
+        config error rather than a case to handle here.
+        """
+        cutoff = time.monotonic() - settings.daemon.host_agent_idle_ttl_seconds
+        aged = [
+            a
+            for a, r in self._runtimes.items()
+            if r.last_used < cutoff and a not in self._in_flight
+        ]
+        for agent_id in aged:
+            del self._runtimes[agent_id]
+        cap = settings.daemon.host_agent_cache_size
+        for agent_id in list(self._runtimes):
+            if len(self._runtimes) <= cap:
+                break
+            if agent_id not in self._in_flight:
+                del self._runtimes[agent_id]
+
+    def drop_agent(self, agent_id: int) -> None:
+        """Forget an agent's cached runtime — the hosted equivalent of the
+        fresh-process half of `ava.self.restart()`. The checkpointer thread, the
+        real state, is untouched, exactly as a process restart leaves it."""
+        self._runtimes.pop(agent_id, None)
+
+    # ── the turn loop ────────────────────────────────────────────────────────
+
+    async def _drive_turns(self, agent_id: int, runtime: _AgentRuntime) -> None:
+        """Build this turn task's context and invoke the graph until it is done.
+
+        The event publisher is created per turn task rather than cached with the
+        runtime: it owns a background drain worker, and a worker per idle agent
+        is precisely the per-idle-agent cost the hosted model deletes. It shares
+        the process's Redis client, so creating one is a queue and a task.
+        """
+        event_publisher = AgentEventPublisher(
+            get_async_redis(), settings.data_plane.events_channel, agent_id=agent_id
+        )
+        await event_publisher.start()
+        ctx = AvaContext(
+            ops_pool=self._pool,
+            llm=runtime.llm,
+            event_publisher=event_publisher,
+            # No inbound listener by design: `hosted=True` makes the claim node
+            # end the turn instead of parking on a subscription, so the one
+            # thing a listener would be used for is unreachable from here.
+            inbound_listener=None,
+            hosted=True,
+        )
+        try:
+            await self._invoke_until_done(agent_id, ctx)
+        finally:
+            await event_publisher.aclose()
+
+    async def _invoke_until_done(self, agent_id: int, ctx: AvaContext) -> None:
+        """Invoke the graph until this agent has nothing left to do.
+
+        Three-way, and the three cases are genuinely different:
+
+        - `exit_requested` — claim resolved a terminate / restart, or lost a
+          lifecycle CAS. Terminal for this agent: stop, tell the gateway, and
+          drop the cached runtime. The notify is the same HTTP hop a process
+          makes on the way out, and it is guarded server-side, so a restart
+          (which already flipped the row to `restarting`) is left alone while a
+          terminate is finalized.
+        - `turn_idle` — claim found nothing to claim and this run is hosted, so
+          there is no process to park. End the task; the dispatcher creates a
+          fresh one when a wake lands, and until then this agent costs nothing.
+        - neither — the turn boundary. Re-invoke on the SAME checkpointer
+          thread, so state carries across turns and the next invocation's claim
+          does the looking.
+
+        The input is the minimal three-flag reset, never a full `AgentState()`:
+        a default state would be an update resetting `halted`, the
+        compact/memory sub-states, and every plugin state field on each turn.
+        Each invocation gets its own root span, so one turn is one exported
+        trace.
+        """
+        tags = ["ava", f"agent-{agent_id}", "hosted"]
+        metadata: dict[str, object] = {"agent_id": agent_id, "hosted": True}
+        config: RunnableConfig = _graph_config(agent_id, tags, metadata)
+        turn = 0
+        while True:
+            turn += 1
+            with turn_span(name=f"ava-agent-{agent_id}", session_id=str(agent_id), turn=turn):
+                result: dict[str, object] = await self._graph.ainvoke(  # pyright: ignore[reportUnknownMemberType, reportAssignmentType]
+                    {  # pyright: ignore[reportArgumentType, reportUnknownMemberType]
+                        "turn_active": False,
+                        "exit_requested": False,
+                        "turn_idle": False,
+                    },
+                    config=config,
+                    context=ctx,
+                )
+            # [] not .get(): this invocation's input wrote both channels, so a
+            # missing key is a bug, not a state to tolerate.
+            if result["exit_requested"]:
+                logger.info(
+                    "hosted agent {agent_id} requested exit after {turns} turn(s) — "
+                    "ending its turn task",
+                    agent_id=agent_id,
+                    turns=turn,
+                )
+                self.drop_agent(agent_id)
+                _notify_exit(agent_id)
+                return
+            if result["turn_idle"]:
+                return
+            # Turn boundary: go round again on the same checkpointer thread.
+
+    async def aclose(self) -> None:
+        """Drop every cached runtime. The pool, checkpointer and graph belong to
+        the daemon that built them and are closed there."""
+        self._runtimes.clear()
+
+
+def build_shared_pool(dsn: str) -> AsyncConnectionPool[psycopg.AsyncConnection]:
+    """The host's one Postgres pool, sized from the concurrent-turn bound.
+
+    `max_size` is the bound plus headroom rather than a round number, so the
+    sizing states its reason (see `_POOL_HEADROOM`). `autocommit=True` +
+    `prepare_threshold=None` are the two settings the per-agent pool already
+    carries in process mode: the saver expects autocommit, and never preparing
+    is what keeps borrows safe across PgBouncer's transaction pooling.
+    """
+    return LoggingConnectionPool[psycopg.AsyncConnection](
+        dsn,
+        pool_name="agent-host",
+        min_size=1,
+        max_size=settings.daemon.host_max_concurrent_turns + _POOL_HEADROOM,
+        kwargs={"autocommit": True, "prepare_threshold": None, **PG_KEEPALIVE_KWARGS},
+        check=AsyncConnectionPool.check_connection,
+        timeout=settings.agent.db_pool_acquire_timeout_seconds,
+        open=False,
+    )

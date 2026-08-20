@@ -435,6 +435,22 @@ def build_services() -> tuple[ServiceSpec, ...]:
             pidfile=settings.services.agent_runner_watchdog_pidfile,
             healthcheck_module=None,
         ),
+        # agent-host: the hosted agent-runner — one daemon running every local
+        # agent's turns as asyncio tasks instead of one OS process per agent
+        # (future/infra/agent-runner-as-server.md). Gated OFF unless
+        # AVA_RUNNER_MODE is `hosted`, which is not the default, so this service
+        # is absent from every cluster's roster until one opts in. One per
+        # runner, like the restarter: two would race on the same agents' turns.
+        ServiceSpec(
+            session="agent-host",
+            cmd=".venv/bin/python -m services.agent_host.daemon",
+            capabilities=_AGENT_RUNNER,
+            requires_db=True,  # assert_schema_current at boot; every turn reads/writes agents_meta
+            pidfile=settings.services.agent_host_pidfile,
+            curl_url=_hz("agent_host"),
+            identity_probe=daemon_identity("agent_host", settings.services.agent_host_pidfile),
+            healthcheck_module="services.healthchecks.agent_host",
+        ),
         # ops: inbound server. Binds 0.0.0.0:<ops_port>, serves POST /ops; the
         # gateway dials it directly (HTTP-uniform, even on a co-located single box).
         ServiceSpec(
@@ -683,7 +699,43 @@ def _gate_reason(spec: ServiceSpec) -> str | None:
         return "disabled (AVA_DELIVERY_WATCHDOG_ENABLED off)"
     if session == "im-bridge" and not settings.services.im_bridge_enabled:
         return "disabled (AVA_IM_BRIDGE_ENABLED off)"
+    if session == "agent-host" and _runner_mode() != "hosted":
+        return "disabled (AVA_RUNNER_MODE is process)"
     return None
+
+
+def _runner_mode() -> str:
+    """The cluster's runner mode, read so that it CANNOT raise.
+
+    Every other gate above rides `_gate_reason`'s fail-open `except`, which is
+    right for the incident that installed it (2026-08-08: a plugin gate read a
+    config domain its process profile had popped, raised, and killed the whole
+    watchdog on its first tick — no healthchecks ran until a respawn). Failing
+    open there means "run the service", and running one service too many is a
+    smaller harm than a supervisor that runs none.
+
+    Here the direction is inverted. Failing open would START the hosted runner on
+    a cluster that never opted in, where every agent already has its own process:
+    the host would become a second claimant for the same inbound rows, and the
+    claim CAS would hide the duplication as ordinary contention rather than
+    surface it. So this gate must fail CLOSED — and rather than trust an
+    `except` to be written correctly at every future call site, it is made
+    structurally unable to raise: any failure to read the setting resolves to
+    `"process"`, which gates the service out. `_gate_reason`'s own fail-open
+    wrapper then never has anything to catch from this branch.
+
+    `services/agent_host/daemon.py` carries a byte-identical copy rather than
+    importing this one, and the duplication is the point: an import is itself a
+    thing that can fail, and a failed `from ops.spec import ...` inside
+    `_gate_reason` would be caught by the fail-OPEN wrapper and start the
+    service — reintroducing exactly the hazard this function exists to remove.
+    Four lines with no dependencies cannot fail that way. Both copies are locked
+    by tests.
+    """
+    try:
+        return str(settings.daemon.runner_mode)
+    except Exception:  # see the docstring: unreadable means process, always
+        return "process"
 
 
 def services_for_capabilities_annotated(

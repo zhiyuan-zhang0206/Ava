@@ -156,11 +156,21 @@ layers = [
     "shared",
 ]
 
+# Every supervision daemon reaches agents by SPAWNING them (ops/agent_launch.py
+# runs `python -m agent` as a subprocess) and never by importing the kernel, so
+# a daemon's crash surface stays its own. `services.agent_host` is the single
+# deliberate exception: the hosted agent-runner
+# (future/infra/agent-runner-as-server.md) exists precisely to run agents' turns
+# INSIDE a supervised daemon instead of forking a process per agent, so being the
+# kernel is its job description rather than a coupling that crept in. Scoped to
+# that one package so the rule keeps biting everywhere else — a second service
+# reaching for `agent` still fails the contract.
 [[tool.importlinter.contracts]]
 name = "services must not import the agent kernel"
 type = "forbidden"
 source_modules = ["services"]
 forbidden_modules = ["agent"]
+ignore_imports = ["services.agent_host.* -> agent.**"]
 
 # Ops layer: shared < ops < {gateway, cli}. The ops module (Spec / Status /
 # controllers) sits above shared and is consumed by gateway + cli (and by the

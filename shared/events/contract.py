@@ -541,6 +541,17 @@ EVENTS: dict[str, EventSpec] = {
         "a hosted turn task raised — the task is dropped and the next wake retries "
         "from the checkpoint; neighbours are unaffected",
     ),
+    "host_agent_prepared": _telemetry(
+        "host_agent_prepared",
+        "the host built an agent's per-agent runtime (chat model + startup reconcile) "
+        "on a cold path — carries duration_ms and a reason of cold / config_changed / "
+        "evicted, so a wake that pays the cold cost is distinguishable from one that "
+        "does not, and a cache thrashing on config churn is visible as reason mix",
+    ),
+    "host_started": _telemetry(
+        "host_started",
+        "the hosted agent-runner finished process-scope boot and its dispatcher is live",
+    ),
     # node / process lifecycle
     "node_enter": _telemetry(
         "node_enter",
