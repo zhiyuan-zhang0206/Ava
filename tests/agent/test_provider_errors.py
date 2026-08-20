@@ -182,6 +182,47 @@ def test_billing_error_types_are_billing(error_type: str) -> None:
     assert classify_error(exc).billing is True
 
 
+@pytest.mark.parametrize(
+    "error_code",
+    [
+        "Arrearage",  # DashScope 400 — the account is in arrears
+        "PrepaidBillOverdue",  # DashScope 429 — subscription bill overdue
+        "PostpaidBillOverdue",
+        "arrearage",  # the vendor's casing is not load-bearing; the match folds
+    ],
+)
+def test_dashscope_billing_codes_are_billing(error_code: str) -> None:
+    """DashScope's OpenAI-compatible endpoint reports the broad class in
+    `error.type` and the SPECIFIC reason in `error.code` — that SHAPE is
+    captured (2026-08-20, `tests/shared/test_qwen_live_smoke.py`), so the
+    vocabulary is matched against both fields.
+
+    The body here is synthetic: the captured one is an auth failure, and no live
+    arrears body has been seen. What is asserted is the shape plus Alibaba's
+    documented arrears codes, which is what the vocabulary claims.
+
+    A `code`-when-`type`-is-missing fallback would be no fix at all here: `type`
+    is present on every DashScope 4xx, just too coarse to carry a reason.
+    """
+    exc = _FakeStatusError(
+        400,
+        {"error": {"type": "invalid_request_error", "code": error_code, "message": "no balance"}},
+    )
+    assert classify_error(exc).billing is True
+
+
+def test_billing_code_match_does_not_widen_the_reported_error_type() -> None:
+    """Widening the MATCH must not widen the reported field: `error_type` on the
+    `llm_provider_error` event stays the body's `error.type` alone, so its
+    meaning is unchanged for the providers that already say everything there."""
+    exc = _FakeStatusError(
+        400, {"error": {"type": "invalid_request_error", "code": "Arrearage", "message": "x"}}
+    )
+    result = classify_error(exc)
+    assert result.billing is True
+    assert result.error_type == "invalid_request_error"
+
+
 def test_billing_is_independent_of_error_class() -> None:
     """OpenAI's out-of-credit arrives as a 429 (TRANSIENT — the RetryPolicy
     still retries it, deliberately unchanged), yet it is still a billing
@@ -199,6 +240,23 @@ def test_billing_is_independent_of_error_class() -> None:
         (400, {"error": {"type": "invalid_request_error", "message": "prompt too long"}}),
         (429, {"error": {"type": "rate_limit_error", "message": "slow down"}}),
         (500, None),
+        # The captured DashScope auth body (2026-08-20) — the same broad `type`
+        # an arrears rejection carries, so only `code` separates the two.
+        (
+            401,
+            {
+                "error": {
+                    "message": "Incorrect API key provided. ",
+                    "type": "invalid_request_error",
+                    "param": None,
+                    "code": "invalid_api_key",
+                }
+            },
+        ),
+        # DashScope's documented TPS/TPM rate limits. They say "quota" and are
+        # NOT billing: admitting them would page the operator on normal traffic.
+        (429, {"error": {"type": "invalid_request_error", "code": "Throttling.AllocationQuota"}}),
+        (429, {"error": {"type": "invalid_request_error", "code": "Throttling.RateQuota"}}),
     ],
 )
 def test_non_billing_failures_are_not_billing(status: int, body: object) -> None:

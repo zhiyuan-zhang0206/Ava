@@ -91,14 +91,19 @@ class LlmProviderError(TypedDict):
 
     ``billing`` is the discriminator the billing/quota alert keys on: True when
     the provider said the key is out of credit or its quota is exhausted (HTTP
-    402, or a per-vendor ``error.type`` — the vocabulary lives in
-    ``shared/lm/errors.py``, so a new provider plugs in there and this key and
-    the alert follow with no further wiring, as long as the vendor reports the
-    SPECIFIC reason through ``error.type`` rather than a broad class; that
-    module's comment carries the caveats). It is
-    deliberately independent of ``error_class``: one vendor says it with a
-    permanent 402, another with a transient 429, and a human has to clear it
-    either way.
+    402, or a per-vendor string in the response body's ``error.type`` OR
+    ``error.code`` — the vocabulary lives in ``shared/lm/errors.py``, so a new
+    provider plugs in there and this key and the alert follow with no further
+    wiring, wherever the vendor puts the specific reason; that module's comment
+    carries the caveats). It is deliberately independent of ``error_class``: one
+    vendor says it with a permanent 402, another with a transient 429, and a
+    human has to clear it either way.
+
+    ``error_type`` stays the body's ``error.type`` alone. ``error.code`` is read
+    for the ``billing`` predicate and not reported here: on the vendors that
+    send both, ``type`` is the broad class and ``code`` the specific reason, and
+    folding the two into one reported field would change what this key means for
+    every provider that already says everything through ``type``.
 
     ``vendor`` is the model's provider key (deepseek / claude / …, None for an
     unregistered prefix) and ``model`` the model in force at the call — the
