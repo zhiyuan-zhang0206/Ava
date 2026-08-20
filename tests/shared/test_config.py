@@ -100,6 +100,48 @@ def test_openai_api_key_field_exists_and_is_per_secret():
     assert field_domain("openai_api_key") == "lm"
 
 
+def test_runner_mode_defaults_to_process_and_is_not_per_agent() -> None:
+    """`AVA_RUNNER_MODE` gates the hosted agent-runner
+    (`future/infra/agent-runner-as-server.md`). Three properties are load-bearing:
+
+    - **default `process`** — the whole Phase 1 rollout is inert until an operator
+      flips this, so a drifted default would silently migrate every cluster;
+    - **not `per_agent`** — the overlay an agent can write through
+      `ava.self.restart(config_overlay)` must not reach it, or an agent could flip
+      the hosting model of the runner it lives in;
+    - **cluster-pinned** — the design forbids a mixed cluster, because a hosted
+      agent's liveness is an in-process fact while a process agent's is a lease
+      row, and reconciling both at once needs double bookkeeping.
+    """
+    from shared.config import FIELD_INFOS, get_config_metadata
+
+    meta = next(m for m in get_config_metadata() if m.name == "runner_mode")
+    assert meta.default_value == "process"
+    assert meta.per_agent is False
+    assert meta.scope == "cluster-pinned"
+    assert meta.capability == "agent-runner"
+    assert meta.env_var == "AVA_RUNNER_MODE"
+    # A closed set the frontend renders as a select; a new member is a deliberate
+    # edit here, not something a typo can introduce.
+    assert meta.choices == ["process", "hosted"]
+    assert FIELD_INFOS["runner_mode"].alias == "AVA_RUNNER_MODE"
+
+
+def test_runner_mode_rejects_an_unknown_value() -> None:
+    """Fail fast on an unknown mode rather than defaulting to one: a typo'd
+    `AVA_RUNNER_MODE` must not silently leave the cluster in process mode (or,
+    worse, be read as truthy by a later `!= "process"` check)."""
+    import pydantic
+
+    from shared.config.daemon import DaemonSettings
+
+    # Through model_validate rather than the constructor: a bad literal spelled
+    # inline is a static type error, and the point here is the RUNTIME rejection
+    # of a value that arrives from a `.env` file, which is untyped by nature.
+    with pytest.raises(pydantic.ValidationError):
+        DaemonSettings.model_validate({"AVA_RUNNER_MODE": "hostd"})
+
+
 def test_current_field_values_coerces_secretstr(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     """A SecretStr field read from .env must come back a SecretStr, not a bare str
     — `.get_secret_value()` consumers crash on a plain str."""

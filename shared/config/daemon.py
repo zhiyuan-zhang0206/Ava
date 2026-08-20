@@ -6,12 +6,27 @@ env alias so the .env surface is unchanged. Aggregated by shared/config.
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import Field
 
 from shared.config._base import EnvSettings
 
 
 class DaemonSettings(EnvSettings):
+    runner_mode: Literal["process", "hosted"] = Field(
+        default="process",
+        alias="AVA_RUNNER_MODE",
+        description="How the agent-runner hosts agents. `process` = one OS process per agent, alive from spawn to terminate (today's model). `hosted` = the runner daemon hosts every local agent's turns as asyncio tasks in its own process, and an idle agent is no task at all. NOT YET SERVED: the host service is still being built, so `hosted` is currently inert and every runner behaves as `process`. Cluster-pinned because the model must be uniform: a cluster running both would need double bookkeeping for agent leases, since a hosted agent's liveness is an in-process fact while a process agent's is a lease row. Rollback is a restart with this flipped back — no schema shape changes with it.",
+        json_schema_extra={
+            "capability": "agent-runner",
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     restarter_poll_interval_seconds: float = Field(
         default=1.0,
         alias="AVA_RESTARTER_POLL_INTERVAL_SECONDS",
