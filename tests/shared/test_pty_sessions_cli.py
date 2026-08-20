@@ -443,7 +443,17 @@ def test_new_honors_cwd(sessions: Path) -> None:
     cwd.mkdir()
     _new(home, name, cwd=cwd)
     _send(home, name, "pwd")
-    assert str(cwd) in _capture_until(home, name, str(cwd))
+
+    # The pty is DEFAULT_COLS (120) columns wide, and pytest's tmp path (base
+    # dir length + monotonically increasing tmp counter, neither related to
+    # this test) can exceed that, wrapping `pwd`'s output mid-path with a
+    # newline the terminal inserted rather than the shell. Match against the
+    # capture with those wrap newlines stripped so the assertion tracks the
+    # code, not the environment (issue #77).
+    def _seen() -> bool:
+        return str(cwd) in _capture(home, name).replace("\n", "")
+
+    assert _wait(_seen, timeout=10.0), f"capture never contained {cwd!s} (even de-wrapped)"
 
 
 def test_send_transports_tricky_text_via_base64(sessions: Path) -> None:
