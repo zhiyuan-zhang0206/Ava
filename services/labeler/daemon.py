@@ -83,7 +83,7 @@ def _cooling_ids(now: float) -> list[int]:
     agent was labeled out of band (or removed) and its backoff state can go.
 
     A retired entry is deliberately never pruned — pruning it would readmit the
-    agent to the SELECT and restart the whole 12-attempt cycle, which is the
+    agent to the SELECT and restart the whole attempt cycle, which is the
     unbounded loop this is here to stop. The retained entries are bounded by the
     number of permanently-unlabelable agents seen in one process lifetime."""
     cooling: list[int] = []
