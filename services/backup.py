@@ -73,8 +73,9 @@ _DUMP_TIMEOUT_S = 60 * 60
 # pruned, disk stuck ~90%). The checkpoints are RUNTIME execution state, not
 # the system of record: the conversation stream lives in the `events` table
 # (the unified read path since the W9 cutover), which IS dumped, and checkpoints
-# are rebuildable from it (scripts/preview/rebuild-checkpoints.py proved the
-# reconstruction; the restore reference in recover-a-cluster documents it).
+# are rebuildable from it (a one-off script proved the reconstruction
+# pre-cutover; the restore reference in recover-a-cluster documents the
+# procedure).
 # A restore therefore loses in-flight graph state (pending interrupts etc.),
 # not the conversation history.
 _EXCLUDE_TABLES = ("checkpoint_blobs", "checkpoints", "checkpoint_writes")

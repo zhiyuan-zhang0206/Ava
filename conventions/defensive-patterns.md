@@ -42,6 +42,18 @@ entirely inside the new code. Worked example:
 of waiting for a `--flag`.
 Evidence: [`postmortems/0001`](../postmortems/0001-a-rollout-cannot-deliver-its-own-protection.md).
 
+### Isolation that one command can undo is a convention, not a boundary
+
+If a single operational act — restarting a service, dropping a database, clearing
+a cache — can take out every tenant, the tenants were never isolated; they were
+co-located under a rule someone had to keep. Discriminators held correct by
+configuration (a database name, a logical-DB index, a channel prefix, an ACL user)
+are that rule wearing a schema. Prefer the structural version: a separate
+instance under a separate home, so the blast radius is set by what the thing *is*
+rather than by how carefully the operator aimed. This is why every Ava cluster
+owns its own Postgres and Redis.
+Evidence: [`postmortems/0004`](../postmortems/0004-isolation-one-command-can-undo.md).
+
 ## Tests and guards
 
 ### A dead dependency is a fact about the dependency, not about one seam
@@ -132,7 +144,28 @@ Evidence: PRs #169 and its follow-up fix, where a port-offset addition produced
 three distinct collision classes — a derive escaping its own record's block, an
 overlap with the next cluster's block, and a duplicate legacy port.
 
+### A health check that does not depend on what it certifies stays green through the outage
+
+A check whose code path shares nothing with the path that breaks will keep
+answering 200 while the system is down — and its greenness is then actively
+harmful, because it is the thing people consult before believing the alarm. The
+gateway's HTTP health does not authenticate to Redis, so it certified a healthy
+cluster for the fifteen minutes every agent on it was dead. Make a check exercise
+the dependency it vouches for, or scope its claim down to what it actually
+touches.
+Evidence: [`postmortems/0004`](../postmortems/0004-isolation-one-command-can-undo.md).
+
 ## Debugging
+
+### A credentials error is not a server error
+
+`WRONGPASS`, `AuthenticationError`, a 401 — each names the credential that was
+presented, not the health of what rejected it. No restart of any server changes
+what a client sends, so restarting is not a cheap thing to try first: it has no
+causal path to the symptom, and its one reliable effect is on whatever state the
+server holds only in memory. Read the error as the statement it is, then find the
+config that holds the wrong value.
+Evidence: [`postmortems/0004`](../postmortems/0004-isolation-one-command-can-undo.md).
 
 ### A mechanism that predicts the symptom is a hypothesis, not a diagnosis
 

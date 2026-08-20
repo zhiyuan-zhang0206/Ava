@@ -106,7 +106,8 @@ scripts/install.sh --worktree                # births cluster <name>: uv sync --
                                              # overrides the home; --no-seed skips the key copy. No host-global
                                              # steps. Idempotent — re-run freely.
 .venv/bin/ava start                          # brings up its gateway + agent-runner (ops/restarter/watchdog + agent
-                                             # processes); still births in-start if the worktree skipped install.sh
+                                             # processes). Pure bring-up: a home install.sh never birthed has no
+                                             # registry record, and start fails fast pointing back at install.sh
 .venv/bin/ava status                         # sessions/probes for this cluster
 .venv/bin/ava cluster down --path ~/.ava-<name>  # stop the cluster's sessions (its own Postgres/Redis + registry slot stay up)
 ```
