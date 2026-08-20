@@ -3,13 +3,15 @@ generation out of the user-facing `agents.label`.
 
 Issue #178: fed a long English second-person imperative brief (the shape
 `ava.agents.spawn()` produces when an agent writes another agent's prompt),
-`deepseek-v4-flash` failed 6/6 on the real preview-cluster prompts — answering
-the brief in assistant voice, emitting `<think>` / `<thinking>` scaffolding as
-plain text, and echoing the `<user_request>` fence back. `_normalize` took the
-first 64 characters of each and `generate_label_async` wrote it.
+`deepseek-v4-flash` failed every draw on the real preview-cluster prompts —
+15/15 on replay — answering the brief in assistant voice, emitting `<think>` /
+`<thinking>` scaffolding as plain text, and echoing the `<user_request>` fence
+back. `_normalize` took the first 64 characters of each and
+`generate_label_async` wrote it.
 
-Two corpora pin the classifier from both sides, because a classifier that never
-fires and one that fires on good labels are both failures:
+Three corpora pin the classifier, because a classifier that never fires and one
+that fires on good labels are both failures — and the second is the one that
+ships silently:
 
 * `_ISSUE_178_OUTPUTS` — the nine real bad outputs recorded in #178. Every one
   must be rejected.
@@ -17,6 +19,11 @@ fires and one that fires on good labels are both failures:
   the production cluster (English and Chinese, verbatim; entries carrying user
   paths, hostnames or URLs excluded). Not one may be rejected. The full 287
   measured 0 false positives.
+* `_FIRST_PERSON_PROMPT_LABELS` — real labels generated from prompts a user
+  wrote in the FIRST PERSON. `assistant_voice` is the one rule keyed on register
+  rather than structure, so it is the one that could eat a good label; these are
+  its adversarial set. 150 such generations measured 0 false positives, because
+  a correct summary of a first-person prompt does not stay in first person.
 """
 
 from __future__ import annotations
@@ -115,6 +122,36 @@ _PROD_LABELS = [
 ]
 
 
+# Real labels the model produced for first-person user prompts ("I'll need the
+# deploy checklist reviewed before Friday's release" -> "Deploy checklist review
+# before Friday release"). The adversarial set for `assistant_voice`: if a
+# future widening of the opener pattern starts eating these, it is eating real
+# labels.
+_FIRST_PERSON_PROMPT_LABELS = [
+    "Deploy checklist review before Friday release",
+    "WebSocket reconnect loop debugging in gateway",
+    "500 on /api/agents when spawning without prompt",
+    "Rewrite retry logic to fix double-counted attempts",
+    "Migration completion notice and row counts",
+    "Notify when migration done and paste row counts",
+    "PgBouncer listener bind failure cause",
+    "Hand off labeler PR to whoever picks it up",
+    "Labeler display name decision logic",
+    "Fix pyright false missing symbol reports",
+    "Worktree broken pyright false positive symbols",
+    "Merge queue config changes last month",
+    "Greeting from Windows",
+    "Windows greeting",
+    "Reply hello from Windows",
+    "Write JSON and terminate",
+    "spawn报错agent起不来",
+    "诊断spawn报错agent无法启动",
+    "labeler 为什么给 agent 起怪名字",
+    "询问 labeler 命名 agent 的原因",
+    "标签器如何决定智能体显示名",
+]
+
+
 class _FakeLLM:
     def __init__(self, content: str) -> None:
         self.content = content
@@ -156,6 +193,12 @@ class TestRejectionReason:
     def test_accepts_every_real_production_label(self, label: str) -> None:
         assert _rejection_reason(label) is None, f"false positive on a real label: {label!r}"
 
+    @pytest.mark.parametrize("label", _FIRST_PERSON_PROMPT_LABELS)
+    def test_accepts_labels_summarized_from_first_person_prompts(self, label: str) -> None:
+        """`assistant_voice` is keyed on register, so this is the corpus that
+        would expose it eating good labels."""
+        assert _rejection_reason(label) is None, f"false positive on a real label: {label!r}"
+
     def test_rejects_assistant_voice_behind_an_interjection(self) -> None:
         """ "Sure, I'll ..." — the first-person marker is not at position 0, and
         an opener test anchored past the interjection would miss it."""
@@ -173,6 +216,13 @@ class TestRejectionReason:
         exactly_max = "DRIVE_PROBE_RESULT mounted=<yes|no> writable=<yes|no> path=<abso"
         assert len(exactly_max) == LABEL_MAX_CHARS
         assert _rejection_reason(exactly_max) is None
+
+    def test_rejects_a_fenced_code_block_opener(self) -> None:
+        """Replaying the three real preview prompts through the old default
+        produced this: the model started answering in a code block and
+        `_normalize` kept the fence line."""
+        assert _rejection_reason("```json") == "markup"
+        assert _rejection_reason("```") == "markup"
 
     def test_a_tag_after_the_first_character_is_not_a_rejection(self) -> None:
         """The markup rule is anchored: `writable=<yes|no>` is a real label

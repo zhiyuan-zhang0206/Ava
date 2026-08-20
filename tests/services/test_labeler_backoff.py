@@ -64,6 +64,61 @@ def test_clear_backoff_drops_state() -> None:
     daemon._clear_backoff(7)
 
 
+def test_agent_is_retired_after_the_give_up_threshold() -> None:
+    """Backoff bounds the retry RATE; the give-up bounds their NUMBER. Past the
+    threshold the agent stays out of the poll SELECT for good, so a
+    permanently-unlabelable agent costs a fixed number of LLM calls rather than
+    ~12/hour forever (issue #178 enlarged the population that can reach this)."""
+    now = 1000.0
+    for _ in range(daemon._GIVE_UP_AFTER_FAILURES - 1):
+        daemon._record_failure(1, now)
+    assert not daemon._is_retired(1)
+    # Still merely cooling: once its window passes it would be retried.
+    assert daemon._cooling_ids(now + daemon._BACKOFF_CAP_S + 1.0) == []
+
+    daemon._record_failure(1, now)
+    assert daemon._is_retired(1)
+    # Retired: excluded no matter how far past the deadline the clock is.
+    assert daemon._cooling_ids(now + daemon._BACKOFF_CAP_S * 100) == [1]
+
+
+def test_retired_entry_is_never_pruned_as_stale() -> None:
+    """The stale-prune exists to drop agents labeled out of band. Applying it to
+    a retired agent would readmit it to the SELECT and restart the whole
+    attempt cycle — the unbounded loop the give-up exists to stop."""
+    now = 1000.0
+    daemon._BACKOFF[5] = (daemon._GIVE_UP_AFTER_FAILURES, now - daemon._BACKOFF_CAP_S * 10)
+
+    assert daemon._cooling_ids(now) == [5]
+    assert 5 in daemon._BACKOFF
+
+
+def test_a_successful_label_clears_a_retired_agent() -> None:
+    """Retirement is not a tombstone: consecutive failures are what count, so a
+    label that lands (e.g. after a daemon restart, or a user PATCH racing in)
+    drops the state like any other success."""
+    now = 1000.0
+    for _ in range(daemon._GIVE_UP_AFTER_FAILURES):
+        daemon._record_failure(9, now)
+    assert daemon._is_retired(9)
+
+    daemon._clear_backoff(9)
+    assert not daemon._is_retired(9)
+    assert daemon._cooling_ids(now) == []
+
+
+def test_retry_note_stops_promising_a_retry_once_retired() -> None:
+    """The failure log line must not name a next retry that will never come."""
+    now = 1000.0
+    delay = daemon._record_failure(3, now)
+    assert "next retry" in daemon._retry_note(3, delay)
+
+    for _ in range(daemon._GIVE_UP_AFTER_FAILURES - 1):
+        delay = daemon._record_failure(3, now)
+    assert "retired" in daemon._retry_note(3, delay)
+    assert "next retry" not in daemon._retry_note(3, delay)
+
+
 def test_cooling_ids_prunes_long_stale_entries() -> None:
     now = 1000.0
     daemon._record_failure(1, now)  # deadline now+2 (recent, will linger as expired-but-fresh)
