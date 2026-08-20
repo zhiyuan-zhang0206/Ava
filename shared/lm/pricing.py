@@ -25,6 +25,28 @@ DeepSeek's reasoning tokens count into output — billed at the merged
 output rate; no separation between reasoning vs answer
 (usage_metadata reports separately but the underlying rate is the
 same).
+
+## Qwen: why the roster is one flat-tier model
+
+A tier boundary here is an exact token count, and the catalog validates that the
+tiers cover every input size with no gap. Alibaba publishes its Qwen boundaries
+only as `Input<=256k` / `256k<Input<=1m` — **the token value of "256K" appears
+nowhere** (verified 2026-08-20 against the qwen3.7-plus and qwen3.6-flash model
+pages). Writing one means guessing 262,144 against 256,000, and whichever is
+wrong silently misprices by ~3x every call landing in the band between them.
+
+That is the real reason the registry seeds `qwen3.8-max` alone: it is the only
+current Qwen priced as a single flat tier (0-1M), so it needs no boundary. The
+cheaper tiers are otherwise ready — qwen3.7-plus publishes a full Beijing table
+including its implicit-cache column — and **resolving the token value of "256K"
+is the one thing standing between them and a catalog entry**. qwen3.6-flash needs
+a second fact too: its page lists only the explicit cache tier, and Ava never
+sends `cache_control`, so its implicit rate would have to be derived.
+
+Rates are region-specific: `shared/lm/_providers.py` binds Beijing, and the
+Singapore endpoint prices the same model differently (qwen3.8-max: $2.00/$0.25/
+$6.00 against Beijing's $1.65/$0.206/$4.951). Switching region is a catalog
+change, not just a URL change.
 """
 
 from __future__ import annotations
