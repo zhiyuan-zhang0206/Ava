@@ -37,11 +37,14 @@ that are NOT the same scope, and the hosted agent-runner
 apart: it serves many agents from one process, so it runs the process half once
 at daemon boot and the agent half per agent.
 
-- `init_process_scope` / `load_process_extensions` — **process** scope: OTLP
-  trace export init and the external-plugin load. Both mutate process globals
-  (the tracer provider; `sys.modules` + the plugin registries), so "once" is a
-  correctness requirement in the hosted runner, not a saving — see each
-  function's docstring.
+- `init_process_scope` / `land_cluster_extensions` / `load_process_extensions` —
+  **process** scope: OTLP trace export init, the cluster-owned skill
+  materialization, and the external-plugin load. The first and third mutate
+  process globals (the tracer provider; `sys.modules` + the plugin registries),
+  so "once" is a correctness requirement in the hosted runner, not a saving —
+  see each function's docstring. The middle one is process scope for a different
+  reason: it writes the machine's skills directory, which every agent on the box
+  shares, so per-agent repetition would be pure cost.
 - `boot_agent_scope` — **agent** scope: the workspace pre-create, the
   screen-capture notice, and the chat model, which is built from
   `turn_settings.lm.llm_model` and therefore differs per agent whenever an
@@ -71,7 +74,7 @@ from shared.config import settings
 from shared.config.turn_view import turn_settings
 from shared.event_publisher import AgentEventPublisher
 from shared.lm.factory import build_chat_model
-from shared.log import init_agent_process
+from shared.log import init_agent_process, logger
 from shared.paths import workspace_dir
 from shared.redis_client import get_async_redis
 from shared.redis_listener import RedisInboundListener
@@ -146,6 +149,60 @@ def init_process_scope() -> None:
     from shared.trace import initialize_tracing
 
     initialize_tracing()
+
+
+def land_cluster_extensions() -> None:
+    """Process-scope boot: land the cluster's installed skills onto this machine.
+
+    The boot-side sibling of `cli/commands/_converge_extensions.py`
+    (`materialize_cluster_extensions`), over the same
+    `shared.extension_materialize.materialize_skills`. Converge covers the
+    operator path — `ava start`, `ava converge`; this covers the one that needs
+    no operator at all, which is what closes the offline window: a machine that
+    was down when someone ran `ava skill install` elsewhere catches up the moment
+    anything on it next starts, and an agent never boots against a tree older
+    than the registry row it could have read
+    (`future/infra/extension-ownership.md` S2).
+
+    Process scope, not agent scope: the skills directory is a fact about the
+    MACHINE, identical for every agent on it. The hosted runner therefore calls
+    this once at daemon boot, beside the other two process-scope halves, rather
+    than per agent.
+
+    Runs before `load_process_extensions` so the ordering stays correct when
+    plugins become registry-owned in a later slice. Today it does not matter —
+    skills are read per turn and plugins still come from the checkout — which is
+    exactly why it is worth fixing now rather than after the ordering has a
+    consequence.
+
+    Failures are logged, not raised, and that is a different judgement from the
+    one boot usually makes. Boot fails fast on the things an agent cannot work
+    without; a stale skills directory is not one of them, the registry retries on
+    the next start, and refusing to boot over it would convert a recoverable lag
+    into an outage. Same stance as converge, and the opposite of the install
+    path's, which is where the fact is CREATED.
+
+    On a cluster with no installed extensions this is one indexed query
+    returning no rows.
+    """
+    from shared import db, extension_materialize, paths
+
+    try:
+        with db.connect() as conn:
+            result = extension_materialize.materialize_skills(conn, dest_root=paths.skills_dir())
+    except Exception as exc:
+        logger.warning(
+            "[extensions] could not read the cluster registry at boot ({}); this "
+            "machine keeps whatever skills it already has and retries on the next start",
+            exc,
+        )
+        return
+    if result.changed:
+        logger.info(
+            "[extensions] landed {} skill(s), updated {}",
+            len(result.landed),
+            len(result.updated),
+        )
 
 
 def load_process_extensions() -> None:
@@ -242,6 +299,7 @@ async def _boot_agent_process(
     # already forwards every AVA_* var onto sessions, so setting this here
     # is the single source — no per-session plumbing needed.
     os.environ["AVA_AGENT_ID"] = str(agent_id)
+    land_cluster_extensions()
     load_process_extensions()
 
     # ── MCP daemon startup ──
