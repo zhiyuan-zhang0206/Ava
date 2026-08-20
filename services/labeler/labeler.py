@@ -83,12 +83,13 @@ def _rejection_reason(label: str) -> str | None:
     production cluster (0 false positives) and against the nine real bad outputs
     recorded in issue #178 (all nine rejected):
 
-    * `markup` — the output opens with a tag. Covers all three markup leaks
-      #178 saw: reasoning scaffolding reaching `content` as literal text
-      (`<think>`, `<thinking>`) despite thinking being disabled at the source,
-      the `<user_request>` fence being echoed back as content, and a raw
-      `<request_id>` envelope. No repair is possible here — the generation is
-      structurally wrong, not merely mis-formatted.
+    * `markup` — the output opens with a tag or a fenced code block. Covers all
+      three markup leaks #178 saw: reasoning scaffolding reaching `content` as
+      literal text (`<think>`, `<thinking>`) despite thinking being disabled at
+      the source, the `<user_request>` fence being echoed back as content, and a
+      raw `<request_id>` envelope — plus the bare ```` ```json ```` a model emits
+      when it starts answering in a code block. No repair is possible here — the
+      generation is structurally wrong, not merely mis-formatted.
     * `assistant_voice` — the output opens in first person. This is the
       prompt-injection-shaped failure: a long second-person imperative brief
       steers the summarizer into executing it ("I'll validate the timezone
@@ -113,12 +114,16 @@ def _rejection_reason(label: str) -> str | None:
       verification - terminating immediately', which is a faithful summary of a
       prompt that opens with those words. A short prompt legitimately produces a
       label that is its own opening.
+    * "the output opens with a markdown heading (`#`)" — 0 of the 287, and a
+      real leak (one model answered with `# Google Drive Detection Probe`), but
+      left out anyway: `#` opens an issue reference, and this repo's labels are
+      full of them ('Review PR #44 ...'). A leading ``` has no such reading.
 
     A false positive costs a retry and, if it persists, a NULL label; a false
     negative writes the model's answer into a user-facing field. All three rules
     are anchored and narrow so the cheap failure is the likelier one.
     """
-    if label.startswith("<"):
+    if label.startswith(("<", "```")):
         return "markup"
     if _ASSISTANT_VOICE_RE.match(label):
         return "assistant_voice"
