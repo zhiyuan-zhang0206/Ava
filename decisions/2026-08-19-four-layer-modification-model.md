@@ -137,3 +137,9 @@ Related: issue #42 (this decision), issue #39 (cluster registry / skill sync /
 per-agent activation), `conventions/plugin-spec-v2.md`,
 `decisions/2026-05-09-self-rolling-release.md`,
 `decisions/2026-05-13-plugin-and-hook-layers.md`.
+
+<!-- Superseded in part by: decisions/2026-08-20-stop-fleet-distributing-kernel-contributor-skills.md
+— resolves the "Open point: family placement is taxonomy, not distribution"
+section above: option 2 is ruled, sequenced after issue #39's S2 registry
+slice. The rest of this entry (the four layers, the skill restructuring, the
+known gaps) stands unchanged. -->

@@ -314,6 +314,12 @@ Adoption, not flag-day:
   requirements (matched) vs resource access (context-gated). The seven
   injection surfaces, the three payload runtimes, and the S3 lifecycle state
   machine are untouched.
+- `decisions/2026-08-20-stop-fleet-distributing-kernel-contributor-skills.md`
+  (issue #146) — ruled to stop converging `.agents/skills/` fleet-wide,
+  sequenced after S2 lands. S2 as scoped above does not itself touch this: repo-
+  shipped content stays converging from the checkout as it does today (see
+  "Repo-shipped content" above). The stop is follow-on work timed to land
+  alongside S2 rather than a consequence of the registry rows S2 adds.
 
 ## Related work — must stay coherent with
 
