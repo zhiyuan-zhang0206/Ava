@@ -23,6 +23,13 @@ vi.mock("@/app/control/inventory/page", () => ({
   PluginsInventory: () => <div>PLUGINS_BODY</div>,
   McpInventory: () => <div>MCP_BODY</div>,
 }));
+// The Plugins section also carries plugin-contributed page links, which read
+// the contributions endpoint. Kept real (it renders nothing when no plugin
+// declares one) with the api boundary mocked, like every other test here.
+vi.mock("@/lib/api", () => ({
+  api: { getUiContributions: vi.fn().mockResolvedValue({ themes: [], nav: [] }) },
+  assetUrl: (p: string) => p,
+}));
 
 import ControlPage from "./page";
 import { CONTROL_SECTIONS } from "./_sections";

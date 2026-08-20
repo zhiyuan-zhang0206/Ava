@@ -6,6 +6,7 @@ import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 
 import { errMsg as formatErrMsg } from "@/lib/errors";
+import { PluginNavIcons } from "@/components/plugin-nav";
 import {
   STATS_WINDOW_LABELS,
   STATS_WINDOWS,
@@ -185,6 +186,9 @@ export function SidebarFooter() {
         <SidebarNavButton onClick={() => router.push("/control")} label={navT("control")}>
           <Settings className="size-4" />
         </SidebarNavButton>
+        {/* Plugin-contributed entries come last, after the console's own;
+            renders nothing when no plugin declares one for the sidebar. */}
+        <PluginNavIcons location="sidebar" />
       </div>
     </div>
   );

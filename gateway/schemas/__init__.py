@@ -136,6 +136,7 @@ from gateway.schemas.tasks import (
 )
 from gateway.schemas.ui_contributions import (
     UiContributionsResponse,
+    UiNavContribution,
     UiThemeContribution,
 )
 from gateway.schemas.uploads import (
@@ -257,6 +258,7 @@ __all__ = [
     "TokenUsageResponse",
     "TraceCheckpointMessagesResponse",
     "UiContributionsResponse",
+    "UiNavContribution",
     "UiThemeContribution",
     "UploadedBatch",
     "UploadedFile",

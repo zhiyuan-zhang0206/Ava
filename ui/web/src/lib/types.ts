@@ -490,6 +490,7 @@ export type SystemStatus = Schemas["SystemStatus"];
 // no plugin JavaScript ever enters this bundle.
 
 export type UiThemeContribution = Schemas["UiThemeContribution"];
+export type UiNavContribution = Schemas["UiNavContribution"];
 export type UiContributionsResponse = Schemas["UiContributionsResponse"];
 
 // --- File Upload ---

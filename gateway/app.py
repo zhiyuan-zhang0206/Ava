@@ -151,6 +151,9 @@ from gateway.routers import (
     pages as pages_router,
 )
 from gateway.routers import (
+    plugin_ui as plugin_ui_router,
+)
+from gateway.routers import (
     presets as presets_router,
 )
 from gateway.routers import (
@@ -593,6 +596,7 @@ app.include_router(frontend_telemetry_router.router)
 app.include_router(grafana_router.router)
 app.include_router(okf_graph_router.router)
 app.include_router(tasks_router.router)
+app.include_router(plugin_ui_router.router)
 app.include_router(ui_contributions_router.router)
 app.include_router(uploads_router.router)
 

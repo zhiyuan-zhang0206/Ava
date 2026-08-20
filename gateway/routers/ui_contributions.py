@@ -25,7 +25,11 @@ from typing import Any, cast
 
 from fastapi import APIRouter, HTTPException
 
-from gateway.schemas import UiContributionsResponse, UiThemeContribution
+from gateway.schemas import (
+    UiContributionsResponse,
+    UiNavContribution,
+    UiThemeContribution,
+)
 from shared import plugins_config
 from shared.plugin_manifest import ManifestError, load_manifest
 
@@ -61,6 +65,7 @@ def _enabled_ui_declarations() -> list[tuple[str, dict[str, Any]]]:
 def get_ui_contributions() -> UiContributionsResponse:
     """Every console contribution the cluster's enabled plugins declare."""
     themes: list[UiThemeContribution] = []
+    nav: list[UiNavContribution] = []
     for plugin, ui in _enabled_ui_declarations():
         for theme in cast(list[dict[str, Any]], ui.get("themes", [])):
             themes.append(
@@ -70,4 +75,14 @@ def get_ui_contributions() -> UiContributionsResponse:
                     tokens=cast(dict[str, str], theme["tokens"]),
                 )
             )
-    return UiContributionsResponse(themes=themes)
+        for entry in cast(list[dict[str, Any]], ui.get("nav", [])):
+            nav.append(
+                UiNavContribution(
+                    plugin=plugin,
+                    location=cast(str, entry["location"]),
+                    label=cast(str, entry["label"]),
+                    icon=cast(str, entry["icon"]),
+                    page=cast(str, entry["page"]),
+                )
+            )
+    return UiContributionsResponse(themes=themes, nav=nav)

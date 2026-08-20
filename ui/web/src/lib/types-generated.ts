@@ -3137,6 +3137,52 @@ export interface paths {
         patch: operations["patch_task_api_tasks__task_id__patch"];
         trace?: never;
     };
+    "/api/plugin-ui/{plugin}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Plugin Ui Root
+         * @description Trailing-slash canonicalization, so a page's relative asset links
+         *     resolve against the mount rather than one level above it.
+         */
+        get: operations["plugin_ui_root_api_plugin_ui__plugin__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/plugin-ui/{plugin}/{rest}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Plugin Ui Get
+         * @description Serve one file from an enabled plugin's `ui/` directory.
+         *
+         *     A directory reached without a trailing slash redirects to the slash form
+         *     before its index is served: the browser resolves a page's relative asset
+         *     links against the URL it was loaded from, so `…/board` would send
+         *     `app.js` to `…/app.js` — one level above where the plugin put it.
+         */
+        get: operations["plugin_ui_get_api_plugin_ui__plugin___rest__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/ui/contributions": {
         parameters: {
             query?: never;
@@ -6432,6 +6478,29 @@ export interface components {
         UiContributionsResponse: {
             /** Themes */
             themes: components["schemas"]["UiThemeContribution"][];
+            /** Nav */
+            nav: components["schemas"]["UiNavContribution"][];
+        };
+        /**
+         * UiNavContribution
+         * @description One nav entry opening a plugin-served page.
+         *
+         *     `page` is a path under the plugin's own mount (`/api/plugin-ui/<plugin>/`),
+         *     `icon` a lucide icon name from the closed set the console imports, and
+         *     `location` names which of the console's nav surfaces carries the entry —
+         *     all three validated at manifest load.
+         */
+        UiNavContribution: {
+            /** Plugin */
+            plugin: string;
+            /** Location */
+            location: string;
+            /** Label */
+            label: string;
+            /** Icon */
+            icon: string;
+            /** Page */
+            page: string;
         };
         /**
          * UiThemeContribution
@@ -10293,6 +10362,69 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TaskRow"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    plugin_ui_root_api_plugin_ui__plugin__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                plugin: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    plugin_ui_get_api_plugin_ui__plugin___rest__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                plugin: string;
+                rest: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */

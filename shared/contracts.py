@@ -310,6 +310,13 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("GET", "/api/agents/{agent_id}/pages/{name}/{rest:path}"): RouteContract(
         note="page reverse proxy"
     ),
+    # ── gateway/routers/plugin_ui.py ───────────────────────────────────
+    ("GET", "/api/plugin-ui/{plugin}"): RouteContract(
+        note="plugin page mount — trailing-slash redirect"
+    ),
+    ("GET", "/api/plugin-ui/{plugin}/{rest:path}"): RouteContract(
+        note="plugin page mount — static read"
+    ),
     # ── gateway/routers/presets.py ───────────────────────────────────
     ("GET", "/api/presets"): RouteContract(),
     ("GET", "/api/presets/{preset_id}"): RouteContract(),
