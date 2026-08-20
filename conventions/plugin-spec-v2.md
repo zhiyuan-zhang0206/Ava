@@ -93,7 +93,8 @@ Example (the shape `ava_code` would declare):
     "config": { "schema": "default_config.py", "perAgentFields": ["marker"] },
     "skills": ["skills/"],
     "commands": ["commands/"],
-    "mcpServers": ["."]
+    "mcpServers": ["."],
+    "ui": { "themes": [{ "name": "solarized", "tokens": { "--background": "oklch(0.99 0.02 90)" } }] }
   },
   "dependencies": {
     "plugins": {},
@@ -119,6 +120,7 @@ Example (the shape `ava_code` would declare):
 | `dependencies.pythonPackages` | The Python dependency ranges this package is known to work with. For MCP packages this is the **mirror / validation anchor** of `pyproject.toml` dependencies. **Hard enforcement** (user ruling 2026-08-13): a declared range without an upper bound is a validator error, and an install/upgrade whose pyproject range falls outside the declared range is refused | **#1198, permanently**: unbounded or drifting pyproject ranges are stopped at install time |
 | `dependencies.hostCapabilities` | Host capability declarations — `db: none|ro|rw`, `network: none|local|any`, `shell: none|any`, `display: none|required`, `unixSocket: none|required`. The execution side (capability gates on resource injection) lands with the context model (S5); today the manifest only declares, and MCP runtime keeps its existing `requires` check | context/capability declarations unified (D12/D13); generalizes the MCP `requires` keys |
 | `contributions.*` | Declared contribution surfaces (VS Code `contributes` analog). **The declaration is documentation; registration is fact.** The diff between the two is already computed and readable — `ava plugins inspect <name>` reports it (`agent/plugin_catalog.py:declared_vs_registered`, over the attribution ledger every `register_*` writes); S3 turns that same computation into the load-time gate (declared-but-not-registered = warning, registered-but-not-declared = fail-fast) | surfaces pre-checkable, listable, auditable |
+| `contributions.ui` | The console surfaces this package contributes, as data: `agentInspect` sections, `nav` entries, `themes` token packs. Closed type set, closed icon vocabulary, and a theme token vocabulary that is the console's own `:root` custom properties — validated by `shared/plugin_ui_contributions.py`. No registration side: the console reads the declaration itself. Design + the runtime slices: [`future/frontend-plugin-contributions.md`](../future/frontend-plugin-contributions.md) | a plugin can put a panel, a page, or a skin in front of the user without a frontend fork |
 | `config.schema` / `config.perAgentFields` | Pointer to the config schema (the Pydantic model, or a declarative schema) + which fields per-agent overlays may override | PR-E; pre-install config validation without importing plugin code |
 | `lifecycle.*` | See the lifecycle section | dispose contract (C9/C10) |
 
@@ -134,7 +136,8 @@ hard validator requirement for `dependencies.pythonPackages` entries** — the
 ## Implemented today (S0–S2)
 
 The validator lives in `shared/plugin_manifest.py` (parse + validate +
-range algebra + the pyproject mirror check). Enforcement points:
+range algebra + the pyproject mirror check), with the `contributions.ui`
+schema in `shared/plugin_ui_contributions.py`. Enforcement points:
 
 | Surface | What runs | When |
 |---|---|---|
@@ -260,7 +263,7 @@ dimensions that today are scattered (D13), one concept.
 
 | Mechanism | Where it lands |
 |---|---|
-| One `package.json` + `contributes` | `ava-plugin.json` + the seven contribution surfaces |
+| One `package.json` + `contributes` | `ava-plugin.json` + its contribution surfaces |
 | `engines.vscode` | `engines.ava` |
 | `extensionDependencies` | `dependencies.plugins` — resolved + refused, **not** auto-installed (auto-installing third-party code violates the install-scan gate) |
 | `activationEvents` | `lifecycle.activation` — the slot is declared (`immediate` only); event-driven activation is not implemented (six plugins, cheap imports — no benefit) |
@@ -271,12 +274,13 @@ dimensions that today are scattered (D13), one concept.
 1. **Marketplace / publishing channel** — Ava stays git-URL + local registry
    (user ruling 2026-08-12: generic MCP servers are user-installed and
    user-maintained; a store is infra a single-user deployment does not need).
-2. **UI contribution surfaces (menus/views/themes)** — Ava plugins have no UI
-   surface today; the key that grows when that changes is designed in
-   [`future/frontend-plugin-contributions.md`](../future/frontend-plugin-contributions.md)
-   (`contributions.ui`: declarative inspect sections / nav pages / theme token
-   packs — the declarative *shape* is borrowed, runtime component composition
-   still is not).
+2. **Runtime component composition** — VS Code's *declarative* views/themes
+   shape IS borrowed: `contributions.ui` declares inspect sections, nav pages,
+   and theme token packs, rendered by the console's own components
+   ([`future/frontend-plugin-contributions.md`](../future/frontend-plugin-contributions.md)).
+   What stays unborrowed is third-party code composed into the app at runtime;
+   a plugin's custom visuals come from a page it serves itself, embedded in a
+   sandboxed iframe (VS Code webviews are the same deliberate boundary).
 3. **Auto-generated activation event sets** — activation surface = agent
    process start; no workspace/language/command triggers.
 

@@ -212,7 +212,8 @@ def _print_diff(view: PluginView) -> None:
         print(
             _wrapped(
                 "install-time",
-                f"{', '.join(declared_only)} — declared, and settled on disk at install "
-                "time rather than by a register_* call (not comparable here)",
+                f"{', '.join(declared_only)} — declared, and read straight from the "
+                "manifest (files settled on disk at install time, `ui` by the console) "
+                "rather than by a register_* call (not comparable here)",
             )
         )

@@ -34,6 +34,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
 
+from shared.plugin_ui_contributions import validate_ui_contributions
+
 MANIFEST_FILENAME = "ava-plugin.json"
 API_VERSION = 2
 
@@ -296,6 +298,7 @@ CONTRIBUTION_KEYS = {
     "skills",
     "commands",
     "mcpServers",
+    "ui",
 }
 HOST_CAPABILITIES = {
     "db": ("none", "ro", "rw"),
@@ -438,6 +441,9 @@ def _validate_contributions(data: dict[str, Any], errors: list[str]) -> dict[str
                 else:
                     cfg[ckey] = cval
             parsed[key] = cfg
+            continue
+        if key == "ui":
+            parsed[key] = validate_ui_contributions(value, errors)
             continue
         lst = _str_list(value, f"contributions.{key}", errors)
         if lst is None:
