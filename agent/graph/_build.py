@@ -8,7 +8,9 @@ build_graph does not take them; the caller passes them via
 At startup, `_load_extensions()` reads `$AVA_HOME/plugins.json` and imports the
 `plugin.py` of every enabled plugin itself, by path — builtin and external alike,
 one loop, no delegation to `ava._extend.scan_and_load` (that loader is
-external-only and is called once from `agent/loop.py`). Layer A wrap
+external-only and is called once from `agent/loop.py`). A repeat call re-executes
+the module already in `sys.modules` rather than binding a new one, so a plugin
+module's identity is stable for the life of the process. Layer A wrap
 monkey-patches the main process's ava module; worker thread `import ava` hits
 sys.modules cache and sees the wrapped version. Config decides what is imported;
 not imported = not registered.
@@ -181,6 +183,8 @@ def _load_extensions() -> plugins_cfg.PluginsConfig:
     1. plugins_cfg._discover_plugins() → scan built-in + external dirs, returns {name: path}
     2. plugins_cfg.load(known_plugins) → read config + auto-merge new plugins
     3. For each enabled=true plugin: import plugin.py to trigger side-effects
+       (reload semantics — a module object already registered for that file is
+       re-executed, never replaced)
     """
     # 0. Reset previously registered plugin state / hook / contributor — multiple calls
     # to _load_extensions (test fixture, dev hot-reload) accumulate module-level
@@ -199,6 +203,7 @@ def _load_extensions() -> plugins_cfg.PluginsConfig:
 
     # 3. Import enabled plugin (with PluginContext for state key prefixing)
     import importlib.util
+    import os.path
     import sys
 
     from shared.plugin_context import PluginContext
@@ -223,7 +228,26 @@ def _load_extensions() -> plugins_cfg.PluginsConfig:
             assert spec is not None and spec.loader is not None, (  # noqa: S101
                 f"spec_from_file_location returned None for existing {plugin_py}"
             )
-            module = importlib.util.module_from_spec(spec)
+            # Reload, not replace (issue #147). When this dotted name already
+            # names *this* file, execute into the module object that is already
+            # registered — `importlib.reload` semantics — instead of binding a
+            # fresh one. Replacing it forks the module identity: whoever imported
+            # the plugin before the load (a test's module-level import, a hook
+            # bound at import time) keeps the old object, while every later
+            # `sys.modules` lookup — `mock.patch`, `getattr` on the dotted path —
+            # resolves the new one, so a patch silently never reaches the code
+            # under test. Re-executing keeps one `__dict__`, so both sides see
+            # the same globals. A *different* file claiming the same dotted name
+            # (synthetic plugins under a tmp dir in tests) is a different module
+            # and must not inherit the previous one's globals — bind fresh.
+            existing = sys.modules.get(spec.name)
+            recorded = getattr(existing, "__file__", None)
+            module = (
+                existing
+                if recorded is not None
+                and os.path.realpath(recorded) == os.path.realpath(plugin_py)
+                else importlib.util.module_from_spec(spec)
+            )
             # Register to sys.modules **before exec_module** — standard importlib idiom:
             # BaseModel class definitions inside the plugin trigger Pydantic's
             # `__init_subclass__`, which calls `get_type_hints` to resolve
