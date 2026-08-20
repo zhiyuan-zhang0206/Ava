@@ -50,8 +50,11 @@ Both are guardrails from real escapes; the rules are condensed in
 - **A guard only guards if the regression actually fails it.** When you add a
   protective test, lint, or assertion, introduce the regression it targets, watch
   it go red, and revert — in the same PR. For a test written against a fix that
-  already landed: `git stash push <implementation file>`, re-run, confirm *that*
-  test fails, `git stash pop`. A green result from a test that cannot go red is
+  already landed: `git checkout <sha-before-the-fix> -- <file>`, re-run, confirm
+  *that* test fails, `git checkout HEAD -- <file>`. **Not `git stash push
+  <file>`** — that stashes only uncommitted changes, so against a committed fix
+  it stashes nothing and the test passes, which looks exactly like a proof and is
+  the opposite of one. Confirm the revert landed before trusting the result. A green result from a test that cannot go red is
   indistinguishable from a green result that means something. This suite makes it
   easy to get wrong: it provisions a real throwaway Postgres, so a "dependency is
   down" fixture that patches only the seam today's code calls leaves every other
