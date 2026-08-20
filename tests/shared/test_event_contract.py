@@ -47,16 +47,16 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     2026-08-09 + gateway_latency Task #1091 + exec_thread_unreapable
     Task #1058 + the three CAS-race kinds from Task #688: claim_cas_lost,
     claim_cas_lost_exit, idle_cas_lost + history_dump Task #1249 +
-    plugin_activation issue #40 + the six hosted-runner kinds
+    plugin_activation issue #40 + the seven hosted-runner kinds
     (future/infra/agent-runner-as-server.md): host_dispatcher_subscribed,
     host_dispatcher_reconnect, host_dispatcher_bad_channel, host_turn_crashed,
-    host_agent_prepared, host_started).
+    host_agent_prepared, host_started, host_turn_uncancellable).
     Bump deliberately when adding a telemetry event, never to silence a
     drift."""
     from shared.telemetry import _TELEMETRY_KINDS
 
     assert telemetry_events() == frozenset(_TELEMETRY_KINDS)
-    assert len(_TELEMETRY_KINDS) == 96
+    assert len(_TELEMETRY_KINDS) == 97
 
 
 def test_category_for_kind() -> None:
