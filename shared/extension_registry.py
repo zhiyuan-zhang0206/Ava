@@ -17,9 +17,10 @@ would buy the dependency without the payoff.
 
 A package's identity as *content* is `install_registry.tree_hash` — the same
 hash converge already uses as its user-modification detector, so the registry
-and the local trees speak one vocabulary. `extension_blobs` is keyed by it and
-its rows are immutable: re-installing identical content re-uses the blob, and
-two extensions that happen to hold identical trees share one row.
+and the local trees speak one vocabulary and a materialized directory can be
+compared to its row by hashing it, with no re-packing. `extension_blobs` is
+keyed by that value and its rows are immutable: re-installing identical content
+re-uses the blob, and two extensions holding identical trees share one row.
 
 The archive is a **deterministic** tar: entries sorted by path, and every
 mtime/uid/gid/mode normalized. Without that, packing the same tree twice
@@ -174,12 +175,17 @@ def unpack_tree(archive: bytes, dest: Path) -> None:
 
 
 def blob_hash(archive: bytes) -> str:
-    """The content hash of an already-packed archive.
+    """A hash of the archive BYTES — a fallback identity, not the scheme.
 
-    Distinct from `install_registry.tree_hash`, which hashes the tree on disk.
-    Both address the same content; this one is what `extension_blobs` is keyed
-    by, so that the blob's identity is a property of the stored bytes rather
-    than of a directory that may since have changed.
+    `extension_blobs` is keyed by the TREE hash (`install_registry.tree_hash`),
+    because that is the vocabulary the per-machine registry and converge's
+    user-modification detector already speak: a materialized tree can then be
+    compared to its row by hashing the directory, with no re-packing and no
+    second notion of "same content". `pack_tree` is deterministic, so tree and
+    archive are 1:1 either way — the choice is about which value other code can
+    compute cheaply.
+
+    Used only when a caller has bytes and no tree to hash.
     """
     return hashlib.sha256(archive).hexdigest()
 
@@ -201,16 +207,25 @@ def check_size(archive: bytes, *, name: str) -> None:
         )
 
 
-def put_blob(conn: psycopg.Connection, archive: bytes, *, name: str) -> str:
-    """Store `archive` if absent and return its content hash.
+def put_blob(
+    conn: psycopg.Connection, archive: bytes, *, name: str, content_hash: str | None = None
+) -> str:
+    """Store `archive` under `content_hash` if absent; return the hash used.
+
+    `content_hash` is the TREE hash (`install_registry.tree_hash`) of what the
+    archive contains — the same value converge already records as its
+    user-modification detector, so the cluster row and a materialized tree
+    compare directly with no re-packing. `register_tree` always supplies it;
+    the `blob_hash` fallback exists for a caller holding only bytes and is not
+    the addressing scheme (see `blob_hash`).
 
     Idempotent by construction: blobs are immutable and content-addressed, so a
-    second write of identical bytes is a no-op rather than an update. Re-storing
-    is the common case — reinstalling an unchanged package, or two extensions
-    with identical trees.
+    second write of identical content is a no-op rather than an update.
+    Re-storing is the common case — reinstalling an unchanged package, or two
+    extensions with identical trees.
     """
     check_size(archive, name=name)
-    digest = blob_hash(archive)
+    digest = content_hash if content_hash is not None else blob_hash(archive)
     conn.execute(
         "INSERT INTO extension_blobs (content_hash, archive, size_bytes) "
         "VALUES (%s, %s, %s) ON CONFLICT (content_hash) DO NOTHING",
@@ -356,10 +371,16 @@ def register_tree(
 
     Returns the content hash the row now points at.
     """
+    from shared.install_registry import tree_hash
+
     archive = pack_tree(root)
     check_size(archive, name=name)
+    # The TREE hash, not the archive's: this is the value a machine can recompute
+    # from a materialized directory to answer "is this the content the row points
+    # at", and the one converge already records per package.
+    digest = tree_hash(root)
     with pool.connection() as conn, conn.transaction():
-        digest = put_blob(conn, archive, name=name)
+        put_blob(conn, archive, name=name, content_hash=digest)
         upsert(
             conn,
             name=name,
