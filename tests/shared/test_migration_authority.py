@@ -37,18 +37,37 @@ _SYN = "29991231T235959_synthetic-authority"
 
 @pytest.fixture(autouse=True)
 def _clean_units_and_synthetic() -> Iterator[None]:
-    """Own machine_units + the synthetic migration's row/table for each test.
+    """Own machine_units + the synthetic migration's row/table for each test,
+    and put back the applied names this module's applying tests squash away.
 
     conftest's TRUNCATE list does not cover machine_units (it is cluster
     topology, not business data), so this module clears it before and after
     rather than inheriting whatever another module registered.
+
+    schema_migrations needs the same ownership. The tests that point
+    MIGRATIONS_DIR at a tmp dir holding only the synthetic migration make every
+    REAL migration name a squash candidate, and a squash DELETEs those rows from
+    the suite's shared database for the rest of the session. Left unrestored,
+    what the next test sees depends on which sibling ran first — an ordering
+    xdist is free to change, and did: CI shard 7 failed while the same test
+    passed locally.
     """
+    from shared.migrations import required_migration_set
+
+    # Snapshot before any test monkeypatches MIGRATIONS_DIR, so teardown
+    # restores the checkout's real set rather than some tmp dir's.
+    required = sorted(required_migration_set())
 
     def _clear() -> None:
         with psycopg.connect(settings.data_plane.db_url, autocommit=True) as conn:
             conn.execute("DELETE FROM machine_units")
             conn.execute("DELETE FROM schema_migrations WHERE name = %s", (_SYN,))
             conn.execute("DROP TABLE IF EXISTS syn_authority_t")
+            for name in required:
+                conn.execute(
+                    "INSERT INTO schema_migrations (name) VALUES (%s) ON CONFLICT DO NOTHING",
+                    (name,),
+                )
 
     _clear()
     yield
@@ -162,11 +181,16 @@ def test_allows_a_non_gateway_host_with_nothing_to_apply(
     """An agent-runner's ordinary `ava start` calls this against the central DB
     and legitimately applies nothing. Authority is checked only when something
     would actually be written, so the guard must not turn every runner start into
-    a hard failure."""
+    a hard failure.
+
+    Runs against the checkout's REAL migrations dir, which is what makes this a
+    genuine no-op: the suite provisions its database with exactly those
+    migrations applied, so nothing is pending and nothing is squashed. Pointing
+    MIGRATIONS_DIR at an empty dir instead would make every applied migration a
+    squash candidate — a mutation, which the guard is supposed to refuse.
+    """
     _register_gateway_unit(*_GATEWAY)
     _claim_checkout(monkeypatch, *_RUNNER)
-    _as_git_worktree(tmp_path)  # empty migrations/ in a real checkout
-    monkeypatch.setattr("shared.migrations.MIGRATIONS_DIR", tmp_path)  # empty
 
     with psycopg.connect(settings.data_plane.db_url) as conn:
         assert apply_pending_migrations(conn) == []
