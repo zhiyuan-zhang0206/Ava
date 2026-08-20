@@ -23,7 +23,4 @@ Code and document structure guards, mostly invoked by `.pre-commit-config.yaml` 
 - `check_doc_references.py` — validates every CLI flag in the docs against the argparse tree and `scripts/*.sh` case branches, plus relative markdown links; runs on every pre-commit commit (`pass_filenames: false`) (`lint_skill_md_size.py`: hard cap of 300 lines / soft zone 250-300 for SKILL.md, pushing progressive disclosure — root SKILL.md as index, depth sinks into sub-skills)
 - `lint_migrations.py` — timestamp-id + applied-set scheme checks: filename format, unique names, up/down `.down.sql` pairing, and `db/schema.sql` baseline stamping; **no expand-contract check** (that's a documentation discipline, not lint)
 
-### OKF Graph Toolchain
-- `build_okf_data.py` — bundle → `graph_data.json` (nodes / tree edges / cross edges)
-
 Parent: [[scripts/scripts.ava.okf.md|scripts]].
