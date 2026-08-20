@@ -54,6 +54,37 @@ rather than by how carefully the operator aimed. This is why every Ava cluster
 owns its own Postgres and Redis.
 Evidence: [`postmortems/0004`](../postmortems/0004-isolation-one-command-can-undo.md).
 
+### An operation over "all X" covers the X that existed when it ran
+
+A grant, a sync, a permission sweep, a capability probe cached at boot, a config
+snapshot read once — anything that enumerates a population and acts on each member
+is a **loop**, however much its name reads like a policy. Nothing about the moment
+it runs reveals the gap: every member is covered, the test passes, the operator
+sees the right thing. The gap opens when a member joins later, and by then the
+operation is long finished and nobody is watching the join.
+
+`GRANT SELECT ON ALL TABLES IN SCHEMA public` is close to a perfect specimen,
+because "ALL TABLES" actively reads as a standing rule while meaning *all tables
+that exist this instant* — Postgres expands it into per-object entries at
+execution time and nothing carries forward. Prefer the platform's standing form
+where one exists (`ALTER DEFAULT PRIVILEGES`), and note it needs a partner: a
+standing rule is not retroactive, so the one-time operation still has to be re-run
+once to cover the members already there. Where no standing form exists, re-run at
+the moment the population changes — not on a timer, and not on every start, which
+buys nothing and puts a privileged connection on a hot path.
+
+The test that catches this must put the calls in the **live** order: establish,
+then add a member, then check. A fixture that builds the whole world first and
+applies the operation last covers every member by construction and can never fail,
+which is how a grant matrix asserted over a dozen tables while the class stayed
+open. Same family as *a guard only guards if the regression actually fails it*.
+Evidence: PR #208 — `shared/cluster/provision.py` granted the runner role
+`SELECT ON ALL TABLES` once at install birth, so `extensions`, created by the
+first post-baseline migration to add a table, was unreadable on every pure
+agent-runner for the life of the cluster. It surfaced as a *materialization*
+warning naming an unreachable registry, on the one machine class the feature
+existed for.
+
 ## Tests and guards
 
 ### A dead dependency is a fact about the dependency, not about one seam
