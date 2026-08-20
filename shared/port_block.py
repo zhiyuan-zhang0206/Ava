@@ -98,5 +98,12 @@ LEGACY_AVA_PORTS: dict[str, int] = {
     "delivery_watchdog": 8110,
     "im_bridge": 8111,
     "page_server": 8112,
-    "agent_host": 8113,
+    # 8114, NOT 8113: `ops` already holds 8113 (it moved off 8106 to dodge the
+    # Windows iphlpsvc grab, which is why this table is not in offset order).
+    # These are the ports a unit whose `.env` predates a key actually binds, so
+    # a duplicate here is not a cosmetic clash — the host would take the ops
+    # server's port on every existing unit, and the ops server is what the
+    # gateway dials for every runner RPC. `test_legacy_ports_are_unique` is the
+    # guard.
+    "agent_host": 8114,
 }
