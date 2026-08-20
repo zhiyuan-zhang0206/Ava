@@ -340,10 +340,12 @@ def seed_allowlist() -> frozenset[str]:
     """Convenience-seed allowlist — the ONLY keys the install-time seed step
     (`install.sh --worktree` / `python -m cli.install_cluster --seed-only`) may
     copy from the prod home's `.env` into a fresh worktree cluster's `.env`.
-    Capability secrets only: LLM provider keys + web search/fetch keys. Derived
-    from the `seed: True` field marker (declared once on each provider-key
-    field in shared/config/lm.py + web.py), so a new provider key is seedable
-    by adding the marker — no second set to edit. Structurally disjoint from
+    Capability credentials only: LLM provider keys + web search/fetch keys, plus
+    the one non-secret a key is useless without (`AVA_DASHSCOPE_BASE_URL` — a
+    dedicated Model Studio workspace mints its key for its own host). Derived
+    from the `seed: True` field marker (declared once on each such field in
+    shared/config/lm.py + web.py), so a new provider key is seedable by adding
+    the marker — no second set to edit. Structurally disjoint from
     derived_env_keys() | env_identity_keys() (guarded by
     tests/shared/test_cluster_env.py): a seeded worktree must never inherit
     prod's data-plane identity or its cluster secret (always freshly minted),

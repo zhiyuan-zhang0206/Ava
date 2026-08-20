@@ -28,8 +28,9 @@ own cluster under `--home` (install.sh derives the default
 `~/.ava-<checkout-dir>` from the checkout location, never the cwd; any path
 works — the path needs no naming convention), writes the checkout's `.ava_home`
 pointer, and — with `--seed --seed-source <env>` — copies the
-`shared.env_registry.seed_allowlist()` allowlist (LLM + web-search keys only) from the
-stated source. The cluster secret is never seeded or inherited: a worktree
+`shared.env_registry.seed_allowlist()` allowlist (LLM + web-search keys, plus
+the DashScope base URL those keys are minted against) from the stated source.
+The cluster secret is never seeded or inherited: a worktree
 birth is single-machine, so it is a NO-AUTH cluster (empty secret) unless
 `AVA_INSTALL_CLUSTER_SECRET` states one.
 
@@ -200,8 +201,9 @@ def _resolve_runner_password(env_path: Path) -> str:
 
 
 def seed_convenience_env(*, target_env: Path, source_env: Path) -> list[str]:
-    """Copy the seed_allowlist() allowlist (LLM provider + web search/fetch keys)
-    from `source_env` (the prod home's `.env`) into `target_env`. Convenience
+    """Copy the seed_allowlist() allowlist (LLM provider + web search/fetch keys,
+    plus the DashScope base URL those keys are minted against) from `source_env`
+    (the prod home's `.env`) into `target_env`. Convenience
     only — identity/derived keys, the cluster secret, and singleton credentials
     are structurally outside the allowlist. Returns the copied key names;
     missing source is a no-op (a box with no prod install seeds nothing)."""

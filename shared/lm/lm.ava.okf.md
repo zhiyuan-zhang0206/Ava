@@ -27,7 +27,7 @@ tags:
 | `kimi-` | ChatMoonshot (`langchain-moonshot`) | MOONSHOT_API_KEY |
 | `glm-` | ReasoningContentChatModel (Zhipu) | GLM_API_KEY |
 | `grok-` | ChatXAI (`langchain-xai`) | XAI_API_KEY |
-| `qwen` | ReasoningContentChatModel (Alibaba, Beijing) | DASHSCOPE_API_KEY |
+| `qwen` | ReasoningContentChatModel (Alibaba) | DASHSCOPE_API_KEY + `AVA_DASHSCOPE_BASE_URL` |
 
 - SSOT is `registry.py:MODELS`, one `ModelSpec` per model id; `SUPPORTED_MODELS` (spawn dropdown), `MODEL_CONTEXT_WINDOW`, `MODEL_KNOWLEDGE_CUTOFF`, `MODEL_IDENTITY` are derived views re-exported through factory. Per-PROVIDER tables stay in factory (`_MODEL_KEY_MAP`, `_VISION_MODEL_PREFIXES`) / `_effort.py` (`_PROVIDER_EFFORT_LEVELS`).
 - `validate_model_config()` — spawn-boundary pre-check (`POST /api/agents`): model registered + key configured, else 400 (fail-fast vs silent hang).
@@ -45,11 +45,8 @@ LangChain types `AIMessage(Chunk).content` weakly as `str | list[str | dict[str,
 ### stop classification (`stop.py`)
 - `classify_stop()` → `StopCategory` (NORMAL/TRUNCATED/UNEXPECTED/CORRUPTED) by `model_provider`; `_BY_PROVIDER` has five keys for nine providers (anthropic ← claude+deepseek, openai ← gpt+mimo+glm+qwen, google_genai, moonshot, xai). TRUNCATED retries with raised max_tokens; unknown provider fail-fast.
 
-### billing (`pricing.py` + `pricing_catalog.json`)
-- The reviewed JSON catalog is the sole volatile pricing source: every model has official-source provenance plus gapless effective periods, input-token tiers, and optional recurring UTC rate windows. The registry carries no duplicate price tuples.
-- Date-only future increases with no provider timezone use the documented conservative UTC+14 boundary and carry an `effective_time_note`; exact published instants are used unchanged.
-- `rates_at(model, at, input_tokens)` selects one exact 3-rate tuple `(cache_miss, cache_hit, out)` USD/M. `quote()` returns those rates and the computed cost atomically so a scheduled boundary cannot split the event snapshot; `cost_usd()` remains the compatibility reader and returns `None` for unknown models.
-- `scripts/update_model_pricing.py` reconciles strict official-source adapters with the checked-in catalog. Automation proposes an append-only, reviewable PR; runtime pricing stays deterministic and network-free.
+### billing (`pricing.py` + `pricing_catalog.json`) — [[pricing.ava.okf.md]]
+- A reviewed, network-free JSON catalog with official-source provenance is the sole volatile price source; `quote()` returns the selected rates and the cost atomically. Selection rules, the CNY-conversion and tier-boundary traps, and region sensitivity live in the child node.
 
 ### context budget (`context_budget.py`)
 - `resolve_context_budget(model)` → `ContextBudget(max_context_tokens, soft_compact_tokens, hard_compact_tokens)`: hard = `min(auto_compact_fraction × window, auto_compact_ceiling_tokens)`; soft = `compact_reminder_fraction × window` (scaled down when the ceiling bites). One flat rule for the whole roster — soft 30% / hard 40% of each model's own window (`DEFAULT_TUNING` 0.3/0.4, ceiling 0 = no cap, no per-model compact override), per-agent overridable; registry entry ⇒ correct thresholds, no parallel table. Unregistered models raise `UnknownModelWindowError` (compact hook bubbles it; gateway display degrades to 0/0/0).
@@ -64,8 +61,8 @@ LangChain types `AIMessage(Chunk).content` weakly as `str | list[str | dict[str,
 - **DeepSeek uses the Anthropic protocol, not langchain-deepseek**: the latter 1.0.1 breaks AIMessages on thinking + tool_calls + streaming (empty metadata → next-round 400s; upstream #34166 OPEN). The Anthropic-compat endpoint (`api.deepseek.com/anthropic`) sidesteps it.
 - **max_tokens**: both anthropic-protocol branches (claude / deepseek) pin it explicitly to `ModelSpec.max_output_tokens` — langchain-anthropic falls back to a legacy 4096 for ids it doesn't know, truncating thinking mid-turn (#169). `_validate_registry` refuses a spawnable claude/deepseek entry without the cap; unregistered ids fail fast. OpenAI-style branches leave it unset (those APIs default to the model's own cap).
 - **streaming default** (`ModelSpec.streaming`): True, and no registry entry sets False today (kimi-k3's former False was removed — `decisions/2026-07-25-per-model-tuning-values.md`). Explicit kwarg overrides.
-- **model identity** (`ModelSpec.model_identity` → `MODEL_IDENTITY`): per-model note injected before knowledge cutoff in the system prompt (deepseek-v4-pro/flash, kimi-k3, qwen3.8-max).
+- **model identity** (`ModelSpec.model_identity` → `MODEL_IDENTITY`): per-model note injected before knowledge cutoff in the system prompt (deepseek-v4-pro/flash, kimi-k3, both qwen3.8s).
 - **Anthropic prompt caching**: claude branch passes `cache_control: ephemeral`; system + eligible blocks cached 5 min server-side. No facade — submodules imported directly.
-- **Qwen**: reasoning is graded by a token budget on this endpoint, not a level enum, so the knob rides the `enable_thinking` switch (mimo's binary `none`/`high`). Its always-on implicit cache reports `cached_tokens` → `cache_read`, priced at the catalog rate; the explicit `cache_control` tier is unwired.
+- **Qwen**: graded by a token budget, not a level enum, so the knob rides the `enable_thinking` switch (mimo's binary `none`/`high`). Endpoint is CONFIG (`AVA_DASHSCOPE_BASE_URL`) — a dedicated workspace host is unreachable from the public default, and region changes reprice. Verified live 2026-08-20: thinking-off honored, and the streamed usage frame carries `cached_tokens` → `cache_read`. Explicit `cache_control` tier unwired.
 
 - Key deps: [[llm.ava.okf.md]] (agent/graph/_llm.py calls `build_chat_model`)

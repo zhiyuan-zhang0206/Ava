@@ -412,11 +412,9 @@ class TestBuildChatModel:
 
     def test_qwen_returns_reasoning_content_model(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """qwen* (Alibaba DashScope) returns ReasoningContentChatModel pointed at
-        the BEIJING compatible-mode endpoint — Qwen streams its thinking in the
-        `reasoning_content` delta, which the subclass recovers into thinking
-        blocks. The region is load-bearing, not cosmetic: `dashscope-intl` serves
-        the same models at a different tariff than the one priced in
-        pricing_catalog.json."""
+        the default public compatible-mode endpoint — Qwen streams its thinking in
+        the `reasoning_content` delta, which the subclass recovers into thinking
+        blocks."""
         monkeypatch.setattr(settings.lm, "llm_override", "")
         monkeypatch.setattr(settings.lm, "dashscope_api_key", SecretStr("sk-qwen"))
         from shared.lm._reasoning_compat import ReasoningContentChatModel
@@ -424,6 +422,20 @@ class TestBuildChatModel:
         m = build_chat_model("qwen3.8-max")
         assert isinstance(m, ReasoningContentChatModel)
         assert str(m.openai_api_base) == "https://dashscope.aliyuncs.com/compatible-mode/v1"
+
+    def test_qwen_honors_the_configured_base_url(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A dedicated Model Studio workspace serves the same API on its own host,
+        which the public default cannot reach at all — so the endpoint has to be
+        config, not a constant. Hardcoding it locked those accounts out entirely."""
+        monkeypatch.setattr(settings.lm, "llm_override", "")
+        monkeypatch.setattr(settings.lm, "dashscope_api_key", SecretStr("sk-qwen"))
+        workspace = "https://ws-example.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
+        monkeypatch.setattr(settings.lm, "dashscope_base_url", workspace)
+        from shared.lm._reasoning_compat import ReasoningContentChatModel
+
+        m = build_chat_model("qwen3.8-max")
+        assert isinstance(m, ReasoningContentChatModel)
+        assert str(m.openai_api_base) == workspace
 
     def test_qwen_requests_stream_usage(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """stream_usage sends `stream_options.include_usage`, without which the

@@ -529,6 +529,25 @@ MODELS: dict[str, ModelSpec] = {
             reasoning_effort="high",
         ),
     ),
+    "qwen3.8-27b": ModelSpec(
+        provider="qwen",
+        spawnable=True,
+        # Same ceilings as qwen3.8-max (thinking-mode input is the binding one —
+        # see the max entry); only price and weight class differ, at roughly a
+        # quarter of max's input rate.
+        context_window=983_616,
+        max_output_tokens=131_072,
+        # Same unpublished-cutoff situation as every Qwen — see qwen3.8-max.
+        # Anchored on this model's own publication (2026-08-17), erring early.
+        knowledge_cutoff="2026-01",
+        model_identity="You are running on Qwen3.8-27B (Alibaba Qwen).",
+        effort_levels=("none", "high"),
+        tuning=ModelTuning(
+            # Thinking on by default here too — verified live 2026-08-20 that
+            # `enable_thinking: false` is honored rather than rejected.
+            reasoning_effort="high",
+        ),
+    ),
     # -- legacy / non-spawnable (facts kept for old agents) --
     "claude-opus-4-8": ModelSpec(
         provider="claude",

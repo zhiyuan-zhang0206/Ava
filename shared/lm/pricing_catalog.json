@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "catalog_version": "2026-08-20.1",
+  "catalog_version": "2026-08-20.2",
   "currency": "USD",
   "unit_tokens": 1000000,
   "models": {
@@ -490,6 +490,28 @@
                 "input": "1.65",
                 "cache_read": "0.206",
                 "output": "4.951"
+              },
+              "utc_daily_overrides": []
+            }
+          ]
+        }
+      ]
+    },
+    "qwen3.8-27b": {
+      "source_url": "https://www.alibabacloud.com/help/en/model-studio/qwen3-8-27b",
+      "source_checked_at": "2026-08-20",
+      "periods": [
+        {
+          "effective_from": null,
+          "effective_until": null,
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "0.424",
+                "cache_read": "0.085",
+                "output": "1.696"
               },
               "utc_daily_overrides": []
             }

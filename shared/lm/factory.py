@@ -17,7 +17,7 @@ Current provider matrix:
 | `kimi-*`     | Moonshot  | `langchain-moonshot`        | `MOONSHOT_API_KEY`  | (default)                         |
 | `glm-*`      | Zhipu     | `ReasoningContentChatModel`| `GLM_API_KEY`       | `https://open.bigmodel.cn/api/paas/v4` |
 | `grok-*`     | xAI       | `langchain-xai`             | `XAI_API_KEY`       | (default)                         |
-| `qwen*`      | Alibaba   | `ReasoningContentChatModel`| `DASHSCOPE_API_KEY` | `https://dashscope.aliyuncs.com/compatible-mode/v1` |
+| `qwen*`      | Alibaba   | `ReasoningContentChatModel`| `DASHSCOPE_API_KEY` | `AVA_DASHSCOPE_BASE_URL` (default `https://dashscope.aliyuncs.com/compatible-mode/v1`) |
 
 kimi uses `ChatMoonshot` (`langchain-moonshot`); grok uses `ChatXAI`
 (`langchain-xai`). Both capture reasoning in `additional_kwargs["reasoning_content"]`

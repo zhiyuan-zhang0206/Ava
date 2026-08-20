@@ -158,9 +158,9 @@ def test_wsl_default_health_port_base_derives_a_legal_block():
 
 def test_seed_keys_disjoint_from_cluster_identity():
     """The install-time seed allowlist must never overlap the cluster-isolation /
-    machine-identity key sets — a seeded worktree copies capability secrets only,
-    never the prod data plane, serve flags, or the cluster secret (always minted
-    fresh). AVA_TELEGRAM_BOT_TOKEN is additionally banned by name: it is in
+    machine-identity key sets — a seeded worktree copies capability credentials
+    (and the endpoint they are minted against) only, never the prod data plane,
+    serve flags, or the cluster secret (always minted fresh). AVA_TELEGRAM_BOT_TOKEN is additionally banned by name: it is in
     neither set, but two live clusters polling one bot token fight over the same
     getUpdates long-poll."""
     overlap = env_registry.seed_allowlist() & (

@@ -76,6 +76,19 @@ def test_every_spawnable_model_has_core_facts() -> None:
             assert rates_at(model, input_tokens=0) is not None
 
 
+def test_qwen_roster_is_exactly_the_two_flat_tier_models() -> None:
+    """Pinned by id, because which Qwen models may be registered is a pricing
+    constraint, not a preference. Alibaba publishes its length-tier boundaries
+    only as `Input<=256k` with no token count, and a tier boundary here must be
+    an exact integer — so a length-tiered Qwen cannot be priced without guessing
+    262,144 against 256,000 and mispricing ~3x in the band between. These two
+    are registered because an account's own `GET /api/v1/models` reports
+    `"range_name": "Default"` for both: a single flat tier, no boundary to
+    guess. Adding a third Qwen means re-clearing that bar
+    (shared/lm/pricing.ava.okf.md)."""
+    assert sorted(SUPPORTED_MODELS["qwen"]) == ["qwen3.8-27b", "qwen3.8-max"]
+
+
 def test_model_ids_match_their_provider_prefix() -> None:
     """A registry entry filed under the wrong provider would dispatch to the
     wrong build_chat_model branch."""

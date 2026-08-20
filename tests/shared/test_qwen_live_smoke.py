@@ -1,27 +1,26 @@
-"""The one live DashScope call that settles what the mock suite cannot.
+"""Live DashScope regression guard for the two facts that had no documentation.
 
-Everything else about the Qwen provider is asserted against Alibaba's published
-contract (`tests/agent/test_llm_factory.py`): request shaping, the
-`enable_thinking` switch, the base URL, usage plumbing. Three facts, though, are
-not documented anywhere and can only be observed against a real endpoint. They
-all fall out of one session with a real key, which is why they live in one file:
+Both were open risks when the provider shipped and both were then settled
+empirically on 2026-08-20, against a dedicated Model Studio workspace endpoint,
+for `qwen3.8-max` AND `qwen3.8-27b`:
 
-1. **Is `enable_thinking: false` honored on `qwen3.8-max`?** The Qwen3.8 family
-   is absent from Alibaba's deep-thinking table entirely; the open-weights
-   sibling card documents the parameter, and the model page publishes distinct
-   thinking / non-thinking input ceilings, which only makes sense if a
-   non-thinking mode exists. Ava's short-text paths (the labeler, the judge)
-   send it on every call, so a rejection would 400 them.
-2. **Does the STREAMED terminal usage frame carry
-   `prompt_tokens_details.cached_tokens`?** Alibaba documents the field for the
-   compatible endpoint, and separately documents that `stream_options.include_usage`
-   (which the provider sets) produces a terminal usage chunk — but never the
-   intersection. If the field is absent from the streamed frame, every qwen turn
-   silently bills as a full cache miss. This is why both tests stream rather than
-   invoke: the non-streaming path answers a different question.
-3. **Which field and string carry a billing / arrears error?** Still not
-   assertable — provoking it needs an exhausted account — but the error SHAPE is
-   now known, captured by pointing this file at a deliberately bogus key::
+1. **`enable_thinking: false` is honored** — HTTP 200, `reasoning_content`
+   absent, content exactly the requested token. Not the 400 an undocumented
+   switch risked. This matters because Ava's short-text paths (the labeler, the
+   judge) send it on every call.
+2. **The streamed terminal usage frame does carry
+   `prompt_tokens_details.cached_tokens`** — measured `{"prompt_tokens": 2723,
+   "prompt_tokens_details": {"cached_tokens": 2048, ...}}` on a warm repeat of a
+   ~2.7k-token prefix, 0 on the cold first call (27b: 1664 warm). So the ledger
+   reads a real number instead of silently billing every turn as a full cache
+   miss. Both tests stream rather than invoke because that is the specific claim.
+
+Neither is guaranteed to stay true across a vendor model revision, which is what
+this file now guards. A third question remains genuinely open:
+
+3. **Which field and string carry a billing / arrears error?** Provoking it needs
+   an exhausted account. The error SHAPE is known, captured by pointing this file
+   at a deliberately bogus key::
 
        401 {'error': {'message': 'Incorrect API key provided. ...',
                       'type': 'invalid_request_error',
@@ -49,7 +48,10 @@ all fall out of one session with a real key, which is why they live in one file:
         tests/shared/test_qwen_live_smoke.py -v
 
 Costs a few cents. Skipped whenever that variable is unset, which is every CI
-run and every ordinary local run.
+run and every ordinary local run. A dedicated Model Studio workspace is not
+reachable from the public default endpoint, so point the run at it with
+`AVA_LIVE_DASHSCOPE_BASE_URL=https://<workspace-id>.cn-beijing.maas.aliyuncs.com/compatible-mode/v1`
+— unset, the run uses whatever `AVA_DASHSCOPE_BASE_URL` resolves to.
 
 **Why not gate on `DASHSCOPE_API_KEY` itself** — the obvious design, and it is a
 trap that yields a test nobody can ever run. Two independent mechanisms close it:
@@ -81,8 +83,11 @@ from shared.lm.content import content_blocks
 from shared.lm.factory import build_chat_model
 from shared.message_kwargs import message_addl_kwargs, message_content
 
-_MODEL = "qwen3.8-max"
+# Both registered Qwen models — the vendor could revise either independently, and
+# the two facts below were measured on both.
+_MODELS = ("qwen3.8-max", "qwen3.8-27b")
 _LIVE_KEY = os.environ.get("AVA_LIVE_DASHSCOPE_KEY")
+_LIVE_BASE_URL = os.environ.get("AVA_LIVE_DASHSCOPE_BASE_URL")
 
 pytestmark = pytest.mark.skipif(
     not _LIVE_KEY,
@@ -104,16 +109,18 @@ def _live_provider(monkeypatch: pytest.MonkeyPatch) -> None:
     assert _LIVE_KEY is not None  # guaranteed by pytestmark; narrows for the type checker
     monkeypatch.setattr(settings.lm, "dashscope_api_key", SecretStr(_LIVE_KEY))
     monkeypatch.setattr(settings.lm, "llm_override", "")
+    if _LIVE_BASE_URL:
+        monkeypatch.setattr(settings.lm, "dashscope_base_url", _LIVE_BASE_URL)
 
 
-def _stream(text: str, *, thinking_disabled: bool) -> AIMessage:
+def _stream(model: str, text: str, *, thinking_disabled: bool) -> AIMessage:
     """Stream one turn and accumulate it exactly as `agent/graph/_llm.py` does.
 
     Chunk accumulation followed by `message_chunk_to_message` is what preserves
     usage_metadata on the committed message — reproducing it here is the point,
     since fact 2 is specifically about the streamed terminal frame.
     """
-    llm = build_chat_model(_MODEL, thinking={"type": "disabled"} if thinking_disabled else None)
+    llm = build_chat_model(model, thinking={"type": "disabled"} if thinking_disabled else None)
     chunks = list(llm.stream([HumanMessage(text)]))
     assert chunks, "stream produced no chunks"
     merged = chunks[0]
@@ -150,7 +157,8 @@ def _reasoning_tokens(msg: AIMessage) -> int:
     return int(details.get("reasoning", 0))
 
 
-def test_enable_thinking_false_actually_suppresses_reasoning() -> None:
+@pytest.mark.parametrize("model", _MODELS)
+def test_enable_thinking_false_actually_suppresses_reasoning(model: str) -> None:
     """Fact 1, asserted from both sides so a green cannot be vacuous.
 
     Checking only the disabled call would pass just as happily if this model
@@ -158,23 +166,24 @@ def test_enable_thinking_false_actually_suppresses_reasoning() -> None:
     while the reasoning simply landed somewhere unread. So prove reasoning is
     observable with thinking ON first, then prove it disappears with it OFF.
     """
-    thinking_on = _stream("In two sentences: why is the sky blue?", thinking_disabled=False)
+    thinking_on = _stream(model, "In two sentences: why is the sky blue?", thinking_disabled=False)
     assert _reasoning_text(thinking_on) or _reasoning_tokens(thinking_on) > 0, (
-        "no reasoning observed even with thinking ON — the rest of this test would "
-        "be vacuous; check whether qwen3.8-max still reasons by default"
+        f"{model}: no reasoning observed even with thinking ON — the rest of this "
+        "test would be vacuous; check whether it still reasons by default"
     )
 
-    thinking_off = _stream("In two sentences: why is the sky blue?", thinking_disabled=True)
-    assert _reasoning_text(thinking_off) == "", "enable_thinking=false did not suppress reasoning"
-    assert _reasoning_tokens(thinking_off) == 0, (
-        "enable_thinking=false hid the reasoning text but the model still billed "
-        "reasoning tokens — the switch is cosmetic, not a cost lever"
+    off = _stream(model, "In two sentences: why is the sky blue?", thinking_disabled=True)
+    assert _reasoning_text(off) == "", f"{model}: enable_thinking=false did not suppress reasoning"
+    assert _reasoning_tokens(off) == 0, (
+        f"{model}: enable_thinking=false hid the reasoning text but the model still "
+        "billed reasoning tokens — the switch is cosmetic, not a cost lever"
     )
-    assert str(message_content(thinking_off)).strip(), "no answer text came back"
+    assert str(message_content(off)).strip(), f"{model}: no answer text came back"
 
 
-def test_streamed_usage_frame_carries_the_implicit_cache_hit() -> None:
-    """Fact 2. Two turns over an identical long prefix: the second should hit
+@pytest.mark.parametrize("model", _MODELS)
+def test_streamed_usage_frame_carries_the_implicit_cache_hit(model: str) -> None:
+    """Fact 2. Two turns over an identical long prefix: the second hits
     DashScope's implicit cache, which is always on and cannot be opted out of.
 
     The prefix has to clear the documented minimum (256 tokens for most models,
@@ -184,19 +193,19 @@ def test_streamed_usage_frame_carries_the_implicit_cache_hit() -> None:
     """
     prefix = "The quick brown fox jumps over the lazy dog near the river bank. " * 400
 
-    first = _stream(f"{prefix}\n\nReply with exactly: ONE", thinking_disabled=True)
+    first = _stream(model, f"{prefix}\n\nReply with exactly: ONE", thinking_disabled=True)
     assert (first.usage_metadata or {}).get("input_tokens", 0) > 1024, (
-        "prefix did not clear the minimum cacheable length"
+        f"{model}: prefix did not clear the minimum cacheable length"
     )
 
-    second = _stream(f"{prefix}\n\nReply with exactly: TWO", thinking_disabled=True)
+    second = _stream(model, f"{prefix}\n\nReply with exactly: TWO", thinking_disabled=True)
     details = (second.usage_metadata or {}).get("input_token_details") or {}
     assert "cache_read" in details, (
-        "the streamed terminal usage frame carried no cache_read — DashScope's "
-        "prompt_tokens_details.cached_tokens does not survive the streaming path, "
-        "so every qwen turn is billing as a full cache miss"
+        f"{model}: the streamed terminal usage frame carried no cache_read — "
+        "DashScope's prompt_tokens_details.cached_tokens does not survive the "
+        "streaming path, so every turn is billing as a full cache miss"
     )
     assert int(details["cache_read"]) > 0, (
-        "cache_read present but zero on an identical repeated prefix — either the "
-        "implicit cache did not hit (re-run once) or it is not reported here"
+        f"{model}: cache_read present but zero on an identical repeated prefix — "
+        "either the implicit cache did not hit (re-run once) or it is not reported"
     )
