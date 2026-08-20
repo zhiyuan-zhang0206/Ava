@@ -16,6 +16,7 @@ from __future__ import annotations
 from typing import Any, cast
 
 from shared.config import settings
+from shared.config.turn_view import turn_settings
 from shared.lm.errors import ErrorClass, classify_error
 from shared.lm.factory import provider_key_of_model
 from shared.log import logger
@@ -127,7 +128,7 @@ def _is_fatal_provider_error_type(exc: BaseException) -> bool:
     (comma-separated string parsed into a set). On an empty config string
     the check is a fast no-op.
     """
-    fatal_csv = settings.lm.llm_fatal_provider_error_types
+    fatal_csv = turn_settings.lm.llm_fatal_provider_error_types
     if not fatal_csv:
         return False
     fatal_types = {t.strip() for t in fatal_csv.split(",") if t.strip()}

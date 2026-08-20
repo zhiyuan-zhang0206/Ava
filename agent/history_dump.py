@@ -1,6 +1,6 @@
 """Pre-compact history dump — JSONL snapshot of the full conversation (opt-in).
 
-When ``settings.agent.history_dump_enabled`` is on, every compaction path —
+When ``turn_settings.agent.history_dump_enabled`` is on, every compaction path —
 the claim node's agent-/user-triggered compact (``_claim_decide``) and the
 before_llm auto-compact hook (``agent/hooks/compact.py``) — writes the complete
 pre-compact ``state.messages`` to a JSONL file under the agent workspace
@@ -17,7 +17,7 @@ tool_calls / id / additional_kwargs / ...). Replay recipe, per line:
 ``messages_from_dict([{"type": raw["type"], "data": {k: v for k, v in
 raw.items() if k != "type"}}])`` (the ``type``/``data`` split is the
 langchain message envelope). Rotation bounds disk growth: after each write
-only the newest ``settings.agent.history_dump_keep`` files are kept.
+only the newest ``turn_settings.agent.history_dump_keep`` files are kept.
 
 Injection-safety: the note is never merged into the live ``messages`` channel
 — it rides ``context_reset.tail`` (via ``build_compact_transition``), which
@@ -37,7 +37,7 @@ from pathlib import Path
 from langchain_core.messages import AnyMessage, HumanMessage
 
 from agent.messages import NoteTag, system_note_message
-from shared.config import settings
+from shared.config.turn_view import turn_settings
 from shared.log import logger
 from shared.paths import workspace_dir
 
@@ -66,7 +66,7 @@ def dump_history(messages: list[AnyMessage], agent_id: int) -> Path | None:
     fields, same shape as GET /api/agents/{id}/messages); the replay recipe is
     in the module docstring.
     """
-    if not settings.agent.history_dump_enabled:
+    if not turn_settings.agent.history_dump_enabled:
         return None
     try:
         d = history_dump_dir(agent_id)
@@ -77,7 +77,7 @@ def dump_history(messages: list[AnyMessage], agent_id: int) -> Path | None:
         with path.open("w", encoding="utf-8") as f:
             for msg in messages:
                 f.write(json.dumps(msg.model_dump(mode="json")) + "\n")
-        _rotate(d, max(1, settings.agent.history_dump_keep))
+        _rotate(d, max(1, turn_settings.agent.history_dump_keep))
         logger.info(
             "[{label}] {body}",
             label="history-dump",

@@ -61,6 +61,7 @@ import ava
 from agent import state as _state
 from agent.observe import log_llm_usage
 from shared.config import settings
+from shared.config.turn_view import turn_settings
 from shared.event_publisher import AgentEventPublisher
 from shared.live_events import TokenUsage
 from shared.lm.content import content_blocks
@@ -259,7 +260,7 @@ def _finalize_turn_observability(
         }
     log_llm_usage(
         final_msg,
-        model=settings.lm.llm_model,
+        model=turn_settings.lm.llm_model,
         latency_ms=handler.llm_latency_ms,
         decode_ms=handler.llm_decode_ms,
     )

@@ -39,6 +39,7 @@ from langchain_core.messages import HumanMessage
 from agent.messages import NoteTag, system_note_message
 from shared import plugin_contributions
 from shared.config import settings
+from shared.config.turn_view import turn_settings
 from shared.log import logger
 
 NoteBuilder = Callable[[], HumanMessage | None]
@@ -263,7 +264,7 @@ _PRELOADED_SKILLS_FRAMING = (
 @register_context_note(rank=RANK_PRELOADED_SKILLS)
 def preloaded_skills_note() -> HumanMessage | None:
     """The full SKILL.md body of every skill named in
-    `settings.agent.skills_to_expand_at_start`, concatenated into one note.
+    `turn_settings.agent.skills_to_expand_at_start`, concatenated into one note.
 
     Resolution (wildcard, identifier-then-name, warn-and-skip) is shared with
     the capabilities index via `resolve_prompt_skills`. Returns ``None`` — no
@@ -273,7 +274,7 @@ def preloaded_skills_note() -> HumanMessage | None:
     from agent.graph._capabilities import resolve_prompt_skills
 
     skills = resolve_prompt_skills(
-        settings.agent.skills_to_expand_at_start,
+        turn_settings.agent.skills_to_expand_at_start,
         config_field="skills_to_expand_at_start",
     )
     if not skills:

@@ -10,7 +10,7 @@ exposes -- the pool-relative path and the note's frontmatter description
 sees relevant durable notes surface on their own, without having to call
 `ava.memory.search`.
 
-A removable layer: gated by `settings.agent.passive_memory_recall_enabled` (default
+A removable layer: gated by `turn_settings.agent.passive_memory_recall_enabled` (default
 off), and a no-op whenever the search does not come back with results -- index
 down, gateway erroring, feature off -- so the call site degrades to nothing
 rather than failing the turn. It runs before the LLM on every inbound turn, so a
@@ -33,7 +33,7 @@ from agent.graph._memory_filter import Candidate, filter_candidates
 from agent.messages import NoteTag, system_note_message
 from ava import _gateway_client
 from shared.agents import GatewayUnavailable, IndexerUnavailable
-from shared.config import settings
+from shared.config.turn_view import turn_settings
 from shared.lm.content import content_blocks
 from shared.log import logger
 from shared.message_kwargs import AvaMsgType, read_ava_kwargs
@@ -127,12 +127,12 @@ async def passive_memory_recall(
     Never raises on a failed search: the caller is a before_llm hook, so an
     exception here ends the agent process rather than the recall.
     """
-    if not settings.agent.passive_memory_recall_enabled:
+    if not turn_settings.agent.passive_memory_recall_enabled:
         return None
     query = _build_query(messages)
     if not query:
         return None
-    retrieve_k = settings.agent.memory_recall_retrieve_k
+    retrieve_k = turn_settings.agent.memory_recall_retrieve_k
     try:
         results = await asyncio.to_thread(_gateway_client.memory_search, query, retrieve_k)
     except (GatewayUnavailable, IndexerUnavailable) as exc:

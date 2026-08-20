@@ -91,8 +91,8 @@ class MemoryState(BaseModel):
     `injected_paths` are memory-pool note paths already surfaced by passive
     recall this session, union-accumulated across turns (see
     `_memory_state_merge`) so the same note is not re-injected for the agent's
-    life. Gated by settings.agent.passive_memory_recall_enabled; stays empty when
-    recall is off.
+    life. Gated by turn_settings.agent.passive_memory_recall_enabled; stays
+    empty when recall is off.
     """
 
     injected_paths: set[str] = Field(default_factory=set)

@@ -23,6 +23,7 @@ from langchain_core.messages import AIMessage, AIMessageChunk, AnyMessage
 
 from agent.lm_cache import prepare_invocation
 from shared.config import settings
+from shared.config.turn_view import turn_settings
 from shared.lm._gemini_cache import invalidate, is_stale_cache_error
 from shared.log import logger
 
@@ -83,10 +84,10 @@ async def _consume_llm(
             # the per-agent overlay win (a slow provider gets a longer TTFT
             # without loosening every model's stall detection).
             ttft_timeout=resolve_setting(
-                "llm_stream_ttft_timeout_seconds", model=settings.lm.llm_model
+                "llm_stream_ttft_timeout_seconds", model=turn_settings.lm.llm_model
             ),
             inter_chunk_timeout=resolve_setting(
-                "llm_stream_inter_chunk_timeout_seconds", model=settings.lm.llm_model
+                "llm_stream_inter_chunk_timeout_seconds", model=turn_settings.lm.llm_model
             ),
         )
     except LLMStreamStallTimeoutError as e:

@@ -57,7 +57,7 @@ from agent.nodes import INIT_CONTEXT, LLM
 from agent.state import AgentState, CompactState, ContextReset
 from shared.audit_events import insert_event_log_async
 from shared.checkpoint_cleanup import mark_compact_boundary, trim_checkpoints
-from shared.config import settings
+from shared.config.turn_view import turn_settings
 from shared.live_events import CompactDone
 from shared.lm.context_budget import latest_input_tokens, resolve_context_budget
 from shared.log import logger
@@ -246,10 +246,10 @@ def auto_compact_will_fire(state: AgentState) -> bool:
     this instead of replicating the estimate + threshold, so the prediction can
     never drift from ``auto_compact_before_llm``.
 
-    Resolves the ceiling from the agent's own model (``settings.lm.llm_model``,
+    Resolves the ceiling from the agent's own model (``turn_settings.lm.llm_model``,
     which the spawn overlay already applied); ``UnknownModelWindowError`` surfaces
     rather than silently mis-gating an agent whose window we do not know."""
-    budget = resolve_context_budget(settings.lm.llm_model)
+    budget = resolve_context_budget(turn_settings.lm.llm_model)
     if _context_occupancy(state.messages) <= budget.hard_compact_tokens:
         return False
     return bool(conversation_messages(state.messages))
@@ -278,7 +278,7 @@ async def auto_compact_before_llm(
     must surface, not a state to paper over.
     """
     occupancy = _context_occupancy(state.messages)
-    if occupancy <= resolve_context_budget(settings.lm.llm_model).hard_compact_tokens:
+    if occupancy <= resolve_context_budget(turn_settings.lm.llm_model).hard_compact_tokens:
         return None
     content_msgs = conversation_messages(state.messages)
     if not content_msgs:
@@ -472,7 +472,7 @@ def _compact_reminder_update(state: AgentState) -> dict | None:
       compaction advances compact.version past the stored bookmark.
     """
     occupancy = _context_occupancy(state.messages)
-    if occupancy <= resolve_context_budget(settings.lm.llm_model).soft_compact_tokens:
+    if occupancy <= resolve_context_budget(turn_settings.lm.llm_model).soft_compact_tokens:
         return None
     if not conversation_messages(state.messages):
         return None
