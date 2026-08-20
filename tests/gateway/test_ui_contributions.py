@@ -70,6 +70,37 @@ def test_declared_theme_reaches_the_console_attributed() -> None:
                 "plugin": "skins",
                 "name": "solarized",
                 "tokens": {"--background": "oklch(0.99 0.02 90)"},
+                # Explicitly null, not absent: the console distinguishes a pack
+                # that pins both modes from one with a dark half.
+                "dark_tokens": None,
+            }
+        ]
+
+
+def test_a_packs_dark_half_reaches_the_console() -> None:
+    """`darkTokens` rides the same entry, so the console can pick the half that
+    matches the resolved mode instead of pinning one over both."""
+    _write_plugin(
+        "skins",
+        {
+            "themes": [
+                {
+                    "name": "solarized",
+                    "tokens": {"--background": "#fdf6e3"},
+                    "darkTokens": {"--background": "#002b36"},
+                }
+            ]
+        },
+    )
+    write_local({"plugins": {"skins": {"enabled": True}}})
+
+    with TestClient(app) as client:
+        assert _themes(client) == [
+            {
+                "plugin": "skins",
+                "name": "solarized",
+                "tokens": {"--background": "#fdf6e3"},
+                "dark_tokens": {"--background": "#002b36"},
             }
         ]
 

@@ -2,9 +2,10 @@
 
 Design for issue #57. Evidence base: the DeepSeek Harness plugin-ecosystem
 survey (2026-08-19; 1849 npm packages / 1569 curated entries within 6 days of
-their plugin platform shipping). Status: **U1-U3 shipped** — the
-`contributions.ui` manifest key + validator, themes end to end, and the plugin
-page mount + nav entries. The remaining slices are at the bottom.
+their plugin platform shipping). Status: **U1-U3 shipped** (plus the U1a
+`darkTokens` amendment) — the `contributions.ui` manifest key + validator,
+themes end to end, and the plugin page mount + nav entries. The remaining
+slices are at the bottom.
 
 ## Why now
 
@@ -92,7 +93,11 @@ plugin-spec-v2's reserved growth point, filled:
         { "location": "sidebar", "label": "Task board", "icon": "kanban", "page": "board/" }
       ],
       "themes": [
-        { "name": "solarized", "tokens": { "--background": "oklch(0.99 0.02 90)", "...": "..." } }
+        {
+          "name": "solarized",
+          "tokens": { "--background": "oklch(0.99 0.02 90)", "...": "..." },
+          "darkTokens": { "--background": "oklch(0.21 0.03 250)", "...": "..." }
+        }
       ]
     }
   }
@@ -150,7 +155,7 @@ panels, pet widgets) without growing the declaration vocabulary.
 |---|---|---|
 | `agentInspect` section | `{title, source, render: markdown\|kv\|table\|page}` | appends a section to the agent-inspect view (`gateway/routers/agent_inspect.py` feeds it); `source` is a path under the plugin's mount, fetched through the proxy and rendered by a generic markdown/kv/table renderer; `render: page` embeds the iframe with `?agent_id=` |
 | `nav` entry | `{location: sidebar\|settings\|fleet-toolbar, label, icon, page}` | a nav entry opening the plugin's page in an iframe |
-| `theme` | `{name, tokens}` | registers a skin — see below |
+| `theme` | `{name, tokens, darkTokens?}` | registers a skin — see below |
 | metrics / config | *no declaration* | already-automatic surfaces (below) |
 
 ### Themes — token packs, never CSS
@@ -168,6 +173,17 @@ property in it: `--radius` is deliberately excluded, because the component
 geometry is tuned around it and re-valuing it is a layout change wearing a
 theme's clothes (`shared/plugin_ui_contributions.py:NON_THEMABLE_TOKENS`, kept
 honest against `globals.css` by its test).
+
+**A skin and the light/dark mode must stay orthogonal**, which is why a pack has
+two halves. The console applies a pack as inline custom properties on the root
+element, one step MORE specific than both the `:root` and `.dark` rules — so a
+single flat map pins every color it sets across both modes, and the mode toggle
+goes on flipping while those colors do not move. Two controls, one of which
+looks functional and is not. So `tokens` is the light half and the optional
+`darkTokens` the dark one, selected by the resolved mode; both validate against
+the same vocabulary and the same color-literal rule. **Omitting `darkTokens` is
+a deliberate declaration that the pack pins both modes**, not an oversight, and
+the picker marks such a pack so the user meets the fact before choosing it.
 
 Tokens only — no arbitrary CSS, no selectors. That is what makes skins survive
 UI refactors (the token vocabulary is the stable interface; component markup is
@@ -274,13 +290,34 @@ value is validated as a CSS color literal.
     when a second plugin ships the same name.
   - **A pack applies over whichever of light/dark is active** — an inline
     custom property outranks both the `:root` and `.dark` rules, and tokens the
-    pack does not name keep following the mode. A plugin that skins both ships
-    one pack per mode. Growing the entry to a light/dark pair stays possible;
-    it was not invented ahead of a plugin that needs it.
+    pack does not name keep following the mode. U2 shipped one flat map per
+    pack and left the light/dark pair for a plugin that needed it; **U1a below
+    took that back**, because the same specificity that lets a pack apply over
+    the active mode also pins it across BOTH.
 
   The picker section is absent until a plugin contributes a pack, and a stored
   id whose plugin is gone resolves to the console's own palette rather than to
   whatever else is installed.
+- **U1a — the `darkTokens` amendment** — **shipped** (ruling 2026-08-20, a
+  follow-up to U1 rather than part of a slice): a theme entry is
+  `{name, tokens, darkTokens?}`. `tokens` is the light half, `darkTokens` the
+  dark one, selected by the resolved next-themes mode
+  (`ui/web/src/components/theme-pack-tokens.tsx`); both halves validate against
+  the same closed vocabulary and the same color-literal rule, and
+  `UiThemeContribution.dark_tokens` carries the dark half on the wire.
+
+  **Why it could not wait**: a flat pack applied on the root element overrides
+  both `:root` and `.dark`, so choosing a skin silently disabled the light/dark
+  toggle for every color the skin set — two controls fighting, one of which
+  appears functional and is not. A skin and a mode have to stay orthogonal. And
+  the shape had to change **before any third party declares a theme**: cheap as
+  an amendment now, a breaking change later.
+
+  **Omission is a declaration, not an oversight.** A pack without `darkTokens`
+  deliberately pins both modes, so `dark_tokens` is `null` on the wire rather
+  than an empty map, and the picker marks the entry (`— no dark variant`) so
+  the user meets the fact before choosing it rather than after wondering why
+  the mode toggle stopped working.
 - **U3 — plugin page mount + nav** — **shipped, static backend only**:
   `/api/plugin-ui/<plugin>/…` (`gateway/routers/plugin_ui.py`) serves an
   ENABLED plugin's own `ui/` directory — the converge-synced static backend,

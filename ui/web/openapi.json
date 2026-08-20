@@ -12160,6 +12160,20 @@
             },
             "type": "object",
             "title": "Tokens"
+          },
+          "dark_tokens": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dark Tokens"
           }
         },
         "type": "object",
@@ -12169,7 +12183,7 @@
           "tokens"
         ],
         "title": "UiThemeContribution",
-        "description": "One named token pack a plugin offers the theme picker.\n\n`tokens` is a partial map of the console's own `:root` custom properties to\ncolor literals — validated at manifest load, so the console applies the\nvalues as given. Unset tokens keep the console default, which is why a pack\nthat names three colors is a legitimate skin rather than a broken one."
+        "description": "One named token pack a plugin offers the theme picker.\n\n`tokens` is a partial map of the console's own `:root` custom properties to\ncolor literals — validated at manifest load, so the console applies the\nvalues as given. Unset tokens keep the console default, which is why a pack\nthat names three colors is a legitimate skin rather than a broken one.\n\n`dark_tokens` is the pack's dark-mode half, and `null` is a MEANINGFUL\nvalue rather than a missing one: it declares that the pack deliberately\npins both modes to `tokens`. That distinction has to survive onto the wire\nbecause it is what the picker tells the user — a pack applied over both\npalettes silently disables the light/dark toggle for every color it sets,\nand a skin and a mode that fight is the failure this field exists to make\nvisible. With it set, `tokens` is the light half and the two stay\northogonal."
       },
       "UpdateCheck": {
         "properties": {

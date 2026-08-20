@@ -189,8 +189,8 @@ describe("DisplaySettingsPage", () => {
       expect(screen.getByText("Skin")).toBeTruthy();
     });
     // Attributed, because the two packs share a name.
-    const mine = screen.getByLabelText("solarized (skins)") as unknown as HTMLInputElement;
-    expect(screen.getByLabelText("solarized (other)")).toBeTruthy();
+    const mine = screen.getByLabelText("solarized (skins) — no dark variant") as unknown as HTMLInputElement;
+    expect(screen.getByLabelText("solarized (other) — no dark variant")).toBeTruthy();
     expect((screen.getByLabelText("Default (Ava)") as unknown as HTMLInputElement).checked).toBe(
       true,
     );
@@ -199,6 +199,32 @@ describe("DisplaySettingsPage", () => {
     await waitFor(() => {
       expect(api.putSetting).toHaveBeenCalledWith("display.theme_pack", "skins/solarized");
     });
+  });
+
+  it("marks only the packs that pin both light and dark", async () => {
+    // The two cases have to be distinguishable in the picker: a pack without a
+    // dark half disables the light/dark toggle for every color it sets, and
+    // the user is choosing between skins where that matters.
+    vi.mocked(api.getUiContributions).mockResolvedValue({
+      nav: [],
+      themes: [
+        { plugin: "skins", name: "flat", tokens: { "--background": "#fdf6e3" } },
+        {
+          plugin: "skins",
+          name: "dusk",
+          tokens: { "--background": "#fdf6e3" },
+          dark_tokens: { "--background": "#002b36" },
+        },
+      ],
+    });
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("Skin")).toBeTruthy();
+    });
+    expect(screen.getByLabelText("flat (skins) — no dark variant")).toBeTruthy();
+    // The pack that ships both halves is labelled plainly — no marker to explain.
+    expect(screen.getByLabelText("dusk (skins)")).toBeTruthy();
   });
 
   it("clears the pack back to null when Default is chosen", async () => {
@@ -217,7 +243,7 @@ describe("DisplaySettingsPage", () => {
       expect(screen.getByText("Skin")).toBeTruthy();
     });
     expect(
-      (screen.getByLabelText("solarized (skins)") as unknown as HTMLInputElement).checked,
+      (screen.getByLabelText("solarized (skins) — no dark variant") as unknown as HTMLInputElement).checked,
     ).toBe(true);
 
     fireEvent.click(screen.getByLabelText("Default (Ava)"));
