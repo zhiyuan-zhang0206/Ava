@@ -50,13 +50,15 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     plugin_activation issue #40 + the seven hosted-runner kinds
     (future/infra/agent-runner-as-server.md): host_dispatcher_subscribed,
     host_dispatcher_reconnect, host_dispatcher_bad_channel, host_turn_crashed,
-    host_agent_prepared, host_started, host_turn_uncancellable).
+    host_agent_prepared, host_started, host_turn_uncancellable) + the two
+    labeler validity kinds from issue #178: label_generate_rejected,
+    label_generate_retired.
     Bump deliberately when adding a telemetry event, never to silence a
     drift."""
     from shared.telemetry import _TELEMETRY_KINDS
 
     assert telemetry_events() == frozenset(_TELEMETRY_KINDS)
-    assert len(_TELEMETRY_KINDS) == 97
+    assert len(_TELEMETRY_KINDS) == 99
 
 
 def test_category_for_kind() -> None:
