@@ -15,6 +15,11 @@ import pytest
 from cli.commands.skill import cmd_skill_update, cmd_skill_upgrade
 from shared import install_registry as reg
 
+# Every test here installs a package, which records `local:<machine>` provenance
+# in the cluster registry — that needs a machine identity, which a bare
+# `unit_home` deliberately lacks. See the fixture's docstring.
+pytestmark = pytest.mark.usefixtures("_installed_machine_identity")
+
 
 def _write_skill(root: Path, dirname: str, body: str = "# B\n") -> Path:
     d = root / dirname

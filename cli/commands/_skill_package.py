@@ -212,9 +212,14 @@ def _register_in_cluster(
     The operator's fix is to bring the cluster up and re-run, and the error says
     so.
 
-    `source=None` means a local path was installed in place. That is recorded as
-    `local:<machine>` rather than as a repo row, because the content DID arrive
-    by install and must ride the data plane for other machines to get it.
+    A LOCAL-PATH source is recorded as `local:<machine>`, never as the path
+    itself. The row is cluster-wide, and `/Users/someone/skills/foo` means
+    nothing on any other machine — storing it would put a machine-local fact in
+    a cluster table, which is the drift class this whole model removes. The
+    classifier is `_pkg_source.looks_like_local_path`, the same one the install
+    itself uses to decide whether to clone, so "is this local" cannot be
+    answered two ways. The design's `source` vocabulary is exactly
+    `'repo' | <git URL> | 'local:<machine>'`.
 
     `path` is not carried: it locates the package WITHIN a source repo, which is
     a fact about how this machine fetched it, and the cluster row is keyed by
@@ -223,7 +228,14 @@ def _register_in_cluster(
     from shared import db, extension_registry
     from shared.machine import machine_name
 
-    origin = source if source else f"local:{machine_name()}"
+    from ._pkg_source import looks_like_local_path
+
+    origin = (
+        f"local:{machine_name()}" if source is None or looks_like_local_path(source) else source
+    )
+    local = origin.startswith("local:")
+    # A git ref pins a remote source; it says nothing about a local directory.
+    ref = None if local else ref
     pool = db.pool()
     for pkg in packages:
         extension_registry.register_tree(
