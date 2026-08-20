@@ -34,7 +34,10 @@ export function usePluginNav(location: NavLocation): UiNavContribution[] {
  *
  * Cast to `Route` because typedRoutes can only infer a literal it can see;
  * this path is composed from declaration data, and the route it targets
- * (`app/plugin/[plugin]/[[...path]]`) is a catch-all that accepts it. */
+ * (`app/plugin/[plugin]/[[...path]]`) is a catch-all that accepts it.
+ *
+ * The rule that would flag this assertion is off for this file — see the
+ * typedRoutes block in eslint.config.mjs for why it fires only in CI. */
 export function pluginPageRoute(plugin: string, page: string): Route {
   return `/plugin/${encodeURIComponent(plugin)}/${encodePagePath(page)}` as Route;
 }
