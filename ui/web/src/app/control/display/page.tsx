@@ -9,7 +9,7 @@
 // Settings are stored server-side (user_settings DB table) so they survive
 // across browsers and machines.
 
-import { Monitor, Clock, EyeOff, Calendar, Activity, AlertTriangle, Bell, CalendarClock, CircleDot, Languages, Ruler, Rows3, Eye, MoveHorizontal } from "lucide-react";
+import { Monitor, Clock, EyeOff, Calendar, Activity, AlertTriangle, Bell, CalendarClock, CircleDot, Languages, Palette, Ruler, Rows3, Eye, MoveHorizontal } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
@@ -25,6 +25,7 @@ import {
   TIMELINE_WIDTH_RATIO_MAX,
   TIMELINE_WIDTH_RATIO_MIN,
 } from "@/lib/timeline-width";
+import { themePackId, useThemePacks } from "@/lib/use-theme-packs";
 import { useDebouncedSetting, useUserSettings } from "@/lib/use-user-settings";
 import { FLEX, FLEX_1, MIN_W_0 } from "@/lib/layout";
 
@@ -191,6 +192,10 @@ export default function DisplaySettingsPage() {
   // have. Same 768px boundary the layout itself uses.
   const { isNarrow } = useBreakpoint();
 
+  // Skins contributed by the cluster's enabled plugins. Must be called
+  // unconditionally (before any early return) — React hook rules.
+  const { packs: themePacks } = useThemePacks();
+
   // Fetch models for the model picker visibility section.
   // Must be called unconditionally (before any early return) — React hook rules.
   const { data: modelsData } = useQuery({
@@ -233,6 +238,28 @@ export default function DisplaySettingsPage() {
           onChange={(v) => setSetting("display.language", v)}
         />
       </SettingsSection>
+
+      {/* Skins exist only when a plugin contributes one, so the section
+          appears with the first pack rather than standing empty offering the
+          console's own palette as the only choice. */}
+      {themePacks.length > 0 && (
+        <SettingsSection id="display-theme" title="Theme">
+          <RadioRow
+            icon={Palette}
+            label="Skin"
+            description="A plugin-contributed color pack, applied over the active light/dark palette. Colors it does not set keep following light/dark; a plugin that skins both ships one pack per mode"
+            options={[
+              { value: "", label: "Default (Ava)" },
+              ...themePacks.map((p) => ({
+                value: themePackId(p),
+                label: `${p.name} (${p.plugin})`,
+              })),
+            ]}
+            value={(settings["display.theme_pack"] as string | null) ?? ""}
+            onChange={(v) => setSetting("display.theme_pack", v === "" ? null : v)}
+          />
+        </SettingsSection>
+      )}
 
       <SettingsSection id="display-agent-list" title={t("agentListDisplay")}>
         <ToggleRow

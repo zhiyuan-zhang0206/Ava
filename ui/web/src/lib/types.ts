@@ -483,6 +483,15 @@ export type ClusterStatus = Schemas["ClusterStatus"];
 export type ClusterUpdateCheck = Schemas["UpdateCheck"];
 export type SystemStatus = Schemas["SystemStatus"];
 
+// --- Plugin console contributions (GET /api/ui/contributions) ---
+//
+// What the cluster's enabled plugins declare under `contributions.ui` in their
+// ava-plugin.json. Declarations are data the console's own components render —
+// no plugin JavaScript ever enters this bundle.
+
+export type UiThemeContribution = Schemas["UiThemeContribution"];
+export type UiContributionsResponse = Schemas["UiContributionsResponse"];
+
 // --- File Upload ---
 
 export type UploadedFile = Schemas["UploadedFile"];
@@ -674,6 +683,11 @@ export const USER_SETTING_DEFAULTS: Record<string, unknown> = {
   "display.task_needs_you": false,
   // Shell tail page terminal theme: "system" | "light" | "dark".
   "display.shell_terminal_theme": "system",
+  // Plugin-contributed skin, as "<plugin>/<theme>" (themePackId). null = the
+  // console's own palette. A pack re-values the :root color tokens on the root
+  // element, so it applies over whichever of light/dark is active — a plugin
+  // that wants both ships one pack per mode.
+  "display.theme_pack": null,
   "behavior.confirm_terminate": true,
   "behavior.confirm_restart": true,
   "behavior.confirm_force_kill": true,

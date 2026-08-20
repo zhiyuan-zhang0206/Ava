@@ -69,6 +69,7 @@ import type { NoticesFeed,
   ScheduleSummary,
   ScheduleUpdate,
   ScheduleView,
+  UiContributionsResponse,
   UploadedBatch,
 } from "./types";
 import { projectAgentStatus } from "./types";
@@ -740,5 +741,15 @@ export const api = {
     return f(`/api/settings/${encodeURIComponent(key)}`, PUT_JSON({ value })).then(
       ok<UserSettingRow>,
     );
+  },
+
+  // --- Plugin console contributions (GET /api/ui/contributions) ---
+  //
+  // The merged, plugin-attributed declaration set of the cluster's enabled
+  // plugins. Read like any other server data; it changes only when a plugin is
+  // installed, enabled, or upgraded.
+
+  getUiContributions: (): Promise<UiContributionsResponse> => {
+    return f("/api/ui/contributions").then(ok<UiContributionsResponse>);
   },
 };

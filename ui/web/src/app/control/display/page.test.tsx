@@ -12,6 +12,7 @@ vi.mock("@/lib/api", () => ({
     getSettings: vi.fn(),
     putSetting: vi.fn(),
     getModels: vi.fn(),
+    getUiContributions: vi.fn(),
   },
 }));
 
@@ -52,6 +53,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(api.getSettings).mockResolvedValue({ settings: [] });
   vi.mocked(api.getModels).mockResolvedValue({ providers: {}, models: {}, default: "" });
+  vi.mocked(api.getUiContributions).mockResolvedValue({ themes: [] });
 });
 
 describe("DisplaySettingsPage", () => {
@@ -159,6 +161,67 @@ describe("DisplaySettingsPage", () => {
     expect(screen.getByText("Claude")).toBeTruthy();
     expect(screen.getByText("claude-sonnet-5")).toBeTruthy();
     expect(screen.getByText("claude-haiku-4-5-20251001")).toBeTruthy();
+  });
+
+  // Plugin skins (contributions.ui.themes): the section is absent until a
+  // plugin contributes one, then lists it plugin-attributed and persists the
+  // qualified id.
+  it("has no Theme section when no plugin contributes a skin", async () => {
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("Show machine name")).toBeTruthy();
+    });
+    expect(screen.queryByText("Skin")).toBeNull();
+  });
+
+  it("lists contributed skins and persists the chosen pack", async () => {
+    vi.mocked(api.getUiContributions).mockResolvedValue({
+      themes: [
+        { plugin: "skins", name: "solarized", tokens: { "--background": "#fdf6e3" } },
+        { plugin: "other", name: "solarized", tokens: { "--background": "#111111" } },
+      ],
+    });
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("Skin")).toBeTruthy();
+    });
+    // Attributed, because the two packs share a name.
+    const mine = screen.getByLabelText("solarized (skins)") as unknown as HTMLInputElement;
+    expect(screen.getByLabelText("solarized (other)")).toBeTruthy();
+    expect((screen.getByLabelText("Default (Ava)") as unknown as HTMLInputElement).checked).toBe(
+      true,
+    );
+
+    fireEvent.click(mine);
+    await waitFor(() => {
+      expect(api.putSetting).toHaveBeenCalledWith("display.theme_pack", "skins/solarized");
+    });
+  });
+
+  it("clears the pack back to null when Default is chosen", async () => {
+    vi.mocked(api.getSettings).mockResolvedValue({
+      settings: [
+        { key: "display.theme_pack", value: "skins/solarized", updated_at: "2026-01-01T00:00:00Z" },
+      ],
+    });
+    vi.mocked(api.getUiContributions).mockResolvedValue({
+      themes: [{ plugin: "skins", name: "solarized", tokens: { "--background": "#fdf6e3" } }],
+    });
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("Skin")).toBeTruthy();
+    });
+    expect(
+      (screen.getByLabelText("solarized (skins)") as unknown as HTMLInputElement).checked,
+    ).toBe(true);
+
+    fireEvent.click(screen.getByLabelText("Default (Ava)"));
+    await waitFor(() => {
+      expect(api.putSetting).toHaveBeenCalledWith("display.theme_pack", null);
+    });
   });
 
   // i18n MVP: the Language row renders English/中文 options and writes the

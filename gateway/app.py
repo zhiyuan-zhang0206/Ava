@@ -178,6 +178,9 @@ from gateway.routers import (
     timeline as timeline_router,
 )
 from gateway.routers import (
+    ui_contributions as ui_contributions_router,
+)
+from gateway.routers import (
     uploads as uploads_router,
 )
 from gateway.schedule_manager import ScheduleManager
@@ -590,6 +593,7 @@ app.include_router(frontend_telemetry_router.router)
 app.include_router(grafana_router.router)
 app.include_router(okf_graph_router.router)
 app.include_router(tasks_router.router)
+app.include_router(ui_contributions_router.router)
 app.include_router(uploads_router.router)
 
 # /mcp — MCP control plane (design task #1212 step 1). Mounted always; the

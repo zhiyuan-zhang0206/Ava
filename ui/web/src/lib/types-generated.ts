@@ -3137,6 +3137,26 @@ export interface paths {
         patch: operations["patch_task_api_tasks__task_id__patch"];
         trace?: never;
     };
+    "/api/ui/contributions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Ui Contributions
+         * @description Every console contribution the cluster's enabled plugins declare.
+         */
+        get: operations["get_ui_contributions_api_ui_contributions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/agents/{agent_id}/uploads": {
         parameters: {
             query?: never;
@@ -6404,6 +6424,33 @@ export interface components {
             messages: {
                 [key: string]: unknown;
             }[];
+        };
+        /**
+         * UiContributionsResponse
+         * @description Every console contribution the cluster's enabled plugins declare.
+         */
+        UiContributionsResponse: {
+            /** Themes */
+            themes: components["schemas"]["UiThemeContribution"][];
+        };
+        /**
+         * UiThemeContribution
+         * @description One named token pack a plugin offers the theme picker.
+         *
+         *     `tokens` is a partial map of the console's own `:root` custom properties to
+         *     color literals — validated at manifest load, so the console applies the
+         *     values as given. Unset tokens keep the console default, which is why a pack
+         *     that names three colors is a legitimate skin rather than a broken one.
+         */
+        UiThemeContribution: {
+            /** Plugin */
+            plugin: string;
+            /** Name */
+            name: string;
+            /** Tokens */
+            tokens: {
+                [key: string]: string;
+            };
         };
         /**
          * UpdateCheck
@@ -10255,6 +10302,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_ui_contributions_api_ui_contributions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UiContributionsResponse"];
                 };
             };
         };
