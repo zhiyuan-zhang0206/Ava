@@ -48,6 +48,7 @@ from __future__ import annotations
 
 import contextlib
 
+from shared.config.turn_view import turn_settings
 from shared.log import logger
 from shared.plugin_contributions import SurfaceId
 
@@ -92,7 +93,6 @@ def record(
 def emit(plugin: str, surface: SurfaceId, identifier: str, detail: str) -> None:
     """Write one `plugin_activation` event. Raises on a broken sink — `record`
     is the guarded entry point every production caller uses."""
-    from shared.config import settings
 
     logger.bind(
         event=PLUGIN_ACTIVATION_EVENT,
@@ -100,5 +100,5 @@ def emit(plugin: str, surface: SurfaceId, identifier: str, detail: str) -> None:
         surface=surface,
         identifier=identifier,
         detail=detail,
-        model=settings.lm.llm_model,
+        model=turn_settings.lm.llm_model,
     ).info("plugin_activation")

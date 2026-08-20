@@ -54,7 +54,7 @@ from typing import Any
 from langchain_core.language_models.chat_models import BaseChatModel
 from loguru import logger
 
-from shared.config import settings
+from shared.config.turn_view import turn_settings
 
 # Cache lifetime. 3600s is also the API default; stated explicitly so the
 # refresh arithmetic has one source. Storage bills per token-hour, so a
@@ -147,7 +147,7 @@ async def _maybe_refresh(client: Any, ref: CacheRef, now: datetime) -> None:
                 name=ref.name,
                 config=types.UpdateCachedContentConfig(ttl=f"{_CACHE_TTL_SECONDS}s"),
             ),
-            timeout=settings.lm.gemini_cache_timeout_seconds,
+            timeout=turn_settings.lm.gemini_cache_timeout_seconds,
         )
         ref.expire_time = updated.expire_time or (now + timedelta(seconds=_CACHE_TTL_SECONDS))
     except Exception as exc:
@@ -181,7 +181,9 @@ async def _adopt_existing(client: Any, model: str, key: str, now: datetime) -> C
         return None
 
     try:
-        return await asyncio.wait_for(_scan(), timeout=settings.lm.gemini_cache_timeout_seconds)
+        return await asyncio.wait_for(
+            _scan(), timeout=turn_settings.lm.gemini_cache_timeout_seconds
+        )
     except Exception as exc:
         logger.debug("[gemini-cache] list failed (will create instead): {exc!r}", exc=exc)
     return None
@@ -201,7 +203,7 @@ async def get_or_create_cache(
     `tools` are LangChain tools (``[execute_code]``); their converted schema
     is baked into the cache, so cache-bound requests must NOT bind tools.
     """
-    if not settings.lm.gemini_explicit_cache_enabled:
+    if not turn_settings.lm.gemini_explicit_cache_enabled:
         return None
     # Cheap pre-check before the ~66MB google-genai import: this function runs
     # on EVERY LLM call, and for non-Gemini providers the import was pure waste
@@ -264,7 +266,7 @@ async def get_or_create_cache(
                     ttl=f"{_CACHE_TTL_SECONDS}s",
                 ),
             ),
-            timeout=settings.lm.gemini_cache_timeout_seconds,
+            timeout=turn_settings.lm.gemini_cache_timeout_seconds,
         )
     except Exception as exc:
         _NEGATIVE[key] = time.monotonic() + _NEGATIVE_RETRY_SECONDS

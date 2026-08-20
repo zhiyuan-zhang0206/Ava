@@ -30,6 +30,7 @@ from langgraph.graph.state import CompiledStateGraph
 from psycopg_pool import PoolTimeout
 
 from shared.config import settings
+from shared.config.turn_view import turn_settings
 from shared.db import PG_KEEPALIVE_KWARGS
 from shared.live_events import Error
 from shared.log import logger
@@ -271,7 +272,7 @@ async def _invoke_graph_with_lifecycle_logging(
     tags = ["ava", f"agent-{agent_id}"]
     metadata: dict[str, object] = {
         "agent_id": agent_id,
-        "model": settings.lm.llm_model,
+        "model": turn_settings.lm.llm_model,
     }
     # Generic trace tag passthrough: caller (bench / eval / experiment / any
     # periphery) sets settings.observability.trace_tags (env AVA_TRACE_TAGS); we append to

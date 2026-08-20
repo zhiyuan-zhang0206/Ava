@@ -5,7 +5,7 @@ Everything between `python -m agent` and the graph going live, split out of
 
 - framework-scope per-agent config (birth_config first, config_overlay on top)
   + the sdk_disable delta, applied BEFORE `build_chat_model` so
-  `settings.lm.llm_model` reflects this agent's model;
+  `turn_settings.lm.llm_model` reflects this agent's model;
 - boot phase 1 (`_boot_agent_process`): process init, MCP daemon handle, trace
   export init, ava SDK identity (`ava._boot.establish`), plugin load, workspace
   pre-create, model build;
@@ -24,7 +24,7 @@ daemon is supervised independently and is already listening before any agent
 boots, so there is no per-agent fork or socket-bind cost here.
 
 Framework-scope config must apply BEFORE build_chat_model so
-`settings.lm.llm_model` reflects it if this agent runs a different model.
+`turn_settings.lm.llm_model` reflects it if this agent runs a different model.
 Plugin-scope is deferred until after build_graph's bind_from_disk has
 populated _PLUGIN_CONFIGS — see the second apply_config_overlay call in
 `_build_graph`.
@@ -44,6 +44,7 @@ from psycopg_pool import AsyncConnectionPool
 import ava
 import ava._boot
 from shared.config import settings
+from shared.config.turn_view import turn_settings
 from shared.event_publisher import AgentEventPublisher
 from shared.lm.factory import build_chat_model
 from shared.log import init_agent_process
@@ -74,12 +75,11 @@ def _apply_per_agent_sdk_disable() -> None:
     of the env baseline — ``ava._apply_sdk_disable`` is idempotent, so
     only genuinely new entries take effect.
     """
-    from shared.config import settings
 
-    if not settings.agent.sdk_disable:
+    if not turn_settings.agent.sdk_disable:
         return
     env_entries = set(ava._sdk_disable_entries)
-    new_disable = [e for e in settings.agent.sdk_disable if e not in env_entries]
+    new_disable = [e for e in turn_settings.agent.sdk_disable if e not in env_entries]
     if new_disable:
         ava._apply_sdk_disable(new_disable)
 
@@ -124,7 +124,7 @@ async def _boot_agent_process(
     agent boots, so there is no per-agent fork or socket-bind cost here.
 
     Framework-scope config (birth_config first, config_overlay on top) must
-    apply BEFORE build_chat_model so `settings.lm.llm_model` reflects it if
+    apply BEFORE build_chat_model so `turn_settings.lm.llm_model` reflects it if
     this agent runs a different model. Plugin-scope is deferred until after
     build_graph's bind_from_disk has populated _PLUGIN_CONFIGS — see the
     second apply_config_overlay call in `_build_graph`.
@@ -183,7 +183,7 @@ async def _boot_agent_process(
     # populated _PLUGIN_CONFIGS — see the second apply_config_overlay call below.
     _apply_per_agent_framework_config(config_overlay, birth_config)
 
-    llm = build_chat_model(settings.lm.llm_model)
+    llm = build_chat_model(turn_settings.lm.llm_model)
     _boot_timing.mark("sdk_mcp_model")
     return mcp_daemon, llm
 

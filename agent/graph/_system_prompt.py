@@ -26,6 +26,7 @@ from typing import Any
 
 from shared import plugin_activation, plugin_contributions
 from shared.config import settings
+from shared.config.turn_view import turn_settings
 from shared.paths import workspace_dir
 from shared.plugin_context import current_plugin_name
 
@@ -47,7 +48,7 @@ def _resolved(setting: str) -> Any:
     guidance profile without any per-cluster config."""
     from shared.lm.registry import resolve_setting
 
-    return resolve_setting(setting, model=settings.lm.llm_model)
+    return resolve_setting(setting, model=turn_settings.lm.llm_model)
 
 
 _SYSTEM_PROMPT_SECTIONS: list[Callable[[], str]] = []
@@ -335,7 +336,7 @@ _COMMUNICATION_STYLE_SECTIONS = {
 
 @register_system_prompt_section
 def _communication_style_section() -> str:
-    """Selected by settings.agent.agent_communication_style (env
+    """Selected by turn_settings.agent.agent_communication_style (env
     AVA_AGENT_COMMUNICATION_STYLE, default 'oriented'). Three styles carry the
     same output-channel map and differ only in how much the agent says while it
     works: 'oriented' interleaves brief updates, 'concise' speaks at milestones
@@ -740,7 +741,7 @@ tool calls. Before using any `ava.*` function, you must explicitly `import ava` 
     # Model identity — per-model note telling the model what it runs on.
     from shared.lm.factory import MODEL_IDENTITY
 
-    identity = MODEL_IDENTITY.get(settings.lm.llm_model)
+    identity = MODEL_IDENTITY.get(turn_settings.lm.llm_model)
     if identity:
         parts.append(identity)
     # Knowledge cutoff — tail line so the agent knows its training-data
@@ -751,7 +752,7 @@ tool calls. Before using any `ava.*` function, you must explicitly `import ava` 
     if settings.agent.prompt_knowledge_cutoff_enabled:
         from shared.lm.factory import MODEL_KNOWLEDGE_CUTOFF
 
-        cutoff = MODEL_KNOWLEDGE_CUTOFF.get(settings.lm.llm_model)
+        cutoff = MODEL_KNOWLEDGE_CUTOFF.get(turn_settings.lm.llm_model)
         if cutoff:
             parts.append(f"Knowledge cutoff: {cutoff}")
     # Exactly one trailing newline regardless of which section lands last, so

@@ -25,6 +25,7 @@ from agent.state import BaseAgentState, build_agent_state
 from shared import paths
 from shared import plugins_config as plugins_cfg
 from shared.config import settings
+from shared.config.turn_view import turn_settings
 
 from ._claim import claim_node
 from ._context import AvaContext
@@ -134,7 +135,7 @@ def _build_llm_retry() -> RetryPolicy:
     return RetryPolicy(
         # Per-model default with shared fallback; an explicit
         # AVA_LLM_RETRY_MAX_ATTEMPTS / per-agent overlay wins.
-        max_attempts=resolve_setting("llm_retry_max_attempts", model=settings.lm.llm_model),
+        max_attempts=resolve_setting("llm_retry_max_attempts", model=turn_settings.lm.llm_model),
         # + _retry_phase_jitter(): per-agent schedule offset (see module note).
         initial_interval=settings.lm.llm_retry_initial_interval_seconds + _retry_phase_jitter(),
         backoff_factor=2,
