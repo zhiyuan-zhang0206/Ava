@@ -796,6 +796,30 @@ def unit_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]
     """Point this unit's home at a fresh per-test tmp dir and reset machine
     identity so a test that writes machine_name/role/description files (or any
     $AVA_HOME-derived path) is isolated from the session home.
+
+    The dir it yields is BARE — no `machine_name`, no `role`, no `.env`. That is
+    not an oversight to fix: this fixture legitimately models two different
+    homes, and an empty dir is the only state both of them start from.
+
+    * A **virgin home** — never installed, never through `ava start`. Tests here
+      assert the ABSENCE of the identity files, e.g.
+      `test_start_arg_writes_to_file_for_persistence`, whose premise is "all env
+      empty, files also do not exist".
+    * An **installed unit** — a home some earlier step gave an identity. The CLI
+      tests that run `ava skill install` need this one: a local-path install
+      records `local:<machine>` provenance in the cluster registry, and
+      `machine_name()` raises when the file is missing.
+
+    **Do not pre-write an identity here to make the second kind pass.** It looks
+    free — the installed-unit tests go green and nothing else obviously cares —
+    but it silently converts every `unit_home` in the repo to the installed
+    meaning. The only tests that can object are the few whose whole premise is
+    the absence, and they object only if their premise was written down; the
+    rest stay green while quietly testing a different world.
+
+    The opt-in for the installed meaning is `_installed_machine_identity` in
+    `tests/cli/conftest.py` — a module takes it with one line:
+    `pytestmark = pytest.mark.usefixtures("_installed_machine_identity")`.
     """
     from shared.machine import reset_identity
 
