@@ -34,8 +34,10 @@ CRON = "0 0 * * *"  # 00:00 cluster time — the off-peak trough of a cluster wo
 # machine sits. Read at process start — `ava schedules restart <id>` to adopt a
 # changed AVA_TIMEZONE.
 TZ = settings.general.timezone
-# Optional daily report recipient (an agent id); unset to skip the report.
-REPORT_AGENT = os.environ.get("AVA_SELF_EVOLUTION_DAILY_REPORT_AGENT")
+# Daily report recipient (an agent id) — defaults to the CEO #228 per the
+# 2026-08-09 ruling (daily reports replaced the weekly ones); an env override
+# wins, and an explicit empty env value skips the report.
+REPORT_AGENT = os.environ.get("AVA_SELF_EVOLUTION_DAILY_REPORT_AGENT", "228")
 
 
 def ensure_agent(label: str, prompt: str) -> int:
