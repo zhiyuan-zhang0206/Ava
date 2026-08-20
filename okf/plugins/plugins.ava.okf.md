@@ -62,7 +62,7 @@ keyed by the same triple: [[activation-telemetry.ava.okf.md]].
 
 ## Entry Points
 - `shared/plugins_config.py:_discover_plugins()` — filesystem scan for `ava_builtins/plugins/<name>/plugin.py` (built-in) and `~/.ava/plugins/<name>/plugin.py` (external)
-- `agent/graph/_build.py:_load_extensions()` — imports plugins according to the enabled set (each `plugin.py` import wrapped with `with PluginContext(name):`), after which `bind_from_disk()` uniformly instantiates configs
+- `agent/graph/_build.py:_load_extensions()` — imports plugins according to the enabled set (each `plugin.py` import wrapped with `with PluginContext(name):`), after which `bind_from_disk()` uniformly instantiates configs. Import mechanics, load order and reload semantics: [[okf/plugins/module-loading.ava.okf.md]].
 - `agent/graph/_build.py:build_graph()` — at build time calls `make_hook_runner` to snapshot hook lists
 - `agent/state.py:build_agent_state()` — at build time merges all plugins' state fields
 - `agent/plugin_catalog.py:build_catalog()` — loads this machine's enabled plugins and reads back what they registered (`ava plugins inspect`)
@@ -85,5 +85,4 @@ shape — and where each is validated: [[okf/plugins/package-manifest.ava.okf.md
 ## Notes
 - Plugins can carry **skills** (`ava_builtins/plugins/<p>/skills/`, converge syncs them with the plugin name as the top-level directory; nodes hang under each plugin subtree) and **MCP server definitions** (`.mcp.json`), and can also register **ops services** (`services.py` declaring `ServiceSpec`, e.g., ava_fleet's task-maintenance).
 - All hooks share a single global HOOKS list—`make_hook_runner` snapshots the reference, not a copy.
-- Plugin loading order = order of the `config.plugins` dict (sorted alphabetically by `shared/plugins_config.py`), with `_build.py:_load_extensions` importing one by one—**no dependency declaration / topological sort mechanism**; configs are uniformly bound after all imports complete.
 - Config files are per-machine, supporting different plugin combinations on different machines.

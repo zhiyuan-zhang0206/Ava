@@ -4,8 +4,11 @@ Confirms:
 - Plugin config is read from the per-machine local file at graph build time
 - Only enabled=true plugins are imported
 - enabled=false plugins are not imported
+- A repeat load re-executes the module already in sys.modules (issue #147)
 """
 
+import sys
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -13,6 +16,9 @@ import pytest
 from shared import paths
 from shared.config import settings
 from shared.plugins_config import write_local
+
+# Every dotted name `_load_extensions` can register a plugin module under.
+_PLUGIN_MODULE_PREFIXES = ("ava_builtins.plugins.", "plugins.")
 
 
 @pytest.fixture(autouse=True)
@@ -28,11 +34,28 @@ def _isolate_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(paths, "ava_home", lambda: tmp_path)
 
 
-def _make_plugin(name: str) -> None:
+@pytest.fixture(autouse=True)
+def _restore_plugin_modules() -> Iterator[None]:
+    """The synthetic plugins here live in a per-test tmp dir but claim a
+    process-global dotted name, so a load leaks a module object bound to a
+    directory the next test has already discarded — the pollution class of
+    issue #147. Snapshot the plugin namespace and put it back, same shape as
+    the migration-authority fix in c86c63dce.
+    """
+    before = {k: v for k, v in sys.modules.items() if k.startswith(_PLUGIN_MODULE_PREFIXES)}
+    yield
+    for key in [
+        k for k in sys.modules if k.startswith(_PLUGIN_MODULE_PREFIXES) and k not in before
+    ]:
+        del sys.modules[key]
+    sys.modules.update(before)
+
+
+def _make_plugin(name: str, body: str | None = None) -> None:
     root = paths.repo_plugins_dir()
     plugin_dir = root / name
     plugin_dir.mkdir(parents=True, exist_ok=True)
-    (plugin_dir / "plugin.py").write_text(f"__description__ = '{name}'\n")
+    (plugin_dir / "plugin.py").write_text(body or f"__description__ = '{name}'\n")
 
 
 def _make_external_plugin(name: str) -> None:
@@ -123,6 +146,82 @@ def test_load_extensions_installs_sdk_metering(monkeypatch: pytest.MonkeyPatch):
     _build._load_extensions()
 
     assert installed == [True]
+
+
+def test_a_repeat_load_reuses_the_module_object_so_a_patch_still_lands(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Issue #147: a second `_load_extensions()` re-executes the plugin module
+    already registered in `sys.modules` — it must not bind a new one.
+
+    Replacing it forks the module identity. Whoever imported the plugin before
+    the load — a test's module-level `from ...plugin import hook`, a hook object
+    built at import time — keeps the old object, while `mock.patch` resolves the
+    dotted path through `sys.modules` and patches the new one. The patch then
+    silently never reaches the code under test: it is not a mock failure, it is
+    two live copies of one module. `tests/agent/test_syntax_fix.py` failed
+    exactly this way whenever a plugin-loading sibling ran first in the same
+    xdist worker, and passed in isolation.
+
+    Repeated in-process loads are a production path too, not only a test
+    fixture: `agent/plugin_catalog.py:build_catalog()` loads in the calling
+    process, and the runner-hosted executor sketched in
+    `future/infra/extension-ownership.md` would reload as the activated union
+    changes rather than once at process boot.
+    """
+    _make_plugin(
+        "demo",
+        "__description__ = 'demo'\nMARK = 'real'\n\n\ndef probe():\n    return MARK\n",
+    )
+    write_local({"plugins": {"demo": {"enabled": True}}})
+
+    from agent.graph import _build
+
+    _build._load_extensions()
+    dotted = "ava_builtins.plugins.demo.plugin"
+    first = sys.modules[dotted]
+    stale_probe = first.probe  # the reference an earlier importer would be holding
+
+    _build._load_extensions()
+
+    assert sys.modules[dotted] is first
+    # The consequence that actually bites: a callable captured before the reload
+    # resolves its globals out of the one module `__dict__`, so a patch applied
+    # through `sys.modules` reaches it. Two module objects, and it would not.
+    monkeypatch.setattr(sys.modules[dotted], "MARK", "patched")
+    assert stale_probe() == "patched"
+
+
+def test_a_different_file_under_the_same_name_gets_a_fresh_module(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Reuse is keyed on the file, not just the dotted name.
+
+    Plugin names are unique within one discovery pass, but a tmp-dir plugin can
+    claim a dotted name that an earlier test's plugin already registered. Those
+    are different modules; executing the new file into the old one's globals
+    would let the dead file's names survive into the live one — the same
+    cross-test leak this reuse exists to close, only pointed the other way.
+    """
+    _make_plugin("demo", "__description__ = 'demo'\nGHOST = 'first file'\n")
+    write_local({"plugins": {"demo": {"enabled": True}}})
+
+    from agent.graph import _build
+
+    _build._load_extensions()
+    dotted = "ava_builtins.plugins.demo.plugin"
+    first = sys.modules[dotted]
+    assert first.GHOST == "first file"
+
+    other_repo = tmp_path / "other_repo_plugins"
+    other_repo.mkdir()
+    monkeypatch.setattr(paths, "repo_plugins_dir", lambda: other_repo)
+    _make_plugin("demo", "__description__ = 'demo'\n")
+
+    _build._load_extensions()
+
+    assert sys.modules[dotted] is not first
+    assert not hasattr(sys.modules[dotted], "GHOST")
 
 
 def test_duplicate_plugin_name_raises(monkeypatch: pytest.MonkeyPatch):
