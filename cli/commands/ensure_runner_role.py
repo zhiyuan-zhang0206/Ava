@@ -101,3 +101,64 @@ def cmd_ensure_runner_role() -> int:
                 "entry into its userlist"
             )
     return 0
+
+
+def refresh_runner_grants_after_migration() -> None:
+    """Re-affirm `ava_runner`'s grants because a migration just changed the schema.
+
+    A migration that CREATES a table leaves the runner unable to read it:
+    `GRANT SELECT ON ALL TABLES` is a point-in-time loop over what existed at
+    install birth, and nothing re-runs it on a schedule (the standing
+    `ALTER DEFAULT PRIVILEGES` beside it covers tables created after IT was
+    declared, which is no help to a cluster born before this shipped). So the
+    moment the schema grows is the moment the read surface has to be re-affirmed
+    — otherwise a pure agent-runner, which dials as `ava_runner`, sees
+    `permission denied` on the new table for the rest of the cluster's life.
+
+    Deliberately narrower than `cmd_ensure_runner_role`, which is the operator
+    door and may CREATE the role, mint a password and rewrite the pooler
+    userlist. This is a start-path step, so it only ever re-affirms what a
+    cluster already adopted, and quietly does nothing otherwise:
+
+    - not a gateway home (no `AVA_DB_URL` in `.env`) — a runner has no admin
+      credential and no business touching roles;
+    - no `AVA_RUNNER_DB_PASSWORD` — the cluster predates the runner-role cutover
+      and never provisioned one. Minting it here would silently adopt the whole
+      role on somebody's next start; `ava cluster ensure-runner-role` is the
+      deliberate door for that.
+
+    Reports and continues on failure. Being behind on grants is recoverable and
+    self-heals on the next migration; a start that already brought the data
+    plane up should not abort over it.
+    """
+    import sys
+
+    from dotenv import dotenv_values
+
+    from cli.commands._cluster_instance import pg_admin_url
+    from shared import cluster as cl
+    from shared.paths import ava_home
+
+    env = dotenv_values(ava_home() / ".env")
+    db_url = (env.get("AVA_DB_URL") or "").strip()
+    runner_password = (env.get(cl.RUNNER_DB_PASSWORD_ENV) or "").strip()
+    if not db_url or not runner_password:
+        return
+    rec = cl.get_record(ava_home())
+    if rec is None:
+        return
+    try:
+        cl.ensure_runner_role(
+            cl.identity_from_url(db_url),
+            base_admin_url=pg_admin_url(rec.ports["postgres"]),
+            runner_password=runner_password,
+        )
+    except Exception as exc:  # see the docstring: report, never abort the start
+        print(
+            f"  ! could not re-affirm {cl.RUNNER_ROLE} grants after the migration "
+            f"({exc}); run `ava cluster ensure-runner-role` — until then this "
+            "cluster's agent-runners cannot read tables the migration added",
+            file=sys.stderr,
+        )
+        return
+    print(f"  ✓ re-affirmed {cl.RUNNER_ROLE} read grants over the new schema")

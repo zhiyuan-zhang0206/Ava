@@ -288,3 +288,51 @@ def test_runner_grant_matrix(runner_db: str) -> None:
             conn.execute("INSERT INTO agents_meta (id, spawner) VALUES (999, 'user')")
         with pytest.raises(psycopg.errors.InsufficientPrivilege):
             conn.execute("CREATE TABLE runner_must_not_ddl (id int)")
+
+
+def _identity_url(url: str) -> str:
+    """The cluster's MAIN identity — the role migrations actually run as.
+
+    On a live cluster `AVA_DB_URL` names role and database with one identifier
+    (`identity_from_url`), so the applier connects as `identity`. The throwaway
+    fixture's URL dials the initdb superuser instead, which would make a
+    default-privileges test pass for the wrong reason: default privileges key on
+    the role that CREATES the object.
+    """
+    return url.replace("://ava@", f"://{_IDENTITY}@", 1)
+
+
+def test_read_grant_reaches_a_table_created_after_provisioning(runner_db: str) -> None:
+    """A table a LATER migration creates is still readable by the runner role.
+
+    `test_runner_grant_matrix` cannot reach this: its fixture applies the whole
+    of `schema.sql` and provisions afterwards, so every table it checks existed
+    at grant time. The live order is the reverse — install births the cluster and
+    grants once, then migrations keep creating tables for the rest of the
+    cluster's life.
+
+    That matters because `GRANT SELECT ON ALL TABLES IN SCHEMA public` is a
+    point-in-time loop, not a standing policy: Postgres expands it into
+    per-object ACL entries and nothing carries forward. Without the
+    `ALTER DEFAULT PRIVILEGES` beside it, every table added after birth is
+    invisible to `ava_runner` forever, and nothing re-runs the grant on a
+    schedule. It went unnoticed until `20260820T175737_extension-registry.sql`,
+    the first post-baseline migration to CREATE a table rather than add columns
+    — which came out unreadable on every pure agent-runner, where processes dial
+    as `ava_runner` rather than the main identity.
+    """
+    ensure_runner_role(_IDENTITY, base_admin_url=_admin_url(runner_db), runner_password=_RUNNER_PW)
+
+    # ... and then a migration creates a table, as the cluster's main identity.
+    with psycopg.connect(_identity_url(runner_db), autocommit=True) as conn:
+        conn.execute("CREATE TABLE post_provision_table (id int PRIMARY KEY)")
+        conn.execute("CREATE TABLE post_provision_serial (id bigserial PRIMARY KEY, v int)")
+
+    with psycopg.connect(_runner_url(runner_db), autocommit=True) as conn:
+        assert conn.execute("SELECT count(*) FROM post_provision_table").fetchone() == (0,)
+        # The sequence half of the same policy: a BIGSERIAL table added later
+        # must also carry USAGE on its owning sequence, or the first runner
+        # INSERT into it fails on the sequence rather than the table.
+        assert conn.execute("SELECT last_value FROM post_provision_serial_id_seq").fetchone() == (
+            1,
+        )
