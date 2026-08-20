@@ -47,6 +47,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import time
 from collections.abc import Awaitable, Callable
 
 from shared.log import logger
@@ -55,6 +56,26 @@ from shared.log import logger
 # derived from `inbound_channel` (via the shared prefix) so the publish side
 # and this pattern cannot drift — the same reason `inbound_channel` exists.
 _INBOUND_PATTERN_SUFFIX = ":inbound:*"
+
+# How long a cancelled turn gets to unwind before the host stops waiting and
+# reports it as uncancellable.
+#
+# `asyncio.Task.cancel()` only lands at the task's next await point. That covers
+# the overwhelming majority of a turn — waiting on the model, on I/O, on a lock —
+# but NOT a task blocked inside a C call, which cannot be interrupted at all.
+# Waiting forever on such a task is the failure this bound exists to convert into
+# a visible one: without it, `aclose` hangs, the supervisor eventually SIGKILLs
+# the host, and nothing anywhere says why.
+#
+# The value is bounded from above by the stop path's own window:
+# `cli/commands/stop.py:_reap_agent_sessions` sends SIGTERM and waits
+# `timeout_s` (15s) before force-killing. This wait plus the rest of shutdown —
+# emitting the report, closing the pool, the healthz server, the pidfile — has to
+# fit inside that, or the host is killed before it can say what was stuck. 5s
+# leaves the remaining ~10s for the rest, and
+# `tests/services/test_turn_dispatcher.py` pins the ordering against the stop
+# path's actual default rather than against this comment.
+_CANCEL_UNWIND_TIMEOUT_S = 5.0
 
 
 class TurnScheduler:
@@ -134,20 +155,59 @@ class TurnScheduler:
             self._tasks.pop(agent_id, None)
 
     async def aclose(self) -> None:
-        """Cancel every turn task and wait for them to unwind.
+        """Cancel every turn task and wait, BOUNDED, for them to unwind.
 
         Turns are checkpointed, so cancelling one loses at most the in-flight
         step — the same recovery path a runner restart already exercises.
+
+        The bound is the point. `cancel()` lands at the task's next await, so a
+        turn blocked inside a C call never unwinds, and an unbounded `await task`
+        would hang shutdown until the supervisor SIGKILLs the host — leaving no
+        record of which agent was stuck. Waiting `_CANCEL_UNWIND_TIMEOUT_S` and
+        then REPORTING the stragglers turns a silent hang into a named one.
+
+        Returns after the report either way: a turn that will not unwind is not
+        something this process can fix, and the host exiting is what the
+        supervisor is waiting for.
         """
         self._closed = True
-        tasks = list(self._tasks.values())
-        for task in tasks:
+        tasks = dict(self._tasks)
+        for task in tasks.values():
             task.cancel()
-        for task in tasks:
-            with contextlib.suppress(asyncio.CancelledError, Exception):
-                await task
+        if tasks:
+            await self._await_unwind(tasks)
         self._tasks.clear()
         self._pending.clear()
+
+    async def _await_unwind(self, tasks: dict[int, asyncio.Task[None]]) -> None:
+        """Wait out the cancellations and name whatever is still running.
+
+        `asyncio.wait` returns the stragglers rather than raising, so a task that
+        refuses to unwind is data here instead of an exception — which is what
+        lets the host report it and keep shutting down.
+        """
+        started = time.monotonic()
+        _, pending = await asyncio.wait(tasks.values(), timeout=_CANCEL_UNWIND_TIMEOUT_S)
+        # Retrieving the outcome of the tasks that DID finish keeps asyncio from
+        # logging "exception was never retrieved" for a turn that raised on its
+        # way out — noise that would sit next to the real report below.
+        for task in tasks.values():
+            if task not in pending and not task.cancelled():
+                with contextlib.suppress(Exception):
+                    task.exception()
+        if not pending:
+            return
+        waited = time.monotonic() - started
+        for agent_id, task in tasks.items():
+            if task in pending:
+                logger.error(
+                    "hosted turn for agent {agent_id} did not unwind {waited:.1f}s after cancel "
+                    "— it is blocked somewhere asyncio cannot interrupt (a C call); the host is "
+                    "exiting anyway and this agent's turn resumes from its checkpoint on restart",
+                    event="host_turn_uncancellable",
+                    agent_id=agent_id,
+                    waited_s=round(waited, 1),
+                )
 
 
 def agent_id_from_channel(channel: str) -> int | None:

@@ -552,6 +552,13 @@ EVENTS: dict[str, EventSpec] = {
         "host_started",
         "the hosted agent-runner finished process-scope boot and its dispatcher is live",
     ),
+    "host_turn_uncancellable": _telemetry(
+        "host_turn_uncancellable",
+        "a hosted turn did not unwind after being cancelled — it is blocked where asyncio "
+        "cannot interrupt it (a C call), so the host stopped waiting and exited. Names the "
+        "agent and how long the cancel was pending; the turn resumes from its checkpoint on "
+        "restart. Process mode had no equivalent because SIGKILL always lands",
+    ),
     # node / process lifecycle
     "node_enter": _telemetry(
         "node_enter",

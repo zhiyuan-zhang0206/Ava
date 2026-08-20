@@ -17,9 +17,11 @@ locked here are the ones the hosted model cannot be correct without:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 
 import pytest
 
+from services.agent_host import dispatcher
 from services.agent_host.dispatcher import (
     InboundWakeDispatcher,
     TurnScheduler,
@@ -225,6 +227,168 @@ class TestFailureIsolation:
         sched.wake(7)
         await _settle()
         assert sched.active_agents == frozenset()
+
+
+class _StuckTurn:
+    """A turn that refuses the cancel, then can be released.
+
+    Swallowing `CancelledError` forever is the faithful stand-in for a task
+    blocked in a C call — and it is also unkillable at loop teardown, so a test
+    using one hangs the whole run instead of failing. `release()` re-arms
+    cancellation so the test can clean up after asserting.
+    """
+
+    def __init__(self) -> None:
+        self.entered = asyncio.Event()
+        self._released = False
+        self._task: asyncio.Task[None] | None = None
+
+    async def __call__(self, _agent_id: int) -> None:
+        self._task = asyncio.current_task()
+        self.entered.set()
+        while True:
+            try:
+                await asyncio.sleep(3600)
+            except asyncio.CancelledError:
+                if self._released:
+                    raise
+                continue  # refuses to unwind, exactly like a blocked C call
+
+    async def release(self) -> None:
+        """Let the turn die, so the loop can close on a clean task set."""
+        self._released = True
+        task = self._task
+        if task is not None and not task.done():
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await task
+
+
+async def _aclose_without_hanging(sched: TurnScheduler, stuck: _StuckTurn) -> bool:
+    """Run `sched.aclose()` and report whether it RETURNED, never hanging.
+
+    `asyncio.wait`, not `wait_for`: the pre-bound implementation sat in
+    `await task` under a `suppress(CancelledError, ...)` which ATE the
+    cancellation `wait_for` sends, so `wait_for` could not rescue the test and
+    the whole run hung instead of failing. Waiting without cancelling turns "it
+    never returned" into a boolean the caller can assert on.
+
+    Cleanup order is load-bearing: releasing the turn is what lets the pump task
+    die, which is what lets a still-parked `aclose` finish. Cancelling `aclose`
+    first cannot do it, for the same reason `wait_for` could not.
+    """
+    closing = asyncio.create_task(sched.aclose())
+    try:
+        done, _ = await asyncio.wait([closing], timeout=5)
+        return closing in done
+    finally:
+        await stuck.release()
+        closing.cancel()
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await closing
+
+
+class TestUncancellableTurn:
+    """`aclose` must be BOUNDED, and must name what would not unwind.
+
+    `Task.cancel()` lands at the next await, so a turn blocked where asyncio
+    cannot interrupt it — a C call — never unwinds. The old `await task` waited
+    on that forever: shutdown hung until the supervisor SIGKILLed the host, and
+    nothing said which agent was stuck. These lock the replacement.
+    """
+
+    async def test_aclose_returns_even_when_a_turn_refuses_to_unwind(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The load-bearing one: shutdown completes rather than hanging.
+
+        The turn swallows its CancelledError and keeps awaiting — a faithful
+        stand-in for a task that cannot be interrupted, and one that hangs the
+        unbounded version of this method forever.
+        """
+        monkeypatch.setattr(dispatcher, "_CANCEL_UNWIND_TIMEOUT_S", 0.05)
+        stuck = _StuckTurn()
+        sched = TurnScheduler(stuck)
+        sched.wake(7)
+        await asyncio.wait_for(stuck.entered.wait(), 2)
+
+        returned = await _aclose_without_hanging(sched, stuck)
+
+        assert returned, (
+            "aclose never returned — a turn that refuses to unwind is hanging shutdown, "
+            "which is the failure the bounded wait exists to prevent"
+        )
+        assert sched.active_agents == frozenset(), "aclose must not leave the registry populated"
+
+    async def test_the_straggler_is_named_in_the_event_river(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """ "Is anything wedged right now" must be answerable without reading
+        logs, so the report carries the agent id and how long the cancel was
+        pending as event fields."""
+        monkeypatch.setattr(dispatcher, "_CANCEL_UNWIND_TIMEOUT_S", 0.05)
+        records: list[dict[str, object]] = []
+
+        def _capture(_msg: str, **kw: object) -> None:
+            records.append(kw)
+
+        monkeypatch.setattr(dispatcher.logger, "error", _capture)
+        turn = _StuckTurn()
+        sched = TurnScheduler(turn)
+        sched.wake(31)
+        await asyncio.wait_for(turn.entered.wait(), 2)
+
+        assert await _aclose_without_hanging(sched, turn), "aclose never returned"
+
+        reports = [r for r in records if r.get("event") == "host_turn_uncancellable"]
+        assert len(reports) == 1, "exactly one report per stuck agent"
+        assert reports[0]["agent_id"] == 31
+        assert isinstance(reports[0]["waited_s"], float)
+
+    async def test_a_turn_that_unwinds_cleanly_reports_nothing(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The ordinary case must stay silent, or the report is noise nobody
+        reads by the time it matters."""
+        monkeypatch.setattr(dispatcher, "_CANCEL_UNWIND_TIMEOUT_S", 0.05)
+        records: list[dict[str, object]] = []
+
+        def _capture(_msg: str, **kw: object) -> None:
+            records.append(kw)
+
+        monkeypatch.setattr(dispatcher.logger, "error", _capture)
+
+        rec = _Recorder()
+        rec.gate(7)
+        sched = TurnScheduler(rec)
+        sched.wake(7)
+        await _settle()
+        await asyncio.wait_for(sched.aclose(), 5)
+
+        assert [r for r in records if r.get("event") == "host_turn_uncancellable"] == []
+
+    def test_the_unwind_bound_fits_inside_the_stop_paths_kill_window(self) -> None:
+        """The bound is only useful if the host survives long enough to emit the
+        report. `ava stop` SIGTERMs each agent process and force-kills after
+        `_reap_agent_sessions(timeout_s=...)`, so this wait plus the rest of
+        shutdown has to fit inside that window.
+
+        Pinned against the stop path's ACTUAL default rather than a number
+        copied into a comment, so moving either side surfaces here.
+        """
+        import inspect
+
+        from cli.commands.stop import _reap_agent_sessions
+
+        kill_window = inspect.signature(_reap_agent_sessions).parameters["timeout_s"].default
+        assert kill_window > dispatcher._CANCEL_UNWIND_TIMEOUT_S, (
+            f"the host waits {dispatcher._CANCEL_UNWIND_TIMEOUT_S}s for a turn to unwind but "
+            f"the stop path force-kills after {kill_window}s — the uncancellable-turn report "
+            "would never be emitted"
+        )
+        assert kill_window > dispatcher._CANCEL_UNWIND_TIMEOUT_S * 2, (
+            "leave room for the rest of shutdown (pool, healthz, pidfile), not just the wait"
+        )
 
 
 class TestChannelParsing:
