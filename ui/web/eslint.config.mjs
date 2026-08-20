@@ -288,6 +288,21 @@ export default tseslint.config(
     },
   },
 
+  // ── typedRoutes route builders ──
+  {
+    // `Route` resolves differently depending on whether `.next/types` has been
+    // generated: with them it is the literal union typedRoutes derives from the
+    // app dir (so a composed path NEEDS the assertion), without them it widens
+    // to string (so the assertion looks redundant). CI lints on a clean
+    // checkout, a dev box usually has the generated types, so the same code is
+    // flagged in one environment and not the other. tsc holds the real types,
+    // so the assertion stays and the rule is off for route builders.
+    files: ["src/lib/plugin-nav.ts"],
+    rules: {
+      "@typescript-eslint/no-unnecessary-type-assertion": "off",
+    },
+  },
+
   // ── Test files ──
   {
     files: ["**/*.test.{ts,tsx}"],
