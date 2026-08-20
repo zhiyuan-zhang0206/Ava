@@ -648,6 +648,9 @@ EVENTS: dict[str, EventSpec] = {
     "label_generate_failed": _telemetry("label_generate_failed", "label generation failed"),
     "label_generate_skipped": _telemetry("label_generate_skipped", "label generation skipped"),
     "label_generate_empty": _telemetry("label_generate_empty", "label generation empty"),
+    "label_generate_rejected": _telemetry(
+        "label_generate_rejected", "label generation rejected as not a label"
+    ),
     "trace": _telemetry("trace", "otel span export"),
     # agent lifecycle / state
     "idle_wake": _telemetry("idle_wake", "agent woken from idle", payload=IdleWake),

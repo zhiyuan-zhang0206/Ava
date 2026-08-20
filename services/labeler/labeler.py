@@ -4,6 +4,8 @@ Extracted from gateway/labels.py to eliminate the services -> gateway
 reverse dependency.
 """
 
+import re
+
 from langchain_core.messages import HumanMessage, SystemMessage
 from loguru import logger
 
@@ -43,6 +45,67 @@ def _normalize(raw: str) -> str:
     first_line = raw.strip().splitlines()[0] if raw.strip() else ""
     stripped = first_line.strip().strip('"').strip("'").strip("「」『』《》").strip()
     return stripped[:LABEL_MAX_CHARS]
+
+
+# An output that opens in the assistant's own voice is the model ANSWERING the
+# brief instead of summarizing it. The optional leading interjection covers
+# "Sure, I'll ..." — without it the first-person test would be anchored past the
+# thing it is looking for. Matched case-insensitively at the START only: a label
+# may legitimately contain "I" mid-string ("Explain what I owe"), and it is the
+# opening position that makes it a continuation rather than a description.
+_ASSISTANT_VOICE_RE = re.compile(
+    r"""^
+    (?:(?:sure|certainly|absolutely|of\s+course|okay|ok|alright|got\s+it|understood)
+       \s*[,.!:;-]?\s+)?                                    # optional agreement opener
+    (?:i|we|let\s+me|let['\u2019]s|here['\u2019]s|here\s+is)\b   # \u2019 = smart apostrophe
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
+
+def _rejection_reason(label: str) -> str | None:
+    """Classify a normalized output that is not a label at all, returning a
+    short reason for the log (None = it looks like a label).
+
+    This is REJECTION, not repair. `_normalize` above deliberately refuses to
+    rewrite a bad output, on the grounds that a normalization heuristic papers
+    over a bad prompt — that stance holds. What was missing is the separate
+    judgement of whether the model produced a label *at all*: the caller turns a
+    reason into a failed generation (`generate_label_async` -> False), which the
+    daemon already handles as exponential backoff + retry rather than a write.
+
+    Two rules, both measured against the 287 real auto-generated labels on the
+    production cluster (0 false positives) and against the nine real bad outputs
+    recorded in issue #178 (all nine rejected):
+
+    * `markup` — the output opens with a tag. Covers all three markup leaks
+      #178 saw: reasoning scaffolding reaching `content` as literal text
+      (`<think>`, `<thinking>`) despite thinking being disabled at the source,
+      the `<user_request>` fence being echoed back as content, and a raw
+      `<request_id>` envelope. No repair is possible here — the generation is
+      structurally wrong, not merely mis-formatted.
+    * `assistant_voice` — the output opens in first person. This is the
+      prompt-injection-shaped failure: a long second-person imperative brief
+      steers the summarizer into executing it ("I'll validate the timezone
+      configuration and then test the syste").
+
+    Two rules #178 suggested were measured and DROPPED as wrong:
+
+    * "the output is exactly LABEL_MAX_CHARS" — 16 of the 287 production labels
+      are exactly 64 characters, a 5.6% false-positive rate.
+    * "the output contains a tag-shaped `<x` anywhere" — 9 of the 287, the same
+      machine-protocol labels (`DRIVE_PROBE_RESULT mounted=<yes|no> ...`).
+      Anchoring the markup rule at the start is what makes it safe.
+
+    A false positive costs a retry and, if it persists, a NULL label; a false
+    negative writes the model's answer into a user-facing field. Both rules are
+    anchored and narrow so the cheap failure is the likelier one.
+    """
+    if label.startswith("<"):
+        return "markup"
+    if _ASSISTANT_VOICE_RE.match(label):
+        return "assistant_voice"
+    return None
 
 
 async def generate_label_async(agent_id: int, prompt: str, model: str) -> bool | None:
@@ -94,6 +157,19 @@ async def generate_label_async(agent_id: int, prompt: str, model: str) -> bool |
                 event="label_generate_empty",
                 agent_id=agent_id,
                 raw=raw,
+            )
+            return False
+        reason = _rejection_reason(label)
+        if reason:
+            # Not a label — a failed generation. Returning False hands it to the
+            # daemon's existing backoff-and-retry path instead of writing the
+            # model's answer into a user-facing field (issue #178).
+            logger.error(
+                "label generate rejected for agent {agent_id} ({reason}): {label!r}",
+                event="label_generate_rejected",
+                agent_id=agent_id,
+                reason=reason,
+                label=label,
             )
             return False
     except Exception as exc:

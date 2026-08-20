@@ -330,7 +330,7 @@ def test_profile_marker_derives_from_capabilities(
 
 
 def test_labeler_is_the_only_service_that_opts_out_of_the_profile_marker() -> None:
-    """The labeler builds chat models (deepseek-v4-flash labels) and therefore
+    """The labeler builds chat models (it generates labels) and therefore
     consumes the agent-runner-capability LLM provider keys (DEEPSEEK_API_KEY
     among them). The gateway profile's env-authority pop would remove them from
     its os.environ at boot, so its spec must boot profile-less — and EVERY

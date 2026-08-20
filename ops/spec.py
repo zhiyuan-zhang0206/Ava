@@ -295,7 +295,7 @@ def build_services() -> tuple[ServiceSpec, ...]:
             curl_url=_hz("labeler"),
             identity_probe=daemon_identity("labeler", settings.services.labeler_pidfile),
             healthcheck_module="services.healthchecks.labeler",
-            # The labeler builds chat models (deepseek-v4-flash labels), so it
+            # The labeler builds chat models (it generates labels), so it
             # consumes the agent-runner-capability LLM provider keys its own
             # .env declares. The gateway profile's env-authority pass would pop
             # them (DEEPSEEK_API_KEY among them) and every label generation

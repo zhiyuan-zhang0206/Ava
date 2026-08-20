@@ -183,6 +183,7 @@ consumers: see the comments at each emit point.
 | `label_generate_failed` | label generation failed | — | — | 90d | events |
 | `label_generate_skipped` | label generation skipped | — | — | 90d | events |
 | `label_generate_empty` | label generation empty | — | — | 90d | events |
+| `label_generate_rejected` | label generation rejected as not a label | — | — | 90d | events |
 | `trace` | otel span export | — | — | 90d | events |
 | `idle_wake` | agent woken from idle | degraded, elapsed_s, rounds, timeout_s | — | 90d | events |
 | `compact_request` | compact requested | — | — | 90d | events |
