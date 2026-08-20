@@ -574,6 +574,13 @@ _PER_TEST_TRUNCATE_TABLES = (
     "checkpoints",
     "checkpoint_migrations",
     "user_settings",  # no FK, per-test key/value data (audit round-2 cc-docs-tests P2)
+    # The cluster extension registry (issue #39 S2). `extensions` FKs to
+    # `extension_blobs`, so truncating the blobs cascades to the rows — but both
+    # are listed, because the cascade direction is the opposite of the reading
+    # order and a future row without a blob (a `source='repo'` row carries none)
+    # would otherwise survive into the next test.
+    "extensions",
+    "extension_blobs",
 )
 
 

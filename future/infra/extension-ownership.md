@@ -11,8 +11,17 @@
 > and `conventions/plugin-spec-v2.md` S5 now says `machine` = capability set,
 > `enabled_set` = cluster default + per-agent overlay, and splits
 > `dependencies.hostCapabilities` into host requirements (matched for placement)
-> versus resource access (context-gated at injection). **S2 onward is unbuilt** —
-> no `extensions` / `extension_blobs` tables, no migrations, no materialization.
+> versus resource access (context-gated at injection).
+>
+> **S2 is partially built.** The `extensions` / `extension_blobs` tables, their
+> constraints (the blob size cap, the repo-rows-carry-no-content iff) and
+> `shared/extension_registry.py` exist and are tested. **Nothing writes or reads
+> them yet** — `ava skill install` still installs machine-locally and converge
+> still materializes from the checkout. That is the expand phase of
+> expand-contract, kept deliberately separate so install does not gain a
+> cluster-DB dependency before anything materializes from the rows it would
+> write. S3 onward is untouched.
+>
 > This doc remains where the buildable detail lives; the decision entry holds
 > only what is durable (the tiers, the invariants, what was rejected).
 
@@ -359,7 +368,7 @@ Adoption, not flag-day:
 | Slice | What lands | Test locks |
 |---|---|---|
 | **S1 — decision + spec** (landed) | `decisions/2026-08-21-extension-ownership-three-tiers.md` (three tiers; machine demoted to derived constraint; version-canary non-goal) + the plugin-spec-v2 S5 revision above, incl. the `hostCapabilities` split. No code. | — |
-| **S2 — skills first** | `extensions`/`extension_blobs` migrations; `ava skill install` writes row + blob; converge + boot materialization for `kind='skill'`; adoption sweep; the sync event. Skills are pure text, no runtime, no requirements — validates the whole chain at minimum risk. | install on home A materializes on home B (two homes, one PG); adoption conflict refused with both machines named; user-edit hash guard survives the source change |
+| **S2 — skills first** (tables landed; install-write + materialization pending) | `extensions`/`extension_blobs` migrations; `ava skill install` writes row + blob; converge + boot materialization for `kind='skill'`; adoption sweep; the sync event. Skills are pure text, no runtime, no requirements — validates the whole chain at minimum risk. | install on home A materializes on home B (two homes, one PG); adoption conflict refused with both machines named; user-edit hash guard survives the source change |
 | **S3 — per-agent activation** | `agents_meta.extension_overlay` migration; spawn API + preset + `ava.agents.spawn` field; resolution in `_load_extensions()` (or the turn boundary, per PR #49 ordering); event-trail recording. | overlay survives restart and hibernation swap-in; overlay-disabled plugin has zero import side effects (process mode); unknown name refused at spawn |
 | **S4 — plugins + capability matching** | plugin rows to the registry; `shared/capabilities.py` + probes + `machine_capabilities` registration; the matcher; placement constraint + boot re-check; `plugins_config.json` demoted to cache; not-runnable rows in status/inventory/inspect. | requirement-missing machine is refused as placement for a requiring agent; a default-enabled-but-not-runnable pair is queryable, not silent; cache rewrite is idempotent |
 | **S5 — MCP** | `kind='mcp'` rows + `requires` → vocabulary unification; `mcp_enabled.json` demoted. Routing endgame stays #1212. | machine-singleton browser server expressed via requirements matches only the capable machine |
