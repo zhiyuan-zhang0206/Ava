@@ -148,14 +148,11 @@ class _RemoteMCPClient:
 def _current_agent_id() -> int | None:
     """This process's agent identity, from the bootstrap env (same source
     `ava.self.AGENT_ID` reads). None outside an agent process — background
-    scripts recovered an identity only when AVA_AGENT_ID is set."""
-    import os
+    scripts recovered an identity only when AVA_AGENT_ID is set; a hosted
+    turn context (turn contextvar bound) wins over the ambient env."""
+    from shared.turn_identity import effective_agent_id
 
-    raw = os.environ.get("AVA_AGENT_ID")
-    try:
-        return int(raw) if raw else None
-    except ValueError:
-        return None
+    return effective_agent_id()
 
 
 def _socket_path_for() -> str:

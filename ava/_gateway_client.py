@@ -57,7 +57,6 @@ Design trade-offs:
 from __future__ import annotations
 
 import json as _json
-import os as _os
 import time as _time
 import uuid as _uuid
 from typing import NamedTuple
@@ -156,14 +155,17 @@ def _agent_jitter_seconds() -> float:
     agent at the same moment, and a fleet-wide identical retry schedule
     (1s, 2s, 4s, ...) would re-synchronize the retry waves as each agent
     retries in lockstep. Offsetting every sleep by a stable per-agent amount
-    keeps the waves de-phased. Deterministic on the agent id (AVA_AGENT_ID,
-    set by agent/loop.py at boot) so an agent keeps its own offset across
-    restarts; absent the env var (tests, non-agent callers) → 0 (no offset).
+    keeps the waves de-phased. Deterministic on the agent id (the turn
+    contextvar in the hosted runner, else AVA_AGENT_ID set by agent/loop.py
+    at boot) so an agent keeps its own offset across restarts; no identity
+    (tests, non-agent callers) → 0 (no offset).
     """
-    raw = _os.environ.get("AVA_AGENT_ID")
-    if raw is None:
+    from shared.turn_identity import effective_agent_id
+
+    ident = effective_agent_id()
+    if ident is None:
         return 0.0
-    return _JITTER_SPAN_S * (int(raw) % 1000) / 1000.0
+    return _JITTER_SPAN_S * (ident % 1000) / 1000.0
 
 
 def _retry_delay_seconds(attempt: int) -> float:

@@ -101,12 +101,12 @@ def _retry_phase_jitter() -> float:
     offset is deterministic so an agent keeps its own phase across restarts.
     Absent the env var (tests, non-agent entry points) → 0 (no offset).
     """
-    import os
+    from shared.turn_identity import effective_agent_id
 
-    raw = os.environ.get("AVA_AGENT_ID")
-    if raw is None:
+    ident = effective_agent_id()
+    if ident is None:
         return 0.0
-    return _RETRY_JITTER_SPAN_S * (int(raw) % 1000) / 1000.0
+    return _RETRY_JITTER_SPAN_S * (ident % 1000) / 1000.0
 
 
 def _build_llm_retry() -> RetryPolicy:

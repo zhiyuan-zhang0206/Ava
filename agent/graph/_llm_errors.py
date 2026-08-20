@@ -159,7 +159,7 @@ def _classify_and_log_provider_error(exc: Exception) -> FatalProviderError | Non
     classification = classify_error(exc)
     fatal_type_hit = _is_fatal_provider_error_type(exc)
     fatal = classification.error_class is ErrorClass.PERMANENT or fatal_type_hit
-    model = settings.lm.llm_model
+    model = turn_settings.lm.llm_model
     logger.opt(exception=True).warning(
         "[{label}] {error_class} provider={provider} status={status} fatal={fatal}",
         event="llm_provider_error",

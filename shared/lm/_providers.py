@@ -11,7 +11,6 @@ before dispatch. See the factory module docstring for the provider matrix.
 
 from __future__ import annotations
 
-import os
 import uuid
 from typing import Any, Literal, NotRequired, TypedDict
 
@@ -27,6 +26,7 @@ from shared.lm._effort import (
     mimo_extra_body,
 )
 from shared.lm.registry import ModelSpec, resolve_setting
+from shared.turn_identity import effective_agent_id
 
 
 class ThinkingConfig(TypedDict):
@@ -66,8 +66,10 @@ _PROCESS_CONV_ID = str(uuid.uuid4())
 
 
 def _grok_conv_id() -> str:
-    agent_id = os.environ.get("AVA_AGENT_ID")
-    if agent_id:
+    # Turn contextvar > AVA_AGENT_ID env: in the hosted runner one process
+    # serves many agents, and cache affinity must follow the turn's agent.
+    agent_id = effective_agent_id()
+    if agent_id is not None:
         return str(uuid.uuid5(_GROK_CONV_ID_NAMESPACE, f"ava-agent-{agent_id}"))
     return _PROCESS_CONV_ID
 

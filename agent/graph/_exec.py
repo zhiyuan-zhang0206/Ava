@@ -61,6 +61,7 @@ are accessed dynamically (consistent with existing convention).
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import sys
 import threading
 import time
@@ -383,9 +384,16 @@ async def _run_in_thread(
     # native code) never unwinds its redirect, so the orphan branch restores
     # the process-global streams here.
     pre_stdout, pre_stderr = sys.stdout, sys.stderr
+    # Run the worker under a copy of the creating context: threads do NOT
+    # inherit contextvars, and in the hosted runner the turn identity
+    # (shared/turn_identity.py) and the per-turn config view
+    # (shared/config/turn_view.py) both live in contextvars that agent code on
+    # this thread reads through ava.* / turn_settings. In process mode the
+    # copied context carries nothing bound and behavior is unchanged.
+    exec_ctx = contextvars.copy_context()
     t = threading.Thread(
-        target=_exec_worker,
-        args=(code, stream, result_holder),
+        target=exec_ctx.run,
+        args=(_exec_worker, code, stream, result_holder),
         daemon=True,
         name=f"exec-{agent_id}",
     )
