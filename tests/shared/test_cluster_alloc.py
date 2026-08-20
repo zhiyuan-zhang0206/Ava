@@ -12,6 +12,26 @@ def test_legacy_ava_ports():
     assert set(cluster.LEGACY_AVA_PORTS) == set(PORT_OFFSETS)
 
 
+def test_legacy_ports_are_unique():
+    """No two services may share a legacy port.
+
+    These are the ports a unit whose `.env` predates a key ACTUALLY BINDS
+    (`daemon_health.DEFAULT_PORTS` is derived from this table), so a duplicate
+    is not a cosmetic clash — the two daemons fight over one socket on every
+    existing unit. The table is deliberately not in offset order (`ops` moved
+    off 8106 to dodge the Windows iphlpsvc grab), so "next number after the last
+    line" is not a safe way to add one: agent_host was written as 8113, which
+    `ops` already held, and nothing caught it until a boot log printed the same
+    port twice.
+    """
+    ports = cluster.LEGACY_AVA_PORTS
+    collisions = {
+        port: sorted(svc for svc, p in ports.items() if p == port)
+        for port in {p for p in ports.values() if list(ports.values()).count(p) > 1}
+    }
+    assert not collisions, f"legacy ports shared by more than one service: {collisions}"
+
+
 def test_per_cluster_pg_redis_ports():
     """Every cluster carries its own Postgres+Redis port, so two co-located clusters
     never share a data plane. `main` gets fixed 5433/6380 (its own instance, off the
