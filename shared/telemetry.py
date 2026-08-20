@@ -496,6 +496,21 @@ def init_telemetry(*, process: str = "unknown", agent_id: int | None = None) -> 
         _state["pipeline"] = _open_pipeline()
 
 
+def _ambient_agent_id() -> int | None:
+    """The agent an event belongs to when the caller named none.
+
+    Turn first, then the process binding: a hosted runner emits on behalf of
+    every local agent, so its process binding is None and the turn contextvar
+    (`shared/turn_identity.py`) is the only truthful answer. In process mode
+    nothing binds the contextvar and this is the `init_telemetry` value."""
+    from shared.turn_identity import current_turn_agent_id
+
+    bound = current_turn_agent_id()
+    if bound is not None:
+        return bound
+    return _state["agent_id"]
+
+
 def _ensure_pipeline() -> _EventPipeline | None:
     """Lazy-init fallback for emit-before-init callers. Best-effort: a process
     with no DB available degrades to dropping (never raises, never blocks)."""
@@ -558,7 +573,7 @@ def emit(
                 ts=ts or datetime.now(UTC),
                 trace_id=trace_id,
                 span_id=span_id,
-                agent_id=agent_id if agent_id is not None else _state["agent_id"],
+                agent_id=agent_id if agent_id is not None else _ambient_agent_id(),
                 machine=_state["machine"] or _resolve_machine(),
                 process=_state["process"],
                 category=category,
