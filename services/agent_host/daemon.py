@@ -20,10 +20,16 @@ Usage:
 1. **Refuse unless hosted**, before anything expensive.
 2. **Pidfile**, so a second instance exits instead of racing the first for turns.
 3. **Process-scope boot** — `init_process_scope` (trace export; must precede any
-   model build so OpenLLMetry can instrument it) then `load_process_extensions`
+   model build so OpenLLMetry can instrument it), `land_cluster_extensions` (the
+   cluster's installed skills onto this machine), then `load_process_extensions`
    (the external-plugin load). Exactly once per process: see
    `agent/_process_boot.py:load_process_extensions` for why repeating it is not
-   an option, and issue #170 for the behavioural change that follows.
+   an option, and issue #170 for the behavioural change that follows. The
+   materialization is once per process for a milder reason — the skills
+   directory belongs to the machine, not to any agent — but it lands here rather
+   than per turn precisely because a hosted daemon is long-lived: without it a
+   host that booted before an install would never pick the skill up, where
+   process mode gets a fresh boot on every spawn.
 4. **The shared data plane** — pool, checkpointer, graph. `build_graph` runs the
    builtin-plugin load and the state-class build, which is the other half of
    "once per process".
@@ -158,7 +164,11 @@ async def run() -> None:
         _log.info("[agent-host] could not acquire pidfile %s, exiting", _PIDFILE)
         sys.exit(1)
 
-    from agent._process_boot import init_process_scope, load_process_extensions
+    from agent._process_boot import (
+        init_process_scope,
+        land_cluster_extensions,
+        load_process_extensions,
+    )
 
     # langgraph types its checkpointer parameter with an unparameterized generic,
     # so the imported symbol reads as partially unknown; the return type — the
@@ -166,6 +176,7 @@ async def run() -> None:
     from agent.graph import build_graph  # pyright: ignore[reportUnknownVariableType]
 
     init_process_scope()
+    land_cluster_extensions()
     load_process_extensions()
 
     pool = build_shared_pool(settings.data_plane.db_url)

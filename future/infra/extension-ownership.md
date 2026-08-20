@@ -24,8 +24,12 @@
 > homes one PG* — is exercised by
 > `tests/cli/test_extension_two_home_chain.py`.
 >
-> **Still open in S2**: process-boot materialization (`ava start` covers the
-> restart path today), the adoption sweep for names already installed on a
+> Process boot materializes too (`agent/_process_boot.py:land_cluster_extensions`,
+> and once per daemon in the hosted runner), which closes the window converge
+> cannot reach: a machine that was down during an install, or a long-lived host
+> that has been up since before it.
+>
+> **Still open in S2**: the adoption sweep for names already installed on a
 > machine before the registry existed, and the sync event. S3 onward is
 > untouched.
 >
