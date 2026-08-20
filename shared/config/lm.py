@@ -40,12 +40,23 @@ class LmSettings(EnvSettings):
     )
 
     labeler_model: str = Field(
-        default="deepseek-v4-flash",
+        # pro, not flash, by measurement (issue #178): prompts on this path are
+        # frequently the long English second-person imperative brief that
+        # `ava.agents.spawn()` writes, and flash *executes* that shape instead
+        # of summarizing it — replaying real stored prompts, 15 of 56 attempts
+        # answered the brief or emitted scaffolding, against 0 of 56 for pro.
+        # Staying inside DeepSeek keeps the gateway's required-key surface
+        # unchanged; the cheaper models that also scored 0 lost on output
+        # quality (gpt-5.6-luna emitted stray private-use and Malayalam
+        # codepoints into labels).
+        default="deepseek-v4-pro",
         alias="AVA_LABELER_MODEL",
         description=(
-            "Cheap model used only to generate a conversation's short display name "
+            "Model used only to generate a conversation's short display name "
             "from its first message. Same provider matrix as llm_model; one "
-            "cluster-wide value (no per-agent override)."
+            "cluster-wide value (no per-agent override). Prompts on this path "
+            "are frequently machine-authored agent briefs, which a weaker model "
+            "executes instead of summarizing — measure before downgrading."
         ),
         json_schema_extra={
             "restart_required": "",
