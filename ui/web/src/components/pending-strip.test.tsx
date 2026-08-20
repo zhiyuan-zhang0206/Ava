@@ -43,7 +43,7 @@ describe("PendingStrip", () => {
       />,
     );
     expect(screen.getByText("· User")).toBeTruthy();
-    expect(screen.getByText("· agent 3")).toBeTruthy();
+    expect(screen.getByText("· Agent #3")).toBeTruthy();
     expect(screen.getByText("· scheduled")).toBeTruthy();
     // unrecognized tags fall through to the raw value
     expect(screen.getByText("· watcher:5")).toBeTruthy();
