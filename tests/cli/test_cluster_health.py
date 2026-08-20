@@ -1131,13 +1131,18 @@ def test_run_health_probe_allowed_from_prod_checkout(
     def _ok(*_args: object, **_kwargs: object) -> object:
         return True
 
-    # Healthy path: every check passes.
+    # Healthy path: every check passes. Check 6 (disk usage) reads the real
+    # data volume via `_disk_usage_failure` unless stubbed — on a dev box
+    # whose disk happens to be over the watermark, an unstubbed check here
+    # makes the verdict track the developer's disk rather than the code
+    # (issue #76).
     monkeypatch.setattr(_cluster_health, "_gateway_liveness", _ok)
     monkeypatch.setattr(_cluster_health, "_agent_population", _ok)
     monkeypatch.setattr(_cluster_health, "_crash_loop_detection", _ok)
     monkeypatch.setattr(_cluster_health, "_schema_health", _ok)
     monkeypatch.setattr(_cluster_health, "_service_probes", list)
     monkeypatch.setattr(_cluster_health, "_gate_probe", lambda: None)
+    monkeypatch.setattr(_cluster_health, "_disk_usage_failure", lambda: None)
 
     rc = _cluster_health.run_health_probe()
 
