@@ -63,4 +63,5 @@ tags:
   Firewall's per-binary allow list (needs root to mutate, which Ava does not
   have); see [[shared/session-backend/session-backend.ava.okf.md|session backend]].
 - Layer constraints are enforced by `import-linter`: shared < ava < agent < gateway < cli
-- There is no internal layer restriction within shared; services must not import agent kernel- File line budget: soft limit 500 / hard limit 800 (enforced by lint)
+- There is no internal layer restriction within shared; services must not import agent kernel
+- File line budget: soft limit 500 / hard limit 800 (enforced by lint)

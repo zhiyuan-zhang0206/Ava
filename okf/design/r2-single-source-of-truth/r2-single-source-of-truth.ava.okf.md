@@ -36,7 +36,9 @@ The pattern is uniform across four convergence points, but **the mechanism is in
 
 ### A. Env keys — `EnvRegistry` (declaration registry, see [[okf/design/design.ava.okf.md|lexicon]])
 
-Moved to [[okf/design/r2-single-source-of-truth/env-registry.ava.okf.md|R2 Env Registry]] — every env key declared exactly once; forwarding/keep-drop/seed-allowlist are pure projections; invariants A1–A3.### B. Skill names — `SkillIdentity` (an entity, not a string)
+Moved to [[okf/design/r2-single-source-of-truth/env-registry.ava.okf.md|R2 Env Registry]] — every env key declared exactly once; forwarding/keep-drop/seed-allowlist are pure projections; invariants A1–A3.
+
+### B. Skill names — `SkillIdentity` (an entity, not a string)
 
 A skill's identity is one entity: constructed from any surface (`from_dir`/`from_frontmatter`/`from_cli`), all folding (dash↔underscore) in the constructor, `display_name()` renders. **The install directory is the source of identity; frontmatter `name` is the display declaration** — folded they must be equal, else fail-fast (isomorphic to "cluster identity IS home path"). Registry key = match_key; two directories folding to the same key → `SkillNameCollision` fail-fast. All boundaries accept or produce the entity; bare strings are constructed explicitly at boundaries — forgetting to fold becomes structurally impossible.
 

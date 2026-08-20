@@ -29,7 +29,9 @@ The audit Round 1 (2026-08-07) traced 48h of incidents to **four root design pro
 
 ## Shared vocabulary (one concept, one definition)
 
-The consolidated lexicon (single source of truth / registry / lease / doorplate / projection / fold — one definition per concept, used by every design node): [[okf/design/vocabulary.ava.okf.md]].## Cross-design handoffs (explicit, no gaps)
+The consolidated lexicon (single source of truth / registry / lease / doorplate / projection / fold — one definition per concept, used by every design node): [[okf/design/vocabulary.ava.okf.md]].
+
+## Cross-design handoffs (explicit, no gaps)
 
 - **R2 ↔ R3 (skill identity)**: identity definition (fold at construction, canonical at render) belongs to R2's `SkillIdentity`; R3's `SkillIndex.build()` consumes that entity as index key — materialization belongs to R3.
 - **R2 ↔ R3 (idempotency)**: R3 declares idempotency at the API boundary (service-side promise, `idempotency` field on the doorplate); R2's `resilience.Policy.idempotent` is the client-side execution parameter. One shared decision point (R2 Q1 / R3 门①): same question, two perspectives.

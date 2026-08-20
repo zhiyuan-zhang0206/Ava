@@ -36,6 +36,19 @@ Rules (source of truth):
      rescuing it the day a second node takes that basename, turning an
      untouched link into a W008. W011 reports the mismatch while the link still
      works, so the path is fixed rather than discovered broken later.
+ 12. Concatenation (block): a header or bullet marker glued directly onto the
+     text before it, with no blank line / newline between them. This is the
+     defect class found across the W010 okf-split campaign — replacing a
+     section with "summary sentence + [[wikilink]]" dropped the blank line
+     before the next header or bullet, so it renders as part of the previous
+     line instead of its own block (e.g. "...write-path.ava.okf.md]].## Next
+     Section" — the header never renders). Detection excludes fenced code and
+     inline code spans and is anchored on punctuation immediately before the
+     marker, so it does not fire on a header's own repeated '#' or on an
+     inline mention like "C#".
+ 13. Duplicate consecutive headers (block): the same header line appearing
+     twice in a row (blank lines between are fine) — the other shape the same
+     campaign produced.
 
 Usage:
     .venv/bin/python scripts/lint_ava_okf.py [--fix] [paths...]
@@ -78,6 +91,30 @@ _SPLIT_HINT = (
 )
 # Same syntax as build_okf_data.WIKILINK_RE: [[target]] or [[target|label]]
 WIKILINK_RE = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]*)?\]\]")
+
+# Rule 12 masking: fenced code blocks and inline code spans are blanked out
+# (line-count-preserving) before the concatenation scan, so a Python "#
+# comment" or a `# Capabilities` name quoted in prose never trips it.
+_FENCE_RE = re.compile(r"^\s*```")
+_INLINE_CODE_RE = re.compile(r"`[^`\n]*`")
+
+# Rule 12: a header/bullet marker glued directly onto the preceding text with
+# no line break between them — the missing-blank-line concatenation defect.
+# Both lookbehinds are deliberately narrow to stay zero-false-positive:
+#   - HEADER: the char right before the marker must be punctuation/bracket-
+#     like — never a letter, digit, or another '#'. Excluding letters/digits
+#     rules out inline mentions like "C#"/"F#"; excluding '#' rules out a
+#     legitimate header's own repeated '#' run (matching mid-hash).
+#   - BULLET: the char right before must be non-whitespace and not another
+#     '-', so a horizontal rule / spaced em-dash-as-double-hyphen is not
+#     flagged, but a bullet glued onto the end of a word still is (the
+#     observed shape: "...must not import agent kernel- File line budget...").
+_HEADER_GLUE_RE = re.compile(r"(?<=[^\sA-Za-z0-9#])#{1,6} (?=[A-Za-z0-9`(])")
+_BULLET_GLUE_RE = re.compile(r"(?<=[^\s-])- (?=[A-Za-z0-9`(*])")
+
+# Rule 13: two identical header lines back to back (blank lines allowed
+# between, since that is the normal spacing between two real sections).
+_HEADER_LINE_RE = re.compile(r"^#{1,6} ")
 
 # Directories the axis-search rglob skips (mirrors okf_graph.find_files'
 # hidden-dir policy plus the heavy trees a whole-repo walk would drag in).
@@ -280,6 +317,119 @@ def _wikilink_error(
     return None
 
 
+def _tags_errors(path_str: str, fm: dict) -> list[LintError]:
+    """Rule 5: 'tags', when present, must be a list of strings."""
+    errors: list[LintError] = []
+    if "tags" not in fm:
+        return errors
+    tags = fm["tags"]
+    if not isinstance(tags, list):
+        errors.append(LintError(path_str, 1, "E005", "'tags' must be a list of strings"))
+        return errors
+    for i, t in enumerate(tags):
+        if not isinstance(t, str):
+            errors.append(
+                LintError(
+                    path_str, 1, "E005", f"tags[{i}] must be a string, got {type(t).__name__}"
+                )
+            )
+    return errors
+
+
+def _forbidden_key_errors(path_str: str, fm: dict) -> list[LintError]:
+    """Rule 6: none of the forbidden frontmatter keys may be present."""
+    errors: list[LintError] = []
+    for key in FORBIDDEN_KEYS:
+        if key in fm:
+            errors.append(
+                LintError(
+                    path_str,
+                    1,
+                    "E006",
+                    f"Forbidden frontmatter key: '{key}'. "
+                    f"Use 'tags' for categorization; filesystem for hierarchy.",
+                )
+            )
+    return errors
+
+
+def _mask_code(text: str) -> str:
+    """Blank out fenced code blocks and inline code spans, preserving line count
+    and column offsets, so rule 12's scan never fires inside code."""
+    lines = text.split("\n")
+    out = []
+    in_fence = False
+    for line in lines:
+        if _FENCE_RE.match(line):
+            in_fence = not in_fence
+            out.append("")
+            continue
+        if in_fence:
+            out.append("")
+            continue
+        out.append(_INLINE_CODE_RE.sub(lambda m: " " * len(m.group(0)), line))
+    return "\n".join(out)
+
+
+def _concat_glue_errors(path_str: str, text: str, fm_end_line: int) -> list[LintError]:
+    """Rule 12: header/bullet markers glued to the preceding text. Scans from
+    `fm_end_line` on (skipping the YAML frontmatter) using real line numbers
+    from the raw file, not the frontmatter-stripped/lstripped `body`."""
+    errors: list[LintError] = []
+    body_lines = text.split("\n")[fm_end_line:]
+    masked = _mask_code("\n".join(body_lines))
+    for i, line in enumerate(masked.split("\n")):
+        line_no = fm_end_line + i + 1
+        if _HEADER_GLUE_RE.search(line):
+            errors.append(
+                LintError(
+                    path_str,
+                    line_no,
+                    "E012",
+                    "Header glued to the preceding text with no blank line — "
+                    "insert the missing blank line before the header.",
+                )
+            )
+        if _BULLET_GLUE_RE.search(line):
+            errors.append(
+                LintError(
+                    path_str,
+                    line_no,
+                    "E012",
+                    "Bullet glued to the preceding text with no line break — "
+                    "insert the missing newline before the bullet.",
+                )
+            )
+    return errors
+
+
+def _duplicate_header_errors(path_str: str, text: str, fm_end_line: int) -> list[LintError]:
+    """Rule 13: the same header line twice in a row (blank lines between are
+    fine — that is the normal spacing between two real sections)."""
+    errors: list[LintError] = []
+    body_lines = text.split("\n")[fm_end_line:]
+    prev_header: str | None = None
+    prev_line_no = 0
+    for i, line in enumerate(body_lines):
+        if _HEADER_LINE_RE.match(line):
+            if line == prev_header:
+                errors.append(
+                    LintError(
+                        path_str,
+                        fm_end_line + i + 1,
+                        "E013",
+                        f"Duplicate consecutive header (also at line {prev_line_no}): "
+                        f"'{line}'. Merge the two sections or give the second one its "
+                        f"own heading.",
+                    )
+                )
+            prev_header = line
+            prev_line_no = fm_end_line + i + 1
+        elif line.strip() != "":
+            prev_header = None
+    return errors
+
+
 def lint_file(filepath: Path, all_paths: set[str], repo_root: Path) -> list[LintError]:
     errors = []
     path_str = str(filepath)
@@ -338,7 +488,7 @@ def lint_file(filepath: Path, all_paths: set[str], repo_root: Path) -> list[Lint
         )
 
     # Parse frontmatter
-    fm, body, _fm_end_line = parse_frontmatter(text)
+    fm, body, fm_end_line = parse_frontmatter(text)
     if not fm:
         errors.append(
             LintError(
@@ -372,35 +522,9 @@ def lint_file(filepath: Path, all_paths: set[str], repo_root: Path) -> list[Lint
             )
         )
 
-    # Rule 5: tags format
-    if "tags" in fm:
-        tags = fm["tags"]
-        if not isinstance(tags, list):
-            errors.append(LintError(path_str, 1, "E005", "'tags' must be a list of strings"))
-        else:
-            for i, t in enumerate(tags):
-                if not isinstance(t, str):
-                    errors.append(
-                        LintError(
-                            path_str,
-                            1,
-                            "E005",
-                            f"tags[{i}] must be a string, got {type(t).__name__}",
-                        )
-                    )
-
-    # Rule 6: forbidden keys
-    for key in FORBIDDEN_KEYS:
-        if key in fm:
-            errors.append(
-                LintError(
-                    path_str,
-                    1,
-                    "E006",
-                    f"Forbidden frontmatter key: '{key}'. "
-                    f"Use 'tags' for categorization; filesystem for hierarchy.",
-                )
-            )
+    # Rules 5 + 6: tags format, forbidden keys
+    errors.extend(_tags_errors(path_str, fm))
+    errors.extend(_forbidden_key_errors(path_str, fm))
 
     # Rules 8 + 11: wikilink targets (warn level) — same resolution as the graph builder
     try:
@@ -411,6 +535,11 @@ def lint_file(filepath: Path, all_paths: set[str], repo_root: Path) -> list[Lint
         err = _wikilink_error(path_str, rel_path, m.group(1).strip(), all_paths, repo_root)
         if err is not None:
             errors.append(err)
+
+    # Rules 12 + 13: concatenation defects (block) — operate on the raw text so
+    # line numbers are exact, not on `body` (which parse_frontmatter lstrips).
+    errors.extend(_concat_glue_errors(path_str, text, fm_end_line))
+    errors.extend(_duplicate_header_errors(path_str, text, fm_end_line))
 
     return errors
 
