@@ -2,8 +2,9 @@
 
 Design for issue #57. Evidence base: the DeepSeek Harness plugin-ecosystem
 survey (2026-08-19; 1849 npm packages / 1569 curated entries within 6 days of
-their plugin platform shipping). Status: **design only — nothing here is
-implemented**; the slices at the bottom are the implementation that remains.
+their plugin platform shipping). Status: **U1 shipped** (the `contributions.ui`
+manifest key + validator — declaration only); everything else here is design.
+The slices at the bottom are the implementation that remains.
 
 ## Why now
 
@@ -240,9 +241,16 @@ value is validated as a CSS color literal.
 
 ## Implementation remaining (slices, each independently landable)
 
-- **U1 — manifest key + validator**: `contributions.ui` schema in
-  `shared/plugin_manifest.py` (closed type set, token/icon vocabulary checks).
-  Declaration-only; zero runtime change. Can land now.
+- **U1 — manifest key + validator** — **shipped**: the `contributions.ui`
+  schema lives in `shared/plugin_ui_contributions.py` (closed type set, closed
+  icon vocabulary, and a theme token vocabulary locked against
+  `ui/web/src/app/globals.css` by
+  `tests/shared/test_plugin_ui_contributions.py`, so a token the console adds
+  fails the suite until it is offered to skins or listed as non-themable).
+  `shared/plugin_manifest.py` calls it for the `ui` key. Declaration-only;
+  zero runtime change. `--radius` is deliberately non-themable — a theme pack
+  is colors, and re-valuing the radius is a layout change in a theme's
+  clothes.
 - **U2 — themes end-to-end**: aggregation endpoint (themes subset) + settings
   theme picker + `user_settings` persistence + root-element token application.
   The smallest slice that exercises the whole declaration→aggregation→render
