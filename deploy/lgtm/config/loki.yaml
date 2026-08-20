@@ -6,6 +6,10 @@ auth_enabled: false
 
 server:
   http_listen_port: 3100
+  # Querier-to-frontend result messages exceed the gRPC default 4MiB on
+  # 10-minute raw-line queries (~5k rows) and drop the client connection
+  # (RemoteProtocolError); raise the server-side recv cap to 100MiB.
+  grpc_server_max_recv_msg_size: 104857600
 
 # No phone-home: this config ships as the open-source reference deployment;
 # downstream users must not inherit vendor telemetry silently.
