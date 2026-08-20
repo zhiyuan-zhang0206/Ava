@@ -47,17 +47,17 @@ def _normalize(raw: str) -> str:
     return stripped[:LABEL_MAX_CHARS]
 
 
+# Shortest output treated as an echo of the instruction rather than a
+# coincidence. 16 characters into `_LABEL_SYSTEM_PROMPT` is already mid-sentence
+# ("Summarize the us"), so nothing a summarizer would produce on purpose.
+_ECHO_MIN_CHARS = 16
+
 # An output that opens in the assistant's own voice is the model ANSWERING the
 # brief instead of summarizing it. The optional leading interjection covers
 # "Sure, I'll ..." — without it the first-person test would be anchored past the
 # thing it is looking for. Matched case-insensitively at the START only: a label
 # may legitimately contain "I" mid-string ("Explain what I owe"), and it is the
 # opening position that makes it a continuation rather than a description.
-# Shortest output treated as an echo of the instruction rather than a
-# coincidence. 16 characters into `_LABEL_SYSTEM_PROMPT` is already mid-sentence
-# ("Summarize the us"), so nothing a summarizer would produce on purpose.
-_ECHO_MIN_CHARS = 16
-
 _ASSISTANT_VOICE_RE = re.compile(
     r"""^
     (?:(?:sure|certainly|absolutely|of\s+course|okay|ok|alright|got\s+it|understood)
@@ -79,7 +79,7 @@ def _rejection_reason(label: str) -> str | None:
     reason into a failed generation (`generate_label_async` -> False), which the
     daemon already handles as exponential backoff + retry rather than a write.
 
-    Two rules, both measured against the 287 real auto-generated labels on the
+    Three rules, all measured against the 287 real auto-generated labels on the
     production cluster (0 false positives) and against the nine real bad outputs
     recorded in issue #178 (all nine rejected):
 
@@ -115,8 +115,8 @@ def _rejection_reason(label: str) -> str | None:
       label that is its own opening.
 
     A false positive costs a retry and, if it persists, a NULL label; a false
-    negative writes the model's answer into a user-facing field. Both rules are
-    anchored and narrow so the cheap failure is the likelier one.
+    negative writes the model's answer into a user-facing field. All three rules
+    are anchored and narrow so the cheap failure is the likelier one.
     """
     if label.startswith("<"):
         return "markup"
