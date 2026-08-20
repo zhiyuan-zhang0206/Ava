@@ -13,7 +13,9 @@ no CLI test has to remember the seam and the local leg stays assertable.
 
 from __future__ import annotations
 
+import pathlib
 import subprocess
+from collections.abc import Iterator
 
 import pytest
 
@@ -70,3 +72,26 @@ def local_unpauses(monkeypatch: pytest.MonkeyPatch) -> list[bool]:
 
     monkeypatch.setattr("ops.cluster.unpause_local_cluster", _unpause)
     return calls
+
+
+@pytest.fixture
+def _installed_machine_identity(unit_home: pathlib.Path) -> Iterator[None]:
+    """Give this test's unit home a machine identity, as a real install has.
+
+    `unit_home` is deliberately a bare directory — several tests model a home
+    that has never been through `ava start` and assert exactly that (see
+    `test_start_arg_writes_to_file_for_persistence`, whose premise is "files
+    also do not exist"). So the identity cannot be pre-written there.
+
+    But an install that lands content into the CLUSTER registry records
+    `local:<machine>` provenance for a local-path source, which needs a machine
+    name — and a home doing `ava skill install` is by definition an installed
+    unit, not a virgin one. Modules exercising the install paths opt in with
+    `pytestmark = pytest.mark.usefixtures("_installed_machine_identity")`.
+    """
+    from shared.machine import reset_identity
+
+    (unit_home / "machine_name").write_text("unit-test-machine", encoding="utf-8")
+    reset_identity()
+    yield
+    reset_identity()

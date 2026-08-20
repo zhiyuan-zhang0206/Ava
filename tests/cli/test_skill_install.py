@@ -20,6 +20,11 @@ import ava.skills as skills_mod
 from cli.commands import cmd_skill_install
 from shared import install_registry as reg
 
+# Every test here installs a package, which records `local:<machine>` provenance
+# in the cluster registry — that needs a machine identity, which a bare
+# `unit_home` deliberately lacks. See the fixture's docstring.
+pytestmark = pytest.mark.usefixtures("_installed_machine_identity")
+
 # A skill carrying every optional field the standard defines — the compatibility
 # claim in one fixture. Ava honors name + description and preserves the rest on
 # disk without tripping over it.

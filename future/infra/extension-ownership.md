@@ -20,7 +20,11 @@
 > touching local disk, and converge lands enabled `kind='skill'` rows onto each
 > machine, refusing to overwrite a locally edited tree.
 >
-> **Still open in S2**: process-boot materialization (converge covers the
+> The design's own S2 lock — *install on home A materializes on home B, two
+> homes one PG* — is exercised by
+> `tests/cli/test_extension_two_home_chain.py`.
+>
+> **Still open in S2**: process-boot materialization (`ava start` covers the
 > restart path today), the adoption sweep for names already installed on a
 > machine before the registry existed, and the sync event. S3 onward is
 > untouched.
@@ -378,7 +382,7 @@ Adoption, not flag-day:
 | Slice | What lands | Test locks |
 |---|---|---|
 | **S1 — decision + spec** (landed) | `decisions/2026-08-21-extension-ownership-three-tiers.md` (three tiers; machine demoted to derived constraint; version-canary non-goal) + the plugin-spec-v2 S5 revision above, incl. the `hostCapabilities` split. No code. | — |
-| **S2 — skills first** (tables + install-write + converge materialization landed; boot materialization, adoption sweep and sync event pending) | `extensions`/`extension_blobs` migrations; `ava skill install` writes row + blob; converge + boot materialization for `kind='skill'`; adoption sweep; the sync event. Skills are pure text, no runtime, no requirements — validates the whole chain at minimum risk. | install on home A materializes on home B (two homes, one PG); adoption conflict refused with both machines named; user-edit hash guard survives the source change |
+| **S2 — skills first** (tables + install-write + materialization landed, cross-machine chain locked; boot materialization, adoption sweep and sync event pending) | `extensions`/`extension_blobs` migrations; `ava skill install` writes row + blob; converge + boot materialization for `kind='skill'`; adoption sweep; the sync event. Skills are pure text, no runtime, no requirements — validates the whole chain at minimum risk. | install on home A materializes on home B (two homes, one PG); adoption conflict refused with both machines named; user-edit hash guard survives the source change |
 | **S3 — per-agent activation** | `agents_meta.extension_overlay` migration; spawn API + preset + `ava.agents.spawn` field; resolution in `_load_extensions()` (or the turn boundary, per PR #49 ordering); event-trail recording. | overlay survives restart and hibernation swap-in; overlay-disabled plugin has zero import side effects (process mode); unknown name refused at spawn |
 | **S4 — plugins + capability matching** | plugin rows to the registry; `shared/capabilities.py` + probes + `machine_capabilities` registration; the matcher; placement constraint + boot re-check; `plugins_config.json` demoted to cache; not-runnable rows in status/inventory/inspect. | requirement-missing machine is refused as placement for a requiring agent; a default-enabled-but-not-runnable pair is queryable, not silent; cache rewrite is idempotent |
 | **S5 — MCP** | `kind='mcp'` rows + `requires` → vocabulary unification; `mcp_enabled.json` demoted. Routing endgame stays #1212. | machine-singleton browser server expressed via requirements matches only the capable machine |
