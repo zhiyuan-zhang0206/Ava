@@ -239,8 +239,15 @@ calls already carry (`shared/plugin_context.py`), not a runtime realm.
 
 ## Converge, enroll, boot — who materializes what, and offline semantics
 
-**Converge** (`cli/commands/_converge.py`) gains one step and loses authority:
-`ensure_extensions_materialized()` pulls the enabled rows for this machine,
+**Converge** loses authority, and materialization is invoked BESIDE the converge
+steps rather than as one of them. `ava start` runs converge as step 1, brings
+this cluster's Postgres up as step 2 and applies migrations as step 2.5, so a
+`CONVERGE_STEPS` entry would read the registry before the database is up on a
+single box, and before the `extensions` table exists on the rollout that creates
+it (this doc originally described it as a step; #201 shipped it that way and the
+correction is `cli/commands/_converge.py:materialize_cluster_extensions`, called
+from `ava start` after the schema-current check and from the end of standalone
+`ava converge`). The materializer itself pulls the enabled rows for this machine,
 lands missing/stale trees from blobs (verified against `content_hash`), and
 rewrites the local caches (`plugins_config.json`, `mcp_enabled.json`,
 `installed.json` entries for registry-owned names) as derived state. The

@@ -447,6 +447,17 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
     if rc != 0:
         return rc
 
+    # 2.7) land the cluster's installed extensions on this machine. AFTER the
+    # schema check on purpose: converge (step 1) runs before this cluster's
+    # Postgres is even up (step 2) and before migrations (step 2.5), so a
+    # converge step could not read the registry on a single box at all. Here the
+    # data plane is up and known-current, which is the precondition
+    # materialization actually has. Reports and continues on failure — a machine
+    # that is behind catches up on the next start.
+    from cli.commands._converge_extensions import materialize_cluster_extensions
+
+    materialize_cluster_extensions()
+
     # 3) UPSERT this host into the machines table. The table is informational
     # for ops (`ava cluster status`) + drives agent-runner self-update orchestration;
     # gateway→agent-runner RPC dials the host's ops URL stored in this row, so
