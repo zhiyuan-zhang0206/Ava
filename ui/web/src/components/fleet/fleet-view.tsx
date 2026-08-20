@@ -23,6 +23,7 @@ import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { GraphView } from "@/components/fleet/graph-view";
 import { InboxQueue } from "@/components/fleet/inbox-queue";
 import { TaskGraph } from "@/components/fleet/task-graph";
+import { PluginNavIcons } from "@/components/plugin-nav";
 import {
   ResizablePanel,
   ResizablePanelGroup,
@@ -154,9 +155,14 @@ const DesktopLayout = memo(function DesktopLayout({
         <span className="text-xs text-muted-foreground tabular-nums">
           {aliveCount} active · {agents.length} total
         </span>
+        {/* Plugin-contributed toolbar entries (contributions.ui.nav, location
+            "fleet-toolbar"); renders nothing when none are declared. */}
+        <div className="ml-auto">
+          <PluginNavIcons location="fleet-toolbar" />
+        </div>
         <Link
           href="/"
-          className="ml-auto p-1 rounded text-muted-foreground hover:bg-sidebar-accent hover:text-foreground"
+          className="p-1 rounded text-muted-foreground hover:bg-sidebar-accent hover:text-foreground"
           aria-label="Back to conversation"
         >
           <MessageSquare className="size-5" aria-hidden />

@@ -29,7 +29,16 @@ color tokens, applied as inline custom properties on the root element by
 `components/theme-pack-tokens.tsx` and chosen in Display settings
 (`display.theme_pack`, stored `<plugin>/<theme>`). A pack applies over
 whichever of light/dark is active; unset tokens keep following the mode.
-Design: [[future/frontend-plugin-contributions.md]].
+Nav entries (`contributions.ui.nav`) place a link on the sidebar, the Control
+page's Plugins section, or the fleet toolbar; it opens
+`/plugin/<plugin>/<path>`, which frames the plugin's own page from the
+gateway's plugin mount in a **sandboxed iframe**
+(`components/plugin-page-frame.tsx`). The frame is breakage containment, not a
+security boundary — the trust decision is the install scan gate — so what it
+buys is that a broken plugin page fails alone and no third-party code enters
+this bundle. Icon names map to lucide components the console imports
+(`components/plugin-nav-icon.ts`), locked against the validator's vocabulary by
+its test. Design: [[future/frontend-plugin-contributions.md]].
 
 ## Sub-concepts
 

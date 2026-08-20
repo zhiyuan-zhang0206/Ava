@@ -48,7 +48,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   resetMockSettings();
   document.documentElement.removeAttribute("style");
-  vi.mocked(api.getUiContributions).mockResolvedValue({ themes: [SOLARIZED, MIDNIGHT] });
+  vi.mocked(api.getUiContributions).mockResolvedValue({ themes: [SOLARIZED, MIDNIGHT], nav: [] });
 });
 
 afterEach(cleanup);

@@ -2,10 +2,9 @@
 
 Design for issue #57. Evidence base: the DeepSeek Harness plugin-ecosystem
 survey (2026-08-19; 1849 npm packages / 1569 curated entries within 6 days of
-their plugin platform shipping). Status: **U1 + U2 shipped** — the
-`contributions.ui` manifest key + validator, and themes end to end (aggregation
-endpoint, settings picker, root-element token application). The remaining
-slices are at the bottom.
+their plugin platform shipping). Status: **U1-U3 shipped** — the
+`contributions.ui` manifest key + validator, themes end to end, and the plugin
+page mount + nav entries. The remaining slices are at the bottom.
 
 ## Why now
 
@@ -122,13 +121,16 @@ gateway exactly like `ava.ui` pages are today (`gateway/routers/pages.py`
 reverse-proxies `/api/pages/<agent_id>-<name>/…` to a supervised local page
 server, behind the gateway's normal auth). Plugin pages get the sibling mount:
 
-- `/api/plugin-ui/<plugin>/<path>` → reverse-proxy to the plugin's declared
-  page backend: either a **converge-synced static dir** (preferred — converge
-  already materializes plugin images; a static page needs no process) or the
-  plugin's **ops service** (`contributions.opsServices` — the existing surface;
-  needed only for dynamic pages).
-- Same path-segment validation, same forwarded-header allowlist, same
-  404-when-disabled semantics as `pages.py`.
+- `/api/plugin-ui/<plugin>/<path>` → the plugin's page backend: a
+  **converge-synced static dir** (preferred — converge already materializes
+  plugin images; a static page needs no process), which is what U3 shipped, or
+  the plugin's **ops service** (`contributions.opsServices` — the existing
+  surface; needed only for dynamic pages), which U3 deliberately left
+  unimplemented for want of a declared address (see the U3 slice below).
+- Same path-segment validation and the same 404-when-disabled semantics as
+  `pages.py`. The forwarded-header allowlist is a proxy concern and does not
+  apply to the static backend, which has no upstream response to forward; the
+  served file carries `X-Content-Type-Options: nosniff` instead.
 - The frontend embeds it in a **sandboxed iframe**. The sandbox is **breakage
   containment, not a security boundary**: plugin Python already runs in agent
   processes with shell and DB access, so the trust decision is made at install
@@ -160,6 +162,12 @@ picker; the choice persists as a `user_settings` `display.*` key via
 `useUserSettings` (the frontend state policy in `ui/web/AGENTS.md`: durable
 preferences are DB rows, never localStorage), and the frontend applies the pack
 by setting the custom properties on the root element.
+
+The vocabulary is the **color** custom properties of that layer, not every
+property in it: `--radius` is deliberately excluded, because the component
+geometry is tuned around it and re-valuing it is a layout change wearing a
+theme's clothes (`shared/plugin_ui_contributions.py:NON_THEMABLE_TOKENS`, kept
+honest against `globals.css` by its test).
 
 Tokens only — no arbitrary CSS, no selectors. That is what makes skins survive
 UI refactors (the token vocabulary is the stable interface; component markup is
@@ -273,9 +281,32 @@ value is validated as a CSS color literal.
   The picker section is absent until a plugin contributes a pack, and a stored
   id whose plugin is gone resolves to the console's own palette rather than to
   whatever else is installed.
-- **U3 — plugin page mount + nav**: `/api/plugin-ui/<plugin>/…` reverse-proxy
-  (static-dir and ops-service backends) + sandboxed-iframe page component +
-  nav entries from the aggregation endpoint.
+- **U3 — plugin page mount + nav** — **shipped, static backend only**:
+  `/api/plugin-ui/<plugin>/…` (`gateway/routers/plugin_ui.py`) serves an
+  ENABLED plugin's own `ui/` directory — the converge-synced static backend,
+  which needs no process because converge already materializes the plugin
+  image.
+
+  **Backend resolution is a convention, not a declaration** (ruling
+  2026-08-20): a `ui/` directory in the plugin package wins; failing that, the
+  plugin's declared `contributions.opsServices` entry would be dialed. No key
+  inside `contributions.ui` names a backend — growing that closed set is a
+  deliberate change and this does not earn one, and the declarations there say
+  where the console LINKS to a page, not whether one is served. So availability
+  is the enable-state plus the directory. The console frames it
+  at `/plugin/<plugin>/<path>` (`components/plugin-page-frame.tsx`, sandbox
+  without top-level navigation or downloads), and nav entries render on all
+  three declared locations: the sidebar footer, the Control page's Plugins
+  section, and the fleet toolbar.
+
+  **The ops-service backend is NOT implemented**, deliberately: a plugin's
+  `ServiceSpec` (`ops/spec.py`) carries `curl_url` / `tcp_port` for probes, not
+  a page port, and `contributions.ui` has no key naming a backend — so reaching
+  a dynamic page would need either a new manifest field or a service-address
+  lookup that does not exist. Neither was invented ahead of a plugin that needs
+  one; the static backend covers the cases the survey actually cited (a task
+  board, a balance panel, a widget), and a plugin whose page must be dynamic is
+  the trigger to design that field.
 - **U4 — agent-inspect sections**: generic markdown/kv/table renderers over
   proxied `source` endpoints + the `page` variant; plus finishing the reserved
   `inspector` surface of `shared/plugin_metrics.py`.

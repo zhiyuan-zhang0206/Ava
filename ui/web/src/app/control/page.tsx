@@ -29,6 +29,7 @@ import { McpInventory, PluginsInventory } from "@/app/control/inventory/page";
 import PresetsPage from "@/app/control/presets/page";
 import SchedulesPage from "@/app/control/schedules/page";
 import SkillsPage from "@/app/control/skills/page";
+import { PluginNavList } from "@/components/plugin-nav";
 import { buttonVariants } from "@/components/ui/button";
 import { assetUrl } from "@/lib/api";
 
@@ -137,6 +138,10 @@ export default function ControlPage() {
               description={t("pluginsDescription")}
             >
               <PluginsInventory />
+              {/* Pages contributed by enabled plugins (contributions.ui.nav,
+                  location "settings") — rendered here beside the roster they
+                  belong to; absent when nothing declares one. */}
+              <PluginNavList location="settings" />
             </ControlSection>
 
             <ControlSection

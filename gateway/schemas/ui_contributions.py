@@ -5,9 +5,9 @@ The wire form of what the cluster's enabled plugins declare under
 name-attributed: the console labels provenance, and an operator tracing a
 surface back to the plugin that put it there reads one field.
 
-Themes only today — the slice that carries nav entries and agent-inspect
-sections adds its own array beside this one (additive, so an alternative
-frontend built against today's spec keeps working).
+Themes and nav entries today — the slice that carries agent-inspect sections
+adds its own array beside these (additive, so an alternative frontend built
+against today's spec keeps working).
 """
 
 from __future__ import annotations
@@ -29,7 +29,24 @@ class UiThemeContribution(BaseModel):
     tokens: dict[str, str]
 
 
+class UiNavContribution(BaseModel):
+    """One nav entry opening a plugin-served page.
+
+    `page` is a path under the plugin's own mount (`/api/plugin-ui/<plugin>/`),
+    `icon` a lucide icon name from the closed set the console imports, and
+    `location` names which of the console's nav surfaces carries the entry —
+    all three validated at manifest load.
+    """
+
+    plugin: str
+    location: str
+    label: str
+    icon: str
+    page: str
+
+
 class UiContributionsResponse(BaseModel):
     """Every console contribution the cluster's enabled plugins declare."""
 
     themes: list[UiThemeContribution]
+    nav: list[UiNavContribution]

@@ -5452,6 +5452,91 @@
         }
       }
     },
+    "/api/plugin-ui/{plugin}": {
+      "get": {
+        "summary": "Plugin Ui Root",
+        "description": "Trailing-slash canonicalization, so a page's relative asset links\nresolve against the mount rather than one level above it.",
+        "operationId": "plugin_ui_root_api_plugin_ui__plugin__get",
+        "parameters": [
+          {
+            "name": "plugin",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Plugin"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/plugin-ui/{plugin}/{rest}": {
+      "get": {
+        "summary": "Plugin Ui Get",
+        "description": "Serve one file from an enabled plugin's `ui/` directory.\n\nA directory reached without a trailing slash redirects to the slash form\nbefore its index is served: the browser resolves a page's relative asset\nlinks against the URL it was loaded from, so `…/board` would send\n`app.js` to `…/app.js` — one level above where the plugin put it.",
+        "operationId": "plugin_ui_get_api_plugin_ui__plugin___rest__get",
+        "parameters": [
+          {
+            "name": "plugin",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Plugin"
+            }
+          },
+          {
+            "name": "rest",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Rest"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/ui/contributions": {
       "get": {
         "summary": "Get Ui Contributions",
@@ -12008,14 +12093,56 @@
             },
             "type": "array",
             "title": "Themes"
+          },
+          "nav": {
+            "items": {
+              "$ref": "#/components/schemas/UiNavContribution"
+            },
+            "type": "array",
+            "title": "Nav"
           }
         },
         "type": "object",
         "required": [
-          "themes"
+          "themes",
+          "nav"
         ],
         "title": "UiContributionsResponse",
         "description": "Every console contribution the cluster's enabled plugins declare."
+      },
+      "UiNavContribution": {
+        "properties": {
+          "plugin": {
+            "type": "string",
+            "title": "Plugin"
+          },
+          "location": {
+            "type": "string",
+            "title": "Location"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "icon": {
+            "type": "string",
+            "title": "Icon"
+          },
+          "page": {
+            "type": "string",
+            "title": "Page"
+          }
+        },
+        "type": "object",
+        "required": [
+          "plugin",
+          "location",
+          "label",
+          "icon",
+          "page"
+        ],
+        "title": "UiNavContribution",
+        "description": "One nav entry opening a plugin-served page.\n\n`page` is a path under the plugin's own mount (`/api/plugin-ui/<plugin>/`),\n`icon` a lucide icon name from the closed set the console imports, and\n`location` names which of the console's nav surfaces carries the entry —\nall three validated at manifest load."
       },
       "UiThemeContribution": {
         "properties": {

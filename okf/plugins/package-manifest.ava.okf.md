@@ -33,6 +33,7 @@ declared-vs-registered diff has no registered side to compare against. The
 console reads the declarations itself, through
 `GET /api/ui/contributions` (`gateway/routers/ui_contributions.py`), which
 merges the ENABLED plugins' manifests and attributes every entry to the plugin
-that declared it. Themes are served and rendered today; the page proxy and the
-inspect-section renderers are
+that declared it. Themes and nav entries are served and rendered today, and a plugin's own
+pages are mounted read-only at `/api/plugin-ui/<plugin>/…` from its `ui/`
+directory (`gateway/routers/plugin_ui.py`). The inspect-section renderers are
 [future/frontend-plugin-contributions.md](../../future/frontend-plugin-contributions.md).
