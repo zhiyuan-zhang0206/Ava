@@ -24,6 +24,13 @@ only make sense when `owns_loop` is true — from a launched script they would
 post a lifecycle inbound for an agent whose loop this process cannot drive
 (e.g. a watcher compacting the agent that launched it), so they refuse instead.
 
+In the hosted runner (future/infra/agent-runner-as-server.md) one process
+drives many agents' turns, so a third, innermost identity channel exists:
+the turn contextvar (`shared/turn_identity.py`), bound by the dispatcher
+around turn-task creation. Every read here resolves
+`turn contextvar > process slot > AVA_AGENT_ID env`; process mode never binds
+the contextvar, so its reads are unchanged.
+
 This module is framework-internal (plugin/SDK author surface), not agent-facing:
 it carries no `ava.help()` docstrings and is never imported by `ava/__init__`.
 """
@@ -31,6 +38,8 @@ it carries no `ava.help()` docstrings and is never imported by `ava/__init__`.
 from __future__ import annotations
 
 import os
+
+from shared.turn_identity import current_turn_agent_id
 
 # This process's agent id — the single framework-internal source of truth, set
 # once by `establish`. `None` (not `0`) is the pre-bootstrap placeholder: a real
@@ -113,7 +122,10 @@ def is_launched_child() -> bool:
     such a child self-loads plugins on first unknown-attribute access — so a bare
     `python x.py` in a persistent shell session gets `ava.tasks` et al. without a
     bootstrap, while the agent process (which loaded plugins explicitly) and
-    gateway / cli keep fail-fast on a genuinely unknown `ava.X`."""
+    gateway / cli keep fail-fast on a genuinely unknown `ava.X`. A bound turn
+    context is the hosted runner itself — never a launched child."""
+    if current_turn_agent_id() is not None:
+        return False
     _try_establish_from_env()
     return _agent_id is not None and not _owns_loop
 
@@ -124,7 +136,11 @@ def agent_id() -> int:
     with "who am I". Before a bootstrap runs, falls back to the `AVA_AGENT_ID`
     environment variable if present; returns `None` only when neither source
     provides an identity (the pre-bootstrap placeholder). Callers that must
-    tolerate the pre-bootstrap state check for `None` explicitly."""
+    tolerate the pre-bootstrap state check for `None` explicitly. A hosted
+    turn context (turn contextvar bound) wins over both fallbacks."""
+    turn = current_turn_agent_id()
+    if turn is not None:
+        return turn
     _try_establish_from_env()
     return _agent_id  # type: ignore[return-value]
 
@@ -140,6 +156,9 @@ def require_agent_id() -> int:
         RuntimeError: ``establish`` was never called and ``AVA_AGENT_ID`` is
         not set in the environment.
     """
+    turn = current_turn_agent_id()
+    if turn is not None:
+        return turn
     _try_establish_from_env()
     if _agent_id is None:
         raise RuntimeError(
@@ -162,6 +181,9 @@ def require_actor() -> str:
     Raises:
         RuntimeError: neither an actor nor an agent identity was established.
     """
+    turn = current_turn_agent_id()
+    if turn is not None:
+        return f"agent:{turn}"
     _try_establish_from_env()
     if _actor is not None:
         return _actor
@@ -180,6 +202,9 @@ def default_actor() -> str:
     non-raising: with no identity at all it returns the pre-actor
     ``agent:None`` sentinel, preserving the legacy default-source behavior rather
     than turning an unset identity into an error at these lower-stakes sites."""
+    turn = current_turn_agent_id()
+    if turn is not None:
+        return f"agent:{turn}"
     _try_establish_from_env()
     if _actor is not None:
         return _actor
@@ -198,6 +223,10 @@ def assert_self_action(action: str) -> None:
         RuntimeError: this process does not own the agent turn loop (a launched
             background script), or has no established identity.
     """
+    if current_turn_agent_id() is not None:
+        # A hosted turn context: the runner drives this agent's loop, so the
+        # turn is the loop owner by construction.
+        return
     if not _owns_loop:
         raise RuntimeError(
             f"ava.self.{action}() can only be called from inside an agent process, "

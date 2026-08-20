@@ -43,6 +43,8 @@ from collections.abc import Set as AbstractSet
 from dataclasses import dataclass, field
 from typing import Protocol, TypeVar
 
+from shared.turn_identity import effective_agent_id
+
 __all__ = [
     "ExponentialBackoff",
     "Policy",
@@ -103,13 +105,7 @@ def _agent_phase(span: float) -> float:
     identical retry schedule would make every process retry at the same
     instants.
     """
-    raw = os.environ.get("AVA_AGENT_ID")
-    ident: int | None = None
-    if raw is not None:
-        try:
-            ident = int(raw)
-        except ValueError:
-            ident = None
+    ident = effective_agent_id()
     if ident is None:
         ident = os.getpid()
     return span * (ident % 1000) / 1000.0
