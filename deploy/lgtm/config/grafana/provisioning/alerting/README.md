@@ -63,9 +63,10 @@ R13 (llm-billing-quota) is the one rule with no threshold and no `for`
 window: an out-of-credit API key fails every turn in the fleet and only a
 human spending money clears it, so the first rejection is already the whole
 incident. Its discriminator is the `billing` field the emitter writes from
-`shared/lm/errors.py`'s cross-provider predicate (HTTP 402 plus the
-per-vendor `error.type` vocabulary) — a new provider is covered by adding
-its string there, with no edit to `rules.yml`.
+`shared/lm/errors.py`'s cross-provider predicate (HTTP 402 plus a per-vendor
+vocabulary matched against the response body's `error.type` AND `error.code`) —
+a new provider is covered by adding its string there, with no edit to
+`rules.yml`.
 
 ### Migration notes (Postgres → LGTM, 2026-08-12)
 
