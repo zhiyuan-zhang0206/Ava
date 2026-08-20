@@ -244,7 +244,10 @@ def ensure_runner_role(identity: str, *, base_admin_url: str, runner_password: s
     runner processes exactly their audited surface:
 
       - SELECT on every table in public (the runner read surface: agents,
-        tasks, notices, ...)
+        tasks, notices, ...), and — as a standing `ALTER DEFAULT PRIVILEGES`
+        beside it — on every table a later migration adds. The `ALL TABLES`
+        form alone covers only what exists at grant time; see the comment at
+        the two ALTERs for why that gap is invisible until it bites.
       - SELECT, UPDATE, INSERT on inbound_messages — claim polling AND the
         agent-side self-lifecycle inbounds (`ava.self.terminate` / `restart` /
         `compact` insert their own 'terminate' / 'restart' / 'compact_summary'
@@ -273,10 +276,18 @@ def ensure_runner_role(identity: str, *, base_admin_url: str, runner_password: s
     once runners dial this role. (notices/agent_pages INSERTs travel over the
     gateway HTTP API as the main identity, never from the runner role.)
 
-    `identity` is the cluster's main db/role identifier (names-as-data). The
+    `identity` is the cluster's main db/role identifier (names-as-data), and
+    also the role the default privileges are declared FOR — it is what
+    migrations run as, and default privileges key on the creating role. The
     checkpoint tables must already exist (see `ensure_checkpoint_schema`); a
     missing table makes the grant fail loudly rather than silently narrowing
     the contract.
+
+    Re-running this is how an EXISTING cluster picks up tables added since its
+    birth: `ava start` calls it on a gateway host after applying a migration,
+    and `ava cluster ensure-runner-role` is the manual door. The standing
+    default privileges only take effect for tables created after they are
+    declared, so the re-run is what closes the retroactive half.
     """
     import psycopg
     from psycopg import sql as pgsql
@@ -309,6 +320,38 @@ def ensure_runner_role(identity: str, *, base_admin_url: str, runner_password: s
             pgsql.SQL("GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO {}").format(
                 pgsql.Identifier(RUNNER_ROLE)
             )
+        )
+        # The two ALL grants above are a point-in-time LOOP over what exists
+        # right now — Postgres expands them into per-object ACL entries and
+        # nothing carries forward. A table a later migration creates is
+        # therefore invisible to the runner until somebody re-runs this
+        # function, which nothing does on a schedule. That gap was live and
+        # unnoticed until the first post-baseline migration to CREATE a table
+        # (`20260820T175737_extension-registry.sql`); every earlier one only
+        # added columns to tables the birth grant already covered.
+        #
+        # These two ALTER DEFAULT PRIVILEGES are the standing form of the same
+        # policy, so the read surface stays whole by construction. `FOR ROLE
+        # {identity}` is load-bearing: default privileges key on the role that
+        # CREATES the object, not on the connection issuing the ALTER, and
+        # migrations run as the cluster's main identity while this call dials
+        # as the instance admin. Without it the policy would attach to the
+        # admin and never fire.
+        #
+        # They do NOT retroactively grant anything, so an existing cluster
+        # still needs the re-run above to cover tables it already has — that
+        # is what `ava start` triggers after applying a migration, and what
+        # `ava cluster ensure-runner-role` does by hand.
+        conn.execute(
+            pgsql.SQL(
+                "ALTER DEFAULT PRIVILEGES FOR ROLE {} IN SCHEMA public GRANT SELECT ON TABLES TO {}"
+            ).format(pgsql.Identifier(identity), pgsql.Identifier(RUNNER_ROLE))
+        )
+        conn.execute(
+            pgsql.SQL(
+                "ALTER DEFAULT PRIVILEGES FOR ROLE {} IN SCHEMA public"
+                " GRANT USAGE, SELECT ON SEQUENCES TO {}"
+            ).format(pgsql.Identifier(identity), pgsql.Identifier(RUNNER_ROLE))
         )
         for table in ("inbound_messages", "agents_meta"):
             conn.execute(

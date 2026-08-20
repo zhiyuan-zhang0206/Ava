@@ -430,7 +430,7 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
     # applied 0; first-time bench run -> applies the full set.
     print("\n→ apply pending migrations")
     try:
-        cmd_migrations_apply()
+        applied = cmd_migrations_apply()
     except Exception as e:
         print(f"  ✗ migrations apply failed: {e}", file=sys.stderr)
         return 1
@@ -446,6 +446,18 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
     rc = _ns._assert_schema_current_or_die()
     if rc != 0:
         return rc
+
+    # 2.65) a migration that CREATED a table left the ava_runner read grant
+    # behind it: `GRANT SELECT ON ALL TABLES` is a point-in-time loop over what
+    # existed at install birth, so a pure agent-runner — which dials as
+    # ava_runner — gets `permission denied` on anything added since. Re-affirm
+    # the grants at the one moment the schema is known to have grown, rather
+    # than on every start. Gateway-only: the admin credential lives in the
+    # gateway's .env, and a runner has no business touching roles.
+    if applied and "gateway" in roles:
+        from cli.commands.ensure_runner_role import refresh_runner_grants_after_migration
+
+        refresh_runner_grants_after_migration()
 
     # 2.7) land the cluster's installed extensions on this machine. AFTER the
     # schema check on purpose: converge (step 1) runs before this cluster's
