@@ -23,6 +23,10 @@ This lives in `shared/` (not `ava/`) because identity consumers exist below
 the `ava` layer (`shared/lm/_providers.py` cache affinity, `shared/resilience.py`
 retry de-phasing) and the import layering is `shared < ava`. `ava._boot`
 layers its process slot on top of this module's read.
+
+`TurnScopedAgentId` at the bottom is the same resolution deferred to *render*
+time, for sinks that are handed a value once and format it per record —
+`shared/log.py` binds one into loguru's `extra`.
 """
 
 from __future__ import annotations
@@ -74,3 +78,65 @@ def effective_agent_id() -> int | None:
         except ValueError:
             return None
     return None
+
+
+# ── Deferred attribution (log sinks) ──
+
+# The agent a process attributes its records to when no turn is bound. Set by
+# `shared.log.init_agent_process`; stays None in a process that hosts many
+# agents' turns, and in one that owns no agent at all (gateway, ops).
+_process_agent_id: int | None = None
+
+
+def set_process_agent_id(agent_id: int | None) -> None:
+    """Declare which agent this process is, for records written outside a turn.
+
+    Deliberately NOT folded into `effective_agent_id`: that read answers "who is
+    executing", and its env fallback is the launched-child channel. This slot
+    answers "whose log file is this", which only the logging init knows.
+    """
+    global _process_agent_id  # noqa: PLW0603 — process-level singleton
+    _process_agent_id = agent_id
+
+
+class TurnScopedAgentId:
+    """Deferred `agent_id` for a sink: resolves per record, not per process.
+
+    `logger.configure(extra=...)` freezes its values at bind time, which is
+    exactly right for one agent per process and wrong for the hosted runner,
+    where one process writes log lines on behalf of every local agent. Binding
+    an instance of this instead defers the answer to write time:
+
+        turn contextvar  >  this process's agent  >  `-` (no agent)
+
+    A caller that passes `agent_id=N` explicitly replaces the whole extra value
+    and never reaches this — explicit attribution still wins.
+
+    It renders as the resolved id everywhere a record is formatted:
+    `__format__` for the human stderr format's `{extra[agent_id]:>3}`,
+    `__str__` for the JSONL file sink (loguru serializes with `default=str`).
+    Both run in the writing thread's context, so the turn binding is still live.
+    """
+
+    __slots__ = ()
+
+    def resolve(self) -> str:
+        """The agent id for the record being written, or the `-` no-agent sentinel."""
+        bound = _TURN_AGENT_ID.get()
+        if bound is not None:
+            return str(bound)
+        if _process_agent_id is not None:
+            return str(_process_agent_id)
+        return "-"
+
+    def __str__(self) -> str:
+        return self.resolve()
+
+    def __format__(self, spec: str) -> str:
+        return format(self.resolve(), spec)
+
+    def __repr__(self) -> str:
+        return f"TurnScopedAgentId({self.resolve()})"
+
+
+TURN_SCOPED_AGENT_ID = TurnScopedAgentId()

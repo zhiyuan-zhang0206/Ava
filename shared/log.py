@@ -23,8 +23,10 @@ spawning 10 prints 10 lines of hint, breaking the agent's plain
 
 loguru single logger instance + `extra` dict for contextual fields.
 Each entry-point process calls init_* once at startup, binding
-process-level fields (agent process binds agent_id; gateway does not;
-SDK subprocess binds the same group as its parent agent). All
+process-level fields (agent process binds agent_id — deferred, so a
+process hosting several agents' turns attributes each record to the
+turn that wrote it; gateway does not; SDK subprocess binds the same
+group as its parent agent). All
 subsequent `from shared.log import logger` calls get a logger that
 auto-carries those fields — callers do not repeat them per line.
 
@@ -33,7 +35,8 @@ auto-carries those fields — callers do not repeat them per line.
 Every log line carries at least:
 - `level`  (loguru built-in)
 - `time`   (loguru built-in)
-- `agent_id`  process-level; if unbound, `-`
+- `agent_id`  the turn's agent if one is bound, else this process's
+  (`TurnScopedAgentId`); if neither, `-`
 
 More granular fields (`turn_id` / `node` / `tool_name`) are added
 as-needed later; not strictly required on every line.
@@ -72,6 +75,11 @@ import loguru
 from loguru import logger
 
 from shared import process_sha
+from shared.turn_identity import (
+    TURN_SCOPED_AGENT_ID,
+    TurnScopedAgentId,
+    set_process_agent_id,
+)
 
 # `shared.machine` / `shared.paths` are imported inside the init functions that
 # use them, never at module top: both pull the pydantic Settings chain (+~30 MB
@@ -454,7 +462,10 @@ def _message_to_params(
     bind this key via `logger.configure(extra={...})` (default `"-"`
     sentinel = no agent, stored NULL). Logger calls pass
     `agent_id=N` to override the default. Missing key fast-raises
-    KeyError (means init_* did not run, framework bug).
+    KeyError (means init_* did not run, framework bug). The agent
+    init binds a `TurnScopedAgentId` rather than a fixed id, so a
+    process hosting several agents' turns attributes each record to
+    the turn that wrote it.
 
     `source` comes from record.extra["source"] (default "system") —
     the unified events table's source column; callers that represent
@@ -471,6 +482,9 @@ def _message_to_params(
     record = message.record
     extra = dict(record["extra"])
     agent_id_raw = extra.pop("agent_id")  # required — init_* bound it; KeyError fast
+    if isinstance(agent_id_raw, TurnScopedAgentId):
+        # Deferred binding: the turn's agent, else this process's (see the class).
+        agent_id_raw = agent_id_raw.resolve()
     event_explicit = extra.pop("event", None)
     if event_explicit == "":
         raise ValueError(f"empty event= passed to logger: {record['message']!r}")
@@ -627,13 +641,18 @@ def init_agent_process(*, agent_id: int) -> None:
     adds stderr (human) + file (`agent-{N}.log`) + the unified event
     pipeline (events table) sinks.
 
+    Attribution is turn-scoped: the bound `TurnScopedAgentId` resolves to the
+    turn's agent when one is bound, else to `agent_id` — identical to a fixed
+    binding in a one-agent process, correct in a hosted one.
+
     Idempotent — repeat in the same process silent-skips (see
     ``_init_done`` at module top).
     """
     global _init_done  # noqa: PLW0603 — process-level singleton
     if _init_done:
         return
-    logger.configure(extra={"agent_id": str(agent_id)})
+    set_process_agent_id(agent_id)
+    logger.configure(extra={"agent_id": TURN_SCOPED_AGENT_ID})
     logger.add(sys.stderr, format=_HUMAN_FORMAT, level="INFO", colorize=True)
     from shared.paths import logs_dir
 
