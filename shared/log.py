@@ -230,8 +230,16 @@ def _install_stdlib_intercept() -> None:
 logger.remove()
 
 # extra defaults. format string references {extra[...]}; missing keys
-# raise KeyError, so pre-fill with sentinel "-".
-logger.configure(extra={"agent_id": "-"})
+# raise KeyError, so pre-fill.
+#
+# The deferred binding rather than a bare "-": a process that never calls
+# `init_agent_process` still resolves to "-" (no turn bound, no process agent),
+# so gateway / daemon / CLI attribution is unchanged — but a process that binds
+# a TURN gets that turn's agent. That is the hosted agent-runner
+# (`future/infra/agent-runner-as-server.md`), which inits through
+# `init_gateway_process` and would otherwise stamp every hosted agent's records
+# with the `-` sentinel, throwing away the attribution the turn contextvar knows.
+logger.configure(extra={"agent_id": TURN_SCOPED_AGENT_ID})
 
 # Human-readable format — agent_id helps distinguish when
 # multiple agents run concurrently. `{extra[agent_id]:>3}` is
@@ -711,6 +719,14 @@ def init_gateway_process(name: str = "gateway") -> None:
         return
     from shared.paths import logs_dir
 
+    # Bind the deferred agent id explicitly rather than inheriting the
+    # module-level default: `init_subprocess_logger` also calls
+    # `logger.configure`, which REPLACES the whole extra dict, so the default is
+    # not something a long-lived daemon can rely on still holding. With no turn
+    # and no process agent this resolves to the `-` sentinel exactly as before;
+    # in the hosted agent-runner — which inits through THIS function — it is
+    # what lets each record carry the turn's agent instead of `-`.
+    logger.configure(extra={"agent_id": TURN_SCOPED_AGENT_ID})
     logger.add(sys.stderr, format=_HUMAN_FORMAT, level="INFO", colorize=True)
     _add_file_sink(logs_dir() / f"{name}.log")
     _add_postgres_sink(process=name)
