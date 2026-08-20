@@ -105,6 +105,25 @@ class AvaContext:
     Redis pub/sub needs its own connection for `get_message()` and cannot
     share pool conns. None in container mode (no inbound queue)."""
 
+    hosted: bool = False
+    """True when this run's turns are hosted as tasks inside the agent-runner
+    rather than owned by a process of their own
+    (`future/infra/agent-runner-as-server.md`).
+
+    It changes exactly one decision: what the claim node does when it finds
+    nothing to claim. A process agent parks there — flips its row to `idling`
+    and blocks on the inbound pub/sub — because the process has nothing else to
+    do and must stay alive. A hosted agent has no process to park: the host ends
+    the turn task and creates a new one when the dispatcher sees a wake, so idle
+    genuinely costs nothing.
+
+    Deliberately a context field, not a `settings.daemon.runner_mode` read at
+    the claim site: the mode belongs to the runtime that BUILT this context, so
+    an eval-container or test run can stay process-shaped regardless of what
+    the cluster's flag says, and the claim node keeps taking all its
+    dependencies from one place. Left False by every current caller, so the
+    branch is unreachable until the host service builds a context with it."""
+
     # ── string-level config ──
     #
     # String-level config. Defaults read live `settings.X` so callers that

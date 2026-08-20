@@ -319,7 +319,16 @@ async def _invoke_graph_with_lifecycle_logging(
                 # schema defaults.
                 # Dict-update input form is runtime-valid but absent from the input type.
                 result: dict[str, object] = await graph.ainvoke(  # pyright: ignore[reportUnknownMemberType, reportAssignmentType]
-                    {"turn_active": False, "exit_requested": False, **input_update},  # pyright: ignore[reportArgumentType, reportUnknownMemberType]
+                    # turn_idle is reset with the other two: a cluster rolled
+                    # back from hosted to process mode replays threads a hosted
+                    # run checkpointed, and a stale True must not be mistaken
+                    # for this turn's answer.
+                    {  # pyright: ignore[reportArgumentType, reportUnknownMemberType]
+                        "turn_active": False,
+                        "exit_requested": False,
+                        "turn_idle": False,
+                        **input_update,
+                    },
                     config=_graph_config(agent_id, tags, metadata),
                     context=ctx,
                 )

@@ -81,6 +81,7 @@ def _make_runtime(
     inbound_listener: RedisInboundListener | None = None,
     llm: Any | None = None,
     event_publisher: Any | None = None,
+    hosted: bool = False,
 ) -> Runtime[AvaContext]:
     """test helper: assemble AvaContext into Runtime.
 
@@ -92,12 +93,17 @@ def _make_runtime(
     InboundCommitted SSE fan-out goes through `ctx.event_publisher.emit`; default to a MagicMock
     so the node's `assert ctx.event_publisher` passes; tests verifying InboundCommitted pass their own
     mock to assert `pub.emit.call_args_list`.
+
+    `hosted=True` is the agent-runner-as-server runtime: claim ends the turn
+    instead of parking. Default False keeps every existing test on the process
+    path.
     """
     ctx = AvaContext(
         ops_pool=ops_pool,
         inbound_listener=inbound_listener,
         llm=llm if llm is not None else _fake_llm(),
         event_publisher=event_publisher if event_publisher is not None else MagicMock(),
+        hosted=hosted,
     )
     return Runtime(context=ctx)
 
@@ -865,6 +871,88 @@ async def test_claim_turn_boundary_ends_invocation_instead_of_waiting(
     assert cmd.goto == END
     # Turn boundary only: no process exit, no other state touched.
     assert cmd.update == {"turn_active": False}
+
+
+async def test_claim_hosted_ends_turn_instead_of_parking(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    aredis_inbound_listener: RedisInboundListener,
+):
+    """Hosted mode has no process to park: a fresh invocation (turn_active=False)
+    that finds nothing must goto END with `turn_idle`, not enter the IDLING wait.
+
+    The process-mode twin of this call
+    (`test_claim_fresh_invocation_waits_then_runs_turn`) blocks in
+    `_wait_for_batch`. Here nothing fakes the wait, and no inbound is ever
+    inserted — so if the hosted branch were missing, this test would hang on a
+    real Redis wait rather than fail. Returning at all IS the lock.
+
+    `exit_requested` stays False: an idle agent is not a terminated one — the
+    host drops the task and re-creates it on the next wake.
+    """
+    tid = create_agent(db_conn)
+
+    cmd = await claim_node(
+        AgentState(messages=[SystemMessage(content="sys")], halted=True, turn_active=False),
+        _make_runtime(ops_pool=aops_pool, inbound_listener=aredis_inbound_listener, hosted=True),
+        _config(tid),
+    )
+
+    assert cmd.goto == END
+    assert cmd.update == {"turn_active": False, "turn_idle": True}
+
+
+async def test_claim_hosted_never_enters_idling_status(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    aredis_inbound_listener: RedisInboundListener,
+):
+    """The status row is the observable half: `_wait_for_batch` flips the agent to
+    IDLING before it blocks, and the hosted branch returns BEFORE that flip. Idle
+    must be the absence of a task, not a status a hosted agent sits in — otherwise
+    the reaper and the delivery watchdog, which both reason about idling owners,
+    would be told a lie about an agent that has no process at all."""
+    tid = spawn_agent()
+    with db_conn.cursor() as cur:
+        cur.execute("UPDATE agents_meta SET status = 'starting' WHERE id = %s", (tid,))
+    db_conn.commit()
+
+    await claim_node(
+        AgentState(messages=[SystemMessage(content="sys")], halted=True, turn_active=False),
+        _make_runtime(ops_pool=aops_pool, inbound_listener=aredis_inbound_listener, hosted=True),
+        _config(tid),
+    )
+
+    with db_conn.cursor() as cur:
+        cur.execute("SELECT status FROM agents_meta WHERE id = %s", (tid,))
+        row = cur.fetchone()
+    assert row is not None
+    # 'running' specifically, not merely "not idling": claim's own
+    # `leave_starting_state` elevates to RUNNING at the top, and the hosted
+    # branch must return without touching status again.
+    assert row[0] == "running", f"hosted claim left status {row[0]!r}"
+
+
+async def test_claim_hosted_still_dispatches_an_available_batch(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    aredis_inbound_listener: RedisInboundListener,
+):
+    """Hosted mode changes only the empty-batch branch. When the first SELECT
+    finds work, dispatch is byte-for-byte the process path — the turn runs, and
+    `turn_idle` is NOT set (the host must re-invoke, not end the task)."""
+    tid = create_agent(db_conn)
+    insert_inbound_message(db_conn, tid, "hello", kind="chat", source="user")
+
+    cmd = await claim_node(
+        AgentState(messages=[SystemMessage(content="sys")], halted=True, turn_active=False),
+        _make_runtime(ops_pool=aops_pool, inbound_listener=aredis_inbound_listener, hosted=True),
+        _config(tid),
+    )
+
+    assert cmd.goto == "before_llm"
+    assert cmd.update["turn_active"] is True  # type: ignore[index]
+    assert cmd.update.get("turn_idle") in (None, False)  # type: ignore[union-attr]
 
 
 async def test_claim_fresh_invocation_waits_then_runs_turn(
