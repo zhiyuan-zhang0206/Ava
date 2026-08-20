@@ -6510,6 +6510,15 @@ export interface components {
          *     color literals — validated at manifest load, so the console applies the
          *     values as given. Unset tokens keep the console default, which is why a pack
          *     that names three colors is a legitimate skin rather than a broken one.
+         *
+         *     `dark_tokens` is the pack's dark-mode half, and `null` is a MEANINGFUL
+         *     value rather than a missing one: it declares that the pack deliberately
+         *     pins both modes to `tokens`. That distinction has to survive onto the wire
+         *     because it is what the picker tells the user — a pack applied over both
+         *     palettes silently disables the light/dark toggle for every color it sets,
+         *     and a skin and a mode that fight is the failure this field exists to make
+         *     visible. With it set, `tokens` is the light half and the two stay
+         *     orthogonal.
          */
         UiThemeContribution: {
             /** Plugin */
@@ -6520,6 +6529,10 @@ export interface components {
             tokens: {
                 [key: string]: string;
             };
+            /** Dark Tokens */
+            dark_tokens?: {
+                [key: string]: string;
+            } | null;
         };
         /**
          * UpdateCheck

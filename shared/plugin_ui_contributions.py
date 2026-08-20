@@ -166,20 +166,27 @@ _PATH_SEGMENT_RE = re.compile(r"^[A-Za-z0-9._~-]+$")
 
 
 def _entry_fields(
-    entry: object, what: str, required: tuple[str, ...], errors: list[str]
+    entry: object,
+    what: str,
+    required: tuple[str, ...],
+    errors: list[str],
+    optional: tuple[str, ...] = (),
 ) -> dict[str, Any] | None:
     """The entry as a dict once it is an object with exactly the known fields.
 
     None when it is not usable at all (the caller skips it); missing/unknown
     fields are reported here so one bad entry yields one readable report.
+    An `optional` field may be absent but may not be misspelled: it counts as
+    known for the unknown-field report and is never required.
     """
+    known = required + optional
     if not isinstance(entry, dict):
         errors.append(f"{what}: expected an object with {', '.join(required)}")
         return None
     data = cast(dict[str, Any], entry)
     for field in data:
-        if field not in required:
-            errors.append(f"{what}: unknown field {field!r} (one of {', '.join(required)})")
+        if field not in known:
+            errors.append(f"{what}: unknown field {field!r} (one of {', '.join(known)})")
     for field in required:
         if field not in data:
             errors.append(f"{what}: missing required field {field!r}")
@@ -310,7 +317,17 @@ def _validate_theme_tokens(value: object, what: str, errors: list[str]) -> dict[
 
 
 def _validate_themes(value: object, errors: list[str]) -> list[dict[str, Any]]:
-    """`themes` — named token packs the settings theme picker offers."""
+    """`themes` — named token packs the settings theme picker offers.
+
+    `darkTokens` is optional and is the pack's dark-mode half: with it, `tokens`
+    applies in light mode and `darkTokens` in dark, so the skin and the
+    light/dark toggle stay orthogonal. **Omitting it is a deliberate
+    declaration, not an oversight** — it means the pack PINS BOTH MODES to
+    `tokens`, and the console says so in the picker, because a pack applied
+    over both palettes silently disables the mode toggle for every color it
+    sets. Both halves validate identically: same closed token vocabulary, same
+    color-literal rule.
+    """
     if not isinstance(value, list):
         errors.append("contributions.ui.themes: expected a list of token packs")
         return []
@@ -318,7 +335,7 @@ def _validate_themes(value: object, errors: list[str]) -> list[dict[str, Any]]:
     seen: set[str] = set()
     for i, entry in enumerate(cast(list[Any], value)):
         what = f"contributions.ui.themes[{i}]"
-        data = _entry_fields(entry, what, ("name", "tokens"), errors)
+        data = _entry_fields(entry, what, ("name", "tokens"), errors, optional=("darkTokens",))
         if data is None:
             continue
         name = data["name"]
@@ -332,7 +349,13 @@ def _validate_themes(value: object, errors: list[str]) -> list[dict[str, Any]]:
         tokens = _validate_theme_tokens(data["tokens"], f"{what}.tokens", errors)
         if tokens is None:
             continue
-        themes.append({"name": name, "tokens": tokens})
+        theme: dict[str, Any] = {"name": name, "tokens": tokens}
+        if "darkTokens" in data:
+            dark = _validate_theme_tokens(data["darkTokens"], f"{what}.darkTokens", errors)
+            if dark is None:
+                continue
+            theme["darkTokens"] = dark
+        themes.append(theme)
     return themes
 
 

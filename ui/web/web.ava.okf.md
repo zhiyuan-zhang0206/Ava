@@ -27,8 +27,13 @@ The console renders what the cluster's enabled plugins declare under
 Today that is theme packs: a named set of values for the `globals.css` `:root`
 color tokens, applied as inline custom properties on the root element by
 `components/theme-pack-tokens.tsx` and chosen in Display settings
-(`display.theme_pack`, stored `<plugin>/<theme>`). A pack applies over
-whichever of light/dark is active; unset tokens keep following the mode.
+(`display.theme_pack`, stored `<plugin>/<theme>`). A pack has two halves —
+`tokens` for light and optional `darkTokens` for dark, picked by the resolved
+mode — because an inline custom property outranks both `:root` and `.dark`, so
+one flat map would pin its colors across BOTH modes and silently disable the
+light/dark toggle for them. Omitting `darkTokens` declares exactly that pinning
+on purpose, and the picker marks the pack. Unset tokens keep following the
+mode.
 Nav entries (`contributions.ui.nav`) place a link on the sidebar, the Control
 page's Plugins section, or the fleet toolbar; it opens
 `/plugin/<plugin>/<path>`, which frames the plugin's own page from the

@@ -103,6 +103,60 @@ def test_partial_token_pack_is_allowed() -> None:
     assert parsed["themes"] == [{"name": "warm", "tokens": {"--primary": "#a31515"}}]
 
 
+# ── a pack's two halves ────────────────────────────────────────────────
+
+
+def test_dark_tokens_carry_the_packs_dark_half() -> None:
+    """With `darkTokens`, `tokens` is the light half and the skin stays
+    orthogonal to the mode toggle."""
+    parsed = _ui(
+        themes=[
+            {
+                "name": "warm",
+                "tokens": {"--primary": "#a31515"},
+                "darkTokens": {"--primary": "#ff9d9d"},
+            }
+        ]
+    )
+    assert parsed["themes"] == [
+        {
+            "name": "warm",
+            "tokens": {"--primary": "#a31515"},
+            "darkTokens": {"--primary": "#ff9d9d"},
+        }
+    ]
+
+
+def test_omitting_dark_tokens_leaves_the_key_absent() -> None:
+    """Omission is a declaration — the pack pins both modes — so the console
+    has to be able to SEE it was omitted rather than get an empty map."""
+    parsed = _ui(themes=[{"name": "warm", "tokens": {"--primary": "#a31515"}}])
+    assert "darkTokens" not in cast(list[dict[str, Any]], parsed["themes"])[0]
+
+
+def test_dark_tokens_validate_exactly_like_tokens() -> None:
+    """Same closed vocabulary and same color-literal rule — the dark half is
+    not a looser second door into the stylesheet."""
+    base = {"name": "x", "tokens": {"--primary": "#fff"}}
+    _rejects("unknown token", themes=[{**base, "darkTokens": {"--wallpaper": "#000"}}])
+    _rejects("not themable", themes=[{**base, "darkTokens": {"--radius": "2rem"}}])
+    _rejects(
+        "not a color literal", themes=[{**base, "darkTokens": {"--background": "var(--evil)"}}]
+    )
+    _rejects("at least one token", themes=[{**base, "darkTokens": {}}])
+
+
+def test_a_misspelled_dark_tokens_is_refused_not_ignored() -> None:
+    """The failure mode of adding an OPTIONAL field: a typo that is silently
+    dropped ships a pack whose dark half never applies, and nothing says so."""
+    _rejects(
+        "unknown field 'darktokens'",
+        themes=[
+            {"name": "x", "tokens": {"--primary": "#fff"}, "darktokens": {"--primary": "#000"}}
+        ],
+    )
+
+
 def test_every_renderer_and_location_is_accepted() -> None:
     for render in ui.INSPECT_RENDERERS:
         _ui(agentInspect=[{"title": "T", "source": "x", "render": render}])
