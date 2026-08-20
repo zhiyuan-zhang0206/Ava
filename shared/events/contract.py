@@ -363,6 +363,22 @@ class GatewayLatency(TypedDict):
     count: int
 
 
+class LokiQueryFailed(TypedDict):
+    """`loki_query_failed` payload — gateway/loki_events.py transport failure.
+
+    One row per failed Loki HTTP call (timeout / disconnect / non-2xx) with
+    the request shape, so a stalled query is attributable after Loki's own
+    logs have rotated away (task #1289: the 2026-08-20 incident window).
+    """
+
+    endpoint: str
+    duration_s: float
+    error: str
+    window_from: str | None
+    window_to: str | None
+    query: str
+
+
 class LogPayload(TypedDict):
     """`log` payload — bare-log fallback; `msg` rides every loguru-sourced row."""
 
@@ -680,6 +696,12 @@ EVENTS: dict[str, EventSpec] = {
     ),
     # ── log (category=log) — registry.md §4, the bare-log fallback ──
     "log": EventSpec(name="log", category="log", payload=LogPayload, doc="bare log line"),
+    "loki_query_failed": EventSpec(
+        name="loki_query_failed",
+        category="log",
+        payload=LokiQueryFailed,
+        doc="a Loki HTTP query failed (timeout / disconnect / non-2xx) — carries the request shape",
+    ),
     # unresolved-ops markers: a warning/error (or a class of them) declared fixed —
     # ops panels filter these out of the "unresolved" views (user ruling 2026-08-09)
     "warning_resolved": EventSpec(

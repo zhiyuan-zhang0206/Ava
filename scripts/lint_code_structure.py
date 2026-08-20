@@ -136,6 +136,11 @@ _OVERSIZE_ALLOWED = frozenset(
         # rows and grouped counts share the pipeline builders
         # (_build_logql/_agg_pipeline/_escape_label); splitting would scatter
         # the shared LogQL machinery (task #1197 A3).
+        "shared/events/contract.py",
+        # The EVENTS registry — one cohesive schema block (every event name +
+        # payload TypedDict in one dict). It grows one entry per event and
+        # crossed 800 with loki_query_failed (task #1289); splitting a flat
+        # name→spec registry scatters the one lookup surface emit() consults.
         "gateway/loki_events.py",
         # shared/metrics_aggregate.py — aggregate fetch + report assemblers +
         # the injected LokiBackend contract: one cohesive unit whose pieces
