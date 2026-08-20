@@ -199,3 +199,19 @@ unreachable, leaving one candidate. The rival (a `ruff` subprocess exceeding its
 5s budget under load) was then forced by raising `subprocess.TimeoutExpired` on
 every `ruff` call: both assertions still passed. Two seconds of work, against a
 47-minute suite run that had suggested it.
+
+### A status document is not a status
+
+Tools report state as a rendered document — a checklist, a comment, a summary
+line — and the state lives in a structured field, not in the document's
+vocabulary. Grepping the prose for `conflict|failed|dequeue|skipped` matches
+condition *names*, including satisfied ones and negated ones, so the filter fires
+on a perfectly healthy report: Mergify's queue comment lists
+`- [ ] check-skipped=backend (pytest + pyright)` on a PR whose backend check
+**passed**, because the state is in the box, not in the word. Read the field that
+carries it — that same comment ships `{"version": 1, "state": "merged", ...}` as a
+machine payload directly above the prose — or ask the API (`gh pr view --json
+state,mergedAt`, `scripts/ci_utils.py`). The same discipline as *discriminate on
+the observed values, never the names*, applied to tool output instead of test
+output: a monitor keyed on vocabulary answers a question nobody asked, and it
+answers it confidently.
