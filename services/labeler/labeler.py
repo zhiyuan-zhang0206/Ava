@@ -53,6 +53,11 @@ def _normalize(raw: str) -> str:
 # thing it is looking for. Matched case-insensitively at the START only: a label
 # may legitimately contain "I" mid-string ("Explain what I owe"), and it is the
 # opening position that makes it a continuation rather than a description.
+# Shortest output treated as an echo of the instruction rather than a
+# coincidence. 16 characters into `_LABEL_SYSTEM_PROMPT` is already mid-sentence
+# ("Summarize the us"), so nothing a summarizer would produce on purpose.
+_ECHO_MIN_CHARS = 16
+
 _ASSISTANT_VOICE_RE = re.compile(
     r"""^
     (?:(?:sure|certainly|absolutely|of\s+course|okay|ok|alright|got\s+it|understood)
@@ -88,14 +93,26 @@ def _rejection_reason(label: str) -> str | None:
       prompt-injection-shaped failure: a long second-person imperative brief
       steers the summarizer into executing it ("I'll validate the timezone
       configuration and then test the syste").
+    * `instruction_echo` — the output is a verbatim prefix of the instruction
+      the model was given, i.e. it repeated its own system prompt instead of
+      applying it. Observed while measuring model candidates for #178. The
+      length floor keeps a short label that merely shares an opening word from
+      colliding with it.
 
-    Two rules #178 suggested were measured and DROPPED as wrong:
+    Three rules were measured and DROPPED as wrong:
 
-    * "the output is exactly LABEL_MAX_CHARS" — 16 of the 287 production labels
-      are exactly 64 characters, a 5.6% false-positive rate.
+    * "the output is exactly LABEL_MAX_CHARS" (#178's suggestion) — 16 of the
+      287 production labels are exactly 64 characters, a 5.6% false-positive
+      rate.
     * "the output contains a tag-shaped `<x` anywhere" — 9 of the 287, the same
       machine-protocol labels (`DRIVE_PROBE_RESULT mounted=<yes|no> ...`).
       Anchoring the markup rule at the start is what makes it safe.
+    * "the output is a verbatim prefix of the user prompt" — the natural
+      generalisation of `instruction_echo` to the input side, and the one thing
+      here that cannot be made safe: it rejects the real label 'revert
+      verification - terminating immediately', which is a faithful summary of a
+      prompt that opens with those words. A short prompt legitimately produces a
+      label that is its own opening.
 
     A false positive costs a retry and, if it persists, a NULL label; a false
     negative writes the model's answer into a user-facing field. Both rules are
@@ -105,6 +122,8 @@ def _rejection_reason(label: str) -> str | None:
         return "markup"
     if _ASSISTANT_VOICE_RE.match(label):
         return "assistant_voice"
+    if len(label) >= _ECHO_MIN_CHARS and _LABEL_SYSTEM_PROMPT.startswith(label):
+        return "instruction_echo"
     return None
 
 

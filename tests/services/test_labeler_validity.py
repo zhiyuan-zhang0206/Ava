@@ -29,7 +29,12 @@ import redis.asyncio as aredis
 from langchain_core.messages import AIMessage
 
 import services.labeler.labeler as labeler_module
-from services.labeler.labeler import LABEL_MAX_CHARS, _rejection_reason, generate_label_async
+from services.labeler.labeler import (
+    _LABEL_SYSTEM_PROMPT,
+    LABEL_MAX_CHARS,
+    _rejection_reason,
+    generate_label_async,
+)
 from shared.db import create_agent
 
 # The nine outputs #178 recorded from real runs: three observed landing in
@@ -49,9 +54,10 @@ _ISSUE_178_OUTPUTS = [
 ]
 
 # Real production labels. Deliberately includes the machine-protocol ones that
-# are exactly LABEL_MAX_CHARS long and contain `<yes|no>` placeholders: they are
-# the measured counter-examples to the two rules #178 suggested and this change
-# dropped (see `_rejection_reason`'s comment).
+# are exactly LABEL_MAX_CHARS long and contain `<yes|no>` placeholders, and the
+# one that is a verbatim prefix of its own prompt: they are the measured
+# counter-examples to the three rules this change considered and dropped (see
+# `_rejection_reason`'s docstring).
 _PROD_LABELS = [
     "Extend Syntax Fix Plugin to auto-import missing names on NameErr",
     "Mining transcript for user interrupt signals and durable prefere",
@@ -156,7 +162,7 @@ class TestRejectionReason:
         assert _rejection_reason("Sure, I'll take a look at the migration") == "assistant_voice"
         assert _rejection_reason("Okay, let me check the cluster status") == "assistant_voice"
 
-    def test_reason_distinguishes_the_two_failure_modes(self) -> None:
+    def test_reason_names_the_failure_mode(self) -> None:
         assert _rejection_reason("<think>I need to validate timezone") == "markup"
         assert _rejection_reason("I'll validate the timezone configuration") == "assistant_voice"
 
@@ -172,6 +178,24 @@ class TestRejectionReason:
         """The markup rule is anchored: `writable=<yes|no>` is a real label
         shape, and a contains-a-tag-anywhere rule fired on 9 of the 287."""
         assert _rejection_reason("report writable=<yes|no> to the fleet") is None
+
+    def test_rejects_an_echo_of_the_system_prompt(self) -> None:
+        """Observed while measuring model candidates: the model repeated its own
+        instruction instead of applying it, and `_normalize` truncated that to
+        64 characters like any other output."""
+        echoed = _LABEL_SYSTEM_PROMPT[:LABEL_MAX_CHARS]
+        assert _rejection_reason(echoed) == "instruction_echo"
+
+    def test_a_short_label_sharing_an_opening_word_survives(self) -> None:
+        """The length floor: 'Summarize' is a prefix of the system prompt but is
+        a plausible label, so only a long verbatim run counts as an echo."""
+        assert _rejection_reason("Summarize") is None
+
+    def test_a_label_echoing_the_user_prompt_is_not_rejected(self) -> None:
+        """The input-side generalisation is deliberately absent — it rejects this
+        real production label, which is a faithful summary of a short prompt that
+        opens with exactly those words."""
+        assert _rejection_reason("revert verification - terminating immediately") is None
 
     def test_words_that_merely_start_with_a_pronoun_survive(self) -> None:
         """`i`/`we` are matched as whole words — a label starting "Improve" or

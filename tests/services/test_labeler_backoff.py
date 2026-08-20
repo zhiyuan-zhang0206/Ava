@@ -91,7 +91,7 @@ def _seed_chat(db: psycopg.Connection, tid: int) -> None:
 async def test_dispatch_loop_uses_labeler_model_not_main_model(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The poll loop labels with settings.lm.labeler_model (the cheaper tier), not
+    """The poll loop labels with settings.lm.labeler_model (its own knob), not
     settings.lm.llm_model (the main reasoning model). Pin the two to different
     values and assert the model handed to generate_label_async is the labeler
     one — guards against a future edit reverting the daemon to llm_model."""
