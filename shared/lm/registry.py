@@ -500,6 +500,35 @@ MODELS: dict[str, ModelSpec] = {
             reasoning_effort="high",
         ),
     ),
+    # -- qwen --
+    "qwen3.8-max": ModelSpec(
+        provider="qwen",
+        spawnable=True,
+        # Alibaba publishes 991,808 max input and 983,616 "max input (thinking
+        # mode)". This roster runs with thinking on, so the lower ceiling is the
+        # one an agent actually has.
+        context_window=983_616,
+        max_output_tokens=131_072,
+        # Alibaba publishes NO training-data cutoff for any Qwen model (checked
+        # 2026-08-20 across the Model Studio model pages, the pricing page and
+        # the Qwen team blog) — but `_validate_registry` requires one for a
+        # spawnable model, and the value only feeds the system prompt's temporal
+        # boundary. This is a deliberate conservative estimate anchored on the
+        # model page's own publication (2026-08-03): erring EARLY is the safe
+        # direction, since an over-late cutoff makes the agent trust stale
+        # knowledge as current. Replace it the day Alibaba publishes one.
+        knowledge_cutoff="2026-01",
+        model_identity="You are running on Qwen3.8-Max (Alibaba Qwen).",
+        # No graded effort field on the compatible-mode endpoint — the knob's
+        # only wire effect is the `enable_thinking` on/off switch
+        # (shared/lm/_effort.py:qwen_extra_body), same binary as mimo.
+        effort_levels=("none", "high"),
+        tuning=ModelTuning(
+            # The "high" rung IS the provider default: thinking is on for this
+            # model unless `enable_thinking=false` is sent.
+            reasoning_effort="high",
+        ),
+    ),
     # -- legacy / non-spawnable (facts kept for old agents) --
     "claude-opus-4-8": ModelSpec(
         provider="claude",

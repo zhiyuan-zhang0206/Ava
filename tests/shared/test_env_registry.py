@@ -166,6 +166,7 @@ class TestConsumptionMatrixDeclarations:
             "MOONSHOT_API_KEY",
             "GLM_API_KEY",
             "XAI_API_KEY",
+            "DASHSCOPE_API_KEY",
             "BRAVE_API_KEY",
             "JINA_API_KEY",
         }

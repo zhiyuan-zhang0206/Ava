@@ -17,17 +17,19 @@ Current provider matrix:
 | `kimi-*`     | Moonshot  | `langchain-moonshot`        | `MOONSHOT_API_KEY`  | (default)                         |
 | `glm-*`      | Zhipu     | `ReasoningContentChatModel`| `GLM_API_KEY`       | `https://open.bigmodel.cn/api/paas/v4` |
 | `grok-*`     | xAI       | `langchain-xai`             | `XAI_API_KEY`       | (default)                         |
+| `qwen*`      | Alibaba   | `ReasoningContentChatModel`| `DASHSCOPE_API_KEY` | `https://dashscope.aliyuncs.com/compatible-mode/v1` |
 
 kimi uses `ChatMoonshot` (`langchain-moonshot`); grok uses `ChatXAI`
 (`langchain-xai`). Both capture reasoning in `additional_kwargs["reasoning_content"]`
 (not canonical content blocks) — the streaming fan-out (`RedisStreamHandler`)
 and timeline (`shared/timeline.py`) handle both styles.
 
-glm / mimo use `ReasoningContentChatModel` (`shared/lm/_reasoning_compat.py`), a
+glm / mimo / qwen use `ReasoningContentChatModel` (`shared/lm/_reasoning_compat.py`), a
 ChatOpenAI subclass folding `reasoning_content` deltas into canonical
-`{"type":"thinking", ...}` blocks — neither has a suitable community package
+`{"type":"thinking", ...}` blocks — none has a suitable community package
 (`langchain-zhipuai` unmaintained; `langchain_zhipu` needs `langchain<0.3.0`;
-MiMo has none at all).
+MiMo has none at all; Alibaba ships a `dashscope` SDK that is not a LangChain
+client and its own docs drive the OpenAI-compatible endpoint with the OpenAI SDK).
 
 **deepseek-* goes through ChatAnthropic, not langchain-deepseek**:
 langchain-deepseek 1.0.1 on the thinking + tool calls + streaming path
@@ -97,6 +99,7 @@ from shared.lm._providers import (
     _build_grok_model,
     _build_kimi_model,
     _build_mimo_model,
+    _build_qwen_model,
 )
 from shared.lm.registry import (
     MODEL_CONTEXT_WINDOW as MODEL_CONTEXT_WINDOW,  # re-exported catalog view
@@ -130,14 +133,26 @@ class _LLMFactory(Protocol):
 
 # Model prefixes whose provider binding decodes native image content blocks.
 # claude / gemini / gpt are multimodal on the endpoints Ava binds; kimi / grok
-# accept image input on their OpenAI-compatible endpoints. deepseek (bound to
-# its anthropic-compatible endpoint above), mimo, and glm are text-only there,
-# so a HumanMessage carrying an image block would 400 (or be silently dropped)
-# mid-turn. The message endpoint gates on this to 422 an image addressed to a
-# text-only agent up front, rather than letting the LLM call fail after the
-# inbound is already queued. Add a prefix here the day its provider ships vision
-# on the bound endpoint.
-_VISION_MODEL_PREFIXES: tuple[str, ...] = ("claude-", "gemini-", "gpt-", "kimi-", "grok-")
+# accept image input on their OpenAI-compatible endpoints, and every Qwen model
+# in the registry is natively multimodal (Alibaba made the mainline models
+# multimodal from Qwen3.5 on — the text-only/`-vl-` split ended there).
+# deepseek (bound to its anthropic-compatible endpoint above), mimo, and glm are
+# text-only there, so a HumanMessage carrying an image block would 400 (or be
+# silently dropped) mid-turn. The message endpoint gates on this to 422 an image
+# addressed to a text-only agent up front, rather than letting the LLM call fail
+# after the inbound is already queued. Add a prefix here the day its provider
+# ships vision on the bound endpoint — and note the gate is per PREFIX, so
+# registering a text-only legacy id under a vision prefix (Alibaba's retired
+# `qwen-plus` / `qwen-flash` are the live example) means making it per-model
+# first.
+_VISION_MODEL_PREFIXES: tuple[str, ...] = (
+    "claude-",
+    "gemini-",
+    "gpt-",
+    "kimi-",
+    "grok-",
+    "qwen",
+)
 
 
 def model_supports_vision(model: str) -> bool:
@@ -148,14 +163,14 @@ def model_supports_vision(model: str) -> bool:
 def provider_key_of_model(model: str) -> str | None:
     """Provider key for a model name, or None for an unregistered prefix.
 
-    Keys are the `_MODEL_KEY_MAP` prefixes with the trailing dash stripped
+    Keys are the `_MODEL_KEY_MAP` prefixes with any trailing dash stripped
     (`deepseek` / `claude` / `gpt` / `gemini` / `mimo` / `kimi` / `glm` /
-    `grok`) — the same keys `AVA_LLM_MAX_CONCURRENT` accepts
+    `grok` / `qwen`) — the same keys `AVA_LLM_MAX_CONCURRENT` accepts
     (`shared/lm/_concurrency.py`). None means the limiter passes through.
     """
     for prefix in _MODEL_KEY_MAP:
         if model.startswith(prefix):
-            return prefix[:-1]
+            return prefix.rstrip("-")
     return None
 
 
@@ -168,6 +183,11 @@ def provider_key_of_model(model: str) -> str | None:
 # The full per-vendor cost, and the plan to make it a plugin concern instead, are
 # in future/infra/model-providers-as-plugins.md (summarized in
 # shared/lm/lm.ava.okf.md).
+#
+# Prefixes usually carry the trailing dash of the id they match; `qwen` does not,
+# because Alibaba versions inside the family name (`qwen3.8-max`). The provider
+# key is the prefix with a trailing dash stripped IF it has one, so `qwen` reads
+# as `qwen` rather than a truncated `qwe`.
 _MODEL_KEY_MAP: dict[str, tuple[str, str, str]] = {
     "claude-": ("Anthropic", "anthropic_api_key", "ANTHROPIC_API_KEY"),
     "deepseek-": ("DeepSeek", "deepseek_api_key", "DEEPSEEK_API_KEY"),
@@ -177,6 +197,7 @@ _MODEL_KEY_MAP: dict[str, tuple[str, str, str]] = {
     "kimi-": ("Moonshot", "moonshot_api_key", "MOONSHOT_API_KEY"),
     "glm-": ("Zhipu", "zhipu_api_key", "GLM_API_KEY"),
     "grok-": ("xAI", "xai_api_key", "XAI_API_KEY"),
+    "qwen": ("Alibaba", "dashscope_api_key", "DASHSCOPE_API_KEY"),
 }
 
 
@@ -333,8 +354,8 @@ def build_chat_model(
             thinking is slow/expensive and turns content into list-of-blocks);
             it also skips reasoning-effort injection where both would conflict
             (deepseek 400) or contradict intent (claude / glm / gemini /
-            mimo). kimi-k3 / grok-4.5 cannot disable reasoning — logged and
-            ignored. `{"type": "enabled", "budget_tokens": N}` is manual
+            mimo / qwen). kimi-k3 / grok-4.5 cannot disable reasoning — logged
+            and ignored. `{"type": "enabled", "budget_tokens": N}` is manual
             extended thinking — see the claude helper for the per-model rules.
             None = provider default.
         reasoning_effort: deepseek-* only — when set, overrides the resolved
@@ -450,6 +471,14 @@ def build_chat_model(
         )
     if model.startswith("grok-"):
         return _build_grok_model(
+            model,
+            thinking=thinking,
+            resolved_effort=resolved_effort,
+            disable_streaming=disable_streaming,
+            timeout=timeout,
+        )
+    if model.startswith("qwen"):
+        return _build_qwen_model(
             model,
             thinking=thinking,
             resolved_effort=resolved_effort,

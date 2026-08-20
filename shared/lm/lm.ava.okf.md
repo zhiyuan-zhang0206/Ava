@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Language Model Provider Layer
-description: '`shared/lm/` — unified LLM provider abstraction above LangChain; eight providers behind one factory.'
+description: '`shared/lm/` — unified LLM provider abstraction above LangChain; nine providers behind one factory.'
 tags:
 - shared
 - library
@@ -10,7 +10,7 @@ tags:
 
 # Language Model Provider Layer
 
-`shared/lm/` — unified LLM provider abstraction above LangChain, below the agent kernel: eight providers, provider-agnostic upper layers. Adding a provider is a core edit across up to seven files (`config/lm.py` key field, `registry.py` `MODELS` entries, `_providers.py` builder, `factory.py` `_MODEL_KEY_MAP` + branch, `_effort.py` vocabulary, `stop.py` terminal-reason entry when the client emits an unseen `model_provider`, `pyproject.toml` dep) — making it a plugin concern is planned in [model-providers-as-plugins](model-providers-as-plugins.md).
+`shared/lm/` — unified LLM provider abstraction above LangChain, below the agent kernel: nine providers, provider-agnostic upper layers. Adding a provider is a core edit across up to seven files (`config/lm.py` key field, `registry.py` `MODELS` entries, `_providers.py` builder, `factory.py` `_MODEL_KEY_MAP` + branch, `_effort.py` vocabulary, `stop.py` terminal-reason entry when the client emits an unseen `model_provider`, `pyproject.toml` dep) — making it a plugin concern is planned in [model-providers-as-plugins](model-providers-as-plugins.md).
 
 ## Core Responsibilities
 
@@ -27,10 +27,11 @@ tags:
 | `kimi-` | ChatMoonshot (`langchain-moonshot`) | MOONSHOT_API_KEY |
 | `glm-` | ReasoningContentChatModel (Zhipu) | GLM_API_KEY |
 | `grok-` | ChatXAI (`langchain-xai`) | XAI_API_KEY |
+| `qwen` | ReasoningContentChatModel (Alibaba, Beijing) | DASHSCOPE_API_KEY |
 
 - SSOT is `registry.py:MODELS`, one `ModelSpec` per model id; `SUPPORTED_MODELS` (spawn dropdown), `MODEL_CONTEXT_WINDOW`, `MODEL_KNOWLEDGE_CUTOFF`, `MODEL_IDENTITY` are derived views re-exported through factory. Per-PROVIDER tables stay in factory (`_MODEL_KEY_MAP`, `_VISION_MODEL_PREFIXES`) / `_effort.py` (`_PROVIDER_EFFORT_LEVELS`).
 - `validate_model_config()` — spawn-boundary pre-check (`POST /api/agents`): model registered + key configured, else 400 (fail-fast vs silent hang).
-- `model_supports_vision()` — claude/gemini/gpt/kimi/grok native images; deepseek/mimo/glm text-only (endpoint 422s images).
+- `model_supports_vision()` — claude/gemini/gpt/kimi/grok/qwen native images; deepseek/mimo/glm text-only (endpoint 422s images).
 - `AVA_LLM_OVERRIDE=mod:factory` injects a fake factory (e2e/multi-instance); key checks skipped.
 - `thinking: ThinkingConfig | None` — `TypedDict` for Anthropic extended-thinking (`{"type":"disabled"}`/`{"type":"enabled","budget_tokens":N}`); gemini-*/gpt-* read only `type`, mirroring on/off to reasoning toggles.
 
@@ -42,7 +43,7 @@ LangChain types `AIMessage(Chunk).content` weakly as `str | list[str | dict[str,
 - `extract_reasoning_tokens()` — `usage_metadata.output_token_details` preferred, else char estimates.
 
 ### stop classification (`stop.py`)
-- `classify_stop()` → `StopCategory` (NORMAL/TRUNCATED/UNEXPECTED/CORRUPTED) by `model_provider`; `_BY_PROVIDER` has five keys for eight providers (anthropic ← claude+deepseek, openai ← gpt+mimo+glm, google_genai, moonshot, xai). TRUNCATED retries with raised max_tokens; unknown provider fail-fast.
+- `classify_stop()` → `StopCategory` (NORMAL/TRUNCATED/UNEXPECTED/CORRUPTED) by `model_provider`; `_BY_PROVIDER` has five keys for nine providers (anthropic ← claude+deepseek, openai ← gpt+mimo+glm+qwen, google_genai, moonshot, xai). TRUNCATED retries with raised max_tokens; unknown provider fail-fast.
 
 ### billing (`pricing.py` + `pricing_catalog.json`)
 - The reviewed JSON catalog is the sole volatile pricing source: every model has official-source provenance plus gapless effective periods, input-token tiers, and optional recurring UTC rate windows. The registry carries no duplicate price tuples.
@@ -56,14 +57,15 @@ LangChain types `AIMessage(Chunk).content` weakly as `str | list[str | dict[str,
 
 ### compatibility layers
 - `_anthropic_compat.py`: `ThinkingTokensChatAnthropic` — ChatAnthropic subclass patching thinking_tokens into usage_metadata (base drops it); shared by claude/deepseek.
-- `_reasoning_compat.py`: `ReasoningContentChatModel` — ChatOpenAI subclass folding delta `reasoning_content` into canonical thinking blocks; **used only by glm / mimo**. kimi / grok use `langchain-moonshot` / `langchain-xai`; reasoning lands in `additional_kwargs["reasoning_content"]`, handled by fan-out + timeline.
+- `_reasoning_compat.py`: `ReasoningContentChatModel` — ChatOpenAI subclass folding delta `reasoning_content` into canonical thinking blocks; **used by glm / mimo / qwen**. kimi / grok use `langchain-moonshot` / `langchain-xai`; reasoning lands in `additional_kwargs["reasoning_content"]`, handled by fan-out + timeline.
 
 ## Notes
 
 - **DeepSeek uses the Anthropic protocol, not langchain-deepseek**: the latter 1.0.1 breaks AIMessages on thinking + tool_calls + streaming (empty metadata → next-round 400s; upstream #34166 OPEN). The Anthropic-compat endpoint (`api.deepseek.com/anthropic`) sidesteps it.
 - **max_tokens**: both anthropic-protocol branches (claude / deepseek) pin it explicitly to `ModelSpec.max_output_tokens` — langchain-anthropic falls back to a legacy 4096 for ids it doesn't know, truncating thinking mid-turn (#169). `_validate_registry` refuses a spawnable claude/deepseek entry without the cap; unregistered ids fail fast. OpenAI-style branches leave it unset (those APIs default to the model's own cap).
 - **streaming default** (`ModelSpec.streaming`): True, and no registry entry sets False today (kimi-k3's former False was removed — `decisions/2026-07-25-per-model-tuning-values.md`). Explicit kwarg overrides.
-- **model identity** (`ModelSpec.model_identity` → `MODEL_IDENTITY`): per-model note injected before knowledge cutoff in the system prompt (deepseek-v4-pro/flash, kimi-k3).
+- **model identity** (`ModelSpec.model_identity` → `MODEL_IDENTITY`): per-model note injected before knowledge cutoff in the system prompt (deepseek-v4-pro/flash, kimi-k3, qwen3.8-max).
 - **Anthropic prompt caching**: claude branch passes `cache_control: ephemeral`; system + eligible blocks cached 5 min server-side. No facade — submodules imported directly.
+- **Qwen**: reasoning is graded by a token budget on this endpoint, not a level enum, so the knob rides the `enable_thinking` switch (mimo's binary `none`/`high`). Its always-on implicit cache reports `cached_tokens` → `cache_read`, priced at the catalog rate; the explicit `cache_control` tier is unwired.
 
 - Key deps: [[llm.ava.okf.md]] (agent/graph/_llm.py calls `build_chat_model`)

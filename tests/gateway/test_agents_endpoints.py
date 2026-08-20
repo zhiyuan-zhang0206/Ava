@@ -108,7 +108,7 @@ def test_get_models_reasoning_effort_options_match_factory_tables() -> None:
 
     # And the registry vocabulary for the OpenAI-style providers matches the
     # per-provider wire clamp, so UI options and clamp cannot diverge.
-    for provider in ("gemini", "grok", "kimi", "glm", "mimo"):
+    for provider in ("gemini", "grok", "kimi", "glm", "mimo", "qwen"):
         expected = list(_PROVIDER_EFFORT_LEVELS[provider])
         provider_models = [m for m, info in models.items() if info["provider"] == provider]
         assert provider_models, f"no models registered for provider {provider!r}"

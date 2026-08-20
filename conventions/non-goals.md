@@ -24,7 +24,7 @@ first and ask "what changed that made it worth doing".
   (`ava/agents/presets.py`), and the `ava-guide/models` skill's tier judgment put the model choice
   in the hands of whoever is deciding the sub-task, once, at spawn, not a framework router with none
   of that context. **This is not a rejection of multi-model support**: the registry
-  (`shared/lm/registry.py`) backs 8 providers side by side, each with its own per-model tuning
+  (`shared/lm/registry.py`) backs 9 providers side by side, each with its own per-model tuning
   (`decisions/2026-07-25-per-model-config-registry.md`) — "single model" language elsewhere
   describes today's default *operating* configuration (one operator, one provider live per
   deployment), not a registry limit. What is rejected here is a dispatcher choosing FOR the agent

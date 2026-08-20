@@ -32,7 +32,7 @@ Today: single model *live per deployment*, fail-fast — if the provider is
 down, the agent's view errors and a human swaps config. This is correct for
 single-user (the operator is present to swap). "Single model" here describes
 the default *operating* choice, not a capability ceiling — the registry
-(`shared/lm/registry.py`) already backs 8 providers side by side, and any
+(`shared/lm/registry.py`) already backs 9 providers side by side, and any
 agent can be spawned on any of them today via `config_overlay`/presets.
 
 At open-source time: a public deployment cannot hard-fail when one upstream
