@@ -93,9 +93,11 @@ class LlmProviderError(TypedDict):
     the provider said the key is out of credit or its quota is exhausted (HTTP
     402, or a per-vendor ``error.type`` — the vocabulary lives in
     ``shared/lm/errors.py``, so a new provider plugs in there and this key and
-    the alert follow with no further wiring). It is deliberately independent of
-    ``error_class``: one vendor says it with a permanent 402, another with a
-    transient 429, and a human has to clear it either way.
+    the alert follow with no further wiring, as long as the vendor reports it
+    through ``error.type``; that module's comment carries the caveats). It is
+    deliberately independent of ``error_class``: one vendor says it with a
+    permanent 402, another with a transient 429, and a human has to clear it
+    either way.
 
     ``vendor`` is the model's provider key (deepseek / claude / …, None for an
     unregistered prefix) and ``model`` the model in force at the call — the
