@@ -247,12 +247,16 @@ export default function DisplaySettingsPage() {
           <RadioRow
             icon={Palette}
             label="Skin"
-            description="A plugin-contributed color pack, applied over the active light/dark palette. Colors it does not set keep following light/dark; a plugin that skins both ships one pack per mode"
+            description="A plugin-contributed color pack, applied over the active light/dark palette. Colors it does not set keep following light/dark. A pack marked 'no dark variant' pins the colors it does set across both modes, so the light/dark toggle will not change them"
             options={[
               { value: "", label: "Default (Ava)" },
               ...themePacks.map((p) => ({
                 value: themePackId(p),
-                label: `${p.name} (${p.plugin})`,
+                // Marked per pack rather than only in the description: a pack
+                // without a dark half disables the mode toggle for every color
+                // it sets, and that is a property of the pack being chosen, not
+                // of skins in general.
+                label: `${p.name} (${p.plugin})${p.dark_tokens ? "" : " — no dark variant"}`,
               })),
             ]}
             value={(settings["display.theme_pack"] as string | null) ?? ""}

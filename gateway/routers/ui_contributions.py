@@ -68,11 +68,16 @@ def get_ui_contributions() -> UiContributionsResponse:
     nav: list[UiNavContribution] = []
     for plugin, ui in _enabled_ui_declarations():
         for theme in cast(list[dict[str, Any]], ui.get("themes", [])):
+            # Absent darkTokens is carried as None, not as an empty map: the
+            # picker distinguishes "pins both modes" from "has a dark half",
+            # and an empty map would read as the latter.
+            dark = cast(dict[str, str], theme["darkTokens"]) if "darkTokens" in theme else None
             themes.append(
                 UiThemeContribution(
                     plugin=plugin,
                     name=cast(str, theme["name"]),
                     tokens=cast(dict[str, str], theme["tokens"]),
+                    dark_tokens=dark,
                 )
             )
         for entry in cast(list[dict[str, Any]], ui.get("nav", [])):
