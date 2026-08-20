@@ -90,16 +90,13 @@ then `git checkout HEAD -- <file>`; confirm the revert actually landed (`git dif
 or grep the file for a token from the fix) rather than trusting the command.
 **The same failure has a second door: the code under test never runs.** A guard
 whose trigger the framework silently declines is as green and as worthless as one
-whose revert never landed. Two live examples: a retry test raising `ValueError`,
-which `langgraph.types.default_retry_on` explicitly REFUSES to retry — the node
-ran once and the attempt-count assertion measured nothing; and a test asserting a
-bounded shutdown where the code under test suppressed `CancelledError`, so the
-`asyncio.wait_for` meant to bound it was swallowed and the run HUNG rather than
-failing. The tell is the same in both directions — ask what would have to execute
-for this assertion to be meaningful, then confirm it did (count the calls, assert
-the elapsed time, watch it go red) rather than inferring it from a pass. A test
-that hangs instead of failing is the worst of the three: it reads as
-infrastructure flakiness, not as a caught regression.
+whose revert never landed. A retry test raised `ValueError`, which
+`langgraph.types.default_retry_on` explicitly REFUSES to retry — the node ran
+once, and the assertion counting retry attempts measured nothing. Ask what would
+have to execute for this assertion to be meaningful, then confirm it did (count
+the calls, assert the elapsed time, watch it go red) rather than inferring it
+from a pass. A third door — the guard itself being neutralized — is its own
+entry below.
 Evidence: [`postmortems/0002`](../postmortems/0002-db-down-tests-pass-for-the-wrong-reason.md);
 procedure in [`.agents/skills/run-local-tests/SKILL.md`](../.agents/skills/run-local-tests/SKILL.md).
 
@@ -166,6 +163,36 @@ cluster for the fifteen minutes every agent on it was dead. Make a check exercis
 the dependency it vouches for, or scope its claim down to what it actually
 touches.
 Evidence: [`postmortems/0004`](../postmortems/0004-isolation-one-command-can-undo.md).
+
+### A guard that shares a mechanism with the failure cannot catch it
+
+The health-check rule above, turned on tests. `asyncio.wait_for` is the reflexive
+hang guard in an async suite — and it bounds by **cancelling** what it wraps. So
+against code that suppresses `CancelledError`, which shutdown paths do precisely
+to survive teardown, the cancellation is swallowed and `wait_for` never returns.
+The guard hangs alongside the thing it was guarding, and the suite reports
+nothing at all.
+
+Both halves of one PR hit this. `TurnScheduler.aclose` awaited cancelled tasks
+under a `suppress(CancelledError, Exception)`; the `wait_for` meant to bound the
+test was eaten by that same suppress. And the *fake* was faithful enough to a
+blocked C call to be unkillable at loop teardown — the property that made it a
+good stand-in is the property that hung the run. In both cases the guard and the
+failure ran through one mechanism.
+
+Give the guard a mechanism the failure cannot share. `asyncio.wait([task],
+timeout=...)` observes without cancelling, so "it never returned" becomes a
+boolean to assert on instead of a hang; the cleanup then has to release whatever
+the code is blocked on *before* cancelling the waiter, or the teardown inherits
+the same trap. Then confirm it: reintroducing the unbounded await now fails in
+~12s instead of hanging.
+
+**A hanging test is worse than a failing one and worse than a silently-green
+one.** A red gets triaged; a hang gets rerun and shrugged at, because it reads as
+infrastructure flakiness rather than as a caught regression — which is how a real
+regression buys itself weeks. When a guard's failure mode is "no verdict", fixing
+that comes before trusting the guard.
+Evidence: PR #189 and its follow-up.
 
 ## Debugging
 
