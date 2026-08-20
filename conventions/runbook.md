@@ -259,8 +259,12 @@ real posture; Task #1113). `ava start`
 is a *consumer*: it skips the bring-up when this cluster's pg/redis are already up
 (`pg_isready` + a redis PING), and on a fresh start first waits (bounded, ~60s) for the
 reachable bind address to appear on an interface — so a reboot that starts `ava` before
-the private-network interface exists retries rather than dying on an un-bindable address. So a
-(re)start never disrupts a running cluster's data plane. `ava stop` tears this cluster's
+the private-network interface exists retries rather than dying on an un-bindable address.
+pg/redis are never touched when already up, so a (re)start never disrupts a running
+data plane — with ONE deliberate exception: a running pgbouncer that answers on
+loopback but is missing its reachable-address listener (a silently degraded double
+bind, task #1288) is RESTARTED rather than reloaded, because a SIGHUP reload never
+retries a `listen_addr` that failed to bind at startup. `ava stop` tears this cluster's
 own instance down (data persists on disk); `ava cluster update` keeps it up (`--keep-infra`) for
 the migrate step.
 
@@ -478,7 +482,7 @@ supervisor socket for agent shells / watchers).
 | `milvus`                 | `.venv/bin/python -m services.milvus.daemon` (`milvus-lite server` gRPC :19530, data dir `~/.ava/milvus-data/`) | `services.healthchecks.milvus` (TCP probe :19530) |
 | `memory-indexer`         | `.venv/bin/python -m services.memory_indexer.daemon` (watchdog fs watch `~/.ava/memory/` + Gemini Embedding 2 → milvus collection) | `services.healthchecks.memory_indexer` (`/healthz` :8105) |
 | `frontend`               | `cd ui/web && NEXT_PUBLIC_GATEWAY_PORT=<AVA_GATEWAY_PORT> npm run build && npm run start` (Next.js prod build, 0.0.0.0:3000; the build-time port is injected from `AVA_GATEWAY_PORT` so the browser dials the gateway on the right port even when it is not the default 8000) | `services.healthchecks.frontend` (curl) |
-| `gateway-watchdog` ★ (gateway only) | `.venv/bin/python -m services.watchdog.daemon --role gateway` (asyncio imports + runs the gateway-capability healthchecks above — redis-acl first (re-affirms the cluster's redis ACL user (the identifier its redis_url carries), which a redis-server restart silently drops), then pgbouncer (restarts the per-cluster pooler when its listener stops answering — when the pooler is enabled it is every consumer's AVA_DB_URL, so it comes before any service that would be revived without a database), then gateway/labeler/heartbeat/events-maintenance/task-maintenance/report/milvus/memory-indexer/frontend — every 60s) | the OS-scheduled **watchdog probe** (`ava cluster watchdog-probe --role gateway`, launchd / crontab / schtasks, every 60s) respawns it when its pidfile shows it dead |
+| `gateway-watchdog` ★ (gateway only) | `.venv/bin/python -m services.watchdog.daemon --role gateway` (asyncio imports + runs the gateway-capability healthchecks above — redis-acl first (re-affirms the cluster's redis ACL user (the identifier its redis_url carries), which a redis-server restart silently drops), then pgbouncer (restarts the per-cluster pooler when its listener stops answering OR its reachable-address listener is missing — a silently degraded double bind, task #1288; when the pooler is enabled it is every consumer's AVA_DB_URL, so it comes before any service that would be revived without a database), then gateway/labeler/heartbeat/events-maintenance/task-maintenance/report/milvus/memory-indexer/frontend — every 60s) | the OS-scheduled **watchdog probe** (`ava cluster watchdog-probe --role gateway`, launchd / crontab / schtasks, every 60s) respawns it when its pidfile shows it dead |
 | `agent-runner-watchdog` ★ (agent-runner only) | `.venv/bin/python -m services.watchdog.daemon --role agent-runner` (asyncio imports + runs the agent-runner-capability healthchecks above — ops/restarter (+browser, browser-mcp) — every 60s) | the OS-scheduled **watchdog probe** (`ava cluster watchdog-probe --role agent-runner`, launchd / crontab / schtasks, every 60s) respawns it when its pidfile shows it dead |
 | `browser` (agent-runner only, auto-detect display; opt-out `AVA_BROWSER_ENABLED=false`) | `.venv/bin/python -m services.browser.daemon` (headed real Chrome, dedicated profile `~/.ava/chrome-profile/`, CDP :9222) | `services.healthchecks.browser` (HTTP probe `/json/version` :9222) |
 | `otel-collector` | `<otel-collector-dir>/otelcol-contrib --config <otel-collector-dir>/config.yaml` (native Go binary installed by converge; one per machine — the local OTLP entry every agent exports to, fanning out to Tempo/Loki/Prometheus + the local JSONL trace mirror; file-backed queue absorbs backend outages) | `services.healthchecks.otel_collector` (OTLP POST probe on 4318) |

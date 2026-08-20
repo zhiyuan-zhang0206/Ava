@@ -47,11 +47,16 @@ pytestmark = pytest.mark.skipif(
 
 
 @contextlib.contextmanager
-def _pgbouncer_in_front(pg_url: str) -> Generator[str]:
+def _pgbouncer_in_front(pg_url: str, listen_addr: str = "127.0.0.1") -> Generator[str]:
     """Start a transaction-pooling PgBouncer in front of the throwaway Postgres at
     `pg_url`; yield the pooled connection URL. Config mirrors cli/commands/_pgbouncer,
     but the server hop is TCP loopback (the throwaway's trust posture) rather than the
-    prod unix socket — behaviourally the same credential-less trust hop."""
+    prod unix socket — behaviourally the same credential-less trust hop.
+
+    `listen_addr` lets a test bind the listener on a specific loopback address —
+    e.g. 127.0.0.2 to prove the degraded-bind probe dials exactly the bound
+    address (127.0.0.0/8 is local on Linux; macOS needs an lo0 alias, so the
+    caller guards on sys.platform)."""
     info = conninfo_to_dict(pg_url)
     pg_port = int(str(info["port"]))
     dbname = str(info["dbname"])
@@ -79,7 +84,7 @@ def _pgbouncer_in_front(pg_url: str) -> Generator[str]:
                 f"{dbname} = host=127.0.0.1 port={pg_port} dbname={dbname} "
                 f"connect_query='{PG_STATEMENT_TIMEOUT_SET_SQL}'",
                 "[pgbouncer]",
-                "listen_addr = 127.0.0.1",
+                f"listen_addr = {listen_addr}",
                 f"listen_port = {listen_port}",
                 "auth_type = scram-sha-256",
                 f"auth_file = {userlist}",
@@ -98,8 +103,8 @@ def _pgbouncer_in_front(pg_url: str) -> Generator[str]:
         [pgbouncer_bin(), "-d", str(ini)], check=True, capture_output=True, text=True
     )
     try:
-        _wait_port(listen_port)
-        pooled = f"postgresql://{role}:{_SECRET}@127.0.0.1:{listen_port}/{dbname}"
+        _wait_port(listen_port, host=listen_addr)
+        pooled = f"postgresql://{role}:{_SECRET}@{listen_addr}:{listen_port}/{dbname}"
         # pgbouncer -d races the listener; wait for a real authenticated answer.
         deadline = time.monotonic() + 15
         while True:
@@ -239,3 +244,26 @@ def test_langgraph_saver_setup_and_roundtrip_through_pgbouncer() -> None:
         got = saver.get_tuple(saved_cfg)
         assert got is not None
         assert got.checkpoint["id"] == ckpt["id"]
+
+
+def test_admin_probe_reaches_the_bound_address_only() -> None:
+    """P4: the load-bearing premise of the degraded-bind probe — a psycopg dial
+    to an address pgbouncer failed to bind actually FAILS, while the bound one
+    answers. `_admin_reachable(host=...)` is what `pgbouncer_public_listener_
+    reachable` trusts to tell a silently degraded pooler from a healthy one.
+
+    127.0.0.2 is local on Linux (CI runs this); macOS needs an lo0 alias, so
+    skip there."""
+    import sys
+
+    from cli.commands._pgbouncer import _admin_reachable
+
+    if sys.platform == "darwin":
+        pytest.skip("127.0.0.2 needs an lo0 alias on macOS")
+    with (
+        postgres() as pg_url,
+        _pgbouncer_in_front(pg_url, listen_addr="127.0.0.2") as pooled,
+    ):
+        listen_port = int(str(conninfo_to_dict(pooled)["port"]))
+        assert _admin_reachable(listen_port, "ava_citest", _SECRET, host="127.0.0.2") is True
+        assert _admin_reachable(listen_port, "ava_citest", _SECRET, host="127.0.0.1") is False

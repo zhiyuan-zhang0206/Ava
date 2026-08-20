@@ -94,7 +94,11 @@ collapses to loopback alone (zero-config); a split deployment sets each node's r
 private-network IP, which is appended, plus the `scram-sha-256` `AVA_TRUSTED_CIDRS`
 pg_hba ranges. So a split runner needs reachability *and* the secret. `ava start`
 is a consumer of the data plane: it only ensures its instance is up (skip-if-running),
-never reconfigures it.
+never reconfigures it — with one deliberate exception (task #1288): a running
+pgbouncer that is missing its reachable-address listener (a silently degraded double
+bind — pgbouncer logs a WARNING and keeps running when one `listen_addr` entry fails
+to bind) is RESTARTED, because a SIGHUP reload never retries a `listen_addr` that
+failed to bind at startup.
 
 | Path | Role |
 |---|---|
