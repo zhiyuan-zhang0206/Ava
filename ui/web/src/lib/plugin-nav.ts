@@ -9,8 +9,6 @@
 // gateway from the plugin package (`/api/plugin-ui/<plugin>/…`) and embedded in
 // a sandboxed iframe. No third-party code enters this bundle at any step.
 
-import type { Route } from "next";
-
 import { API_BASE } from "./api";
 import type { UiNavContribution } from "./types";
 import { useUiContributions } from "./ui-contributions";
@@ -32,14 +30,16 @@ export function usePluginNav(location: NavLocation): UiNavContribution[] {
 
 /** The console route that frames a plugin page.
  *
- * Cast to `Route` because typedRoutes can only infer a literal it can see;
- * this path is composed from declaration data, and the route it targets
- * (`app/plugin/[plugin]/[[...path]]`) is a catch-all that accepts it.
- *
- * The rule that would flag this assertion is off for this file — see the
- * typedRoutes block in eslint.config.mjs for why it fires only in CI. */
-export function pluginPageRoute(plugin: string, page: string): Route {
-  return `/plugin/${encodeURIComponent(plugin)}/${encodePagePath(page)}` as Route;
+ * The return type is the template literal, not `Route`, and that is
+ * load-bearing. typedRoutes gates dynamic routes behind a conditional on the
+ * type argument, so a BARE `Route` (i.e. `T = string`) collapses that arm to
+ * `never` and leaves only the static routes — annotating the return as `Route`
+ * would discard the inference `Link` does from its own argument, and a composed
+ * path would then need an assertion to get back in. Handing `Link` the
+ * template literal keeps that inference, which is why `inspector-panel.tsx`
+ * links the dynamic shell route with a bare template literal and no cast. */
+export function pluginPageRoute(plugin: string, page: string): `/plugin/${string}/${string}` {
+  return `/plugin/${encodeURIComponent(plugin)}/${encodePagePath(page)}`;
 }
 
 /** The gateway URL the iframe loads — the plugin's own mount.

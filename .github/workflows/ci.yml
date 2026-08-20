@@ -246,6 +246,17 @@ jobs:
       - name: Install frontend deps
         working-directory: ui/web
         run: npm ci
+      # typedRoutes: `Route` is the app dir's literal union only once
+      # `next typegen` has written .next/types, and .next is gitignored — so a
+      # clean checkout resolves it to a widened `string`. Without this step CI
+      # checks every route link against that widened type, and a typed-route
+      # regression cannot fail the build. It also makes CI disagree with the
+      # local `frontend tsc --noEmit` pre-commit hook, which runs typegen
+      # first: the same line is then flagged in one environment and not the
+      # other. Generating the types here is what makes the two agree.
+      - name: Generate Next.js route types (typedRoutes)
+        working-directory: ui/web
+        run: npx next typegen
       - name: TypeScript typecheck (tsc --noEmit)
         working-directory: ui/web
         run: npx tsc --noEmit
