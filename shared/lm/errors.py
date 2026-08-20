@@ -73,14 +73,31 @@ _TRANSIENT_STATUSES: frozenset[int] = frozenset({408, 409, 425, 429})
 # case-folded because the vocabularies are not consistently cased across
 # vendors. A new provider adds its string here and nothing else: the emit site,
 # the event payload and the alert rule all key off this one predicate.
+#
+# TWO limits worth knowing before trusting a silent alert:
+#
+# 1. Only `error.type` is read (`_error_type_of`). A vendor that reports billing
+#    under a different body field — DashScope's compatible mode carries a `code`
+#    (dotted PascalCase, e.g. `Throttling.AllocationQuota`) rather than an
+#    OpenAI-style snake_case `type` — is not matched by any string added here,
+#    and needs `_error_type_of` widened first. Reading a second field is not done
+#    speculatively: it waits for one captured body proving which field carries it.
+# 2. Every entry below except the DeepSeek 402 path comes from vendor
+#    documentation, not from a captured live 4xx. A wrong or missing string costs
+#    a MISSED alert, never a false one — the failure mode is silence, so the
+#    first real incident on an unverified vendor is what confirms the string.
 _BILLING_STATUS = 402
 _BILLING_ERROR_TYPES: frozenset[str] = frozenset(
     {
         "insufficient_quota",  # OpenAI — credit exhausted (arrives as a 429)
         "billing_not_active",  # OpenAI — account not billable
         "insufficient_balance",  # DeepSeek + the OpenAI-compatible CN endpoints
-        "exceeded_current_quota_error",  # Moonshot / Kimi
+        # UNVERIFIED (2026-08-20): the Qwen provider author has no DashScope key
+        # and could not confirm this string; see limit 1 above — DashScope may
+        # not report it through `error.type` at all. Kept because a miss is
+        # silent, not wrong.
         "arrearage",  # Alibaba DashScope (Qwen) — account in arrears
+        "exceeded_current_quota_error",  # Moonshot / Kimi
     }
 )
 
