@@ -39,9 +39,13 @@
 > cannot reach: a machine that was down during an install, or a long-lived host
 > that has been up since before it.
 >
-> **Still open in S2**: the adoption sweep for names already installed on a
-> machine before the registry existed, and the sync event. S3 onward is
-> untouched.
+> The adoption sweep runs on every converge
+> (`shared/extension_adopt.py:adopt_local_installs`): user-origin skills this
+> machine installed before the registry existed become cluster rows, identical
+> content on two machines merges in silence, and differing content is refused
+> with both machines named.
+>
+> **Still open in S2**: the sync event. S3 onward is untouched.
 >
 > This doc remains where the buildable detail lives; the decision entry holds
 > only what is durable (the tiers, the invariants, what was rejected).
