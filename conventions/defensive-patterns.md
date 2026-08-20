@@ -115,3 +115,20 @@ starting one (the module under test contains no tmux at all); "the pytest tmp
 counter reached three digits" was true and still incomplete, since `TMPDIR` is a
 second, independent input — `TMPDIR=/tmp pytest ...::test_new_honors_cwd` passes
 (69-character path) where the default per-session `TMPDIR` fails (121).
+
+### Agreeing on the failing test names is not agreeing on the failure
+
+Rival mechanisms usually agree on *which* tests fail and disagree on *what the
+failure looks like*. Discriminate on the observed values, never the names: find
+the branch that produces those values and ask which mechanism can reach it. Then
+**force** the loser rather than call it unlikely — making the suspect call fail on
+every invocation costs seconds and turns "probably not that" into "provably not
+that". A mechanism you merely argued down stays available as an explanation for
+the next thing that breaks nearby.
+Evidence: issue #147 — two mechanisms offered for the same two failing tests. The
+reported values (`goto: after_exec` *and* zero emitted events) arise only where
+`_llm_repair_syntax` returns `None`, which the tests' own `AsyncMock` makes
+unreachable, leaving one candidate. The rival (a `ruff` subprocess exceeding its
+5s budget under load) was then forced by raising `subprocess.TimeoutExpired` on
+every `ruff` call: both assertions still passed. Two seconds of work, against a
+47-minute suite run that had suggested it.
