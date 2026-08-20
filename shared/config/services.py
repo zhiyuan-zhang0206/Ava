@@ -155,6 +155,20 @@ class ServiceSettings(EnvSettings):
         },
     )
 
+    agent_host_health_port: int | None = Field(
+        default=None,
+        alias="AVA_AGENT_HOST_HEALTH_PORT",
+        description="Hosted agent-runner healthz port. None = derive from the unit's port block.",
+        json_schema_extra={
+            "capability": "agent-runner",
+            "restart_required": "",
+            "writable": False,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
+
     page_server_health_port: int | None = Field(
         default=None,
         alias="AVA_PAGE_SERVER_HEALTH_PORT",
@@ -239,6 +253,20 @@ class ServiceSettings(EnvSettings):
         default_factory=lambda: _unit_home() / "run" / "restarter.pid",
         alias="AVA_RESTARTER_PIDFILE",
         description="Restarter daemon pidfile path.",
+        json_schema_extra={
+            "capability": "agent-runner",
+            "restart_required": "",
+            "writable": False,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
+
+    agent_host_pidfile: Path = Field(
+        default_factory=lambda: _unit_home() / "run" / "agent-host.pid",
+        alias="AVA_AGENT_HOST_PIDFILE",
+        description="Hosted agent-runner daemon pidfile path.",
         json_schema_extra={
             "capability": "agent-runner",
             "restart_required": "",

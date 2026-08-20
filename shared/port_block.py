@@ -60,8 +60,13 @@ PORT_OFFSETS: dict[str, int] = {
     "delivery_watchdog": 16,
     "im_bridge": 17,
     "page_server": 18,
+    # The hosted agent-runner (future/infra/agent-runner-as-server.md). Appended
+    # rather than inserted, for the same reason delivery_watchdog/im_bridge were:
+    # an existing cluster's registry record pins its block base, so renumbering a
+    # live offset would move a running daemon's port out from under it.
+    "agent_host": 19,
 }
-BLOCK_SIZE = 19
+BLOCK_SIZE = 20
 BLOCK_START = 18000
 BLOCK_MAX = 20000
 
@@ -93,4 +98,5 @@ LEGACY_AVA_PORTS: dict[str, int] = {
     "delivery_watchdog": 8110,
     "im_bridge": 8111,
     "page_server": 8112,
+    "agent_host": 8113,
 }

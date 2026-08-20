@@ -8,7 +8,7 @@ Everything between `python -m agent` and the graph going live, split out of
   `turn_settings.lm.llm_model` reflects this agent's model;
 - boot phase 1 (`_boot_agent_process`): process init, MCP daemon handle, trace
   export init, ava SDK identity (`ava._boot.establish`), plugin load, workspace
-  pre-create, model build;
+  pre-create, model build — composed from the two SCOPES below;
 - boot phase 2 (`_build_data_plane`): the inbound Redis pub/sub listener + the
   SSE event publisher;
 - `_build_checkpointer`: the AsyncPostgresSaver (wrapped with loud-failure
@@ -28,6 +28,30 @@ Framework-scope config must apply BEFORE build_chat_model so
 Plugin-scope is deferred until after build_graph's bind_from_disk has
 populated _PLUGIN_CONFIGS — see the second apply_config_overlay call in
 `_build_graph`.
+
+## The two boot scopes
+
+`_boot_agent_process` is the one-process-per-agent composition of two halves
+that are NOT the same scope, and the hosted agent-runner
+(`future/infra/agent-runner-as-server.md`, `services/agent_host/`) needs them
+apart: it serves many agents from one process, so it runs the process half once
+at daemon boot and the agent half per agent.
+
+- `init_process_scope` / `load_process_extensions` — **process** scope: OTLP
+  trace export init and the external-plugin load. Both mutate process globals
+  (the tracer provider; `sys.modules` + the plugin registries), so "once" is a
+  correctness requirement in the hosted runner, not a saving — see each
+  function's docstring.
+- `boot_agent_scope` — **agent** scope: the workspace pre-create, the
+  screen-capture notice, and the chat model, which is built from
+  `turn_settings.lm.llm_model` and therefore differs per agent whenever an
+  overlay pins a model.
+
+Splitting them moved `workspace_dir` from just before the plugin load to just
+after it (the agent half must follow the process half, because
+`_notify_screen_capture_at_startup` needs the SDK loaded). It is an idempotent
+mkdir and no plugin touches the workspace at import time, so the two orders are
+equivalent.
 """
 
 import os
@@ -108,6 +132,69 @@ def _apply_per_agent_framework_config(
     _apply_per_agent_sdk_disable()
 
 
+def init_process_scope() -> None:
+    """Process-scope boot: initialize OTLP trace export.
+
+    Must run before `build_chat_model` so OpenLLMetry can auto-instrument the
+    LangChain `BaseChatModel` + LangGraph `CompiledGraph` at construction time.
+
+    Process scope, not agent scope: `initialize_tracing` installs the global
+    tracer provider, and the span attribution that distinguishes agents is the
+    per-turn root span (`shared.trace.turn_span`), not the provider. The hosted
+    runner calls this once at daemon boot.
+    """
+    from shared.trace import initialize_tracing
+
+    initialize_tracing()
+
+
+def load_process_extensions() -> None:
+    """Process-scope boot: import every external plugin under `$AVA_HOME/plugins`.
+
+    Import side effects are the registration (hooks, Layer A wraps, system-prompt
+    contributions), and they must land before the first exec node runs agent code
+    — plugins may monkey-patch `ava.X.y`.
+
+    **Exactly once per process.** Repeating it is not a supported way to pick up
+    a newly installed plugin: plugin-spec-v2's S4 dispose contract is
+    unimplemented, so a second load leaks whatever the first allocated and forks
+    class identity for anything that captured a plugin class before it (PR #154
+    made the module object stable, which removes a different obstacle, not this
+    one). The consequence is visible in hosted mode — process mode reloads on
+    each agent spawn, hosted mode only on a runner restart — and is a known,
+    filed behavioural difference, not something to work around here.
+    """
+    ava._extend.scan_and_load()
+
+
+async def boot_agent_scope(agent_id: int) -> BaseChatModel:
+    """Agent-scope boot: workspace pre-create, screen-capture notice, chat model.
+
+    Everything here is a fact about ONE agent, so the hosted runner runs it per
+    agent (cached, keyed on the agent's stored config) while the process-scope
+    half above runs once for the whole daemon.
+
+    The workspace pre-create is unconditional, not gated by
+    `settings.agent.workspace_in_system_prompt`: the folder is the relative-path
+    base for `ava.files` / `ava.shell.run`, so it must exist even when the prompt
+    section advertising it is off (bench runners).
+
+    The chat model is built from `turn_settings.lm.llm_model`, so callers must
+    have this agent's framework-scope config in effect first — the singleton
+    write in process mode (`_apply_per_agent_framework_config`), the contextvar
+    bind in hosted mode (`shared.config.turn_view.bind_agent_config`).
+
+    Returns:
+        This agent's chat model.
+    """
+    workspace_dir(agent_id)
+    # When the converge step detected no screen capture permission, an agent
+    # notifies the user once (idempotent — clears the status file after). Must
+    # run after the SDK/plugin load so ava.ui.notify is available.
+    await _notify_screen_capture_at_startup()
+    return build_chat_model(turn_settings.lm.llm_model)
+
+
 async def _boot_agent_process(
     agent_id: int,
     config_overlay: dict[str, object] | None,
@@ -139,11 +226,7 @@ async def _boot_agent_process(
     await mcp_daemon.spawn()
 
     # ── trace recording init (OTLP export to the local collector sidecar) ──
-    # Must run before build_chat_model() so OpenLLMetry can auto-instrument the
-    # LangChain BaseChatModel + LangGraph CompiledGraph at construction time.
-    from shared.trace import initialize_tracing
-
-    initialize_tracing()
+    init_process_scope()
     _boot_timing.mark("trace_init")
 
     # ── ava SDK in-process init ──
@@ -159,17 +242,7 @@ async def _boot_agent_process(
     # already forwards every AVA_* var onto sessions, so setting this here
     # is the single source — no per-session plumbing needed.
     os.environ["AVA_AGENT_ID"] = str(agent_id)
-    # Pre-create the per-agent workspace at startup — unconditional, not gated
-    # by settings.agent.workspace_in_system_prompt: the folder is the relative-path
-    # base for ava.files / ava.shell.run, so it must exist even when the
-    # prompt section advertising it is off (bench runners).
-    workspace_dir(agent_id)
-    ava._extend.scan_and_load()
-    # ── Screen capture startup check ──
-    # When the converge step detected no screen capture permission, an agent
-    # notifies the user once (idempotent — clears the status file after).
-    # Must run after SDK init so ava.ui.notify is available.
-    await _notify_screen_capture_at_startup()
+    load_process_extensions()
 
     # ── MCP daemon startup ──
     # The in-process exec worker thread reaches the daemon via
@@ -183,7 +256,7 @@ async def _boot_agent_process(
     # populated _PLUGIN_CONFIGS — see the second apply_config_overlay call below.
     _apply_per_agent_framework_config(config_overlay, birth_config)
 
-    llm = build_chat_model(turn_settings.lm.llm_model)
+    llm = await boot_agent_scope(agent_id)
     _boot_timing.mark("sdk_mcp_model")
     return mcp_daemon, llm
 

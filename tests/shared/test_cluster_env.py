@@ -27,6 +27,7 @@ def _rec(tmp_path: Path):
             # Post-S4-slot birth shape: every PORT_OFFSETS service carries a key.
             "delivery_watchdog": 18016,
             "im_bridge": 18017,
+            "agent_host": 18019,
         },
         gateway_home=str(tmp_path / ".ava-t1"),
         created_at="x",
@@ -34,13 +35,14 @@ def _rec(tmp_path: Path):
 
 
 def _old_rec(tmp_path: Path):
-    """A record born before the im_bridge/delivery_watchdog slots existed —
-    the shape EVERY existing registry record has until re-birth. Such a unit's
-    .env also predates the keys, so its daemons bind the legacy fallback, not a
-    block offset (record_health_port's late-slot rule)."""
+    """A record born before the im_bridge/delivery_watchdog/agent_host slots
+    existed — the shape EVERY existing registry record has until re-birth. Such
+    a unit's .env also predates the keys, so its daemons bind the legacy
+    fallback, not a block offset (record_health_port's late-slot rule)."""
     ports = dict(_rec(tmp_path).ports)
     del ports["delivery_watchdog"]
     del ports["im_bridge"]
+    del ports["agent_host"]
     return cluster.ClusterRecord(
         ports=cast("cluster.ClusterPorts", ports),
         gateway_home=str(tmp_path / ".ava-t1"),
@@ -297,24 +299,54 @@ def test_record_health_port_late_slot_legacy_for_old_record(tmp_path: Path):
     assert cluster.record_health_port(_old_rec(tmp_path), "heartbeat") == 18002
 
 
+def test_record_health_port_agent_host_never_reaches_past_the_allocated_block(tmp_path: Path):
+    """The hosted agent-runner's offset (19) is the first one that lands OUTSIDE
+    the block an existing record owns: those records were allocated at
+    BLOCK_SIZE 19, so they hold base..base+18, and `base + 19` is the FIRST PORT
+    OF THE NEXT CLUSTER'S BLOCK. Growing the block must not make an existing
+    cluster's own derive point at a neighbour, so `agent_host` derives its
+    legacy value — which is also what `health_port()` binds at runtime for a
+    unit whose `.env` predates the key.
+
+    A cluster BORN after this change allocates a 20-port block and carries the
+    key, so it reads its own port back — the contrast the second half pins."""
+    from shared.port_block import LEGACY_AVA_PORTS
+
+    old = _old_rec(tmp_path)
+    derived = cluster.record_health_port(old, "agent_host")
+    assert derived == LEGACY_AVA_PORTS["agent_host"]
+    # The number the block-offset derive would have produced, and the reason it
+    # is wrong: it is the first port of whoever holds the next block.
+    assert derived != old.ports["gateway"] + 19
+    # A fresh birth carries the key and reads it back — inside its own block.
+    assert cluster.record_health_port(_rec(tmp_path), "agent_host") == 18019
+
+
 def test_allocate_ports_skips_blocks_overlapping_legacy_16_port_records(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    """BLOCK_SIZE grew 16 -> 18, but every pre-existing record occupies a 16-port
-    block at 18000+16k — and every 18-step candidate inside such a block would
-    overlap it. allocate_ports must skip overlapping blocks, not just exact
-    bases, or a DOWN cluster's block gets re-allocated while its record still
-    owns it (silent collision when both start)."""
+    """BLOCK_SIZE has grown repeatedly (16 -> 18 -> 19 -> 20), but every
+    pre-existing record still occupies a 16-port block at 18000+16k — and a
+    candidate inside such a block would overlap it. allocate_ports must skip
+    overlapping blocks, not just exact bases, or a DOWN cluster's block gets
+    re-allocated while its record still owns it (silent collision when both
+    start).
+
+    The expected base below is concrete on purpose and MOVES whenever
+    BLOCK_SIZE does: growing the block changes which candidates clear a legacy
+    record, so a block growth should force someone to re-check allocation
+    rather than slide past a derived assertion."""
     from shared import cluster as cl
     from shared.port_block import BLOCK_SIZE, BLOCK_START
 
     monkeypatch.setattr(cl, "_port_free", lambda _port: True)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
 
-    # existing record at 18016 occupies 18016..18031 — candidates 18000 (block
-    # 18000..18018 overlaps 18016/18017) and 18019 (18019..18037 overlaps
-    # 18016..18031) must be skipped; the first legal base is 18038
+    # existing record at 18016 occupies 18016..18031 — at BLOCK_SIZE 20,
+    # candidates 18000 (block 18000..18019 overlaps 18016..18019) and 18020
+    # (18020..18039 overlaps 18020..18031) must be skipped; the first legal
+    # base is 18040
     ports = cl.allocate_ports({18016})
-    assert ports["gateway"] == 18038
+    assert ports["gateway"] == 18040
     assert set(ports) == set(cl.PORT_OFFSETS)
     # without any existing record, the allocator starts at BLOCK_START
     assert cl.allocate_ports(set())["gateway"] == BLOCK_START
