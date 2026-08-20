@@ -17,6 +17,8 @@ than printing an object repr, the attribution slot staying independent of
 
 from __future__ import annotations
 
+from unittest import mock
+
 import pytest
 
 from shared import telemetry, turn_identity
@@ -79,6 +81,53 @@ class TestResolution:
         never reaches the deferred binding — attribution stays explicit."""
         with bind_turn_identity(42):
             assert _agent_id_of({"agent_id": "99", "event": "log"}) == 99
+
+
+class TestDefaultBinding:
+    def test_init_gateway_process_binds_the_deferred_object(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A daemon-style init must bind the deferred object, not a bare `"-"`.
+
+        The hosted agent-runner inits through `init_gateway_process`. A static
+        sentinel there stamps EVERY hosted agent's record with `-`, discarding
+        attribution the turn contextvar is holding at that very moment. Binding
+        the deferred object costs an ordinary daemon nothing — with no turn and
+        no process agent it still resolves to `"-"`.
+
+        Asserted through the init function rather than by reading the live
+        logger's `extra`: `logger.configure` REPLACES the whole dict and several
+        inits call it, so a global read is order-dependent (issue #147's bug
+        class) and would pass or fail on which sibling ran first.
+        """
+        import shared.log as slog
+
+        monkeypatch.setattr(slog, "_init_done", False)
+        with (
+            mock.patch.object(slog.logger, "add"),
+            mock.patch.object(slog, "_add_file_sink"),
+            mock.patch.object(slog, "_add_postgres_sink"),
+            mock.patch.object(slog, "_install_stdlib_intercept"),
+            mock.patch.object(slog.logger, "info"),
+            mock.patch.object(slog.logger, "configure") as configure,
+        ):
+            slog.init_gateway_process(name="agent_host")
+
+        configure.assert_called_once()
+        bound = configure.call_args.kwargs["extra"]["agent_id"]
+        assert isinstance(bound, TurnScopedAgentId)
+
+    def test_daemon_style_process_attributes_a_bound_turn(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The hosted case end to end at the record level: no process agent (a
+        daemon init), a turn bound, so the record belongs to that turn's agent —
+        and outside the turn the same process is back to unattributed."""
+        monkeypatch.setattr(turn_identity, "_process_agent_id", None)
+
+        with bind_turn_identity(314):
+            assert _agent_id_of({"agent_id": TURN_SCOPED_AGENT_ID, "event": "log"}) == 314
+        assert _agent_id_of({"agent_id": TURN_SCOPED_AGENT_ID, "event": "log"}) is None
 
 
 class TestProcessSlot:
