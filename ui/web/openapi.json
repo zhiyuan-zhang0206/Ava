@@ -5452,6 +5452,25 @@
         }
       }
     },
+    "/api/ui/contributions": {
+      "get": {
+        "summary": "Get Ui Contributions",
+        "description": "Every console contribution the cluster's enabled plugins declare.",
+        "operationId": "get_ui_contributions_api_ui_contributions_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UiContributionsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/agents/{agent_id}/uploads": {
       "post": {
         "summary": "Upload Files",
@@ -11980,6 +11999,50 @@
         ],
         "title": "TraceCheckpointMessagesResponse",
         "description": "GET /api/agents/{id}/traces/{trace_id}/messages response — the full\nmessage list (incl. the system prompt) of the turn that produced one OTel\ntrace, resolved on demand from the checkpoints table.\n\nSpans are metadata-only (trace v2): this endpoint is how content comes\nback. `pruned` distinguishes the two absence shapes:\n- pruned=true, checkpoint_id=None — the trace's checkpoint was dropped by\n  compact/checkpoint trim (retention is the latest K checkpoints), so the\n  content is gone; the span metadata in the mirror / events table still\n  exists. The frontend renders this as \"trimmed\" rather than an error.\n- pruned=false — the checkpoint exists; messages is its `messages` channel\n  (the full conversation at that point, system prompt included).\n\n`messages[i]` is one LangChain BaseMessage `model_dump()` — the same raw\nshape as GET /api/agents/{id}/messages."
+      },
+      "UiContributionsResponse": {
+        "properties": {
+          "themes": {
+            "items": {
+              "$ref": "#/components/schemas/UiThemeContribution"
+            },
+            "type": "array",
+            "title": "Themes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "themes"
+        ],
+        "title": "UiContributionsResponse",
+        "description": "Every console contribution the cluster's enabled plugins declare."
+      },
+      "UiThemeContribution": {
+        "properties": {
+          "plugin": {
+            "type": "string",
+            "title": "Plugin"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "tokens": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Tokens"
+          }
+        },
+        "type": "object",
+        "required": [
+          "plugin",
+          "name",
+          "tokens"
+        ],
+        "title": "UiThemeContribution",
+        "description": "One named token pack a plugin offers the theme picker.\n\n`tokens` is a partial map of the console's own `:root` custom properties to\ncolor literals — validated at manifest load, so the console applies the\nvalues as given. Unset tokens keep the console default, which is why a pack\nthat names three colors is a legitimate skin rather than a broken one."
       },
       "UpdateCheck": {
         "properties": {

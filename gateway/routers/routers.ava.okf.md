@@ -1,13 +1,13 @@
 ---
 type: doc
 title: Gateway Routers
-description: Gateway's 34 route modules, split by business domain under gateway/routers/<domain>.py, each a FastAPI APIRouter, uniformly mounted to /api/* by app.py (grafana mounts outside /api).
+description: Gateway's route modules, one FastAPI APIRouter per business domain under gateway/routers/<domain>.py, uniformly mounted to /api/* by app.py (grafana mounts outside /api).
 tags: []
 ---
 
 # Gateway Routers
 
-Gateway's 35 route modules, split by business domain under `gateway/routers/<domain>.py`, each a FastAPI `APIRouter` `include_router`-mounted to `/api/*` at the bottom of `gateway/app.py` (grafana mounts outside `/api`). `_delivery.py` / `agents_forward.py` are not routers but internal helpers (chat-inbound delivery / cross-machine forward).
+Gateway's 36 route modules, split by business domain under `gateway/routers/<domain>.py`, each a FastAPI `APIRouter` `include_router`-mounted to `/api/*` at the bottom of `gateway/app.py` (grafana mounts outside `/api`). `_delivery.py` / `agents_forward.py` are not routers but internal helpers (chat-inbound delivery / cross-machine forward).
 
 ## Router categories
 
@@ -39,6 +39,7 @@ Gateway's 35 route modules, split by business domain under `gateway/routers/<dom
 - **notices** (`/api/notices/*`) — `ava.ui.notify()` user notifications; rows carry `task_id` (`null` when unattached), driving notice→task linkage in the inspector
 - **pages** (`/api/pages`, `/api/agents/{id}/pages`) — `ava.ui.show/close` registered UI pages + the streaming reverse proxy for them (`/api/agents/{id}/pages/{name}/...` → the page server; browser never dials it directly)
 - **grafana** (`/grafana/*`, outside `/api`) — optional streaming reverse proxy to a co-located Grafana instance (`AVA_GRAFANA_PROXY_ENABLED`, `AVA_GRAFANA_HOST`/`AVA_GRAFANA_PORT`, default off → 404), auth-gated by the same cluster middleware, for dashboard iframes
+- **ui_contributions** (`/api/ui/contributions`) — the merged, plugin-attributed `contributions.ui` declaration set of the cluster's ENABLED plugins (theme token packs today; nav + agent-inspect sections as those slices land). Read straight from each plugin's `ava-plugin.json` — no plugin code is imported to answer it [[okf/plugins/package-manifest.ava.okf.md]]
 
 ### Ops & system
 - **status** (`/api/health`, `/api/status`, `/api/stats/dashboard`) — liveness + status panel + dashboard ([[gateway/routers/ops-surfaces.ava.okf.md|dashboard contract]])
@@ -53,10 +54,9 @@ Gateway's 35 route modules, split by business domain under `gateway/routers/<dom
 
 ## Design principles
 
-- Each router is an independent file, depending on pure functions from `shared.*`/`ops.*` plus gateway internals (`gateway.sse`, `_delivery`, lazy `gateway.app` `db_pool`, spawn forwarding in `routers.agents_forward`); **never** imports `agent.*`
-- Gateway itself does not build the turn-loop prompts, run LLMs, or construct LangGraph (the spawn/draft endpoints — schedules/guide/packages — inline a fixed system prompt for the agent they spawn; that is the deliberate, enumerated exception)
-- Endpoint implementation and mounting are separated: router defines handlers, app.py is responsible for `include_router`
-- **Boundary typing**: request bodies are pydantic models (`gateway/schemas/<domain>.py`), not bare `dict[str, object]`; cross-machine RPC wire dicts are immediately `Model.model_validate()`d into named types in `ops/rpc_schemas.py` (`ConfigReadResult`, `InventoryReadResult`, …)—handlers use attribute access, no bare `dict.get()`/`row["key"]`
+Dependency direction, the no-turn-loop rule and its enumerated exception, the
+handler/mounting split, and boundary typing:
+[[gateway/routers/design-principles.ava.okf.md]].
 
 ## Entry points
 
