@@ -319,11 +319,15 @@ def frontend_base_url() -> str:
     ``AVA_FRONTEND_HEALTHCHECK_URL`` (the fleet UI entry the user reaches).
     """
 
-    gw = urlsplit(settings.gateway.gateway_url or "http://localhost:8000")
-    fe = urlsplit(settings.services.frontend_healthcheck_url or "http://localhost:3000")
-    host = gw.hostname or "localhost"
+    gw = urlsplit(settings.gateway.gateway_url or "")
+    fe = urlsplit(settings.services.frontend_healthcheck_url or "")
+    host = gw.hostname or fe.hostname
+    if not host:
+        # No gateway URL and no healthcheck URL configured — no reachable
+        # fleet UI to link; never fall back to a loopback address.
+        return ""
     port = fe.port or 3000
-    return f"{gw.scheme}://{host}:{port}"
+    return f"{gw.scheme or 'http'}://{host}:{port}"
 
 
 def _summary(alert: dict[str, Any]) -> str:
