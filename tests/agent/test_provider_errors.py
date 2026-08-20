@@ -151,3 +151,57 @@ def test_provider_label_from_module() -> None:
     assert classify_error(openai.APIConnectionError(request=req)).provider == "openai"
     assert classify_error(httpx.ReadError("x")).provider == "httpx"
     assert classify_error(ValueError("x")).provider == "builtins"
+
+
+# ───────────── billing / quota exhaustion ─────────────
+
+
+def test_402_is_billing() -> None:
+    """HTTP 402 Payment Required is the unambiguous cross-provider signal
+    (DeepSeek returns it for `Insufficient Balance`)."""
+    result = classify_error(_FakeStatusError(402))
+    assert result.billing is True
+    assert result.error_class is ErrorClass.PERMANENT
+
+
+@pytest.mark.parametrize(
+    "error_type",
+    [
+        "insufficient_quota",
+        "billing_not_active",
+        "insufficient_balance",
+        "exceeded_current_quota_error",
+        "arrearage",
+        "Arrearage",  # DashScope cases its codes; the match is case-folded
+    ],
+)
+def test_billing_error_types_are_billing(error_type: str) -> None:
+    """Providers that reuse a generic 4xx say it in the body's error.type
+    instead — matched by vocabulary so a vendor plugs in at one place."""
+    exc = _FakeStatusError(429, {"error": {"type": error_type, "message": "no balance"}})
+    assert classify_error(exc).billing is True
+
+
+def test_billing_is_independent_of_error_class() -> None:
+    """OpenAI's out-of-credit arrives as a 429 (TRANSIENT — the RetryPolicy
+    still retries it, deliberately unchanged), yet it is still a billing
+    failure the operator has to clear. The two axes must not be conflated."""
+    exc = _FakeStatusError(429, {"error": {"type": "insufficient_quota", "message": "x"}})
+    result = classify_error(exc)
+    assert result.error_class is ErrorClass.TRANSIENT
+    assert result.billing is True
+
+
+@pytest.mark.parametrize(
+    ("status", "body"),
+    [
+        (401, None),  # bad key, not an empty one
+        (400, {"error": {"type": "invalid_request_error", "message": "prompt too long"}}),
+        (429, {"error": {"type": "rate_limit_error", "message": "slow down"}}),
+        (500, None),
+    ],
+)
+def test_non_billing_failures_are_not_billing(status: int, body: object) -> None:
+    """The false-positive guard: this alert fires on the FIRST occurrence, so a
+    plain auth failure or rate limit must never read as "out of credit"."""
+    assert classify_error(_FakeStatusError(status, body)).billing is False  # type: ignore[arg-type]

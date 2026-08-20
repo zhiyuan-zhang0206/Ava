@@ -17,6 +17,7 @@ from typing import Any, cast
 
 from shared.config import settings
 from shared.lm.errors import ErrorClass, classify_error
+from shared.lm.factory import provider_key_of_model
 from shared.log import logger
 
 
@@ -146,10 +147,18 @@ def _classify_and_log_provider_error(exc: Exception) -> FatalProviderError | Non
     structured log fires for every class — including TRANSIENT/UNKNOWN that go on
     to retry — so the `error_class` / `provider` payload keys /
     `->>'status'` are queryable in a postmortem instead of scraping the message.
+
+    `billing` / `vendor` / `model` ride the same log because an out-of-credit key
+    is an ops event, not a postmortem detail: the Grafana rule
+    `ava-ops-llm-billing-quota` fires on the first `billing=True` row and its IM
+    message has to name what stopped working. `vendor` is the model's provider
+    key (deepseek / claude / …) — `classification.provider` is only the SDK
+    package that raised, which DeepSeek and Claude share.
     """
     classification = classify_error(exc)
     fatal_type_hit = _is_fatal_provider_error_type(exc)
     fatal = classification.error_class is ErrorClass.PERMANENT or fatal_type_hit
+    model = settings.lm.llm_model
     logger.opt(exception=True).warning(
         "[{label}] {error_class} provider={provider} status={status} fatal={fatal}",
         event="llm_provider_error",
@@ -159,14 +168,18 @@ def _classify_and_log_provider_error(exc: Exception) -> FatalProviderError | Non
         status=classification.status,
         error_type=classification.error_type,
         fatal=fatal,
+        billing=classification.billing,
+        vendor=provider_key_of_model(model),
+        model=model,
     )
     if not fatal:
         return None
-    reason = (
-        "provider permanently rejected the request"
-        if classification.error_class is ErrorClass.PERMANENT
-        else f"provider returned configured-fatal error type {classification.error_type!r}"
-    )
+    if classification.billing:
+        reason = "provider rejected the request for billing: the key is out of credit or quota"
+    elif classification.error_class is ErrorClass.PERMANENT:
+        reason = "provider permanently rejected the request"
+    else:
+        reason = f"provider returned configured-fatal error type {classification.error_type!r}"
     return FatalProviderError(
         f"{reason} (HTTP {classification.status}, provider={classification.provider}): {exc}. "
         "Retry cannot succeed; aborting the turn — the agent stays alive and idles.",
