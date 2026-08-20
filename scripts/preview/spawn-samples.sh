@@ -1,100 +1,71 @@
 #!/usr/bin/env bash
-# Spawn sample agents with mock tasks on the preview cluster.
-# Called by deploy-daily.sh after each deploy, or run manually.
+# Spawn sample agents with mock tasks, to give a cluster visible activity for
+# manual UI review (FleetView graph, notices, chat).
 #
-# Spawns agents via POST /api/agents, then sends each its mock task
-# via POST /api/agents/{id}/messages with {content, source}.
+# Run it from the cluster's own checkout (on preview: ~/.ava-preview/source) —
+# same resolution rules as validate.sh: repo root from this script's location,
+# gateway address + auth from that checkout's cluster config.
+#
+# Each sample spawns via POST /api/agents, then sends its mock task via
+# POST /api/agents/{id}/messages with {content, source}.
 set -euo pipefail
 
-CLUSTER="preview"  # display label; the preview home is fixed (CLUSTER_HOME below)
-AVA_REPO="${AVA_REPO:-$HOME/Ava}"
-CLUSTER_HOME="$HOME/.ava-preview"
-MOCK_DIR="$AVA_REPO/scripts/preview/mock-tasks"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "$REPO_ROOT"
 
-export PATH="$HOME/.local/bin:$PATH"
+echo "=== Spawning sample agents ($REPO_ROOT) ==="
 
-# Source cluster .env for gateway URL/port
-if [ -f "$CLUSTER_HOME/.env" ]; then
-    set -a; source "$CLUSTER_HOME/.env"; set +a
-fi
+.venv/bin/python3 - <<'PY'
+import time
+from pathlib import Path
 
-GATEWAY_URL="http://localhost:${AVA_GATEWAY_PORT:-18000}"
+from shared.http_dial import get as dial_get
+from shared.http_dial import post as dial_post
+from shared.machine import gateway_api_base, gateway_auth_headers
 
-echo "=== Spawning sample agents on cluster '$CLUSTER' ==="
+base = gateway_api_base()
+headers = gateway_auth_headers()
+mock_dir = Path("scripts/preview/mock-tasks")
 
-# Ensure gateway is reachable
-if ! curl -sf "${GATEWAY_URL}/api/health" >/dev/null 2>&1; then
-    echo "ERROR: Gateway not reachable at ${GATEWAY_URL}"
-    exit 1
-fi
+health = dial_get(f"{base}/api/health", timeout=10)
+if health.status_code != 200:
+    raise SystemExit(f"FATAL: gateway at {base} answered /api/health with {health.status_code}")
 
-cd "$AVA_REPO"
-.venv/bin/python3 << 'PYEOF'
-import httpx, time, sys, os
 
-BASE = os.environ.get("GATEWAY_URL", "http://localhost:18000")
-MOCK_DIR = os.environ.get("MOCK_DIR", "scripts/preview/mock-tasks")
-
-def spawn_with_task(label: str, task_rel: str):
-    """Spawn an agent and send it a mock task."""
-    task_path = os.path.join(os.environ.get("AVA_REPO", os.path.expanduser("~/Ava")), task_rel)
-    try:
-        with open(task_path) as f:
-            task_content = f.read()
-    except FileNotFoundError:
-        print(f"  SKIP {label}: task file {task_path} not found")
-        return None
-
-    # 1. Spawn the agent
-    try:
-        resp = httpx.post(f"{BASE}/api/agents", json={"spawner": "preview-deploy"})
-        resp.raise_for_status()
-        agent_id = resp.json()["id"]
-        print(f"  Spawned {label}: agent_id={agent_id}")
-    except Exception as e:
-        print(f"  FAIL {label}: spawn error: {e}")
-        return None
-
-    # 2. Small delay for agent process to start
-    time.sleep(2)
-
-    # 3. Send the mock task as the first message
-    try:
-        resp2 = httpx.post(
-            f"{BASE}/api/agents/{agent_id}/messages",
-            json={"content": task_content, "source": "user"},
-        )
-        resp2.raise_for_status()
-        print(f"  → Task delivered to {label} (agent {agent_id})")
-    except Exception as e:
-        print(f"  → FAIL delivering task to {label}: {e}")
-
+def spawn_with_task(label: str, task_file: str) -> int:
+    """Spawn an agent and send it a mock task; returns the new agent id."""
+    task = (mock_dir / task_file).read_text()
+    resp = dial_post(f"{base}/api/agents", json={"spawner": "preview-samples"}, headers=headers)
+    resp.raise_for_status()
+    agent_id = int(resp.json()["id"])
+    print(f"  spawned {label}: agent_id={agent_id}")
+    time.sleep(2)  # let the spawned process come up before the first inbound
+    resp2 = dial_post(
+        f"{base}/api/agents/{agent_id}/messages",
+        json={"content": task, "source": "user"},
+        headers=headers,
+    )
+    resp2.raise_for_status()
+    print(f"  -> task delivered to {label}")
     return agent_id
 
-# 1. Coding agent
-print("
---- 1. Coding agent (mock PR workflow) ---")
-coder_id = spawn_with_task("preview-coder", "scripts/preview/mock-tasks/mock-pr-workflow.md")
 
-# 2. Chat agents
-print("
---- 2. Chat agents (FleetView graph activity) ---")
-chat_a = spawn_with_task("preview-chat-a", "scripts/preview/mock-tasks/mock-chat-exchange.md")
-time.sleep(3)
-chat_b = spawn_with_task("preview-chat-b", "scripts/preview/mock-tasks/mock-chat-exchange-b.md")
-time.sleep(3)
-chat_c = spawn_with_task("preview-chat-c", "scripts/preview/mock-tasks/mock-chat-exchange-c.md")
+print("\n--- 1. Coding agent (mock PR workflow) ---")
+coder_id = spawn_with_task("samples-coder", "mock-pr-workflow.md")
 
-# 3. Notice agent
-print("
---- 3. Notice agent (notice queue exercise) ---")
-notice_id = spawn_with_task("preview-notices", "scripts/preview/mock-tasks/mock-notices.md")
+print("\n--- 2. Chat agents (FleetView graph activity) ---")
+chat_ids = []
+for suffix, task_file in (
+    ("a", "mock-chat-exchange.md"),
+    ("b", "mock-chat-exchange-b.md"),
+    ("c", "mock-chat-exchange-c.md"),
+):
+    chat_ids.append(spawn_with_task(f"samples-chat-{suffix}", task_file))
+    time.sleep(3)
 
-print("
-=== Sample agents spawned ===")
-ids = [x for x in [coder_id, chat_a, chat_b, chat_c, notice_id] if x is not None]
-print(f"Agent IDs: {ids}")
-PYEOF
+print("\n--- 3. Notice agent (notice queue exercise) ---")
+notice_id = spawn_with_task("samples-notices", "mock-notices.md")
 
-echo ""
-echo "=== Done ==="
+print("\n=== Sample agents spawned ===")
+print(f"Agent IDs: {[coder_id, *chat_ids, notice_id]}")
+PY

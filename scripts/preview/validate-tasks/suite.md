@@ -93,7 +93,8 @@ Terminate all test agents (child_id, fork_id, alice_id, bob_id).
 
 ## 6. Summary Report
 
-Write test results to `preview-validation-report.md`:
+Write the test results to the absolute path `{{REPORT_PATH}}` (your cwd is your own
+workspace, so a relative path would not land where the operator looks):
 
 ```markdown
 # Preview Validation Report
@@ -108,6 +109,6 @@ Write test results to `preview-validation-report.md`:
 **Total**: X/Y passed
 ```
 
-Then notify using `ava.ui.notify(title="Preview Validation Completed", content="X/Y passed. Details in preview-validation-report.md")`.
+Then notify using `ava.ui.notify(title="Preview Validation Completed", content="X/Y passed. Details in {{REPORT_PATH}}")`.
 
 Stay idle, do not terminate.
