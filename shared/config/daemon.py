@@ -17,7 +17,46 @@ class DaemonSettings(EnvSettings):
     runner_mode: Literal["process", "hosted"] = Field(
         default="process",
         alias="AVA_RUNNER_MODE",
-        description="How the agent-runner hosts agents. `process` = one OS process per agent, alive from spawn to terminate (today's model). `hosted` = the runner daemon hosts every local agent's turns as asyncio tasks in its own process, and an idle agent is no task at all. NOT YET SERVED: the host service is still being built, so `hosted` is currently inert and every runner behaves as `process`. Cluster-pinned because the model must be uniform: a cluster running both would need double bookkeeping for agent leases, since a hosted agent's liveness is an in-process fact while a process agent's is a lease row. Rollback is a restart with this flipped back — no schema shape changes with it.",
+        description="How the agent-runner hosts agents. `process` = one OS process per agent, alive from spawn to terminate (today's model). `hosted` = the runner daemon hosts every local agent's turns as asyncio tasks in its own process, and an idle agent is no task at all; it is what puts the `agent-host` service on this host's start roster. Cluster-pinned because the model must be uniform: a cluster running both would need double bookkeeping for agent leases, since a hosted agent's liveness is an in-process fact while a process agent's is a lease row. Rollback is a restart with this flipped back — no schema shape changes with it.",
+        json_schema_extra={
+            "capability": "agent-runner",
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    host_max_concurrent_turns: int = Field(
+        default=16,
+        alias="AVA_HOST_MAX_CONCURRENT_TURNS",
+        description="Hosted agent-runner: how many agents may have a turn RUNNING at once. Wakes beyond this queue rather than run, so the host's shared Postgres pool can be sized as a statement about this bound (bound + headroom) instead of a hope. An agent waiting on the bound still holds no task-level cost beyond the coroutine itself; the whole point of the hosted model is that an idle agent is no task at all.",
+        json_schema_extra={
+            "capability": "agent-runner",
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    host_agent_cache_size: int = Field(
+        default=32,
+        alias="AVA_HOST_AGENT_CACHE_SIZE",
+        description="Hosted agent-runner: how many agents' prepared runtimes (chat model + the boot reconcile already done for them) the host keeps warm, evicted least-recently-used. A cold entry costs one model build plus this agent's startup reconcile on its next wake; an unbounded cache would let a fleet-wide wake burst hold one per local agent forever.",
+        json_schema_extra={
+            "capability": "agent-runner",
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    host_agent_idle_ttl_seconds: float = Field(
+        default=900.0,
+        alias="AVA_HOST_AGENT_IDLE_TTL_SECONDS",
+        description="Hosted agent-runner: how long a prepared agent runtime survives with no turn before the host drops it. The size cap alone would keep a long-silent agent warm forever on a lightly loaded runner; this is the other half, so a runner that goes quiet returns to holding nothing.",
         json_schema_extra={
             "capability": "agent-runner",
             "restart_required": "all",

@@ -30,6 +30,10 @@ def test_probe_set_agent_runner_membership() -> None:
         "restarter",
         "page-server",
         "agent-runner-watchdog",
+        # Present but gated: probe_set is the ANNOTATED view, which keeps a
+        # gated-out service and its reason so an operator sees why it is absent
+        # rather than watching the roster silently shrink.
+        "agent-host",
         "browser",
         "browser-mcp",
         "mcp-daemon",
@@ -38,6 +42,7 @@ def test_probe_set_agent_runner_membership() -> None:
     } == sessions
     views = {v.session: v for v in observe.probe_set(frozenset({"agent-runner"}))}
     assert views["browser-mcp"].kind == "none"  # MCP over a unix socket — no HTTP/TCP probe
+    assert views["agent-host"].gate_reason == "disabled (AVA_RUNNER_MODE is process)"
 
 
 def test_observe_gated_service_reports_na_with_reason(monkeypatch: pytest.MonkeyPatch) -> None:

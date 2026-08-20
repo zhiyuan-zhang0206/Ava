@@ -1,9 +1,22 @@
 # Agent-runner as server: agents as turn tasks, not processes
 
-> **Status: design proposal — awaiting ratification.** Nothing here is built.
-> Phase 0 (per-turn graph invocation) is implemented and landing as its own PR;
-> it is valuable independently (it fixes the never-exporting root span) and is a
-> prerequisite here, but it does not commit us to the rest of this doc.
+> **Status: ratified; Phase 1 partially built, behind `AVA_RUNNER_MODE`.**
+> Phase 0 (per-turn graph invocation) is shipped. Of Phase 1: the per-turn
+> settings + plugin-config views, turn-scoped identity and log attribution, the
+> claim node's hosted idle branch, the wake dispatcher, and the `agent-host`
+> daemon that runs turns are all built (`services/agent_host/`). What is NOT
+> built is the lifecycle integration around them — spawn still forks a process
+> per agent, restart/terminate still route through the process path, and
+> hibernation, the per-agent lease renewer and the lease-zombie reaper are
+> untouched. So `hosted` is a runnable daemon but not yet an end-to-end cluster
+> mode; the flag defaults to `process` and the service is gated off the roster
+> until a cluster opts in. Migration step 3's deletions remain future work.
+>
+> One Phase 1 property was NOT achieved and is worth knowing before a soak: the
+> host builds ONE compiled graph per process, because `build_graph` mutates
+> process-global plugin registration. `_build_llm_retry()` is evaluated at build
+> time, so the per-model retry cap and the per-agent retry-wave de-phasing
+> offset become cluster-level in hosted mode.
 
 ## The invariant
 

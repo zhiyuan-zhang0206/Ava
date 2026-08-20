@@ -22,6 +22,7 @@ Source of truth = services in `ops/spec.py` `build_services()` whose `ServiceSpe
 | browser | headed Chrome reuse + shared MCP upstream | [[browser.ava.okf.md]] |
 | permissions-helper | macOS/Windows desktop automation (launchd / logon task, not a session) | [[permissions-helper.ava.okf.md]] |
 | computer-mcp | computer-use executor: desktop actions through the signed permissions helper, screen-coordinated (lease + FIFO) + audited (task #1101) | [[computer-mcp.ava.okf.md]] |
+| agent-host | hosted runner: every local agent's turns as asyncio tasks in one daemon. Gated off unless `AVA_RUNNER_MODE=hosted`, so it is absent from every cluster's start roster by default | `services/agent_host/` |
 
 ## Also Under agent-runner Capability
 - **browser-mcp** — shared chrome-devtools-mcp upstream. Gate = browser's PLUS AF_UNIX (its wrapper→daemon transport is a Unix socket), so it is **POSIX-only** where `browser` is not; see [[browser.ava.okf.md]]

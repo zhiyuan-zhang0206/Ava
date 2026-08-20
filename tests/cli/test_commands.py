@@ -582,6 +582,9 @@ def test_services_for_role_gateway_excludes_ops(monkeypatch: pytest.MonkeyPatch)
         "computer-mcp",
         "restarter",
         "agent-runner-watchdog",
+        # agent-host: agent-runner-only, and gated off by AVA_RUNNER_MODE on top
+        # — dropped both ways, like browser.
+        "agent-host",
     }
     assert "ops" not in sessions
     assert "browser" not in sessions
@@ -624,8 +627,10 @@ def test_services_for_roles_single_box_unions_both(monkeypatch: pytest.MonkeyPat
     all_sessions = {s.session for s in _cli.build_services()}
     # union = everything that is not gated out; browser + browser-mcp are off
     # above (build_services still lists them, services_for_capabilities drops
-    # them), computer-mcp is pinned available; ops IS present.
-    assert sessions == all_sessions - {"browser", "browser-mcp"}
+    # them), computer-mcp is pinned available; ops IS present. agent-host is
+    # gated out by AVA_RUNNER_MODE, which defaults to `process` — so a single
+    # box does NOT run the hosted runner unless the cluster opts in.
+    assert sessions == all_sessions - {"browser", "browser-mcp", "agent-host"}
     assert "ops" in sessions  # the load-bearing addition vs gateway-only
     assert "gateway" in sessions
     assert "restarter" in sessions  # exactly one restarter, here
