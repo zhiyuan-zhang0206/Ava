@@ -155,7 +155,20 @@ def install() -> None:
 def uninstall() -> None:
     """Restore every metered target to the callable the recorder wraps — test
     teardown, so a test that installs the recorders does not leak them into the
-    shared ``ava`` singleton the rest of the suite imports."""
+    shared ``ava`` singleton the rest of the suite imports.
+
+    The suite calls this after every test (autouse ``_restore_sdk_metering`` in
+    ``tests/conftest.py``), because ``install()`` is a side effect of
+    ``_load_extensions()`` and is reached lazily on any ``ava.*`` miss — so merely
+    touching the namespace metered it for every later test in the worker (issue #83).
+    """
+    # O(1) early-out: _RECORDERS is a WeakSet, and an installed recorder is held
+    # strongly by the namespace it sits on, so an empty set proves nothing is
+    # installed. Without it every per-test teardown would pay the full namespace
+    # walk below (~7 ms) to restore nothing.
+    if not _RECORDERS:
+        return
+
     for parent, attr, _fq in _instrument_targets():
         current = getattr(parent, attr, None)
         if current is not None and current in _RECORDERS:

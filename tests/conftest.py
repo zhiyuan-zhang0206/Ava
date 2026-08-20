@@ -589,6 +589,36 @@ def _otlp_export_off(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _restore_sdk_metering() -> Iterator[None]:
+    """Per-test isolation for the process-global `ava` singleton's metering state:
+    whatever a test wrapped, the next test sees the bare callables again.
+
+    `agent.graph._build._load_extensions()` calls `agent.sdk_metering.install()` as
+    a side effect, which replaces every public `ava.*` callable — plus the
+    `ava.mcps._call_raw` MCP funnel — with a recording proxy, and nothing ever put
+    them back. `_load_extensions()` is reached directly *and* lazily, via
+    `ava/__init__.py:_ensure_plugins_loaded` on an `ava.*` miss, so merely touching
+    the namespace permanently swapped out the callables every later test in that
+    xdist worker would see.
+
+    That is invisible in isolation and only appears when the polluting test lands in
+    the same worker — nondeterministic under `-n`, since `--dist load` distributes
+    dynamically. It has already cost a night: a test asserting that `install()` wraps
+    an unwrapped funnel read `install()`'s correct no-op as a failure, and the merge
+    queue's bisect blamed whichever innocent PR shared the batch (issue #83, after
+    #82 fixed that one test's symptom by taking its own baseline).
+
+    Free for the tests that never metered: `uninstall()` returns immediately when
+    nothing is installed, and `sys.modules` is read rather than imported so a test
+    process that never pulled in the agent layer does not pull it in here.
+    """
+    yield
+    metering = sys.modules.get("agent.sdk_metering")
+    if metering is not None:
+        metering.uninstall()
+
+
+@pytest.fixture(autouse=True)
 def _clean_state(
     _provisioned_db: str,
     _provisioned_redis: str,
