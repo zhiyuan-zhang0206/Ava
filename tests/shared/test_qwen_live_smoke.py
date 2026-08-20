@@ -36,12 +36,22 @@ all fall out of one session with a real key, which is why they live in one file:
    machine-readable reason lives in `error.code` (`invalid_api_key`, snake_case),
    with `type` carrying only the broad class.
 
-   So `shared/lm/errors.py`, which matches a vocabulary against `error.type`,
-   will always see the generic class here and never the specific reason: an
-   arrears string added to that set cannot fire on DashScope no matter how it is
-   spelled. Reading `error.code` is the change that would make it possible.
-   Whoever hits a real billing failure should still **capture the raw body** —
-   the one remaining unknown is which string `code` carries for arrears.
+   `shared/lm/errors.py` now matches its billing vocabulary against BOTH
+   `error.type` and `error.code`, so which of the two carries the reason no
+   longer decides whether the alert can fire. What is still unconfirmed is the
+   SPELLING: the vocabulary carries Alibaba's documented `Arrearage` plus the
+   two overdue-bill codes, and Alibaba publishes those in a single table that
+   never says which entries the compatible endpoint re-spells — its
+   compatible-mode page documents exactly one code, the `invalid_api_key` above.
+   No live arrears body has ever been seen to check the set against.
+
+   Two ways to close that, in the order they are likely to happen. Whoever hits
+   a real billing failure should **capture the raw body** and reconcile it with
+   the vocabulary — the alert is silent either way, so nothing else will surface
+   a mismatch. Or, deliberately: point `AVA_LIVE_DASHSCOPE_KEY` at a key on a
+   drained account and run this file; the arrears rejection arrives on the first
+   call. That needs an account with no balance, which is why the assertion lives
+   in that operator's hands rather than in a test here.
 
 ## Running it
 

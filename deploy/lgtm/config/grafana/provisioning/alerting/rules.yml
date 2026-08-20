@@ -1029,11 +1029,13 @@ groups:
       # fingerprint x starts_at by shared/alerts.py, not on `for`).
       #
       # `billing` is emitted by agent/graph/_llm_errors.py from
-      # shared/lm/errors.py's cross-provider predicate (HTTP 402, plus the
-      # per-vendor error.type vocabulary) — the rule never enumerates statuses
-      # itself, so a provider added there is covered here for free. Grouping by
-      # vendor+model makes one dead key one alert instance that names itself;
-      # both labels come off the json-flattened event body.
+      # shared/lm/errors.py's cross-provider predicate (HTTP 402, plus a
+      # per-vendor vocabulary matched against the response body's error.type AND
+      # error.code — DashScope reports the specific reason only in the latter) —
+      # the rule never enumerates statuses itself, so a provider added there is
+      # covered here for free. Grouping by vendor+model makes one dead key one
+      # alert instance that names itself; both labels come off the
+      # json-flattened event body.
       #
       # critical, not error: this is the only rule whose condition means the
       # agents cannot run at all until a human spends money.
@@ -1055,7 +1057,7 @@ groups:
             reached {{ $values.C }} in the last 15 minutes for model
             {{ $labels.attributes_model }} (vendor
             {{ $labels.attributes_vendor }}). The provider refused with HTTP 402
-            or its own insufficient-balance / quota error type — no retry can
+            or its own insufficient-balance / quota code — no retry can
             clear it, so every turn on this key fails until the account is
             topped up or the quota raised. Fires on the FIRST occurrence by
             design (no spike threshold): one rejection already means the fleet

@@ -69,49 +69,71 @@ _TRANSIENT_STATUSES: frozenset[int] = frozenset({408, 409, 425, 429})
 #
 # HTTP 402 Payment Required is the unambiguous signal — DeepSeek returns it for
 # `Insufficient Balance`. Providers that reuse a generic 4xx say it in the
-# response body's `error.type` instead, so those strings are matched too,
-# case-folded because the vocabularies are not consistently cased across
-# vendors. A new provider adds its string here and nothing else: the emit site,
-# the event payload and the alert rule all key off this one predicate.
+# response body instead, in one of two fields, so the vocabulary is matched
+# against BOTH `error.type` and `error.code`. Entries keep the vendor's own
+# spelling and the match is case-folded on either side, because the vocabularies
+# are not consistently cased across vendors. A new provider adds its string here
+# and nothing else: the emit site, the event payload and the alert rule all key
+# off this one predicate.
 #
-# TWO limits worth knowing before trusting a silent alert:
+# Why both fields, and not `code` as a fallback for a missing `type`: DashScope's
+# OpenAI-compatible endpoint sends both, with `type` carrying only a broad class
+# and `code` the specific reason. Captured 401 (2026-08-20,
+# `tests/shared/test_qwen_live_smoke.py`)::
 #
-# 1. Only `error.type` is read (`_error_type_of`), and on some vendors that field
-#    is too COARSE to ever carry a billing reason. Captured DashScope
-#    compatible-mode 401 (2026-08-20, `tests/shared/test_qwen_live_smoke.py`)::
+#     {'error': {'type': 'invalid_request_error',    <- broad class only
+#                'code': 'invalid_api_key', ...}}    <- the specific reason
 #
-#        {'error': {'type': 'invalid_request_error',    <- broad class only
-#                   'code': 'invalid_api_key', ...}}    <- the specific reason
+# A fallback would therefore never reach `code` on this vendor — `type` is
+# present on every 4xx, just useless. Matching both keeps the fields independent,
+# and `error.code` is read for this predicate ONLY: it is deliberately not logged
+# on the `llm_provider_error` event, so widening the match does not widen what
+# the reported `error_type` means for the providers that already say it there.
 #
-#    So on DashScope every 4xx reports the same generic `type`, and no arrears
-#    string added below can fire there however it is spelled — matching
-#    `error.code` too is the change that would make a Qwen billing alert possible
-#    at all. Note the shape of that fix: a plain "fall back to `code` when `type`
-#    is missing" does NOT work, because `type` is present-but-coarse; the
-#    vocabulary has to be matched against BOTH fields. Not done speculatively —
-#    the remaining unknown is which string `code` carries for ARREARS (the
-#    captured body is an auth failure), and widening changes the reported
-#    `error_type` for every provider, so it waits for that one body.
-# 2. Every entry below except the DeepSeek 402 path comes from vendor
-#    documentation, not from a captured live 4xx. A wrong or missing string costs
-#    a MISSED alert, never a false one — but silence here is indistinguishable
-#    from health: an unmatched string means nothing is ever tagged and the rule
-#    stays quiet forever, so no incident "surfaces" the gap on its own. That is
-#    why these caveats sit at the definition site rather than in a tracker.
+# What is still unverified: every entry below except the DeepSeek 402 path comes
+# from vendor documentation, not from a captured live 4xx. For DashScope matching
+# both fields removes one unknown and leaves one. Removed: WHICH field carries an
+# arrears reason no longer decides whether the alert can fire. Remaining: the
+# SPELLING. Alibaba documents its arrears codes in a single table that never says
+# which entries the OpenAI-compatible endpoint re-spells, and its compatible-mode
+# page publishes exactly one code — `invalid_api_key`, the body captured above.
+# So the documented PascalCase is what goes in; the case-fold absorbs a casing
+# difference, but a different WORD on the wire would still miss.
+#
+# A wrong or missing string costs a MISSED alert, never a false one — but silence
+# here is indistinguishable from health: an unmatched string means nothing is
+# ever tagged and the rule stays quiet forever, so no incident "surfaces" the gap
+# on its own. Two things close it, both operator-driven: the first real arrears
+# rejection (capture the raw body and reconcile it with this set), or an opt-in
+# live run against a drained key — `tests/shared/test_qwen_live_smoke.py` carries
+# both instructions. That is why these caveats sit at the definition site rather
+# than in a tracker.
 _BILLING_STATUS = 402
-_BILLING_ERROR_TYPES: frozenset[str] = frozenset(
-    {
+_BILLING_ERROR_VOCABULARY: frozenset[str] = frozenset(
+    entry.lower()
+    for entry in (
         "insufficient_quota",  # OpenAI — credit exhausted (arrives as a 429)
         "billing_not_active",  # OpenAI — account not billable
         "insufficient_balance",  # DeepSeek + the OpenAI-compatible CN endpoints
-        # UNVERIFIED, and known NOT to fire as things stand (2026-08-20): a
-        # captured DashScope body proved `error.type` carries only the broad
-        # class there (limit 1), so this entry is inert until the vocabulary is
-        # matched against `error.code`. Kept as the pointer to the vendor and
-        # the open question, not because it works.
-        "arrearage",  # Alibaba DashScope (Qwen) — account in arrears
         "exceeded_current_quota_error",  # Moonshot / Kimi
-    }
+        # Alibaba DashScope (Qwen) — all three from the Model Studio error-code
+        # reference, https://www.alibabacloud.com/help/en/model-studio/error-code
+        "Arrearage",  # 400 — "make sure your account is in good standing"
+        "PrepaidBillOverdue",  # 429 — the prepaid bill is overdue
+        "PostpaidBillOverdue",  # 429 — the postpaid bill is overdue
+        # Three neighbours on that page are deliberately left out, because this
+        # predicate promises "only a payment clears it" and the alert fires on
+        # the FIRST occurrence:
+        #   `Throttling.AllocationQuota` / `Throttling.RateQuota` (429) — TPS/TPM
+        #     rate limiting, not an exhausted account; it would page the operator
+        #     during ordinary traffic.
+        #   `CommodityNotPurchased` (429) — a model that was never activated: a
+        #     setup mistake, not arrears.
+        #   `AllocationQuota.FreeTierOnly` (403, free tier exhausted) — reads
+        #     like billing, but the page does not say whether a free tier resets
+        #     on its own, and a billing alert that can clear without a payment
+        #     breaks the contract above. Add it if the reset question is settled.
+    )
 )
 
 
@@ -138,22 +160,28 @@ class ErrorClassification(NamedTuple):
     provider: str  # top-level package that raised: anthropic / openai / httpx / builtins / ...
     status: int | None  # HTTP status_code when the SDK carries one, else None
     error_type: str | None  # provider body `error.type` (e.g. engine_overloaded_error), else None
+    error_code: str | None  # provider body `error.code` — read by `billing` only, never logged
 
     @property
     def billing(self) -> bool:
         """True when the provider refused because the key is out of credit or
-        its quota is exhausted (`_BILLING_STATUS` / `_BILLING_ERROR_TYPES`).
+        its quota is exhausted (`_BILLING_STATUS` / `_BILLING_ERROR_VOCABULARY`).
 
         A derived view, not a field: it is a reading of the same
-        (status, error_type) the classifier already carries, so it cannot drift
-        out of sync with them, and every tuple-shaped construction site stays
-        untouched. Deliberately independent of `error_class` — an out-of-credit
-        key arrives as a PERMANENT 402 from one vendor and a TRANSIENT 429 from
-        another, and the operator has to top the key up either way.
+        (status, error_type, error_code) the classifier already carries, so it
+        cannot drift out of sync with them. Both body fields are matched — not
+        `code` as a fallback for an absent `type`, which would never reach the
+        vendor that needs it (see the vocabulary comment). Deliberately
+        independent of `error_class` — an out-of-credit key arrives as a
+        PERMANENT 402 from one vendor and a TRANSIENT 429 from another, and the
+        operator has to top the key up either way.
         """
         if self.status == _BILLING_STATUS:
             return True
-        return self.error_type is not None and self.error_type.lower() in _BILLING_ERROR_TYPES
+        return any(
+            field is not None and field.lower() in _BILLING_ERROR_VOCABULARY
+            for field in (self.error_type, self.error_code)
+        )
 
 
 def _provider_of(exc: BaseException) -> str:
@@ -173,12 +201,14 @@ def _status_of(exc: BaseException) -> int | None:
     return status if isinstance(status, int) else None
 
 
-def _error_type_of(exc: BaseException) -> str | None:
-    """Provider response body `error.type`, or None.
+def _error_field_of(exc: BaseException, key: str) -> str | None:
+    """One string field of the provider response body's `error` object, or None.
 
-    Both SDKs shape errors as ``{"error": {"type": ..., "message": ...}}`` on
-    `.body`. Returns None when `body` is absent / not a dict, `error` is missing /
-    not a dict, or `type` is missing / not a non-empty string.
+    Both SDKs shape errors as ``{"error": {"type": ..., "code": ..., "message":
+    ...}}`` on `.body` — `type` the broad class, `code` (when the vendor sends
+    one) the specific reason. Returns None when `body` is absent / not a dict,
+    `error` is missing / not a dict, or the field is missing / not a non-empty
+    string.
     """
     body = getattr(exc, "body", None)
     if not isinstance(body, dict):
@@ -186,8 +216,8 @@ def _error_type_of(exc: BaseException) -> str | None:
     error = cast("dict[str, Any]", body).get("error")
     if not isinstance(error, dict):
         return None
-    error_type = cast("dict[str, Any]", error).get("type")
-    return error_type if isinstance(error_type, str) and error_type else None
+    value = cast("dict[str, Any]", error).get(key)
+    return value if isinstance(value, str) and value else None
 
 
 def classify_error(exc: BaseException) -> ErrorClassification:
@@ -198,7 +228,8 @@ def classify_error(exc: BaseException) -> ErrorClassification:
     UNKNOWN, not a guess.
     """
     provider = _provider_of(exc)
-    error_type = _error_type_of(exc)
+    error_type = _error_field_of(exc, "type")
+    error_code = _error_field_of(exc, "code")
     status = _status_of(exc)
     if status is not None:
         if status in _PERMANENT_STATUSES:
@@ -207,7 +238,7 @@ def classify_error(exc: BaseException) -> ErrorClassification:
             error_class = ErrorClass.TRANSIENT
         else:
             error_class = ErrorClass.UNKNOWN
-        return ErrorClassification(error_class, provider, status, error_type)
+        return ErrorClassification(error_class, provider, status, error_type, error_code)
     if _is_transport_error(exc):
-        return ErrorClassification(ErrorClass.TRANSIENT, provider, None, error_type)
-    return ErrorClassification(ErrorClass.UNKNOWN, provider, None, error_type)
+        return ErrorClassification(ErrorClass.TRANSIENT, provider, None, error_type, error_code)
+    return ErrorClassification(ErrorClass.UNKNOWN, provider, None, error_type, error_code)
