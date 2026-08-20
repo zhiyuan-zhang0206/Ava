@@ -280,6 +280,135 @@ def test_runs_probe_survives_unparseable_output(monkeypatch: pytest.MonkeyPatch)
     assert ci_utils._runs_not_yet_reporting("abc123", None) == []
 
 
+# --- issue #98: the Mergify Merge Queue check is queue state, not CI ----------
+# `--wait --merge` deadlocked when a PR was dequeued (e.g. by a force-push):
+# the only non-green check left was "Mergify Merge Queue" itself, and nothing
+# but re-queuing could ever turn it green — but queuing is what --merge does
+# once it sees green. Fix: (a) exclude checks named "Mergify*" from the
+# all-green predicate; (b) detect a dequeue and post `requeue` instead of
+# `queue`.
+
+_MERGIFY_PENDING = _check("Mergify Merge Queue", "", workflow="", status="IN_PROGRESS")
+_MERGIFY_SUCCESS = _check("Mergify Merge Queue", "SUCCESS", workflow="")
+
+
+def test_pending_mergify_check_does_not_block_all_passed(gh: Any, has_workflows: Any) -> None:
+    """The reproduction from issue #98: a dequeued PR's Mergify check sits
+    IN_PROGRESS forever. It must not keep real, completed CI from reading
+    green."""
+    gh([_check("backend (pytest + pyright)", "SUCCESS"), _MERGIFY_PENDING])
+    has_workflows(True)
+    r = ci_utils.check_ci("53")
+    assert r.verdict is CIStatus.ALL_PASSED
+    assert "Mergify Merge Queue" not in r.pending
+
+
+def test_mergify_check_excluded_from_passed_and_workflow_checks(
+    gh: Any, has_workflows: Any
+) -> None:
+    """Even a green Mergify check must not count as a CI check — it is queue
+    state, not a workflow result."""
+    gh([_check("backend (pytest + pyright)", "SUCCESS"), _MERGIFY_SUCCESS])
+    has_workflows(True)
+    r = ci_utils.check_ci("56")
+    assert r.verdict is CIStatus.ALL_PASSED
+    assert "Mergify Merge Queue" not in r.passed
+    assert "Mergify Merge Queue" not in r.workflow_checks
+    assert len(r.mergify_checks) == 1
+
+
+def test_mergify_only_rollup_falls_back_to_no_workflow_runs(gh: Any, has_workflows: Any) -> None:
+    """Stripping the Mergify check must not silently invent an ALL_PASSED
+    verdict for a PR with no real CI checks at all — the existing
+    NO_WORKFLOW_RUNS guard still applies to what's left."""
+    gh([_MERGIFY_SUCCESS], scheduled=[])
+    has_workflows(True)
+    assert ci_utils.check_ci("1").verdict is CIStatus.NO_WORKFLOW_RUNS
+
+
+def test_mergify_was_dequeued_recognizes_removal_text() -> None:
+    assert ci_utils._mergify_was_dequeued("The pull request has been removed from the queue")
+    assert ci_utils._mergify_was_dequeued("The pull request has been dequeued")
+
+
+def test_mergify_was_dequeued_false_for_normal_states() -> None:
+    assert not ci_utils._mergify_was_dequeued("Merged via merge queue")
+    assert not ci_utils._mergify_was_dequeued("Waiting for conditions to match")
+    assert not ci_utils._mergify_was_dequeued(None)
+    assert not ci_utils._mergify_was_dequeued("")
+
+
+def test_fetch_mergify_check_title_reads_jq_output(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, list[str]] = {}
+
+    class _R:
+        returncode = 0
+        stdout = "The pull request has been removed from the queue\n"
+        stderr = ""
+
+    def _run(cmd, *_a, **_k):
+        seen["cmd"] = cmd
+        return _R()
+
+    monkeypatch.setattr(ci_utils.subprocess, "run", _run)
+
+    title = ci_utils._fetch_mergify_check_title("abc123", "o/r")
+
+    assert title == "The pull request has been removed from the queue"
+    joined = " ".join(seen["cmd"])
+    assert "repos/o/r/commits/abc123/check-runs" in joined
+    assert "Mergify Merge Queue" in joined
+
+
+def test_fetch_mergify_check_title_none_on_missing_head_sha() -> None:
+    assert ci_utils._fetch_mergify_check_title("", "o/r") is None
+
+
+def test_fetch_mergify_check_title_none_on_gh_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _R:
+        returncode = 1
+        stdout = ""
+        stderr = "boom"
+
+    monkeypatch.setattr(ci_utils.subprocess, "run", lambda *_a, **_k: _R())
+
+    assert ci_utils._fetch_mergify_check_title("abc123", "o/r") is None
+
+
+def test_fetch_mergify_check_title_none_on_jq_null(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No Mergify check on this commit -> the jq selector yields `null`."""
+
+    class _R:
+        returncode = 0
+        stdout = "null\n"
+        stderr = ""
+
+    monkeypatch.setattr(ci_utils.subprocess, "run", lambda *_a, **_k: _R())
+
+    assert ci_utils._fetch_mergify_check_title("abc123", "o/r") is None
+
+
+def test_queue_command_picks_requeue_after_dequeue(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        ci_utils,
+        "_fetch_mergify_check_title",
+        lambda *_a, **_k: "The pull request has been removed from the queue",
+    )
+    assert ci_utils._queue_command("o/r", "abc123") == "@mergifyio requeue"
+
+
+def test_queue_command_defaults_to_queue_when_never_queued(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(ci_utils, "_fetch_mergify_check_title", lambda *_a, **_k: None)
+    assert ci_utils._queue_command("o/r", "abc123") == "@mergifyio queue"
+
+
+def test_queue_command_defaults_to_queue_for_normal_state(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        ci_utils, "_fetch_mergify_check_title", lambda *_a, **_k: "Merged via merge queue"
+    )
+    assert ci_utils._queue_command("o/r", "abc123") == "@mergifyio queue"
+
+
 # --- --wait (poller) mode: the canonical CI watcher ---------------------------
 # `ci_utils.py <PR> --wait` polls check_ci until the verdict settles, then
 # exits with the monitor contract (0 green / 1 not green / 3 persistent
@@ -378,6 +507,9 @@ def test_wait_timeout_while_pending_exits_one(monkeypatch, poll, capsys) -> None
 def test_wait_merge_enqueues_when_green(no_sleep, poll, monkeypatch, capsys) -> None:
     poll(CIStatus.ALL_PASSED)
     captured: dict = {}
+    # The dequeue-detection decision (_queue_command) is covered by its own
+    # unit tests below; stub it here so this test isolates enqueue + merge-wait.
+    monkeypatch.setattr(ci_utils, "_queue_command", lambda *_a, **_k: "@mergifyio queue")
 
     def fake_run(cmd, **_kw):
         class _R:
