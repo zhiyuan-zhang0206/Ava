@@ -76,26 +76,39 @@ _TRANSIENT_STATUSES: frozenset[int] = frozenset({408, 409, 425, 429})
 #
 # TWO limits worth knowing before trusting a silent alert:
 #
-# 1. Only `error.type` is read (`_error_type_of`). A vendor that reports billing
-#    under a different body field — DashScope's compatible mode carries a `code`
-#    (dotted PascalCase, e.g. `Throttling.AllocationQuota`) rather than an
-#    OpenAI-style snake_case `type` — is not matched by any string added here,
-#    and needs `_error_type_of` widened first. Reading a second field is not done
-#    speculatively: it waits for one captured body proving which field carries it.
+# 1. Only `error.type` is read (`_error_type_of`), and on some vendors that field
+#    is too COARSE to ever carry a billing reason. Captured DashScope
+#    compatible-mode 401 (2026-08-20, `tests/shared/test_qwen_live_smoke.py`)::
+#
+#        {'error': {'type': 'invalid_request_error',    <- broad class only
+#                   'code': 'invalid_api_key', ...}}    <- the specific reason
+#
+#    So on DashScope every 4xx reports the same generic `type`, and no arrears
+#    string added below can fire there however it is spelled — matching
+#    `error.code` too is the change that would make a Qwen billing alert possible
+#    at all. Note the shape of that fix: a plain "fall back to `code` when `type`
+#    is missing" does NOT work, because `type` is present-but-coarse; the
+#    vocabulary has to be matched against BOTH fields. Not done speculatively —
+#    the remaining unknown is which string `code` carries for ARREARS (the
+#    captured body is an auth failure), and widening changes the reported
+#    `error_type` for every provider, so it waits for that one body.
 # 2. Every entry below except the DeepSeek 402 path comes from vendor
 #    documentation, not from a captured live 4xx. A wrong or missing string costs
-#    a MISSED alert, never a false one — the failure mode is silence, so the
-#    first real incident on an unverified vendor is what confirms the string.
+#    a MISSED alert, never a false one — but silence here is indistinguishable
+#    from health: an unmatched string means nothing is ever tagged and the rule
+#    stays quiet forever, so no incident "surfaces" the gap on its own. That is
+#    why these caveats sit at the definition site rather than in a tracker.
 _BILLING_STATUS = 402
 _BILLING_ERROR_TYPES: frozenset[str] = frozenset(
     {
         "insufficient_quota",  # OpenAI — credit exhausted (arrives as a 429)
         "billing_not_active",  # OpenAI — account not billable
         "insufficient_balance",  # DeepSeek + the OpenAI-compatible CN endpoints
-        # UNVERIFIED (2026-08-20): the Qwen provider author has no DashScope key
-        # and could not confirm this string; see limit 1 above — DashScope may
-        # not report it through `error.type` at all. Kept because a miss is
-        # silent, not wrong.
+        # UNVERIFIED, and known NOT to fire as things stand (2026-08-20): a
+        # captured DashScope body proved `error.type` carries only the broad
+        # class there (limit 1), so this entry is inert until the vocabulary is
+        # matched against `error.code`. Kept as the pointer to the vendor and
+        # the open question, not because it works.
         "arrearage",  # Alibaba DashScope (Qwen) — account in arrears
         "exceeded_current_quota_error",  # Moonshot / Kimi
     }
