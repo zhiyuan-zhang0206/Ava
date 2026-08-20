@@ -5,8 +5,14 @@
 --
 -- Content-addressed blobs come FIRST: `extensions.content_hash` references them,
 -- and a row may only exist for content that has already landed.
+--
+-- IF NOT EXISTS throughout: db/schema.sql is kept current as the squashed
+-- baseline, so a fresh DB gets these tables from the baseline AND then applies
+-- every post-baseline migration on top. Without the guard this file errors with
+-- "relation already exists" on exactly that path — which is what
+-- scripts/migration_smoke.py's convergence stage checks.
 
-CREATE TABLE extension_blobs (
+CREATE TABLE IF NOT EXISTS extension_blobs (
     content_hash TEXT PRIMARY KEY,      -- shared.install_registry.tree_hash of the landed tree
     archive      BYTEA NOT NULL,        -- tar of that tree, IGNORED_NAMES excluded
     size_bytes   INTEGER NOT NULL,
@@ -24,7 +30,7 @@ CREATE TABLE extension_blobs (
     CONSTRAINT extension_blobs_size_is_real CHECK (size_bytes = octet_length(archive))
 );
 
-CREATE TABLE extensions (
+CREATE TABLE IF NOT EXISTS extensions (
     name            TEXT PRIMARY KEY,   -- match_key-folded (dash/underscore are one name)
     kind            TEXT NOT NULL CHECK (kind IN ('skill', 'plugin', 'mcp')),
     source          TEXT NOT NULL,      -- 'repo' | git URL | 'local:<machine>'
@@ -51,4 +57,4 @@ CREATE TABLE extensions (
 
 -- The materialization query is "what should this machine have", which reads the
 -- enabled rows; kind narrows it per slice (S2 materializes only skills).
-CREATE INDEX idx_extensions_enabled_kind ON extensions (kind) WHERE default_enabled;
+CREATE INDEX IF NOT EXISTS idx_extensions_enabled_kind ON extensions (kind) WHERE default_enabled;
