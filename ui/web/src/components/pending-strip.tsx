@@ -19,7 +19,7 @@ function sourceLabel(source: string | null): string {
   if (!source) return "system";
   // user typing, or a callback from an agent-rendered page — both are "User".
   if (source === "user" || source.startsWith("ui:page:")) return "User";
-  if (source.startsWith("agent:")) return `agent ${source.slice("agent:".length)}`;
+  if (source.startsWith("agent:")) return `Agent #${source.slice("agent:".length)}`;
   if (source.startsWith("schedule:")) return "scheduled";
   return source;
 }
