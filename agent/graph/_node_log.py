@@ -104,10 +104,10 @@ def _dump_async_tasks() -> None:
     for task in tasks:
         out.append(f"--- task {task.get_name()} ---")
         out.extend(awaiter_chain_lines(task))
-    # Target sys.__stderr__ (the original stderr), not the live sys.stderr: the
-    # exec stream redirects the process-global sys.stderr to a capture buffer,
-    # and an orphaned exec thread can leave that redirect in place — writing
-    # there would drop the dump into a buffer no one reads. One single write —
+    # Target sys.__stderr__ (the original stderr), not the live sys.stderr:
+    # the exec capture router (agent/graph/_exec_capture.py) resolves per
+    # context, and a diagnostic must land on the real stream no matter which
+    # context the dump happens to run in. One single write —
     # the faulthandler watchdog thread writes to this same stderr from another
     # thread, so a line-by-line loop would interleave with it. Skip if the
     # process has no real stderr: a diagnostic must never crash its host.
@@ -129,12 +129,11 @@ _STALL_GUARD_EXEMPT = frozenset({"claim"})
 def _real_stderr() -> TextIO | None:
     """The stable real-fd stderr to point diagnostic dumps at. faulthandler
     writes via a raw file descriptor, so its target MUST expose a usable
-    `fileno()`. The exec stream redirects the process-global `sys.stderr` to a
-    fileno-less capture buffer while agent code runs; if a Stop lands while that
-    code is stuck in native code, the worker thread is orphaned before its
-    redirect unwinds and `sys.stderr` stays that buffer for the rest of the
-    process. `sys.__stderr__` is the interpreter's original stderr, never touched
-    by the redirect, so it keeps its real fd. Returns None if even that has no
+    `fileno()`. `sys.stderr` is the exec capture router
+    (agent/graph/_exec_capture.py), which resolves to a fileno-less capture
+    buffer in a context where agent code is running. `sys.__stderr__` is the
+    interpreter's original stderr, never routed, so it keeps its real fd
+    regardless of the calling context. Returns None if even that has no
     usable fileno (closed / detached) — a diagnostic must never crash its host,
     so the caller then skips the dump rather than hand faulthandler a bad fd."""
     stderr = sys.__stderr__
