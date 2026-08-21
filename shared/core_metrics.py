@@ -12,11 +12,12 @@ Two-tier metric architecture since 2026-08-06 (user ruling):
   first-party business plugins (ava_code / ava_fleet / ava_memory) or
   external plugins, registered under their plugin name.
 
-The generator (``scripts/gen_plugin_dashboard.py``) renders the single
-dashboard (``deploy/lgtm/config/grafana/provisioning/dashboards/ava-ops-main.json``) with the **core section
-first** — row header ``core``, then one row per plugin — and exports both
-registries into the state snapshot
-($AVA_HOME/state/plugin_metrics.json) for the inspector surface.
+The dashboards (``deploy/lgtm/config/grafana/provisioning/dashboards/
+ava-ops-main.json``) carry the **core section first** — row header ``core``,
+then one row per plugin. The inspector surface (``gateway/routers/
+_plugin_metrics.py``) builds both registries in process — task #180 PR D
+replaced the generator's state snapshot ($AVA_HOME/state/plugin_metrics.json),
+which froze when the generator did not survive the archive->public port.
 
 Core definitions live in ``shared/core_metrics_panels.py`` (the migrated
 ops-dashboard panels) and ``shared/core_metrics_observability.py`` (the
@@ -28,8 +29,6 @@ from __future__ import annotations
 
 import importlib
 from contextlib import suppress
-from datetime import UTC, datetime
-from typing import Any
 
 from shared.plugin_metrics import (
     DuplicateMetric,
@@ -88,13 +87,3 @@ def collect_core_metrics() -> list[MetricSpec]:
         with suppress(ImportError):
             importlib.import_module(module_name)
     return registered_core_metrics()
-
-
-def export_core_registry() -> dict[str, Any]:
-    """Serialize the core registry for the state snapshot (same shape as the
-    plugin registry — the gateway validates both as MetricSpec rows)."""
-    return {
-        "schema_version": 1,
-        "exported_at": datetime.now(UTC).isoformat(),
-        "core_metrics": [spec.model_dump(mode="json") for spec in _CORE_REGISTRY.values()],
-    }

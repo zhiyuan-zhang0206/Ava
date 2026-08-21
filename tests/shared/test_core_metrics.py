@@ -1,5 +1,5 @@
 """Core metrics registry (Task #882) — registration, validation reuse, and
-the state-snapshot export shape shared with the plugin registry."""
+in-process collection shared with the plugin registry."""
 
 from typing import Any
 
@@ -86,19 +86,6 @@ def test_register_core_metric_agent_placeholder_rule() -> None:
         )
     )
     assert "inspector" in spec.output
-
-
-def test_export_core_registry_shape() -> None:
-    core_metrics.register_core_metric(_spec())
-    dumped = core_metrics.export_core_registry()
-    assert dumped["schema_version"] == 1
-    rows = dumped["core_metrics"]
-    assert len(rows) == 1
-    assert rows[0]["name"] == "core_test"
-    assert rows[0]["plugin"] == "core"
-    # every row round-trips as a MetricSpec (the gateway validates both
-    # sections of the snapshot identically)
-    assert MetricSpec.model_validate(rows[0]).name == "core_test"
 
 
 def test_collect_core_metrics_tolerates_missing_modules() -> None:

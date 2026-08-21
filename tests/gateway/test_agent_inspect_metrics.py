@@ -1,26 +1,25 @@
 """Integration tests for GET /api/agents/{id}/inspect/metrics (W13b).
 
-The inspector surface of the plugin metric system: the gateway reads the
-registry snapshot ($AVA_HOME/state/plugin_metrics.json — written by
-scripts/gen_plugin_dashboard.py, mocked here by writing the file directly),
-keeps `output`-inspector metrics, renders each template for the agent,
-re-validates the rendered SQL, substitutes the Grafana time macros with a
-fixed window, and executes the query against the test DB.
+The inspector surface of the plugin metric system: the gateway builds the
+metric registry in process (task #180 PR D — mocked here by patching
+`_load_plugin_metrics`), keeps `output`-inspector metrics, renders each
+template for the agent, re-validates the rendered query, substitutes the
+Grafana time macros with a fixed window, and executes the query — LogQL
+against a fake Loki client, SQL against the test DB.
 
-Locks: missing file -> [], unknown agent -> 404, malformed file / wrong
-schema_version / invalid spec row / tampered template -> 500 with the reason,
-{{agent_id}} template rendered with no agent id -> 400, execution-time query
-failure -> per-metric `error` while the other metrics still render, and the
-execution semantics (event_name/category literals, per-agent filtering, stat vs
-series payloads, macro translation).
+Locks: empty registry -> [], unknown agent -> 404, tampered template -> 500
+with the reason, {{agent_id}} template rendered with no agent id -> 400,
+execution-time query failure -> per-metric `error` while the other metrics
+still render, and the execution semantics (event_name/category literals,
+per-agent filtering, stat vs series payloads, macro translation).
 """
 
 from __future__ import annotations
 
+import importlib
 import json
-from collections.abc import Iterator
+import sys
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any
 
 import psycopg
@@ -29,8 +28,8 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from gateway.app import app
+from gateway.routers import _plugin_metrics
 from gateway.routers._plugin_metrics import (
-    _plugin_metrics_state_path,
     _render_metric_query,
     _translate_macros,
 )
@@ -65,7 +64,7 @@ def _metric(
     output: list[str] | None = None,
     unit: str = "percent",
 ) -> dict[str, Any]:
-    """A registry-row dict (the shape export_registry writes)."""
+    """A registry-row dict (the shape a MetricSpec registration carries)."""
     return {
         "name": name,
         "title": "Task done rate",
@@ -80,31 +79,12 @@ def _metric(
     }
 
 
-def _write_registry(*metrics: dict[str, Any]) -> Path:
-    """Write the registry snapshot where the gateway reads it (the test
-    AVA_HOME). Returns the path."""
-    path = _plugin_metrics_state_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "exported_at": datetime.now(UTC).isoformat(),
-                "metrics": list(metrics),
-            }
-        )
-        + "\n"
-    )
-    return path
-
-
-@pytest.fixture(autouse=True)
-def _clean_metrics_state() -> Iterator[None]:
-    """Every test starts without a registry file; tests that need one write it."""
-    path = _plugin_metrics_state_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    yield
-    path.unlink(missing_ok=True)
+def _patch_loader(monkeypatch: pytest.MonkeyPatch, *metrics: dict[str, Any]) -> None:
+    """Seed the in-process loader with the given registry rows — the
+    task #180 PR D equivalent of the old snapshot file (the loader itself is
+    covered separately by `test_in_process_loader_imports_shipped_metrics`)."""
+    specs = [MetricSpec.model_validate(m) for m in metrics]
+    monkeypatch.setattr(_plugin_metrics, "_load_plugin_metrics", lambda: specs)
 
 
 def _insert_agent(db: psycopg.Connection, label: str = "t") -> int:
@@ -144,8 +124,11 @@ def _insert_event(
 # ── file absent / agent unknown ───────────────────────────────────────────────
 
 
-def test_metrics_missing_registry_returns_empty(db_conn: psycopg.Connection) -> None:
-    """No registry file (generator never ran) -> 200 []."""
+def test_metrics_empty_registry_returns_empty(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No registered metrics -> 200 []."""
+    _patch_loader(monkeypatch)
     aid = _insert_agent(db_conn)
     db_conn.commit()
     with TestClient(app) as client:
@@ -154,9 +137,11 @@ def test_metrics_missing_registry_returns_empty(db_conn: psycopg.Connection) -> 
     assert resp.json() == []
 
 
-def test_metrics_unknown_agent_404(db_conn: psycopg.Connection) -> None:
+def test_metrics_unknown_agent_404(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """No agents_meta row -> 404 (same contract as /inspect)."""
-    _write_registry(_metric())
+    _patch_loader(monkeypatch, _metric())
     db_conn.commit()
     with TestClient(app) as client:
         resp = client.get("/api/agents/999999/inspect/metrics")
@@ -166,11 +151,14 @@ def test_metrics_unknown_agent_404(db_conn: psycopg.Connection) -> None:
 # ── filtering + rendering + execution ─────────────────────────────────────────
 
 
-def test_metrics_filters_inspector_output(db_conn: psycopg.Connection) -> None:
+def test_metrics_filters_inspector_output(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Only metrics whose output includes 'inspector' are returned; a
     grafana-only metric (even one sharing the same table shape) is skipped."""
     aid = _insert_agent(db_conn)
-    _write_registry(
+    _patch_loader(
+        monkeypatch,
         _metric(name="insp_metric"),
         _metric(
             name="grafana_only",
@@ -186,11 +174,11 @@ def test_metrics_filters_inspector_output(db_conn: psycopg.Connection) -> None:
     assert [m["name"] for m in body] == ["insp_metric"]
 
 
-def test_metrics_stat_scalar(db_conn: psycopg.Connection) -> None:
+def test_metrics_stat_scalar(db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch) -> None:
     """A stat metric returns the single aggregate as `value` (windowed to the
     inspector's 24h, so an old event falls out)."""
     aid = _insert_agent(db_conn)
-    _write_registry(_metric(name="stat_count", panel="stat", query=_STAT_QUERY))
+    _patch_loader(monkeypatch, _metric(name="stat_count", panel="stat", query=_STAT_QUERY))
     _insert_event(db_conn, agent_id=aid, payload={"fixes": 1})
     _insert_event(db_conn, agent_id=aid, payload={"fixes": 1})
     _insert_event(db_conn, agent_id=aid, payload={"fixes": 1}, ts_offset_hours=48)
@@ -207,11 +195,13 @@ def test_metrics_stat_scalar(db_conn: psycopg.Connection) -> None:
     assert body[0]["error"] is None
 
 
-def test_metrics_timeseries_series(db_conn: psycopg.Connection) -> None:
+def test_metrics_timeseries_series(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A timeseries metric returns a chronological series of (ts, value)
     points over the fixed 24h window."""
     aid = _insert_agent(db_conn)
-    _write_registry(_metric())
+    _patch_loader(monkeypatch, _metric())
     for _ in range(3):
         _insert_event(db_conn, agent_id=aid, payload={"status": "done"})
     _insert_event(db_conn, agent_id=aid, payload={"status": "pending"})
@@ -235,7 +225,7 @@ def test_metrics_timeseries_series(db_conn: psycopg.Connection) -> None:
 
 
 def test_metrics_timeseries_bucket_is_utc_hour_with_offset(
-    db_conn: psycopg.Connection,
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """tz audit PR-1 behavior lock: the inspector's `date_trunc` bucket lands
     on the UTC hour (not the host OS timezone's hour) and the JSON-serialized
@@ -246,7 +236,7 @@ def test_metrics_timeseries_bucket_is_utc_hour_with_offset(
     Python's own `.isoformat()`, which writes `+00:00`; see
     TestTimestampOffset in tests/gateway/test_tasks_router.py for that form.)"""
     aid = _insert_agent(db_conn)
-    _write_registry(_metric(name="bucket_check"))
+    _patch_loader(monkeypatch, _metric(name="bucket_check"))
     _insert_event(db_conn, agent_id=aid, payload={"status": "done"})
     db_conn.commit()
     expected_bucket = datetime.now(UTC).replace(minute=0, second=0, microsecond=0)
@@ -258,12 +248,14 @@ def test_metrics_timeseries_bucket_is_utc_hour_with_offset(
     assert datetime.fromisoformat(point_ts) == expected_bucket
 
 
-def test_metrics_agent_id_placeholder_filters(db_conn: psycopg.Connection) -> None:
+def test_metrics_agent_id_placeholder_filters(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """{{agent_id}} renders to `agent_id = <n>`: the metric counts only the
     requested agent's events, not the fleet's."""
     a1 = _insert_agent(db_conn)
     a2 = _insert_agent(db_conn)
-    _write_registry(_metric())
+    _patch_loader(monkeypatch, _metric())
     _insert_event(db_conn, agent_id=a1, payload={"status": "done"})
     _insert_event(db_conn, agent_id=a2, payload={"status": "done"})
     _insert_event(db_conn, agent_id=a2, payload={"status": "done"})
@@ -317,11 +309,14 @@ def test_metrics_macro_translation_unit() -> None:
         "SELECT count(*) FROM events -- WHERE event_name = 'x'",
     ],
 )
-def test_metrics_tampered_query_500(db_conn: psycopg.Connection, tampered: str) -> None:
+def test_metrics_tampered_query_500(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, tampered: str
+) -> None:
     """A registry file edited after generation fails the second validation ->
     500 with the reason (never executed)."""
     aid = _insert_agent(db_conn)
-    _write_registry(
+    _patch_loader(
+        monkeypatch,
         _metric(name="tampered", query=tampered),
         _metric(name="still_fine"),
     )
@@ -330,45 +325,6 @@ def test_metrics_tampered_query_500(db_conn: psycopg.Connection, tampered: str) 
         resp = client.get(f"/api/agents/{aid}/inspect/metrics")
     assert resp.status_code == 500
     assert "re-validation" in resp.json()["detail"]
-
-
-def test_metrics_malformed_registry_500(db_conn: psycopg.Connection) -> None:
-    """Unparseable JSON -> 500 with the reason."""
-    aid = _insert_agent(db_conn)
-    path = _plugin_metrics_state_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("{not json")
-    db_conn.commit()
-    with TestClient(app) as client:
-        resp = client.get(f"/api/agents/{aid}/inspect/metrics")
-    assert resp.status_code == 500
-    assert "unreadable" in resp.json()["detail"]
-
-
-def test_metrics_wrong_schema_version_500(db_conn: psycopg.Connection) -> None:
-    """A registry written by a newer generator (schema_version=2) is refused
-    loudly instead of guessed at."""
-    aid = _insert_agent(db_conn)
-    path = _plugin_metrics_state_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"schema_version": 2, "metrics": []}))
-    db_conn.commit()
-    with TestClient(app) as client:
-        resp = client.get(f"/api/agents/{aid}/inspect/metrics")
-    assert resp.status_code == 500
-    assert "schema_version" in resp.json()["detail"]
-
-
-def test_metrics_invalid_spec_row_500(db_conn: psycopg.Connection) -> None:
-    """A registry row that is not a valid MetricSpec -> 500 (missing required
-    field)."""
-    aid = _insert_agent(db_conn)
-    _write_registry({"name": "missing_fields"})
-    db_conn.commit()
-    with TestClient(app) as client:
-        resp = client.get(f"/api/agents/{aid}/inspect/metrics")
-    assert resp.status_code == 500
-    assert "invalid metric spec" in resp.json()["detail"]
 
 
 def test_metrics_render_requires_agent_id_400() -> None:
@@ -396,13 +352,14 @@ def test_metrics_render_substitutes_placeholders() -> None:
 
 
 def test_metrics_runtime_query_error_per_metric(
-    db_conn: psycopg.Connection,
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A template that passes the whitelist but fails at runtime (missing
     column) lands in that metric's `error`; the sibling metric still renders
     and the request stays 200."""
     aid = _insert_agent(db_conn)
-    _write_registry(
+    _patch_loader(
+        monkeypatch,
         _metric(name="broken", query="SELECT count(*) FROM events WHERE unknown_col = 1"),
         _metric(name="healthy", panel="stat", query=_STAT_QUERY),
     )
@@ -418,7 +375,7 @@ def test_metrics_runtime_query_error_per_metric(
 
 
 def test_metrics_read_only_is_transaction_scoped(
-    db_conn: psycopg.Connection,
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The read-only enforcement must NOT leak onto pooled connections.
 
@@ -429,7 +386,7 @@ def test_metrics_read_only_is_transaction_scoped(
     read-only session and its writes would fail. After a metrics request,
     the gateway's own pool must still accept writes."""
     aid = _insert_agent(db_conn)
-    _write_registry(_metric(name="stat_count", panel="stat", query=_STAT_QUERY))
+    _patch_loader(monkeypatch, _metric(name="stat_count", panel="stat", query=_STAT_QUERY))
     _insert_event(db_conn, agent_id=aid, payload={"status": "done"})
     db_conn.commit()
     with TestClient(app) as client:
@@ -530,7 +487,7 @@ def test_metrics_logql_timeseries_via_loki(
     from gateway import loki_events
 
     aid = _insert_agent(db_conn)
-    _write_registry(_logql_metric())
+    _patch_loader(monkeypatch, _logql_metric())
     db_conn.commit()
     fake = _FakeLokiClient(
         _loki_payload(
@@ -568,7 +525,8 @@ def test_metrics_logql_stat_via_loki(
     from gateway import loki_events
 
     aid = _insert_agent(db_conn)
-    _write_registry(
+    _patch_loader(
+        monkeypatch,
         _logql_metric(
             name="stat_cost",
             panel="stat",
@@ -577,7 +535,7 @@ def test_metrics_logql_stat_via_loki(
                 "category={category} | event_name={event_name} | {{agent_id}} | "
                 "unwrap attributes_cost_usd [$__range]))"
             ),
-        )
+        ),
     )
     db_conn.commit()
     fake = _FakeLokiClient(
@@ -603,7 +561,8 @@ def test_metrics_logql_loki_failure_is_per_metric(
     from gateway import loki_events
 
     aid = _insert_agent(db_conn)
-    _write_registry(
+    _patch_loader(
+        monkeypatch,
         _logql_metric(),
         _metric(name="still_fine"),
     )
@@ -631,11 +590,12 @@ def test_metrics_logql_tampered_query_500(
     """A tampered logql registry row (lost selector / json pipeline) fails
     the rendered-form re-validation -> 500, never executed."""
     aid = _insert_agent(db_conn)
-    _write_registry(
+    _patch_loader(
+        monkeypatch,
         _logql_metric(
             name="tampered_logql",
             query='sum(count_over_time({other="x"} | json | event_name={event_name} [1h]))',
-        )
+        ),
     )
     db_conn.commit()
     with TestClient(app) as client:
@@ -656,3 +616,49 @@ def test_metrics_logql_macro_translation_unit() -> None:
     assert "[1h]" in translated
     assert "[24h]" in translated
     assert "$__" not in translated
+
+
+# ── in-process registry (task #180 PR D) ──────────────────────────────────────
+
+
+def test_in_process_loader_imports_shipped_metrics() -> None:
+    """The loader imports every shipped plugin metrics.py under its plugin
+    context plus the core definition modules — plugin metrics first, then
+    core, the old snapshot's two-section order. No file involved."""
+    from shared import core_metrics
+    from shared.plugin_context import PluginContext
+    from shared.plugin_metrics import clear_registry
+
+    # Re-run the registrations fresh — earlier tests in the session may have
+    # cleared or reloaded the process-global registries (a module already in
+    # sys.modules must be reloaded, a fresh one only imported once).
+
+    clear_registry()
+    core_metrics.clear_core_registry()
+    for name in ("ava_code", "ava_fleet", "ava_memory"):
+        mod_name = f"ava_builtins.plugins.{name}.metrics"
+        mod = sys.modules.get(mod_name)
+        with PluginContext(name):
+            if mod is None:
+                importlib.import_module(mod_name)
+            else:
+                importlib.reload(mod)
+    for mod_name in ("shared.core_metrics_panels", "shared.core_metrics_observability"):
+        mod = sys.modules.get(mod_name)
+        if mod is None:
+            importlib.import_module(mod_name)
+        else:
+            importlib.reload(mod)
+
+    specs = _plugin_metrics._load_plugin_metrics()
+
+    plugin_specs = [s for s in specs if s.plugin != "core"]
+    core_specs = [s for s in specs if s.plugin == "core"]
+    # the shipped plugin metrics (10 after the task #180 LogQL cutover)
+    assert {s.plugin for s in plugin_specs} == {"ava_code", "ava_fleet", "ava_memory"}
+    assert len(plugin_specs) == 10
+    # core section follows, plugin section first (old snapshot order)
+    assert [s.plugin for s in specs].index("core") == len(plugin_specs)
+    assert len(core_specs) >= 16
+    # a second call is the same objects (module cache, no re-registration)
+    assert _plugin_metrics._load_plugin_metrics() == specs

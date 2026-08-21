@@ -17,7 +17,6 @@ from shared.plugin_metrics import (
     MetricSpec,
     NoPluginContext,
     clear_registry,
-    export_registry,
     register_metric,
     render_query,
     render_targets,
@@ -372,21 +371,3 @@ def test_render_agent_id_placeholder() -> None:
         "SELECT count(*) FROM events WHERE event_name = 'spawn' AND {{agent_id}} AND $__timeFilter(ts)"
     )
     assert "agent_id = 7" in render_query(spec, agent_id=7)
-
-
-def test_export_registry_keeps_templates_verbatim() -> None:
-    query = (
-        "SELECT count(*) FROM events WHERE event_name = {event_name} AND category = {category} "
-        "AND {{agent_id}} AND $__timeFilter(ts)"
-    )
-    with PluginContext("ava_demo"):
-        register_metric(_spec(name="agent_demo", query=query, output=["inspector"]))
-    exported = export_registry()
-    assert exported["schema_version"] == 1
-    assert "exported_at" in exported
-    assert len(exported["metrics"]) == 1
-    metric = exported["metrics"][0]
-    assert metric["name"] == "agent_demo"
-    assert metric["plugin"] == "ava_demo"
-    assert metric["query"] == query  # placeholders preserved for the gateway
-    assert metric["output"] == ["inspector"]

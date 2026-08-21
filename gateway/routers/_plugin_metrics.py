@@ -3,24 +3,28 @@
 Not a router: ``gateway/routers/agent_inspect.py`` mounts the single endpoint
 ``GET /api/agents/{id}/inspect/metrics`` and delegates the blocking work here
 (kept as its own module so agent_inspect stays under the per-file line budget).
-The inspector surface of the plugin metric system (W13, PR #1374): read the
-registry snapshot the generator exports ($AVA_HOME/state/plugin_metrics.json,
-written by scripts/gen_plugin_dashboard.py), keep the metrics whose `output`
-includes "inspector", render each template for the requested agent,
-re-validate the rendered SQL (the persisted file is disk input — register-time
-validation is not enough), substitute the Grafana time macros with a fixed
-recent window (the templates are written for Grafana's query-time injection;
-the inspector has no dashboard time range), and execute the query read-only
-against the cluster's own Postgres. One `PluginMetricResult` per metric; a
-metric whose query fails at execution time carries an `error` field instead of
-failing the whole request, while registry-level problems (missing file -> [],
-unreadable/invalid file -> 500, template failing the safety re-validation ->
-500, `{{agent_id}}` template without an agent id -> 400) are HTTP errors.
+The inspector surface of the plugin metric system (W13, PR #1374): build the
+metric registry **in process** — the shipped plugin ``metrics.py`` modules
+imported under their plugin context plus the core definition modules (task
+#180 PR D: the generator that used to write
+$AVA_HOME/state/plugin_metrics.json did not survive the archive->public port,
+and a stale snapshot is indistinguishable from a live one — the file is
+gone), keep the metrics whose `output` includes "inspector", render each
+template for the requested agent, re-validate the rendered query (the metric
+specs are repo code, but the re-validation still defends the execution path
+end to end), substitute the Grafana time macros with a fixed recent window
+(the templates are written for Grafana's query-time injection; the inspector
+has no dashboard time range), and execute the query — LogQL against Loki,
+SQL read-only against the cluster's own Postgres. One `PluginMetricResult`
+per metric; a metric whose query fails at execution time carries an `error`
+field instead of failing the whole request, while registry-level problems
+(a template failing the safety re-validation -> 500, `{{agent_id}}` template
+without an agent id -> 400) are HTTP errors.
 """
 
 from __future__ import annotations
 
-import json
+import importlib
 import re
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -31,23 +35,23 @@ import psycopg
 from fastapi import HTTPException
 from psycopg import Connection, Cursor
 from psycopg_pool import ConnectionPool
-from pydantic import ValidationError
 
 from gateway import loki_events
 from gateway.schemas import MetricPoint, PluginMetricResult
+from shared import core_metrics
 from shared.metrics_logql import validate_logql
+from shared.plugin_context import PluginContext
 from shared.plugin_metrics import (
     MetricSpec,
     PluginMetricError,
+    registered_metrics,
     render_query,
     validate_metric_sql,
 )
 
-# The registry snapshot path — matches the generator's `_default_state_out`
-# (scripts/gen_plugin_dashboard.py). A function so tests can point it at a
-# fixture file.
-_PLUGIN_METRICS_STATE_FILE = "plugin_metrics.json"
-_PLUGIN_METRICS_SCHEMA_VERSION = 1
+# The shipped-plugin metrics directory — every plugin dir with a metrics.py is
+# part of the in-process registry (the generator's import set, task #180 PR D).
+_PLUGINS_DIR = Path(__file__).resolve().parents[2] / "ava_builtins" / "plugins"
 
 # The inspector's fixed recent window: the templates' `$__timeFilter(ts)` /
 # `$__timeGroup(ts, $__interval)` render to this window (24h in 1h buckets =
@@ -64,9 +68,9 @@ _INSPECTOR_BUCKET_UNIT = "hour"  # date_trunc field name (no count)
 _MAX_METRIC_ROWS = 500
 
 # The macro -> SQL translation table. The replacement strings are module
-# constants (trusted gateway code); the macro *arguments* from the registry
-# file are consumed by the regex and never reach the DB — a tampered file can
-# put anything whitelisted inside the parens, it is discarded wholesale.
+# constants (trusted gateway code); the macro *arguments* from the spec
+# template are consumed by the regex and never reach the DB — a drifted spec
+# can put anything whitelisted inside the parens, it is discarded wholesale.
 # The double `AT TIME ZONE 'UTC'` round-trip (timestamptz -> naive UTC wall
 # clock -> back to timestamptz) truncates the bucket in UTC while keeping the
 # result a tz-aware timestamptz: `MetricPoint.ts` (gateway/schemas/inspect.py)
@@ -84,62 +88,42 @@ _MACRO_INTERVAL_LOKI = "1h"
 _MACRO_RANGE_LOKI = f"{_INSPECTOR_WINDOW_HOURS}h"
 
 
-def _plugin_metrics_state_path() -> Path:
-    """$AVA_HOME/state/plugin_metrics.json — the registry snapshot written by
-    ``scripts/gen_plugin_dashboard.py`` (W13). The gateway only ever reads it;
-    the generator is the single writer."""
-    from shared import paths
-
-    return paths.ava_home() / "state" / _PLUGIN_METRICS_STATE_FILE
+def _plugin_metric_modules() -> list[Path]:
+    """``metrics.py`` of every shipped plugin directory, sorted — the
+    generator's import set, in its import order."""
+    if not _PLUGINS_DIR.is_dir():
+        return []
+    return sorted(p / "metrics.py" for p in _PLUGINS_DIR.iterdir() if (p / "metrics.py").is_file())
 
 
 def _load_plugin_metrics() -> list[MetricSpec]:
-    """Read + parse the registry snapshot.
+    """The in-process metric registry: every shipped plugin ``metrics.py``
+    imported under its plugin context (registration fills the process-global
+    plugin registry), plus the core definition modules — plugin metrics
+    first, then core, the order the old snapshot's two sections read.
 
-    Missing file -> [] (the generator has not run / no plugin registers
-    metrics — the inspector panel renders nothing). Any other problem (unreadable
-    file, non-JSON, wrong schema_version, a row that does not parse as a
-    MetricSpec) is a 500 with the concrete reason — the file is generated from
-    plugin code, so an invalid file means a bug/tampering that should be loud,
-    not silently skipped."""
-    path = _plugin_metrics_state_path()
-    if not path.exists():
-        return []
-    try:
-        raw: dict[str, Any] = json.loads(path.read_text())
-    except (OSError, json.JSONDecodeError) as exc:
-        raise HTTPException(
-            status_code=500,
-            detail=f"plugin metrics registry {path} is unreadable: {exc}",
-        ) from exc
-    if not isinstance(raw, dict) or raw.get("schema_version") != _PLUGIN_METRICS_SCHEMA_VERSION:
-        raise HTTPException(
-            status_code=500,
-            detail=(
-                f"plugin metrics registry {path} has an unsupported schema_version "
-                f"(expected {_PLUGIN_METRICS_SCHEMA_VERSION})"
-            ),
-        )
-    try:
-        # Core metrics (Task #882) live in the same snapshot under a
-        # `core_metrics` section; both surfaces render identically.
-        rows = list(raw.get("metrics", [])) + list(raw.get("core_metrics", []))
-        return [MetricSpec.model_validate(m) for m in rows]
-    except (KeyError, ValidationError) as exc:
-        raise HTTPException(
-            status_code=500,
-            detail=f"plugin metrics registry {path} contains an invalid metric spec: {exc}",
-        ) from exc
+    Task #180 PR D: this replaces the generator's state snapshot
+    ($AVA_HOME/state/plugin_metrics.json) — the generator did not survive the
+    archive->public port, so the snapshot froze while its consumers kept
+    reading it. No file means no staleness; module caching makes repeated
+    calls free. A shipped metric module that fails to import raises here
+    (loud, per-request) instead of serving stale rows."""
+    for path in _plugin_metric_modules():
+        with PluginContext(path.parent.name):
+            importlib.import_module(f"ava_builtins.plugins.{path.parent.name}.metrics")
+    core_metrics.collect_core_metrics()
+    return registered_metrics() + core_metrics.registered_core_metrics()
 
 
 def _render_metric_query(spec: MetricSpec, agent_id: int | None) -> str:
     """Render one template for the inspector surface and re-validate the result.
 
-    Rendering substitutes {event_name}/{category} as single-quoted literals and
-    {{agent_id}} as ``agent_id = <n>``. The SECOND validation runs on the
-    rendered SQL — the persisted registry is disk input, and the register-time
-    check (W13) does not protect against a tampered file; this one refuses
-    anything that no longer parses as a whitelisted single SELECT.
+    Rendering substitutes {event_name}/{category} as literals (double-quoted
+    for LogQL, single-quoted for SQL) and {{agent_id}} as ``agent_id="<n>"`` /
+    ``agent_id = <n>``. The SECOND validation runs on the rendered query —
+    register-time checks do not protect against a spec drifting after
+    registration; this one refuses anything that no longer parses as a
+    whitelisted template.
 
     Raises:
         HTTPException 400: the template uses {{agent_id}} but `agent_id` is
@@ -166,8 +150,7 @@ def _render_metric_query(spec: MetricSpec, agent_id: int | None) -> str:
             status_code=500,
             detail=(
                 f"metric {spec.name!r} failed the inspector safety re-validation "
-                f"(registry {_plugin_metrics_state_path()} diverges from what "
-                f"register_metric allowed): {exc}"
+                f"(the registered spec diverges from what register_metric allows): {exc}"
             ),
         ) from exc
     return query

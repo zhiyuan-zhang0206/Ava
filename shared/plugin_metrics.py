@@ -1,38 +1,40 @@
-"""Plugin metric registration — plugins declare metrics over the `events` table.
+"""Plugin metric registration — plugins declare metrics over the event stream.
 
 Two output surfaces (user-approved design, 2026-08-04, event-system W13):
 
-- ``grafana`` (this wave): ``scripts/gen_plugin_dashboard.py`` imports every
-  plugin's ``*metrics*.py`` module to collect registrations, then renders
-  ``deploy/lgtm/config/grafana/provisioning/dashboards/ava-ops-plugins.json`` (independent uid, provisioner reloads
-  within 30s).
-- ``inspector`` (reserved for W13b): the gateway reads the registry snapshot
-  the generator exports (``$AVA_HOME/state/plugin_metrics.json``) to build
-  per-agent panels under ``/api/agents/{id}/inspect``. Only the persistence
-  format ships here; query templates may carry the ``{{agent_id}}`` placeholder,
-  which the gateway will render to ``agent_id = <n>``.
+- ``grafana``: the ops dashboards
+  (``deploy/lgtm/config/grafana/provisioning/dashboards/ava-ops-*.json``) are
+  hand-maintained since the generator did not survive the archive->public
+  port — a MetricSpec change must be mirrored in the JSONs by hand
+  (``tests/plugins/test_plugin_metrics_logql.py`` locks JSON against the
+  registered specs).
+- ``inspector`` (W13b): the gateway builds the registry in process (imports
+  every plugin's ``metrics.py`` under its PluginContext + the core definition
+  modules — task #180 PR D) and serves per-agent panels under
+  ``/api/agents/{id}/inspect/metrics``. Query templates may carry the
+  ``{{agent_id}}`` placeholder, which the gateway renders per dialect
+  (``agent_id="<n>"`` for LogQL, ``agent_id = <n>`` for SQL).
 
 Registration mirrors the plugin state/config pattern: the plugin calls
 ``register_metric(MetricSpec(...))`` at import time inside ``PluginContext``
 (the framework ``_load_extensions`` wrap) and the plugin name is auto-filled.
-The registry is process-local; the generator is what materializes it into the
-dashboard JSON + the exported snapshot.
+The registry is process-local.
 
-SQL safety (enforced at register time): a query template must be a single
-SELECT over the ``events`` table only, built from a whitelist of keywords,
-aggregate functions, Grafana macros, operators and literals — no DML/DDL, no
-information/``pg_*`` functions, no comments, no multi-statement. ``{event_name}`` /
-``{category}`` placeholders are rendered by the generator as single-quoted
-literals (defense in depth: both are validated identifiers/enums at register
-time; the generator writes a static JSON file, so there is no connection to
-bind parameters against). ``{{agent_id}}`` is kept verbatim for the inspector
-surface and is only legal when the metric does not also target grafana.
+Template safety (enforced at register time): a SQL query template must be a
+single SELECT over the ``events`` table only, built from a whitelist of
+keywords, aggregate functions, Grafana macros, operators and literals — no
+DML/DDL, no information/``pg_*`` functions, no comments, no multi-statement.
+LogQL templates (``query_type="logql"``, task #1280) follow the lighter
+contract in ``shared/metrics_logql.py``. ``{event_name}`` / ``{category}``
+placeholders are rendered as dialect-appropriate literals (both are validated
+identifiers/enums at register time); ``{{agent_id}}`` is kept verbatim for the
+inspector surface and is only legal when the metric does not also target
+grafana.
 """
 
 from __future__ import annotations
 
 import re
-from datetime import UTC, datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -832,15 +834,3 @@ def render_targets(spec: MetricSpec, agent_id: int | None = None) -> list[str]:
     return [render_query(spec, agent_id)] + [
         _render_template(t, spec, agent_id) for t in (spec.targets or [])
     ]
-
-
-def export_registry() -> dict[str, Any]:
-    """Serialize the registry snapshot — the persistence format the gateway
-    reads for the inspector surface (W13b). Query templates are exported
-    verbatim, placeholders included, so the gateway can render them per
-    agent."""
-    return {
-        "schema_version": 1,
-        "exported_at": datetime.now(UTC).isoformat(),
-        "metrics": [spec.model_dump(mode="json") for spec in _REGISTRY.values()],
-    }
