@@ -68,6 +68,7 @@ from dataclasses import dataclass
 
 import shared.boot_timing as boot
 import shared.deploy_timing as deploy
+import shared.stop_timing as stop
 from shared import cluster_lock
 from shared.config import settings
 from shared.host_deploy_state import UPDATER_LEASE_TTL_S
@@ -227,6 +228,22 @@ CLOCKS: dict[str, Clock] = {
         LLM_RETRY_BUDGET_ESTIMATE_S,
         "historical estimate of the LLM retry budget (wedged derivation component)",
     ),
+    # --- stop family (values in shared/stop_timing.py) ---
+    "CANCEL_UNWIND_TIMEOUT_S": Clock(
+        "stop",
+        lambda: stop.CANCEL_UNWIND_TIMEOUT_S,
+        "cancel unwind: how long a hosted runner's cancel waits for the host to emit host_turn_uncancellable",
+    ),
+    "CLOCK_READ_TIMEOUT_S": Clock(
+        "stop",
+        lambda: stop.CLOCK_READ_TIMEOUT_S,
+        "stuck-clock read: how long the cancel path may wait for one clock read",
+    ),
+    "REAP_KILL_WINDOW_S": Clock(
+        "stop",
+        lambda: stop.REAP_KILL_WINDOW_S,
+        "stop path's force-kill window: when the hosted runner is SIGKILLed if it has not exited",
+    ),
 }
 
 
@@ -338,6 +355,17 @@ CONSTRAINTS: list[Constraint] = [
         "EXEC_NODE_TIMEOUT_S + LLM_RETRY_BUDGET_ESTIMATE_S",
         "the wedged threshold must cover a healthy agent's longest legitimate "
         "stall: one exec node plus the LLM retry budget (2400 >= 1200 + 770)",
+    ),
+    # --- stop family: the hosted runner's shutdown waits must fit inside the
+    # stop path's force-kill window, or the host is killed before it can emit
+    # host_turn_uncancellable (issue #196) ---
+    Constraint(
+        "<",
+        "CANCEL_UNWIND_TIMEOUT_S + CLOCK_READ_TIMEOUT_S",
+        "REAP_KILL_WINDOW_S",
+        "cancel unwind + stuck-clock read must finish inside the stop path's "
+        "force-kill window (5 + 2 < 15), so the uncancellable report is never "
+        "killed mid-emission",
     ),
 ]
 

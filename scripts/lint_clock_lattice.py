@@ -97,6 +97,7 @@ _FAMILY_MODULES = (
     "shared/timing.py",
     "shared/boot_timing.py",
     "shared/deploy_timing.py",
+    "shared/stop_timing.py",
     "shared/cluster_lock.py",
     "shared/host_deploy_state.py",
 )
