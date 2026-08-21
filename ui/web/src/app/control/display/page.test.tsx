@@ -83,6 +83,26 @@ describe("DisplaySettingsPage", () => {
     });
   });
 
+  it("renders the reasoning markdown toggle", async () => {
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Render reasoning as markdown")).toBeTruthy();
+    });
+  });
+
+  it("persists disabling reasoning markdown", async () => {
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Render reasoning as markdown")).toBeTruthy();
+    });
+    fireEvent.click(screen.getByLabelText("Render reasoning as markdown"));
+    await waitFor(() => {
+      expect(api.putSetting).toHaveBeenCalledWith("display.render_reasoning_markdown", false);
+    });
+  });
+
   // Task #715: the Timeline max-width slider renders with the default ratio
   // (0.4 → "40%") and persists changes (debounced PUT) to
   // display.timeline_width_ratio.

@@ -89,9 +89,14 @@ vi.mock("@/lib/content-toggle-store", () => ({
 // timeline component tests don't need a full React Query provider setup.
 // resetUserSettings restores the defaults in afterEach.
 const userSettingsState: Record<string, unknown> = {
+  "display.render_reasoning_markdown": true,
   "display.show_timestamp_weekday": true,
 };
+function setUserSettings(settings: Record<string, unknown>) {
+  Object.assign(userSettingsState, settings);
+}
 function resetUserSettings() {
+  userSettingsState["display.render_reasoning_markdown"] = true;
   userSettingsState["display.show_timestamp_weekday"] = true;
 }
 
@@ -212,14 +217,25 @@ describe("ItemView: agent_code + agent_reasoning", () => {
     expect(screen.getByTestId("python-code").getAttribute("data-streaming")).toBe("1");
   });
 
-  it("agent_reasoning renders payload below a 'Thinking' toggle chip", () => {
+  it("agent_reasoning renders markdown by default below a 'Thinking' toggle chip", () => {
     render(
       <TimelineView
         items={[makeItem({ kind: "agent_reasoning", payload: "thinking..." })]}
       />,
     );
-    expect(screen.getByText("thinking...")).toBeTruthy();
+    expect(screen.getByTestId("chat-markdown").textContent).toBe("thinking...");
     expect(screen.getByText("Thinking")).toBeTruthy();
+  });
+
+  it("agent_reasoning renders raw text when markdown rendering is disabled", () => {
+    setUserSettings({ "display.render_reasoning_markdown": false });
+    render(
+      <TimelineView
+        items={[makeItem({ kind: "agent_reasoning", payload: "raw thinking" })]}
+      />,
+    );
+    expect(screen.queryByTestId("chat-markdown")).toBeNull();
+    expect(screen.getByText("raw thinking").tagName).toBe("PRE");
   });
 });
 
@@ -2545,6 +2561,7 @@ describe("turn-collapse (always on — Turns toggle controls expand/collapse)", 
     // Human-readable backbone (the two agent replies) stays visible …
     expect(screen.getAllByTestId("chat-markdown").map((m) => m.textContent)).toEqual([
       "hi",
+      "thinking",
       "done",
     ]);
     // … and the inner code body IS mounted (expanded).

@@ -9,7 +9,24 @@
 // Settings are stored server-side (user_settings DB table) so they survive
 // across browsers and machines.
 
-import { Monitor, Clock, EyeOff, Calendar, Activity, AlertTriangle, Bell, CalendarClock, CircleDot, Languages, Palette, Ruler, Rows3, Eye, MoveHorizontal } from "lucide-react";
+import {
+  Activity,
+  AlertTriangle,
+  Bell,
+  Calendar,
+  CalendarClock,
+  CircleDot,
+  Clock,
+  Eye,
+  EyeOff,
+  Languages,
+  Monitor,
+  MoveHorizontal,
+  Palette,
+  Rows3,
+  Ruler,
+  Sparkles,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
@@ -345,6 +362,13 @@ export default function DisplaySettingsPage() {
           description="A newly-toggled work block starts collapsed instead of open. Flipping this (or the header's Details chip) expands/collapses every work block at once"
           value={!expandRunsDefault}
           onChange={(v) => setSetting("display.expand_runs_mode", !v ? "none" : "all")}
+        />
+        <ToggleRow
+          icon={Sparkles}
+          label="Render reasoning as markdown"
+          description="Render agent reasoning (thinking) content as formatted markdown; off shows the raw text"
+          value={settings["display.render_reasoning_markdown"] as boolean}
+          onChange={(v) => setSetting("display.render_reasoning_markdown", v)}
         />
       </SettingsSection>
 
