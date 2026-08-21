@@ -281,6 +281,92 @@ def _load_catalog() -> dict[str, _ModelPrice]:
 
 _CATALOG = _load_catalog()
 
+
+@dataclass(frozen=True)
+class _PluginPrice:
+    """A plugin-declared price: flat Rates + provenance (no periods/tiers).
+
+    Plugin prices live in plugin code — the plugin is the reviewed object;
+    its freshness signal is ``source_checked_at``. The core catalog keeps its
+    own stricter discipline (effective periods, tiers, windows). Runtime never
+    scrapes either source.
+    """
+
+    rates: Rates
+    source_url: str
+    source_checked_at: str
+
+
+_PLUGIN_PRICES: dict[str, _PluginPrice] = {}
+
+
+def register_plugin_price(
+    model: str,
+    *,
+    cache_miss: float,
+    cache_hit: float,
+    output: float,
+    source_url: str,
+    source_checked_at: str,
+    plugin: str = "<unknown>",
+) -> None:
+    """Register a plugin provider's per-model price (shared/lm/provider_api.py).
+
+    A duplicate model id is an error, whatever the source: the catalog owns
+    core models, plugin prices own plugin models, and a collision is a typo or
+    a rebinding — never a precedence order.
+    """
+    if model in _CATALOG:
+        raise ValueError(
+            f"provider plugin {plugin!r}: model {model!r} is priced by the core "
+            "catalog — plugin pricing cannot override it"
+        )
+    if model in _PLUGIN_PRICES:
+        raise ValueError(
+            f"provider plugin {plugin!r}: model {model!r} already has a plugin "
+            "price registered — duplicate registration"
+        )
+    if not source_url.startswith("https://"):
+        raise ValueError(
+            f"provider plugin {plugin!r}: source_url must be HTTPS, got {source_url!r}"
+        )
+    try:
+        checked_at = date.fromisoformat(source_checked_at)
+    except ValueError as e:
+        raise ValueError(
+            f"provider plugin {plugin!r}: source_checked_at must be YYYY-MM-DD, "
+            f"got {source_checked_at!r}"
+        ) from e
+    if checked_at.isoformat() != source_checked_at:
+        raise ValueError(
+            f"provider plugin {plugin!r}: source_checked_at must be YYYY-MM-DD, "
+            f"got {source_checked_at!r}"
+        )
+    for name, value in (("cache_miss", cache_miss), ("cache_hit", cache_hit), ("output", output)):
+        if not math.isfinite(value) or value < 0:
+            raise ValueError(
+                f"provider plugin {plugin!r}: {model!r} price {name} must be finite and non-negative"
+            )
+    _PLUGIN_PRICES[model] = _PluginPrice(
+        rates=Rates(cache_miss, cache_hit, output),
+        source_url=source_url,
+        source_checked_at=source_checked_at,
+    )
+
+
+def plugin_price_provenance(model: str) -> tuple[str, str] | None:
+    """(source_url, source_checked_at) of a plugin-declared price, or None.
+
+    The observability hook for price drift: a cost event can name which source
+    its rates came from, so a plugin price stale for months is visible instead
+    of silently wrong.
+    """
+    entry = _PLUGIN_PRICES.get(model)
+    if entry is None:
+        return None
+    return (entry.source_url, entry.source_checked_at)
+
+
 # Retired models — their FINAL published rate, frozen at retirement (add-only
 # ledger). A model leaves MODELS when it is replaced (fail-fast on residual
 # config_overlay references), but historical llm_usage rows keep their model
@@ -334,24 +420,31 @@ def rates_at(
                     return tier.rates_at(instant)
             return None
         return None
+    plugin_price = _PLUGIN_PRICES.get(model)
+    if plugin_price is not None:
+        return plugin_price.rates
     retired = RETIRED_MODEL_PRICING.get(model)
     return Rates(*retired) if retired is not None else None
 
 
 class _CurrentPricing(Mapping[str, tuple[float, float, float]]):
-    """Compatibility mapping whose values follow the current UTC schedule."""
+    """Compatibility mapping whose values follow the current UTC schedule.
+
+    Iterates the catalog plus registered plugin prices — a plugin model must
+    be visible wherever MODEL_PRICING is enumerated (e.g. the usage view).
+    """
 
     def __getitem__(self, model: str) -> tuple[float, float, float]:
         selected = rates_at(model)
-        if selected is None or model not in _CATALOG:
+        if selected is None or (model not in _CATALOG and model not in _PLUGIN_PRICES):
             raise KeyError(model)
         return selected.as_tuple()
 
     def __iter__(self) -> Iterator[str]:
-        return iter(_CATALOG)
+        return iter([*_CATALOG, *_PLUGIN_PRICES])
 
     def __len__(self) -> int:
-        return len(_CATALOG)
+        return len(_CATALOG) + len(_PLUGIN_PRICES)
 
 
 MODEL_PRICING: Mapping[str, tuple[float, float, float]] = _CurrentPricing()

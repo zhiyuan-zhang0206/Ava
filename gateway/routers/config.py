@@ -320,7 +320,11 @@ def get_resolved_config(model: str | None = None) -> ResolvedConfigView:
     which fields a spawn/restart overlay may still override.
     """
     from shared.config import per_agent_field_names
+    from shared.lm.factory import ensure_provider_plugins_loaded
     from shared.lm.registry import MODELS, explain_setting, tuning_field_names
+
+    # Plugin models must be registered before the registry lookup below.
+    ensure_provider_plugins_loaded()
 
     target = model or settings.lm.llm_model
     metas = {m.name: m for m in get_config_metadata()}

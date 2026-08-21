@@ -9,12 +9,12 @@ finish/stop reason — each provider keeps its own key + vocabulary:
   google_genai  -> response_metadata["finish_reason"] (STOP / MAX_TOKENS / SAFETY / RECITATION / ...)
 
 `classify_stop` maps any of them to a provider-agnostic StopCategory, dispatched
-on model_provider. Unknown provider raises (fail-fast — add a branch when a new
-provider is introduced in shared/lm/factory.py:build_chat_model).
+on model_provider. Unknown provider raises (fail-fast — a plugin provider
+registers its vocabulary via register_stop_spec; see shared/lm/provider_api.py).
 """
 
 import enum
-from typing import Literal, NamedTuple
+from typing import NamedTuple
 
 from langchain_core.messages import AIMessage
 
@@ -30,42 +30,75 @@ class StopCategory(enum.Enum):
     CORRUPTED = "corrupted"  # terminal reason missing -> protocol drift / lost final frame
 
 
-# model_provider values build_chat_model emits (response_metadata["model_provider"]).
-# Adding a provider in shared/lm/factory.py means adding it here too — keeping this a
-# Literal makes pyright flag a _BY_PROVIDER key that drifts from this set.
-ProviderKey = Literal["anthropic", "openai", "google_genai", "moonshot", "xai"]
-
-
-class _ProviderSpec(NamedTuple):
+# model_provider values the bound client classes emit
+# (response_metadata["model_provider"]). A provider bound through a client class
+# already in this table inherits its entry; a plugin binding a client class
+# whose model_provider string is not here must register one via
+# register_stop_spec (shared/lm/provider_api.py wires it through) or the first
+# turn that ends raises ValueError.
+class StopSpec(NamedTuple):
     """How to read + classify one provider's terminal reason.
 
-    `key` is the response_metadata field that carries it; a value in `normal`
-    is a clean turn end, one in `truncated` is an output-budget cutoff; anything
-    else present is UNEXPECTED; the key missing is CORRUPTED.
+    `provider_key` is the emitted ``model_provider`` value. `key` is the
+    response_metadata field that carries the terminal reason; a value in
+    `normal` is a clean turn end, one in `truncated` is an output-budget
+    cutoff; anything else present is UNEXPECTED; the key missing is CORRUPTED.
     """
 
+    provider_key: str
     key: str
     normal: frozenset[str]
     truncated: frozenset[str]
 
 
-_BY_PROVIDER: dict[ProviderKey, _ProviderSpec] = {
-    "anthropic": _ProviderSpec(
-        "stop_reason", frozenset({"end_turn", "tool_use", "refusal"}), frozenset({"max_tokens"})
+_BY_PROVIDER: dict[str, StopSpec] = {
+    "anthropic": StopSpec(
+        "anthropic",
+        "stop_reason",
+        frozenset({"end_turn", "tool_use", "refusal"}),
+        frozenset({"max_tokens"}),
     ),
-    "openai": _ProviderSpec(
-        "finish_reason", frozenset({"stop", "tool_calls", "function_call"}), frozenset({"length"})
+    "openai": StopSpec(
+        "openai",
+        "finish_reason",
+        frozenset({"stop", "tool_calls", "function_call"}),
+        frozenset({"length"}),
     ),
-    "google_genai": _ProviderSpec("finish_reason", frozenset({"STOP"}), frozenset({"MAX_TOKENS"})),
+    "google_genai": StopSpec(
+        "google_genai", "finish_reason", frozenset({"STOP"}), frozenset({"MAX_TOKENS"})
+    ),
     # OpenAI-compatible providers — ChatMoonshot / ChatXAI both inherit from
     # BaseChatOpenAI and use the same finish_reason vocabulary.
-    "moonshot": _ProviderSpec(
-        "finish_reason", frozenset({"stop", "tool_calls", "function_call"}), frozenset({"length"})
+    "moonshot": StopSpec(
+        "moonshot",
+        "finish_reason",
+        frozenset({"stop", "tool_calls", "function_call"}),
+        frozenset({"length"}),
     ),
-    "xai": _ProviderSpec(
-        "finish_reason", frozenset({"stop", "tool_calls", "function_call"}), frozenset({"length"})
+    "xai": StopSpec(
+        "xai",
+        "finish_reason",
+        frozenset({"stop", "tool_calls", "function_call"}),
+        frozenset({"length"}),
     ),
 }
+
+
+def register_stop_spec(spec: StopSpec, *, plugin: str = "<unknown>") -> None:
+    """Register a plugin provider's terminal-reason vocabulary.
+
+    Key is the ``model_provider`` string the plugin's client class emits. A
+    key already present is an error — two different client classes never
+    share a model_provider string, so a collision is a typo or a rebinding of
+    a core client (which should reuse the existing entry, not re-declare it).
+    """
+    if spec.provider_key in _BY_PROVIDER:
+        raise ValueError(
+            f"provider plugin {plugin!r}: stop vocabulary key {spec.provider_key!r} already "
+            "registered — bind the existing client class's entry instead of "
+            "re-declaring it"
+        )
+    _BY_PROVIDER[spec.provider_key] = spec
 
 
 def classify_stop(final_msg: AIMessage) -> tuple[StopCategory, str | None]:

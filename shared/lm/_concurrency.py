@@ -42,26 +42,43 @@ import asyncio
 import threading
 from collections.abc import AsyncGenerator, Generator, Mapping
 from contextlib import asynccontextmanager, contextmanager
+from functools import lru_cache
+
+
+@lru_cache(maxsize=1)
+def _provider_keys() -> frozenset[str]:
+    from shared.lm.factory import provider_key_map
+
+    return frozenset(prefix.rstrip("-") for prefix in provider_key_map())
 
 
 def known_provider_keys() -> frozenset[str]:
     """The provider keys `AVA_LLM_MAX_CONCURRENT` accepts — DERIVED from
-    `shared/lm/factory.py:_MODEL_KEY_MAP` prefixes (any trailing dash stripped), the
-    model catalog's single source (audit 2026-08-08 P2: the old explicit list
-    drifted in exactly the one direction a config parse cannot catch — factory
-    gained a provider and the limiter silently passed it through).
+    `shared/lm/factory.py:provider_key_map` (core + plugin prefixes, with a
+    trailing dash stripped when present), the model catalog's single source
+    (audit 2026-08-08 P2: the old explicit list drifted in exactly the one
+    direction a config parse cannot catch — factory gained a provider and the
+    limiter silently passed it through). Lazy import + lru_cache:
+    `_concurrency` is a leaf on hot paths and must not pull the model catalog
+    at module scope. The cache is invalidated on every provider-plugin
+    registration (provider_api.register_invalidator), so a plugin provider's
+    key becomes a legal `AVA_LLM_MAX_CONCURRENT` key without a second
+    mechanism.
+    """
+    return _provider_keys()
 
-    Lazy import + lru_cache: `_concurrency` is a leaf on hot paths and must
-    not pull the model catalog at module scope."""
-    from functools import lru_cache
 
-    @lru_cache(maxsize=1)
-    def _keys() -> frozenset[str]:
-        from shared.lm.factory import _MODEL_KEY_MAP
+def _invalidate_known_provider_keys_cache() -> None:
+    """Clear the lru_cache behind `known_provider_keys` — called by
+    provider_api after every plugin registration (registered via
+    register_invalidator)."""
+    _provider_keys.cache_clear()
 
-        return frozenset(prefix.rstrip("-") for prefix in _MODEL_KEY_MAP)
+# Register the invalidator eagerly: `_concurrency` is imported by hot call
+# paths, and provider_api must not import it back (layering + cycle).
+from shared.lm import provider_api  # noqa: E402
 
-    return _keys()
+provider_api.REGISTRY.register_invalidator(_invalidate_known_provider_keys_cache)
 
 
 # A provider Retry-After longer than this is treated as a misconfiguration

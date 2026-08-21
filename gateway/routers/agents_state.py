@@ -37,7 +37,7 @@ from shared.checkpoint import (
 from shared.config import settings
 from shared.db import agent_exists, list_pending_inbounds
 from shared.lm.content import content_blocks
-from shared.lm.factory import model_supports_vision
+from shared.lm.factory import model_supports_vision, vision_capable_provider_names
 from shared.uploads import image_mime_for, parse_upload_url, resolve_upload_path
 
 router = APIRouter()
@@ -97,7 +97,8 @@ def _prepare_message_content(
             raise HTTPException(
                 422,
                 f"agent {agent_id}'s model {model!r} cannot see images — "
-                "switch it to a vision-capable model (claude / gemini / gpt / kimi / grok)",
+                "switch it to a vision-capable model "
+                f"({', '.join(vision_capable_provider_names())})",
             )
         for b in blocks:
             if isinstance(b, ImageUrlContentBlock):
@@ -386,6 +387,10 @@ def get_token_usage(agent_id: int, request: Request) -> TokenUsageResponse:
     from langchain_core.messages import AIMessage
 
     from shared.lm.context_budget import UnknownModelWindowError, resolve_context_budget
+    from shared.lm.factory import ensure_provider_plugins_loaded
+
+    # Plugin models must be registered before the registry lookup below.
+    ensure_provider_plugins_loaded()
 
     # Look up the agent's model from config_overlay (per-agent override) else the
     # cluster default, and resolve its context budget: the window ceiling plus
@@ -477,6 +482,10 @@ def get_context_breakdown(agent_id: int, request: Request) -> ContextBreakdownRe
         latest_input_tokens,
         resolve_context_budget,
     )
+    from shared.lm.factory import ensure_provider_plugins_loaded
+
+    # Plugin models must be registered before the registry lookup below.
+    ensure_provider_plugins_loaded()
 
     def _to_context_section(node: SectionNode) -> ContextSection:
         return ContextSection(
