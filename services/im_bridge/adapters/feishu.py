@@ -151,6 +151,13 @@ class FeishuAdapter(IMAdapter):
             "", ""
         )
         handler = handler.register_p2_im_message_receive_v1(self._on_im_message)
+        try:
+            # Card button callbacks ride the long connection too (official SDK
+            # support); the try keeps older lark-oapi versions working where the
+            # v2 card event is not registered by name.
+            handler = handler.register_p2_card_action_trigger(self._on_card_action)
+        except (AttributeError, TypeError):
+            logger.warning("FeishuAdapter: card.action.trigger not available in lark-oapi")
         handler = handler.build()
         client: Any = lark.ws.Client(  # pyright: ignore[reportUnknownMemberType]
             self._app_id, self._app_secret, event_handler=handler
@@ -184,6 +191,44 @@ class FeishuAdapter(IMAdapter):
             return
         future = asyncio.run_coroutine_threadsafe(self._handle_event(data), main_loop)
         future.add_done_callback(_log_future_error)
+
+    def _on_card_action(self, data: Any) -> None:
+        """Card button callback (ws thread) — the button's value.key is the
+        command; feed it through core as a text message from the operator."""
+        main_loop = self._main_loop
+        if main_loop is None or main_loop.is_closed():
+            return
+        future = asyncio.run_coroutine_threadsafe(self._handle_card_action(data), main_loop)
+        future.add_done_callback(_log_future_error)
+
+    async def _handle_card_action(self, data: Any) -> None:
+        try:
+            action = getattr(data, "event", None)
+            if action is None:
+                return
+            operator = getattr(action, "operator", None)
+            open_id = getattr(operator, "open_id", "") if operator is not None else ""
+            if not open_id:
+                return
+            card_action: Any = getattr(action, "action", None)
+            if card_action is None:
+                return
+            card_value: dict[str, object] = getattr(card_action, "value", None) or {}
+            key = str(card_value.get("key", ""))
+            if not key:
+                return
+            # Button taps are the user pressing a command — same routing as
+            # typed text (commands, notice callbacks, spawn menus).
+            self._last_open_id = open_id
+            await self.core.handle_inbound(
+                InboundMessage(
+                    channel=self.channel,
+                    chat_id=open_id,
+                    text=key,
+                )
+            )
+        except Exception as exc:
+            logger.error("FeishuAdapter: card action failed: {}", exc)
 
     async def _handle_event(self, data: Any) -> None:
         try:
@@ -245,12 +290,16 @@ class FeishuAdapter(IMAdapter):
         buttons: list[tuple[str, str]] | None = None,
         markdown: bool = False,
     ) -> None:
-        """Send text to a user (open_id), segmenting at MAX_SEGMENT_CHARS.
+        """Send a message to a user (open_id).
 
-        ``buttons`` / ``markdown`` are accepted for the shared adapter contract
-        but not rendered on Feishu (plain text only)."""
+        With ``buttons`` this is an interactive card (the button callback
+        value is the command, routed through core.handle_inbound exactly like
+        a typed command); without, plain text, segmenting at
+        MAX_SEGMENT_CHARS (a card must not be segmented — buttons belong to
+        the whole message). ``markdown`` is accepted for the shared contract
+        but not rendered (text messages are plain)."""
 
-        del buttons, markdown  # platform contract: accepted, not rendered
+        del markdown  # platform contract: accepted, not rendered
         if not self._app_id or not self._app_secret:
             raise RuntimeError(
                 "feishu send failed: adapter not configured "
@@ -260,6 +309,9 @@ class FeishuAdapter(IMAdapter):
             raise RuntimeError("feishu send failed: adapter not started")
         if self._rest_client is None:
             self._rest_client = await asyncio.to_thread(self._build_rest_client)
+        if buttons:
+            await asyncio.to_thread(self._send_card, self._rest_client, chat_id, text, buttons)
+            return
         for segment in _segment(text, MAX_SEGMENT_CHARS):
             await asyncio.to_thread(self._send_one, self._rest_client, chat_id, segment)
 
@@ -275,6 +327,57 @@ class FeishuAdapter(IMAdapter):
         if not self._last_open_id:
             raise RuntimeError("feishu: no known user chat yet")
         await self.send(self._last_open_id, text)
+
+    def _send_card(
+        self, client: Any, chat_id: str, text: str, buttons: list[tuple[str, str]]
+    ) -> None:
+        """Send an interactive card whose buttons carry the callback values.
+
+        The card's ``value.key`` is the same command string the button label
+        stands for (e.g. ``/list`` or ``notice:read:7:42``); the card callback
+        handler feeds it back into core.handle_inbound as a text message, so
+        every existing command / notice callback works on Feishu untouched.
+        """
+
+        from lark_oapi.api.im.v1 import (  # pyright: ignore[reportUnknownVariableType]
+            CreateMessageRequest,
+            CreateMessageRequestBody,
+        )
+
+        actions = [
+            {
+                "tag": "button",
+                "text": {"tag": "plain_text", "content": label},
+                "value": {"key": callback},
+            }
+            for label, callback in buttons
+        ]
+        card = {
+            "config": {"wide_screen_mode": True},
+            "header": {
+                "title": {"tag": "plain_text", "content": "Ava"},
+                "template": "blue",
+            },
+            "elements": [
+                {"tag": "div", "text": {"tag": "lark_md", "content": text}},
+                {"tag": "action", "actions": actions},
+            ],
+        }
+        request: Any = (
+            CreateMessageRequest.builder()  # pyright: ignore[reportUnknownMemberType]
+            .receive_id_type("open_id")
+            .request_body(
+                CreateMessageRequestBody.builder()  # pyright: ignore[reportUnknownMemberType]
+                .receive_id(chat_id)
+                .msg_type("interactive")
+                .content(json.dumps(card))
+                .build()
+            )
+            .build()
+        )
+        response = client.im.v1.message.create(request)
+        if not response.success():
+            raise RuntimeError(f"feishu card send failed: code={response.code} msg={response.msg}")
 
     def _send_one(self, client: Any, chat_id: str, text: str) -> None:
         from lark_oapi.api.im.v1 import (  # pyright: ignore[reportUnknownVariableType]

@@ -406,3 +406,59 @@ def test_rest_client_applies_configured_timeout(
     client = adapter._build_rest_client()
     assert client is not None
     assert seen == [7.5]
+
+
+async def test_send_with_buttons_renders_interactive_card(adapter: FeishuAdapter) -> None:
+    """Buttons render as an interactive card; the callback value is the
+    command string so core routing handles the tap unchanged."""
+    adapter._app_id = "cli_x"
+    adapter._app_secret = "secret_x"  # noqa: S105
+    thread = BlockingThread()
+    thread.start()
+    adapter._ws_thread = thread
+    rest = FakeRestClient()
+    adapter._rest_client = rest
+    try:
+        await adapter.send(
+            "ou_user_1",
+            "在线 agent，点一个切换：",
+            buttons=[("405 Ava 负责人", "/switch 405"), ("队列", "notice:list")],
+        )
+    finally:
+        thread.release()
+        thread.join(timeout=2)
+    assert len(rest.created) == 1
+    request = rest.created[0]
+    assert request.request_body.msg_type == "interactive"
+    card = json.loads(request.request_body.content)
+    actions = card["elements"][1]["actions"]
+    assert [a["text"]["content"] for a in actions] == ["405 Ava 负责人", "队列"]
+    assert [a["value"]["key"] for a in actions] == ["/switch 405", "notice:list"]
+
+
+async def test_card_action_forwards_command_to_core(adapter: FeishuAdapter) -> None:
+    """A card button tap lands in core as the command text from the operator."""
+    event = SimpleNamespace(
+        event=SimpleNamespace(
+            operator=SimpleNamespace(open_id="ou_user_1"),
+            action=SimpleNamespace(value={"key": "/switch 405"}),
+        )
+    )
+    await adapter._handle_card_action(event)
+    assert len(adapter.core.received) == 1
+    message = adapter.core.received[0]
+    assert message.channel == "feishu"
+    assert message.chat_id == "ou_user_1"
+    assert message.text == "/switch 405"
+    assert adapter._last_open_id == "ou_user_1"
+
+
+async def test_card_action_missing_key_ignored(adapter: FeishuAdapter) -> None:
+    event = SimpleNamespace(
+        event=SimpleNamespace(
+            operator=SimpleNamespace(open_id="ou_user_1"),
+            action=SimpleNamespace(value={}),
+        )
+    )
+    await adapter._handle_card_action(event)
+    assert adapter.core.received == []
