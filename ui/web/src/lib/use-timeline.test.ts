@@ -58,6 +58,7 @@ vi.mock("./api", () => ({
 // per-active-agent stream, so we stub useAgentEventStream (not useEventStream).
 let currentEventHandler: ((ev: SystemEvent) => void) | null = null;
 let currentConnectionHandler: ((ev: ConnectionEvent) => void) | null = null;
+let currentBatchHandler: ((evs: SystemEvent[]) => void) | null = null;
 vi.mock("./useEventStream", () => ({
   // Both Providers pass children through — when useTimeline calls
   // useAgentEventStream, we stub the handlers into module-level vars
@@ -67,9 +68,11 @@ vi.mock("./useEventStream", () => ({
   useAgentEventStream: (
     onEvent: (ev: SystemEvent) => void,
     onConnectionEvent: (ev: ConnectionEvent) => void,
+    onEventBatch?: (evs: SystemEvent[]) => void,
   ) => {
     currentEventHandler = onEvent;
     currentConnectionHandler = onConnectionEvent;
+    currentBatchHandler = onEventBatch ?? null;
   },
 }));
 
@@ -79,6 +82,15 @@ function pushEvent(ev: SystemEvent): void {
   }
   act(() => {
     currentEventHandler!(ev);
+  });
+}
+
+function pushBatch(evs: SystemEvent[]): void {
+  if (!currentBatchHandler) {
+    throw new Error("useTimeline did not pass a batch handler");
+  }
+  act(() => {
+    currentBatchHandler!(evs);
   });
 }
 
@@ -134,6 +146,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   currentEventHandler = null;
   currentConnectionHandler = null;
+  currentBatchHandler = null;
   // Default getTimeline returns empty; each test resets as needed
   vi.mocked(api.getTimeline).mockResolvedValue(tlResp([]));
   // Restore any store actions a prior test swapped for spies, so switchThread /
@@ -158,6 +171,7 @@ afterEach(() => {
   cleanup();
   currentEventHandler = null;
   currentConnectionHandler = null;
+  currentBatchHandler = null;
 });
 
 
@@ -1306,5 +1320,37 @@ describe("useTimeline data effect agentId==null guard (L135)", () => {
     // agentId==null should short-circuit → reloadSnapshot not called.
     // After mutation: short-circuit defeated → reloadSnapshot called.
     expect(reloadSpy).not.toHaveBeenCalled();
+  });
+});
+
+
+describe("useTimeline SSE batch path", () => {
+  it("a frame batch folds in one store update (same visible result as per-event)", async () => {
+    const showError = vi.fn();
+    vi.mocked(api.getTimeline).mockResolvedValue(tlResp([]));
+    const { result } = renderHook(() => useTimeline(42, showError), { wrapper });
+    await waitFor(() => expect(api.getTimeline).toHaveBeenCalled());
+    // Settle the initial snapshot fold (reloadSnapshot fires when the GET
+    // resolves) so the listener only observes the batch's own set().
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const listener = vi.fn();
+    const unsub = useTimelineStore.subscribe(listener);
+    pushBatch([
+      { role: "code_start", agent_id: 42, item_id: "7.0" },
+      { role: "code_delta", agent_id: 42, item_id: "7.0", content: "pri" },
+      { role: "code_delta", agent_id: 42, item_id: "7.0", content: "nt" },
+      { role: "token_usage", agent_id: 42, input_tokens: 500, output_tokens: 10 },
+    ]);
+    unsub();
+
+    // The whole frame = one store notification (token_usage is
+    // useTokenUsage's — filtered out of the timeline batch).
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(result.current.items.map((i) => i.item_id)).toEqual(["7.0"]);
+    expect(result.current.items[0].payload).toBe("print");
+    expect(result.current.streamingCode).toBe(true);
   });
 });

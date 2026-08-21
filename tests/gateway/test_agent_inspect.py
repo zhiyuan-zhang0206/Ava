@@ -30,7 +30,7 @@ from fastapi.testclient import TestClient
 from gateway import loki_events
 from gateway.app import app
 from gateway.loki_events import _weighted_quantile
-from gateway.routers import _agent_cost
+from gateway.routers import _agent_cost, agent_inspect
 from shared.config import settings
 
 
@@ -220,13 +220,14 @@ class _FakeLoki:
 @pytest.fixture(autouse=True)
 def fake_loki(monkeypatch: pytest.MonkeyPatch) -> _FakeLoki:
     """Route all loki_events calls through an in-memory fake; each test gets
-    an empty store and adds its own rows. The cost TTL cache is cleared on
-    both sides so no test serves another test's cached AgentCost."""
+    an empty store and adds its own rows. The cost + inspect TTL caches are
+    cleared so no test serves another test's cached aggregates."""
     fake = _FakeLoki()
     monkeypatch.setattr(loki_events, "query_events", fake.query_events)
     monkeypatch.setattr(loki_events, "count_events", fake.count_events)
     monkeypatch.setattr(loki_events, "attribute_aggregate", fake.attribute_aggregate)
     _agent_cost.cache_clear()
+    agent_inspect.cache_clear()
     return fake
 
 
@@ -1609,3 +1610,86 @@ def test_inspect_activity_resurrect_without_terminate_windows_clip(
         act = client.get(f"/api/agents/{aid}/inspect", params={"hours": 1}).json()["activity"]
     # In the 1h window: [now-1h, resurrect] (0.5h) + [resurrect, now] (0.5h) = 1h.
     assert act["alive_seconds"] == pytest.approx(3600, abs=30)  # pyright: ignore[reportUnknownMemberType]
+
+
+# ── Response-cache discipline (the panel refetches in bursts) ─────────────────
+
+
+def test_inspect_response_cache_absorbs_repeat_burst(
+    db_conn: psycopg.Connection, fake_loki: _FakeLoki
+) -> None:
+    """A repeat call within the TTL serves the cached aggregates — the panel's
+    refetch bursts (open + notice SSE invalidation + 60s interval) must not
+    re-run the Loki fan-out per request. The notice is NOT cached: it must
+    reflect a change made after the first call immediately."""
+    aid = _insert_agent(db_conn)
+    fake_loki.add(event="turn_end", agent_id=aid, payload={"duration_seconds": 2.0, "ok": True})
+    db_conn.commit()
+    with TestClient(app) as client:
+        first = client.get(f"/api/agents/{aid}/inspect").json()
+        assert first["stats"]["turn_total"] == 1
+
+        # More events land AFTER the first call; a cached serve must not see them.
+        fake_loki.add(event="turn_end", agent_id=aid, payload={"duration_seconds": 4.0, "ok": True})
+        fake_loki.add(event="turn_end", agent_id=aid, payload={"duration_seconds": 6.0, "ok": True})
+        second = client.get(f"/api/agents/{aid}/inspect").json()
+        assert second["stats"]["turn_total"] == 1  # cached, pre-burst view
+
+        # ... but a newly opened notice appears on the very next call.
+        db_conn.cursor().execute(
+            "INSERT INTO agent_notices (agent_id, local_id, title, content, priority, require_response, blocking) "
+            "VALUES (%s, COALESCE((SELECT MAX(local_id) FROM agent_notices WHERE agent_id = %s), -1) + 1, "
+            "'q', 'q', 'P2', true, false)",
+            (aid, aid),
+        )
+        db_conn.commit()
+        third = client.get(f"/api/agents/{aid}/inspect").json()
+        assert third["notice"] is not None
+        assert third["notice"]["title"] == "q"
+
+
+def test_inspect_response_cache_keyed_by_window(
+    db_conn: psycopg.Connection, fake_loki: _FakeLoki
+) -> None:
+    """The cache key includes the window: hours=1 and whole-life are separate
+    entries, so a burst on one window never serves the other's data."""
+    aid = _insert_agent(db_conn)
+    fake_loki.add(event="turn_end", agent_id=aid, payload={"duration_seconds": 1.0, "ok": True})
+    db_conn.commit()
+    with TestClient(app) as client:
+        windowed = client.get(f"/api/agents/{aid}/inspect", params={"hours": 1}).json()
+        assert windowed["stats"]["turn_total"] == 1
+
+        # An event older than the 1h window lands after the windowed call.
+        fake_loki.add(
+            event="turn_end",
+            agent_id=aid,
+            payload={"duration_seconds": 9.0, "ok": True},
+            ts_offset_hours=3,
+        )
+        # Whole-life is a different cache entry: it must see the old event.
+        whole = client.get(f"/api/agents/{aid}/inspect").json()
+        assert whole["stats"]["turn_total"] == 2
+        # The windowed entry is still cached from before: no new event seen.
+        windowed_again = client.get(f"/api/agents/{aid}/inspect", params={"hours": 1}).json()
+        assert windowed_again["stats"]["turn_total"] == 1
+
+
+def test_inspect_response_cache_expires(
+    db_conn: psycopg.Connection,
+    fake_loki: _FakeLoki,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """After the TTL the next call re-runs the fan-out and sees new events."""
+    # Zero TTL → every call is a miss.
+    monkeypatch.setattr(agent_inspect, "_INSPECT_CACHE_TTL_S", 0.0)
+    aid = _insert_agent(db_conn)
+    fake_loki.add(event="turn_end", agent_id=aid, payload={"duration_seconds": 2.0, "ok": True})
+    db_conn.commit()
+    with TestClient(app) as client:
+        first = client.get(f"/api/agents/{aid}/inspect").json()
+        assert first["stats"]["turn_total"] == 1
+
+        fake_loki.add(event="turn_end", agent_id=aid, payload={"duration_seconds": 4.0, "ok": True})
+        second = client.get(f"/api/agents/{aid}/inspect").json()
+        assert second["stats"]["turn_total"] == 2

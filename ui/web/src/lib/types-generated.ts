@@ -874,7 +874,14 @@ export interface paths {
          *     `shells` + `config_overlay` + `heartbeat` are always
          *     current, independent of the window. 404 if the agent is unknown (no
          *     agents_meta row). `config_overlay` is the spawn-time override map — `{}` when
-         *     the agent runs on cluster defaults (the column is NULL). `shells` is probed
+         *     the agent runs on cluster defaults (the column is NULL).
+         *
+         *     Latency discipline: the event-history sections run on parallel workers
+         *     (one Loki fan-out per section, overlapped), and the assembled rows ride a
+         *     10s TTL cache keyed by (agent_id, hours, since_compact) — the panel
+         *     refetches in bursts (open, notice SSE events, 60s interval), and a burst
+         *     must not re-run the ~20-query fan-out per request. `notice` and `shells`
+         *     are fetched fresh on every call and never ride the cache. `shells` is probed
          *     on the agent's own machine via the `shell_probe` cluster op (the gateway
          *     never runs sessions itself; every machine — its own included — is dialed at its
          *     registered ops URL), so a split deployment reflects each agent's runner and

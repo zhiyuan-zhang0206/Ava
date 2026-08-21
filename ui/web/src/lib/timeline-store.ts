@@ -139,6 +139,15 @@ export interface TimelineState {
   /** SSE business-event handler — single entry point, replaces scattered setState calls */
   processSseEvent: (ev: SystemEvent) => void;
 
+  /** SSE frame-batch entry point. Folds every event of ONE SSE frame inside a
+   * single set() — one store notification + one render per frame instead of
+   * one per event. The all-events broadcast (`/api/system/all`) delivers every
+   * agent's events batched at up to 25 frames/s; when the fleet is busy (the
+   * moment a user opens a live shell view of an active agent) the per-event
+   * path turned each burst into a render/layout storm. Same reducer as
+   * `processSseEvent` — batch and per-event paths can never diverge. */
+  processSseEventBatch: (events: SystemEvent[]) => void;
+
   /** SSE connection event handler — banner / disconnect cleanup */
   processConnectionEvent: (ev: { type: ConnectionState }) => void;
 
@@ -218,7 +227,158 @@ function evictLruThreads(threads: Map<number, ThreadTimelineState>): void {
 }
 
 
-export const useTimelineStore = create<TimelineState>()((set) => ({
+/**
+ * The per-event reducer shared by `processSseEvent` and
+ * `processSseEventBatch` — one event, one state, one partial to merge
+ * ({} = nothing changed). Pure: both entry points route through it, so the
+ * batch path can never diverge from the per-event path.
+ */
+function applySseEvent(state: TimelineState, ev: SystemEvent): Partial<TimelineState> {
+  // token_usage is a thread's own concern but NOT part of ThreadTimelineState
+  // — the token fields are cached per-thread in React Query and mirrored to
+  // the top-level active-thread fields. Write the active thread's token
+  // fields; a parked thread's token event is dropped (its value is restored
+  // from React Query on switch-back). agent_id=0 is a system reset (passes
+  // isEventForThread), which writes tokenUsage=0 on the active thread as before.
+  if (ev.role === "token_usage") {
+    return isEventForThread(ev, state.activeThreadId)
+      ? { tokenUsage: ev.input_tokens, reasoningTokens: ev.reasoning_tokens ?? 0 }
+      : {};
+  }
+
+  // ACTIVE thread (or agent_id=0 system signal): fold into the top-level
+  // fields. This is the rendered thread, so its updates drive the UI.
+  if (isEventForThread(ev, state.activeThreadId)) {
+    // compact_done = the whole history was rewritten (shrink). keep-all
+    // merging would resurrect pre-compact items, and a GET fired during
+    // the window may read a lagging pre-compact checkpoint — so arm the
+    // reset window: the first NON-EMPTY timeline_snapshot (SSE ordering
+    // guarantees it is post-compact — the rebuilt head renders at the
+    // next node enter) replaces the items wholesale. The pre-compact
+    // items stay visible until that swap: clearing them here made the
+    // context panel flash blank for the whole window (sub-second locally,
+    // seconds on remote machines — the "context UI doesn't refresh after
+    // compact" report).
+    if (ev.role === "compact_done") {
+      return {
+        streamingIds: new Set(),
+        // Old foldEvent treated compact_done as a code-end (streamingCode
+        // false, turnActive untouched); preserve that flag behavior.
+        streamingCode: false,
+        resetPending: true,
+      };
+    }
+    // First snapshot inside the reset window: overall replace, not merge.
+    // The backend publishes a full-window snapshot on the post-compact
+    // node enter (its cursor is past the shrunk history), so this is a
+    // complete, race-free (in-memory) view of the new history. An EMPTY
+    // snapshot (a wiped-but-not-yet-rebuilt history, e.g. the
+    // post-REMOVE_ALL init_context enter on an older backend) is skipped
+    // — replacing with [] would blank the panel before the real history
+    // arrives.
+    if (state.resetPending && ev.role === "timeline_snapshot") {
+      const snapItems = ev.items as unknown as BackendTimelineItem[];
+      if (snapItems.length === 0) return {};
+      return {
+        items: snapItems,
+        streamingIds: new Set(),
+        resetPending: false,
+      };
+    }
+    const next = foldEvent(
+      {
+        items: state.items,
+        streamingIds: state.streamingIds,
+        streamingCode: state.streamingCode,
+        turnActive: state.turnActive,
+        hasMoreOlder: state.hasMoreOlder,
+        olderFetchCount: state.olderFetchCount,
+        // The active thread's reset window state rides in the fold input
+        // so a parked fold inside foldEvent keeps it (foldEvent spreads t).
+        resetPending: state.resetPending,
+      },
+      ev,
+    );
+    // Unchanged fields keep their references (foldEvent carries them via
+    // ...t / no-op reducers), so per-field Zustand selectors short-circuit.
+    return {
+      items: next.items,
+      streamingIds: next.streamingIds,
+      streamingCode: next.streamingCode,
+      turnActive: next.turnActive,
+    };
+  }
+
+  // PARKED (inactive) thread with a live bucket: fold in the background so
+  // switching back is instant (R3). Non-parked, non-active threads have no
+  // bucket → drop (unchanged from the old isEventForThread gate). This
+  // never re-renders the active view: no render selector reads `threads`.
+  const parked = state.threads.get(ev.agent_id);
+  const threads = new Map(state.threads);
+  if (ev.role === "compact_done") {
+    // compact_done rewrites the whole history (a shrink); foldEvent is
+    // built for growth and can't reconcile it. Mark the thread so a
+    // switch-back seeds cold with the reset window armed (the React Query
+    // cache may hold the lagging pre-compact snapshot) — the first
+    // post-compact snapshot then replaces wholesale. A live bucket keeps
+    // its items (still visible on switch-back) with the flag set; a
+    // bucketless thread is covered by the marker alone.
+    const compactedThreadIds = new Set(state.compactedThreadIds);
+    compactedThreadIds.add(ev.agent_id);
+    if (parked) {
+      threads.set(ev.agent_id, {
+        ...parked,
+        streamingIds: new Set(),
+        streamingCode: false,
+        resetPending: true,
+      });
+    }
+    return { threads, compactedThreadIds };
+  }
+  if (parked) {
+    // Parked reset window: same wholesale-replace rule as the active
+    // thread — the first non-empty post-compact snapshot replaces the
+    // bucket and clears the marker.
+    if (parked.resetPending && ev.role === "timeline_snapshot") {
+      const snapItems = ev.items as unknown as BackendTimelineItem[];
+      if (snapItems.length === 0) return {};
+      const compactedThreadIds = new Set(state.compactedThreadIds);
+      compactedThreadIds.delete(ev.agent_id);
+      threads.set(ev.agent_id, {
+        ...parked,
+        items: snapItems,
+        streamingIds: new Set(),
+        resetPending: false,
+      });
+      return { threads, compactedThreadIds };
+    }
+    threads.set(ev.agent_id, foldEvent(parked, ev));
+  }
+  // Bucketless compact marker: compact_done arms the reset window for a
+  // thread with NO parked bucket via `compactedThreadIds` (a later
+  // switch-back seeds cold + resetPending, so the lagging pre-compact
+  // cache cannot be keep-merged back in). The reset window's whole job is
+  // done by the FIRST timeline_snapshot after compact_done — SSE order
+  // guarantees it is the full post-compact snapshot (the backend emits it
+  // from in-memory state on the post-compact node enter). For a parked
+  // thread with a bucket that snapshot is folded into the bucket and
+  // clears the window there; for a BUCKLESS thread it is dropped, so the
+  // marker would otherwise survive until a switch-back and arm a STALE
+  // window: the HTTP snapshot is dropped inside it, and the first
+  // *incremental* snapshot (the full one already passed, the agent may
+  // still be streaming) replaces the fresh seed wholesale — the timeline
+  // ends up showing only the tail ("只显示最后一个 detail block，之前
+  // 所有消息不触发加载", Task #994). Consume the marker here: the full
+  // snapshot happened, nothing is left to protect.
+  if (ev.role === "timeline_snapshot" && state.compactedThreadIds.has(ev.agent_id)) {
+    const nextCompacted = new Set(state.compactedThreadIds);
+    nextCompacted.delete(ev.agent_id);
+    return { threads, compactedThreadIds: nextCompacted };
+  }
+  return { threads };
+}
+
+export const useTimelineStore = create<TimelineState>()((set, get) => ({
   items: [],
   streamingCode: false,
   turnActive: false,
@@ -245,156 +405,26 @@ export const useTimelineStore = create<TimelineState>()((set) => ({
     // Query cache), not the timeline. The root fold (the single
     // cache writer) handles them; the timeline store ignores them outright.
     if (ev.role === "agent_spawned" || ev.role === "agent_updated") return;
+    set((s) => applySseEvent(s, ev));
+  },
 
-    // token_usage is a thread's own concern but NOT part of ThreadTimelineState
-    // — the token fields are cached per-thread in React Query and mirrored to
-    // the top-level active-thread fields. Write the active thread's token
-    // fields; a parked thread's token event is dropped (its value is restored
-    // from React Query on switch-back). agent_id=0 is a system reset (passes
-    // isEventForThread), which writes tokenUsage=0 on the active thread as before.
-    if (ev.role === "token_usage") {
-      set((s) =>
-        isEventForThread(ev, s.activeThreadId)
-          ? { tokenUsage: ev.input_tokens, reasoningTokens: ev.reasoning_tokens ?? 0 }
-          : {},
-      );
-      return;
+  processSseEventBatch: (events) => {
+    let changed = false;
+    const merged: Partial<TimelineState> = {};
+    let working = get();
+    for (const ev of events) {
+      if (ev.role === "agent_spawned" || ev.role === "agent_updated") continue;
+      const patch = applySseEvent(working, ev);
+      if (Object.keys(patch).length === 0) continue;
+      changed = true;
+      Object.assign(merged, patch);
+      working = { ...working, ...patch };
     }
-
-    // All state changes happen in a single set() — avoids high-rate SSE
-    // (code_delta one per chunk) triggering cascading renders and stalling.
-    set((s) => {
-      // ACTIVE thread (or agent_id=0 system signal): fold into the top-level
-      // fields. This is the rendered thread, so its updates drive the UI.
-      if (isEventForThread(ev, s.activeThreadId)) {
-        // compact_done = the whole history was rewritten (shrink). keep-all
-        // merging would resurrect pre-compact items, and a GET fired during
-        // the window may read a lagging pre-compact checkpoint — so arm the
-        // reset window: the first NON-EMPTY timeline_snapshot (SSE ordering
-        // guarantees it is post-compact — the rebuilt head renders at the
-        // next node enter) replaces the items wholesale. The pre-compact
-        // items stay visible until that swap: clearing them here made the
-        // context panel flash blank for the whole window (sub-second locally,
-        // seconds on remote machines — the "context UI doesn't refresh after
-        // compact" report).
-        if (ev.role === "compact_done") {
-          return {
-            streamingIds: new Set(),
-            // Old foldEvent treated compact_done as a code-end (streamingCode
-            // false, turnActive untouched); preserve that flag behavior.
-            streamingCode: false,
-            resetPending: true,
-          };
-        }
-        // First snapshot inside the reset window: overall replace, not merge.
-        // The backend publishes a full-window snapshot on the post-compact
-        // node enter (its cursor is past the shrunk history), so this is a
-        // complete, race-free (in-memory) view of the new history. An EMPTY
-        // snapshot (a wiped-but-not-yet-rebuilt history, e.g. the
-        // post-REMOVE_ALL init_context enter on an older backend) is skipped
-        // — replacing with [] would blank the panel before the real history
-        // arrives.
-        if (s.resetPending && ev.role === "timeline_snapshot") {
-          const snapItems = ev.items as unknown as BackendTimelineItem[];
-          if (snapItems.length === 0) return {};
-          return {
-            items: snapItems,
-            streamingIds: new Set(),
-            resetPending: false,
-          };
-        }
-        const next = foldEvent(
-          {
-            items: s.items,
-            streamingIds: s.streamingIds,
-            streamingCode: s.streamingCode,
-            turnActive: s.turnActive,
-            hasMoreOlder: s.hasMoreOlder,
-            olderFetchCount: s.olderFetchCount,
-            // The active thread's reset window state rides in the fold input
-            // so a parked fold inside foldEvent keeps it (foldEvent spreads t).
-            resetPending: s.resetPending,
-          },
-          ev,
-        );
-        // Unchanged fields keep their references (foldEvent carries them via
-        // ...t / no-op reducers), so per-field Zustand selectors short-circuit.
-        return {
-          items: next.items,
-          streamingIds: next.streamingIds,
-          streamingCode: next.streamingCode,
-          turnActive: next.turnActive,
-        };
-      }
-
-      // PARKED (inactive) thread with a live bucket: fold in the background so
-      // switching back is instant (R3). Non-parked, non-active threads have no
-      // bucket → drop (unchanged from the old isEventForThread gate). This
-      // never re-renders the active view: no render selector reads `threads`.
-      const parked = s.threads.get(ev.agent_id);
-      const threads = new Map(s.threads);
-      if (ev.role === "compact_done") {
-        // compact_done rewrites the whole history (a shrink); foldEvent is
-        // built for growth and can't reconcile it. Mark the thread so a
-        // switch-back seeds cold with the reset window armed (the React Query
-        // cache may hold the lagging pre-compact snapshot) — the first
-        // post-compact snapshot then replaces wholesale. A live bucket keeps
-        // its items (still visible on switch-back) with the flag set; a
-        // bucketless thread is covered by the marker alone.
-        const compactedThreadIds = new Set(s.compactedThreadIds);
-        compactedThreadIds.add(ev.agent_id);
-        if (parked) {
-          threads.set(ev.agent_id, {
-            ...parked,
-            streamingIds: new Set(),
-            streamingCode: false,
-            resetPending: true,
-          });
-        }
-        return { threads, compactedThreadIds };
-      }
-      if (parked) {
-        // Parked reset window: same wholesale-replace rule as the active
-        // thread — the first non-empty post-compact snapshot replaces the
-        // bucket and clears the marker.
-        if (parked.resetPending && ev.role === "timeline_snapshot") {
-          const snapItems = ev.items as unknown as BackendTimelineItem[];
-          if (snapItems.length === 0) return {};
-          const compactedThreadIds = new Set(s.compactedThreadIds);
-          compactedThreadIds.delete(ev.agent_id);
-          threads.set(ev.agent_id, {
-            ...parked,
-            items: snapItems,
-            streamingIds: new Set(),
-            resetPending: false,
-          });
-          return { threads, compactedThreadIds };
-        }
-        threads.set(ev.agent_id, foldEvent(parked, ev));
-      }
-      // Bucketless compact marker: compact_done arms the reset window for a
-      // thread with NO parked bucket via `compactedThreadIds` (a later
-      // switch-back seeds cold + resetPending, so the lagging pre-compact
-      // cache cannot be keep-merged back in). The reset window's whole job is
-      // done by the FIRST timeline_snapshot after compact_done — SSE order
-      // guarantees it is the full post-compact snapshot (the backend emits it
-      // from in-memory state on the post-compact node enter). For a parked
-      // thread with a bucket that snapshot is folded into the bucket and
-      // clears the window there; for a BUCKLESS thread it is dropped, so the
-      // marker would otherwise survive until a switch-back and arm a STALE
-      // window: the HTTP snapshot is dropped inside it, and the first
-      // *incremental* snapshot (the full one already passed, the agent may
-      // still be streaming) replaces the fresh seed wholesale — the timeline
-      // ends up showing only the tail ("只显示最后一个 detail block，之前
-      // 所有消息不触发加载", Task #994). Consume the marker here: the full
-      // snapshot happened, nothing is left to protect.
-      if (ev.role === "timeline_snapshot" && s.compactedThreadIds.has(ev.agent_id)) {
-        const nextCompacted = new Set(s.compactedThreadIds);
-        nextCompacted.delete(ev.agent_id);
-        return { threads, compactedThreadIds: nextCompacted };
-      }
-      return { threads };
-    });
+    if (!changed) return;
+    // One set() per frame: every event's fold already applied to `working`;
+    // `merged` carries the cumulative patch. Synchronous — no other set()
+    // can interleave between get() above and this commit.
+    set(merged);
   },
 
   processConnectionEvent: (ev) => {

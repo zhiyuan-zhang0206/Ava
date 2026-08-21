@@ -76,12 +76,22 @@ export type ConnectionEvent =
 interface Subscriber {
   system: (ev: SystemEvent) => void;
   conn: (ev: ConnectionEvent) => void;
+  /** Frame-batch delivery (optional): when present, ONE SSE frame's events
+   * arrive in a single call instead of one `system` call per event. The
+   * high-rate all-events broadcast carries every agent's deltas batched at
+   * up to 25 frames/s; a batch subscriber folds a whole frame inside one
+   * store update — one notification + one render per frame instead of one
+   * per event (the storm that janked the home page while busy agents
+   * streamed). Subscribers without it keep the per-event contract. When
+   * present, `system` is not called for that subscriber. */
+  systemBatch?: (events: SystemEvent[]) => void;
 }
 
 interface EventStreamContextValue {
   subscribe: (
     onSystem: (ev: SystemEvent) => void,
     onConnection: (ev: ConnectionEvent) => void,
+    onSystemBatch?: (events: SystemEvent[]) => void,
   ) => () => void;
 }
 
@@ -237,13 +247,20 @@ function useSseConnection(
 
       // Fan-out (outside the try, per-subscriber isolated): one subscriber's
       // bug must not starve the others of this frame or of future frames.
-      for (const event of events) {
-        for (const sub of subscribersRef.current) {
-          try {
-            sub.system(event);
-          } catch (subErr) {
-            console.error("[useSseConnection] subscriber threw while folding an event", subErr);
+      // Batch subscribers receive the whole frame in one call; the rest get
+      // the per-event contract. A throwing subscriber drops the remainder of
+      // THIS frame for itself only (its own bug) — never for anyone else.
+      for (const sub of subscribersRef.current) {
+        try {
+          if (sub.systemBatch) {
+            sub.systemBatch(events);
+          } else {
+            for (const event of events) {
+              sub.system(event);
+            }
           }
+        } catch (subErr) {
+          console.error("[useSseConnection] subscriber threw while folding an event", subErr);
         }
       }
     };
@@ -291,8 +308,12 @@ function useSubscribe(
   subscribersRef: React.RefObject<Set<Subscriber>>,
 ): EventStreamContextValue["subscribe"] {
   return useCallback(
-    (onSystem, onConnection) => {
-      const handler: Subscriber = { system: onSystem, conn: onConnection };
+    (onSystem, onConnection, onSystemBatch) => {
+      const handler: Subscriber = {
+        system: onSystem,
+        conn: onConnection,
+        systemBatch: onSystemBatch,
+      };
       subscribersRef.current.add(handler);
       return () => {
         subscribersRef.current.delete(handler);
@@ -308,13 +329,14 @@ function useSubscribeEffect(
   providerName: string,
   onSystemEvent: (event: SystemEvent) => void,
   onConnectionEvent: (ev: ConnectionEvent) => void,
+  onSystemBatch?: (events: SystemEvent[]) => void,
 ): void {
   if (!ctx) {
     throw new Error(`${hookName} must be used inside <${providerName}>`);
   }
   useEffect(() => {
-    return ctx.subscribe(onSystemEvent, onConnectionEvent);
-  }, [ctx, onSystemEvent, onConnectionEvent]);
+    return ctx.subscribe(onSystemEvent, onConnectionEvent, onSystemBatch);
+  }, [ctx, onSystemEvent, onConnectionEvent, onSystemBatch]);
 }
 
 // ---------------------------------------------------------------------------
@@ -435,6 +457,7 @@ export function AgentEventStreamProvider({
 export function useAgentEventStream(
   onSystemEvent: (event: SystemEvent) => void,
   onConnectionEvent: (ev: ConnectionEvent) => void,
+  onSystemEventBatch?: (events: SystemEvent[]) => void,
 ): void {
   const ctx = useContext(AgentEventStreamContext);
   useSubscribeEffect(
@@ -443,5 +466,6 @@ export function useAgentEventStream(
     "AgentEventStreamProvider",
     onSystemEvent,
     onConnectionEvent,
+    onSystemEventBatch,
   );
 }

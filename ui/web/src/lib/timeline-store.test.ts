@@ -12,7 +12,7 @@ import { act } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useTimelineStore } from "./timeline-store";
-import type { BackendTimelineItem, SystemEvent } from "./types";
+import type { AgentRow, BackendTimelineItem, SystemEvent } from "./types";
 
 // -- helpers ───────────────────────────────────────────────────────────────
 
@@ -1467,5 +1467,146 @@ describe("spawn scenario: first snapshot carries 0.0 (#615)", () => {
     const s = useTimelineStore.getState();
     expect(s.items.map((i) => i.item_id)).toEqual(["0.0"]);
     expect(s.items[0].payload).toBe("PROMPT");
+  });
+});
+
+describe("processSseEventBatch — frame-level folding", () => {
+  /** Minimal AgentRow for sidebar-owned roles the batch must skip. */
+  function agentRow(id: number): AgentRow {
+    return {
+      agent_id: id,
+      label: null,
+      status: "running",
+      spawner: "user",
+      fork_source_agent_id: null,
+      fork_source_checkpoint_id: null,
+      pid: null,
+      spawned_at: "2026-01-01T00:00:00Z",
+      started_at: "2026-01-01T00:00:01Z",
+      machine: "test",
+      last_active_at: "2026-01-01T00:00:01Z",
+      last_inbound_at: "2026-01-01T00:00:01Z",
+      notices_awaiting_response: [],
+      unread_notice_count: 0,
+      heartbeat_paused_until: null,
+      liveness_state: "online",
+      last_probe_at: null,
+    };
+  }
+  it("folds a whole frame's deltas in ONE store notification, in arrival order", () => {
+    const listener = vi.fn();
+    const unsub = useTimelineStore.subscribe(listener);
+    act(() => {
+      useTimelineStore.getState().processSseEventBatch([
+        { role: "chat_start", agent_id: 42, item_id: "1.0" },
+        { role: "chat_delta", agent_id: 42, item_id: "1.0", content: "he" },
+        { role: "chat_delta", agent_id: 42, item_id: "1.0", content: "llo" },
+        { role: "llm_done", agent_id: 42 },
+      ]);
+    });
+    unsub();
+    const s = useTimelineStore.getState();
+    // One set() for the whole frame — the listener fired exactly once.
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(s.items).toHaveLength(1);
+    expect(s.items[0].item_id).toBe("1.0");
+    expect(s.items[0].payload).toBe("hello");
+    expect(s.turnActive).toBe(false); // chat_start then llm_done within the frame
+  });
+
+  it("one set() per frame — subscriber notified once for a 4-event burst", () => {
+    const listener = vi.fn();
+    const unsub = useTimelineStore.subscribe(listener);
+    act(() => {
+      useTimelineStore.getState().processSseEventBatch([
+        { role: "code_start", agent_id: 42, item_id: "2.0" },
+        { role: "code_delta", agent_id: 42, item_id: "2.0", content: "x" },
+        { role: "code_delta", agent_id: 42, item_id: "2.0", content: "y" },
+        { role: "exec_start", agent_id: 42, item_id: "2.1" },
+      ]);
+    });
+    unsub();
+    expect(listener).toHaveBeenCalledTimes(1);
+    const s = useTimelineStore.getState();
+    expect(s.items.map((i) => i.item_id)).toEqual(["2.0", "2.1"]);
+  });
+
+  it("empty batch and no-op batches never notify", () => {
+    const listener = vi.fn();
+    const unsub = useTimelineStore.subscribe(listener);
+    act(() => {
+      useTimelineStore.getState().processSseEventBatch([]);
+      // agent_spawned / agent_updated are sidebar-owned — skipped entirely.
+      useTimelineStore.getState().processSseEventBatch([
+        { role: "agent_spawned", agent_id: 99, snapshot: agentRow(99) },
+        { role: "agent_updated", agent_id: 99, snapshot: agentRow(99) },
+      ]);
+    });
+    unsub();
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  it("token_usage in a batch applies like the per-event path (last wins)", () => {
+    act(() => {
+      useTimelineStore.getState().processSseEventBatch([
+        { role: "token_usage", agent_id: 42, input_tokens: 100, output_tokens: 1 },
+        { role: "token_usage", agent_id: 42, input_tokens: 222, output_tokens: 2 },
+        // A parked agent's token event is dropped (its own React Query cache owns it).
+        { role: "token_usage", agent_id: 7, input_tokens: 999, output_tokens: 9 },
+      ]);
+    });
+    const s = useTimelineStore.getState();
+    expect(s.tokenUsage).toBe(222);
+    expect(s.reasoningTokens).toBe(0);
+  });
+
+  it("a batch matches sequential per-event application (no divergence)", () => {
+    // Park a background thread first.
+    act(() => {
+      useTimelineStore.getState().switchThread(42, [], false);
+      useTimelineStore.getState().switchThread(1, [], false);
+    });
+    const frame = (): SystemEvent[] => [
+      { role: "code_start", agent_id: 1, item_id: "3.0" },
+      { role: "code_delta", agent_id: 1, item_id: "3.0", content: "pri" },
+      { role: "code_delta", agent_id: 1, item_id: "3.0", content: "nt" },
+      { role: "chat_delta", agent_id: 42, item_id: "9.0", content: "bg" },
+      { role: "exec_output", agent_id: 1, item_id: "3.0", content: "done" },
+    ];
+
+    // Batch path on a fresh store…
+    act(() => {
+      useTimelineStore.getState().processSseEventBatch(frame());
+    });
+    const afterBatch = {
+      items: useTimelineStore.getState().items,
+      streamingCode: useTimelineStore.getState().streamingCode,
+      turnActive: useTimelineStore.getState().turnActive,
+      threads: new Map(useTimelineStore.getState().threads),
+    };
+
+    // …vs per-event path on an identical fresh store.
+    resetStore();
+    useTimelineStore.setState({ resetPending: false, compactedThreadIds: new Set() });
+    act(() => {
+      useTimelineStore.getState().switchThread(42, [], false);
+      useTimelineStore.getState().switchThread(1, [], false);
+      for (const ev of frame()) {
+        useTimelineStore.getState().processSseEvent(ev);
+      }
+    });
+    // created_at is stamped per item creation (new Date) — compare the
+    // stable business fields only, both for the active thread and the
+    // parked buckets.
+    const strip = (list: BackendTimelineItem[]) =>
+      list.map((i) => ({ item_id: i.item_id, payload: i.payload }));
+    const stripThreads = (map: Map<number, unknown>) =>
+      [...map.entries()].map(([id, t]) => [id, strip((t as { items: BackendTimelineItem[] }).items)]);
+    expect(strip(useTimelineStore.getState().items)).toEqual(strip(afterBatch.items));
+    expect(useTimelineStore.getState().streamingCode).toBe(afterBatch.streamingCode);
+    expect(useTimelineStore.getState().turnActive).toBe(afterBatch.turnActive);
+    expect(stripThreads(useTimelineStore.getState().threads)).toEqual(
+      stripThreads(afterBatch.threads),
+    );
   });
 });

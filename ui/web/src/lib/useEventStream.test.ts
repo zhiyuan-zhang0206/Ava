@@ -19,6 +19,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useStore } from "./store";
 import { useFoldOwner } from "./fold/owner";
 import type { AgentRow } from "./types";
+import type { SystemEvent } from "./types";
 import type { ConnectionEvent } from "./useEventStream";
 import {
   AgentEventStreamProvider,
@@ -675,6 +676,80 @@ describe("AgentEventStreamProvider all-events broadcast URL", () => {
       item_id: "1.0",
       content: "b",
     });
+  });
+
+  it("batch subscriber gets the whole frame in ONE call; its per-event callback is not invoked", () => {
+    const onSystem = vi.fn();
+    const onBatch = vi.fn<(events: SystemEvent[]) => void>();
+    void renderHook(
+      () => useAgentEventStream(onSystem, vi.fn(), onBatch),
+      { wrapper: withAgentProvider() },
+    );
+    act(() => {
+      expectInstance().fireOpen();
+      expectInstance().fireMessage(
+        JSON.stringify([
+          { role: "chat_delta", agent_id: 7, item_id: "1.0", content: "a" },
+          { role: "code_delta", agent_id: 7, item_id: "2.0", content: "b" },
+        ]),
+      );
+    });
+
+    expect(onBatch).toHaveBeenCalledTimes(1);
+    expect(onBatch).toHaveBeenCalledWith([
+      { role: "chat_delta", agent_id: 7, item_id: "1.0", content: "a" },
+      { role: "code_delta", agent_id: 7, item_id: "2.0", content: "b" },
+    ]);
+    // The per-event callback is the fallback contract for subscribers
+    // without a batch handler — it never fires for a batch subscriber.
+    expect(onSystem).not.toHaveBeenCalled();
+  });
+
+  it("a throwing batch subscriber never starves per-event subscribers of the same frame", () => {
+    const onSystem = vi.fn();
+    const onConn = vi.fn<(ev: ConnectionEvent) => void>();
+    const onBatchBoom = vi.fn(() => {
+      throw new Error("batch subscriber bug");
+    });
+    function useDualSubscriber() {
+      useAgentEventStream(onSystem, onConn);
+      useAgentEventStream(vi.fn(), vi.fn(), onBatchBoom);
+    }
+    void renderHook(() => useDualSubscriber(), {
+      wrapper: withAgentProvider(),
+    });
+    const errSpy = vi.spyOn(console, "error");
+    act(() => {
+      expectInstance().fireMessage(
+        JSON.stringify([
+          { role: "chat_delta", agent_id: 7, item_id: "1.0", content: "a" },
+          { role: "chat_delta", agent_id: 7, item_id: "1.0", content: "b" },
+        ]),
+      );
+    });
+    errSpy.mockRestore();
+
+    // The per-event subscriber received BOTH events of the frame…
+    expect(onSystem).toHaveBeenCalledTimes(2);
+    // …the batch subscriber threw and was isolated (no parse-failed).
+    expect(onBatchBoom).toHaveBeenCalledTimes(1);
+    expect(onConn).not.toHaveBeenCalled();
+  });
+
+  it("single-event frame → batch subscriber receives a one-element array", () => {
+    const onBatch = vi.fn<(events: SystemEvent[]) => void>();
+    void renderHook(
+      () => useAgentEventStream(vi.fn(), vi.fn(), onBatch),
+      { wrapper: withAgentProvider() },
+    );
+    act(() => {
+      expectInstance().fireOpen();
+      expectInstance().fireMessage(
+        JSON.stringify({ role: "llm_done", agent_id: 7 }),
+      );
+    });
+    expect(onBatch).toHaveBeenCalledTimes(1);
+    expect(onBatch).toHaveBeenCalledWith([{ role: "llm_done", agent_id: 7 }]);
   });
 });
 
