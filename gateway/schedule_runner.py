@@ -35,7 +35,7 @@ from loguru import logger
 
 import shared.db
 from shared.config import settings
-from shared.paths import ava_home
+from shared.paths import ava_home, prod_service_checkout_error
 
 # A .py schedule script is run in-process, so a single call that hangs (a
 # wedged gateway, a black-holed DB connection, a stuck import) parks the whole
@@ -301,6 +301,14 @@ def main() -> None:
     if len(sys.argv) != 2:
         logger.error("Usage: python -m gateway.schedule_runner <schedule_id>")
         raise SystemExit(2)
+    # issue #194: refuse to run from a foreign checkout (a dev worktree
+    # against the prod home) — the runner's own repo root anchors every
+    # subprocess it spawns, so a worktree-anchored runner executes un-reviewed
+    # code and dies silently when the worktree is removed.
+    refusal = prod_service_checkout_error(Path(__file__).resolve().parents[1])
+    if refusal is not None:
+        logger.error("schedule runner refused: {}", refusal)
+        raise SystemExit(3)
     raise SystemExit(run(int(sys.argv[1])))
 
 

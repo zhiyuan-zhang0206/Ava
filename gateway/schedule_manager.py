@@ -44,6 +44,7 @@ from psycopg_pool import ConnectionPool
 
 from shared.cluster import session_name
 from shared.config import settings
+from shared.paths import prod_service_checkout_error
 from shared.session_backend import get_shell_backend
 from shared.session_env import forward_env_dict
 
@@ -87,6 +88,15 @@ class ScheduleManager:
         self._lock = threading.Lock()
 
     async def start(self) -> None:
+        # issue #194: a gateway launched from a foreign checkout (e.g. a dev
+        # worktree against the prod home) must not supervise schedules — the
+        # manager anchors each session to its own repo root, so its schedules
+        # would run un-reviewed worktree code and die silently when the
+        # worktree is removed. Same guard as `ava start` (Task #966).
+        refusal = prod_service_checkout_error(_REPO_ROOT)
+        if refusal is not None:
+            _log.error("schedule supervision refused: {}", refusal)
+            return
         self._task = asyncio.create_task(self._run(), name="schedule-manager")
 
     async def stop(self) -> None:
