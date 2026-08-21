@@ -174,9 +174,15 @@ import time as _time
 _WHEN = _dt.datetime.fromisoformat({when_iso!r})
 _MESSAGE = {message!r}
 
-_delay = (_WHEN - _dt.datetime.now(_dt.UTC)).total_seconds()
-if _delay > 0:
+while True:
+    _delay = (_WHEN - _dt.datetime.now(_dt.UTC)).total_seconds()
+    if _delay <= 0:
+        break
     _time.sleep(_delay)
+    # The wall clock can step during the sleep (laptop resume / NTP
+    # correction): sleeping the computed delay does not guarantee the clock
+    # reached _WHEN. Re-check against the target instead of firing early
+    # (issue #182).
 _wake(_MESSAGE)
 """
 
@@ -203,6 +209,7 @@ def _next() -> _dt.datetime:
     return nxt.astimezone(_dt.UTC)
 
 
+_last = None
 while True:
     _fire = _next()
     if _END is not None and _fire > _END:
@@ -210,10 +217,24 @@ while True:
         # is outside the window, so stop silently. Do NOT wake here — that would
         # emit a duplicate right after the last in-window fire.
         break
-    _delay = (_fire - _dt.datetime.now(_dt.UTC)).total_seconds()
-    if _delay > 0:
+    if _last is not None and _fire <= _last:
+        # The wall clock stepped backwards: _next() re-resolved the boundary we
+        # already fired. Sleep past it (a monotonic sleep, unaffected by clock
+        # correction), then re-evaluate — one boundary fires at most once
+        # (issue #182).
+        _time.sleep((_last - _dt.datetime.now(_dt.UTC)).total_seconds() + 1.0)
+        continue
+    while True:
+        _delay = (_fire - _dt.datetime.now(_dt.UTC)).total_seconds()
+        if _delay <= 0:
+            break
         _time.sleep(_delay)
+        # The wall clock can step during the sleep (laptop resume / NTP
+        # correction): verify the clock actually reached the boundary before
+        # firing — a stepped clock must not fire early, then fire again
+        # (issue #182).
     _wake(_MESSAGE)
+    _last = _fire
 """
 
 
