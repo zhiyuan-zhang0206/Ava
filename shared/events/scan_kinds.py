@@ -14,8 +14,11 @@ Regenerates the raw material behind shared/events/registry.md:
   3. `insert_event_log*` event_type values (event_log event names, category=audit).
   4. SSE role discriminators in shared/live_events.py (real-time channel,
      not persisted).
-  5. Optional: live distribution from the prod agent_events / event_log
-     tables (pass --db-url; read-only SELECT queries).
+  5. Optional: historical distribution from the PG archive (pass --db-url;
+     read-only SELECT queries). ARCHIVE ONLY since the LGTM cutover (task
+     #1197): `event_log` is frozen and the `agent_events` mirrors were removed
+     (2026-08-06) — against a live cluster the DB scan errors or returns
+     pre-cutover data; the live distribution lives in Loki (LogQL).
 
 Usage:
     python shared/events/scan_kinds.py [--db-url postgresql://...] [--repo ~/Ava]
@@ -113,6 +116,8 @@ def scan_code(repo: Path) -> tuple[Counter[str], Counter[str], Counter[str], Cou
 
 
 def scan_db(db_url: str) -> None:
+    # Archive-only (task #1197): event_log is frozen and the agent_events
+    # mirrors were removed — this path reads pre-cutover history or errors.
     import psycopg
 
     conn = psycopg.connect(db_url)

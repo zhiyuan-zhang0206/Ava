@@ -11,8 +11,8 @@ loops:
   the append-only fact tables (`services.events_maintenance.table_retention`),
   recompute the day-grain rollup tables
   (`services.events_maintenance.rollup`), run the index-bloat governance
-  (`services.events_maintenance.reindex`), and consume the resolved-event
-  markers — PLUS, unconditionally, the Rule B checkpoint reaper
+  (`services.events_maintenance.reindex`) — PLUS, unconditionally, the
+  Rule B checkpoint reaper
   (`services.events_maintenance.checkpoint_reaper`, Task #1057): terminated /
   inactive agents' checkpoints are trimmed to keep=1 (the PostgresSaver is
   append-only, so terminated threads grow without bound — the 2026-08-08 disk
@@ -119,7 +119,7 @@ def _retention_policy() -> dict[str, int]:
 def _run_maintenance(pool: ConnectionPool) -> None:
     """One hourly pass. The events-archive slices — partition rolling, events
     retention (drop/prune expired months), table retention, index-bloat
-    governance (audit M2), resolved-marker consumption — run only when
+    governance (audit M2) — run only when
     `AVA_EVENTS_MAINTENANCE_ENABLED` is set; since the LGTM cutover (task
     #1197) the PG `events` copy is a read-only archive that nothing writes or
     reads, so those slices are dead weight on every cluster. Three steps are
@@ -154,7 +154,6 @@ def _run_maintenance(pool: ConnectionPool) -> None:
         # transaction and must not ride the transaction-mode pooler. A no-op pass
         # (healthy indexes) logs nothing.
         reindex_result = run_governance_pass(now_utc=now)
-        _apply_resolved_markers(pool)
         if created:
             _log.info("[events-maintenance] created partitions: %s", ", ".join(created))
         if retention.dropped or retention.pruned:
@@ -189,54 +188,6 @@ def _run_maintenance(pool: ConnectionPool) -> None:
             reaped.writes,
             reaped.blobs,
         )
-
-
-def _apply_resolved_markers(pool: ConnectionPool) -> int:
-    """Consume warning_resolved/error_resolved events: mark their targets
-    (exact event id, or msg-LIKE match) with ``attributes.resolved_by`` so the
-    unresolved-ops panels can filter them out with a plain WHERE. Idempotent —
-    an already-marked event is never re-marked; a resolved event stays in the
-    stream (it is itself an event) and simply stops matching. The exact-id
-    pass runs first; the pattern pass only touches events older than the
-    resolving event (a resolution cannot reach into the future)."""
-    with pool.connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                UPDATE events e
-                SET attributes = e.attributes || jsonb_build_object('resolved_by', r.id)
-                FROM events r
-                WHERE r.event_name IN ('warning_resolved', 'error_resolved')
-                  AND r.attributes->>'target_event_id' IS NOT NULL
-                  AND (r.attributes->>'target_event_id')::bigint = e.id
-                  AND e.attributes->>'resolved_by' IS NULL
-                """
-            )
-            exact = cur.rowcount
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                UPDATE events e
-                SET attributes = e.attributes || jsonb_build_object('resolved_by', r.id)
-                FROM events r
-                WHERE r.event_name IN ('warning_resolved', 'error_resolved')
-                  AND r.attributes->>'match' IS NOT NULL
-                  AND r.attributes->>'match' <> ''
-                  AND e.level IN ('warning', 'error', 'critical')
-                  AND e.attributes->>'msg' LIKE r.attributes->>'match'
-                  AND e.attributes->>'resolved_by' IS NULL
-                  AND e.ts < r.ts
-                  AND e.ts > now() - interval '90 days'
-                """
-            )
-            pat = cur.rowcount
-    if exact or pat:
-        _log.info(
-            "[events-maintenance] resolved markers: %d exact + %d pattern",
-            exact,
-            pat,
-        )
-    return exact + pat
 
 
 def _run_checkpoint_trim(pool: ConnectionPool) -> None:

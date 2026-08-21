@@ -241,17 +241,10 @@ def test_daemon_maintenance_runs_table_retention(
     def _fake_partitions(_conn: object, **_kwargs: object) -> list[str]:
         return []
 
-    # The resolved-marker slice (Task #2102) runs on the events table, which
-    # this throwaway schema does not carry — it has its own test file
-    # (test_events_maintenance_resolved.py) and is stubbed out here.
-    def _fake_resolved_markers(_pool: object) -> int:
-        return 0
-
     monkeypatch.setattr(daemon, "apply_table_retention", _fake_table_retention)
     monkeypatch.setattr(daemon, "apply_retention", _fake_retention)
     monkeypatch.setattr(daemon, "compute_rollup", _fake_rollup)
     monkeypatch.setattr(daemon, "ensure_month_partitions", _fake_partitions)
-    monkeypatch.setattr(daemon, "_apply_resolved_markers", _fake_resolved_markers)
     try:
         with pool:
             daemon._run_maintenance(pool)

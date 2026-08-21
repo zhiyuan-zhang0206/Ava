@@ -20,16 +20,15 @@ Registration mirrors the plugin state/config pattern: the plugin calls
 (the framework ``_load_extensions`` wrap) and the plugin name is auto-filled.
 The registry is process-local.
 
-Template safety (enforced at register time): a SQL query template must be a
-single SELECT over the ``events`` table only, built from a whitelist of
-keywords, aggregate functions, Grafana macros, operators and literals — no
-DML/DDL, no information/``pg_*`` functions, no comments, no multi-statement.
-LogQL templates (``query_type="logql"``, task #1280) follow the lighter
-contract in ``shared/metrics_logql.py``. ``{event_name}`` / ``{category}``
-placeholders are rendered as dialect-appropriate literals (both are validated
-identifiers/enums at register time); ``{{agent_id}}`` is kept verbatim for the
-inspector surface and is only legal when the metric does not also target
-grafana.
+SQL safety (enforced at register time, task #180 PR C): a metric query must
+be a static single SELECT over ``events`` (the frozen archive) or
+``agents_meta`` (live), built from a whitelist of keywords, aggregate
+functions, operators and literals — no DML/DDL, no information/``pg_*``
+functions, no comments, no multi-statement, no Grafana macros, no
+``{event_name}`` / ``{category}`` / ``{{agent_id}}`` placeholders (the live
+event stream is read through LogQL, task #1280). LogQL templates
+(``query_type="logql"``) follow the lighter contract in
+``shared/metrics_logql.py``.
 """
 
 from __future__ import annotations
@@ -280,10 +279,6 @@ _SQL_FUNCTIONS = frozenset(
 
 # Grafana Postgres macros. `$__interval_ms` is used by the ops dashboard for
 # tokens/s; `$__timeGroup` / `$__timeFilter` are the standard window macros.
-_SQL_MACROS = frozenset(
-    {"$__timeGroup", "$__timeFilter", "$__interval", "$__interval_ms", "$__timeFrom", "$__timeTo"}
-)
-
 # events-table columns (plus `time`, the conventional $__timeGroup alias).
 _SQL_COLUMNS = frozenset(
     {
@@ -351,22 +346,12 @@ _TOKEN_RE = re.compile(
     | (?P<num>\d+(?:\.\d+)?)
     | (?P<str>'(?:[^']|'')*')
     | (?P<ident>"(?:[^"]*)")
-    | (?P<macro>\$__[A-Za-z_][A-Za-z0-9_]*)
     | (?P<word>[A-Za-z_][A-Za-z0-9_]*)
     | (?P<op>::|->>|->|[#]>|[#]>>|@>|<@|\?|<=|>=|<>|!=|[()+,.*%/:=<>-])
     """,
     re.VERBOSE,
 )
 _QUOTED_RE = re.compile(r"\'(?:[^\']|\'\')*\'|\"(?:[^\"])*\"")
-
-
-def _replace_placeholders(sql: str) -> str:
-    """Substitute template placeholders with plain literals so the tokenizer
-    sees a complete SQL statement; also catches misspelled placeholders
-    (anything else containing ``{`` / ``}`` fails tokenization)."""
-    return (
-        sql.replace("{event_name}", "'x'").replace("{category}", "'x'").replace("{{agent_id}}", "0")
-    )
 
 
 _FROM_FOLLOW = frozenset({"WHERE", "GROUP", "ORDER", "LIMIT", "OFFSET"})
@@ -595,31 +580,50 @@ def _check_from_clauses(
 
 
 def validate_metric_sql(sql: str) -> None:
-    """Validate one query template against the events-table-only whitelist.
+    """Validate one static metric query against the read-only whitelist.
+
+    Task #180 (PR C): the SQL template era is over — the live event stream is
+    read through LogQL (task #1280), so Grafana time macros and the
+    ``{event_name}`` / ``{category}`` / ``{{{{agent_id}}}}`` placeholders are
+    rejected outright. What remains is the static-read guardrail: a single
+    SELECT over ``events`` (the frozen archive — deliberate archive reads
+    only) or ``agents_meta`` (live), whitelisted functions / columns /
+    operators, no comments / multi-statement / DML / information functions.
 
     Rejects: multi-statement input (``;`` outside the trailing position),
-    comments (``--`` / ``/* */``), any FROM target other than ``events``,
-    unknown identifiers / functions / macros / operators, and any character
-    the tokenizer does not recognize (e.g. dollar-quoted strings).
+    comments (``--`` / ``/* */``), any FROM target other than ``events`` /
+    ``agents_meta``, Grafana macros, template placeholders, unknown
+    identifiers / functions / operators, and any character the tokenizer
+    does not recognize (e.g. dollar-quoted strings).
 
     Raises:
         InvalidMetricQuery: with a concrete reason for plugin authors.
     """
-    # 1. Placeholder substitution + single-statement / comment checks on a
-    #    string with quoted literals blanked out (so 'a;b' or "--" inside a
-    #    string does not trip them).
-    body = _replace_placeholders(sql).rstrip()
+    # 1. Single-statement / comment / no-template checks on a string with
+    #    quoted literals blanked out (so 'a;b' or "--" inside a string does
+    #    not trip them).
+    body = sql.rstrip()
     if body.endswith(";"):
         body = body[:-1]
     blanked = _QUOTED_RE.sub("''", body)
     if "--" in blanked or "/*" in blanked:
         raise InvalidMetricQuery(
-            "SQL comments are not allowed in metric query templates "
-            f"(found '--' or '/* */'): {sql!r}"
+            f"SQL comments are not allowed in metric queries (found '--' or '/* */'): {sql!r}"
         )
     if ";" in blanked:
         raise InvalidMetricQuery(
             f"multi-statement SQL is not allowed — exactly one SELECT, no ';' separators: {sql!r}"
+        )
+    if "$__" in body:
+        raise InvalidMetricQuery(
+            "Grafana time macros are not allowed in metric queries — the live "
+            f"event stream is read through LogQL (task #1280/#180): {sql!r}"
+        )
+    if "{" in body or "}" in body:
+        raise InvalidMetricQuery(
+            "template placeholders are not allowed in metric queries — "
+            "{event_name}/{category}/{{agent_id}} were retired with the "
+            f"events-table cutover (task #180): {sql!r}"
         )
 
     # 2. Tokenize; every character must belong to a recognized token.
@@ -672,12 +676,6 @@ def validate_metric_sql(sql: str) -> None:
                     f"the allowed set: {sql!r}"
                 )
             continue
-        if kind == "macro":
-            if value not in _SQL_MACROS:
-                raise InvalidMetricQuery(
-                    f"unknown Grafana macro {value!r} — allowed: {sorted(_SQL_MACROS)}: {sql!r}"
-                )
-            continue
         if kind == "op":
             if value not in _SQL_OPS:
                 raise InvalidMetricQuery(f"operator {value!r} is not on the whitelist: {sql!r}")
@@ -712,19 +710,17 @@ _REGISTRY: dict[str, MetricSpec] = {}
 
 def register_metric(spec: MetricSpec) -> MetricSpec:
     """Register one metric — must run inside PluginContext (the framework
-    wraps plugin imports; the generator wraps its imports too).
+    wraps plugin imports).
 
-    Validation at register time: name uniqueness across all plugins, SQL
-    safety (``validate_metric_sql``), and the ``{{agent_id}}`` ↔ output rule.
-    The ``plugin`` field is auto-filled from the context, overriding whatever
-    the author passed.
+    Validation at register time: name uniqueness across all plugins and
+    query safety (``validate_metric_sql`` / ``validate_spec_logql``, by
+    dialect). The ``plugin`` field is auto-filled from the context,
+    overriding whatever the author passed.
 
     Raises:
         NoPluginContext: called outside ``with PluginContext(...)``.
         DuplicateMetric: ``spec.name`` already registered.
-        InvalidMetricQuery: SQL template failed validation or the
-            ``{{agent_id}}`` placeholder is used while ``grafana`` is in
-            ``output`` (grafana cannot render per-agent placeholders).
+        InvalidMetricQuery: a query template failed validation.
     """
     plugin = current_plugin_name()
     if plugin is None:
@@ -746,10 +742,14 @@ def register_metric(spec: MetricSpec) -> MetricSpec:
 
 
 def validate_spec_sql(spec: MetricSpec) -> None:
-    """Validate every SQL template on a spec (``query`` + ``targets``) and
-    the ``{{agent_id}}`` ↔ output rule. Shared by ``register_metric`` and
-    ``register_core_metric`` (Task #882) — core metrics go through the same
-    template safety checks as plugin metrics."""
+    """Validate every query template on a spec (``query`` + ``targets``) —
+    the static-SQL whitelist or the LogQL contract, by dialect. Shared by
+    ``register_metric`` and ``register_core_metric`` (Task #882) — core
+    metrics go through the same safety checks as plugin metrics. SQL
+    templates carry no placeholders anymore (task #180 PR C), so the old
+    ``{{agent_id}}`` ↔ grafana rule is subsumed by the placeholder
+    rejection; the LogQL dialect keeps its ``{{agent_id}}`` inspector idiom
+    (render-only, per-agent)."""
     if spec.query_type == "logql":
         # Lazy: metrics_logql imports this module (the exception class), so a
         # module-level from-import here would cycle.
@@ -759,13 +759,6 @@ def validate_spec_sql(spec: MetricSpec) -> None:
         return
     for template in [spec.query, *(spec.targets or [])]:
         validate_metric_sql(template)
-        if "{{agent_id}}" in template and "grafana" in spec.output:
-            raise InvalidMetricQuery(
-                f"metric {spec.name!r} query uses the {{{{agent_id}}}} placeholder "
-                f"but output includes 'grafana' — the grafana surface cannot "
-                f"render a per-agent placeholder; drop 'grafana' from output or "
-                f"remove the placeholder."
-            )
 
 
 def registered_metrics() -> list[MetricSpec]:
