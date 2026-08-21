@@ -174,15 +174,30 @@ def enter_starting_state(agent_id: int) -> None:
     """
     local_machine = machine_name()
     with shared.db.connect() as conn, conn.cursor() as cur:
-        cur.execute("SELECT machine FROM agents_meta WHERE id = %s", (agent_id,))
+        # Lock by identity before checking status. A guarded auto-resurrect
+        # creates the detached session while its terminated -> allocated write
+        # is still uncommitted; selecting only the old visible status would
+        # incorrectly reject that child. FOR UPDATE waits for the lifecycle
+        # transaction, then validates the committed winner.
+        cur.execute(
+            "SELECT machine, status FROM agents_meta WHERE id = %s FOR UPDATE",
+            (agent_id,),
+        )
         row = cur.fetchone()
         if row is None:
             raise RuntimeError(
                 f"agent --agent-id {agent_id}: agents_meta row does not exist. "
                 "Create first via spawn_agent / resurrect_agent."
             )
-        row_machine = row[0]
+        row_machine, row_status = row
+        if AgentStatus(row_status) is not AgentStatus.ALLOCATED:
+            raise RuntimeError(
+                f"agent --agent-id {agent_id}: agents row does not exist or not in "
+                f"'allocated' state (status={row_status!r}). Create first via "
+                "spawn_agent / resurrect_agent."
+            )
         if row_machine != local_machine:
+            conn.rollback()
             _mark_allocated_terminated(agent_id)
             raise RuntimeError(
                 f"agent --agent-id {agent_id}: placement mismatch — "

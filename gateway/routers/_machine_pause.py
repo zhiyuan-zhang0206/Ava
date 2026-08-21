@@ -24,6 +24,7 @@ from gateway.schemas import (
     MachinePauseResponse,
     MachineResumeResponse,
 )
+from ops.ops_lifecycle import _force_mark_terminated
 from shared import machines
 from shared.machine import machine_name
 from shared.task_notes import task_note_line
@@ -89,31 +90,32 @@ def _drain_tasks_blocking(pool: ConnectionPool, name: str) -> int:
     return len(rows)
 
 
-def _list_live_agent_ids_blocking(pool: ConnectionPool, name: str) -> list[int]:
-    """Every non-terminated agent row homed on `name` — the terminate targets
-    of a pause."""
+def _list_agent_rows_for_pause_blocking(pool: ConnectionPool, name: str) -> list[tuple[int, bool]]:
+    """Lock every agent row on `name`, returning ``(id, was_live)``.
+
+    The pause latch is already committed before this sweep. Locking even rows
+    that look terminated is deliberate: a pre-latch resurrect may hold an
+    uncommitted terminated -> allocated transition. ``FOR UPDATE`` waits for
+    it and rechecks the current row, so the subsequent force fence is ordered
+    after that resurrection. Already-terminated rows are included too: pause
+    is an explicit kill intent and must fence their older pending work.
+    """
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
-            "SELECT id FROM agents_meta WHERE machine = %s AND status != 'terminated'",
+            "SELECT id, status FROM agents_meta WHERE machine = %s FOR UPDATE",
             (name,),
         )
-        return [r[0] for r in cur.fetchall()]
+        return [(r[0], r[1] != "terminated") for r in cur.fetchall()]
 
 
 def _force_mark_terminated_blocking(pool: ConnectionPool, agent_id: int) -> None:
     """Force-mark one agent row terminated in the shared DB — the fallback
     when the machine's ops server could not take the force terminate (the
-    machine is already unreachable). Mirrors `ops.ops_lifecycle._force_mark_terminated`
-    exactly (same sanctioned write site: status + termination_source='user' in
-    one statement, `heartbeat_paused_until` cleared; the
-    cascade_close_agent_pages trigger closes the agent's pages)."""
-    with pool.connection() as conn, conn.cursor() as cur:
-        cur.execute(
-            "UPDATE agents_meta SET status='terminated', termination_source='user', "
-            "heartbeat_paused_until = NULL WHERE id=%s AND status != 'terminated'",
-            (agent_id,),
-        )
-        conn.commit()
+    machine is already unreachable). Reuses the lifecycle primitive so the
+    fallback writes the same terminate inbound fence under the agent row lock;
+    the process is on the unreachable machine, so there is no local OS session
+    to kill."""
+    _force_mark_terminated(agent_id, pool, source="machine-pause")
 
 
 def _resolve_machine_alerts_blocking(pool: ConnectionPool, name: str) -> None:
@@ -162,14 +164,24 @@ async def pause_cluster_machine(
 ) -> MachinePauseResponse:
     """Temporarily pull a machine out of the cluster (`ava cluster pause`).
 
-    The three-step operator act, in dependency order so a partial failure
-    leaves the machine NOT paused (retryable) rather than paused with agents
-    still running:
+    The operator act starts with an admission fence, then drains and sweeps:
 
-    1. **Drain** — every open/in_progress task owned by a live agent on this
+    1. **Latch** — set `paused_at`/`pause_reason` first. Every resurrection
+       transaction (explicit, pending-work, controller, and retry) locks and
+       checks this latch before its agent row, so stale resurrection cannot
+       escape the sweep.
+    2. **Drain** — every open/in_progress task owned by a live agent on this
        machine is reassigned to the drain owner (#405) with a note; the
        reminder daemon then surfaces it.
-    2. **Terminate** — every non-terminated agent on the machine is
+    3. **Final sweep** — every agent row on the machine, including an already
+       terminated row, receives a newer force-terminate intent fence. A
+       pre-latch resurrection holding the agent row lock completes first, then
+       this sweep terminates its exact session; older pending work on a dead
+       row cannot reverse the pause either. Other existing-agent re-entry paths
+       (respawn/swap/revive) keep their established admission rules and are
+       caught when they hold or update an existing row before the final sweep.
+
+    The live rows are
        force-terminated via the machine's own ops server (kill the process +
        mark terminated in one op, source="machine-pause"): the machine is
        about to be disconnected, so waiting for graceful turns is not worth
@@ -177,10 +189,11 @@ async def pause_cluster_machine(
        ops server is unreachable (the machine is already down) is force-marked
        terminated in the shared DB — its process is on the departing host
        anyway.
-    3. **Latch** — `paused_at`/`pause_reason` are set. From that moment the
-       machine vanishes from the roster / cluster panel / agents' list_machines,
-       `list_agent_runners()` drops it (no probe, no offline alert, rollout
-       skips it) and spawns targeting it are refused (409).
+    From the latch onward the machine vanishes from the roster / cluster panel /
+    agents' list_machines, `list_agent_runners()` drops it (no probe, no offline
+    alert, rollout skips it) and ordinary spawns targeting it are refused (409).
+    The separate transaction race between the pause latch and creation of a
+    brand-new agent row is outside this resurrection boundary.
 
     Open "machine offline" alerts for the machine are resolved as part of the
     latch step — an expected absence is not an incident. Idempotent: pausing
@@ -201,12 +214,16 @@ async def pause_cluster_machine(
     if not exists:
         raise HTTPException(status_code=404, detail=f"no machine named {name!r}")
 
+    if paused_at is None:
+        machines.pause(name, reason=req.reason)
+        exists, paused_at, pause_reason = await asyncio.to_thread(_read_machine_row, pool, name)
+
     reassigned = await asyncio.to_thread(_drain_tasks_blocking, pool, name)
 
-    agent_ids = await asyncio.to_thread(_list_live_agent_ids_blocking, pool, name)
+    agent_rows = await asyncio.to_thread(_list_agent_rows_for_pause_blocking, pool, name)
 
     terminated = force_marked = 0
-    for agent_id in agent_ids:
+    for agent_id, was_live in agent_rows:
         # The same lifecycle path the frontend/SDK terminate uses — the target
         # machine's ops server runs post_agent_terminate in-process. A machine
         # that is already unreachable raises; the agent's process is on the
@@ -217,16 +234,15 @@ async def pause_cluster_machine(
                 f"/api/agents/{agent_id}/terminate",
                 {"force": True, "source": "machine-pause"},
             )
-            terminated += 1
+            if was_live:
+                terminated += 1
         except Exception:
             await asyncio.to_thread(_force_mark_terminated_blocking, pool, agent_id)
-            force_marked += 1
+            if was_live:
+                force_marked += 1
 
     await asyncio.to_thread(_resolve_machine_alerts_blocking, pool, name)
 
-    if paused_at is None:
-        machines.pause(name, reason=req.reason)
-        exists, paused_at, pause_reason = await asyncio.to_thread(_read_machine_row, pool, name)
     return MachinePauseResponse(
         name=name,
         paused=True,

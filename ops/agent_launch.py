@@ -419,15 +419,16 @@ def _launch_agent_process(
 # forces the row 'terminated' so a silently-failed launch does not linger
 # 'allocated'; the restarter's allocated-reaper is the ultimate backstop if this
 # task is ever lost.
-_pending_launch_confirms: set[asyncio.Task[None]] = set()
+_pending_launch_confirms: set[asyncio.Task[bool]] = set()
 
 
-def _confirm_launch_or_force_terminated(agent_id: int) -> None:
+def _confirm_launch_or_force_terminated(agent_id: int) -> bool:
     """Confirm a spawned child claimed its row; if it never did, force the row
-    'terminated'. Runs in a worker thread (synchronous poll + DB)."""
+    'terminated'. Runs in a worker thread (synchronous poll + DB). Returns
+    whether the launch confirmed."""
     try:
         _wait_for_status_to_leave_allocated(agent_id)
-        return
+        return True
     except Exception:
         logger.warning(
             "agent {id} launch did not confirm — forcing 'terminated' "
@@ -457,9 +458,10 @@ def _confirm_launch_or_force_terminated(agent_id: int) -> None:
             publish_agent_updated_sync(conn, agent_id)
             for page_name in page_names:
                 publish_page_closed_sync(agent_id, page_name)
+    return False
 
 
-def _on_confirm_done(task: asyncio.Task[None]) -> None:
+def _on_confirm_done(task: asyncio.Task[bool]) -> None:
     _pending_launch_confirms.discard(task)
     if not task.cancelled() and (exc := task.exception()) is not None:
         logger.opt(exception=exc).error(

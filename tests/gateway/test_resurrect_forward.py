@@ -67,7 +67,7 @@ class TestResurrectRouting:
         assert resp.status_code == 200
         assert resp.json() == {"status": "spawned"}
         assert captured["agent_id"] == agent_id
-        assert captured["path"] == f"/api/agents/{agent_id}/resurrect"
+        assert captured["path"] == f"/api/agents/{agent_id}/resurrect-explicit-v2"
         assert captured["json_body"]["resurrected_by"] == "user"
         assert captured["json_body"]["prompt"] == "hello"
 
@@ -164,4 +164,4 @@ def test_local_home_machine_is_forwarded(
     assert resp.status_code == 200
     assert resp.json() == {"status": "spawned"}
     assert captured["target"] == "local-test"
-    assert captured["path"] == f"/api/agents/{agent_id}/resurrect"
+    assert captured["path"] == f"/api/agents/{agent_id}/resurrect-explicit-v2"

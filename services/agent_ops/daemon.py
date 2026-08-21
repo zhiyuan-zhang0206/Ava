@@ -383,7 +383,13 @@ async def _dispatch(kind: str, payload: dict[str, Any]) -> tuple[str, dict[str, 
                 return "completed", spawned.model_dump(mode="json")
             case "lifecycle":
                 lc = LifecyclePayload.model_validate(payload)
-                resp = await ops_lifecycle.lifecycle_op(lc.path, lc.body, pool)
+                resp = await ops_lifecycle.lifecycle_op(
+                    lc.path,
+                    lc.body,
+                    pool,
+                    trigger_inbound_id=lc.trigger_inbound_id,
+                    trigger_inbound_kind=lc.trigger_inbound_kind,
+                )
                 return "completed", resp.model_dump(mode="json")
             case "cluster_update":
                 # Serialized against itself, and refused rather than queued (see

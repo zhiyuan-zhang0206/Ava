@@ -13,15 +13,21 @@ expired during a DB outage (the same pause the lease-zombie grace protects).
 
 from __future__ import annotations
 
-from typing import Any, cast
+from collections.abc import Iterator
+from datetime import UTC, datetime, timedelta
+from typing import cast
 from unittest.mock import MagicMock
 
+import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
 import ops.controllers.wedged as wedged_mod
+from ops.agent_identity import AgentProcessIdentity
 from ops.controllers.base import BlockScope
 from shared.agents import ResurrectAlreadyAlive
+from shared.config import settings
+from tests.conftest import spawn_agent
 
 
 def _fake_pool(*, rowcount: int = 1) -> MagicMock:
@@ -39,30 +45,53 @@ def _fake_pool(*, rowcount: int = 1) -> MagicMock:
 
 
 @pytest.fixture
-def wedged_env(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[Any]]:
-    """A wedged controller with every guard open: one candidate (id 7, pid 1234),
-    gateway healthy, process alive, kill + resurrect spies."""
-    claimed: list[tuple[int, int]] = [(7, 1234)]
-    killed: list[int] = []
-    resurrected: list[dict[str, object]] = []
+def sync_pool() -> Iterator[ConnectionPool]:
+    pool = ConnectionPool(settings.data_plane.db_url, min_size=1, max_size=4, open=True)
+    try:
+        yield cast(ConnectionPool, pool)
+    finally:
+        pool.close()
+
+
+def _park_wedged(db_conn: psycopg.Connection, *, pid: int = 1234) -> int:
+    aid = spawn_agent(spawner="user")
+    with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
+        cur.execute(
+            "UPDATE agents_meta SET status='running', pid=%s, lease_expires_at=%s WHERE id=%s",
+            (pid, datetime.now(UTC) + timedelta(minutes=10), aid),
+        )
+    db_conn.commit()  # pyright: ignore[reportUnknownMemberType]
+    return aid
+
+
+def _open_recovery(
+    monkeypatch: pytest.MonkeyPatch,
+    aid: int,
+    *,
+    pid: int,
+    identities: list[AgentProcessIdentity],
+) -> tuple[list[int], list[dict[str, object]]]:
+    claimed_at = datetime.now(UTC)
     monkeypatch.setattr(
         wedged_mod,
         "_claim_wedged_candidates",
-        lambda *_args, **_kwargs: list(claimed),  # pyright: ignore[reportUnknownArgumentType]
+        lambda *_args, **_kwargs: [(aid, pid, claimed_at)],  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(wedged_mod, "_gateway_healthy", lambda: True)
-    monkeypatch.setattr(wedged_mod, "process_alive", lambda pid: pid == 1234)  # pyright: ignore[reportUnknownArgumentType]
+    verdicts = iter(identities)
+    monkeypatch.setattr(wedged_mod, "probe_agent_process", lambda *_a: next(verdicts))  # pyright: ignore[reportUnknownArgumentType]
+    killed: list[int] = []
+    resurrected: list[dict[str, object]] = []
     monkeypatch.setattr(wedged_mod, "force_kill", killed.append)
-    monkeypatch.setattr(wedged_mod, "list_open_page_names", lambda _conn, _aid: [])  # pyright: ignore[reportUnknownArgumentType]
 
-    def _resurrect(agent_id: int, *, resurrected_by: str, prompt: str) -> None:
-        resurrected.append({"agent_id": agent_id, "by": resurrected_by, "prompt": prompt})
+    def _resurrect(agent_id: int, **kwargs: object) -> None:
+        resurrected.append({"agent_id": agent_id, **kwargs})
 
     monkeypatch.setattr(wedged_mod, "resurrect_agent", _resurrect)
-    return {"claimed": claimed, "killed": killed, "resurrected": resurrected}
+    return killed, resurrected
 
 
-def _fresh_controller(pool: MagicMock) -> wedged_mod.WedgedAgentController:
+def _fresh_controller(pool: ConnectionPool | MagicMock) -> wedged_mod.WedgedAgentController:
     controller = wedged_mod.WedgedAgentController(cast(ConnectionPool, pool))
     controller._last_scan = 0.0  # force the first scan
     return controller
@@ -116,55 +145,108 @@ class TestGuards:
 
 
 class TestRecovery:
-    def test_dead_pid_skipped_no_kill_no_resurrect(self, wedged_env: dict[str, list[Any]]) -> None:
-        """A candidate whose pid died between the claim and the kill is left for
-        the reaper — no kill, no resurrect."""
-        wedged_env["claimed"][:] = [(7, 9999)]  # pid 9999 != 1234 -> not alive
-
-        controller = _fresh_controller(_fake_pool())
-        result = controller.reconcile("agent-runner")
-
-        assert wedged_env["killed"] == []
-        assert wedged_env["resurrected"] == []
-        assert not result.acted
-
-    def test_kill_then_resurrect_with_prompt(self, wedged_env: dict[str, list[Any]]) -> None:
-        """The recovery sequence: status CAS (terminated + 'reaper' source) ->
-        force_kill -> resurrect with an explanatory prompt. Order is asserted
-        because a resurrect before the kill would race a live process."""
-        pool = _fake_pool(rowcount=1)
-        controller = _fresh_controller(pool)
-
-        result = controller.reconcile("agent-runner")
-
-        assert wedged_env["killed"] == [1234]
-        assert len(wedged_env["resurrected"]) == 1
-        resurrect = wedged_env["resurrected"][0]
-        assert resurrect["agent_id"] == 7
-        assert resurrect["by"] == "system"
-        assert resurrect["prompt"].startswith(
-            "You were force-restarted by the wedged-agent detector"
+    @pytest.mark.parametrize(
+        ("identity", "expected_kill"),
+        [
+            (AgentProcessIdentity.OWNED, [1234]),
+            (AgentProcessIdentity.FOREIGN, []),
+            (AgentProcessIdentity.GONE, []),
+        ],
+    )
+    def test_identity_evidence_reconciles_without_signalling_foreign_pid(
+        self,
+        db_conn: psycopg.Connection,
+        sync_pool: ConnectionPool,
+        monkeypatch: pytest.MonkeyPatch,
+        identity: AgentProcessIdentity,
+        expected_kill: list[int],
+    ) -> None:
+        aid = _park_wedged(db_conn)
+        killed, resurrected = _open_recovery(
+            monkeypatch, aid, pid=1234, identities=[identity, identity]
         )
+
+        result = _fresh_controller(sync_pool).reconcile("agent-runner")
+
+        assert killed == expected_kill
+        assert len(resurrected) == 1
+        assert resurrected[0]["agent_id"] == aid
+        assert str(resurrected[0]["prompt"]).startswith(
+            "You were restarted by the wedged-agent detector"
+        )
+        with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
+            cur.execute("SELECT status, termination_source FROM agents_meta WHERE id=%s", (aid,))
+            assert cur.fetchone() == ("terminated", "reaper")
         assert result.acted is True
-        # The CAS UPDATE ran (status flip to terminated before the kill).
-        cur = pool.connection.return_value.__enter__.return_value.cursor.return_value.__enter__.return_value
-        executed = [c.args[0] for c in cur.execute.call_args_list]
-        assert any("termination_source = 'reaper'" in sql for sql in executed)
 
-    def test_cas_lost_still_kills_and_resurrects(self, wedged_env: dict[str, list[Any]]) -> None:
-        """A lost status CAS (row moved concurrently) does not abort the recovery —
-        the kill is idempotent and the resurrect CASes the row itself."""
-        pool = _fake_pool(rowcount=0)  # CAS finds 0 rows
-        controller = _fresh_controller(pool)
+    def test_unreadable_identity_defers_without_transition(
+        self,
+        db_conn: psycopg.Connection,
+        sync_pool: ConnectionPool,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        aid = _park_wedged(db_conn)
+        killed, resurrected = _open_recovery(
+            monkeypatch, aid, pid=1234, identities=[AgentProcessIdentity.UNREADABLE]
+        )
 
-        result = controller.reconcile("agent-runner")
+        result = _fresh_controller(sync_pool).reconcile("agent-runner")
 
-        assert wedged_env["killed"] == [1234]
-        assert len(wedged_env["resurrected"]) == 1
-        assert result.acted is True
+        assert killed == [] and resurrected == [] and not result.acted
+        with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
+            cur.execute("SELECT status FROM agents_meta WHERE id=%s", (aid,))
+            assert cur.fetchone() == ("running",)
+
+    def test_identity_becoming_unreadable_under_lock_defers(
+        self,
+        db_conn: psycopg.Connection,
+        sync_pool: ConnectionPool,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        aid = _park_wedged(db_conn)
+        killed, resurrected = _open_recovery(
+            monkeypatch,
+            aid,
+            pid=1234,
+            identities=[AgentProcessIdentity.OWNED, AgentProcessIdentity.UNREADABLE],
+        )
+
+        result = _fresh_controller(sync_pool).reconcile("agent-runner")
+
+        assert killed == [] and resurrected == [] and not result.acted
+        with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
+            cur.execute("SELECT status FROM agents_meta WHERE id=%s", (aid,))
+            assert cur.fetchone() == ("running",)
+
+    def test_user_force_before_transition_skips_kill_and_resurrect(
+        self,
+        db_conn: psycopg.Connection,
+        sync_pool: ConnectionPool,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        aid = _park_wedged(db_conn)
+        killed, resurrected = _open_recovery(
+            monkeypatch,
+            aid,
+            pid=1234,
+            identities=[AgentProcessIdentity.OWNED, AgentProcessIdentity.OWNED],
+        )
+        with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
+            cur.execute(
+                "UPDATE agents_meta SET status='terminated', termination_source='user' WHERE id=%s",
+                (aid,),
+            )
+        db_conn.commit()  # pyright: ignore[reportUnknownMemberType]
+
+        result = _fresh_controller(sync_pool).reconcile("agent-runner")
+
+        assert killed == [] and resurrected == [] and not result.acted
 
     def test_resurrect_already_alive_race_is_tolerated(
-        self, wedged_env, monkeypatch: pytest.MonkeyPatch
+        self,
+        db_conn: psycopg.Connection,
+        sync_pool: ConnectionPool,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Another recovery won the resurrect race — ResurrectAlreadyAlive is
         logged and the pass continues without crashing."""
@@ -172,13 +254,20 @@ class TestRecovery:
         def _already_alive(agent_id: int, **kwargs: object) -> None:
             raise ResurrectAlreadyAlive(agent_id)
 
+        aid = _park_wedged(db_conn)
+        killed, _ = _open_recovery(
+            monkeypatch,
+            aid,
+            pid=1234,
+            identities=[AgentProcessIdentity.OWNED, AgentProcessIdentity.OWNED],
+        )
         monkeypatch.setattr(wedged_mod, "resurrect_agent", _already_alive)
-        controller = _fresh_controller(_fake_pool())
+        controller = _fresh_controller(sync_pool)
 
         result = controller.reconcile("agent-runner")
 
         assert result.acted is False
-        assert wedged_env["killed"] == [1234]
+        assert killed == [1234]
 
 
 class TestClaimSQL:

@@ -12,7 +12,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from functools import partial
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 import psycopg
 import pytest
@@ -2294,7 +2294,10 @@ class TestMachinePauseResume:
         assert second.json()["terminated_agents"] == 0
 
     def test_pause_force_marks_when_ops_unreachable(
-        self, db_conn, set_machine_identity, monkeypatch: pytest.MonkeyPatch
+        self,
+        db_conn: psycopg.Connection,
+        set_machine_identity,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:  # type: ignore[no-untyped-def]
         """A machine whose ops server cannot take the graceful terminate (already
         unreachable) gets its agent rows force-marked terminated in the shared
@@ -2303,7 +2306,10 @@ class TestMachinePauseResume:
 
         set_machine_identity(role="agent-runner", name="test-host")
         _seed_away_machine(db_conn)  # pyright: ignore[reportUnknownArgumentType]
-        _seed_agent_on_machine(db_conn, "away")  # pyright: ignore[reportUnknownArgumentType]
+        aid = _seed_agent_on_machine(db_conn, "away")  # pyright: ignore[reportUnknownArgumentType]
+        from shared.db import insert_inbound_message
+
+        old_chat_id = insert_inbound_message(db_conn, aid, "queued before pause", source="user")
 
         async def _unreachable(target: str, path: str, json_body: dict) -> dict:
             raise RuntimeError("ops server unreachable")
@@ -2317,11 +2323,31 @@ class TestMachinePauseResume:
         assert body["force_marked_agents"] == 1
         with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
             cur.execute(  # pyright: ignore[reportUnknownMemberType]
-                "SELECT status, termination_source FROM agents_meta WHERE machine = 'away'"
+                "SELECT status, termination_source, last_force_terminate_inbound_id "
+                "FROM agents_meta WHERE machine = 'away'"
             )
-            status, source = cur.fetchone()  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+            status_row = cur.fetchone()
+            assert status_row is not None
+            status, source, fence_id = status_row
+            cur.execute(  # pyright: ignore[reportUnknownMemberType]
+                "SELECT id FROM inbound_messages WHERE agent_id=%s AND kind='terminate' "
+                "ORDER BY id DESC LIMIT 1",
+                (aid,),
+            )
+            terminate_row = cur.fetchone()
+            assert terminate_row is not None
+            terminate_id = terminate_row[0]
         assert status == "terminated"
         assert source == "user"
+        assert old_chat_id < fence_id == terminate_id
+
+        from psycopg_pool import ConnectionPool
+
+        from services.delivery_watchdog.daemon import select_terminated_owners_with_pending
+        from shared.config import settings
+
+        with ConnectionPool(settings.data_plane.db_url, min_size=1, max_size=2) as pool:
+            assert select_terminated_owners_with_pending(cast(ConnectionPool, pool)) == []
 
     def test_pause_unknown_machine_404(self, db_conn, set_machine_identity) -> None:  # type: ignore[no-untyped-def]
         set_machine_identity(role="gateway", name="test-host")

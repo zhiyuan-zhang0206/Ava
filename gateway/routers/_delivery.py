@@ -108,7 +108,11 @@ async def deliver_chat_inbound(
     # the sender's message gets a response — the user's reply (or any peer /
     # watcher message) implies they want the agent alive to handle it. Shared
     # with the compact path via `resurrect_if_terminated`.
-    return await _ops.resurrect_if_terminated(agent_id)
+    return await _ops.resurrect_if_terminated(
+        agent_id,
+        trigger_inbound_id=inbound[0],
+        trigger_inbound_kind="chat",
+    )
 
 
 def _deliver_blocking(

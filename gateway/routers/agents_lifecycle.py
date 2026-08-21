@@ -59,8 +59,16 @@ async def post_compact(
     process to claim it. The co-batched resurrect wins the claim node's recency
     routing, so the agent wakes and the requested compaction still runs.
     """
-    await asyncio.to_thread(_compact_request_blocking, request.app.state.db_pool, agent_id)
-    await _ops.resurrect_if_terminated(agent_id)
+    inbound_id = await asyncio.to_thread(
+        _compact_request_blocking,
+        request.app.state.db_pool,
+        agent_id,
+    )
+    await _ops.resurrect_if_terminated(
+        agent_id,
+        trigger_inbound_id=inbound_id,
+        trigger_inbound_kind="compact_request",
+    )
 
     return CompactEnqueued(mode=mode, agent_id=agent_id, status="enqueued")
 
@@ -82,12 +90,12 @@ async def post_cancel(body: CancelRequest, request: Request) -> CancelRequested:
     return await _ops.cancel_agent_op(body.agent_id, request.app.state.db_pool)
 
 
-def _compact_request_blocking(pool: ConnectionPool, agent_id: int) -> None:
+def _compact_request_blocking(pool: ConnectionPool, agent_id: int) -> int:
     """Sync compact-request INSERT + 404 guard — via to_thread."""
     with pool.connection() as conn:
         if not agent_exists(conn, agent_id):
             raise HTTPException(status_code=404, detail=f"agent {agent_id} not found")
-        insert_compact_request_inbound(conn, agent_id)
+        return insert_compact_request_inbound(conn, agent_id)
 
 
 @router.post("/api/agents/{agent_id}/terminate")
@@ -188,8 +196,9 @@ async def post_agent_resurrect(
     lifecycle event with no message — the agent just gets the "you have been
     resurrected" marker; the "resurrect with prompt" path carries a `prompt`
     that is INSERTed as a chat inbound in the **same transaction** as the
-    lifecycle 'resurrect' inbound, committed before the process launch so the new
-    process never races ahead of its prompt. `resurrected_by` defaults to
+    lifecycle 'resurrect' inbound. The detached session may be created before
+    commit, but its child blocks on the agent row and cannot claim or process
+    either inbound early. `resurrected_by` defaults to
     "user" and is validated against the envelope source whitelist.
 
     Peer agents have no dedicated resurrect API — they `send_message`, and
@@ -207,7 +216,9 @@ async def post_agent_resurrect(
         apply — idempotent.
     """
     forwarded = await _forward_to_home_machine(
-        agent_id, f"/api/agents/{agent_id}/resurrect", body.model_dump()
+        agent_id,
+        f"/api/agents/{agent_id}/resurrect-explicit-v2",
+        body.model_dump(),
     )
     return ResurrectAgentResponse.model_validate(forwarded)
 

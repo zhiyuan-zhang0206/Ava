@@ -376,19 +376,51 @@ class TestTerminate:
     def test_terminate_force_already_terminated_returns_already_terminated(
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """force=true for already terminated agent is still noop — does not kill again."""
-        _stub_native_kill(monkeypatch)
+        """Repeated force preserves its wire response but records a fresh
+        fence and clears the exact session without killing a possibly-reused
+        stale PID or faking a new status transition."""
+        session_kills: list[tuple[str, bool]] = []
+        pid_kills: list[int] = []
+
+        class _RecordingSupervisor:
+            @staticmethod
+            def kill_session(name: str, *, graceful: bool):
+                session_kills.append((name, graceful))
+                return (True, "noop")
+
+        monkeypatch.setattr("ops.ops_lifecycle.native_proc", lambda: _RecordingSupervisor)
+        monkeypatch.setattr("ops.ops_lifecycle.force_kill", pid_kills.append)
 
         with TestClient(app) as client:
             agent_id = client.post("/api/agents", json={}).json()["id"]
             with db_conn.cursor() as cur:
                 cur.execute(
-                    "UPDATE agents_meta SET status = 'terminated' WHERE id = %s",
+                    "UPDATE agents_meta SET status = 'terminated', pid = 424242 WHERE id = %s",
                     (agent_id,),
                 )
             db_conn.commit()
+            with db_conn.cursor() as cur:
+                cur.execute(
+                    "SELECT status_changed_at FROM agents_meta WHERE id = %s",
+                    (agent_id,),
+                )
+                before = cur.fetchone()
             resp = client.post(f"/api/agents/{agent_id}/terminate", json={"force": True})
         assert resp.json() == {"status": "already_terminated"}
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "SELECT status_changed_at, last_force_terminate_inbound_id "
+                "FROM agents_meta WHERE id = %s",
+                (agent_id,),
+            )
+            after = cur.fetchone()
+        assert before is not None and after is not None
+        assert after[0] == before[0]
+        assert after[1] is not None
+        assert _inbound_rows(db_conn, agent_id) == [("", "terminate", "user")]
+        assert len(session_kills) == 1
+        assert session_kills[0][1] is False
+        assert pid_kills == []
 
     def test_terminate_force_nonexistent_404(
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
@@ -406,6 +438,15 @@ class TestTerminate:
     ) -> None:
         """force=true and pid is not NULL, sends SIGKILL."""
         _stub_native_kill(monkeypatch)
+        from ops.agent_identity import AgentProcessIdentity
+
+        def _owned_process(_pid: int, _agent_id: int) -> AgentProcessIdentity:
+            return AgentProcessIdentity.OWNED
+
+        monkeypatch.setattr(
+            "ops.ops_lifecycle.probe_agent_process",
+            _owned_process,
+        )
 
         # track os.kill calls
         kill_calls: list[tuple] = []  # pyright: ignore[reportMissingTypeArgument, reportUnknownVariableType]

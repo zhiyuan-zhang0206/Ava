@@ -29,6 +29,8 @@ stubbed per-reconcile-test (resurrect_agent shells out to it before relaunch).
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
@@ -49,6 +51,10 @@ from tests.conftest import spawn_agent
 _DEAD_PID = 424243
 _LOCAL = machine_name()
 _BACKOFF = 300.0
+
+
+def _claim_ids(claims: list[agent_wake.AutoResurrectClaim]) -> list[int]:
+    return [claim.agent_id for claim in claims]
 
 
 @pytest.fixture
@@ -348,7 +354,7 @@ class TestClaimScan:
         aid = _corpse(db_conn, source="reaper")
         _add_pending_inbound(db_conn, aid)
         assert _last_resurrect_at(db_conn, aid) is None
-        assert aid in cr._claim_crash_resurrect_candidates(sync_pool, _LOCAL, _BACKOFF)
+        assert aid in _claim_ids(cr._claim_crash_resurrect_candidates(sync_pool, _LOCAL, _BACKOFF))
         assert _last_resurrect_at(db_conn, aid) is not None  # backoff clock stamped by the claim
 
     def test_launch_confirm_with_pending_claimed(
@@ -356,7 +362,7 @@ class TestClaimScan:
     ) -> None:
         aid = _corpse(db_conn, source="launch-confirm")
         _add_pending_inbound(db_conn, aid)
-        assert aid in cr._claim_crash_resurrect_candidates(sync_pool, _LOCAL, _BACKOFF)
+        assert aid in _claim_ids(cr._claim_crash_resurrect_candidates(sync_pool, _LOCAL, _BACKOFF))
 
     @pytest.mark.parametrize("source", ["user", "exit", "integrity", None])
     def test_intentional_and_null_never_claimed(
@@ -367,14 +373,18 @@ class TestClaimScan:
         (NULL — pre-column rows) is never resurrected, even with a pending inbound."""
         aid = _corpse(db_conn, source=source)
         _add_pending_inbound(db_conn, aid)
-        assert aid not in cr._claim_crash_resurrect_candidates(sync_pool, _LOCAL, _BACKOFF)
+        assert aid not in _claim_ids(
+            cr._claim_crash_resurrect_candidates(sync_pool, _LOCAL, _BACKOFF)
+        )
         assert _last_resurrect_at(db_conn, aid) is None  # not even the clock is touched
 
     def test_no_pending_inbound_not_claimed(
         self, db_conn: psycopg.Connection, sync_pool: ConnectionPool
     ) -> None:
         aid = _corpse(db_conn, source="reaper")
-        assert aid not in cr._claim_crash_resurrect_candidates(sync_pool, _LOCAL, _BACKOFF)
+        assert aid not in _claim_ids(
+            cr._claim_crash_resurrect_candidates(sync_pool, _LOCAL, _BACKOFF)
+        )
 
     @pytest.mark.parametrize(
         "kind", ["terminate", "cancel", "restart", "heartbeat", "compact_summary", "resurrect"]
@@ -390,7 +400,9 @@ class TestClaimScan:
         process its own kill signal (codex)."""
         aid = _corpse(db_conn, source="reaper")
         _add_pending_inbound(db_conn, aid, kind=kind)
-        assert aid not in cr._claim_crash_resurrect_candidates(sync_pool, _LOCAL, _BACKOFF)
+        assert aid not in _claim_ids(
+            cr._claim_crash_resurrect_candidates(sync_pool, _LOCAL, _BACKOFF)
+        )
 
     @pytest.mark.parametrize("kind", ["chat", "compact_request"])
     def test_work_kind_pending_is_claimed(
@@ -400,7 +412,7 @@ class TestClaimScan:
         resurrects for — each make a corpse eligible."""
         aid = _corpse(db_conn, source="reaper")
         _add_pending_inbound(db_conn, aid, kind=kind)
-        assert aid in cr._claim_crash_resurrect_candidates(sync_pool, _LOCAL, _BACKOFF)
+        assert aid in _claim_ids(cr._claim_crash_resurrect_candidates(sync_pool, _LOCAL, _BACKOFF))
 
     def test_real_work_alongside_control_signal_is_claimed(
         self, db_conn: psycopg.Connection, sync_pool: ConnectionPool
@@ -409,7 +421,7 @@ class TestClaimScan:
         aid = _corpse(db_conn, source="reaper")
         _add_pending_inbound(db_conn, aid, kind="terminate")
         _add_pending_inbound(db_conn, aid, kind="chat")
-        assert aid in cr._claim_crash_resurrect_candidates(sync_pool, _LOCAL, _BACKOFF)
+        assert aid in _claim_ids(cr._claim_crash_resurrect_candidates(sync_pool, _LOCAL, _BACKOFF))
 
 
 # ── boot-gate corpse <-> claim query agreement ────────────────────────────────
@@ -442,7 +454,7 @@ class TestBootGateCorpseIsResurrectable:
         with pytest.raises(CodeBehindSchema):
             _starting.enter_starting_or_die_on_stale_schema(aid)
 
-        assert aid in cr._claim_crash_resurrect_candidates(sync_pool, _LOCAL, _BACKOFF)
+        assert aid in _claim_ids(cr._claim_crash_resurrect_candidates(sync_pool, _LOCAL, _BACKOFF))
 
     def test_placement_mismatch_boot_corpse_is_claimed_by_the_row_s_own_host(
         self, db_conn: psycopg.Connection, sync_pool: ConnectionPool
@@ -460,9 +472,13 @@ class TestBootGateCorpseIsResurrectable:
             _starting.enter_starting_state(aid)
 
         # The wrong host (the one that ran the doomed launch) must NOT claim it...
-        assert aid not in cr._claim_crash_resurrect_candidates(sync_pool, _LOCAL, _BACKOFF)
+        assert aid not in _claim_ids(
+            cr._claim_crash_resurrect_candidates(sync_pool, _LOCAL, _BACKOFF)
+        )
         # ...the host the row actually names does.
-        assert aid in cr._claim_crash_resurrect_candidates(sync_pool, "other-host", _BACKOFF)
+        assert aid in _claim_ids(
+            cr._claim_crash_resurrect_candidates(sync_pool, "other-host", _BACKOFF)
+        )
 
     def test_respawn_integrity_corpse_is_not_claimed(
         self, db_conn: psycopg.Connection, sync_pool: ConnectionPool
@@ -475,7 +491,9 @@ class TestBootGateCorpseIsResurrectable:
         with pytest.raises(RuntimeError, match="DB integrity violated"):
             respawn_agent(aid)
         assert _row(db_conn, aid)[1] == "integrity"
-        assert aid not in cr._claim_crash_resurrect_candidates(sync_pool, _LOCAL, _BACKOFF)
+        assert aid not in _claim_ids(
+            cr._claim_crash_resurrect_candidates(sync_pool, _LOCAL, _BACKOFF)
+        )
 
     @pytest.mark.parametrize("kind", ["chat", "compact_request"])
     def test_claimed_work_inbound_is_claimed(
@@ -489,7 +507,7 @@ class TestBootGateCorpseIsResurrectable:
         The kind allowlist still applies."""
         aid = _corpse(db_conn, source="reaper")
         _add_claimed_inbound(db_conn, aid, kind=kind)
-        assert aid in cr._claim_crash_resurrect_candidates(sync_pool, _LOCAL, _BACKOFF)
+        assert aid in _claim_ids(cr._claim_crash_resurrect_candidates(sync_pool, _LOCAL, _BACKOFF))
 
     @pytest.mark.parametrize("kind", ["terminate", "cancel", "restart", "heartbeat"])
     def test_claimed_non_work_kind_not_claimed(
@@ -499,7 +517,9 @@ class TestBootGateCorpseIsResurrectable:
         a claimed control signal / nudge never revives the corpse."""
         aid = _corpse(db_conn, source="reaper")
         _add_claimed_inbound(db_conn, aid, kind=kind)
-        assert aid not in cr._claim_crash_resurrect_candidates(sync_pool, _LOCAL, _BACKOFF)
+        assert aid not in _claim_ids(
+            cr._claim_crash_resurrect_candidates(sync_pool, _LOCAL, _BACKOFF)
+        )
 
     def test_done_inbound_not_claimed(
         self, db_conn: psycopg.Connection, sync_pool: ConnectionPool
@@ -515,7 +535,9 @@ class TestBootGateCorpseIsResurrectable:
                 (aid,),
             )
         db_conn.commit()
-        assert aid not in cr._claim_crash_resurrect_candidates(sync_pool, _LOCAL, _BACKOFF)
+        assert aid not in _claim_ids(
+            cr._claim_crash_resurrect_candidates(sync_pool, _LOCAL, _BACKOFF)
+        )
 
     def test_force_terminate_overwrites_reaper_stamp(
         self, db_conn: psycopg.Connection, sync_pool: ConnectionPool
@@ -528,21 +550,25 @@ class TestBootGateCorpseIsResurrectable:
         _add_pending_inbound(db_conn, aid)  # real work still queued
         _force_mark_terminated(aid, sync_pool)  # user force-kills the already-dead agent
         assert _row(db_conn, aid) == ("terminated", "user")  # stamp overwritten
-        assert aid not in cr._claim_crash_resurrect_candidates(sync_pool, _LOCAL, _BACKOFF)
+        assert aid not in _claim_ids(
+            cr._claim_crash_resurrect_candidates(sync_pool, _LOCAL, _BACKOFF)
+        )
 
     def test_within_backoff_not_claimed(
         self, db_conn: psycopg.Connection, sync_pool: ConnectionPool
     ) -> None:
         aid = _corpse(db_conn, source="reaper", last_resurrect_s_ago=10)  # < 300s window
         _add_pending_inbound(db_conn, aid)
-        assert aid not in cr._claim_crash_resurrect_candidates(sync_pool, _LOCAL, _BACKOFF)
+        assert aid not in _claim_ids(
+            cr._claim_crash_resurrect_candidates(sync_pool, _LOCAL, _BACKOFF)
+        )
 
     def test_past_backoff_claimed(
         self, db_conn: psycopg.Connection, sync_pool: ConnectionPool
     ) -> None:
         aid = _corpse(db_conn, source="reaper", last_resurrect_s_ago=9999)  # > window
         _add_pending_inbound(db_conn, aid)
-        assert aid in cr._claim_crash_resurrect_candidates(sync_pool, _LOCAL, _BACKOFF)
+        assert aid in _claim_ids(cr._claim_crash_resurrect_candidates(sync_pool, _LOCAL, _BACKOFF))
 
     def test_claim_is_idempotent_within_backoff(
         self, db_conn: psycopg.Connection, sync_pool: ConnectionPool
@@ -553,15 +579,91 @@ class TestBootGateCorpseIsResurrectable:
         _add_pending_inbound(db_conn, aid)
         first = cr._claim_crash_resurrect_candidates(sync_pool, _LOCAL, _BACKOFF)
         second = cr._claim_crash_resurrect_candidates(sync_pool, _LOCAL, _BACKOFF)
-        assert aid in first
-        assert aid not in second
+        assert aid in _claim_ids(first)
+        assert aid not in _claim_ids(second)
 
     def test_other_machine_not_claimed(
         self, db_conn: psycopg.Connection, sync_pool: ConnectionPool
     ) -> None:
         aid = _corpse(db_conn, source="reaper", machine="other-box")
         _add_pending_inbound(db_conn, aid)
-        assert aid not in cr._claim_crash_resurrect_candidates(sync_pool, _LOCAL, _BACKOFF)
+        assert aid not in _claim_ids(
+            cr._claim_crash_resurrect_candidates(sync_pool, _LOCAL, _BACKOFF)
+        )
+
+
+class TestControllerFinalClaimGuard:
+    def test_crash_claim_then_user_force_is_stale_at_final_cas(
+        self,
+        db_conn: psycopg.Connection,
+        sync_pool: ConnectionPool,
+        monkeypatch: pytest.MonkeyPatch,
+        launched_agents: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    ) -> None:
+        """A controller task claimed for a reaper death cannot reverse a user
+        force that lands before its final resurrection transition."""
+        aid = _corpse(db_conn, source="reaper")
+        _add_pending_inbound(db_conn, aid)
+        claim = cr._claim_crash_resurrect_candidates(sync_pool, _LOCAL, _BACKOFF)[0]
+        _force_mark_terminated(aid, sync_pool)
+        launched_agents.clear()
+        with pytest.raises(agent_wake.ResurrectClaimStaleError):
+            resurrect_agent(
+                aid,
+                resurrected_by="system",
+                auto_claim=claim,
+            )
+
+        assert _row(db_conn, aid) == ("terminated", "user")
+        assert launched_agents == []
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "SELECT COUNT(*) FROM inbound_messages WHERE agent_id = %s AND kind = 'resurrect'",
+                (aid,),
+            )
+            assert cur.fetchone() == (0,)
+
+    def test_crash_claim_death_epoch_blocks_same_source_aba(
+        self,
+        db_conn: psycopg.Connection,
+        sync_pool: ConnectionPool,
+        monkeypatch: pytest.MonkeyPatch,
+        launched_agents: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    ) -> None:
+        """source+backoff can repeat after manual revive and another crash;
+        the exact status_changed_at death epoch makes the old claim stale."""
+        aid = _corpse(db_conn, source="reaper")
+        _add_pending_inbound(db_conn, aid)
+        old_claim = cr._claim_crash_resurrect_candidates(sync_pool, _LOCAL, _BACKOFF)[0]
+
+        resurrect_agent(aid, resurrected_by="user")
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "UPDATE agents_meta SET status = 'terminated', termination_source = 'reaper' "
+                "WHERE id = %s",
+                (aid,),
+            )
+            cur.execute(
+                "UPDATE agents_meta SET status_changed_at = %s + interval '1 second' WHERE id = %s",
+                (old_claim.termination_epoch, aid),
+            )
+        db_conn.commit()
+        launched_agents.clear()
+        with pytest.raises(agent_wake.ResurrectClaimStaleError):
+            resurrect_agent(
+                aid,
+                resurrected_by="system",
+                auto_claim=old_claim,
+            )
+
+        assert _row(db_conn, aid) == ("terminated", "reaper")
+        assert launched_agents == []
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "SELECT COUNT(*) FROM inbound_messages WHERE agent_id = %s AND kind = 'resurrect'",
+                (aid,),
+            )
+            assert cur.fetchone() == (1,)
 
 
 # ── resurrect clears the per-death mark ──────────────────────────────────────
@@ -586,6 +688,10 @@ class TestResurrectClearsSource:
 # ── controller reconcile ─────────────────────────────────────────────────────
 
 
+def _confirm_launch(_agent_id: int) -> bool:
+    return True
+
+
 class TestControllerReconcile:
     @pytest.fixture(autouse=True)
     def _tune(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -593,6 +699,11 @@ class TestControllerReconcile:
         monkeypatch.setattr(settings.daemon, "auto_resurrect_backoff_seconds", _BACKOFF)
         monkeypatch.setattr(cr, "_gateway_healthy", lambda: True)
         monkeypatch.setattr("ops.agent_launch._kill_stale_session", lambda _id: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr(
+            agent_launch,
+            "_confirm_launch_or_force_terminated",
+            _confirm_launch,
+        )
 
     def test_resurrects_involuntary_corpse_with_pending(
         self,
@@ -724,6 +835,11 @@ class TestBootRevivePass:
         monkeypatch.setattr(settings.daemon, "auto_resurrect_backoff_seconds", _BACKOFF)
         monkeypatch.setattr(cr, "_gateway_healthy", lambda: True)
         monkeypatch.setattr("ops.agent_launch._kill_stale_session", lambda _id: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr(
+            agent_launch,
+            "_confirm_launch_or_force_terminated",
+            _confirm_launch,
+        )
 
     def test_boot_pass_resurrects_corpse_without_pending(
         self,
@@ -893,11 +1009,35 @@ class TestWedgedForceTerminatePublishesPageClosed:
         aid = _park(db_conn, status="running", pid=12345)
         _open_page(db_conn, aid, name="panel")
 
-        monkeypatch.setattr(wd, "_claim_wedged_candidates", lambda _p, _m, _a, _b: [(aid, 12345)])  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-        monkeypatch.setattr(wd, "process_alive", lambda _pid: True)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        def _claimed_candidate(
+            _pool: ConnectionPool,
+            _machine: str,
+            _age_s: float,
+            _backoff_s: float,
+        ) -> list[tuple[int, int, datetime]]:
+            return [(aid, 12345, datetime.now(UTC))]
+
+        def _owned_process(_pid: int, _agent_id: int) -> AgentProcessIdentity:
+            return AgentProcessIdentity.OWNED
+
+        monkeypatch.setattr(
+            wd,
+            "_claim_wedged_candidates",
+            _claimed_candidate,
+        )
+        monkeypatch.setattr(
+            wd,
+            "probe_agent_process",
+            _owned_process,
+        )
         killed: list[int] = []
         monkeypatch.setattr(wd, "force_kill", killed.append)
         monkeypatch.setattr(wd, "resurrect_agent", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        monkeypatch.setattr(
+            agent_launch,
+            "_confirm_launch_or_force_terminated",
+            _confirm_launch,
+        )
         monkeypatch.setattr(wd, "_gateway_healthy", lambda: True)
         monkeypatch.setattr(settings.daemon, "wedged_agent_enabled", True)
         closed = _capture_page_closed(monkeypatch, wd)

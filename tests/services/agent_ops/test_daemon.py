@@ -285,22 +285,34 @@ async def test_dispatch_lifecycle_calls_lifecycle_op(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(daemon, "_db_pool", _stub_pool())
     captured: dict[str, object] = {}
 
-    async def _fake_lifecycle(path, body, pool):  # type: ignore[no-untyped-def]
+    async def _fake_lifecycle(  # type: ignore[no-untyped-def]
+        path, body, pool, *, trigger_inbound_id=None, trigger_inbound_kind=None
+    ):
         from ops.rpc_schemas import TerminateAgentResponse
 
         captured["path"] = path
         captured["body"] = body
+        captured["trigger_inbound_id"] = trigger_inbound_id
+        captured["trigger_inbound_kind"] = trigger_inbound_kind
         return TerminateAgentResponse(status="enqueued")
 
     monkeypatch.setattr(daemon.ops_lifecycle, "lifecycle_op", _fake_lifecycle)  # pyright: ignore[reportUnknownArgumentType]
     status, result = await daemon._dispatch(
-        "lifecycle", {"path": "/api/agents/42/terminate", "body": {"source": "user"}}
+        "lifecycle",
+        {
+            "path": "/api/agents/42/resurrect-if-pending-work-v2",
+            "body": {"resurrected_by": "system"},
+            "trigger_inbound_id": 123,
+            "trigger_inbound_kind": "chat",
+        },
     )
     assert status == "completed"
     # _dispatch serializes the lifecycle response model to a JSON dict for the wire.
     assert result == {"status": "enqueued"}
-    assert captured["path"] == "/api/agents/42/terminate"
-    assert captured["body"] == {"source": "user"}
+    assert captured["path"] == "/api/agents/42/resurrect-if-pending-work-v2"
+    assert captured["body"] == {"resurrected_by": "system"}
+    assert captured["trigger_inbound_id"] == 123
+    assert captured["trigger_inbound_kind"] == "chat"
 
 
 @pytest.mark.asyncio
@@ -332,7 +344,9 @@ async def test_dispatch_unparseable_lifecycle_path(monkeypatch: pytest.MonkeyPat
     """ops.lifecycle_op raising ValueError lands as failed result, not a crash."""
     monkeypatch.setattr(daemon, "_db_pool", _stub_pool())
 
-    async def _raises(path, body, pool):  # type: ignore[no-untyped-def]
+    async def _raises(  # type: ignore[no-untyped-def]
+        path, body, pool, *, trigger_inbound_id=None, trigger_inbound_kind=None
+    ):
         raise ValueError(f"lifecycle path not recognized: {path!r}")
 
     monkeypatch.setattr(daemon.ops_lifecycle, "lifecycle_op", _raises)  # pyright: ignore[reportUnknownArgumentType]
@@ -369,7 +383,9 @@ async def test_dispatch_wire_error_carries_reason(monkeypatch: pytest.MonkeyPatc
 
     from shared.agents import AgentNotFound
 
-    async def _raises(path, body, pool):  # type: ignore[no-untyped-def]
+    async def _raises(  # type: ignore[no-untyped-def]
+        path, body, pool, *, trigger_inbound_id=None, trigger_inbound_kind=None
+    ):
         raise AgentNotFound("agent 999 does not exist")
 
     monkeypatch.setattr(daemon.ops_lifecycle, "lifecycle_op", _raises)  # pyright: ignore[reportUnknownArgumentType]
@@ -867,7 +883,9 @@ async def test_idempotent_dispatch_failed_outcome_is_stored_and_replayed(
     same-key retry — a deterministic business failure must not re-run the op."""
     monkeypatch.setattr(daemon, "_db_pool", ops_pool)
 
-    async def _fake_lifecycle(path, body, pool):  # type: ignore[no-untyped-def]
+    async def _fake_lifecycle(  # type: ignore[no-untyped-def]
+        path, body, pool, *, trigger_inbound_id=None, trigger_inbound_kind=None
+    ):
         raise ValueError("unparseable lifecycle path")
 
     monkeypatch.setattr(daemon.ops_lifecycle, "lifecycle_op", _fake_lifecycle)  # pyright: ignore[reportUnknownArgumentType]

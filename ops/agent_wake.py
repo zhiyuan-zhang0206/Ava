@@ -3,27 +3,29 @@
 The other lifecycle half from `ops/agent_spawn.py` (which creates new rows);
 both are reached through `ops/agents.py`. Three wake paths, one shape: a CAS on
 `agents_meta.status` into 'allocated' (clearing pid / started_at), an optional
-lifecycle inbound committed *before* the launch, then a relaunch attached to the
-same `agent_id` — LangGraph's checkpointer restores the message history, so the
-process resumes rather than starts over. `resurrect_agent` comes from
+lifecycle inbound, then a relaunch attached to the same `agent_id` — LangGraph's
+checkpointer restores the message history, so the process resumes rather than
+starts over. Resurrection creates the detached session while its machine and
+agent row locks are held; the child cannot claim the row or process the inbound
+until that transaction commits. `resurrect_agent` comes from
 'terminated', `respawn_agent` from 'restarting', `swap_in_agent` from
 'hibernating'; only the first two write a lifecycle inbound, because
 hibernation is deliberately invisible to the agent. The *mechanics* of launching
 the child live in `ops/agent_launch.py`, reached via module-qualified access
 (`agent_launch._launch_or_force_terminated`).
 
-- **resurrect_agent(agent_id, *, resurrected_by, prompt)** — a
-  'terminated' agents_meta row -> 'allocated' + launch process. **Automatically
-  INSERTs one kind='resurrect' inbound** (source=resurrected_by, content=''),
-  so the agent sees from the LLM perspective that it was resurrected rather
-  than receiving an ordinary new message — this is the semantic difference
-  between resurrect and spawn. `prompt` is optional: a peer-agent resurrect
-  passes one (the reason it woke the other agent); the UI resurrect button is
-  a bare lifecycle event and passes none. When given, INSERT another 'chat'
-  inbound in the same transaction (kind='chat', content=prompt,
-  source=resurrected_by) — **both inbounds are committed before** the process
-  launch, eliminating at the root the race "prompt has not arrived yet but
-  agent has already started running".
+- **resurrect_agent(...)** — a 'terminated' row -> 'allocated' + launch.
+  INSERTs a kind='resurrect' inbound so the LLM sees why it resumed; an
+  optional `prompt` adds a chat in the same transaction. The child cannot claim
+  or process either inbound
+  before the transaction commits, eliminating the race "prompt has not arrived
+  yet but agent has already started running". Pending-work auto-resurrect also
+  carries the exact inbound id and expected kind (`chat` or `compact_request`):
+  the final UPDATE accepts it only while that row is pending, newer than the
+  current termination, and above the latest force-terminate inbound fence. A
+  later kill therefore wins without a marker or launch. Crash and wedged
+  recovery instead carry an exact controller claim for the current death;
+  explicit manual resurrection has neither automatic-work guard.
 - **respawn_agent(agent_id)** — 'restarting' -> 'allocated' + launch process,
   same pattern as resurrect. **Automatically INSERTs one
   kind='restart_completed' inbound** (source taken from the original 'restart'
@@ -40,15 +42,334 @@ enforces this with a 422 (`ResurrectAgentRequest`).
 from __future__ import annotations
 
 import json
+import time
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Literal
+
+import psycopg
 
 import shared.db
 from ops import agent_launch
 from ops.pages import list_open_page_names
-from shared.agents import AgentNotFound, AgentStatus, ResurrectAlreadyAlive
+from shared.agents import (
+    AgentNotFound,
+    AgentStatus,
+    MachinePaused,
+    ResurrectAlreadyAlive,
+    ResurrectError,
+    TerminationSource,
+)
 from shared.audit_events import insert_event_log
 from shared.db import fetch_one
 from shared.live_announce import publish_agent_updated_sync, publish_page_closed_sync
 from shared.log import logger
+
+
+class ResurrectTriggerStaleError(ResurrectError):
+    """An auto-resurrect trigger no longer qualifies for the current death.
+
+    Internal and non-wire: the lifecycle op turns it into an idempotent no-op.
+    Unlike `ResurrectAlreadyAlive`, the agent can still be terminated.
+    """
+
+
+class ResurrectClaimStaleError(ResurrectError):
+    """A controller's auto-resurrect claim no longer owns this death."""
+
+
+@dataclass(frozen=True)
+class AutoResurrectClaim:
+    """Persistent token carried from a controller claim to the final CAS."""
+
+    agent_id: int
+    termination_source: TerminationSource
+    termination_epoch: datetime
+    claim_kind: Literal["crash", "wedged"]
+    claimed_at: datetime
+
+
+@dataclass(frozen=True)
+class _PreparedResurrect:
+    allocation_epoch: datetime
+    config_overlay: dict[str, object] | None
+    birth_config: dict[str, object] | None
+    event_target: int | None
+
+
+class _ResurrectSessionStartError(RuntimeError):
+    """Detached session creation failed before the resurrect commit."""
+
+
+def _lock_active_home_machine(cur: psycopg.Cursor, agent_id: int) -> None:
+    """Lock the home-machine admission row before locking the agent row.
+
+    Machine pause takes the inverse side of this same lock first, commits the
+    latch, then sweeps agents. A resurrection that wins the share lock may
+    finish and is swept; one that loses observes ``paused_at`` and cannot
+    transition. The global lock order is therefore machine -> agent.
+    """
+    cur.execute("SELECT machine FROM agents_meta WHERE id = %s", (agent_id,))
+    agent_row = cur.fetchone()
+    if agent_row is None:
+        raise AgentNotFound(f"agent {agent_id} does not exist")
+    home_machine = agent_row[0]
+    cur.execute("SELECT paused_at FROM machines WHERE name = %s FOR SHARE", (home_machine,))
+    machine_row = cur.fetchone()
+    if machine_row is not None and machine_row[0] is not None:
+        raise MachinePaused(
+            f"agent {agent_id} home machine {home_machine!r} is paused; "
+            "resume it before resurrecting"
+        )
+
+
+def _transition_terminated_to_allocated(
+    cur: psycopg.Cursor,
+    agent_id: int,
+    *,
+    trigger_inbound_id: int | None,
+    trigger_inbound_kind: Literal["chat", "compact_request"] | None,
+    auto_claim: AutoResurrectClaim | None,
+) -> datetime:
+    """Run the one final resurrection CAS with a fully static SQL shape."""
+    base_params = (AgentStatus.ALLOCATED, agent_id, AgentStatus.TERMINATED)
+    if trigger_inbound_id is not None:
+        assert trigger_inbound_kind is not None  # validated at public helper boundary  # noqa: S101
+        cur.execute(
+            "UPDATE agents_meta SET status = %s, pid = NULL, started_at = NULL, "
+            "termination_source = NULL, lease_expires_at = NULL "
+            "WHERE id = %s AND status = %s "
+            "AND EXISTS ("
+            "  SELECT 1 FROM inbound_messages m "
+            "  WHERE m.id = %s AND m.agent_id = agents_meta.id "
+            "    AND m.status = 'pending' AND m.kind = %s "
+            "    AND m.created_at > agents_meta.status_changed_at "
+            "    AND m.id > COALESCE(agents_meta.last_force_terminate_inbound_id, 0)"
+            ") RETURNING status_changed_at",
+            (*base_params, trigger_inbound_id, trigger_inbound_kind),
+        )
+    elif auto_claim is not None and auto_claim.claim_kind == "crash":
+        cur.execute(
+            "UPDATE agents_meta SET status = %s, pid = NULL, started_at = NULL, "
+            "termination_source = NULL, lease_expires_at = NULL "
+            "WHERE id = %s AND status = %s "
+            "AND termination_source = %s AND status_changed_at = %s "
+            "AND last_resurrect_at = %s RETURNING status_changed_at",
+            (
+                *base_params,
+                auto_claim.termination_source.value,
+                auto_claim.termination_epoch,
+                auto_claim.claimed_at,
+            ),
+        )
+    elif auto_claim is not None and auto_claim.claim_kind == "wedged":
+        cur.execute(
+            "UPDATE agents_meta SET status = %s, pid = NULL, started_at = NULL, "
+            "termination_source = NULL, lease_expires_at = NULL "
+            "WHERE id = %s AND status = %s "
+            "AND termination_source = %s AND status_changed_at = %s "
+            "AND last_wedged_check_at = %s RETURNING status_changed_at",
+            (
+                *base_params,
+                auto_claim.termination_source.value,
+                auto_claim.termination_epoch,
+                auto_claim.claimed_at,
+            ),
+        )
+    else:
+        cur.execute(
+            "UPDATE agents_meta SET status = %s, pid = NULL, started_at = NULL, "
+            "termination_source = NULL, lease_expires_at = NULL "
+            "WHERE id = %s AND status = %s RETURNING status_changed_at",
+            base_params,
+        )
+    transition_row = cur.fetchone()
+    if transition_row is not None:
+        return transition_row[0]
+    cur.execute(
+        "SELECT home.paused_at IS NOT NULL "
+        "FROM agents_meta a JOIN machines home ON home.name = a.machine "
+        "WHERE a.id = %s",
+        (agent_id,),
+    )
+    paused_row = cur.fetchone()
+    if paused_row is not None and paused_row[0] is True:
+        raise MachinePaused(
+            f"agent {agent_id} home machine is paused; resume it before resurrecting"
+        )
+    if trigger_inbound_id is not None:
+        raise ResurrectTriggerStaleError(
+            f"agent {agent_id} trigger work no longer qualifies for its current "
+            "termination; UPDATE affected 0 rows"
+        )
+    if auto_claim is not None:
+        raise ResurrectClaimStaleError(
+            f"agent {agent_id} auto-resurrect claim no longer owns the current "
+            "termination; UPDATE affected 0 rows"
+        )
+    raise ResurrectAlreadyAlive(
+        f"agent {agent_id} was concurrently modified after SELECT; UPDATE affected 0 rows"
+    )
+
+
+def _resurrect_event_target(resurrected_by: str) -> int | None:
+    if not resurrected_by.startswith("agent:"):
+        return None
+    try:
+        return int(resurrected_by.removeprefix("agent:"))
+    except ValueError:
+        return None
+
+
+def _prepare_resurrect_attempt(
+    agent_id: int,
+    *,
+    resurrected_by: str,
+    prompt: str | None,
+    trigger_inbound_id: int | None,
+    trigger_inbound_kind: Literal["chat", "compact_request"] | None,
+    auto_claim: AutoResurrectClaim | None,
+) -> _PreparedResurrect:
+    """Transition, persist lifecycle rows, and create the session under one row lock."""
+    with shared.db.connect() as conn, conn.cursor() as cur:
+        _lock_active_home_machine(cur, agent_id)
+        cur.execute("SELECT status FROM agents_meta WHERE id = %s", (agent_id,))
+        row = cur.fetchone()
+        if row is None:
+            raise AgentNotFound(f"agent {agent_id} does not exist")
+        current = AgentStatus(row[0])
+        if current is not AgentStatus.TERMINATED:
+            raise ResurrectAlreadyAlive(
+                f"agent {agent_id} is in {current.value!r} state, not 'terminated'"
+            )
+        allocation_epoch = _transition_terminated_to_allocated(
+            cur,
+            agent_id,
+            trigger_inbound_id=trigger_inbound_id,
+            trigger_inbound_kind=trigger_inbound_kind,
+            auto_claim=auto_claim,
+        )
+        cur.execute(
+            "INSERT INTO inbound_messages (agent_id, content, kind, source) "
+            "VALUES (%s, '', 'resurrect', %s)",
+            (agent_id, resurrected_by),
+        )
+        if prompt is not None:
+            cur.execute(
+                "INSERT INTO inbound_messages (agent_id, content, kind, source) "
+                "VALUES (%s, %s, 'chat', %s)",
+                (agent_id, prompt, resurrected_by),
+            )
+        cur.execute(
+            "SELECT config_overlay, birth_config FROM agents_meta WHERE id = %s", (agent_id,)
+        )
+        config_overlay: dict[str, object] | None
+        birth_config: dict[str, object] | None
+        config_overlay, birth_config = fetch_one(cur, "resurrect: read per-agent config")
+        try:
+            agent_launch._launch_agent_process(
+                agent_id,
+                config_overlay=config_overlay,
+                birth_config=birth_config,
+                confirm=False,
+            )
+        except RuntimeError as exc:
+            raise _ResurrectSessionStartError(str(exc)) from exc
+        conn.commit()
+        publish_agent_updated_sync(conn, agent_id)
+    return _PreparedResurrect(
+        allocation_epoch=allocation_epoch,
+        config_overlay=config_overlay,
+        birth_config=birth_config,
+        event_target=_resurrect_event_target(resurrected_by),
+    )
+
+
+def _retry_resurrect_session(agent_id: int, prepared: _PreparedResurrect) -> bool:
+    """Create another session only while the same active allocation still owns the row."""
+    with shared.db.connect() as conn, conn.cursor() as cur:
+        _lock_active_home_machine(cur, agent_id)
+        cur.execute(
+            "SELECT status, status_changed_at FROM agents_meta WHERE id = %s FOR UPDATE",
+            (agent_id,),
+        )
+        row = cur.fetchone()
+        if (
+            row is None
+            or row[0] != AgentStatus.ALLOCATED.value
+            or row[1] != prepared.allocation_epoch
+        ):
+            return False
+        agent_launch._launch_agent_process(
+            agent_id,
+            config_overlay=prepared.config_overlay,
+            birth_config=prepared.birth_config,
+            confirm=False,
+        )
+    return True
+
+
+def _mark_resurrect_launch_failed(agent_id: int, prepared: _PreparedResurrect) -> None:
+    """Terminate only the still-unclaimed allocation owned by this resurrect."""
+    page_names: list[str] = []
+    changed = False
+    with shared.db.connect() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT status, status_changed_at FROM agents_meta WHERE id = %s FOR UPDATE",
+            (agent_id,),
+        )
+        row = cur.fetchone()
+        if row == (AgentStatus.ALLOCATED.value, prepared.allocation_epoch):
+            page_names = list_open_page_names(conn, agent_id)
+            agent_launch._kill_stale_session(agent_id)
+            cur.execute(
+                "UPDATE agents_meta SET status = 'terminated', "
+                "termination_source = 'launch-confirm' "
+                "WHERE id = %s AND status = 'allocated' AND status_changed_at = %s",
+                (agent_id, prepared.allocation_epoch),
+            )
+            changed = cur.rowcount == 1
+        conn.commit()
+        if changed:
+            publish_agent_updated_sync(conn, agent_id)
+    if changed:
+        for page_name in page_names:
+            publish_page_closed_sync(agent_id, page_name)
+
+
+def _confirm_resurrect_with_retries(
+    agent_id: int, prepared: _PreparedResurrect, *, first_attempt: int
+) -> bool:
+    """Confirm one incarnation, retrying sessions without reopening an old death."""
+    attempt = first_attempt
+    while True:
+        try:
+            agent_launch._wait_for_status_to_leave_allocated(agent_id)
+            return True
+        except RuntimeError as exc:
+            if attempt >= agent_launch._LAUNCH_MAX_RETRIES:
+                _mark_resurrect_launch_failed(agent_id, prepared)
+                raise
+            backoff = agent_launch._LAUNCH_RETRY_BASE_BACKOFF_SEC * 2**attempt
+            logger.warning(
+                "agent {id} resurrect launch attempt {n}/{total} failed ({exc}); "
+                "retrying the same allocation in {backoff:.0f}s",
+                id=agent_id,
+                n=attempt + 1,
+                total=agent_launch._LAUNCH_MAX_RETRIES + 1,
+                exc=repr(exc),
+                backoff=backoff,
+            )
+            time.sleep(backoff)
+            attempt += 1
+            try:
+                if not _retry_resurrect_session(agent_id, prepared):
+                    return False
+            except RuntimeError:
+                if attempt >= agent_launch._LAUNCH_MAX_RETRIES:
+                    _mark_resurrect_launch_failed(agent_id, prepared)
+                    raise
+                continue
 
 
 def resurrect_agent(
@@ -56,26 +377,27 @@ def resurrect_agent(
     *,
     resurrected_by: str,
     prompt: str | None = None,
+    trigger_inbound_id: int | None = None,
+    trigger_inbound_kind: Literal["chat", "compact_request"] | None = None,
+    auto_claim: AutoResurrectClaim | None = None,
 ) -> int:
     """Resurrect an already-terminated agent: UPDATE 'terminated' -> 'allocated'
     + INSERT one kind='resurrect' inbound (source=resurrected_by) +
     (optionally) one 'chat' prompt inbound + launch process.
 
-    agent + checkpoints + messages are still in DB; the agent wakes up and
-    continues from the last state (LangGraph checkpointer auto-restores
-    messages history). The resurrect inbound acts as a lifecycle signal
-    picked up by the new process's claim, which appends a lifecycle marker
+    Agent, checkpoints, and messages stay in DB; LangGraph restores the last
+    state. The resurrect inbound acts as a lifecycle signal whose claim appends
+    a marker
     "[system ts] You have been resurrected by {resurrected_by}" to messages,
-    so the agent from the LLM perspective sees that it was resurrected rather
-    than continuing from last turn. This marker is the "ok I'm awake" signal
-    and is always present — even when no prompt is delivered.
+    so the LLM sees that it was resurrected. It is always present, even without
+    a prompt.
 
     `prompt` is optional. When given, INSERT one 'chat' inbound in **the same
     transaction** as the lifecycle 'resurrect' inbound (kind='chat',
-    content=prompt, source=resurrected_by) — both inbounds are committed
-    before the process launch. This eliminates at the root the race "agent process
-    already spawned and running, prompt inbound has not arrived yet"; when
-    the agent wakes and SELECTs the batch, both rows are visible, with
+    content=prompt, source=resurrected_by). The detached session is created
+    before commit while the machine and agent locks are held, but its child
+    blocks on the agent row and cannot claim or process either inbound until
+    commit. When the agent wakes and SELECTs the batch, both rows are visible, with
     ordering guaranteed by inbound_messages.id (BIGSERIAL monotonic) so
     lifecycle is before chat. When no prompt is given (the UI resurrect
     event), only the lifecycle inbound is written.
@@ -100,6 +422,18 @@ def resurrect_agent(
             inbound committed in the same transaction as the lifecycle
             'resurrect' inbound, so the agent knows why it was resurrected and
             what to do. None (the UI event path) delivers only the marker.
+        trigger_inbound_id: optional pending-work auto-resurrect guard. When
+            set with `trigger_inbound_kind`, the terminated -> allocated
+            transition wins only if this exact chat or compact request is still
+            pending, was created after the current death, and has an id above
+            the latest explicit-kill fence. Explicit manual and controller
+            recovery callers leave it None.
+        trigger_inbound_kind: expected kind for `trigger_inbound_id`; either
+            `chat` or `compact_request`.
+        auto_claim: optional controller claim token. The final transition
+            additionally requires the same involuntary termination source and
+            persistent claim timestamp, so a later explicit force cannot be
+            reversed by a crash/wedged task already in flight.
 
     Returns:
         agent_id (symmetric with create_agent_row).
@@ -110,93 +444,55 @@ def resurrect_agent(
             (allocated / starting / running / idling / restarting) — any state
             that means "still alive or not fully dead" should not spawn a
             second process.
+        ResurrectTriggerStaleError: `trigger_inbound_id` no longer names the
+            expected pending post-termination work for this agent. The agent can still be
+            terminated; the internal auto-resurrect caller treats this as a
+            no-op.
+        ResurrectClaimStaleError: `auto_claim` no longer owns the terminated
+            row. The controller treats this as a benign stale no-op.
     """
-    with shared.db.connect() as conn, conn.cursor() as cur:
-        # SELECT first to distinguish the two raise reasons (AgentNotFound vs
-        # ResurrectAlreadyAlive). The race between SELECT and UPDATE is not
-        # relied on "WHERE status='terminated'" as a fallback — must
-        # explicitly check UPDATE rowcount; 0 rows -> raise: otherwise INSERT
-        # would deliver a fake resurrect notification to an agent that is
-        # still running.
-        cur.execute("SELECT status FROM agents_meta WHERE id = %s", (agent_id,))
-        row = cur.fetchone()
-        if row is None:
-            raise AgentNotFound(f"agent {agent_id} does not exist")
-        current = AgentStatus(row[0])
-        if current is not AgentStatus.TERMINATED:
-            raise ResurrectAlreadyAlive(
-                f"agent {agent_id} is in {current.value!r} state, not 'terminated'"
+    if (trigger_inbound_id is None) != (trigger_inbound_kind is None):
+        raise ValueError("trigger inbound id and kind must be provided together")
+    if trigger_inbound_id is not None and auto_claim is not None:
+        raise ValueError("chat trigger and controller claim guards are mutually exclusive")
+    if auto_claim is not None and auto_claim.agent_id != agent_id:
+        raise ValueError(
+            f"auto-resurrect claim belongs to agent {auto_claim.agent_id}, not {agent_id}"
+        )
+    prepared: _PreparedResurrect | None = None
+    first_attempt = 0
+    for first_attempt in range(agent_launch._LAUNCH_MAX_RETRIES + 1):
+        try:
+            prepared = _prepare_resurrect_attempt(
+                agent_id,
+                resurrected_by=resurrected_by,
+                prompt=prompt,
+                trigger_inbound_id=trigger_inbound_id,
+                trigger_inbound_kind=trigger_inbound_kind,
+                auto_claim=auto_claim,
             )
-        # Also clear pid + started_at — they are only set during 'running';
-        # going back to 'allocated' must reset to NULL, otherwise the
-        # previous running session's fields become ghost data (agent 44
-        # incident). termination_source is likewise a property of the death we
-        # are leaving behind: clear it so the source is strictly per-death — a
-        # write site that later forgets to stamp leaves NULL (not resurrectable),
-        # which is the whole safety net. last_resurrect_at is NOT cleared here —
-        # it is the persistent backoff clock that must span the
-        # crash->resurrect->crash cycle, and it is owned by the controller.
-        cur.execute(
-            "UPDATE agents_meta SET status = %s, pid = NULL, started_at = NULL, "
-            "termination_source = NULL, lease_expires_at = NULL "
-            "WHERE id = %s AND status = %s",
-            (AgentStatus.ALLOCATED, agent_id, AgentStatus.TERMINATED),
-        )
-        if cur.rowcount != 1:
-            # After SELECT, someone else (concurrent resurrect / restart etc.)
-            # changed status first — current is no longer 'terminated', we
-            # cannot INSERT a resurrect notification + launch a new process
-            raise ResurrectAlreadyAlive(
-                f"agent {agent_id} was concurrently modified after SELECT; UPDATE affected 0 rows"
-            )
-        cur.execute(
-            "INSERT INTO inbound_messages (agent_id, content, kind, source) "
-            "VALUES (%s, '', 'resurrect', %s)",
-            (agent_id, resurrected_by),
-        )
-        if prompt is not None:
-            # resurrected_by is itself a legal envelope source (422-validated at
-            # the HTTP boundary, ResurrectAgentRequest) — reuse it verbatim as the
-            # chat source, no derivation.
-            cur.execute(
-                "INSERT INTO inbound_messages (agent_id, content, kind, source) "
-                "VALUES (%s, %s, 'chat', %s)",
-                (agent_id, prompt, resurrected_by),
-            )
-        cur.execute(
-            "SELECT config_overlay, birth_config FROM agents_meta WHERE id = %s", (agent_id,)
-        )
-        resurrect_overlay: dict[str, object] | None
-        resurrect_birth: dict[str, object] | None
-        resurrect_overlay, resurrect_birth = fetch_one(cur, "resurrect: read per-agent config")
-        # --- lifecycle event ---
-        # Parse the resurrector for the directed-edge target (agent:N -> N), same
-        # as spawn does for the spawner — so a peer-driven resurrect is a visible
-        # inter-agent tie (get_neighbors / FleetView graph), not just a source string.
-        resurrect_target: int | None = None
-        if resurrected_by.startswith("agent:"):
-            import contextlib
-
-            with contextlib.suppress(ValueError):
-                resurrect_target = int(resurrected_by.removeprefix("agent:"))
-        insert_event_log(
-            event_type="resurrect",
-            agent_id=agent_id,
-            source=resurrected_by,
-            target_agent_id=resurrect_target,
-            payload={"prompt": prompt} if prompt else {},
-        )
-        conn.commit()
-        publish_agent_updated_sync(conn, agent_id)
-    agent_launch._kill_stale_session(agent_id)
-    agent_launch._launch_or_force_terminated(
-        agent_id, config_overlay=resurrect_overlay, birth_config=resurrect_birth
+            break
+        except _ResurrectSessionStartError:
+            if first_attempt >= agent_launch._LAUNCH_MAX_RETRIES:
+                raise
+            backoff = agent_launch._LAUNCH_RETRY_BASE_BACKOFF_SEC * 2**first_attempt
+            time.sleep(backoff)
+    if prepared is None:
+        raise AssertionError("resurrect preparation loop exhausted without result")
+    insert_event_log(
+        event_type="resurrect",
+        agent_id=agent_id,
+        source=resurrected_by,
+        target_agent_id=prepared.event_target,
+        payload={"prompt": prompt} if prompt else {},
     )
+    confirmed = _confirm_resurrect_with_retries(agent_id, prepared, first_attempt=first_attempt)
     logger.info(
-        "agent {agent_id} resurrected by {resurrected_by}",
+        "agent {agent_id} resurrected by {resurrected_by} (confirmed={confirmed})",
         event="agent_resurrected",
         agent_id=agent_id,
         resurrected_by=resurrected_by,
+        confirmed=confirmed,
     )
     return agent_id
 

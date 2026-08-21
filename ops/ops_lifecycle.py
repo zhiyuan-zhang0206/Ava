@@ -20,12 +20,14 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from typing import Any
+from typing import Any, Literal
 
 from psycopg_pool import ConnectionPool
 
 from ops import agent_launch
 from ops import cluster_rpc as _cluster_rpc
+from ops.agent_identity import AgentProcessIdentity, probe_agent_process
+from ops.agent_wake import ResurrectTriggerStaleError
 from ops.agents import (
     get_agent_machine,
     get_agent_status,
@@ -46,13 +48,15 @@ from ops.rpc_schemas import (
     TerminateAgentResponse,
 )
 from shared.agents import (
+    AgentNotFound,
     AgentStatus,
     ForkSourceEmpty,
     ResurrectAlreadyAlive,
 )
+from shared.audit_events import insert_event_log
 from shared.cluster import session_name
 from shared.config import settings
-from shared.db import insert_inbound_message
+from shared.db import insert_inbound_message, publish_inbound_wake
 from shared.live_announce import publish_agent_updated_sync
 from shared.live_events import (
     InboundArrived,
@@ -117,20 +121,88 @@ async def publish_notice_posted(
     )
 
 
-def _force_mark_terminated(agent_id: int, db_pool: ConnectionPool) -> list[str]:
-    """Force UPDATE agents_meta.status='terminated' + return list of page names
-    the trigger `cascade_close_agent_pages` closed (caller emits PageClosed)."""
-    with db_pool.connection() as conn:
+def _force_terminate_transaction(
+    agent_id: int,
+    db_pool: ConnectionPool,
+    *,
+    source: str,
+    kill_process: bool,
+) -> tuple[AgentStatus, int | None, list[str], int]:
+    """Fence and mark one explicit kill while holding the agent row lock.
+
+    The newly inserted terminate inbound id is the monotonic intent fence. A
+    guarded chat resurrection competing for this row either commits first (and
+    this kill follows it) or waits, then observes a fence greater than its
+    trigger. When a process should be killed, keep the row lock through the OS
+    kill so a post-force chat cannot create a new session in the gap between DB
+    intent and session cleanup. The transaction commits on context exit.
+    """
+    with db_pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT status, pid FROM agents_meta WHERE id = %s FOR UPDATE",
+            (agent_id,),
+        )
+        row = cur.fetchone()
+        if row is None:
+            raise AgentNotFound(f"agent {agent_id} does not exist")
+        old_status = AgentStatus(row[0])
+        pid = row[1]
         page_names = list_open_page_names(conn, agent_id)
-        with conn.cursor() as cur:
-            cur.execute(
-                # termination_source='user': force-kill / a terminate that found the
-                # pid already dead. Both are the user's will to end the agent, so it
-                # is NOT crash-auto-resurrect-eligible even with a queued inbound.
-                "UPDATE agents_meta SET status='terminated', termination_source='user', "
-                "heartbeat_paused_until = NULL WHERE id=%s",
-                (agent_id,),
-            )
+        cur.execute(
+            "INSERT INTO inbound_messages (agent_id, content, kind, source) "
+            "VALUES (%s, '', 'terminate', %s) RETURNING id",
+            (agent_id, source),
+        )
+        inbound_row = cur.fetchone()
+        if inbound_row is None:
+            raise RuntimeError("force terminate inbound INSERT returned no id")
+        terminate_inbound_id = inbound_row[0]
+        cur.execute(
+            # termination_source='user': force-kill / a terminate that found the
+            # pid already dead. Both are the user's will to end the agent, so it
+            # is NOT crash-auto-resurrect-eligible even with a queued inbound.
+            "UPDATE agents_meta SET status='terminated', termination_source='user', "
+            "heartbeat_paused_until = NULL, last_force_terminate_inbound_id = %s "
+            "WHERE id = %s",
+            (terminate_inbound_id, agent_id),
+        )
+        if kill_process:
+            agent_session = session_name(f"agent-{agent_id}")
+            native_proc().kill_session(agent_session, graceful=False)
+            # The exact session name is safe to clear repeatedly. A raw
+            # pid can be recycled even while a stale row still says live,
+            # so only positive argv identity evidence licenses SIGKILL.
+            if (
+                pid is not None
+                and old_status is not AgentStatus.TERMINATED
+                and probe_agent_process(pid, agent_id) is AgentProcessIdentity.OWNED
+            ):
+                force_kill(pid)
+    return old_status, pid, page_names, terminate_inbound_id
+
+
+def _publish_force_terminate_inbound(agent_id: int, inbound_id: int, source: str) -> None:
+    """Emit the non-transactional audit/wake side effects after fence commit."""
+    insert_event_log(
+        event_type="terminate",
+        agent_id=agent_id,
+        source=source,
+        payload={"inbound_id": inbound_id},
+    )
+    publish_inbound_wake(agent_id, str(inbound_id))
+
+
+def _force_mark_terminated(
+    agent_id: int, db_pool: ConnectionPool, *, source: str = "user"
+) -> list[str]:
+    """Fence an explicit zombie kill and return cascade-closed page names."""
+    _, _, page_names, inbound_id = _force_terminate_transaction(
+        agent_id,
+        db_pool,
+        source=source,
+        kill_process=False,
+    )
+    _publish_force_terminate_inbound(agent_id, inbound_id, source)
     return page_names
 
 
@@ -413,14 +485,12 @@ async def terminate_agent_op(
     agent_id: int, body: TerminateAgentRequest, db_pool: ConnectionPool
 ) -> TerminateAgentResponse:
     """Local-target graceful or force terminate. Caller handles cross-machine."""
-    s = await asyncio.to_thread(get_agent_status, agent_id)
-    if s is AgentStatus.TERMINATED:
-        return TerminateAgentResponse(status="already_terminated")
-
     if body.force:
-        pid, killed_page_names = await asyncio.to_thread(
+        old_status, pid, killed_page_names = await asyncio.to_thread(
             _terminate_force_blocking, agent_id, body, db_pool
         )
+        if old_status is AgentStatus.TERMINATED:
+            return TerminateAgentResponse(status="already_terminated")
         for page_name in killed_page_names:
             await publish_page_closed(agent_id, page_name)
         _log.info(
@@ -430,6 +500,10 @@ async def terminate_agent_op(
             pid,
         )
         return TerminateAgentResponse(status="force_killed")
+
+    s = await asyncio.to_thread(get_agent_status, agent_id)
+    if s is AgentStatus.TERMINATED:
+        return TerminateAgentResponse(status="already_terminated")
 
     status, iid, zombie_closed_page_names = await asyncio.to_thread(
         _terminate_graceful_blocking, agent_id, body, db_pool
@@ -445,29 +519,19 @@ async def terminate_agent_op(
 
 def _terminate_force_blocking(
     agent_id: int, body: TerminateAgentRequest, db_pool: ConnectionPool
-) -> tuple[int | None, list[str]]:
+) -> tuple[AgentStatus, int | None, list[str]]:
     """Sync force-kill section — via to_thread: session kill + SIGKILL + status
-    flip + AgentUpdated + terminate inbound. Returns (pid, killed page names)."""
-    with db_pool.connection() as conn, conn.cursor() as cur:
-        cur.execute("SELECT pid FROM agents_meta WHERE id=%s", (agent_id,))
-        row = cur.fetchone()
-    pid = row[0] if row else None
-    # Kill the agent's detached native process session via the native
-    # supervisor. Keyed by the EXACT process-session name; the agent's shell
-    # shells live under a longer name and are not the supervisor's records,
-    # so they are never collateral. In the zombie case (process dead, row
-    # still 'running') the record is absent and this is a noop — force_kill
-    # on the DB-recorded pid below is the belt-and-suspenders SIGKILL.
-    agent_session = session_name(f"agent-{agent_id}")
-    native_proc().kill_session(agent_session, graceful=False)
-    if pid is not None:
-        force_kill(pid)  # portable SIGKILL (psutil on Windows); tolerant of an absent pid
-    killed_page_names = _force_mark_terminated(agent_id, db_pool)
+    flip + AgentUpdated + terminate inbound. Returns (old status, pid, page names)."""
+    old_status, pid, killed_page_names, inbound_id = _force_terminate_transaction(
+        agent_id,
+        db_pool,
+        source=body.source,
+        kill_process=True,
+    )
+    _publish_force_terminate_inbound(agent_id, inbound_id, body.source)
     with db_pool.connection() as conn:
         publish_agent_updated_sync(conn, agent_id)
-    with db_pool.connection() as conn:
-        insert_inbound_message(conn, agent_id, "", source=body.source, kind="terminate")
-    return pid, killed_page_names
+    return old_status, pid, killed_page_names
 
 
 def _terminate_graceful_blocking(
@@ -482,7 +546,13 @@ def _terminate_graceful_blocking(
         row = cur.fetchone()
     pid = row[0] if row else None
     if pid is not None and not process_alive(pid):
-        zombie_closed_page_names = _force_mark_terminated(agent_id, db_pool)
+        _, _, zombie_closed_page_names, inbound_id = _force_terminate_transaction(
+            agent_id,
+            db_pool,
+            source=body.source,
+            kill_process=True,
+        )
+        _publish_force_terminate_inbound(agent_id, inbound_id, body.source)
         with db_pool.connection() as conn:
             publish_agent_updated_sync(conn, agent_id)
         return "already_terminated", None, zombie_closed_page_names
@@ -491,8 +561,18 @@ def _terminate_graceful_blocking(
     return "enqueued", iid, []
 
 
-async def resurrect_agent_op(agent_id: int, body: ResurrectAgentRequest) -> ResurrectAgentResponse:
-    """Local-target resurrect (UPDATE terminated -> allocated + detached process launch)."""
+async def resurrect_agent_op(
+    agent_id: int,
+    body: ResurrectAgentRequest,
+    *,
+    trigger_inbound_id: int | None = None,
+    trigger_inbound_kind: Literal["chat", "compact_request"] | None = None,
+) -> ResurrectAgentResponse:
+    """Local-target resurrect (UPDATE terminated -> allocated + detached process launch).
+
+    `trigger_inbound_id` carries the internal auto-resurrect CAS to the home
+    runner; manual resurrects omit it and retain their unconditional contract.
+    """
     s = await asyncio.to_thread(get_agent_status, agent_id)
     if s is not AgentStatus.TERMINATED:
         return ResurrectAgentResponse(status="already_alive")
@@ -507,13 +587,20 @@ async def resurrect_agent_op(agent_id: int, body: ResurrectAgentRequest) -> Resu
             agent_id,
             resurrected_by=body.resurrected_by,
             prompt=body.prompt,
+            trigger_inbound_id=trigger_inbound_id,
+            trigger_inbound_kind=trigger_inbound_kind,
         )
-    except ResurrectAlreadyAlive:
+    except (ResurrectAlreadyAlive, ResurrectTriggerStaleError):
         return ResurrectAgentResponse(status="already_alive")
     return ResurrectAgentResponse(status="spawned")
 
 
-async def resurrect_if_terminated(agent_id: int) -> AgentStatus:
+async def resurrect_if_terminated(
+    agent_id: int,
+    *,
+    trigger_inbound_id: int,
+    trigger_inbound_kind: Literal["chat", "compact_request"],
+) -> AgentStatus:
     """Resurrect `agent_id` when it is terminated, so a just-delivered inbound is
     handled by a live process instead of sitting unclaimed forever.
 
@@ -522,6 +609,15 @@ async def resurrect_if_terminated(agent_id: int) -> AgentStatus:
     inserts its own newer 'resurrect' inbound; the claim node resolves a batch by
     recency, so the resurrect wins over any stale prior-life terminate sharing
     the batch and the just-delivered inbound survives to be processed.
+
+    Chat delivery, compact, and the delivery watchdog pass an exact
+    `trigger_inbound_id` plus its expected kind. They travel on the distinct
+    internal `resurrect-if-pending-work-v2` lifecycle path so an older runner
+    rejects the unknown path (version skew fails closed), then the home runner's
+    final terminated -> allocated UPDATE verifies that exact work is still
+    pending, newer than the current termination, and above the force-intent
+    fence. Explicit manual resurrection uses `resurrect-explicit-v2`; crash and
+    wedged recovery use their exact controller claims in the local runner.
 
     Returns the agent's status after the attempt: the post-resurrect status when
     a process was spawned, otherwise the unchanged status (a non-terminated agent
@@ -550,20 +646,30 @@ async def resurrect_if_terminated(agent_id: int) -> AgentStatus:
     try:
         home = await asyncio.to_thread(get_agent_machine, agent_id)
         try:
+            lifecycle_payload: dict[str, object] = {
+                "path": f"/api/agents/{agent_id}/resurrect-if-pending-work-v2",
+                "body": body.model_dump(),
+                "trigger_inbound_id": trigger_inbound_id,
+                "trigger_inbound_kind": trigger_inbound_kind,
+            }
             forwarded = await _cluster_rpc.dispatch_to_machine(
                 target_machine=home,
                 kind="lifecycle",
-                payload={
-                    "path": f"/api/agents/{agent_id}/resurrect",
-                    "body": body.model_dump(),
-                },
+                payload=lifecycle_payload,
             )
             result_status = ResurrectAgentResponse.model_validate(forwarded).status
         except _cluster_rpc.ClusterOpUnreachable:
             if home == machine_name():
                 # Local ops server not reachable (test / single-process):
                 # fall back to in-process resurrect.
-                result_status = (await resurrect_agent_op(agent_id, body)).status
+                result_status = (
+                    await resurrect_agent_op(
+                        agent_id,
+                        body,
+                        trigger_inbound_id=trigger_inbound_id,
+                        trigger_inbound_kind=trigger_inbound_kind,
+                    )
+                ).status
             else:
                 raise
         if result_status == "spawned":
@@ -608,17 +714,31 @@ async def restart_agent_op(
     return RestartAgentResponse(status="enqueued")
 
 
-_LIFECYCLE_PATH = re.compile(r"^/api/agents/(?P<id>\d+)/(?P<action>terminate|resurrect|restart)$")
+_LIFECYCLE_PATH = re.compile(
+    r"^/api/agents/(?P<id>\d+)/"
+    r"(?P<action>terminate|resurrect|resurrect-explicit-v2|"
+    r"resurrect-if-pending-work-v2|restart)$"
+)
 
 
 async def lifecycle_op(
-    path: str, body: dict[str, Any], db_pool: ConnectionPool
+    path: str,
+    body: dict[str, Any],
+    db_pool: ConnectionPool,
+    *,
+    trigger_inbound_id: int | None = None,
+    trigger_inbound_kind: Literal["chat", "compact_request"] | None = None,
 ) -> TerminateAgentResponse | ResurrectAgentResponse | RestartAgentResponse:
     """Parse the lifecycle path from a 'lifecycle' op payload and dispatch to
     the appropriate per-action op. Returns the per-action response model (the
     ops server serializes it into the /ops response).
 
-    Path shapes accepted: `/api/agents/{id}/(terminate|resurrect|restart)`.
+    Path shapes accepted: terminate/restart plus the versioned internal
+    `resurrect-explicit-v2` and guarded `resurrect-if-pending-work-v2` paths.
+    Legacy `resurrect` is recognized only to reject it. This is the
+    version-skew fail-closed boundary: an old runner rejects the v2 paths and a
+    new runner rejects every old gateway resurrection instead of guessing its
+    intent from the request body.
     Anything else raises ValueError — the ops server converts that to a failed
     op result.
     """
@@ -627,12 +747,32 @@ async def lifecycle_op(
         raise ValueError(f"lifecycle path not recognized: {path!r}")
     agent_id = int(m.group("id"))
     action = m.group("action")
+    if (trigger_inbound_id is None) != (trigger_inbound_kind is None):
+        raise ValueError("trigger inbound id and kind must be provided together")
+    if action != "resurrect-if-pending-work-v2" and trigger_inbound_id is not None:
+        raise ValueError(
+            f"trigger inbound is only valid for resurrect-if-pending-work-v2, not {action!r}"
+        )
     if action == "terminate":
         return await terminate_agent_op(
             agent_id, TerminateAgentRequest.model_validate(body), db_pool
         )
     if action == "resurrect":
+        raise ValueError("legacy /resurrect is refused; use a versioned internal path")
+    if action == "resurrect-explicit-v2":
         return await resurrect_agent_op(agent_id, ResurrectAgentRequest.model_validate(body))
+    if action == "resurrect-if-pending-work-v2":
+        if trigger_inbound_id is None:
+            raise ValueError("resurrect-if-pending-work-v2 requires trigger inbound")
+        request = ResurrectAgentRequest.model_validate(body)
+        if request.resurrected_by != "system":
+            raise ValueError("resurrect-if-pending-work-v2 requires resurrected_by='system'")
+        return await resurrect_agent_op(
+            agent_id,
+            request,
+            trigger_inbound_id=trigger_inbound_id,
+            trigger_inbound_kind=trigger_inbound_kind,
+        )
     if action == "restart":
         return await restart_agent_op(agent_id, RestartAgentRequest.model_validate(body), db_pool)
     raise AssertionError(f"unreachable: action={action!r}")

@@ -465,15 +465,92 @@ class TestDeadLetterStaleClaimed:
 
 
 class TestSelectTerminatedOwnersWithPending:
+    def test_force_fence_excludes_older_chat_but_accepts_newer_chat(
+        self, db_conn: psycopg.Connection, pool: ConnectionPool
+    ) -> None:
+        """The selector uses the monotonic explicit-kill fence in addition to
+        wall-clock status time: old queued work stays dead, later work wakes."""
+        from services.delivery_watchdog.daemon import select_terminated_owners_with_pending
+
+        aid = _make_terminated_agent(db_conn)
+        old_chat_id = insert_inbound_message(db_conn, aid, "before force", source="user")
+        fence_id = insert_inbound_message(
+            db_conn,
+            aid,
+            "",
+            source="user",
+            kind="terminate",
+        )
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "UPDATE agents_meta SET last_force_terminate_inbound_id = %s WHERE id = %s",
+                (fence_id, aid),
+            )
+        db_conn.commit()
+
+        assert old_chat_id < fence_id
+        assert select_terminated_owners_with_pending(pool) == []
+
+        new_chat_id = insert_inbound_message(db_conn, aid, "after force", source="user")
+        assert new_chat_id > fence_id
+        assert select_terminated_owners_with_pending(pool) == [(aid, new_chat_id)]
+
+    def test_ignores_pending_chat_that_predates_latest_termination(
+        self, db_conn: psycopg.Connection, pool: ConnectionPool
+    ) -> None:
+        """A user's explicit kill wins over mail already waiting when they
+        killed the agent; that old row must not immediately undo the kill."""
+        from services.delivery_watchdog.daemon import select_terminated_owners_with_pending
+
+        aid = _make_idling_agent(db_conn)
+        iid = insert_inbound_message(db_conn, aid, "already waiting", source="user")
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "UPDATE agents_meta SET status = 'terminated', termination_source = 'user' "
+                "WHERE id = %s",
+                (aid,),
+            )
+            cur.execute(
+                "UPDATE inbound_messages "
+                "SET created_at = (SELECT status_changed_at FROM agents_meta WHERE id = %s) "
+                "                 - interval '1 second' "
+                "WHERE id = %s",
+                (aid, iid),
+            )
+        db_conn.commit()
+
+        assert select_terminated_owners_with_pending(pool) == []
+
+    def test_returns_pending_chat_created_after_latest_termination(
+        self, db_conn: psycopg.Connection, pool: ConnectionPool
+    ) -> None:
+        """A new chat sent after termination preserves the existing contract:
+        delivery to a dead agent wakes it automatically."""
+        from services.delivery_watchdog.daemon import select_terminated_owners_with_pending
+
+        aid = _make_terminated_agent(db_conn)
+        iid = insert_inbound_message(db_conn, aid, "new request", source="user")
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "UPDATE inbound_messages "
+                "SET created_at = (SELECT status_changed_at FROM agents_meta WHERE id = %s) "
+                "                 + interval '1 second' "
+                "WHERE id = %s",
+                (aid, iid),
+            )
+        db_conn.commit()
+
+        assert select_terminated_owners_with_pending(pool) == [(aid, iid)]
+
     def test_returns_terminated_owners_with_pending_chat(
         self, db_conn: psycopg.Connection, pool: ConnectionPool
     ) -> None:
         from services.delivery_watchdog.daemon import select_terminated_owners_with_pending
 
         aid = _make_terminated_agent(db_conn)
-        insert_inbound_message(db_conn, aid, "hello?", source="user")
+        iid = insert_inbound_message(db_conn, aid, "hello?", source="user")
 
-        assert select_terminated_owners_with_pending(pool) == [aid]
+        assert select_terminated_owners_with_pending(pool) == [(aid, iid)]
 
     def test_deduplicates_per_agent(
         self, db_conn: psycopg.Connection, pool: ConnectionPool
@@ -482,10 +559,11 @@ class TestSelectTerminatedOwnersWithPending:
         from services.delivery_watchdog.daemon import select_terminated_owners_with_pending
 
         aid = _make_terminated_agent(db_conn)
+        iids: list[int] = []
         for _ in range(3):
-            insert_inbound_message(db_conn, aid, "hello?", source="user")
+            iids.append(insert_inbound_message(db_conn, aid, "hello?", source="user"))
 
-        assert select_terminated_owners_with_pending(pool) == [aid]
+        assert select_terminated_owners_with_pending(pool) == [(aid, min(iids))]
 
     def test_ignores_live_owners_and_non_chat_kinds(
         self, db_conn: psycopg.Connection, pool: ConnectionPool
@@ -520,14 +598,184 @@ class TestSelectTerminatedOwnersWithPending:
 
 
 class TestResurrectRetry:
+    async def test_failed_resurrect_cleans_in_flight_and_enters_cooldown(
+        self, db_conn: psycopg.Connection, pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A failed RPC is complete work: its task key is removed and its real
+        finally timestamp prevents the next tick from retrying immediately."""
+        import asyncio
+
+        import ops.ops_lifecycle as ol
+        import services.delivery_watchdog.daemon as dw
+
+        aid = _make_terminated_agent(db_conn)
+        insert_inbound_message(db_conn, aid, "hello?", source="user")
+        calls: list[int] = []
+
+        async def _fail(
+            aid_: int,
+            *,
+            trigger_inbound_id: int | None = None,
+            trigger_inbound_kind: str | None = None,
+        ) -> str:
+            calls.append(aid_)
+            raise RuntimeError("runner unavailable")
+
+        monkeypatch.setattr(ol, "resurrect_if_terminated", _fail)
+        dw._last_resurrect_attempt.clear()
+        dw._resurrect_tasks.clear()
+
+        dw._maybe_spawn_resurrects(pool, max_per_tick=5)
+        await asyncio.gather(*list(dw._resurrect_tasks.values()))
+        await asyncio.sleep(0)
+        assert dw._resurrect_tasks == {}
+        assert aid in dw._last_resurrect_attempt
+
+        dw._maybe_spawn_resurrects(pool, max_per_tick=5)
+        await asyncio.sleep(0)
+        assert calls == [aid]
+
+    async def test_cancelled_resurrect_cleans_in_flight_and_enters_cooldown(
+        self, db_conn: psycopg.Connection, pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Cancellation cannot leave a permanent in-flight key or bypass the
+        retry cooldown once the RPC body has started."""
+        import asyncio
+
+        import ops.ops_lifecycle as ol
+        import services.delivery_watchdog.daemon as dw
+
+        aid = _make_terminated_agent(db_conn)
+        insert_inbound_message(db_conn, aid, "hello?", source="user")
+        started = asyncio.Event()
+
+        async def _block(
+            aid_: int,
+            *,
+            trigger_inbound_id: int | None = None,
+            trigger_inbound_kind: str | None = None,
+        ) -> str:
+            started.set()
+            await asyncio.Event().wait()
+            return "terminated"
+
+        monkeypatch.setattr(ol, "resurrect_if_terminated", _block)
+        dw._last_resurrect_attempt.clear()
+        dw._resurrect_tasks.clear()
+
+        dw._maybe_spawn_resurrects(pool, max_per_tick=5)
+        await started.wait()
+        task = dw._resurrect_tasks[aid]
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        await asyncio.sleep(0)
+
+        assert dw._resurrect_tasks == {}
+        assert aid in dw._last_resurrect_attempt
+        dw._maybe_spawn_resurrects(pool, max_per_tick=5)
+        assert dw._resurrect_tasks == {}
+
+    async def test_in_flight_owner_does_not_consume_next_tick_cap(
+        self, db_conn: psycopg.Connection, pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """With cap=1, owner A still in flight is skipped before admission
+        accounting, so the following tick can fairly admit owner B."""
+        import asyncio
+
+        import ops.ops_lifecycle as ol
+        import services.delivery_watchdog.daemon as dw
+
+        dead_a = _make_terminated_agent(db_conn)
+        dead_b = _make_terminated_agent(db_conn)
+        for aid in (dead_a, dead_b):
+            insert_inbound_message(db_conn, aid, "hello?", source="user")
+        started: set[int] = set()
+        both_started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def _block(
+            aid: int,
+            *,
+            trigger_inbound_id: int | None = None,
+            trigger_inbound_kind: str | None = None,
+        ) -> str:
+            started.add(aid)
+            if len(started) == 2:
+                both_started.set()
+            await release.wait()
+            return "terminated"
+
+        monkeypatch.setattr(ol, "resurrect_if_terminated", _block)
+        dw._last_resurrect_attempt.clear()
+        dw._resurrect_tasks.clear()
+
+        try:
+            dw._maybe_spawn_resurrects(pool, max_per_tick=1)
+            await asyncio.sleep(0)
+            assert started == {dead_a}
+
+            dw._maybe_spawn_resurrects(pool, max_per_tick=1)
+            await both_started.wait()
+            assert started == {dead_a, dead_b}
+            assert set(dw._resurrect_tasks) == {dead_a, dead_b}
+        finally:
+            release.set()
+            await asyncio.gather(*list(dw._resurrect_tasks.values()), return_exceptions=True)
+            await asyncio.sleep(0)
+
+    async def test_in_flight_resurrect_is_not_enqueued_again_on_next_tick(
+        self, db_conn: psycopg.Connection, pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A slow resurrect RPC spans many watchdog ticks; every later tick
+        must reuse its in-flight attempt instead of building a task herd."""
+        import asyncio
+
+        import ops.ops_lifecycle as ol
+        import services.delivery_watchdog.daemon as dw
+
+        aid = _make_terminated_agent(db_conn)
+        iid = insert_inbound_message(db_conn, aid, "hello?", source="user")
+        started = asyncio.Event()
+        release = asyncio.Event()
+        calls: list[tuple[int, int | None, str | None]] = []
+
+        async def slow_resurrect(
+            aid_: int,
+            *,
+            trigger_inbound_id: int | None = None,
+            trigger_inbound_kind: str | None = None,
+        ) -> str:
+            calls.append((aid_, trigger_inbound_id, trigger_inbound_kind))
+            started.set()
+            await release.wait()
+            return "terminated"
+
+        monkeypatch.setattr(ol, "resurrect_if_terminated", slow_resurrect)
+        dw._last_resurrect_attempt.clear()
+        dw._resurrect_tasks.clear()
+
+        try:
+            dw._maybe_spawn_resurrects(pool, max_per_tick=5)
+            await started.wait()
+            for _ in range(3):
+                dw._maybe_spawn_resurrects(pool, max_per_tick=5)
+            await asyncio.sleep(0)
+
+            assert calls == [(aid, iid, "chat")]
+            assert len(dw._resurrect_tasks) == 1
+        finally:
+            release.set()
+            await asyncio.gather(*list(dw._resurrect_tasks.values()), return_exceptions=True)
+            dw._resurrect_tasks.clear()
+
     async def test_cooldown_and_cap_bound_retries(
         self, db_conn: psycopg.Connection, pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Per-agent 60s cooldown + per-tick cap: a dead-letter pile for an
         unreachable home machine drains over ticks, never as a burst."""
         import asyncio
-        import time
 
+        import ops.ops_lifecycle as ol
         import services.delivery_watchdog.daemon as dw
 
         dead_a = _make_terminated_agent(db_conn)
@@ -536,41 +784,48 @@ class TestResurrectRetry:
             insert_inbound_message(db_conn, aid, "hello?", source="user")
 
         calls: list[int] = []
+        hold = False
+        release = asyncio.Event()
 
-        async def fake_resurrect(aid: int) -> None:
+        async def fake_resurrect(
+            aid: int,
+            *,
+            trigger_inbound_id: int | None = None,
+            trigger_inbound_kind: str | None = None,
+        ) -> str:
             calls.append(aid)
-            await asyncio.sleep(10)  # hold in flight so task count is observable
+            assert trigger_inbound_id is not None
+            if hold:
+                await release.wait()
+            return "terminated"
 
-        monkeypatch.setattr(dw, "_resurrect_one", fake_resurrect)
+        monkeypatch.setattr(ol, "resurrect_if_terminated", fake_resurrect)
         dw._last_resurrect_attempt.clear()
         dw._resurrect_tasks.clear()
 
-        # First pass: both distinct owners spawn (cap=5).
+        # First pass completes both attempts and naturally stamps cooldown.
         dw._maybe_spawn_resurrects(pool, max_per_tick=5)
-        await asyncio.sleep(0)
-        assert len(dw._resurrect_tasks) == 2
+        await asyncio.gather(*list(dw._resurrect_tasks.values()))
+        await asyncio.sleep(0)  # run task done callbacks
+        assert len(dw._resurrect_tasks) == 0
         assert set(calls) == {dead_a, dead_b}
 
-        # Second pass inside the cooldown: neither spawns again.
-        for aid in (dead_a, dead_b):
-            dw._last_resurrect_attempt[aid] = time.monotonic()
+        # Second pass inside the real cooldown: neither spawns again.
         dw._maybe_spawn_resurrects(pool, max_per_tick=5)
         await asyncio.sleep(0)
-        assert len(dw._resurrect_tasks) == 2  # unchanged
-
-        # Cap: after the in-flight tasks finish, cap=1 admits only one of two.
-        for t in list(dw._resurrect_tasks):
-            t.cancel()
-        await asyncio.gather(*list(dw._resurrect_tasks), return_exceptions=True)
         assert len(dw._resurrect_tasks) == 0
+        assert len(calls) == 2
+
+        # Cap: once cooldown is cleared, max_per_tick=1 admits only one owner.
+        hold = True
         dw._last_resurrect_attempt.clear()
         dw._maybe_spawn_resurrects(pool, max_per_tick=1)
         await asyncio.sleep(0)
         assert len(dw._resurrect_tasks) == 1
-        for t in list(dw._resurrect_tasks):
-            t.cancel()
-        await asyncio.gather(*list(dw._resurrect_tasks), return_exceptions=True)
-        dw._resurrect_tasks.clear()
+        release.set()
+        await asyncio.gather(*list(dw._resurrect_tasks.values()), return_exceptions=True)
+        await asyncio.sleep(0)
+        assert len(dw._resurrect_tasks) == 0
 
     async def test_resurrect_one_runs_and_records_attempt(
         self, db_conn: psycopg.Connection, pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
@@ -583,18 +838,24 @@ class TestResurrectRetry:
         import services.delivery_watchdog.daemon as dw
 
         aid = _make_terminated_agent(db_conn)
-        calls: list[int] = []
+        trigger_id = insert_inbound_message(db_conn, aid, "hello?", source="user")
+        calls: list[tuple[int, int | None, str | None]] = []
 
-        async def fake(aid_: int) -> str:
-            calls.append(aid_)
+        async def fake(
+            aid_: int,
+            *,
+            trigger_inbound_id: int | None = None,
+            trigger_inbound_kind: str | None = None,
+        ) -> str:
+            calls.append((aid_, trigger_inbound_id, trigger_inbound_kind))
             return "terminated"
 
         monkeypatch.setattr(ol, "resurrect_if_terminated", fake)
         dw._last_resurrect_attempt.clear()
 
-        await dw._resurrect_one(aid)
+        await dw._resurrect_one(aid, trigger_id)
 
-        assert calls == [aid]
+        assert calls == [(aid, trigger_id, "chat")]
         assert dw._last_resurrect_attempt[aid] >= time.monotonic() - 5
 
 

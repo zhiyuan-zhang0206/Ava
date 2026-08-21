@@ -99,6 +99,10 @@ import time
 
 from psycopg_pool import ConnectionPool
 
+from ops.agent_wake import (
+    AutoResurrectClaim,
+    ResurrectClaimStaleError,
+)
 from ops.agents import resurrect_agent
 from ops.controllers.base import BlockScope, ReconcileResult
 from ops.controllers.respawn import _gateway_healthy
@@ -137,8 +141,8 @@ _WORK_INBOUND_KINDS = ("chat", "compact_request")
 
 def _claim_crash_resurrect_candidates(
     pool: ConnectionPool, local_machine: str, backoff_s: float
-) -> list[int]:
-    """Atomically claim this host's crash-resurrect candidates and return their ids.
+) -> list[AutoResurrectClaim]:
+    """Atomically claim crash-resurrect candidates and return their CAS tokens.
 
     One UPDATE both selects and claims: it stamps ``last_resurrect_at = now()`` on —
     and so RETURNs — every local 'terminated' row that (a) has an involuntary
@@ -164,17 +168,26 @@ def _claim_crash_resurrect_candidates(
             "    AND im.status IN ('pending', 'claimed') "
             "    AND im.kind = ANY(%s)"
             ") "
-            "RETURNING id",
+            "RETURNING id, termination_source, status_changed_at, last_resurrect_at",
             (list(_RESURRECTABLE_SOURCES), local_machine, backoff_s, list(_WORK_INBOUND_KINDS)),
         )
-        ids = [r[0] for r in cur.fetchall()]
+        claims = [
+            AutoResurrectClaim(
+                agent_id=r[0],
+                termination_source=TerminationSource(r[1]),
+                termination_epoch=r[2],
+                claim_kind="crash",
+                claimed_at=r[3],
+            )
+            for r in cur.fetchall()
+        ]
         conn.commit()
-    return ids
+    return claims
 
 
 def _claim_boot_revive_candidates(
     pool: ConnectionPool, local_machine: str, backoff_s: float, max_revive: int
-) -> list[int]:
+) -> list[AutoResurrectClaim]:
     """Atomically claim this host's boot-revive candidates and return their ids.
 
     The machine-reboot half of the involuntary-death story (Task #694 G5): a
@@ -214,7 +227,7 @@ def _claim_boot_revive_candidates(
             "  ORDER BY id "
             "  LIMIT %s"
             ") "
-            "RETURNING id",
+            "RETURNING id, termination_source, status_changed_at, last_resurrect_at",
             (
                 list(_RESURRECTABLE_SOURCES),
                 local_machine,
@@ -225,9 +238,18 @@ def _claim_boot_revive_candidates(
                 max_revive,
             ),
         )
-        ids = [r[0] for r in cur.fetchall()]
+        claims = [
+            AutoResurrectClaim(
+                agent_id=r[0],
+                termination_source=TerminationSource(r[1]),
+                termination_epoch=r[2],
+                claim_kind="crash",
+                claimed_at=r[3],
+            )
+            for r in cur.fetchall()
+        ]
         conn.commit()
-    return ids
+    return claims
 
 
 class CrashResurrectController:
@@ -289,21 +311,21 @@ class CrashResurrectController:
         burst."""
         if not _gateway_healthy():
             return False
-        ids = _claim_boot_revive_candidates(
+        claims = _claim_boot_revive_candidates(
             self._pool,
             local_machine,
             settings.daemon.auto_resurrect_backoff_seconds,
             settings.daemon.revive_max_per_pass,
         )
-        if not ids:
+        if not claims:
             return False
-        for tid in ids:
+        for claim in claims:
             _log.warning(
                 "[ops.crash_resurrect] boot-reviving involuntary-death agent %s "
                 "(no pending inbound; machine-reboot fleet restore)",
-                tid,
+                claim.agent_id,
             )
-        return self._resurrect_ids(ids)
+        return self._resurrect_claims(claims)
 
     def _resurrect_crashed(self, local_machine: str) -> bool:
         """Claim + resurrect this host's involuntary-death corpses that have pending
@@ -318,28 +340,33 @@ class CrashResurrectController:
             # Cheap pre-check so we don't advance the backoff clock during an outage.
             # A rare false-negative just delays one scan; the corpses are unchanged.
             return False
-        ids = _claim_crash_resurrect_candidates(
+        claims = _claim_crash_resurrect_candidates(
             self._pool, local_machine, settings.daemon.auto_resurrect_backoff_seconds
         )
-        return self._resurrect_ids(ids)
+        return self._resurrect_claims(claims)
 
-    def _resurrect_ids(self, ids: list[int]) -> bool:
-        """Resurrect the claimed ids, one at a time; a single agent's failure is
+    def _resurrect_claims(self, claims: list[AutoResurrectClaim]) -> bool:
+        """Resurrect claimed agents one at a time; a single agent's failure is
         caught and logged so one bad row never drops the pass. The backoff clock
         is already stamped by the claim, so a failed resurrect is spaced by the
         window, not retried next tick."""
-        if not ids:
+        if not claims:
             return False
-        for tid in ids:
+        for claim in claims:
+            tid = claim.agent_id
             try:
-                resurrect_agent(tid, resurrected_by=_RESURRECT_SOURCE)
+                resurrect_agent(
+                    tid,
+                    resurrected_by=_RESURRECT_SOURCE,
+                    auto_claim=claim,
+                )
                 _log.warning(
                     "[ops.crash_resurrect] auto-resurrected involuntary-death agent %s "
                     "(will not retry for %.0fs)",
                     tid,
                     settings.daemon.auto_resurrect_backoff_seconds,
                 )
-            except ResurrectAlreadyAlive:
+            except (ResurrectAlreadyAlive, ResurrectClaimStaleError):
                 # Raced with another resurrect after the claim — harmless (the agent
                 # is already coming back); the stamped backoff just spaces a future one.
                 _log.info(
