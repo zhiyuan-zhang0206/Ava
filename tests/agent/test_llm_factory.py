@@ -23,7 +23,7 @@ from pydantic import SecretStr
 from shared.config import settings
 from shared.lm import factory
 from shared.lm.factory import _resolve_override, build_chat_model, validate_model_config
-from shared.lm.registry import resolve_setting
+from shared.lm.registry import SUPPORTED_MODELS, resolve_setting
 
 
 class TestBuildChatModel:
@@ -1436,3 +1436,66 @@ class TestValidateModelConfig:
         monkeypatch.setattr(settings.lm, "llm_override", "tests.fakes:build")
         result = validate_model_config(model="claude-sonnet-5")
         assert result == "claude-sonnet-5"
+
+
+class TestThinkingDisabledAcrossRoster:
+    """issue #190: `thinking={"type": "disabled"}` must be expressible — or a
+    no-op — for every model in the supported roster, never a 400. This is the
+    assertion whose absence let gemini-2.5-flash / gemini-3.7-flash become
+    silently unusable as labeler_model."""
+
+    _ALL_KEY_FIELDS = (
+        "anthropic_api_key",
+        "deepseek_api_key",
+        "gemini_api_key",
+        "openai_api_key",
+        "xiaomi_api_key",
+        "moonshot_api_key",
+        "zhipu_api_key",
+        "xai_api_key",
+        "dashscope_api_key",
+    )
+
+    def _stub_all_keys(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        for attr in self._ALL_KEY_FIELDS:
+            monkeypatch.setattr(settings.lm, attr, SecretStr("sk-test"))
+
+    @pytest.mark.parametrize("model", [m for models in SUPPORTED_MODELS.values() for m in models])
+    def test_roster_model_constructs_with_thinking_disabled(
+        self, model: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Every spawnable model can be constructed with thinking disabled — a
+        provider that cannot express it must no-op, not 400."""
+        self._stub_all_keys(monkeypatch)
+        llm = build_chat_model(model, thinking={"type": "disabled"})
+        assert isinstance(llm, BaseChatModel)
+
+    def test_gemini_2_5_thinking_disabled_is_noop(
+        self, monkeypatch: pytest.MonkeyPatch, loguru_records: list[dict]
+    ) -> None:
+        """gemini-2.5-flash has no thinking_level vocabulary: disabled must not
+        put thinking parameters on the wire (the 400 of issue #190) and must
+        warn instead of silently dropping the request."""
+        monkeypatch.setattr(settings.lm, "gemini_api_key", SecretStr("sk-test"))
+        from langchain_google_genai import ChatGoogleGenerativeAI
+
+        llm = build_chat_model("gemini-2.5-flash", thinking={"type": "disabled"})
+        assert isinstance(llm, ChatGoogleGenerativeAI)
+        assert llm.thinking_level is None
+        assert llm.include_thoughts is None
+        assert any(
+            "gemini-2.5-flash" in r["message"] and "ignored" in r["message"] for r in loguru_records
+        )
+
+    def test_gemini_3_7_thinking_disabled_maps_to_minimal(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """gemini-3.x declares the thinking_level vocabulary: disabled maps to
+        minimal + no thought blocks on the wire."""
+        monkeypatch.setattr(settings.lm, "gemini_api_key", SecretStr("sk-test"))
+        from langchain_google_genai import ChatGoogleGenerativeAI
+
+        llm = build_chat_model("gemini-3.7-flash", thinking={"type": "disabled"})
+        assert isinstance(llm, ChatGoogleGenerativeAI)
+        assert llm.thinking_level == "minimal"
+        assert llm.include_thoughts is False
