@@ -212,13 +212,6 @@ _OVERSIZE_ALLOWED = frozenset(
         # they all share. Fold, guard, apply and rollback reason over the same
         # applied-set model; splitting scatters an invariant that must hold
         # across all of them (the set matches the real schema).
-        # shared/lm/registry.py — the single per-model registry: every per-model
-        # fact + tunable default in one MODELS table (the legacy per-model dicts
-        # survive as derived views below), one lookup surface resolve_setting()
-        # consults; splitting scatters the per-model facts (same argument as
-        # shared/events/contract.py). Crossed 800 with the vision-gate
-        # registration (Task #1329).
-        "shared/lm/registry.py",
         "shared/migrations.py",
         # shared/lm/registry.py — a flat name→spec registry of every model
         # (one entry per model, same rationale as shared/events/contract.py);
