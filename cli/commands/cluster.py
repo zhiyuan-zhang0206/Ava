@@ -155,13 +155,50 @@ def cmd_cluster_status() -> int:
     every machine's name / role / paused / live status, plus the cluster-global
     deploy lease stamped per row (the `hold` column + its banner). Fails fast on any
     HTTP error rather than masking an unreachable gateway.
+
+    The transport failures get one-line stderr verdicts and a nonzero exit
+    instead of an unhandled traceback — the unreachable-machine case is the
+    exact situation an operator runs this command for, and a roster probe of a
+    down machine can push the gateway's own response past this client's
+    timeout budget (#219).
     """
     from shared.http_dial import get as dial_get
-    from shared.machine import gateway_api_base, gateway_auth_headers
+    from shared.machine import (
+        GatewayApiBaseMissing,
+        gateway_api_base,
+        gateway_auth_headers,
+    )
 
-    url = f"{gateway_api_base()}/api/cluster/roster"
-    resp = dial_get(url, timeout=_CLUSTER_STATUS_PROBE_TIMEOUT_S, headers=gateway_auth_headers())
-    resp.raise_for_status()
+    try:
+        url = f"{gateway_api_base()}/api/cluster/roster"
+    except GatewayApiBaseMissing as exc:
+        # Same diagnostic posture as `ava status`'s gateway supplement: a host
+        # that cannot resolve the gateway URL must still say why.
+        print(f"✗ cannot resolve gateway URL: {exc}", file=sys.stderr)
+        return 1
+    try:
+        resp = dial_get(
+            url, timeout=_CLUSTER_STATUS_PROBE_TIMEOUT_S, headers=gateway_auth_headers()
+        )
+    except httpx.TimeoutException as exc:
+        print(
+            f"✗ gateway at {url} did not respond within "
+            f"{_CLUSTER_STATUS_PROBE_TIMEOUT_S:g}s — an unreachable machine's roster "
+            f"probe shares the same budget: {exc}",
+            file=sys.stderr,
+        )
+        return 1
+    except httpx.TransportError as exc:
+        print(f"✗ gateway unreachable at {url}: {exc}", file=sys.stderr)
+        return 1
+    try:
+        resp.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        print(
+            f"✗ gateway returned HTTP {resp.status_code} for {url}: {exc}",
+            file=sys.stderr,
+        )
+        return 1
     roster = [MachineStatus.model_validate(m) for m in resp.json()]
 
     if not roster:
