@@ -16,7 +16,7 @@ Every session has a **record** (`$AVA_HOME/run/sessions/<name>.json`: pid + star
 ## Core Responsibilities
 
 ### Session Naming Convention
-`shared/cluster.py:session_name(service)` is the single assembly point: `ava-<service>` — the name does **not encode machine or cluster** (each unit's session namespace is its own `$AVA_HOME`, so same-named sessions on different homes never collide). Examples:
+`shared/cluster/derive.py:session_name(service)` is the single assembly point: `ava-<service>` — the name does **not encode machine or cluster** (each unit's session namespace is its own `$AVA_HOME`, so same-named sessions on different homes never collide). Examples:
 - `ava-gateway` — gateway session
 - `ava-agent-<id>` — agent main process session (a session record like any other)
 - `ava-agent-<id>-shell-<n>[-<name>]` — shell sub-session held by an agent

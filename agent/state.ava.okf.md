@@ -13,7 +13,7 @@ Ava agent's LangGraph state management system. Base `BaseAgentState` has seven c
 
 ## Core Responsibilities
 
-- **BaseAgentState**: seven built-in channels `messages` (guarded `add_messages` reducer — append-only invariant, task #1256) / `halted` / `update_initiated` / `compact` (nested `CompactState`) / `memory` (nested `MemoryState`) / `context_reset` (nested `ContextReset`) / `capabilities` (nested `CapabilitiesState`). `_exec.py:_BASE_STATE_FIELDS` derived from `BaseAgentState.model_fields` (`state._BASE_FIELDS`), auto-sync with base — ensures plugins cannot wrongly write to any undeclared base channel via `ava.state_update`
+- **BaseAgentState**: seven built-in channels `messages` (guarded `add_messages` reducer — append-only invariant, task #1256) / `halted` / `update_initiated` / `compact` (nested `CompactState`) / `memory` (nested `MemoryState`) / `context_reset` (nested `ContextReset`) / `capabilities` (nested `CapabilitiesState`). `agent/state.py:_BASE_STATE_FIELDS` derived from `BaseAgentState.model_fields` (`state._BASE_FIELDS`), auto-sync with base — ensures plugins cannot wrongly write to any undeclared base channel via `ava.state_update`
 - **Plugin state registration**: `register_plugin_state(Cls) → PluginStateHandle[Cls]`
   - Field names overlapping with BaseAgentState → treated as modifying base fields, no prefix added, types must exactly match
   - Field names disjoint → automatically prefixed with `<plugin>__<field>`, becoming plugin-private channels

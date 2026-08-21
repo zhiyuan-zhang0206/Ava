@@ -20,7 +20,7 @@ gateway spawn → 'allocated' → 'starting' → heavy import → run loop → '
                                     ↑ boot stage ↑
 ```
 
-### Stage 1: Schema Gate (`_starting.py:enter_starting_or_die_on_stale_schema()`)
+### Stage 1: Schema Gate (`agent/_starting.py:enter_starting_or_die_on_stale_schema()`)
 - **Before entering 'starting'**, validates that DB schema matches the local code.
 - **Two mismatch types have the same runtime behavior**: both set 'terminated' + raise to exit, no catch-up in process
 - `CodeBehindSchema` (local code behind) — host layer can self-heal afterwards: update checkout to match cluster then resurrect
@@ -35,7 +35,7 @@ gateway spawn → 'allocated' → 'starting' → heavy import → run loop → '
 - A second bound, `--boot-budget-seconds` (90s), caps the WHOLE pre-claim boot and never resets. The stall window alone bounds a boot only at `phases x stall` — today 4 x 30s, exactly the reap grace — so without it a slow-but-progressing child has its row reaped while still alive. Whichever bound trips first wins; the stderr line names which
 - Disarmed immediately after the CAS — past the claim the row carries a pid and the restarter's reapers are the authority
 
-### Stage 2: Enter Starting (`_starting.py:enter_starting_state()`)
+### Stage 2: Enter Starting (`agent/_starting.py:enter_starting_state()`)
 - Flip agents_meta row from 'allocated' to 'starting'
 - Record pid, publish `agent_updated` event
 - **Write the liveness lease** (`lease_expires_at = now() + TTL`) in the same UPDATE — the claim is the lease's birth; the run loop renews it ([[lease.ava.okf.md|Agent Liveness Lease]])

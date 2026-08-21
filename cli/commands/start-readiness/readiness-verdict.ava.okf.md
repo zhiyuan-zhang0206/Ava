@@ -10,7 +10,7 @@ tags:
 
 # Start Readiness Gate & Verdict
 
-- `_probe.py:_wait_for_services_ready` is `ava start`'s **readiness gate**: it polls
+- `cli/commands/_probe.py:_wait_for_services_ready` is `ava start`'s **readiness gate**: it polls
   the probes `ava status` uses for the roster the start just launched and returns the
   specs that never passed, which `start.py` turns into
   `SERVICES_NOT_READY_EXIT_CODE` (4) *after* the status snapshot has printed and the
@@ -36,8 +36,8 @@ tags:
 - A flag only arrives if the caller knows to pass it, and the rollout's local gateway
   leg is spawned by an orchestrator that imported `update.py` *before* the checkout —
   so on the rollout that first ships a flag change, the parent is old code and the
-  child is new. `start.py:_readiness_waiver` therefore also waives the verdict when a
-  gateway-capable host *observes* a live update lease (`status.py:_update_in_flight`),
+  child is new. `cli/commands/start.py:_readiness_waiver` therefore also waives the verdict when a
+  gateway-capable host *observes* a live update lease (`cli/commands/status.py:_update_in_flight`),
   which is the same fact reached without the parent's cooperation. Scoped to gateway
   hosts: only that leg's exit code becomes a cluster-wide revert, while a pure
   agent-runner's 4 buys an idempotent local `ava start`.
@@ -47,7 +47,7 @@ tags:
   the aftermath block — without aborting it: the gateway is serving and the
   agent-runners still need Phase B, so the failure changes the verdict, not the plan.
   The frontend-only fast path returns before that machinery exists, so it prints its
-  own block and returns 1 in `update.py:_run_frontend_only_update`.
+  own block and returns 1 in `cli/commands/update.py:_run_frontend_only_update`.
 
 
 Parent: [[cli/commands/start-readiness/start-readiness.ava.okf.md|start readiness]].

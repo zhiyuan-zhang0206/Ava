@@ -210,7 +210,7 @@ repos:
         name: lint-doc-anchors
         language: system
         entry: .venv/bin/python scripts/lint_doc_anchors.py
-        files: ^(conventions/.*|\.agents/skills/.*|.*\.py)$
+        files: ^(conventions/.*|\.agents/skills/.*|ava_builtins/skills/.*|.*\.ava\.okf\.md|.*\.py)$
         pass_filenames: false
 
       # Every CLI flag written as a command invocation, and every relative

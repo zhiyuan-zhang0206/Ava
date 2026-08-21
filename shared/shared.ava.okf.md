@@ -24,7 +24,7 @@ tags:
 - **Deploy state & liveness (R1)**: the explicit-model tables + lease APIs — the `deployment_state` singleton (cluster deploy lease + phase/kind/settle/last_outcome, [[cluster_lock.ava.okf.md|cluster_lock]]), `host_deploy_state` (per-host posture + updater lease + mirror, [[host_deploy_state.ava.okf.md|host_deploy_state]]), the agent alive predicate in `shared/db.py` (see [[../agent/agent.ava.okf.md|agent domain]]), and the watcher registry ([[watcher_registry.ava.okf.md|watcher_registry]]).
 - **HTTP API contracts** (`shared/api_contracts/`): gateway↔cli HTTP response contract types (`ConfigFieldView`/`ConfigSectionView` etc.), moved down from `gateway/schemas` 2026-07-21.
 - **Configuration & bootstrapping** (`shared/config/`, `shared/bootstrap.py`): runtime configuration parsing (split by owning domain into sub-models like `agent`/`daemon`/`data_plane`/`general`/`services`, aggregated into `settings`, with per-field category/scope/capability metadata), system bootstrapping.
-- **Infrastructure utilities** (`shared/db.py`, `shared/redis_client.py`, `shared/pg_*.py`): Postgres/Redis client wrappers; `redis_client.py:publish_best_effort`/`_sync` is the never-raise publish primitive for lifecycle events (`mark_agent_status`, agent_events, labels, ops lifecycle) — fire-and-forget, on failure it only degrades with a log, never throws upwards. The agent kernel's **streaming live events** (chat_start/chat_delta/code_*/exec_*, the live view's main traffic) go through `shared/event_publisher.py`'s `AgentEventPublisher` instead (non-blocking enqueue, since 2026-06-04 #806). `shared/redis_listener.py` is the long-lived Redis pub/sub listener with auto-reconnect/resubscribe (PG LISTEN/NOTIFY → Redis pub/sub rework) that backs the claim node's inbound idle-wait (`wait_for_inbound`); the in-turn interrupt watcher polls the DB instead of sharing this listener (see `agent/graph/_interrupt.py`).
+- **Infrastructure utilities** (`shared/db.py`, `shared/redis_client.py`, `shared/pg_*.py`): Postgres/Redis client wrappers; `shared/redis_client.py:publish_best_effort`/`_sync` is the never-raise publish primitive for lifecycle events (`mark_agent_status`, agent_events, labels, ops lifecycle) — fire-and-forget, on failure it only degrades with a log, never throws upwards. The agent kernel's **streaming live events** (chat_start/chat_delta/code_*/exec_*, the live view's main traffic) go through `shared/event_publisher.py`'s `AgentEventPublisher` instead (non-blocking enqueue, since 2026-06-04 #806). `shared/redis_listener.py` is the long-lived Redis pub/sub listener with auto-reconnect/resubscribe (PG LISTEN/NOTIFY → Redis pub/sub rework) that backs the claim node's inbound idle-wait (`wait_for_inbound`); the in-turn interrupt watcher polls the DB instead of sharing this listener (see `agent/graph/_interrupt.py`).
 - **Installation & paths** (`shared/install_registry.py`, `shared/paths.py`, `shared/plugins_config.py`): the machine-local package registry that gates the skill scanner, per-machine plugin enable state, and `$AVA_HOME` path resolution — see the child nodes below.
 - **Process supervision** (`shared/posixproc.py`, `shared/winproc.py`, `shared/session_backend.py`, `shared/daemon_shutdown.py`): services, orchestration sessions and agent processes are **native** sessions; agent shells run on per-session **PTY hosts** ([[shared/pty_sessions/pty_sessions.ava.okf.md]]); Windows uses winproc. Launch shape, the kill contract and the SIGTERM unwind: [[shared/session-backend/session-backend.ava.okf.md|session backend]].
 
@@ -48,14 +48,7 @@ tags:
 - [[watcher_registry.ava.okf.md]] — the `agent_watchers` registry
 
 ## Entry points
-
-- `shared/lm/factory.py:build_chat_model` — dispatches to the appropriate LangChain chat model based on model name prefix
-- `shared/lm/factory.py:validate_model_config` — model/key pre-check at spawn boundary
-- `shared/lm/pricing.py:tally_tokens` / `cost_usd` — token usage and three-tier cost calculation
-- `shared/agents.py:AgentStatus` — agent lifecycle status enum (ALLOCATED→…→TERMINATED)
-- `shared/message_kwargs.py:read_ava_kwargs` — typed reading entry point for message `additional_kwargs`
-- `shared/metrics.py:build_report` — assemble metrics report
-- `shared/bootstrap.py` — system boot entry point
+The shared-layer public entry points: [[shared/entry-points.ava.okf.md]].
 
 ## Notes
 

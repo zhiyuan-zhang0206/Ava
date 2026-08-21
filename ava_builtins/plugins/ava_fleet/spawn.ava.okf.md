@@ -13,7 +13,7 @@ tags:
 
 ## Responsibility
 
-Agent creation, copying, termination, restart, resurrection — dynamic member management for the fleet. spawn/fork/terminate/restart/resurrect are `ava.agents` **core** methods, the fleet plugin does not register them. However, **the `label=` parameter of `spawn` is fleet-only**: wrapped around core spawn by `plugins/ava_fleet/plugin.py:_spawn_with_label` (:554-584) via monkeypatch (**not** `register_namespace_member`); after disabling fleet, `spawn(label=…)` raises `TypeError`, and `create_and_assign` also disappears.
+Agent creation, copying, termination, restart, resurrection — dynamic member management for the fleet. spawn/fork/terminate/restart/resurrect are `ava.agents` **core** methods, the fleet plugin does not register them. However, **the `label=` parameter of `spawn` is fleet-only**: wrapped around core spawn by `ava_builtins/plugins/ava_fleet/plugin.py:_spawn_with_label` (:554-584) via monkeypatch (**not** `register_namespace_member`); after disabling fleet, `spawn(label=…)` raises `TypeError`, and `create_and_assign` also disappears.
 
 ## API
 

@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Start Readiness (what `ava start` calls up)
-description: The questions `ava start` asks about a service and the one exit code they produce — `_session_lifecycle`'s launch guard (is this live session actually serving?) and its launch verdict (did `new-session` even take?), `_probe.py:_wait_for_services_ready` (did what I launched come up?), and `start.py:_readiness_waiver` (is an unready service this start's fault?). Split from the parent node; the launch guard and the wait share one frontend carve-out on purpose.
+description: The questions `ava start` asks about a service and the one exit code they produce — `_session_lifecycle`'s launch guard (is this live session actually serving?) and its launch verdict (did `new-session` even take?), `cli/commands/_probe.py:_wait_for_services_ready` (did what I launched come up?), and `cli/commands/start.py:_readiness_waiver` (is an unready service this start's fault?). Split from the parent node; the launch guard and the wait share one frontend carve-out on purpose.
 tags:
 - cli
 - tool
@@ -23,7 +23,7 @@ fact: **is the port I am about to bind mine to bind?**
 
 ## Notes
 
-- `start.py:_refuse_occupied_health_ports` is the **pre-bind gate**, run on the roster
+- `cli/commands/start.py:_refuse_occupied_health_ports` is the **pre-bind gate**, run on the roster
   `_session_lifecycle._launch_roster` reports (the same set the launch uses, so a gated-out or
   `--disable-service`-d daemon's port is not one this start would take). For each spec
   whose probe target is an Ava `/healthz` it runs `_probe._occupied_health_ports`,

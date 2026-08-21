@@ -44,4 +44,4 @@ Ava agent's LLM invocation layer — containing tool schema definition (`agent/l
 ## Notes
 
 - State type hint uses `from __future__ import annotations` + module attribute references to avoid capturing `BaseAgentState` alias and losing plugin dynamic fields
-- Retry policy is built in `_build.py:_build_llm_retry()` reading from `settings.llm_retry_*` (default max_attempts=6 / initial=30s / max=480s / backoff=2), no longer DeepSeek-specific — covers multi-provider network jitter and rate-limit bursts, and explicitly excludes `FatalLLMStreamError` / `FatalProviderError`
+- Retry policy is built in `agent/graph/_build.py:_build_llm_retry()` reading from `settings.llm_retry_*` (default max_attempts=6 / initial=30s / max=480s / backoff=2), no longer DeepSeek-specific — covers multi-provider network jitter and rate-limit bursts, and explicitly excludes `FatalLLMStreamError` / `FatalProviderError`

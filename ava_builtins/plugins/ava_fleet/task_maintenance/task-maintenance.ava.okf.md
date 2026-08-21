@@ -10,7 +10,7 @@ tags: []
 ## What It Is
 A gateway-owned daemon — every `AVA_TASK_MAINTENANCE_INTERVAL_SECONDS` (default 5 min) scans `agent_tasks`, chat-reminds owners of in-progress tasks overdue for updates, and escalates repeat non-responders: with a delegator (parent task has an owner) notify the parent owner; top-level tasks (parent = unowned system root) escalate to the human queue via a require_response notice on the stuck owner. Cluster-level, one per cluster, same shape as heartbeat. **Only sends messages / inserts notices, never modifies task status**—no stale sweep, no auto-cancel, no orphan release.
 
-**Attribution**: fleet domain service under the `ava_fleet` plugin namespace (not hardcoded in core `ops/spec.py`): the plugin declares a `ServiceSpec` via `plugins/ava_fleet/services.py:services()`, `ops/spec.py:_plugin_services()` discovers it into the single-source `build_services()` roster—"plugin declares, ops discovers"; gateway capability. **Discovery keys on the plugin code's existence, not the agent-side enable-state**; the cluster switch is the explicit settings field `AVA_TASK_MAINTENANCE_ENABLED` (via `ServiceSpec.gate`, evaluated at daemon-start, unaffected by per-agent overlays).
+**Attribution**: fleet domain service under the `ava_fleet` plugin namespace (not hardcoded in core `ops/spec.py`): the plugin declares a `ServiceSpec` via `ava_builtins/plugins/ava_fleet/services.py:services()`, `ops/spec.py:_plugin_services()` discovers it into the single-source `build_services()` roster—"plugin declares, ops discovers"; gateway capability. **Discovery keys on the plugin code's existence, not the agent-side enable-state**; the cluster switch is the explicit settings field `AVA_TASK_MAINTENANCE_ENABLED` (via `ServiceSpec.gate`, evaluated at daemon-start, unaffected by per-agent overlays).
 
 ## Core Responsibilities
 - **Remind**: SELECT `status='in_progress' AND owner IS NOT NULL AND NOT is_root` and `now()-updated_at > remind_interval_seconds`; deliver a `chat` reminder via gateway `POST /api/agents/{id}/messages` (`source='system'`); on success `last_reminded_at=now()`, `reminder_count += 1`. `last_reminded_at` gates the backoff (`AVA_TASK_REMINDER_BACKOFF_SECONDS`, default 3600s)—at most one reminder per backoff within the same overdue window (so the count can climb to the escalate threshold in one window).
@@ -24,7 +24,7 @@ A gateway-owned daemon — every `AVA_TASK_MAINTENANCE_INTERVAL_SECONDS` (defaul
 - [[loop.ava.okf.md]] — reminder/escalation messages are received and processed by the owner/parent owner on their respective machines
 
 ## Entry Points
-- `plugins/ava_fleet/services.py:services()` — declares this service's `ServiceSpec` (session `task-maintenance`, gateway capability, carries `gate` reading `AVA_TASK_MAINTENANCE_ENABLED`)
+- `ava_builtins/plugins/ava_fleet/services.py:services()` — declares this service's `ServiceSpec` (session `task-maintenance`, gateway capability, carries `gate` reading `AVA_TASK_MAINTENANCE_ENABLED`)
 - `plugins/ava_fleet/task_maintenance/daemon.py` — `.venv/bin/python -m plugins.ava_fleet.task_maintenance.daemon`
 - Healthcheck `plugins/ava_fleet/task_maintenance/healthcheck.py` (HTTP `/healthz` :8108 liveness → `shared.service_respawn.run_keepalive`)
 

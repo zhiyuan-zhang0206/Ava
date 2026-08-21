@@ -70,7 +70,7 @@ its life promising a heartbeat these tables have never had; liveness is the live
 
 Cross-machine spawn is a direct dial, not a queue: the gateway POSTs a `spawn`
 op to the target runner's ops server (address read from this table), which calls
-`gateway/ops_lifecycle.py:spawn_agent_op` in-process and returns the result in
+`ops/ops_lifecycle.py:launch_agent_op` in-process and returns the result in
 the same response. Runners run **no** local gateway process — an agent's SDK
 reaches the gateway over HTTP via `gateway_api_base()`.
 
