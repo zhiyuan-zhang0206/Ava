@@ -20,14 +20,16 @@ from the checkout; a `source='repo'` row is forbidden to carry a blob at all
 is a separate step that needs the plugin and MCP kinds this slice does not have
 yet.
 
-`trust` does not travel. A local `reviewed` is a decision someone made about
-THIS machine's copy (`ava skill trust`); promoting it cluster-wide because one
-machine swept would make a review of one directory into a review for every
-machine. Adopted rows land `unreviewed`, which is exactly what `ava skill
-install` writes today, so a swept name and a freshly installed one are
-indistinguishable afterwards.
+`trust` travels, exactly like `enabled` (user ruling 2026-08-21, issue #218):
+trust is a CLUSTER-level fact about CONTENT — "has a human reviewed these
+bytes" — and which machine the reviewer sat at is not part of the fact. The
+sweep uploads the local tier as the row's `trust`, keyed to the content_hash
+it is carried with; the registry's upsert only ever lets trust rise (never
+downgrade a `reviewed`/`builtin` row for the same content) and resets it
+when the content changes. So a review survives the sweep but never launders
+across versions.
 
-`enabled` does travel, as the row's `default_enabled`. It is the only signal
+`enabled` travels too, as the row's `default_enabled`. It is the only signal
 available about what the operator wanted, and the alternative — adopting
 everything as enabled — silently switches on something a person deliberately
 turned off.
@@ -153,6 +155,9 @@ def adopt_local_installs(pool: ConnectionPool, *, skills_root: Path) -> Adoption
             name=pkg.name,
             kind="skill",
             source=f"local:{machine_name()}",
+            # Trust is a cluster-level fact about these bytes (issue #218): the
+            # local review tier travels with the content it was given for.
+            trust=pkg.trust,
             default_enabled=pkg.enabled,
         )
         result.adopted.append(pkg.name)

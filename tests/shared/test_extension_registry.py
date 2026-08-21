@@ -23,6 +23,7 @@ import psycopg
 import pytest
 
 from shared import extension_registry as reg
+from shared.install_registry import TrustTier, tree_hash
 
 
 def _tree(root: Path, files: dict[str, str]) -> Path:
@@ -296,3 +297,98 @@ class TestEnablementIsClusterPolicy:
         <typo>` has to be able to say so."""
         with db_conn.transaction(force_rollback=True):
             assert reg.set_default_enabled(db_conn, "no-such-extension", enabled=True) is False
+
+
+class TestTrustIsKeyedToContent:
+    """User ruling 2026-08-21 (issue #218): trust is a cluster-level fact about
+    content. It travels with the content_hash it was given for, only ever rises
+    for the same content, and resets when the content changes."""
+
+    @staticmethod
+    def _upsert(
+        db_conn: psycopg.Connection, root: Path, *, name: str, source: str, trust: TrustTier
+    ) -> None:
+        """put_blob + upsert — the FK requires the blob to exist first; the blob
+        is stored under the TREE hash the row points at."""
+        digest = tree_hash(root)
+        reg.put_blob(db_conn, reg.pack_tree(root), name=name, content_hash=digest)
+        reg.upsert(
+            db_conn,
+            name=name,
+            kind="skill",
+            source=source,
+            content_hash=digest,
+            trust=trust,
+        )
+
+    def test_same_content_never_downgrades_a_review(
+        self, db_conn: psycopg.Connection, tmp_path: Path
+    ) -> None:
+        """A reviewed row written by machine A must survive a later unreviewed
+        upsert of the SAME content from machine B — trust only ever rises."""
+        with db_conn.transaction(force_rollback=True):
+            self._upsert(
+                db_conn,
+                _tree(tmp_path / "pkg", {"SKILL.md": "same bytes"}),
+                name="trust-pkg",
+                source="local:a",
+                trust="reviewed",
+            )
+            self._upsert(
+                db_conn,
+                _tree(tmp_path / "pkg", {"SKILL.md": "same bytes"}),
+                name="trust-pkg",
+                source="local:b",
+                trust="unreviewed",
+            )
+            row = reg.get(db_conn, "trust-pkg")
+            assert row is not None
+            assert row.trust == "reviewed", "an unreviewed rewrite must not downgrade a review"
+
+    def test_changed_content_resets_to_the_callers_tier(
+        self, db_conn: psycopg.Connection, tmp_path: Path
+    ) -> None:
+        """Installing DIFFERENT content resets the review to the caller's tier
+        (default unreviewed) — a review never launders across versions."""
+        with db_conn.transaction(force_rollback=True):
+            self._upsert(
+                db_conn,
+                _tree(tmp_path / "pkg", {"SKILL.md": "v1"}),
+                name="trust-pkg",
+                source="local:a",
+                trust="reviewed",
+            )
+            self._upsert(
+                db_conn,
+                _tree(tmp_path / "pkg2", {"SKILL.md": "v2"}),
+                name="trust-pkg",
+                source="local:a",
+                trust="unreviewed",
+            )
+            row = reg.get(db_conn, "trust-pkg")
+            assert row is not None
+            assert row.trust == "unreviewed", "new content must reset the review"
+
+    def test_same_content_accepts_a_promotion(
+        self, db_conn: psycopg.Connection, tmp_path: Path
+    ) -> None:
+        """The upward direction: an unreviewed row promoted to reviewed by a
+        later upsert of the same content lands reviewed."""
+        with db_conn.transaction(force_rollback=True):
+            self._upsert(
+                db_conn,
+                _tree(tmp_path / "pkg", {"SKILL.md": "same bytes"}),
+                name="trust-pkg",
+                source="local:a",
+                trust="unreviewed",
+            )
+            self._upsert(
+                db_conn,
+                _tree(tmp_path / "pkg", {"SKILL.md": "same bytes"}),
+                name="trust-pkg",
+                source="local:a",
+                trust="reviewed",
+            )
+            row = reg.get(db_conn, "trust-pkg")
+            assert row is not None
+            assert row.trust == "reviewed"
