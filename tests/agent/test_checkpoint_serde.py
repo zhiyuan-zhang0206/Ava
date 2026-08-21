@@ -79,6 +79,40 @@ def test_allowlist_round_trip_is_silent(state, caplog) -> None:
     assert _warning_messages(caplog) == []  # pyright: ignore[reportUnknownArgumentType]
 
 
+def test_legacy_checkpoint_envelopes_still_resolve() -> None:
+    """Issue #156 compatibility lock: a checkpoint written BEFORE the split
+    carries ext envelopes naming `("agent.state", "<Name>")`. The serializer
+    resolves them by module attribute lookup, and `agent.state` re-exports the
+    models from `agent.state_channels` — so the legacy envelope must revive to
+    the CURRENT class, not to a raw dict or None.
+
+    Simulated with a dynamic subclass whose `__module__` is the legacy value
+    (the envelope writes `__class__.__module__`), round-tripped through the
+    allowlist serde."""
+    serde = _allowlist_serde()
+    cases = [
+        (CompactState, lambda c: c(version=2)),
+        (MemoryState, lambda c: c(injected_paths={"a.md"})),
+        (ContextReset, lambda c: c(resume="claim")),
+        (CapabilitiesState, lambda c: c(indexed={"x"})),
+    ]
+    for real_cls, make in cases:
+        legacy_cls = type(real_cls.__name__, (real_cls,), {"__module__": "agent.state"})
+        restored = serde.loads_typed(serde.dumps_typed(make(legacy_cls)))
+        # Revives to the real (state_channels) class via the agent.state re-export.
+        assert type(restored) is real_cls
+        assert restored == make(real_cls)
+
+
+def test_legacy_allowlist_entries_stay_present() -> None:
+    """The legacy `("agent.state", ...)` pairs must remain allowlisted — old
+    checkpoints carry those names and would warn (then block) without them."""
+    allow = checkpoint_msgpack_allowlist()
+    for name in ("CompactState", "MemoryState", "ContextReset", "CapabilitiesState"):
+        assert ("agent.state", name) in allow
+        assert ("agent.state_channels", name) in allow
+
+
 def test_default_permissive_serde_warns_for_same_types(
     caplog, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -106,8 +140,11 @@ def test_default_permissive_serde_warns_for_same_types(
             serde.loads_typed(serde.dumps_typed(s))
     msgs = _warning_messages(caplog)  # pyright: ignore[reportUnknownArgumentType]
     assert len(msgs) == 4
+    # Issue #156 split: freshly-written checkpoints carry the models' real module
+    # (agent.state_channels); the legacy agent.state names only appear in
+    # checkpoints written before the split.
     for name in ("ContextReset", "CapabilitiesState", "CompactState", "MemoryState"):
-        assert any(f"agent.state.{name}" in m for m in msgs)
+        assert any(f"agent.state_channels.{name}" in m for m in msgs)
 
 
 # ── plugin classes enter the allowlist automatically ──────────────────────

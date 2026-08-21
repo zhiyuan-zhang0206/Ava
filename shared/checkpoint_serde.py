@@ -22,10 +22,19 @@ unregistered types outright.
 # `agent.state.checkpoint_msgpack_allowlist` starts from this set.
 STATIC_CHECKPOINT_MSGPACK_TYPES: frozenset[tuple[str, str]] = frozenset(
     {
+        # Legacy pairs: checkpoints written before the issue #156 split carry
+        # `("agent.state", ...)` envelopes; `agent.state` re-exports the models
+        # from `agent.state_channels`, so these must stay for old checkpoints to
+        # keep deserializing.
         ("agent.state", "CompactState"),
         ("agent.state", "MemoryState"),
         ("agent.state", "ContextReset"),
         ("agent.state", "CapabilitiesState"),
         ("agent.state", "AgentState"),
+        # Current pairs: freshly-written checkpoints carry the real module.
+        ("agent.state_channels", "CompactState"),
+        ("agent.state_channels", "MemoryState"),
+        ("agent.state_channels", "ContextReset"),
+        ("agent.state_channels", "CapabilitiesState"),
     }
 )
