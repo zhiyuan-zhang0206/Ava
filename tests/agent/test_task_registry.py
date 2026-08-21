@@ -1534,3 +1534,42 @@ def test_update_parent_alone_is_a_valid_update(db_conn: psycopg.Connection) -> N
         assert _persisted_parent(db_conn, child.id) == parent.id
     finally:
         ava._boot._agent_id = original
+
+
+def test_sdk_task_timestamps_are_bare_cluster_zone(db_conn: psycopg.Connection) -> None:
+    """Issue #181: the SDK task object must not mix timestamp conventions.
+
+    `created_at` / `updated_at` / `last_reminded_at` are agent-facing rendered
+    timestamps, so they carry the bare cluster-zone form (no UTC/offset suffix)
+    — the same convention as the `results` notes. The gateway JSON API and the
+    DB keep explicit offsets; only this object is uniform."""
+    agent_id = _seed_agent(db_conn)
+    original = ava._boot._agent_id
+    ava._boot._agent_id = agent_id
+    try:
+        task = task_registry.create("ts-uniform", "d")
+        task_registry.log(task.id, "probe log line 1")
+        got = task_registry.get(task.id)
+
+        for field in ("created_at", "updated_at"):
+            value = getattr(got, field)
+            assert isinstance(value, str), f"{field} must be a rendered string"
+            # Bare cluster-zone: bracket format, no suffix of any kind.
+            assert re.match(r"^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\]$", value), (
+                f"{field} is not a bare timestamp: {value!r}"
+            )
+            assert "+00:00" not in value and "+08" not in value and "Z" not in value
+
+        # last_reminded_at is None before any reminder (still typed as rendered
+        # string once set — same convention).
+        assert got.last_reminded_at is None
+
+        # The results notes use the same bare convention — one object, one
+        # convention end to end.
+        assert got.results is not None
+        for line in got.results.splitlines():
+            assert re.match(r"^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\] ", line), (
+                f"note line is not bare: {line!r}"
+            )
+    finally:
+        ava._boot._agent_id = original

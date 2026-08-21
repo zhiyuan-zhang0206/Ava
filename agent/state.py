@@ -7,9 +7,10 @@ BaseAgentState (framework layer, static):
     exit_requested   — claim's END means process exit, not just turn over
     turn_idle        — hosted mode: claim found nothing and did not park, so the host ends the turn task
     update_initiated — this agent kicked off a cluster self-update
-    compact          — nested compaction bookkeeping (CompactState)
-    memory           — nested passive-recall bookkeeping (MemoryState)
-    capabilities     — nested capability-index snapshot (CapabilitiesState)
+    compact          — nested compaction bookkeeping (CompactState, agent/state_channels.py)
+    memory           — nested passive-recall bookkeeping (MemoryState, agent/state_channels.py)
+    capabilities     — nested capability-index snapshot (CapabilitiesState, agent/state_channels.py)
+    context_reset    — nested pending-context-reset bookkeeping (ContextReset, agent/state_channels.py)
 
 Plugins register an entire BaseModel via `register_plugin_state(Cls)`,
 getting back a `PluginStateHandle[Cls]` for typed read/write; framework
@@ -60,102 +61,25 @@ from pydantic import BaseModel, Field
 from pydantic.fields import FieldInfo
 
 from agent.messages_guard import guarded_add_messages
-from agent.nodes import CLAIM, NodeName
+
+# The four nested sub-state channel models live in agent/state_channels
+# (issue #156 — this module sat at the 800-line ceiling). They are RE-EXPORTED
+# here, never re-defined: LangGraph checkpoints written before the split carry
+# ("agent.state", "<Name>") ext envelopes, and the serializer resolves them by
+# module attribute lookup — so old checkpoints keep deserializing only while
+# these names stay importable from agent.state. New checkpoints carry
+# ("agent.state_channels", "<Name>") and are allowlisted in
+# shared/checkpoint_serde.py alongside the legacy pairs.
+from agent.state_channels import (
+    CapabilitiesState,
+    CompactState,
+    ContextReset,
+    MemoryState,
+    _memory_state_merge,
+)
 from shared import plugin_contributions
 from shared.checkpoint_serde import STATIC_CHECKPOINT_MSGPACK_TYPES
 from shared.plugin_context import current_plugin_name
-
-
-class CompactState(BaseModel):
-    """Compaction bookkeeping, nested under `BaseAgentState.compact` (built-in
-    since Issue #1284, grouped into a sub-state by the state-nesting refactor).
-
-    `version` is a monotonic counter, +=1 on each successful compaction, never
-    resets; subscribers (ava_code, ava_sdk_reminder) bookmark against it.
-    `reminder_shown` / `reminder_seen_version` track the one-time wind-down
-    reminder so it fires at most once per context window.
-
-    The `compact` channel is last-value (no reducer): a writer reads the current
-    value and `model_copy(update=...)`'s only the fields it changes, so bumping
-    `version` alone (force / claim path) or flipping the reminder flags alone
-    never resets the siblings.
-    """
-
-    version: int = 0
-    reminder_shown: bool = False
-    reminder_seen_version: int = 0
-
-
-class MemoryState(BaseModel):
-    """Passive-recall bookkeeping, nested under `BaseAgentState.memory`.
-
-    `injected_paths` are memory-pool note paths already surfaced by passive
-    recall this session, union-accumulated across turns (see
-    `_memory_state_merge`) so the same note is not re-injected for the agent's
-    life. Gated by turn_settings.agent.passive_memory_recall_enabled; stays
-    empty when recall is off.
-    """
-
-    injected_paths: set[str] = Field(default_factory=set)
-
-
-def _memory_state_merge(old: MemoryState, new: MemoryState) -> MemoryState:
-    """Reducer for the `memory` channel: union the injected-path sets. The recall
-    hook writes only the fresh paths each turn; this accumulates them across turns
-    so a note recalled once stays deduped."""
-    return MemoryState(injected_paths=old.injected_paths | new.injected_paths)
-
-
-class CapabilitiesState(BaseModel):
-    """What the `# Capabilities` index has actually told this agent about,
-    nested under `BaseAgentState.capabilities`.
-
-    `indexed` is the set of skill display identifiers the standing SystemMessage
-    lists. It is recorded by `init_context` at the moment it builds that prompt
-    and advanced by the drift check that keeps the listing honest between builds
-    (`agent/hooks/capabilities.py`). The record has to exist because the two
-    sides age differently: the index is rendered once per context window, while
-    `ava.skills` under it is an uncached filesystem scan — without a snapshot,
-    nothing in the loop can tell that they have diverged.
-
-    `None` means no snapshot has been recorded for the current window — a
-    checkpoint written before this field existed. The drift check then adopts the
-    live catalog as its baseline in silence: what that agent's standing
-    SystemMessage lists is unknowable from here, and announcing the whole catalog
-    as newly installed would be a louder wrong answer than none.
-
-    Last-value channel (no reducer): one writer per turn, and each writes the
-    whole membership rather than a delta.
-    """
-
-    indexed: set[str] | None = None
-
-
-class ContextReset(BaseModel):
-    """A pending context (re)establishment, nested under
-    `BaseAgentState.context_reset` — written by whoever clears the history,
-    consumed and cleared by the `init_context` node.
-
-    A compaction empties `messages` (RemoveMessage(REMOVE_ALL)) and hands the
-    standing head back to `init_context` rather than re-assembling it: the node
-    lays down the SystemMessage plus the ordered context notes, then `tail` —
-    the post-compact summary alone (a compact is a clean wipe; chats that
-    arrived while the turn was in flight are re-delivered as pending inbounds
-    by the claim node instead of being parked here) — and routes on to
-    `resume`.
-
-    `resume` exists because a reset is requested from two depths: the forced
-    compaction detours out of `before_llm` mid-turn, while the claim path has
-    already computed where its batch should go next — which may be the graph's
-    END, when a terminate rode in the same batch. Defaults to `claim`, the
-    cold-start path, where nothing has been decided yet.
-
-    Last-value channel (no reducer): one writer per reset, and `init_context`
-    clears it by writing the default back.
-    """
-
-    tail: list[AnyMessage] = Field(default_factory=list)
-    resume: NodeName = CLAIM
 
 
 class BaseAgentState(BaseModel):

@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import builtins
 from dataclasses import dataclass
-from datetime import datetime
 from typing import TypeGuard
 
 import psycopg
@@ -20,6 +19,7 @@ from shared.live_announce import publish_task_created_sync, publish_task_updated
 from shared.priority import validate_priority
 from shared.task_notes import task_note_line
 from shared.task_reparent import resolve_reparent
+from shared.task_timestamps import render_task_timestamps
 
 # `list` / `get` shadow builtins intentionally: these are the agent-facing names
 # (ava.tasks.list / ava.tasks.get), matching ava.shell.sessions.list. flake8-builtins
@@ -96,10 +96,10 @@ class Task:
     status: str
     owner: int | None
     created_by: str
-    created_at: datetime
-    updated_at: datetime
+    created_at: str
+    updated_at: str
     remind_interval_seconds: int | None = None
-    last_reminded_at: datetime | None = None
+    last_reminded_at: str | None = None
     reminder_count: int = 0
     priority: str = _DEFAULT_PRIORITY
 
@@ -120,8 +120,8 @@ class Task:
 
 
 def _row_to_task(row: tuple) -> Task:
-    """Build a Task from a row selected in _COLS order."""
-    return Task(*row)
+    """Build a Task from a _COLS row; timestamps rendered bare (issue #181)."""
+    return Task(*render_task_timestamps(row, _COLS))
 
 
 def _default_parent(cur) -> int | None:  # noqa: ANN001
