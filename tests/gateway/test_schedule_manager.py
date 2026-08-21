@@ -8,6 +8,8 @@ without a real session backend.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from collections.abc import Iterator
 
 import psycopg
@@ -381,3 +383,20 @@ def test_successful_launch_clears_stale_last_error(
     status, last_error = row
     assert status == "running"
     assert last_error is None, "stale breaker text must be cleared on successful launch"
+
+
+def test_start_refuses_on_foreign_checkout(
+    pool: ConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """issue #194: a gateway running from a worktree must not supervise schedules."""
+    import asyncio
+
+    monkeypatch.setattr(sm, "prod_service_checkout_error", _refuse_foreign_checkout)
+    mgr = sm.ScheduleManager(pool)
+    asyncio.run(mgr.start())
+    assert mgr._task is None
+
+
+def _refuse_foreign_checkout(_repo: Path) -> str:
+    return "prod home but foreign checkout"

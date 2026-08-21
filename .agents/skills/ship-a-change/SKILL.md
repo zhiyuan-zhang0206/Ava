@@ -124,8 +124,14 @@ Still on you:
    A PR Mergify cannot rebase (conflict) is bounced back — `git fetch
    origin main && git rebase origin/main`, force-push, re-enqueue.
 8. Verify it landed (when not using `--merge`): `gh pr view <PR#>` →
-   state `MERGED`; the queue may take 10-30 min. Then `git worktree remove
-   <path>` and delete the remote branch (`git push origin --delete
+   state `MERGED`; the queue may take 10-30 min. Before removing the
+   worktree, run `python scripts/check_worktree_remove.py <path>` from the
+   dev clone and **abort the removal if it reports live sessions or
+   processes anchored under the path** — a cluster-owned session anchored
+   there (a schedule launched by a gateway that ran from the worktree,
+   issue #194) dies silently when the worktree's `.venv` disappears, and
+   the schedule's DB row keeps claiming `running`. Then `git worktree
+   remove <path>` and delete the remote branch (`git push origin --delete
    <branch>`) to clean up — Mergify does not auto-delete branches.
 
 Exception: skip PR only when the user explicitly says "push directly".

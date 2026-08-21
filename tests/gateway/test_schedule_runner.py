@@ -8,6 +8,7 @@ tested here — that needs a live gateway and is covered end-to-end elsewhere.
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import psycopg
@@ -261,3 +262,18 @@ def test_run_hung_subprocess_times_out_and_records_error(
     status, last_error = _status_and_error(db_conn, sid)
     assert status != "completed"
     assert last_error is not None and "did not finish within 2s" in last_error
+
+
+def test_main_refuses_on_foreign_checkout(monkeypatch: pytest.MonkeyPatch) -> None:
+    """issue #194: the runner refuses to start from a worktree-anchored checkout."""
+    import gateway.schedule_runner as runner
+
+    monkeypatch.setattr(sys, "argv", ["schedule_runner", "1"])
+    monkeypatch.setattr(runner, "prod_service_checkout_error", _refuse_foreign_checkout)
+    with pytest.raises(SystemExit) as excinfo:
+        runner.main()
+    assert excinfo.value.code == 3
+
+
+def _refuse_foreign_checkout(_repo: Path) -> str:
+    return "prod home but foreign checkout"
