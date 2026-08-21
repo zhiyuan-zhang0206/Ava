@@ -445,8 +445,9 @@ export interface paths {
          *     lifecycle event with no message — the agent just gets the "you have been
          *     resurrected" marker; the "resurrect with prompt" path carries a `prompt`
          *     that is INSERTed as a chat inbound in the **same transaction** as the
-         *     lifecycle 'resurrect' inbound, committed before the process launch so the new
-         *     process never races ahead of its prompt. `resurrected_by` defaults to
+         *     lifecycle 'resurrect' inbound. The detached session may be created before
+         *     commit, but its child blocks on the agent row and cannot claim or process
+         *     either inbound early. `resurrected_by` defaults to
          *     "user" and is validated against the envelope source whitelist.
          *
          *     Peer agents have no dedicated resurrect API — they `send_message`, and
@@ -1928,14 +1929,24 @@ export interface paths {
          * Pause Cluster Machine
          * @description Temporarily pull a machine out of the cluster (`ava cluster pause`).
          *
-         *     The three-step operator act, in dependency order so a partial failure
-         *     leaves the machine NOT paused (retryable) rather than paused with agents
-         *     still running:
+         *     The operator act starts with an admission fence, then drains and sweeps:
          *
-         *     1. **Drain** — every open/in_progress task owned by a live agent on this
+         *     1. **Latch** — set `paused_at`/`pause_reason` first. Every resurrection
+         *        transaction (explicit, pending-work, controller, and retry) locks and
+         *        checks this latch before its agent row, so stale resurrection cannot
+         *        escape the sweep.
+         *     2. **Drain** — every open/in_progress task owned by a live agent on this
          *        machine is reassigned to the drain owner (#405) with a note; the
          *        reminder daemon then surfaces it.
-         *     2. **Terminate** — every non-terminated agent on the machine is
+         *     3. **Final sweep** — every agent row on the machine, including an already
+         *        terminated row, receives a newer force-terminate intent fence. A
+         *        pre-latch resurrection holding the agent row lock completes first, then
+         *        this sweep terminates its exact session; older pending work on a dead
+         *        row cannot reverse the pause either. Other existing-agent re-entry paths
+         *        (respawn/swap/revive) keep their established admission rules and are
+         *        caught when they hold or update an existing row before the final sweep.
+         *
+         *     The live rows are
          *        force-terminated via the machine's own ops server (kill the process +
          *        mark terminated in one op, source="machine-pause"): the machine is
          *        about to be disconnected, so waiting for graceful turns is not worth
@@ -1943,10 +1954,11 @@ export interface paths {
          *        ops server is unreachable (the machine is already down) is force-marked
          *        terminated in the shared DB — its process is on the departing host
          *        anyway.
-         *     3. **Latch** — `paused_at`/`pause_reason` are set. From that moment the
-         *        machine vanishes from the roster / cluster panel / agents' list_machines,
-         *        `list_agent_runners()` drops it (no probe, no offline alert, rollout
-         *        skips it) and spawns targeting it are refused (409).
+         *     From the latch onward the machine vanishes from the roster / cluster panel /
+         *     agents' list_machines, `list_agent_runners()` drops it (no probe, no offline
+         *     alert, rollout skips it) and ordinary spawns targeting it are refused (409).
+         *     The separate transaction race between the pause latch and creation of a
+         *     brand-new agent row is outside this resurrection boundary.
          *
          *     Open "machine offline" alerts for the machine are resolved as part of the
          *     latch step — an expected absence is not an incident. Idempotent: pausing
@@ -5736,14 +5748,15 @@ export interface components {
          * ResurrectAgentRequest
          * @description Resurrect agent request body.
          *
-         *     Two callers: the `POST /api/agents/{id}/resurrect` endpoint (the frontend
-         *     resurrect button — a bare lifecycle wake with no message to deliver), and
-         *     `resurrect_if_terminated` for auto-resurrect when a chat message is
-         *     delivered to a terminated agent.
+         *     The public `POST /api/agents/{id}/resurrect` endpoint uses this for an
+         *     explicit lifecycle wake with no work guard. The internal versioned
+         *     pending-work path also carries it alongside the exact chat or compact
+         *     request id and kind; controller recovery calls the lower lifecycle helper
+         *     with its own exact death claim.
          *
          *     `resurrected_by` default "user" — frontend resurrect button does not
-         *     need to pass it; SDK paths pass f"agent:{my_id}"; auto-resurrect
-         *     (resurrect_if_terminated) passes "system". Written into the
+         *     need to pass it; SDK paths pass f"agent:{my_id}"; pending-work and
+         *     controller auto-resurrect pass "system". Written into the
          *     lifecycle 'resurrect' inbound's source; the claim-side dispatch
          *     composes it into the marker `[system ts] You have been resurrected
          *     by {resurrected_by}` so the agent knows who resurrected it.
@@ -5761,9 +5774,9 @@ export interface components {
          *     marker. Peer agents no longer have a dedicated resurrect API — they send
          *     a chat message (`ava.agents.send_message`) and auto-resurrect handles the
          *     rest. When a prompt is given it is INSERTed as a chat inbound in **the same
-         *     transaction** as the lifecycle 'resurrect' inbound, committed together
-         *     before the process launch — eliminating at the root the race "agent process
-         *     started running, prompt inbound has not yet arrived".
+         *     transaction** as the lifecycle 'resurrect' inbound. The session may be
+         *     created before commit, but its child blocks on the agent row and cannot
+         *     claim or process either inbound until both are committed.
          */
         ResurrectAgentRequest: {
             /**
@@ -6322,7 +6335,9 @@ export interface components {
          *
          *     `enqueued`: terminate inbound INSERTed; agent exits after processing
          *     the current turn.
-         *     `already_terminated`: agent was already dead, noop.
+         *     `already_terminated`: agent was already dead. Graceful termination is a
+         *         no-op; force preserves this response while recording a newer kill-intent
+         *         fence and cleaning the exact supervisor session.
          *     `force_killed`: force=true killed the agent's detached process + force
          *         marked terminated — agent may have been stuck and never took
          *         the graceful path.

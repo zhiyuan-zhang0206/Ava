@@ -1215,6 +1215,11 @@ def _guard_agent_launch(request: pytest.FixtureRequest, monkeypatch: pytest.Monk
     # `schedule_launch_confirm` would otherwise detach a background DB-polling
     # task per spawn (spawn's off-path launch confirm).
     monkeypatch.setattr("ops.agent_launch._launch_agent_process", _spy)
+    # Resurrect now creates the detached session under its DB row lock and
+    # confirms only after commit. The launch spy never advances the row, so its
+    # matching confirm must be a no-op too. Tests of the real wait opt out with
+    # `real_agent_launch`.
+    monkeypatch.setattr("ops.agent_launch._wait_for_status_to_leave_allocated", lambda _id: None)
     monkeypatch.setattr("ops.agent_launch.schedule_launch_confirm", lambda _id: None)
     request.node.stash[_LAUNCH_RECORDER] = calls
 

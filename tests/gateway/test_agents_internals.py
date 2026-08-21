@@ -18,11 +18,14 @@ lifecycle markers appended to messages, letting the agent know what transition j
 from __future__ import annotations
 
 import os
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any, cast
 
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
+from psycopg_pool import ConnectionPool
 
 import shared.db
 from gateway.app import app
@@ -32,19 +35,28 @@ from ops.agent_launch import (
     _launch_or_force_terminated,
     _wait_for_status_to_leave_allocated,
 )
+from ops.agent_wake import (
+    AutoResurrectClaim,
+    ResurrectClaimStaleError,
+    ResurrectTriggerStaleError,
+)
 from ops.agents import (
     create_agent_row,
     respawn_agent,
     resurrect_agent,
 )
+from ops.ops_lifecycle import _force_mark_terminated
 from shared import boot_timing
 from shared.agents import (
     AgentNotFound,
     AgentStatus,
     ForkCheckpointNotFound,
+    MachinePaused,
     ResurrectAlreadyAlive,
     ResurrectError,
+    TerminationSource,
 )
+from shared.config import settings
 from shared.env_registry import AGENT_CONFIG_OVERLAY_ENV
 from shared.envelope import wrap_inbound
 from shared.machine import machine_name
@@ -57,7 +69,26 @@ from shared.machine import machine_name
 # `@pytest.mark.flaky` to run serial.
 
 
-def _agents_row(db: psycopg.Connection, agent_id: int) -> tuple | None:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+def _test_pool() -> ConnectionPool:
+    """Return a concretely typed pool for helpers that open their own pool."""
+    return cast(
+        ConnectionPool,
+        ConnectionPool(settings.data_plane.db_url, min_size=1, max_size=2),
+    )
+
+
+def _record_agent_ids(target: list[int]) -> Callable[..., None]:
+    def _record(agent_id: int, **_kwargs: object) -> None:
+        target.append(agent_id)
+
+    return _record
+
+
+def _noop(*_args: object, **_kwargs: object) -> None:
+    return None
+
+
+def _agents_row(db: psycopg.Connection, agent_id: int) -> tuple[int, str, str, int | None] | None:
     with db.cursor() as cur:
         cur.execute(
             "SELECT id, spawner, status, pid FROM agents_meta WHERE id = %s",
@@ -80,6 +111,64 @@ def _agents_pid_started_at(db: psycopg.Connection, agent_id: int) -> tuple[int |
 def _inbound_count(db: psycopg.Connection, agent_id: int) -> int:
     with db.cursor() as cur:
         cur.execute("SELECT COUNT(*) FROM inbound_messages WHERE agent_id = %s", (agent_id,))
+        row = cur.fetchone()
+    assert row is not None
+    return row[0]
+
+
+def _terminated_with_chat(db: psycopg.Connection, agent_id: int, content: str) -> int:
+    with db.cursor() as cur:
+        cur.execute("UPDATE agents_meta SET status='terminated' WHERE id=%s", (agent_id,))
+    db.commit()
+    return shared.db.insert_inbound_message(db, agent_id, content, source="user")
+
+
+def _terminated_on_machine_with_chat(
+    db: psycopg.Connection, agent_id: int, machine: str, content: str
+) -> int:
+    with db.cursor() as cur:
+        cur.execute(
+            "INSERT INTO machines (name, role) VALUES (%s, ARRAY['agent-runner'])",
+            (machine,),
+        )
+        cur.execute(
+            "UPDATE agents_meta SET machine=%s, status='terminated' WHERE id=%s",
+            (machine, agent_id),
+        )
+    db.commit()
+    return shared.db.insert_inbound_message(db, agent_id, content, source="user")
+
+
+def _pause_and_force_sweep(machine: str) -> None:
+    from gateway.routers._machine_pause import _list_agent_rows_for_pause_blocking
+    from ops.ops_lifecycle import _force_terminate_transaction
+    from shared import machines
+
+    machines.pause(machine, reason="test pause race")
+    with _test_pool() as pool:
+        for agent_id, _was_live in _list_agent_rows_for_pause_blocking(pool, machine):
+            _force_terminate_transaction(agent_id, pool, source="machine-pause", kill_process=True)
+
+
+def _termination_row(db: psycopg.Connection, agent_id: int) -> tuple[str, str | None, bool]:
+    with db.cursor() as cur:
+        cur.execute(
+            "SELECT status, termination_source, "
+            "last_force_terminate_inbound_id IS NOT NULL "
+            "FROM agents_meta WHERE id=%s",
+            (agent_id,),
+        )
+        row = cur.fetchone()
+    assert row is not None
+    return row
+
+
+def _resurrect_inbound_count(db: psycopg.Connection, agent_id: int) -> int:
+    with db.cursor() as cur:
+        cur.execute(
+            "SELECT count(*) FROM inbound_messages WHERE agent_id=%s AND kind='resurrect'",
+            (agent_id,),
+        )
         row = cur.fetchone()
     assert row is not None
     return row[0]
@@ -119,7 +208,7 @@ def _spawn_agent(
     return agent_id
 
 
-def _inbound_rows(db: psycopg.Connection, agent_id: int) -> list[tuple]:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+def _inbound_rows(db: psycopg.Connection, agent_id: int) -> list[tuple[str, str, str | None]]:
     with db.cursor() as cur:
         cur.execute(
             "SELECT content, kind, source FROM inbound_messages "
@@ -229,6 +318,931 @@ class TestSpawnAgent:
 
 
 class TestResurrectAgent:
+    def test_repeat_force_fence_preserves_page_reopen_epoch(
+        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A repeated force creates a newer intent fence without changing the
+        real status-transition epoch used to reopen pages on manual resurrect."""
+        agent_id = _spawn_agent()
+        monkeypatch.setattr("ops.ops_lifecycle.publish_inbound_wake", _noop)
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO agent_pages (agent_id, name, port) VALUES (%s, 'work', 8765)",
+                (agent_id,),
+            )
+        db_conn.commit()
+
+        with _test_pool() as pool:
+            _force_mark_terminated(agent_id, pool)
+            with db_conn.cursor() as cur:
+                cur.execute(
+                    "SELECT status_changed_at, last_force_terminate_inbound_id "
+                    "FROM agents_meta WHERE id = %s",
+                    (agent_id,),
+                )
+                first_agent_row = cur.fetchone()
+                cur.execute(
+                    "SELECT closed_at FROM agent_pages WHERE agent_id = %s AND name = 'work'",
+                    (agent_id,),
+                )
+                first_page_row = cur.fetchone()
+            assert first_agent_row is not None and first_page_row is not None
+            assert first_page_row[0] == first_agent_row[0]
+
+            _force_mark_terminated(agent_id, pool)
+
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "SELECT status_changed_at, last_force_terminate_inbound_id "
+                "FROM agents_meta WHERE id = %s",
+                (agent_id,),
+            )
+            repeated_agent_row = cur.fetchone()
+            cur.execute(
+                "SELECT closed_at FROM agent_pages WHERE agent_id = %s AND name = 'work'",
+                (agent_id,),
+            )
+            repeated_page_row = cur.fetchone()
+        assert repeated_agent_row is not None and repeated_page_row is not None
+        assert repeated_agent_row[0] == first_agent_row[0]
+        assert repeated_agent_row[1] > first_agent_row[1]
+        assert repeated_page_row[0] == first_page_row[0]
+
+        resurrect_agent(agent_id, resurrected_by="user")
+
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "SELECT closed_at FROM agent_pages WHERE agent_id = %s AND name = 'work'",
+                (agent_id,),
+            )
+            reopened_page_row = cur.fetchone()
+        assert reopened_page_row == (None,)
+
+    def test_guarded_resurrect_rejects_chat_below_latest_force_fence(
+        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Even without a real status transition, a repeated explicit force
+        fences every chat inbound that existed before that latest intent."""
+        agent_id = _spawn_agent()
+        launched: list[int] = []
+        monkeypatch.setattr(
+            agent_launch,
+            "_launch_agent_process",
+            _record_agent_ids(launched),
+        )
+        monkeypatch.setattr("ops.ops_lifecycle.publish_inbound_wake", _noop)
+        with db_conn.cursor() as cur:
+            cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
+        db_conn.commit()
+        trigger_id = shared.db.insert_inbound_message(
+            db_conn, agent_id, "work before repeated force", source="user"
+        )
+        with _test_pool() as pool:
+            _force_mark_terminated(agent_id, pool)
+
+        with pytest.raises(ResurrectTriggerStaleError, match="trigger work no longer qualifies"):
+            resurrect_agent(
+                agent_id,
+                resurrected_by="system",
+                trigger_inbound_id=trigger_id,
+                trigger_inbound_kind="chat",
+            )
+
+        row = _agents_row(db_conn, agent_id)
+        assert row is not None and row[2] == "terminated"
+        assert launched == []
+
+    def test_guarded_resurrect_rejects_chat_from_prior_termination(
+        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A watchdog task selected for one death must not revive a later
+        explicit kill while its RPC was in flight."""
+        agent_id = _spawn_agent()
+        launched: list[int] = []
+        monkeypatch.setattr(
+            agent_launch,
+            "_launch_agent_process",
+            _record_agent_ids(launched),
+        )
+        with db_conn.cursor() as cur:
+            cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
+        db_conn.commit()
+        trigger_id = shared.db.insert_inbound_message(
+            db_conn, agent_id, "wake after first death", source="user"
+        )
+
+        # The agent came back by another path and was explicitly killed again
+        # before the watchdog's original RPC reached its home runner.
+        with db_conn.cursor() as cur:
+            cur.execute("UPDATE agents_meta SET status = 'allocated' WHERE id = %s", (agent_id,))
+        db_conn.commit()
+        with db_conn.cursor() as cur:
+            cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
+            cur.execute(
+                "UPDATE inbound_messages "
+                "SET created_at = (SELECT status_changed_at FROM agents_meta WHERE id = %s) "
+                "                 - interval '1 second' "
+                "WHERE id = %s",
+                (agent_id, trigger_id),
+            )
+        db_conn.commit()
+
+        with pytest.raises(ResurrectTriggerStaleError, match="trigger work no longer qualifies"):
+            resurrect_agent(
+                agent_id,
+                resurrected_by="system",
+                trigger_inbound_id=trigger_id,
+                trigger_inbound_kind="chat",
+            )
+
+        row = _agents_row(db_conn, agent_id)
+        assert row is not None and row[2] == "terminated"
+        assert _inbound_rows(db_conn, agent_id) == [("wake after first death", "chat", "user")]
+        assert launched == []
+
+    def test_guarded_resurrect_rejects_chat_that_is_no_longer_pending(
+        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A trigger claimed while the RPC is in flight no longer justifies
+        launching the terminated owner."""
+        agent_id = _spawn_agent()
+        launched: list[int] = []
+        monkeypatch.setattr(
+            agent_launch,
+            "_launch_agent_process",
+            _record_agent_ids(launched),
+        )
+        with db_conn.cursor() as cur:
+            cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
+        db_conn.commit()
+        trigger_id = shared.db.insert_inbound_message(
+            db_conn, agent_id, "already handled", source="user"
+        )
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "UPDATE inbound_messages SET status = 'claimed', claimed_at = now() WHERE id = %s",
+                (trigger_id,),
+            )
+        db_conn.commit()
+
+        with pytest.raises(ResurrectTriggerStaleError, match="trigger work no longer qualifies"):
+            resurrect_agent(
+                agent_id,
+                resurrected_by="system",
+                trigger_inbound_id=trigger_id,
+                trigger_inbound_kind="chat",
+            )
+
+        row = _agents_row(db_conn, agent_id)
+        assert row is not None and row[2] == "terminated"
+        assert _inbound_rows(db_conn, agent_id) == [("already handled", "chat", "user")]
+        assert launched == []
+
+    def test_guarded_resurrect_accepts_pending_chat_after_current_termination(
+        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A pending chat created after the current death still auto-wakes the
+        agent, preserving the post-termination delivery contract."""
+        agent_id = _spawn_agent()
+        with db_conn.cursor() as cur:
+            cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
+        db_conn.commit()
+        trigger_id = shared.db.insert_inbound_message(
+            db_conn, agent_id, "new work after death", source="user"
+        )
+        returned = resurrect_agent(
+            agent_id,
+            resurrected_by="system",
+            trigger_inbound_id=trigger_id,
+            trigger_inbound_kind="chat",
+        )
+
+        assert returned == agent_id
+        row = _agents_row(db_conn, agent_id)
+        assert row is not None and row[2] == "allocated"
+        assert _inbound_rows(db_conn, agent_id) == [
+            ("new work after death", "chat", "user"),
+            ("", "resurrect", "system"),
+        ]
+
+    def test_guarded_resurrect_accepts_exact_pending_compact_after_termination(
+        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """UI compact is guarded work too: its exact durable id and expected
+        kind qualify only while pending after the current death."""
+        agent_id = _spawn_agent()
+        with db_conn.cursor() as cur:
+            cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
+        db_conn.commit()
+        compact_id = shared.db.insert_inbound_message(
+            db_conn,
+            agent_id,
+            "",
+            source="user",
+            kind="compact_request",
+        )
+        returned = resurrect_agent(
+            agent_id,
+            resurrected_by="system",
+            trigger_inbound_id=compact_id,
+            trigger_inbound_kind="compact_request",
+        )
+
+        assert returned == agent_id
+        assert _agents_row(db_conn, agent_id)[2] == "allocated"  # type: ignore[index]
+        assert _inbound_rows(db_conn, agent_id) == [
+            ("", "compact_request", "user"),
+            ("", "resurrect", "system"),
+        ]
+
+    def test_guarded_compact_rejects_kind_mismatch_and_claimed_trigger(
+        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The caller's expected kind is part of the CAS, and a compact that
+        has already been claimed no longer licenses a new process."""
+        agent_id = _spawn_agent()
+        launched: list[int] = []
+        monkeypatch.setattr(
+            agent_launch,
+            "_launch_agent_process",
+            _record_agent_ids(launched),
+        )
+        with db_conn.cursor() as cur:
+            cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
+        db_conn.commit()
+        compact_id = shared.db.insert_inbound_message(
+            db_conn,
+            agent_id,
+            "",
+            source="user",
+            kind="compact_request",
+        )
+
+        with pytest.raises(ResurrectTriggerStaleError):
+            resurrect_agent(
+                agent_id,
+                resurrected_by="system",
+                trigger_inbound_id=compact_id,
+                trigger_inbound_kind="chat",
+            )
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "UPDATE inbound_messages SET status = 'claimed', claimed_at = now() WHERE id = %s",
+                (compact_id,),
+            )
+        db_conn.commit()
+        with pytest.raises(ResurrectTriggerStaleError):
+            resurrect_agent(
+                agent_id,
+                resurrected_by="system",
+                trigger_inbound_id=compact_id,
+                trigger_inbound_kind="compact_request",
+            )
+
+        assert _agents_row(db_conn, agent_id)[2] == "terminated"  # type: ignore[index]
+        assert launched == []
+
+    def test_guarded_compact_below_force_fence_is_stale(
+        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A force after compact enqueue fences that older work exactly like
+        chat, even though no second status transition occurs."""
+        agent_id = _spawn_agent()
+        launched: list[int] = []
+        monkeypatch.setattr(
+            agent_launch,
+            "_launch_agent_process",
+            _record_agent_ids(launched),
+        )
+        monkeypatch.setattr("ops.ops_lifecycle.publish_inbound_wake", _noop)
+        with db_conn.cursor() as cur:
+            cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
+        db_conn.commit()
+        compact_id = shared.db.insert_inbound_message(
+            db_conn,
+            agent_id,
+            "",
+            source="user",
+            kind="compact_request",
+        )
+        with _test_pool() as pool:
+            _force_mark_terminated(agent_id, pool)
+
+        with pytest.raises(ResurrectTriggerStaleError):
+            resurrect_agent(
+                agent_id,
+                resurrected_by="system",
+                trigger_inbound_id=compact_id,
+                trigger_inbound_kind="compact_request",
+            )
+        assert _agents_row(db_conn, agent_id)[2] == "terminated"  # type: ignore[index]
+        assert launched == []
+
+    def test_concurrent_guarded_resurrect_launches_once(
+        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Even if duplicate watchdog processes reach the home runner, the
+        final status/chat CAS permits one marker and one process launch."""
+        import threading
+        from concurrent.futures import ThreadPoolExecutor
+
+        agent_id = _spawn_agent()
+        launched: list[int] = []
+        monkeypatch.setattr(
+            agent_launch,
+            "_launch_agent_process",
+            _record_agent_ids(launched),
+        )
+        with db_conn.cursor() as cur:
+            cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
+        db_conn.commit()
+        trigger_id = shared.db.insert_inbound_message(db_conn, agent_id, "one wake", source="user")
+        update_barrier = threading.Barrier(2)
+        barrier_hits: list[str] = []
+        original_execute = cast(Callable[..., Any], psycopg.Cursor.execute)
+
+        def _synchronize_guarded_updates(cursor: Any, query: Any, *args: Any, **kwargs: Any) -> Any:
+            if (
+                threading.current_thread().name.startswith("resurrect-cas")
+                and "UPDATE agents_meta SET status" in str(query)
+                and "AND EXISTS (" in str(query)
+            ):
+                barrier_hits.append(threading.current_thread().name)
+                update_barrier.wait(timeout=5)
+            return original_execute(cursor, query, *args, **kwargs)
+
+        monkeypatch.setattr(psycopg.Cursor, "execute", _synchronize_guarded_updates)
+
+        def _attempt() -> str:
+            try:
+                resurrect_agent(
+                    agent_id,
+                    resurrected_by="system",
+                    trigger_inbound_id=trigger_id,
+                    trigger_inbound_kind="chat",
+                )
+            except (ResurrectAlreadyAlive, ResurrectTriggerStaleError) as exc:
+                return type(exc).__name__
+            return "spawned"
+
+        def _attempt_ignoring_index(_index: int) -> str:
+            return _attempt()
+
+        with ThreadPoolExecutor(max_workers=2, thread_name_prefix="resurrect-cas") as executor:
+            results = list(executor.map(_attempt_ignoring_index, range(2)))
+
+        assert sorted(results) == ["ResurrectTriggerStaleError", "spawned"]
+        assert len(barrier_hits) == 2
+        assert launched == [agent_id]
+        assert _inbound_rows(db_conn, agent_id) == [
+            ("one wake", "chat", "user"),
+            ("", "resurrect", "system"),
+        ]
+
+    def test_force_row_lock_first_makes_guarded_resurrect_stale(
+        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A force intent holding the agent row lock commits before a waiting
+        guarded CAS, which then inserts no marker and creates no session."""
+        import threading
+
+        agent_id = _spawn_agent()
+        trigger_id = _terminated_with_chat(db_conn, agent_id, "after death")
+        force_locked = threading.Event()
+        release_force = threading.Event()
+        guard_attempted = threading.Event()
+        launched: list[int] = []
+        failures: list[BaseException] = []
+        monkeypatch.setattr(agent_launch, "_launch_agent_process", _record_agent_ids(launched))
+        monkeypatch.setattr("ops.ops_lifecycle.publish_inbound_wake", _noop)
+        original_execute = cast(Callable[..., Any], psycopg.Cursor.execute)
+
+        def _ordered_execute(cursor: Any, query: Any, *args: Any, **kwargs: Any) -> Any:
+            sql = str(query)
+            name = threading.current_thread().name
+            if name == "force-first" and "SELECT status, pid FROM agents_meta" in sql:
+                result = original_execute(cursor, query, *args, **kwargs)
+                force_locked.set()
+                assert release_force.wait(timeout=5)
+                return result
+            if name == "guard-waits" and "UPDATE agents_meta SET status" in sql:
+                guard_attempted.set()
+            return original_execute(cursor, query, *args, **kwargs)
+
+        monkeypatch.setattr(psycopg.Cursor, "execute", _ordered_execute)
+
+        def _force() -> None:
+            try:
+                with _test_pool() as pool:
+                    _force_mark_terminated(agent_id, pool)
+            except BaseException as exc:
+                failures.append(exc)
+
+        def _guard() -> None:
+            try:
+                resurrect_agent(
+                    agent_id,
+                    resurrected_by="system",
+                    trigger_inbound_id=trigger_id,
+                    trigger_inbound_kind="chat",
+                )
+            except BaseException as exc:
+                failures.append(exc)
+
+        force_thread = threading.Thread(target=_force, name="force-first")
+        guard_thread = threading.Thread(target=_guard, name="guard-waits")
+        force_thread.start()
+        assert force_locked.wait(timeout=5)
+        guard_thread.start()
+        assert guard_attempted.wait(timeout=5)
+        assert launched == []
+        release_force.set()
+        force_thread.join(timeout=5)
+        guard_thread.join(timeout=5)
+
+        assert not force_thread.is_alive() and not guard_thread.is_alive()
+        assert len(failures) == 1 and isinstance(failures[0], ResurrectTriggerStaleError)
+        assert launched == []
+        assert _termination_row(db_conn, agent_id)[:2] == ("terminated", "user")
+        assert _resurrect_inbound_count(db_conn, agent_id) == 0
+
+    def test_guarded_session_is_created_under_lock_then_force_kills_exact_session(
+        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Once the guarded CAS wins, its exact session exists before the row
+        unlocks; a later force waits, then kills that session and wins last."""
+        import threading
+
+        from ops.ops_lifecycle import _force_terminate_transaction
+        from shared.cluster import session_name
+
+        agent_id = _spawn_agent()
+        trigger_id = _terminated_with_chat(db_conn, agent_id, "wake")
+        session_created = threading.Event()
+        release_guard = threading.Event()
+        force_lock_attempted = threading.Event()
+        launched: list[int] = []
+        killed_sessions: list[str] = []
+        failures: list[BaseException] = []
+
+        def _launch(aid: int, **_kwargs: object) -> None:
+            launched.append(aid)
+            session_created.set()
+            assert release_guard.wait(timeout=5)
+
+        class _Supervisor:
+            @staticmethod
+            def kill_session(name: str, *, graceful: bool) -> tuple[bool, str]:
+                assert graceful is False
+                killed_sessions.append(name)
+                return True, "killed"
+
+        monkeypatch.setattr(agent_launch, "_launch_agent_process", _launch)
+        monkeypatch.setattr("ops.ops_lifecycle.native_proc", _Supervisor)
+        original_execute = cast(Callable[..., Any], psycopg.Cursor.execute)
+
+        def _observe_force_lock(cursor: Any, query: Any, *args: Any, **kwargs: Any) -> Any:
+            if (
+                threading.current_thread().name == "force-after-session"
+                and "SELECT status, pid FROM agents_meta" in str(query)
+            ):
+                force_lock_attempted.set()
+            return original_execute(cursor, query, *args, **kwargs)
+
+        monkeypatch.setattr(psycopg.Cursor, "execute", _observe_force_lock)
+
+        def _guard() -> None:
+            try:
+                resurrect_agent(
+                    agent_id,
+                    resurrected_by="system",
+                    trigger_inbound_id=trigger_id,
+                    trigger_inbound_kind="chat",
+                )
+            except BaseException as exc:
+                failures.append(exc)
+
+        def _force() -> None:
+            try:
+                with _test_pool() as pool:
+                    _force_terminate_transaction(agent_id, pool, source="user", kill_process=True)
+            except BaseException as exc:
+                failures.append(exc)
+
+        guard_thread = threading.Thread(target=_guard, name="guard-holds-row")
+        force_thread = threading.Thread(target=_force, name="force-after-session")
+        guard_thread.start()
+        assert session_created.wait(timeout=5)
+        force_thread.start()
+        assert force_lock_attempted.wait(timeout=5)
+        assert killed_sessions == []
+        release_guard.set()
+        guard_thread.join(timeout=5)
+        force_thread.join(timeout=5)
+
+        assert not failures
+        assert launched == [agent_id]
+        assert killed_sessions == [session_name(f"agent-{agent_id}")]
+        assert _termination_row(db_conn, agent_id) == ("terminated", "user", True)
+
+    def test_child_starting_waits_for_resurrect_commit(
+        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The child locks by id, waits for the uncommitted allocation, then
+        claims it after the resurrect transaction releases the row."""
+        import threading
+
+        from agent import _starting
+
+        agent_id = _spawn_agent()
+        with db_conn.cursor() as cur:
+            cur.execute("UPDATE agents_meta SET status='terminated' WHERE id=%s", (agent_id,))
+        db_conn.commit()
+        trigger_id = shared.db.insert_inbound_message(db_conn, agent_id, "wake", source="user")
+        child_lock_attempted = threading.Event()
+        child_done = threading.Event()
+        child_failures: list[BaseException] = []
+        child_threads: list[threading.Thread] = []
+        child_backend_pid: list[int] = []
+        original_execute = cast(Callable[..., Any], psycopg.Cursor.execute)
+
+        def _observe_child_lock(cursor: Any, query: Any, *args: Any, **kwargs: Any) -> Any:
+            if (
+                threading.current_thread().name == "resurrect-child"
+                and "SELECT machine, status FROM agents_meta" in str(query)
+            ):
+                child_backend_pid.append(cursor.connection.info.backend_pid)
+                child_lock_attempted.set()
+            return original_execute(cursor, query, *args, **kwargs)
+
+        monkeypatch.setattr(psycopg.Cursor, "execute", _observe_child_lock)
+
+        def _child() -> None:
+            try:
+                _starting.enter_starting_state(agent_id)
+            except BaseException as exc:
+                child_failures.append(exc)
+            finally:
+                child_done.set()
+
+        def _launch(_aid: int, **_kwargs: object) -> None:
+            import time
+
+            child = threading.Thread(target=_child, name="resurrect-child")
+            child_threads.append(child)
+            child.start()
+            assert child_lock_attempted.wait(timeout=5)
+            deadline = time.monotonic() + 2
+            while time.monotonic() < deadline:
+                with db_conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT cardinality(pg_blocking_pids(%s)) > 0",
+                        (child_backend_pid[0],),
+                    )
+                    if cur.fetchone() == (True,):
+                        break
+                time.sleep(0.01)
+            else:
+                raise AssertionError("child did not wait on the uncommitted resurrect row lock")
+            assert not child_done.is_set()
+
+        monkeypatch.setattr(agent_launch, "_launch_agent_process", _launch)
+
+        resurrect_agent(
+            agent_id,
+            resurrected_by="system",
+            trigger_inbound_id=trigger_id,
+            trigger_inbound_kind="chat",
+        )
+        child_threads[0].join(timeout=5)
+
+        assert child_done.is_set() and not child_failures
+        with db_conn.cursor() as cur:
+            cur.execute("SELECT status FROM agents_meta WHERE id=%s", (agent_id,))
+            assert cur.fetchone() == ("starting",)
+
+    def test_pause_waits_for_initial_resurrect_then_final_sweep_wins(
+        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A resurrection holding the machine share lock may commit its exact
+        session, but pause waits for it and the final sweep kills it last."""
+        import threading
+
+        from shared.cluster import session_name
+
+        agent_id = _spawn_agent()
+        trigger_id = _terminated_on_machine_with_chat(
+            db_conn, agent_id, "pause-race-initial", "wake"
+        )
+        session_created = threading.Event()
+        release_resurrect = threading.Event()
+        pause_latch_attempted = threading.Event()
+        killed_sessions: list[str] = []
+        failures: list[BaseException] = []
+
+        def _launch(_aid: int, **_kwargs: object) -> None:
+            session_created.set()
+            assert release_resurrect.wait(timeout=5)
+
+        class _Supervisor:
+            @staticmethod
+            def kill_session(name: str, *, graceful: bool) -> tuple[bool, str]:
+                assert graceful is False
+                killed_sessions.append(name)
+                return True, "killed"
+
+        monkeypatch.setattr(agent_launch, "_launch_agent_process", _launch)
+        monkeypatch.setattr("ops.ops_lifecycle.native_proc", _Supervisor)
+        original_execute = cast(Callable[..., Any], psycopg.Cursor.execute)
+
+        def _observe_latch(cursor: Any, query: Any, *args: Any, **kwargs: Any) -> Any:
+            if (
+                threading.current_thread().name == "pause-after-resurrect"
+                and "UPDATE machines SET paused_at" in str(query)
+            ):
+                pause_latch_attempted.set()
+            return original_execute(cursor, query, *args, **kwargs)
+
+        monkeypatch.setattr(psycopg.Cursor, "execute", _observe_latch)
+
+        def _resurrect() -> None:
+            try:
+                resurrect_agent(
+                    agent_id,
+                    resurrected_by="system",
+                    trigger_inbound_id=trigger_id,
+                    trigger_inbound_kind="chat",
+                )
+            except BaseException as exc:
+                failures.append(exc)
+
+        def _pause() -> None:
+            try:
+                _pause_and_force_sweep("pause-race-initial")
+            except BaseException as exc:
+                failures.append(exc)
+
+        resurrect_thread = threading.Thread(target=_resurrect, name="resurrect-before-pause")
+        pause_thread = threading.Thread(target=_pause, name="pause-after-resurrect")
+        resurrect_thread.start()
+        assert session_created.wait(timeout=5)
+        pause_thread.start()
+        assert pause_latch_attempted.wait(timeout=5)
+        assert killed_sessions == []
+        release_resurrect.set()
+        resurrect_thread.join(timeout=5)
+        pause_thread.join(timeout=5)
+
+        assert not failures
+        assert killed_sessions == [session_name(f"agent-{agent_id}")]
+        assert _termination_row(db_conn, agent_id) == ("terminated", "user", True)
+
+    def test_pause_before_resurrect_retry_prevents_second_session(
+        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A retry re-locks the machine admission row. Pause may win after the
+        first committed session, sweep it, and prevent any second launch."""
+        import threading
+
+        from shared.cluster import session_name
+
+        agent_id = _spawn_agent()
+        trigger_id = _terminated_on_machine_with_chat(db_conn, agent_id, "pause-race-retry", "wake")
+        confirm_failed = threading.Event()
+        retry_lock_attempted = threading.Event()
+        release_retry = threading.Event()
+        launches: list[int] = []
+        killed_sessions: list[str] = []
+        failures: list[BaseException] = []
+        retry_barrier_hits: list[str] = []
+
+        def _launch(aid: int, **_kwargs: object) -> None:
+            launches.append(aid)
+
+        class _Supervisor:
+            @staticmethod
+            def kill_session(name: str, *, graceful: bool) -> tuple[bool, str]:
+                assert graceful is False
+                killed_sessions.append(name)
+                return True, "killed"
+
+        def _never_confirms(_aid: int) -> None:
+            confirm_failed.set()
+            raise RuntimeError("child did not claim")
+
+        monkeypatch.setattr(agent_launch, "_launch_agent_process", _launch)
+        monkeypatch.setattr(agent_launch, "_wait_for_status_to_leave_allocated", _never_confirms)
+        monkeypatch.setattr(agent_launch, "_LAUNCH_RETRY_BASE_BACKOFF_SEC", 0.0)
+        monkeypatch.setattr("ops.ops_lifecycle.native_proc", _Supervisor)
+        original_execute = cast(Callable[..., Any], psycopg.Cursor.execute)
+
+        def _block_retry_machine_lock(cursor: Any, query: Any, *args: Any, **kwargs: Any) -> Any:
+            if (
+                threading.current_thread().name == "resurrect-retry"
+                and "SELECT paused_at FROM machines" in str(query)
+                and confirm_failed.is_set()
+            ):
+                retry_barrier_hits.append("retry-machine-lock")
+                retry_lock_attempted.set()
+                assert release_retry.wait(timeout=5)
+            return original_execute(cursor, query, *args, **kwargs)
+
+        monkeypatch.setattr(psycopg.Cursor, "execute", _block_retry_machine_lock)
+
+        def _resurrect() -> None:
+            try:
+                resurrect_agent(
+                    agent_id,
+                    resurrected_by="system",
+                    trigger_inbound_id=trigger_id,
+                    trigger_inbound_kind="chat",
+                )
+            except BaseException as exc:
+                failures.append(exc)
+
+        retry_thread = threading.Thread(target=_resurrect, name="resurrect-retry")
+        retry_thread.start()
+        assert retry_lock_attempted.wait(timeout=5)
+        _pause_and_force_sweep("pause-race-retry")
+        release_retry.set()
+        retry_thread.join(timeout=5)
+
+        assert len(failures) == 1 and isinstance(failures[0], MachinePaused)
+        assert retry_barrier_hits == ["retry-machine-lock"]
+        assert launches == [agent_id]
+        assert killed_sessions == [session_name(f"agent-{agent_id}")]
+        assert _termination_row(db_conn, agent_id) == ("terminated", "user", True)
+
+    @pytest.mark.parametrize("reentry_kind", ["manual", "chat", "compact", "crash"])
+    def test_paused_home_rejects_every_resurrection_admission(
+        self,
+        db_conn: psycopg.Connection,
+        monkeypatch: pytest.MonkeyPatch,
+        reentry_kind: str,
+    ) -> None:
+        """The machine latch is a shared admission fence for explicit,
+        pending-work, and controller resurrection paths."""
+        agent_id = _spawn_agent()
+        launched: list[int] = []
+        monkeypatch.setattr(agent_launch, "_launch_agent_process", _record_agent_ids(launched))
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO machines (name, role, paused_at) "
+                "VALUES ('paused-runner', ARRAY['agent-runner'], now())"
+            )
+            cur.execute(
+                "UPDATE agents_meta SET machine='paused-runner', status='terminated', "
+                "termination_source='reaper', last_resurrect_at=now() WHERE id=%s "
+                "RETURNING status_changed_at, last_resurrect_at",
+                (agent_id,),
+            )
+            claim_row = cur.fetchone()
+            assert claim_row is not None
+            termination_epoch, claimed_at = claim_row
+        db_conn.commit()
+        kwargs: dict[str, object] = {}
+        if reentry_kind in {"chat", "compact"}:
+            inbound_kind = "chat" if reentry_kind == "chat" else "compact_request"
+            trigger_id = shared.db.insert_inbound_message(
+                db_conn, agent_id, "work", source="user", kind=inbound_kind
+            )
+            kwargs = {
+                "trigger_inbound_id": trigger_id,
+                "trigger_inbound_kind": inbound_kind,
+            }
+        elif reentry_kind == "crash":
+            kwargs = {
+                "auto_claim": AutoResurrectClaim(
+                    agent_id=agent_id,
+                    termination_source=TerminationSource.REAPER,
+                    termination_epoch=termination_epoch,
+                    claim_kind="crash",
+                    claimed_at=claimed_at,
+                )
+            }
+
+        with pytest.raises(MachinePaused):
+            resurrect_agent(agent_id, resurrected_by="system", **kwargs)  # pyright: ignore[reportArgumentType]
+
+        assert launched == []
+        assert _termination_row(db_conn, agent_id)[:2] == ("terminated", "reaper")
+        assert _resurrect_inbound_count(db_conn, agent_id) == 0
+
+    def test_wedged_claim_resurrects_exact_claimed_death(
+        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The wedged final CAS accepts the exact source, death epoch, and
+        controller claim stamp produced by the transition."""
+        agent_id = _spawn_agent()
+        launched: list[int] = []
+        monkeypatch.setattr(agent_launch, "_launch_agent_process", _record_agent_ids(launched))
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "UPDATE agents_meta SET status='terminated', termination_source='reaper', "
+                "last_wedged_check_at=now() WHERE id=%s "
+                "RETURNING status_changed_at, last_wedged_check_at",
+                (agent_id,),
+            )
+            claim_row = cur.fetchone()
+            assert claim_row is not None
+            death_epoch, claimed_at = claim_row
+        db_conn.commit()
+
+        resurrect_agent(
+            agent_id,
+            resurrected_by="system",
+            auto_claim=AutoResurrectClaim(
+                agent_id=agent_id,
+                termination_source=TerminationSource.REAPER,
+                termination_epoch=death_epoch,
+                claim_kind="wedged",
+                claimed_at=claimed_at,
+            ),
+        )
+
+        assert _agents_row(db_conn, agent_id)[2] == "allocated"  # type: ignore[index]
+        assert _resurrect_inbound_count(db_conn, agent_id) == 1
+        assert launched == [agent_id]
+
+    def test_wedged_claim_cannot_reverse_later_force(
+        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A user force after wedged claimed the death makes the old final CAS
+        stale without writing a marker or creating a session."""
+        agent_id = _spawn_agent()
+        launched: list[int] = []
+        monkeypatch.setattr(agent_launch, "_launch_agent_process", _record_agent_ids(launched))
+        monkeypatch.setattr("ops.ops_lifecycle.publish_inbound_wake", _noop)
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "UPDATE agents_meta SET status='terminated', termination_source='reaper', "
+                "last_wedged_check_at=now() WHERE id=%s "
+                "RETURNING status_changed_at, last_wedged_check_at",
+                (agent_id,),
+            )
+            claim_row = cur.fetchone()
+            assert claim_row is not None
+            death_epoch, claimed_at = claim_row
+        db_conn.commit()
+        claim = AutoResurrectClaim(
+            agent_id=agent_id,
+            termination_source=TerminationSource.REAPER,
+            termination_epoch=death_epoch,
+            claim_kind="wedged",
+            claimed_at=claimed_at,
+        )
+        with _test_pool() as pool:
+            _force_mark_terminated(agent_id, pool)
+
+        with pytest.raises(ResurrectClaimStaleError):
+            resurrect_agent(agent_id, resurrected_by="system", auto_claim=claim)
+
+        assert _termination_row(db_conn, agent_id)[:2] == ("terminated", "user")
+        assert _resurrect_inbound_count(db_conn, agent_id) == 0
+        assert launched == []
+
+    def test_wedged_claim_rejects_same_source_death_aba(
+        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The exact death epoch prevents an old wedged claim from matching a
+        later death that happens to reuse its source and claim timestamp."""
+        agent_id = _spawn_agent()
+        launched: list[int] = []
+        monkeypatch.setattr(agent_launch, "_launch_agent_process", _record_agent_ids(launched))
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "UPDATE agents_meta SET status='terminated', termination_source='reaper', "
+                "last_wedged_check_at=now() WHERE id=%s "
+                "RETURNING status_changed_at, last_wedged_check_at",
+                (agent_id,),
+            )
+            claim_row = cur.fetchone()
+            assert claim_row is not None
+            old_epoch, claimed_at = claim_row
+        db_conn.commit()
+        claim = AutoResurrectClaim(
+            agent_id=agent_id,
+            termination_source=TerminationSource.REAPER,
+            termination_epoch=old_epoch,
+            claim_kind="wedged",
+            claimed_at=claimed_at,
+        )
+        with db_conn.cursor() as cur:
+            cur.execute("UPDATE agents_meta SET status='allocated' WHERE id=%s", (agent_id,))
+            cur.execute(
+                "UPDATE agents_meta SET status='terminated', termination_source='reaper', "
+                "last_wedged_check_at=%s WHERE id=%s",
+                (claimed_at, agent_id),
+            )
+        db_conn.commit()
+
+        with pytest.raises(ResurrectClaimStaleError):
+            resurrect_agent(agent_id, resurrected_by="system", auto_claim=claim)
+
+        assert _termination_row(db_conn, agent_id)[:2] == ("terminated", "reaper")
+        assert _resurrect_inbound_count(db_conn, agent_id) == 0
+        assert launched == []
+
     def test_resurrects_terminated_agent_and_inserts_resurrect_inbound(
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -309,6 +1323,7 @@ class TestResurrectAgent:
         # The chat inbound's source must be a valid value accepted by the claim-side wrap
         for content, kind, source in rows:  # pyright: ignore[reportUnknownVariableType]
             if kind == "chat":
+                assert source is not None
                 wrap_inbound(
                     content,  # pyright: ignore[reportUnknownArgumentType]
                     source,  # pyright: ignore[reportUnknownArgumentType]
@@ -367,15 +1382,23 @@ class TestResurrectAgent:
         """
         agent_id = _spawn_agent()  # real status='allocated'
 
+        original_execute = cast(Callable[..., Any], psycopg.Cursor.execute)
         original_fetchone = psycopg.Cursor.fetchone
-        call_count = {"n": 0}
+        status_select_cursors: set[int] = set()
 
-        def lying_fetchone(self):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-            call_count["n"] += 1
-            if call_count["n"] == 1:
-                return ("terminated",)  # first SELECT lies to get code into UPDATE branch
+        def tracking_execute(self: Any, query: Any, *args: Any, **kwargs: Any) -> Any:
+            result = original_execute(self, query, *args, **kwargs)
+            if query == "SELECT status FROM agents_meta WHERE id = %s":
+                status_select_cursors.add(id(self))
+            return result
+
+        def lying_fetchone(self: Any) -> Any:
+            if id(self) in status_select_cursors:
+                status_select_cursors.remove(id(self))
+                return ("terminated",)  # target status SELECT lies to enter UPDATE branch
             return original_fetchone(self)  # pyright: ignore[reportUnknownArgumentType]
 
+        monkeypatch.setattr(psycopg.Cursor, "execute", tracking_execute)  # pyright: ignore[reportUnknownArgumentType]
         monkeypatch.setattr(psycopg.Cursor, "fetchone", lying_fetchone)  # pyright: ignore[reportUnknownArgumentType]
 
         with pytest.raises(ResurrectAlreadyAlive, match="concurrently modified"):
@@ -1713,10 +2736,11 @@ class TestRespawnResurrectColumnOverlay:
             *,
             config_overlay: dict | None = None,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
             birth_config: dict | None = None,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+            confirm: bool = True,
         ) -> None:
             captured.append(config_overlay)  # pyright: ignore[reportUnknownMemberType]
 
-        monkeypatch.setattr("ops.agent_launch._launch_or_force_terminated", fake_launch)  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr("ops.agent_launch._launch_agent_process", fake_launch)  # pyright: ignore[reportUnknownArgumentType]
         monkeypatch.setattr("ops.agent_launch._kill_stale_session", lambda _id: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
 
         resurrect_agent(agent_id, resurrected_by="user", prompt="test")
@@ -1821,6 +2845,7 @@ class TestLaunchAgentProcessConfigOverlay:
         assert "sk-top-secret" in env[AGENT_CONFIG_OVERLAY_ENV]
 
 
+@pytest.mark.real_agent_launch
 class TestLaunchConfirmActuallyWaits:
     """The deadline calculation in `_wait_for_status_to_leave_allocated` must be
     `monotonic() + timeout` (future-oriented), not `monotonic() - timeout` (past-oriented).

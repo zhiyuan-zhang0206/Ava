@@ -112,6 +112,42 @@ async def test_deliver_degrades_when_badge_step_raises(
         assert cur.fetchall() == [("hi",)]
 
 
+async def test_deliver_passes_inserted_chat_as_auto_resurrect_guard(
+    db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The durable chat id is the evidence the home runner re-checks before
+    reviving; delivery must not fall back to an unguarded resurrect."""
+    import gateway.routers._delivery as delivery
+
+    tid = _seed_idling_agent(db_conn)
+    calls: list[tuple[int, int | None, str | None]] = []
+
+    async def _resurrect(
+        agent_id: int,
+        *,
+        trigger_inbound_id: int | None = None,
+        trigger_inbound_kind: str | None = None,
+    ) -> AgentStatus:
+        calls.append((agent_id, trigger_inbound_id, trigger_inbound_kind))
+        return AgentStatus.IDLING
+
+    monkeypatch.setattr(delivery._ops, "resurrect_if_terminated", _resurrect)
+
+    with _sync_pool() as pool:
+        status = await deliver_chat_inbound(pool, tid, prepare=lambda _c: "guard me")
+
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "SELECT id FROM inbound_messages WHERE agent_id = %s AND content = 'guard me'",
+            (tid,),
+        )
+        row = cur.fetchone()
+    assert row is not None
+    assert status is AgentStatus.IDLING
+    assert calls == [(tid, row[0], "chat")]
+
+
 async def test_badge_publish_happens_after_commit(
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,

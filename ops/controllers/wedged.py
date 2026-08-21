@@ -9,16 +9,18 @@ exactly this pattern: a check-in inbound is delivered, the agent ignores it
 from the sleep/wake diagnosis), and the row stays ``running``/``idling`` with a
 pending inbound forever — permanent limbo, invisible to every other detector.
 
-This controller scans for those agents, verifies the process is alive, force-kills
-it with SIGKILL (so termination_source is ``'reaper'``, not ``'exit'`` — the
-reaper is resurrection-eligible), then resurrects it directly so it boots fresh
-and processes its backlog. One action, machine-scoped (same placement rule as the
-other restarter controllers).
+This controller scans for those agents and re-checks process identity under the
+agent row lock. An OWNED process is force-killed before the reaper transition
+commits; FOREIGN or GONE proves the old agent is absent, so it is transitioned
+without signalling; UNREADABLE provides no safe evidence and is deferred. A
+successful transition is resurrected directly so it boots fresh and processes
+its backlog. One action, machine-scoped (same placement rule as the other
+restarter controllers).
 
 **Why SIGKILL, not SIGTERM.** ``agent/lifecycle.py`` routes SIGTERM→SystemExit→
 finally→POST /exited with ``termination_source='exit'``, which is explicitly
 excluded from auto-resurrect. SIGKILL bypasses the agent's lifecycle handler;
-the reaper stamps ``'reaper'`` on the orphaned row, which is the voluntary-death
+the controller stamps ``'reaper'`` on the orphaned row, which is the involuntary-death
 source. This controller then resurrects it directly (bypassing
 CrashResurrectController's work-kind-inbound filter, since the wedging inbound
 is usually just a ``heartbeat`` which is not in ``_WORK_INBOUND_KINDS``).
@@ -36,18 +38,21 @@ from __future__ import annotations
 
 import logging
 import time
+from datetime import datetime
 
 from psycopg_pool import ConnectionPool
 
+from ops.agent_identity import AgentProcessIdentity, probe_agent_process
+from ops.agent_wake import AutoResurrectClaim, ResurrectClaimStaleError
 from ops.agents import resurrect_agent
 from ops.controllers.base import BlockScope, ReconcileResult
 from ops.controllers.respawn import _gateway_healthy
 from ops.pages import list_open_page_names
-from shared.agents import ResurrectAlreadyAlive
+from shared.agents import ResurrectAlreadyAlive, TerminationSource
 from shared.config import settings
 from shared.live_announce import publish_page_closed_sync
 from shared.machine import MachineRole, machine_name
-from shared.proc import force_kill, process_alive
+from shared.proc import force_kill
 from shared.timing import CONTROLLER_SCAN_INTERVAL_S
 
 _log = logging.getLogger("ops.controllers.wedged")
@@ -72,18 +77,18 @@ _BACKOFF_S = 600.0
 
 def _claim_wedged_candidates(
     pool: ConnectionPool, local_machine: str, age_s: float, backoff_s: float
-) -> list[tuple[int, int]]:
-    """Atomically claim this host's wedged-agent candidates: ``(agent_id, pid)``.
+) -> list[tuple[int, int, datetime]]:
+    """Atomically claim wedged candidates: ``(agent_id, pid, claim_time)``.
 
     One UPDATE both selects and claims: on match it stamps ``last_wedged_check_at``,
     so a concurrent pass cannot double-claim the same agent. Returns the claimed
-    pairs for the caller to kill+resurrect.
+    rows for the caller to re-check under lock and recover.
 
-    Selects ``running``/``idling`` rows on this host with a live pid, holding an
+    Selects ``running``/``idling`` rows on this host with a recorded pid, holding an
     unconsumed ``pending`` inbound older than ``age_s``, and either never checked
     or past the per-agent backoff. The UPDATE's RETURNING is the atomic claim —
-    the caller processes every returned row and tolerates a pid that died between
-    the SELECT and the kill (force_kill is a no-op on a dead pid).
+    the caller processes every returned row through the OWNED/FOREIGN/GONE/
+    UNREADABLE identity matrix under the agent row lock.
     """
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
@@ -99,10 +104,10 @@ def _claim_wedged_candidates(
             "    AND im.status = 'pending' "
             "    AND im.created_at < now() - make_interval(secs => %s)"
             ") "
-            "RETURNING id, pid",
+            "RETURNING id, pid, last_wedged_check_at",
             (local_machine, backoff_s, age_s),
         )
-        return [(r[0], r[1]) for r in cur.fetchall()]
+        return [(r[0], r[1], r[2]) for r in cur.fetchall()]
 
 
 class WedgedAgentController:
@@ -137,63 +142,97 @@ class WedgedAgentController:
         candidates = _claim_wedged_candidates(self._pool, local_machine, age_s, _BACKOFF_S)
 
         acted = False
-        for agent_id, pid in candidates:
-            if not process_alive(pid):
-                # PID died between the SELECT and now — the reaper will handle it.
+        for agent_id, pid, claimed_at in candidates:
+            first_identity = probe_agent_process(pid, agent_id)
+            if first_identity is AgentProcessIdentity.UNREADABLE:
+                # No evidence licenses either a signal or a duplicate launch.
+                # Leave the row for a later scan.
                 _log.info(
-                    "[ops.wedged] agent %s pid %s already dead; reaper will finalize",
+                    "[ops.wedged] agent %s pid %s identity unreadable; deferring",
                     agent_id,
                     pid,
                 )
                 continue
 
             _log.warning(
-                "[ops.wedged] agent %s (pid %s) is wedged (live process, stale pending "
-                "inbound > %.0fs) — force-killing and resurrecting",
+                "[ops.wedged] agent %s (recorded pid %s) has stale pending "
+                "inbound > %.0fs — reconciling process identity",
                 agent_id,
                 pid,
                 age_s,
             )
 
             try:
-                # Force status to 'terminated' before killing — the kill itself may
-                # race, and we need the row stamped before the reaper sees the dead pid.
+                transition_row = None
+                page_names: list[str] = []
                 with self._pool.connection() as conn, conn.cursor() as cur:
-                    # Capture open page names BEFORE the status flip — the
-                    # cascade_close_agent_pages trigger closes the page rows on
-                    # 'terminated'. The resurrect below reopens them (cascade_open)
-                    # and the agent boot re-serves + re-publishes PageOpened, so the
-                    # frontend ends consistent either way; if the resurrect fails the
-                    # PageClosed events leave the popover correct.
-                    page_names = list_open_page_names(conn, agent_id)
                     cur.execute(
-                        "UPDATE agents_meta SET status = 'terminated', "
-                        "termination_source = 'reaper' "
-                        "WHERE id = %s AND status IN ('running', 'idling') "
-                        "AND lease_expires_at > now()",
+                        "SELECT status, pid, lease_expires_at > now() "
+                        "FROM agents_meta WHERE id = %s FOR UPDATE",
                         (agent_id,),
                     )
-                    transitioned = cur.rowcount == 1
-                if transitioned:
-                    for page_name in page_names:
-                        publish_page_closed_sync(agent_id, page_name)
-                force_kill(pid)
+                    locked_row = cur.fetchone()
+                    locked_identity = probe_agent_process(pid, agent_id)
+                    if (
+                        locked_row is not None
+                        and locked_row[0] in ("running", "idling")
+                        and locked_row[1] == pid
+                        and locked_row[2] is True
+                        and locked_identity is not AgentProcessIdentity.UNREADABLE
+                    ):
+                        # Capture pages only after the row lock proves this is
+                        # still the claimed live incarnation.
+                        page_names = list_open_page_names(conn, agent_id)
+                        cur.execute(
+                            "UPDATE agents_meta SET status = 'terminated', "
+                            "termination_source = 'reaper' "
+                            "WHERE id = %s AND status IN ('running', 'idling') "
+                            "AND pid = %s AND lease_expires_at > now() "
+                            "RETURNING status_changed_at",
+                            (agent_id, pid),
+                        )
+                        transition_row = cur.fetchone()
+                        if (
+                            transition_row is not None
+                            and locked_identity is AgentProcessIdentity.OWNED
+                        ):
+                            # Keep the row lock through the identity-verified
+                            # kill. A concurrent user force waits, then writes
+                            # its newer fence/source after this transaction.
+                            force_kill(pid)
+                if transition_row is None:
+                    _log.info(
+                        "[ops.wedged] agent %s changed before recovery transition; skipping",
+                        agent_id,
+                    )
+                    continue
+                for page_name in page_names:
+                    publish_page_closed_sync(agent_id, page_name)
 
                 # Resurrect: pass a prompt so the agent knows why it was woken.
                 resurrect_agent(
                     agent_id,
                     resurrected_by="system",
                     prompt=(
-                        "You were force-restarted by the wedged-agent detector — "
-                        "your process was alive but stuck (unconsumed pending inbound). "
+                        "You were restarted by the wedged-agent detector after an "
+                        "unconsumed pending inbound stopped making progress. "
                         "Continue from where you left off."
+                    ),
+                    auto_claim=AutoResurrectClaim(
+                        agent_id=agent_id,
+                        termination_source=TerminationSource.REAPER,
+                        termination_epoch=transition_row[0],
+                        claim_kind="wedged",
+                        claimed_at=claimed_at,
                     ),
                 )
                 acted = True
                 _log.info(
-                    "[ops.wedged] agent %s recovered: killed pid %s, resurrected", agent_id, pid
+                    "[ops.wedged] agent %s recovered from process identity %s; resurrected",
+                    agent_id,
+                    locked_identity.value,
                 )
-            except ResurrectAlreadyAlive:
+            except (ResurrectAlreadyAlive, ResurrectClaimStaleError):
                 _log.info(
                     "[ops.wedged] agent %s already alive — race with another recovery", agent_id
                 )

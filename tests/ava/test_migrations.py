@@ -20,9 +20,10 @@ from __future__ import annotations
 
 import os
 import time
-from collections.abc import Iterable, Iterator
+from collections.abc import Generator, Iterable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, LiteralString, cast
 
 import psycopg
 import pytest
@@ -54,6 +55,11 @@ from shared.migrations import (
 )
 
 _SCHEMA_SQL = Path(__file__).resolve().parents[2] / "db" / "schema.sql"
+_FORCE_FENCE_MIGRATION = (
+    Path(__file__).resolve().parents[2]
+    / "migrations"
+    / "20260821T104519_add-force-terminate-inbound-fence.sql"
+)
 
 # A syntactically-valid synthetic post-baseline migration name (far-future
 # timestamp so it never clashes with a real one).
@@ -62,6 +68,26 @@ _SYN2 = "29991231T235960_synthetic-two"  # sorts after _SYN by name
 # Synthetic orphan name (NOT in _V010_PRE_RESET_SET) — simulates a
 # post-v0.1.0 re-baseline: an applied name whose file no longer exists.
 SYN_ORPHAN = "20260815T000001_synthetic-orphan"
+
+
+@contextmanager
+def _throwaway_database(prefix: str) -> Generator[str, None, None]:
+    base_url, _ = settings.data_plane.db_url.rsplit("/", 1)
+    admin_url = f"{base_url}/postgres"
+    name = f"ava_test_{prefix}_{os.getpid()}_{int(time.time() * 1_000_000)}"
+    url = f"{base_url}/{name}"
+    with psycopg.connect(admin_url, autocommit=True) as admin, admin.cursor() as cur:
+        cur.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(name)))
+    try:
+        yield url
+    finally:
+        with psycopg.connect(admin_url, autocommit=True) as admin, admin.cursor() as cur:
+            cur.execute(
+                "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                "WHERE datname = %s AND pid <> pg_backend_pid()",
+                (name,),
+            )
+            cur.execute(sql.SQL("DROP DATABASE IF EXISTS {}").format(sql.Identifier(name)))
 
 
 def _set_table_to(
@@ -261,6 +287,74 @@ def test_fresh_schema_sql_bootstrap_is_baselined() -> None:
                 (name,),
             )
             cur.execute(sql.SQL("DROP DATABASE IF EXISTS {}").format(sql.Identifier(name)))
+
+
+def test_force_terminate_fence_migration_backfills_current_death_intent() -> None:
+    """Upgrade preserves only current-death force evidence.
+
+    A marker after the current death is the exact fence; without one, every
+    inbound already present is conservatively fenced. Historical markers from a
+    prior death and rows outside user-terminated state must not be mistaken for
+    current force intent.
+    """
+    with (
+        _throwaway_database("force_fence") as url,
+        psycopg.connect(url, autocommit=True) as conn,
+        conn.cursor() as cur,
+    ):
+        cur.execute(sql.SQL(cast(LiteralString, _SCHEMA_SQL.read_text())), prepare=False)
+        cur.execute("ALTER TABLE agents_meta DROP COLUMN last_force_terminate_inbound_id")
+        cur.execute("INSERT INTO agents (id) SELECT generate_series(1, 6)")
+        cur.execute(
+            "INSERT INTO agents_meta "
+            "(id, status, termination_source, status_changed_at) VALUES "
+            "(1, 'terminated', 'user', '2026-08-21 10:00:00+00'), "
+            "(2, 'terminated', 'user', '2026-08-21 10:00:00+00'), "
+            "(3, 'terminated', 'user', '2026-08-21 10:00:00+00'), "
+            "(4, 'terminated', 'reaper', '2026-08-21 10:00:00+00'), "
+            "(5, 'allocated', 'user', '2026-08-21 10:00:00+00'), "
+            "(6, 'terminated', 'user', '2026-08-21 10:00:00+00')"
+        )
+
+        def _inbound(agent_id: int, kind: str, created_at: str) -> int:
+            cur.execute(
+                "INSERT INTO inbound_messages "
+                "(agent_id, content, kind, source, created_at) "
+                "VALUES (%s, '', %s, 'user', %s) RETURNING id",
+                (agent_id, kind, created_at),
+            )
+            row = cur.fetchone()
+            assert row is not None
+            return row[0]
+
+        current_marker = _inbound(1, "terminate", "2026-08-21 10:01:00+00")
+        post_force_chat = _inbound(1, "chat", "2026-08-21 10:02:00+00")
+        historical_marker = _inbound(2, "terminate", "2026-08-21 09:00:00+00")
+        no_current_marker_chat = _inbound(2, "chat", "2026-08-21 10:01:00+00")
+        no_marker_chat = _inbound(3, "chat", "2026-08-21 10:01:00+00")
+        _inbound(4, "terminate", "2026-08-21 10:01:00+00")
+        _inbound(5, "terminate", "2026-08-21 10:01:00+00")
+        pre_force_chat = _inbound(6, "chat", "2026-08-21 10:01:00+00")
+        current_marker_after_chat = _inbound(6, "terminate", "2026-08-21 10:02:00+00")
+
+        cur.execute(
+            sql.SQL(cast(LiteralString, _FORCE_FENCE_MIGRATION.read_text())),
+            prepare=False,
+        )
+        cur.execute("SELECT id, last_force_terminate_inbound_id FROM agents_meta ORDER BY id")
+        fences = dict(cur.fetchall())
+
+    assert fences == {
+        1: current_marker,
+        2: no_current_marker_chat,
+        3: no_marker_chat,
+        4: None,
+        5: None,
+        6: current_marker_after_chat,
+    }
+    assert post_force_chat > current_marker
+    assert no_current_marker_chat > historical_marker
+    assert pre_force_chat < current_marker_after_chat
 
 
 # ─── apply_pending: post-baseline delta ───────────────────────────────────────

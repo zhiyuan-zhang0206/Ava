@@ -169,14 +169,15 @@ class SpawnedAgent(BaseModel):
 class ResurrectAgentRequest(BaseModel):
     """Resurrect agent request body.
 
-    Two callers: the `POST /api/agents/{id}/resurrect` endpoint (the frontend
-    resurrect button — a bare lifecycle wake with no message to deliver), and
-    `resurrect_if_terminated` for auto-resurrect when a chat message is
-    delivered to a terminated agent.
+    The public `POST /api/agents/{id}/resurrect` endpoint uses this for an
+    explicit lifecycle wake with no work guard. The internal versioned
+    pending-work path also carries it alongside the exact chat or compact
+    request id and kind; controller recovery calls the lower lifecycle helper
+    with its own exact death claim.
 
     `resurrected_by` default "user" — frontend resurrect button does not
-    need to pass it; SDK paths pass f"agent:{my_id}"; auto-resurrect
-    (resurrect_if_terminated) passes "system". Written into the
+    need to pass it; SDK paths pass f"agent:{my_id}"; pending-work and
+    controller auto-resurrect pass "system". Written into the
     lifecycle 'resurrect' inbound's source; the claim-side dispatch
     composes it into the marker `[system ts] You have been resurrected
     by {resurrected_by}` so the agent knows who resurrected it.
@@ -194,9 +195,9 @@ class ResurrectAgentRequest(BaseModel):
     marker. Peer agents no longer have a dedicated resurrect API — they send
     a chat message (`ava.agents.send_message`) and auto-resurrect handles the
     rest. When a prompt is given it is INSERTed as a chat inbound in **the same
-    transaction** as the lifecycle 'resurrect' inbound, committed together
-    before the process launch — eliminating at the root the race "agent process
-    started running, prompt inbound has not yet arrived".
+    transaction** as the lifecycle 'resurrect' inbound. The session may be
+    created before commit, but its child blocks on the agent row and cannot
+    claim or process either inbound until both are committed.
     """
 
     resurrected_by: str = Field(default="user", min_length=1, max_length=64)
@@ -275,7 +276,9 @@ class TerminateAgentResponse(BaseModel):
 
     `enqueued`: terminate inbound INSERTed; agent exits after processing
     the current turn.
-    `already_terminated`: agent was already dead, noop.
+    `already_terminated`: agent was already dead. Graceful termination is a
+        no-op; force preserves this response while recording a newer kill-intent
+        fence and cleaning the exact supervisor session.
     `force_killed`: force=true killed the agent's detached process + force
         marked terminated — agent may have been stuck and never took
         the graceful path.
@@ -443,10 +446,14 @@ class OpFailure(BaseModel):
 class LifecyclePayload(BaseModel):
     """`lifecycle` op payload: the agent lifecycle path plus the per-action
     request body, which the op validates per-action into a
-    Terminate/Resurrect/Restart request."""
+    Terminate/Resurrect/Restart request. The trigger id+kind pair is internal
+    to auto-resurrect: the home runner uses it as the final pending-work CAS;
+    manual lifecycle calls omit both."""
 
     path: str
     body: dict[str, Any] = Field(default_factory=dict)
+    trigger_inbound_id: int | None = Field(default=None, gt=0)
+    trigger_inbound_kind: Literal["chat", "compact_request"] | None = None
 
 
 class ClusterUpdatePayload(BaseModel):

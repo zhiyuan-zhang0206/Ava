@@ -30,8 +30,9 @@ in-flight turn is normal — the claim's turn-end SELECT picks it up. Boot state
 (starting / restarting / allocated) are left to their own reaper.
 
 3. **Terminated-owner resurrect retry** — every tick, for each DISTINCT
-   terminated agent that still holds a `pending` chat (the delivery-path
-   auto-resurrect failed or predates it), re-run `resurrect_if_terminated`.
+   terminated agent that still holds a `pending` chat created after its latest
+   termination (the delivery-path auto-resurrect failed), re-run
+   `resurrect_if_terminated`.
    This extends the delivery check from live owners to ALL agents (Task #689
    G4, user ruling 2026-08-03): a chat to a dead agent must wake it, and a
    missed auto-resurrect must be retried, not just alerted. Per-agent cooldown
@@ -179,23 +180,30 @@ def dispatch_wakes(
     return dispatched
 
 
-def select_terminated_owners_with_pending(pool: ConnectionPool) -> list[int]:
-    """Distinct agent ids, ascending, that are `terminated` and still hold a
-    `pending` chat inbound — the rows whose delivery-path auto-resurrect
-    failed or predates it (Task #689 G4). Chat only: a lifecycle kind
-    (terminate / restart) must not resurrect a dead agent against the
-    caller's intent. One row per agent, not per inbound: a pile of 250 dead
-    letters for one agent means one resurrect, not 250."""
+def select_terminated_owners_with_pending(pool: ConnectionPool) -> list[tuple[int, int]]:
+    """One `(agent_id, trigger_inbound_id)` per terminated owner with a
+    post-termination pending chat, ordered by agent id.
+
+    The selected chat is carried to the home runner as the final resurrection
+    CAS. A chat already pending when the agent was terminated cannot reverse
+    that explicit lifecycle decision, and a later termination makes this
+    trigger stale before it can launch. Chat only: lifecycle kinds (terminate /
+    restart) must not resurrect a dead agent against the caller's intent. A
+    pile of 250 dead letters for one agent still means one attempt, not 250.
+    """
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
-            "SELECT DISTINCT m.agent_id "
+            "SELECT m.agent_id, MIN(m.id) "
             "FROM inbound_messages m "
             "JOIN agents_meta am ON am.id = m.agent_id "
             "WHERE m.status = 'pending' AND m.kind = 'chat' "
             "  AND am.status = 'terminated' "
+            "  AND m.created_at > am.status_changed_at "
+            "  AND m.id > COALESCE(am.last_force_terminate_inbound_id, 0) "
+            "GROUP BY m.agent_id "
             "ORDER BY m.agent_id"
         )
-        return [r[0] for r in cur.fetchall()]
+        return [(r[0], r[1]) for r in cur.fetchall()]
 
 
 def dead_letter_stale_claimed(pool: ConnectionPool, threshold_s: float) -> int:
@@ -396,11 +404,11 @@ async def _sleep_with_liveness(liveness: Liveness, total_s: float) -> None:
 
 # ── Terminated-owner resurrect retry (G4) ────────────────────────────────────
 _last_resurrect_attempt: dict[int, float] = {}
-_resurrect_tasks: set[asyncio.Task[None]] = set()
+_resurrect_tasks: dict[int, asyncio.Task[None]] = {}
 _resurrect_semaphore = asyncio.Semaphore(_RESURRECT_MAX_CONCURRENCY)
 
 
-async def _resurrect_one(agent_id: int) -> None:
+async def _resurrect_one(agent_id: int, trigger_inbound_id: int) -> None:
     """Run `resurrect_if_terminated` for one agent, bounded by the concurrency
     semaphore; log the outcome, never raise (a failure is retried next
     cooldown window)."""
@@ -408,7 +416,11 @@ async def _resurrect_one(agent_id: int) -> None:
 
     async with _resurrect_semaphore:
         try:
-            status = await resurrect_if_terminated(agent_id)
+            status = await resurrect_if_terminated(
+                agent_id,
+                trigger_inbound_id=trigger_inbound_id,
+                trigger_inbound_kind="chat",
+            )
             _log.info(
                 "[delivery] resurrect retry for terminated agent %s -> status %s",
                 agent_id,
@@ -434,15 +446,24 @@ def _maybe_spawn_resurrects(pool: ConnectionPool, max_per_tick: int) -> None:
     owners = select_terminated_owners_with_pending(pool)
     spawned = 0
     deferred = 0
-    for agent_id in owners:
-        if spawned >= max_per_tick:
-            deferred += 1
+    for agent_id, trigger_inbound_id in owners:
+        if agent_id in _resurrect_tasks:
             continue
         if now - _last_resurrect_attempt.get(agent_id, 0.0) < _RESURRECT_RETRY_MIN_INTERVAL_S:
             continue
-        task = asyncio.create_task(_resurrect_one(agent_id))
-        _resurrect_tasks.add(task)
-        task.add_done_callback(_resurrect_tasks.discard)
+        if spawned >= max_per_tick:
+            deferred += 1
+            continue
+        task = asyncio.create_task(_resurrect_one(agent_id, trigger_inbound_id))
+        _resurrect_tasks[agent_id] = task
+
+        def _discard_completed_task(
+            completed: asyncio.Task[None], *, completed_agent_id: int = agent_id
+        ) -> None:
+            if _resurrect_tasks.get(completed_agent_id) is completed:
+                del _resurrect_tasks[completed_agent_id]
+
+        task.add_done_callback(_discard_completed_task)
         spawned += 1
     if deferred:
         _log.warning(

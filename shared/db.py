@@ -719,7 +719,7 @@ def list_pending_inbounds(db: psycopg.Connection, agent_id: int) -> list[Inbound
         return [InboundRow(*row) for row in cur.fetchall()]
 
 
-def insert_compact_request_inbound(db: psycopg.Connection, agent_id: int) -> None:
+def insert_compact_request_inbound(db: psycopg.Connection, agent_id: int) -> int:
     """UI / admin call: insert one kind='compact_request' inbound —
     the claim Node, on receiving, runs the backend Compaction LLM to
     generate a summary that replaces messages.
@@ -732,9 +732,14 @@ def insert_compact_request_inbound(db: psycopg.Connection, agent_id: int) -> Non
     own summary)."""
     with db.cursor() as cur:
         cur.execute(
-            "INSERT INTO inbound_messages (agent_id, content, kind) VALUES (%s, %s, %s)",
+            "INSERT INTO inbound_messages (agent_id, content, kind) VALUES (%s, %s, %s) "
+            "RETURNING id",
             (agent_id, "", "compact_request"),
         )
+        row = cur.fetchone()
+        if row is None:
+            raise RuntimeError("compact request inbound INSERT returned no id")
+        inbound_id = row[0]
         from shared.audit_events import insert_event_log
 
         insert_event_log(
@@ -745,8 +750,9 @@ def insert_compact_request_inbound(db: psycopg.Connection, agent_id: int) -> Non
         )
     db.commit()
     # Publish to Redis for agent wake-up (see insert_inbound_message + the
-    # publish_inbound_wake docstring). compact_request has no id, so "0".
-    publish_inbound_wake(agent_id, "0")
+    # publish_inbound_wake docstring).
+    publish_inbound_wake(agent_id, str(inbound_id))
+    return inbound_id
 
 
 def list_inbound_messages(

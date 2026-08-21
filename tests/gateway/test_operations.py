@@ -9,6 +9,7 @@ endpoint smoke tests live in tests/gateway/test_cluster_endpoints.py.
 
 from __future__ import annotations
 
+import re
 from unittest.mock import MagicMock
 
 import pytest
@@ -247,6 +248,33 @@ async def test_resurrect_agent_op_alive_returns_already_alive(
 
 
 @pytest.mark.asyncio
+async def test_resurrect_agent_op_stale_trigger_returns_idempotent_noop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The internal guarded path treats a stale chat as an expected no-launch
+    race, while leaving the still-terminated status for its caller to return."""
+    from ops.agent_wake import ResurrectTriggerStaleError
+    from shared.agents import AgentStatus
+
+    def _terminated(_agent_id: int) -> AgentStatus:
+        return AgentStatus.TERMINATED
+
+    monkeypatch.setattr(ops_lifecycle, "get_agent_status", _terminated)
+
+    def _stale(*_args: object, **_kwargs: object) -> None:
+        raise ResurrectTriggerStaleError("trigger chat no longer qualifies")
+
+    monkeypatch.setattr(ops_lifecycle, "resurrect_agent", _stale)
+    resp = await ops_lifecycle.resurrect_agent_op(
+        9,
+        ResurrectAgentRequest(resurrected_by="system"),
+        trigger_inbound_id=123,
+        trigger_inbound_kind="chat",
+    )
+    assert resp.status == "already_alive"
+
+
+@pytest.mark.asyncio
 async def test_terminate_agent_op_terminated_short_circuits(
     monkeypatch: pytest.MonkeyPatch, stub_pool: object
 ) -> None:
@@ -294,6 +322,101 @@ async def test_lifecycle_op_unparseable_path_raises(stub_pool: object) -> None:
             {},
             stub_pool,  # type: ignore[arg-type]
         )
+
+
+@pytest.mark.asyncio
+async def test_guarded_resurrect_path_requires_trigger(stub_pool: object) -> None:
+    """The new internal path fails closed when its CAS evidence is missing."""
+    with pytest.raises(ValueError, match="requires trigger inbound"):
+        await ops_lifecycle.lifecycle_op(
+            "/api/agents/42/resurrect-if-pending-work-v2",
+            {"resurrected_by": "system"},
+            stub_pool,  # type: ignore[arg-type]
+        )
+
+
+@pytest.mark.parametrize(
+    "new_path",
+    [
+        "/api/agents/42/resurrect-explicit-v2",
+        "/api/agents/42/resurrect-if-pending-work-v2",
+    ],
+)
+def test_versioned_resurrect_paths_are_unknown_to_legacy_runner(new_path: str) -> None:
+    """Freeze the pre-v2 runner parser: a new gateway's two versioned paths
+    cannot match its legacy lifecycle regex, so rollout skew fails closed."""
+    legacy_lifecycle_path = re.compile(
+        r"^/api/agents/(?P<id>\d+)/(?P<action>terminate|resurrect|restart)$"
+    )
+
+    assert legacy_lifecycle_path.fullmatch(new_path) is None
+    assert legacy_lifecycle_path.fullmatch("/api/agents/42/resurrect") is not None
+
+
+@pytest.mark.asyncio
+async def test_manual_lifecycle_path_rejects_auto_resurrect_trigger(stub_pool: object) -> None:
+    """A mismatched path/guard pair cannot silently fall back to an
+    unconditional manual resurrect."""
+    with pytest.raises(ValueError, match="only valid for resurrect-if-pending-work-v2"):
+        await ops_lifecycle.lifecycle_op(
+            "/api/agents/42/resurrect",
+            {"resurrected_by": "system"},
+            stub_pool,  # type: ignore[arg-type]
+            trigger_inbound_id=99,
+            trigger_inbound_kind="chat",
+        )
+
+
+@pytest.mark.asyncio
+async def test_legacy_resurrect_path_fails_closed_without_trigger(stub_pool: object) -> None:
+    """A new runner rejects an old gateway's ambiguous resurrection even when
+    no new trigger field is present; mixed-version rollback cannot revive."""
+    with pytest.raises(ValueError, match="legacy /resurrect is refused"):
+        await ops_lifecycle.lifecycle_op(
+            "/api/agents/42/resurrect",
+            {"resurrected_by": "user"},
+            stub_pool,  # type: ignore[arg-type]
+        )
+
+
+@pytest.mark.asyncio
+async def test_explicit_v2_resurrect_dispatches_manual_op(
+    monkeypatch: pytest.MonkeyPatch, stub_pool: object
+) -> None:
+    """The versioned unguarded path is the only runner path used by a new
+    gateway for a deliberate manual or system lifecycle resurrection."""
+    captured: dict[str, object] = {}
+
+    async def _fake_resurrect(
+        agent_id: int,
+        body: ResurrectAgentRequest,
+        *,
+        trigger_inbound_id: int | None = None,
+        trigger_inbound_kind: str | None = None,
+    ) -> ResurrectAgentResponse:
+        captured.update(
+            agent_id=agent_id,
+            resurrected_by=body.resurrected_by,
+            trigger_inbound_id=trigger_inbound_id,
+            trigger_inbound_kind=trigger_inbound_kind,
+        )
+        return ResurrectAgentResponse(status="spawned")
+
+    monkeypatch.setattr(ops_lifecycle, "resurrect_agent_op", _fake_resurrect)
+
+    result = await ops_lifecycle.lifecycle_op(
+        "/api/agents/42/resurrect-explicit-v2",
+        {"resurrected_by": "user"},
+        stub_pool,  # type: ignore[arg-type]
+    )
+
+    assert result.status == "spawned"
+    assert captured == {
+        "agent_id": 42,
+        "resurrected_by": "user",
+        "trigger_inbound_id": None,
+        "trigger_inbound_kind": None,
+    }
 
 
 def test_cluster_stop_op_invokes_pause(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -469,10 +592,16 @@ class TestResurrectIfTerminatedPlacement:
         dispatch_called: list[dict[str, object]] = []
 
         async def _fake_resurrect_op(
-            agent_id: int, body: ResurrectAgentRequest
+            agent_id: int,
+            body: ResurrectAgentRequest,
+            *,
+            trigger_inbound_id: int | None = None,
+            trigger_inbound_kind: str | None = None,
         ) -> ResurrectAgentResponse:
             called["agent_id"] = agent_id
             called["resurrected_by"] = body.resurrected_by
+            called["trigger_inbound_id"] = trigger_inbound_id
+            called["trigger_inbound_kind"] = trigger_inbound_kind
             return ResurrectAgentResponse(status="spawned")
 
         monkeypatch.setattr(ops_lifecycle, "resurrect_agent_op", _fake_resurrect_op)
@@ -483,13 +612,28 @@ class TestResurrectIfTerminatedPlacement:
 
         monkeypatch.setattr(ops_lifecycle._cluster_rpc, "dispatch_to_machine", _fake_dispatch)  # pyright: ignore[reportUnknownArgumentType]
 
-        status = await ops_lifecycle.resurrect_if_terminated(5)
+        status = await ops_lifecycle.resurrect_if_terminated(
+            5,
+            trigger_inbound_id=88,
+            trigger_inbound_kind="chat",
+        )
         assert status is AgentStatus.IDLING
         # Dispatch was attempted (HTTP-uniform path)
         assert len(dispatch_called) == 1
         assert dispatch_called[0]["target_machine"] == "home-a"
+        assert dispatch_called[0]["payload"] == {
+            "path": "/api/agents/5/resurrect-if-pending-work-v2",
+            "body": {"resurrected_by": "system", "prompt": None},
+            "trigger_inbound_id": 88,
+            "trigger_inbound_kind": "chat",
+        }
         # Fallback: in-process resurrect happened
-        assert called == {"agent_id": 5, "resurrected_by": "system"}
+        assert called == {
+            "agent_id": 5,
+            "resurrected_by": "system",
+            "trigger_inbound_id": 88,
+            "trigger_inbound_kind": "chat",
+        }
 
     @pytest.mark.asyncio
     async def test_remote_home_forwards_lifecycle_op(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -517,13 +661,19 @@ class TestResurrectIfTerminatedPlacement:
 
         monkeypatch.setattr(ops_lifecycle._cluster_rpc, "dispatch_to_machine", _fake_dispatch)  # pyright: ignore[reportUnknownArgumentType]
 
-        status = await ops_lifecycle.resurrect_if_terminated(7)
+        status = await ops_lifecycle.resurrect_if_terminated(
+            7,
+            trigger_inbound_id=99,
+            trigger_inbound_kind="chat",
+        )
         assert status is AgentStatus.IDLING
         assert captured["target"] == "wsl"
         assert captured["kind"] == "lifecycle"
         assert captured["payload"] == {
-            "path": "/api/agents/7/resurrect",
+            "path": "/api/agents/7/resurrect-if-pending-work-v2",
             "body": {"resurrected_by": "system", "prompt": None},
+            "trigger_inbound_id": 99,
+            "trigger_inbound_kind": "chat",
         }
 
     @pytest.mark.asyncio
@@ -543,7 +693,9 @@ class TestResurrectIfTerminatedPlacement:
         monkeypatch.setattr(ops_lifecycle._cluster_rpc, "dispatch_to_machine", _unreachable)  # pyright: ignore[reportUnknownArgumentType]
 
         with caplog.at_level("WARNING"):
-            status = await ops_lifecycle.resurrect_if_terminated(7)
+            status = await ops_lifecycle.resurrect_if_terminated(
+                7, trigger_inbound_id=99, trigger_inbound_kind="chat"
+            )
         assert status is AgentStatus.TERMINATED
         assert "home machine unreachable" in caplog.text
 
@@ -561,7 +713,9 @@ class TestResurrectIfTerminatedPlacement:
 
         monkeypatch.setattr(ops_lifecycle._cluster_rpc, "dispatch_to_machine", _failed)  # pyright: ignore[reportUnknownArgumentType]
 
-        status = await ops_lifecycle.resurrect_if_terminated(7)
+        status = await ops_lifecycle.resurrect_if_terminated(
+            7, trigger_inbound_id=99, trigger_inbound_kind="chat"
+        )
         assert status is AgentStatus.TERMINATED
 
     @pytest.mark.asyncio
@@ -575,5 +729,7 @@ class TestResurrectIfTerminatedPlacement:
 
         monkeypatch.setattr(ops_lifecycle, "get_agent_machine", _no_machine_read)
 
-        status = await ops_lifecycle.resurrect_if_terminated(5)
+        status = await ops_lifecycle.resurrect_if_terminated(
+            5, trigger_inbound_id=99, trigger_inbound_kind="chat"
+        )
         assert status is AgentStatus.RUNNING

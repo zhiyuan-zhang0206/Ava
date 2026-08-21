@@ -11,9 +11,11 @@ runs ConnectionPool connected to it as well.
 """
 
 import psycopg
+import pytest
 from fastapi.testclient import TestClient
 
 from gateway.app import app
+from shared.agents import AgentStatus
 from shared.machine import machine_name
 
 
@@ -75,12 +77,53 @@ def test_compact_endpoint_ignores_mode_param(db_conn: psycopg.Connection) -> Non
     assert _pending_rows(db_conn, tid) == [("compact_request", "pending")]
 
 
-def test_compact_terminated_agent_auto_resurrects(db_conn: psycopg.Connection) -> None:
+def test_compact_passes_inserted_id_and_kind_to_guarded_resurrect(
+    db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The durable compact row itself is the final CAS evidence; the route
+    cannot call the unguarded explicit resurrection path."""
+    import gateway.routers.agents_lifecycle as lifecycle
+
+    tid = _seed_agent(db_conn)
+    calls: list[tuple[int, int | None, str | None]] = []
+
+    async def _resurrect(
+        agent_id: int,
+        *,
+        trigger_inbound_id: int | None = None,
+        trigger_inbound_kind: str | None = None,
+    ) -> AgentStatus:
+        calls.append((agent_id, trigger_inbound_id, trigger_inbound_kind))
+        return AgentStatus.ALLOCATED
+
+    monkeypatch.setattr(lifecycle._ops, "resurrect_if_terminated", _resurrect)
+    with TestClient(app) as client:
+        assert client.post(f"/api/agents/{tid}/compact").status_code == 200
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "SELECT id FROM inbound_messages WHERE agent_id = %s AND kind = 'compact_request'",
+            (tid,),
+        )
+        row = cur.fetchone()
+    assert row is not None
+    assert calls == [(tid, row[0], "compact_request")]
+
+
+def test_compact_terminated_agent_auto_resurrects(
+    db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A compact targeting a terminated agent auto-resurrects it (shared with the
     chat path) so the compaction actually runs instead of leaving a compact_request
     row pending forever. The resurrect inserts its own newer 'resurrect' inbound and
     flips status terminated -> allocated; the claim node's recency routing then lets
     the resurrect win while the compact_request still applies."""
+
+    def _confirm(_agent_id: int) -> bool:
+        return True
+
+    monkeypatch.setattr("ops.agent_launch._confirm_launch_or_force_terminated", _confirm)
     tid = _seed_agent(db_conn, status="terminated")
     with TestClient(app) as client:
         resp = client.post(f"/api/agents/{tid}/compact")
