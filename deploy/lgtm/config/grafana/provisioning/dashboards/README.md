@@ -255,30 +255,31 @@ observability is core, not a plugin.
 (`gateway/routers/agent_inspect.py`). The frontend "Plugin metrics" inspector
 section that consumed it was removed 2026-08-05 (user ruling: plugin metrics
 display lives in Grafana only); the endpoint stays for API consumers. The
-gateway reads the same registry snapshot
-(`$AVA_HOME/state/plugin_metrics.json`) — since Task #882 the snapshot
-carries **two sections**, `metrics` (plugins) and `core_metrics` (core),
-and the gateway merges both and renders them identically (same
-re-validation, macro substitution, execution) — keeps metrics
+gateway builds the registry **in process**
+(task #180 PR D: the generator that wrote `$AVA_HOME/state/plugin_metrics.json`
+did not survive the archive->public port — the snapshot file is gone, and
+`_load_plugin_metrics` imports every shipped plugin `metrics.py` under its
+plugin context plus the core definition modules) — plugin metrics first,
+then core, both rendered identically (same re-validation, macro
+substitution, execution) — keeps metrics
 whose `output` includes `inspector`, renders each template for the
 requested agent (`{event_name}`/`{category}` -> double-quoted literals,
 `{{agent_id}}` -> `agent_id="<n>"` for LogQL), **re-validates the rendered
-query** (the persisted file is disk input — register-time validation does
-not protect against a tampered file; anything that fails the template
-contract is a 500, never executed), substitutes the Grafana time macros
-(`$__interval` -> `1h`, `$__range` -> `24h` — the inspector has no
-dashboard time range, so the gateway renders a fixed recent window, 24h in
-1h buckets) and executes LogQL queries against Loki
-(`gateway/loki_events.metric_range`); SQL templates (the `core_live_agents`
-stat) still execute read-only against the cluster's own Postgres, one
-savepoint per metric so a failing query never poisons its siblings.
+query** (register-time validation does not protect against a spec drifting
+after registration; anything that fails the template contract is a 500,
+never executed), substitutes the Grafana time macros (`$__interval` -> `1h`,
+`$__range` -> `24h` — the inspector has no dashboard time range, so the
+gateway renders a fixed recent window, 24h in 1h buckets) and executes
+LogQL queries against Loki (`gateway/loki_events.metric_range`); SQL
+templates (the `core_live_agents` stat) still execute read-only against the
+cluster's own Postgres, one savepoint per metric so a failing query never
+poisons its siblings.
 
 Response: one `PluginMetricResult` per inspector metric, in registration
 order — `stat` metrics carry `value`; `timeseries`/`barchart` carry `series`
 (`[{ts, value}]`, chronological). A metric whose query fails at runtime
-carries `error` (the rest still render); registry-level problems are HTTP
-errors: missing file -> 200 `[]`, unreadable/invalid file or a template
-failing the re-validation -> 500 with the reason, `{{agent_id}}` template
+carries `error` (the rest still render); a template failing the
+re-validation -> 500 with the reason, `{{agent_id}}` template
 without an agent id -> 400 (structurally unreachable via HTTP — the id is a
 path param; the guard lives in the render helper). Unknown agent -> 404. The
 frontend no longer polls this endpoint (section removed 2026-08-05).

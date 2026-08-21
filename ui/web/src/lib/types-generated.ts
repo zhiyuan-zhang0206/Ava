@@ -932,20 +932,19 @@ export interface paths {
          * @description The agent's plugin metrics for the inspector panel — the W13b inspector
          *     surface of the plugin metric system (see `shared/plugin_metrics.py`).
          *
-         *     Reads the registry snapshot the generator exports
-         *     ($AVA_HOME/state/plugin_metrics.json), keeps the metrics whose `output`
-         *     includes "inspector", renders each template for this agent ({{agent_id}}
-         *     -> ``agent_id = <n>``), re-validates the rendered SQL (the persisted file
-         *     is not trusted), substitutes the Grafana time macros with a fixed recent
-         *     window (24h in 1h buckets), and executes each query read-only against the
-         *     cluster's Postgres.
+         *     Builds the metric registry in process (task #180 PR D — shipped
+         *     plugin `metrics.py` modules + core definitions), keeps the metrics whose
+         *     `output` includes "inspector", renders each template for this agent
+         *     ({{agent_id}} -> ``agent_id = <n>``), re-validates the rendered query,
+         *     substitutes the Grafana time macros with a fixed recent window (24h in 1h
+         *     buckets), and executes each query — LogQL against Loki, SQL read-only
+         *     against the cluster's Postgres.
          *
          *     Response: one `PluginMetricResult` per registered inspector metric, in
          *     registration order. `timeseries` / `barchart` metrics carry `series`
          *     (bucket ts + value, chronological); `stat` metrics carry `value`. A
          *     metric whose query fails at runtime carries `error` (the others still
-         *     render); registry-level problems are HTTP errors instead — missing file ->
-         *     200 [] (nothing registered yet), unreadable/invalid file or a template
+         *     render); registry-level problems are HTTP errors instead — a template
          *     failing the safety re-validation -> 500 with the reason, {{agent_id}}
          *     template without an agent id -> 400 (unreachable here — the id is a path
          *     param). 404 when the agent does not exist. The frontend panel polls this
