@@ -35,12 +35,14 @@ import shutil
 import socket
 import subprocess
 import time
-from collections.abc import Iterator
+from collections.abc import Generator, Iterator
 from pathlib import Path
+from typing import Any, cast
 
 import httpx
 import psycopg
 import pytest
+from _pytest.reports import TestReport
 from langgraph.checkpoint.postgres import PostgresSaver
 from playwright.sync_api import Browser, BrowserContext, Page, Playwright, sync_playwright
 from psycopg import sql
@@ -723,3 +725,27 @@ def pytest_configure(config: pytest.Config) -> None:
 # socket / subprocess references to avoid ruff treating as unused imports erroneously removed (only type hints usage)
 _ = socket
 _ = subprocess
+
+
+# ── issue #213: dead-server evidence on failure ────────────────────────────
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(
+    item: pytest.Item, call: pytest.CallInfo[object]
+) -> Generator[None, object, None]:
+    """When a test fails, append evidence for any e2e server that exited while
+    its fixture was still active — exit code + the server's own log tail — so a
+    "server that should have been up wasn't" flake (issue #213) carries its
+    cause in the report instead of only in an uploaded artifact."""
+    outcome = yield
+    report = cast(TestReport, cast(Any, outcome).get_result())
+    if not report.failed:
+        return
+    from tests.e2e._proc import dead_server_evidence
+
+    evidence = dead_server_evidence()
+    if not evidence:
+        return
+    rendered = str(report.longrepr) + "\n\n" + evidence
+    report.longrepr = rendered

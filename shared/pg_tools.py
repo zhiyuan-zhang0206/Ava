@@ -30,10 +30,14 @@ from pathlib import Path
 from typing import NamedTuple, TypedDict, cast
 
 from shared.log import logger
+from shared.pg_stall_watchdog import fixture_log_artifact_dir, stall_guard
 from shared.platform import IS_MACOS, IS_WINDOWS
 
 PG_BIN_LINUX = Path("/usr/lib/postgresql/17/bin")
 PG_BIN_WINDOWS = Path("C:\\Program Files\\PostgreSQL\\17\\bin")  # EDB installer default
+
+# Historical private name: tests monkeypatch it to redirect artifact writes.
+_fixture_log_artifact_dir = fixture_log_artifact_dir
 
 
 def is_macos() -> bool:
@@ -447,20 +451,6 @@ def _allocate_port(instance_dir: Path) -> tuple[int, _Registration | None]:
         os.close(root_fd)
 
 
-def _fixture_log_artifact_dir() -> Path:
-    """Where a failed throwaway cluster's pg.log is preserved for CI artifacts.
-
-    Derived here rather than exposed as a Settings knob: nothing outside this
-    test fixture reads it, and CI names the same fixed path in its
-    upload-artifact step. Mirrors the e2e-logs convention
-    (`tests/e2e/conftest.py::_LOG_DIR`). Issue #1037: without this, the reason
-    `pg_ctl` refused to start lives in the tmpfs and is deleted with the
-    instance dir."""
-    from shared.paths import repo_root
-
-    return repo_root() / "tmp" / "pg-fixture-logs"
-
-
 # Stands in for pg.log content that was never written — postgres died before
 # opening the log (initdb refusing, the postmaster never forking) or before
 # writing its first line. Recorded rather than skipped: "the log is empty" is
@@ -673,6 +663,7 @@ def throwaway_postgres(schema_sql: str | None = None) -> Generator[str]:
             with PostgresSaver.from_conn_string(url) as saver:
                 saver.setup()
 
-        yield url
+        with stall_guard(admin, port):
+            yield url
     finally:
         _teardown_throwaway(tmp, data, registration)
