@@ -26,7 +26,7 @@ Together with SDK wraps (the `ava.extend.wrap` registration primitive in `ava/_e
 
 ## Key Dependencies
 
-- [[state.ava.okf.md]] — The hook's `state` parameter is the `AgentState` passed by LangGraph; the returned dict goes through standard LangGraph reducer merging; hooks do **not** go through `PluginStateHandle`—that is the channel for agent code inside the exec thread to read/write plugin state (`ava.state` / `ava.state_update` are only injected inside exec_node), whereas hooks run at the graph-node level and directly receive/return the whole state
+- [[state.ava.okf.md]] — The hook's `state` parameter is the `AgentState` passed by LangGraph; the returned dict goes through standard LangGraph reducer merging; hooks do **not** go through `PluginStateHandle`—that is the channel for agent code inside execute_code to read/write plugin state (`ava.state` / `ava.state_update` are only injected inside exec_node), whereas hooks run at the graph-node level and directly receive/return the whole state
 - [[agent/graph/graph.ava.okf.md]] — Placement of hook container nodes in the 8-node topology
 
 ## Entry Points

@@ -23,7 +23,7 @@ Transparency contract — the recorder MUST NOT perturb the SDK surface:
     (``AgentTermination`` / ``AgentRestart``) propagate untouched.
 
 Scope + top-level gating live in ``run_metered``: metering is armed only inside
-``recording()`` (which the exec worker wraps around ``exec(compile(agent_code))``), so a
+``recording()`` (which the exec child wraps around ``exec(compile(agent_code))``), so a
 call counts only when it comes from agent-authored code — framework-internal ``ava.*``
 calls (system-prompt rendering via ``ava.help``, hooks) never count. A per-call frame
 stack records only the outermost call, so one agent statement that calls
@@ -33,7 +33,7 @@ per internal fan-out. The recorder is installed *outermost* of any plugin
 ``label``) still counts exactly once per agent call, whether the plugin short-circuits
 or calls ``inner`` several times.
 
-Coverage is the agent exec worker thread — the dominant SDK-call path. Static namespaces
+Coverage is agent-authored code inside execute_code (the exec child) — the dominant SDK-call path. Static namespaces
 are wrapped by the walk; ``ava.mcps``'s module helpers (``servers`` / ``description`` /
 ``help``) are wrapped via the dir() fallback, and its dynamic tools are metered at their
 single call funnel (``_call_raw``, keyed by runtime server/tool). ``ava.skills`` is left

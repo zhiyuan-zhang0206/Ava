@@ -6448,7 +6448,7 @@
           "exec_failed"
         ],
         "title": "AgentStats",
-        "description": "Cumulative turn + exec counters for one agent (all-time, no window).\n\n`turn_ok` counts `turn_end` events with ok=true (abnormal/cancelled turns\nexcluded); the p50/p90/max are over every turn's `duration_seconds`.\n`exec_ok` is plain `exec` events; `exec_failed` is every other exec outcome\n(exec_failed / exec_thread_stuck / exec(timeout))."
+        "description": "Cumulative turn + exec counters for one agent (all-time, no window).\n\n`turn_ok` counts `turn_end` events with ok=true (abnormal/cancelled turns\nexcluded); the p50/p90/max are over every turn's `duration_seconds`.\n`exec_ok` is plain `exec` events; `exec_failed` is every other exec outcome\n(exec_failed / exec(timeout) / exec_cancelled; the prefix regex also\ncounts legacy exec_thread_stuck rows for historical continuity)."
       },
       "AgentStatus": {
         "type": "string",

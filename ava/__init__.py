@@ -68,13 +68,14 @@ from ._settings import REDIS as REDIS
 # `register_plugin_state(Cls)`)**. These two attributes exist because the
 # framework itself (primarily `agent/graph/_exec.py:_exec_node_impl`) and
 # the handle internals rely on them to pass the working copy + delta dict;
-# a module-level slot is simpler than ContextVar, and the worker thread
-# and LangGraph node share `sys.modules['ava']` in the same process
-# naturally reachable.
+# a module-level slot is simpler than ContextVar — the slot lives in the
+# exec child, which rebuilds it from the request envelope before agent code
+# runs; the parent process never touches it.
 #
 # Lifecycle (framework side):
-#   Before _exec_node_impl enters the worker thread, sets
-#   `ava.state = state.model_copy(deep=True)` + `ava.state_update = {}`.
+#   Before agent code runs, the exec child sets
+#   `ava.state = <snapshot validated from the request envelope>` +
+#   `ava.state_update = {}` (`agent/exec_child.py:_build_state_slot`).
 #   handle.read reads ava.state; handle.update synchronously mutates the
 #   ava.state working copy + accumulates raw delta into ava.state_update.
 #   At turn end, exec_node takes state_update, merges into
@@ -93,7 +94,7 @@ class PluginStateOutsideTurnError(Exception):
     Common misuse: plugin calls handle.read at module load time (during
     `import`); at that moment exec_node hasn't set the slot. Plugins
     should only access state inside hook callbacks or wrapped SDK
-    functions (running inside the worker thread).
+    functions (running inside execute_code).
     """
 
 

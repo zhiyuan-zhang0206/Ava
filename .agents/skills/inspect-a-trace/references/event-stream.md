@@ -77,8 +77,10 @@ is forced to the last 24h — never unbounded. `limit` caps at 1000; paging is
 
 **Exec outcomes.** The outcome is the event name, not an attribute:
 `exec` is success; failures are `exec_failed`, `exec_timeout`,
-`exec_cancelled`, `exec_thread_stuck`, `exec_node_timeout` (legacy
-parenthesized spellings such as `exec(failed)` still appear in old data).
+`exec_cancelled`, `exec_node_timeout`. Legacy spellings still appear in
+old data: parenthesized names such as `exec(failed)`, and
+`exec_thread_stuck` (emitted by the in-process thread backend, removed
+2026-08-21).
 
 ```logql
 sum(count_over_time({service_name="unknown_service"} | json | agent_id="3048" | event_name=~"exec_.+|exec[(].*" [1h]))

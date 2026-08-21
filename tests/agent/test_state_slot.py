@@ -1,9 +1,8 @@
 """`ava.state` / `ava.state_update` / `ava.state.<plugin>` namespace view behavior guard.
 
 Plugin <-> framework IPC channel — `agent/graph/_exec.py:_exec_node_impl` runs the
-exec through the configured backend: the subprocess child rebuilds `ava.state` from the
-request-envelope snapshot (the thread rollback backend sets
-`ava.state = state.model_copy(deep=True)` in-process). Inside the exec the plugin reads
+exec in one disposable subprocess: the child rebuilds `ava.state` from the
+request-envelope snapshot. Inside the exec the plugin reads
 ava.state and writes ava.state_update through the SDK; at the end of the turn
 ava.state_update is merged into Command(update=...).
 Commit entry validates keys — must be prefixed fields declared through register_plugin_state,
@@ -634,7 +633,7 @@ async def test_state_update_multiple_plugins_no_conflict(fake_cancel_event):
 
 
 async def test_state_update_non_dict_raises_type_error(fake_cancel_event):
-    """plugin inside worker thread sets ava.state_update to None / list /
+    """plugin inside the exec child sets ava.state_update to None / list /
     str → TypeError, not silent (`or {}` fallback against CLAUDE.md fail-fast)."""
 
     state = BaseAgentState(
@@ -739,7 +738,7 @@ async def test_exec_node_preserves_state_update_on_lifecycle(fake_cancel_event):
 
 def _seed_security_findings(*sources: str) -> None:
     """Plant findings into ava.security's in-memory buffer, as scan_content
-    would have during the worker thread."""
+    would have during the exec turn."""
     from ava import security as _security
 
     _security._pending_findings = [

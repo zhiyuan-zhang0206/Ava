@@ -27,7 +27,7 @@ EXPECTED = {
     "ava_obs_llm_error_rate": ("timeseries", ["grafana", "inspector"], "llm_usage", "telemetry", 4),
     "ava_obs_turn_ok_rate": ("timeseries", ["grafana", "inspector"], "turn_end", "telemetry", 1),
     "ava_obs_turn_duration_s": ("timeseries", ["grafana"], "turn_end", "telemetry", 3),
-    "ava_obs_exec_success_rate": ("timeseries", ["grafana"], "exec", "telemetry", 7),
+    "ava_obs_exec_success_rate": ("timeseries", ["grafana"], "exec", "telemetry", 6),
     "ava_obs_syntax_fix_by_kind": ("timeseries", ["grafana"], "syntax_fix", "telemetry", 7),
     "ava_obs_spawn_by_spawner": ("barchart", ["grafana"], "spawn", "audit", 4),
     "ava_obs_lifecycle_counts": ("barchart", ["grafana"], "spawn", "audit", 5),
@@ -163,20 +163,21 @@ def test_cost_queries_unwrap_cost_usd() -> None:
 
 
 def test_exec_breakdown_covers_legacy_spellings() -> None:
-    """exec panel series: ok / failed / timeout / cancelled / thread_stuck /
-    node_timeout / other — parenthesized legacy spellings counted via RE2
-    character classes, unknown exec* events fall into other."""
+    """exec panel series: ok / failed / timeout / cancelled / node_timeout /
+    other — parenthesized legacy spellings counted via RE2 character classes,
+    unknown exec* events fall into other (legacy exec_thread_stuck rows now
+    land in other — the thread backend stopped emitting them, PR3)."""
     _load_pack()
     exprs = _all_rendered()["ava_obs_exec_success_rate"]
     assert 'event_name="exec" [$__interval]' in exprs[0]
     assert 'event_name=~"exec_failed|exec[(]failed[)]"' in exprs[1]
     assert 'event_name=~"exec_timeout|exec[(]timeout[)]"' in exprs[2]
     assert 'event_name=~"exec_cancelled|exec[(]cancelled[)]"' in exprs[3]
-    assert 'event_name="exec_thread_stuck"' in exprs[4]
-    assert 'event_name="exec_node_timeout"' in exprs[5]
+    assert 'event_name="exec_node_timeout"' in exprs[4]
     # other: exec prefix minus every known spelling (anchored regex)
-    assert 'event_name=~"exec.*"' in exprs[6]
-    assert "exec_thread_stuck|exec_node_timeout" in exprs[6]
+    assert 'event_name=~"exec.*"' in exprs[5]
+    assert "exec_node_timeout" in exprs[5]
+    assert "exec_thread_stuck" not in exprs[5]
 
 
 def test_turn_ok_rate_math_shape() -> None:

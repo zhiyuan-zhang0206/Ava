@@ -9,13 +9,13 @@ would close an import cycle once `_exec.py` itself imports the machinery).
 `_exec.py` re-exports every name here, so existing callers and tests keep
 their imports.
 
-`ExecChildError` is the one new variant carrier: a real exception cannot
+`ExecChildError` is the one variant carrier: a real exception cannot
 cross a process boundary, so a crashed child ships `exc_type` / `exc_msg` /
 `full_traceback` as strings in the result envelope, and the parent wraps them
 in this Exception subclass. `_ExecCrashed.full_traceback` (optional) carries
-the child-formatted text; when it is None the dispatcher falls back to
-`format_full_traceback(exc)` — the in-process path (PR2's flag-gated thread
-fallback) keeps that behavior unchanged.
+the child-formatted text; when it is None (a parent-side construction failure
+— spawn error, unserializable state) the dispatcher falls back to
+`format_full_traceback(exc)`.
 
 Every variant carries `stream_cap` (set when the accumulation budget dropped
 the middle of `output` mid-run) so both execution paths hand the cap to the
@@ -94,8 +94,8 @@ class _ExecCrashed:
     etc.). Traceback is already in output; exec_node logs at INFO +
     event=exec_failed. When the crash happened in the exec child,
     `full_traceback` carries the child-formatted text (the `exc` is an
-    `ExecChildError` placeholder); None means in-process and the dispatcher
-    formats from `exc`."""
+    `ExecChildError` placeholder); None means a parent-side construction
+    failure and the dispatcher formats from `exc`."""
 
     output: str
     exc: BaseException
@@ -107,7 +107,7 @@ type _ExecResult = _ExecDone | _ExecCancelled | _ExecTimedOut | _ExecLifecycle |
 
 # The fixed set of lifecycle classes the child can report by name. A future
 # `_LifecycleExit` subclass missing from this map falls through to the
-# dispatcher's exhaustive TypeError (same fail-fast as the in-process path).
+# dispatcher's exhaustive TypeError (same fail-fast as the old in-process path).
 _LIFECYCLE_BY_NAME: dict[str, type[_LifecycleExit]] = {
     cls.__name__: cls for cls in (AgentTermination, AgentRestart, _SystemHalt)
 }

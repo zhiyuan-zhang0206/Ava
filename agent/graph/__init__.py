@@ -13,7 +13,7 @@ Submodules split by node (one file per node, `_` prefix marks internal impl):
   - `_llm_cancel.py`   — llm streaming-vs-cancel race (partial turn discard)
   - `_llm_chunk.py`    — llm chunk assembly + final-message validation
   - `_llm_errors.py`   — llm stream error taxonomy + consecutive-error tracking
-  - `_exec.py`         — exec node + worker thread + ctypes async raise cancel/timeout
+  - `_exec.py`         — exec node (one disposable subprocess per execute_code call)
   - `_exec_output.py`  — code execution output envelope: format / truncate / overflow-to-file
   - `_build.py`        — build_graph: assemble 8-Node self-cycling topology
   - `_node_log.py`     — node enter/exit lifecycle log + publish timeline snapshot
@@ -25,16 +25,12 @@ Public API is re-exported via this __init__.py — external
 
 from ._build import build_graph
 from ._claim import claim_node
-from ._exec import (
-    _run_in_thread,
-    exec_node,
-)
+from ._exec import exec_node
 from ._exec_output import EXEC_CANCEL_NOTE
 from ._llm import llm_node
 
 __all__ = [
     "EXEC_CANCEL_NOTE",
-    "_run_in_thread",
     "build_graph",
     "claim_node",
     "exec_node",

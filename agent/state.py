@@ -286,7 +286,7 @@ def _resolve_reducer(field: FieldInfo) -> Callable[[Any, Any], Any]:
             # annotation `add_messages`; the channel's actual reducer is the
             # guarded wrapper (same semantics + the append-only invariant,
             # task #1256). Route the working-copy merge through the guard too,
-            # so an in-turn plugin violation fails inside the exec thread
+            # so an in-turn plugin violation fails inside execute_code
             # instead of only at commit.
             return guarded_add_messages if m is add_messages else m
     return lambda _old, new: new  # last-value (overwrite)
@@ -379,7 +379,7 @@ class PluginStateHandle[T: BaseModel]:
         if ava.state is None:
             raise ava.PluginStateOutsideTurnError(
                 f"PluginStateHandle[{self._cls.__name__}].read() called outside exec turn—"
-                f"ava.state only valid inside worker thread during exec_node."
+                f"ava.state only valid inside execute_code (the exec turn)."
             )
         return self._cls.model_validate(
             {f: getattr(ava.state, self._channel_keys[f]) for f in self._cls.model_fields}
@@ -406,7 +406,7 @@ class PluginStateHandle[T: BaseModel]:
         if ava.state is None or ava.state_update is None:
             raise ava.PluginStateOutsideTurnError(
                 f"PluginStateHandle[{self._cls.__name__}].update() called outside exec turn—"
-                f"ava.state_update only valid inside worker thread during exec_node."
+                f"ava.state_update only valid inside execute_code (the exec turn)."
             )
         for field, new in delta.items():
             if field not in self._cls.model_fields:

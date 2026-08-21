@@ -69,7 +69,7 @@ def wrap_code_output(
 ) -> str:
     """Generate the code execution output envelope fed to the LLM.
 
-    `output` is the worker thread's stdout + stderr merged stream (both
+    `output` is the exec's stdout + stderr merged stream (both
     redirected to the same `StreamingTextIO`) — preserves the real
     chronological order of print / traceback / log output, same as
     running Python in a terminal.
@@ -97,8 +97,8 @@ def wrap_code_output(
         timeout_seconds = settings.sandbox.exec_timeout_seconds
     if max_chars is None:
         max_chars = settings.sandbox.exec_output_max_chars
-    # cancelled and timed_out are mutually exclusive — caller (_exec_with_cancel_event)
-    # guarantees only one is set. Assert is defense-in-depth: if a future caller
+    # cancelled and timed_out are mutually exclusive — the subprocess result
+    # constructor guarantees only one is set. Assert is defense-in-depth: if a future caller
     # forgets the mutual exclusion, this blows up rather than silently emitting two markers.
     assert not (cancelled and timed_out), "cancelled and timed_out are mutually exclusive"  # noqa: S101
     if cancelled:

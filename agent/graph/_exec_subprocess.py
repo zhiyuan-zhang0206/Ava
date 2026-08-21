@@ -1,18 +1,13 @@
 """Exec subprocess mechanics — the parent side: spawn / poll / signal / kill /
 collect one disposable child per execute_code call.
 
-PR1 scope: standalone machinery, unit-tested directly; the exec node is not
-wired to it yet (PR2 does that, behind the AVA_EXEC_BACKEND flag). No
-behavior change in production from this module alone.
-
 Model (`python -m agent.exec_child`, same venv, `start_new_session=True` so a
 process group exists to kill): the parent stays authoritative on
-cancel/timeout exactly like the old worker-thread poll loop — 50ms cadence,
-SIGINT for cancel, SIGTERM for timeout, SIGKILL(-pgid) after a grace period —
-and the child's envelope kind is advisory except for lifecycle outcomes (only
-the child can know which `_LifecycleExit` subclass ran). Output streams back
-through the merged pipe into the same `StreamingTextIO` the old thread model
-used, so chunk publishing to the frontend is unchanged.
+cancel/timeout — 50ms cadence, SIGINT for cancel, SIGTERM for timeout,
+SIGKILL(-pgid) after a grace period — and the child's envelope kind is
+advisory except for lifecycle outcomes (only the child can know which
+`_LifecycleExit` subclass ran). Output streams back through the merged pipe
+into a `StreamingTextIO`, so chunk publishing to the frontend is unchanged.
 """
 
 from __future__ import annotations

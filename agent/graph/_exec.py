@@ -1,61 +1,37 @@
-"""exec node: agent-written code runs through the configured exec backend.
+"""exec node: agent-written code runs in a disposable subprocess.
 
-Default (`AVA_EXEC_BACKEND=subprocess`): each execute_code call runs in a
-disposable child process (`agent/exec_child.py`, PR1 machinery wired in by
-PR2), so a stuck native call is SIGKILLable without touching the agent
-process (issue #184). The pre-subprocess in-process worker thread stays
-available behind `AVA_EXEC_BACKEND=thread` as the instant-rollback valve and
-is removed in PR3; its mechanics live in `_exec_thread_backend.py`.
-
-All paths return Command(goto="after_exec") — under cycling topology after_exec
-always routes to claim, which decides whether to wait or continue multi-step
-based on pending inbound + state.halted.
+Each execute_code call runs in a fresh child process (`agent/exec_child.py`),
+so a stuck native call is SIGKILLable without touching the agent process
+(issue #184). All paths return Command(goto="after_exec") — under cycling
+topology after_exec always routes to claim, which decides whether to wait or
+continue multi-step based on pending inbound + state.halted.
 
 Core mechanisms:
   - Subprocess backend (`agent/graph/_exec_subprocess.py`): the parent spawns
     one `python -m agent.exec_child` per exec, polls every 50ms, streams
-    output through the same chunk pipeline, and escalates cancel/timeout via
+    output through the chunk pipeline, and escalates cancel/timeout via
     SIGINT/SIGTERM to SIGKILL(-pgid) after a grace period. The child rebuilds
     the state snapshot from the request envelope; the plugin state-update
     delta and the drained security findings ride the result envelope back
-    and are validated here exactly like the in-process path.
-  - Main process has already `import ava`-ed at startup (sys.modules cache);
-    agent code in the worker thread `import ava.X` hits the frozen snapshot —
-    breaking ava/*.py on disk does not affect the in-process copy (unless
-    agent explicitly `importlib.reload`s, explicit footgun not defended).
-  - `_run_in_thread` spawns a worker thread that runs `exec(compile(code))`;
-    the main task polls in an asyncio while-loop every 50ms: thread alive /
-    cancel_event / deadline. cancel/timeout is injected into the thread via
-    `ctypes.pythonapi.PyThreadState_SetAsyncExc` with `KeyboardInterrupt` /
-    `TimeoutError` (CPython C API, raises at the next Python bytecode boundary).
-    Pure Python infinite loops / blocking syscalls all respond; pure native
-    code stuck does not respond, the thread is orphaned (Task #1058) — but
-    only after a bounded background reaper has spent a window re-injecting
-    KeyboardInterrupt on a cadence: the one-shot injection is invisible to a
-    thread inside `time.sleep`, and code that swallows `Exception` (TimeoutError
-    is one) survives it forever. KeyboardInterrupt is a BaseException, so only
-    an infinite native loop or an `except BaseException` swallow loop leaks to
-    process exit (daemon=True lets the OS clean those up at exit).
+    and are validated here.
   - Halt signal uses exception type rather than exit code: agent code raising
     `_LifecycleExit` (AgentTermination / AgentRestart / _SystemHalt) → captured
     in result_holder["lifecycle"] → exec_node decides halted + writes marker
     based on isinstance.
-  - stdout/stderr is captured into a `StreamingTextIO` bound to the worker's
-    own context (`_exec_capture`): `sys.stdout`/`sys.stderr` are stable routers
-    that resolve per context, so concurrent execs cannot cross-capture and an
-    orphan's abandoned binding cannot clobber anyone; the main task polls every
-    50ms and pushes the new accumulated chunk to redis (frontend streaming).
-    The same stream catches stdout+stderr to preserve chronological order —
-    same as what running Python in a terminal shows. Accumulation is bounded
-    by `exec_output_accumulation_max_chars`: past it the middle is dropped as
+  - The child writes stdout/stderr line-buffered onto the pipe (both
+    streams merge chronologically — same as what running Python in a
+    terminal shows); the parent drains the pipe into a `StreamingTextIO`
+    and pushes each new accumulated chunk to redis every 50ms poll
+    (frontend streaming). Accumulation is bounded by
+    `exec_output_accumulation_max_chars`: past it the middle is dropped as
     it streams and a `StreamCap` rides the result to the envelope, so a
-    runaway print loop is truncated rather than left to OOM the process —
+    runaway print loop is truncated rather than left to OOM the parent —
     the run itself is not killed.
-  - `_exec_with_cancel_event` returns `_ExecOutcome` — the `_ExecResult`
-    sum type (`_ExecDone | _ExecCancelled | _ExecTimedOut | _ExecLifecycle |
+  - `_run_in_subprocess` returns the `_ExecResult` sum type
+    (`_ExecDone | _ExecCancelled | _ExecTimedOut | _ExecLifecycle |
     _ExecCrashed`) plus the raw child envelope; exec_node dispatches via
-    `match`, illegal state combinations are unrepresentable. Ordinary exception
-    tracebacks are already in the stream output.
+    `match`, illegal state combinations are unrepresentable. Ordinary
+    exception tracebacks are already in the stream output.
 
 State type hint key design (`state: _state.AgentState` + `from __future__ import
 annotations`): LangGraph 1.x narrows the state schema by the node function's
@@ -88,7 +64,6 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 from langgraph.types import Command
 
-import ava
 from agent import state as _state
 from agent._config_carrier import get_config_maps
 from agent.graph._exec_notes import merge_exec_notes
@@ -123,9 +98,6 @@ from ._exec_result import (
 )
 from ._exec_stream import ExecOutputChunkPublisher
 from ._exec_subprocess import _run_in_subprocess
-from ._exec_thread_backend import (
-    _run_in_thread,  # re-exported — tests import it from agent.graph._exec
-)
 from ._interrupt import subscribe_interrupt
 from ._node_log import node_lifecycle
 from ._nodes import AFTER_EXEC
@@ -157,76 +129,12 @@ class _ExecCall:
     state_messages_update: list[AnyMessage]
 
 
-@dataclass(frozen=True)
-class _ExecOutcome:
-    """One exec run, backend-agnostic — the sum-type result plus the raw child
-    envelope for the subprocess backend (None for the thread backend, whose
-    parent process owns the state slot and the findings buffer directly)."""
-
-    result: _ExecResult
-    payload: ResultPayload | None
-
-
-async def _exec_with_cancel_event(
-    code: str,
-    agent_id: str,
-    cancel_event: asyncio.Event,
-    timeout: float | None = None,
-    chunk_publisher: ExecOutputChunkPublisher | None = None,
-    *,
-    backend: str | None = None,
-    state: dict[str, Any] | None = None,
-    config_overlay: dict[str, object] | None = None,
-    birth_config: dict[str, object] | None = None,
-) -> _ExecOutcome:
-    """Run one exec through the configured backend, returning a unified
-    `_ExecOutcome` — the single seam the exec node calls, so both backends
-    share the cancel/timeout wiring and tests keep one monkeypatch target.
-
-    Subprocess-only inputs: `state` is the model-dumped snapshot the child
-    rebuilds (the thread backend ignores it — the node injects ava.state
-    itself), and `config_overlay` / `birth_config` are re-emitted into the
-    child's environment so SDK calls made from agent code see the same
-    effective settings as the agent process.
-    """
-    if backend is None:
-        backend = settings.sandbox.exec_backend
-    if timeout is None:
-        timeout = settings.sandbox.exec_timeout_seconds
-
-    if backend == "subprocess":
-        result, payload = await _run_in_subprocess(
-            code,
-            int(agent_id),
-            cancel_event,
-            timeout,
-            chunk_publisher,
-            state=state,
-            config_overlay=config_overlay,
-            birth_config=birth_config,
-        )
-        return _ExecOutcome(result, payload)
-    if backend == "thread":
-        return _ExecOutcome(
-            await _run_in_thread(
-                code=code,
-                agent_id=agent_id,
-                cancel_event=cancel_event,
-                timeout=timeout,
-                chunk_publisher=chunk_publisher,
-            ),
-            None,
-        )
-    raise ValueError(f"unknown exec backend {backend!r} — expected 'subprocess' or 'thread'")
-
-
 async def exec_node(
     state: _state.AgentState,
     runtime: Runtime[AvaContext],
     config: RunnableConfig,
 ) -> Command[ExecGoto]:
-    """Run worker thread to execute agent-written code + ctypes async raise cancel/timeout.
-    See module docstring."""
+    """Run agent-written code in one disposable child process. See module docstring."""
     event_publisher = runtime.context.event_publisher
     assert event_publisher is not None, "exec_node requires ctx.event_publisher"  # noqa: S101
     async with node_lifecycle(
@@ -292,13 +200,15 @@ def _resolve_exec_call(state: _state.AgentState, agent_id: int) -> _ExecCall | C
     )
 
 
-async def _exec_with_node_shield(coro: Awaitable[_ExecOutcome], agent_id: int) -> _ExecOutcome:
+async def _exec_with_node_shield(
+    coro: Awaitable[tuple[_ExecResult, ResultPayload | None]], agent_id: int
+) -> tuple[_ExecResult, ResultPayload | None]:
     """Graph-level exec node timeout — defense-in-depth above the per-code-block
     exec_timeout_seconds. If the inner deadline missed a hang inside the
-    execution machinery (e.g. a stuck thread join / a wedged child reaper),
-    this outer shield catches it and surfaces as a timeout result rather than
-    leaving the agent process stuck. (The interrupt subscription sits outside
-    this wait_for and is bounded by its own watcher exit timeout.)"""
+    execution machinery (e.g. a wedged child reaper), this outer shield
+    catches it and surfaces as a timeout result rather than leaving the agent
+    process stuck. (The interrupt subscription sits outside this wait_for and
+    is bounded by its own watcher exit timeout.)"""
     try:
         return await asyncio.wait_for(coro, timeout=settings.sandbox.exec_node_timeout_seconds)
     except TimeoutError:
@@ -310,7 +220,7 @@ async def _exec_with_node_shield(coro: Awaitable[_ExecOutcome], agent_id: int) -
             timeout=settings.sandbox.exec_node_timeout_seconds,
             agent_id=agent_id,
         )
-        return _ExecOutcome(
+        return (
             _ExecTimedOut(
                 output=(
                     f"[exec node timeout after {settings.sandbox.exec_node_timeout_seconds:.0f}s] "
@@ -331,49 +241,25 @@ async def _run_agent_code(
     code: str,
     chunk_publisher: ExecOutputChunkPublisher,
 ) -> tuple[_ExecResult, dict[str, Any], int, list[SecurityFindingEntry]]:
-    """Run the agent's code through the configured exec backend.
-
-    Both backends race the run against the durable-interrupt cancel_event,
-    sit under the graph-level node timeout as an outer shield, and validate
-    the plugin's state_update keys identically. Returns
-    (result, plugin_state_update, exec_ms, findings) — `findings` carries the
-    child-drained security findings for the subprocess backend (the thread
-    backend drains its own process buffer via `take_findings()` at the node).
-    """
-    backend = settings.sandbox.exec_backend
-    if backend == "subprocess":
-        return await _run_agent_code_in_subprocess(state, ctx, agent_id, code, chunk_publisher)
-    if backend == "thread":
-        return await _run_agent_code_in_thread(state, ctx, agent_id, code, chunk_publisher)
-    raise ValueError(f"unknown exec backend {backend!r} — expected 'subprocess' or 'thread'")
-
-
-async def _run_agent_code_in_subprocess(
-    state: _state.AgentState,
-    ctx: AvaContext,
-    agent_id: int,
-    code: str,
-    chunk_publisher: ExecOutputChunkPublisher,
-) -> tuple[_ExecResult, dict[str, Any], int, list[SecurityFindingEntry]]:
     """Run the agent's code in one disposable child process.
 
     The parent does not touch the ava.state slot — the child rebuilds the
     snapshot from the request envelope (`agent/exec_child.py`), and the
     plugin's state-update delta + drained security findings ride the result
-    envelope back. Validation is identical to the in-process path (same
-    fail-fast on a tampered slot), and the child re-receives the agent's
-    popped per-agent config maps so its SDK calls resolve the same settings.
-    """
+    envelope back. Validation is fail-fast on a tampered slot, and the child
+    re-receives the agent's popped per-agent config maps so its SDK calls
+    resolve the same settings. Returns
+    (result, plugin_state_update, exec_ms, findings)."""
     config_overlay, birth_config = get_config_maps()
     exec_started = time.monotonic()
     async with subscribe_interrupt(ctx.ops_pool, agent_id) as cancel_event:
         outcome = await _exec_with_node_shield(
-            _exec_with_cancel_event(
+            _run_in_subprocess(
                 code,
-                str(agent_id),
+                int(agent_id),
                 cancel_event,
-                chunk_publisher=chunk_publisher,
-                backend="subprocess",
+                settings.sandbox.exec_timeout_seconds,
+                chunk_publisher,
                 state=state.model_dump(),
                 config_overlay=config_overlay,
                 birth_config=birth_config,
@@ -383,10 +269,10 @@ async def _run_agent_code_in_subprocess(
     # Wall-clock surfaced on the code_output item ("ran in 1.3s"); cancel /
     # timeout still report the honest time-before-stop.
     exec_ms = round((time.monotonic() - exec_started) * 1000)
-    payload = outcome.payload
+    result, payload = outcome
     if payload is not None and payload.state_update_error is not None:
         # The child reported a tampered slot (agent set ava.state_update to a
-        # non-dict) — raise the same TypeError the in-process path raised.
+        # non-dict) — raise the TypeError the child would have raised.
         raise TypeError(payload.state_update_error)
     delta = payload.state_update if payload is not None else None
     plugin_state_update = _validate_plugin_state_keys(dict(delta), state.__class__) if delta else {}
@@ -395,66 +281,7 @@ async def _run_agent_code_in_subprocess(
         if payload is not None and payload.findings
         else []
     )
-    return outcome.result, plugin_state_update, exec_ms, findings
-
-
-async def _run_agent_code_in_thread(
-    state: _state.AgentState,
-    ctx: AvaContext,
-    agent_id: int,
-    code: str,
-    chunk_publisher: ExecOutputChunkPublisher,
-) -> tuple[_ExecResult, dict[str, Any], int, list[SecurityFindingEntry]]:
-    """Run the agent's code in the worker thread under the plugin state slot —
-    the pre-subprocess backend, kept as the instant-rollback valve.
-
-    Sets `ava.state` / `ava.state_update` around the run (try/finally reset),
-    races the run against the durable-interrupt cancel_event with the
-    graph-level node timeout as an outer shield, and validates the plugin's
-    state_update keys. Findings stay in this process's buffer — the node
-    drains them via `take_findings()`.
-    """
-    # ── plugin <-> framework state slot injection ──────────────────────────
-    #
-    # Worker thread and the LangGraph node share one process + `sys.modules['ava']`:
-    # the node sets `ava.state` (model_copy(deep=True) — plugin edits never pollute
-    # real state) and `ava.state_update` (merged into Command(update=...) at turn
-    # end via the LangGraph reducer). try/finally guards reset both (including the
-    # model_copy exception path), else an exec exception would leave the next turn
-    # with a stale snapshot — breaking the "ava.state is None outside exec turn"
-    # contract. Re-evaluate this module-level slot model if a parallel branch
-    # (LangGraph fan-out) is ever introduced; the cycling topology has no race.
-    plugin_state_update: dict[str, Any] = {}
-    try:
-        ava.state = state.model_copy(deep=True)
-        ava.state_update = {}
-        exec_started = time.monotonic()
-        async with subscribe_interrupt(ctx.ops_pool, agent_id) as cancel_event:
-            outcome = await _exec_with_node_shield(
-                _exec_with_cancel_event(
-                    code,
-                    str(agent_id),
-                    cancel_event,
-                    chunk_publisher=chunk_publisher,
-                    backend="thread",
-                ),
-                agent_id,
-            )
-        # Wall-clock surfaced on the code_output item ("ran in 1.3s"); cancel /
-        # timeout still report the honest time-before-stop.
-        exec_ms = round((time.monotonic() - exec_started) * 1000)
-        # fail-fast: plugin abuse in the worker thread (setting to None / list / str)
-        # blows up immediately; silent `or {}` fallback would swallow all of the
-        # plugin's deltas this round (CLAUDE.md forbids the `... or default` pattern).
-        if not isinstance(ava.state_update, dict):
-            raise TypeError(
-                f"plugin tampered with ava.state_update: expected dict, got {type(ava.state_update).__name__}"
-            )
-        plugin_state_update = _validate_plugin_state_keys(dict(ava.state_update), state.__class__)
-    finally:
-        ava.state = None
-        ava.state_update = None
-    return outcome.result, plugin_state_update, exec_ms, []
+    return result, plugin_state_update, exec_ms, findings
 
 
 def _dispatch_exec_result(
@@ -463,7 +290,7 @@ def _dispatch_exec_result(
     """Map the `_ExecResult` sum type to (halted, result_text, exit_code_for_msg).
 
     Lifecycle priority (lifecycle always wins the cancel/timeout race) is
-    implemented at the construction site in `_run_in_thread`; the match directly
+    implemented at the construction site in `_construct_exec_result` (`_exec_result.py`); the match directly
     consumes the sum type. Exhaustiveness: pyright strict + match narrowing make
     a forgotten variant a static error (replaces the hand-written fallthrough).
     """
@@ -529,8 +356,9 @@ def _dispatch_exec_result(
             # bugs invisible in the agent view stay diagnosable). INFO +
             # event=exec_failed — trial-and-error is the normal dev loop, not
             # an operator alert (metrics still aggregate by event name).
-            # A child-side crash ships its formatted traceback in the envelope
-            # (`child_traceback`); the in-process path formats from `exc`.
+            # The child ships its formatted traceback in the envelope
+            # (`child_traceback`); parent-side construction failures (spawn
+            # error, unserializable state) format from `exc`.
             halted = False
             result_text = wrap_code_output(output, stream_cap=stream_cap)
             exit_code_for_msg = 0
@@ -599,8 +427,7 @@ async def _exec_node_impl(
     plugin_messages = plugin_state_update.pop("messages", None)
     # Findings drained from this process's own buffer (scans outside the exec
     # turn — inbound injection checks — run in the parent) first, then the
-    # child-drained ones from the result envelope (subprocess backend; empty
-    # for the thread backend, whose exec ran in this process's buffer).
+    # child-drained ones from the result envelope.
     findings = take_findings() + envelope_findings
 
     # Compact path (_SystemHalt): write nothing back — claim REMOVE_ALLs the

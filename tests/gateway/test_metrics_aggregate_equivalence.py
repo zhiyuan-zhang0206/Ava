@@ -204,7 +204,6 @@ def test_equivalence_exec_failure_variants() -> None:
     _add(fake, event="exec_failed", agent_id=aid, payload={"body": "t", "exc_type": "ValueError"})
     _add(fake, event="exec_failed", agent_id=aid, payload={"body": "t"})  # no exc_type
     _add(fake, event="exec_timeout", agent_id=aid, payload={"body": "t"})
-    _add(fake, event="exec_thread_stuck", agent_id=aid, payload={"body": "t"})
     _add(fake, event="exec_cancelled", agent_id=aid, payload={"body": "t"})
     _run_aggregate(fake)
 
@@ -326,7 +325,7 @@ def _random_payload(rng: random.Random, event_name: str) -> dict[str, Any]:
         return {"fixes": rng.choice(_FIXES)}
     if event_name == "exec":
         return {"body": "o" * rng.randint(0, 200), "ok": True}
-    if event_name in ("exec_failed", "exec_timeout", "exec_thread_stuck", "exec_cancelled"):
+    if event_name in ("exec_failed", "exec_timeout", "exec_cancelled"):
         p: dict[str, Any] = {"body": "t" * rng.randint(0, 100)}
         if event_name == "exec_failed":
             p["exc_type"] = rng.choice(_EXC)
@@ -374,7 +373,6 @@ def test_equivalence_randomized() -> None:
             "agent_spawned",
             "exec_failed",
             "exec_timeout",
-            "exec_thread_stuck",
             "exec_cancelled",
         ],
         *_LIFECYCLE,

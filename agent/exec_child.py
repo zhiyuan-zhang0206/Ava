@@ -218,7 +218,7 @@ def _take_result_state_update(payload: ResultPayload, *, state_injected: bool) -
 
     A tampered slot (agent set ava.state_update to a non-dict) is reported as
     an error string rather than a delta; the parent raises the same TypeError
-    the in-process path raised. With a snapshot injected, even None is
+    the old in-process path raised. With a snapshot injected, even None is
     tampering — the slot was initialized to {}; without one (container/eval
     mode) None is the uninitialized default and carries no delta.
     """
@@ -257,7 +257,7 @@ def _run_code(code: str, payload: ResultPayload) -> None:
     try:
         # `recording()` arms SDK-usage metering for exactly this agent-authored
         # code, so framework-internal ava.* calls are never counted (same
-        # contract as the in-process worker had).
+        # contract as the old in-process worker had).
         with sdk_telemetry.recording():
             exec(compile(code, "<agent_code>", "exec"), fresh_globals)
     except BaseException as exc:

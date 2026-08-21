@@ -769,13 +769,13 @@ def test_inspect_turn_stats(db_conn: psycopg.Connection, fake_loki: _FakeLoki) -
 
 
 def test_inspect_exec_ok_fail_split(db_conn: psycopg.Connection, fake_loki: _FakeLoki) -> None:
-    """exec_ok = plain 'exec'; exec_failed = exec_failed / exec_thread_stuck /
-    exec(timeout). Non-exec events like 'code' not counted."""
+    """exec_ok = plain 'exec'; exec_failed = exec_failed / exec(timeout) /
+    exec_cancelled (the prefix regex also counts legacy exec_thread_stuck rows
+    for historical continuity). Non-exec events like 'code' not counted."""
     aid = _insert_agent(db_conn)
     fake_loki.add(event="exec", agent_id=aid)
     fake_loki.add(event="exec", agent_id=aid)
     fake_loki.add(event="exec_failed", agent_id=aid)
-    fake_loki.add(event="exec_thread_stuck", agent_id=aid)
     fake_loki.add(event="exec(timeout)", agent_id=aid)
     # non-exec event — must not pollute counts
     fake_loki.add(event="code", agent_id=aid)
@@ -784,7 +784,7 @@ def test_inspect_exec_ok_fail_split(db_conn: psycopg.Connection, fake_loki: _Fak
         body = client.get(f"/api/agents/{aid}/inspect").json()
     stats = body["stats"]
     assert stats["exec_ok"] == 2
-    assert stats["exec_failed"] == 3
+    assert stats["exec_failed"] == 2
 
 
 def test_inspect_empty_agent_zeros(db_conn: psycopg.Connection) -> None:

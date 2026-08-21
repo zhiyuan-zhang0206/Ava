@@ -99,7 +99,7 @@ class ResultPayload:
     `state_update` carries the raw `ava.state_update` delta (typed-blob
     decoded); `state_update_error` is set when the agent tampered with the
     slot (left it a non-dict) — the parent then raises the same TypeError the
-    in-process path raised. `findings` are plain dicts of
+    old in-process path raised. `findings` are plain dicts of
     `ava.security.SecurityFindingEntry`."""
 
     kind: ResultKind

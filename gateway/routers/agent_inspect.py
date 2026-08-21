@@ -65,8 +65,10 @@ def _agent_stats(agent_id: int, from_: datetime | None, to: datetime | None) -> 
     the Loki payload-attribute aggregates over every turn's
     `duration_seconds` (client-side percentile, `percentile_cont` semantics).
     exec failure is every exec outcome other than plain `exec`
-    (exec_failed / exec_thread_stuck / exec(timeout)) — same exec-ok /
-    exec-failed split as the metrics report.
+    (exec_failed / exec(timeout) / exec_cancelled; the prefix regex still
+    counts legacy exec_thread_stuck rows so 90d historical aggregation
+    stays continuous even though the thread backend no longer emits them) —
+    same exec-ok / exec-failed split as the metrics report.
     """
     common: _agent_cost._AggCommon = {
         "event_names": ["turn_end"],

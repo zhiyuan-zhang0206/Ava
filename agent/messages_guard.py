@@ -21,8 +21,8 @@ LangGraph invokes the channel reducer once per write at commit time with
 ``(checkpoint_value, delta)`` — so every persisted mutation — nodes, hooks,
 plugins, the boot-pass crash repair, compaction — funnels through the guard
 at the single choke point. The plugin state handle routes its working-copy
-merges through the same guard, so an in-turn plugin violation fails in the
-exec thread instead of only at commit.
+merges through the same guard, so an in-turn plugin violation fails inside
+execute_code instead of only at commit.
 
 Validation model (per the ruling):
 

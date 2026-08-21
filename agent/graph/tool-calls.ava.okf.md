@@ -20,11 +20,10 @@ Ava agent's tool invocation and code execution layer—including normalization o
 - **`code` parameter extraction** in two strictness levels sharing the same type contract: `code_from_args(args, source=)` strict version (raises if `args` is not dict or `code` is not str), used by the exec path (merge) and log lines; `first_tool_call_code(tool_calls)` loose version (returns `""` if not obtainable), used by before_llm/before_exec hooks for "no code, so skip" checks, avoiding repeated hand-written `tool_calls[0]["args"].get("code")`
 
 ### Code Execution (`_exec.py`)
-- **Worker thread**: `_run_in_thread` starts a worker thread in the main process to run `exec(compile(code))`; the main task polls the thread's liveness/cancel/deadline every 50ms
-- **Cancel/timeout**: Injects `KeyboardInterrupt` / `TimeoutError` into the thread via `ctypes.pythonapi.PyThreadState_SetAsyncExc` (CPython C API, taking effect at the next Python bytecode boundary)
-- **Lifecycle exits**: Agent code raises `AgentTermination` / `AgentRestart` / `_SystemHalt` → exec_node recognizes and writes halted + marker
-- **Streaming output**: stdout/stderr redirected to `StreamingTextIO`, main task pushes to Redis every 50ms (frontend streaming display), preserving timing order
-- **Result type**: `_exec_with_cancel_event` returns a sum type (`_ExecDone | _ExecCancelled | _ExecTimedOut | _ExecLifecycle | _ExecCrashed`), dispatched by exec_node via `match`
+- **Disposable subprocess**: `_run_in_subprocess` spawns one child (`python -m agent.exec_child`) per exec; the parent polls liveness/cancel/deadline every 50ms and escalates SIGINT (cancel) / SIGTERM (timeout) → SIGKILL(-pgid) after a grace period
+- **Lifecycle exits**: Agent code raises `AgentTermination` / `AgentRestart` / `_SystemHalt` → the child reports the exception name in the result envelope → exec_node recognizes and writes halted + marker
+- **Streaming output**: the child writes stdout/stderr line-buffered onto the pipe; the parent drains into `StreamingTextIO` and pushes to Redis every 50ms (frontend streaming display), preserving timing order
+- **Result type**: `_run_in_subprocess` returns the sum type (`_ExecDone | _ExecCancelled | _ExecTimedOut | _ExecLifecycle | _ExecCrashed`) plus the raw child envelope, dispatched by exec_node via `match`
 
 ## Key Dependencies
 
@@ -36,10 +35,10 @@ Ava agent's tool invocation and code execution layer—including normalization o
 
 - `agent/graph/_tool_calls.py:merge_multiple_execute_code_tool_calls()` — Multiple tool_call normalization
 - `agent/graph/_exec.py:exec_node()` — Execution node
-- `agent/graph/_exec.py:_run_in_thread()` — Worker thread launch
+- `agent/graph/_exec.py:_run_agent_code()` — Exec run (one disposable child)
 
 ## Notes
 
-- When pure native code is stuck, the thread does not respond to ctypes cancellation—set `daemon=True`, and the OS cleans up on main process exit
-- **Agent code must explicitly `import ava`**: `fresh_globals` no longer pre-sets `ava` (declared in `execute_code` docstring). The framework's main process already imported `ava` at startup; worker threads importing `ava.X` hit the frozen snapshot in `sys.modules`—changes to ava/*.py on disk do not affect running copies
-- Design choice: subprocess → in-process thread to reduce process overhead
+- When pure native code is stuck, the child does not respond to SIGINT/SIGTERM—after the grace period the parent SIGKILLs the whole process group (no orphan survives)
+- **Agent code must explicitly `import ava`**: `fresh_globals` no longer pre-sets `ava` (declared in `execute_code` docstring). The child is a fresh process that imports ava from disk — changes to ava/*.py on disk DO affect the child (unlike the old in-process thread's frozen `sys.modules` snapshot)
+- Design choice: in-process thread → subprocess, so a stuck native call is killable without touching the agent process (issue #184)

@@ -47,7 +47,8 @@ class AgentStats(BaseModel):
     `turn_ok` counts `turn_end` events with ok=true (abnormal/cancelled turns
     excluded); the p50/p90/max are over every turn's `duration_seconds`.
     `exec_ok` is plain `exec` events; `exec_failed` is every other exec outcome
-    (exec_failed / exec_thread_stuck / exec(timeout))."""
+    (exec_failed / exec(timeout) / exec_cancelled; the prefix regex also
+    counts legacy exec_thread_stuck rows for historical continuity)."""
 
     model_config = ConfigDict(frozen=True)
 

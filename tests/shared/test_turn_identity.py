@@ -2,7 +2,7 @@
 `ava._boot` — Phase 1 of future/infra/agent-runner-as-server.md.
 
 Locks the resolution order `turn contextvar > process slot > AVA_AGENT_ID env`
-at every identity read, the exec-worker thread context handoff, and the
+at every identity read, the copied-context handoff to worker threads, and the
 process-mode invariants (nothing bound => behavior identical to today).
 """
 

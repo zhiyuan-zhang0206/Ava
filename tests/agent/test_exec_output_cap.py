@@ -10,7 +10,8 @@ length survives into the banner and the instrumentation log line, and the
 overflow archive stops claiming to hold the full output once the middle is gone.
 
 The other half of the contract — that the run is truncated, never killed — is
-pinned end-to-end through `_run_in_thread`.
+pinned end-to-end through `_run_in_subprocess` (the budget lives in the
+parent's accumulator; the child ships raw chunks).
 """
 
 from __future__ import annotations
@@ -236,14 +237,18 @@ async def test_runaway_print_loop_is_truncated_and_the_run_completes(
     normal `_ExecDone` with bounded output and an explicit marker, so the model
     stays in the loop and can self-correct. The exec result taxonomy is
     unchanged — no new failure kind."""
-    from agent.graph._exec import _ExecDone, _run_in_thread
+    from agent.graph._exec import _ExecDone
+    from agent.graph._exec_subprocess import _run_in_subprocess
 
     budget = 5000
+    # The accumulation budget lives in the PARENT's StreamingTextIO — the
+    # child ships raw chunks and the parent accumulates/truncates. So the
+    # in-process monkeypatch still reaches it.
     monkeypatch.setattr("shared.config.settings.sandbox.exec_output_accumulation_max_chars", budget)
 
-    result = await _run_in_thread(
+    result, _payload = await _run_in_subprocess(
         code="for i in range(20000): print('spam', i)\nprint('DONE_MARKER')",
-        agent_id="1",
+        agent_id=1,
         cancel_event=asyncio.Event(),
         timeout=60.0,
         chunk_publisher=None,

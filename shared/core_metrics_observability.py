@@ -33,10 +33,11 @@ Data provenance (verified against the live prod stream, 2026-08-04):
   in_total / out_total / cache_read / reasoning / latency_ms / cost_usd.
 - turn_end ~41.4k rows/7d: attributes ok ('true'/'false') + duration_seconds;
   ok=true 166.7k / ok=false 4.9k all-time (~97%).
-- exec 36.5k ok / 1235 exec_failed / 29 exec_thread_stuck /
-  1 exec_node_timeout per 7d; failure event names emitted as exec_failed /
-  exec(timeout) / exec(cancelled) / exec_thread_stuck / exec_node_timeout
-  (legacy parenthesized spellings coexist in the stream — both counted).
+- exec 36.5k ok / 1235 exec_failed / 1 exec_node_timeout per 7d;
+  failure event names emitted as exec_failed / exec(timeout) /
+  exec(cancelled) / exec_node_timeout (legacy parenthesized spellings
+  coexist in the stream — both counted; exec_thread_stuck stopped being
+  emitted when the thread backend was removed, PR3).
 - syntax_fix 9.8k rows/7d, category=telemetry (final caliber, 2026-08-05,
   tracker #762 — pre-caliber rows were backfilled by the accompanying migration);
   attributes.fixes is a comma list,
@@ -245,7 +246,7 @@ core_metrics.register_core_metric(
         description=(
             "Exec outcome breakdown per bucket: ok = event_name='exec'; "
             "failures split by event_name (exec_failed / exec(timeout) / "
-            "exec(cancelled) / exec_thread_stuck / exec_node_timeout, legacy "
+            "exec(cancelled) / exec_node_timeout, legacy "
             "parenthesized spellings counted in; unknown exec* events fall "
             "into other). event_name='exec', category='telemetry'."
         ),
@@ -268,7 +269,6 @@ core_metrics.register_core_metric(
                 'category={category} | event_name=~"exec_cancelled|exec[(]cancelled[)]"',
                 "$__interval",
             ),
-            _count('category={category} | event_name="exec_thread_stuck"', "$__interval"),
             _count('category={category} | event_name="exec_node_timeout"', "$__interval"),
             # other: every exec* event outside the known spellings (the
             # regex is anchored, so "exec.*" is a prefix match).
@@ -276,7 +276,7 @@ core_metrics.register_core_metric(
                 'category={category} | event_name=~"exec.*" | '
                 'event_name!~"exec|exec_failed|exec[(]failed[)]|exec_timeout|'
                 "exec[(]timeout[)]|exec_cancelled|exec[(]cancelled[)]|"
-                'exec_thread_stuck|exec_node_timeout"',
+                'exec_node_timeout"',
                 "$__interval",
             ),
         ],
@@ -285,7 +285,6 @@ core_metrics.register_core_metric(
             "failed",
             "timeout",
             "cancelled",
-            "thread_stuck",
             "node_timeout",
             "other",
         ],
