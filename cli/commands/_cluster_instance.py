@@ -294,7 +294,11 @@ def _start_pg(pg_port: int, cluster_secret: str) -> int:
             return 1
         print("    pg_hba.conf reloaded into the running server")
         return 0
-    if not _wait_for_reachable_bind():
+    # Same gate as the redis/pgbouncer paths (task #1303, PR #47 P2): a no-secret
+    # cluster binds loopback alone (`_bind_addrs`), so a stray ambient
+    # AVA_MACHINE_HOST must not hold a warm start hostage for a bind that never
+    # happens. Wait only when this cluster actually binds the reachable address.
+    if _bind_addrs(cluster_secret) != ["127.0.0.1"] and not _wait_for_reachable_bind():
         print(
             f"  ✗ reachable bind address {reachable_host()!r} is not assigned to any "
             f"local interface after {int(_BIND_WAIT_TIMEOUT_S)}s — postgres cannot bind "

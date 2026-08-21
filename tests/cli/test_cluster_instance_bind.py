@@ -231,3 +231,82 @@ def test_start_redis_waits_for_reachable_bind_before_starting(
     assert _ci._start_redis(6380, "s3cr3t", "ava") == 0
     assert waited == [True]
     assert started != []
+
+
+# ─── task #1303: postgres gets the same secret-gated reachable-bind wait ──────
+
+
+def _wire_pg_start(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: object,
+    *,
+    running: bool = False,
+) -> list[list[str]]:
+    """Common mocks for _start_pg: a not-running pg on a scratch data dir, with
+    subprocess.run captured."""
+    monkeypatch.setattr(_ci, "_ensure_pg_data", lambda: tmp_path)
+    monkeypatch.setattr(_ci, "_pg_running", lambda _port: running)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(_ci, "_pg_socket_dir", lambda: tmp_path)
+    calls: list[list[str]] = []
+
+    def _run(cmd: list[str], **_: object) -> object:
+        calls.append(cmd)
+        return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+
+    monkeypatch.setattr(_ci.subprocess, "run", _run)
+    return calls
+
+
+def test_start_pg_loopback_only_bind_never_waits(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: object
+) -> None:
+    """A no-secret cluster binds loopback only — the wait is never consulted and
+    the start proceeds (a stray AVA_MACHINE_HOST must not hold a warm start)."""
+    monkeypatch.setattr(_ci, "_bind_addrs", lambda _secret: ["127.0.0.1"])  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(
+        _ci,
+        "_wait_for_reachable_bind",
+        lambda: pytest.fail("loopback-only bind must never wait"),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    )
+    calls = _wire_pg_start(monkeypatch, tmp_path)
+
+    assert _ci._start_pg(5433, "") == 0
+    assert calls != [], "the start must proceed without waiting"
+
+
+def test_start_pg_waits_and_fails_fast_on_timeout(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: object, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Secret-set cluster, reachable address never assigned: postgres must not be
+    launched into a guaranteed bind failure — fail fast with an explicit error."""
+    monkeypatch.setattr(_ci, "_bind_addrs", lambda _secret: ["127.0.0.1", "100.64.0.5"])  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(_ci, "_wait_for_reachable_bind", lambda: False)
+    monkeypatch.setattr(_ci, "reachable_host", lambda: "100.64.0.5")
+    calls = _wire_pg_start(monkeypatch, tmp_path)
+
+    rc = _ci._start_pg(5433, "s3cr3t")
+
+    assert rc == 1
+    assert calls == [], "postgres must not be launched when the bind address is absent"
+    err = capsys.readouterr().err
+    assert "not assigned to any local interface" in err
+    assert "private network" in err
+
+
+def test_start_pg_waits_for_reachable_bind_before_starting(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: object
+) -> None:
+    """Secret-set cluster, address appears late: the wait resolves and the start
+    proceeds — the boot-race case the wait exists for."""
+    waited: list[bool] = []
+    monkeypatch.setattr(_ci, "_bind_addrs", lambda _secret: ["127.0.0.1", "100.64.0.5"])  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(
+        _ci,
+        "_wait_for_reachable_bind",
+        lambda: waited.append(True) or True,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    )
+    calls = _wire_pg_start(monkeypatch, tmp_path)
+
+    assert _ci._start_pg(5433, "s3cr3t") == 0
+    assert waited == [True]
+    assert calls != []
