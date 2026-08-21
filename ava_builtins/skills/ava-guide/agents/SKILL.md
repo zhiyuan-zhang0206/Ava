@@ -27,14 +27,16 @@ Agent-to-agent communication: `ava.agents.send_message(agent_id, content)` —
 pure INSERT, no status check, no wait, no delivery receipt. If the target is
 `terminated`, it is auto-resurrected to handle the message. Use
 `get_neighbors` to see which agents are most closely tied to you (ties form on
-spawn/fork/resurrect/send_message and decay over time).
+spawn/fork/resurrect/send_message and decay over time), and `get_ancestors`
+to see the spawn chain above an agent (who spawned whom, nearest first —
+the responsibility-attribution read).
 
 Each agent can have a **label** (`ava.self.set_label` / `get_label`) — a
 human-readable role/name that persists once set.
 
 SDK reference: `ava.agents` (`spawn` / `terminate` / `restart` / `resurrect` /
-`send_message` / `list_agents` / `list_machines` / `get_neighbors` / `commands` /
-`get_last_message`).
+`send_message` / `list_agents` / `list_machines` / `get_neighbors` /
+`get_ancestors` / `commands` / `get_last_message`).
 
 ## Command（user-level command）
 

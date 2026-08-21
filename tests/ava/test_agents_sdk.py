@@ -307,13 +307,10 @@ class TestSendMessage:
 
 
 class TestGetNeighbors:
-    (
-        """SDK get_neighbors maps the gateway rows to Neighbor dataclasses (status to
+    """SDK get_neighbors maps the gateway rows to Neighbor dataclasses (status to
     the AgentStatus enum). The graph behaviors (Loki live tail + archive stitch)
     are covered in tests/gateway/test_agent_neighbors.py; here we verify the
     wrapper + wire path only, seeding ties through the FakeLoki live tail."""
-        ""
-    )
 
     @staticmethod
     def _seed(db: psycopg.Connection, *, status: str = "running") -> int:
@@ -378,6 +375,68 @@ class TestGetNeighbors:
     def test_nonexistent_raises(self, db_conn: psycopg.Connection) -> None:
         with pytest.raises(AgentNotFound):
             ava.agents.get_neighbors(9999)
+
+
+class TestGetAncestors:
+    """SDK get_ancestors maps the gateway `ancestors` rows to Neighbor
+    dataclasses. The chain walk itself is covered in
+    tests/gateway/test_agent_neighbors.py; here we verify the wrapper + wire
+    path only, seeding the spawn tie through the FakeLoki live tail."""
+
+    @staticmethod
+    def _seed(db: psycopg.Connection, *, status: str = "running") -> int:
+        with db.cursor() as cur:
+            cur.execute("INSERT INTO agents DEFAULT VALUES RETURNING id")
+            row = cur.fetchone()
+            assert row is not None
+            aid = row[0]
+            cur.execute(
+                "INSERT INTO agents_meta (id, spawner, status) VALUES (%s, 'test', %s)",
+                (aid, status),
+            )
+        db.commit()
+        return aid
+
+    @staticmethod
+    def _spawn(fake: FakeLoki, child: int, parent: int) -> None:
+        # Event direction: agent_id = the new agent, target_agent_id = spawner.
+        fake.add(
+            event="spawn",
+            agent_id=child,
+            target_agent_id=parent,
+            category="audit",
+            ts_offset_hours=0.0,
+        )
+
+    def test_returns_spawn_chain_as_neighbor_dataclasses(
+        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        fake = FakeLoki()
+        monkeypatch.setattr(loki_events, "query_events", fake.query_events)
+        a = self._seed(db_conn, status="terminated")
+        b = self._seed(db_conn)
+        self._spawn(fake, b, a)
+
+        rows = ava.agents.get_ancestors(b)
+
+        assert all(isinstance(r, ava.agents.Neighbor) for r in rows)
+        assert [r.agent_id for r in rows] == [a]  # nearest ancestor first
+        assert rows[0].depth == 1  # hops UP from the queried agent
+        assert rows[0].status is AgentStatus.TERMINATED  # terminated parent included
+        assert f"#{a}" in str(rows[0]) and "depth=1" in str(rows[0])
+
+    def test_no_spawner_returns_empty(
+        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        fake = FakeLoki()
+        monkeypatch.setattr(loki_events, "query_events", fake.query_events)
+        a = self._seed(db_conn)
+
+        assert ava.agents.get_ancestors(a) == []
+
+    def test_nonexistent_raises(self, db_conn: psycopg.Connection) -> None:
+        with pytest.raises(AgentNotFound):
+            ava.agents.get_ancestors(9999)
 
 
 class TestHibernationProjection:

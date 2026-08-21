@@ -37,6 +37,7 @@ __all_for_ava__ = [
     "ResurrectResult",
     "TerminateResult",
     "commands",
+    "get_ancestors",
     "get_last_message",
     "get_neighbors",
     "get_status",
@@ -105,8 +106,9 @@ class AgentRow:
 
 @dataclass
 class Neighbor:
-    """`depth`: hops away (1 = direct); `score`: tie strength. Terminated
-    agents can still be neighbors."""
+    """`depth`: hops from the queried agent (1 = direct) — out along ties for
+    neighbors, up the spawn chain for ancestors; `score`: tie strength.
+    Terminated agents are included."""
 
     agent_id: int
     label: str | None
@@ -142,7 +144,8 @@ def get_neighbors(agent_id: int, depth: int = 1, limit: int = 20) -> list[Neighb
     """Rank the agents most strongly tied to `agent_id`, strongest first.
 
     Ties form on spawn, fork, resurrect, or send_message and fade with time;
-    `depth` is how many hops out to look.
+    `depth` is how many hops out to look. The chain ABOVE an agent (who
+    spawned whom) is a separate read: `get_ancestors`.
     """
     return [
         Neighbor(
@@ -153,6 +156,27 @@ def get_neighbors(agent_id: int, depth: int = 1, limit: int = 20) -> list[Neighb
             score=n["score"],
         )
         for n in _client.get_neighbors(agent_id, depth=depth, limit=limit)
+    ]
+
+
+def get_ancestors(agent_id: int) -> list[Neighbor]:
+    """Return the spawn/fork chain above `agent_id`, nearest ancestor first.
+
+    Each row is a `Neighbor` with `depth` = hops UP (1 = the agent that
+    directly spawned the queried agent) and `score` = the lineage tie
+    strength. The walk goes to the top of the chain. Message ties never form
+    ancestors, and an agent spawned by the user (or with no recorded spawn)
+    returns [].
+    """
+    return [
+        Neighbor(
+            agent_id=n["agent_id"],
+            label=n.get("label"),
+            status=AgentStatus(n["status"]),
+            depth=n["depth"],
+            score=n["score"],
+        )
+        for n in _client.get_ancestors(agent_id)
     ]
 
 

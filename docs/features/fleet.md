@@ -10,7 +10,9 @@ all peers, no central scheduler.
   strands it. A goal-watcher wakes a supervisor the moment a worker stalls; a
   terminated agent auto-resurrects to handle an incoming message.
 - **Findable** — ties form on spawn / fork / message and fade with time;
-  `get_neighbors` ranks who to talk to by tie strength, not by rank.
+  `get_neighbors` ranks who to talk to by tie strength, not by rank;
+  `get_ancestors` walks the spawn chain above an agent, so responsibility
+  attribution (who spawned whom) stays legible even as ties shuffle.
 
 ## Human interface — the notification queue
 
@@ -44,6 +46,8 @@ worker = ava.agents.spawn(
 ava.agents.send_message(worker, "Skip the legacy SAML path — out of scope.")
 for n in ava.agents.get_neighbors(ava.self.AGENT_ID, depth=1):
     print(n)   # #id <label> <status> — strongest ties first
+for a in ava.agents.get_ancestors(ava.self.AGENT_ID):
+    print(a)   # #id <label> <status> — spawn chain upward, nearest first
 ```
 
 ## Design decisions

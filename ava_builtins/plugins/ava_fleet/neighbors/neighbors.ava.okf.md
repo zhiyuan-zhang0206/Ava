@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Neighbors — Inter-Agent Communication and Discovery
-description: "Methods in ava.agents for inter-agent communication and discovery: get_neighbors discovers peers by relationship strength, send_message direct messaging, get_last_message reads output, list_agents/list_machines lists agents and machines."
+description: "Methods in ava.agents for inter-agent communication and discovery: get_neighbors discovers peers by relationship strength, get_ancestors walks the spawn chain above an agent, send_message direct messaging, get_last_message reads output, list_agents/list_machines lists agents and machines."
 tags:
 - fleet
 - agents

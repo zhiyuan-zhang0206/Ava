@@ -320,4 +320,141 @@ def test_archive_lineage_alone_forms_a_tie(
     assert rows[0]["score"] == pytest.approx(math.log1p(1), abs=1e-3)  # pyright: ignore[reportUnknownMemberType]
 
 
+# ── ancestors: the directed spawn/fork chain above the queried agent ──────
+
+
+def _ancestors(client: TestClient, agent_id: int, **params: int) -> list[dict]:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    resp = client.get(f"/api/agents/{agent_id}/neighbors", params=params)
+    assert resp.status_code == 200, resp.text
+    return resp.json()["ancestors"]
+
+
+def test_ancestors_spawn_chain_nearest_first_walks_to_top(
+    db_conn: psycopg.Connection, fake_loki: FakeLoki
+) -> None:
+    """a spawns b, b spawns c: c's ancestors are [b, a] — nearest first, walked
+    to the top. The event direction is the child's row: agent_id = the NEW
+    agent, target_agent_id = its spawner, so b's row points at a."""
+    a = _seed_agent(db_conn)
+    b = _seed_agent(db_conn)
+    c = _seed_agent(db_conn)
+    _event(fake_loki, event_type="spawn", agent_id=b, target=a)
+    _event(fake_loki, event_type="spawn", agent_id=c, target=b)
+
+    with TestClient(app) as client:
+        rows = _ancestors(client, c)  # pyright: ignore[reportUnknownVariableType]
+        # the parent is not an ancestor of itself — direction is read correctly
+        rows_b = _ancestors(client, b)  # pyright: ignore[reportUnknownVariableType]
+
+    assert [r["agent_id"] for r in rows] == [b, a]  # pyright: ignore[reportUnknownVariableType]
+    assert [r["depth"] for r in rows] == [1, 2]  # pyright: ignore[reportUnknownVariableType]
+    # each hop's edge is the permanent lineage weight, gamma-discounted per hop
+    assert rows[0]["score"] == pytest.approx(math.log1p(1), abs=1e-3)  # pyright: ignore[reportUnknownMemberType]
+    assert rows[1]["score"] < rows[0]["score"]  # pyright: ignore[reportUnknownMemberType]
+    assert [r["agent_id"] for r in rows_b] == [a]  # pyright: ignore[reportUnknownVariableType]
+
+
+def test_ancestors_ignore_neighbor_depth_param(
+    db_conn: psycopg.Connection, fake_loki: FakeLoki
+) -> None:
+    """`depth` bounds the neighbor walk only; the ancestor chain always walks
+    to the top — responsibility attribution needs the whole chain."""
+    a = _seed_agent(db_conn)
+    b = _seed_agent(db_conn)
+    c = _seed_agent(db_conn)
+    _event(fake_loki, event_type="spawn", agent_id=b, target=a)
+    _event(fake_loki, event_type="spawn", agent_id=c, target=b)
+
+    with TestClient(app) as client:
+        rows = _ancestors(client, c, depth=1)  # pyright: ignore[reportUnknownVariableType]
+
+    assert [r["agent_id"] for r in rows] == [b, a]  # pyright: ignore[reportUnknownVariableType]
+
+
+def test_ancestors_fork_forms_a_parent(db_conn: psycopg.Connection, fake_loki: FakeLoki) -> None:
+    a = _seed_agent(db_conn)
+    b = _seed_agent(db_conn)
+    _event(fake_loki, event_type="fork", agent_id=b, target=a)
+
+    with TestClient(app) as client:
+        rows = _ancestors(client, b)  # pyright: ignore[reportUnknownVariableType]
+
+    assert [r["agent_id"] for r in rows] == [a]  # pyright: ignore[reportUnknownVariableType]
+
+
+def test_ancestors_message_ties_and_resurrect_never_parent(
+    db_conn: psycopg.Connection, fake_loki: FakeLoki
+) -> None:
+    """Only creation events carry parentage: a message is a peer tie and a
+    resurrect wakes an existing agent — neither makes the other an ancestor."""
+    a = _seed_agent(db_conn)
+    b = _seed_agent(db_conn)
+    _event(fake_loki, event_type="send_message", agent_id=b, target=a)
+    _event(fake_loki, event_type="resurrect", agent_id=b, target=a)
+
+    with TestClient(app) as client:
+        assert _ancestors(client, a) == []
+
+
+def test_ancestors_no_spawner_returns_empty(
+    db_conn: psycopg.Connection, fake_loki: FakeLoki
+) -> None:
+    a = _seed_agent(db_conn)
+    with TestClient(app) as client:
+        assert _ancestors(client, a) == []
+
+
+def test_ancestors_terminated_ancestor_included_with_status(
+    db_conn: psycopg.Connection, fake_loki: FakeLoki
+) -> None:
+    """A terminated parent stays in the chain (same inclusion rule as
+    neighbors) and carries its status."""
+    a = _seed_agent(db_conn, status="terminated")
+    b = _seed_agent(db_conn)
+    _event(fake_loki, event_type="spawn", agent_id=b, target=a)
+
+    with TestClient(app) as client:
+        rows = _ancestors(client, b)  # pyright: ignore[reportUnknownVariableType]
+
+    assert len(rows) == 1  # pyright: ignore[reportUnknownArgumentType]
+    assert rows[0]["agent_id"] == a
+    assert rows[0]["status"] == "terminated"
+
+
+def test_ancestors_archive_lineage_read_directionally(
+    db_conn: psycopg.Connection, fake_loki: FakeLoki
+) -> None:
+    """A pre-cutover spawn row lives in the frozen archive only. The ancestor
+    walk reads it directionally (child = agent_id, parent = target) — the
+    neighbor merge's LEAST/GREATEST grouping deliberately discards that."""
+    a = _seed_agent(db_conn)
+    b = _seed_agent(db_conn)
+    _archive_boundary_anchor(db_conn)
+    _archive_event(db_conn, event_type="spawn", agent_id=b, target=a, age_hours=2.0)
+
+    with TestClient(app) as client:
+        rows = _ancestors(client, b)  # pyright: ignore[reportUnknownVariableType]
+
+    assert [r["agent_id"] for r in rows] == [a]  # pyright: ignore[reportUnknownVariableType]
+    assert rows[0]["score"] == pytest.approx(math.log1p(1), abs=1e-3)  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_ancestors_archive_and_loki_merge_counts(
+    db_conn: psycopg.Connection, fake_loki: FakeLoki
+) -> None:
+    """One archive spawn + one live spawn on the same directed pair weigh
+    LN(1+2), exactly like the neighbor merge (counts add before the LN)."""
+    a = _seed_agent(db_conn)
+    b = _seed_agent(db_conn)
+    _archive_boundary_anchor(db_conn)
+    _archive_event(db_conn, event_type="spawn", agent_id=b, target=a, age_hours=1.0)
+    _event(fake_loki, event_type="spawn", agent_id=b, target=a, days_ago=0.0)
+
+    with TestClient(app) as client:
+        rows = _ancestors(client, b)  # pyright: ignore[reportUnknownVariableType]
+
+    assert [r["agent_id"] for r in rows] == [a]  # pyright: ignore[reportUnknownVariableType]
+    assert rows[0]["score"] == pytest.approx(math.log1p(2), abs=1e-3)  # pyright: ignore[reportUnknownMemberType]
+
+
 # ── migration round-trip: the down migration must actually execute ────────

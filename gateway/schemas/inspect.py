@@ -201,16 +201,19 @@ class AgentInspect(BaseModel):
 
 
 class NeighborRow(BaseModel):
-    """One neighbor in the GET /api/agents/{id}/neighbors result."""
+    """One row in the GET /api/agents/{id}/neighbors result — a neighbor in
+    `neighbors` or an ancestor in `ancestors`."""
 
     model_config = ConfigDict(frozen=True)
 
     agent_id: int
     label: str | None
     status: str
-    # Shortest-path hop count from the queried agent (1 = direct tie).
+    # Hops from the queried agent: out along ties for `neighbors`, up the
+    # spawn chain for `ancestors` (1 = direct).
     depth: int
-    # Recency-weighted tie strength, discounted per extra hop. Higher = closer.
+    # Tie strength, discounted per extra hop. Higher = closer. For ancestors:
+    # the lineage edge weight (spawn/fork counts only).
     score: float
 
 
@@ -219,7 +222,10 @@ class NeighborsResponse(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
+    # Undirected ties ranked by recency-weighted strength, strongest first.
     neighbors: list[NeighborRow]
+    # The spawn/fork chain above the queried agent, nearest ancestor first.
+    ancestors: list[NeighborRow]
 
 
 class MetricPoint(BaseModel):

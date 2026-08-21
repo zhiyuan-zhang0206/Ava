@@ -902,15 +902,19 @@ export interface paths {
         /**
          * Get Agent Neighbors
          * @description The agents most strongly tied to `agent_id`, ranked by recency-weighted
-         *     interaction strength (spawn / fork / resurrect / message, all equal weight).
+         *     interaction strength (spawn / fork / resurrect / message, all equal weight),
+         *     plus `ancestors` — the spawn chain above `agent_id`, nearest ancestor first.
          *
          *     `depth=1` returns direct ties only; a higher `depth` follows ties outward,
-         *     discounting each extra hop. Terminated agents are included (each row carries
-         *     `status`); `limit` caps the count, strongest first. The tie graph reads the
-         *     unified event stream (task #180 LGTM cutover): audit edge events stitch the
-         *     frozen PG `events` archive with the Loki live tail and the walk runs in
-         *     Python (gateway/neighbors.py) — the retired `agent_neighbors` SQL function
-         *     died with the frozen table it read.
+         *     discounting each extra hop. `ancestors` ignores `depth`/`limit`: it walks
+         *     the directed spawn/fork chain to the top (message ties never form
+         *     ancestors), each row's `depth` = hops up (1 = the direct spawner).
+         *     Terminated agents are included (each row carries `status`); `limit` caps
+         *     the neighbor count, strongest first. The tie graph reads the unified event
+         *     stream (task #180 LGTM cutover): audit edge events stitch the frozen PG
+         *     `events` archive with the Loki live tail and the walks run in Python
+         *     (gateway/neighbors.py) — the retired `agent_neighbors` SQL function died
+         *     with the frozen table it read.
          *
          *     404: agent_id does not exist (AgentNotFound -> handler returns 404 + reason).
          */
@@ -5130,7 +5134,8 @@ export interface components {
         };
         /**
          * NeighborRow
-         * @description One neighbor in the GET /api/agents/{id}/neighbors result.
+         * @description One row in the GET /api/agents/{id}/neighbors result — a neighbor in
+         *     `neighbors` or an ancestor in `ancestors`.
          */
         NeighborRow: {
             /** Agent Id */
@@ -5151,6 +5156,8 @@ export interface components {
         NeighborsResponse: {
             /** Neighbors */
             neighbors: components["schemas"]["NeighborRow"][];
+            /** Ancestors */
+            ancestors: components["schemas"]["NeighborRow"][];
         };
         /**
          * NoticeCreateIn

@@ -24,7 +24,7 @@ Sets the agent's role label — the name displayed in the fleet graph.
 
 - Label should be stable (role name, e.g., "health steward", "Memory pool maintenance"), not a task summary (changing every few minutes) and not a status line (current status goes in replies / task results)
 - Task names are legitimate labels for ephemeral workers — a worker's "role" is its task
-- Other agents discover and locate peers by label through `get_neighbors`
+- Other agents discover and locate peers by label through `get_neighbors`, and read the responsibility chain above you through `get_ancestors`
 - Once set, it is not automatically replaced; explicit call needed to change
 
 ### `ava.self.get_label() -> str`
