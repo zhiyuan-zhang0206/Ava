@@ -145,7 +145,7 @@ def test_shared_floor_applies_when_nothing_set() -> None:
     assert resolve_setting("auto_compact_fraction", model="claude-sonnet-5") == 0.4
     assert resolve_setting("compact_reminder_fraction", model="claude-sonnet-5") == 0.3
     assert resolve_setting("llm_retry_max_attempts", model="claude-sonnet-5") == 6
-    assert resolve_setting("agent_communication_style", model="gpt-5.6-sol") == "oriented"
+    assert resolve_setting("agent_communication_style", model="gpt-5.6-sol") == "off"
     assert resolve_setting("prompt_temporal_awareness_enabled", model="glm-5.2") is True
 
 

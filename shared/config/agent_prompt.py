@@ -243,7 +243,7 @@ class AgentPromptSettings(EnvSettings):
             "interleaved updates. 'concise': speak only at real milestones. 'silent': "
             "one report at the end. 'off': the section is omitted entirely. Unset "
             "resolves the per-model default (shared/lm/registry.py; shared floor "
-            "'oriented'). The retired AVA_SYSTEM_PROMPT_PROGRESS boolean still maps "
+            "'off'). The retired AVA_SYSTEM_PROMPT_PROGRESS boolean still maps "
             "in (false -> 'silent', true -> 'oriented'); this var wins."
         ),
         json_schema_extra={

@@ -28,7 +28,7 @@ The system prompt carried in every LLM call, built **once per context window** �
 
 **Conduct group**:
 - `_prefer_sdk_section` — "Prefer SDK"
-- `_communication_style_section` — How verbose to be while working; `AVA_AGENT_COMMUNICATION_STYLE` selects `oriented` (default, short progress reports while working) / `concise` (only speak at milestones) / `silent` (work silently, provide a complete summary at the end). **Not an on/off switch**—all three styles share the same channel description ("where output goes"), which is always rendered
+- `_communication_style_section` — How verbose to be while working; `AVA_AGENT_COMMUNICATION_STYLE` selects `off` (default; section omitted entirely) / `oriented` (short progress reports while working) / `concise` (only speak at milestones) / `silent` (work silently, provide a complete summary at the end)
 - `_output_conciseness_section` — Output conciseness
 - `_outcome_reporting_section` — Honest reporting
 - `_action_caution_section` — Confirm before irreversible actions

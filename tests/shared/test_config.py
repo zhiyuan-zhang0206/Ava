@@ -516,14 +516,14 @@ def _style_from_env(monkeypatch: pytest.MonkeyPatch, **env: str) -> str | None:
     return AgentSettings().agent_communication_style
 
 
-def test_communication_style_defaults_to_oriented(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_communication_style_defaults_to_off(monkeypatch: pytest.MonkeyPatch) -> None:
     """No env at all leaves the None sentinel (unset -> per-model resolution),
-    whose shared floor keeps the historical default behavior (narrate as you
-    go)."""
+    whose shared floor is 'off' by user ruling (2026-08-22), so the section is
+    omitted unless explicitly enabled."""
     from shared.lm.registry import DEFAULT_TUNING
 
     assert _style_from_env(monkeypatch) is None
-    assert DEFAULT_TUNING.agent_communication_style == "oriented"
+    assert DEFAULT_TUNING.agent_communication_style == "off"
 
 
 @pytest.mark.parametrize("style", ["oriented", "concise", "silent", "off"])
