@@ -123,7 +123,6 @@ def _instrument_maintenance_slices(
             SimpleNamespace(start_day=None, end_day=None, metrics_rows=0, tokens_rows=0)
         ),
         "reindex": _CallRecorder(empty),
-        "resolved": _CallRecorder(0),
         "reap": _CallRecorder(SimpleNamespace(agents=0, checkpoints=0, writes=0, blobs=0)),
         "vacuum": _CallRecorder(SimpleNamespace(ran=False, summary=lambda: "")),
     }
@@ -132,13 +131,12 @@ def _instrument_maintenance_slices(
     monkeypatch.setattr(daemon, "apply_table_retention", rec["table_retention"])
     monkeypatch.setattr(daemon, "compute_rollup", rec["rollup"])
     monkeypatch.setattr(daemon, "run_governance_pass", rec["reindex"])
-    monkeypatch.setattr(daemon, "_apply_resolved_markers", rec["resolved"])
     monkeypatch.setattr(daemon, "reap_stale_checkpoints", rec["reap"])
     monkeypatch.setattr(daemon, "run_blob_vacuum", rec["vacuum"])
     return rec
 
 
-_EVENTS_SLICES = ("partitions", "retention", "table_retention", "reindex", "resolved")
+_EVENTS_SLICES = ("partitions", "retention", "table_retention", "reindex")
 
 
 def test_maintenance_pass_reaps_when_events_disabled(monkeypatch: pytest.MonkeyPatch) -> None:

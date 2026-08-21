@@ -494,12 +494,18 @@ CREATE TRIGGER agents_meta_status_changed_at
     WHEN (OLD.status IS DISTINCT FROM NEW.status)
     EXECUTE FUNCTION set_agents_meta_status_changed_at();
 
--- ─────────────── events (unified event stream) ───────────────
+-- ─────────────── events (unified event stream — FROZEN ARCHIVE) ───────────────
+-- FROZEN ARCHIVE since the LGTM cutover (task #1197, 2026-08-12): the live
+-- event stream ships to Loki via the unified OTLP emitter, and reads over
+-- recent windows go through LogQL (gateway/loki_events.py) — this table
+-- stopped receiving rows at the cutover. It serves retention/rollup and
+-- deliberate historical reads only (issue #180).
+--
 -- The single event stream — the unified model (design §1) that audit, telemetry
--- and log signals share. Write path: the unified emitter (shared/telemetry.py),
--- the ONLY event-write entry every process uses; the legacy `event_log` /
--- `agent_events` mirrors were removed with the migration window (2026-08-06),
--- and those tables are frozen (see their sections above).
+-- and log signals share. Write path was the unified emitter
+-- (shared/telemetry.py), the ONLY event-write entry every process used; the
+-- legacy `event_log` / `agent_events` mirrors were removed with the migration
+-- window (2026-08-06), and those tables are frozen (see their sections above).
 --
 -- `trace_id`/`span_id` are the OTel correlation keys captured from the active
 -- span (turn_span) at emit time — one turn = one trace, every event in it
@@ -533,6 +539,9 @@ CREATE TABLE events (
     attributes       JSONB NOT NULL DEFAULT '{}'::jsonb,
     PRIMARY KEY (id, ts)
 ) PARTITION BY RANGE (ts);
+
+COMMENT ON TABLE events IS
+    'Frozen archive since the LGTM cutover (task #1197): the live event stream ships to Loki via the unified OTLP emitter; reads over recent windows go through LogQL (gateway/loki_events.py). This copy serves retention/rollup and deliberate historical reads only.';
 
 -- Query-pattern indexes (the reads the unified model must serve):
 --   (agent_id, ts DESC)   per-agent windows (timeline / stats / inspect)

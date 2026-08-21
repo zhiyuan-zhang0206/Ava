@@ -26,9 +26,7 @@ def _clean():
 
 def _spec(name: str = "core_test", **overrides) -> MetricSpec:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
     query = overrides.pop("query", None) or (  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
-        "SELECT $__timeGroup(ts, $__interval) AS time, count(*) AS n "
-        "FROM events WHERE event_name = {event_name} AND category = {category} "
-        "AND $__timeFilter(ts) GROUP BY 1 ORDER BY 1"
+        "SELECT count(*) AS n FROM events WHERE event_name = 'turn_end' AND category = 'telemetry'"
     )
     return MetricSpec(
         name=name,
@@ -69,23 +67,17 @@ def test_register_core_metric_validates_sql_like_plugins() -> None:
 
 
 def test_register_core_metric_agent_placeholder_rule() -> None:
-    with pytest.raises(InvalidMetricQuery, match="placeholder"):
+    # The template era is over (task #180 PR C): {{agent_id}} in a SQL query
+    # is rejected outright — the per-agent inspector idiom lives in the LogQL
+    # dialect (rendered per agent), not in SQL templates.
+    with pytest.raises(InvalidMetricQuery, match="template placeholders"):
         core_metrics.register_core_metric(
             _spec(
                 name="core_agent",
                 query="SELECT count(*) FROM events WHERE {{agent_id}}",
-                output=["grafana"],
+                output=["inspector"],
             )
         )
-    # inspector-only is fine
-    spec = core_metrics.register_core_metric(
-        _spec(
-            name="core_agent_ok",
-            query="SELECT count(*) FROM events WHERE {{agent_id}}",
-            output=["inspector"],
-        )
-    )
-    assert "inspector" in spec.output
 
 
 def test_collect_core_metrics_tolerates_missing_modules() -> None:

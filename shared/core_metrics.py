@@ -51,9 +51,9 @@ _CORE_REGISTRY: dict[str, MetricSpec] = {}
 def register_core_metric(spec: MetricSpec) -> MetricSpec:
     """Register one core metric (first-party observability surface).
 
-    Validation at register time: name uniqueness across core metrics, SQL
-    safety for every template (``validate_spec_sql`` — the same checks plugin
-    metrics go through), and the ``{{agent_id}}`` ↔ output rule.
+    Validation at register time: name uniqueness across core metrics and
+    query safety for every template (``validate_spec_sql`` — the same checks
+    plugin metrics go through).
 
     Raises:
         DuplicateMetric: ``spec.name`` already registered.

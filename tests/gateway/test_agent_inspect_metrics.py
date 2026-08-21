@@ -19,7 +19,6 @@ from __future__ import annotations
 import importlib
 import json
 import sys
-from datetime import UTC, datetime
 from typing import Any
 
 import psycopg
@@ -35,22 +34,24 @@ from gateway.routers._plugin_metrics import (
 )
 from shared.plugin_metrics import MetricSpec
 
-# A valid inspector template — the fleet demo shape: per-agent task done rate.
+# A valid inspector query — the static-SQL shape (task #180 PR C): the
+# template era (macros + {event_name}/{category}/{{agent_id}} placeholders)
+# is over; the per-agent inspector idiom lives in the LogQL dialect. A
+# timeseries SQL metric is no longer expressible (bucketing was a macro
+# feature), so the SQL inspector surface is stat-shaped (core_live_agents).
 _DEMO_QUERY = (
-    "SELECT $__timeGroup(ts, $__interval) AS time, "
-    "100.0 * count(*) FILTER (WHERE attributes->>'status' = 'done') "
+    "SELECT 100.0 * count(*) FILTER (WHERE attributes->>'status' = 'done') "
     '/ NULLIF(count(*), 0) AS "done %" '
     "FROM events "
-    "WHERE event_name = {event_name} AND category = {category} "
-    "AND attributes ? 'status' AND {{agent_id}} AND $__timeFilter(ts) "
-    "GROUP BY 1 ORDER BY 1"
+    "WHERE event_name = 'task_update' AND category = 'audit' "
+    "AND attributes ? 'status'"
 )
 
-# A stat-shaped inspector template (no time macro, one aggregate row).
+# A stat-shaped inspector query (one aggregate row).
 _STAT_QUERY = (
     "SELECT count(*) AS fixes "
     "FROM events "
-    "WHERE event_name = {event_name} AND category = {category} AND $__timeFilter(ts)"
+    "WHERE event_name = 'syntax_fix' AND category = 'telemetry'"
 )
 
 
@@ -59,7 +60,7 @@ def _metric(
     *,
     event_name: str = "task_update",
     category: str = "audit",
-    panel: str = "timeseries",
+    panel: str = "stat",
     query: str = _DEMO_QUERY,
     output: list[str] | None = None,
     unit: str = "percent",
@@ -175,13 +176,17 @@ def test_metrics_filters_inspector_output(
 
 
 def test_metrics_stat_scalar(db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A stat metric returns the single aggregate as `value` (windowed to the
-    inspector's 24h, so an old event falls out)."""
+    """A stat metric returns the single aggregate as `value`. The SQL
+    inspector surface is static now (task #180 PR C — no macro windows), so
+    the query counts exactly what its own predicates select."""
     aid = _insert_agent(db_conn)
     _patch_loader(monkeypatch, _metric(name="stat_count", panel="stat", query=_STAT_QUERY))
-    _insert_event(db_conn, agent_id=aid, payload={"fixes": 1})
-    _insert_event(db_conn, agent_id=aid, payload={"fixes": 1})
-    _insert_event(db_conn, agent_id=aid, payload={"fixes": 1}, ts_offset_hours=48)
+    _insert_event(
+        db_conn, agent_id=aid, event_name="syntax_fix", category="telemetry", payload={"fixes": 1}
+    )
+    _insert_event(
+        db_conn, agent_id=aid, event_name="syntax_fix", category="telemetry", payload={"fixes": 1}
+    )
     db_conn.commit()
     with TestClient(app) as client:
         resp = client.get(f"/api/agents/{aid}/inspect/metrics")
@@ -190,85 +195,9 @@ def test_metrics_stat_scalar(db_conn: psycopg.Connection, monkeypatch: pytest.Mo
     assert len(body) == 1
     assert body[0]["name"] == "stat_count"
     assert body[0]["panel"] == "stat"
-    assert body[0]["value"] == 2  # 48h-old event outside the 24h window
+    assert body[0]["value"] == 2
     assert body[0]["series"] == []
     assert body[0]["error"] is None
-
-
-def test_metrics_timeseries_series(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A timeseries metric returns a chronological series of (ts, value)
-    points over the fixed 24h window."""
-    aid = _insert_agent(db_conn)
-    _patch_loader(monkeypatch, _metric())
-    for _ in range(3):
-        _insert_event(db_conn, agent_id=aid, payload={"status": "done"})
-    _insert_event(db_conn, agent_id=aid, payload={"status": "pending"})
-    db_conn.commit()
-    with TestClient(app) as client:
-        resp = client.get(f"/api/agents/{aid}/inspect/metrics")
-    assert resp.status_code == 200
-    body = resp.json()
-    assert len(body) == 1
-    m = body[0]
-    assert m["panel"] == "timeseries"
-    assert m["unit"] == "percent"
-    assert m["error"] is None
-    assert m["value"] is None
-    # 4 events in one hour -> one 1h bucket; done rate = 3/4 = 75.0
-    assert len(m["series"]) == 1
-    point = m["series"][0]
-    assert point["value"] == 75.0
-    # ts parses as an ISO instant (datetime serialized by FastAPI)
-    datetime.fromisoformat(point["ts"])
-
-
-def test_metrics_timeseries_bucket_is_utc_hour_with_offset(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """tz audit PR-1 behavior lock: the inspector's `date_trunc` bucket lands
-    on the UTC hour (not the host OS timezone's hour) and the JSON-serialized
-    `ts` carries a UTC offset — both follow from pinning the PG session
-    timezone to UTC (shared/pg_tools.py: pg_tz_args), independent of the
-    machine this test runs on. (`MetricPoint.ts` is a pydantic `datetime`
-    field — pydantic-core's JSON mode renders a zero UTC offset as `Z`, unlike
-    Python's own `.isoformat()`, which writes `+00:00`; see
-    TestTimestampOffset in tests/gateway/test_tasks_router.py for that form.)"""
-    aid = _insert_agent(db_conn)
-    _patch_loader(monkeypatch, _metric(name="bucket_check"))
-    _insert_event(db_conn, agent_id=aid, payload={"status": "done"})
-    db_conn.commit()
-    expected_bucket = datetime.now(UTC).replace(minute=0, second=0, microsecond=0)
-    with TestClient(app) as client:
-        resp = client.get(f"/api/agents/{aid}/inspect/metrics")
-    assert resp.status_code == 200
-    point_ts = resp.json()[0]["series"][0]["ts"]
-    assert point_ts.endswith("Z")
-    assert datetime.fromisoformat(point_ts) == expected_bucket
-
-
-def test_metrics_agent_id_placeholder_filters(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """{{agent_id}} renders to `agent_id = <n>`: the metric counts only the
-    requested agent's events, not the fleet's."""
-    a1 = _insert_agent(db_conn)
-    a2 = _insert_agent(db_conn)
-    _patch_loader(monkeypatch, _metric())
-    _insert_event(db_conn, agent_id=a1, payload={"status": "done"})
-    _insert_event(db_conn, agent_id=a2, payload={"status": "done"})
-    _insert_event(db_conn, agent_id=a2, payload={"status": "done"})
-    db_conn.commit()
-    with TestClient(app) as client:
-        resp = client.get(f"/api/agents/{a1}/inspect/metrics")
-        assert resp.status_code == 200
-        m = resp.json()[0]
-        # one 1h bucket, 1 done / 1 with status = 100.0
-        assert m["series"][0]["value"] == 100.0
-        resp2 = client.get(f"/api/agents/{a2}/inspect/metrics")
-        assert resp2.status_code == 200
-        assert resp2.json()[0]["series"][0]["value"] == 100.0
 
 
 def test_metrics_macro_translation_unit() -> None:
@@ -330,22 +259,21 @@ def test_metrics_tampered_query_500(
 def test_metrics_render_requires_agent_id_400() -> None:
     """A {{agent_id}} template rendered without an agent id is refused with
     400. (The HTTP route always carries the id in the path, so this is a
-    helper-level guard — defense in depth against a future caller.)"""
-    spec = MetricSpec.model_validate(_metric())
+    helper-level guard — defense in depth against a future caller.) The
+    {{agent_id}} idiom lives in the LogQL dialect (task #180 PR C)."""
+    spec = MetricSpec.model_validate(_logql_metric())
     with pytest.raises(HTTPException) as exc_info:
         _render_metric_query(spec, agent_id=None)
     assert exc_info.value.status_code == 400
 
 
-def test_metrics_render_substitutes_placeholders() -> None:
-    """{event_name}/{category} become single-quoted literals; {{agent_id}}
-    becomes `agent_id = <n>`; the rendered SQL passes the whitelist."""
+def test_metrics_render_static_sql_passes_through() -> None:
+    """A static SQL query renders verbatim and passes the whitelist (the
+    template era is over, task #180 PR C)."""
     spec = MetricSpec.model_validate(_metric())
     query = _render_metric_query(spec, agent_id=7)
-    assert "event_name = 'task_update'" in query
-    assert "category = 'audit'" in query
-    assert "agent_id = 7" in query
-    assert "{{agent_id}}" not in query
+    assert query == _DEMO_QUERY
+    assert "{event_name}" not in query
 
 
 # ── execution-time failure is per-metric, not fatal ───────────────────────────
@@ -354,13 +282,19 @@ def test_metrics_render_substitutes_placeholders() -> None:
 def test_metrics_runtime_query_error_per_metric(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A template that passes the whitelist but fails at runtime (missing
-    column) lands in that metric's `error`; the sibling metric still renders
-    and the request stays 200."""
+    """A query that passes the whitelist but fails at runtime (a bad cast on
+    the row values) lands in that metric's `error`; the sibling metric still
+    renders and the request stays 200."""
     aid = _insert_agent(db_conn)
     _patch_loader(
         monkeypatch,
-        _metric(name="broken", query="SELECT count(*) FROM events WHERE unknown_col = 1"),
+        _metric(
+            name="broken",
+            query=(
+                "SELECT (attributes->>'status')::bigint AS n FROM events "
+                "WHERE event_name = 'task_update' AND category = 'audit'"
+            ),
+        ),
         _metric(name="healthy", panel="stat", query=_STAT_QUERY),
     )
     _insert_event(db_conn, agent_id=aid, payload={"status": "done"})
@@ -369,9 +303,9 @@ def test_metrics_runtime_query_error_per_metric(
         resp = client.get(f"/api/agents/{aid}/inspect/metrics")
     assert resp.status_code == 200
     by_name = {m["name"]: m for m in resp.json()}
-    assert "column" in by_name["broken"]["error"].lower()
+    assert "bigint" in by_name["broken"]["error"].lower()
     assert by_name["healthy"]["error"] is None
-    assert by_name["healthy"]["value"] == 1
+    assert by_name["healthy"]["value"] == 0
 
 
 def test_metrics_read_only_is_transaction_scoped(
@@ -387,7 +321,9 @@ def test_metrics_read_only_is_transaction_scoped(
     the gateway's own pool must still accept writes."""
     aid = _insert_agent(db_conn)
     _patch_loader(monkeypatch, _metric(name="stat_count", panel="stat", query=_STAT_QUERY))
-    _insert_event(db_conn, agent_id=aid, payload={"status": "done"})
+    _insert_event(
+        db_conn, agent_id=aid, event_name="syntax_fix", category="telemetry", payload={"fixes": 1}
+    )
     db_conn.commit()
     with TestClient(app) as client:
         resp = client.get(f"/api/agents/{aid}/inspect/metrics")
