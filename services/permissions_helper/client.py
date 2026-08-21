@@ -16,6 +16,8 @@ reports.
 
 from __future__ import annotations
 
+import base64
+import binascii
 import itertools
 import json
 import os
@@ -216,6 +218,21 @@ class FrontmostApp(TypedDict):
     app: str  # display name, or "" when nothing is focused
 
 
+class PermissionsFileEntry(TypedDict):
+    name: str
+    size: int
+    mtime: int
+    is_dir: bool
+
+
+class FileListResult(TypedDict):
+    entries: list[PermissionsFileEntry]
+
+
+class FileReadResult(TypedDict):
+    content_b64: str
+
+
 def ping(*, sock_path: str | Path | None = None) -> PingResult:
     """Report the helper's liveness and whether it holds the desktop grants."""
     return _call("ping", sock_path=sock_path)
@@ -226,6 +243,30 @@ def screencapture_region(
 ) -> ScreencaptureResult:
     """Capture the screen rectangle (x, y, w, h) to a PNG at `path`."""
     return _call("screencapture_region", x=x, y=y, w=w, h=h, path=path, sock_path=sock_path)
+
+
+def list_dir(path: str, *, sock_path: str | Path | None = None) -> list[PermissionsFileEntry]:
+    """List a whitelisted directory's immediate entries, sorted by name."""
+    result: FileListResult = _call("file_list", path=path, sock_path=sock_path)
+    return result["entries"]
+
+
+def read_file(path: str, *, sock_path: str | Path | None = None) -> bytes:
+    """Read a whitelisted regular file of at most 32 MiB."""
+    result: FileReadResult = _call("file_read", path=path, sock_path=sock_path)
+    try:
+        content_b64 = result["content_b64"]
+    except (KeyError, TypeError) as exc:
+        raise PermissionsHelperError("invalid file_read response") from exc
+    if not isinstance(content_b64, str):
+        raise PermissionsHelperError("invalid file_read response")
+    try:
+        content = base64.b64decode(content_b64, validate=False)
+    except (ValueError, binascii.Error) as exc:
+        raise PermissionsHelperError("invalid file_read response") from exc
+    if base64.b64encode(content).decode("ascii") != content_b64:
+        raise PermissionsHelperError("invalid file_read response")
+    return content
 
 
 def click(

@@ -65,6 +65,95 @@ func writeJSONLine(_ fd: Int32, _ obj: [String: Any]) {
 
 enum OpError: Error { case bad(String) }
 
+private let maxFileReadBytes: Int64 = 32 * 1024 * 1024
+
+/// Resolve an allowed path or reject it. A bare prefix is insufficient:
+/// `/Users/ava/DownloadsEvil` is not in `/Users/ava/Downloads`.
+// SECURITY SYNC: tests/services/test_permissions_helper.py::
+// _is_whitelisted_file_path mirrors this exact resolved-path boundary rule in
+// `resolvedWhitelistedFilePath`. Update both implementations together whenever
+// whitelist containment changes.
+func resolvedWhitelistedFilePath(_ requestedPath: String) throws -> String {
+    guard requestedPath.hasPrefix("/") else { throw OpError.bad("outside whitelist") }
+
+    let resolvedPath = ((requestedPath as NSString).standardizingPath as NSString)
+        .resolvingSymlinksInPath
+    let home = NSHomeDirectory()
+    let roots = ["Downloads", "Desktop", ".ava/incoming"].map { relativePath in
+        (((home as NSString).appendingPathComponent(relativePath) as NSString)
+            .standardizingPath as NSString)
+            .resolvingSymlinksInPath
+    }
+    let allowed = roots.contains { root in
+        resolvedPath == root || resolvedPath.hasPrefix(root + "/")
+    }
+    guard allowed else { throw OpError.bad("outside whitelist") }
+    return resolvedPath
+}
+
+/// List immediate children of a whitelisted directory with the metadata the
+/// Python client exposes. Names are sorted before metadata is collected so the
+/// reply order is stable.
+func fileList(_ req: [String: Any]) throws -> [String: Any] {
+    guard let requestedPath = req["path"] as? String else {
+        throw OpError.bad("file_list needs string path")
+    }
+    let path = try resolvedWhitelistedFilePath(requestedPath)
+    let fm = FileManager.default
+    var isDirectory = ObjCBool(false)
+    guard fm.fileExists(atPath: path, isDirectory: &isDirectory) else {
+        throw OpError.bad("not found")
+    }
+    guard isDirectory.boolValue else { throw OpError.bad("not a directory") }
+
+    let names: [String]
+    do {
+        names = try fm.contentsOfDirectory(atPath: path).sorted()
+    } catch {
+        throw OpError.bad("not found")
+    }
+    let entries = try names.map { name -> [String: Any] in
+        let attributes = try fm.attributesOfItem(
+            atPath: (path as NSString).appendingPathComponent(name)
+        )
+        guard let size = attributes[.size] as? NSNumber,
+              let modificationDate = attributes[.modificationDate] as? Date
+        else { throw OpError.bad("not found") }
+        return [
+            "name": name,
+            "size": size.int64Value,
+            "mtime": Int64(modificationDate.timeIntervalSince1970),
+            "is_dir": (attributes[.type] as? FileAttributeType) == .typeDirectory,
+        ]
+    }
+    return ["entries": entries]
+}
+
+/// Read a bounded regular file from a whitelisted location as base64.
+func fileRead(_ req: [String: Any]) throws -> [String: Any] {
+    guard let requestedPath = req["path"] as? String else {
+        throw OpError.bad("file_read needs string path")
+    }
+    let path = try resolvedWhitelistedFilePath(requestedPath)
+    let fm = FileManager.default
+    var isDirectory = ObjCBool(false)
+    guard fm.fileExists(atPath: path, isDirectory: &isDirectory) else {
+        throw OpError.bad("not found")
+    }
+    guard !isDirectory.boolValue,
+          let attributes = try? fm.attributesOfItem(atPath: path),
+          (attributes[.type] as? FileAttributeType) == .typeRegular
+    else { throw OpError.bad("not a regular file") }
+    guard let size = attributes[.size] as? NSNumber else { throw OpError.bad("not found") }
+    guard size.int64Value <= maxFileReadBytes else { throw OpError.bad("file too large") }
+
+    guard let content = try? Data(contentsOf: URL(fileURLWithPath: path)) else {
+        throw OpError.bad("not found")
+    }
+    guard content.count <= maxFileReadBytes else { throw OpError.bad("file too large") }
+    return ["content_b64": content.base64EncodedString()]
+}
+
 /// Capture a screen region to a PNG file via the system screencapture tool.
 /// screencapture runs as a child of this launchd-parented process, so it
 /// inherits this binary's Screen Recording grant.
@@ -262,6 +351,8 @@ func dispatch(_ req: [String: Any]) -> [String: Any] {
         case "ping":
             result = ["pong": true, "preflight_screen": CGPreflightScreenCaptureAccess(),
                       "ax_trusted": AXIsProcessTrusted()]
+        case "file_list": result = try fileList(req)
+        case "file_read": result = try fileRead(req)
         case "screencapture_region": result = try screencaptureRegion(req)
         case "click": result = try click(req)
         case "type": result = try typeText(req)
