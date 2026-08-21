@@ -19,7 +19,7 @@ What makes it a design error rather than a missing `try` is the coupling: a DB o
 Two rules follow for any healthcheck that grows a second responsibility:
 
 - **Order**: probe → respawn → verify → report. Reconciliation belongs to the daemon being revived, not to the thing reviving it. The one verdict that skips the respawn instead of preceding it is the terminal one, where no respawn could succeed ([[services/healthchecks/terminal-verdict/terminal-verdict.ava.okf.md]]).
-- **Work the daemon cannot do** (`restarter.py:_standin_dispatch`, for the rounds that will have no live daemon at all) runs **after** the respawn verdict — or in place of a respawn that would be futile, never ahead of one — is total (never raises, so it cannot mask the non-zero exit), and is **bounded**: it executes inside the watchdog's sequential tick, so a long wait there delays every check behind it.
+- **Work the daemon cannot do** (`services/healthchecks/restarter.py:_standin_dispatch`, for the rounds that will have no live daemon at all) runs **after** the respawn verdict — or in place of a respawn that would be futile, never ahead of one — is total (never raises, so it cannot mask the non-zero exit), and is **bounded**: it executes inside the watchdog's sequential tick, so a long wait there delays every check behind it.
 
 `shared.service_respawn.run_keepalive` holds both rules for every daemon healthcheck, so they are properties of the shared runner rather than of each module keeping its `main()` in the right shape.
 

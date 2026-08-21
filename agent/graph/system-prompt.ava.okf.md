@@ -13,7 +13,7 @@ The system prompt carried in every LLM call, built **once per context window** â
 
 ## Core Mechanism
 
-### build_system_prompt (`_system_prompt.py:build_system_prompt`)
+### build_system_prompt (`agent/graph/_system_prompt.py:build_system_prompt`)
 - The base is the `_BASE_SYSTEM_PROMPT` constant in `agent/graph/_llm.py` (the `{_AVA_OVERVIEW}` placeholder injects the SDK overview)â€”**it never reads `AGENTS.md` at runtime** (that file is for coding agents)
 - Appends SDK documentation (the output of `ava.help(ava)`)
 - Runs all registered section functions in fixed order
@@ -46,7 +46,7 @@ The system prompt carried in every LLM call, built **once per context window** â
 - Header prose is assembled from whichever halves rendered, so an agent with MCP servers but no skill index is never pointed at a skill listing it does not have
 - Each index line is flattened to one line and truncated (`_one_line`): a description is free-form frontmatter from whoever wrote the SKILL.md, including a drop-in under `~/.ava/skills/`
 
-### Keeping the index from going stale (`_capabilities.py:index_drift` + `agent/hooks/capabilities.py`)
+### Keeping the index from going stale (`agent/graph/_capabilities.py:index_drift` + `agent/hooks/capabilities.py`)
 - The rendered index is a **snapshot**, built once per window; `ava.skills._names()` under it is an **uncached filesystem scan**. Nothing reconciles them by itself, so a skill installed mid-window would be reachable by name and absent from the listing the delegation check orders the agent to match every task against â€” until a compaction happened to rebuild the prompt
 - `init_context` records the membership it rendered into `state.capabilities.indexed` (see [[../state.ava.okf.md]]). Snapshot taken **before** the render, so a skill landing between the two is named once too many rather than dropped
 - A framework-owned `before_llm` hook diffs the live membership against that record each turn and names whatever appeared in one `new_skills` system note, in the index's own line shape; the snapshot advances with the note, so one install produces one note no matter who installed it. Drift is the trigger, not a timer

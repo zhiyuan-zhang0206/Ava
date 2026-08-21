@@ -44,19 +44,32 @@ more often command output or a grep result than a doc anchor, and flagging those
 would cost the zero-false-positive property. Every anchor in the tree today is
 backticked, so the miss is latent rather than live.
 
-## Scope: the procedural axis, and not only Markdown
+## Scope: the procedural axis, the built-in skills, and the OKF axis
 
-`conventions/` plus the repo's own dev skills under `.agents/skills/` — both tell
-an agent what to do *right now*, so a stale anchor there is a live instruction to
-open something that no longer exists. `decisions/` is a never-rewritten archive
-and `future/` is design space that may name not-yet-built symbols; both stay out,
-exactly as they are for `lint_doc_symbols.py` and `check_doc_references.py`.
+`conventions/`, the repo's own dev skills under `.agents/skills/`, and the
+built-in skills under `ava_builtins/skills/` — all three tell an agent what to
+do *right now*, so a stale anchor there is a live instruction to open something
+that no longer exists. `decisions/` is a never-rewritten archive and `future/`
+is design space that may name not-yet-built symbols; both stay out, exactly as
+they are for `lint_doc_symbols.py` and `check_doc_references.py`.
 
-Every **file** under those roots is scanned, not just `*.md`. A maintained
-non-Markdown file carries live anchors too — `.agents/skills/ship-a-change/
-reference/ci_watcher.py` cites `scripts/ci_utils.py:check_ci` in its module
-docstring, and the `#65` rename hunt lost a reference in `db/schema.sql` to
-exactly this `.md`-only assumption.
+The **OKF axis** — every `*.ava.okf.md` under the repo root — is scanned too.
+Its `## Entry Points` sections are *made* of `file.py:symbol` anchors, so it is
+the densest and least guarded surface (issue #112). Hidden directories are not
+descended, with the same single exception the OKF graph makes: `.github/`.
+
+**Anchors are repo-relative on every axis.** The OKF axis once wrote 15 anchors
+relative to the citing doc's own directory (`agent/graph/graph.ava.okf.md`
+citing `` `_build.py:_build_llm_retry` `` for `agent/graph/_build.py`). That
+convention was normalised away rather than resolved two ways (issue #112): one
+shape, one meaning, and the resolver stays the trivial single-root lookup that
+the procedural axis already had.
+
+Every **file** under the procedural roots is scanned, not just `*.md`. A
+maintained non-Markdown file carries live anchors too — `.agents/skills/ship-a-
+change/reference/ci_watcher.py` cites `scripts/ci_utils.py:check_ci` in its
+module docstring, and the `#65` rename hunt lost a reference in `db/schema.sql`
+to exactly this `.md`-only assumption.
 
 Symlinked directories ARE descended: 21 of the 38 entries under `.agents/skills/`
 are symlinks to the built-in skills, so a `Path.rglob` walk (which does not follow
@@ -74,6 +87,7 @@ from pathlib import Path
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _DOCS_CONVENTIONS = _REPO_ROOT / "conventions"
 _DEV_SKILLS = _REPO_ROOT / ".agents" / "skills"
+_BUILTIN_SKILLS = _REPO_ROOT / "ava_builtins" / "skills"
 
 # Inline-code span: text between single backticks, no embedded backtick or
 # newline. Same span definition as `lint_doc_symbols.py`.
@@ -155,6 +169,36 @@ def iter_doc_files(root: Path) -> list[Path]:
     return sorted(files)
 
 
+# Directories the OKF walk never descends: tooling/vendored trees that are not
+# hidden (and so survive the hidden-dir rule) and can hold thousands of files.
+_OKF_SKIP_DIRS = {".venv", "node_modules", "__pycache__", ".mypy_cache", ".ruff_cache"}
+
+
+def iter_okf_docs() -> list[Path]:
+    """Every `*.ava.okf.md` under the repo root.
+
+    Hidden directories are not descended, with the one exception the OKF graph
+    itself makes (`.github/` carries an overview node). `.venv` / `node_modules`
+    / cache trees are pruned by name — they are not hidden, and a vendor walk
+    would drown the scan in files that are not documentation.
+    """
+    files: list[Path] = []
+    for dirpath, dirnames, filenames in os.walk(_REPO_ROOT):
+        rel_root = Path(dirpath).relative_to(_REPO_ROOT)
+        keep: list[str] = []
+        for name in dirnames:
+            rel = rel_root / name
+            hidden = name.startswith(".") and name != ".github"
+            skip = name in _OKF_SKIP_DIRS or str(rel) in _OKF_SKIP_DIRS
+            if not hidden and not skip:
+                keep.append(name)
+        dirnames[:] = keep
+        for name in filenames:
+            if name.endswith(".ava.okf.md"):
+                files.append(Path(dirpath) / name)
+    return sorted(files)
+
+
 def check() -> int:
     """Validate every procedural-doc anchor; return 0 (clean) or 1 (violations)."""
     violations: list[str] = []
@@ -165,39 +209,51 @@ def check() -> int:
     # the reason is carried alongside so the message can say which.
     cache: dict[Path, set[str] | str] = {}
 
-    for root in (_DOCS_CONVENTIONS, _DEV_SKILLS):
+    targets: list[tuple[Path, Path]] = []
+    for root in (_DOCS_CONVENTIONS, _DEV_SKILLS, _BUILTIN_SKILLS):
         if not root.is_dir():
             continue
         # Display paths relative to the repo root on the real run; fall back to
         # the root's parent when a test monkeypatches it to a tmp tree.
         display_root = _REPO_ROOT if root.is_relative_to(_REPO_ROOT) else root.parent
-        for doc in iter_doc_files(root):
-            text = doc.read_text(encoding="utf-8", errors="replace")
-            found = anchors_in(text)
-            if not found:
-                continue
-            docs += 1
-            rel_doc = doc.relative_to(display_root)
-            for lineno, path, symbol in found:
-                checked += 1
-                target = _REPO_ROOT / path
-                if target not in cache:
-                    cache[target] = _names_or_reason(target)
-                names = cache[target]
-                if isinstance(names, str):
-                    violations.append(f"{rel_doc}:{lineno}: {path}:{symbol} — {names}")
-                elif symbol not in names:
-                    violations.append(
-                        f"{rel_doc}:{lineno}: {path}:{symbol} — {path} binds no `{symbol}`"
-                    )
+        targets.extend((doc, display_root) for doc in iter_doc_files(root))
+    targets.extend((doc, _REPO_ROOT) for doc in iter_okf_docs())
+
+    # A doc can be in scope twice — an OKF file under a procedural root (the
+    # built-in skills) — so dedupe by resolved path; each doc is scanned once.
+    seen_docs: set[Path] = set()
+    for doc, display_root in targets:
+        resolved = doc.resolve()
+        if resolved in seen_docs:
+            continue
+        seen_docs.add(resolved)
+        text = doc.read_text(encoding="utf-8", errors="replace")
+        found = anchors_in(text)
+        if not found:
+            continue
+        docs += 1
+        rel_doc = doc.relative_to(display_root)
+        for lineno, path, symbol in found:
+            checked += 1
+            target = _REPO_ROOT / path
+            if target not in cache:
+                cache[target] = _names_or_reason(target)
+            names = cache[target]
+            if isinstance(names, str):
+                violations.append(f"{rel_doc}:{lineno}: {path}:{symbol} — {names}")
+            elif symbol not in names:
+                violations.append(
+                    f"{rel_doc}:{lineno}: {path}:{symbol} — {path} binds no `{symbol}`"
+                )
 
     if violations:
         for v in violations:
             print(v, file=sys.stderr)
         print(
-            f"\n{len(violations)} dangling file:symbol anchor(s) in conventions or "
-            ".agents/skills. A rename or deletion left a doc pointing at code that is "
-            "no longer there — update the anchor to the new name (or drop it).",
+            f"\n{len(violations)} dangling file:symbol anchor(s) across the scanned docs "
+            "(conventions, .agents/skills, ava_builtins/skills, *.ava.okf.md). A rename or "
+            "deletion left a doc pointing at code that is no longer there — update the "
+            "anchor to the new name (or drop it).",
             file=sys.stderr,
         )
         return 1

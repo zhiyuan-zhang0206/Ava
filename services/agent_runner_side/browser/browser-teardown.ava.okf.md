@@ -26,7 +26,7 @@ A process is this cluster's Chrome iff all three hold (`orphan.is_cluster_chrome
 
 Unreadable argv (another user's process, `psutil.AccessDenied`) is a **skip, not an error**: the token is the only thing that authorizes a kill, so a process whose argv cannot be read has not been identified and the teardown carries on. The asymmetry is deliberate — a missed orphan costs one manual kill, a wrong kill costs the operator their logged-in browser.
 
-Rejected alternative: the profile's own `SingletonLock` pid (`profile.py:_running_chrome_pid`). It is positive, but a *stale* lock plus pid recycling could point at an unrelated process, which is the one mistake that must be impossible; and it is a POSIX-only symlink.
+Rejected alternative: the profile's own `SingletonLock` pid (`services/browser/profile.py:_running_chrome_pid`). It is positive, but a *stale* lock plus pid recycling could point at an unrelated process, which is the one mistake that must be impossible; and it is a POSIX-only symlink.
 
 ## Scope
 Only the paths that explicitly ask for the browser down: `ava stop --stop-browser`, and `ava cluster destroy` (whose child stop passes `--stop-browser`) — both funnelling through `_do_stop(keep_browser=False)`. Plain `ava stop`, `ava restart` and `ava update` preserve the login Chrome and never sweep, so a normal stop pays nothing.

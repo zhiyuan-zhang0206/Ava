@@ -84,7 +84,7 @@ ava.register_sdk_expand("cwd")
 
 ## Configuration
 
-- Project-local skills: discovered when `ava.cwd.set` at git root's `.claude/skills` (Claude Code compatible), `.agents/skills` (open Agent Skills standard) and `.ava/skills` (Ava repo local — last, so it takes priority) (`_walk.py:project_skill_roots`)
+- Project-local skills: discovered when `ava.cwd.set` at git root's `.claude/skills` (Claude Code compatible), `.agents/skills` (open Agent Skills standard) and `.ava/skills` (Ava repo local — last, so it takes priority) (`ava_builtins/plugins/ava_code/_walk.py:project_skill_roots`)
 - `ava.cwd` initial value = plugin's own `AvaCodeState.cwd` Field `default_factory=_default_cwd` (has agent identity → `workspace_dir(agent_id)`, no identity → `$HOME`), **not** injected by agent-runner
 
 ## Notes

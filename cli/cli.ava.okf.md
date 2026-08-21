@@ -57,7 +57,7 @@ the rest of the `_`-prefixed steps are enumerated in
 - **install births, `ava start` pure bring-up**: birth only at install; preflight rejects uninstalled homes, never implicit birthing.
 - **Ops-layer only**: not exposed to agents (they use the `ava.*` SDK).
 - **Settings-independent**: `ava enroll` / the `ava start` preflight are specially routed in `main()` before settings-gated imports — no `shared.config` (stdlib + `shared.dotenv_boot`).
-- **Migrations are not a command**: `migrations.py:cmd_migrations_apply` runs internally from `ava start` / `ava cluster update`.
+- **Migrations are not a command**: `cli/commands/migrations.py:cmd_migrations_apply` runs internally from `ava start` / `ava cluster update`.
 
 ## Entry Points
 

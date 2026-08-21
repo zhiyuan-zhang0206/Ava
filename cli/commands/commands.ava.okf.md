@@ -34,13 +34,13 @@ Two kinds of module live here, distinguished by filename:
   `_claude_code_plugin`, `_cluster_health` /
   `_cluster_rollback` / `_cluster_cron` / `_cluster_watchdog_probe`.
 
-`migrations.py:cmd_migrations_apply` is deliberately not a user-facing verb —
+`cli/commands/migrations.py:cmd_migrations_apply` is deliberately not a user-facing verb —
 it runs as a step of `ava start` / `ava update`, so any restart crossing a
 schema change catches the DB up on its own.
 
 ## Notes
 
-- Which cluster a command acts on comes from `_repo.py:_repo_root` — the
+- Which cluster a command acts on comes from `cli/commands/_repo.py:_repo_root` — the
   checkout the running `ava` belongs to — never the current directory.
 - What `ava start` treats as already-up, what it waits for, and when an unready
   service becomes exit code 4 are one subject, in [[start-readiness.ava.okf.md]].

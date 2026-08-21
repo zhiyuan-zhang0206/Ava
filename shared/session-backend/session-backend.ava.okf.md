@@ -51,5 +51,5 @@ The read-only Application Firewall allow-list audit (issue #949, converge report
 
 ## Notes
 
-- Session naming: `shared/cluster.py:session_name(service)` → `ava-<service>`. Each unit's session namespace is its own `$AVA_HOME`, so same-named sessions on different homes never collide; agent shells are prefix-isolated as `ava-agent-<id>-shell-<n>[-<name>]`.
+- Session naming: `shared/cluster/derive.py:session_name(service)` → `ava-<service>`. Each unit's session namespace is its own `$AVA_HOME`, so same-named sessions on different homes never collide; agent shells are prefix-isolated as `ava-agent-<id>-shell-<n>[-<name>]`.
 - Shell sub-sessions are deliberately NOT torn down when the agent exits (background work outlives the process); the backends keep running even if every agent exits.

@@ -27,14 +27,14 @@ The agent's sole tool—`execute_code(code: str)`—executes Python code in a sa
 - The agent's working directory (workspace) is sandboxed
 
 ### Output Handling
-- `_exec_output.py:wrap_code_output()` wraps the result (cancelled/timed_out markers)
-- Long output `_exec_output.py:truncate_both_ends` **keeps the head and tail, drops the middle** (each half `max_chars//2`); the full text is saved to a workspace `.exec_output/` file ring (keeping the last 20 copies, `_OVERFLOW_KEEP=20`) for grep
+- `agent/graph/_exec_output.py:wrap_code_output()` wraps the result (cancelled/timed_out markers)
+- Long output `agent/graph/_exec_output.py:truncate_both_ends` **keeps the head and tail, drops the middle** (each half `max_chars//2`); the full text is saved to a workspace `.exec_output/` file ring (keeping the last 20 copies, `_OVERFLOW_KEEP=20`) for grep
 - The two caps are compatible by construction: `exec_output_accumulation_max_chars >= exec_output_max_chars` is validated at startup, so `truncate_both_ends` always slices its head out of the accumulator's kept head and its tail out of the kept tail. When the accumulation cap fired, a `StreamCap` rides the `_ExecResult` into `wrap_code_output`, which reports the **true produced length** (banner + the `[exec output chars]` instrumentation line) and headers the archive with "this file is NOT the full output" instead of pretending — the dropped middle was never stored anywhere
 - Results are dispatched by sum type (`_ExecDone|_ExecCancelled|_ExecTimedOut|_ExecLifecycle|_ExecCrashed`): user code exceptions **do not** raise; they are returned as tracebacks for the agent to judge; lifecycle exceptions (terminate/restart/compact) take highest priority
 
 ### In-memory system-note injection (`_exec_notes.py`, user ruling 2026-08-11)
 - AGENTS.md / CLAUDE.md context notes (ava_code plugin) and prompt-injection security findings (ava.security) are delivered **inside the exec's own messages delta** — no side-channel file
-- `_exec_notes.py:merge_exec_notes()` appends both after the exec-result ToolMessage: the Anthropic-compat wire contract requires `tool_use` to be immediately followed by `tool_result` (verified against the DeepSeek anthropic endpoint 2026-08-11), so notes must not be sandwiched between the AIMessage and its ToolMessage; the compact path (`_SystemHalt`) drops both (history is REMOVE_ALL'd anyway)
+- `agent/graph/_exec_notes.py:merge_exec_notes()` appends both after the exec-result ToolMessage: the Anthropic-compat wire contract requires `tool_use` to be immediately followed by `tool_result` (verified against the DeepSeek anthropic endpoint 2026-08-11), so notes must not be sandwiched between the AIMessage and its ToolMessage; the compact path (`_SystemHalt`) drops both (history is REMOVE_ALL'd anyway)
 
 ## Key Dependencies
 

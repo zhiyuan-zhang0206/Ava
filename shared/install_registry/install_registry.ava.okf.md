@@ -27,7 +27,7 @@ installed_at, updated_at, trust, scanned_at, accepted_findings}`
 - `type` — `skill` | `plugin` | `mcp`
 - `source` / `path` / `ref` — the git URL, the subdir within it, the pinned ref
 - `origin` / `origin_path` / `content_hash` — converge provenance written by
-  `cli/commands/_converge_skills.py`; `shared/paths.py:tree_hash()` recomputes
+  `cli/commands/_converge_skills.py`; `shared/install_registry.py:tree_hash()` recomputes
   the hash to surface a `modified_locally` drift flag
 - `trust` / `scanned_at` / `accepted_findings` — the content trust tier, when
   `shared/skill_scan.py` last read the package, and the rule ids a human waived
