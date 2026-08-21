@@ -82,6 +82,17 @@ class TestPauseMiddleware:
         assert "updating" in r.json()["detail"]
         assert r.headers.get("Retry-After") == "30"
 
+    def test_paused_503_carries_cors_headers(self, fake_flag: Path) -> None:
+        """A 503 short-circuited by the pause middleware still carries the CORS
+        headers — CORSMiddleware is the OUTERMOST middleware, so a browser
+        caller sees the real 503 instead of "Failed to fetch" (#187)."""
+        fake_flag.write_text("")
+        with TestClient(app) as client:
+            r = client.get("/api/agents", headers={"Origin": "http://localhost:3000"})
+        assert r.status_code == 503
+        assert r.headers["access-control-allow-origin"] == "http://localhost:3000"
+        assert r.headers["access-control-allow-credentials"] == "true"
+
     def test_cluster_status_bypasses_503(self, fake_flag: Path, set_machine_identity) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
         """`/api/cluster/status` still returns 200 while paused — it is the observability + control path."""
         fake_flag.write_text("")

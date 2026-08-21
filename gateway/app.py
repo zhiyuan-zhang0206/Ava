@@ -327,21 +327,6 @@ app = FastAPI(
     openapi_url=None,
 )
 
-# The gateway is reachable on the cluster's private network. CORS allows
-# all origins (the frontend on :3000 calls the gateway on :8000 — a different
-# port, hence cross-origin — from any private-network address).
-# ``allow_origin_regex`` is used instead of ``allow_origins=["*"]`` because
-# credentials (session cookies) require a concrete origin — ``*`` is forbidden
-# by the spec with credentials.
-app.add_middleware(
-    CORSMiddleware,
-    allow_origin_regex=".*",
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-
 # Pause exemptions are a route-declared attribute: the middleware consumes
 # only the tested decision function `gateway._pause_policy.should_bypass_pause`,
 # which reads the CONTROL_PLANE doorplates from `shared/contracts.py`. The
@@ -486,12 +471,11 @@ async def _cluster_auth_middleware(
     if not settings.gateway.auth_middleware_enabled or not secret:
         return await call_next(request)
     # CORS preflight (OPTIONS) carries no credentials by spec, so it can never
-    # satisfy the cookie/Bearer check below. Let it fall through to
-    # CORSMiddleware (inner), which answers the preflight with the
-    # Access-Control-* headers the browser needs before sending the real
-    # cross-origin request. Without this the preflight 401s here, never reaches
-    # CORS, and every cross-origin POST/PATCH/PUT (resurrect / terminate /
-    # restart / send-message) surfaces in the browser as "Failed to fetch".
+    # satisfy the cookie/Bearer check below. CORSMiddleware is now OUTERMOST and
+    # answers preflights before this middleware runs, so this branch is a
+    # defensive fallback for a future CORS reconfiguration — keep it, because a
+    # preflight that 401s here would surface every cross-origin POST/PATCH/PUT
+    # (resurrect / terminate / restart / send-message) as "Failed to fetch".
     if request.method == "OPTIONS":
         return await call_next(request)
     if request.url.path in _AUTH_BYPASS_PATHS:
@@ -522,12 +506,34 @@ async def _cluster_auth_middleware(
     )
 
 
-# Per-endpoint latency metering (Task #1091). Registered LAST so it is the
-# OUTERMOST middleware — Starlette builds the stack in reverse registration
-# order — and the measurement covers the full pipeline: CORS, pause gate,
-# idempotency dedup, and auth. `await call_next` returns at response headers,
-# so SSE / long-poll connections count time-to-first-byte, not lifetime.
+# Per-endpoint latency metering (Task #1091). Registered near-last so it is
+# near-OUTERMOST — Starlette builds the stack in reverse registration order —
+# and the measurement covers the full pipeline: pause gate, idempotency
+# dedup, and auth. `await call_next` returns at response headers, so SSE /
+# long-poll connections count time-to-first-byte, not lifetime.
 app.middleware("http")(_latency.latency_middleware)
+
+
+# CORSMiddleware is registered AFTER latency — the OUTERMOST middleware —
+# so every response carries the Access-Control-* headers, including the ones
+# short-circuited by inner middleware: the auth middleware's 401, the pause
+# middleware's 503, and the exception handler's 500 (a bare ServerErrorMiddleware
+# response — the only layer OUTSIDE user middleware — carries no CORS headers,
+# which is why unhandled route exceptions need the Exception handler below;
+# #187). The gateway is reachable on the cluster's private network; CORS
+# allows all origins (the frontend on :3000 calls the gateway on :8000 — a
+# different port, hence cross-origin — from any private-network address).
+# ``allow_origin_regex`` is used instead of ``allow_origins=["*"]`` because
+# credentials (session cookies) require a concrete origin — ``*`` is forbidden
+# by the spec with credentials. A CORS preflight (OPTIONS) is answered here,
+# before auth or pause ever see it.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origin_regex=".*",
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.exception_handler(AvaAgentError)
@@ -550,6 +556,48 @@ async def _ava_agent_error_handler(request: Request, exc: AvaAgentError) -> JSON
     return JSONResponse(
         status_code=exc.http_status,
         content=AgentErrorResponse(detail=str(exc), reason=exc.reason).model_dump(mode="json"),
+    )
+
+
+def _cors_headers(request: Request) -> dict[str, str]:
+    """The Access-Control-* headers CORSMiddleware adds to a normal response.
+
+    ServerErrorMiddleware — which answers unhandled exceptions — sits OUTSIDE
+    every user middleware (Starlette/FastAPI build order), so its response
+    never passes through CORSMiddleware and the catch-all handler below must
+    add the headers itself. Mirrors CORSMiddleware's simple-response behavior
+    for this gateway's fixed configuration: allow_origin_regex=".*" plus
+    allow_credentials=True echoes the concrete Origin with a Vary: Origin
+    (#187).
+    """
+    origin = request.headers.get("origin")
+    if origin is None:
+        return {}
+    return {
+        "Access-Control-Allow-Origin": origin,
+        "Vary": "Origin",
+        "Access-Control-Allow-Credentials": "true",
+    }
+
+
+@app.exception_handler(Exception)
+async def _unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Last-resort handler for route-level unhandled exceptions.
+
+    Without it, an unhandled route exception is caught by Starlette's
+    ServerErrorMiddleware — the one layer OUTSIDE all user middleware — and its
+    bare 500 response carries no Access-Control-* headers, so a browser caller
+    sees "Failed to fetch" instead of the actual status (#187). FastAPI routes
+    the Exception handler to ServerErrorMiddleware, so this handler returns a
+    500 with the CORS headers added explicitly (`_cors_headers`); the
+    traceback is logged here because ServerErrorMiddleware would otherwise be
+    the only observer.
+    """
+    _log.error("unhandled gateway exception", exc_info=exc)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal Server Error"},
+        headers=_cors_headers(request),
     )
 
 
