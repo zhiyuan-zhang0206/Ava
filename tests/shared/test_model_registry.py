@@ -76,6 +76,45 @@ def test_every_spawnable_model_has_core_facts() -> None:
             assert rates_at(model, input_tokens=0) is not None
 
 
+def test_deepseek_vision_exp_registry_facts() -> None:
+    """The new multimodal deepseek entry carries the v4-flash facts (window,
+    output cap, cutoff, effort vocabulary, compact thresholds) plus vision=True —
+    it is the same text model with still-image input added, not a new family."""
+    spec = MODELS["deepseek-v4-flash-vision-exp"]
+    assert spec.provider == "deepseek"
+    assert spec.spawnable
+    assert spec.context_window == 1_000_000
+    assert spec.max_output_tokens == 384_000
+    assert spec.knowledge_cutoff == "2026-04"
+    assert spec.effort_levels == ("high", "max")
+    assert spec.vision is True
+    # Same compact decision as every deepseek entry (task #581): soft 374k /
+    # hard 512k on the 1M window.
+    assert resolve_setting("auto_compact_fraction", model="deepseek-v4-flash-vision-exp") == 0.512
+    assert (
+        resolve_setting("compact_reminder_fraction", model="deepseek-v4-flash-vision-exp") == 0.374
+    )
+
+
+def test_vision_flag_matches_prefix_gate_except_deepseek_split() -> None:
+    """The per-model vision flag must reproduce the old prefix-based gate for
+    every registered id — the migration is behavior-preserving by construction.
+    The single deliberate exception is deepseek-v4-flash-vision-exp: True under a
+    prefix whose other members are text-only (the reason the gate went per-model)."""
+    from shared.lm.factory import _VISION_MODEL_PREFIXES
+
+    for model, spec in MODELS.items():
+        prefix_decision = model.startswith(_VISION_MODEL_PREFIXES)
+        if model == "deepseek-v4-flash-vision-exp":
+            assert spec.vision is True and prefix_decision is False, model
+        else:
+            assert spec.vision == prefix_decision, (
+                model,
+                spec.vision,
+                prefix_decision,
+            )
+
+
 def test_qwen_roster_is_exactly_the_two_flat_tier_models() -> None:
     """Pinned by id, because which Qwen models may be registered is a pricing
     constraint, not a preference. Alibaba publishes its length-tier boundaries
@@ -113,7 +152,7 @@ def test_shared_floor_applies_when_nothing_set() -> None:
 def test_deepseek_carries_per_model_compact_thresholds() -> None:
     """User decision (task #581): deepseek-v4-pro / deepseek-v4-flash compact
     at soft 374k / hard 512k on their 1M window — 0.374 / 0.512 of the window."""
-    for model in ("deepseek-v4-pro", "deepseek-v4-flash"):
+    for model in ("deepseek-v4-pro", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp"):
         assert resolve_setting("auto_compact_fraction", model=model) == 0.512, model
         assert resolve_setting("compact_reminder_fraction", model=model) == 0.374, model
 

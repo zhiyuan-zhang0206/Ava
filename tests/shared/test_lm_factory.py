@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 
 from shared.config import settings
-from shared.lm.factory import validate_model_config
+from shared.lm.factory import model_supports_vision, validate_model_config
 
 
 @pytest.fixture
@@ -58,3 +58,29 @@ def test_unknown_model_still_fails(env_file: Path) -> None:
     env_file.write_text("DEEPSEEK_API_KEY=x\n")
     with pytest.raises(ValueError, match="unknown model"):
         validate_model_config(model="no-such-model-xyz", config={})
+
+
+# ---------------------------------------------------------------------------
+# model_supports_vision — the message-endpoint image capability gate
+# ---------------------------------------------------------------------------
+
+
+class TestModelSupportsVision:
+    """The gate answers per-model from the registry, with the prefix table as
+    fallback for unregistered ids. The deepseek family is the live case that
+    forced the per-model move: one multimodal member under a text-only prefix."""
+
+    def test_registered_vision_model_passes(self) -> None:
+        assert model_supports_vision("deepseek-v4-flash-vision-exp") is True
+
+    def test_registered_text_only_deepseek_fails(self) -> None:
+        # Same prefix as the vision model — the per-model flag, not the prefix,
+        # decides: an image to a v4-flash agent must still 422 up front.
+        assert model_supports_vision("deepseek-v4-flash") is False
+        assert model_supports_vision("deepseek-v4-pro") is False
+
+    def test_unregistered_id_falls_back_to_prefix(self) -> None:
+        # config_overlay experiments and retired aliases keep the old prefix
+        # behavior: a gemini-* id passes, a deepseek-* id does not.
+        assert model_supports_vision("gemini-4-experiment") is True
+        assert model_supports_vision("deepseek-unknown-id") is False

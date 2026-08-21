@@ -24,14 +24,14 @@ pricing_updater = _load_script()
 _DEEPSEEK_TABLE = """
 <html><main>
 <table>
-  <tr><td colspan="3">MODEL</td><td>deepseek-v4-flash</td><td>deepseek-v4-pro</td></tr>
-  <tr><td colspan="3">MODEL VERSION</td><td>DeepSeek-V4-Flash-0731</td><td>DeepSeek-V4-Pro-0813</td></tr>
-  <tr><td rowspan="6">PRICING</td><td rowspan="2">1M INPUT TOKENS (CACHE HIT)</td><td>OFF-PEAK</td><td>$0.007</td><td>$0.022</td></tr>
-  <tr><td>PEAK</td><td>$0.014</td><td>$0.044</td></tr>
-  <tr><td rowspan="2">1M INPUT TOKENS (CACHE MISS)</td><td>OFF-PEAK</td><td>$0.22</td><td>$0.66</td></tr>
-  <tr><td>PEAK</td><td>$0.44</td><td>$1.32</td></tr>
-  <tr><td rowspan="2">1M OUTPUT TOKENS</td><td>OFF-PEAK</td><td>$0.66</td><td>$1.98</td></tr>
-  <tr><td>PEAK</td><td>$1.32</td><td>$3.96</td></tr>
+  <tr><td colspan="3">MODEL</td><td>deepseek-v4-flash</td><td>deepseek-v4-pro</td><td>deepseek-v4-flash-vision-exp</td></tr>
+  <tr><td colspan="3">MODEL VERSION</td><td>DeepSeek-V4-Flash-0731</td><td>DeepSeek-V4-Pro-0813</td><td>DeepSeek-V4-Flash-Vision-Exp</td></tr>
+  <tr><td rowspan="6">PRICING</td><td rowspan="2">1M INPUT TOKENS (CACHE HIT)</td><td>OFF-PEAK</td><td>$0.007</td><td>$0.022</td><td>$0.007</td></tr>
+  <tr><td>PEAK</td><td>$0.014</td><td>$0.044</td><td>$0.014</td></tr>
+  <tr><td rowspan="2">1M INPUT TOKENS (CACHE MISS)</td><td>OFF-PEAK</td><td>$0.22</td><td>$0.66</td><td>$0.22</td></tr>
+  <tr><td>PEAK</td><td>$0.44</td><td>$1.32</td><td>$0.44</td></tr>
+  <tr><td rowspan="2">1M OUTPUT TOKENS</td><td>OFF-PEAK</td><td>$0.66</td><td>$1.98</td><td>$0.66</td></tr>
+  <tr><td>PEAK</td><td>$1.32</td><td>$3.96</td><td>$1.32</td></tr>
 </table>
 <p>Off-peak rates are half of the peak rates. Peak hours are 01:00 - 04:00 and 06:00 - 10:00 UTC.</p>
 </main></html>
@@ -64,11 +64,22 @@ def test_deepseek_parser_preserves_models_meters_and_decimal_units() -> None:
         cache_read=Decimal("0.022"),
         output=Decimal("1.98"),
     )
+    # The vision variant bills at v4-flash rates (its images count as input tokens).
+    assert prices["deepseek-v4-flash-vision-exp"].peak == pricing_updater.Rates(
+        input=Decimal("0.44"),
+        cache_read=Decimal("0.014"),
+        output=Decimal("1.32"),
+    )
+    assert prices["deepseek-v4-flash-vision-exp"].off_peak == pricing_updater.Rates(
+        input=Decimal("0.22"),
+        cache_read=Decimal("0.007"),
+        output=Decimal("0.66"),
+    )
 
 
 def test_deepseek_parser_fails_closed_when_a_meter_disappears() -> None:
     html = _DEEPSEEK_TABLE.replace(
-        '<tr><td rowspan="2">1M OUTPUT TOKENS</td><td>OFF-PEAK</td><td>$0.66</td><td>$1.98</td></tr>',
+        '<tr><td rowspan="2">1M OUTPUT TOKENS</td><td>OFF-PEAK</td><td>$0.66</td><td>$1.98</td><td>$0.66</td></tr>',
         "",
     )
 

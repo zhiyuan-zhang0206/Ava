@@ -138,14 +138,14 @@ def test_post_message_invalid_source_422(db_conn: psycopg.Connection) -> None:
     assert _pending_rows(db_conn, tid) == []
 
 
-def _seed_vision_agent(db_conn: psycopg.Connection) -> int:
+def _seed_vision_agent(db_conn: psycopg.Connection, model: str = "claude-opus-4-8") -> int:
     """Seed an agent whose per-agent overlay pins a vision-capable model, so the
     capability gate lets image messages through."""
     tid = _seed_agent(db_conn)
     with db_conn.cursor() as cur:
         cur.execute(
             "UPDATE agents_meta SET config_overlay = %s::jsonb WHERE id = %s",
-            ('{"llm_model": "claude-opus-4-8"}', tid),
+            (f'{{"llm_model": "{model}"}}', tid),
         )
     db_conn.commit()
     return tid
@@ -204,6 +204,43 @@ class TestMultimodalMessage:
             assert url == f"/api/agents/{tid}/uploads/shot.png"
             # deliver=false must not have queued any inbound.
             assert _pending_rows(db_conn, tid) == []
+
+            resp = client.post(
+                f"/api/agents/{tid}/messages",
+                json={
+                    "content": [
+                        {"type": "text", "text": "describe this"},
+                        {"type": "image_url", "image_url": {"url": url}},
+                    ],
+                    "source": "user",
+                },
+            )
+        assert resp.status_code == 201
+        content, payload = _payload_row(db_conn, tid)  # pyright: ignore[reportUnknownVariableType]
+        assert content == "describe this"
+        assert payload is not None
+        blocks = payload["content_blocks"]  # pyright: ignore[reportUnknownVariableType]
+        assert blocks[0] == {"type": "text", "text": "describe this"}
+        assert blocks[1]["type"] == "image_url"
+        assert blocks[1]["image_url"]["url"] == url
+
+    def test_image_to_deepseek_vision_model_stores_blocks(
+        self, db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """deepseek-v4-flash-vision-exp is multimodal on the deepseek branch —
+        the per-model gate must let an image through even though its prefix-mates
+        (v4-pro / v4-flash) are text-only."""
+        from pathlib import Path
+
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+        tid = _seed_vision_agent(db_conn, model="deepseek-v4-flash-vision-exp")
+        with TestClient(app) as client:
+            up = client.post(
+                f"/api/agents/{tid}/uploads?deliver=false",
+                files=[("files", ("shot.png", b"\x89PNG\r\n\x1a\npix", "image/png"))],
+            )
+            assert up.status_code == 200
+            url = up.json()["files"][0]["url"]
 
             resp = client.post(
                 f"/api/agents/{tid}/messages",

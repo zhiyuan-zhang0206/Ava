@@ -131,20 +131,20 @@ class _LLMFactory(Protocol):
     def __call__(self, model: str) -> BaseChatModel: ...
 
 
-# Model prefixes whose provider binding decodes native image content blocks.
-# claude / gemini / gpt are multimodal on the endpoints Ava binds; kimi / grok
-# accept image input on their OpenAI-compatible endpoints, and every Qwen model
-# in the registry is natively multimodal (Alibaba made the mainline models
-# multimodal from Qwen3.5 on — the text-only/`-vl-` split ended there).
-# deepseek (bound to its anthropic-compatible endpoint above), mimo, and glm are
-# text-only there, so a HumanMessage carrying an image block would 400 (or be
-# silently dropped) mid-turn. The message endpoint gates on this to 422 an image
-# addressed to a text-only agent up front, rather than letting the LLM call fail
-# after the inbound is already queued. Add a prefix here the day its provider
-# ships vision on the bound endpoint — and note the gate is per PREFIX, so
-# registering a text-only legacy id under a vision prefix (Alibaba's retired
-# `qwen-plus` / `qwen-flash` are the live example) means making it per-model
-# first.
+# Prefix fallback for UNREGISTERED model ids — the registry's per-model
+# `ModelSpec.vision` flag is authoritative for registered ids (see
+# `model_supports_vision`). claude / gemini / gpt are multimodal on the endpoints
+# Ava binds; kimi / grok accept image input on their OpenAI-compatible endpoints,
+# and every Qwen model in the registry is natively multimodal (Alibaba made the
+# mainline models multimodal from Qwen3.5 on — the text-only/`-vl-` split ended
+# there). deepseek (bound to its anthropic-compatible endpoint above), mimo, and
+# glm are text-only there, so a HumanMessage carrying an image block would 400
+# (or be silently dropped) mid-turn. The message endpoint gates on this to 422
+# an image addressed to a text-only agent up front, rather than letting the LLM
+# call fail after the inbound is already queued. A prefix is only correct while
+# every model under it shares one answer — the deepseek family no longer does
+# (v4-flash-vision-exp is multimodal, pro/flash are not), which is exactly why
+# the gate is per-model for registered ids.
 _VISION_MODEL_PREFIXES: tuple[str, ...] = (
     "claude-",
     "gemini-",
@@ -156,7 +156,17 @@ _VISION_MODEL_PREFIXES: tuple[str, ...] = (
 
 
 def model_supports_vision(model: str) -> bool:
-    """Whether `model`'s provider binding accepts native image content blocks."""
+    """Whether `model`'s provider binding accepts native image content blocks.
+
+    Registered ids answer from the registry's per-model `ModelSpec.vision` flag
+    (the message-endpoint gate must not treat text-only `deepseek-v4-pro` as
+    vision-capable just because `deepseek-v4-flash-vision-exp` is). Unregistered
+    ids — config_overlay experiments, retired aliases — fall back to the prefix
+    table, which keeps today's behavior for models without a registry entry.
+    """
+    spec = MODELS.get(model)
+    if spec is not None:
+        return spec.vision
     return model.startswith(_VISION_MODEL_PREFIXES)
 
 
