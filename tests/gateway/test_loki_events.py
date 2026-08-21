@@ -784,3 +784,124 @@ class TestAttributeMaxSeries:
             == []
         )
         assert client.calls == []
+
+
+class _RaisingClient:
+    """Stands in for the shared client; get() raises the configured error."""
+
+    def __init__(self, exc: BaseException) -> None:
+        self.exc = exc
+        self.calls: list[tuple[str, dict[str, Any]]] = []
+
+    def get(self, url: str, params: dict[str, Any]) -> _FakeResponse:
+        self.calls.append((url, params))
+        raise self.exc
+
+
+class _StatusClient:
+    """Stands in for the shared client; returns an httpx response with the
+    configured status so raise_for_status raises the real HTTPStatusError."""
+
+    def __init__(self, status: int) -> None:
+        self._resp = httpx.Response(status, request=httpx.Request("GET", "http://loki"))
+
+    def get(self, url: str, params: dict[str, Any]) -> httpx.Response:
+        return self._resp
+
+
+class TestGetJson:
+    """The shared fetch helper: per-call failure events (task #1289 — a
+    60s Loki hang surfaced as a bare /api/events 500 with no record of the
+    query shape; `loki_query_failed` is that record)."""
+
+    def test_timeout_emits_failure_event_and_reraises(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        client = _RaisingClient(httpx.ReadTimeout("timed out"))
+        monkeypatch.setattr(loki_events, "_client", _accessor(client))
+        emitted: list[tuple[str, str, dict[str, Any]]] = []
+
+        def _emit(category: str, name: str, **kwargs: Any) -> None:
+            emitted.append((category, name, kwargs))
+
+        monkeypatch.setattr(loki_events.telemetry, "emit", _emit)
+        params: dict[str, Any] = {
+            "query": '{service_name="unknown_service"} | json | category=~"telemetry"',
+            "limit": 1001,
+            "start": 1787068800000000000,
+            "end": 1787155200000000000,
+        }
+        with pytest.raises(httpx.ReadTimeout):
+            loki_events._get_json(
+                "http://loki/loki/api/v1/query_range",
+                params,
+                endpoint="query_range",
+            )
+        assert len(emitted) == 1
+        category, name, kwargs = emitted[0]
+        assert category == "log"
+        assert name == "loki_query_failed"
+        attrs = kwargs["attributes"]
+        assert kwargs["level"] == "error"
+        assert attrs["endpoint"] == "query_range"
+        assert attrs["error"] == "ReadTimeout"
+        assert attrs["window_from"] == "2026-08-18T16:00:00+00:00"
+        assert attrs["window_to"] == "2026-08-19T16:00:00+00:00"
+        assert attrs["query"].startswith("{service_name=")
+
+    def test_http_5xx_emits_failure_event_and_reraises(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        client = _StatusClient(500)
+        monkeypatch.setattr(loki_events, "_client", _accessor(client))
+        emitted: list[tuple[str, str, dict[str, Any]]] = []
+
+        def _emit(category: str, name: str, **kwargs: Any) -> None:
+            emitted.append((category, name, kwargs))
+
+        monkeypatch.setattr(loki_events.telemetry, "emit", _emit)
+        with pytest.raises(httpx.HTTPStatusError):
+            loki_events._get_json(
+                "http://loki/loki/api/v1/query",
+                {"query": "sum(count_over_time(({}[1d])))"},
+                endpoint="query",
+            )
+        assert len(emitted) == 1
+        assert emitted[0][1] == "loki_query_failed"
+        assert emitted[0][2]["attributes"]["error"] == "HTTPStatusError"
+
+    def test_emit_failure_does_not_mask_transport_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        client = _RaisingClient(httpx.ReadTimeout("timed out"))
+        monkeypatch.setattr(loki_events, "_client", _accessor(client))
+
+        def _boom(*args: Any, **kwargs: Any) -> None:
+            raise ValueError("unregistered event")
+
+        monkeypatch.setattr(loki_events.telemetry, "emit", _boom)
+        with pytest.raises(httpx.ReadTimeout):
+            loki_events._get_json(
+                "http://loki/loki/api/v1/query_range",
+                {"query": '{service_name=~".+"}'},
+                endpoint="query_range",
+            )
+
+    def test_success_returns_payload_without_event(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        client = _install(monkeypatch, {"data": {"result": []}})
+        emitted: list[tuple[str, str, dict[str, Any]]] = []
+
+        def _emit(category: str, name: str, **kwargs: Any) -> None:
+            emitted.append((category, name, kwargs))
+
+        monkeypatch.setattr(loki_events.telemetry, "emit", _emit)
+        payload = loki_events._get_json(
+            "http://loki/loki/api/v1/query",
+            {"query": "sum(count_over_time(({}[1d])))"},
+            endpoint="query",
+        )
+        assert payload == {"data": {"result": []}}
+        assert emitted == []
+        assert client.calls == [
+            ("http://loki/loki/api/v1/query", {"query": "sum(count_over_time(({}[1d])))"})
+        ]
