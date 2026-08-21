@@ -8,9 +8,8 @@ without a real session backend.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from collections.abc import Iterator
+from pathlib import Path
 
 import psycopg
 import pytest
