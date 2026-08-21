@@ -127,6 +127,7 @@ export function useTimeline(
   const connectionState = useTimelineStore((s) => s.connectionState);
   const turnActive = useTimelineStore((s) => s.turnActive);
   const processSseEvent = useTimelineStore((s) => s.processSseEvent);
+  const processSseEventBatch = useTimelineStore((s) => s.processSseEventBatch);
   const processConnectionEvent = useTimelineStore((s) => s.processConnectionEvent);
   const reloadSnapshot = useTimelineStore((s) => s.reloadSnapshot);
   const switchThread = useTimelineStore((s) => s.switchThread);
@@ -222,54 +223,38 @@ export function useTimeline(
   }, [timelineQuery.error, showError, clearPartialFlags]);
 
   // -- SSE business-event handler --
-  const onSystemEvent = useCallback(
+  // Wrap delta-streaming events in startTransition to lower React render
+  // priority — so successive code_delta / chat_delta chunk re-renders don't
+  // block UI interactions (e.g. clicking stop). Lifecycle events
+  // (start/committed/done/cancelled) aren't delayed — the user needs to see
+  // the button flip and reload result immediately.
+  const isStreamingDelta = (ev: SystemEvent): boolean =>
+    ev.role === "code_delta" ||
+    ev.role === "chat_delta" ||
+    ev.role === "reasoning_delta" ||
+    ev.role === "exec_output_chunk";
+
+  // The agent publishes a timeline_snapshot on each graph node enter, so the
+  // frontend no longer needs to refetch. LLMDone and InboundCommitted also no
+  // longer trigger refetch — their responsibility is replaced by the
+  // agent-published timeline_snapshot.
+  //
+  // compact_done is the exception: compaction replaces the whole history (the
+  // old messages are removed, not appended to), and the snapshot merge is
+  // built for growth, not shrinkage. The cache must reconcile to the
+  // authoritative post-compact state — but an invalidate fired HERE reads the
+  // checkpoint BEFORE the compact commits (the commit lands a beat later, on
+  // remote machines seconds later) and would cache the lagging pre-compact
+  // snapshot; a later switch-back then seeds it and keep-all merging
+  // resurrects the old bubbles. So defer the invalidate to the first
+  // NON-EMPTY post-compact timeline_snapshot for that agent: by then the
+  // checkpoint is committed (the snapshot is emitted from the in-memory state
+  // after the compacting super-steps), the refetch returns the new history,
+  // and the cache + switch-back stay clean. The store's reset window drops
+  // the refetch's merge while it is open, so the visible thread is unaffected
+  // either way.
+  const trackCompactForInvalidation = useCallback(
     (ev: SystemEvent) => {
-      // token_usage is owned solely by useTokenUsage (its own processSseEvent
-      // call on the same shared AgentEventStreamProvider). The timeline slice
-      // must not also forward it — otherwise every token_usage event writes the
-      // token state twice (R10 double-processing). It carries nothing the
-      // timeline renders: applySystemEvent treats token_usage as a no-op.
-      if (ev.role === "token_usage") return;
-
-      // Wrap delta-streaming events in startTransition to lower
-      // React render priority — so successive code_delta / chat_delta
-      // chunk re-renders don't block UI interactions (e.g. clicking
-      // stop). Lifecycle events (start/committed/done/cancelled)
-      // aren't delayed — the user needs to see the button flip and
-      // reload result immediately.
-      const isStreamingDelta =
-        ev.role === "code_delta" ||
-        ev.role === "chat_delta" ||
-        ev.role === "reasoning_delta" ||
-        ev.role === "exec_output_chunk";
-
-      if (isStreamingDelta) {
-        startTransition(() => {
-          processSseEvent(ev);
-        });
-      } else {
-        processSseEvent(ev);
-      }
-
-      // The agent publishes a timeline_snapshot on each graph node enter,
-      // so the frontend no longer needs to refetch. LLMDone and
-      // InboundCommitted also no longer trigger refetch — their
-      // responsibility is replaced by the agent-published timeline_snapshot.
-      //
-      // compact_done is the exception: compaction replaces the whole history
-      // (the old messages are removed, not appended to), and the snapshot
-      // merge is built for growth, not shrinkage. The cache must reconcile to
-      // the authoritative post-compact state — but an invalidate fired HERE
-      // reads the checkpoint BEFORE the compact commits (the commit lands a
-      // beat later, on remote machines seconds later) and would cache the
-      // lagging pre-compact snapshot; a later switch-back then seeds it and
-      // keep-all merging resurrects the old bubbles. So defer the invalidate
-      // to the first NON-EMPTY post-compact timeline_snapshot for that agent:
-      // by then the checkpoint is committed (the snapshot is emitted from the
-      // in-memory state after the compacting super-steps), the refetch
-      // returns the new history, and the cache + switch-back stay clean. The
-      // store's reset window drops the refetch's merge while it is open, so
-      // the visible thread is unaffected either way.
       if (ev.role === "compact_done") {
         pendingCompactAgentsRef.current.add(ev.agent_id);
       } else if (
@@ -280,7 +265,58 @@ export function useTimeline(
         void queryClient.invalidateQueries({ queryKey: ["timeline", ev.agent_id] });
       }
     },
-    [processSseEvent, queryClient],
+    [queryClient],
+  );
+
+  // Streaming-delta roles — rendered through startTransition so a burst of
+  // chunks never blocks UI interactions (shared by the per-event and batch
+  // paths; a batch containing ANY delta renders as a transition — a lifecycle
+  // event in the same frame is delayed by at most one transition commit).
+  const onSystemEvent = useCallback(
+    (ev: SystemEvent) => {
+      // token_usage is owned solely by useTokenUsage (its own processSseEvent
+      // call on the same shared AgentEventStreamProvider). The timeline slice
+      // must not also forward it — otherwise every token_usage event writes the
+      // token state twice (R10 double-processing). It carries nothing the
+      // timeline renders: applySystemEvent treats token_usage as a no-op.
+      if (ev.role === "token_usage") return;
+
+      if (isStreamingDelta(ev)) {
+        startTransition(() => {
+          processSseEvent(ev);
+        });
+      } else {
+        processSseEvent(ev);
+      }
+      trackCompactForInvalidation(ev);
+    },
+    [processSseEvent, trackCompactForInvalidation],
+  );
+
+  // Frame-batch delivery: the provider calls this ONCE per SSE frame with
+  // every event in it, and the whole frame folds in one store set() (one
+  // notification + one render) instead of one set() per event. This is the
+  // subscriber-level half of the busy-fleet fix — while several agents
+  // stream at once (the moment a live shell view is open) the all-events
+  // broadcast carries dozens of deltas per second, and the per-event path
+  // turned every one into a render/layout pass on the home page.
+  const onSystemEventBatch = useCallback(
+    (events: SystemEvent[]) => {
+      // token_usage belongs to useTokenUsage's own per-event subscriber.
+      const filtered = events.filter((ev) => ev.role !== "token_usage");
+      if (filtered.length === 0) return;
+      const hasStreaming = filtered.some((ev) => isStreamingDelta(ev));
+      const apply = () => processSseEventBatch(filtered);
+      if (hasStreaming) {
+        startTransition(apply);
+      } else {
+        apply();
+      }
+      for (const ev of filtered) {
+        trackCompactForInvalidation(ev);
+      }
+    },
+    [processSseEventBatch, trackCompactForInvalidation],
   );
 
   const onConnectionEvent = useCallback(
@@ -319,7 +355,7 @@ export function useTimeline(
     [showError, processConnectionEvent, queryClient, agentId],
   );
 
-  useAgentEventStream(onSystemEvent, onConnectionEvent);
+  useAgentEventStream(onSystemEvent, onConnectionEvent, onSystemEventBatch);
 
   // -- Scroll-up: fetch + prepend the previous window of older items --
   // Reads live store state via getState() (not the subscribed values) so

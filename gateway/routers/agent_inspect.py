@@ -18,6 +18,9 @@ are visible exactly like a local one's.
 from __future__ import annotations
 
 import asyncio
+import threading
+import time as time_mod
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, Literal, NamedTuple, cast
 
@@ -419,15 +422,18 @@ async def _probe_agent_shells(agent_id: int, machine: str) -> list[ShellInfo]:
 
 
 class _InspectRows(NamedTuple):
-    """Everything the inspect endpoint reads from the DB — assembled off the
-    event loop (the queries are synchronous psycopg; the frontend polls this
-    endpoint every 5s, and a DB stall on the loop would freeze the gateway)."""
+    """The inspector's per-agent payload minus `notice` and `shells`.
+
+    `notice` is fetched fresh on every call — the panel's reply surface must
+    react to a resolve/reply instantly, so it never rides the cache. `shells`
+    is a live cross-machine probe. Everything else aggregates event history
+    that drifts on the scale of seconds, so the short-TTL cache below serves
+    it safely."""
 
     machine: str
     spawned_at: Any
     started_at: Any
     config_overlay: dict[str, Any]
-    notice: OpenNotice | None
     cost: Any
     stats: Any
     tps: Any
@@ -437,11 +443,24 @@ class _InspectRows(NamedTuple):
     last_probe_at: Any
 
 
-def _inspect_blocking(
-    pool: ConnectionPool[Any], agent_id: int, hours: StatsWindowHours | None, *, since_compact: bool
-) -> _InspectRows:
-    """Sync twin of the inspect endpoint's DB section — runs via
-    asyncio.to_thread so the event loop stays free (5s frontend poll)."""
+class _DbRows(NamedTuple):
+    """The inspect endpoint's agents_meta read — the one DB round-trip the
+    event-history sections key off."""
+
+    machine: str
+    status: Any
+    last_active_at: Any
+    spawned_at: Any
+    started_at: Any
+    paused_until: Any
+    pending_inbound: bool
+    config_overlay: dict[str, Any]
+    liveness_state: Literal["online", "offline", "unknown"]
+    last_probe_at: Any
+
+
+def _db_rows_blocking(pool: ConnectionPool[Any], agent_id: int) -> _DbRows:
+    """The agents_meta row + pending-inbound flag — one DB round-trip."""
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT config_overlay, machine, status, last_active_at, "
@@ -454,10 +473,6 @@ def _inspect_blocking(
         row = cur.fetchone()
         if row is None:
             raise HTTPException(status_code=404, detail=f"agent {agent_id} not found")
-        config_overlay = row[0] if row[0] is not None else {}
-        machine = row[1]
-        spawned_at = row[4]
-        started_at = row[5]
         cur.execute(
             "SELECT EXISTS (SELECT 1 FROM inbound_messages "
             "WHERE agent_id = %s AND status = 'pending')",
@@ -465,22 +480,33 @@ def _inspect_blocking(
         )
         pending_row = cur.fetchone()
         assert pending_row is not None  # noqa: S101 — EXISTS always returns one row
-        heartbeat = _heartbeat(
-            agent_id,
+        return _DbRows(
+            machine=row[1],
             status=row[2],
             last_active_at=row[3],
+            spawned_at=row[4],
+            started_at=row[5],
             paused_until=row[6],
             pending_inbound=bool(pending_row[0]),
+            config_overlay=row[0] if row[0] is not None else {},
+            liveness_state=cast(
+                Literal["online", "offline", "unknown"],
+                row[7] if row[7] is not None else "unknown",
+            ),
+            last_probe_at=row[8],
         )
-        liveness_state = cast(
-            Literal["online", "offline", "unknown"],
-            row[7] if row[7] is not None else "unknown",
-        )
-        last_probe_at = row[8]
-        # The agent's single open notice (since #152 at most one) — may be
-        # either kind (require_response or FYI). None when the agent has none.
-        # Expired FYI notices (older than NOTICE_FYI_TTL_DAYS, audit C1) are
-        # excluded like everywhere else; require_response never expires.
+
+
+def _notice_blocking(pool: ConnectionPool[Any], agent_id: int) -> OpenNotice | None:
+    """The agent's single open notice (since #152 at most one) — may be
+    either kind (require_response or FYI). None when the agent has none.
+    Expired FYI notices (older than NOTICE_FYI_TTL_DAYS, audit C1) are
+    excluded like everywhere else; require_response never expires.
+
+    Fetched on EVERY call (never cached): the panel's reply surface must
+    clear the moment a notice resolves, and this is one cheap indexed SELECT
+    — no reason to ride the aggregates' TTL."""
+    with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT id, title, content, priority, require_response, blocking, created_at "
             "FROM agent_notices "
@@ -490,43 +516,113 @@ def _inspect_blocking(
             (agent_id, NOTICE_FYI_TTL_DAYS),
         )
         nr = cur.fetchone()
-        notice = (
-            OpenNotice(
-                id=nr[0],
-                title=nr[1],
-                content=nr[2],
-                priority=nr[3],
-                require_response=nr[4],
-                blocking=nr[5],
-                created_at=nr[6],
-            )
-            if nr
-            else None
+    if nr is None:
+        return None
+    return OpenNotice(
+        id=nr[0],
+        title=nr[1],
+        content=nr[2],
+        priority=nr[3],
+        require_response=nr[4],
+        blocking=nr[5],
+        created_at=nr[6],
+    )
+
+
+# Parallel workers for one inspect call's event-history fan-out. Each section
+# issues its own sequential Loki queries over the shared event stream, so the
+# serial per-query round-trips that dominated the panel's latency (a whole-life
+# call ≈ 20 queries, each an HTTP round-trip scanning the full retention
+# window) now overlap: the call's wall time becomes ≈ its slowest section
+# instead of the sum of all of them. Bounded at 6 so one panel open does not
+# queue far beyond Loki's own querier concurrency (max_concurrent: 4).
+_INSPECT_WORKERS = 6
+
+
+def _inspect_blocking(
+    pool: ConnectionPool[Any], agent_id: int, hours: StatsWindowHours | None, *, since_compact: bool
+) -> _InspectRows:
+    """Sync twin of the inspect endpoint's event-history section — runs via
+    asyncio.to_thread so the event loop stays free. The independent sections
+    (cost / stats / tps / activity / heartbeat) run on parallel workers."""
+    db = _db_rows_blocking(pool, agent_id)
+    # `window_start` is the concrete lower-bound instant of the request
+    # window — the active-rate denominator clips alive-time to it (alive
+    # is replayed in Python). since_compact → the compact halt ts (or
+    # None when never compacted); hours → now - N h; neither → None
+    # (whole life).
+    from_, window_start = window_bounds(agent_id, hours, since_compact=since_compact)
+    with ThreadPoolExecutor(max_workers=_INSPECT_WORKERS, thread_name_prefix="inspect") as ex:
+        f_cost = ex.submit(
+            _agent_cost.agent_cost, pool, agent_id, hours, since_compact=since_compact
         )
-        # `window_start` is the concrete lower-bound instant of the request
-        # window — the active-rate denominator clips alive-time to it (alive
-        # is replayed in Python). since_compact → the compact halt ts (or
-        # None when never compacted); hours → now - N h; neither → None
-        # (whole life).
-        from_, window_start = window_bounds(agent_id, hours, since_compact=since_compact)
-        cost = _agent_cost.agent_cost(pool, agent_id, hours, since_compact=since_compact)
-        stats = _agent_stats(agent_id, from_, None)
-        tps = _agent_tps(agent_id, from_, None, spawned_at)
-        activity = _agent_activity(agent_id, from_, None, window_start, spawned_at)
+        f_stats = ex.submit(_agent_stats, agent_id, from_, None)
+        f_tps = ex.submit(_agent_tps, agent_id, from_, None, db.spawned_at)
+        f_activity = ex.submit(_agent_activity, agent_id, from_, None, window_start, db.spawned_at)
+        f_heartbeat = ex.submit(
+            _heartbeat,
+            agent_id,
+            status=db.status,
+            last_active_at=db.last_active_at,
+            paused_until=db.paused_until,
+            pending_inbound=db.pending_inbound,
+        )
+        cost = f_cost.result()
+        stats = f_stats.result()
+        tps = f_tps.result()
+        activity = f_activity.result()
+        heartbeat = f_heartbeat.result()
     return _InspectRows(
-        machine=machine,
-        spawned_at=spawned_at,
-        started_at=started_at,
-        config_overlay=config_overlay,
-        notice=notice,
+        machine=db.machine,
+        spawned_at=db.spawned_at,
+        started_at=db.started_at,
+        config_overlay=db.config_overlay,
         cost=cost,
         stats=stats,
         tps=tps,
         activity=activity,
         heartbeat=heartbeat,
-        liveness_state=liveness_state,
-        last_probe_at=last_probe_at,
+        liveness_state=db.liveness_state,
+        last_probe_at=db.last_probe_at,
     )
+
+
+# (agent_id, hours, since_compact) -> (monotonic expiry, _InspectRows).
+# The event-history aggregates are the panel's expensive half (a whole-life
+# call fans ~20 Loki queries out over the shared stream), and the frontend
+# refetches them in bursts — on every panel open (refetchOnMount:always), on
+# every notice SSE event for the agent, and on the 60s background interval.
+# A 10s TTL absorbs those bursts while staying far fresher than the panel's
+# own drift tolerance. `notice` / `shells` never ride the cache (see the
+# endpoint). Bound the dict and prune on overflow the way _agent_cost does.
+_INSPECT_CACHE_TTL_S = 10.0
+_INSPECT_CACHE_MAX = 1024
+_inspect_cache: dict[tuple[int, int | None, bool], tuple[float, _InspectRows]] = {}
+_inspect_cache_lock = threading.Lock()
+
+
+def _inspect_cache_get(key: tuple[int, int | None, bool]) -> _InspectRows | None:
+    with _inspect_cache_lock:
+        hit = _inspect_cache.get(key)
+        if hit is not None and hit[0] > time_mod.monotonic():
+            return hit[1]
+    return None
+
+
+def _inspect_cache_put(key: tuple[int, int | None, bool], rows: _InspectRows) -> None:
+    now = time_mod.monotonic()
+    with _inspect_cache_lock:
+        if len(_inspect_cache) >= _INSPECT_CACHE_MAX:
+            expired = [k for k, v in _inspect_cache.items() if v[0] <= now]
+            for k in expired:
+                del _inspect_cache[k]
+        _inspect_cache[key] = (now + _INSPECT_CACHE_TTL_S, rows)
+
+
+def cache_clear() -> None:
+    """Test seam: drop the inspect response cache."""
+    with _inspect_cache_lock:
+        _inspect_cache.clear()
 
 
 @router.get("/api/agents/{agent_id}/inspect")
@@ -549,7 +645,14 @@ async def get_agent_inspect(
     `shells` + `config_overlay` + `heartbeat` are always
     current, independent of the window. 404 if the agent is unknown (no
     agents_meta row). `config_overlay` is the spawn-time override map — `{}` when
-    the agent runs on cluster defaults (the column is NULL). `shells` is probed
+    the agent runs on cluster defaults (the column is NULL).
+
+    Latency discipline: the event-history sections run on parallel workers
+    (one Loki fan-out per section, overlapped), and the assembled rows ride a
+    10s TTL cache keyed by (agent_id, hours, since_compact) — the panel
+    refetches in bursts (open, notice SSE events, 60s interval), and a burst
+    must not re-run the ~20-query fan-out per request. `notice` and `shells`
+    are fetched fresh on every call and never ride the cache. `shells` is probed
     on the agent's own machine via the `shell_probe` cluster op (the gateway
     never runs sessions itself; every machine — its own included — is dialed at its
     registered ops URL), so a split deployment reflects each agent's runner and
@@ -558,13 +661,18 @@ async def get_agent_inspect(
     projected next check-in when idle (or the active pause / running suppression)
     plus its most recent pause from history.
     """
-    rows = await asyncio.to_thread(
-        _inspect_blocking,
-        request.app.state.db_pool,
-        agent_id,
-        hours,
-        since_compact=since_compact,
-    )
+    pool = request.app.state.db_pool
+    key = (agent_id, None if hours is None else int(hours), since_compact)
+    rows = _inspect_cache_get(key)
+    if rows is None:
+        rows = await asyncio.to_thread(
+            _inspect_blocking, pool, agent_id, hours, since_compact=since_compact
+        )
+        _inspect_cache_put(key, rows)
+    # The notice is read fresh on every call (it never rides the cache): the
+    # panel's reply surface must clear the moment a notice resolves, and the
+    # SELECT is cheap. The shell probe is equally cheap and always live.
+    notice = await asyncio.to_thread(_notice_blocking, pool, agent_id)
     return AgentInspect(
         agent_id=agent_id,
         machine=rows.machine,
@@ -574,7 +682,7 @@ async def get_agent_inspect(
         since_compact=since_compact,
         shells=await _probe_agent_shells(agent_id, rows.machine),
         config_overlay=rows.config_overlay,
-        notice=rows.notice,
+        notice=notice,
         cost=rows.cost,
         stats=rows.stats,
         tps=rows.tps,
