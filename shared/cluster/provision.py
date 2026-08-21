@@ -236,7 +236,7 @@ def ensure_checkpoint_schema(identity: str, *, base_admin_url: str, cluster_secr
 def ensure_runner_role(identity: str, *, base_admin_url: str, runner_password: str) -> None:
     """Create (or re-affirm) the cluster's `ava_runner` least-privilege role and
     its table grants. Idempotent — install birth and `ava cluster
-    ensure-runner-role` run the same SQL (Task #1236 design).
+    ensure-db-role` run the same SQL (Task #1236 design).
 
     The role is `LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE` with
     `runner_password` (the gateway `.env` AVA_RUNNER_DB_PASSWORD value,
@@ -285,7 +285,7 @@ def ensure_runner_role(identity: str, *, base_admin_url: str, runner_password: s
 
     Re-running this is how an EXISTING cluster picks up tables added since its
     birth: `ava start` calls it on a gateway host after applying a migration,
-    and `ava cluster ensure-runner-role` is the manual door. The standing
+    and `ava cluster ensure-db-role` is the manual door. The standing
     default privileges only take effect for tables created after they are
     declared, so the re-run is what closes the retroactive half.
     """
@@ -341,7 +341,7 @@ def ensure_runner_role(identity: str, *, base_admin_url: str, runner_password: s
         # They do NOT retroactively grant anything, so an existing cluster
         # still needs the re-run above to cover tables it already has — that
         # is what `ava start` triggers after applying a migration, and what
-        # `ava cluster ensure-runner-role` does by hand.
+        # `ava cluster ensure-db-role` does by hand.
         conn.execute(
             pgsql.SQL(
                 "ALTER DEFAULT PRIVILEGES FOR ROLE {} IN SCHEMA public GRANT SELECT ON TABLES TO {}"

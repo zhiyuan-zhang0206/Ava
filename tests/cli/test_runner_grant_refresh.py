@@ -97,7 +97,7 @@ def test_refresh_re_affirms_the_identity_the_url_carries(
 ) -> None:
     """Identity is READ from the URL, never re-derived — a cluster on its
     historical `ava_main` must not be re-affirmed as `ava`."""
-    from cli.commands.ensure_runner_role import refresh_runner_grants_after_migration
+    from cli.commands.ensure_db_role import refresh_runner_grants_after_migration
 
     _write_env(
         unit_home,
@@ -113,7 +113,7 @@ def test_refresh_skips_a_runner_home(unit_home: Path, _calls: list[tuple[str, st
     """A pure agent-runner's `.env` carries no AVA_DB_URL — it fetches connection
     facts from the gateway — and it holds no admin credential. Touching roles
     from there is not a degraded case to warn about; it is not its job."""
-    from cli.commands.ensure_runner_role import refresh_runner_grants_after_migration
+    from cli.commands.ensure_db_role import refresh_runner_grants_after_migration
 
     _write_env(unit_home, AVA_GATEWAY_URL="http://gw:8000")
     refresh_runner_grants_after_migration()
@@ -127,8 +127,8 @@ def test_refresh_does_not_adopt_the_role_on_a_pre_cutover_cluster(
     """No `AVA_RUNNER_DB_PASSWORD` means this cluster never provisioned the
     runner role at all. `ensure_runner_role` would CREATE it and mint a
     credential — a real adoption, silently, on somebody's next start.
-    `ava cluster ensure-runner-role` is the deliberate door for that."""
-    from cli.commands.ensure_runner_role import refresh_runner_grants_after_migration
+    `ava cluster ensure-db-role` is the deliberate door for that."""
+    from cli.commands.ensure_db_role import refresh_runner_grants_after_migration
 
     _write_env(unit_home, AVA_DB_URL="postgresql://ava:pw@127.0.0.1:5433/ava")
     refresh_runner_grants_after_migration()
@@ -147,7 +147,7 @@ def test_refresh_failure_names_the_operator_fix_and_does_not_abort(
     reports and continues — but it has to say what to run, because nothing else
     will surface it until an agent-runner hits `permission denied`."""
     import shared.cluster as cl
-    from cli.commands.ensure_runner_role import refresh_runner_grants_after_migration
+    from cli.commands.ensure_db_role import refresh_runner_grants_after_migration
 
     def _boom(identity: str, *, base_admin_url: str, runner_password: str) -> None:
         raise ConnectionError("could not connect to server")
@@ -161,5 +161,5 @@ def test_refresh_failure_names_the_operator_fix_and_does_not_abort(
     refresh_runner_grants_after_migration()
 
     err = capsys.readouterr().err
-    assert "ava cluster ensure-runner-role" in err
+    assert "ava cluster ensure-db-role" in err
     assert "could not connect to server" in err

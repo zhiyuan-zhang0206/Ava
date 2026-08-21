@@ -1,6 +1,7 @@
-"""End-to-end test of `ava cluster ensure-runner-role` (Task #1236).
+"""End-to-end test of `ava cluster ensure-db-role` (Task #1236, renamed from
+ensure-runner-role for issue #217).
 
-Drives cmd_ensure_runner_role against a REAL throwaway Postgres: the command
+Drives cmd_ensure_db_role against a REAL throwaway Postgres: the command
 resolves the cluster's .env / registry / admin URL (monkeypatched to the
 fixture), runs the same idempotent SQL as install birth, mints and persists
 AVA_RUNNER_DB_PASSWORD, and the resulting credential actually works — the
@@ -18,7 +19,7 @@ import pytest
 from dotenv import dotenv_values
 
 from cli.commands import _cluster_instance as ci
-from cli.commands import cmd_ensure_runner_role
+from cli.commands import cmd_ensure_db_role
 from shared import cluster as cl
 from shared import paths
 from shared.pg_tools import throwaway_postgres
@@ -50,7 +51,7 @@ def _home_env(tmp_path: Path, url: str) -> Path:
     return home
 
 
-def test_cmd_ensure_runner_role_provisions_and_persists(
+def test_cmd_ensure_db_role_provisions_and_persists(
     runner_db: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     port = urlsplit(runner_db).port
@@ -64,7 +65,7 @@ def test_cmd_ensure_runner_role_provisions_and_persists(
     # layout pg_admin_url probes — point the admin URL at the fixture instead.
     monkeypatch.setattr(ci, "pg_admin_url", lambda _p: db_url.rsplit("/", 1)[0] + "/postgres")  # pyright: ignore[reportUnknownArgumentType]
 
-    assert cmd_ensure_runner_role() == 0
+    assert cmd_ensure_db_role() == 0
 
     # The credential was minted + persisted into the gateway .env.
     env = dotenv_values(home / ".env")
@@ -83,7 +84,7 @@ def test_cmd_ensure_runner_role_provisions_and_persists(
     assert row == (False,)
 
 
-def test_cmd_ensure_runner_role_keeps_existing_password(
+def test_cmd_ensure_db_role_keeps_existing_password(
     runner_db: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """An existing AVA_RUNNER_DB_PASSWORD is kept (never rotated) and the role is
@@ -99,7 +100,7 @@ def test_cmd_ensure_runner_role_keeps_existing_password(
     monkeypatch.setattr(cl, "get_record", lambda _h: _FakeRec(port))  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(ci, "pg_admin_url", lambda _p: db_url.rsplit("/", 1)[0] + "/postgres")  # pyright: ignore[reportUnknownArgumentType]
 
-    assert cmd_ensure_runner_role() == 0
+    assert cmd_ensure_db_role() == 0
     assert dotenv_values(home / ".env")["AVA_RUNNER_DB_PASSWORD"] == existing
     existing_str: str = existing
     with psycopg.connect(
@@ -108,11 +109,11 @@ def test_cmd_ensure_runner_role_keeps_existing_password(
         conn.execute("SELECT 1")
 
 
-def test_cmd_ensure_runner_role_refuses_home_without_db_url(
+def test_cmd_ensure_db_role_refuses_home_without_db_url(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     home = tmp_path / "home"
     home.mkdir()
     (home / ".env").write_text("AVA_MACHINE_SERVE_AGENT_RUNNER=true\n")
     monkeypatch.setattr(paths, "ava_home", lambda: home)
-    assert cmd_ensure_runner_role() == 1
+    assert cmd_ensure_db_role() == 1

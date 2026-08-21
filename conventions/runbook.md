@@ -237,7 +237,7 @@ life of the cluster: `ava start` on a gateway host re-affirms the grants wheneve
 it actually applied a migration, and an `ALTER DEFAULT PRIVILEGES` declared FOR
 the cluster's main identity (the role migrations run as) covers everything
 created after that first re-affirm. Its password (`AVA_RUNNER_DB_PASSWORD`) is minted
-at install (or by `ava cluster ensure-runner-role` on pre-cutover clusters),
+at install (or by `ava cluster ensure-db-role` on pre-cutover clusters),
 kept in the gateway's `.env`, and travels only inside the projected URL —
 never as a standalone bootstrap field. The pooler's userlist carries the
 matching entry; the gateway's own processes keep dialing the main identity.

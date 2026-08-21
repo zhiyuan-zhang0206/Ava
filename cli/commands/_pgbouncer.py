@@ -89,7 +89,7 @@ def runner_password_from_env() -> str:
     a gateway-.env secret with no Settings field, and a parent shell that
     sourced another cluster's env must not leak its value into this cluster's
     pooler userlist. An absent/empty value means the cluster has no runner
-    credential yet (a legacy cluster pre-`ava cluster ensure-runner-role`) —
+    credential yet (a legacy cluster pre-`ava cluster ensure-db-role`) —
     the userlist then simply carries no ava_runner entry."""
     from dotenv import dotenv_values
 
@@ -146,7 +146,7 @@ def _render_userlist(
     double-quotes both fields; escape any embedded quote.
 
     The runner entry appears only when a runner password exists: a legacy
-    cluster that never ran `ava cluster ensure-runner-role` keeps a byte-identical
+    cluster that never ran `ava cluster ensure-db-role` keeps a byte-identical
     userlist, and a scram entry with an empty password would reject every
     ava_runner dial anyway (nobody dials as ava_runner before the cutover, so
     the entry's absence is silent either way)."""

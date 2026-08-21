@@ -69,7 +69,7 @@ def test_ensure_runner_role_provisions_idempotently(runner_db: str) -> None:
 
 def test_ensure_runner_role_reauths_password_on_rerun(runner_db: str) -> None:
     """Re-running with a different password rotates the role's stored verifier —
-    the .env edit + `ava cluster ensure-runner-role` self-heal path."""
+    the .env edit + `ava cluster ensure-db-role` self-heal path."""
     admin = _admin_url(runner_db)
     ensure_runner_role(_IDENTITY, base_admin_url=admin, runner_password=_RUNNER_PW)
 

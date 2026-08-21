@@ -108,7 +108,7 @@ from cli.commands.cluster_lifecycle import (
     cmd_cluster_ls,
 )
 from cli.commands.config import cmd_config_get, cmd_config_set, cmd_config_unset
-from cli.commands.ensure_runner_role import cmd_ensure_runner_role
+from cli.commands.ensure_db_role import cmd_ensure_db_role
 from cli.commands.mcp import (
     cmd_mcp_add,
     cmd_mcp_disable,
@@ -279,7 +279,7 @@ __all__ = [
     "cmd_converge",
     "cmd_cron_register",
     "cmd_cron_unregister",
-    "cmd_ensure_runner_role",
+    "cmd_ensure_db_role",
     "cmd_firewall_status",
     "cmd_firewall_sync",
     "cmd_health_probe",

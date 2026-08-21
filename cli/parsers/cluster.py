@@ -93,10 +93,10 @@ def _h_cluster_health_probe(args: argparse.Namespace) -> int:
     )
 
 
-def _h_cluster_ensure_runner_role(_args: argparse.Namespace) -> int:
-    from cli.commands import cmd_ensure_runner_role
+def _h_cluster_ensure_db_role(_args: argparse.Namespace) -> int:
+    from cli.commands import cmd_ensure_db_role
 
-    return cmd_ensure_runner_role()
+    return cmd_ensure_db_role()
 
 
 def _h_cluster_rollback(args: argparse.Namespace) -> int:
@@ -146,6 +146,7 @@ def _add_cluster_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
     from cli.main import (
         _h_cluster_destroy,
         _h_cluster_down,
+        _h_cluster_ensure_db_role,
         _h_cluster_health_probe,
         _h_cluster_health_probe_register,
         _h_cluster_health_probe_unregister,
@@ -383,20 +384,25 @@ def _add_cluster_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
     )
     cluster_health_probe_p.set_defaults(func=_h_cluster_health_probe)
 
-    # --- `ava cluster ensure-runner-role` ---
+    # --- `ava cluster ensure-db-role` ---
     # The one-shot legacy-cluster counterpart of install-time provisioning: the
-    # SAME idempotent SQL a birth runs (ava_runner role + grants), plus the
-    # AVA_RUNNER_DB_PASSWORD credential and a live pooler userlist refresh.
-    cluster_ensure_runner_role_p = cluster_sub.add_parser(
-        "ensure-runner-role",
-        help="[cluster] provision the least-privilege ava_runner role on THIS "
-        "cluster (idempotent; runs the same SQL as install birth). For clusters "
-        "born before the runner-role cutover — a fresh install does this "
-        "automatically. Also writes AVA_RUNNER_DB_PASSWORD to the gateway .env "
-        "and refreshes the pooler userlist when the pooler is running. Postgres "
-        "must be up (`ava start` first).",
+    # SAME idempotent SQL a birth runs (ava_runner Postgres role + grants), plus
+    # the AVA_RUNNER_DB_PASSWORD credential and a live pooler userlist refresh.
+    # Named for the Postgres account it provisions (issue #217) — "runner role"
+    # elsewhere means the machine capability; this verb has nothing to do with
+    # machine capabilities. The old name stays as an alias for anything that
+    # scripts it.
+    cluster_ensure_db_role_p = cluster_sub.add_parser(
+        "ensure-db-role",
+        aliases=["ensure-runner-role"],
+        help="[cluster] provision the least-privilege ava_runner Postgres role "
+        "on THIS cluster (idempotent; runs the same SQL as install birth). For "
+        "clusters born before the runner-role cutover — a fresh install does "
+        "this automatically. Also writes AVA_RUNNER_DB_PASSWORD to the gateway "
+        ".env and refreshes the pooler userlist when the pooler is running. "
+        "Postgres must be up (`ava start` first).",
     )
-    cluster_ensure_runner_role_p.set_defaults(func=_h_cluster_ensure_runner_role)
+    cluster_ensure_db_role_p.set_defaults(func=_h_cluster_ensure_db_role)
 
     # --- `ava cluster rollback` ---
     cluster_rollback_p = cluster_sub.add_parser(

@@ -33,7 +33,7 @@ DATA_PLANE_IDENTITY = "ava"
 # connects as `ava_runner`, and the role name is part of the bootstrap
 # projection contract (GET /api/bootstrap?role=runner), not a per-cluster fact.
 # The password is a gateway-side secret — generated at install / by
-# `ava cluster ensure-runner-role`, written to the gateway's .env as
+# `ava cluster ensure-db-role`, written to the gateway's .env as
 # AVA_RUNNER_DB_PASSWORD, and only ever distributed inside the projected
 # AVA_DB_URL (never as a standalone bootstrap field).
 RUNNER_ROLE = "ava_runner"
