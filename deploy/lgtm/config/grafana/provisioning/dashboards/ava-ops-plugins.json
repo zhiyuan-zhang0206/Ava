@@ -21,8 +21,8 @@
     },
     {
       "datasource": {
-        "type": "postgres",
-        "uid": "ops"
+        "type": "loki",
+        "uid": "loki"
       },
       "fieldConfig": {
         "defaults": {
@@ -79,25 +79,20 @@
       "targets": [
         {
           "datasource": {
-            "type": "postgres",
-            "uid": "ops"
+            "type": "loki",
+            "uid": "loki"
           },
           "editorMode": "code",
-          "format": "time_series",
-          "rawSql": "SELECT $__timeGroup(ts, $__interval) AS time, count(*) AS \"fixes\" FROM events WHERE event_name = 'syntax_fix' AND category = 'telemetry' AND $__timeFilter(ts) GROUP BY 1 ORDER BY 1",
+          "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=~\"telemetry|log\" | event_name=\"syntax_fix\" [$__interval]))",
           "refId": "A",
-          "sql": {
-            "columns": [],
-            "groupBy": [],
-            "orderBy": []
-          }
+          "queryType": "range"
         }
       ]
     },
     {
       "datasource": {
-        "type": "postgres",
-        "uid": "ops"
+        "type": "loki",
+        "uid": "loki"
       },
       "fieldConfig": {
         "defaults": {
@@ -145,18 +140,13 @@
       "targets": [
         {
           "datasource": {
-            "type": "postgres",
-            "uid": "ops"
+            "type": "loki",
+            "uid": "loki"
           },
           "editorMode": "code",
-          "format": "table",
-          "rawSql": "SELECT count(*) AS fixes FROM events WHERE event_name = 'syntax_fix' AND category = 'telemetry' AND $__timeFilter(ts)",
+          "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=~\"telemetry|log\" | event_name=\"syntax_fix\" [$__range]))",
           "refId": "A",
-          "sql": {
-            "columns": [],
-            "groupBy": [],
-            "orderBy": []
-          }
+          "queryType": "instant"
         }
       ]
     },
@@ -175,8 +165,8 @@
     },
     {
       "datasource": {
-        "type": "postgres",
-        "uid": "ops"
+        "type": "loki",
+        "uid": "loki"
       },
       "fieldConfig": {
         "defaults": {
@@ -233,25 +223,20 @@
       "targets": [
         {
           "datasource": {
-            "type": "postgres",
-            "uid": "ops"
+            "type": "loki",
+            "uid": "loki"
           },
           "editorMode": "code",
-          "format": "time_series",
-          "rawSql": "SELECT $__timeGroup(ts, $__interval) AS time, 100.0 * count(*) FILTER (WHERE attributes->>'status' = 'done') / NULLIF(count(*), 0) AS \"done %\" FROM events WHERE event_name = 'task_update' AND category = 'audit' AND attributes ? 'status' AND $__timeFilter(ts) GROUP BY 1 ORDER BY 1",
+          "expr": "100 * sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"audit\" | event_name=\"task_update\" | attributes_status=\"done\" [$__interval])) / sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"audit\" | event_name=\"task_update\" | attributes_status!=\"\" [$__interval]))",
           "refId": "A",
-          "sql": {
-            "columns": [],
-            "groupBy": [],
-            "orderBy": []
-          }
+          "queryType": "range"
         }
       ]
     },
     {
       "datasource": {
-        "type": "postgres",
-        "uid": "ops"
+        "type": "loki",
+        "uid": "loki"
       },
       "fieldConfig": {
         "defaults": {
@@ -312,18 +297,13 @@
       "targets": [
         {
           "datasource": {
-            "type": "postgres",
-            "uid": "ops"
+            "type": "loki",
+            "uid": "loki"
           },
           "editorMode": "code",
-          "format": "time_series",
-          "rawSql": "SELECT $__timeGroup(ts, $__interval) AS time, count(*) AS \"spawns\" FROM events WHERE event_name = 'spawn' AND category = 'audit' AND $__timeFilter(ts) GROUP BY 1 ORDER BY 1",
+          "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"audit\" | event_name=\"spawn\" [$__interval]))",
           "refId": "A",
-          "sql": {
-            "columns": [],
-            "groupBy": [],
-            "orderBy": []
-          }
+          "queryType": "range"
         }
       ]
     },
@@ -342,8 +322,8 @@
     },
     {
       "datasource": {
-        "type": "postgres",
-        "uid": "ops"
+        "type": "loki",
+        "uid": "loki"
       },
       "fieldConfig": {
         "defaults": {
@@ -400,25 +380,20 @@
       "targets": [
         {
           "datasource": {
-            "type": "postgres",
-            "uid": "ops"
+            "type": "loki",
+            "uid": "loki"
           },
           "editorMode": "code",
-          "format": "time_series",
-          "rawSql": "SELECT $__timeGroup(ts, $__interval) AS time, count(*) AS \"runs\" FROM events WHERE event_name = 'recall_filter' AND category = 'telemetry' AND level = 'info' AND $__timeFilter(ts) GROUP BY 1 ORDER BY 1",
+          "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=~\"telemetry|log\" | event_name=\"recall_filter\" | level=\"info\" [$__interval]))",
           "refId": "A",
-          "sql": {
-            "columns": [],
-            "groupBy": [],
-            "orderBy": []
-          }
+          "queryType": "range"
         }
       ]
     },
     {
       "datasource": {
-        "type": "postgres",
-        "uid": "ops"
+        "type": "loki",
+        "uid": "loki"
       },
       "fieldConfig": {
         "defaults": {
@@ -475,25 +450,20 @@
       "targets": [
         {
           "datasource": {
-            "type": "postgres",
-            "uid": "ops"
+            "type": "loki",
+            "uid": "loki"
           },
           "editorMode": "code",
-          "format": "time_series",
-          "rawSql": "SELECT $__timeGroup(ts, $__interval) AS time, 100.0 * count(*) FILTER (WHERE attributes->>'body' LIKE '%-> 0 kept%') / NULLIF(count(*), 0) AS \"empty %\" FROM events WHERE event_name = 'recall_filter' AND category = 'telemetry' AND level = 'info' AND $__timeFilter(ts) GROUP BY 1 ORDER BY 1",
+          "expr": "100 * sum(count_over_time({service_name=\"unknown_service\"} | json | category=~\"telemetry|log\" | event_name=\"recall_filter\" | level=\"info\" | attributes_body =~ \".*-> 0 kept.*\" [$__interval])) / sum(count_over_time({service_name=\"unknown_service\"} | json | category=~\"telemetry|log\" | event_name=\"recall_filter\" | level=\"info\" [$__interval]))",
           "refId": "A",
-          "sql": {
-            "columns": [],
-            "groupBy": [],
-            "orderBy": []
-          }
+          "queryType": "range"
         }
       ]
     },
     {
       "datasource": {
-        "type": "postgres",
-        "uid": "ops"
+        "type": "loki",
+        "uid": "loki"
       },
       "fieldConfig": {
         "defaults": {
@@ -558,25 +528,20 @@
       "targets": [
         {
           "datasource": {
-            "type": "postgres",
-            "uid": "ops"
+            "type": "loki",
+            "uid": "loki"
           },
           "editorMode": "code",
-          "format": "time_series",
-          "rawSql": "SELECT $__timeGroup(ts, $__interval) AS time, 100.0 * count(*) FILTER (WHERE level = 'warning') / NULLIF(count(*), 0) AS \"anomaly %\" FROM events WHERE event_name = 'recall_filter' AND category = 'telemetry' AND $__timeFilter(ts) GROUP BY 1 ORDER BY 1",
+          "expr": "100 * sum(count_over_time({service_name=\"unknown_service\"} | json | category=~\"telemetry|log\" | event_name=\"recall_filter\" | level=\"warning\" [$__interval])) / sum(count_over_time({service_name=\"unknown_service\"} | json | category=~\"telemetry|log\" | event_name=\"recall_filter\" [$__interval]))",
           "refId": "A",
-          "sql": {
-            "columns": [],
-            "groupBy": [],
-            "orderBy": []
-          }
+          "queryType": "range"
         }
       ]
     },
     {
       "datasource": {
-        "type": "postgres",
-        "uid": "ops"
+        "type": "loki",
+        "uid": "loki"
       },
       "fieldConfig": {
         "defaults": {
@@ -624,18 +589,13 @@
       "targets": [
         {
           "datasource": {
-            "type": "postgres",
-            "uid": "ops"
+            "type": "loki",
+            "uid": "loki"
           },
           "editorMode": "code",
-          "format": "table",
-          "rawSql": "SELECT count(*) AS failures FROM events WHERE event_name = 'recall_filter' AND category = 'telemetry' AND level = 'warning' AND $__timeFilter(ts)",
+          "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=~\"telemetry|log\" | event_name=\"recall_filter\" | level=\"warning\" [$__range]))",
           "refId": "A",
-          "sql": {
-            "columns": [],
-            "groupBy": [],
-            "orderBy": []
-          }
+          "queryType": "instant"
         }
       ]
     }

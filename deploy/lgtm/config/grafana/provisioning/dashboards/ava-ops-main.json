@@ -697,7 +697,7 @@
         "xTickLabelRotation": 0,
         "xField": "Time"
       },
-      "title": "SSE backlog — delivery_stalled (by stall seconds)",
+      "title": "SSE backlog \u2014 delivery_stalled (by stall seconds)",
       "type": "barchart",
       "targets": [
         {
@@ -907,7 +907,7 @@
           "sort": "desc"
         }
       },
-      "title": "Token usage — Output + Reasoning",
+      "title": "Token usage \u2014 Output + Reasoning",
       "type": "timeseries",
       "targets": [
         {
@@ -1148,7 +1148,7 @@
       },
       "title": "Input TPS (avg / max agent / min agent)",
       "type": "timeseries",
-      "description": "Input throughput = Σ(in_total) ÷ Σ(latency_sec), tok/s. in_total is the log_llm_usage total input tokens (incl. cache_read; ~99.5% cache hits over the last 24h, so input TPS ≈ cache/prefill read throughput). latency is the llm_usage wall-clock (latency_ms). avg = token-weighted over all calls; max/min = the fastest/slowest agent per bucket (agent_id IS NOT NULL, only buckets with valid calls count).",
+      "description": "Input throughput = \u03a3(in_total) \u00f7 \u03a3(latency_sec), tok/s. in_total is the log_llm_usage total input tokens (incl. cache_read; ~99.5% cache hits over the last 24h, so input TPS \u2248 cache/prefill read throughput). latency is the llm_usage wall-clock (latency_ms). avg = token-weighted over all calls; max/min = the fastest/slowest agent per bucket (agent_id IS NOT NULL, only buckets with valid calls count).",
       "targets": [
         {
           "datasource": {
@@ -1267,7 +1267,7 @@
       },
       "title": "Output TPS (avg / max agent / min agent)",
       "type": "timeseries",
-      "description": "Output throughput = Σ(out_total) ÷ Σ(latency_sec), tok/s. out_total is the log_llm_usage total output tokens, incl. reasoning (Anthropic thinking / OpenAI reasoning both count into output_tokens; observe.py does not add them again) — i.e. pure decode generation speed (~79 tok/s measured over the last 24h). latency is the llm_usage wall-clock (latency_ms). avg = token-weighted over all calls; max/min = the fastest/slowest agent per bucket (agent_id IS NOT NULL, only buckets with valid calls count).",
+      "description": "Output throughput = \u03a3(out_total) \u00f7 \u03a3(latency_sec), tok/s. out_total is the log_llm_usage total output tokens, incl. reasoning (Anthropic thinking / OpenAI reasoning both count into output_tokens; observe.py does not add them again) \u2014 i.e. pure decode generation speed (~79 tok/s measured over the last 24h). latency is the llm_usage wall-clock (latency_ms). avg = token-weighted over all calls; max/min = the fastest/slowest agent per bucket (agent_id IS NOT NULL, only buckets with valid calls count).",
       "targets": [
         {
           "datasource": {
@@ -1386,7 +1386,7 @@
       },
       "title": "Gen-stage output TPS (avg / max agent / min agent)",
       "type": "timeseries",
-      "description": "Gen-stage output throughput = Σ(out_total) ÷ Σ(decode_sec), tok/s. decode_ms is the 2026-08-04 new instrumentation (stream last chunk − first chunk arrival, excluding network/queue/prefill); out_total is the log_llm_usage total output tokens (incl. reasoning). Only calls after the decode_ms instrumentation went live are counted (attributes ? 'decode_ms'); non-streaming fallback / empty-stream calls with decode_ms=NULL do not count. avg = token-weighted over all calls; max/min = the fastest/slowest agent per bucket (agent_id IS NOT NULL, only buckets with valid calls count).",
+      "description": "Gen-stage output throughput = \u03a3(out_total) \u00f7 \u03a3(decode_sec), tok/s. decode_ms is the 2026-08-04 new instrumentation (stream last chunk \u2212 first chunk arrival, excluding network/queue/prefill); out_total is the log_llm_usage total output tokens (incl. reasoning). Only calls after the decode_ms instrumentation went live are counted (attributes ? 'decode_ms'); non-streaming fallback / empty-stream calls with decode_ms=NULL do not count. avg = token-weighted over all calls; max/min = the fastest/slowest agent per bucket (agent_id IS NOT NULL, only buckets with valid calls count).",
       "targets": [
         {
           "datasource": {
@@ -1594,7 +1594,7 @@
           "sort": "desc"
         }
       },
-      "title": "Event health — WARNING+ERROR vs total",
+      "title": "Event health \u2014 WARNING+ERROR vs total",
       "type": "timeseries",
       "targets": [
         {
@@ -1695,7 +1695,7 @@
           "sort": "desc"
         }
       },
-      "title": "Token usage — Input",
+      "title": "Token usage \u2014 Input",
       "type": "timeseries",
       "targets": [
         {
@@ -1802,7 +1802,7 @@
           "sort": "desc"
         }
       },
-      "title": "Gateway latency — p50/p95/max",
+      "title": "Gateway latency \u2014 p50/p95/max",
       "type": "timeseries",
       "targets": [
         {
@@ -1976,7 +1976,7 @@
       },
       "title": "LLM cost (USD)",
       "type": "timeseries",
-      "description": "LLM call cost per bucket — unwrap of the cost_usd field every llm_usage payload carries (task #2626; the producer computes it from one versioned-catalog quote in shared/lm/pricing.py, unpriced models carry no cost_usd and are skipped). event_name='llm_usage', category='telemetry'.",
+      "description": "LLM call cost per bucket \u2014 unwrap of the cost_usd field every llm_usage payload carries (task #2626; the producer computes it from one versioned-catalog quote in shared/lm/pricing.py, unpriced models carry no cost_usd and are skipped). event_name='llm_usage', category='telemetry'.",
       "targets": [
         {
           "datasource": {
@@ -2208,7 +2208,7 @@
       },
       "title": "Turn success rate",
       "type": "timeseries",
-      "description": "Share of turn_end with ok='true' per bucket — turn-level health (LLM call failures, exhausted retries, and interrupted executions all set ok to false). event_name='turn_end', category='telemetry'.",
+      "description": "Share of turn_end with ok='true' per bucket \u2014 turn-level health (LLM call failures, exhausted retries, and interrupted executions all set ok to false). event_name='turn_end', category='telemetry'.",
       "targets": [
         {
           "datasource": {
@@ -2315,7 +2315,7 @@
       },
       "title": "Turn duration (p50/p90/max)",
       "type": "timeseries",
-      "description": "Percentile trend of turn_end.duration_seconds per bucket. Loki's quantile_over_time is per-series (each event is its own series), so p50/p90 aggregate the per-stream quantiles with max() — an approximation of the SQL percentile_cont, tilted toward the slowest agent process; the exact global read is the ava_turn_end_duration_seconds histogram in Prometheus (same trade-off as alert rule R4). max is exact (max_over_time over the unwrapped field). event_name='turn_end', category='telemetry'.",
+      "description": "Percentile trend of turn_end.duration_seconds per bucket. Loki's quantile_over_time is per-series (each event is its own series), so p50/p90 aggregate the per-stream quantiles with max() \u2014 an approximation of the SQL percentile_cont, tilted toward the slowest agent process; the exact global read is the ava_turn_end_duration_seconds histogram in Prometheus (same trade-off as alert rule R4). max is exact (max_over_time over the unwrapped field). event_name='turn_end', category='telemetry'.",
       "targets": [
         {
           "datasource": {
@@ -3171,7 +3171,7 @@
       },
       "title": "SDK calls (Top 20)",
       "type": "table",
-      "description": "Top 20 sdk_call grouped by attributes.fn — runtime call-frequency ranking, replacing the retired Metrics page's sdk_usage text ranking. event_name='sdk_call', category='telemetry'. Table panel (instant query over the whole window).",
+      "description": "Top 20 sdk_call grouped by attributes.fn \u2014 runtime call-frequency ranking, replacing the retired Metrics page's sdk_usage text ranking. event_name='sdk_call', category='telemetry'. Table panel (instant query over the whole window).",
       "targets": [
         {
           "datasource": {
@@ -3547,7 +3547,7 @@
       },
       "title": "Delivery backlog",
       "type": "timeseries",
-      "description": "delivery_stalled events per bucket — message-delivery backlog level (the delivery watchdog's alert signal for over-age pending inbound). event_name='delivery_stalled', category='telemetry'.",
+      "description": "delivery_stalled events per bucket \u2014 message-delivery backlog level (the delivery watchdog's alert signal for over-age pending inbound). event_name='delivery_stalled', category='telemetry'.",
       "targets": [
         {
           "datasource": {
@@ -3630,7 +3630,7 @@
       },
       "title": "Event rate (events/s)",
       "type": "timeseries",
-      "description": "Total event-stream rate per bucket — rate() over the whole stream, events per second (the SQL count * 1000 / interval_ms equivalent). The query covers all event_name/category (the event_name/category fields are nominal metadata, not in WHERE).",
+      "description": "Total event-stream rate per bucket \u2014 rate() over the whole stream, events per second (the SQL count * 1000 / interval_ms equivalent). The query covers all event_name/category (the event_name/category fields are nominal metadata, not in WHERE).",
       "targets": [
         {
           "datasource": {
@@ -3713,7 +3713,7 @@
       },
       "title": "Frontend interactions",
       "type": "timeseries",
-      "description": "Frontend interaction volume per bucket (total frontend_interaction events): the entry panel of user-modeling telemetry, doubling as volume monitoring — an abnormal interaction spike (an instrumentation loop bug) is immediately visible here. event_name='frontend_interaction', category='telemetry', source='user'.",
+      "description": "Frontend interaction volume per bucket (total frontend_interaction events): the entry panel of user-modeling telemetry, doubling as volume monitoring \u2014 an abnormal interaction spike (an instrumentation loop bug) is immediately visible here. event_name='frontend_interaction', category='telemetry', source='user'.",
       "targets": [
         {
           "datasource": {
@@ -3791,7 +3791,7 @@
       },
       "title": "Frontend interactions (Top 15 elements)",
       "type": "table",
-      "description": "Top 15 in-window interactions grouped by attributes.element — ranking of the interaction points users click/trigger most (spawn/composer-send/setting-change/page-view/...). event_name='frontend_interaction', category='telemetry'.",
+      "description": "Top 15 in-window interactions grouped by attributes.element \u2014 ranking of the interaction points users click/trigger most (spawn/composer-send/setting-change/page-view/...). event_name='frontend_interaction', category='telemetry'.",
       "targets": [
         {
           "datasource": {
@@ -3869,7 +3869,7 @@
       },
       "title": "Frontend page views (Top 15)",
       "type": "table",
-      "description": "Top 15 in-window page views (element='page-view') grouped by attributes.page — which screens users spend the most time on. event_name='frontend_interaction', category='telemetry'.",
+      "description": "Top 15 in-window page views (element='page-view') grouped by attributes.page \u2014 which screens users spend the most time on. event_name='frontend_interaction', category='telemetry'.",
       "targets": [
         {
           "datasource": {
@@ -3947,7 +3947,7 @@
       },
       "title": "Settings changes (Top 15)",
       "type": "table",
-      "description": "Top 15 in-window user setting changes (element='setting-change') grouped by attributes.key — which settings/layout/preferences users adjusted (display.* / behavior.* keys). event_name='frontend_interaction', category='telemetry'.",
+      "description": "Top 15 in-window user setting changes (element='setting-change') grouped by attributes.key \u2014 which settings/layout/preferences users adjusted (display.* / behavior.* keys). event_name='frontend_interaction', category='telemetry'.",
       "targets": [
         {
           "datasource": {
@@ -3976,8 +3976,8 @@
     },
     {
       "datasource": {
-        "type": "postgres",
-        "uid": "ops"
+        "type": "loki",
+        "uid": "loki"
       },
       "fieldConfig": {
         "defaults": {
@@ -4030,29 +4030,24 @@
       },
       "title": "Syntax fix count",
       "type": "timeseries",
-      "description": "Syntax_fix events over time — how often the repair pipeline fixes syntax errors in LLM-produced code (event_name='syntax_fix', category='telemetry', 90d retention).",
+      "description": "Syntax_fix events over time \u2014 how often the repair pipeline fixes syntax errors in LLM-produced code (event_name='syntax_fix', category='telemetry', 90d retention).",
       "targets": [
         {
           "datasource": {
-            "type": "postgres",
-            "uid": "ops"
+            "type": "loki",
+            "uid": "loki"
           },
           "editorMode": "code",
-          "format": "time_series",
-          "rawSql": "SELECT $__timeGroup(ts, $__interval) AS time, count(*) AS \"fixes\" FROM events WHERE event_name = 'syntax_fix' AND category = 'telemetry' AND $__timeFilter(ts) GROUP BY 1 ORDER BY 1",
+          "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=~\"telemetry|log\" | event_name=\"syntax_fix\" [$__interval]))",
           "refId": "A",
-          "sql": {
-            "columns": [],
-            "groupBy": [],
-            "orderBy": []
-          }
+          "queryType": "range"
         }
       ]
     },
     {
       "datasource": {
-        "type": "postgres",
-        "uid": "ops"
+        "type": "loki",
+        "uid": "loki"
       },
       "fieldConfig": {
         "defaults": {
@@ -4100,18 +4095,13 @@
       "targets": [
         {
           "datasource": {
-            "type": "postgres",
-            "uid": "ops"
+            "type": "loki",
+            "uid": "loki"
           },
           "editorMode": "code",
-          "format": "table",
-          "rawSql": "SELECT count(*) AS fixes FROM events WHERE event_name = 'syntax_fix' AND category = 'telemetry' AND $__timeFilter(ts)",
+          "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=~\"telemetry|log\" | event_name=\"syntax_fix\" [$__range]))",
           "refId": "A",
-          "sql": {
-            "columns": [],
-            "groupBy": [],
-            "orderBy": []
-          }
+          "queryType": "instant"
         }
       ]
     },
@@ -4130,8 +4120,8 @@
     },
     {
       "datasource": {
-        "type": "postgres",
-        "uid": "ops"
+        "type": "loki",
+        "uid": "loki"
       },
       "fieldConfig": {
         "defaults": {
@@ -4184,29 +4174,24 @@
       },
       "title": "Task completion rate",
       "type": "timeseries",
-      "description": "Share of task_update events with status='done' — only updates carrying a status count toward the denominator (event_name='task_update', category='audit').",
+      "description": "Share of task_update events with status='done' \u2014 only updates carrying a status count toward the denominator (event_name='task_update', category='audit').",
       "targets": [
         {
           "datasource": {
-            "type": "postgres",
-            "uid": "ops"
+            "type": "loki",
+            "uid": "loki"
           },
           "editorMode": "code",
-          "format": "time_series",
-          "rawSql": "SELECT $__timeGroup(ts, $__interval) AS time, 100.0 * count(*) FILTER (WHERE attributes->>'status' = 'done') / NULLIF(count(*), 0) AS \"done %\" FROM events WHERE event_name = 'task_update' AND category = 'audit' AND attributes ? 'status' AND $__timeFilter(ts) GROUP BY 1 ORDER BY 1",
+          "expr": "100 * sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"audit\" | event_name=\"task_update\" | attributes_status=\"done\" [$__interval])) / sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"audit\" | event_name=\"task_update\" | attributes_status!=\"\" [$__interval]))",
           "refId": "A",
-          "sql": {
-            "columns": [],
-            "groupBy": [],
-            "orderBy": []
-          }
+          "queryType": "range"
         }
       ]
     },
     {
       "datasource": {
-        "type": "postgres",
-        "uid": "ops"
+        "type": "loki",
+        "uid": "loki"
       },
       "fieldConfig": {
         "defaults": {
@@ -4263,22 +4248,17 @@
       },
       "title": "Agent spawn rate",
       "type": "barchart",
-      "description": "Spawn events over time — the rate at which new agents are born (event_name='spawn', category='audit').",
+      "description": "Spawn events over time \u2014 the rate at which new agents are born (event_name='spawn', category='audit').",
       "targets": [
         {
           "datasource": {
-            "type": "postgres",
-            "uid": "ops"
+            "type": "loki",
+            "uid": "loki"
           },
           "editorMode": "code",
-          "format": "time_series",
-          "rawSql": "SELECT $__timeGroup(ts, $__interval) AS time, count(*) AS \"spawns\" FROM events WHERE event_name = 'spawn' AND category = 'audit' AND $__timeFilter(ts) GROUP BY 1 ORDER BY 1",
+          "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"audit\" | event_name=\"spawn\" [$__interval]))",
           "refId": "A",
-          "sql": {
-            "columns": [],
-            "groupBy": [],
-            "orderBy": []
-          }
+          "queryType": "range"
         }
       ]
     },
@@ -4297,8 +4277,8 @@
     },
     {
       "datasource": {
-        "type": "postgres",
-        "uid": "ops"
+        "type": "loki",
+        "uid": "loki"
       },
       "fieldConfig": {
         "defaults": {
@@ -4351,29 +4331,24 @@
       },
       "title": "Memory recall filter runs",
       "type": "timeseries",
-      "description": "Recall_filter INFO events over time — how often passive memory recall filters retrieval results for relevance (event_name='recall_filter', level='info', category='telemetry', 90d retention).",
+      "description": "Recall_filter INFO events over time \u2014 how often passive memory recall filters retrieval results for relevance (event_name='recall_filter', level='info', category='telemetry', 90d retention).",
       "targets": [
         {
           "datasource": {
-            "type": "postgres",
-            "uid": "ops"
+            "type": "loki",
+            "uid": "loki"
           },
           "editorMode": "code",
-          "format": "time_series",
-          "rawSql": "SELECT $__timeGroup(ts, $__interval) AS time, count(*) AS \"runs\" FROM events WHERE event_name = 'recall_filter' AND category = 'telemetry' AND level = 'info' AND $__timeFilter(ts) GROUP BY 1 ORDER BY 1",
+          "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=~\"telemetry|log\" | event_name=\"recall_filter\" | level=\"info\" [$__interval]))",
           "refId": "A",
-          "sql": {
-            "columns": [],
-            "groupBy": [],
-            "orderBy": []
-          }
+          "queryType": "range"
         }
       ]
     },
     {
       "datasource": {
-        "type": "postgres",
-        "uid": "ops"
+        "type": "loki",
+        "uid": "loki"
       },
       "fieldConfig": {
         "defaults": {
@@ -4426,29 +4401,24 @@
       },
       "title": "Empty recall ratio",
       "type": "timeseries",
-      "description": "Share of INFO runs where filtering kept 0 notes (body 'N candidate(s) -> 0 kept') — recall-quality signal: a high share means retrieval/filtering usually judges nothing relevant (event_name='recall_filter', category='telemetry').",
+      "description": "Share of INFO runs where filtering kept 0 notes (body 'N candidate(s) -> 0 kept') \u2014 recall-quality signal: a high share means retrieval/filtering usually judges nothing relevant (event_name='recall_filter', category='telemetry').",
       "targets": [
         {
           "datasource": {
-            "type": "postgres",
-            "uid": "ops"
+            "type": "loki",
+            "uid": "loki"
           },
           "editorMode": "code",
-          "format": "time_series",
-          "rawSql": "SELECT $__timeGroup(ts, $__interval) AS time, 100.0 * count(*) FILTER (WHERE attributes->>'body' LIKE '%-> 0 kept%') / NULLIF(count(*), 0) AS \"empty %\" FROM events WHERE event_name = 'recall_filter' AND category = 'telemetry' AND level = 'info' AND $__timeFilter(ts) GROUP BY 1 ORDER BY 1",
+          "expr": "100 * sum(count_over_time({service_name=\"unknown_service\"} | json | category=~\"telemetry|log\" | event_name=\"recall_filter\" | level=\"info\" | attributes_body =~ \".*-> 0 kept.*\" [$__interval])) / sum(count_over_time({service_name=\"unknown_service\"} | json | category=~\"telemetry|log\" | event_name=\"recall_filter\" | level=\"info\" [$__interval]))",
           "refId": "A",
-          "sql": {
-            "columns": [],
-            "groupBy": [],
-            "orderBy": []
-          }
+          "queryType": "range"
         }
       ]
     },
     {
       "datasource": {
-        "type": "postgres",
-        "uid": "ops"
+        "type": "loki",
+        "uid": "loki"
       },
       "fieldConfig": {
         "defaults": {
@@ -4509,29 +4479,24 @@
       },
       "title": "Recall filter error ratio",
       "type": "timeseries",
-      "description": "Share of recall_filter WARNINGs across all runs — when the filter call fails (model error / timeout / unparseable reply) the round's recall injection is empty; a spiking rate points at the filter model or provider (event_name='recall_filter', category='telemetry').",
+      "description": "Share of recall_filter WARNINGs across all runs \u2014 when the filter call fails (model error / timeout / unparseable reply) the round's recall injection is empty; a spiking rate points at the filter model or provider (event_name='recall_filter', category='telemetry').",
       "targets": [
         {
           "datasource": {
-            "type": "postgres",
-            "uid": "ops"
+            "type": "loki",
+            "uid": "loki"
           },
           "editorMode": "code",
-          "format": "time_series",
-          "rawSql": "SELECT $__timeGroup(ts, $__interval) AS time, 100.0 * count(*) FILTER (WHERE level = 'warning') / NULLIF(count(*), 0) AS \"anomaly %\" FROM events WHERE event_name = 'recall_filter' AND category = 'telemetry' AND $__timeFilter(ts) GROUP BY 1 ORDER BY 1",
+          "expr": "100 * sum(count_over_time({service_name=\"unknown_service\"} | json | category=~\"telemetry|log\" | event_name=\"recall_filter\" | level=\"warning\" [$__interval])) / sum(count_over_time({service_name=\"unknown_service\"} | json | category=~\"telemetry|log\" | event_name=\"recall_filter\" [$__interval]))",
           "refId": "A",
-          "sql": {
-            "columns": [],
-            "groupBy": [],
-            "orderBy": []
-          }
+          "queryType": "range"
         }
       ]
     },
     {
       "datasource": {
-        "type": "postgres",
-        "uid": "ops"
+        "type": "loki",
+        "uid": "loki"
       },
       "fieldConfig": {
         "defaults": {
@@ -4575,22 +4540,17 @@
       },
       "title": "Recall filter failures (window)",
       "type": "stat",
-      "description": "Total recall_filter WARNINGs in the current window — filter unavailable, an unparseable reply, or an unknown model path all leave the round without injection (event_name='recall_filter', category='telemetry').",
+      "description": "Total recall_filter WARNINGs in the current window \u2014 filter unavailable, an unparseable reply, or an unknown model path all leave the round without injection (event_name='recall_filter', category='telemetry').",
       "targets": [
         {
           "datasource": {
-            "type": "postgres",
-            "uid": "ops"
+            "type": "loki",
+            "uid": "loki"
           },
           "editorMode": "code",
-          "format": "table",
-          "rawSql": "SELECT count(*) AS failures FROM events WHERE event_name = 'recall_filter' AND category = 'telemetry' AND level = 'warning' AND $__timeFilter(ts)",
+          "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=~\"telemetry|log\" | event_name=\"recall_filter\" | level=\"warning\" [$__range]))",
           "refId": "A",
-          "sql": {
-            "columns": [],
-            "groupBy": [],
-            "orderBy": []
-          }
+          "queryType": "instant"
         }
       ]
     }

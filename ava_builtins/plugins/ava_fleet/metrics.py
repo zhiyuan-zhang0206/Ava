@@ -4,22 +4,50 @@
 PluginContext) to collect the registrations. Three metrics:
 
 - ``ava_fleet_task_done_rate`` — dual-surface (grafana + inspector): a
-  cluster-wide task-completion rate panel, and the same query the future
-  inspector surface can render per agent.
+  cluster-wide task-completion rate panel, and the same query the inspector
+  surface renders per agent.
 - ``ava_fleet_spawn_rate`` — grafana-only spawn frequency.
 - ``ava_fleet_agent_task_done_rate`` — inspector-only: demonstrates the
   ``{{agent_id}}`` placeholder semantics reserved in the registry snapshot
-  (the gateway renders it to ``agent_id = <n>``); it is exported to
+  (the gateway renders it to ``agent_id="<n>"``); it is exported to
   the registry JSON but never becomes a Grafana panel.
+
+Query dialect (task #1280 / #180): every metric reads the event stream from
+Loki (the PG ``events`` table is a frozen archive since the LGTM cutover) —
+``{service_name="unknown_service"} | json`` then label filters on the
+flattened event fields; the same read the core panels and the alert rules
+use. Stat panels run as instant queries over ``[$__range]`` (the whole panel
+window); timeseries/barchart panels run as range queries bucketed by
+``[$__interval]``. Every count wraps in ``sum(...)``: the unknown_service
+family has >500 streams over a day, and an unaggregated count_over_time hits
+Loki's per-query series cap.
 
 Data provenance (verified against the live DB, 2026-08-04): ``task_update``
 is category='audit' with a ``status`` attribute present only when the status
-changed (so queries filter on ``attributes ? 'status'``); ``spawn`` is
-category='audit' (~1.1k rows/30d).
+changed — the Loki presence filter is ``attributes_status != ""`` (the
+json-extracted label exists only on lines that carry the field); ``spawn`` is
+category='audit' (~1.1k rows/30d). ``audit`` never had a ``log`` phase, so
+the category predicate is exact (no ``|log`` alternative).
 """
 
 from shared.events.contract import TASK_UPDATE_KEYS
 from shared.plugin_metrics import MetricSpec, register_metric
+
+# The event stream + json pipeline every template starts with. The selector
+# matches the unified emitter's OTLP resource (gateway/loki_events._SELECTOR).
+_SEL = '{service_name="unknown_service"} | json'
+
+# Attribute labels are derived from the payload-key contract (a renamed
+# payload key fails loudly here instead of silently NULLing out) — the same
+# pattern the core panels use (_LLM_ATTR etc.).
+_TASK_ATTR = {k: f"attributes_{k}" for k in TASK_UPDATE_KEYS}
+
+
+def _count(pipeline: str, window: str) -> str:
+    """One count_over_time series — every count wraps in sum(...) (see the
+    module docstring for the series-cap note)."""
+    return f"sum(count_over_time({_SEL} | {pipeline} [{window}]))"
+
 
 register_metric(
     MetricSpec(
@@ -35,14 +63,25 @@ register_metric(
         unit="percent",
         panel="timeseries",
         query=(
-            "SELECT $__timeGroup(ts, $__interval) AS time, "
-            "100.0 * count(*) FILTER (WHERE " + TASK_UPDATE_KEYS["status"] + " = 'done') "
-            '/ NULLIF(count(*), 0) AS "done %" '
-            "FROM events "
-            "WHERE event_name = {event_name} AND category = {category} "
-            "AND attributes ? 'status' AND $__timeFilter(ts) "
-            "GROUP BY 1 ORDER BY 1"
+            f"100 * {
+                _count(
+                    'category={category} | event_name={event_name} | '
+                    + _TASK_ATTR['status']
+                    + '="done"',
+                    '$__interval',
+                )
+            }"
+            f" / {
+                _count(
+                    'category={category} | event_name={event_name} | '
+                    + _TASK_ATTR['status']
+                    + '!=""',
+                    '$__interval',
+                )
+            }"
         ),
+        query_type="logql",
+        target_names=["done %"],
         output=["grafana", "inspector"],
     )
 )
@@ -59,12 +98,9 @@ register_metric(
         category="audit",
         unit="ops",
         panel="barchart",
-        query=(
-            'SELECT $__timeGroup(ts, $__interval) AS time, count(*) AS "spawns" '
-            "FROM events "
-            "WHERE event_name = {event_name} AND category = {category} AND $__timeFilter(ts) "
-            "GROUP BY 1 ORDER BY 1"
-        ),
+        query=_count("category={category} | event_name={event_name}", "$__interval"),
+        query_type="logql",
+        target_names=["spawns"],
         output=["grafana"],
     )
 )
@@ -75,7 +111,7 @@ register_metric(
         title="Agent task completion rate",
         description=(
             "Inspector-only: the same query parameterized by agent. The {{agent_id}} "
-            "placeholder is rendered by the gateway as agent_id = <n>; metrics "
+            'placeholder is rendered by the gateway as agent_id="<n>"; metrics '
             "carrying the placeholder must not also be emitted to Grafana panels."
         ),
         event_name="task_update",
@@ -83,14 +119,25 @@ register_metric(
         unit="percent",
         panel="timeseries",
         query=(
-            "SELECT $__timeGroup(ts, $__interval) AS time, "
-            "100.0 * count(*) FILTER (WHERE " + TASK_UPDATE_KEYS["status"] + " = 'done') "
-            '/ NULLIF(count(*), 0) AS "done %" '
-            "FROM events "
-            "WHERE event_name = {event_name} AND category = {category} "
-            "AND attributes ? 'status' AND {{agent_id}} AND $__timeFilter(ts) "
-            "GROUP BY 1 ORDER BY 1"
+            f"100 * {
+                _count(
+                    'category={category} | event_name={event_name} | '
+                    + _TASK_ATTR['status']
+                    + '="done" | {{agent_id}}',
+                    '$__interval',
+                )
+            }"
+            f" / {
+                _count(
+                    'category={category} | event_name={event_name} | '
+                    + _TASK_ATTR['status']
+                    + '!="" | {{agent_id}}',
+                    '$__interval',
+                )
+            }"
         ),
+        query_type="logql",
+        target_names=["done %"],
         output=["inspector"],
     )
 )

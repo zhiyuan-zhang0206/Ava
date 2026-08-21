@@ -105,7 +105,7 @@ Authorization widens what you may do on your own; it does not remove the rails. 
 - **Don't touch prod** — no deploys, no prod data-plane writes, no rollout.
 - **Spend only what was authorized** — the budget in the approval is a ceiling, not a target.
 
-The budget ceiling is enforced softly: a watcher meters, a human decides the hard stop. The spawner points a watcher (`ava.watcher.launch` / `ava.watcher.cron`) at `reference/usage.py`, which reports per-agent and total spend from the unified `events` stream:
+The budget ceiling is enforced softly: a watcher meters, a human decides the hard stop. The spawner points a watcher (`ava.watcher.launch` / `ava.watcher.cron`) at `reference/usage.py`, which reports per-agent and total spend from the LGTM read side (the durable cost ledger + Loki — the PG `events` table is a frozen archive):
 
 - **Approaching the ceiling** → message the worker to converge: finish the current thread, stop opening new ones.
 - **Over the ceiling** → message the worker to clean up and stop: finish the in-flight unit, update its task status.
