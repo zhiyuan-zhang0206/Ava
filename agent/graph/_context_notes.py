@@ -261,7 +261,7 @@ _PRELOADED_SKILLS_FRAMING = (
 )
 
 
-@register_context_note(rank=RANK_PRELOADED_SKILLS)
+@register_context_note(on_fork=True, rank=RANK_PRELOADED_SKILLS)
 def preloaded_skills_note() -> HumanMessage | None:
     """The full SKILL.md body of every skill named in
     `turn_settings.agent.skills_to_expand_at_start`, concatenated into one note.
@@ -270,7 +270,12 @@ def preloaded_skills_note() -> HumanMessage | None:
     the capabilities index via `resolve_prompt_skills`. Returns ``None`` — no
     empty note — when the list is empty, `skills` is SDK-disabled, or nothing
     resolves. Skips (with a warning) any resolved skill whose SKILL.md has since
-    become unreadable rather than aborting the whole note."""
+    become unreadable rather than aborting the whole note.
+
+    `on_fork`: the inherited history carries the SOURCE agent's preloaded
+    skills (its own `skills_to_expand_at_start`); the fork grafts the new
+    agent's own set after `_handle_fork` strips the inherited note — exactly
+    one copy, owned by the agent reading it (issue #1320)."""
     from agent.graph._capabilities import resolve_prompt_skills
 
     skills = resolve_prompt_skills(

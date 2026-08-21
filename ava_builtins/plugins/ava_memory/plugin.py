@@ -108,8 +108,15 @@ from .notes import memory_index_note, per_agent_memory_note
 # would not survive a clear_plugin_registrations cycle. Disabling this plugin
 # means neither is ever registered, and a window is laid down with no memory
 # notes in it — matching an agent that has no memory stores.
-register_context_note(on_fork=True, rank=RANK_CLUSTER_MEMORY)(memory_index_note)
-register_context_note(rank=RANK_PER_AGENT_MEMORY)(per_agent_memory_note)
+# The shared index is NOT `on_fork`: the pool is cluster-wide, so the copy
+# a fork inherits with the source's history is the same content the graft would
+# add — grafting it duplicates the index in the forked agent's window
+# (issue #1320). Same reasoning as the framework's timezone note. The per-agent
+# index IS `on_fork`: it names the source agent's store, which the inherited
+# history renders wrong for the new agent — `_handle_fork` strips the inherited
+# copy before grafting the new agent's own.
+register_context_note(rank=RANK_CLUSTER_MEMORY)(memory_index_note)
+register_context_note(on_fork=True, rank=RANK_PER_AGENT_MEMORY)(per_agent_memory_note)
 
 _MEMORY_DOC = """Long-term notes as markdown files, with semantic search to find them.
 

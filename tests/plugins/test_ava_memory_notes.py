@@ -91,12 +91,17 @@ def test_notes_render_in_the_documented_rank_order(memory_plugin: Any) -> None:
 
 
 def test_only_the_shared_index_is_grafted_onto_a_fork(memory_plugin: Any) -> None:
-    """A fork inherits the source's cold-start snapshot of the shared index, so
-    that one is refreshed. Per-agent memory is not: a fork starts with its own
-    empty store rather than inheriting one it did not write."""
+    """Issue #1320 flipped the fork contract for the two memory notes:
+
+    - The shared index is cluster-wide, so the copy a fork inherits IS the
+      content a graft would add — grafting it duplicated the index in the
+      forked window. Not `on_fork` (the timezone rule).
+    - Per-agent memory names the SOURCE agent's store, so the inherited copy
+      renders the new agent wrong: `on_fork` — `_handle_fork` strips the
+      inherited note and grafts the new agent's own index."""
     on_fork = {e.build.__name__ for e in _CONTEXT_NOTES if e.on_fork}
-    assert "memory_index_note" in on_fork
-    assert "per_agent_memory_note" not in on_fork
+    assert "memory_index_note" not in on_fork
+    assert "per_agent_memory_note" in on_fork
     # Nor the cluster timezone: a fork stays in the cluster it forked from, so
     # the declaration it inherited is still true.
     assert "timezone_note" not in on_fork

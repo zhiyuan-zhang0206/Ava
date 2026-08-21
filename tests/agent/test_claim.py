@@ -20,12 +20,12 @@ import asyncio
 import os
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import psycopg
 import pytest
-from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, AnyMessage, BaseMessage, HumanMessage, SystemMessage
 from langchain_core.messages.modifier import RemoveMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END
@@ -2059,22 +2059,37 @@ async def test_claim_fork_kind_appends_identity_marker_and_continues(
     """fork inbound (delivered to the new process by spawn_agent on fork) → claim appends
     identity marker: contains the fork source from source (agent:M) + new agent's own id (N) +
     'inherited' wording + goto BEFORE_LLM. Simulates forked checkpoint: messages non-empty
-    (inherited history from source agent), so no SystemMessage injection, marker appended at the end."""
+    (inherited history from source agent), so no SystemMessage injection; marker appended at
+    the end, then the `on_fork` notes (fork_notes stubbed here — its membership is pinned in
+    test_fork_notes.py, issue #1320)."""
     tid = create_agent(db_conn)
     _insert_inbound_kind(db_conn, tid, "", "fork", source="agent:7")
-
-    cmd = await claim_node(
-        AgentState(messages=[SystemMessage(content="sys"), HumanMessage(content="inherited")]),
-        _make_runtime(ops_pool=aops_pool, inbound_listener=aredis_inbound_listener),
-        _config(tid),
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(
+        "agent.graph._claim_dispatch.fork_notes",
+        lambda: [system_note_message(content="Your Agent ID is N.", tag=NoteTag.AGENT_ID)],
     )
+    try:
+        cmd = await claim_node(
+            AgentState(messages=[SystemMessage(content="sys"), HumanMessage(content="inherited")]),
+            _make_runtime(ops_pool=aops_pool, inbound_listener=aredis_inbound_listener),
+            _config(tid),
+        )
+    finally:
+        monkeypatch.undo()
 
     assert cmd.goto == "before_llm"
     msgs = cmd.update["messages"]  # type: ignore[index]
-    # messages non-empty → no SystemMessage injection, only append fork marker + id_note
-    assert len(msgs) == 2  # pyright: ignore[reportUnknownArgumentType]
-    lifecycle = msgs[0]
-    assert msgs[1].additional_kwargs.get("ava_note_tag") == "agent_id"  # pyright: ignore[reportUnknownMemberType]
+    # messages non-empty → no SystemMessage injection; the fork rebuilds the
+    # head (full wipe + inherited history re-listed) and appends marker + notes.
+    # Shape: [RemoveMessage(__remove_all__), sys, inherited, marker, agent_id].
+    assert len(msgs) == 5  # pyright: ignore[reportUnknownArgumentType]
+    assert isinstance(msgs[0], RemoveMessage) and msgs[0].id == REMOVE_ALL_MESSAGES  # pyright: ignore[reportUnknownMemberType]
+    assert [m.additional_kwargs.get("ava_note_tag") for m in msgs[-2:]] == [  # pyright: ignore[reportUnknownMemberType]
+        "lifecycle_fork",
+        "agent_id",
+    ]
+    lifecycle = msgs[3]
     assert isinstance(lifecycle, HumanMessage)
     assert isinstance(lifecycle.content, str)  # pyright: ignore[reportUnknownMemberType]
     content = lifecycle.content
@@ -2084,6 +2099,70 @@ async def test_claim_fork_kind_appends_identity_marker_and_continues(
     assert "inherited from agent:7" in content
     assert lifecycle.additional_kwargs.get("ava_msg_type") == "system_note"  # pyright: ignore[reportUnknownMemberType]
     assert lifecycle.additional_kwargs.get("ava_note_tag") == "lifecycle_fork"  # pyright: ignore[reportUnknownMemberType]
+
+
+async def test_claim_fork_strips_inherited_source_notes(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    aredis_inbound_listener: RedisInboundListener,
+):
+    """The fork strip (issue #1320): inherited head notes that name the SOURCE —
+    its agent id, its per-agent memory, its preloaded skills — are removed, and
+    the new agent's own copies are grafted. The cluster memory index is
+    cluster-wide: the inherited copy is kept and NOT re-grafted."""
+    from langchain_core.messages import RemoveMessage
+
+    tid = create_agent(db_conn)
+    _insert_inbound_kind(db_conn, tid, "", "fork", source="agent:7")
+
+    def _tagged(tag: NoteTag, content: str, id: str) -> HumanMessage:  # pyright: ignore[reportShadowedBuiltins]
+        return HumanMessage(
+            content=f"[system] {content}",
+            id=id,
+            additional_kwargs={"ava_msg_type": "system_note", "ava_note_tag": tag.value},
+        )
+
+    old_id = _tagged(NoteTag.AGENT_ID, "old agent id", "note-old-id")
+    old_mem = _tagged(NoteTag.AGENT_MEMORY, "source's memory", "note-old-mem")
+    old_preload = _tagged(NoteTag.PRELOADED_SKILLS, "source's preloaded skills", "note-old-preload")
+    cluster_index = _tagged(NoteTag.MEMORY, "shared pool index", "note-cluster-index")
+    inherited = [SystemMessage(content="sys"), old_id, old_mem, old_preload, cluster_index]
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(
+        "agent.graph._claim_dispatch.fork_notes",
+        lambda: [
+            system_note_message(content="Your Agent ID is N.", tag=NoteTag.AGENT_ID),
+            system_note_message(content="the new agent's memory", tag=NoteTag.AGENT_MEMORY),
+        ],
+    )
+    try:
+        cmd = await claim_node(
+            AgentState(messages=list(inherited)),
+            _make_runtime(ops_pool=aops_pool, inbound_listener=aredis_inbound_listener),
+            _config(tid),
+        )
+    finally:
+        monkeypatch.undo()
+
+    assert cmd.goto == "before_llm"
+    msgs = cast(list[BaseMessage], (cmd.update or {})["messages"])
+    # The rebuild: one full-wipe marker, then the inherited history re-listed
+    # with the three source-identity notes dropped (the cluster index — the
+    # SYSTEM_NOTE not owned by the source — survives the rebuild).
+    assert isinstance(msgs[0], RemoveMessage) and msgs[0].id == REMOVE_ALL_MESSAGES  # pyright: ignore[reportUnknownMemberType]
+    rebuilt_ids = {m.id for m in msgs[1:] if not isinstance(m, RemoveMessage)}
+    assert {old_id.id, old_mem.id, old_preload.id} & rebuilt_ids == set()
+    assert cluster_index.id in rebuilt_ids
+    # Grafted after the rebuild: fork marker + the new agent's own id + its
+    # own per-agent memory.
+    tail = [m for m in msgs if not isinstance(m, RemoveMessage)][-3:]
+    assert [m.additional_kwargs.get("ava_note_tag") for m in tail] == [  # pyright: ignore[reportUnknownMemberType]
+        "lifecycle_fork",
+        "agent_id",
+        "agent_memory",
+    ]
+    grafted_content: object = tail[-1].content  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+    assert isinstance(grafted_content, str) and "source's memory" not in grafted_content
 
 
 async def test_claim_multiple_chat_inbounds_all_appended_in_fifo_order(
