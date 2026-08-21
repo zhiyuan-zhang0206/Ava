@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { groupedModels, providerLabel } from "./models";
+import { groupedModels, isSuperseded, providerLabel } from "./models";
 import type { ModelsResponse } from "./types";
 
 function modelsResponse(providers: Record<string, string[]>): ModelsResponse {
@@ -56,5 +56,42 @@ describe("groupedModels", () => {
     });
     const result = groupedModels(data, (m) => m.startsWith("claude"));
     expect(result).toEqual([["claude", ["claude-sonnet-5"]]]);
+  });
+});
+
+describe("isSuperseded", () => {
+  const response: ModelsResponse = {
+    providers: { deepseek: ["deepseek-v4-pro", "deepseek-v4-flash"] },
+    models: {
+      "deepseek-v4-pro": {
+        provider: "deepseek",
+        context_window: 128_000,
+        superseded_by: "deepseek-v4-flash",
+      },
+      "deepseek-v4-flash": {
+        provider: "deepseek",
+        context_window: 128_000,
+        superseded_by: null,
+      },
+      "deepseek-v4-legacy": {
+        provider: "deepseek",
+        context_window: 128_000,
+      },
+    },
+    default: "deepseek-v4-flash",
+  };
+
+  it("returns true when the registry supplies a replacement", () => {
+    expect(isSuperseded(response, "deepseek-v4-pro")).toBe(true);
+  });
+
+  it("returns false for null or omitted replacements", () => {
+    expect(isSuperseded(response, "deepseek-v4-flash")).toBe(false);
+    expect(isSuperseded(response, "deepseek-v4-legacy")).toBe(false);
+  });
+
+  it("returns false when the model metadata or catalog is absent", () => {
+    expect(isSuperseded(response, "deepseek-v4-unknown")).toBe(false);
+    expect(isSuperseded(undefined, "deepseek-v4-pro")).toBe(false);
   });
 });

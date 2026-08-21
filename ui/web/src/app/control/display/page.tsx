@@ -34,7 +34,7 @@ import { Fragment } from "react";
 
 import { Switch } from "@/components/ui/switch";
 import { api } from "@/lib/api";
-import { groupedModels, providerLabel } from "@/lib/models";
+import { groupedModels, isSuperseded, providerLabel } from "@/lib/models";
 import { useBreakpoint } from "@/lib/breakpoint";
 import {
   TIMELINE_NARROW_BREAKPOINT_PX,
@@ -53,12 +53,14 @@ function ToggleRow({
   label,
   description,
   value,
+  disabled = false,
   onChange,
 }: {
   icon: React.ComponentType<{ className?: string }>;
   label: string;
   description: React.ReactNode;
   value: boolean;
+  disabled?: boolean;
   onChange: (v: boolean) => void;
 }) {
   return (
@@ -72,7 +74,12 @@ function ToggleRow({
           <div className="text-xs text-muted-foreground mt-0.5 [overflow-wrap:anywhere]">{description}</div>
         </div>
       </div>
-      <Switch checked={value} onCheckedChange={onChange} aria-label={label} />
+      <Switch
+        checked={value}
+        onCheckedChange={onChange}
+        disabled={disabled}
+        aria-label={label}
+      />
     </div>
   );
 }
@@ -429,20 +436,29 @@ export default function DisplaySettingsPage() {
             </div>
             {models.map((modelName) => {
               const hidden = hiddenModels.includes(modelName);
-              const p = modelsData?.models[modelName]?.pricing;
+              const info = modelsData?.models[modelName];
+              const supersededBy = info?.superseded_by ?? null;
+              const superseded = isSuperseded(modelsData, modelName);
+              const p = info?.pricing;
               return (
                 <ToggleRow
                   key={modelName}
                   icon={Eye}
                   label={modelName}
                   description={
-                    p ? (
+                    supersededBy ? (
+                      <span className="italic">
+                        superseded by {supersededBy} — kept out of the spawn picker; agents
+                        can still be switched to it through settings/config
+                      </span>
+                    ) : p ? (
                       <span className="tabular-nums">
                         ${p.input.toFixed(2)} / ${p.cache_read.toFixed(2)} / ${p.output.toFixed(2)}
                       </span>
                     ) : null
                   }
                   value={!hidden}
+                  disabled={superseded}
                   onChange={(v) => {
                     const next = v
                       ? hiddenModels.filter((m) => m !== modelName)

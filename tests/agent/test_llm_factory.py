@@ -1336,6 +1336,20 @@ class TestValidateModelConfig:
             result = validate_model_config(model=m)
             assert result == m
 
+    def test_superseded_model_stays_spawn_valid(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Supersession is display-only: a registry model carrying
+        ``superseded_by`` (hidden from the picker) must keep passing spawn
+        validation — settings/config switching back to it stays allowed."""
+        from dataclasses import replace
+
+        from shared.lm.registry import MODELS
+
+        self._clear_all_keys(monkeypatch)
+        monkeypatch.setattr(settings.lm, "zhipu_api_key", SecretStr("sk-test"))
+        monkeypatch.setitem(MODELS, "glm-5.2", replace(MODELS["glm-5.2"], superseded_by="kimi-k3"))
+        result = validate_model_config(model="glm-5.2", config={"llm_model": "glm-5.2"})
+        assert result == "glm-5.2"
+
     # --- API key validation -----------------------------------------------------
 
     def test_missing_claude_key_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:

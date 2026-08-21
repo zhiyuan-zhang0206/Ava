@@ -164,6 +164,12 @@ class ModelSpec:
 
     provider: str  # SUPPORTED_MODELS group key == build_chat_model prefix
     spawnable: bool = False  # offered in the frontend spawn dropdown
+    superseded_by: str | None = None  # the model id that replaced this one in the
+    # spawn picker. Purely a display fact: a superseded model stays spawnable
+    # (and therefore fully config-valid — spawn/restart validation and the
+    # settings panels accept it unchanged), the picker just hides it by default
+    # in favor of the replacement. The replacement chain is set explicitly at
+    # onboarding time (see the model-switch playbook), never inferred at runtime.
     context_window: int | None = None  # max input tokens (compact thresholds derive from it)
     max_output_tokens: int | None = None  # documented output cap; pinned explicitly on the
     # anthropic-protocol branches (claude/deepseek) — langchain-anthropic falls back to a
@@ -745,6 +751,43 @@ def _validate_registry() -> None:
                 f"spawnable {spec.provider} model {model_id!r} needs max_output_tokens — "
                 f"the anthropic-protocol branches must pin the output cap explicitly"
             )
+
+    # The supersession chain must stay coherent — a broken link would hide a
+    # model from the picker while its replacement is absent or invisible.
+    for model_id, spec in MODELS.items():
+        replacement_id = spec.superseded_by
+        if replacement_id is None:
+            continue
+        if replacement_id == model_id:
+            raise RuntimeError(
+                f"model {model_id!r} lists itself as its own replacement — "
+                f"fix superseded_by in shared/lm/registry.py:MODELS"
+            )
+        if replacement_id not in MODELS:
+            raise RuntimeError(
+                f"model {model_id!r} is superseded by {replacement_id!r}, which is "
+                f"not in MODELS — point superseded_by at a registered model id"
+            )
+        target = MODELS[replacement_id]
+        if not target.spawnable:
+            raise RuntimeError(
+                f"model {model_id!r} is superseded by {replacement_id!r}, which is "
+                f"not spawnable — the replacement would never show in the picker"
+            )
+
+    # After every link is known-good, follow each chain to guarantee it ends
+    # at a visible model instead of cycling through hidden models forever.
+    for model_id, spec in MODELS.items():
+        seen = {model_id}
+        replacement_id = spec.superseded_by
+        while replacement_id is not None:
+            if replacement_id in seen:
+                raise RuntimeError(
+                    f"superseded_by cycle from model {model_id!r} — "
+                    f"point the chain at a visible model"
+                )
+            seen.add(replacement_id)
+            replacement_id = MODELS[replacement_id].superseded_by
 
 
 _validate_registry()

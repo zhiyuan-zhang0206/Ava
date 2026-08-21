@@ -21,7 +21,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
 import { errMsg } from "@/lib/errors";
-import { groupedModels, providerLabel } from "@/lib/models";
+import { groupedModels, isSuperseded, providerLabel } from "@/lib/models";
 import { useStore } from "@/lib/store";
 
 import { useSectionVisible } from "../_visibility";
@@ -67,7 +67,10 @@ export function DefaultModelPanel({ id }: { id: string }) {
   const stored = current.data?.model ?? "";
   const value = picked ?? stored;
   const dirty = picked !== null && picked !== stored;
-  const groups = groupedModels(models.data);
+  // Superseded models stay valid as a stored default (agents born before the
+  // swap keep running on them), but the dropdown offers only the current
+  // picker roster — same visibility rule as the spawn picker.
+  const groups = groupedModels(models.data, (m) => !isSuperseded(models.data, m));
 
   return (
     <div id={id} className="scroll-mt-4 space-y-2" data-testid="config-default-model">

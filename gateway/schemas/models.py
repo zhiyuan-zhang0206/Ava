@@ -32,6 +32,10 @@ class ModelInfo(BaseModel):
     # None = no concrete default (effective default is the provider's own; the
     # picker then keeps a synthetic "provider default" option).
     reasoning_effort_default: str | None = None
+    # The model id that replaced this one in the spawn picker, or None when the
+    # model still shows. Display-only: a superseded model remains spawnable and
+    # config-valid; the frontend filters it from the picker by this field.
+    superseded_by: str | None = None
 
 
 class ModelsResponse(BaseModel):

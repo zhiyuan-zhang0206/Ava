@@ -71,6 +71,22 @@ def test_get_models_returns_grouped_supported_models() -> None:
     assert body["default"] == settings.lm.llm_model
 
 
+def test_get_models_surfaces_superseded_by(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The picker's hide-by-default rule is data, not gateway logic: the
+    endpoint publishes each model's ``superseded_by`` straight off the registry,
+    and an un-superseded model carries null."""
+    from dataclasses import replace
+
+    from shared.lm.registry import MODELS
+
+    monkeypatch.setitem(MODELS, "glm-5.2", replace(MODELS["glm-5.2"], superseded_by="kimi-k3"))
+    with TestClient(app) as client:
+        resp = client.get("/api/models")
+    body = resp.json()
+    assert body["models"]["glm-5.2"]["superseded_by"] == "kimi-k3"
+    assert body["models"]["deepseek-v4-pro"]["superseded_by"] is None
+
+
 def test_get_models_every_model_has_reasoning_effort_control() -> None:
     """No model may render a bare "Effort: default" blank dropdown — every
     provider either exposes a graded reasoning_effort field, or, where the

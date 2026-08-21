@@ -98,6 +98,7 @@ def get_models() -> ModelsResponse:
                     list(spec.effort_levels) if spec.effort_levels is not None else None
                 ),
                 reasoning_effort_default=resolved_effort or None,
+                superseded_by=spec.superseded_by,
             )
 
     return ModelsResponse(

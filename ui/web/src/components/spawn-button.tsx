@@ -31,7 +31,7 @@ import { useTranslations } from "next-intl";
 import { Fragment, useState } from "react";
 
 import { api } from "@/lib/api";
-import { groupedModels, providerLabel } from "@/lib/models";
+import { groupedModels, isSuperseded, providerLabel } from "@/lib/models";
 import { useUserSettings } from "@/lib/use-user-settings";
 import { FLEX, FLEX_1, MIN_W_0 } from "@/lib/layout";
 import { cn } from "@/lib/utils";
@@ -96,9 +96,14 @@ export function SpawnButton({ onSpawn, variant }: Props) {
 
   // Provider-grouped model list for the picker — providers in response
   // order, models within each provider in order (see lib/models.ts).
-  // Hidden models (user setting models.hidden) are excluded from the picker.
+  // User-hidden models (setting models.hidden) and registry-superseded models
+  // (superseded_by — replaced by a newer model, still config-valid) are
+  // excluded from the picker.
   const hiddenModels: string[] = (settings["models.hidden"] as string[] | undefined) ?? [];
-  const modelGroups = groupedModels(modelsData, (m) => !hiddenModels.includes(m));
+  const modelGroups = groupedModels(
+    modelsData,
+    (m) => !hiddenModels.includes(m) && !isSuperseded(modelsData, m),
+  );
   const defaultModel = modelsData?.default;
 
   // Resolve the effective model: an explicit selection is ALWAYS sent —

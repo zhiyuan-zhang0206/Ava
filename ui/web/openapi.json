@@ -9284,6 +9284,17 @@
               }
             ],
             "title": "Reasoning Effort Default"
+          },
+          "superseded_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Superseded By"
           }
         },
         "type": "object",

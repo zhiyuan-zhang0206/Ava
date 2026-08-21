@@ -50,3 +50,12 @@ export function groupedModels(
     ])
     .filter(([, models]) => models.length > 0);
 }
+
+/**
+ * Whether the registry superseded `model` — i.e. the spawn picker hides it by
+ * default in favor of its replacement. Display-only: a superseded model stays
+ * spawnable and config-valid; settings/config can still switch back to it.
+ */
+export function isSuperseded(modelsData: ModelsResponse | undefined, model: string): boolean {
+  return Boolean(modelsData?.models[model]?.superseded_by);
+}
