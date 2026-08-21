@@ -6,6 +6,11 @@ identity IS the home path (AGENTS.md), so an operator or tool reading that line
 could not tell which cluster the rollout was acting on — a worktree cluster and
 the prod checkout were indistinguishable. The identity line must carry the
 resolved home and its registry record (or an explicit unregistered marker).
+
+Issue #216 (2026-08-21): `cmd_update` no longer dispatches by machine_role —
+every host POSTs the gateway, and `--local` runs the in-process gateway
+orchestration (`_run_gateway_orchestration`), which prints the identity line
+before any repo work. These tests stop the dispatch at that seam.
 """
 
 from __future__ import annotations
@@ -24,14 +29,18 @@ _HOME = Path("/home/ava-prod")
 
 @pytest.fixture
 def runner_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A pure agent-runner `ava cluster update --local` that stops at the dispatch."""
-    monkeypatch.setattr("shared.machine.machine_role", lambda: frozenset({"agent-runner"}))
-    # `_repo_root` / `ava_home` / `get_record` are update.py module globals
-    # (the `cli.commands` package re-exports only `_repo_root`/dispatch names —
-    # patching the package attr would not reach cmd_update's global lookup).
+    """A pure `ava cluster update --local` that stops at the identity line.
+
+    `_repo_root` / `ava_home` / `get_record` are update.py module globals
+    (the `cli.commands` package re-exports only `_repo_root`/dispatch names —
+    patching the package attr would not reach cmd_update's global lookup).
+    `_run_gateway_orchestration` is looked up on the `cli.commands` package at
+    call time inside `_update_dispatch._run_in_process`, so patching the
+    package attr stops the dispatch before any repo/git work.
+    """
     monkeypatch.setattr(_update, "_repo_root", lambda: _REPO)
     monkeypatch.setattr(_update, "ava_home", lambda: _HOME)
-    monkeypatch.setattr(_cli, "_run_agent_runner_self_update", lambda _repo, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_cli, "_run_gateway_orchestration", lambda *_a, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
 
 
 def test_identity_line_prints_home_and_registry_name(
