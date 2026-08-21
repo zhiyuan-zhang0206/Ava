@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Skill sources — load-directory sync
-description: One load directory ~/.ava/skills/; converge syncs three source types into it — repo built-ins (ava_builtins/skills/ plus the repo's .agents/skills project skills), plugin-carried skills, and user installs (untouched by converge).
+description: One load directory ~/.ava/skills/; converge syncs repo built-ins (ava_builtins/skills/) and plugin-carried skills into it, and user installs land directly (untouched). The repo's .agents/skills project skills are NOT converged — they reach agents through the project-local mount.
 tags:
 - extensions
 - agent-instruction
@@ -11,30 +11,26 @@ tags:
 
 One load directory: `~/.ava/skills/` (gated by the install registry's enabled
 flag). Converge (`cli/commands/_converge_skills.py`, on `ava start` /
-`ava cluster update` / `ava converge`) syncs three source types into it:
+`ava cluster update` / `ava converge`) syncs two source types into it:
 
 1. **Repo built-in** (origin=repo): `<repo>/ava_builtins/skills/` →
-   `~/.ava/skills/<name>/`, plus the **non-symlink entries of
-   `<repo>/.agents/skills/`** (the R5 design, task #1013). The latter means
-   kernel-contributor project skills (ship-a-change, ava-self-development, …)
-   also land fleet-wide, not only when working inside the repo. Ruled to stop
-   (`decisions/2026-08-20-stop-fleet-distributing-kernel-contributor-skills.md`,
-   resolving the open point in
-   `decisions/2026-08-19-four-layer-modification-model.md`), sequenced after
-   issue #39's S2 registry slice lands (tracked in issue #146) — until then
-   this is current behavior. Repo-native sources are bootstrap-only:
+   `~/.ava/skills/<name>/`. Repo-native sources are bootstrap-only:
    converge lands a missing copy and never updates one; the explicit update is
    `ava skill update`.
 2. **Plugin-carried** (origin=plugin): `<repo>/ava_builtins/plugins/<p>/skills/`
    and `~/.ava/plugins/<p>/skills/` → `~/.ava/skills/<p>/`.
-3. **User-installed** (origin=user): `ava skill install` drops directly into
-   `~/.ava/skills/` (untouched by converge); a hand-placed dir needs
-   `ava skill register`.
 
-Project-local mounts (the working repo's `.agents/skills` etc., resolved from
-`ava.cwd` at scan time) are a separate mechanism:
+User-installed packages (origin=user): `ava skill install` drops directly into
+`~/.ava/skills/` (untouched by converge); a hand-placed dir needs
+`ava skill register`.
+
+**Not converged — the repo's `.agents/skills/` project skills.** The
+kernel-contributor family (ship-a-change, write-a-pr-description,
+ava-self-development, …) stopped being fleet-distributed (issue #146;
+`decisions/2026-08-20-stop-fleet-distributing-kernel-contributor-skills.md`,
+resolving the open point in
+`decisions/2026-08-19-four-layer-modification-model.md`). A converge pass
+treats them as gone sources: untouched copies they used to land are removed
+and deregistered, so runtime agents' indexes lose the L4 noise. They reach
+agents only through the project-local mount — see
 [[okf/skills/project-local.ava.okf.md]].
-
-## Key Dependencies
-- [[okf/skills/skills.ava.okf.md|Skill System]] — the overview this node details
-- `shared/install_registry.py` — per-machine installation/origin/enabled registry

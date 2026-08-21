@@ -33,7 +33,7 @@ Each skill in the install registry (`shared/install_registry.py`) carries an `or
 Four further core built-in skills live at the top level without a group: **ava-package-installer** (a verified skill / plugin / MCP installer), **ava-qa-inspection** (sweep the rendered frontend over the chrome MCP for visual/structural defects), **ava-modification-layers** (pick the right layer L1–L4 before changing a deployment; `decisions/2026-08-19-four-layer-modification-model.md`) and **develop-a-plugin** (the L3 plugin ladder, applied at `self.restart`, decoupled from `ava cluster update`). All are origin=repo skills in every agent's capabilities index; none has an OKF node yet.
 
 ## Skill Sources (Load Directory Sync)
-One load directory: `~/.ava/skills/`; converge syncs three source types into it — repo built-ins (`ava_builtins/skills/` plus the repo's `.agents/skills/` project skills), plugin-carried, user-installed: [[okf/skills/load-directory-sync.ava.okf.md]]. Project-local mounts: [[okf/skills/project-local.ava.okf.md]].
+One load directory: `~/.ava/skills/`; converge syncs repo built-ins (`ava_builtins/skills/`) and plugin-carried skills into it; user installs land directly: [[okf/skills/load-directory-sync.ava.okf.md]]. The repo's `.agents/skills/` project skills are NOT converged — project-local mount only: [[okf/skills/project-local.ava.okf.md]].
 
 ## Skill Structure
 `SKILL.md` = frontmatter (`name` + `description`) + a markdown body; `description` is the capabilities line in the system prompt. This format **is** the [Agent Skills](https://agentskills.io) open standard — a Claude Code skill folder installs unmodified: [[okf/skills/agent-skills-standard.ava.okf.md]].

@@ -273,9 +273,11 @@ def cmd_skill_register(name: str, *, accept_risk: bool = False) -> int:
 
 
 def _repo_native_sources(repo: Path | None = None) -> list[_Source]:
-    """The repo-native skill sources of the running checkout (builtin skills,
-    `.agents/skills` project skills, builtin-plugin skills) — the set `ava
-    skill update` syncs. Installed-plugin skills are excluded (they update via
+    """The repo-native skill sources of the running checkout (builtin skills
+    from `ava_builtins/skills/` and builtin-plugin skills) — the set `ava
+    skill update` syncs. `.agents/skills/` project skills are excluded (they
+    reach agents through the project-local mount, not the load dir; issue
+    #146). Installed-plugin skills are excluded too (they update via
     `ava plugins upgrade`)."""
     from ._converge_skills import iter_sources
     from ._repo import _repo_root
@@ -345,7 +347,12 @@ def _update_one(
             (".agents/skills/", ".claude/skills/", ".ava/skills/")
         ):
             # Hand-installed residue of this repo skill (the pre-converge way
-            # to get project skills into the load dir). Adopt it.
+            # to get project skills into the load dir was a manual
+            # `skill install --path .agents/skills/<name>`). This only fires
+            # for names that are still repo-native sources (builtins / plugin
+            # skills); `.agents/skills`-only skills are no longer sources
+            # (issue #146) and a hand-installed copy of one stays user-origin.
+            # Adopt it.
             if not dest.exists():
                 landed.append(_land_repo_copy(s, skills_root, registry, now, overwrite=False))
                 return
@@ -428,8 +435,8 @@ def cmd_skill_update(
       content_hash (no local edits)
     - copy differs from the  -> conflict: abort that package with the local
       recorded hash           edit surfaced; `--force` overwrites it
-    - user-origin residue of a repo skill (installed by hand from
-      `.agents/skills` before converge knew the source) -> adopted as repo
+    - user-origin residue of a repo skill (installed by hand from the
+      project skill dirs before converge knew the source) -> adopted as repo
       when content matches, conflict/force otherwise
 
     `repo` is the checkout whose sources to sync from (tests inject a
@@ -458,7 +465,7 @@ def cmd_skill_update(
         for m in sorted(missing):
             print(
                 f"[ava skill update] '{m}' is not a repo-native skill of this checkout "
-                f"(repo/plugin builtins and .agents/skills are; a user install would be "
+                f"(repo/plugin builtins are; a user install would be "
                 f"`ava skill upgrade {m}`).",
                 file=sys.stderr,
             )

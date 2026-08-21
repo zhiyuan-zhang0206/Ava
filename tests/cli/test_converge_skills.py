@@ -381,7 +381,7 @@ def test_contains_skill_md_any_depth(unit_home: Path, tmp_path: Path) -> None:
     assert not contains_skill_md(empty)
 
 
-# ─── .agents/skills project source (R5) ─────────────────────────────────────
+# ─── .agents/skills is NOT a converge source (issue #146) ───────────────────
 
 
 def _agents_repo(tmp_path: Path) -> Path:
@@ -390,44 +390,59 @@ def _agents_repo(tmp_path: Path) -> Path:
     repo = tmp_path / "repo-agents"
     _write_skill(repo / "ava_builtins" / "skills", "builtin-a")
     _write_skill(repo / ".agents" / "skills", "project-x")
-    # Builtin mirror: a symlink back to ava_builtins/skills — must be skipped
-    # (the real tree already provides it), not treated as a second source.
+    # Builtin mirror: a symlink back to ava_builtins/skills (the open-standard
+    # path exposing builtins to other clients). Converge must not enumerate
+    # .agents/skills at all, so the link is irrelevant to the load dir.
     (repo / ".agents" / "skills" / "builtin-a").symlink_to(
         repo / "ava_builtins" / "skills" / "builtin-a", target_is_directory=True
     )
     return repo
 
 
-def test_agents_project_source_lands_and_is_bootstrap_only(unit_home: Path, tmp_path: Path) -> None:
+def test_agents_project_skills_not_converged(unit_home: Path, tmp_path: Path) -> None:
+    """Kernel-contributor project skills reach agents only through the
+    project-local mount (project_skill_roots), never through the fleet-wide
+    load dir: converge lands nothing from .agents/skills and records no row."""
     repo = _agents_repo(tmp_path)
     result = converge_skills(repo, unit_home)
-    assert sorted(result.copied) == ["builtin-a", "project-x"]
+    assert sorted(result.copied) == ["builtin-a"]
+    assert result.removed == []
     assert not any("already provided" in w for w in result.warnings)
-    assert (unit_home / "skills" / "project-x" / "SKILL.md").is_file()
-    entry = _entry("project-x")
-    assert entry.origin == "repo" and entry.content_hash
-
-    # Source change: converge does NOT propagate it (bootstrap-only).
-    (repo / ".agents" / "skills" / "project-x" / "SKILL.md").write_text(
-        "---\nname: project-x\ndescription: v2\n---\n", encoding="utf-8"
-    )
-    result = converge_skills(repo, unit_home)
-    assert result.updated == []
-    assert "project-x" in result.unchanged
-    body = (unit_home / "skills" / "project-x" / "SKILL.md").read_text(encoding="utf-8")
-    assert "v2" not in body
-
-
-def test_agents_project_source_vanish_cleans_untouched(unit_home: Path, tmp_path: Path) -> None:
-    import shutil
-
-    repo = _agents_repo(tmp_path)
-    converge_skills(repo, unit_home)
-    shutil.rmtree(repo / ".agents" / "skills" / "project-x")
-    result = converge_skills(repo, unit_home)
-    assert result.removed == ["project-x"]
     assert not (unit_home / "skills" / "project-x").exists()
     assert reg.get("project-x") is None
+
+
+def test_legacy_agents_skill_converge_copy_cleaned_up(unit_home: Path, tmp_path: Path) -> None:
+    """The fleet transition (issue #146): machines that converged
+    .agents/skills before the stop carry a repo-origin copy + registry row.
+    Once the source is gone, an untouched copy is derived state -> removed and
+    deregistered, so runtime agents' indexes lose the L4 noise."""
+    import shutil
+
+    from shared.install_registry import InstalledPackage, tree_hash
+
+    repo = _agents_repo(tmp_path)
+    # Pre-#146 state, as converge used to write it: copy + repo row.
+    src = repo / ".agents" / "skills" / "project-x"
+    dest = unit_home / "skills" / "project-x"
+    shutil.copytree(src, dest)
+    reg.register(
+        InstalledPackage(
+            name="project-x",
+            type="skill",
+            origin="repo",
+            origin_path=str(src),
+            trust="builtin",
+            content_hash=tree_hash(src),
+            installed_at="2026-08-20T00:00:00+00:00",
+        )
+    )
+    result = converge_skills(repo, unit_home)
+    assert result.removed == ["project-x"]
+    assert not dest.exists()
+    assert reg.get("project-x") is None
+    # The real builtin still converges alongside.
+    assert (unit_home / "skills" / "builtin-a" / "SKILL.md").is_file()
 
 
 # ─── identity fold (design R2-B / audit 02 #4) ─────────────────────────────
