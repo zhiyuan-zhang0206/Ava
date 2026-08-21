@@ -1,7 +1,10 @@
 # Model providers as plugins
 
-> **Status: nothing built.** Onboarding a model provider is a core edit today,
-> spread across up to seven files — six of them under `shared/` — in this repo,
+> **Status: the mechanics are built** (extension points below, provider.py
+> contract + loader; 2026-08, `provider_api.py`). Nothing is extracted yet —
+> all eight providers still live in core; the grok pilot is the first planned
+> extraction. Onboarding a model provider is a core edit today,
+> spread across up to eight files — seven of them under `shared/` — in this repo,
 > for every vendor. This doc commits to making provider onboarding a plugin
 > concern and names the exact extension points the mechanics must open. It does
 > not open them.

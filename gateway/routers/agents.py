@@ -60,8 +60,12 @@ def get_models() -> ModelsResponse:
     so the UI can pre-select it.
     """
     from gateway.schemas import ModelInfo, ModelPricing
-    from shared.lm.factory import SUPPORTED_MODELS
+    from shared.lm.factory import SUPPORTED_MODELS, ensure_provider_plugins_loaded
     from shared.lm.pricing import rates_at
+
+    # Plugin provider models register here (once per process) — the spawn
+    # dropdown must list them even though the gateway never loads plugin.py.
+    ensure_provider_plugins_loaded()
     from shared.lm.registry import MODELS, explain_setting
 
     # Stable model facts come off the registry; volatile prices come off the

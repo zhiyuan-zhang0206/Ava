@@ -10,7 +10,7 @@ tags:
 
 # Language Model Provider Layer
 
-`shared/lm/` — unified LLM provider abstraction above LangChain, below the agent kernel: nine providers, provider-agnostic upper layers. Adding a provider is a core edit across up to seven files (`config/lm.py` key field, `registry.py` `MODELS` entries, `_providers.py` builder, `factory.py` `_MODEL_KEY_MAP` + branch, `_effort.py` vocabulary, `stop.py` terminal-reason entry when the client emits an unseen `model_provider`, `pyproject.toml` dep) — making it a plugin concern is planned in [model-providers-as-plugins](model-providers-as-plugins.md).
+`shared/lm/` — unified LLM provider abstraction above LangChain, below the agent kernel: nine providers, provider-agnostic upper layers. Adding a provider is a core edit across up to eight files (`config/lm.py` key field, `registry.py` `MODELS` entries, `_providers.py` builder, `factory.py` `_MODEL_KEY_MAP` + branch, `_effort.py` vocabulary, `stop.py` terminal-reason entry when the client emits an unseen `model_provider`, `pricing_catalog.json` prices, `pyproject.toml` dep) — or a **provider plugin**: a `provider.py` beside a plugin's `plugin.py`, registering a binding + models + prices against the contract in [provider_api](provider_api.py), loaded once per process by `_plugin_providers.py`. Design: [model-providers-as-plugins](model-providers-as-plugins.md).
 
 ## Core Responsibilities
 
@@ -51,6 +51,9 @@ LangChain types `AIMessage(Chunk).content` weakly as `str | list[str | dict[str,
 ### context budget (`context_budget.py`)
 - `resolve_context_budget(model)` → `ContextBudget(max_context_tokens, soft_compact_tokens, hard_compact_tokens)`: hard = `min(auto_compact_fraction × window, auto_compact_ceiling_tokens)`; soft = `compact_reminder_fraction × window` (scaled down when the ceiling bites). One flat rule for the whole roster — soft 30% / hard 40% of each model's own window (`DEFAULT_TUNING` 0.3/0.4, ceiling 0 = no cap, no per-model compact override), per-agent overridable; registry entry ⇒ correct thresholds, no parallel table. Unregistered models raise `UnknownModelWindowError` (compact hook bubbles it; gateway display degrades to 0/0/0).
 - `latest_input_tokens(messages)` → `input_tokens` from the latest AIMessage with `usage_metadata` (provider's true occupancy), `None` if absent (first turn/post-compact fallback chars/4). Shared by compact trigger (`agent/hooks/compact.py`, Option Y) and token-usage endpoint — one unit for gauge/scale/trigger.
+
+### provider plugins
+- [[shared/lm/provider-plugins.ava.okf.md]] — provider binding contract, lazy loader, registration invariants, and gateway visibility.
 
 ### compatibility layers
 - `_anthropic_compat.py`: `ThinkingTokensChatAnthropic` — ChatAnthropic subclass patching thinking_tokens into usage_metadata (base drops it); shared by claude/deepseek.

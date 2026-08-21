@@ -48,6 +48,7 @@ code, an explicit user choice is ``.env``, a per-agent choice is the overlay.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from dataclasses import fields as dataclass_fields
 from typing import Any
@@ -665,92 +666,155 @@ MODELS: dict[str, ModelSpec] = {
 # provider in registry order. Adding a model to MODELS with spawnable=True is
 # the only edit needed for it to appear in the UI; provider availability still
 # depends on the corresponding API key being set on the agent-runner.
+# Rebuilt in place so plugin registration remains visible to imported readers.
 SUPPORTED_MODELS: dict[str, list[str]] = {}
-for _model_id, _spec in MODELS.items():
-    if _spec.spawnable:
-        SUPPORTED_MODELS.setdefault(_spec.provider, []).append(_model_id)
 
 # Model context window sizes (max input tokens). Used by the token-usage
 # endpoint and the compact machinery; a model without a known window is absent
 # (the frontend hides the max segment).
-MODEL_CONTEXT_WINDOW: dict[str, int] = {
-    _model_id: _spec.context_window
-    for _model_id, _spec in MODELS.items()
-    if _spec.context_window is not None
-}
+MODEL_CONTEXT_WINDOW: dict[str, int] = {}
 
 # Knowledge cutoff dates (YYYY-MM), appended to the system prompt so the agent
 # knows the temporal boundary of its training data. A model without one simply
 # gets no cutoff line.
-MODEL_KNOWLEDGE_CUTOFF: dict[str, str] = {
-    _model_id: _spec.knowledge_cutoff
-    for _model_id, _spec in MODELS.items()
-    if _spec.knowledge_cutoff is not None
-}
+MODEL_KNOWLEDGE_CUTOFF: dict[str, str] = {}
 
 # Model identity — a per-model note injected before the knowledge cutoff
 # in the system prompt so the model knows what it is running on.
-MODEL_IDENTITY: dict[str, str] = {
-    _model_id: _spec.model_identity
-    for _model_id, _spec in MODELS.items()
-    if _spec.model_identity is not None
-}
+MODEL_IDENTITY: dict[str, str] = {}
 
 
-def _validate_registry() -> None:
-    """Fail fast at import on a registry gap.
+def _rebuild_derived_views() -> None:
+    """Recompute the derived views from MODELS, in place.
+
+    The views are module-level names imported across ~36 files; mutating the
+    same dict objects (clear + update) keeps every existing import site
+    working unchanged after a plugin registration.
+    """
+    SUPPORTED_MODELS.clear()
+    for _model_id, _spec in MODELS.items():
+        if _spec.spawnable:
+            SUPPORTED_MODELS.setdefault(_spec.provider, []).append(_model_id)
+
+    MODEL_CONTEXT_WINDOW.clear()
+    MODEL_CONTEXT_WINDOW.update(
+        {
+            _model_id: _spec.context_window
+            for _model_id, _spec in MODELS.items()
+            if _spec.context_window is not None
+        }
+    )
+    MODEL_KNOWLEDGE_CUTOFF.clear()
+    MODEL_KNOWLEDGE_CUTOFF.update(
+        {
+            _model_id: _spec.knowledge_cutoff
+            for _model_id, _spec in MODELS.items()
+            if _spec.knowledge_cutoff is not None
+        }
+    )
+    MODEL_IDENTITY.clear()
+    MODEL_IDENTITY.update(
+        {
+            _model_id: _spec.model_identity
+            for _model_id, _spec in MODELS.items()
+            if _spec.model_identity is not None
+        }
+    )
+
+
+def _validate_spec(model_id: str, spec: ModelSpec, *, anthropic_protocol: bool) -> None:
+    """Fail fast on a registry gap for one spawnable model entry.
 
     A spawnable model missing a core fact would surface as a degraded UI row /
     an uncompactable agent / an unpriced eval — catch it where the entry is
-    written instead.
+    written instead. Shared by the import-time core validation and the
+    registration-time plugin validation.
     """
+    if not spec.spawnable:
+        return
+    from shared.lm.pricing import rates_at
+
+    missing = [
+        fact
+        for fact in ("context_window", "knowledge_cutoff", "effort_levels")
+        if getattr(spec, fact) is None
+    ]
+    if missing:
+        raise RuntimeError(
+            f"spawnable model {model_id!r} is missing registry facts {missing} — "
+            "fill them in its ModelSpec"
+        )
+    if rates_at(model_id, input_tokens=0) is None:
+        raise RuntimeError(
+            f"spawnable model {model_id!r} has no current price — a core model "
+            "needs a shared/lm/pricing_catalog.json entry; a plugin model needs "
+            "a price in its register() call"
+        )
+    # The spawn picker pre-selects each model's default effort
+    # (GET /api/models reasoning_effort_default) — without a concrete
+    # per-model value it cannot show one ("" means "provider's own
+    # default", which is not a displayable rung), and the UI would regress
+    # to a synthetic "Effort: default" option. Pin a real default (the
+    # vendor's documented one; see decisions/2026-07-25-per-model-
+    # tuning-values.md Decision 4).
+    if not spec.tuning.reasoning_effort:
+        raise RuntimeError(
+            f"spawnable model {model_id!r} has no concrete reasoning_effort default — "
+            f"pin one in its ModelTuning ('' provider-default is not displayable "
+            f"in the spawn picker)"
+        )
+    if anthropic_protocol and spec.max_output_tokens is None:
+        raise RuntimeError(
+            f"spawnable model {model_id!r} needs max_output_tokens — "
+            f"the anthropic-protocol bindings must pin the output cap explicitly"
+        )
+
+
+def register_models(
+    provider: str,
+    models: Mapping[str, ModelSpec],
+    *,
+    anthropic_protocol: bool = False,
+) -> None:
+    """Merge a plugin provider's ModelSpec entries into MODELS.
+
+    Called by ``shared.lm/provider_api.py:register`` — not by core code.
+    Mutates the same MODELS dict object (every imported reference sees it) and
+    rebuilds the derived views in place; validates each new spawnable entry
+    with the same facts/price/effort checks the core roster gets at import. A
+    duplicate model id — core or another plugin's — is an error, never a
+    precedence order.
+    """
+    for model_id, spec in models.items():
+        if spec.provider != provider:
+            raise ValueError(
+                f"plugin model {model_id!r} declares provider {spec.provider!r}, "
+                f"but it is registering under {provider!r} — fix ModelSpec.provider"
+            )
+        if model_id in MODELS:
+            raise RuntimeError(
+                f"model id {model_id!r} is already registered (core roster or an "
+                "earlier plugin) — model ids are flat and a duplicate is an error"
+            )
+        _validate_spec(model_id, spec, anthropic_protocol=anthropic_protocol)
+    MODELS.update(models)
+    _rebuild_derived_views()
+
+
+def _validate_registry() -> None:
+    """Fail fast at import on a core-registry gap (see _validate_spec)."""
     for tuning_field in dataclass_fields(ModelTuning):
         if getattr(DEFAULT_TUNING, tuning_field.name) is None:
             raise RuntimeError(
                 f"DEFAULT_TUNING.{tuning_field.name} is None — the shared-default floor "
                 f"must be fully populated (it is the last resort of resolve_setting)"
             )
-    # Function-local import keeps the roster independent of catalog storage at
-    # module definition time. `pricing` no longer imports this registry, so
-    # validation can ask its public selector without forming a cycle.
-    from shared.lm.pricing import rates_at
-
     for model_id, spec in MODELS.items():
-        if not spec.spawnable:
-            continue
-        missing = [
-            fact
-            for fact in ("context_window", "knowledge_cutoff", "effort_levels")
-            if getattr(spec, fact) is None
-        ]
-        if missing:
-            raise RuntimeError(
-                f"spawnable model {model_id!r} is missing registry facts {missing} — "
-                f"fill them in shared/lm/registry.py:MODELS"
-            )
-        if rates_at(model_id, input_tokens=0) is None:
-            raise RuntimeError(
-                f"spawnable model {model_id!r} has no current price in "
-                "shared/lm/pricing_catalog.json"
-            )
-        # The spawn picker pre-selects each model's default effort
-        # (GET /api/models reasoning_effort_default) — without a concrete
-        # per-model value it cannot show one ("" means "provider's own
-        # default", which is not a displayable rung), and the UI would regress
-        # to a synthetic "Effort: default" option. Pin a real default (the
-        # vendor's documented one; see decisions/2026-07-25-per-model-
-        # tuning-values.md Decision 4).
-        if not spec.tuning.reasoning_effort:
-            raise RuntimeError(
-                f"spawnable model {model_id!r} has no concrete reasoning_effort default — "
-                f"pin one in its ModelTuning ('' provider-default is not displayable "
-                f"in the spawn picker)"
-            )
-        if spec.provider in ("claude", "deepseek") and spec.max_output_tokens is None:
-            raise RuntimeError(
-                f"spawnable {spec.provider} model {model_id!r} needs max_output_tokens — "
-                f"the anthropic-protocol branches must pin the output cap explicitly"
-            )
+        _validate_spec(
+            model_id,
+            spec,
+            anthropic_protocol=spec.provider in ("claude", "deepseek"),
+        )
 
     # The supersession chain must stay coherent — a broken link would hide a
     # model from the picker while its replacement is absent or invisible.
@@ -790,6 +854,7 @@ def _validate_registry() -> None:
             replacement_id = MODELS[replacement_id].superseded_by
 
 
+_rebuild_derived_views()
 _validate_registry()
 
 
