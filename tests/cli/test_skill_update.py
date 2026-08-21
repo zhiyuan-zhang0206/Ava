@@ -32,7 +32,9 @@ def _write_skill(root: Path, dirname: str, body: str = "# B\n") -> Path:
 
 @pytest.fixture
 def repo(tmp_path: Path) -> Path:
-    """Synthetic checkout: one builtin skill + one .agents project skill."""
+    """Synthetic checkout: one builtin skill + one .agents project skill.
+    The .agents skill exists only to prove update does NOT touch it
+    (issue #146 — project skills reach agents via the local mount)."""
     r = tmp_path / "repo"
     _write_skill(r / "ava_builtins" / "skills", "builtin-a")
     _write_skill(r / ".agents" / "skills", "project-x")
@@ -51,9 +53,22 @@ def _entry(name: str) -> reg.InstalledPackage:
 def test_update_lands_missing_and_reports(unit_home: Path, repo: Path, capsys) -> None:
     assert cmd_skill_update(None, repo=repo) == 0
     out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
-    assert "landed 'builtin-a'" in out and "landed 'project-x'" in out
-    assert (unit_home / "skills" / "project-x" / "SKILL.md").is_file()
-    assert _entry("project-x").origin == "repo"
+    assert "landed 'builtin-a'" in out
+    assert "project-x" not in out
+    assert (unit_home / "skills" / "builtin-a" / "SKILL.md").is_file()
+    assert not (unit_home / "skills" / "project-x").exists()
+    assert reg.get("project-x") is None
+
+
+def test_update_agents_project_skill_is_not_repo_native(
+    unit_home: Path, repo: Path, capsys
+) -> None:
+    """`.agents/skills` skills are no longer repo-native sources (issue #146):
+    update reports them as unknown and never lands a copy."""
+    assert cmd_skill_update(["project-x"], repo=repo) == 0
+    err = capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
+    assert "'project-x' is not a repo-native skill" in err
+    assert not (unit_home / "skills" / "project-x").exists()
 
 
 def test_update_unknown_name_errors(unit_home: Path, repo: Path, capsys) -> None:
@@ -119,29 +134,30 @@ def test_update_local_edit_without_source_change_reports_conflict(
 
 
 def test_update_adopts_matching_user_residue(unit_home: Path, repo: Path) -> None:
-    """The pre-converge way to get a project skill into the load dir was a
-    manual `skill install --path .agents/skills/<name>` (origin=user). update
-    adopts the copy as repo-native when its content matches the source."""
-    _write_skill(unit_home / "skills", "project-x", body="# from repo\n")
-    (repo / ".agents" / "skills" / "project-x" / "SKILL.md").write_text(
-        "---\nname: project-x\ndescription: d\n---\n\n# from repo\n", encoding="utf-8"
+    """The pre-converge way to get a skill into the load dir was a manual
+    `skill install --path .agents/skills/<name>` (origin=user) — here of a
+    builtin, hand-installed from the open-standard mirror. update adopts the
+    copy as repo-native when its content matches the source."""
+    _write_skill(unit_home / "skills", "builtin-a", body="# from repo\n")
+    (repo / "ava_builtins" / "skills" / "builtin-a" / "SKILL.md").write_text(
+        "---\nname: builtin-a\ndescription: d\n---\n\n# from repo\n", encoding="utf-8"
     )
     reg.register(
         reg.InstalledPackage(
-            name="project-x", type="skill", source=".agents/skills/project-x", origin="user"
+            name="builtin-a", type="skill", source=".agents/skills/builtin-a", origin="user"
         )
     )
     assert cmd_skill_update(None, repo=repo) == 0
-    entry = _entry("project-x")
+    entry = _entry("builtin-a")
     assert entry.origin == "repo" and entry.source is None
-    assert (unit_home / "skills" / "project-x" / "SKILL.md").exists()
+    assert (unit_home / "skills" / "builtin-a" / "SKILL.md").exists()
 
 
 def test_update_conflicts_on_diverged_user_residue(unit_home: Path, repo: Path, capsys) -> None:
-    _write_skill(unit_home / "skills", "project-x", body="# user hacked\n")
+    _write_skill(unit_home / "skills", "builtin-a", body="# user hacked\n")
     reg.register(
         reg.InstalledPackage(
-            name="project-x", type="skill", source=".agents/skills/project-x", origin="user"
+            name="builtin-a", type="skill", source=".agents/skills/builtin-a", origin="user"
         )
     )
     rc = cmd_skill_update(None, repo=repo)
@@ -149,8 +165,8 @@ def test_update_conflicts_on_diverged_user_residue(unit_home: Path, repo: Path, 
     assert "--force" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
     # --force adopts the repo version
     assert cmd_skill_update(None, repo=repo, force=True) == 0
-    assert _entry("project-x").origin == "repo"
-    body = (unit_home / "skills" / "project-x" / "SKILL.md").read_text(encoding="utf-8")
+    assert _entry("builtin-a").origin == "repo"
+    body = (unit_home / "skills" / "builtin-a" / "SKILL.md").read_text(encoding="utf-8")
     assert "user hacked" not in body
 
 
@@ -290,34 +306,34 @@ def test_update_refuses_worktree_repo_for_default_home(
 def test_update_adopt_sets_builtin_trust(unit_home: Path, repo: Path) -> None:
     """Adopting a hand-installed residue of a repo skill stamps it builtin —
     it ships under the checkout's review, not third-party."""
-    # 模拟收编前状态：user 行 + 磁盘副本与源一致（repo fixture 已含 project-x）
+    # 模拟收编前状态：user 行（磁盘无副本 — 更新会落地源内容）
     from datetime import UTC, datetime
 
     reg.register(
         reg.InstalledPackage(
-            name="project-x",
+            name="builtin-a",
             type="skill",
             origin="user",
-            source=".agents/skills/project-x",
+            source=".agents/skills/builtin-a",
             trust="unreviewed",
             installed_at=datetime.now(UTC).isoformat(),
         )
     )
-    assert cmd_skill_update(["project-x"], repo=repo) == 0
-    assert _entry("project-x").trust == "builtin"
+    assert cmd_skill_update(["builtin-a"], repo=repo) == 0
+    assert _entry("builtin-a").trust == "builtin"
 
 
 def test_update_unchanged_reanchors_stale_origin_path(unit_home: Path, repo: Path, capsys) -> None:
     """An up-to-date copy whose recorded origin_path points at a deleted
     worktree gets re-anchored to the current source (no-op pass)."""
     cmd_skill_update(None, repo=repo)
-    e = _entry("project-x")
-    e.origin_path = "/Users/x/Ava/.worktrees/ava-dead/.agents/skills/project-x"
+    e = _entry("builtin-a")
+    e.origin_path = "/Users/x/Ava/.worktrees/ava-dead/.agents/skills/builtin-a"
     reg.save(reg.load())  # 持久化
     # 重新加载后更新 entry
-    pkg = reg.get("project-x")
+    pkg = reg.get("builtin-a")
     assert pkg is not None
-    pkg.origin_path = "/Users/x/Ava/.worktrees/ava-dead/.agents/skills/project-x"
+    pkg.origin_path = "/Users/x/Ava/.worktrees/ava-dead/.agents/skills/builtin-a"
     reg.save(reg.load())
     assert cmd_skill_update(None, repo=repo) == 0
-    assert _entry("project-x").origin_path == str(repo / ".agents" / "skills" / "project-x")
+    assert _entry("builtin-a").origin_path == str(repo / "ava_builtins" / "skills" / "builtin-a")

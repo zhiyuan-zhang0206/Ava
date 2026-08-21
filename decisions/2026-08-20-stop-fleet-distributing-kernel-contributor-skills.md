@@ -55,3 +55,14 @@ marking. The work itself is tracked in issue #146, blocked on S2.
 Related: `decisions/2026-08-19-four-layer-modification-model.md` (the decision
 this resolves), issue #39 and `future/infra/extension-ownership.md` (the
 registry this rides), issue #146 (the tracked follow-up work).
+
+## Implementation
+
+Landed 2026-08-21 in the PR closing issue #146: `iter_sources` no longer
+enumerates `.agents/skills/`, so converge stops landing the family and removes
+the untouched copies it had landed (edited copies are kept with the usual
+warning); `ava skill update` stops treating them as repo-native sources;
+`okf/skills/load-directory-sync.ava.okf.md` and the `.agents/skills/README.md`
+describe the project-local mount as the family's only distribution path. The
+project-local mount itself (`project_skill_roots`) predates this change and
+needed no code work — only the converge source was removed.

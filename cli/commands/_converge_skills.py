@@ -8,6 +8,10 @@ three source kinds:
 - built-in plugin skills:  `<repo>/ava_builtins/plugins/<p>/skills/`  -> `skills/<p>/`     (origin="plugin")
 - installed plugin skills: `$AVA_HOME/plugins/<p>/skills/` -> `skills/<p>/`   (origin="plugin")
 
+`<repo>/.agents/skills/` (the kernel-contributor project skills) is NOT a
+converge source: it reaches agents through the project-local mount instead
+(issue #146).
+
 Each synced top-level dir is tracked in the install registry
 (`shared/install_registry.py`); the scanner loads only enabled entries. An
 installed plugin's skills gate on the plugin's own registry entry — no
@@ -189,19 +193,13 @@ def iter_sources(repo: Path) -> tuple[list[_Source], list[str]]:
         for d in sorted(repo_skills.iterdir()):
             if d.is_dir() and d.name not in IGNORED_NAMES and contains_skill_md(d):
                 add(d.name, d, "repo", "builtin", bootstrap_only=True)
-    # Project skills under the open .agents standard. Symlinks (the builtin
-    # mirrors back to ava_builtins/skills) are skipped — the real tree above
-    # already provided those names, and a link is not a source tree.
-    agents_skills = repo / ".agents" / "skills"
-    if agents_skills.is_dir():
-        for d in sorted(agents_skills.iterdir()):
-            if (
-                d.is_dir()
-                and not d.is_symlink()
-                and d.name not in IGNORED_NAMES
-                and contains_skill_md(d)
-            ):
-                add(d.name, d, "repo", "builtin", bootstrap_only=True)
+    # The repo's `.agents/skills/` project skills (the kernel-contributor
+    # family: ship-a-change, write-a-pr-description, …) are deliberately NOT a
+    # converge source (issue #146 / decision 2026-08-20). They reach agents
+    # only through the project-local mount — `project_skill_roots` in
+    # `ava_builtins/plugins/ava_code/_walk.py` resolves `.agents/skills/` from
+    # `ava.cwd` at scan time — so only an agent working inside the checkout
+    # sees them, never a runtime agent via the fleet-wide load dir.
     builtin_then_installed: tuple[tuple[Path, TrustTier, bool], ...] = (
         (repo / "ava_builtins" / "plugins", "builtin", True),
         (paths.plugins_dir(), "unreviewed", False),

@@ -129,15 +129,21 @@ exists to kill. The blob is the *landed, scanned* tree: the supply-chain scan
 and the manifest gate run once at install, and what was scanned is what every
 machine materializes, byte-identical, verified by `content_hash`.
 
-Repo-shipped content (`ava_builtins/plugins/`, `ava_builtins/skills/`,
-`.agents/skills/`) does **not** move into these tables: it is already
-cluster-consistent via commit-pinned code rollout, and its trust story is the
-checkout itself. The registry owns what arrives by *install*, not by *release*.
+Repo-shipped content (`ava_builtins/plugins/`, `ava_builtins/skills/`)
+does **not** move into these tables: it is already cluster-consistent via
+commit-pinned code rollout, and its trust story is the checkout itself. The
+registry owns what arrives by *install*, not by *release*.
 `extensions.source = 'repo'` is therefore not a blob-backed row; repo sources
 keep converging from the checkout exactly as `cli/commands/_converge_skills.py`
 does today. What changes for them is only that enablement (today
 `plugins_config.json` / registry `enabled` bits) becomes the cluster
 `default_enabled` column.
+
+`.agents/skills/` (the kernel-contributor project skills) is the exception:
+since issue #146 it does **not** converge fleet-wide — it reaches agents
+through the project-local mount
+(`ava_builtins/plugins/ava_code/_walk.py:project_skill_roots`), so only agents
+working inside the checkout see it.
 
 The agent side is one column:
 
@@ -364,10 +370,11 @@ Adoption, not flag-day:
   machine are untouched.
 - `decisions/2026-08-20-stop-fleet-distributing-kernel-contributor-skills.md`
   (issue #146) — ruled to stop converging `.agents/skills/` fleet-wide,
-  sequenced after S2 lands. S2 as scoped above does not itself touch this: repo-
-  shipped content stays converging from the checkout as it does today (see
-  "Repo-shipped content" above). The stop is follow-on work timed to land
-  alongside S2 rather than a consequence of the registry rows S2 adds.
+  sequenced after S2 lands. Landed alongside S2's materialization work: converge
+  no longer enumerates `.agents/skills/` and cleans up the copies it used to
+  land (see "Repo-shipped content" above). S2 as scoped above did not itself
+  touch this: repo-shipped content still converges from the checkout; the stop
+  is not a consequence of the registry rows S2 adds.
 
 ## Related work — must stay coherent with
 
