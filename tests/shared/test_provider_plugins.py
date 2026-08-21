@@ -91,6 +91,10 @@ def provider_plugin() -> Generator[Callable[..., None], None, None]:
     """Write a fixture provider.py + enable config, then restore all
     module-level registration state after the test."""
 
+    # Another test in the same process may have already triggered the
+    # production loader. Reset the test-only once flag before creating this
+    # fixture plugin, or its provider.py would never be discovered.
+    _reset_loaded_for_tests()
     models_snapshot = dict(MODELS)
     bindings_snapshot = dict(provider_api.REGISTRY.bindings)
     prices_snapshot = dict(pricing._PLUGIN_PRICES)
