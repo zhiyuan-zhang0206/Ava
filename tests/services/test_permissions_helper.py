@@ -8,6 +8,7 @@ pure-Python fake server, plus the platform gate and the per-cluster naming.
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import plistlib
@@ -149,6 +150,105 @@ def test_method_name_mapping(fake_helper) -> None:  # pyright: ignore[reportMiss
     client.click(1, 2, sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
     client.ping(sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
     assert seen == ["type", "click", "ping"]
+
+
+def test_file_method_mapping_and_list_result(fake_helper) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    seen: list[str] = []
+    entries = [{"name": "notes.txt", "size": 12, "mtime": 1_725_000_000, "is_dir": False}]
+
+    def handler(req: dict) -> dict:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+        seen.append(req["method"])  # pyright: ignore[reportUnknownArgumentType]
+        return {  # pyright: ignore[reportUnknownVariableType]
+            "id": req["id"],
+            "ok": True,
+            "result": {"entries": entries},
+        }
+
+    path = fake_helper(handler)  # pyright: ignore[reportUnknownVariableType]
+    assert client.list_dir("/Users/ava/Downloads", sock_path=path) == entries  # pyright: ignore[reportUnknownArgumentType]
+    assert seen == ["file_list"]
+
+
+@pytest.mark.parametrize("content", [b"", b"\x00binary\xff\n"])
+def test_read_file_decodes_base64_content(fake_helper, content: bytes) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    seen: list[str] = []
+
+    def handler(req: dict) -> dict:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+        seen.append(req["method"])  # pyright: ignore[reportUnknownArgumentType]
+        return {  # pyright: ignore[reportUnknownVariableType]
+            "id": req["id"],
+            "ok": True,
+            "result": {"content_b64": base64.b64encode(content).decode("ascii")},
+        }
+
+    path = fake_helper(handler)  # pyright: ignore[reportUnknownVariableType]
+    assert client.read_file("/Users/ava/Downloads/example.bin", sock_path=path) == content  # pyright: ignore[reportUnknownArgumentType]
+    assert seen == ["file_read"]
+
+
+@pytest.mark.parametrize("result", [{}, {"content_b64": 1}, {"content_b64": "%%%"}])
+def test_read_file_rejects_missing_or_malformed_content(
+    fake_helper, result: dict[str, object]
+) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    def handler(req: dict) -> dict:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+        return {"id": req["id"], "ok": True, "result": result}  # pyright: ignore[reportUnknownVariableType]
+
+    with pytest.raises(PermissionsHelperError, match="invalid file_read response"):
+        client.read_file(  # pyright: ignore[reportUnknownArgumentType]
+            "/Users/ava/Downloads/example.bin",
+            sock_path=fake_helper(handler),  # pyright: ignore[reportUnknownArgumentType]
+        )
+
+
+def test_file_operations_raise_server_errors(fake_helper) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    def handler(req: dict) -> dict:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+        error = "outside whitelist" if req["method"] == "file_list" else "file too large"  # pyright: ignore[reportUnknownVariableType]
+        return {"id": req["id"], "ok": False, "error": error}  # pyright: ignore[reportUnknownVariableType]
+
+    path = fake_helper(handler)  # pyright: ignore[reportUnknownVariableType]
+    with pytest.raises(PermissionsHelperError, match="outside whitelist"):
+        client.list_dir("/private/secret", sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
+    with pytest.raises(PermissionsHelperError, match="file too large"):
+        client.read_file("/Users/ava/Downloads/large.bin", sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
+
+
+# SECURITY SYNC: mirrors the resolved-string boundary check in
+# services/permissions_helper/helper/main.swift::resolvedWhitelistedFilePath.
+# Update both implementations together whenever whitelist containment changes.
+def _is_whitelisted_file_path(path: Path, roots: list[Path]) -> bool:
+    if not path.is_absolute():
+        return False
+    resolved_path = str(path.resolve())
+    return any(
+        resolved_path == (resolved_root := str(root.resolve()))
+        or resolved_path.startswith(resolved_root + "/")
+        for root in roots
+    )
+
+
+def test_file_whitelist_boundary_reference(tmp_path: Path) -> None:
+    downloads = tmp_path / "Downloads"
+    desktop = tmp_path / "Desktop"
+    incoming = tmp_path / ".ava" / "incoming"
+    for root in (downloads, desktop, incoming):
+        root.mkdir(parents=True)
+
+    nested_file = downloads / "nested" / "report.txt"
+    nested_file.parent.mkdir()
+    nested_file.write_text("approved")
+    sibling_prefix = tmp_path / "DownloadsEvil"
+    sibling_prefix.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret.txt").write_text("no")
+    (downloads / "escape").symlink_to(outside, target_is_directory=True)
+
+    roots = [downloads, desktop, incoming]
+    assert _is_whitelisted_file_path(nested_file, roots)
+    assert _is_whitelisted_file_path(nested_file.parent, roots)
+    assert not _is_whitelisted_file_path(sibling_prefix / "report.txt", roots)
+    assert not _is_whitelisted_file_path(downloads / "escape" / "secret.txt", roots)
+    assert not _is_whitelisted_file_path(Path("Downloads/report.txt"), roots)
 
 
 def test_gui_ops_wire_requests(fake_helper) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
