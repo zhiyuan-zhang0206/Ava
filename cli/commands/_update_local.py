@@ -50,6 +50,38 @@ from cli.commands._update_report import _print_local_launch_failure_block
 _FRONTEND_SESSION = "frontend"
 
 
+def _refresh_builtin_skills(repo: Path) -> None:
+    """Refresh repo-native skill copies after the rollout's pull (#1289).
+
+    Runs `ava skill update` in a FRESH subprocess on the just-landed tree, for
+    the same reason the boot below is a fresh process: this interpreter's
+    already-imported `cli.commands.skill` is pre-pull code, and the update
+    table must be the new revision's.
+
+    Never fatal: `ava skill update` exits 1 on conflicts (locally edited
+    copies — the R5 contract, nothing overwritten), which is reported and
+    ignored here, and a launcher/OSError is a warning too. Skills are derived
+    state; no staleness justifies failing or rolling back the rollout.
+    """
+    from cli.commands import update as _up_mod
+
+    ava_bin = str(repo / ".venv" / "bin" / "ava")  # the gateway is POSIX-only
+    print("\n→ ava skill update (repo-native skills to the landed revision)")
+    try:
+        rc = _up_mod.subprocess.run([ava_bin, "skill", "update"], cwd=repo, check=False).returncode
+    except OSError as exc:
+        print(f"  ! builtin skill refresh failed (non-fatal): {exc}", file=sys.stderr)
+        return
+    if rc == 1:
+        print(
+            "  ! builtin skill refresh: conflicts reported — locally edited copies "
+            "were left untouched",
+            file=sys.stderr,
+        )
+    elif rc != 0:
+        print(f"  ! builtin skill refresh failed (non-fatal): rc={rc}", file=sys.stderr)
+
+
 def _restart_frontend_session(repo: Path) -> bool:
     """Graceful-stop + relaunch the frontend session (rebuilds).
 
@@ -311,6 +343,15 @@ def _run_gateway_local_update(
             rc = _checkout_and_sync(repo, target_sha, pull_recover, preserve_frontend)
             if rc is not None:
                 return rc
+            # 3.5) refresh the repo-native skill copies in ~/.ava/skills to the
+            #    just-landed tree. Converge is bootstrap-only (R5): it lands
+            #    missing copies and never updates one, so without this step the
+            #    materialized builtins stay at whatever version first landed
+            #    them (#1289 — ava-self-evolution stuck at 8/9). Never fatal:
+            #    conflicts (locally edited copies) are reported and left alone,
+            #    and an unexpected failure must not roll back the cluster over
+            #    derived-state sync.
+            _refresh_builtin_skills(repo)
         else:
             print("\n→ restart-only: skip git pull / uv sync (bounce on current code)")
 

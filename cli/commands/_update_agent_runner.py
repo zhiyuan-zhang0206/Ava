@@ -103,6 +103,31 @@ def _run_agent_runner_self_update(
         release_updater_lock()
 
 
+def _refresh_builtin_skills(repo: Path, ava_bin: Path) -> None:
+    """Refresh repo-native skill copies after the self-update's checkout (#1289).
+
+    Runs `ava skill update` in a FRESH subprocess on the just-landed tree — the
+    same freshness rule as step 5's start: this interpreter's imports are
+    pre-checkout code. Never fatal: `ava skill update` exits 1 on conflicts
+    (locally edited copies, the R5 contract — nothing overwritten), reported
+    and ignored here; a launcher/OSError is a warning too.
+    """
+    print("\n→ ava skill update (repo-native skills to the landed revision)")
+    try:
+        rc = subprocess.run([str(ava_bin), "skill", "update"], cwd=repo, check=False).returncode
+    except OSError as exc:
+        print(f"  ! builtin skill refresh failed (non-fatal): {exc}", file=sys.stderr)
+        return
+    if rc == 1:
+        print(
+            "  ! builtin skill refresh: conflicts reported — locally edited copies "
+            "were left untouched",
+            file=sys.stderr,
+        )
+    elif rc != 0:
+        print(f"  ! builtin skill refresh failed (non-fatal): rc={rc}", file=sys.stderr)
+
+
 @contextlib.contextmanager
 def _source_switch_window() -> Generator[None, None, None]:
     """Open the source-switch window around an update leg that writes the tree.
@@ -241,6 +266,18 @@ def _run_agent_runner_self_update_inner(
             file=sys.stderr,
         )
         return 1
+
+    # 3.6) refresh the repo-native skill copies to the just-landed tree.
+    #    Converge is bootstrap-only (R5): it lands missing copies and never
+    #    updates one, so without this step the materialized builtins stay at
+    #    whatever version first landed them (#1289 — ava-self-evolution stuck
+    #    at 8/9). Runs as a fresh subprocess on the new tree (this interpreter
+    #    is pre-checkout code), and is never fatal: conflicts are reported and
+    #    left alone, and no staleness may abort a self-update. Skipped on
+    #    restart-only — a bounce changes no code, so there is nothing to
+    #    refresh to.
+    if not restart_only:
+        _refresh_builtin_skills(repo, ava_bin)
 
     # 3.75) quiesce this host's agents BEFORE the stop — the per-host analogue of
     #    the rollout's stop-the-world. A standalone self-update (operator `ava

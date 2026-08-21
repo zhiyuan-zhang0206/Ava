@@ -18,9 +18,12 @@ from ava.agents import AgentStatus as S
 from shared.config import settings
 from shared.watcher import next_fire
 
-# daily_scan.py ships with the ava-self-evolution skill, so it arrives with
-# every skill install / converge and updates with the product (unlike a
-# deployment-private path that nothing would ever populate).
+# daily_scan.py ships with the ava-self-evolution skill. The load-dir copy is
+# converge-managed but bootstrap-only (R5): converge lands it once, and the
+# product rollout's update legs refresh it to the landed revision (issue
+# #1289 — before that wiring, the copy stayed at its first-landing version
+# and a script added later never arrived; `ava skill update` is the manual
+# equivalent).
 DAILY = os.path.join(
     os.environ.get("AVA_HOME", os.path.expanduser("~/.ava")),
     "skills",
@@ -62,7 +65,7 @@ def ensure_agent(label: str, prompt: str) -> int:
         else:
             ava.agents.send_message(a.agent_id, prompt)
         return a.agent_id
-    return ava.agents.spawn(prompt=prompt, label=label)
+    return ava.agents.spawn(prompt=prompt, label=label)  # pyright: ignore[reportCallIssue] — fleet plugin wraps spawn with label
 
 
 def run_scan() -> None:
@@ -70,7 +73,10 @@ def run_scan() -> None:
         # A missing script must not masquerade as an ALERT: python exits 2
         # when it cannot open the file, which the rc==2 branch would read
         # as "bad runs found". Fail loudly and wake the agent instead.
-        msg = f"daily_scan.py missing at {DAILY} — reinstall the ava-self-evolution skill (ava skill install ava-self-evolution)"
+        msg = (
+            f"daily_scan.py missing at {DAILY} — run `ava skill update ava-self-evolution` "
+            f"(or `ava skill update` for all repo-native skills) to refresh the load-dir copy"
+        )
         print(f"[{datetime.now(UTC).isoformat()}] {msg}")
         ensure_agent("self-evolution", f"Daily scan cannot run: {msg}")
         return
