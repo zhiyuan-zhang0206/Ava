@@ -6305,6 +6305,11 @@
             "format": "date-time",
             "title": "Last Active At"
           },
+          "last_inbound_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Last Inbound At"
+          },
           "label": {
             "anyOf": [
               {
@@ -6376,6 +6381,7 @@
           "spawned_at",
           "started_at",
           "last_active_at",
+          "last_inbound_at",
           "label",
           "machine",
           "liveness_state",
@@ -6385,7 +6391,7 @@
           "heartbeat_paused_until"
         ],
         "title": "AgentRow",
-        "description": "One row of GET /api/agents — full state snapshot of the `agents` table.\n\nIdentical schema to `AgentSnapshot` (the SSE-side type); subclassed\nrather than aliased so OpenAPI keeps the historical name `AgentRow` for\nthe generated frontend types."
+        "description": "One row of GET /api/agents — full state snapshot of the `agents` table.\n\nIdentical schema to `AgentSnapshot` (the SSE-side type); subclassed\nrather than aliased so OpenAPI keeps the historical name `AgentRow` for\nthe generated frontend types. `last_active_at` is the real-activity clock\n(agents_meta), `last_inbound_at` the latest inbound (issue #183)."
       },
       "AgentStats": {
         "properties": {

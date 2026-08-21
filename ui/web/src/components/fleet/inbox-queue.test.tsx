@@ -132,7 +132,7 @@ function agent(over: {
     pid: null,
     spawned_at: "2026-06-14T00:00:00Z",
     started_at: null,
-    last_active_at: "2026-06-14T00:00:00Z",
+    last_active_at: "2026-06-14T00:00:00Z", last_inbound_at: "2026-06-14T00:00:00Z",
     label: over.label ?? null,
     machine: "test",
     notices_awaiting_response: over.notices_awaiting_response ?? [],

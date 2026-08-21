@@ -38,6 +38,7 @@ def test_agent_row_wire_shape() -> None:
         spawned_at=t,
         started_at=t,
         last_active_at=t,
+        last_inbound_at=t,
         label="agent-1",
         machine="test-machine",
         liveness_state="online",

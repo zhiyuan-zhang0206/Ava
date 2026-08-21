@@ -91,8 +91,8 @@ beforeAll(() => {
 });
 
 const MOCK_AGENTS: AgentRow[] = [
-  { agent_id: 1, label: "Test #1", status: "running", last_active_at: "2026-05-10T00:00:00Z", spawner: "user", fork_source_agent_id: null, fork_source_checkpoint_id: null, pid: 100, spawned_at: "2026-05-10T00:00:00Z", started_at: "2026-05-10T00:00:01Z", machine: "test-host",  notices_awaiting_response: [], unread_notice_count: 0, heartbeat_paused_until: null, liveness_state: "online", last_probe_at: null,},
-  { agent_id: 2, label: "Test #2", status: "idling", last_active_at: "2026-05-10T01:00:00Z", spawner: "user", fork_source_agent_id: null, fork_source_checkpoint_id: null, pid: 101, spawned_at: "2026-05-10T01:00:00Z", started_at: "2026-05-10T01:00:01Z", machine: "wsl",  notices_awaiting_response: [], unread_notice_count: 0, heartbeat_paused_until: null, liveness_state: "online", last_probe_at: null,},
+  { agent_id: 1, label: "Test #1", status: "running", last_active_at: "2026-05-10T00:00:00Z", last_inbound_at: "2026-05-10T00:00:00Z", spawner: "user", fork_source_agent_id: null, fork_source_checkpoint_id: null, pid: 100, spawned_at: "2026-05-10T00:00:00Z", started_at: "2026-05-10T00:00:01Z", machine: "test-host",  notices_awaiting_response: [], unread_notice_count: 0, heartbeat_paused_until: null, liveness_state: "online", last_probe_at: null,},
+  { agent_id: 2, label: "Test #2", status: "idling", last_active_at: "2026-05-10T01:00:00Z", last_inbound_at: "2026-05-10T01:00:00Z", spawner: "user", fork_source_agent_id: null, fork_source_checkpoint_id: null, pid: 101, spawned_at: "2026-05-10T01:00:00Z", started_at: "2026-05-10T01:00:01Z", machine: "wsl",  notices_awaiting_response: [], unread_notice_count: 0, heartbeat_paused_until: null, liveness_state: "online", last_probe_at: null,},
 ];
 
 let _qc: QueryClient;
@@ -497,7 +497,7 @@ describe("useAgents.spawn", () => {
           pid: null,
           spawned_at: "2026-05-25T00:00:00Z",
           started_at: null,
-          last_active_at: "2026-05-25T00:00:00Z",
+          last_active_at: "2026-05-25T00:00:00Z", last_inbound_at: "2026-05-25T00:00:00Z",
           label: null,
           machine: "test-host",
           notices_awaiting_response: [], unread_notice_count: 0,
@@ -994,7 +994,7 @@ describe("useAgents SSE merge (regression)", () => {
       pid: null,
       spawned_at: "2026-05-25T12:00:00Z",
       started_at: null,
-      last_active_at: "2026-05-25T12:00:00Z",
+      last_active_at: "2026-05-25T12:00:00Z", last_inbound_at: "2026-05-25T12:00:00Z",
       label: null,
       machine: "test-host",
       notices_awaiting_response: [], unread_notice_count: 0,
@@ -1075,7 +1075,7 @@ describe("useAgents SSE merge (regression)", () => {
       pid: null,
       spawned_at: "2026-05-25T12:00:00Z",
       started_at: null,
-      last_active_at: "2026-05-25T12:00:00Z",
+      last_active_at: "2026-05-25T12:00:00Z", last_inbound_at: "2026-05-25T12:00:00Z",
       label: null,
       machine: "test-host",
       notices_awaiting_response: [], unread_notice_count: 0,
@@ -1131,7 +1131,7 @@ describe("useAgents SSE merge (regression)", () => {
       pid: null,
       spawned_at: "2026-05-25T12:00:00Z",
       started_at: null,
-      last_active_at: "2026-05-25T12:00:00Z",
+      last_active_at: "2026-05-25T12:00:00Z", last_inbound_at: "2026-05-25T12:00:00Z",
       label: null,
       machine: "test-host",
       notices_awaiting_response: [], unread_notice_count: 0,
@@ -1197,7 +1197,7 @@ describe("useAgents SSE merge (regression)", () => {
       pid: null,
       spawned_at: "2026-05-25T12:00:00Z",
       started_at: null,
-      last_active_at: "2026-05-25T12:00:00Z",
+      last_active_at: "2026-05-25T12:00:00Z", last_inbound_at: "2026-05-25T12:00:00Z",
       label: null,
       machine: "test-host",
       notices_awaiting_response: [], unread_notice_count: 0,

@@ -251,6 +251,7 @@ function makeAgent(overrides: Partial<AgentRow>): AgentRow {
     spawned_at: "2026-05-15T00:00:00Z",
     started_at: "2026-05-15T00:00:00Z",
     last_active_at: "2026-05-15T00:00:00Z",
+    last_inbound_at: "2026-05-15T00:00:00Z",
     label: null,
     machine: "test",
     notices_awaiting_response: [], unread_notice_count: 0,

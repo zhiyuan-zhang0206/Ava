@@ -18,10 +18,15 @@ from pydantic import BaseModel, Field
 from shared.agents import AgentStatus
 from shared.priority import Priority
 
-# Canonical columns + JOIN. last_active_at = MAX(inbound_messages.created_at)
-# across all kinds (chat / lifecycle / compact all count as activity), with
-# COALESCE fallback to started_at / spawned_at when the agent has no inbound
-# yet. agents JOIN agents_meta on id; t.label is the user-editable thread name.
+# Canonical columns + JOIN. last_active_at is the agent's REAL-activity clock
+# (agents_meta.last_active_at, written by the agent process on every completed
+# LLM turn — agent/graph/_llm.py) with a spawned_at fallback for brand-new
+# rows; last_inbound_at is MAX(inbound_messages.created_at) across all kinds
+# (chat / lifecycle / compact all count as "when did anyone last talk to it"),
+# with the same fallback. The two diverge exactly for an agent grinding on a
+# long single turn — the case where "is it alive" is the real question
+# (issue #183). agents JOIN agents_meta on id; t.label is the user-editable
+# thread name.
 # notices_awaiting_response is a correlated scalar subquery (a json array —
 # json has no equality operator, so it never joins) over the agent's open
 # require_response notices (migration 0053) — the bounded "needs response"
@@ -34,7 +39,8 @@ _COLS = (
     "a.id, a.spawner, a.fork_source_agent_id, "
     "a.fork_source_checkpoint_id, a.status, a.pid, "
     "a.spawned_at, a.started_at, "
-    "COALESCE(im.last_active_at, a.started_at, a.spawned_at) AS last_active_at, "
+    "COALESCE(a.last_active_at, a.started_at, a.spawned_at) AS last_active_at, "
+    "COALESCE(im.last_inbound_at, a.started_at, a.spawned_at) AS last_inbound_at, "
     "t.label, a.machine, "
     "a.heartbeat_paused_until, "
     "a.liveness_state, a.last_probe_at, "
@@ -64,7 +70,7 @@ _FROM = (
     # lateral row per agent — index-only MAX over
     # inbound_messages_agent_id_created_at_idx — keeps select_all O(agents).
     "LEFT JOIN LATERAL ("
-    "SELECT MAX(created_at) AS last_active_at FROM inbound_messages im "
+    "SELECT MAX(created_at) AS last_inbound_at FROM inbound_messages im "
     "WHERE im.agent_id = a.id"
     ") im ON true "
 )
@@ -112,9 +118,13 @@ class AgentSnapshot(BaseModel):
 
     `label` is None when not set; the frontend falls back to `#N`.
 
-    `last_active_at` is the most recent activity time (any inbound kind);
-    falls back to started_at / spawned_at when no inbound has ever
-    arrived. The frontend sorts within status groups by this desc.
+    `last_active_at` is the agent's real-activity clock (agents_meta column,
+    written on every completed LLM turn); `last_inbound_at` is the most
+    recent inbound of any kind. They differ exactly for an agent working
+    through a long single turn — last_active_at stays current while
+    last_inbound_at goes stale (issue #183). Both fall back to
+    started_at / spawned_at before any activity/inbound. The frontend sorts
+    within status groups by last_active_at desc.
 
     `notices_awaiting_response` is the agent's open require_response notices,
     oldest first — empty when it is not waiting on the user.
@@ -129,6 +139,7 @@ class AgentSnapshot(BaseModel):
     spawned_at: datetime
     started_at: datetime | None
     last_active_at: datetime
+    last_inbound_at: datetime
     label: str | None
     machine: str
     # Gateway-owned liveness projection (Task #1174): 'online' = the machine is
@@ -159,13 +170,14 @@ def _row_to_snapshot(row: tuple[Any, ...]) -> AgentSnapshot:
             "spawned_at": row[6],
             "started_at": row[7],
             "last_active_at": row[8],
-            "label": row[9],
-            "machine": row[10],
-            "heartbeat_paused_until": row[11],
-            "liveness_state": row[12],
-            "last_probe_at": row[13],
-            "notices_awaiting_response": row[14],
-            "unread_notice_count": row[15],
+            "last_inbound_at": row[9],
+            "label": row[10],
+            "machine": row[11],
+            "heartbeat_paused_until": row[12],
+            "liveness_state": row[13],
+            "last_probe_at": row[14],
+            "notices_awaiting_response": row[15],
+            "unread_notice_count": row[16],
         }
     )
 
