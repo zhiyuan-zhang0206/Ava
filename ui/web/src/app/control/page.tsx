@@ -20,7 +20,9 @@ import { ExternalLink, MessageSquare } from "lucide-react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+
+import { useSettledAnchorScroll } from "./_anchor-scroll";
 
 import ConfigPage from "@/app/control/config/page";
 import DisplaySettingsPage from "@/app/control/display/page";
@@ -59,9 +61,18 @@ export default function ControlPage() {
   const t = useTranslations("control");
   const ts = useTranslations("control.sections");
   const router = useRouter();
-  // Honor a #anchor on first load / direct link. Anchors that migrated to
-  // /insights redirect there; the rest scroll their target into the container
-  // (no smooth — it's the initial position).
+  // Honor a #anchor on first load / direct link: resolve the target once,
+  // from the URL hash at mount (later hash changes come from nav clicks,
+  // which scroll themselves). Anchors that migrated to /insights redirect
+  // there; the rest scroll their target into the container — no smooth, it's
+  // the initial position, re-applied by useSettledAnchorScroll while the
+  // async section bodies settle.
+  const [anchorTarget] = useState<string | null>(() => {
+    if (typeof window === "undefined") return null;
+    const id = window.location.hash.slice(1);
+    if (!id || INSIGHTS_ANCHORS.has(id) || RETIRED_INSIGHTS_ANCHORS.has(id)) return null;
+    return id;
+  });
   useEffect(() => {
     const id = window.location.hash.slice(1);
     if (!id) return;
@@ -73,9 +84,8 @@ export default function ControlPage() {
       router.replace(`/insights#${RETIRED_ANCHOR_TARGET}`);
       return;
     }
-    const el = document.getElementById(id);
-    if (el) el.scrollIntoView({ block: "start" });
   }, [router]);
+  useSettledAnchorScroll(CONTROL_SCROLL_ID, anchorTarget);
 
   return (
     <div className={cn(FLEX, FLEX_1, MIN_H_0, FLEX_COL)}>
