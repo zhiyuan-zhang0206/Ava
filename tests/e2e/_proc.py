@@ -10,6 +10,42 @@ import subprocess
 import time
 from collections.abc import Generator
 from contextlib import contextmanager
+from pathlib import Path
+
+# Servers currently running under `managed_proc`, label -> (proc, log_path).
+# `pytest_runtest_makereport` in conftest.py reads this on failure so a server
+# that should have been up but wasn't (issue #213) leaves its exit code and log
+# tail IN the failing report instead of only in an artifact nobody opens.
+_LIVE_SERVERS: dict[str, tuple[subprocess.Popen[str], str | None]] = {}
+
+
+def proc_log_tail(log_path: str | None, n: int = 40) -> str:
+    """Last `n` lines of a managed process's merged log (or a short reason why
+    there is no tail) — the evidence a dead server leaves behind."""
+    if log_path is None:
+        return "(no log_path; stdout was inherited by pytest)"
+    try:
+        lines = Path(log_path).read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError as e:
+        return f"(log unreadable: {e!r})"
+    if not lines:
+        return "(log is empty)"
+    return "\n".join(lines[-n:])
+
+
+def dead_server_evidence() -> str:
+    """For every registered server that exited while its fixture was still
+    active, the exit code + log tail — appended to failing test reports."""
+    parts: list[str] = []
+    for label, (proc, log_path) in sorted(_LIVE_SERVERS.items()):
+        code = proc.poll()
+        if code is None:
+            continue
+        parts.append(
+            f"[e2e] server '{label}' (pid {proc.pid}) was dead at failure time — "
+            f"exit code {code}; log tail:\n{proc_log_tail(log_path)}"
+        )
+    return "\n\n".join(parts)
 
 
 def wait_for_port(host: str, port: int, timeout: float = 30.0, *, label: str) -> None:
@@ -76,9 +112,11 @@ def managed_proc(
         if log_file is not None:
             log_file.close()
         raise
+    _LIVE_SERVERS[label] = (proc, log_path)
     try:
         yield proc
     finally:
+        _LIVE_SERVERS.pop(label, None)
         try:
             if proc.poll() is None:
                 with contextlib.suppress(ProcessLookupError):
