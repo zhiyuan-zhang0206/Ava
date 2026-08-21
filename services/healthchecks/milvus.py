@@ -1,18 +1,25 @@
 """Milvus server healthcheck — called every 60s by the watchdog.
 
-TCP probe `127.0.0.1:<port>` (gRPC listening = ready). On death,
-`shared.service_respawn.respawn_service` starts a new daemon in the
-ava-milvus pane (same pattern as the 5 daemon healthchecks in #257;
-daemon enters the session and does not detach).
+Probes with a real RPC — `MilvusClient.list_collections` against the cluster's
+milvus URI (the same client path `services.memory_indexer` uses) — not a bare
+TCP connect. A port-open probe certifies only that *some* process holds the
+port, and it stays green while the server behind it is unusable; the memory
+indexer's runtime calls then fail forever with nothing respawning milvus
+(`conventions/defensive-patterns.md`: a health check must traverse what it
+certifies — the 0004 lesson). `list_collections` breaks exactly when milvus
+stops serving RPCs, so the watchdog restarts it.
 
-Does not probe via `MilvusClient.list_collections` — pymilvus client
-creation + gRPC handshake itself is slow, and the watchdog 60s cycle
-does not want to wait. TCP listening = milvus-lite server process is
-alive, which is enough.
+Cost is bounded both ways: a healthy round is ~0.3s (client create +
+`list_collections` on a loopback server), a dead server fails the client
+connect within `_TIMEOUT_S`. On death, `shared.service_respawn.respawn_service`
+starts a new daemon in the ava-milvus pane (same pattern as the other daemon
+healthchecks; daemon enters the session and does not detach).
 """
 
+from __future__ import annotations
+
+import contextlib
 import logging
-import socket
 import sys
 from pathlib import Path
 
@@ -22,16 +29,37 @@ from shared.service_respawn import respawn_service
 
 _log = logging.getLogger("services.healthchecks.milvus")
 
-_PORT = settings.services.milvus_port
 _TIMEOUT_S = 3.0
 
 
 def _is_alive() -> bool:
+    """True when milvus answers a real RPC; any failure means "not alive".
+
+    The probe fails closed: an unforeseen exception (a wedged server, a foreign
+    process on the port that does not speak milvus) degrades to "dead" — a
+    verdict the watchdog can act on — instead of to no answer at all. The import
+    stays inside the function so the watchdog's own import of this module stays
+    light.
+    """
+    from pymilvus import MilvusClient
+
+    client: MilvusClient | None = None
     try:
-        with socket.create_connection(("127.0.0.1", _PORT), timeout=_TIMEOUT_S):
-            return True
-    except OSError:
+        client = MilvusClient(uri=settings.services.milvus_uri, timeout=_TIMEOUT_S)
+        # The real MilvusClient is sync; the stubs type it as an async Unknown.
+        client.list_collections()  # pyright: ignore[reportUnknownMemberType, reportUnusedCoroutine]
+        return True
+    except Exception as exc:
+        _log.debug(
+            "[milvus healthcheck] probe failed (%s: %s); treating as dead",
+            type(exc).__name__,
+            exc,
+        )
         return False
+    finally:
+        if client is not None:
+            with contextlib.suppress(Exception):
+                client.close()
 
 
 def _restart_daemon() -> bool:

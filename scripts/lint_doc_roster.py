@@ -1,20 +1,29 @@
 #!/usr/bin/env python3
-"""Lint: the runbook daemon roster table must match the registered services.
+"""Lint: roster tables must match their registrations.
 
-`ops/spec.py:build_services()` (re-exported by `cli/commands/_repo.py`) is the
-single source of truth for the
-long-running sessions the cluster runs (gateway, restarter, labeler, milvus,
-memory-indexer, telegram, frontend, watchdog, runner, browser). The runbook
-(`conventions/runbook.md`) carries a human-readable roster table documenting the
-same set. Nothing keeps the two in sync, so a PR can delete (or add) a daemon and
-silently leave the table wrong — exactly what happened in #728, which removed the
-`scheduler` daemon but left its roster row + prose behind for nobody to catch.
+Two tables are checked, both by set equality in both directions:
 
-This lint closes that gap. It asserts SET EQUALITY in both directions:
-  - a service documented in the roster but not registered in `build_services()`
-    -> "deleted a daemon, forgot to undocument it" (the #728 case);
-  - a service registered in `build_services()` but missing from the roster
-    -> "added a daemon, forgot to document it".
+1. the runbook daemon roster (`conventions/runbook.md`) against
+   `ops/spec.py:build_services()` (re-exported by `cli/commands/_repo.py`) —
+   the single source of truth for the long-running sessions the cluster runs
+   (gateway, restarter, labeler, milvus, memory-indexer, telegram, frontend,
+   watchdog, runner, browser). The runbook carries a human-readable roster
+   table documenting the same set. Nothing kept the two in sync, so a PR could
+   delete (or add) a daemon and silently leave the table wrong — exactly what
+   happened in #728, which removed the `scheduler` daemon but left its roster
+   row + prose behind for nobody to catch.
+   - a service documented in the roster but not registered in
+     `build_services()` -> "deleted a daemon, forgot to undocument it" (the
+     #728 case);
+   - a service registered in `build_services()` but missing from the roster
+     -> "added a daemon, forgot to document it".
+
+2. the healthcheck roster (`services/healthchecks/check-roster.ava.okf.md`)
+   against the healthcheck module directory plus the ServiceSpec
+   `healthcheck_module` fields and the watchdog's hand-added imports — the
+   2026-08-21 audit (issue #192) found the table documenting a phantom module
+   (`task_maintenance.py`) and missing seven real ones. See
+   `check_healthcheck_roster()` for the exact sources of truth.
 
 Sentinel contract: the table is located by a `<!-- lint:roster-table -->` HTML
 comment placed on its own line immediately ABOVE the roster table (the one whose
@@ -134,8 +143,150 @@ def check() -> int:
     return 0
 
 
+# ── healthcheck roster (issue #192) ─────────────────────────────────────────
+# The same failure class as the runbook roster, found in the 2026-08-21
+# healthcheck audit: `check-roster.ava.okf.md` documented a phantom module
+# (`task_maintenance.py`) and missed seven real ones. The three sources of
+# truth are all structured data — the module directory, the ServiceSpec
+# roster, and the watchdog's hand-added imports — so set equality pins all
+# three to the doc table.
+
+_HEALTHCHECK_SENTINEL = "<!-- lint:healthcheck-roster-table -->"
+
+_HEALTHCHECK_ROSTER = _REPO_ROOT / "services" / "healthchecks" / "check-roster.ava.okf.md"
+
+_WATCHDOG_DAEMON = _REPO_ROOT / "services" / "watchdog" / "daemon.py"
+
+# The watchdog's hand-added checks (no ServiceSpec — native per-cluster
+# processes / a docker compose stack; see services/watchdog/daemon.py). Parsed
+# from the watchdog's own `from services.healthchecks.<x> import main as`
+# imports rather than hardcoded, so a hand-added check added or removed there
+# must be reflected in the roster table on the next lint run.
+_HAND_ADDED_IMPORT = re.compile(
+    r"^from services\.healthchecks\.(\w+) import main as \w+_healthcheck$"
+)
+
+
+def hand_added_healthchecks() -> set[str]:
+    """The healthcheck modules the watchdog imports directly, outside the
+    ServiceSpec roster (redis-acl, pgbouncer, lgtm)."""
+    names: set[str] = set()
+    for line in _WATCHDOG_DAEMON.read_text(encoding="utf-8").splitlines():
+        m = _HAND_ADDED_IMPORT.match(line)
+        if m:
+            names.add(m.group(1))
+    return names
+
+
+def directory_healthchecks() -> set[str]:
+    """The healthcheck module files themselves — every `*.py` beside the two
+    okf docs, minus `__init__.py`."""
+    return {p.stem for p in _HEALTHCHECK_ROSTER.parent.glob("*.py") if p.name != "__init__.py"}
+
+
+def spec_healthchecks() -> set[str]:
+    """The healthcheck modules registered on ServiceSpec rows inside this
+    directory (`services.healthchecks.<x>`, last segment).
+
+    Plugin-registered services keep their healthchecks in their own namespace
+    (`ava_builtins.plugins.ava_fleet.task_maintenance.healthcheck`) and are out
+    of scope for this table — the roster documents this directory only."""
+    names: set[str] = set()
+    for spec in build_services():
+        hm = spec.healthcheck_module
+        if hm and hm.startswith("services.healthchecks."):
+            names.add(hm.rsplit(".", 1)[-1])
+    return names
+
+
+def parse_healthcheck_roster(text: str) -> set[str]:
+    """Extract the healthcheck roster table's first-column module names
+    (`browser.py`, …) — sentinel-anchored like the runbook roster; the `.py`
+    suffix is stripped so the set compares against module stems."""
+    idx = text.find(_HEALTHCHECK_SENTINEL)
+    if idx < 0:
+        raise RosterSentinelMissingError(_HEALTHCHECK_SENTINEL)
+
+    names: set[str] = set()
+    started = False
+    for line in text[idx + len(_HEALTHCHECK_SENTINEL) :].splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("|"):
+            if started:
+                break
+            continue
+        started = True
+        m = _FIRST_CODE_SPAN.match(stripped)
+        if m and m.group(1).endswith(".py"):
+            names.add(m.group(1)[: -len(".py")])
+    return names
+
+
+def check_healthcheck_roster() -> int:
+    """Assert set equality between the roster table, the module directory, and
+    the ServiceSpec + hand-added registrations; return 0/1 exit code."""
+    try:
+        text = _HEALTHCHECK_ROSTER.read_text(encoding="utf-8")
+        parsed = parse_healthcheck_roster(text)
+    except RosterSentinelMissingError:
+        print(
+            f"healthcheck roster lint failed: sentinel {_HEALTHCHECK_SENTINEL!r} not found "
+            f"in {_HEALTHCHECK_ROSTER.name} — place it on its own line immediately above "
+            f"the roster table.",
+            file=sys.stderr,
+        )
+        return 1
+
+    directory = directory_healthchecks()
+    registered = spec_healthchecks() | hand_added_healthchecks()
+
+    if parsed != directory:
+        print(
+            "healthcheck roster lint failed: table does not match the module directory.",
+            file=sys.stderr,
+        )
+        extra = parsed - directory
+        missing = directory - parsed
+        if extra:
+            print(
+                f"  roster documents healthcheck modules that do not exist: {sorted(extra)}",
+                file=sys.stderr,
+            )
+        if missing:
+            print(
+                f"  healthcheck modules missing from the roster: {sorted(missing)}",
+                file=sys.stderr,
+            )
+        return 1
+    if registered != directory:
+        print(
+            "healthcheck roster lint failed: module directory does not match the "
+            "ServiceSpec + hand-added registrations.",
+            file=sys.stderr,
+        )
+        extra = registered - directory
+        missing = directory - registered
+        if extra:
+            print(
+                f"  ServiceSpec/hand-added healthchecks with no module file: {sorted(extra)}",
+                file=sys.stderr,
+            )
+        if missing:
+            print(
+                f"  healthcheck modules not registered (ServiceSpec nor hand-added): "
+                f"{sorted(missing)}",
+                file=sys.stderr,
+            )
+        return 1
+
+    print(f"healthcheck roster lint OK: {len(parsed)} modules match.")
+    return 0
+
+
 def main() -> int:
-    return check()
+    rc = check()
+    rc2 = check_healthcheck_roster()
+    return rc or rc2
 
 
 if __name__ == "__main__":
