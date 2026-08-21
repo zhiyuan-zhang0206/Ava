@@ -39,7 +39,7 @@ Cluster identity is **path-only** (`shared/cluster/`, #629/#633): there is no `A
 | `AVA_SDK_DISABLE` | environment variable | Comma-separated list of SDK module names to disable |
 | `AVA_LLM_OVERRIDE` | environment variable | Inject custom LLM factory (testing/multi-instance) |
 | `AVA_SYSTEM_PROMPT_*` | environment variable | Control toggles for system prompt sections |
-| `AVA_AGENT_COMMUNICATION_STYLE` | environment variable | How verbose the agent is when working: `oriented` (default) / `concise` / `silent`; it selects wording, not an on/off switch—the section is always rendered |
+| `AVA_AGENT_COMMUNICATION_STYLE` | environment variable | How verbose the agent is when working: `off` (default) / `oriented` / `concise` / `silent`; `off` omits the section entirely |
 
 ### DB
 | Variable | Set at | Purpose |

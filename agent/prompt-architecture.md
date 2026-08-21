@@ -105,7 +105,7 @@ Capabilities rather than standing as its own section.
   section — and which drops that step when this section renders nothing.
 - **Core communication style** — `agent/graph/_system_prompt.py:_communication_style_section`,
   selected by `settings.agent.agent_communication_style` (env
-  `AVA_AGENT_COMMUNICATION_STYLE`, default `oriented`): how much the agent narrates
+  `AVA_AGENT_COMMUNICATION_STYLE`, default `off`): how much the agent narrates
   while it works — `oriented` interleaves brief progress updates in its text content,
   `concise` speaks at milestones only, `silent` works quietly and reports once at the
   end, `off` omits the section from the system prompt entirely. General-agent behavior
@@ -218,8 +218,8 @@ them.
 A lightweight conversation section lives in the **Ava core** prompt
 (`_communication_style_section`) — it is general-agent behavior, not
 coding-specific. It is selected by an enum, `settings.agent.agent_communication_style`,
-env `AVA_AGENT_COMMUNICATION_STYLE`, one of `oriented` (**the default**) / `concise` /
-`silent` / `off`. The first three carry the same output-channel map — which of code
+env `AVA_AGENT_COMMUNICATION_STYLE`, one of `off` (**the default**) / `oriented` /
+`concise` / `silent`. The latter three carry the same output-channel map — which of code
 output, text content, and `ava.ui.notify` actually reaches the user is a fact about
 the system, not a preference — and differ only in how much the agent says while
 working. `off` is the exception: it is a true on/off gate, not a wording choice —
@@ -292,7 +292,7 @@ Landed so far:
 - The `_engineering_workflow_section` move into `ava_code` (responsibility split).
 - The core conversation section, since generalized from an on/off progress-narration
   toggle into a four-way communication style (`AVA_AGENT_COMMUNICATION_STYLE`:
-  `oriented` (default) / `concise` / `silent` / `off`, the last omitting the section
+  `off` (default) / `oriented` / `concise` / `silent`, with `off` omitting the section
   entirely).
 - The core memory-behavior section (`AVA_SYSTEM_PROMPT_MEMORY`, default on) — the
   general-agent "when / what to remember" layer.

@@ -127,7 +127,9 @@ DEFAULT_TUNING = ModelTuning(
     # thinking_delta at all, and the streaming docs warn of tool-call gaps. At 10
     # this timeout was manufacturing turn aborts out of healthy streams.
     llm_stream_inter_chunk_timeout_seconds=300.0,
-    agent_communication_style="oriented",
+    # User ruling (2026-08-22): narration guidance is off by default for every
+    # model; the section is omitted unless an explicit value opts in.
+    agent_communication_style="off",
     prompt_prefer_sdk_enabled=True,
     prompt_output_conciseness_enabled=True,
     prompt_ui_delivery_enabled=True,

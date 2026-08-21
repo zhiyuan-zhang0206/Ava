@@ -337,7 +337,7 @@ _COMMUNICATION_STYLE_SECTIONS = {
 @register_system_prompt_section
 def _communication_style_section() -> str:
     """Selected by turn_settings.agent.agent_communication_style (env
-    AVA_AGENT_COMMUNICATION_STYLE, default 'oriented'). Three styles carry the
+    AVA_AGENT_COMMUNICATION_STYLE, default 'off'). Three styles carry the
     same output-channel map and differ only in how much the agent says while it
     works: 'oriented' interleaves brief updates, 'concise' speaks at milestones
     only, 'silent' stays quiet and reports once at the end. 'off' is the one
