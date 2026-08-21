@@ -76,6 +76,94 @@ def test_every_spawnable_model_has_core_facts() -> None:
             assert rates_at(model, input_tokens=0) is not None
 
 
+def test_superseded_models_stay_spawnable() -> None:
+    """Supersession is display-only (picker visibility): a superseded model
+    must keep ``spawnable=True`` so settings/config_overlay can still switch
+    back to it, and its replacement must be a registered model id."""
+    for model_id, spec in MODELS.items():
+        if spec.superseded_by is None:
+            continue
+        assert spec.spawnable, model_id
+        assert spec.superseded_by in MODELS, model_id
+
+
+def test_superseded_chain_validation_rejects_self_link(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The import-time chain guard refuses a model that names itself as its
+    own replacement (would hide it from the picker with nothing to show)."""
+    from dataclasses import replace
+
+    from shared.lm import registry as reg
+
+    monkeypatch.setitem(
+        reg.MODELS, "glm-5.2", replace(reg.MODELS["glm-5.2"], superseded_by="glm-5.2")
+    )
+    with pytest.raises(RuntimeError, match="its own replacement"):
+        reg._validate_registry()
+
+
+def test_superseded_chain_validation_rejects_unknown_target(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The replacement id must exist in MODELS — a dangling link would hide
+    the old model while the supposed replacement is nowhere in the roster."""
+    from dataclasses import replace
+
+    from shared.lm import registry as reg
+
+    monkeypatch.setitem(
+        reg.MODELS, "glm-5.2", replace(reg.MODELS["glm-5.2"], superseded_by="glm-9.9")
+    )
+    with pytest.raises(RuntimeError, match="not in MODELS"):
+        reg._validate_registry()
+
+
+def test_superseded_chain_validation_rejects_non_spawnable_target(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The replacement must itself be offered in the picker (spawnable) —
+    hiding a model behind a replacement that never shows would strand it."""
+    from dataclasses import replace
+
+    from shared.lm import registry as reg
+
+    monkeypatch.setitem(
+        reg.MODELS, "glm-5.2", replace(reg.MODELS["glm-5.2"], superseded_by="gpt-5.5")
+    )
+    with pytest.raises(RuntimeError, match="not spawnable"):
+        reg._validate_registry()
+
+
+def test_superseded_chain_validation_rejects_cycle(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Each hidden model must eventually lead to one the picker can show."""
+    from dataclasses import replace
+
+    from shared.lm import registry as reg
+
+    monkeypatch.setitem(
+        reg.MODELS, "glm-5.2", replace(reg.MODELS["glm-5.2"], superseded_by="kimi-k3")
+    )
+    monkeypatch.setitem(
+        reg.MODELS, "kimi-k3", replace(reg.MODELS["kimi-k3"], superseded_by="glm-5.2")
+    )
+    with pytest.raises(RuntimeError, match="cycle"):
+        reg._validate_registry()
+
+
+def test_superseded_chain_validation_accepts_valid_link(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A well-formed chain (target registered and spawnable) passes the
+    guard — superseding is a supported registry state, not an error shape."""
+    from dataclasses import replace
+
+    from shared.lm import registry as reg
+
+    monkeypatch.setitem(
+        reg.MODELS, "glm-5.2", replace(reg.MODELS["glm-5.2"], superseded_by="kimi-k3")
+    )
+    reg._validate_registry()
+
+
 def test_deepseek_vision_exp_registry_facts() -> None:
     """The new multimodal deepseek entry carries the v4-flash facts (window,
     output cap, cutoff, effort vocabulary, compact thresholds) plus vision=True —

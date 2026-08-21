@@ -69,6 +69,45 @@ describe("DefaultModelPanel", () => {
     ]);
   });
 
+  it("omits superseded roster options while preserving a stored superseded default", async () => {
+    vi.mocked(api.getModels).mockResolvedValue({
+      providers: {
+        deepseek: ["deepseek-v4-pro", "deepseek-v4-flash", "deepseek-v4-legacy"],
+      },
+      models: {
+        "deepseek-v4-pro": {
+          provider: "deepseek",
+          context_window: 128_000,
+          superseded_by: "deepseek-v4-flash",
+        },
+        "deepseek-v4-flash": {
+          provider: "deepseek",
+          context_window: 128_000,
+          superseded_by: null,
+        },
+        "deepseek-v4-legacy": {
+          provider: "deepseek",
+          context_window: 128_000,
+          superseded_by: "deepseek-v4-flash",
+        },
+      },
+      default: "deepseek-v4-flash",
+    });
+    vi.mocked(api.getDefaultModel).mockResolvedValue({
+      model: "deepseek-v4-pro",
+      source: "cluster",
+    });
+
+    wrap();
+    const select = await screen.findByTestId<HTMLSelectElement>("select-default-model");
+    await waitFor(() => expect(select.value).toBe("deepseek-v4-pro"));
+
+    expect([...select.options].map((option) => option.value)).toEqual([
+      "deepseek-v4-pro",
+      "deepseek-v4-flash",
+    ]);
+  });
+
   it("PUTs the picked model on save", async () => {
     wrap();
     const select = await screen.findByTestId<HTMLSelectElement>("select-default-model");

@@ -183,6 +183,31 @@ describe("DisplaySettingsPage", () => {
     expect(screen.getByText("claude-haiku-4-5-20251001")).toBeTruthy();
   });
 
+  it("explains and locks superseded model visibility while normal models stay enabled", async () => {
+    vi.mocked(api.getModels).mockResolvedValue({
+      providers: { deepseek: ["deepseek-v4-pro", "deepseek-v4-flash"] },
+      models: {
+        "deepseek-v4-pro": {
+          provider: "deepseek",
+          context_window: 128_000,
+          superseded_by: "deepseek-v4-flash",
+        },
+        "deepseek-v4-flash": {
+          provider: "deepseek",
+          context_window: 128_000,
+          superseded_by: null,
+        },
+      },
+      default: "deepseek-v4-flash",
+    });
+    renderPage();
+
+    const supersededToggle = await screen.findByLabelText<HTMLButtonElement>("deepseek-v4-pro");
+    expect(screen.getByText(/superseded by deepseek-v4-flash/)).toBeTruthy();
+    expect(supersededToggle.disabled).toBe(true);
+    expect(screen.getByLabelText<HTMLButtonElement>("deepseek-v4-flash").disabled).toBe(false);
+  });
+
   // Plugin skins (contributions.ui.themes): the section is absent until a
   // plugin contributes one, then lists it plugin-attributed and persists the
   // qualified id.

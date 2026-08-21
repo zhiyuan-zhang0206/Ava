@@ -111,6 +111,23 @@ const modelsDefault = () => ({
   default: "deepseek-v4-pro",
 });
 
+const modelsWithSupersession = () => ({
+  providers: { deepseek: ["deepseek-v4-pro", "deepseek-v4-flash"] },
+  models: {
+    "deepseek-v4-pro": {
+      provider: "deepseek",
+      context_window: 128_000,
+      superseded_by: "deepseek-v4-flash",
+    },
+    "deepseek-v4-flash": {
+      provider: "deepseek",
+      context_window: 128_000,
+      superseded_by: null,
+    },
+  },
+  default: "deepseek-v4-pro",
+});
+
 // Like modelsDefault, but with per-model metadata: deepseek publishes an
 // effort ladder, claude publishes none. `null` is what the wire actually
 // carries for a model with no ladder — the gateway always emits the key
@@ -512,6 +529,19 @@ describe("SpawnButton variant", () => {
 });
 
 describe("SpawnButton model dropdown", () => {
+  it("omits a registry-superseded model while keeping its replacement", async () => {
+    vi.mocked(api.getSystemStatus).mockResolvedValue(singleMachineStatus());
+    vi.mocked(api.getModels).mockResolvedValue(modelsWithSupersession());
+    wrap(<SpawnButton variant="sm" onSpawn={vi.fn()} />);
+
+    const trigger = await screen.findByLabelText("Model");
+    fireEvent.click(trigger);
+    const list = await screen.findByRole("list");
+
+    expect(within(list).queryByText("deepseek-v4-pro")).toBeNull();
+    expect(within(list).getByText("deepseek-v4-flash")).toBeTruthy();
+  });
+
   it("selecting a non-default model passes model to onSpawn", async () => {
     vi.mocked(api.getSystemStatus).mockResolvedValue(singleMachineStatus());
     vi.mocked(api.getModels).mockResolvedValue(modelsDefault());

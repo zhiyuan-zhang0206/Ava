@@ -5111,6 +5111,8 @@ export interface components {
             reasoning_effort_options?: string[] | null;
             /** Reasoning Effort Default */
             reasoning_effort_default?: string | null;
+            /** Superseded By */
+            superseded_by?: string | null;
         };
         /**
          * ModelPricing
