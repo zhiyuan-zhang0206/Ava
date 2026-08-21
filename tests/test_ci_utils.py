@@ -632,3 +632,57 @@ def test_json_probe_pending_is_not_terminal(gh: Any, has_workflows: Any, capsys)
     payload = json.loads(capsys.readouterr().out)
     assert payload["verdict"] == "pending"
     assert payload["terminal"] is False
+
+
+# --- --rerun-failed-jobs CLI (issue #102) ---
+
+
+def test_rerun_failed_jobs_dry_run_lists_jobs(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
+    """--dry-run lists the failed jobs and exits 0 without re-running anything."""
+    monkeypatch.setattr(
+        ci_utils,
+        "list_failed_jobs",
+        lambda _pr, _repo: [
+            {"name": "e2e shard (3/4)", "job_id": 102, "run_id": 11, "conclusion": "FAILURE"}
+        ],
+    )
+    assert ci_utils.main(["42", "--rerun-failed-jobs", "--dry-run"]) == 0
+    out = capsys.readouterr().out
+    assert "e2e shard (3/4)" in out and "102" in out
+
+
+def test_rerun_failed_jobs_nothing_to_do(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
+    monkeypatch.setattr(ci_utils, "list_failed_jobs", lambda _pr, _repo: [])
+    assert ci_utils.main(["42", "--rerun-failed-jobs", "--dry-run"]) == 0
+    assert "No failed jobs" in capsys.readouterr().out
+
+
+def test_rerun_failed_jobs_forwards_and_reports_errors(
+    monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    """A rejected rerun request is printed and flips the exit code to 3."""
+    monkeypatch.setattr(
+        ci_utils,
+        "rerun_failed_jobs",
+        lambda _pr, _repo: ([], ["lint: gh: rate limited"]),
+    )
+    assert ci_utils.main(["42", "--rerun-failed-jobs"]) == 3
+    assert "rate limited" in capsys.readouterr().out
+
+
+def test_rerun_failed_jobs_success_exits_zero(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
+    monkeypatch.setattr(
+        ci_utils,
+        "rerun_failed_jobs",
+        lambda _pr, _repo: (
+            [{"name": "lint", "job_id": 104, "run_id": 11, "conclusion": "FAILURE"}],
+            [],
+        ),
+    )
+    assert ci_utils.main(["42", "--rerun-failed-jobs"]) == 0
+    assert "Re-ran lint" in capsys.readouterr().out
+
+
+def test_rerun_failed_jobs_exclusive_with_wait() -> None:
+    with pytest.raises(SystemExit):
+        ci_utils.main(["42", "--rerun-failed-jobs", "--wait"])
