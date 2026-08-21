@@ -105,7 +105,16 @@ from ._agent_traceback import (
 from ._context import AvaContext, agent_id_from_config
 from ._exec_capture import capture_output, install_capture_routers
 from ._exec_output import wrap_code_output
-from ._exec_stream import ExecOutputChunkPublisher, StreamCap, StreamingTextIO
+from ._exec_result import (
+    _construct_exec_result,
+    _ExecCancelled,
+    _ExecCrashed,
+    _ExecDone,
+    _ExecLifecycle,
+    _ExecResult,
+    _ExecTimedOut,
+)
+from ._exec_stream import ExecOutputChunkPublisher, StreamingTextIO
 from ._exec_threads import _async_raise_in_thread, _reap_orphaned_thread
 from ._interrupt import subscribe_interrupt
 from ._node_log import node_lifecycle
@@ -132,74 +141,17 @@ _THREAD_JOIN_GRACE_S = 2.0
 _THREAD_STUCK_WINDOW_S, _THREAD_STUCK_WARN_THRESHOLD = 3600.0, 3
 _thread_stuck_times: deque[float] = deque(maxlen=_THREAD_STUCK_WARN_THRESHOLD)
 
-
-# `_exec_with_cancel_event` returns a sum type — 5 mutually exclusive variants + a shared output field.
-# Frozen dataclass + match dispatch replaces the old NamedTuple `(output, exc,
-# cancelled, timed_out)` 4-bool state space — illegal combinations (cancelled=True
-# while timed_out=True, or cancelled=True while exc is a lifecycle) are unrepresentable
-# at the type level; exec_node uses match for pyright exhaustiveness check instead
-# of hand-written `assert not (cancelled and timed_out)` mutual-exclusion guards.
+# The `_ExecResult` sum type — 5 mutually exclusive variants + a shared output
+# field — lives in `_exec_result.py` (moved there so the exec-subprocess
+# machinery can construct the same type without importing this module, which
+# would close an import cycle). Re-exported here: exec_node's match dispatch
+# and existing tests keep importing from agent.graph._exec.
 #
-# Lifecycle priority is implemented in `_run_in_thread`'s end construction
-# order (if a lifecycle exc exists, construct `_ExecLifecycle` directly, skipping
-# the cancelled/timed_out branches) — moving the "lifecycle always wins" race
-# decision from dispatch site to construction site; exec_node match no longer
-# has to consider the race.
-
-
-# Every variant carries `stream_cap`: set when the accumulation budget dropped
-# the middle of `output` mid-run (see `_exec_stream.StreamingTextIO`). Every
-# outcome can be capped — a runaway loop can also time out or be cancelled — so
-# the field rides the whole sum type rather than one branch, and
-# `_dispatch_exec_result` hands it to the envelope uniformly.
-@dataclass(frozen=True)
-class _ExecDone:
-    """Worker thread completed, no exception."""
-
-    output: str
-    stream_cap: StreamCap | None = None
-
-
-@dataclass(frozen=True)
-class _ExecCancelled:
-    """User pressed Stop → main task ctypes-injects KeyboardInterrupt →
-    thread exits; `output` contains accumulated partial + KeyboardInterrupt traceback."""
-
-    output: str
-    stream_cap: StreamCap | None = None
-
-
-@dataclass(frozen=True)
-class _ExecTimedOut:
-    """60s deadline → main task ctypes-injects TimeoutError → thread exits."""
-
-    output: str
-    stream_cap: StreamCap | None = None
-
-
-@dataclass(frozen=True)
-class _ExecLifecycle:
-    """Agent actively called `ava.self.{terminate,restart,compact}` raising
-    `_LifecycleExit` subclass — lifecycle takes priority over cancel/timeout:
-    on a same-tick race, lifecycle has already INSERTed the inbound via SDK,
-    framework should respect this semantic rather than downgrading to
-    "was interrupted"."""
-
-    output: str
-    exc: _LifecycleExit  # _SystemHalt | AgentTermination | AgentRestart
-    stream_cap: StreamCap | None = None
-
-
-@dataclass(frozen=True)
-class _ExecCrashed:
-    """Non-lifecycle exception (SyntaxError / NameError / missing import /
-    other SystemExit subclasses / user code raising KeyboardInterrupt|TimeoutError, etc.).
-    Traceback is already in output; exec_node logs at INFO + event=exec_failed — an
-    ordinary dev-flow error, not an operator alert."""
-
-    output: str
-    exc: BaseException
-    stream_cap: StreamCap | None = None
+# Lifecycle priority is implemented at the construction site
+# (`_construct_exec_result`): if a lifecycle exc exists, `_ExecLifecycle` is
+# constructed directly, skipping the cancelled/timed_out branches — the
+# "lifecycle always wins" race decision moved from dispatch site to
+# construction site; exec_node match no longer has to consider the race.
 
 
 @dataclass(frozen=True)
@@ -210,9 +162,6 @@ class _ExecCall:
     code: str
     tool_call_id: str
     state_messages_update: list[AnyMessage]
-
-
-type _ExecResult = _ExecDone | _ExecCancelled | _ExecTimedOut | _ExecLifecycle | _ExecCrashed
 
 
 def _exec_worker(
@@ -324,31 +273,6 @@ async def _await_worker_exit(t: threading.Thread, agent_id: str) -> None:
         daemon=True,
         name=f"exec-reap-{agent_id}",
     ).start()
-
-
-def _construct_exec_result(
-    output: str,
-    exc: BaseException | None,
-    *,
-    cancelled: bool,
-    timed_out: bool,
-    stream_cap: StreamCap | None,
-) -> _ExecResult:
-    """Dispatch priority: lifecycle > cancel > timeout > crashed > done.
-
-    Lifecycle always wins (the agent actively calling terminate/restart/compact
-    has higher semantic priority than "was interrupted"; SDK already INSERTed
-    inbound). Cancel > timeout (CLAUDE design: cancel always wins).
-    """
-    if isinstance(exc, _LifecycleExit):
-        return _ExecLifecycle(output=output, exc=exc, stream_cap=stream_cap)
-    if cancelled:
-        return _ExecCancelled(output=output, stream_cap=stream_cap)
-    if timed_out:
-        return _ExecTimedOut(output=output, stream_cap=stream_cap)
-    if exc is not None:
-        return _ExecCrashed(output=output, exc=exc, stream_cap=stream_cap)
-    return _ExecDone(output=output, stream_cap=stream_cap)
 
 
 async def _run_in_thread(
@@ -655,12 +579,14 @@ def _dispatch_exec_result(
             logger.info(
                 "[{label}] {body}", label="exec-timeout", body=result_text, event="exec_timeout"
             )
-        case _ExecCrashed(output=output, exc=exc):
+        case _ExecCrashed(output=output, exc=exc, full_traceback=child_traceback):
             # Ordinary exception: `output` carries the agent-facing (filtered)
             # traceback; the log gets the full unfiltered chain (framework/SDK
             # bugs invisible in the agent view stay diagnosable). INFO +
             # event=exec_failed — trial-and-error is the normal dev loop, not
             # an operator alert (metrics still aggregate by event name).
+            # A child-side crash ships its formatted traceback in the envelope
+            # (`child_traceback`); the in-process path formats from `exc`.
             halted = False
             result_text = wrap_code_output(output, stream_cap=stream_cap)
             exit_code_for_msg = 0
@@ -668,7 +594,7 @@ def _dispatch_exec_result(
                 "[{label}] {body}\n[full traceback]\n{full_traceback}",
                 label="exec-failed",
                 body=result_text,
-                full_traceback=format_full_traceback(exc),
+                full_traceback=child_traceback or format_full_traceback(exc),
                 event="exec_failed",
                 exc_type=type(exc).__name__,
             )

@@ -154,6 +154,10 @@ _INDEPENDENT_CLOCKS: dict[tuple[str, str], str] = {
         "_THREAD_JOIN_GRACE_S",
     ): "independent: thread-join grace inside the exec sandbox, no lattice neighbour",
     (
+        "agent/graph/_exec_protocol.py",
+        "KILL_GRACE_S",
+    ): "independent: SIGINT/SIGTERM -> SIGKILL grace ladder for the exec child, no lattice neighbour",
+    (
         "agent/graph/_exec_threads.py",
         "_THREAD_REAP_INTERVAL_S",
     ): "independent: orphan-reaper injection cadence inside the exec sandbox, no lattice neighbour",
