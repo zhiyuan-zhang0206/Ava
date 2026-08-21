@@ -1001,6 +1001,7 @@ CREATE TABLE agent_watchers (
     cron_timezone  TEXT,                  -- kind='cron'
     cron_end_at    TIMESTAMPTZ,           -- kind='cron' (NULL = standing)
     timeout_secs   REAL,                  -- kind='launch'
+    template_version INTEGER,             -- watcher template generation at spawn (issue #1330)
     status         TEXT NOT NULL DEFAULT 'running'
                    CHECK (status IN ('running', 'rebuilt', 'missed')),
     created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),

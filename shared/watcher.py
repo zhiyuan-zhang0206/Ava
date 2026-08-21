@@ -24,6 +24,7 @@ class CronExprError(Exception):
 
 
 __all__ = [
+    "TEMPLATE_VERSION",
     "CronExprError",
     "build_at_script",
     "build_cron_script",
@@ -33,6 +34,16 @@ __all__ = [
     "validate_cron",
     "validate_timezone",
 ]
+
+
+# Template version: bumped whenever a generated watcher script's loop
+# semantics change (issue #1330). The registry stores the version a session was
+# spawned with; the boot reconcile rebuilds a live cron watcher whose version is
+# behind, so a template fix reaches watchers that were already running when it
+# landed (the generated script is frozen at launch — a rollout does not rewrite
+# it). v1 = pre-#182 loop (no rollback guard); v2 = #182 loop (_last guard +
+# boundary re-check).
+TEMPLATE_VERSION = 2
 
 
 # Cron
@@ -167,6 +178,7 @@ def _wake(message):
 
 _AT_TEMPLATE = """\
 # Auto-generated time watcher (one-shot). Do not edit manually.
+_TEMPLATE_VERSION = {template_version}
 import datetime as _dt
 import time as _time
 
@@ -188,6 +200,7 @@ _wake(_MESSAGE)
 
 _CRON_TEMPLATE = """\
 # Auto-generated time watcher (recurring cron). Do not edit manually.
+_TEMPLATE_VERSION = {template_version}
 import datetime as _dt
 import time as _time
 from zoneinfo import ZoneInfo
@@ -238,11 +251,16 @@ while True:
 """
 
 
-def build_at_script(*, when_iso: str, message: str) -> str:
+def build_at_script(
+    *, when_iso: str, message: str, template_version: int = TEMPLATE_VERSION
+) -> str:
     """Build a one-shot time-watcher script that sleeps until ``when_iso`` (an
     ISO-8601 UTC string) then wakes the launching agent once and exits."""
     return _tw.dedent(_AT_TEMPLATE).format(
-        wake_helper=_WAKE_HELPER, when_iso=when_iso, message=message
+        wake_helper=_WAKE_HELPER,
+        when_iso=when_iso,
+        message=message,
+        template_version=template_version,
     )
 
 
@@ -252,6 +270,7 @@ def build_cron_script(
     message: str,
     timezone: str,
     end_time_iso: str | None,
+    template_version: int = TEMPLATE_VERSION,
 ) -> str:
     """Build a recurring cron-watcher script that wakes the launching agent on
     each cron fire, evaluated in ``timezone``, stopping after ``end_time_iso``
@@ -262,4 +281,5 @@ def build_cron_script(
         message=message,
         timezone=timezone,
         end_time_iso=end_time_iso,
+        template_version=template_version,
     )

@@ -14,15 +14,16 @@ from typing import Any
 from ava.shell import _background
 from ava.shell import sessions as _sessions
 from shared.watcher import (
-    CronExprError as CronExprError,
-)
-from shared.watcher import (
+    TEMPLATE_VERSION,
     build_at_script,
     build_cron_script,
     normalize_end_time,
     normalize_when,
     validate_cron,
     validate_timezone,
+)
+from shared.watcher import (
+    CronExprError as CronExprError,
 )
 
 __all_for_ava__ = [
@@ -360,6 +361,7 @@ def _spawn(
             cron_timezone=cron_timezone,
             cron_end_at=cron_end_at,
             timeout_secs=timeout_secs,
+            template_version=TEMPLATE_VERSION,
         )
     except Exception:
         logger.warning(
@@ -480,6 +482,104 @@ def at(
 logger = logging.getLogger(__name__)
 
 
+def _reconcile_missing(row: dict[str, Any], now: datetime.datetime) -> str | None:
+    """Handle one registry row whose session is gone: rebuild a standing
+    schedule / future one-shot, mark a passed one-shot or launch watcher missed,
+    drop an ended schedule. Returns the action sentence (None when nothing was
+    done — an ended cron schedule deletes its row without an action)."""
+    import contextlib
+
+    from ava import agents as _agents
+    from shared.watcher_registry import delete_watcher, mark_status
+
+    agent_id = _agent_id()
+    session_id = row["session_id"]
+    name = row["name"]
+    try:
+        if row["kind"] == "cron":
+            end_at = row["cron_end_at"]
+            if end_at is not None and end_at < now:
+                delete_watcher(agent_id, session_id)
+                return f"cron watcher '{name}': schedule ended; row dropped"
+            new_id = cron(
+                row["cron_expr"],
+                row["message"] or "",
+                timezone=row["cron_timezone"],
+                end_time=row["cron_end_at"],
+                name=name,
+            )
+            mark_status(agent_id, session_id, "rebuilt")
+            return f"cron watcher '{name}' rebuilt as session {new_id}"
+        if row["kind"] == "at":
+            if row["fires_at"] is not None and row["fires_at"] > now:
+                new_id = at(row["fires_at"], row["message"] or "", name=name)
+                mark_status(agent_id, session_id, "rebuilt")
+                return f"one-shot watcher '{name}' rebuilt as session {new_id}"
+            mark_status(agent_id, session_id, "missed")
+            with contextlib.suppress(Exception):
+                _agents.send_message(
+                    agent_id,
+                    f"[watcher] '{name}' was not running at boot and its "
+                    f"moment ({row['fires_at']}) has passed — marked missed.",
+                )
+            return f"one-shot watcher '{name}' marked missed"
+        mark_status(agent_id, session_id, "missed")
+        with contextlib.suppress(Exception):
+            _agents.send_message(
+                agent_id,
+                f"[watcher] '{name}' (one-shot launch watcher) was not "
+                "running at boot — marked missed.",
+            )
+        return f"launch watcher '{name}' marked missed"
+    except Exception:
+        logger.warning(
+            "watcher reconcile: failed for session %s (%s)",
+            session_id,
+            name,
+            exc_info=True,
+        )
+        return None
+
+
+def _rebuild_stale_cron_watcher(row: dict[str, Any]) -> str | None:
+    """Rebuild one live cron watcher whose spawn template version is behind the
+    current template; return the action sentence (None when the rebuild failed).
+
+    The generated script is frozen at launch, so a template fix (issue #182)
+    never reaches a running session — it keeps the old loop (and the double-fire
+    at a stepped boundary, issue #1330) until rebuilt. The replacement is
+    spawned first (its own registry row carries the rebuild duty from here),
+    then the stale session is killed (dropping its old row — the
+    deliberate-kill semantics).
+    """
+    from ava.shell import sessions as _sessions_mod
+
+    session_id = row["session_id"]
+    name = row["name"]
+    try:
+        new_id = cron(
+            row["cron_expr"],
+            row["message"] or "",
+            timezone=row["cron_timezone"],
+            end_time=row["cron_end_at"],
+            name=name,
+        )
+        _sessions_mod.kill(session_id)
+        return (
+            f"cron watcher '{name}' rebuilt as session {new_id} "
+            f"(stale template v{row.get('template_version') or 0} "
+            f"-> v{TEMPLATE_VERSION})"
+        )
+    except Exception:
+        logger.warning(
+            "watcher reconcile: stale cron watcher '%s' (session %s) rebuild failed",
+            name,
+            session_id,
+            exc_info=True,
+        )
+        return None
+
+
 def reconcile() -> list[str]:
     """Rebuild / mark watchers whose sessions died — the #1014 fix (R1-8).
 
@@ -497,18 +597,17 @@ def reconcile() -> list[str]:
     - `launch` — one-shot scripts are not re-run at boot (their work is
       time-bound and probably stale); marked `missed` + alerted.
 
-    A row whose session is alive is left alone. Fail-soft: a registry or spawn
-    failure is logged and skipped, never allowed to block the boot it runs in.
+    A row whose session is alive is left alone — except a live cron watcher
+    whose spawn template version is behind the current one, which is rebuilt so
+    a template fix reaches sessions that were already running when it landed
+    (issue #1330). Fail-soft: a registry or spawn failure is logged and
+    skipped, never allowed to block the boot it runs in.
 
     Returns the action sentences (empty when nothing needed doing).
     """
-    import contextlib
 
-    from ava import agents as _agents
     from ava.shell import sessions as _sessions_mod
     from shared.watcher_registry import (
-        delete_watcher,
-        mark_status,
         watcher_rows,
     )
 
@@ -539,52 +638,19 @@ def reconcile() -> list[str]:
             continue
         session_id = row["session_id"]
         if session_id in alive:
+            # Live but stale: a generated watcher script is frozen at launch, so
+            # a template fix (issue #182 / #1330) never reaches a session that
+            # was already running when it landed — it keeps the old loop until
+            # rebuilt. Rebuild live cron watchers whose spawn version is behind
+            # the current template: spawn the replacement first (its own row
+            # carries the rebuild duty from here), then kill the stale session
+            # (which drops its old row — the deliberate-kill semantics).
+            if row["kind"] == "cron" and (row.get("template_version") or 0) < TEMPLATE_VERSION:
+                action = _rebuild_stale_cron_watcher(row)
+                if action:
+                    actions.append(action)
             continue
-        name = row["name"]
-        try:
-            if row["kind"] == "cron":
-                end_at = row["cron_end_at"]
-                if end_at is not None and end_at < now:
-                    delete_watcher(agent_id, session_id)
-                    actions.append(f"cron watcher '{name}': schedule ended; row dropped")
-                    continue
-                new_id = cron(
-                    row["cron_expr"],
-                    row["message"] or "",
-                    timezone=row["cron_timezone"],
-                    end_time=row["cron_end_at"],
-                    name=name,
-                )
-                mark_status(agent_id, session_id, "rebuilt")
-                actions.append(f"cron watcher '{name}' rebuilt as session {new_id}")
-            elif row["kind"] == "at":
-                if row["fires_at"] is not None and row["fires_at"] > now:
-                    new_id = at(row["fires_at"], row["message"] or "", name=name)
-                    mark_status(agent_id, session_id, "rebuilt")
-                    actions.append(f"one-shot watcher '{name}' rebuilt as session {new_id}")
-                else:
-                    mark_status(agent_id, session_id, "missed")
-                    with contextlib.suppress(Exception):
-                        _agents.send_message(
-                            agent_id,
-                            f"[watcher] '{name}' was not running at boot and its "
-                            f"moment ({row['fires_at']}) has passed — marked missed.",
-                        )
-                    actions.append(f"one-shot watcher '{name}' marked missed")
-            else:  # launch
-                mark_status(agent_id, session_id, "missed")
-                with contextlib.suppress(Exception):
-                    _agents.send_message(
-                        agent_id,
-                        f"[watcher] '{name}' (one-shot launch watcher) was not "
-                        "running at boot — marked missed.",
-                    )
-                actions.append(f"launch watcher '{name}' marked missed")
-        except Exception:
-            logger.warning(
-                "watcher reconcile: failed for session %s (%s)",
-                session_id,
-                name,
-                exc_info=True,
-            )
+        action = _reconcile_missing(row, now)
+        if action:
+            actions.append(action)
     return actions

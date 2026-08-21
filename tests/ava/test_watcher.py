@@ -876,3 +876,126 @@ def test_reconcile_skips_rebuilt_rows(_agent_row: int, monkeypatch: pytest.Monke
     assert calls and len(calls) == 1  # only the running row rebuilt
     assert any("real-dead" in a for a in actions)
     assert not any("dup-guard" in a or "gone-once" in a for a in actions)
+
+
+# -- boot reconcile: stale-template rebuild (issue #1330) ----------------------
+
+
+def _cron_row(**over: object) -> dict[str, object]:
+    row: dict[str, object] = {
+        "session_id": 68,
+        "agent_id": 2811,
+        "kind": "cron",
+        "name": "daily-signal-scan",
+        "message": "scan now",
+        "fires_at": None,
+        "cron_expr": "30 21 * * *",
+        "cron_timezone": "Asia/Shanghai",
+        "cron_end_at": None,
+        "timeout_secs": None,
+        "status": "running",
+        "template_version": 1,
+    }
+    row.update(over)
+    return row
+
+
+def test_reconcile_rebuilds_live_cron_watcher_with_stale_template(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A cron watcher whose session is alive but whose spawn template version is
+    behind the current one must be rebuilt: the generated script is frozen at
+    launch, so a template fix (issue #182) never reaches a running session —
+    it would keep double-firing at the boundary (issue #1330)."""
+    from shared import watcher_registry
+
+    monkeypatch.setattr(
+        watcher_registry,
+        "watcher_rows",
+        lambda _agent_id: [_cron_row()],  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    )
+    monkeypatch.setattr(watcher_registry, "mark_status", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(watcher_registry, "delete_watcher", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(ava.shell.sessions, "list", lambda: {68: "watcher:68"})
+    killed: list[int] = []
+    monkeypatch.setattr(ava.shell.sessions, "kill", killed.append)  # pyright: ignore[reportUnknownArgumentType]
+    spawned: dict[str, object] = {}
+
+    def fake_cron(expr: str, message: str, *, timezone: str, end_time: object, name: str) -> int:
+        spawned.update(expr=expr, message=message, timezone=timezone, end_time=end_time, name=name)
+        return 999
+
+    monkeypatch.setattr(watcher, "cron", fake_cron)
+
+    actions = watcher.reconcile()
+
+    assert spawned == {
+        "expr": "30 21 * * *",
+        "message": "scan now",
+        "timezone": "Asia/Shanghai",
+        "end_time": None,
+        "name": "daily-signal-scan",
+    }
+    assert killed == [68]
+    assert any("rebuilt as session 999" in a and "stale template v1" in a for a in actions)
+
+
+def test_reconcile_leaves_current_template_watcher_alone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A live cron watcher spawned with the current template version must not
+    be rebuilt on every boot."""
+    from shared import watcher_registry
+
+    monkeypatch.setattr(
+        watcher_registry,
+        "watcher_rows",
+        lambda _agent_id: [_cron_row(template_version=2)],  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    )
+    monkeypatch.setattr(ava.shell.sessions, "list", lambda: {68: "watcher:68"})
+    killed: list[int] = []
+    monkeypatch.setattr(ava.shell.sessions, "kill", killed.append)  # pyright: ignore[reportUnknownArgumentType]
+    spawned: list[object] = []
+    monkeypatch.setattr(watcher, "cron", spawned.append)  # pyright: ignore[reportUnknownArgumentType]
+
+    actions = watcher.reconcile()
+
+    assert actions == []
+    assert killed == []
+    assert spawned == []
+
+
+def test_reconcile_missing_session_still_rebuilds_cron(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The pre-existing missing-session rebuild (issue #1014) is unaffected by
+    the version column: a dead cron watcher is rebuilt regardless of its spawn
+    version."""
+    from shared import watcher_registry
+
+    monkeypatch.setattr(
+        watcher_registry,
+        "watcher_rows",
+        lambda _agent_id: [_cron_row(template_version=2)],  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    )
+    monkeypatch.setattr(ava.shell.sessions, "list", set)
+    statuses: list[tuple[object, object, object]] = []
+    monkeypatch.setattr(
+        watcher_registry,
+        "mark_status",
+        lambda a, s, st: statuses.append((a, s, st)),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    )
+    spawned: list[object] = []
+    monkeypatch.setattr(
+        watcher,
+        "cron",
+        lambda *a, **k: spawned.append((a, k)) or 999,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    )
+
+    actions = watcher.reconcile()
+
+    from tests.ava.conftest import _TEST_AGENT_BASE
+
+    assert len(spawned) == 1
+    assert statuses == [(_TEST_AGENT_BASE, 68, "rebuilt")]
+    assert any("rebuilt as session 999" in a for a in actions)
