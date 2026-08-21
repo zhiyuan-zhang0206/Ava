@@ -48,6 +48,8 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import os
+import signal
 import sys
 from typing import cast
 
@@ -59,6 +61,7 @@ from psycopg_pool import AsyncConnectionPool
 from services._pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from services.agent_host.dispatcher import InboundWakeDispatcher, TurnScheduler
 from services.agent_host.host import AgentHost, build_shared_pool
+from shared import paths
 from shared.config import settings
 from shared.daemon_health import Liveness, health_port, start_health_server, stop_health_server
 from shared.daemon_shutdown import install_graceful_shutdown
@@ -116,6 +119,62 @@ def _runner_mode() -> str:
         return str(settings.daemon.runner_mode)
     except Exception:  # see the docstring: unreadable means process, always
         return "process"
+
+
+# Plugin-discovery watchdog (issue #170): the host loads external plugins
+# exactly once per process (`load_process_extensions`), so a plugin installed
+# after boot is invisible to every agent on this runner until a restart. The
+# runner's supervisor (watchdog -> healthcheck) restarts a dead host within a
+# minute, so the fix is not a reload (plugin-spec-v2's S4 dispose contract is
+# unimplemented — a second load would leak and fork class identity) but an
+# intentional, ergonomic restart: watch $AVA_HOME/plugins, and on any change
+# exit so the supervisor brings the host back with the new plugin loaded.
+_PLUGINS_POLL_INTERVAL_S = 30.0
+
+
+def _plugins_fingerprint() -> str:
+    """A cheap fingerprint of the external-plugin directory.
+
+    One entry per plugin subdirectory: name + plugin.py (size, mtime_ns).
+    Changing, adding, or removing a plugin changes the fingerprint; touching
+    any other file under the dir does not. The directory itself missing is a
+    valid state (no plugins) — the fingerprint is then empty, not an error.
+    """
+    root = paths.plugins_dir()
+    if not root.exists():
+        return ""
+    parts: list[str] = []
+    for sub in sorted(root.iterdir()):
+        if not sub.is_dir():
+            continue
+        plugin_py = sub / "plugin.py"
+        if not plugin_py.exists():
+            continue
+        st = plugin_py.stat()
+        parts.append(f"{sub.name}:{st.st_size}:{st.st_mtime_ns}")
+    return "|".join(parts)
+
+
+async def _watch_plugins_for_restart() -> None:
+    """Exit the host when the plugin directory changes under it.
+
+    Runs for the daemon's whole life; on a fingerprint change it logs the
+    names that changed and raises SIGTERM at itself, which `install_graceful_shutdown`
+    turns into the KeyboardInterrupt every daemon already unwinds through —
+    the drains run, then the supervisor restarts the host fresh.
+    """
+    base = _plugins_fingerprint()
+    while True:
+        await asyncio.sleep(_PLUGINS_POLL_INTERVAL_S)
+        now = _plugins_fingerprint()
+        if now == base:
+            continue
+        _log.info(
+            "[agent-host] external plugins changed under $AVA_HOME/plugins — "
+            "restarting to load them (issue #170)"
+        )
+        os.kill(os.getpid(), signal.SIGTERM)
+        return
 
 
 async def _beat_forever(liveness: Liveness) -> None:
@@ -207,9 +266,13 @@ async def run() -> None:
             port=health_port("agent_host"),
             bound=settings.daemon.host_max_concurrent_turns,
         )
+        plugins_watch = asyncio.create_task(_watch_plugins_for_restart())
         try:
             await InboundWakeDispatcher(settings.data_plane.redis_url, scheduler).run()
         finally:
+            plugins_watch.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await plugins_watch
             # Turns are checkpointed, so cancelling one loses at most the
             # in-flight step — the same recovery path a runner restart already
             # exercises, and the reason a rolling restart is cheap here.

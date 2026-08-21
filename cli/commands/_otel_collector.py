@@ -22,6 +22,7 @@ import shutil
 import sys
 import tarfile
 import tempfile
+import time
 import urllib.request
 from pathlib import Path
 from string import Template
@@ -52,6 +53,18 @@ _DOWNLOAD_URL = (
 )
 
 _VERSION_MARKER = "version"
+
+# Download fetch discipline (issue #172): the tarball is on the critical path
+# of `ava start`, so a slow or dead mirror must fail the converge step in
+# bounded time and say so — never stall bring-up indefinitely. Per-read socket
+# timeout catches a wedged connection; a total wall-clock cap per attempt
+# catches a mirror that trickles forever; a bounded retry rides out transient
+# blips; a heartbeat line distinguishes slow from dead.
+_DOWNLOAD_SOCKET_TIMEOUT_S = 30.0
+_DOWNLOAD_ATTEMPT_TIMEOUT_S = 600.0
+_DOWNLOAD_ATTEMPTS = 3
+_DOWNLOAD_RETRY_BACKOFF_S = 5.0
+_DOWNLOAD_PROGRESS_INTERVAL_S = 15.0
 
 
 def platform_tag() -> str | None:
@@ -182,6 +195,74 @@ def generate_config(repo: Path, ava_home: Path, roles: MachineRoles | None) -> s
     )
 
 
+def _stream_download(url: str, dest: Path) -> None:
+    """Stream ``url`` into ``dest`` with the issue #172 fetch discipline.
+
+    A bounded, loud download: per-read socket timeout, a wall-clock cap on the
+    whole attempt, a progress heartbeat every 15 s (so a slow mirror reads as
+    "slow", not "hung"), and a RuntimeError naming the URL + elapsed time when
+    the attempt exceeds its budget. Deliberately not ``urlretrieve`` — it has
+    no timeout parameter, which is exactly the gap this fixes.
+    """
+    started = time.monotonic()
+    last_beat = started
+    got = 0
+    total: int | None = None
+    with (
+        urllib.request.urlopen(url, timeout=_DOWNLOAD_SOCKET_TIMEOUT_S) as resp,  # noqa: S310 — pinned https release asset
+        dest.open("wb") as fh,
+    ):
+        try:
+            total = int(resp.headers.get("Content-Length") or 0)
+        except (TypeError, ValueError):
+            total = None
+        while True:
+            chunk = resp.read(1 << 16)
+            if not chunk:
+                break
+            fh.write(chunk)
+            got += len(chunk)
+            now = time.monotonic()
+            if now - last_beat >= _DOWNLOAD_PROGRESS_INTERVAL_S:
+                pct = f" ({got * 100 // total}%)" if total else ""
+                print(
+                    f"  · otel-collector: {got / 1e6:.1f} MB{pct} in {now - started:.0f}s",
+                    flush=True,
+                )
+                last_beat = now
+            if now - started > _DOWNLOAD_ATTEMPT_TIMEOUT_S:
+                raise TimeoutError(
+                    f"download exceeded {_DOWNLOAD_ATTEMPT_TIMEOUT_S:.0f}s wall-clock cap"
+                )
+    print(f"  · otel-collector: downloaded {got / 1e6:.1f} MB in {time.monotonic() - started:.0f}s")
+
+
+def _download_with_retry(url: str, tarball: Path) -> None:
+    """Bounded retry around ``_stream_download``; a final failure names the
+    URL and total elapsed time so the operator knows exactly what to fix."""
+    started = time.monotonic()
+    last_err: Exception | None = None
+    for attempt in range(1, _DOWNLOAD_ATTEMPTS + 1):
+        try:
+            _stream_download(url, tarball)
+            return
+        except Exception as exc:  # URLError / TimeoutError / OSError
+            last_err = exc
+            elapsed = time.monotonic() - started
+            print(
+                f"  ! otel-collector: download attempt {attempt}/{_DOWNLOAD_ATTEMPTS} "
+                f"failed after {elapsed:.0f}s: {exc}",
+                file=sys.stderr,
+                flush=True,
+            )
+            if attempt < _DOWNLOAD_ATTEMPTS:
+                time.sleep(_DOWNLOAD_RETRY_BACKOFF_S * attempt)
+    raise RuntimeError(
+        f"failed to download otel-collector from {url} after {_DOWNLOAD_ATTEMPTS} "
+        f"attempts ({time.monotonic() - started:.0f}s total): {last_err}"
+    ) from last_err
+
+
 def _download_and_verify(tag: str, dest_dir: Path) -> None:
     """Download + SHA256-verify + extract the pinned tarball into dest_dir."""
     url = _DOWNLOAD_URL.format(version=OTELCOL_CONTRIB_VERSION, tag=tag)
@@ -189,7 +270,7 @@ def _download_and_verify(tag: str, dest_dir: Path) -> None:
     with tempfile.TemporaryDirectory() as tmp:
         tarball = Path(tmp) / "otelcol-contrib.tar.gz"
         print(f"  · otel-collector: downloading {url}")
-        urllib.request.urlretrieve(url, tarball)  # noqa: S310 — pinned https release asset
+        _download_with_retry(url, tarball)
         digest = hashlib.sha256(tarball.read_bytes()).hexdigest()
         if digest != expected:
             raise RuntimeError(

@@ -239,3 +239,109 @@ def test_config_file_is_owner_only(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
     config = tmp_path / "otel-collector/config.yaml"
     assert config.stat().st_mode & 0o777 == 0o600
     assert "s3cr3t" in config.read_text(encoding="utf-8")
+
+
+# -- issue #172: bounded, loud download -------------------------------------
+
+
+class _ChunkedResp:
+    """A urlopen response stand-in that yields chunk by chunk."""
+
+    def __init__(self, chunks: list[bytes], headers: dict[str, str] | None = None) -> None:
+        self._chunks = list(chunks)
+        self._headers = headers or {}
+
+    def __enter__(self) -> _ChunkedResp:
+        return self
+
+    def __exit__(self, *_a: object) -> None:
+        return None
+
+    def read(self, _n: int) -> bytes:
+        return self._chunks.pop(0) if self._chunks else b""
+
+    @property
+    def headers(self) -> dict[str, str]:
+        return self._headers
+
+
+def test_stream_download_writes_all_chunks(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The streamed bytes land in the tarball path; the final line reports the
+    size; no heartbeat fires for a fast download."""
+    payload = b"x" * (1 << 20)  # 1 MiB
+
+    def _fake_urlopen(_url: str, **kw: object) -> _ChunkedResp:
+        return _ChunkedResp([payload] * 4, {"Content-Length": str(4 << 20)})
+
+    monkeypatch.setattr(oc.urllib.request, "urlopen", _fake_urlopen)
+    dest = tmp_path / "t.tar.gz"
+
+    oc._stream_download("https://example.invalid/t.tar.gz", dest)
+
+    assert dest.read_bytes() == payload * 4
+    out = capsys.readouterr().out
+    assert "downloaded 4.2 MB" in out
+    assert "in 0s" in out
+
+
+def test_stream_download_honors_socket_timeout(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The socket timeout is passed through to urlopen — the per-read guard
+    against a wedged connection."""
+    seen: dict[str, object] = {}
+
+    def _fake_urlopen(url: str, timeout: float) -> None:
+        seen["timeout"] = timeout
+        raise TimeoutError("timed out")
+
+    monkeypatch.setattr(oc.urllib.request, "urlopen", _fake_urlopen)
+    with pytest.raises(TimeoutError):
+        oc._stream_download("https://example.invalid/t.tar.gz", tmp_path / "t.tar.gz")
+    assert seen["timeout"] == oc._DOWNLOAD_SOCKET_TIMEOUT_S
+
+
+def test_download_with_retry_exhausts_and_names_url(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """All attempts fail -> RuntimeError naming the URL; each attempt is
+    announced, and the retry sleeps between attempts."""
+    calls = {"n": 0}
+
+    def _always_fail(_url: str, _dest: Path) -> None:
+        calls["n"] += 1
+        raise OSError("connection reset")
+
+    monkeypatch.setattr(oc, "_stream_download", _always_fail)
+    monkeypatch.setattr(oc.time, "sleep", lambda _s: None)  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]  # no real backoff wait
+
+    with pytest.raises(RuntimeError) as ei:
+        oc._download_with_retry("https://example.invalid/t.tar.gz", tmp_path / "t.tar.gz")
+
+    assert calls["n"] == oc._DOWNLOAD_ATTEMPTS
+    assert "https://example.invalid/t.tar.gz" in str(ei.value)
+    assert "after 3 attempts" in str(ei.value)
+    err = capsys.readouterr().err
+    assert "attempt 1/3" in err and "attempt 3/3" in err
+
+
+def test_download_with_retry_succeeds_on_second_attempt(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A transient first failure is retried and the second attempt wins."""
+    calls = {"n": 0}
+
+    def _fail_then_win(_url: str, dest: Path) -> None:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise OSError("connection reset")
+        dest.write_bytes(b"ok")
+
+    monkeypatch.setattr(oc, "_stream_download", _fail_then_win)
+    monkeypatch.setattr(oc.time, "sleep", lambda _s: None)  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]
+
+    oc._download_with_retry("https://example.invalid/t.tar.gz", tmp_path / "t.tar.gz")
+    assert calls["n"] == 2
+    assert (tmp_path / "t.tar.gz").read_bytes() == b"ok"
