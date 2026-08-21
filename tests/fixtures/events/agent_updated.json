@@ -11,6 +11,7 @@
     "spawned_at": "2026-01-01T00:00:00Z",
     "started_at": "2026-01-01T00:00:05Z",
     "last_active_at": "2026-01-01T00:00:10Z",
+    "last_inbound_at": "2026-01-01T00:00:07Z",
     "label": "demo",
     "machine": "test-host",
     "notices_awaiting_response": [],
