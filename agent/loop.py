@@ -334,6 +334,12 @@ def run() -> None:
 
     overlay = _decode_env_json(AGENT_CONFIG_OVERLAY_ENV)
     birth = _decode_env_json(AGENT_BIRTH_CONFIG_ENV)
+    # Retain the popped maps for the exec subprocess: each execute_code child
+    # must see the same effective per-agent settings the agent process booted
+    # with (agent/_config_carrier.py).
+    from agent._config_carrier import store_config_maps
+
+    store_config_maps(overlay, birth)
 
     # DB schema version out of sync with code blows up early — otherwise
     # subsequent enter_starting_state / checkpointer.setup hitting drift

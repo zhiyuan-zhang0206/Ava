@@ -32,8 +32,10 @@ lifecycle outcome. The parent reconstructs the exception from the name
 
 Per-agent config: the parent re-emits `AVA_AGENT_CONFIG_OVERLAY` /
 `AVA_AGENT_BIRTH_CONFIG` into this child's environment (the agent process pops
-them at boot). They are popped here and applied framework-scope, so SDK calls
-made from exec code (`ava.understand`, `ava.web.fetch`, ...) see the same
+them at boot and retains them in `agent/_config_carrier.py`). They are popped
+here and applied in two phases mirroring the agent process's own boot —
+framework scope early, plugin scope after plugins load — so SDK calls made
+from exec code (`ava.understand`, `ava.web.fetch`, ...) see the same
 effective settings as the agent process.
 """
 
@@ -45,7 +47,7 @@ import signal
 import sys
 import threading
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 # isort: split
 # First import after stdlib, BEFORE the heavy `import ava` block below:
@@ -136,31 +138,47 @@ def _arm_watchdog(timeout_s: float) -> None:
     timer.start()
 
 
-def _apply_overlay_from_env() -> None:
-    """Pop and apply the re-emitted per-agent config maps, framework scope —
-    the same precedence the agent process uses at boot
-    (`agent/_process_boot.py`): birth_config first, config_overlay on top."""
+def _pop_overlay_env() -> tuple[dict[str, object] | None, dict[str, object] | None]:
+    """Pop + JSON-decode the re-emitted per-agent config maps, exactly once —
+    applying them in two phases (framework now, plugin after plugins load)
+    must not re-read the env."""
     import json as _json
 
     from shared.env_registry import AGENT_BIRTH_CONFIG_ENV, AGENT_CONFIG_OVERLAY_ENV
-    from shared.plugin_config_registry import apply_config_overlay
 
-    applied_any = False
+    maps: dict[str, dict[str, object] | None] = {}
     for env_name in (AGENT_BIRTH_CONFIG_ENV, AGENT_CONFIG_OVERLAY_ENV):
         raw = os.environ.pop(env_name, "")
         if not raw:
+            maps[env_name] = None
             continue
         value = _json.loads(raw)
         if not isinstance(value, dict):
             raise TypeError(f"{env_name} must be a JSON object, got {type(value).__name__}")
-        apply_config_overlay(cast(dict[str, object], value), scope="framework")
-        applied_any = True
-    if applied_any:
-        # Per-agent sdk_disable additions ride the overlay; re-apply on top of
-        # the env baseline (idempotent — only new entries take effect).
-        from agent._process_boot import _apply_per_agent_sdk_disable
+        maps[env_name] = cast(dict[str, object], value)
+    return (
+        maps[AGENT_BIRTH_CONFIG_ENV],
+        maps[AGENT_CONFIG_OVERLAY_ENV],
+    )
 
-        _apply_per_agent_sdk_disable()
+
+def _apply_overlay_scope(
+    birth: dict[str, object] | None,
+    overlay: dict[str, object] | None,
+    *,
+    scope: Literal["framework", "plugin"],
+) -> bool:
+    """Apply both maps at one scope — birth first, overlay on top (the same
+    precedence the agent process uses at boot, `agent/_process_boot.py`).
+    Returns True when at least one map applied."""
+    from shared.plugin_config_registry import apply_config_overlay
+
+    applied = False
+    for value in (birth, overlay):
+        if value:
+            apply_config_overlay(value, scope=scope)
+            applied = True
+    return applied
 
 
 def _init_logger(agent_id: int | None) -> None:
@@ -195,15 +213,21 @@ def _build_state_slot(state: dict[str, Any] | None) -> None:
     ava.state_update = {}
 
 
-def _take_result_state_update(payload: ResultPayload) -> None:
+def _take_result_state_update(payload: ResultPayload, *, state_injected: bool) -> None:
     """Serialize this turn's plugin delta into the result envelope.
 
     A tampered slot (agent set ava.state_update to a non-dict) is reported as
     an error string rather than a delta; the parent raises the same TypeError
-    the in-process path raised.
+    the in-process path raised. With a snapshot injected, even None is
+    tampering — the slot was initialized to {}; without one (container/eval
+    mode) None is the uninitialized default and carries no delta.
     """
     update = ava.state_update
     if update is None:
+        if state_injected:
+            payload.state_update_error = (
+                "plugin tampered with ava.state_update: expected dict, got NoneType"
+            )
         return
     if not isinstance(update, dict):
         payload.state_update_error = (
@@ -270,13 +294,23 @@ def _run(request_path: str, result_path: str) -> None:
 
     _line_buffered_output()
     _install_signal_handlers()
+    overlay, birth = _pop_overlay_env()
     if request.agent_id is not None:
         _boot.establish(request.agent_id, owns_loop=True)
         _init_logger(request.agent_id)
-    _apply_overlay_from_env()
+    # Two-phase overlay application, mirroring the agent process's own boot:
+    # framework fields early (before any settings read), plugin fields after
+    # plugins load (apply_config_overlay needs _PLUGIN_CONFIGS bound first).
+    if _apply_overlay_scope(birth, overlay, scope="framework"):
+        # Per-agent sdk_disable additions ride the overlay; re-apply on top of
+        # the env baseline (idempotent — only new entries take effect).
+        from agent._process_boot import _apply_per_agent_sdk_disable
+
+        _apply_per_agent_sdk_disable()
     # Load plugin namespaces (ava.tasks etc.) + wraps + state fields into this
     # process — the same explicit load a watcher child runs. Idempotent.
     ava._ensure_plugins_loaded()
+    _apply_overlay_scope(birth, overlay, scope="plugin")
     _build_state_slot(request.state)
 
     if request.timeout_s > 0:
@@ -285,7 +319,7 @@ def _run(request_path: str, result_path: str) -> None:
     try:
         _run_code(request.code, payload)
     finally:
-        _take_result_state_update(payload)
+        _take_result_state_update(payload, state_injected=request.state is not None)
         payload.findings = [f.model_dump() for f in take_findings()]
         try:
             write_result(Path(result_path), payload)

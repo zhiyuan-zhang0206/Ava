@@ -150,7 +150,7 @@ _INDEPENDENT_CLOCKS: dict[tuple[str, str], str] = {
         "_STALL_GUARD_EXEMPT",
     ): "frozenset of exempt node kinds, not a clock",
     (
-        "agent/graph/_exec.py",
+        "agent/graph/_exec_thread_backend.py",
         "_THREAD_JOIN_GRACE_S",
     ): "independent: thread-join grace inside the exec sandbox, no lattice neighbour",
     (

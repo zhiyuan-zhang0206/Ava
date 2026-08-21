@@ -50,7 +50,10 @@ async def _run(
 
         cancel_task = asyncio.create_task(_set_cancel())
     try:
-        return await _run_in_subprocess(
+        # PR2 return shape: (result, raw child envelope) — the envelope feeds
+        # the exec node's delta/findings extraction; tests assert on the
+        # result here.
+        result, _payload = await _run_in_subprocess(
             code,
             _AGENT_ID,
             cancel_event,
@@ -59,6 +62,7 @@ async def _run(
             state=state,
             exec_dir=tmp_path / "exec",
         )
+        return result
     finally:
         # A completed run may finish before the scheduled cancel fires — make
         # sure the helper task does not leak past the test.

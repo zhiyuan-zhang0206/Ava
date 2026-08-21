@@ -53,6 +53,7 @@ from agent.graph._exec import (
     _ExecCrashed,
     _ExecDone,
     _ExecLifecycle,
+    _ExecOutcome,
     _ExecTimedOut,
 )
 from agent.graph._exec_capture import current_capture
@@ -75,9 +76,9 @@ def fast_join_grace(monkeypatch: pytest.MonkeyPatch):
     any outcome. Partial output is captured before the sleep, independent of
     grace. (Mirrors the inline pattern already used by
     test_orphaned_exec_thread_leaves_process_streams_usable.)"""
-    import agent.graph._exec as _exec_mod
+    import agent.graph._exec_thread_backend as _thread_mod
 
-    monkeypatch.setattr(_exec_mod, "_THREAD_JOIN_GRACE_S", 0.25)
+    monkeypatch.setattr(_thread_mod, "_THREAD_JOIN_GRACE_S", 0.25)
 
 
 def _has_cancelled_event(pub: MagicMock, agent_id: int) -> bool:
@@ -207,9 +208,9 @@ async def test_orphaned_exec_thread_leaves_process_streams_usable(
     the per-context capture landed this was a process-global assignment, and
     an orphan left sys.stderr pointed at the fileno-less capture buffer for
     the rest of the process."""
-    import agent.graph._exec as _exec_mod
+    import agent.graph._exec_thread_backend as _thread_mod
 
-    monkeypatch.setattr(_exec_mod, "_THREAD_JOIN_GRACE_S", 0.1)
+    monkeypatch.setattr(_thread_mod, "_THREAD_JOIN_GRACE_S", 0.1)
 
     cancel_event = asyncio.Event()
     trigger = asyncio.create_task(_set_after(cancel_event, 0.1))
@@ -249,9 +250,9 @@ async def test_timeout_orphan_is_reaped(monkeypatch: pytest.MonkeyPatch) -> None
     The reaper re-injects KeyboardInterrupt on a cadence — a BaseException, so
     `except Exception` swallow loops cannot survive it — and the thread dies
     within the cadence of its native call returning."""
-    import agent.graph._exec as _exec_mod
+    import agent.graph._exec_thread_backend as _thread_mod
 
-    monkeypatch.setattr(_exec_mod, "_THREAD_JOIN_GRACE_S", 0.1)
+    monkeypatch.setattr(_thread_mod, "_THREAD_JOIN_GRACE_S", 0.1)
     import agent.graph._exec_threads as _exec_threads_mod
 
     monkeypatch.setattr(_exec_threads_mod, "_THREAD_REAP_INTERVAL_S", 0.05)
@@ -456,7 +457,7 @@ async def test_exec_node_cancel_event_kills_thread(
     with wrap_code_output cancelled=True + frontend Cancelled event."""
 
     async def _fake_cancelled(code, agent_id, cancel_event, timeout=60.0, **kwargs):
-        return _ExecCancelled(output="partial work\n")
+        return _ExecOutcome(_ExecCancelled(output="partial work\n"), None)
 
     monkeypatch.setattr("agent.graph._exec._exec_with_cancel_event", _fake_cancelled)  # pyright: ignore[reportUnknownArgumentType]
 
@@ -489,7 +490,7 @@ async def test_exec_node_cancel_event_race_normal_completion(
     wrap_code_output format ('Code execution output:'), exit_code=0."""
 
     async def _fake_normal(code, agent_id, cancel_event, timeout=60.0, **kwargs):
-        return _ExecDone(output="hello\n")
+        return _ExecOutcome(_ExecDone(output="hello\n"), None)
 
     monkeypatch.setattr("agent.graph._exec._exec_with_cancel_event", _fake_normal)  # pyright: ignore[reportUnknownArgumentType]
 
@@ -621,7 +622,7 @@ async def test_exec_node_timeout_path(
     LLM round reads the feedback and changes strategy."""
 
     async def _fake_timed_out(code, agent_id, cancel_event, timeout=60.0, **kwargs):
-        return _ExecTimedOut(output="partial work\n")
+        return _ExecOutcome(_ExecTimedOut(output="partial work\n"), None)
 
     monkeypatch.setattr("agent.graph._exec._exec_with_cancel_event", _fake_timed_out)  # pyright: ignore[reportUnknownArgumentType]
 
@@ -652,7 +653,7 @@ async def test_exec_node_timeout_empty_output(
     """timeout triggers and the thread has no output → (no output) marker still appears."""
 
     async def _fake_empty_timeout(code, agent_id, cancel_event, timeout=60.0, **kwargs):
-        return _ExecTimedOut(output="")
+        return _ExecOutcome(_ExecTimedOut(output=""), None)
 
     monkeypatch.setattr("agent.graph._exec._exec_with_cancel_event", _fake_empty_timeout)  # pyright: ignore[reportUnknownArgumentType]
 
@@ -818,7 +819,7 @@ async def test_exec_node_dispatch_system_halt(
     from shared.lifecycle import _SystemHalt
 
     async def _fake(code, agent_id, cancel_event, timeout=60.0, **kwargs):
-        return _ExecLifecycle(output="user prep work\n", exc=_SystemHalt())
+        return _ExecOutcome(_ExecLifecycle(output="user prep work\n", exc=_SystemHalt()), None)
 
     emitter = MagicMock()
     monkeypatch.setattr("agent.graph._exec._exec_with_cancel_event", _fake)  # pyright: ignore[reportUnknownArgumentType]
@@ -847,7 +848,7 @@ async def test_exec_node_dispatch_agent_termination(
     from shared.exit_codes import IDLE_EXIT_CODE
 
     async def _fake(code, agent_id, cancel_event, timeout=60.0, **kwargs):
-        return _ExecLifecycle(output="", exc=AgentTermination())
+        return _ExecOutcome(_ExecLifecycle(output="", exc=AgentTermination()), None)
 
     monkeypatch.setattr("agent.graph._exec._exec_with_cancel_event", _fake)  # pyright: ignore[reportUnknownArgumentType]
     state = AgentState(messages=[_ai_with_code("ava.self.terminate()")], halted=False)
@@ -872,7 +873,7 @@ async def test_exec_node_dispatch_agent_restart(
     from shared.exit_codes import IDLE_EXIT_CODE
 
     async def _fake(code, agent_id, cancel_event, timeout=60.0, **kwargs):
-        return _ExecLifecycle(output="", exc=AgentRestart())
+        return _ExecOutcome(_ExecLifecycle(output="", exc=AgentRestart()), None)
 
     monkeypatch.setattr("agent.graph._exec._exec_with_cancel_event", _fake)  # pyright: ignore[reportUnknownArgumentType]
     state = AgentState(messages=[_ai_with_code("ava.self.restart()")], halted=False)
@@ -945,9 +946,12 @@ async def test_exec_node_dispatch_ordinary_exception(
     trial-and-error is not an operator alert; metrics aggregate by event)."""
 
     async def _fake(code, agent_id, cancel_event, timeout=60.0, **kwargs):
-        return _ExecCrashed(
-            output="Traceback...\nValueError: boom\n",
-            exc=ValueError("boom"),
+        return _ExecOutcome(
+            _ExecCrashed(
+                output="Traceback...\nValueError: boom\n",
+                exc=ValueError("boom"),
+            ),
+            None,
         )
 
     monkeypatch.setattr("agent.graph._exec._exec_with_cancel_event", _fake)  # pyright: ignore[reportUnknownArgumentType]
@@ -980,7 +984,7 @@ async def test_exec_node_dispatch_unknown_lifecycle_subclass_raises(
             super().__init__(0)
 
     async def _fake(code, agent_id, cancel_event, timeout=60.0, **kwargs):
-        return _ExecLifecycle(output="", exc=_MysteryLifecycle())
+        return _ExecOutcome(_ExecLifecycle(output="", exc=_MysteryLifecycle()), None)
 
     monkeypatch.setattr("agent.graph._exec._exec_with_cancel_event", _fake)  # pyright: ignore[reportUnknownArgumentType]
     state = AgentState(messages=[_ai_with_code("...")], halted=False)

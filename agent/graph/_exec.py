@@ -1,10 +1,24 @@
-"""exec node: agent-written code runs in a worker thread inside the main process (no longer subprocess).
+"""exec node: agent-written code runs through the configured exec backend.
+
+Default (`AVA_EXEC_BACKEND=subprocess`): each execute_code call runs in a
+disposable child process (`agent/exec_child.py`, PR1 machinery wired in by
+PR2), so a stuck native call is SIGKILLable without touching the agent
+process (issue #184). The pre-subprocess in-process worker thread stays
+available behind `AVA_EXEC_BACKEND=thread` as the instant-rollback valve and
+is removed in PR3; its mechanics live in `_exec_thread_backend.py`.
 
 All paths return Command(goto="after_exec") — under cycling topology after_exec
 always routes to claim, which decides whether to wait or continue multi-step
 based on pending inbound + state.halted.
 
 Core mechanisms:
+  - Subprocess backend (`agent/graph/_exec_subprocess.py`): the parent spawns
+    one `python -m agent.exec_child` per exec, polls every 50ms, streams
+    output through the same chunk pipeline, and escalates cancel/timeout via
+    SIGINT/SIGTERM to SIGKILL(-pgid) after a grace period. The child rebuilds
+    the state snapshot from the request envelope; the plugin state-update
+    delta and the drained security findings ride the result envelope back
+    and are validated here exactly like the in-process path.
   - Main process has already `import ava`-ed at startup (sys.modules cache);
     agent code in the worker thread `import ava.X` hits the frozen snapshot —
     breaking ava/*.py on disk does not affect the in-process copy (unless
@@ -37,8 +51,9 @@ Core mechanisms:
     it streams and a `StreamCap` rides the result to the envelope, so a
     runaway print loop is truncated rather than left to OOM the process —
     the run itself is not killed.
-  - `_exec_with_cancel_event` returns a sum type (`_ExecDone | _ExecCancelled |
-    _ExecTimedOut | _ExecLifecycle | _ExecCrashed`); exec_node dispatches via
+  - `_exec_with_cancel_event` returns `_ExecOutcome` — the `_ExecResult`
+    sum type (`_ExecDone | _ExecCancelled | _ExecTimedOut | _ExecLifecycle |
+    _ExecCrashed`) plus the raw child envelope; exec_node dispatches via
     `match`, illegal state combinations are unrepresentable. Ordinary exception
     tracebacks are already in the stream output.
 
@@ -62,10 +77,8 @@ are accessed dynamically (consistent with existing convention).
 from __future__ import annotations
 
 import asyncio
-import contextvars
-import threading
 import time
-from collections import deque
+from collections.abc import Awaitable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal
@@ -77,17 +90,16 @@ from langgraph.types import Command
 
 import ava
 from agent import state as _state
+from agent._config_carrier import get_config_maps
 from agent.graph._exec_notes import merge_exec_notes
 from agent.messages import exec_output_message
 from agent.state import _validate_plugin_state_keys
-from ava.security import take_findings
-from shared import sdk_telemetry
+from ava.security import SecurityFindingEntry, take_findings
 from shared.config import settings
 from shared.exit_codes import IDLE_EXIT_CODE, SYSTEM_HALT_EXIT_CODE
 from shared.lifecycle import (
     AgentRestart,
     AgentTermination,
-    _LifecycleExit,
     _SystemHalt,
 )
 from shared.live_events import (
@@ -97,16 +109,11 @@ from shared.live_events import (
 )
 from shared.log import logger
 
-from ._agent_traceback import (
-    format_agent_traceback,
-    format_full_traceback,
-    register_agent_source,
-)
+from ._agent_traceback import format_full_traceback
 from ._context import AvaContext, agent_id_from_config
-from ._exec_capture import capture_output, install_capture_routers
 from ._exec_output import wrap_code_output
+from ._exec_protocol import ResultPayload
 from ._exec_result import (
-    _construct_exec_result,
     _ExecCancelled,
     _ExecCrashed,
     _ExecDone,
@@ -114,8 +121,11 @@ from ._exec_result import (
     _ExecResult,
     _ExecTimedOut,
 )
-from ._exec_stream import ExecOutputChunkPublisher, StreamingTextIO
-from ._exec_threads import _async_raise_in_thread, _reap_orphaned_thread
+from ._exec_stream import ExecOutputChunkPublisher
+from ._exec_subprocess import _run_in_subprocess
+from ._exec_thread_backend import (
+    _run_in_thread,  # re-exported — tests import it from agent.graph._exec
+)
 from ._interrupt import subscribe_interrupt
 from ._node_log import node_lifecycle
 from ._nodes import AFTER_EXEC
@@ -123,23 +133,6 @@ from ._tool_calls import merge_multiple_execute_code_tool_calls
 
 # exec_node always goto AFTER_EXEC (under the cycling topology, halted is routed by after_exec)
 ExecGoto = Literal["after_exec"]
-
-# Main asyncio task polling interval for monitoring thread alive / cancel / deadline.
-# 50ms is near-free from CPU's perspective; cancel/timeout response latency is
-# ≤ 50ms + the latency for ctypes injection to reach the next bytecode boundary
-# (microseconds), imperceptible to humans.
-_POLL_INTERVAL_S = 0.05
-
-# Grace period after ctypes-injecting an exception into the thread, letting it
-# print traceback + run finally chain cleanup (close socket / let SDK internal
-# finally clean up an already-launched ava.shell.run subprocess). If the thread
-# is still alive beyond this, native code is stuck; mark the thread orphaned
-# (daemon=True takes over), main task returns the envelope letting LLM / user decide.
-_THREAD_JOIN_GRACE_S = 2.0
-# Orphan reaper cadence/budget + _async_raise_in_thread live in
-# `_exec_threads.py` (Task #1058) — see there.
-_THREAD_STUCK_WINDOW_S, _THREAD_STUCK_WARN_THRESHOLD = 3600.0, 3
-_thread_stuck_times: deque[float] = deque(maxlen=_THREAD_STUCK_WARN_THRESHOLD)
 
 # The `_ExecResult` sum type — 5 mutually exclusive variants + a shared output
 # field — lives in `_exec_result.py` (moved there so the exec-subprocess
@@ -164,175 +157,14 @@ class _ExecCall:
     state_messages_update: list[AnyMessage]
 
 
-def _exec_worker(
-    code: str, stream: StreamingTextIO, result_holder: dict[str, BaseException | None]
-) -> None:
-    """Worker-thread body: `exec(compile(code))` with stdout/stderr captured.
+@dataclass(frozen=True)
+class _ExecOutcome:
+    """One exec run, backend-agnostic — the sum-type result plus the raw child
+    envelope for the subprocess backend (None for the thread backend, whose
+    parent process owns the state slot and the findings buffer directly)."""
 
-    The same stream catches stdout and stderr, preserving print → traceback →
-    print chronological order, same as running Python in a terminal.
-    """
-    fresh_globals: dict[str, Any] = {
-        "__name__": "__agent_code__",
-        "__builtins__": __builtins__,
-    }
-    # Capture is bound in THIS context only (see agent/graph/_exec_capture.py):
-    # concurrent execs in one hosted process never see each other's output, and
-    # an orphaned worker that never unwinds cannot leave the process-global
-    # streams pointed at its own buffer.
-    with capture_output(stream):
-        try:
-            # `recording()` arms SDK-usage metering for exactly this
-            # agent-authored code, so framework-internal ava.* calls (prompt
-            # rendering, hooks) that run outside it are never counted (see
-            # shared/sdk_telemetry.py).
-            with sdk_telemetry.recording():
-                exec(compile(code, "<agent_code>", "exec"), fresh_globals)
-        except _LifecycleExit as e:
-            # Lifecycle (terminate/restart/halt): SDK already INSERTed the
-            # inbound; don't print a traceback (not an error).
-            result_holder["exc"] = e
-        except BaseException as e:
-            # Ordinary exceptions / SystemExit / KeyboardInterrupt (cancel
-            # injection) / TimeoutError (timeout injection) — exec_node
-            # dispatches by cancelled/timed_out flag + exc type. Only the
-            # agent's own `<agent_code>` frames go into the stream
-            # (agent-facing surface); the full traceback reaches the logs via
-            # the _ExecCrashed branch.
-            result_holder["exc"] = e
-            stream.write(format_agent_traceback(e))
-
-
-async def _poll_worker_loop(
-    t: threading.Thread,
-    stream: StreamingTextIO,
-    chunk_publisher: ExecOutputChunkPublisher | None,
-    cancel_event: asyncio.Event,
-    deadline: float,
-) -> tuple[bool, bool]:
-    """Poll the worker thread every 50ms: publish accumulated stream chunks,
-    ctypes-inject KeyboardInterrupt (user Stop) / TimeoutError (deadline).
-
-    Returns (cancelled, timed_out); on a same-tick race cancel always wins
-    (priority enforced by the result construction in `_run_in_thread`).
-    """
-    cancelled = False
-    timed_out = False
-    while t.is_alive():
-        # Incrementally publish accumulated stream chunks to frontend
-        if chunk_publisher is not None:
-            pending = stream.take_pending()
-            if pending:
-                chunk_publisher.publish(pending)
-
-        if cancel_event.is_set():
-            # user pressed Stop; tid guaranteed non-None after t.start()
-            assert t.ident is not None  # noqa: S101
-            _async_raise_in_thread(t.ident, KeyboardInterrupt)
-            cancelled = True
-            break
-        if time.monotonic() > deadline:
-            assert t.ident is not None  # noqa: S101
-            _async_raise_in_thread(t.ident, TimeoutError)
-            timed_out = True
-            break
-        await asyncio.sleep(_POLL_INTERVAL_S)
-    return cancelled, timed_out
-
-
-async def _await_worker_exit(t: threading.Thread, agent_id: str) -> None:
-    """Join the worker with a grace period; a thread still alive past it is
-    stuck in native code — log it and orphan it (daemon=True)."""
-    if not t.is_alive():
-        return
-    await asyncio.to_thread(t.join, _THREAD_JOIN_GRACE_S)
-    if not t.is_alive():
-        return
-    _thread_stuck_times.append(time.monotonic())
-    if len(_thread_stuck_times) >= _THREAD_STUCK_WARN_THRESHOLD and (
-        time.monotonic() - _thread_stuck_times[0] <= _THREAD_STUCK_WINDOW_S
-    ):
-        logger.warning(
-            "[{label}] {n} threads stuck in native code in the last hour",
-            label="exec-thread-stuck",
-            n=len(_thread_stuck_times),
-            event="exec_thread_stuck",
-            agent_id=agent_id,
-        )
-    # Nothing to restore: the orphan's capture binding lives in its own
-    # context (agent/graph/_exec_capture.py), so the process's sys.stdout /
-    # sys.stderr keep resolving to the real streams for everyone else — the
-    # next node's faulthandler stall dump still finds a real fd.
-    # Hand the orphan to the bounded reaper (Task #1058): the one-shot
-    # injection cannot kill a thread inside a native call or one that
-    # swallows Exception, so re-inject KeyboardInterrupt on a cadence until
-    # the thread dies or the window elapses.
-    threading.Thread(
-        target=_reap_orphaned_thread,
-        args=(t, agent_id),
-        daemon=True,
-        name=f"exec-reap-{agent_id}",
-    ).start()
-
-
-async def _run_in_thread(
-    code: str,
-    agent_id: str,
-    cancel_event: asyncio.Event,
-    timeout: float,
-    chunk_publisher: ExecOutputChunkPublisher | None,
-) -> _ExecResult:
-    """Run `exec(compile(code))` in a worker thread; main asyncio task polls
-    every 50ms monitoring thread alive / cancel_event / deadline.
-
-    Priority: cancel_event > deadline > thread natural completion. Cancel
-    always wins on a same-tick race (user Stop takes effect immediately).
-    """
-    stream = StreamingTextIO()
-    result_holder: dict[str, BaseException | None] = {"exc": None}
-
-    # Register the source so `<agent_code>` frames resolve their offending line
-    # in tracebacks (exec'd code is invisible to linecache).
-    register_agent_source(code)
-
-    # Point the process streams at the routers before the worker binds its
-    # capture. Idempotent and one-way — a router with nothing bound in the
-    # calling context writes straight through to the real stream.
-    install_capture_routers()
-    # Run the worker under a copy of the creating context: threads do NOT
-    # inherit contextvars, and in the hosted runner the turn identity
-    # (shared/turn_identity.py) and the per-turn config view
-    # (shared/config/turn_view.py) both live in contextvars that agent code on
-    # this thread reads through ava.* / turn_settings. In process mode the
-    # copied context carries nothing bound and behavior is unchanged.
-    exec_ctx = contextvars.copy_context()
-    t = threading.Thread(
-        target=exec_ctx.run,
-        args=(_exec_worker, code, stream, result_holder),
-        daemon=True,
-        name=f"exec-{agent_id}",
-    )
-    t.start()
-
-    deadline = time.monotonic() + timeout
-    cancelled, timed_out = await _poll_worker_loop(
-        t, stream, chunk_publisher, cancel_event, deadline
-    )
-    await _await_worker_exit(t, agent_id)
-
-    # Wrap up: publish remaining chunks from the stream (thread post-cleanup may still write traceback)
-    if chunk_publisher is not None:
-        pending = stream.take_pending()
-        if pending:
-            chunk_publisher.publish(pending)
-
-    return _construct_exec_result(
-        stream.getvalue(),
-        result_holder["exc"],
-        cancelled=cancelled,
-        timed_out=timed_out,
-        stream_cap=stream.cap(),
-    )
+    result: _ExecResult
+    payload: ResultPayload | None
 
 
 async def _exec_with_cancel_event(
@@ -341,25 +173,51 @@ async def _exec_with_cancel_event(
     cancel_event: asyncio.Event,
     timeout: float | None = None,
     chunk_publisher: ExecOutputChunkPublisher | None = None,
-) -> _ExecResult:
-    """Run worker thread with three-way monitoring (cancel_event + timeout),
-    return a unified `_ExecResult` sum type.
+    *,
+    backend: str | None = None,
+    state: dict[str, Any] | None = None,
+    config_overlay: dict[str, object] | None = None,
+    birth_config: dict[str, object] | None = None,
+) -> _ExecOutcome:
+    """Run one exec through the configured backend, returning a unified
+    `_ExecOutcome` — the single seam the exec node calls, so both backends
+    share the cancel/timeout wiring and tests keep one monkeypatch target.
 
-    A wrapper layer on top of _run_in_thread providing an entry name
-    symmetric with the old subprocess model, so exec_node / tests do not
-    need to change call sites. If _run_in_thread behavior needs extension
-    in the future (e.g. capture thread crash dump), add it at this layer.
+    Subprocess-only inputs: `state` is the model-dumped snapshot the child
+    rebuilds (the thread backend ignores it — the node injects ava.state
+    itself), and `config_overlay` / `birth_config` are re-emitted into the
+    child's environment so SDK calls made from agent code see the same
+    effective settings as the agent process.
     """
+    if backend is None:
+        backend = settings.sandbox.exec_backend
     if timeout is None:
         timeout = settings.sandbox.exec_timeout_seconds
 
-    return await _run_in_thread(
-        code=code,
-        agent_id=agent_id,
-        cancel_event=cancel_event,
-        timeout=timeout,
-        chunk_publisher=chunk_publisher,
-    )
+    if backend == "subprocess":
+        result, payload = await _run_in_subprocess(
+            code,
+            int(agent_id),
+            cancel_event,
+            timeout,
+            chunk_publisher,
+            state=state,
+            config_overlay=config_overlay,
+            birth_config=birth_config,
+        )
+        return _ExecOutcome(result, payload)
+    if backend == "thread":
+        return _ExecOutcome(
+            await _run_in_thread(
+                code=code,
+                agent_id=agent_id,
+                cancel_event=cancel_event,
+                timeout=timeout,
+                chunk_publisher=chunk_publisher,
+            ),
+            None,
+        )
+    raise ValueError(f"unknown exec backend {backend!r} — expected 'subprocess' or 'thread'")
 
 
 async def exec_node(
@@ -434,19 +292,127 @@ def _resolve_exec_call(state: _state.AgentState, agent_id: int) -> _ExecCall | C
     )
 
 
+async def _exec_with_node_shield(coro: Awaitable[_ExecOutcome], agent_id: int) -> _ExecOutcome:
+    """Graph-level exec node timeout — defense-in-depth above the per-code-block
+    exec_timeout_seconds. If the inner deadline missed a hang inside the
+    execution machinery (e.g. a stuck thread join / a wedged child reaper),
+    this outer shield catches it and surfaces as a timeout result rather than
+    leaving the agent process stuck. (The interrupt subscription sits outside
+    this wait_for and is bounded by its own watcher exit timeout.)"""
+    try:
+        return await asyncio.wait_for(coro, timeout=settings.sandbox.exec_node_timeout_seconds)
+    except TimeoutError:
+        logger.error(
+            "[exec(node-timeout)] exec_node timed out after {timeout}s — "
+            "inner code-exec timeout did not trigger; possible framework hang. "
+            "Returning timeout ToolMessage so the LLM can react.",
+            event="exec_node_timeout",
+            timeout=settings.sandbox.exec_node_timeout_seconds,
+            agent_id=agent_id,
+        )
+        return _ExecOutcome(
+            _ExecTimedOut(
+                output=(
+                    f"[exec node timeout after {settings.sandbox.exec_node_timeout_seconds:.0f}s] "
+                    "Execution was stopped by an internal safeguard and did not "
+                    "complete. This does not necessarily mean your code was slow; "
+                    "consider re-running it, or moving long-running work to a "
+                    "persistent shell session."
+                )
+            ),
+            None,
+        )
+
+
 async def _run_agent_code(
     state: _state.AgentState,
     ctx: AvaContext,
     agent_id: int,
     code: str,
     chunk_publisher: ExecOutputChunkPublisher,
-) -> tuple[_ExecResult, dict[str, Any], int]:
-    """Run the agent's code in the worker thread under the plugin state slot.
+) -> tuple[_ExecResult, dict[str, Any], int, list[SecurityFindingEntry]]:
+    """Run the agent's code through the configured exec backend.
+
+    Both backends race the run against the durable-interrupt cancel_event,
+    sit under the graph-level node timeout as an outer shield, and validate
+    the plugin's state_update keys identically. Returns
+    (result, plugin_state_update, exec_ms, findings) — `findings` carries the
+    child-drained security findings for the subprocess backend (the thread
+    backend drains its own process buffer via `take_findings()` at the node).
+    """
+    backend = settings.sandbox.exec_backend
+    if backend == "subprocess":
+        return await _run_agent_code_in_subprocess(state, ctx, agent_id, code, chunk_publisher)
+    if backend == "thread":
+        return await _run_agent_code_in_thread(state, ctx, agent_id, code, chunk_publisher)
+    raise ValueError(f"unknown exec backend {backend!r} — expected 'subprocess' or 'thread'")
+
+
+async def _run_agent_code_in_subprocess(
+    state: _state.AgentState,
+    ctx: AvaContext,
+    agent_id: int,
+    code: str,
+    chunk_publisher: ExecOutputChunkPublisher,
+) -> tuple[_ExecResult, dict[str, Any], int, list[SecurityFindingEntry]]:
+    """Run the agent's code in one disposable child process.
+
+    The parent does not touch the ava.state slot — the child rebuilds the
+    snapshot from the request envelope (`agent/exec_child.py`), and the
+    plugin's state-update delta + drained security findings ride the result
+    envelope back. Validation is identical to the in-process path (same
+    fail-fast on a tampered slot), and the child re-receives the agent's
+    popped per-agent config maps so its SDK calls resolve the same settings.
+    """
+    config_overlay, birth_config = get_config_maps()
+    exec_started = time.monotonic()
+    async with subscribe_interrupt(ctx.ops_pool, agent_id) as cancel_event:
+        outcome = await _exec_with_node_shield(
+            _exec_with_cancel_event(
+                code,
+                str(agent_id),
+                cancel_event,
+                chunk_publisher=chunk_publisher,
+                backend="subprocess",
+                state=state.model_dump(),
+                config_overlay=config_overlay,
+                birth_config=birth_config,
+            ),
+            agent_id,
+        )
+    # Wall-clock surfaced on the code_output item ("ran in 1.3s"); cancel /
+    # timeout still report the honest time-before-stop.
+    exec_ms = round((time.monotonic() - exec_started) * 1000)
+    payload = outcome.payload
+    if payload is not None and payload.state_update_error is not None:
+        # The child reported a tampered slot (agent set ava.state_update to a
+        # non-dict) — raise the same TypeError the in-process path raised.
+        raise TypeError(payload.state_update_error)
+    delta = payload.state_update if payload is not None else None
+    plugin_state_update = _validate_plugin_state_keys(dict(delta), state.__class__) if delta else {}
+    findings = (
+        [SecurityFindingEntry.model_validate(f) for f in payload.findings]
+        if payload is not None and payload.findings
+        else []
+    )
+    return outcome.result, plugin_state_update, exec_ms, findings
+
+
+async def _run_agent_code_in_thread(
+    state: _state.AgentState,
+    ctx: AvaContext,
+    agent_id: int,
+    code: str,
+    chunk_publisher: ExecOutputChunkPublisher,
+) -> tuple[_ExecResult, dict[str, Any], int, list[SecurityFindingEntry]]:
+    """Run the agent's code in the worker thread under the plugin state slot —
+    the pre-subprocess backend, kept as the instant-rollback valve.
 
     Sets `ava.state` / `ava.state_update` around the run (try/finally reset),
-    races the run against the durable-interrupt cancel_event with the graph-level
-    node timeout as an outer shield, and validates the plugin's state_update
-    keys. Returns (result, plugin_state_update, exec_ms).
+    races the run against the durable-interrupt cancel_event with the
+    graph-level node timeout as an outer shield, and validates the plugin's
+    state_update keys. Findings stay in this process's buffer — the node
+    drains them via `take_findings()`.
     """
     # ── plugin <-> framework state slot injection ──────────────────────────
     #
@@ -464,38 +430,16 @@ async def _run_agent_code(
         ava.state_update = {}
         exec_started = time.monotonic()
         async with subscribe_interrupt(ctx.ops_pool, agent_id) as cancel_event:
-            try:
-                result = await asyncio.wait_for(
-                    _exec_with_cancel_event(
-                        code, str(agent_id), cancel_event, chunk_publisher=chunk_publisher
-                    ),
-                    timeout=settings.sandbox.exec_node_timeout_seconds,
-                )
-            except TimeoutError:
-                # Graph-level exec node timeout — defense-in-depth above the
-                # per-code-block exec_timeout_seconds. If the inner deadline
-                # missed a hang inside the execution machinery (e.g. a stuck
-                # thread join), this outer shield catches it and surfaces as
-                # a timeout result rather than leaving the agent process stuck.
-                # (The interrupt subscription sits outside this wait_for and is
-                # bounded by its own watcher exit timeout.)
-                logger.error(
-                    "[exec(node-timeout)] exec_node timed out after {timeout}s — "
-                    "inner code-exec timeout did not trigger; possible framework hang. "
-                    "Returning timeout ToolMessage so the LLM can react.",
-                    event="exec_node_timeout",
-                    timeout=settings.sandbox.exec_node_timeout_seconds,
-                    agent_id=agent_id,
-                )
-                result = _ExecTimedOut(
-                    output=(
-                        f"[exec node timeout after {settings.sandbox.exec_node_timeout_seconds:.0f}s] "
-                        "Execution was stopped by an internal safeguard and did not "
-                        "complete. This does not necessarily mean your code was slow; "
-                        "consider re-running it, or moving long-running work to a "
-                        "persistent shell session."
-                    )
-                )
+            outcome = await _exec_with_node_shield(
+                _exec_with_cancel_event(
+                    code,
+                    str(agent_id),
+                    cancel_event,
+                    chunk_publisher=chunk_publisher,
+                    backend="thread",
+                ),
+                agent_id,
+            )
         # Wall-clock surfaced on the code_output item ("ran in 1.3s"); cancel /
         # timeout still report the honest time-before-stop.
         exec_ms = round((time.monotonic() - exec_started) * 1000)
@@ -510,7 +454,7 @@ async def _run_agent_code(
     finally:
         ava.state = None
         ava.state_update = None
-    return result, plugin_state_update, exec_ms
+    return outcome.result, plugin_state_update, exec_ms, []
 
 
 def _dispatch_exec_result(
@@ -643,7 +587,7 @@ async def _exec_node_impl(
         item_id=f"{exec_msg_idx}.0",
     )
 
-    result, plugin_state_update, exec_ms = await _run_agent_code(
+    result, plugin_state_update, exec_ms, envelope_findings = await _run_agent_code(
         state, ctx, agent_id, resolved.code, chunk_publisher
     )
     halted, result_text, exit_code_for_msg = _dispatch_exec_result(result, ctx, agent_id)
@@ -653,7 +597,11 @@ async def _exec_node_impl(
     # clobber the ToolMessage). Popped + drained unconditionally so a compact
     # turn (REMOVE_ALL'd by claim) leaks nothing to later turns.
     plugin_messages = plugin_state_update.pop("messages", None)
-    findings = take_findings()
+    # Findings drained from this process's own buffer (scans outside the exec
+    # turn — inbound injection checks — run in the parent) first, then the
+    # child-drained ones from the result envelope (subprocess backend; empty
+    # for the thread backend, whose exec ran in this process's buffer).
+    findings = take_findings() + envelope_findings
 
     # Compact path (_SystemHalt): write nothing back — claim REMOVE_ALLs the
     # whole history this turn, so ToolMessage/notes would be wiped anyway.
