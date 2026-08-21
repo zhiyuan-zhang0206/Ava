@@ -8,7 +8,9 @@ producer that builds a malformed envelope is caught at construction rather than
 on the wire.
 
   Request:  {"id": 1, "method": "list_tools"}
-            {"id": 2, "method": "call_tool", "tool": "click", "args": {...}}
+            {"id": 2, "method": "call_tool", "tool": "click", "args": {...},
+             "agent_id": 7}          # call_tool only, optional — the calling
+                                     # agent's id; keys page affinity per agent
             {"id": 0, "method": "ping"}
   Response: {"id": 1, "ok": true,  "result": ...}   # tool dicts / CallToolResult dump / None
             {"id": 2, "ok": false, "error": "message"}
@@ -24,6 +26,7 @@ class Request(TypedDict):
     method: str
     tool: NotRequired[str]  # call_tool only — the upstream tool name
     args: NotRequired[dict[str, Any]]  # call_tool only — the tool arguments
+    agent_id: NotRequired[int]  # call_tool only, optional — keys page affinity per agent
 
 
 # Response is discriminated on `ok`, so `ok` and the field it guards are bound

@@ -81,6 +81,18 @@ _LEAN_FLAGS = ["--usageStatistics=false"]
 # before forwarding. Everything else is page-scoped and gets re-pinned.
 _MANAGEMENT_TOOLS = frozenset({"new_page", "select_page", "close_page", "list_pages"})
 
+# Per-agent page affinity — agent id -> that agent's current page. The
+# selected-page state belongs to the AGENT, not to a TCP connection: an exec
+# subprocess child re-connecting mid-turn (or the agent process itself after a
+# session rebuild) must land on the same tab the agent selected, not cold-start
+# with "No page selected" on every exec. Module-level on purpose: the
+# ChromeMcpDaemon object is replaced on upstream reconnect, and this registry
+# must survive that. One int per agent that has used the browser — bounded by
+# the machine's agent count; a closed/crashed page drops the slot naturally
+# via the existing re-pin failure path. Requests without an agent id (legacy
+# wrapper clients) keep the per-connection fallback in _handle_client.
+_AGENT_AFFINITY: dict[int, int | None] = {}
+
 # chrome-devtools-mcp's cold-start error: a page-scoped call with no selected
 # page. Matched verbatim from the upstream result; if upstream rewords it the
 # daemon simply stops auto-recovering and the original error surfaces.
@@ -164,6 +176,10 @@ class ChromeMcpDaemon:
     tab; it does not sandbox the namespace -- close_page / list_pages can still
     name any client's page (a client whose tab is closed out just gets a clean
     no-page error on its next call, never another client's tab).
+
+    Two affinity shapes: requests carrying an `agent_id` resolve their page
+    from the per-agent registry (`_AGENT_AFFINITY`, survives connections);
+    requests without one fall back to the caller-supplied per-connection page.
     """
 
     def __init__(self, upstream: ClientSession) -> None:
@@ -213,6 +229,23 @@ class ChromeMcpDaemon:
         """
         async with self._lock:
             return await self._affinity_call(name, args, current_page)
+
+    async def call_tool_for_agent(
+        self, name: str, args: dict[str, Any], agent_id: int
+    ) -> types.CallToolResult:
+        """Forward one call pinned to the agent's page (per-agent affinity).
+
+        The connection's page resolves from the agent-keyed registry, so a
+        fresh connection presenting the same agent id (an exec subprocess
+        child) lands on the tab the agent process selected. Same serial lock +
+        re-pin machinery as `call_tool`; a re-pin failure (tab closed
+        underneath) drops the slot to no-page exactly like the per-connection
+        path.
+        """
+        async with self._lock:
+            result, updated = await self._affinity_call(name, args, _AGENT_AFFINITY.get(agent_id))
+            _AGENT_AFFINITY[agent_id] = updated
+            return result
 
     async def _affinity_call(
         self, name: str, args: dict[str, Any], current_page: int | None
@@ -265,9 +298,12 @@ async def _handle_client(
     writer: asyncio.StreamWriter,
     daemon_ref: list[ChromeMcpDaemon | None],
 ) -> None:
-    """One agent bridge connection. `current_page` is this connection's affinity.
-    `daemon_ref` is a mutable cell so the handler always sees the current daemon
-    across upstream reconnects; when None (reconnecting), returns a transient error."""
+    """One agent bridge connection. Requests carrying an `agent_id` resolve
+    their page from the per-agent registry (a fresh connection — exec
+    subprocess child — inherits the agent's page); the rest track
+    `current_page` per connection (legacy fallback). `daemon_ref` is a mutable
+    cell so the handler always sees the current daemon across upstream
+    reconnects; when None (reconnecting), returns a transient error."""
     current_page: int | None = None
     try:
         with suppress(ConnectionResetError, BrokenPipeError):
@@ -320,9 +356,17 @@ async def _handle_client(
                                 "error": "call_tool requires a non-empty 'tool' name",
                             }
                         else:
-                            result, current_page = await daemon.call_tool(
-                                tool, req.get("args") or {}, current_page
-                            )
+                            agent_id = req.get("agent_id")
+                            # bool is an int subclass — reject it so a JSON
+                            # `true` can never alias another agent's slot.
+                            if isinstance(agent_id, int) and not isinstance(agent_id, bool):
+                                result = await daemon.call_tool_for_agent(
+                                    tool, req.get("args") or {}, agent_id
+                                )
+                            else:
+                                result, current_page = await daemon.call_tool(
+                                    tool, req.get("args") or {}, current_page
+                                )
                             resp = {
                                 "id": req_id,
                                 "ok": True,

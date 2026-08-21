@@ -318,3 +318,49 @@ async def test_connect_browser_direct_retries_until_socket_appears(
             await task
         with contextlib.suppress(OSError):
             sock_path.unlink()
+
+
+async def test_call_tool_wire_carries_agent_id() -> None:
+    """The daemon stamps the calling agent's id before each call, and the
+    request carries it — the service keys page affinity per agent, so an exec
+    subprocess child's fresh connection adopts the agent's selected page."""
+    session, writer = _make_session(
+        [
+            {
+                "id": 1,
+                "ok": True,
+                "result": {
+                    "content": [{"type": "text", "text": "hello"}],
+                    "isError": False,
+                },
+            }
+        ]
+    )
+    session.client_agent_id = 7
+    result = await session.call_tool("take_snapshot", {})
+    assert result.is_error is False
+    assert writer.requests() == [
+        {"id": 1, "method": "call_tool", "tool": "take_snapshot", "args": {}, "agent_id": 7}
+    ]
+
+
+async def test_call_tool_wire_omits_agent_id_when_unset() -> None:
+    """No agent identity (daemon serving a non-agent client): the wire stays
+    exactly the legacy shape — the service falls back to per-connection
+    affinity."""
+    session, writer = _make_session(
+        [
+            {
+                "id": 1,
+                "ok": True,
+                "result": {
+                    "content": [{"type": "text", "text": "hello"}],
+                    "isError": False,
+                },
+            }
+        ]
+    )
+    await session.call_tool("take_snapshot", {})
+    assert writer.requests() == [
+        {"id": 1, "method": "call_tool", "tool": "take_snapshot", "args": {}}
+    ]
