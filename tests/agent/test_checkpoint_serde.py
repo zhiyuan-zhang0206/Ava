@@ -79,8 +79,21 @@ def test_allowlist_round_trip_is_silent(state, caplog) -> None:
     assert _warning_messages(caplog) == []  # pyright: ignore[reportUnknownArgumentType]
 
 
-def test_default_permissive_serde_warns_for_same_types(caplog) -> None:
+def test_default_permissive_serde_warns_for_same_types(
+    caplog, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The regression: the default serde (no allowlist) warns once per type."""
+    # LangGraph dedups warnings in a process-global set
+    # (`_warned_unregistered_types`); a sibling test that round-tripped one of
+    # these types through a permissive serde first would prime it and this
+    # test would see fewer than 4 warnings — order-dependent (issue #161).
+    import langgraph.checkpoint.serde.jsonplus as _jsonplus
+
+    monkeypatch.setattr(
+        _jsonplus,
+        "_warned_unregistered_types",
+        set[tuple[str, str]](),  # same element type as the module-level memo
+    )
     serde = JsonPlusSerializer()
     states = [
         ContextReset(),

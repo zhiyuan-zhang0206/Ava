@@ -366,6 +366,12 @@ def test_plugin_prompt_section_records_an_activation(monkeypatch: pytest.MonkeyP
 
     saved = list(_system_prompt._SYSTEM_PROMPT_SECTIONS)
     try:
+        # Isolate the build: touching the `ava` namespace earlier in the process
+        # (any test that hits an `ava.*` miss) loads the builtin plugins, whose
+        # sections are registered WITH plugin identity — their records would
+        # land in `recorded` and this exact-list assertion would fail depending
+        # on what ran before. Build with only the two sections under test.
+        _system_prompt._SYSTEM_PROMPT_SECTIONS[:] = []
         with PluginContext("myplugin"):
             _system_prompt.register_system_prompt_section(loud_section)
             _system_prompt.register_system_prompt_section(silent_section)

@@ -531,6 +531,7 @@ class TestTheSlice:
 
 def test_the_line_the_updater_echoes_is_the_line_the_reader_anchors_on(
     windows_log: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Emitter and parser are one contract, so they are tested as one.
 
@@ -539,6 +540,14 @@ def test_the_line_the_updater_echoes_is_the_line_the_reader_anchors_on(
     that drifts — the spelling, the trailing space, the line ending — silently stops
     anchoring, and a marker nothing anchors on is exactly the state before the fix.
     """
+    # The emitter samples time.time() when it builds the command line, and the
+    # assertion below re-spells the literal with its own time.time() sample; on a
+    # busy shard the real work between the two (writing the log, reading it back)
+    # can straddle a second boundary and the truncated epochs drift by one —
+    # issue #123. Freeze the clock for the span so both literals sample the same
+    # instant while each stays independently spelled.
+    frozen = time.time()
+    monkeypatch.setattr(time, "time", lambda: frozen)
     marked = uo.mark_native_run("git fetch origin")
     assert marked.endswith(" & git fetch origin")
     echoed = marked.removeprefix("echo ").removesuffix("& git fetch origin")
