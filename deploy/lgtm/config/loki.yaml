@@ -88,8 +88,12 @@ limits_config:
   max_query_series: 2000
   # Line cap per query. The default (5000) truncates the raw-line range
   # queries the 100MiB gRPC cap (server.grpc_server_max_recv_msg_size) was
-  # raised for; 20k lines is a few MB, well inside it.
-  max_entries_limit_per_query: 20000
+  # raised for; 20k lines is a few MB, well inside it. fleet_graph needs
+  # more: it asks for 50000 edge rows, and gateway/loki_events.query_events
+  # adds a one-row has_more lookahead, so the request arrives as 50001 --
+  # below this the query is rejected with HTTP 400 and the fleet graph
+  # degrades to stale-empty (Task #1344, 2026-08-22).
+  max_entries_limit_per_query: 50001
   # Query splitting + fan-out bounds, sized for a single binary on a shared
   # box (upstream defaults — 1h splits, parallelism 32/128 — are sized for a
   # horizontally scaled querier fleet; here they turned one 30d instant
