@@ -191,6 +191,41 @@ class TestSpawn:
         assert ava.agents.spawn(machine="other-host") == 7
         assert captured["machine"] == "other-host"
 
+    @pytest.mark.parametrize(
+        ("prompt", "expected"),
+        [
+            # Runtime value of `("a" "b",)`: implicit concatenation plus trailing comma.
+            pytest.param(("ab",), "ab", id="implicit-concatenation-tuple"),
+            pytest.param(("a", "b"), "ab", id="multi-string-tuple"),
+            pytest.param(["a", "b"], "ab", id="string-list"),
+            pytest.param("ok", "ok", id="plain-string"),
+        ],
+    )
+    def test_spawn_normalizes_prompt_before_gateway_call(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        prompt: object,
+        expected: str,
+    ) -> None:
+        from ava import agents
+
+        seen: dict[str, Any] = {}
+        monkeypatch.setattr(agents._client, "spawn", lambda **kw: seen.update(kw) or 3)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+
+        assert agents.spawn(prompt=prompt) == 3  # pyright: ignore[reportArgumentType]
+        assert seen["prompt"] == expected
+
+    def test_spawn_rejects_non_string_prompt(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from ava import agents
+
+        monkeypatch.setattr(agents._client, "spawn", lambda **_kw: 3)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+
+        with pytest.raises(
+            TypeError,
+            match="prompt must be a string or a list/tuple of strings, got int",
+        ):
+            agents.spawn(prompt=42)  # pyright: ignore[reportArgumentType]
+
 
 class TestSpawnFork:
     def test_fork_resolves_latest_checkpoint(self, db_conn: psycopg.Connection) -> None:
@@ -689,6 +724,23 @@ class TestResurrect:
         assert seen["prompt"] == "wake up!"
         # resurrected_by is set by the client default, not by the SDK wrapper
         assert "resurrected_by" not in seen
+
+    def test_resurrect_joins_tuple_prompt_before_gateway_call(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from ava import agents
+        from shared.agents import ResurrectResult
+
+        seen: dict[str, Any] = {}
+        monkeypatch.setattr(
+            agents._client,
+            "resurrect",
+            lambda agent_id, **kw: seen.update({"agent_id": agent_id, **kw}) or "spawned",  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        )
+
+        result = agents.resurrect(42, ("wake",))  # pyright: ignore[reportArgumentType]
+        assert result == ResurrectResult.SPAWNED
+        assert seen["prompt"] == "wake"
 
     def test_resurrect_already_alive(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """When the agent is still alive, resurrect returns ALREADY_ALIVE."""
