@@ -247,6 +247,133 @@ class TestRemind:
         )
         assert _run_reminders(pool, 3600.0) == 1
 
+    def test_interval_floor_blocks_hourly_nag(
+        self, pool: ConnectionPool, db_conn: psycopg.Connection, deliver: list[tuple[int, str]]
+    ) -> None:
+        """A task whose remind_interval exceeds the backoff floor repeats at its
+        own interval: a P3 task (4h) reminded 1.5h ago is NOT nagged again,
+        even though the 1h backoff has elapsed (pre-floor behavior would
+        remind it every hour once overdue)."""
+        owner = _make_agent(db_conn)
+        _make_task(
+            db_conn,
+            owner=owner,
+            remind_interval_seconds=14400,
+            updated_s_ago=20000,
+            last_reminded_s_ago=5400,  # 1.5h ago
+        )
+        assert _run_reminders(pool, 3600.0) == 0
+        assert deliver == []
+
+    def test_interval_floor_allows_repeat_after_full_interval(
+        self, pool: ConnectionPool, db_conn: psycopg.Connection, deliver: list[tuple[int, str]]
+    ) -> None:
+        owner = _make_agent(db_conn)
+        _make_task(
+            db_conn,
+            owner=owner,
+            remind_interval_seconds=14400,
+            updated_s_ago=20000,
+            last_reminded_s_ago=15000,  # 4h+ elapsed — a fresh reminder is due
+        )
+        assert _run_reminders(pool, 3600.0) == 1
+
+    def test_counter_failure_retries_without_redelivery(
+        self,
+        pool: ConnectionPool,
+        db_conn: psycopg.Connection,
+        deliver: list[tuple[int, str]],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Same-cause dedup: when the reminder message lands but the counter
+        write fails (a DB blip after a 2xx delivery), the next sweep retries
+        the counter write WITHOUT re-delivering the message — the owner gets
+        one reminder, not a duplicate minutes later."""
+        monkeypatch.setattr(daemon, "_pending_counter_writes", {})
+        owner = _make_agent(db_conn)
+        tid = _make_task(db_conn, owner=owner, remind_interval_seconds=1800, updated_s_ago=3600)
+
+        real = daemon._advance_reminder_counters
+        attempts = {"n": 0}
+
+        def _flaky(pool_: ConnectionPool, task_id: int) -> None:
+            attempts["n"] += 1
+            if attempts["n"] == 1:
+                raise psycopg.OperationalError("db blip")
+            real(pool_, task_id)
+
+        monkeypatch.setattr(daemon, "_advance_reminder_counters", _flaky)
+
+        # First sweep: the message is delivered, the counter write fails.
+        assert _run_reminders(pool, 3600.0) == 0
+        assert len(deliver) == 1
+        row = _task_row(db_conn, tid)
+        assert row is not None
+        _status, _owner, reminder_count, last_reminded_at = row
+        assert reminder_count == 0
+        assert last_reminded_at is None
+
+        # Second sweep: counters advance, no second message is delivered.
+        assert _run_reminders(pool, 3600.0) == 0
+        assert len(deliver) == 1  # still exactly one reminder delivered
+        row = _task_row(db_conn, tid)
+        assert row is not None
+        _status, _owner, reminder_count, last_reminded_at = row
+        assert reminder_count == 1
+        assert last_reminded_at is not None
+
+    def test_expired_counter_mark_does_not_suppress_new_reminder(
+        self,
+        pool: ConnectionPool,
+        db_conn: psycopg.Connection,
+        deliver: list[tuple[int, str]],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The dedup mark is window-bounded: past the window the task is
+        reminded again — a new overdue window (the owner updated the task,
+        resetting the counters) must not lose its reminder to a stale mark."""
+        monkeypatch.setattr(daemon, "_pending_counter_writes", {})
+
+        class _FakeTime:
+            now = 0.0
+
+            @staticmethod
+            def monotonic() -> float:
+                return _FakeTime.now
+
+        monkeypatch.setattr(daemon, "time", _FakeTime)
+        owner = _make_agent(db_conn)
+        tid = _make_task(db_conn, owner=owner, remind_interval_seconds=1800, updated_s_ago=3600)
+
+        real = daemon._advance_reminder_counters
+        attempts = {"n": 0}
+
+        def _flaky(pool_: ConnectionPool, task_id: int) -> None:
+            attempts["n"] += 1
+            if attempts["n"] == 1:
+                raise psycopg.OperationalError("db blip")
+            real(pool_, task_id)
+
+        monkeypatch.setattr(daemon, "_advance_reminder_counters", _flaky)
+
+        assert _run_reminders(pool, 3600.0) == 0
+        assert len(deliver) == 1
+
+        # Time passes beyond the dedup window, the owner updates the task
+        # (counters reset), and the task is overdue again.
+        _FakeTime.now = daemon._DELIVER_DEDUP_WINDOW_S + 1.0
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "UPDATE agent_tasks SET last_reminded_at = NULL, reminder_count = 0, "
+                "updated_at = now() - make_interval(secs => 3600) WHERE id = %s",
+                (tid,),
+            )
+        db_conn.commit()
+
+        # The stale mark is expired: a fresh reminder is delivered.
+        assert _run_reminders(pool, 3600.0) == 1
+        assert len(deliver) == 2
+
 
 class TestEscalate:
     def test_escalates_at_threshold(

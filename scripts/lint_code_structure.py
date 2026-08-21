@@ -213,6 +213,21 @@ _OVERSIZE_ALLOWED = frozenset(
         # applied-set model; splitting scatters an invariant that must hold
         # across all of them (the set matches the real schema).
         "shared/migrations.py",
+        # shared/lm/registry.py — a flat name→spec registry of every model
+        # (one entry per model, same rationale as shared/events/contract.py);
+        # crossed 800 with the deepseek-v4-flash-vision-exp registration
+        # (14f79a1db) without an exemption, and this list is the only lint
+        # enforcement (CI runs no lint-code-structure job), so every later
+        # commit failed until it was listed. Splitting a flat registry
+        # scatters the one lookup surface build_chat_model consults.
+        "shared/lm/registry.py",
+        # ava_builtins/plugins/ava_fleet/task_registry.py — the whole
+        # ava.tasks SDK surface in one cohesive module: the Task model,
+        # create/get/list/update/log, validation and the owner-notification
+        # helpers they share. Crossed 800 with the per-priority reminder
+        # defaults (Task #915); splitting scatters one API surface and forces
+        # the notification/validation helpers to be imported back.
+        "ava_builtins/plugins/ava_fleet/task_registry.py",
     }
 )
 

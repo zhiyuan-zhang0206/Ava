@@ -1,9 +1,10 @@
-"""`plugins.ava_fleet.task_registry.create` — the default reminder interval.
+"""`plugins.ava_fleet.task_registry.create` — the per-priority default reminder interval.
 
-A new task reminds its owner after 30 minutes of silence. `create()` defaults
-`remind_interval_seconds` to 1800s; an explicit value (positive, <= 24h) is honoured.
-Reminders cannot be disabled — an explicit `None` falls back to the default.
-Persisted via `ava.DB`.
+A new task reminds its owner after a silence window that scales with its
+priority: P0 30m / P1 1h / P2 2h / P3 4h. `create()` defaults
+`remind_interval_seconds` to the priority's window; an explicit value
+(positive, <= 24h) always wins. Reminders cannot be disabled — an explicit
+`None` falls back to the priority default. Persisted via `ava.DB`.
 """
 
 from __future__ import annotations
@@ -49,19 +50,54 @@ def _persisted_priority(db: psycopg.Connection, task_id: int) -> str:
     return row[0]
 
 
-def test_default_remind_interval_is_30_min() -> None:
+def test_default_remind_interval_is_none_sentinel() -> None:
+    """Not-passed and None mean the same thing: resolve against priority, so
+    the per-priority default applies at create time."""
     assert (
         inspect.signature(task_registry.create).parameters["remind_interval_seconds"].default
-        == 1800
+        is None
     )
 
 
-def test_create_defaults_to_30_min(db_conn: psycopg.Connection) -> None:
+@pytest.mark.parametrize(
+    ("priority", "expected"),
+    [("P0", 1800), ("P1", 3600), ("P2", 7200), ("P3", 14400)],
+)
+def test_create_defaults_per_priority(
+    db_conn: psycopg.Connection, priority: str, expected: int
+) -> None:
+    """No explicit interval → the priority's default window (P0 30m .. P3 4h)."""
+    agent_id = _seed_agent(db_conn)
+    original = ava._boot._agent_id
+    ava._boot._agent_id = agent_id
+    try:
+        task = task_registry.create("title", "detail", priority=priority)
+        assert task.remind_interval_seconds == expected
+        assert _persisted_remind_interval_seconds(db_conn, task.id) == expected
+        assert _persisted_priority(db_conn, task.id) == priority
+    finally:
+        ava._boot._agent_id = original
+
+
+def test_create_default_priority_is_p2_with_2h_interval(db_conn: psycopg.Connection) -> None:
     agent_id = _seed_agent(db_conn)
     original = ava._boot._agent_id
     ava._boot._agent_id = agent_id
     try:
         task = task_registry.create("title", "detail")
+        assert task.remind_interval_seconds == 7200
+        assert _persisted_remind_interval_seconds(db_conn, task.id) == 7200
+    finally:
+        ava._boot._agent_id = original
+
+
+def test_create_explicit_interval_beats_priority_default(db_conn: psycopg.Connection) -> None:
+    """An explicit interval wins over the priority's default (user override)."""
+    agent_id = _seed_agent(db_conn)
+    original = ava._boot._agent_id
+    ava._boot._agent_id = agent_id
+    try:
+        task = task_registry.create("title", "detail", priority="P3", remind_interval_seconds=1800)
         assert task.remind_interval_seconds == 1800
         assert _persisted_remind_interval_seconds(db_conn, task.id) == 1800
     finally:
@@ -82,14 +118,14 @@ def test_create_honours_explicit_value(db_conn: psycopg.Connection) -> None:
 
 def test_create_none_falls_back_to_default(db_conn: psycopg.Connection) -> None:
     """Reminders cannot be disabled: create(remind_interval_seconds=None) uses the
-    default rather than writing NULL."""
+    priority default rather than writing NULL."""
     agent_id = _seed_agent(db_conn)
     original = ava._boot._agent_id
     ava._boot._agent_id = agent_id
     try:
         task = task_registry.create("title", "detail", remind_interval_seconds=None)
-        assert task.remind_interval_seconds == 1800
-        assert _persisted_remind_interval_seconds(db_conn, task.id) == 1800
+        assert task.remind_interval_seconds == 7200  # P2 default -> 2h
+        assert _persisted_remind_interval_seconds(db_conn, task.id) == 7200
     finally:
         ava._boot._agent_id = original
 
@@ -134,9 +170,9 @@ def test_update_changes_remind_interval_seconds(db_conn: psycopg.Connection) -> 
     ava._boot._agent_id = agent_id
     try:
         task = task_registry.create("title", "detail")
-        assert task.remind_interval_seconds == 1800
-        task_registry.update(task.id, remind_interval_seconds=7200)
-        assert _persisted_remind_interval_seconds(db_conn, task.id) == 7200
+        assert task.remind_interval_seconds == 7200  # P2 default -> 2h
+        task_registry.update(task.id, remind_interval_seconds=1800)
+        assert _persisted_remind_interval_seconds(db_conn, task.id) == 1800
     finally:
         ava._boot._agent_id = original
 
@@ -150,7 +186,7 @@ def test_update_none_remind_interval_is_noop(db_conn: psycopg.Connection) -> Non
     try:
         task = task_registry.create("title", "detail")
         task_registry.update(task.id, status="in_progress", remind_interval_seconds=None)
-        assert _persisted_remind_interval_seconds(db_conn, task.id) == 1800
+        assert _persisted_remind_interval_seconds(db_conn, task.id) == 7200  # P2 default
     finally:
         ava._boot._agent_id = original
 
@@ -784,7 +820,7 @@ def test_create_and_assign_signature() -> None:
     assert params["config_overlay"].default is None
     assert params["machine"].default is None
     assert params["parent"].default is None
-    assert params["remind_interval_seconds"].default == 1800
+    assert params["remind_interval_seconds"].default is None
     assert params["priority"].default == "P2"
 
 
@@ -953,7 +989,7 @@ def test_create_and_assign_remind_interval_none(db_conn: psycopg.Connection) -> 
             task, _ = task_registry.create_and_assign(  # pyright: ignore[reportUnknownMemberType]
                 "title", "detail", remind_interval_seconds=None
             )
-        assert task.remind_interval_seconds == 1800
+        assert task.remind_interval_seconds == 7200  # P2 default -> 2h
     finally:
         ava._boot._agent_id = original
 

@@ -364,7 +364,7 @@ class DaemonSettings(EnvSettings):
     task_reminder_backoff_seconds: float = Field(
         default=3600.0,
         alias="AVA_TASK_REMINDER_BACKOFF_SECONDS",
-        description="Minimum interval (seconds) between repeated reminders for the same overdue window.",
+        description="Floor for the interval (seconds) between repeated reminders for the same overdue window: a task whose remind_interval_seconds exceeds this repeats at its own interval instead.",
         json_schema_extra={
             "restart_required": "all",
             "writable": True,

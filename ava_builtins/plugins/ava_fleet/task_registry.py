@@ -16,7 +16,7 @@ import ava._boot
 import ava.agents
 from shared.audit_events import insert_event_log
 from shared.live_announce import publish_task_created_sync, publish_task_updated_sync
-from shared.priority import validate_priority
+from shared.priority import DEFAULT_REMIND_INTERVAL_SECONDS, Priority, validate_priority
 from shared.task_notes import task_note_line
 from shared.task_reparent import resolve_reparent
 from shared.task_timestamps import render_task_timestamps
@@ -38,11 +38,12 @@ _STATUSES = frozenset({"open", "in_progress", "done", "cancelled"})
 _DEFAULT_PRIORITY = "P2"
 
 
-# A new task reminds its owner after 30 minutes of no updates. An unattended
-# in-progress task is the common failure the reminder guards against, so the
-# reminder is always on and cannot be disabled -- create(remind_interval_seconds=None)
-# falls back to this default rather than turning it off.
-_DEFAULT_REMIND_INTERVAL_SECONDS = 1800
+# A new task reminds its owner after a silence window that scales with its
+# priority (P0 30m / P1 1h / P2 2h / P3 4h — shared.priority.DEFAULT_REMIND_INTERVAL_SECONDS).
+# An unattended in-progress task is the common failure the reminder guards
+# against, so the reminder is always on and cannot be disabled —
+# create(remind_interval_seconds=None) falls back to the priority default
+# rather than turning it off; an explicit value always wins.
 
 # Reminders cannot be turned off, so the interval is capped at 24h: every task
 # gets at least one reminder a day. Enforced on every SDK write (create / update)
@@ -213,7 +214,7 @@ def create(
     description: str | None = None,
     *,
     parent: int | None = None,
-    remind_interval_seconds: int | None = _DEFAULT_REMIND_INTERVAL_SECONDS,
+    remind_interval_seconds: int | None = None,
     owner: int | None = None,
     priority: str = _DEFAULT_PRIORITY,
     brief: str | None = None,
@@ -225,7 +226,8 @@ def create(
         description: what to do and why.
         parent: parent task id, for a subtask.
         remind_interval_seconds: seconds without updates before the owner is reminded.
-            Cannot be disabled: None means the default (1800), capped at 24h.
+            Cannot be disabled: None means the priority default (P0 30m / P1 1h /
+            P2 2h / P3 4h), capped at 24h. An explicit value wins over the default.
         owner: agent to assign to; None means you. An owner other than you is
             notified.
         priority: "P0" (highest) through "P3" (lowest).
@@ -274,7 +276,7 @@ def create_and_assign(
     config_overlay: dict | None = None,
     machine: str | None = None,
     parent: int | None = None,
-    remind_interval_seconds: int | None = _DEFAULT_REMIND_INTERVAL_SECONDS,
+    remind_interval_seconds: int | None = None,
     priority: str = _DEFAULT_PRIORITY,
 ) -> tuple[Task, int]:
     """Spawn an agent and create a task assigned to it, in one call.
@@ -372,11 +374,13 @@ def _resolve_create_args(
         description = brief
     if description is None:
         raise TypeError("create() missing required argument: 'description'")
-    # Reminders cannot be turned off: None means "use the default", not "off".
-    if remind_interval_seconds is None:
-        remind_interval_seconds = _DEFAULT_REMIND_INTERVAL_SECONDS
-    _validate_remind_interval_seconds(remind_interval_seconds)
     validate_priority(priority)
+    # Reminders cannot be turned off: None means "use the priority default",
+    # not "off". The interval scales with stakes — a P0 task nags its owner
+    # after 30 minutes of silence, a P3 task only after 4 hours.
+    if remind_interval_seconds is None:
+        remind_interval_seconds = DEFAULT_REMIND_INTERVAL_SECONDS[Priority(priority)]
+    _validate_remind_interval_seconds(remind_interval_seconds)
     return description, remind_interval_seconds, priority
 
 
