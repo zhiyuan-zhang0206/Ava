@@ -23,7 +23,7 @@ An agent has only one tool—`execute_code(code: str)`—but obtains all capabil
 ### Tools & External
 - [[ava/mcps.ava.okf.md]] — MCP tool servers (determined by config; built-in chrome + servers installed via `ava mcp install` beyond core)
 - [[web.ava.okf.md]] — Web access: search + fetch (concurrent)
-- [[understand.ava.okf.md]] — Multimodal understanding primitive: understand(targets) → list[str], each target carrying prompt + path|text
+- [[understand.ava.okf.md]] — Multimodal understanding primitive: understand(targets) → list[str], each target carrying prompt + text|paths
 - [[watcher.ava.okf.md]] — Background listener: at / cron / launch (wake self = `ava.agents.send_message`)
 
 ### Self & User

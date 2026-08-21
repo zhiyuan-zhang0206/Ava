@@ -16,30 +16,29 @@ tags:
 
 ## Core API
 
-- `understand(targets: list[dict], max_concurrent=None) → list[str]` — Batch-only. Each target is a dict with `prompt` plus exactly one of `path` / `text` / `paths`. Answers come back in input order.
-  - `path`: file path (relative path resolution same as other file operations). Text is read as UTF-8; images/video/audio/PDF are processed via media path based on detected MIME (Gemini inline, with size limits).
-  - `paths`: non-empty list of file paths — every file is sent in ONE model call as separate parts, so the model can compare them (e.g. a design frame plus a page screenshot). Media files become media parts; text files ride along as text parts; any media file routes the whole call to the media model.
+- `understand(targets: list[dict], max_concurrent=None) → list[str]` — Batch-only. Each target is a dict with `prompt` plus exactly one of `text` / `paths`. Answers come back in input order.
+  - `paths`: non-empty list of file paths (relative path resolution same as other file operations) — a single file is a one-element list. Text files are read as UTF-8; images/video/audio/PDF are processed via media path based on detected MIME (Gemini inline, with size limits). Every file is sent in ONE model call as separate parts, so the model can compare them (e.g. a design frame plus a page screenshot); any media file routes the whole call to the media model.
   - `text`: material itself (literal string).
 
 There is no single-call form — one question is a one-element list:
 
 ```python
-[answer] = ava.understand([{"prompt": "summarize this", "path": "notes.md"}])
+[answer] = ava.understand([{"prompt": "summarize this", "paths": ["notes.md"]}])
 ```
 
 Targets run concurrently by default with no ceiling; pass `max_concurrent=N` to cap how many targets are in flight at once (useful under a provider rate limit). Rate limiting beyond that belongs to the provider: a 429 surfaces as `UnderstandError` rather than being retried or backed off. Same batch shape as [[web.ava.okf.md]]'s `search` / `fetch`.
 
 ## Constraints & Errors
 - `TypeError` — `targets` is not a list, or an element is not a dict.
-- `ValueError` — a target is missing `prompt`, does not carry exactly one of `path` / `text` / `paths`, or `paths` is an empty list.
+- `ValueError` — a target is missing `prompt`, does not carry exactly one of `text` / `paths`, or `paths` is an empty list.
 - `TypeError` — `targets[i]['paths']` is not a list, or an element is not a path string.
-- `FileNotFoundError` — a target's `path` does not point to an existing file.
-- `UnderstandError` — model call failed, or `path` is a binary file that cannot be read as UTF-8 and whose extension is not in supported media suffixes.
+- `FileNotFoundError` — a target's `paths` entry does not point to an existing file.
+- `UnderstandError` — model call failed, or a file in `paths` is binary, cannot be read as UTF-8, and its extension is not in supported media suffixes.
 
 Validation runs over every target before any model call, so a malformed batch fails before spending tokens. The first error from a running batch propagates.
 
 ## Key Dependencies
-- [[files.ava.okf.md]] — `path` uses the same path resolution (workspace-relative)
+- [[files.ava.okf.md]] — `paths` uses the same path resolution (workspace-relative)
 - [[shared/lm/lm.ava.okf.md]] — underlying chat model factory (text/media models come from settings)
 
 ## Notes
