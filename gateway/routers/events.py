@@ -33,6 +33,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
+import httpx
 from fastapi import APIRouter, HTTPException, Query
 
 from gateway import loki_events
@@ -180,9 +181,20 @@ def get_events(
         )
     name = event_name if event_name is not None else kind
 
-    total: int | None = None
-    if with_total:
-        total = loki_events.count_events(
+    try:
+        total: int | None = None
+        if with_total:
+            total = loki_events.count_events(
+                agent_id=agent_id,
+                categories=[category] if category is not None else None,
+                event_names=[name] if name is not None else None,
+                trace_id=trace_id.lower() if trace_id is not None else None,
+                machine=machine,
+                level=level,
+                from_=window_from,
+                to=to,
+            )
+        rows, has_more = loki_events.query_events(
             agent_id=agent_id,
             categories=[category] if category is not None else None,
             event_names=[name] if name is not None else None,
@@ -191,19 +203,19 @@ def get_events(
             level=level,
             from_=window_from,
             to=to,
+            limit=limit,
+            offset=offset,
         )
-    rows, has_more = loki_events.query_events(
-        agent_id=agent_id,
-        categories=[category] if category is not None else None,
-        event_names=[name] if name is not None else None,
-        trace_id=trace_id.lower() if trace_id is not None else None,
-        machine=machine,
-        level=level,
-        from_=window_from,
-        to=to,
-        limit=limit,
-        offset=offset,
-    )
+    except httpx.HTTPError as exc:
+        # The events backend (Loki) timed out or dropped the connection — a
+        # retriable backend failure, not a client error (task #1289: the
+        # 60s httpx timeout on dense-window queries surfaced as a bare 500).
+        # The failing query shape is recorded as a `loki_query_failed` event
+        # by loki_events before the exception reaches here.
+        raise HTTPException(
+            status_code=503,
+            detail=(f"events backend unavailable ({type(exc).__name__}); retry in a moment"),
+        ) from exc
 
     items = [
         EventRow(

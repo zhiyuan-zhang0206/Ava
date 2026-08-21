@@ -15,6 +15,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -99,6 +100,31 @@ class TestEventsApi:
         assert body["meta"]["limit"] == 100
         assert body["meta"]["offset"] == 0
         assert body["meta"]["window_from"] is not None  # 24h default echoes
+
+    def test_loki_timeout_returns_503(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A backend timeout is a retriable 503 with a hint, not a bare 500
+        (task #1289: the dense-window query hang surfaced as an unhandled
+        httpx.ReadTimeout)."""
+
+        def _boom(**kwargs: Any) -> tuple[list[dict[str, Any]], bool]:
+            raise httpx.ReadTimeout("timed out")
+
+        monkeypatch.setattr(loki_events, "query_events", _boom)
+        with TestClient(app) as client:
+            r = client.get("/api/events")
+        assert r.status_code == 503
+        assert "retry" in r.json()["detail"]
+
+    def test_loki_disconnect_returns_503(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Server-side disconnects map to the same 503."""
+
+        def _boom(**kwargs: Any) -> tuple[list[dict[str, Any]], bool]:
+            raise httpx.RemoteProtocolError("server disconnected")
+
+        monkeypatch.setattr(loki_events, "query_events", _boom)
+        with TestClient(app) as client:
+            r = client.get("/api/events")
+        assert r.status_code == 503
 
     def test_returns_newest_first_with_unified_shape(self, fake_events: _FakeEvents) -> None:
         fake_events.rows.extend([_row(), _row(event_name="llm_usage")])

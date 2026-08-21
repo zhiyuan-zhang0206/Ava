@@ -23,13 +23,16 @@ Notes:
 from __future__ import annotations
 
 import json
+import time
 from datetime import UTC, datetime, timedelta
 from hashlib import blake2b
 from typing import Any, overload
 
 import httpx
 
+from shared import telemetry
 from shared.config import settings
+from shared.log import logger
 
 # The emitter's OTLP resource is the default (service.name=unknown_service);
 # every ava.telemetry log lands in this stream family.
@@ -42,6 +45,82 @@ _LEVELS = ("debug", "info", "warning", "error", "critical")
 # exceed it when the count path is used. The list path fetches raw streams
 # so it is unaffected.
 _HTTP_TIMEOUT_S = 60.0
+
+# A query slower than this logs a structured "loki query slow" line — the
+# threshold keeps the log volume near zero (fast queries are Loki's own
+# metrics' business) while making the slow tail visible in the gateway log
+# (which the LGTM sidecar ships into the event stream). Task #1289: the
+# 2026-08-20 /api/events 500s were 60s Loki hangs this line would have caught.
+_SLOW_QUERY_LOG_S = 5.0
+
+
+def _log_loki_failure(
+    *, endpoint: str, params: dict[str, Any], duration_s: float, error: str
+) -> None:
+    """Emit a structured `loki_query_failed` event for a transport failure.
+
+    The router maps the re-raised exception to a 503; this event is the
+    durable record of *which* query shape stalled, for post-mortems when
+    Loki's own logs have already rotated away (task #1289: the incident
+    window's Loki logs were gone before anyone looked). Best-effort: an
+    emit contract violation must never mask the original transport error.
+    """
+    window_from: str | None = None
+    window_to: str | None = None
+    start_ns = params.get("start")
+    end_ns = params.get("end")
+    if isinstance(start_ns, int):
+        window_from = datetime.fromtimestamp(start_ns / 1e9, UTC).isoformat()
+    if isinstance(end_ns, int):
+        window_to = datetime.fromtimestamp(end_ns / 1e9, UTC).isoformat()
+    attributes = {
+        "endpoint": endpoint,
+        "duration_s": round(duration_s, 3),
+        "error": error,
+        "window_from": window_from,
+        "window_to": window_to,
+        "query": str(params.get("query", ""))[:500],
+    }
+    try:
+        telemetry.emit("log", "loki_query_failed", level="error", attributes=attributes)
+    except Exception:
+        logger.error("loki_query_failed emit failed", attributes=attributes)
+
+
+def _get_json(url: str, params: dict[str, Any], *, endpoint: str) -> dict[str, Any]:
+    """One Loki HTTP GET with per-call timing and failure reporting.
+
+    Every Loki call in this module funnels through here. Transport failures
+    (timeout / disconnect — httpx.TimeoutException / httpx.TransportError)
+    and non-2xx responses (httpx.HTTPStatusError) emit a `loki_query_failed`
+    event and re-raise untouched; the callers' routers map them to 503s.
+    Slow-but-successful queries log one structured line (see
+    `_SLOW_QUERY_LOG_S`).
+    """
+    started = time.perf_counter()
+    try:
+        resp = _client().get(url, params=params)
+        resp.raise_for_status()
+        payload = resp.json()
+    except (httpx.TimeoutException, httpx.TransportError, httpx.HTTPStatusError) as exc:
+        duration_s = time.perf_counter() - started
+        _log_loki_failure(
+            endpoint=endpoint,
+            params=params,
+            duration_s=duration_s,
+            error=type(exc).__name__,
+        )
+        raise
+    duration_s = time.perf_counter() - started
+    if duration_s >= _SLOW_QUERY_LOG_S:
+        logger.info(
+            "loki query slow: {endpoint} {duration_s:.1f}s {query}",
+            endpoint=endpoint,
+            duration_s=round(duration_s, 1),
+            query=str(params.get("query", ""))[:300],
+        )
+    return payload
+
 
 # One long-lived HTTP client for every Loki query — connection reuse across
 # the gateway's fan-out reads (an inspect poll or ops-monitor call issues
@@ -242,9 +321,7 @@ def query_events(
         "start": start_ns,
         "end": end_ns,
     }
-    resp = _client().get(url, params=params)
-    resp.raise_for_status()
-    payload = resp.json()
+    payload = _get_json(url, params, endpoint="query_range")
 
     raw: list[tuple[int, str]] = []
     for stream in payload.get("data", {}).get("result", []):
@@ -325,9 +402,7 @@ def count_events(
     logql = f"sum(count_over_time(({pipeline})[{duration_s}s]))"
     url = settings.observability.telemetry_loki_url.rstrip("/") + "/loki/api/v1/query"
     params = {"query": logql, "time": end.timestamp()}
-    resp = _client().get(url, params=params)
-    resp.raise_for_status()
-    payload = resp.json()
+    payload = _get_json(url, params, endpoint="query")
     result = payload.get("data", {}).get("result", [])
     if not result:
         return 0
@@ -682,9 +757,7 @@ def _query_instant(logql: str, at: datetime) -> list[dict[str, Any]]:
     """One Loki instant query; returns the result vectors (metric + value)."""
     url = settings.observability.telemetry_loki_url.rstrip("/") + "/loki/api/v1/query"
     params = {"query": logql, "time": at.timestamp()}
-    resp = _client().get(url, params=params)
-    resp.raise_for_status()
-    payload = resp.json()
+    payload = _get_json(url, params, endpoint="query")
     return payload.get("data", {}).get("result", [])
 
 
@@ -716,9 +789,7 @@ def metric_range(
         "step": str(step_s),
         "limit": "2000",
     }
-    resp = _client().get(url, params=params)
-    resp.raise_for_status()
-    payload = resp.json()
+    payload = _get_json(url, params, endpoint="query_range")
     result = payload.get("data", {}).get("result", [])
     if not result:
         return []
@@ -851,12 +922,11 @@ def query_projected_lines(
             "start": s0_ns,
             "end": e0_ns,
         }
-        resp = _client().get(
+        payload = _get_json(
             settings.observability.telemetry_loki_url.rstrip("/") + "/loki/api/v1/query_range",
-            params=params,
+            params,
+            endpoint="query_range",
         )
-        resp.raise_for_status()
-        payload = resp.json()
         rows: list[tuple[int, int | None, str]] = []
         for stream in payload.get("data", {}).get("result", []):
             aid_raw = stream.get("stream", {}).get("agent_id", "")
@@ -1016,9 +1086,7 @@ def count_events_series(
         "end": end.timestamp(),
         "step": f"{step}s",
     }
-    resp = _client().get(url, params=params)
-    resp.raise_for_status()
-    payload = resp.json()
+    payload = _get_json(url, params, endpoint="query_range")
     out: dict[str, list[tuple[int, int]]] = {"": []} if group_by is None else {}
     for series in payload.get("data", {}).get("result", []):
         k = str(series.get("metric", {}).get(group_by, "")) if group_by else ""
@@ -1067,9 +1135,7 @@ def attribute_max_series(
         "end": end.timestamp(),
         "step": f"{step}s",
     }
-    resp = _client().get(url, params=params)
-    resp.raise_for_status()
-    payload = resp.json()
+    payload = _get_json(url, params, endpoint="query_range")
     out: list[tuple[int, float]] = []
     for series in payload.get("data", {}).get("result", []):
         for ts, value in series.get("values", []):
