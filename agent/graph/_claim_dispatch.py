@@ -43,7 +43,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, cast
 
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import BaseMessage, RemoveMessage
+from langgraph.graph.message import REMOVE_ALL_MESSAGES
 from psycopg_pool import AsyncConnectionPool
 
 from agent import state as _state
@@ -64,7 +65,7 @@ from shared.config import now_timestamp, settings
 from shared.inbound import InboundKind
 from shared.live_events import Cancelled
 from shared.log import logger
-from shared.message_kwargs import AvaMsgType
+from shared.message_kwargs import AvaMsgType, read_ava_kwargs
 
 from ._claim_routing import _ROUTING_KINDS, ClaimGoto, _Routing
 
@@ -77,7 +78,9 @@ class _BatchState:
     in-place by the per-kind handlers during dispatch_batch().
     """
 
-    new_msgs: list[HumanMessage] = field(default_factory=list)
+    new_msgs: list[BaseMessage] = field(default_factory=list)
+    """Messages appended this pass — HumanMessages from the handlers plus,
+    for a fork, the `RemoveMessage` strip entries (issue #1320)."""
     next_goto: ClaimGoto = BEFORE_LLM
     compact_payload: tuple[str, str] | None = None  # (summary_text, compact_kind)
     cancelled: bool = False
@@ -417,16 +420,66 @@ async def _handle_resurrect(
     )
 
 
+# Notes the inherited history renders wrong for the new agent: each names the
+# SOURCE (its id, its personal memory store, its preloaded-skill set). The fork
+# drops the inherited copies in its full-wipe head rebuild and grafts the new
+# agent's own — exactly one of each, owned by the agent reading it (issue
+# #1320). The cluster memory index is deliberately NOT here: it is
+# cluster-wide, so the inherited copy is the same content a graft would add
+# (grafting it duplicated the index — the timezone note's reasoning applies to
+# it too).
+_STRIP_ON_FORK_TAGS: frozenset[NoteTag] = frozenset(
+    {NoteTag.AGENT_ID, NoteTag.AGENT_MEMORY, NoteTag.PRELOADED_SKILLS}
+)
+
+
+def _is_source_identity_note(m: BaseMessage) -> bool:
+    """Whether `m` is a standing note the fork must drop from the rebuild — a
+    system note whose tag names the SOURCE agent."""
+    kw = read_ava_kwargs(m)
+    return (
+        kw.get("ava_msg_type") == AvaMsgType.SYSTEM_NOTE.value
+        and kw.get("ava_note_tag") in _STRIP_ON_FORK_TAGS
+    )
+
+
+def _fork_rebuild_prefix(state: _state.AgentState) -> list[BaseMessage]:
+    """The full-wipe rebuild the fork prepends to its claim update: the
+    inherited history re-listed UNCHANGED except that the source-identity
+    notes are dropped.
+
+    Mid-history `RemoveMessage(id=...)` deletion is forbidden by the
+    append-only ruling (task #1256, `agent/messages_guard.py`); the full wipe
+    is the one sanctioned deletion shape, and the guard's rebuild check only
+    demands that survivors keep content + relative order — dropping the
+    source notes and splicing the grafted own-copies afterwards satisfies it.
+    A fork is a brand-new agent whose model has seen nothing yet, so the head
+    rewrite breaks no "model-visible means logged" invariant.
+    """
+    return [
+        RemoveMessage(id=REMOVE_ALL_MESSAGES),
+        *[m for m in state.messages if not _is_source_identity_note(m)],
+    ]
+
+
 async def _handle_fork(
     agent_id: int,
     item: ClaimedInbound,
     st: _BatchState,
+    state: _state.AgentState,
 ) -> None:
-    """FORK: append identity marker + graft corrected notes.
+    """FORK: rebuild the head (drop source-identity notes), append marker, graft own notes.
 
     Fork copied the source agent's full history; without a marker the model
-    keeps the source's identity.  State the new identity explicitly.
+    keeps the source's identity.  State the new identity explicitly. Notes the
+    inherited history renders wrong for the new agent are dropped from the
+    rebuild and re-grafted with the new agent's content via `fork_notes`.
+
+    The rebuild is prepended (not appended) to `st.new_msgs` so any chat /
+    marker the same batch dispatched stays a tail append AFTER the rebuild —
+    a wipe must never swallow a message another handler already appended.
     """
+    st.new_msgs[0:0] = _fork_rebuild_prefix(state)
     st.new_msgs.append(
         system_note_message(
             content=(
@@ -480,6 +533,6 @@ async def dispatch_batch(
         elif kind == InboundKind.RESURRECT:
             await _handle_resurrect(item, st)
         elif kind == InboundKind.FORK:
-            await _handle_fork(agent_id, item, st)
+            await _handle_fork(agent_id, item, st, state)
         else:
             raise ValueError(f"Unknown inbound kind: {kind!r} (id={item.id})")

@@ -14,7 +14,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import cast
 
+from langchain_core.messages import AnyMessage, RemoveMessage
 from langgraph.types import Command
 
 from agent import state as _state
@@ -141,10 +143,14 @@ async def decide(
             # st.new_msgs — it survives the chat-deferral filter above (which
             # keeps only SYSTEM_NOTE-typed messages) and rides the fresh tail.
             st.new_msgs.append(history_dump_note(dump_path))
+        # The fork strip entries are channel operations (RemoveMessage),
+        # not content the compact summary may carry — and build_compact_transition
+        # types extra_msgs as AnyMessage, which excludes them.
+        extra_msgs = [cast(AnyMessage, m) for m in st.new_msgs if not isinstance(m, RemoveMessage)]
         transition = build_compact_transition(
             summary_text,
             resume=st.next_goto,
-            extra_msgs=list(st.new_msgs),  # pyright: ignore[reportUnknownArgumentType]
+            extra_msgs=extra_msgs,
             summary_kwargs={
                 "additional_kwargs": {
                     "ava_msg_type": compact_kind,
