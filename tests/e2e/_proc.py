@@ -77,7 +77,7 @@ def managed_proc(
     stop_signal: int = signal.SIGTERM,
     stop_timeout: float = 10.0,
     log_path: str | None = None,
-) -> Generator[subprocess.Popen]:
+) -> Generator[subprocess.Popen[str]]:
     """Start subprocess + clean teardown kill.
 
     Uses `start_new_session=True` to make the child a process group leader;

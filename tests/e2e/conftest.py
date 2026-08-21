@@ -51,7 +51,7 @@ from shared.agents import AgentStatus
 from shared.config import settings
 from tests.e2e._env import E2EEnv
 from tests.e2e._ports import FRONTEND_PORT, FRONTEND_URL, GATEWAY_PORT, GATEWAY_URL
-from tests.e2e._proc import managed_proc, wait_for_port
+from tests.e2e._proc import managed_proc, proc_log_tail, wait_for_port
 
 # ---- module-level overrides (run after top-level conftest) ---------------------
 
@@ -568,13 +568,24 @@ def restarter_proc(gateway_proc: None) -> Iterator[None]:
         restarter_health_port = s.getsockname()[1]
     env["AVA_RESTARTER_HEALTH_PORT"] = str(restarter_health_port)
     log_path = _LOG_DIR / f"restarter-{_E2E_SUFFIX}.log"
-    with managed_proc(cmd, env=env, label="restarter", log_path=str(log_path)):
+    with managed_proc(cmd, env=env, label="restarter", log_path=str(log_path)) as proc:
         # Wait for the daemon's healthz server to bind instead of a fixed sleep:
         # faster, and it catches a daemon that failed to come up (a blind sleep
         # would not). The restart request is a persistent DB row the dispatch
         # loop self-heals on its next poll, so proceeding the moment healthz is
         # up never loses an event.
-        wait_for_port("127.0.0.1", restarter_health_port, timeout=30.0, label="restarter")
+        try:
+            wait_for_port("127.0.0.1", restarter_health_port, timeout=30.0, label="restarter")
+        except RuntimeError as e:
+            # A daemon that dies during startup (bad code, env, port conflict)
+            # otherwise surfaces as a bare connect timeout — exactly how a
+            # lattice crash was misread as an environment flake. Attach the
+            # daemon's own log tail so the cause is in the report.
+            code = proc.poll()
+            state = f"exited with code {code}" if code is not None else "still running"
+            raise RuntimeError(
+                f"{e}; restarter daemon {state}; log tail:\n{proc_log_tail(str(log_path))}"
+            ) from e
         yield
 
 
