@@ -43,6 +43,7 @@ from typing import Any
 from psycopg_pool import ConnectionPool
 
 from shared.cluster import session_name
+from shared.config import settings
 from shared.session_backend import get_shell_backend
 from shared.session_env import forward_env_dict
 
@@ -214,6 +215,17 @@ class ScheduleManager:
         # submits it once the login shell is ready.
         env = forward_env_dict()
         env["AVA_SCHEDULE_ID"] = str(schedule_id)
+        # The runner's cron math is timezone-DEFINED: it must fire on the
+        # CLUSTER's clock, not on whatever ambient env the session happens to
+        # carry. forward_env_dict deliberately excludes cluster-scope keys (a
+        # child is expected to re-source .env at boot), but a unit .env that
+        # misses AVA_TIMEZONE silently left the runner on the field default
+        # America/Los_Angeles — 2026-08-21: schedule #3 fired at PT midnight
+        # instead of Shanghai midnight after the 08-12 timezone ruling. Pin the
+        # gateway's own resolved timezone into the spawn env so the fire time is
+        # deterministic; dotenv_boot's authority pass still lets a declared .env
+        # value override it (and never drops it — shared/dotenv_boot._force_also).
+        env["AVA_TIMEZONE"] = settings.general.timezone
         # `cd` first: the login shell's own profile can move the cwd the
         # daemon forked with (macOS path_helper rebuilds PATH; a profile `cd`
         # would strand the relative runner path). The `; exit $?` tail makes

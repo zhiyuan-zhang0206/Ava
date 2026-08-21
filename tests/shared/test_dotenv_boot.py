@@ -6,6 +6,8 @@ anchored, i.e. safe to load the host .env's prod database URL)."""
 from __future__ import annotations
 
 import os
+import subprocess
+import sys
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -333,6 +335,50 @@ def test_enforce_drops_undeclared_identity_key(
     assert "AVA_MACHINE_SERVE_AGENT_RUNNER" not in os.environ
     assert "AVA_MACHINE_NAME" not in os.environ
     assert "AVA_MEMORY_REMOTE" not in os.environ
+
+
+def test_enforce_keeps_timezone_supplied_by_env_alone(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """An inherited AVA_TIMEZONE the unit .env does NOT declare survives the
+    authority pass — the gateway-hosted schedule runner receives the cluster
+    timezone from its spawn env, and dropping it left the runner on the
+    America/Los_Angeles field default (2026-08-21: schedule #3 fired at PT
+    midnight instead of Shanghai midnight after the 08-12 ruling). The gateway
+    is the cluster's timezone authority; a pure agent-runner re-injects the
+    authoritative value via /api/bootstrap at Settings build regardless."""
+    monkeypatch.setitem(os.environ, "AVA_TIMEZONE", "Asia/Shanghai")
+    _point_env_at(monkeypatch, tmp_path / "no-timezone.env", tmp_path)
+    dotenv_boot._enforce_cluster_env_authority()
+    assert os.environ["AVA_TIMEZONE"] == "Asia/Shanghai"
+
+
+def test_spawned_child_reads_forwarded_timezone_without_env_key(
+    tmp_path: Path,
+) -> None:
+    """The 2026-08-21 incident chain, end to end: a schedule-runner child
+    spawned with AVA_TIMEZONE in its env resolves settings.general.timezone to
+    that value even when its unit .env does not declare the key. Before the
+    never-drop exemption the authority pass popped the forwarded value and the
+    America/Los_Angeles field default won — schedule #3 fired at PT midnight
+    instead of Shanghai midnight."""
+    child_env = dict(os.environ)
+    child_env["AVA_HOME"] = str(tmp_path)  # a unit .env with no AVA_TIMEZONE
+    child_env["AVA_TIMEZONE"] = "Asia/Shanghai"
+    out = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from shared.config import settings; print(settings.general.timezone)",
+        ],
+        env=child_env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.strip() == "Asia/Shanghai"
 
 
 def test_enforce_keeps_gateway_url_supplied_by_env_alone(

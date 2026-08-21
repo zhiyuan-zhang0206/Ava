@@ -10,7 +10,8 @@ from pathlib import Path
 from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import Field, field_validator
+from loguru import logger
+from pydantic import Field, field_validator, model_validator
 
 from shared.config._base import EnvSettings
 
@@ -63,6 +64,32 @@ class GeneralSettings(EnvSettings):
                     f"(e.g. America/Los_Angeles, Asia/Shanghai, UTC)"
                 ) from exc
         return v
+
+    @model_validator(mode="after")
+    def _warn_when_timezone_unset(self) -> GeneralSettings:
+        """A silent America/Los_Angeles default is this cluster's worst failure mode.
+
+        The field default only applies when AVA_TIMEZONE is absent from both the
+        process env and the unit .env. On a cluster pinned to another zone
+        (2026-08-12 ruling: Asia/Shanghai) that fallback fires cron schedules at
+        PT midnight instead of the cluster's midnight — schedule #3 did exactly
+        that on 2026-08-21 while its .env lacked the key. The default is kept
+        for explicit-PT installs, but a process that never received a value must
+        not drift silently: name the missing key and the consequence."""
+        if "timezone" not in self.model_fields_set:
+            # loguru directly (not shared.log): this fires during the Settings
+            # singleton build, before any process has installed the stdlib ->
+            # loguru bridge, and loguru's default stderr sink keeps the warning
+            # visible even then.
+            logger.warning(
+                "AVA_TIMEZONE is not set (env or unit .env) — "
+                "settings.general.timezone falls back to the field default "
+                "America/Los_Angeles. A schedule runner with this default fires "
+                "cron jobs at PT midnight instead of the cluster's configured "
+                "midnight (2026-08-21 incident, schedule #3). Set AVA_TIMEZONE "
+                "in the cluster .env."
+            )
+        return self
 
     message_timestamps: bool = Field(
         default=True,

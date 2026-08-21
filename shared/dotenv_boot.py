@@ -396,12 +396,23 @@ def _enforce_cluster_env_authority() -> None:
     # - AVA_CLUSTER_SECRET: the gateway-auth credential a not-yet-enrolled
     #   runner (or a test subprocess) supplies from env alone before its first
     #   fetch — dropping it would silently un-configure the fetch.
+    # AVA_TIMEZONE joins the never-drop family for the same reason as the
+    # gateway URL series: a gateway-hosted child (the schedule runner) receives
+    # it from the gateway's own spawn env, and the gateway IS the cluster's
+    # timezone authority (it resolved the value from this same .env or its own
+    # env at boot). Dropping the undeclared key left the runner on the field
+    # default America/Los_Angeles — silently, since the 2026-08-12 cluster
+    # ruling pins Asia/Shanghai — and schedule #3 fired at PT midnight
+    # (2026-08-21). A pure agent-runner is unaffected: the gateway's
+    # /api/bootstrap fetch re-injects the authoritative value at Settings build
+    # regardless of what its env carried.
     _force_also = {
         "AVA_CLUSTER_SECRET",
         "AVA_GATEWAY_URL",
         "AVA_GATEWAY_PORT",
         "AVA_GATEWAY_HEALTH_URL",
         "AVA_FRONTEND_HEALTHCHECK_URL",
+        "AVA_TIMEZONE",
     } | set(health_port_env_aliases().values())
     file_vals = {**dotenv_values(AVA_ENV_PATH), **dotenv_values(AVA_MIRROR_ENV_PATH)}
     role = "gateway" if _is_gateway_process() else "agent"
