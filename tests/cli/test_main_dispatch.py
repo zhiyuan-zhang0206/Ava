@@ -27,6 +27,11 @@ _HANDLERS: tuple[tuple[list[str], str], ...] = (
     (["firewall", "sync"], "_h_firewall_sync"),
     (["cluster", "status"], "_h_cluster_status"),
     (["cluster", "restart"], "_h_cluster_restart"),
+    (["cluster", "ensure-db-role"], "_h_cluster_ensure_db_role"),
+    # The pre-#217 name stays as an alias — both spellings route to the same
+    # handler (issue #217: the verb provisions the ava_runner POSTGRES role,
+    # not a machine capability).
+    (["cluster", "ensure-runner-role"], "_h_cluster_ensure_db_role"),
     (["plugins", "update"], "_h_plugins_update"),
     (["agents", "ls"], "_h_agents_ls"),
     (["agents", "cancel", "1"], "_h_agents_cancel"),

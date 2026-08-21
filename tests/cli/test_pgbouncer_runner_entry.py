@@ -2,7 +2,7 @@
 
 The pooler's userlist carries `ava_runner` with its own password exactly when
 the cluster has a runner credential — a legacy cluster keeps a byte-identical
-userlist until `ava cluster ensure-runner-role` runs.
+userlist until `ava cluster ensure-db-role` runs.
 """
 
 from __future__ import annotations

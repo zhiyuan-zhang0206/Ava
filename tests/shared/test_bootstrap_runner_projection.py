@@ -73,7 +73,7 @@ def test_runner_projection_without_credential_fails_loud(
     """A runner request on a cluster that never provisioned the role gets the
     operator fix, not a URL that would fail at first connect."""
     _write_gateway_env(tmp_path, runner_pw=None)
-    with pytest.raises(ValueError, match="ensure-runner-role"):
+    with pytest.raises(ValueError, match="ensure-db-role"):
         _projected(monkeypatch, tmp_path)
 
 

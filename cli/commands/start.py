@@ -455,7 +455,7 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
     # than on every start. Gateway-only: the admin credential lives in the
     # gateway's .env, and a runner has no business touching roles.
     if applied and "gateway" in roles:
-        from cli.commands.ensure_runner_role import refresh_runner_grants_after_migration
+        from cli.commands.ensure_db_role import refresh_runner_grants_after_migration
 
         refresh_runner_grants_after_migration()
 

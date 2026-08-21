@@ -1,4 +1,4 @@
-"""`ava cluster ensure-runner-role` — provision the ava_runner role on a live cluster.
+"""`ava cluster ensure-db-role` — provision the `ava_runner` Postgres role on a live cluster.
 
 The one-shot counterpart of install-time provisioning (Task #1236): a cluster
 born before the runner-role design gets the SAME idempotent SQL — the
@@ -20,8 +20,8 @@ import sys
 from dotenv import dotenv_values
 
 
-def cmd_ensure_runner_role() -> int:
-    """Ensure the ava_runner role + grants + credential on this cluster.
+def cmd_ensure_db_role() -> int:
+    """Ensure the `ava_runner` Postgres role + grants + credential on this cluster.
 
     Returns 0 on success; 1 when the home is not a gateway home, the registry
     record is missing, or Postgres is not reachable (the role lives in pg, so a
@@ -115,7 +115,7 @@ def refresh_runner_grants_after_migration() -> None:
     — otherwise a pure agent-runner, which dials as `ava_runner`, sees
     `permission denied` on the new table for the rest of the cluster's life.
 
-    Deliberately narrower than `cmd_ensure_runner_role`, which is the operator
+    Deliberately narrower than `cmd_ensure_db_role`, which is the operator
     door and may CREATE the role, mint a password and rewrite the pooler
     userlist. This is a start-path step, so it only ever re-affirms what a
     cluster already adopted, and quietly does nothing otherwise:
@@ -124,7 +124,7 @@ def refresh_runner_grants_after_migration() -> None:
       credential and no business touching roles;
     - no `AVA_RUNNER_DB_PASSWORD` — the cluster predates the runner-role cutover
       and never provisioned one. Minting it here would silently adopt the whole
-      role on somebody's next start; `ava cluster ensure-runner-role` is the
+      role on somebody's next start; `ava cluster ensure-db-role` is the
       deliberate door for that.
 
     Reports and continues on failure. Being behind on grants is recoverable and
@@ -156,7 +156,7 @@ def refresh_runner_grants_after_migration() -> None:
     except Exception as exc:  # see the docstring: report, never abort the start
         print(
             f"  ! could not re-affirm {cl.RUNNER_ROLE} grants after the migration "
-            f"({exc}); run `ava cluster ensure-runner-role` — until then this "
+            f"({exc}); run `ava cluster ensure-db-role` — until then this "
             "cluster's agent-runners cannot read tables the migration added",
             file=sys.stderr,
         )

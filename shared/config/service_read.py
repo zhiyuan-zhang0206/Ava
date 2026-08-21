@@ -256,7 +256,7 @@ def bootstrap_config_values(role: str | None = None) -> dict[str, str]:
         if not runner_password:
             raise ValueError(
                 "AVA_RUNNER_DB_PASSWORD is not set in the gateway's .env — run "
-                "`ava cluster ensure-runner-role` on the gateway first, then retry."
+                "`ava cluster ensure-db-role` on the gateway first, then retry."
             )
         db_url = out.get("AVA_DB_URL")
         if not db_url:

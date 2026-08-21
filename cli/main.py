@@ -41,7 +41,7 @@ from cli.parsers.agents import (
 from cli.parsers.cluster import (
     _h_cluster_destroy,
     _h_cluster_down,
-    _h_cluster_ensure_runner_role,
+    _h_cluster_ensure_db_role,
     _h_cluster_health_probe,
     _h_cluster_health_probe_register,
     _h_cluster_health_probe_unregister,
@@ -130,7 +130,7 @@ __all__ = [
     "_h_agents_terminate",
     "_h_cluster_destroy",
     "_h_cluster_down",
-    "_h_cluster_ensure_runner_role",
+    "_h_cluster_ensure_db_role",
     "_h_cluster_health_probe",
     "_h_cluster_health_probe_register",
     "_h_cluster_health_probe_unregister",
@@ -279,7 +279,7 @@ _LITE_VERBS = frozenset(
 # subcommands are absent too.
 _ANCHORED_HOME_VERBS = frozenset({"stop", "restart", "converge"})
 _ANCHORED_HOME_CLUSTER_SUBVERBS = frozenset(
-    {"update", "restart", "rollback", "recover", "ensure-runner-role"}
+    {"update", "restart", "rollback", "recover", "ensure-db-role", "ensure-runner-role"}
 )
 
 
