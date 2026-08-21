@@ -185,3 +185,153 @@ def test_normalize_when_iso_no_tz_raises() -> None:
 def test_normalize_when_bad_type_raises() -> None:
     with pytest.raises(TypeError, match="when must be"):
         normalize_when(42)  # type: ignore[arg-type]
+
+
+# -- wall-clock stepping (issue #182) -----------------------------------------
+
+
+class _FakeWall:
+    """A virtual wall clock whose `sleep` advances by the requested delay PLUS a
+    per-sleep correction — the issue #182 mechanism (laptop resume / NTP steps
+    the wall clock while a watcher sleeps, so waking up does not mean the clock
+    reached the target). Corrections are consumed one per sleep call."""
+
+    def __init__(self, start: dt.datetime, corrections: list[float]) -> None:
+        self.t = start
+        self.corrections = list(corrections)
+        self.sleeps: list[float] = []
+
+    def now(self) -> dt.datetime:
+        return self.t
+
+    def sleep(self, secs: float) -> None:
+        self.sleeps.append(secs)
+        self.t += dt.timedelta(seconds=secs)
+        if self.corrections:
+            self.t += dt.timedelta(seconds=self.corrections.pop(0))
+        if len(self.sleeps) > 500:
+            raise RuntimeError("watcher loop did not converge on the fake clock")
+
+
+class _FakeDateTime(dt.datetime):
+    """Fake `datetime.datetime`: `now` reads the active fake wall clock (set per
+    test). A subclass so croniter's issubclass check on its ret_type passes."""
+
+    _wall: "_FakeWall | None" = None
+
+    @staticmethod
+    def now(_tz=None) -> dt.datetime:  # pyright: ignore[reportIncompatibleMethodOverride]
+        assert _FakeDateTime._wall is not None
+        return _FakeDateTime._wall.now()
+
+    @classmethod
+    def fromisoformat(cls, value: str) -> dt.datetime:
+        return dt.datetime.fromisoformat(value)
+
+
+class _FakeDT:
+    """Mirrors the `datetime` module surface the generated scripts use."""
+
+    UTC = dt.UTC
+    timedelta = dt.timedelta
+    datetime = _FakeDateTime
+
+
+def _exec_watcher(
+    script: str,
+    wall: _FakeWall,
+    monkeypatch: pytest.MonkeyPatch,
+) -> list[tuple[object, object]]:
+    """Execute a generated watcher script against the fake wall clock; return
+    the (args, kwargs) of every `_wake` call.
+
+    The generated scripts import `datetime` / `time` at the top; `datetime.datetime`
+    is an immutable C type, so instead of patching it we substitute the two imports
+    with fakes before exec — the template itself stays untouched. `_wake`'s delivery
+    is stubbed through ava._gateway_client."""
+    from ava import _boot, _gateway_client
+
+    script = script.replace("import datetime as _dt\n", "_dt = _FakeDT\n").replace(
+        "import time as _time\n", "_time = _fake_time\n"
+    )
+    fake_time = type("_FakeTime", (), {"sleep": staticmethod(wall.sleep)})()
+    _FakeDateTime._wall = wall
+
+    sent: list[tuple[object, object]] = []
+    monkeypatch.setattr(_boot, "agent_id", lambda: 3115)
+    monkeypatch.setattr(
+        _gateway_client,
+        "send_message",
+        lambda *a, **k: sent.append((a, k)),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    )
+    monkeypatch.setenv("AVA_WATCHER_SESSION_ID", "77")
+    exec(script, {"__name__": "__watcher__", "_FakeDT": _FakeDT, "_fake_time": fake_time})
+    return sent
+
+
+def test_cron_clock_step_backwards_never_fires_a_boundary_twice(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The issue #182 scenario: every sleep lands the wall clock BACK before the
+    boundary (accumulated ~1.5-3s corrections), and after a fire the clock steps
+    back across the fired boundary. The watcher must fire each boundary exactly
+    once — 3 fires for a */2 watcher with a 6-minute end_time, never an extra
+    early fire and never a duplicate."""
+    wall = _FakeWall(
+        dt.datetime(2026, 8, 20, 23, 57, 58, tzinfo=dt.UTC),
+        corrections=[-4.0, -5.0],
+    )
+    script = build_cron_script(
+        expr="*/2 * * * *",
+        message="tick",
+        timezone="UTC",
+        end_time_iso="2026-08-20T16:02:00-08:00",  # 00:02:00 UTC
+    )
+    sent = _exec_watcher(script, wall, monkeypatch)
+
+    assert len(sent) == 3, f"expected exactly 3 boundary fires, got {len(sent)}"
+    # Fires happened at the boundary instants — never before them.
+    boundary_times = [
+        dt.datetime(2026, 8, 20, 23, 58, 0, tzinfo=dt.UTC),
+        dt.datetime(2026, 8, 21, 0, 0, 0, tzinfo=dt.UTC),
+        dt.datetime(2026, 8, 21, 0, 2, 0, tzinfo=dt.UTC),
+    ]
+    for (_args, _kwargs), boundary in zip(sent, boundary_times, strict=True):
+        assert wall.t >= boundary, f"fired before the boundary ({wall.t} < {boundary})"
+
+
+def test_at_clock_step_backwards_does_not_fire_early(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An `at` watcher whose sleep lands the clock back before `when` (the 2.9s-early
+    fire from the issue) must keep waiting and fire at/after `when`, exactly once."""
+    when = dt.datetime(2026, 8, 20, 16, 0, 12, 330000, tzinfo=dt.UTC)
+    wall = _FakeWall(
+        dt.datetime(2026, 8, 20, 16, 0, 9, 420000, tzinfo=dt.UTC),  # 2.91s before when
+        corrections=[-4.0],
+    )
+    script = build_at_script(when_iso=when.isoformat(), message="wake")
+    sent = _exec_watcher(script, wall, monkeypatch)
+
+    assert len(sent) == 1
+    assert wall.t >= when, f"fired before `when` ({wall.t} < {when})"
+
+
+def test_cron_clock_step_forward_still_fires_each_boundary_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Clock stepping FORWARD (waking past the boundary) must not add or drop
+    fires: each boundary fires once, late by the step but never twice."""
+    wall = _FakeWall(
+        dt.datetime(2026, 8, 20, 23, 57, 58, tzinfo=dt.UTC),
+        corrections=[+3.0],
+    )
+    script = build_cron_script(
+        expr="*/2 * * * *",
+        message="tick",
+        timezone="UTC",
+        end_time_iso="2026-08-20T16:02:00-08:00",  # 00:02:00 UTC
+    )
+    sent = _exec_watcher(script, wall, monkeypatch)
+
+    assert len(sent) == 3, f"expected exactly 3 boundary fires, got {len(sent)}"
