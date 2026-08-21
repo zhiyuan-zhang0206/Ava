@@ -15,7 +15,7 @@ tags:
 
 **Passive Memory Recall** is a mechanism in the agent graph's `claim` stage: when new inbound messages wake the agent, the system automatically performs a semantic search over the last 6 dialogue messages, retrieves the top-100 candidates from the shared memory pool, has a small filter model keep the relevant ones, and injects at most 3 as system annotations into the agent's context.
 
-The agent **does not need to actively call `ava.memory.search()`**—relevant memories surface automatically.
+The agent **does not need to actively call `ava.memory.search()`**—relevant memories surface automatically. Each hit presents path + frontmatter description — two of the three fields `ava.memory.search` returns; recall deliberately omits tags (the injected note is a pointer, not a tag list). Description is empty when absent, never synthesized from title/body.
 
 ## Difference from Memory Injection
 

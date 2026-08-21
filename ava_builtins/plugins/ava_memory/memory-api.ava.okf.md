@@ -26,7 +26,7 @@ Two types of memory, each serving different audiences:
 ## Core API
 
 - `PATH: PosixPath` — shared memory pool root directory `~/.ava/memory`
-- `search(query, k=5) → list[tuple[Path, str]]` — semantic search, returns a list of `(absolute path, frontmatter description)` tuples for the most relevant notes
+- `search(query, k=5) → list[tuple[Path, str, list[str]]]` — semantic search, returns `(absolute path, frontmatter description, tags)` tuples for the most relevant notes
 - `IndexerUnavailable` — exception when the indexer service is unavailable
 
 ## Note Format

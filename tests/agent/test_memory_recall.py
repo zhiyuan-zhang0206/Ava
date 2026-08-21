@@ -1,10 +1,9 @@
 """Passive memory recall rendering (`agent/graph/_memory_recall.py`).
 
-Recall must present exactly the fields `ava.memory.search` returns: the
-pool-relative path plus the note's frontmatter `description` (empty string when
-the note has none). It must NOT read the note to synthesize a summary from the
-title or a body line, and it must not truncate -- so the injected note is a
-faithful mirror of what a manual `ava.memory.search` call would surface.
+Recall presents the pool-relative path plus the note's frontmatter `description`
+-- two of the three fields `ava.memory.search` returns. It deliberately omits
+tags because the injected note is a pointer, not a tag list. The description is
+empty when absent, never synthesized from title/body, and is not truncated.
 """
 
 from pathlib import Path
