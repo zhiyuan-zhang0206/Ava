@@ -8,8 +8,12 @@ server:
   http_listen_port: 3100
   # Querier-to-frontend result messages exceed the gRPC default 4MiB on
   # 10-minute raw-line queries (~5k rows) and drop the client connection
-  # (RemoteProtocolError); raise the server-side recv cap to 100MiB.
+  # (RemoteProtocolError). Both directions need the cap raised: recv bounds
+  # what the server accepts from the querier stage, send bounds what it
+  # returns to the client — the default 4MiB send cap truncates the same
+  # large result sets the recv raise was for (issue #129).
   grpc_server_max_recv_msg_size: 104857600
+  grpc_server_max_send_msg_size: 104857600
 
 # No phone-home: this config ships as the open-source reference deployment;
 # downstream users must not inherit vendor telemetry silently.
