@@ -37,143 +37,93 @@ with no escape hell.
 
 ## Running
 
-A **cluster** = one logical deployment; **its identity IS its home path** —
-there is no cluster name (display label = home basename, computed on the fly).
-Every cluster — including the prod default home `~/.ava` — owns its OWN
-Postgres + Redis instance (under its `$AVA_HOME`, on a per-cluster pg/redis port
-in its host-port block) **plus a PgBouncer pooler** (default on — `AVA_DB_URL`
-points at it; migrations/pg_dump dial the direct URL), so two co-located
-clusters share no data plane and cannot cross-talk: isolation is
-home-directory isolation, not an identifier kept correct inside one shared
-instance. A cluster also owns one outward gateway and
-a contiguous host-port block.
-The rationale (and the remaining slice 3 — bundling the pg/redis binaries) is in
+A **cluster** = one logical deployment; **its identity IS its home path** — no
+cluster name (display label = home basename). A **unit** = one install under its
+own `$AVA_HOME`, carrying a capability set: `gateway` (owns Postgres/Redis + the
+HTTP gateway) and/or `agent-runner` (agents + the ops server); a single box
+carries both (home `~/.ava`). Every cluster owns its OWN Postgres + Redis
+instance under `$AVA_HOME` (per-cluster ports in its host-port block) **plus a
+PgBouncer pooler** (default on — `AVA_DB_URL` points at it; migrations/pg_dump
+dial the direct URL); isolation is home-directory isolation, so co-located
+clusters share no data plane. Postgres
+and Redis run as native processes (no Docker); `gateway` is POSIX-only, so a
+Windows unit carries `agent-runner` only
+([setup](conventions/windows-setup.md)). Rationale + the remaining slice:
 [`future/infra/embedded-per-cluster-data-plane.md`](future/infra/embedded-per-cluster-data-plane.md).
-A **unit** = one install under its own `$AVA_HOME`. A unit carries a SET of
-capabilities (`machine_role()` returns a frozenset): `gateway` (owns Postgres/
-Redis + the HTTP gateway) and/or `agent-runner` (runs agents + the ops server). A
-**single box carries both** (`gateway,agent-runner`, home `~/.ava`) — owns the
-data plane and runs agents. Split deployments give each capability its own
-machine (a gateway-only `~/.ava_gateway` + a runner-only `~/.ava`).
-`install.sh --role gateway,agent-runner|gateway|agent-runner` scaffolds a unit.
 
-Postgres and Redis run as native processes (no Docker — the pg/redis binaries come
-from brew on macOS / apt on Linux, but the data plane is driven directly via
-`pg_ctl` + `redis-server`, not `brew services`/launchd/systemd). No native Windows
-redis exists to drive, so `gateway` is POSIX-only and a **Windows unit carries
-`agent-runner` only** ([setup](conventions/windows-setup.md)). Every cluster
-brings up its own pair under `$AVA_HOME` (`cli/commands/_cluster_instance.py`:
-`initdb` into `$AVA_HOME/pg` — template-cached so a new cluster / a test spins up by
-directory copy — plus `redis-server` with a data dir under `$AVA_HOME/redis`, both
-on the cluster's own pg/redis port, `requirepass`/scram = the cluster secret).
-`ava start` ensures this cluster's instance is up (skip-if-running) and `ava stop`
-tears it down (it is private, so it stops even on an internal restart; `ava cluster update`
-uses `--keep-infra` to leave it running for the migrate step) — there is no separate
-infra verb. Each cluster's database and the Postgres role that owns it share one
-identifier, carried by the cluster's `.env` connection URLs **as data** (a fresh
-birth writes the fixed `ava`; prod stays on its historical `ava_main` until an
-ops rename edits the URLs — nothing re-derives identifiers from a name); the role
-is `NOSUPERUSER` owning only its own database. Role + database are provisioned by
-that instance's own `initdb` superuser (the OS user) over its private
-loopback-`trust` unix socket — no shared bootstrap superuser reaches across
-clusters.
-The data-plane network posture is uniform — the default is multi-machine, and a
-single box is just the special case where the reachable address is loopback (no
-single-vs-multi branch). **Auth follows the secret**: with a secret set, each
-cluster connects to Postgres as its own role and to redis as its own ACL user
-(the identifier its URLs carry), authenticating with `AVA_CLUSTER_SECRET`; the
-gateway API + /ops require it as a bearer. An EMPTY secret (single-box default —
-off is fully off) serves everything unauthenticated: gateway API and /ops without
-auth, pg_hba local+loopback `trust` (no scram lines), redis without requirepass,
-every surface loopback-only. The redis instance is single-tenant: its `requirepass` IS the
-cluster secret — no separate box-level admin secret. With a secret set,
-**pg/redis always bind loopback + this host's reachable address** (`AVA_MACHINE_HOST`,
-default `localhost`), de-duplicated — never all interfaces, so exposure is limited
-to networks that can route to the chosen address. A single box is reachable only at localhost, so the bind
-collapses to loopback alone (zero-config); a split deployment sets each node's real
-private-network IP, which is appended, plus the `scram-sha-256` `AVA_TRUSTED_CIDRS`
-pg_hba ranges. So a split runner needs reachability *and* the secret. `ava start`
-is a consumer of the data plane: it only ensures its instance is up (skip-if-running),
-never reconfigures it — with one deliberate exception (task #1288): a running
-pgbouncer that is missing its reachable-address listener (a silently degraded double
-bind — pgbouncer logs a WARNING and keeps running when one `listen_addr` entry fails
-to bind) is RESTARTED, because a SIGHUP reload never retries a `listen_addr` that
-failed to bind at startup.
+**Auth follows the secret.** With a secret set, each cluster connects to
+Postgres as its own role and to redis as its own ACL user (the identifiers its
+URLs carry, as data — never derived from a name), authenticating with
+`AVA_CLUSTER_SECRET`; the gateway API + /ops require it as a bearer, and
+pg/redis bind loopback + this host's reachable address only. An EMPTY secret
+(single-box default — off is fully off) serves everything unauthenticated,
+loopback-only.
 
 | Path | Role |
 |---|---|
 | `$AVA_HOME/source/` (default `~/.ava/source/`) | **prod** — cwd of the long-running service sessions; always the default home's cluster (its own pg 5433 / redis 6380 + prod service ports) |
-| `~/Ava/` | **dev clone** — worktree dev under `.worktrees/<task>/` (branch from `main`, PR into `main`) (manual / agent-created) or `.claude/worktrees/<task>/` (Claude Code's native worktree tool); each worktree gets its own cluster via `scripts/install.sh --worktree` (home `~/.ava-<worktree-dir>` by default), isolated db/redis/ports/sessions |
+| `~/Ava/` (this checkout) | **dev clone** — worktree dev under `.worktrees/<task>/` (branch from `main`, PR into `main`) (manual / agent-created) or `.claude/worktrees/<task>/` (Claude Code's native worktree tool); each worktree gets its own cluster via `scripts/install.sh --worktree` (home `~/.ava-<worktree-dir>` by default), isolated db/redis/ports/sessions |
 
 Cluster identity is born at **install time** (`scripts/install.sh` →
-`python -m cli.install_cluster`): the install allocates the home-keyed registry
-record + port block, brings up the cluster's own pg/redis, provisions the
-database, writes the cluster `.env` (secret: single-machine = NO-AUTH empty;
-gateway-only = minted; `AVA_INSTALL_CLUSTER_SECRET` states one; existing secrets never rotate),
-and — for a worktree — writes the checkout's `.ava_home` pointer. The home is resolved from
-the **checkout-anchored** boot (`resolve_ava_home`: `AVA_HOME` env > prod source
-→ `~/.ava` > the checkout's `.ava_home` pointer; an env var CONTRADICTING the
-checkout's own claim refuses outright unless `AVA_HOME_OVERRIDE=1`), never the
-current directory and never a flag — there is no name to pass, so the whole
-phantom-cluster incident class (env/cwd/flag naming the wrong cluster) is
-structurally gone: the prod `ava` on PATH always acts on `~/.ava`. `ava
-start` is a **pure bring-up**: an uninstalled home fails fast pointing at
-`install.sh` / `install.sh --worktree` / `ava enroll` by role; so does every
-no-target verb acting on this checkout's cluster (`stop`, `restart`, `converge`,
-`cluster update|restart|rollback|recover`) — `cluster down|destroy` take `--path`. Cluster
-identity is checkout-anchored (never a flag); machine identity
-(machine-name / serve-gateway / serve-agent-runner / gateway-url) is
-passed on the FIRST start only and persisted to `$AVA_HOME/<field>`
-files — later runs need none of them (see `ava start --help`). Registry:
-host-level JSON `~/.ava/clusters.json` (`AVA_CLUSTER_REGISTRY`), keyed by home
-path. An enrolled agent-runner does NOT birth a cluster; its cluster identity IS
-the gateway URL + cluster secret it enrolled with (`ava enroll` persists only
-identity/reachability and verifies the projection; every runner process re-fetches
-connection facts, whose URLs carry db/role identifiers as data).
+`python -m cli.install_cluster`): registry record + port block + the cluster's
+own pg/redis + provisioned db + cluster `.env` (secret: single-machine =
+NO-AUTH empty; gateway-only = minted; existing secrets never rotate). The home
+is resolved **checkout-anchored** (`AVA_HOME` env > prod source → `~/.ava` > the
+checkout's `.ava_home` pointer; a contradicting env refuses outright unless
+`AVA_HOME_OVERRIDE=1`) — never cwd, never a flag. `ava start` is a pure
+bring-up: an uninstalled home fails fast pointing at `install.sh` /
+`install.sh --worktree` / `ava enroll` by role. Machine identity
+(machine-name / serve-gateway / serve-agent-runner / gateway-url) is passed on
+the FIRST start only and persisted to `$AVA_HOME/<field>` files. An enrolled
+agent-runner does NOT birth a cluster; its identity IS the gateway URL +
+cluster secret it enrolled with. Registry: host-level JSON
+`~/.ava/clusters.json`, keyed by home path.
 
-Which cluster an `ava` acts on is fixed by **which checkout it belongs to** (where its `cli` source lives), not by the current directory. `install.sh --role gateway` symlinks the prod checkout's `ava` onto PATH at `~/.local/bin`, so a bare `ava` always means prod; dev work runs `.venv/bin/ava` inside the worktree. Idempotent host wiring (symlink, PATH, `$AVA_HOME` dirs, plugin images) plus each enabled plugin's own `scaffold()` (`setup.py` beside its `plugin.py` — this is how `ava_memory` brings up the memory pool and lays its template down) is applied by the converge phase (`cli/commands/_converge.py`), run on every `ava start` / `ava cluster update` and standalone via `ava converge` (detail in `conventions/runbook.md`). Prod upgrades go through `ava cluster update` (the CLI — the only update entry point; `ava.self.update()` was removed 2026-08), never directly `git checkout` on the prod path.
+Which cluster an `ava` acts on is fixed by **which checkout it belongs to**
+(where its `cli` source lives), not by the current directory. `install.sh
+--role gateway` symlinks the prod checkout's `ava` onto PATH at
+`~/.local/bin`, so a bare `ava` always means prod; dev work runs
+`.venv/bin/ava` inside the worktree. Host wiring + each plugin's `scaffold()`
+are applied by the converge phase (`cli/commands/_converge.py`) on every
+`ava start` / `ava cluster update` (standalone: `ava converge`). Prod upgrades
+go through `ava cluster update` (the CLI — the only update entry point),
+never directly `git checkout` on the prod path.
 
 ```bash
-scripts/install.sh --role ... | --worktree   # the ONLY birth: registry record + the cluster's
-              # own pg/redis + provisioned db + .env (secret: single machine = NO-AUTH empty,
-              # gateway-only = minted; serve flags from --role). --worktree births a dev
-              # worktree cluster (home ~/.ava-<dir>, --path overrides). Idempotent.
+scripts/install.sh --role ... | --worktree   # the ONLY birth (idempotent): registry record +
+              # cluster's own pg/redis + provisioned db + .env (--worktree = dev worktree
+              # cluster, home ~/.ava-<dir>). Secret: single machine = NO-AUTH empty,
+              # gateway-only = minted.
 uv sync       # install deps + the `ava` CLI into .venv/bin/
-ava start     # pure bring-up: ensures the cluster's own pg/redis instance is up
-              # (skip-if-running), then brings up the union of this host's services.
-              # Idempotent; takes no identity flags — the home comes from the checkout-
-              # anchored boot. An uninstalled home fails fast pointing at install/enroll.
-ava stop      # stdin-confirmed force kill (tears down this host's services + this cluster's pg/redis).
-              # Leaves the headed browser session running (login Chrome preserved); add
-              # --stop-browser to take it down too (a full cluster teardown).
+ava start     # pure bring-up: ensures the cluster's own pg/redis is up, then brings up this
+              # host's services. No identity flags — the home comes from the checkout-anchored boot.
+ava stop      # stdin-confirmed force kill (tears down services + this cluster's pg/redis).
+              # Leaves the headed browser session running; add --stop-browser for a full teardown.
 ava status    # check status (includes the pg/redis view)
-ava cluster update    # [cluster] upgrade: a gateway-capable host (incl. single box) orchestrates
-              # the whole cluster (pause agent-runners -> local pull/sync/migrate/restart -> trigger
-              # agent-runner self-updates); a pure agent-runner self-updates (git pull + uv sync + restart)
-ava enroll --gateway URL --machine-name NAME --machine-host HOST  # join after exporting AVA_CLUSTER_SECRET from a non-echoing prompt
-              # (presents the cluster secret to the gateway's authenticated /api/bootstrap);
-              # verifies the runner projection, which processes re-fetch at startup, then run `ava start`
-ava cluster ls                        # list all registered clusters (label = home basename)
-ava cluster status                    # full multi-machine roster
-ava cluster down --path PATH          # stop the cluster at a home path, keep its slot (data stays on disk)
-                                      # (the safe way to stop a dev worktree cluster)
-ava cluster destroy --path PATH       # stop a cluster + free its slot + deregister its OS jobs (refused for ~/.ava)
+ava cluster update    # upgrade: a gateway-capable host orchestrates the whole cluster (pause
+              # runners -> pull/sync/migrate/restart -> trigger runner self-updates); a pure
+              # agent-runner self-updates.
+ava enroll --gateway URL --machine-name NAME --machine-host HOST  # join a cluster (export
+              # AVA_CLUSTER_SECRET first; verifies the runner projection, then run `ava start`)
+ava cluster ls / status             # list all registered clusters (label = home basename) / full multi-machine roster
+ava cluster down --path PATH        # stop the cluster at a home path, keep its slot (data stays on disk)
+ava cluster destroy --path PATH     # stop + free its slot + deregister its OS jobs (refused for ~/.ava)
 ```
 
-Agent processes are **not started directly** — they always go through the gateway via `POST /api/agents` (`ava.agents.spawn` / frontend / `scripts/start_agent.py` all share this one endpoint), so startup ordering has a strict requirement: **start gateway first, then start agents**.
+Agent processes are **not started directly** — they always go through the
+gateway via `POST /api/agents` (`ava.agents.spawn` / frontend /
+`scripts/start_agent.py` all share this one endpoint): **start gateway first,
+then start agents**.
 
-For units/prod/dev paths in depth, the long-running session table, healthchecks,
-and the full ops runbook, see
-[`conventions/runbook.md`](conventions/runbook.md); dev-host inventory + secret
-paths in [`conventions/dev-setup.md`](conventions/dev-setup.md).
+Units/prod/dev paths in depth, the long-running session table, healthchecks,
+and the full ops runbook: [`conventions/runbook.md`](conventions/runbook.md);
+dev-host inventory + secret paths: [`conventions/dev-setup.md`](conventions/dev-setup.md).
 
 **Migrations:** `migrations/YYYYMMDDTHHMMSS_<kebab-name>.sql` (second-precision UTC),
-tracked as an applied SET keyed by name — not a sequential integer. `db/schema.sql` is
-the squashed **baseline** and the rollback floor. Every post-baseline migration ships a
-paired `.down.sql`, and lossy operations (drop column/table, destructive transform) go
-**expand-contract** so any one upgrade stays reversible; `scripts/lint_migrations.py`
-enforces format + pairing. `rollback_to`/`apply_down`: `future/infra/commit-pinned-cluster.md`.
-**Adding a migration:** `.agents/skills/add-a-migration/SKILL.md`.
+tracked as an applied SET keyed by name; `db/schema.sql` is the squashed baseline.
+Every migration ships a paired `.down.sql`, and lossy operations go
+**expand-contract** so any one upgrade stays reversible (`scripts/lint_migrations.py`
+enforces format + pairing). **Adding a migration:** `.agents/skills/add-a-migration/SKILL.md`.
 
 ## Agent instruction files
 
@@ -223,12 +173,12 @@ and the `ava.skills.ava-code:testing` discipline; rule 4's ask-first loop is [wo
 
 ## Workflow (mandatory)
 
-- **Worktree + PR** — every change in `git worktree add -b ava-<id>-<task>`, merged via PR through the **Mergify merge queue** (`.mergify.yml`: queued PRs are batched into one speculative draft verification (batch_size 5, auto-bisect on red), then land as rebase merges — linear history). Direct push forbidden. [Merge queue workflow →](.agents/skills/ship-a-change/SKILL.md)
+- **Worktree + PR** — every change in `git worktree add -b ava-<id>-<task>`, merged via PR through the Mergify merge queue; direct push forbidden. [Workflow →](.agents/skills/ship-a-change/SKILL.md)
 - **PR description** — must have file-tree diff with ★ critical paths + prose data flow. [Spec →](.agents/skills/write-a-pr-description/SKILL.md)
 - **Tech-debt sweeps** — follow `.agents/skills/ava-sweeper/` (debt classes + tracker; boundary vs. lint in [`conventions/lint-vs-sweeper.md`](conventions/lint-vs-sweeper.md)).
 - **Complexity analysis** — McCabe cyclomatic complexity + maintainability index via radon, ranked for refactoring. [Skill →](.agents/skills/measure-complexity/SKILL.md)
 - **Local tests before push** — run pytest (Python) + vitest/eslint/tsc (frontend) for touched areas before pushing; CI runs the full suite. [How to →](.agents/skills/run-local-tests/SKILL.md)
-- **CI to green, then enqueue, then clean up** — after opening a PR poll `.venv/bin/python scripts/ci_utils.py <PR#>` (every 30–60 s, or launch a watcher) until all-green, fixing red immediately rather than letting a failing PR sit; `NO_WORKFLOW_RUNS` means the suite never ran and is **not** green. Then enqueue: `.venv/bin/python scripts/ci_utils.py <PR#> --wait --merge` (posts `@mergifyio queue` on the PR). Mergify batches queued PRs into one speculative draft verification and lands them on green (red batches auto-bisect) — **no manual rebase + re-poll loop, no merge-base check**: the queue verifies the combined tree that actually lands. A PR with conflicts still needs a manual `git rebase origin/main` first. PRs awaiting user review are never enqueued. After merge, remove the local worktree (`git worktree remove <path>`) and delete the remote branch (`git push origin --delete <branch>`) — Mergify does not auto-delete it. [Detail →](.agents/skills/ship-a-change/SKILL.md)
+- **CI to green, then enqueue, then clean up** — poll `.venv/bin/python scripts/ci_utils.py <PR#>` until all-green (fix red immediately; `NO_WORKFLOW_RUNS` = the suite never ran = not green), then enqueue with `--wait --merge` (posts `@mergifyio queue`; the queue verifies the combined tree that actually lands — a PR with conflicts still needs a manual `git rebase origin/main` first; PRs awaiting user review are never enqueued). After merge: remove the local worktree and delete the remote branch. [Detail →](.agents/skills/ship-a-change/SKILL.md)
 - **Commit = code + docs stable** — docs go in same PR. Structure changes reconcile the co-located `*.ava.okf.md`; scan `conventions/` + `future/` for stale refs.
 
 ## Python conventions (quick reference)
