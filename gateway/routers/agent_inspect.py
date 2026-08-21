@@ -24,7 +24,7 @@ from typing import Annotated, Any, Literal, NamedTuple, cast
 from fastapi import APIRouter, HTTPException, Query, Request
 from psycopg_pool import ConnectionPool
 
-from gateway import loki_events
+from gateway import loki_events, neighbors
 from gateway.routers import _agent_cost, _plugin_metrics
 from gateway.routers._agent_cost import window_bounds
 from gateway.schemas import (
@@ -597,8 +597,11 @@ def get_agent_neighbors(
 
     `depth=1` returns direct ties only; a higher `depth` follows ties outward,
     discounting each extra hop. Terminated agents are included (each row carries
-    `status`); `limit` caps the count, strongest first. The strength + decay are
-    computed by the `agent_neighbors` SQL function — fleet-wide read, role-neutral.
+    `status`); `limit` caps the count, strongest first. The tie graph reads the
+    unified event stream (task #180 LGTM cutover): audit edge events stitch the
+    frozen PG `events` archive with the Loki live tail and the walk runs in
+    Python (gateway/neighbors.py) — the retired `agent_neighbors` SQL function
+    died with the frozen table it read.
 
     404: agent_id does not exist (AgentNotFound -> handler returns 404 + reason).
     """
@@ -606,21 +609,34 @@ def get_agent_neighbors(
         cur.execute("SELECT 1 FROM agents_meta WHERE id = %s", (agent_id,))
         if cur.fetchone() is None:
             raise AgentNotFound(f"agent {agent_id} does not exist")
-        cur.execute(
-            """
-            SELECT n.agent_id, t.label, m.status, n.depth, n.score
-            FROM agent_neighbors(%s, %s, 0.5, 0.5, %s) n
-            JOIN agents t      ON t.id = n.agent_id
-            JOIN agents_meta m ON m.id = n.agent_id
-            ORDER BY n.score DESC
-            """,
-            (agent_id, depth, limit),
+    ranked = neighbors.compute(
+        request.app.state.db_pool, root=agent_id, max_depth=depth, limit=limit
+    )
+    ids = [r[0] for r in ranked]
+    label_status: dict[int, tuple[str | None, str]] = {}
+    if ids:
+        with request.app.state.db_pool.connection() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT t.id, t.label, m.status
+                FROM agents t
+                JOIN agents_meta m ON m.id = t.id
+                WHERE t.id = ANY(%s)
+                """,
+                (ids,),
+            )
+            label_status = {r[0]: (r[1], r[2]) for r in cur.fetchall()}
+    neighbors_rows = [
+        NeighborRow(
+            agent_id=agent,
+            label=label_status.get(agent, (None, "terminated"))[0],
+            status=label_status.get(agent, (None, "terminated"))[1],
+            depth=depth_found,
+            score=round(score, 4),
         )
-        neighbors = [
-            NeighborRow(agent_id=r[0], label=r[1], status=r[2], depth=r[3], score=round(r[4], 4))
-            for r in cur.fetchall()
-        ]
-    return NeighborsResponse(neighbors=neighbors)
+        for agent, depth_found, score in ranked
+    ]
+    return NeighborsResponse(neighbors=neighbors_rows)
 
 
 @router.get("/api/agents/{agent_id}/inspect/metrics")

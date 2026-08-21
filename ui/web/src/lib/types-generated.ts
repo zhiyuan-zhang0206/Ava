@@ -906,8 +906,11 @@ export interface paths {
          *
          *     `depth=1` returns direct ties only; a higher `depth` follows ties outward,
          *     discounting each extra hop. Terminated agents are included (each row carries
-         *     `status`); `limit` caps the count, strongest first. The strength + decay are
-         *     computed by the `agent_neighbors` SQL function — fleet-wide read, role-neutral.
+         *     `status`); `limit` caps the count, strongest first. The tie graph reads the
+         *     unified event stream (task #180 LGTM cutover): audit edge events stitch the
+         *     frozen PG `events` archive with the Loki live tail and the walk runs in
+         *     Python (gateway/neighbors.py) — the retired `agent_neighbors` SQL function
+         *     died with the frozen table it read.
          *
          *     404: agent_id does not exist (AgentNotFound -> handler returns 404 + reason).
          */

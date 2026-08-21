@@ -24,6 +24,8 @@ from fastapi.testclient import TestClient
 
 import ava
 from ava.agents import AgentNotFound, AgentStatus, ForkSourceEmpty
+from gateway import loki_events
+from tests.gateway.loki_fake import FakeLoki
 
 
 def _spawn_agent() -> int:
@@ -305,10 +307,13 @@ class TestSendMessage:
 
 
 class TestGetNeighbors:
-    """SDK get_neighbors maps the gateway rows to Neighbor dataclasses (status to
-    the AgentStatus enum). The SQL-function behaviors are covered against a real
-    DB in tests/gateway/test_agent_neighbors.py; here we verify the wrapper +
-    wire path only."""
+    (
+        """SDK get_neighbors maps the gateway rows to Neighbor dataclasses (status to
+    the AgentStatus enum). The graph behaviors (Loki live tail + archive stitch)
+    are covered in tests/gateway/test_agent_neighbors.py; here we verify the
+    wrapper + wire path only, seeding ties through the FakeLoki live tail."""
+        ""
+    )
 
     @staticmethod
     def _seed(db: psycopg.Connection, *, status: str = "running") -> int:
@@ -325,23 +330,25 @@ class TestGetNeighbors:
         return aid
 
     @staticmethod
-    def _tie(db: psycopg.Connection, agent_id: int, target: int, *, days_ago: float) -> None:
-        with db.cursor() as cur:
-            cur.execute(
-                "INSERT INTO events "
-                "(ts, agent_id, event_name, source, target_agent_id, machine, process, category, level) "
-                "VALUES (now() - %s * interval '1 day', %s, 'send_message', 'test', %s, "
-                "'test', 'test', 'audit', 'info')",
-                (days_ago, agent_id, target),
-            )
-        db.commit()
+    def _tie(fake: FakeLoki, agent_id: int, target: int, *, days_ago: float) -> None:
+        fake.add(
+            event="send_message",
+            agent_id=agent_id,
+            target_agent_id=target,
+            category="audit",
+            ts_offset_hours=days_ago * 24.0,
+        )
 
-    def test_returns_ranked_neighbor_dataclasses(self, db_conn: psycopg.Connection) -> None:
+    def test_returns_ranked_neighbor_dataclasses(
+        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        fake = FakeLoki()
+        monkeypatch.setattr(loki_events, "query_events", fake.query_events)
         a = self._seed(db_conn)
         fresh = self._seed(db_conn)
         stale = self._seed(db_conn, status="terminated")
-        self._tie(db_conn, fresh, a, days_ago=0.0)
-        self._tie(db_conn, stale, a, days_ago=20.0)
+        self._tie(fake, fresh, a, days_ago=0.0)
+        self._tie(fake, stale, a, days_ago=20.0)
 
         rows = ava.agents.get_neighbors(a)
 
@@ -352,12 +359,16 @@ class TestGetNeighbors:
         assert rows[0].score > rows[1].score
         assert f"#{fresh}" in str(rows[0]) and "depth=1" in str(rows[0])
 
-    def test_hibernating_neighbor_projected_to_idling(self, db_conn: psycopg.Connection) -> None:
+    def test_hibernating_neighbor_projected_to_idling(
+        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """A hibernating peer reads as IDLING to an agent — the ops-only swap-out
         state is projected at the SDK boundary, so no agent ever observes it."""
+        fake = FakeLoki()
+        monkeypatch.setattr(loki_events, "query_events", fake.query_events)
         a = self._seed(db_conn)
         parked = self._seed(db_conn, status="hibernating")
-        self._tie(db_conn, parked, a, days_ago=0.0)
+        self._tie(fake, parked, a, days_ago=0.0)
 
         rows = ava.agents.get_neighbors(a)
 

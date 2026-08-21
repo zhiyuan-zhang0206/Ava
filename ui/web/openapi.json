@@ -1285,7 +1285,7 @@
     "/api/agents/{agent_id}/neighbors": {
       "get": {
         "summary": "Get Agent Neighbors",
-        "description": "The agents most strongly tied to `agent_id`, ranked by recency-weighted\ninteraction strength (spawn / fork / resurrect / message, all equal weight).\n\n`depth=1` returns direct ties only; a higher `depth` follows ties outward,\ndiscounting each extra hop. Terminated agents are included (each row carries\n`status`); `limit` caps the count, strongest first. The strength + decay are\ncomputed by the `agent_neighbors` SQL function — fleet-wide read, role-neutral.\n\n404: agent_id does not exist (AgentNotFound -> handler returns 404 + reason).",
+        "description": "The agents most strongly tied to `agent_id`, ranked by recency-weighted\ninteraction strength (spawn / fork / resurrect / message, all equal weight).\n\n`depth=1` returns direct ties only; a higher `depth` follows ties outward,\ndiscounting each extra hop. Terminated agents are included (each row carries\n`status`); `limit` caps the count, strongest first. The tie graph reads the\nunified event stream (task #180 LGTM cutover): audit edge events stitch the\nfrozen PG `events` archive with the Loki live tail and the walk runs in\nPython (gateway/neighbors.py) — the retired `agent_neighbors` SQL function\ndied with the frozen table it read.\n\n404: agent_id does not exist (AgentNotFound -> handler returns 404 + reason).",
         "operationId": "get_agent_neighbors_api_agents__agent_id__neighbors_get",
         "parameters": [
           {
