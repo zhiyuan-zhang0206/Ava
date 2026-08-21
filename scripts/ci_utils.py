@@ -59,6 +59,12 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 
+# Allow `python scripts/ci_utils.py` (sys.path[0] = scripts/) to find the
+# sibling module; under pytest pythonpath=["."] this is a redundant no-op.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from scripts.ci_job_rerun import list_failed_jobs, rerun_failed_jobs
+
 
 class CIStatus(Enum):
     ALL_PASSED = "all_passed"  # every COMPLETED check is SUCCESS / SKIPPED / NEUTRAL
@@ -675,6 +681,20 @@ def main(argv: list[str] | None = None) -> int:
         help="with --wait: enqueue the PR once CI is green and wait for the "
         "merge queue to land it (implies --wait; default timeout 1800s)",
     )
+    p.add_argument(
+        "--rerun-failed-jobs",
+        action="store_true",
+        help="re-run every failed job of the PR's workflow runs at JOB level "
+        "(issue #102): run-level rerun is refused while any job is still "
+        "going, so recovery must not wait on the slowest surviving shard. "
+        "Exit 0 when all failed jobs were re-run (or none were), 3 on errors. "
+        "Exclusive with --wait/--merge/--json.",
+    )
+    p.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="with --rerun-failed-jobs: list failed jobs without re-running them",
+    )
     args = p.parse_args(argv)
     if args.every <= 0:
         p.error("--every must be positive")
@@ -689,6 +709,24 @@ def main(argv: list[str] | None = None) -> int:
         # unless the caller explicitly passed --timeout.
         if args.timeout == 0:
             args.timeout = 1800
+
+    if args.rerun_failed_jobs:
+        if args.wait or args.merge or args.json:
+            p.error("--rerun-failed-jobs is exclusive with --wait/--merge/--json")
+        if args.dry_run:
+            jobs = list_failed_jobs(args.pr, args.repo)
+            if not jobs:
+                print("No failed jobs to re-run")
+                return 0
+            for j in jobs:
+                print(f"{j['name']} (job {j['job_id']}, run {j['run_id']}, {j['conclusion']})")
+            return 0
+        reran, errors = rerun_failed_jobs(args.pr, args.repo)
+        for j in reran:
+            print(f"Re-ran {j['name']} (job {j['job_id']})")
+        for e in errors:
+            print(f"Re-run failed: {e}")
+        return 3 if errors else 0
 
     if args.wait:
         return _wait_for_verdict(args.pr, args.repo, args.every, args.timeout, merge=args.merge)
