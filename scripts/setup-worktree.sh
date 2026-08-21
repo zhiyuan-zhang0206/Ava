@@ -18,7 +18,7 @@ echo "→ uv sync …"
 uv sync
 
 echo "→ npm install (frontend) …"
-cd "$REPO_ROOT/frontend"
+cd "$REPO_ROOT/ui/web"
 npm install
 
 cd "$REPO_ROOT"

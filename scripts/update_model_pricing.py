@@ -48,7 +48,7 @@ _METERS = {
     "1M INPUT TOKENS (CACHE HIT)": "cache_read",
     "1M OUTPUT TOKENS": "output",
 }
-_DEEPSEEK_MODELS = {"deepseek-v4-flash", "deepseek-v4-pro"}
+_DEEPSEEK_MODELS = {"deepseek-v4-flash", "deepseek-v4-flash-vision-exp", "deepseek-v4-pro"}
 _PEAK_HOURS = re.compile(
     r"\bPeak hours are\s+(\d{2}:\d{2})\s*-\s*(\d{2}:\d{2})\s+"
     r"and\s+(\d{2}:\d{2})\s*-\s*(\d{2}:\d{2})\s+UTC\b"

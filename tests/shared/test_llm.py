@@ -40,6 +40,16 @@ class TestDeepseekMaxTokens:
         assert isinstance(llm, ChatAnthropic)
         assert llm.max_tokens == 384_000
 
+    def test_vision_exp_max_tokens(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The vision variant rides the same deepseek branch — ChatAnthropic on the
+        anthropic-compatible endpoint (which speaks image blocks for this model per
+        api-docs.deepseek.com/guides/vision) — with the same 384K output cap."""
+        monkeypatch.setattr(settings.lm, "deepseek_api_key", SecretStr("sk-test-deepseek"))
+        llm = build_chat_model("deepseek-v4-flash-vision-exp")
+        assert isinstance(llm, ChatAnthropic)
+        assert llm.max_tokens == 384_000
+        assert "deepseek.com" in str(llm.anthropic_api_url)
+
     def test_unknown_deepseek_model_fails_fast(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """A deepseek-prefixed model not in _DEEPSEEK_MAX_TOKENS raises rather
         than silently borrowing some other model's cap (fail-fast: an unknown
@@ -59,6 +69,9 @@ class TestModelContextWindow:
 
     def test_deepseek_flash_is_one_million(self) -> None:
         assert MODEL_CONTEXT_WINDOW["deepseek-v4-flash"] == 1_000_000
+
+    def test_deepseek_vision_exp_is_one_million(self) -> None:
+        assert MODEL_CONTEXT_WINDOW["deepseek-v4-flash-vision-exp"] == 1_000_000
 
     def test_kimi_k3_is_1m(self) -> None:
         assert MODEL_CONTEXT_WINDOW["kimi-k3"] == 1_048_576
