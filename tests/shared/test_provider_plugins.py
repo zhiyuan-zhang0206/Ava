@@ -76,6 +76,7 @@ _MODEL_LINE = """\"{model}\": ModelSpec(
             knowledge_cutoff="2026-01",
             effort_levels=("low", "high"),
             tuning=ModelTuning(reasoning_effort="high"),
+            vision={model_vision},
         )"""
 
 _PRICE_LINE = """\"{model}\": PriceRates(
@@ -103,6 +104,7 @@ def provider_plugin() -> Generator[Callable[..., None], None, None]:
         display: str = "TestProvider",
         key_env: str = "TESTP_API_KEY",
         vision: bool = False,
+        model_vision: bool = False,
         stop_spec: str | None = None,
         model: str | None = "testp-1",
         with_price: bool = True,
@@ -111,7 +113,15 @@ def provider_plugin() -> Generator[Callable[..., None], None, None]:
         plugin_dir = paths.plugins_dir() / dir_name
         plugin_dir.mkdir(parents=True, exist_ok=True)
         created.append(plugin_dir)
-        models = _MODEL_LINE.format(model=model, provider=prefix.rstrip("-")) if model else ""
+        models = (
+            _MODEL_LINE.format(
+                model=model,
+                provider=prefix.rstrip("-"),
+                model_vision="True" if model_vision else "False",
+            )
+            if model
+            else ""
+        )
         pricing_line = _PRICE_LINE.format(model=model) if model and with_price else ""
         source = _PLUGIN_SOURCE.format(
             prefix=prefix,
@@ -188,8 +198,30 @@ def test_plugin_model_validation_and_key_check(
 
 def test_vision_flag_drives_image_gate(provider_plugin: Callable[..., None]) -> None:
     provider_plugin(prefix="testv-", model="testv-1", vision=True)
-    assert model_supports_vision("testv-1")
+    assert model_supports_vision("testv-unregistered")
     assert not model_supports_vision("testp-9")
+
+
+def test_registered_plugin_model_vision_overrides_binding(
+    provider_plugin: Callable[..., None],
+) -> None:
+    provider_plugin(
+        prefix="testvtrue-",
+        model="testvtrue-1",
+        vision=False,
+        model_vision=True,
+        dir_name="vision_true",
+    )
+    provider_plugin(
+        prefix="testvfalse-",
+        model="testvfalse-1",
+        vision=True,
+        model_vision=False,
+        dir_name="vision_false",
+    )
+
+    assert model_supports_vision("testvtrue-1")
+    assert not model_supports_vision("testvfalse-1")
 
 
 def test_duplicate_prefix_rejected(provider_plugin: Callable[..., None]) -> None:

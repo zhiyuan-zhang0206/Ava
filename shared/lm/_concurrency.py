@@ -74,6 +74,7 @@ def _invalidate_known_provider_keys_cache() -> None:
     register_invalidator)."""
     _provider_keys.cache_clear()
 
+
 # Register the invalidator eagerly: `_concurrency` is imported by hot call
 # paths, and provider_api must not import it back (layering + cycle).
 from shared.lm import provider_api  # noqa: E402
