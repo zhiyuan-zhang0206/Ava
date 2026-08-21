@@ -6878,6 +6878,11 @@
             "type": "string",
             "title": "Mode",
             "default": "smooth"
+          },
+          "force": {
+            "type": "boolean",
+            "title": "Force",
+            "default": false
           }
         },
         "type": "object",

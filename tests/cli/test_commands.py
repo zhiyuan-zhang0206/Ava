@@ -1785,75 +1785,66 @@ def test_register_agent_runner_loopback_host_exits_nonzero(monkeypatch: pytest.M
 # ─── multi-machine update orchestration (PR-A) ───────────────────────────────
 
 
-def test_update_on_agent_runner_runs_self_update(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`ava cluster update` on a secondary dispatches to `_run_agent_runner_self_update`:
-    force-checkout target (resolve origin/main when none passed) + uv sync subprocess
-    + _do_stop + a **fresh process** `ava start` subprocess (not in-process cmd_start——
-    cross-version jumps would mix old/new modules and crash), called in order; does not
-    call primary's _list_agent_runners / _fan_out."""
-    from shared import machine as _machine
+def test_update_posts_rollout_to_gateway_from_any_host(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`ava cluster update` POSTs /api/cluster/rollout to the gateway from ANY
+    host — no machine_role() branch (user ruling 2026-08-21, issue #216). The
+    body carries origin (default cli:<machine>), mode, force; the response's
+    session/log are printed for polling."""
+    from typing import cast
 
-    monkeypatch.setattr(_machine, "machine_role", lambda: frozenset({"agent-runner"}))
+    monkeypatch.setattr("shared.machine.gateway_api_base", lambda: "http://gw:8000")
+    calls: list[tuple[str, dict[str, object]]] = []
 
-    calls: list[str] = []
-    start_cmd: list[list] = []
+    class _Resp:
+        status_code = 202
 
-    # stub primary-only helpers——secondary path must not call either
-    def _unreachable(*_a, **_kw):
-        raise AssertionError("primary-only helper called on secondary path")
+        def raise_for_status(self) -> None: ...
 
-    monkeypatch.setattr(_cli, "_list_agent_runners", _unreachable)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_fan_out", _unreachable)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_run_gateway_local_update", _unreachable)  # pyright: ignore[reportUnknownArgumentType]
+        def json(self) -> dict[str, object]:
+            return {"session": "ava-rollout", "log": "/var/log/u.log", "backend_changed": True}
 
-    # stub secondary path: the self-update lives in `_update_agent_runner` and
-    # force-checks-out the target (resolving origin/main when none is passed).
-    from cli.commands import _update_agent_runner as _uah
+    def _fake_post(url: str, **_kw: object) -> _Resp:
+        calls.append((url, cast(dict[str, object], _kw.get("json"))))
+        return _Resp()
 
-    monkeypatch.setattr(_uah, "git_resolve_origin_main", lambda: "aaa")
-    monkeypatch.setattr(_uah, "git_checkout_sha", lambda _sha: calls.append("checkout") or "aaa")  # pyright: ignore[reportUnknownArgumentType]
-    # the self-update vets the checked-out tree's migrations/ layout before stopping;
-    # "aaa" is a synthetic sha, so pass the vet here.
-    monkeypatch.setattr(_uah, "validate_migrations_at_ref", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType]
-
-    # Both `uv sync` and the fresh `ava start` go through subprocess.run now (the
-    # start no longer needs a pty); distinguish them by argv[0].
-    def _fake_run(cmd, *_a, **_kw):
-        if cmd and cmd[0] == "uv":
-            calls.append("uv_sync")
-        else:
-            assert cmd[0].endswith(".venv/bin/ava"), f"unexpected subprocess: {cmd}"  # pyright: ignore[reportUnknownMemberType]
-            calls.append("ava_start")
-            start_cmd.append(cmd)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-        return _FakeResult(returncode=0)
-
-    monkeypatch.setattr(_cli.subprocess, "run", _fake_run)  # pyright: ignore[reportUnknownArgumentType]
-
-    def _fake_do_stop(*_a, **kw) -> int:
-        assert kw.get("keep_infra") is True, (  # pyright: ignore[reportUnknownMemberType]
-            "self-update must keep the shared pg/redis up — stopping the data "
-            "plane kills the rollout orchestrator's DB polling mid-Phase-B"
-        )
-        calls.append("do_stop")
-        return 0
-
-    monkeypatch.setattr(_cli, "_do_stop", _fake_do_stop)  # pyright: ignore[reportUnknownArgumentType]
-
-    # in-process cmd_start must NOT run on the self-update path anymore
-    def _no_inprocess_start():
-        raise AssertionError("cmd_start ran in-process instead of a fresh subprocess")
-
-    monkeypatch.setattr(_cli, "cmd_start", _no_inprocess_start)
-
+    monkeypatch.setattr("httpx.post", _fake_post)  # pyright: ignore[reportUnknownArgumentType]
     rc = _cli.cmd_update()
     assert rc == 0
-    assert calls == ["checkout", "uv_sync", "do_stop", "ava_start"]
-    # the start runs as a fresh `ava` subprocess from the synced venv (new code);
-    # --persist-services keeps this internal restart from rewriting the durable
-    # --disable-service marker. No tty / pty needed — the session PATH is forwarded
-    # authoritatively, so a plain subprocess.run from the detached rollout works.
-    assert start_cmd[0][0].endswith(".venv/bin/ava")  # pyright: ignore[reportUnknownMemberType]
-    assert start_cmd[0][1:] == ["start", "--persist-services"]
+    assert calls[0][0] == "http://gw:8000/api/cluster/rollout"
+    body = calls[0][1]
+    assert cast(str, body["origin"]).startswith("cli:")
+    assert cast(str, body["mode"]) == "smooth"
+    assert body["force"] is False
+    assert "ava-rollout" in capsys.readouterr().out
+
+
+def test_update_restart_only_posts_restart_endpoint(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`ava cluster update --restart-only` POSTs /api/cluster/restart (bounce
+    on current code) — also from any host, no role branch."""
+    monkeypatch.setattr("shared.machine.gateway_api_base", lambda: "http://gw:8000")
+    calls: list[str] = []
+
+    class _Resp:
+        status_code = 202
+
+        def raise_for_status(self) -> None: ...
+
+        def json(self) -> dict[str, object]:
+            return {"session": "ava-rollout", "log": "/var/log/u.log"}
+
+    def _fake_post(url: str, **_kw: object) -> _Resp:
+        calls.append(url)
+        return _Resp()
+
+    monkeypatch.setattr("httpx.post", _fake_post)  # pyright: ignore[reportUnknownArgumentType]
+    rc = _cli.cmd_update(restart_only=True)
+    assert rc == 0
+    assert calls == ["http://gw:8000/api/cluster/restart"]
+    assert "ava-rollout" in capsys.readouterr().out
 
 
 def test_gateway_local_update_starts_in_fresh_process(
@@ -1911,25 +1902,28 @@ def test_gateway_local_update_starts_in_fresh_process(
     assert cmds[1][1:] == ["start", "--persist-services", "--no-readiness-gate"]
 
 
-def test_update_on_gateway_runs_orchestration(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`ava cluster update --local` on a primary dispatches to `_run_gateway_orchestration`,
-    does not call the secondary self-update branch. (bare `ava cluster update` on the control plane
-    spawns a detached rollout —— see test_cmd_update_gateway_default_spawns_rollout_locally.)"""
-    from shared import machine as _machine
+def test_update_local_runs_in_process_orchestration(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`ava cluster update --local` — the explicit escape hatch the detached
+    ava-rollout session runs — dispatches to `_run_gateway_orchestration` in
+    this foreground process. No role read: the user asked for the local leg on
+    whatever host they are on."""
+    from cli.commands import update as _up_mod
 
-    monkeypatch.setattr(_machine, "machine_role", lambda: frozenset({"gateway"}))
+    monkeypatch.setattr(_up_mod, "_repo_root", lambda: Path("/repo"))
+    monkeypatch.setattr(_up_mod, "ava_home", lambda: Path("/home"))
+    monkeypatch.setattr(_up_mod, "get_record", lambda _home: None)  # pyright: ignore[reportUnknownArgumentType]
 
+    def _no_post(*_a: object, **_kw: object) -> None:
+        raise AssertionError("--local must not POST the gateway")
+
+    monkeypatch.setattr("httpx.post", _no_post)  # pyright: ignore[reportUnknownArgumentType]
     calls: list[str] = []
 
     def _orch(_repo, **_kw):
         calls.append("orchestration")
         return 0
 
-    def _self(_repo, **_kw):
-        raise AssertionError("secondary self-update called on primary path")
-
     monkeypatch.setattr(_cli, "_run_gateway_orchestration", _orch)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_run_agent_runner_self_update", _self)  # pyright: ignore[reportUnknownArgumentType]
 
     rc = _cli.cmd_update(local=True)
     assert rc == 0
@@ -2867,14 +2861,14 @@ def test_cmd_cluster_restart_posts_endpoint(
     assert "ava-updater" in capsys.readouterr().out
 
 
-def test_cmd_update_gateway_default_spawns_rollout_locally(
+def test_cmd_update_gateway_default_posts_rollout(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The gateway default spawns the detached rollout locally via
-    `gateway.cluster.spawn_rollout` — co-located with its gateway, it does NOT
-    POST its own `/api/cluster/rollout` (the rollout runs in a detached session)
-    and does NOT run the in-process
-    orchestration in the foreground."""
+    """The gateway-capable host's default is the SAME POST every host sends —
+    no local spawn branch (user ruling 2026-08-21, issue #216). The gateway
+    answers by starting the detached rollout; the CLI just prints the
+    session/log it is told about."""
+    monkeypatch.setattr("shared.machine.gateway_api_base", lambda: "http://gw:8000")
     monkeypatch.setattr("shared.machine.machine_role", lambda: frozenset({"gateway"}))
 
     def _no_local(*_a, **_kw):
@@ -2883,33 +2877,41 @@ def test_cmd_update_gateway_default_spawns_rollout_locally(
         )
 
     monkeypatch.setattr(_cli, "_run_gateway_orchestration", _no_local)  # pyright: ignore[reportUnknownArgumentType]
+    from typing import cast
 
-    def _no_post(*_a, **_kw):
-        raise AssertionError("gateway `ava cluster update` must not POST its own gateway")
+    calls: list[tuple[str, dict[str, object]]] = []
 
-    monkeypatch.setattr("httpx.post", _no_post)  # pyright: ignore[reportUnknownArgumentType]
+    class _Resp:
+        status_code = 202
 
-    spawned: list[str] = []
-    monkeypatch.setattr(
-        "ops.cluster.spawn_rollout",
-        lambda origin, **_kw: (  # pyright: ignore[reportUnknownArgumentType]
-            spawned.append(origin) or {"session": "ava-rollout", "log": "/var/log/u.log"}  # pyright: ignore[reportUnknownArgumentType]
-        ),
-    )
+        def raise_for_status(self) -> None: ...
+
+        def json(self) -> dict[str, object]:
+            return {"session": "ava-rollout", "log": "/var/log/u.log"}
+
+    def _fake_post(url: str, **_kw: object) -> _Resp:
+        calls.append((url, cast(dict[str, object], _kw.get("json"))))
+        return _Resp()
+
+    monkeypatch.setattr("httpx.post", _fake_post)  # pyright: ignore[reportUnknownArgumentType]
     rc = _cli.cmd_update()
     assert rc == 0
     # a human-invoked `ava cluster update` self-identifies as cli:<machine>
-    assert len(spawned) == 1 and spawned[0].startswith("cli:")
+    assert calls[0][0] == "http://gw:8000/api/cluster/rollout"
+    assert cast(str, calls[0][1]["origin"]).startswith("cli:")
     assert "ava-rollout" in capsys.readouterr().out
 
 
 def test_cmd_update_local_forces_in_process_orchestration(monkeypatch: pytest.MonkeyPatch) -> None:
     """`ava cluster update --local` (what the detached rollout session runs) forces the
     in-process gateway orchestration and never POSTs."""
-    monkeypatch.setattr("shared.machine.machine_role", lambda: frozenset({"gateway"}))
-    monkeypatch.setattr(_cli, "_repo_root", lambda: Path("/repo"))
+    from cli.commands import update as _up_mod
 
-    def _no_post(*_a, **_kw):
+    monkeypatch.setattr(_up_mod, "_repo_root", lambda: Path("/repo"))
+    monkeypatch.setattr(_up_mod, "ava_home", lambda: Path("/home"))
+    monkeypatch.setattr(_up_mod, "get_record", lambda _home: None)  # pyright: ignore[reportUnknownArgumentType]
+
+    def _no_post(*_a: object, **_kw: object) -> None:
         raise AssertionError("--local must not POST the gateway")
 
     monkeypatch.setattr("httpx.post", _no_post)  # pyright: ignore[reportUnknownArgumentType]
@@ -2924,25 +2926,44 @@ def test_cmd_update_local_forces_in_process_orchestration(monkeypatch: pytest.Mo
     assert ran == [True]
 
 
-def test_cmd_update_agent_runner_stays_in_process(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Agent-runner `ava cluster update` is already light — it runs the local self-update
-    in-process, not through the gateway."""
-    monkeypatch.setattr("shared.machine.machine_role", lambda: frozenset({"agent-runner"}))
-    monkeypatch.setattr(_cli, "_repo_root", lambda: Path("/repo"))
+def test_cmd_update_rollout_conflict_and_noop_are_friendly(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The rollout endpoint's ordinary refusals — 409 update-in-flight and 422
+    nothing-to-update — print one stderr line and exit 1 / 0 respectively,
+    not a raw traceback (the deploy-window case a second operator most often
+    hits)."""
+    monkeypatch.setattr("shared.machine.gateway_api_base", lambda: "http://gw:8000")
 
-    def _no_post(*_a, **_kw):
-        raise AssertionError("agent-runner update must not POST the gateway")
+    class _Resp:
+        def __init__(self, status_code: int, detail: str):
+            self.status_code = status_code
+            self._detail = detail
 
-    monkeypatch.setattr("httpx.post", _no_post)  # pyright: ignore[reportUnknownArgumentType]
-    ran: list[bool] = []
+        def raise_for_status(self) -> None:
+            import httpx
+
+            if self.status_code >= 400:
+                request = httpx.Request("POST", "http://gw:8000")
+                response = httpx.Response(self.status_code, request=request)
+                raise httpx.HTTPStatusError(self._detail, request=request, response=response)
+
+        def json(self) -> dict[str, object]:
+            return {"detail": self._detail}
+
     monkeypatch.setattr(
-        _cli,
-        "_run_agent_runner_self_update",
-        lambda *_a, **_kw: ran.append(True) or 0,  # pyright: ignore[reportUnknownArgumentType]
+        "httpx.post",
+        lambda *_a, **_kw: _Resp(409, "deploy already in flight"),  # pyright: ignore[reportUnknownArgumentType]
     )
-    rc = _cli.cmd_update()
-    assert rc == 0
-    assert ran == [True]
+    assert _cli.cmd_update() == 1
+    assert "deploy already in flight" in capsys.readouterr().err
+
+    monkeypatch.setattr(
+        "httpx.post",
+        lambda *_a, **_kw: _Resp(422, "already up to date"),  # pyright: ignore[reportUnknownArgumentType]
+    )
+    assert _cli.cmd_update() == 0  # a no-op update is not a failure
+    assert "already up to date" in capsys.readouterr().err
 
 
 # ─── gateway-backed CLI paths (stop announce / status snapshot) ──────────────

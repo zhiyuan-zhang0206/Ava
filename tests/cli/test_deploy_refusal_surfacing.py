@@ -23,7 +23,6 @@ import httpx
 import pytest
 
 from cli.commands import cluster as _cluster
-from cli.commands import update as _up
 
 # A realistic refusal — the shape `_assert_no_orchestration_in_flight` builds from a
 # `DeployWindow.detail`. The assertions below key on the parts an operator acts on.
@@ -38,18 +37,28 @@ _REFUSAL = (
 def test_update_reports_a_refused_deploy_instead_of_raising(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The gateway trigger. Exit 1, and the whole refusal — including which host is
-    deploying and the --force escape — lands in the operator's own terminal."""
-    import ops.cluster as _oc
+    """The thin-client trigger (issue #216). Exit 1, and the whole refusal —
+    including which host is deploying and the --force escape — lands in the
+    operator's own terminal from the gateway's 409 body."""
 
-    def _refuse(
-        _origin: str, *, force: bool = False, mode: str = "smooth"
-    ) -> dict[str, str | bool]:
-        raise _oc.ClusterUpdateInProgress(_REFUSAL)
+    class _Refused:
+        status_code = 409
 
-    monkeypatch.setattr(_oc, "spawn_rollout", _refuse)
+        def raise_for_status(self) -> None:
+            req = httpx.Request("POST", "http://gw:8000/api/cluster/rollout")
+            raise httpx.HTTPStatusError(
+                "conflict", request=req, response=httpx.Response(409, request=req)
+            )
 
-    rc = _up._spawn_gateway_rollout("cli:gateway-host")
+        def json(self) -> dict[str, str]:
+            return {"detail": _REFUSAL}
+
+    monkeypatch.setattr("shared.machine.gateway_api_base", lambda: "http://gw:8000")
+    monkeypatch.setattr("httpx.post", lambda *_a, **_k: _Refused())  # pyright: ignore[reportUnknownArgumentType]
+
+    from cli.commands import cmd_update
+
+    rc = cmd_update()
 
     assert rc == 1
     out = capsys.readouterr()
@@ -61,19 +70,31 @@ def test_update_reports_a_refused_deploy_instead_of_raising(
 def test_update_force_is_threaded_through_the_new_try(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Wrapping the call must not drop `--force` — the override is the whole reason
+    """The POST body must carry `--force` — the override is the whole reason
     a legitimately-stuck operator can proceed."""
-    import ops.cluster as _oc
+    from typing import cast
 
     seen: list[bool] = []
 
-    def _spawn(_origin: str, *, force: bool = False, mode: str = "smooth") -> dict[str, str | bool]:
-        seen.append(force)
-        return {"session": "ava-rollout", "log": "/var/log/rollout.log"}
+    class _Resp:
+        status_code = 202
 
-    monkeypatch.setattr(_oc, "spawn_rollout", _spawn)
+        def raise_for_status(self) -> None: ...
 
-    assert _up._spawn_gateway_rollout("cli:gateway-host", force=True) == 0
+        def json(self) -> dict[str, object]:
+            return {"session": "ava-rollout", "log": "/var/log/rollout.log"}
+
+    def _post(url: str, **kw: object) -> _Resp:
+        body = cast(dict[str, object], kw["json"])
+        seen.append(cast(bool, body["force"]))
+        return _Resp()
+
+    monkeypatch.setattr("shared.machine.gateway_api_base", lambda: "http://gw:8000")
+    monkeypatch.setattr("httpx.post", _post)  # pyright: ignore[reportUnknownArgumentType]
+
+    from cli.commands import cmd_update
+
+    assert cmd_update(force=True) == 0
     assert seen == [True]
 
 
@@ -82,29 +103,45 @@ def test_nothing_to_update_is_a_no_op_not_a_traceback(
 ) -> None:
     """An already-up-to-date cluster is the other ordinary answer to `ava cluster update`.
     Exit 0, so a scripted update in a chain is not tripped by a no-op."""
-    import ops.cluster as _oc
 
-    def _nothing(
-        _origin: str, *, force: bool = False, mode: str = "smooth"
-    ) -> dict[str, str | bool]:
-        raise _oc.NothingToUpdate("cluster is already up to date — nothing to roll out")
+    class _Nothing:
+        status_code = 422
 
-    monkeypatch.setattr(_oc, "spawn_rollout", _nothing)
+        def raise_for_status(self) -> None:
+            req = httpx.Request("POST", "http://gw:8000/api/cluster/rollout")
+            raise httpx.HTTPStatusError(
+                "nothing", request=req, response=httpx.Response(422, request=req)
+            )
 
-    assert _up._spawn_gateway_rollout("cli:gateway-host") == 0
+        def json(self) -> dict[str, str]:
+            return {"detail": "cluster is already up to date — nothing to roll out"}
+
+    monkeypatch.setattr("shared.machine.gateway_api_base", lambda: "http://gw:8000")
+    monkeypatch.setattr("httpx.post", lambda *_a, **_k: _Nothing())  # pyright: ignore[reportUnknownArgumentType]
+
+    from cli.commands import cmd_update
+
+    assert cmd_update() == 0
     assert "already up to date" in capsys.readouterr().err
 
 
 def test_a_dispatched_rollout_still_reports_normally(monkeypatch: pytest.MonkeyPatch) -> None:
     """The happy path is untouched by the wrapping."""
-    import ops.cluster as _oc
 
-    monkeypatch.setattr(
-        _oc,
-        "spawn_rollout",
-        lambda _o, **_k: {"session": "ava-rollout", "log": "/var/log/rollout.log"},  # pyright: ignore[reportUnknownArgumentType]
-    )
-    assert _up._spawn_gateway_rollout("cli:gateway-host") == 0
+    class _Resp:
+        status_code = 202
+
+        def raise_for_status(self) -> None: ...
+
+        def json(self) -> dict[str, object]:
+            return {"session": "ava-rollout", "log": "/var/log/rollout.log"}
+
+    monkeypatch.setattr("shared.machine.gateway_api_base", lambda: "http://gw:8000")
+    monkeypatch.setattr("httpx.post", lambda *_a, **_k: _Resp())  # pyright: ignore[reportUnknownArgumentType]
+
+    from cli.commands import cmd_update
+
+    assert cmd_update() == 0
 
 
 # ─── `ava cluster restart` — the same refusal, over HTTP ─────────────────────

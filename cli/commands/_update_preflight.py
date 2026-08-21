@@ -60,7 +60,7 @@ def _refuse_target_sha_on_gateway(target_sha: str) -> int:
     """`ava cluster update --target-sha` on a gateway-capable host is refused (rc=2).
 
     Every gateway route ignores the flag — the detached-rollout default
-    (`_spawn_gateway_rollout`) and `--local` (`_run_gateway_orchestration`, which
+    (`ava cluster update` POSTs the gateway) and `--local` (`_run_gateway_orchestration`, which
     resolves its own pin via `_resolve_rollout_target`) both take no target_sha
     at all. Accepting it there tells the operator the rollout is pinned to their
     sha while origin/main is resolved live underneath them; the flag's only

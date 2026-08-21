@@ -222,12 +222,15 @@ def cluster_update_op(
         raise
 
 
-def cluster_rollout_op(origin: str, *, mode: str = "smooth") -> dict[str, str | bool]:
+def cluster_rollout_op(
+    origin: str, *, mode: str = "smooth", force: bool = False
+) -> dict[str, str | bool]:
     """Run `spawn_rollout()` and return the new orchestration session metadata + rollout scope.
 
     `mode` is the agent-drain policy (smooth/force) the detached orchestration
-    applies to its quiesce step."""
-    return spawn_rollout(origin, mode=mode)
+    applies to its quiesce step; `force` overrides the deploy-window check
+    (issue #216 threads the CLI's `--force` through the POST body)."""
+    return spawn_rollout(origin, force=force, mode=mode)
 
 
 def cluster_restart_op(origin: str, *, mode: str = "smooth") -> dict[str, str]:

@@ -3920,6 +3920,11 @@ export interface components {
              * @default smooth
              */
             mode: string;
+            /**
+             * Force
+             * @default false
+             */
+            force: boolean;
         };
         /**
          * ClusterPanel

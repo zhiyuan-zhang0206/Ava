@@ -86,30 +86,28 @@ def _stub_all_legs(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         _cli, "_run_agent_runner_self_update", _fail_if_called("the agent-runner self-update")
     )
-    monkeypatch.setattr("ops.cluster.spawn_rollout", _fail_if_called("spawn_rollout"))
 
 
 @pytest.mark.parametrize(
-    ("roles", "local", "restart_only"),
+    ("local", "restart_only"),
     [
-        (frozenset({"gateway", "agent-runner"}), True, False),  # the incident's shape
-        (frozenset({"gateway", "agent-runner"}), False, True),  # restart-only bounces too
-        (frozenset({"agent-runner"}), False, False),  # bare update on a runner is in-process
+        (True, False),  # the incident's shape: `ava cluster update --local`
+        (True, True),  # --local --restart-only keeps the in-process restart-only leg
     ],
-    ids=["gateway-local", "gateway-restart-only", "agent-runner"],
+    ids=["gateway-local", "gateway-local-restart-only"],
 )
 def test_in_process_legs_refused_inside_supervised_session(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     write_session_record: Callable[..., Path],
-    roles: frozenset[str],
     local: bool,
     restart_only: bool,
 ) -> None:
-    """Every in-process dispatch route refuses with exit 2, runs nothing, names
-    the hosting session, and points at the detached form."""
+    """The in-process --local route refuses with exit 2, runs nothing, names
+    the hosting session, and points at the detached form. (The bare and
+    --restart-only legs are POSTs to the gateway now — issue #216 — so they
+    never run a stop leg in this process and have nothing to refuse.)"""
     write_session_record(_HOSTING_SESSION)
-    monkeypatch.setattr("shared.machine.machine_role", lambda: roles)
     _stub_all_legs(monkeypatch)
 
     rc = _cli.cmd_update(local=local, restart_only=restart_only)
@@ -120,6 +118,29 @@ def test_in_process_legs_refused_inside_supervised_session(
     assert "ava cluster update" in err  # the way out is named, not implied
 
 
+def test_restart_only_posts_even_inside_supervised_session(
+    monkeypatch: pytest.MonkeyPatch,
+    write_session_record: Callable[..., Path],
+) -> None:
+    """--restart-only POSTs the gateway (issue #216) — the gateway runs the
+    bounce detached, so a supervised caller is NOT refused; it would have been
+    in-process before."""
+
+    class _Resp:
+        status_code = 202
+
+        def raise_for_status(self) -> None: ...
+
+        def json(self) -> dict[str, object]:
+            return {"session": "ava-cluster-restart", "log": "/l"}
+
+    write_session_record(_HOSTING_SESSION)
+    monkeypatch.setattr("shared.machine.gateway_api_base", lambda: "http://gw:8000")
+    monkeypatch.setattr("httpx.post", lambda *_a, **_k: _Resp())  # pyright: ignore[reportUnknownArgumentType]
+
+    assert _cli.cmd_update(restart_only=True) == 0
+
+
 def test_ancestor_lineage_is_walked_not_just_self(
     monkeypatch: pytest.MonkeyPatch,
     write_session_record: Callable[..., Path],
@@ -127,10 +148,9 @@ def test_ancestor_lineage_is_walked_not_just_self(
     """The incident's real shape: the recorded session pid is an ANCESTOR (the
     pty shell), not the update process itself."""
     write_session_record(_HOSTING_SESSION, pid=os.getppid())
-    monkeypatch.setattr("shared.machine.machine_role", lambda: frozenset({"agent-runner"}))
     _stub_all_legs(monkeypatch)
 
-    assert _cli.cmd_update() == 2
+    assert _cli.cmd_update(local=True) == 2
 
 
 def _stub_in_process_gateway_leg(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
