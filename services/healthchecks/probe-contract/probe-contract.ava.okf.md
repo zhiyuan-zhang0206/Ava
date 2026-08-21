@@ -32,7 +32,7 @@ The inner probe keeps its narrow catches — those produce the useful operator-f
 
 **It fails closed.** An unreadable probe is reported *down*, never *alive*: reporting alive would make the watchdog skip a genuinely dead daemon forever, which is the same 98-minute outage shape `probe_daemon`'s identity check exists to prevent.
 
-`probe_daemon` is shared by six healthchecks — heartbeat, labeler, memory-indexer, ops, events-maintenance, restarter — so a single escaping exception type silenced six services' revival at once. `probe_home` is its pid-less sibling for the gateway (uvicorn reload makes the pid comparison unusable — a healthy gateway answers from a worker forked out of the process that wrote the pidfile), and it is where losing the verdict costs most: the gateway is what the cluster health probe polls, with `--auto-rollback --threshold 3` armed against it.
+`probe_daemon` is shared by ten healthchecks — heartbeat, labeler, memory-indexer, ops, events-maintenance, restarter, delivery-watchdog, im-bridge, agent-host, page-server — so a single escaping exception type silences ten services' revival at once. `probe_home` is its pid-less sibling for the gateway (uvicorn reload makes the pid comparison unusable — a healthy gateway answers from a worker forked out of the process that wrote the pidfile), and it is where losing the verdict costs most: the gateway is what the cluster health probe polls, with `--auto-rollback --threshold 3` armed against it.
 
 All three wrappers are **shared with the operator surfaces** through `ServiceSpec.identity_probe`, so `ava status` / `ava cluster health-probe` cannot believe a 2xx the watchdog has already rejected ([[services/healthchecks/terminal-verdict/terminal-verdict.ava.okf.md]]).
 

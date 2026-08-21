@@ -195,6 +195,20 @@ the dependency it vouches for, or scope its claim down to what it actually
 touches.
 Evidence: [`postmortems/0004`](../postmortems/0004-isolation-one-command-can-undo.md).
 
+Enforced form (audited 2026-08-21, issue #192): a check qualifies when it
+either imports the subsystem it certifies (`redis_acl` PINGs via redis-py) or
+probes the certified surface end-to-end — a real RPC against the serving
+endpoint, a protocol ping the daemon must answer. A **port-open-only probe is
+the failure shape**: it stays green while the thing behind the port is
+unusable, so nobody restarts it. A process-liveness probe must scope its claim
+to liveness — the daemon keepalive checks do, via identity-verified `/healthz`
+plus a `Liveness` beat that certifies the work loop is still ticking, not that
+the subsystem's work succeeds. The audit found one violation (`milvus`'s bare
+TCP connect, now a real `list_collections` RPC); the roster carries a
+"what it certifies" column per check (`services/healthchecks/check-roster.ava.okf.md`)
+and `scripts/lint_doc_roster.py` pins roster, module directory, and ServiceSpec
+registrations together so the drift the audit found cannot silently return.
+
 ### A guard that shares a mechanism with the failure cannot catch it
 
 The health-check rule above, turned on tests. `asyncio.wait_for` is the reflexive
