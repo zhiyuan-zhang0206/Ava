@@ -45,3 +45,18 @@ class AgentRuntimeSettings(EnvSettings):
             "scope": "cluster-pinned",
         },
     )
+
+    heartbeat_pause_max_seconds: float = Field(
+        default=86400.0,
+        alias="AVA_HEARTBEAT_PAUSE_MAX_SECONDS",
+        description="Maximum seconds one ava.self.pause_heartbeat(duration) call may pause the idle heartbeat. Cluster default; an agent can override it per-agent via its config overlay (e.g. ava.self.restart(config_overlay=...)).",
+        gt=0,
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-default",
+            "per_agent": True,
+            "lifecycle": "live",
+        },
+    )

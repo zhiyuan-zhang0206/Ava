@@ -16,6 +16,7 @@ import psycopg
 import pytest
 
 import ava
+from shared.config import set_field, settings
 from tests.conftest import spawn_agent
 
 
@@ -226,12 +227,22 @@ class TestPauseHeartbeat:
         assert event_row is not None
         assert float(event_row["attributes"]["duration_s"]) == 1800.0
 
-    @pytest.mark.parametrize("bad", [0, -1, 86_401])
+    @pytest.mark.parametrize("bad", [0, -1, settings.agent.heartbeat_pause_max_seconds + 1])
     def test_pause_heartbeat_rejects_out_of_range(
-        self, db_conn: psycopg.Connection, bad: int
+        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, bad: float
     ) -> None:
-        """duration must be in (0, 86400] — out-of-range raises ValueError, no DB write / no emit."""
+        """duration must be in (0, configured limit] — invalid calls do not write or emit."""
         ava._boot._agent_id = spawn_agent()
+        from shared import telemetry
+
+        def _unexpected_emit(*_args: object, **_kwargs: object) -> None:
+            pytest.fail("invalid duration emitted telemetry")
+
+        monkeypatch.setattr(
+            telemetry,
+            "emit",
+            _unexpected_emit,
+        )
         with pytest.raises(ValueError, match=r"greater than 0|at most"):
             ava.self.pause_heartbeat(bad)
         with db_conn.cursor() as cur:
@@ -242,6 +253,39 @@ class TestPauseHeartbeat:
             row = cur.fetchone()
         assert row is not None
         assert row[0] is None
+
+    def test_pause_heartbeat_lower_cluster_default(self, db_conn: psycopg.Connection) -> None:
+        """The configured cluster limit accepts its inclusive upper boundary."""
+        original_limit = settings.agent.heartbeat_pause_max_seconds
+        set_field("heartbeat_pause_max_seconds", 3600.0)
+        try:
+            ava._boot._agent_id = spawn_agent()
+            ava.self.pause_heartbeat(3600)
+            with db_conn.cursor() as cur:
+                cur.execute(
+                    "SELECT EXTRACT(EPOCH FROM (heartbeat_paused_until - now())) "
+                    "FROM agents_meta WHERE id = %s",
+                    (ava.self.AGENT_ID,),
+                )
+                window_row = cur.fetchone()
+            assert window_row is not None
+            assert window_row[0] == pytest.approx(3600, abs=5)  # pyright: ignore[reportUnknownMemberType]
+            with pytest.raises(ValueError, match=r"at most"):
+                ava.self.pause_heartbeat(3601)
+        finally:
+            set_field("heartbeat_pause_max_seconds", original_limit)
+
+    def test_pause_heartbeat_per_agent_override_wins(self) -> None:
+        """The effective per-agent overlay limit is read when the SDK is called."""
+        original_limit = settings.agent.heartbeat_pause_max_seconds
+        set_field("heartbeat_pause_max_seconds", 172800.0)
+        try:
+            ava._boot._agent_id = spawn_agent()
+            ava.self.pause_heartbeat(172800)
+        finally:
+            set_field("heartbeat_pause_max_seconds", original_limit)
+        with pytest.raises(ValueError, match=r"at most"):
+            ava.self.pause_heartbeat(172800)
 
 
 class TestRestartCompletedMarker:

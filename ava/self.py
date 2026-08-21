@@ -7,6 +7,7 @@ from typing import NoReturn
 
 import ava
 from shared.config import settings
+from shared.config.turn_view import turn_settings
 from shared.lifecycle import AgentRestart, AgentTermination, _SystemHalt
 from shared.live_events import CompactRequest
 from shared.redis_client import publish_best_effort_sync
@@ -220,9 +221,6 @@ def terminate() -> NoReturn:
     raise AgentTermination
 
 
-_MAX_HEARTBEAT_PAUSE_S = 86400.0  # 24 hours
-
-
 def pause_heartbeat(duration: float) -> None:
     """Suppress idle heartbeat check-ins for the next `duration` seconds.
 
@@ -240,15 +238,21 @@ def pause_heartbeat(duration: float) -> None:
     call replaces the window.
 
     Args:
-        duration: seconds, at most 86400 (24 hours).
+        duration: seconds, at most the configured heartbeat pause limit (default
+            86400 = 24 hours; per-agent override via
+            ava.self.restart(config_overlay=...)).
     """
     from ava import _boot
 
     if not duration > 0:
         raise ValueError(f"duration must be greater than 0 seconds, got {duration!r}")
-    if duration > _MAX_HEARTBEAT_PAUSE_S:
+    limit = turn_settings.agent.heartbeat_pause_max_seconds
+    if duration > limit:
         raise ValueError(
-            f"duration must be at most {_MAX_HEARTBEAT_PAUSE_S:.0f} seconds (24 hours), "
+            f"duration must be at most {limit:.0f} seconds (heartbeat pause limit; "
+            "per-agent override via ava.self.restart("
+            "config_overlay={'heartbeat_pause_max_seconds': ...}), cluster default via "
+            "AVA_HEARTBEAT_PAUSE_MAX_SECONDS), "
             f"got {duration!r}"
         )
     with ava.DB.cursor() as cur:
