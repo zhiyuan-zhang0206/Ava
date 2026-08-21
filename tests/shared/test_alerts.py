@@ -74,6 +74,25 @@ def test_notify_text_composes_from_copy_templates(
     assert text.endswith("MARKER-LINK " + frontend_base_url() + "/x")
 
 
+def test_notify_text_omits_jump_link_when_no_frontend_base_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A fully-unconfigured cluster (frontend_base_url() == "") must not
+    push a malformed jump-link line (issue #134) — the line is omitted
+    rather than rendered as a bare path."""
+
+    monkeypatch.setattr(shared_alerts, "frontend_base_url", lambda: "")
+    monkeypatch.setattr(copy, "ALERT_JUMP_LINK", "MARKER-LINK {url}/x")
+
+    text = notify_text(_alert(), lang="en")
+
+    assert "MARKER-LINK" not in text
+    assert "ALERT [ERROR] test-rule" in text
+    # the rest of the message is intact — only the jump-link line is gone
+    assert "triggered " in text
+    assert text.count("\n") == 3
+
+
 # -- language selection -----------------------------------------------------
 
 
