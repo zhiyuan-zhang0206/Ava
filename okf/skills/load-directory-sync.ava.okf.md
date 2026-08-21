@@ -15,8 +15,12 @@ flag). Converge (`cli/commands/_converge_skills.py`, on `ava start` /
 
 1. **Repo built-in** (origin=repo): `<repo>/ava_builtins/skills/` →
    `~/.ava/skills/<name>/`. Repo-native sources are bootstrap-only:
-   converge lands a missing copy and never updates one; the explicit update is
-   `ava skill update`.
+   converge lands a missing copy and never updates one (the R5 ruling). The
+   refresh moment is the **product rollout**: `ava cluster update`'s legs run
+   the explicit-update machinery once per rollout (issue #1289 — before that
+   wiring, a builtin copy stayed at the version that first landed it), and the
+   manual equivalent is `ava skill update`. Local edits are never clobbered:
+   the rollout reports them as conflicts and leaves the copy untouched.
 2. **Plugin-carried** (origin=plugin): `<repo>/ava_builtins/plugins/<p>/skills/`
    and `~/.ava/plugins/<p>/skills/` → `~/.ava/skills/<p>/`.
 

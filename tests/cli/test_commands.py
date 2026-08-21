@@ -1895,11 +1895,15 @@ def test_gateway_local_update_starts_in_fresh_process(
     # non-gateway service into _recover_rc's rollback). See
     # tests/cli/test_start_readiness_gate.py.
     assert cmds[0] == ["uv", "sync"]
+    # Repo-native skills refresh on the just-landed tree (issue #1289), also as a
+    # fresh subprocess so it runs the new revision's update table.
+    assert cmds[1][0].endswith(".venv/bin/ava")  # pyright: ignore[reportUnknownMemberType]
+    assert cmds[1][1:] == ["skill", "update"]
     # No Grafana provisioning sync step: the LGTM Grafana container mounts
     # deploy/lgtm/config/grafana/provisioning straight from the checkout,
     # so the checkout above already refreshed it.
-    assert cmds[1][0].endswith(".venv/bin/ava")  # pyright: ignore[reportUnknownMemberType]
-    assert cmds[1][1:] == ["start", "--persist-services", "--no-readiness-gate"]
+    assert cmds[2][0].endswith(".venv/bin/ava")  # pyright: ignore[reportUnknownMemberType]
+    assert cmds[2][1:] == ["start", "--persist-services", "--no-readiness-gate"]
 
 
 def test_update_local_runs_in_process_orchestration(monkeypatch: pytest.MonkeyPatch) -> None:
