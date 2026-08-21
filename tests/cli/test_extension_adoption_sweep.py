@@ -188,20 +188,41 @@ def test_a_locally_disabled_skill_adopts_disabled(
     assert [e.name for e in reg.list_enabled(db_conn, kind="skill")] == []
 
 
-def test_local_trust_does_not_travel(
+def test_local_reviewed_trust_travels(
     tmp_path: Path, as_machine: _AsMachine, db_conn: psycopg.Connection
 ) -> None:
-    """`ava skill trust` is a decision about THIS machine's copy. Promoting it
-    cluster-wide because one machine swept would turn one person's review of one
-    directory into a review for every machine — and `ava skill install` does not
-    do it either, so a swept name and an installed one stay indistinguishable."""
+    """User ruling 2026-08-21 (issue #218): trust is a cluster-level fact about
+    CONTENT — "has a human reviewed these bytes" — not about the machine the
+    reviewer sat at. A locally-`reviewed` package adopted into an EMPTY registry
+    lands `reviewed`, carrying the review to every machine."""
     with as_machine(tmp_path / "home-a"):
         _install_locally("trusted-demo", trust="reviewed")
         adopt.adopt_local_installs(db.pool(), skills_root=paths.skills_dir())
 
     row = reg.get(db_conn, "trusted-demo")
     assert row is not None
-    assert row.trust == "unreviewed"
+    assert row.trust == "reviewed"
+
+
+def test_reviewed_row_survives_a_later_unreviewed_machine(
+    tmp_path: Path, as_machine: _AsMachine, db_conn: psycopg.Connection
+) -> None:
+    """Multi-machine convergence (issue #218): home-a adopts a reviewed package,
+    then home-b — holding the IDENTICAL bytes unreviewed — sweeps. The review
+    must survive: trust only ever rises for the same content."""
+    with as_machine(tmp_path / "home-a"):
+        _install_locally("shared-trust-demo", body="Same bytes.", trust="reviewed")
+        adopt.adopt_local_installs(db.pool(), skills_root=paths.skills_dir())
+
+    with as_machine(tmp_path / "home-b"):
+        _install_locally("shared-trust-demo", body="Same bytes.", trust="unreviewed")
+        result = adopt.adopt_local_installs(db.pool(), skills_root=paths.skills_dir())
+        assert result.conflicts == []
+        assert result.already_claimed == ["shared-trust-demo"]
+
+    row = reg.get(db_conn, "shared-trust-demo")
+    assert row is not None
+    assert row.trust == "reviewed", "a later unreviewed sweep must not downgrade a review"
 
 
 def test_a_tracked_name_missing_from_disk_is_reported_not_invented(

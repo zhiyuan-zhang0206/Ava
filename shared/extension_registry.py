@@ -262,6 +262,14 @@ def upsert(
     re-enable something an operator turned off. On a fresh insert None means the
     schema default (enabled).
 
+    `trust` is keyed to `content_hash` (user ruling 2026-08-21, issue #218):
+    trust is a cluster-level fact about content. When the upsert CHANGES the
+    content_hash, the caller's tier lands (the default `unreviewed` — a review
+    never launders across versions). When the content_hash is unchanged, trust
+    only ever rises: a `reviewed`/`builtin` row is never downgraded by a later
+    `unreviewed` write (multi-machine convergence), while an `unreviewed` row
+    accepts a `reviewed` promotion.
+
     `updated_at` is stamped on every write, which is what makes a materializer
     able to ask "has anything changed since I last converged".
     """
@@ -275,7 +283,17 @@ def upsert(
         "ON CONFLICT (name) DO UPDATE SET "
         "  kind = EXCLUDED.kind, source = EXCLUDED.source, source_ref = EXCLUDED.source_ref, "
         "  version = EXCLUDED.version, content_hash = EXCLUDED.content_hash, "
-        "  manifest = EXCLUDED.manifest, trust = EXCLUDED.trust, "
+        "  manifest = EXCLUDED.manifest, "
+        # Trust is keyed to content (user ruling 2026-08-21, issue #218): a
+        # review means "I reviewed THESE BYTES". Content changed -> the caller's
+        # tier lands (default unreviewed — a review never launders across
+        # versions). Content unchanged -> trust only ever rises: a reviewed /
+        # builtin row is never downgraded by a later unreviewed write.
+        "  trust = CASE "
+        "    WHEN EXCLUDED.content_hash IS DISTINCT FROM extensions.content_hash "
+        "      THEN EXCLUDED.trust "
+        "    WHEN extensions.trust IN ('reviewed', 'builtin') THEN extensions.trust "
+        "    ELSE EXCLUDED.trust END, "
         "  default_enabled = COALESCE(%s, extensions.default_enabled), "
         "  updated_at = now()",
         (
