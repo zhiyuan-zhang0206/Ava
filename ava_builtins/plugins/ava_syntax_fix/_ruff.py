@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import subprocess
 
-from ._imports import _ruff_executable
+from ._imports import _RUFF_TIMEOUT_SECONDS, _log_ruff_give_up, _ruff_executable
 
 # ---------------------------------------------------------------------------
 # 4. ruff auto-fix
@@ -36,15 +36,24 @@ def _ruff_fix(code: str) -> str:
             input=code,
             capture_output=True,
             text=True,
-            timeout=5,
+            timeout=_RUFF_TIMEOUT_SECONDS,
             check=False,
         )
         # Guard against ruff crashing / producing empty output
         if proc.returncode != 0 or not proc.stdout.strip():
             return code
         return proc.stdout
-    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
-        return code  # ruff not available or slow; pass through unchanged
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError) as exc:
+        # FileNotFoundError: optional step skipped on a host without ruff —
+        # one log line per process, then pass through. Timeout / OSError: a
+        # repair step that gave up must be visible, not indistinguishable
+        # from "ruff found nothing to fix" (issue #159) — warning with the
+        # budget / input size / errno, then pass through unchanged (ruff is
+        # off the deterministic-correctness path: check --fix only applies
+        # safe auto-fixes, so leaving the source as-is is a style gap, not a
+        # correctness one).
+        _log_ruff_give_up("check --fix", code, exc)
+        return code
 
 
 def _ruff_format(code: str) -> str:
@@ -59,11 +68,15 @@ def _ruff_format(code: str) -> str:
             input=code,
             capture_output=True,
             text=True,
-            timeout=5,
+            timeout=_RUFF_TIMEOUT_SECONDS,
             check=False,
         )
         if proc.returncode != 0 or not proc.stdout.strip():
             return code
         return proc.stdout
-    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
-        return code  # ruff not available or slow; pass through unchanged
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError) as exc:
+        # Same contract as _ruff_fix (issue #159): a timeout or OS error is a
+        # visible warning; a missing ruff is logged once per process. Pass
+        # through either way — format only restyles, never fixes an error.
+        _log_ruff_give_up("format", code, exc)
+        return code
