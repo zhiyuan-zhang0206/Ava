@@ -1,10 +1,11 @@
 """`ava.state` / `ava.state_update` / `ava.state.<plugin>` namespace view behavior guard.
 
-Plugin <-> framework IPC channel — main process `agent/graph/_exec.py:_exec_node_impl`
-before entering the worker thread sets `ava.state = state.model_copy(deep=True)` +
-`ava.state_update = {}`, inside the worker thread the plugin reads ava.state and writes
-ava.state_update through the SDK; at the end of the turn ava.state_update is merged into
-Command(update=...).
+Plugin <-> framework IPC channel — `agent/graph/_exec.py:_exec_node_impl` runs the
+exec through the configured backend: the subprocess child rebuilds `ava.state` from the
+request-envelope snapshot (the thread rollback backend sets
+`ava.state = state.model_copy(deep=True)` in-process). Inside the exec the plugin reads
+ava.state and writes ava.state_update through the SDK; at the end of the turn
+ava.state_update is merged into Command(update=...).
 Commit entry validates keys — must be prefixed fields declared through register_plugin_state,
 not base field names, not unregistered typos.
 
@@ -29,6 +30,8 @@ Test coverage:
 """
 
 import asyncio
+import time
+from pathlib import Path
 from typing import Annotated, Any, cast
 from unittest.mock import AsyncMock, MagicMock
 
@@ -655,32 +658,37 @@ async def test_state_update_non_dict_raises_type_error(fake_cancel_event):
 # would cause a silent regression. The following three tests nail down this invariant.
 
 
-async def _drive_with_cancel_event(state, runtime, config, fake_cancel_event):
-    """Helper: spawn _exec_node_impl alongside a cancel trigger that makes cancel arrive first."""
+async def test_exec_node_preserves_state_update_on_cancel(
+    fake_cancel_event: asyncio.Event, tmp_path: Path
+):
+    """In the cancel path, the state_update written by the plugin before the cancel still merges into Command.
 
-    async def _set_cancel_after_delay() -> None:
-        await asyncio.sleep(0.05)
-        fake_cancel_event.set()  # pyright: ignore[reportUnknownMemberType]
-
-    trigger = asyncio.create_task(_set_cancel_after_delay())
-    try:
-        return await _exec_node_impl(state, runtime, config)  # pyright: ignore[reportUnknownArgumentType]
-    finally:
-        await trigger
-
-
-async def test_exec_node_preserves_state_update_on_cancel(fake_cancel_event):
-    """In the cancel path, the state_update written by the plugin before the cancel still merges into Command."""
+    The cancel fires only after the exec code has provably started: a marker
+    file the code writes after its state_update (subprocess boot — `import ava`
+    plus plugins — takes ~1-2s, so a fixed short delay would race it on CI)."""
 
     class _State(BaseAgentState):
         plugin__progress: str = ""
 
-    # plugin first writes state_update then dead-waits (sleep long enough to be cancelled)
-    code = "import ava\nava.state_update['plugin__progress'] = 'before-cancel'\nimport time; time.sleep(5)\n"
+    marker = tmp_path / "started.marker"
+    # plugin first writes state_update, proves it ran, then dead-waits
+    # (sleep long enough to be cancelled)
+    code = (
+        "import ava\n"
+        "ava.state_update['plugin__progress'] = 'before-cancel'\n"
+        f"open({str(marker)!r}, 'w').write('x')\n"
+        "import time; time.sleep(30)\n"
+    )
     state = _State(messages=[_ai_message_with_code(code)], halted=False)
     runtime, config = _make_runtime_and_config(AsyncMock())
 
-    cmd = await _drive_with_cancel_event(state, runtime, config, fake_cancel_event)  # pyright: ignore[reportUnknownArgumentType]
+    node_task = asyncio.create_task(_exec_node_impl(cast(BaseAgentState, state), runtime, config))
+    deadline = time.monotonic() + 20.0
+    while time.monotonic() < deadline and not marker.exists():
+        await asyncio.sleep(0.05)
+    assert marker.exists(), "exec code never started within 20s — cancel would race boot"
+    fake_cancel_event.set()
+    cmd = await node_task
 
     update = cast(dict, cmd.update)
     assert update.get("plugin__progress") == "before-cancel"  # pyright: ignore[reportUnknownMemberType]

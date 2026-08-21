@@ -249,13 +249,17 @@ async def _run_in_subprocess(
     exec_dir: Path | None = None,
     config_overlay: dict[str, object] | None = None,
     birth_config: dict[str, object] | None = None,
-) -> _ExecResult:
+) -> tuple[_ExecResult, ResultPayload | None]:
     """Run `code` in one disposable child process; poll every 50ms monitoring
     exit / cancel_event / deadline (same priority as the old thread loop:
     cancel > deadline > natural completion).
 
-    Returns the same `_ExecResult` sum type the exec node dispatches; the
-    child's outcome kinds map onto it with the parent's flags authoritative.
+    Returns the `_ExecResult` sum type the exec node dispatches plus the raw
+    child envelope (None when the child never wrote one — SIGKILL / watchdog /
+    os._exit): the envelope carries the plugin state-update delta and the
+    security findings the child drained, which only this function can see.
+    The child's outcome kinds map onto the result with the parent's flags
+    authoritative.
     """
     if exec_dir is None:
         exec_dir = exec_run_dir()
@@ -276,7 +280,7 @@ async def _run_in_subprocess(
         return _ExecCrashed(
             output=f"exec subprocess request could not be written: {exc}",
             exc=exc,
-        )
+        ), None
 
     stream = StreamingTextIO()
     cancelled = False
@@ -295,7 +299,7 @@ async def _run_in_subprocess(
             return _ExecCrashed(
                 output=f"exec subprocess could not be spawned: {exc}",
                 exc=exc,
-            )
+            ), None
 
         reader = threading.Thread(
             target=_drain_output,
@@ -313,7 +317,7 @@ async def _run_in_subprocess(
         )
 
         payload, envelope_error = _read_result_envelope(result_path, proc.returncode)
-        return _result_from_payload(
+        result = _result_from_payload(
             stream.getvalue(),
             payload,
             cancelled=cancelled,
@@ -321,6 +325,7 @@ async def _run_in_subprocess(
             envelope_error=envelope_error,
             stream_cap=stream.cap(),
         )
+        return result, payload
     except asyncio.CancelledError:
         # The exec node's outer shield (asyncio.wait_for) cancels this task on
         # node timeout — the child must not survive its parent's decision.

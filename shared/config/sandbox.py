@@ -6,7 +6,7 @@ env alias so the .env surface is unchanged. Aggregated by shared/config.
 
 from __future__ import annotations
 
-from typing import Self
+from typing import Literal, Self
 
 from pydantic import Field, model_validator
 
@@ -53,6 +53,24 @@ class SandboxSettings(EnvSettings):
                 f"envelope must still have both ends of the accumulated output to render"
             )
         return self
+
+    exec_backend: Literal["subprocess", "thread"] = Field(
+        default="subprocess",
+        alias="AVA_EXEC_BACKEND",
+        description=(
+            "Backend that runs execute_code: 'subprocess' (default — one disposable "
+            "child process per exec, so a stuck native call is SIGKILLable without "
+            "touching the agent process; issue #184) or 'thread' (the in-process "
+            "worker thread, kept one release as the instant-rollback valve and "
+            "removed in PR3)."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
 
     exec_timeout_seconds: float = Field(
         default=300.0,
