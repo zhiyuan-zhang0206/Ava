@@ -34,6 +34,10 @@ from ava_builtins.plugins.ava_syntax_fix._deterministic_fixes import (
     fix_unicode_punctuation,
     fix_unterminated_to_triple,
 )
+from ava_builtins.plugins.ava_syntax_fix._imports import (
+    _ruff_undefined_names,
+    _warn_ruff_missing_once,
+)
 from ava_builtins.plugins.ava_syntax_fix.plugin import (
     _detect_missing_imports,
     _extract_text,
@@ -380,6 +384,68 @@ class TestRuffFormat:
             args=["ruff"], returncode=0, stdout="", stderr=""
         )
         assert _ruff_format("x=1\n") == "x=1\n"
+
+
+# --- ruff give-up logging (issue #159) ---
+# A ruff pass that gives up must be visible: a timeout / OS error logs a
+# warning with the budget, input size, and errno; a missing ruff logs once per
+# process. The pass-through behavior itself is unchanged.
+
+
+class TestRuffGiveUpLogging:
+    @patch("subprocess.run")
+    def test_ruff_fix_timeout_logs_warning(self, mock_run, loguru_records):
+        mock_run.side_effect = subprocess.TimeoutExpired("ruff", 5)
+        code = "import os\n"
+        assert _ruff_fix(code) == code
+        msgs = [r["message"] for r in loguru_records]
+        assert any("did not finish within 5s" in m and "char source" in m for m in msgs), msgs
+
+    @patch("subprocess.run")
+    def test_ruff_fix_oserror_logs_errno(self, mock_run, loguru_records):
+        mock_run.side_effect = OSError(24, "Too many open files")
+        code = "import os\n"
+        assert _ruff_fix(code) == code
+        msgs = [r["message"] for r in loguru_records]
+        assert any("errno=24" in m and "Too many open files" in m for m in msgs), msgs
+
+    @patch("subprocess.run")
+    def test_ruff_format_timeout_logs_warning(self, mock_run, loguru_records):
+        mock_run.side_effect = subprocess.TimeoutExpired("ruff", 5)
+        code = "x=1\n"
+        assert _ruff_format(code) == code
+        msgs = [r["message"] for r in loguru_records]
+        assert any("did not finish within 5s" in m and "char source" in m for m in msgs), msgs
+
+    @patch("subprocess.run")
+    def test_ruff_missing_logs_once_per_process(self, mock_run, loguru_records):
+        """A host without ruff logs its absence once, not once per call."""
+        _warn_ruff_missing_once.cache_clear()
+        mock_run.side_effect = FileNotFoundError
+        try:
+            _ruff_fix("a = 1\n")
+            _ruff_fix("b = 2\n")
+            _ruff_format("c = 3\n")
+            msgs = [r["message"] for r in loguru_records]
+            assert sum("not found" in m for m in msgs) == 1, msgs
+        finally:
+            _warn_ruff_missing_once.cache_clear()
+
+    @patch("subprocess.run")
+    def test_undefined_names_timeout_logs_warning(self, mock_run, loguru_records):
+        mock_run.side_effect = subprocess.TimeoutExpired("ruff", 5)
+        assert _ruff_undefined_names("import os\n") == set()
+        msgs = [r["message"] for r in loguru_records]
+        assert any("did not finish within 5s" in m and "check --select F821" in m for m in msgs), (
+            msgs
+        )
+
+    @patch("subprocess.run")
+    def test_undefined_names_oserror_logs_errno(self, mock_run, loguru_records):
+        mock_run.side_effect = OSError(28, "No space left on device")
+        assert _ruff_undefined_names("import os\n") == set()
+        msgs = [r["message"] for r in loguru_records]
+        assert any("errno=28" in m for m in msgs), msgs
 
 
 # --- _ruff_executable ---

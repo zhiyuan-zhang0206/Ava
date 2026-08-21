@@ -17,6 +17,8 @@ import shutil
 import subprocess
 import sys
 
+from loguru import logger
+
 # ---------------------------------------------------------------------------
 # 2. Missing import detection (ruff F821 + curated name -> import mapping)
 # ---------------------------------------------------------------------------
@@ -198,6 +200,53 @@ def _ruff_executable() -> str:
     return shutil.which("ruff", path=str(pathlib.Path(sys.executable).parent)) or "ruff"
 
 
+# Wall-clock timeout for every ruff subprocess pass in this package. A timeout
+# used to collapse into silent pass-through (issue #159): the repair stage
+# reported success-by-omission, indistinguishable from "ruff ran and found
+# nothing to fix". Every give-up below now logs — never silent.
+_RUFF_TIMEOUT_SECONDS = 5
+
+
+@functools.lru_cache(maxsize=1)
+def _warn_ruff_missing_once() -> None:
+    """Log a missing ruff executable once per process.
+
+    ruff is an optional stage — a host without it skips the fix — but the skip
+    must be visible. One line per process, not one per agent turn (issue #159).
+    """
+    logger.warning(
+        f"ruff executable {_ruff_executable()!r} not found — syntax-fix "
+        "ruff stage skipped (source passed through unchanged)"
+    )
+
+
+def _log_ruff_give_up(step: str, code: str, exc: BaseException) -> None:
+    """Log why a ruff subprocess pass gave up, then let the caller pass through.
+
+    FileNotFoundError = the optional stage is skipped on a host without ruff —
+    one line per process via _warn_ruff_missing_once. TimeoutExpired and
+    OSError are silent-failure smells (issue #159): the first logs the elapsed
+    budget and the input size (a timeout correlated with large inputs points at
+    the budget, not the host), the second logs the errno (usually a symptom of
+    something larger on the host).
+    """
+    if isinstance(exc, subprocess.TimeoutExpired):
+        logger.warning(
+            f"ruff {step} did not finish within {exc.timeout}s on "
+            f"{len(code)}-char source — passing through unchanged"
+        )
+        return
+    if isinstance(exc, FileNotFoundError):  # OSError subclass — check first
+        _warn_ruff_missing_once()
+        return
+    if isinstance(exc, OSError):
+        logger.warning(
+            f"ruff {step} failed with OSError errno={exc.errno} "
+            f"({exc.strerror}) — passing through unchanged"
+        )
+        return
+
+
 def _f821_names(diagnostics: list[dict]) -> set[str]:
     """Extract the undefined names from a ruff F821 diagnostic list."""
     names: set[str] = set()
@@ -233,10 +282,15 @@ def _ruff_undefined_names(code: str) -> set[str]:
             input=code,
             capture_output=True,
             text=True,
-            timeout=5,
+            timeout=_RUFF_TIMEOUT_SECONDS,
             check=False,
         )
-    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError) as exc:
+        # Same contract as _ruff_fix / _ruff_format (issue #159): a missing
+        # ruff is logged once per process, a timeout / OS error at warning —
+        # a detection stage that silently returns "no undefined names" would
+        # leave missing imports un-repaired with zero signal.
+        _log_ruff_give_up("check --select F821", code, exc)
         return set()
     # ruff exits 1 when diagnostics were found; >1 means it crashed.
     if proc.returncode > 1 or not proc.stdout.strip():
