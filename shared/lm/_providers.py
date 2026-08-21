@@ -26,7 +26,7 @@ from shared.lm._effort import (
     mimo_extra_body,
     qwen_extra_body,
 )
-from shared.lm.registry import ModelSpec, resolve_setting
+from shared.lm.registry import MODELS, ModelSpec, resolve_setting
 from shared.turn_identity import effective_agent_id
 
 
@@ -306,17 +306,38 @@ def _build_gemini_model(
     thinking_disabled = thinking is not None and thinking.get("type") == "disabled"
     thinking_level: str | None = None
     if thinking_disabled:
-        thinking_level = "minimal"
+        # thinking_level is a Gemini 3.x vocabulary; older models
+        # (gemini-2.5-*) reject it with a 400 on every call (issue #190), so
+        # "disabled" is only expressible where the model declares the
+        # vocabulary. Elsewhere it is a no-op — no thinking parameters on the
+        # wire, exactly what the issue measured as working — plus a warning
+        # so the operator knows the request was not honored.
+        spec = MODELS.get(model)
+        if spec is not None and spec.effort_levels is not None:
+            thinking_level = "minimal"
+        else:
+            logger.warning(
+                f"{model} does not support the thinking_level vocabulary; "
+                f"thinking={{'type': 'disabled'}} ignored (issue #190)"
+            )
     elif resolved_effort:
         thinking_level = _clamp_effort(
             resolved_effort,
             _PROVIDER_EFFORT_LEVELS["gemini"],
             target="gemini",
         )
+    # include_thoughts only on the vocabulary-supporting path: passing it to a
+    # model that rejects thinking parameters would 400 exactly like
+    # thinking_level (issue #190). Unsupported models keep the SDK default;
+    # the non-disabled path keeps its historical include_thoughts=True.
+    if thinking_disabled and thinking_level is None:
+        include_thoughts: bool | None = None
+    else:
+        include_thoughts = not thinking_disabled
     return ChatGoogleGenerativeAI(
         model=model,  # type: ignore[call-arg]
         google_api_key=settings.lm.gemini_api_key.get_secret_value(),  # type: ignore[arg-type]
-        include_thoughts=not thinking_disabled,
+        include_thoughts=include_thoughts,
         thinking_level=thinking_level,  # type: ignore[arg-type]
         disable_streaming=disable_streaming,
         timeout=timeout,
