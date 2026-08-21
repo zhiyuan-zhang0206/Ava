@@ -256,6 +256,35 @@ class TestSpawn:
         assert "prompt_source" in resp.text
 
 
+def test_unhandled_route_exception_500_carries_cors_headers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An unhandled route exception surfaces as a 500 WITH CORS headers — the
+    catch-all Exception handler routes it back through the middleware stack
+    (CORSMiddleware is outermost), so a browser caller sees the real status
+    instead of "Failed to fetch" (#187)."""
+    # The autouse conftest fixture stubs _forward_spawn_to_remote in-process;
+    # this test's monkeypatch runs later and wins, making the route itself blow up.
+    import gateway.routers.agents as _agents_router
+    from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
+
+    async def _explode(target: str, body: LaunchAgentRequest) -> SpawnedAgent:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(_agents_router, "_forward_spawn_to_remote", _explode)
+    # ServerErrorMiddleware re-raises the exception after answering; the test
+    # client would otherwise surface it as a test failure instead of the 500.
+    with TestClient(app, raise_server_exceptions=False) as client:
+        resp = client.post(
+            "/api/agents",
+            json={},
+            headers={"Origin": "http://localhost:3000"},
+        )
+    assert resp.status_code == 500
+    assert resp.headers["access-control-allow-origin"] == "http://localhost:3000"
+    assert resp.headers["access-control-allow-credentials"] == "true"
+
+
 class TestTerminate:
     def test_terminate_inserts_inbound_and_returns_enqueued(
         self, db_conn: psycopg.Connection

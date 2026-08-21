@@ -219,6 +219,20 @@ def test_cors_preflight_on_protected_route_not_401() -> None:
     assert resp.headers["access-control-allow-origin"] == "http://localhost:3000"
 
 
+def test_unauthorized_response_carries_cors_headers() -> None:
+    """A 401 short-circuited by the auth middleware still carries the CORS
+    headers — CORSMiddleware is the OUTERMOST middleware, so a browser caller
+    sees the real 401 instead of "Failed to fetch" (#187)."""
+    with TestClient(app) as client:
+        resp = client.get(
+            "/api/agents",
+            headers={"Origin": "http://localhost:3000"},
+        )
+    assert resp.status_code == 401
+    assert resp.headers["access-control-allow-origin"] == "http://localhost:3000"
+    assert resp.headers["access-control-allow-credentials"] == "true"
+
+
 # ── Bearer token works ────────────────────────────────────────────────
 
 
