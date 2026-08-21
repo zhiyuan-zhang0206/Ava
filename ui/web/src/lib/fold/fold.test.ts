@@ -19,7 +19,7 @@ const baseAgent: AgentRow = {
   agent_id: 1,
   label: "a",
   status: "running",
-  last_active_at: "2026-05-10T00:00:00Z",
+  last_active_at: "2026-05-10T00:00:00Z", last_inbound_at: "2026-05-10T00:00:00Z",
   spawner: "user",
   fork_source_agent_id: null,
   fork_source_checkpoint_id: null,

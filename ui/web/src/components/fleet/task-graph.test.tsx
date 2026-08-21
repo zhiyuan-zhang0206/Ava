@@ -46,7 +46,7 @@ function fleetAgent(agentId: number, notices: OpenNotice[]): AgentRow {
     pid: null,
     spawned_at: "2026-01-01T00:00:00Z",
     started_at: null,
-    last_active_at: "2026-01-01T00:00:00Z",
+    last_active_at: "2026-01-01T00:00:00Z", last_inbound_at: "2026-01-01T00:00:00Z",
     label: null,
     machine: "test",
     notices_awaiting_response: notices,

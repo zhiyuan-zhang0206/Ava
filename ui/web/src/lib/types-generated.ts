@@ -3591,7 +3591,8 @@ export interface components {
          *
          *     Identical schema to `AgentSnapshot` (the SSE-side type); subclassed
          *     rather than aliased so OpenAPI keeps the historical name `AgentRow` for
-         *     the generated frontend types.
+         *     the generated frontend types. `last_active_at` is the real-activity clock
+         *     (agents_meta), `last_inbound_at` the latest inbound (issue #183).
          */
         AgentRow: {
             /** Agent Id */
@@ -3617,6 +3618,11 @@ export interface components {
              * Format: date-time
              */
             last_active_at: string;
+            /**
+             * Last Inbound At
+             * Format: date-time
+             */
+            last_inbound_at: string;
             /** Label */
             label: string | null;
             /** Machine */

@@ -198,6 +198,7 @@ class AgentRow(TypedDict):
     spawned_at: str | None
     started_at: str | None
     last_active_at: str | None
+    last_inbound_at: str | None
     pid: int | None
 
 

@@ -70,7 +70,7 @@ function ag(agent_id: number, overrides: Partial<AgentRowType> = {}): AgentRowTy
     pid: null,
     spawned_at: "2026-05-07T00:00:00.000000Z",
     started_at: null,
-    last_active_at: "2026-05-07T00:00:00.000000Z",
+    last_active_at: "2026-05-07T00:00:00.000000Z", last_inbound_at: "2026-05-07T00:00:00.000000Z",
     label: null,
     machine: "test-machine",
     liveness_state: "online",

@@ -27,6 +27,7 @@ function ag(
     spawned_at: ts,
     started_at: null,
     last_active_at: lastActiveOverride ?? ts,
+    last_inbound_at: ts,
     label: null,
     machine: "test",
     notices_awaiting_response: [], unread_notice_count: 0,
