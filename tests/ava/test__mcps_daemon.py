@@ -2037,3 +2037,73 @@ async def test_computer_call_stamps_agent_id(
             sock.unlink()
     assert received.get("agent_id") == 42
     assert received.get("tool") == "click"
+
+
+async def test_handle_client_stamps_agent_id_on_session(
+    fake_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The SDK's per-request agent_id reaches the session before the call —
+    BrowserLineSession (and ComputerLineSession) carry it on the wire so the
+    service can key per-agent state. Sessions without the attribute (plain
+    stdio servers) are skipped."""
+    _write_config(fake_home, {"fs": {"command": "x"}})
+    session = _make_session(
+        call_result=_call_result([_content({"type": "text", "text": "hi"})]),
+    )
+    monkeypatch.setattr(
+        daemon_mod, "_connect_server", AsyncMock(return_value=(session, MagicMock()))
+    )
+
+    req = {
+        "id": 7,
+        "method": "call_tool",
+        "params": {"server": "fs", "tool": "read", "args": {}},
+        "agent_id": 42,
+    }
+    reader = _make_reader([(json.dumps(req) + "\n").encode()])
+    writer = _FakeWriter()
+    await daemon_mod._handle_client(
+        reader,
+        _writer_arg(writer),
+        daemon_mod.sessions,
+        daemon_mod.stacks,
+        daemon_mod.session_locks,
+    )
+
+    [resp] = writer.responses()
+    assert resp["ok"] is True
+    session.call_tool.assert_awaited_once_with("read", {})
+    assert session.client_agent_id == 42
+
+
+async def test_handle_client_agent_id_none_without_identity(
+    fake_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A request without an agent_id stamps None — the service falls back to
+    per-connection affinity for identity-less clients."""
+    _write_config(fake_home, {"fs": {"command": "x"}})
+    session = _make_session(
+        call_result=_call_result([_content({"type": "text", "text": "hi"})]),
+    )
+    monkeypatch.setattr(
+        daemon_mod, "_connect_server", AsyncMock(return_value=(session, MagicMock()))
+    )
+
+    req = {
+        "id": 7,
+        "method": "call_tool",
+        "params": {"server": "fs", "tool": "read", "args": {}},
+    }
+    reader = _make_reader([(json.dumps(req) + "\n").encode()])
+    writer = _FakeWriter()
+    await daemon_mod._handle_client(
+        reader,
+        _writer_arg(writer),
+        daemon_mod.sessions,
+        daemon_mod.stacks,
+        daemon_mod.session_locks,
+    )
+
+    [resp] = writer.responses()
+    assert resp["ok"] is True
+    assert session.client_agent_id is None

@@ -9,8 +9,12 @@ socket wiring is left to dev-cluster testing.
 """
 
 import asyncio
+import json
+import tempfile
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import anyio
 import pytest
@@ -19,7 +23,9 @@ from mcp.shared.exceptions import MCPError
 from mcp.types import CONNECTION_CLOSED, REQUEST_TIMEOUT
 
 from services.browser.mcp_daemon import (
+    _AGENT_AFFINITY,
     ChromeMcpDaemon,
+    _handle_client,
     _no_page_result,
     _selected_id,
     _text_of,
@@ -289,3 +295,123 @@ async def test_socket_in_use_true_when_listener_present() -> None:
         server.close()
         await server.wait_closed()
         cleanup(d)
+
+
+# ── Per-agent affinity (agent_id keyed — exec subprocess children) ─────────
+
+
+@pytest.fixture(autouse=True)
+def _fresh_agent_affinity() -> Iterator[None]:
+    """The per-agent registry is module-level (must survive upstream
+    reconnects); a test session outlives every test, so clear it around each
+    one the way the production process would start fresh."""
+    _AGENT_AFFINITY.clear()
+    yield
+    _AGENT_AFFINITY.clear()
+
+
+async def test_agent_affinity_shares_page_across_connections() -> None:
+    """Agent 7's page selection survives a fresh connection: the second
+    connection resolves the page from the per-agent registry, not from any
+    per-connection tracking — the exec-subprocess shape."""
+    d, up = _daemon()
+    # connection 1: the agent opens its tab
+    await d.call_tool_for_agent("new_page", {"url": "a"}, 7)
+    assert _AGENT_AFFINITY[7] == 1
+    # connection 2 (fresh): a page-scoped call lands on the agent's page
+    res = await d.call_tool_for_agent("take_snapshot", {}, 7)
+    assert res.is_error is False
+    # the re-pin targeted the agent's page, then the call ran there
+    assert ("select_page", {"pageId": 1}, 1) in up.calls
+    assert up.calls[-1] == ("take_snapshot", {}, 1)
+
+
+async def test_agent_affinity_isolated_between_agents() -> None:
+    """Two agents keep separate pages: agent 7's snapshot re-pins to 7's tab
+    even though agent 8's tab is the globally selected one."""
+    d, up = _daemon()
+    await d.call_tool_for_agent("new_page", {"url": "a"}, 7)  # page 1
+    await d.call_tool_for_agent("new_page", {"url": "b"}, 8)  # page 2, global
+    res = await d.call_tool_for_agent("take_snapshot", {}, 7)
+    assert res.is_error is False
+    assert up.calls[-1] == ("take_snapshot", {}, 1)
+
+
+async def test_agent_affinity_repin_failure_drops_slot() -> None:
+    """The agent's tab vanished underneath (crashed / closed elsewhere): the
+    slot drops to no-page, and the call refuses to touch the global selection
+    (which could be another agent's tab)."""
+    d, up = _daemon()
+    await d.call_tool_for_agent("new_page", {"url": "a"}, 7)
+    up.pages.clear()
+    up.selected = None
+    res = await d.call_tool_for_agent("take_snapshot", {}, 7)
+    assert res.is_error is True
+    assert _AGENT_AFFINITY[7] is None
+
+
+async def test_agent_affinity_management_tools_update_slot() -> None:
+    """new_page / select_page / close_page update the per-agent slot exactly
+    like the per-connection path updates its local."""
+    d, _up = _daemon()
+    await d.call_tool_for_agent("new_page", {"url": "a"}, 7)  # -> page 1
+    await d.call_tool_for_agent("new_page", {"url": "b"}, 7)  # -> page 2
+    assert _AGENT_AFFINITY[7] == 2
+    await d.call_tool_for_agent("select_page", {"pageId": 1}, 7)
+    assert _AGENT_AFFINITY[7] == 1
+    await d.call_tool_for_agent("close_page", {"pageId": 1}, 7)
+    assert _AGENT_AFFINITY[7] is None
+
+
+async def test_handle_client_agent_id_adopts_agent_page(tmp_path: Path) -> None:
+    """Wire-level: a FRESH connection presenting the agent id inherits the
+    page a previous connection selected — exactly what an exec subprocess
+    child needs to not re-select on every execute_code."""
+    import contextlib
+
+    up = FakeUpstream()
+    daemon_ref: list[ChromeMcpDaemon | None] = [ChromeMcpDaemon(up)]  # type: ignore[arg-type]
+    # macOS unix sockets cap at ~104-char paths; pytest tmp dirs blow past it.
+    sock_path = Path(tempfile.gettempdir()) / f"ava-bmd-{uuid4().hex}.sock"
+    server = await asyncio.start_unix_server(
+        lambda r, w: _handle_client(r, w, daemon_ref), path=sock_path
+    )
+    assert sock_path.exists()
+
+    async def roundtrip(payload: dict[str, Any]) -> dict[str, Any]:
+        reader, writer = await asyncio.open_unix_connection(path=sock_path)
+        writer.write((json.dumps(payload) + "\n").encode())
+        await writer.drain()
+        line = await reader.readline()
+        writer.close()
+        with contextlib.suppress(Exception):
+            await writer.wait_closed()
+        return json.loads(line)
+
+    resp1 = await roundtrip(
+        {
+            "id": 1,
+            "method": "call_tool",
+            "tool": "new_page",
+            "args": {"url": "a"},
+            "agent_id": 7,
+        }
+    )
+    assert resp1["ok"] is True
+    # a new connection, same agent: page-scoped call lands on page 1
+    resp2 = await roundtrip(
+        {
+            "id": 1,
+            "method": "call_tool",
+            "tool": "take_snapshot",
+            "args": {},
+            "agent_id": 7,
+        }
+    )
+    assert resp2["ok"] is True
+    text = resp2["result"]["content"][0]["text"]
+    assert "page 1" in text
+
+    server.close()
+    await server.wait_closed()
+    sock_path.unlink(missing_ok=True)

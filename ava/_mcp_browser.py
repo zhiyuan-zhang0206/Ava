@@ -4,8 +4,11 @@ The chrome MCP server used to cost every agent a ~63MB `mcp_wrapper` stdio
 bridge subprocess on top of the shared browser-mcp daemon. This module is the
 process-less replacement: `_connect_browser_direct()` dials the service's
 line protocol from inside the MCP daemon and returns a session-shaped client.
-No child process is involved; each agent connection keeps its own socket, so
-the service's per-connection page affinity still isolates agents.
+No child process is involved; each agent connection keeps its own socket. The
+calling agent's id rides on every request (`client_agent_id`), so the
+service's page affinity is keyed per AGENT, not per connection — an exec
+subprocess child re-connecting mid-turn lands on the same tab the agent
+process selected.
 
 The session self-heals a desynced stream (a response whose id does not match
 the request): it rebuilds the socket and restarts the id counter, so one lost
@@ -54,19 +57,27 @@ class BrowserLineSession:
         # Re-dial path used when the stream desyncs; None (test sessions) means
         # the session cannot rebuild itself.
         self._sock = sock
+        # Set by the daemon before each call (mirrors ComputerLineSession):
+        # the calling agent's id, carried on every request so the service keys
+        # page affinity per agent instead of per connection.
+        self.client_agent_id: int | None = None
 
     async def close(self) -> None:
         """Close the current socket; the service reads this as the connection
-        ending (releasing its page-affinity context for this agent)."""
+        ending (the agent's page affinity survives in the per-agent registry —
+        it is keyed by agent id, not by socket)."""
         await _close_writer(self._writer)
 
     async def _reconnect(self) -> None:
         """Drop the desynced socket and dial a fresh one (ids restart at 1).
 
-        The service treats each connection as its own page-affinity context,
-        so page affinity is lost here: the caller's next page-scoped call gets
-        the service's no-page error and re-navigates. Failing that is
-        acceptable — the alternative is a permanently broken connection.
+        Without an agent id the service treats each connection as its own
+        page-affinity context, so affinity is lost here: the caller's next
+        page-scoped call gets the service's no-page error and re-navigates.
+        With `client_agent_id` set the service keys affinity per agent, and
+        the rebuilt connection re-adopts the agent's page on its next call.
+        Either way the alternative — a permanently broken connection — is
+        worse.
         """
         await self.close()
         if self._sock is None:
@@ -123,7 +134,10 @@ class BrowserLineSession:
     async def call_tool(self, name: str, args: dict[str, Any]) -> Any:
         from mcp import types
 
-        result = await self._request({"method": "call_tool", "tool": name, "args": args})
+        payload: dict[str, Any] = {"method": "call_tool", "tool": name, "args": args}
+        if self.client_agent_id is not None:
+            payload["agent_id"] = self.client_agent_id
+        result = await self._request(payload)
         return types.CallToolResult.model_validate(result)
 
 
