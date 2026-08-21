@@ -42,7 +42,7 @@ def _wrap_memory_search(monkeypatch: pytest.MonkeyPatch) -> None:
 
     def _wrapper(inner, query: str, k: int = 5):
         results = _client.memory_search(query, k)
-        return [(ava.memory.PATH / r.path, r.description) for r in results]
+        return [(ava.memory.PATH / r.path, r.description, list(r.tags)) for r in results]
 
     ava.extend.wrap("memory.search", _wrapper)
 
@@ -122,11 +122,14 @@ def test_search_prefixes_paths_with_memory_path(monkeypatch: pytest.MonkeyPatch)
     )
     results = ava.memory.search("any")
     assert results == [
-        (ava.memory.PATH / "notes" / "foo.md", "desc1"),
-        (ava.memory.PATH / "bar.md", ""),
+        (ava.memory.PATH / "notes" / "foo.md", "desc1", []),
+        (ava.memory.PATH / "bar.md", "", []),
     ]
-    # all are tuple[Path, str]
-    assert all(isinstance(p, Path) and p.is_absolute() and isinstance(d, str) for p, d in results)
+    # all are tuple[Path, str, list[str]]
+    assert all(
+        isinstance(p, Path) and p.is_absolute() and isinstance(d, str) and isinstance(tags, list)
+        for p, d, tags in results
+    )
 
 
 def test_search_empty_result(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -172,13 +175,18 @@ def test_search_exported_in_all() -> None:
     assert "search" in ava.memory.__all_for_ava__
 
 
-# -- search returns (path, description) tuples --
+def test_search_detailed_removed() -> None:
+    assert "search_detailed" not in ava.memory.__all_for_ava__
+    assert not hasattr(ava.memory, "search_detailed")
 
 
-def test_search_returns_path_and_description(
+# -- search returns (path, description, tags) tuples --
+
+
+def test_search_returns_path_description_and_tags(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """search returns (Path, description) tuples."""
+    """search returns (Path, description, tags) tuples."""
     from ava import _gateway_client
     from ava._gateway_client import MemorySearchResult
 
@@ -192,9 +200,29 @@ def test_search_returns_path_and_description(
     )
     results = ava.memory.search("any")
     assert results == [
-        (ava.memory.PATH / "notes" / "foo.md", "My note about foo"),
-        (ava.memory.PATH / "bar.md", ""),
+        (ava.memory.PATH / "notes" / "foo.md", "My note about foo", []),
+        (ava.memory.PATH / "bar.md", "", []),
     ]
+
+
+def test_search_returns_tags(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Tags flow through from the gateway result as a mutable SDK list."""
+    from ava import _gateway_client
+    from ava._gateway_client import MemorySearchResult
+
+    monkeypatch.setattr(
+        _gateway_client,
+        "memory_search",
+        lambda _q, _k: [  # pyright: ignore[reportUnknownArgumentType]
+            MemorySearchResult(
+                path="notes/project.md",
+                description="Project note",
+                tags=("type/project", "x"),
+            )
+        ],
+    )
+    result = ava.memory.search("project")
+    assert result[0][2] == ["type/project", "x"]
 
 
 def test_search_empty_result_desc(monkeypatch: pytest.MonkeyPatch) -> None:

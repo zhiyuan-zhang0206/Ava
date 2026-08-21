@@ -34,7 +34,7 @@ register_before_llm(passive_memory_recall_before_llm)
 - If auto-compact hook would also trigger in the same turn, **defers** (returns None) — `messages` have add_messages reducer that merges, without failing loud, but auto-compact's REMOVE_ALL full replacement is order-sensitive and would swallow the same-turn appended note
 
 **Behavior**:
-- Performs semantic search against recent conversation, injects matched note references as system messages (`system_note`), seen by agent in next turn. Each hit presents the same fields as `ava.memory.search` — path + frontmatter description (empty string when absent, not synthesized from title/body)
+- Performs semantic search against recent conversation, injects matched note references as system messages (`system_note`), seen by agent in next turn. Each hit presents path + frontmatter description — two of the three fields `ava.memory.search` returns; recall deliberately omits tags (the injected note is a pointer, not a tag list). Description is empty when absent, never synthesized from title/body
 - Uses the built-in `memory` (`MemoryState`) sub-state's `injected_paths` union reducer (`_memory_state_merge`) to accumulate path set, each note appears at most once
 
 The recall engine (search + rendering beyond gating) is in the core `agent/graph/_memory_recall.py:passive_memory_recall`;
@@ -52,12 +52,10 @@ Skill nodes see [[ava_builtins/plugins/ava_memory/skills/skills.ava.okf.md|Ava M
 This plugin **owns** the `ava.memory` namespace — `plugin.py` assembles it and calls `register_namespace("memory", ...)`. There is no core `ava/memory.py`; disabling the plugin removes the surface entirely.
 
 - `ava.memory.PATH` — memory pool root path (`$AVA_HOME/memory`, computed by `ava_home()`), shared by all agents
-- `ava.memory.search(query, k=5)` — semantic search, returns `list[(path, description)]`
-  (description from note YAML frontmatter, empty string when absent)
-- `ava.memory.search_detailed(query, k=5)` — the same one search, returning `list[(path, description, tags)]`
-  so a caller can weigh a hit by its `type/<x>` tag rather than only see which hits there are
+- `ava.memory.search(query, k=5)` — semantic search, returns `list[(path, description, tags)]`
+  (description empty string when absent; tags include the note's `type/<x>` tag so a caller can weigh a hit by its kind)
 
-Writing memory notes directly uses `ava.files.write` to write markdown into `ava.memory.PATH` — **there is no `ava.memory.write`** (`__all_for_ava__` is `PATH`, `search`, `search_detailed`; `IndexerUnavailable` is reachable but deliberately excluded from `help(ava.memory)`).
+Writing memory notes directly uses `ava.files.write` to write markdown into `ava.memory.PATH` — **there is no `ava.memory.write`** (`__all_for_ava__` is `PATH`, `search`; `IndexerUnavailable` is reachable but deliberately excluded from `help(ava.memory)`).
 
 ## Key dependencies
 

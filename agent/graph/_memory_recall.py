@@ -4,9 +4,11 @@ Where `memory_index_note` (this plugin's `notes.py`) keeps the standing index
 (MEMORY.md) permanently in front of the agent, passive recall reaches into the
 *rest* of the pool: before a turn woken by new inbound, it runs a semantic
 search keyed on the recent conversation and injects the top matches as a
-system-styled note. Each match carries the same fields `ava.memory.search`
-exposes -- the pool-relative path and the note's frontmatter description
-(empty when the note has none; never synthesized from title/body). The agent
+system-styled note. Each match carries the pool-relative path and the note's
+frontmatter description -- two of the three fields `ava.memory.search` returns;
+recall deliberately omits tags because the injected note is a pointer, not a tag
+list. The description is empty when the note has none and is never synthesized
+from title/body. The agent
 sees relevant durable notes surface on their own, without having to call
 `ava.memory.search`.
 
@@ -208,10 +210,10 @@ async def passive_memory_recall(
     if not fresh:
         return None
 
-    # Present exactly the fields ava.memory.search returns: path + the
-    # frontmatter description (empty when the note has none -- not backfilled
-    # from title/body, so the note stays a faithful mirror of what search would
-    # surface).
+    # Present path + frontmatter description -- two of the three fields
+    # ava.memory.search returns. Recall deliberately omits tags because the
+    # injected note is a pointer, not a tag list. The description stays empty
+    # when absent rather than being synthesized from title/body.
     lines = [f"- {rel}: {by_path[rel]}" if by_path[rel] else f"- {rel}" for rel in fresh]
     fresh_set = set(fresh)
     note = system_note_message(

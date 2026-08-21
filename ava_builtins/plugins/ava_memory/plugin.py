@@ -70,7 +70,7 @@ from __future__ import annotations
 
 __description__ = "Shared memory pool: ava.memory SDK surface (PATH + search) + passive recall hook (auto-surfaces relevant notes) + daily consolidation skill (commit, push, re-index)"
 
-from pathlib import Path as _Path
+from pathlib import Path
 from types import SimpleNamespace as _SimpleNamespace
 
 from langchain_core.runnables import RunnableConfig
@@ -151,31 +151,20 @@ _memory_ns.PATH = _ava.const(_ava_home() / "memory", doc=_PATH_DOC)
 _memory_ns.IndexerUnavailable = IndexerUnavailable
 
 
-def _search(query: str, k: int = 5) -> list[tuple[_Path, str]]:
+def _search(query: str, k: int = 5) -> list[tuple[Path, str, list[str]]]:
     """Semantic search; return the most relevant notes as (absolute path,
-    frontmatter description) tuples. The description is "" when absent."""
-    results = _client.memory_search(query, k)
-    return [(_memory_ns.PATH / r.path, r.description) for r in results]
-
-
-def _search_detailed(query: str, k: int = 5) -> list[tuple[_Path, str, list[str]]]:
-    """Semantic search, with each note's tags alongside its description —
-    (absolute path, description, tags).
-
-    Same one search as `search`; this shape carries the note's `type/<x>` tag as
-    well, for a caller deciding how much weight to give a hit rather than just
-    which hits there are."""
+    description, tags) tuples. The description is "" when absent; tags carry the
+    note's `type/<x>` tag, for a caller weighing a hit by the kind of note."""
     results = _client.memory_search(query, k)
     return [(_memory_ns.PATH / r.path, r.description, list(r.tags)) for r in results]
 
 
 _memory_ns.search = _search
-_memory_ns.search_detailed = _search_detailed
 
 # __all_for_ava__: the curated agent-facing surface. IndexerUnavailable is
 # intentionally excluded — it is reachable (ava.memory.IndexerUnavailable)
 # but does not appear in help(ava.memory).
-_memory_ns.__all_for_ava__ = ["PATH", "search", "search_detailed"]
+_memory_ns.__all_for_ava__ = ["PATH", "search"]
 
 _ava.register_namespace("memory", _memory_ns)
 
