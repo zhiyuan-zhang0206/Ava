@@ -16,6 +16,15 @@ EXP(-k * days_since_last) * LN(1+count). The recursive walk is a BFS/DFS
 path walk in Python (the SQL recursive CTE had no Loki equivalent):
 `max_depth` bounds the hop count, each extra hop discounts the score by
 `gamma`, and a node's result is its shallowest arrival with the best score.
+
+Ancestors: the read also returns the queried agent's spawn chain — the
+agents that spawned it, walked upward over DIRECTED spawn/fork edges. The
+event stream writes those rows as agent_id = the new agent, target_agent_id
+= its spawner, so the upward walk follows agent_id -> target_agent_id.
+Only creation events carry parentage: send_message is a peer tie and
+resurrect wakes an existing agent, so neither forms an ancestor. Spawn
+chains form a forest, so the upward walk is a simple linked-list traversal
+to the top (a visited set guards against malformed cycles — no depth cap).
 """
 
 from __future__ import annotations
@@ -33,6 +42,10 @@ from shared.log import logger
 # Audit event names that form ties (same family as fleet_graph._EDGE_EVENT_NAMES).
 _LINEAGE_EVENT_NAMES = ("spawn", "fork", "resurrect")
 _EDGE_EVENT_NAMES = ("send_message", *_LINEAGE_EVENT_NAMES)
+
+# The lineage subset that creates parentage. Resurrect wakes an EXISTING
+# agent, so it ties but never parents.
+_ANCESTOR_EVENT_NAMES = ("spawn", "fork")
 
 # Loki fetch cap for the edge stream. Audit events are low-volume since the
 # cutover; the cap is a guardrail, not an expectation (mirrors fleet_graph).
@@ -75,6 +88,29 @@ def _fetch_archive_edges(
         (boundary,),
     )
     return [(int(r[0]), int(r[1]), str(r[2]), int(r[3]), r[4]) for r in cur.fetchall()]
+
+
+def _fetch_archive_lineage(cur: Cursor, *, boundary: datetime | None) -> list[tuple[int, int, int]]:
+    """Pre-cutover spawn/fork rows from the frozen PG archive, grouped per
+    DIRECTED (child, parent) pair with the raw count.
+
+    Direction is what the neighbor merge deliberately discards (undirected
+    ties) but the ancestor walk needs: the events stream writes spawn/fork
+    rows as agent_id = the new agent, target_agent_id = its spawner."""
+    if boundary is None:
+        return []
+    cur.execute(
+        "SELECT agent_id, target_agent_id, COUNT(*) "
+        "FROM events "
+        "WHERE category = 'audit' "
+        "  AND event_name IN ('spawn', 'fork') "
+        "  AND target_agent_id IS NOT NULL "
+        "  AND agent_id IS NOT NULL "
+        "  AND ts < %s "
+        "GROUP BY 1, 2",
+        (boundary,),
+    )
+    return [(int(r[0]), int(r[1]), int(r[2])) for r in cur.fetchall()]
 
 
 def _fetch_loki_edges(*, boundary: datetime | None, now: datetime) -> list[dict[str, Any]]:
@@ -140,6 +176,60 @@ def _merge_weights(
     return weights
 
 
+def _merge_lineage_parents(
+    archive_rows: list[tuple[int, int, int]],
+    loki_rows: list[dict[str, Any]],
+) -> dict[int, dict[int, float]]:
+    """Directed spawn/fork parent edges: child -> {parent: lineage weight}.
+
+    Weight per directed pair = LN(1 + combined spawn/fork count), the same
+    lineage weight the undirected neighbor tie uses — the merge sums both
+    sources before the LN, exactly like `_merge_weights`."""
+    counts: dict[tuple[int, int], int] = {}
+    for child, parent, cnt in archive_rows:
+        counts[(child, parent)] = counts.get((child, parent), 0) + cnt
+    for r in loki_rows:
+        name = r.get("event_name")
+        child = r.get("agent_id")
+        parent = r.get("target_agent_id")
+        if name not in _ANCESTOR_EVENT_NAMES or child is None or parent is None:
+            continue
+        key = (int(child), int(parent))
+        counts[key] = counts.get(key, 0) + 1
+    parents: dict[int, dict[int, float]] = {}
+    for (child, parent), cnt in counts.items():
+        parents.setdefault(child, {})[parent] = math.log1p(cnt)
+    return parents
+
+
+def _walk_ancestors(
+    parents: dict[int, dict[int, float]], *, root: int, gamma: float
+) -> list[tuple[int, int, float]]:
+    """Walk the spawn/fork parent chain upward from `root` to the top —
+    (agent_id, depth, score) rows, nearest ancestor first.
+
+    depth = hops up (1 = the agent that directly spawned the queried agent);
+    score = that edge's lineage weight discounted by `gamma` per hop, the
+    same convention `_walk` uses. Chains are a forest, so the traversal is a
+    simple upward walk with a visited set against malformed cycles — no
+    depth cap (a chain is at most as long as agents have spawned agents)."""
+    seen: dict[int, tuple[int, float]] = {}
+    frontier: list[tuple[int, int]] = [(root, 0)]
+    while frontier:
+        nxt: list[tuple[int, int]] = []
+        for node, depth in frontier:
+            for parent, w in parents.get(node, {}).items():
+                if parent in seen or parent == root:
+                    continue
+                seen[parent] = (depth + 1, w * gamma**depth)
+                nxt.append((parent, depth + 1))
+        frontier = nxt
+    return sorted(
+        ((n, seen[n][0], seen[n][1]) for n in seen),
+        key=lambda t: (t[1], -t[2]),
+    )
+
+
 def _walk(
     weights: dict[tuple[int, int], float],
     *,
@@ -196,13 +286,20 @@ def compute(
     limit: int,
     k: float = 0.5,
     gamma: float = 0.5,
-) -> list[tuple[int, int, float]]:
-    """(agent_id, depth, score) rows for `root`, strongest first — the
-    Python counterpart of the retired agent_neighbors() SQL function."""
+) -> tuple[list[tuple[int, int, float]], list[tuple[int, int, float]]]:
+    """(neighbors, ancestors) for `root` — each a list of (agent_id, depth,
+    score) rows; neighbors strongest first, ancestors nearest first. The
+    Python counterpart of the retired agent_neighbors() SQL function, plus
+    the spawn-chain read it never had."""
     now = datetime.now(UTC)
     with pool.connection() as conn, conn.cursor() as cur:
         boundary = _archive_boundary(cur)
         archive_rows = _fetch_archive_edges(cur, boundary=boundary)
+        archive_lineage = _fetch_archive_lineage(cur, boundary=boundary)
     loki_rows = _fetch_loki_edges(boundary=boundary, now=now)
     weights = _merge_weights(archive_rows, loki_rows, k=k, now=now)
-    return _walk(weights, root=root, max_depth=max_depth, gamma=gamma, limit=limit)
+    parents = _merge_lineage_parents(archive_lineage, loki_rows)
+    return (
+        _walk(weights, root=root, max_depth=max_depth, gamma=gamma, limit=limit),
+        _walk_ancestors(parents, root=root, gamma=gamma),
+    )

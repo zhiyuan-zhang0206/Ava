@@ -32,11 +32,12 @@ tags:
 - `get_status(agent_id) → AgentStatus` — current status of a single agent (alternative to list_agents then manual filter).
 - `list_machines() → list[Machine]` — list all machines and their alive status.
 - `get_neighbors(agent_id, depth=1, limit=20) → list[Neighbor]` — related agents ranked by connection strength. Connections are established on spawn/fork/resurrect/send_message and decay over time.
+- `get_ancestors(agent_id) → list[Neighbor]` — the spawn/fork chain ABOVE an agent (who spawned whom), nearest ancestor first; `depth` = hops up. Message ties never form ancestors; a user-spawned agent returns [].
 
 ### Data Types
 - `AgentRow`: agent_id, label, status, spawner, machine, spawned_at, started_at, last_active_at, pid, heartbeat_paused_until
 - `AgentStatus`: ALLOCATED / STARTING / RUNNING / IDLING / RESTARTING / TERMINATED. The enum also has HIBERNATING (ops-layer memory swap-out state, #618), but the SDK **projects it to IDLING** before any status filtering (`ava/_gateway_client.py:_project_ops_status`) — peer agents never observe the swapped-out state, `list_agents(IDLING)` also won't miss hibernated agents; the true value is only visible via ops tools / raw gateway list (see [[process-lifecycle.ava.okf.md]])
-- `Neighbor`: agent_id, label, status, depth (hops), score (connection strength)
+- `Neighbor`: agent_id, label, status, depth (hops from the queried agent — out for neighbors, up for ancestors), score (connection strength)
 - `Machine`: name, description, live (detected at call time, not cached)
 
 ## Key Dependencies

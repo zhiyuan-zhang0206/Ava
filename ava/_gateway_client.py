@@ -549,6 +549,16 @@ def get_neighbors(agent_id: int, *, depth: int, limit: int) -> list[dict]:
     return [_project_ops_status(n) for n in resp.json()["neighbors"]]
 
 
+def get_ancestors(agent_id: int) -> list[dict]:
+    """GET /api/agents/{id}/neighbors → the `ancestors` rows: the spawn/fork
+    chain above `agent_id`, nearest ancestor first (the gateway walks to the
+    top, so the neighbors `depth`/`limit` params do not apply). Same dict
+    shape and ops-status projection as get_neighbors."""
+    resp = _get(f"/api/agents/{agent_id}/neighbors", params={"depth": 1, "limit": 20})
+    _raise_from_response(resp)
+    return [_project_ops_status(n) for n in resp.json()["ancestors"]]
+
+
 def list_agents(filter_by_status: tuple[AgentStatus, ...] | None = None) -> list[dict]:
     """GET /api/agents → full agent list (optional status filter).
 

@@ -72,9 +72,10 @@ orchestrator was woken only six times.
 Multi-agent is native: any agent can `spawn` a peer, `fork` another agent's
 explored context, and `send_message` it directly — all peers, no central
 scheduler. Ties form on spawn/fork/message and fade with time;
-`get_neighbors` ranks who to talk to by tie strength. Recovery is
-decentralized too: a watcher wakes a supervisor the moment a worker stalls, and
-a terminated agent auto-resurrects to handle an incoming message.
+`get_neighbors` ranks who to talk to by tie strength, and `get_ancestors`
+walks the spawn chain above an agent for responsibility attribution. Recovery
+is decentralized too: a watcher wakes a supervisor the moment a worker stalls,
+and a terminated agent auto-resurrects to handle an incoming message.
 
 ```python
 worker = ava.agents.spawn(

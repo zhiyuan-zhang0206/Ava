@@ -1,7 +1,7 @@
 ---
 type: doc
-title: Agent Graph — get_neighbors Relationship Graph
-description: get_neighbors returns a list of associated agents sorted by tie strength. Ties are established on spawn/fork/resurrect/send_message and decay over time. depth controls hop count; terminated agents are also included in results.
+title: Agent Graph — get_neighbors Relationship Graph and get_ancestors Spawn Chain
+description: get_neighbors returns a list of associated agents sorted by tie strength (ties on spawn/fork/resurrect/send_message, decaying over time; depth controls hop count). get_ancestors returns the spawn/fork chain above an agent, nearest first. Terminated agents are included in both.
 tags:
 - fleet
 - agents
@@ -9,16 +9,19 @@ tags:
 - neighbors
 ---
 
-# Agent Graph — `get_neighbors`
+# Agent Graph — `get_neighbors` and `get_ancestors`
 
 ## Responsibility
 
 `ava.agents.get_neighbors(agent_id, depth=1, limit=20)` returns a list of peers with the strongest relationships to the target agent, sorted by tie strength in descending order. This is the core mechanism for agents in the fleet to discover each other — any agent can query the neighbor graph of any agent.
 
+`ava.agents.get_ancestors(agent_id)` returns the spawn chain ABOVE an agent — the agents that spawned it, walking spawn/fork lineage upward to the top of the chain, nearest ancestor first. This is the responsibility-attribution read: when delegation looks misrouted, walk the ancestors of the agent in question to see whose chain it belongs to.
+
 ## API
 
 ```python
 def get_neighbors(agent_id: int, depth: int = 1, limit: int = 20) -> list[Neighbor]
+def get_ancestors(agent_id: int) -> list[Neighbor]
 ```
 
 ### Parameters
@@ -29,6 +32,8 @@ def get_neighbors(agent_id: int, depth: int = 1, limit: int = 20) -> list[Neighb
 | `depth` | `1` | Hops: 1 = direct ties, 2 = indirect ties (friends of friends) |
 | `limit` | `20` | Maximum number of results returned |
 
+`get_ancestors` takes no `depth`/`limit` — the chain walk always goes to the top (a spawn chain is a simple upward path).
+
 ### Returns: `class Neighbor`
 
 ```python
@@ -36,8 +41,10 @@ class Neighbor:
     agent_id: int        # agent ID (field name is agent_id, not id)
     label: str | None    # role label
     status: AgentStatus  # current status
-    depth: int           # hops (1 = direct)
-    score: float         # tie strength (higher = closer / more frequent)
+    depth: int           # hops from the queried agent: out along ties for
+    #                       neighbors, up the spawn chain for ancestors (1 = direct)
+    score: float         # tie strength (higher = closer / more frequent);
+    #                       ancestors: lineage edge weight (spawn/fork counts)
 ```
 
 ## Tie Mechanism
@@ -68,6 +75,23 @@ for n in neighbors:
     if n.label == "Health Steward" and n.status in ("idling",):
         ava.agents.send_message(n.agent_id, "Please check the dental waitlist")
         break
+```
+
+## Ancestors
+
+The ancestor chain is built from **directed** spawn/fork events only: the
+event stream writes them as `agent_id` = the new agent, `target_agent_id` =
+its spawner, so the walk follows `agent_id → target_agent_id` upward.
+Message ties never form ancestors, and `resurrect` wakes an existing agent
+rather than creating one, so it is excluded too. An agent spawned by the
+user (spawner not an agent) has no ancestor edge — `get_ancestors` returns
+`[]`.
+
+```python
+# See who spawned me and who spawned them
+chain = ava.agents.get_ancestors(ava.self.AGENT_ID)
+for a in chain:
+    print(a.agent_id, a.label, a.depth)
 ```
 
 ## Relationship with Other Subsystems
