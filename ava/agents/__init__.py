@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from typing import cast
 
 import ava
 import ava._boot
@@ -220,6 +221,18 @@ def _row_from_dict(data: dict) -> AgentRow:
     )
 
 
+def _coerce_prompt(prompt: object) -> str | None:
+    """Normalize LLM-generated tuple/list-wrapped prompts (issue #1343)."""
+    prompt_type = type(prompt).__name__
+    if prompt is None or isinstance(prompt, str):
+        return prompt
+    if isinstance(prompt, (list, tuple)):
+        parts = cast(list[object] | tuple[object, ...], prompt)
+        if all(isinstance(part, str) for part in parts):
+            return "".join(cast(list[str] | tuple[str, ...], parts))
+    raise TypeError(f"prompt must be a string or a list/tuple of strings, got {prompt_type}")
+
+
 def spawn(
     prompt: str | None = None,
     fork_from: int | None = None,
@@ -272,7 +285,7 @@ def _spawn_impl(
         validate_config_overlay(config)
     return _client.spawn(
         spawner=spawner,
-        prompt=prompt,
+        prompt=_coerce_prompt(prompt),
         fork_from=fork_from,
         prompt_source=spawner,
         machine=machine if machine is not None else ava.self.SELF_MACHINE_NAME,
@@ -296,7 +309,10 @@ def restart(agent_id: int) -> RestartResult:
 
 def resurrect(agent_id: int, prompt: str) -> ResurrectResult:
     """Wake a terminated agent with its previous conversation state intact."""
-    return ResurrectResult(_client.resurrect(agent_id, prompt=prompt))
+    normalized_prompt = _coerce_prompt(prompt)
+    if normalized_prompt is None:
+        raise TypeError("prompt must be a string or a list/tuple of strings, got NoneType")
+    return ResurrectResult(_client.resurrect(agent_id, prompt=normalized_prompt))
 
 
 def commands() -> list[CommandInfo]:
