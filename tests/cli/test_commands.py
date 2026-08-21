@@ -1505,6 +1505,90 @@ def test_cmd_cluster_status_renders_pin_and_role_columns(
     assert "agent-runner" in wsl_line and "gateway +" not in wsl_line
 
 
+# ─── ava cluster status transport failures report, they do not traceback ──────────
+
+
+def test_cmd_cluster_status_read_timeout_reports_friendly(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A gateway that does not answer within the probe budget prints one stderr
+    line and exits 1. An unreachable machine is exactly when an operator runs
+    `ava cluster status`, and its roster probe can push the gateway's own
+    response past this client's budget — so a bare ReadTimeout traceback would
+    hide the diagnosis the command exists for (#219)."""
+    import httpx
+
+    monkeypatch.setattr("shared.machine.gateway_api_base", lambda: "http://gw:8000")
+
+    def _slow_get(url: str, **_kw: object) -> None:
+        raise httpx.ReadTimeout("timed out", request=None)
+
+    monkeypatch.setattr("httpx.get", _slow_get)  # pyright: ignore[reportUnknownArgumentType]
+    rc = _cli.cmd_cluster_status()
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "did not respond within" in err
+    assert "http://gw:8000/api/cluster/roster" in err
+
+
+def test_cmd_cluster_status_connect_error_reports_friendly(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A gateway that refuses the connection prints 'gateway unreachable' and
+    exits 1 instead of raising (#219)."""
+    import httpx
+
+    monkeypatch.setattr("shared.machine.gateway_api_base", lambda: "http://gw:8000")
+
+    def _refused_get(url: str, **_kw: object) -> None:
+        raise httpx.ConnectError("connection refused", request=None)
+
+    monkeypatch.setattr("httpx.get", _refused_get)  # pyright: ignore[reportUnknownArgumentType]
+    rc = _cli.cmd_cluster_status()
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "gateway unreachable" in err
+    assert "connection refused" in err
+
+
+def test_cmd_cluster_status_http_error_reports_status(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A non-2xx roster response names the status code and exits 1 (#219)."""
+    import httpx
+
+    monkeypatch.setattr("shared.machine.gateway_api_base", lambda: "http://gw:8000")
+
+    def _server_error_get(url: str, **_kw: object) -> httpx.Response:
+        # A real dial returns the 500 response; raise_for_status() in
+        # cmd_cluster_status turns it into HTTPStatusError.
+        request = httpx.Request("GET", url)
+        return httpx.Response(500, request=request)
+
+    monkeypatch.setattr("httpx.get", _server_error_get)  # pyright: ignore[reportUnknownArgumentType]
+    rc = _cli.cmd_cluster_status()
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "HTTP 500" in err
+
+
+def test_cmd_cluster_status_unresolvable_gateway_reports_friendly(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A host that cannot resolve the gateway URL says why and exits 1 rather
+    than raising GatewayApiBaseMissing (#219)."""
+    from shared.machine import GatewayApiBaseMissing
+
+    monkeypatch.setattr(
+        "shared.machine.gateway_api_base",
+        lambda: (_ for _ in ()).throw(GatewayApiBaseMissing("AVA_GATEWAY_URL unset")),
+    )
+    rc = _cli.cmd_cluster_status()
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "cannot resolve gateway URL" in err
+
+
 # ─── probe gateway via HTTP, not relying on pidfile ───────────────────────────────────
 
 
@@ -2752,14 +2836,17 @@ def test_cmd_cluster_status_prints_no_banner_when_no_hold(
     assert out.splitlines()[0].startswith("name")
 
 
-def test_cmd_cluster_status_fails_fast_on_http_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A 5xx from the gateway raises (fail-fast) — no silent fallback."""
-    import httpx
-
+def test_cmd_cluster_status_fails_fast_on_http_error(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A 5xx from the gateway exits 1 with the status named — fail-fast, no
+    silent fallback, and no unhandled traceback (#219)."""
     monkeypatch.setattr("shared.machine.gateway_api_base", lambda: "http://gw:8000")
     monkeypatch.setattr("httpx.get", lambda *_a, **_kw: _FakeResponse([], status_code=503))  # pyright: ignore[reportUnknownArgumentType]
-    with pytest.raises(httpx.HTTPStatusError):
-        _cli.cmd_cluster_status()
+    rc = _cli.cmd_cluster_status()
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "HTTP 503" in err
 
 
 def test_cmd_cluster_restart_posts_endpoint(
