@@ -25,9 +25,11 @@ import { assetUrl } from "@/lib/api";
 import type { BackendTimelineItem } from "@/lib/types";
 import { SSE_EVENT_WINDOW_MS } from "@/lib/constants-generated";
 import { useThrottledStreaming } from "@/lib/use-throttled-streaming";
+import { useUserSettings } from "@/lib/use-user-settings";
 import { cn } from "@/lib/utils";
 
 import { EphemeralSystemMarker, MarkerBody, classifyMarker } from "./markers";
+import { isLiveReasoning } from "./reasoning-clock";
 import { FLEX } from "@/lib/layout";
 
 // Cap how often a streaming item re-parses its content (markdown / Prism).
@@ -133,12 +135,13 @@ export const ItemView = memo(function ItemView({
   streaming: boolean;
 }) {
   const t = useTranslations("timeline");
+  const { settings } = useUserSettings();
   // Throttle the heavy-parse content (chat markdown / python highlight) while it
-  // streams. Reasoning / output items render as plain <pre> with no parse, so
-  // they bypass this. Hook is called unconditionally (rules of hooks); `live` is
+  // streams. The hook is called unconditionally (rules of hooks); `live` is
   // false for every other kind, making it a no-op pass-through.
   const live =
     (item.kind === "agent_chat" && !!item.partial) ||
+    isLiveReasoning(item) ||
     (item.kind === "agent_code" && streaming);
   const streamingPayload = useThrottledStreaming(
     item.payload,
@@ -184,7 +187,21 @@ export const ItemView = memo(function ItemView({
       );
 
     case "agent_reasoning":
-      return (
+      return settings["display.render_reasoning_markdown"] as boolean ? (
+        <>
+          <div
+            className={cn(
+              "text-muted-foreground/90",
+              item.partial && "italic opacity-75",
+              item.interrupted && "border-b border-dashed border-amber-500/60 pb-1",
+            )}
+          >
+            {item.partial ? <span className="text-muted-foreground">… </span> : null}
+            <ChatMarkdown content={streamingPayload} />
+          </div>
+          {item.interrupted ? <InterruptedNotice /> : null}
+        </>
+      ) : (
         <>
           <pre
             className={cn(

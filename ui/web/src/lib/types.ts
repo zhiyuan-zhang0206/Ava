@@ -644,6 +644,8 @@ export const USER_SETTING_DEFAULTS: Record<string, unknown> = {
   "display.show_activity_line": false,
   "display.show_agent_status": false,
   "display.show_timestamp_weekday": true,
+  // Render agent reasoning content as markdown in the timeline; off shows raw text.
+  "display.render_reasoning_markdown": true,
   // (display.collapse_agent_runs was removed from the defaults — it had zero
   // readers; run-collapse grouping is always on and the Steps header toggle
   // controls expand/collapse via display.expand_runs_mode.)
