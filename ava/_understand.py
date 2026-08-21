@@ -5,7 +5,7 @@ plus a prompt and get back a text answer. You never see the raw bytes; the
 prompt steers what comes back (summarize, extract, describe, answer).
 
 The call is batch-shaped: you pass `targets` (a list of dicts, each with
-`prompt` + exactly one of `path` / `text` / `paths`) and every target runs
+`prompt` + exactly one of `text` / `paths`) and every target runs
 concurrently, answers coming back in input order. A single question is a
 one-element list. Same batch shape as `ava.web.fetch` / `ava.web.search`.
 
@@ -18,7 +18,7 @@ text model (`settings.lm.understand_text_model`, default DeepSeek V4 Flash); bin
 media (image / video / audio / PDF) runs on the media model
 (`settings.lm.understand_media_model`, default Gemini 3.5 Flash, which natively
 decodes those bytes). `effort` (default `max`) controls the answering model's
-reasoning depth; see `understand()` for the per-path mapping."""
+reasoning depth; see `understand()` for the per-modality mapping."""
 
 from __future__ import annotations
 
@@ -174,14 +174,14 @@ def understand[TargetValue: str | list[str]](
 ) -> list[str]:
     """Answer a prompt about each target in parallel.
 
-    Each target is a dict with `prompt` plus exactly one of `path` / `text` /
-    `paths`. `path` handles text, image, video, audio, and PDF files; a relative
-    path resolves like your other file operations. `paths` is a non-empty list
-    of such file paths sent together in ONE model call as separate parts, so the
-    model can compare them (e.g. a design frame plus a page screenshot); any
-    media file makes the whole call run on the media model, and text files in
-    the list ride along as text parts. `text` is the material itself as a
-    literal string. A failed model call raises
+    Each target is a dict with `prompt` plus exactly one of `text` / `paths`.
+    `paths` is a non-empty list of file paths (text, image, video, audio, or
+    PDF) — a single file is a one-element list, and a relative path resolves
+    like your other file operations. The files are sent together in ONE model
+    call as separate parts, so the model can compare them (e.g. a design frame
+    plus a page screenshot); any media file makes the whole call run on the
+    media model, and text files in the list ride along as text parts. `text`
+    is the material itself as a literal string. A failed model call raises
     `ava.understand.UnderstandError`.
 
     One question is a one-element list — there is no single-call form.
@@ -210,24 +210,24 @@ def understand[TargetValue: str | list[str]](
     if not isinstance(targets, list):
         raise TypeError(
             f"understand() takes a list of target dicts, got {type(targets).__name__}. "
-            "Example: ava.understand([{'prompt': 'summarize this', 'path': 'notes.md'}])"
+            "Example: ava.understand([{'prompt': 'summarize this', 'paths': ['notes.md']}])"
         )
     for i, t in enumerate(targets):
         if not isinstance(t, dict):
             raise TypeError(
                 f"targets[{i}] must be a dict, got {type(t).__name__}. "
-                "Example: {'prompt': 'what is in this image', 'path': 'shot.png'}"
+                "Example: {'prompt': 'what is in this image', 'paths': ['shot.png']}"
             )
         if "prompt" not in t:
             raise ValueError(
                 f"targets[{i}] missing required key 'prompt'. "
                 "Example: {'prompt': 'summarize this', 'text': 'the material'}"
             )
-        srcs = [k for k in ("path", "text", "paths") if k in t]
+        srcs = [k for k in ("text", "paths") if k in t]
         if len(srcs) != 1:
             raise ValueError(
-                f"targets[{i}] must have exactly one of 'path' / 'text' / 'paths', got {srcs}. "
-                "Example: {'prompt': 'summarize this', 'path': 'notes.md'}"
+                f"targets[{i}] must have exactly one of 'text' / 'paths', got {srcs}. "
+                "Example: {'prompt': 'summarize this', 'paths': ['notes.md']}"
             )
         if "paths" in t:
             paths = t["paths"]
@@ -265,7 +265,6 @@ def understand[TargetValue: str | list[str]](
             targets,
             lambda t: _understand_one(
                 prompt=cast(str, t["prompt"]),
-                path=cast(str | Path | None, t.get("path")),
                 text=cast(str | None, t.get("text")),
                 paths=cast(list[str | Path] | None, t.get("paths")),
                 effort=effort,
@@ -279,7 +278,6 @@ def understand[TargetValue: str | list[str]](
 def _understand_one(
     *,
     prompt: str,
-    path: str | Path | None = None,
     text: str | None = None,
     paths: list[str | Path] | None = None,
     effort: str | ReasoningEffort = ReasoningEffort.MAX,
@@ -295,28 +293,13 @@ def _understand_one(
         return _call_text(
             [{"type": "text", "text": text}, {"type": "text", "text": prompt}], effort=effort
         )
-    if paths is not None:
-        return _understand_paths(paths, prompt, effort=effort)
-    assert path is not None  # noqa: S101 — validated by caller
-    p = _files._resolve(path)
-    if not p.is_file():
-        raise FileNotFoundError(f"path {str(path)!r} does not name an existing file ({p})")
-    mime = _MEDIA_MIME.get(p.suffix.lower())
-    if mime is not None:
-        return _understand_media(p, mime, prompt, effort=effort)
-    # Any other file: read as UTF-8 text and run the text path.
-    from ava.security import scan_content
-
-    content = _read_text_file(p)
-    scan_content(content, source="understand.input")
-    return _call_text(
-        [{"type": "text", "text": content}, {"type": "text", "text": prompt}], effort=effort
-    )
+    assert paths is not None  # noqa: S101 — validated by caller
+    return _understand_paths(paths, prompt, effort=effort)
 
 
 def _read_text_file(p: Path) -> str:
     """Read `p` as UTF-8 text; undecodable bytes raise UnderstandError with
-    the supported-suffix hint. Shared by the single-path and multi-path flows."""
+    the supported-suffix hint. Shared by the single-file and multi-file flows."""
     try:
         return p.read_text(encoding="utf-8")
     except UnicodeDecodeError as e:
@@ -377,30 +360,9 @@ def _save_understand_result(t: dict[str, str | list[str]], result: str) -> None:
 
     scan_content(result, source="understand.output")
     prompt = cast(str, t["prompt"])
-    path = t.get("path")
     paths = t.get("paths")
-    if path is not None:
-        source = f"path={path!r}"
-    elif paths is not None:
-        source = f"paths={paths!r}"
-    else:
-        source = "text"
+    source = f"paths={paths!r}" if paths is not None else "text"
     _save_understand_output(prompt, result, source=source)
-
-
-def _understand_media(p: Path, mime: str, prompt: str, effort: str | ReasoningEffort) -> str:
-    """Read a binary media file and have Gemini Flash answer `prompt` about it."""
-    data = p.read_bytes()
-    if len(data) > _INLINE_MAX_BYTES:
-        raise UnderstandError(
-            f"File size {len(data):,} bytes exceeds the {_INLINE_MAX_BYTES:,} byte "
-            "Gemini inline cap"
-        )
-    return _call_media(
-        [{"type": "media", "data": data, "mime_type": mime}, {"type": "text", "text": prompt}],
-        mime=mime,
-        effort=effort,
-    )
 
 
 def _call_text(content: list[Any], *, effort: str | ReasoningEffort) -> str:

@@ -936,7 +936,7 @@ def test_coding_tools_section_all_expanded_keeps_preamble_only(
     assert not text.endswith("\n\n")
 
 
-# ── ava.understand wrap (path= follows the tracked cwd) ───────────────────
+# ── ava.understand wrap (paths follow the tracked cwd) ────────────────────
 
 
 def _stub_understand_text_path(monkeypatch: pytest.MonkeyPatch) -> dict:
@@ -953,14 +953,14 @@ def _stub_understand_text_path(monkeypatch: pytest.MonkeyPatch) -> dict:
     return captured
 
 
-def test_understand_wrap_resolves_path_against_cwd(tmp_path: Path, monkeypatch):
-    """In-turn relative path= resolved against tracked cwd — same string same file as files.read."""
+def test_understand_wrap_resolves_paths_against_cwd(tmp_path: Path, monkeypatch):
+    """In-turn relative paths= resolved against tracked cwd — same string same file as files.read."""
     captured = _stub_understand_text_path(monkeypatch)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
     (tmp_path / "rel.txt").write_text("cwd material", encoding="utf-8")
     ava.state = _make_state_with_cwd(str(tmp_path))
     ava.state_update = {}
     try:
-        [out] = ava.understand([{"prompt": "p", "path": "rel.txt"}])
+        [out] = ava.understand([{"prompt": "p", "paths": ["rel.txt"]}])
         assert out == "ok"
         sent = captured["llm"].invoke.call_args[0][0][0].content  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
         assert sent[0] == {"type": "text", "text": "cwd material"}
@@ -969,8 +969,8 @@ def test_understand_wrap_resolves_path_against_cwd(tmp_path: Path, monkeypatch):
         ava.state_update = None
 
 
-def test_understand_wrap_missing_path_raises_with_cwd_location(tmp_path: Path):
-    """In-turn relative path= that does not exist under cwd → FileNotFoundError points to cwd-resolved result
+def test_understand_wrap_missing_paths_raises_with_cwd_location(tmp_path: Path):
+    """In-turn relative paths= that does not exist under cwd → FileNotFoundError points to cwd-resolved result
     (same semantics as files.read, won't silently treat as text)."""
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -978,7 +978,7 @@ def test_understand_wrap_missing_path_raises_with_cwd_location(tmp_path: Path):
     ava.state_update = {}
     try:
         with pytest.raises(FileNotFoundError, match=r"nope\.txt"):
-            ava.understand([{"prompt": "p", "path": "nope.txt"}])
+            ava.understand([{"prompt": "p", "paths": ["nope.txt"]}])
     finally:
         ava.state = None
         ava.state_update = None
@@ -990,7 +990,7 @@ def test_understand_wrap_outside_turn_defers_to_workspace(workspace: Path, monke
     assert ava.state is None
     workspace.mkdir(parents=True)
     (workspace / "f.txt").write_text("ws material", encoding="utf-8")
-    ava.understand([{"prompt": "p", "path": "f.txt"}])
+    ava.understand([{"prompt": "p", "paths": ["f.txt"]}])
     sent = captured["llm"].invoke.call_args[0][0][0].content  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
     assert sent[0] == {"type": "text", "text": "ws material"}
 
@@ -1007,14 +1007,18 @@ def test_understand_wrap_keeps_error_attribute_and_doc():
 def test_understand_wrap_passes_invalid_combo_to_core(tmp_path: Path):
     """A malformed target reaches the core untouched so its canonical ValueError
     fires — the wrap does not preempt validation, in either direction (a target
-    carrying both `path` and `text`, or neither)."""
+    carrying both `paths` and `text`, or neither)."""
     ava.state = _make_state_with_cwd(str(tmp_path))
     ava.state_update = {}
     try:
         with pytest.raises(ValueError, match="exactly one"):
             ava.understand([{"prompt": "p"}])
         with pytest.raises(ValueError, match="exactly one"):
-            ava.understand([{"prompt": "p", "path": "rel.txt", "text": "t"}])
+            ava.understand([{"prompt": "p", "paths": ["rel.txt"], "text": "t"}])
+        # A `paths` value that is not a list of path strings also reaches the
+        # core untouched, so its canonical TypeError fires (not a wrap error).
+        with pytest.raises(TypeError, match="must be a list of file paths"):
+            ava.understand([{"prompt": "p", "paths": "rel.txt"}])
     finally:
         ava.state = None
         ava.state_update = None
@@ -1046,7 +1050,7 @@ def test_understand_wrap_forwards_effort(monkeypatch):
 
 
 def test_understand_wrap_resolves_every_target_in_a_batch(tmp_path: Path, monkeypatch):
-    """The wrap walks the whole batch: each `path` target is resolved against the
+    """The wrap walks the whole batch: each `paths` target is resolved against the
     tracked cwd, while a `text` target passes through untouched."""
     from unittest.mock import MagicMock
 
@@ -1068,9 +1072,9 @@ def test_understand_wrap_resolves_every_target_in_a_batch(tmp_path: Path, monkey
     try:
         out = ava.understand(
             [
-                {"prompt": "p1", "path": "a.txt"},
+                {"prompt": "p1", "paths": ["a.txt"]},
                 {"prompt": "p2", "text": "inline"},
-                {"prompt": "p3", "path": "b.txt"},
+                {"prompt": "p3", "paths": ["b.txt"]},
             ]
         )
     finally:
@@ -1078,6 +1082,29 @@ def test_understand_wrap_resolves_every_target_in_a_batch(tmp_path: Path, monkey
         ava.state_update = None
     assert out == ["ok", "ok", "ok"]
     assert sorted(materials) == ["inline", "material A", "material B"]
+
+
+def test_understand_wrap_resolves_every_entry_in_a_paths_list(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Each entry of a multi-file `paths` target is resolved against the tracked
+    cwd — the wrap walks the list, not just the first file."""
+    captured = _stub_understand_text_path(monkeypatch)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+    (tmp_path / "a.txt").write_text("material A", encoding="utf-8")
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "sub" / "b.txt").write_text("material B", encoding="utf-8")
+    ava.state = _make_state_with_cwd(str(tmp_path))
+    ava.state_update = {}
+    try:
+        [out] = ava.understand([{"prompt": "p", "paths": ["a.txt", "sub/b.txt"]}])
+        assert out == "ok"
+        sent = captured["llm"].invoke.call_args[0][0][0].content  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+        assert sent[0] == {"type": "text", "text": "material A"}
+        assert sent[1] == {"type": "text", "text": "material B"}
+        assert sent[2] == {"type": "text", "text": "p"}
+    finally:
+        ava.state = None
+        ava.state_update = None
 
 
 def test_understand_wrap_forwards_max_concurrent(tmp_path: Path, monkeypatch):
@@ -1089,10 +1116,10 @@ def test_understand_wrap_forwards_max_concurrent(tmp_path: Path, monkeypatch):
     ava.state = _make_state_with_cwd(str(tmp_path))
     ava.state_update = {}
     try:
-        [out] = ava.understand([{"prompt": "p", "path": "rel.txt"}], max_concurrent=2)
+        [out] = ava.understand([{"prompt": "p", "paths": ["rel.txt"]}], max_concurrent=2)
         assert out == "ok"
         with pytest.raises(ValueError, match="at least 1"):
-            ava.understand([{"prompt": "p", "path": "rel.txt"}], max_concurrent=0)
+            ava.understand([{"prompt": "p", "paths": ["rel.txt"]}], max_concurrent=0)
     finally:
         ava.state = None
         ava.state_update = None

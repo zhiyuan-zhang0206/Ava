@@ -4,7 +4,7 @@ Two pieces, cwd and context-file injection:
 - cwd: `ava_code__cwd` state field (default: the agent's workspace dir; $HOME
   when no process identity is bound); the agent reads/writes via
   `ava.cwd.get` / `set`; the wraps use it to resolve relative paths in
-  `ava.files.*` / `ava.shell.run` / each `ava.understand` target's `path`.
+  `ava.files.*` / `ava.shell.run` / each `ava.understand` target's `paths`.
 - context-file auto-injection: wraps `ava.files.read`, walks up the resolved
   path to git root or `$HOME` (whichever is farther), and surfaces any AGENTS.md
   / CLAUDE.md files along the way as a system note (tag=CONTEXT) so the agent
@@ -453,31 +453,37 @@ ava.extend.wrap("files.glob", _wrapped_glob)
 
 
 # ── wrap ava.understand ───────────────────────────────────────────────────
-# Same shape as the ava.files wraps, applied per target: each target's `path`
-# is resolved against the tracked cwd during a turn (workspace / pre-identity
-# HOME otherwise, via _resolve_for_cwd), then handed to `inner` (the wrapped
-# understand) as an absolute path. A `text` target has no path to resolve and
-# passes through untouched. `effort` mirrors the core signature (default
-# "max", forwarded verbatim — the core validates it). `UnderstandError` rides
-# on the function object; `ava.extend.wrap` carries it (and the docstring)
-# forward, so `ava.understand.UnderstandError` survives the wrap.
+# Same shape as the ava.files wraps, applied per target: each target's `paths`
+# entries are resolved against the tracked cwd during a turn (workspace /
+# pre-identity HOME otherwise, via _resolve_for_cwd), then handed to `inner`
+# (the wrapped understand) as absolute paths. A `text` target has no paths to
+# resolve and passes through untouched. `effort` mirrors the core signature
+# (default "max", forwarded verbatim — the core validates it). `UnderstandError`
+# rides on the function object; `ava.extend.wrap` carries it (and the
+# docstring) forward, so `ava.understand.UnderstandError` survives the wrap.
 def _wrapped_understand(
     inner: Callable[..., list[str]],
-    targets: list[dict[str, str]],
+    targets: list[dict[str, str | list[str]]],
     effort: str = "max",
     max_concurrent: int | None = None,
 ) -> list[str]:
     # Anything malformed passes through untouched so the wrapped function's
     # canonical TypeError / ValueError fires before any path resolution — that
-    # includes a target carrying both `path` and `text`.
+    # includes a target carrying both `paths` and `text`, or a `paths` value
+    # that is not a list of path strings.
     if not isinstance(targets, list):
         return inner(targets, effort=effort, max_concurrent=max_concurrent)
-    resolved: list[dict[str, str]] = []
+    resolved: list[dict[str, str | list[str]]] = []
     for t in targets:
-        if not isinstance(t, dict) or "path" not in t or "text" in t:
+        if not isinstance(t, dict) or "paths" not in t or "text" in t:
             resolved.append(t)
             continue
-        resolved.append({**t, "path": str(_resolve_for_cwd(t["path"]))})
+        paths = t["paths"]
+        if not isinstance(paths, list) or not all(isinstance(p, (str, Path)) for p in paths):
+            # Malformed paths value — leave for the core's canonical TypeError.
+            resolved.append(t)
+            continue
+        resolved.append({**t, "paths": [str(_resolve_for_cwd(p)) for p in paths]})
     return inner(resolved, effort=effort, max_concurrent=max_concurrent)
 
 
