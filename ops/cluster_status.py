@@ -260,7 +260,21 @@ def capture_shell(agent_id: int, session_id: int, lines: int = 200) -> tuple[str
         captured = get_shell_backend().capture_pane(full_name, lines)
     except Exception as exc:
         raise RuntimeError(f"session capture on {full_name!r} failed: {exc}") from exc
-    return full_name, captured.splitlines()
+    captured_lines = captured.splitlines()
+    # Trim blank padding from both ends of the tail. A cursor-addressed TUI
+    # (claude/codex-class CLIs) redraws via escape sequences, and each
+    # full-screen redraw scrolls cleared rows into the pyte scrollback — so a
+    # capture can open with dozens of blank rows the shell-monitor page
+    # renders as a huge blank region above the real output. Trailing blank
+    # screen rows below the last line of a short session do the mirror-image
+    # damage: the bottom-anchored pane scrolls the real output above the fold.
+    # Blank padding at the extremes of a capture is never meaningful output;
+    # interleaved blanks stay.
+    while captured_lines and not captured_lines[0].strip():
+        captured_lines.pop(0)
+    while captured_lines and not captured_lines[-1].strip():
+        captured_lines.pop()
+    return full_name, captured_lines
 
 
 def _collect_sessions() -> tuple[list[SessionInfo], int, int]:

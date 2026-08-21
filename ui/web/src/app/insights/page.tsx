@@ -17,8 +17,9 @@
 
 import { MessageSquare } from "lucide-react";
 import Link from "next/link";
-import { useEffect } from "react";
+import { useState } from "react";
 
+import { useSettledAnchorScroll } from "@/app/control/_anchor-scroll";
 import { ControlNav } from "@/app/control/_nav";
 import {
   INSIGHTS_SCROLL_ID,
@@ -34,16 +35,19 @@ import { cn } from "@/lib/utils";
 
 export default function InsightsPage() {
   // Honor a #anchor on first load / direct link (including forwards from old
-  // /control#status deep links): scroll the target into the container once the
-  // sections mount. Retired Metrics anchors (#metrics, #metrics-*) land on the
-  // Ops section — the Grafana embed that replaced the Metrics page.
-  useEffect(() => {
+  // /control#status deep links): resolve the target once, from the URL hash
+  // at mount (later hash changes come from nav clicks, which scroll
+  // themselves). Retired Metrics anchors (#metrics, #metrics-*) land on the
+  // Ops section — the Grafana embed that replaced the Metrics page. The
+  // scroll itself is re-applied by useSettledAnchorScroll until the async
+  // section bodies stop growing, so the deep link lands on the section at its
+  // final position.
+  const [anchorTarget] = useState<string | null>(() => {
+    if (typeof window === "undefined") return null;
     const id = window.location.hash.slice(1);
-    if (!id) return;
-    const target = RETIRED_INSIGHTS_ANCHORS.has(id) ? "ops" : id;
-    const el = document.getElementById(target);
-    if (el) el.scrollIntoView({ block: "start" });
-  }, []);
+    return id ? (RETIRED_INSIGHTS_ANCHORS.has(id) ? "ops" : id) : null;
+  });
+  useSettledAnchorScroll(INSIGHTS_SCROLL_ID, anchorTarget);
 
   return (
     <div className={cn(FLEX, FLEX_1, MIN_H_0, FLEX_COL)}>
