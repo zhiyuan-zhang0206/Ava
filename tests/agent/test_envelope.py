@@ -15,7 +15,7 @@ value in tests.
 
 from __future__ import annotations
 
-from datetime import UTC
+from datetime import UTC, datetime
 
 import pytest
 
@@ -211,6 +211,20 @@ class TestMessageTimestampsOff:
         assert wrap_inbound("raw", "system:rollback") == "[system] raw"
 
 
+def _local_ts(created: datetime, *, weekday: bool = False) -> str:
+    """The wall-clock the envelope should render `created` at — the same
+    conversion `format_timestamp` applies (UTC -> settings.general.timezone),
+    computed here from the configured zone so these tests pass under any
+    cluster timezone instead of hardcoding America/Los_Angeles."""
+    from zoneinfo import ZoneInfo
+
+    from shared.config import settings
+
+    local = created.astimezone(ZoneInfo(settings.general.timezone))
+    fmt = "%Y-%m-%d %H:%M:%S" if not weekday else "%Y-%m-%d %a %H:%M:%S"
+    return local.strftime(fmt)
+
+
 class TestCreatedAtParameter:
     """`created_at=` parameter — when a real creation time is passed, the
     envelope timestamp uses that wall-clock rather than the current time,
@@ -221,19 +235,19 @@ class TestCreatedAtParameter:
         from datetime import datetime
 
         created = datetime(2026, 6, 21, 10, 30, 0, tzinfo=UTC)
-        # created_at is UTC 10:30, which is PDT 03:30
         out = wrap_inbound("hi", "user", created_at=created)
-        assert "[2026-06-21 03:30:00]" in out
-        assert out == "User [2026-06-21 03:30:00]:\n\nhi"
+        expected = f"[{_local_ts(created)}]"
+        assert expected in out
+        assert out == f"User {expected}:\n\nhi"
 
     def test_agent_with_created_at(self) -> None:
         from datetime import datetime
 
         created = datetime(2026, 6, 21, 14, 0, 0, tzinfo=UTC)
-        # UTC 14:00 = PDT 07:00
         out = wrap_inbound("hey", "agent:5", created_at=created)
-        assert "[2026-06-21 07:00:00]" in out
-        assert out == "Agent 5 [2026-06-21 07:00:00]:\n\nhey"
+        expected = f"[{_local_ts(created)}]"
+        assert expected in out
+        assert out == f"Agent 5 {expected}:\n\nhey"
 
     def test_without_created_at_uses_now(self) -> None:
         """When created_at is None, fallback to now_timestamp (existing behavior)."""
@@ -252,9 +266,8 @@ class TestCreatedAtParameter:
         from datetime import datetime
 
         created = datetime(2026, 6, 21, 20, 0, 0, tzinfo=UTC)
-        # UTC 20:00 = PDT 13:00
         out = wrap_inbound("alert", "watcher:7", created_at=created)
-        assert "[2026-06-21 13:00:00]" in out
+        assert f"[{_local_ts(created)}]" in out
 
 
 class TestCreatedAtWithTimestampsOff:
@@ -296,15 +309,26 @@ class TestWeekdayFlag:
         from shared.config import settings
 
         monkeypatch.setattr(settings.general, "message_timestamp_weekday", weekday)
-        # UTC 10:30 on a Sunday = PDT 03:30
+        # UTC 10:30 on a Sunday — the weekday name is Sunday in every zone
+        # within +-11h of UTC, so this exercises the %a slot regardless of
+        # the configured timezone.
         created = datetime(2026, 6, 21, 10, 30, 0, tzinfo=UTC)
         return wrap_inbound("hi", "user", created_at=created)
 
     def test_weekday_on(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        assert self._wrap(monkeypatch, weekday=True) == "User [2026-06-21 Sun 03:30:00]:\n\nhi"
+        from datetime import datetime
+
+        created = datetime(2026, 6, 21, 10, 30, 0, tzinfo=UTC)
+        assert (
+            self._wrap(monkeypatch, weekday=True)
+            == f"User [{_local_ts(created, weekday=True)}]:\n\nhi"
+        )
 
     def test_weekday_off(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        assert self._wrap(monkeypatch, weekday=False) == "User [2026-06-21 03:30:00]:\n\nhi"
+        from datetime import datetime
+
+        created = datetime(2026, 6, 21, 10, 30, 0, tzinfo=UTC)
+        assert self._wrap(monkeypatch, weekday=False) == f"User [{_local_ts(created)}]:\n\nhi"
 
     def test_no_timezone_suffix_either_way(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """No `%Z` in either shape — the timezone is declared once, in the
