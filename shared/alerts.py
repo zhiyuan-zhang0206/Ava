@@ -356,8 +356,9 @@ def notify_text(alert: dict[str, Any], lang: str | None = None) -> str:
     """The alert IM message — the alert-specific format (user design 2026-08-12):
     a warning-sign-prefixed ``ALERT [<severity>] <alertname>`` head line, the
     summary body, the generatorURL when present, the trigger time, and the
-    fleet-UI jump link. Resolved instances swap the head for the
-    check-marked ``RESOLVED`` variant. Every severity pushes
+    fleet-UI jump link (omitted when no fleet-UI base URL is configured).
+    Resolved instances swap the head for the check-marked ``RESOLVED``
+    variant. Every severity pushes
     (critical/warning/error — no severity gate).
 
     Templates live in ``services/im_bridge/copy.py`` — the single source of
@@ -385,5 +386,7 @@ def notify_text(alert: dict[str, Any], lang: str | None = None) -> str:
     start = format_local(parse_ts(alert.get("starts_at") or ""))
     if start:
         lines.append(im_copy.ALERT_TRIGGERED_AT[lang].format(time=start))
-    lines.append(im_copy.ALERT_JUMP_LINK.format(url=frontend_base_url()))
+    base_url = frontend_base_url()
+    if base_url:
+        lines.append(im_copy.ALERT_JUMP_LINK.format(url=base_url))
     return "\n".join(lines)
