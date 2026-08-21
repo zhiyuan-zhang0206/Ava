@@ -56,12 +56,17 @@ def register_watcher(
     cron_timezone: str | None = None,
     cron_end_at: Any = None,
     timeout_secs: float | None = None,
+    template_version: int | None = None,
 ) -> None:
     """Record a watcher session at spawn (`ava.watcher._spawn`).
 
     `kind` must be one of at/cron/launch and the row carries that kind's
-    rebuild payload (see `_KIND_PAYLOAD`). Fail-soft at the call site: a
-    registry write must never break the watcher it is only observing.
+    rebuild payload (see `_KIND_PAYLOAD`). `template_version` is the generated
+    script's template generation (shared.watcher.TEMPLATE_VERSION); the boot
+    reconcile rebuilds a live cron watcher whose row version is behind, so a
+    template fix reaches sessions that were already running when it landed
+    (issue #1330). Fail-soft at the call site: a registry write must never
+    break the watcher it is only observing.
     """
     if kind not in _KIND_PAYLOAD:
         raise ValueError(f"unknown watcher kind {kind!r}")
@@ -70,8 +75,9 @@ def register_watcher(
             """
             INSERT INTO agent_watchers (
                 session_id, agent_id, kind, name, message, fires_at,
-                cron_expr, cron_timezone, cron_end_at, timeout_secs
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                cron_expr, cron_timezone, cron_end_at, timeout_secs,
+                template_version
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (agent_id, session_id) DO NOTHING
             """,
             (
@@ -85,6 +91,7 @@ def register_watcher(
                 cron_timezone,
                 cron_end_at,
                 timeout_secs,
+                template_version,
             ),
         )
 
