@@ -46,15 +46,12 @@ one iframe.)
   page's Resources section links to it, so the uid is load-bearing. Every
   expression in it was evaluated against a live Prometheus 3.13.2 before it
   landed.
-- Datasource is a **PostgreSQL datasource pointing at the cluster's own
-  Postgres** (the DB that owns the unified `events` stream — now a read-only
-  archive since the LGTM cutover, task #1197). The dashboard's SQL reads
-  `events` directly (the old `ops_metrics` pre-aggregation and
-  `shared/ops_series.py` reader were retired with the ops-monitor LGTM
-  migration; this dashboard itself is slated for decommissioning with the
-  ops-Grafana shutdown). It references the datasource by fixed uid `ops`
-  (provisioned in `~/.ava/grafana/provisioning/datasources/` on the gateway
-  host).
+- Datasource is **Loki** (fixed uid `loki`, provisioned in
+  `../datasources/datasources.yml`) — every panel reads the live event stream
+  through LogQL (task #1280 / #180: the PG `events` table is a frozen
+  archive since the LGTM cutover). The one exception is the **Live agents**
+  stat (`core_live_agents`), which reads the live `agents_meta` table on the
+  **PostgreSQL** datasource (fixed uid `ops`) by design.
 
 Both JSON files were **generated** from the metric registrations (below).
 The generator did not survive the archive→public port (see the plugin
@@ -157,7 +154,9 @@ and **Agent delivery backlog**.
 `shared/plugin_metrics.py` defines `MetricSpec`, shared by core and plugin
 registrations: `name` / `title` / `description` / `event_name` / `category` /
 `unit` / `panel` (`timeseries` / `stat` / `barchart` / `table`) / `query`
-(Grafana SQL template over `events`), plus the Task #882 fields:
+(Grafana query template — LogQL over the Loki event stream,
+`query_type="logql"`, for every shipped metric; the one SQL holdout is the
+core `Live agents` stat over `agents_meta`), plus the Task #882 fields:
 
 - `targets` — extra SQL templates rendered as refId B/C/... targets on the
   same panel (multi-series panels — e.g. the core TPS panels' max/min-agent
@@ -217,12 +216,19 @@ total height — see the EMBED_HEIGHT TODO above.
 1. Add `metrics.py` to your plugin dir (e.g. `ava_builtins/plugins/<name>/metrics.py`).
 2. Call `register_metric(MetricSpec(...))` at module top level — the plugin
    name is auto-filled from the import context; do not pass it.
-3. The `query` template is validated at register time: single SELECT over the
-   `events` table only, whitelisted functions (COUNT/SUM/AVG/MIN/MAX/NULLIF/
-   COALESCE/ROUND) and Grafana macros ($__timeGroup/$__timeFilter/$__interval/
-   $__interval_ms), JSONB access operators, no comments / multi-statement /
-   DML / information functions. `{event_name}` / `{category}` placeholders are
-   rendered as single-quoted literals from the spec.
+3. The `query` template is **LogQL** (`query_type="logql"`) — the live event
+   stream in Loki, the same dialect the core panels use (task #1280 / #180).
+   Every template must select `{service_name="unknown_service"}` and pipeline
+   `| json` before any event-field filter (event fields are structured
+   metadata, NOT stream labels); `{event_name}` / `{category}` placeholders
+   render as double-quoted literals, `{category_re}` renders unquoted for
+   `category=~"{category_re}|log"`-style regexes, and the event
+   stream/json/placeholder contract is validated by
+   `shared/metrics_logql.py`. Stat panels run as instant queries over
+   `[$__range]`; timeseries/barchart panels as range queries bucketed by
+   `[$__interval]`; every count wraps in `sum(...)` (the unknown_service
+   family has >500 streams over a day, and an unaggregated count_over_time
+   hits Loki's per-query series cap).
 4. `output` selects the surfaces: `["grafana"]` (panel in the generated
    dashboard), `["inspector"]` (the per-agent API surface, W13b — query may
    use the `{{agent_id}}` placeholder, rendered by the gateway to
@@ -253,19 +259,19 @@ gateway reads the same registry snapshot
 (`$AVA_HOME/state/plugin_metrics.json`) — since Task #882 the snapshot
 carries **two sections**, `metrics` (plugins) and `core_metrics` (core),
 and the gateway merges both and renders them identically (same
-re-validation, macro substitution, read-only execution) — keeps metrics
+re-validation, macro substitution, execution) — keeps metrics
 whose `output` includes `inspector`, renders each template for the
-requested agent (`{event_name}`/`{category}` -> single-quoted literals,
-`{{agent_id}}` -> `agent_id = <n>`), **re-validates the rendered SQL** (the
-persisted file is disk input — register-time validation does not protect
-against a tampered file; anything that no longer parses as a whitelisted
-single SELECT over `events` is a 500, never executed), substitutes the
-Grafana time macros (`$__timeFilter(ts)` -> `ts >= now() - interval '24 hours'`,
-`$__timeGroup(ts, $__interval)` -> `date_trunc('hour', ts)` — the inspector
-has no dashboard time range, so the gateway renders a fixed recent window,
-24h in 1h buckets) and executes the query **read-only** against the
-cluster's own Postgres, one savepoint per metric so a failing query never
-poisons its siblings.
+requested agent (`{event_name}`/`{category}` -> double-quoted literals,
+`{{agent_id}}` -> `agent_id="<n>"` for LogQL), **re-validates the rendered
+query** (the persisted file is disk input — register-time validation does
+not protect against a tampered file; anything that fails the template
+contract is a 500, never executed), substitutes the Grafana time macros
+(`$__interval` -> `1h`, `$__range` -> `24h` — the inspector has no
+dashboard time range, so the gateway renders a fixed recent window, 24h in
+1h buckets) and executes LogQL queries against Loki
+(`gateway/loki_events.metric_range`); SQL templates (the `core_live_agents`
+stat) still execute read-only against the cluster's own Postgres, one
+savepoint per metric so a failing query never poisons its siblings.
 
 Response: one `PluginMetricResult` per inspector metric, in registration
 order — `stat` metrics carry `value`; `timeseries`/`barchart` carry `series`
