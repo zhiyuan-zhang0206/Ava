@@ -17,10 +17,8 @@ def _h_cluster_update(args: argparse.Namespace) -> int:
     return cmd_update(
         restart_only=args.restart_only,
         local=args.local,
-        target_sha=args.target_sha,
-        origin=args.origin,
-        rollout_log=args.rollout_log,
         force=args.force,
+        origin=args.origin,
         mode=args.mode,
     )
 
@@ -228,8 +226,9 @@ def _add_cluster_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
     cluster_update_p = cluster_sub.add_parser(
         "update",
         help="[cluster] upgrade the whole cluster to the latest code (thin client: "
-        "POST /api/cluster/rollout). On a gateway-capable host the detached rollout "
-        "session runs the three-phase orchestration (pause agent-runners -> local "
+        "POSTs /api/cluster/rollout to the gateway from ANY host — user ruling "
+        "2026-08-21, issue #216). The gateway's detached rollout session runs the "
+        "three-phase orchestration (pause agent-runners -> local "
         "pull/sync/migrate/restart -> fan out agent-runner self-updates); a pure "
         "agent-runner is updated by that fan-out, not by this verb.",
     )
@@ -237,25 +236,17 @@ def _add_cluster_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
         "--restart-only",
         action="store_true",
         help="bounce every service on the current code (no git pull / uv sync / migration) "
-        "— used to apply config changes cluster-wide. The gateway spawns this via "
-        "POST /api/cluster/restart.",
+        "— used to apply config changes cluster-wide. POSTs /api/cluster/restart "
+        "to the gateway from any host.",
     )
     cluster_update_p.add_argument(
         "--local",
         action="store_true",
         default=False,
-        help="force the in-process orchestration instead of the default "
-        "(gateway `ava cluster update` spawns the rollout in a detached session). "
-        "This is what that detached session runs; also for debugging.",
-    )
-    cluster_update_p.add_argument(
-        "--target-sha",
-        default=None,
-        help="pinned rollout commit to force-checkout (instead of resolving origin/main). "
-        "AGENT-RUNNER ONLY — this is how Phase B threads the gateway's resolved pin to each "
-        "runner's self-update. A gateway-capable host REFUSES it (exit 2): the "
-        "orchestration resolves its own target, so honouring a second one is not possible "
-        "and accepting it silently would misreport the rollout as pinned.",
+        help="run the in-process orchestration in this foreground process instead "
+        "of POSTing the gateway. This is what the gateway's detached rollout "
+        "session runs (it must not re-POST and recurse); also for debugging. An "
+        "explicit flag — the default `ava cluster update` never branches by role.",
     )
     cluster_update_p.add_argument(
         "--origin",
@@ -263,11 +254,6 @@ def _add_cluster_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
         help="who triggered this update (e.g. 'agent:9'); recorded in the rollout log "
         "and the cluster pin's updated_by. Defaults to cli:<machine>; the detached "
         "rollout session threads it automatically.",
-    )
-    cluster_update_p.add_argument(
-        "--rollout-log",
-        default=None,
-        help=argparse.SUPPRESS,
     )
     cluster_update_p.add_argument(
         "--force",

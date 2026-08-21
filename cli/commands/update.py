@@ -1,12 +1,10 @@
 """Multi-machine `ava cluster update` orchestration core.
 
-`ava cluster update` dispatches by this host's machine_role (top of `cmd_update`):
-  gateway -> `_run_gateway_orchestration` runs three phases (Phase A -> local -> Phase B)
-  agent-runner    -> `_run_agent_runner_self_update` runs local self-update (checkout/sync/stop/start)
-
-One command works on both hosts; the CLI decides based on role. The gateway
-default spawns the detached `ava-rollout` session (`_spawn_gateway_rollout`)
-and returns immediately.
+`ava cluster update` is a thin POST client to the gateway (user ruling
+2026-08-21, issue #216): every CLI POSTs /api/cluster/rollout regardless of
+role; the gateway's detached `ava-rollout` session (spawned via
+`ops.cluster_deploy.spawn_rollout`, which runs `ava cluster update --local`)
+executes `_run_gateway_orchestration` — three phases (Phase A -> local -> Phase B).
 
 Gateway three-phase details:
   Phase A: pause the local restarter first (so no agent exiting from here on
@@ -60,7 +58,7 @@ subprocess use and the test monkeypatch surfaces):
 recovery + `RolloutOutcome` / `finalize_rollout`), `_update_agent_runner.py`
 (the agent-runner leg), `_update_orchestration.py` (classification + pin +
 fan-out target resolution), `_gateway_ready.py` (Phase B's gateway-readiness
-precondition), `_update_dispatch.py` (`cmd_update` + `_spawn_gateway_rollout`),
+precondition), `_update_dispatch.py` (`cmd_update` — the POST client),
 `_update_preflight.py` (Phase 0 fetch + classify + pin), `_update_quiesce.py`
 (quiesce convergence), `_update_pause.py` (Phase A + stop-the-world),
 `_update_local.py` (the gateway's local stop/checkout/sync/start leg),
@@ -85,9 +83,6 @@ from pathlib import Path
 from cli.commands._repo import _repo_root as _repo_root
 from cli.commands._update_agent_runner import (
     _run_agent_runner_self_update as _run_agent_runner_self_update,
-)
-from cli.commands._update_dispatch import (
-    _spawn_gateway_rollout as _spawn_gateway_rollout,
 )
 from cli.commands._update_dispatch import (
     cmd_update as cmd_update,

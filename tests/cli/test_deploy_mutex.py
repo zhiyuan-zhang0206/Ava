@@ -97,34 +97,57 @@ def test_force_does_not_override_a_local_session(monkeypatch: pytest.MonkeyPatch
 def test_refusal_reaches_the_operator_as_a_message_not_a_traceback(
     monkeypatch: pytest.MonkeyPatch, capsys
 ) -> None:
-    """The live defect this fixes: `ava cluster update` on a gateway raised
-    `ClusterUpdateInProgress` straight out of `_spawn_gateway_rollout` — `main()`
-    catches only `ValidationError`, so a second operator got a stack trace where the
-    entire point was a legible refusal."""
+    """The live defect this fixes: `ava cluster update` used to raise
+    `ClusterUpdateInProgress` straight out of the dispatch — `main()` catches
+    only `ValidationError`, so a second operator got a stack trace where the
+    entire point was a legible refusal. The thin-client POST (issue #216)
+    translates the gateway's 409 into the same one-line stderr verdict."""
 
-    def _refuse(_origin: str, **_kw: object) -> dict[str, str]:
-        raise cluster_mod.ClusterUpdateInProgress("a deploy is in progress — gateway-host:pid1")
+    class _Refused:
+        status_code = 409
 
-    monkeypatch.setattr("ops.cluster.spawn_rollout", _refuse)
+        def raise_for_status(self) -> None:
+            import httpx
 
-    from cli.commands.update import _spawn_gateway_rollout
+            request = httpx.Request("POST", "http://gw:8000")
+            response = httpx.Response(409, request=request)
+            raise httpx.HTTPStatusError("conflict", request=request, response=response)
 
-    assert _spawn_gateway_rollout("cli:test") == 1
+        def json(self) -> dict[str, str]:
+            return {"detail": "a deploy is in progress — gateway-host:pid1"}
+
+    monkeypatch.setattr("shared.machine.gateway_api_base", lambda: "http://gw:8000")
+    monkeypatch.setattr("httpx.post", lambda *_a, **_kw: _Refused())  # pyright: ignore[reportUnknownArgumentType]
+
+    from cli.commands import cmd_update
+
+    assert cmd_update() == 1
     assert "gateway-host:pid1" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
 
 
 def test_nothing_to_update_is_reported_as_success(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
-    """An up-to-date cluster is not a failure; it also used to traceback."""
-    from ops.cluster import NothingToUpdate
+    """An up-to-date cluster is not a failure; it also used to traceback. The
+    gateway's 422 (nothing to roll out) maps to exit 0 with a one-line note."""
 
-    def _nothing(_origin: str, **_kw: object) -> dict[str, str]:
-        raise NothingToUpdate("cluster is already up to date")
+    class _Nothing:
+        status_code = 422
 
-    monkeypatch.setattr("ops.cluster.spawn_rollout", _nothing)
+        def raise_for_status(self) -> None:
+            import httpx
 
-    from cli.commands.update import _spawn_gateway_rollout
+            request = httpx.Request("POST", "http://gw:8000")
+            response = httpx.Response(422, request=request)
+            raise httpx.HTTPStatusError("nothing", request=request, response=response)
 
-    assert _spawn_gateway_rollout("cli:test") == 0
+        def json(self) -> dict[str, str]:
+            return {"detail": "cluster is already up to date"}
+
+    monkeypatch.setattr("shared.machine.gateway_api_base", lambda: "http://gw:8000")
+    monkeypatch.setattr("httpx.post", lambda *_a, **_kw: _Nothing())  # pyright: ignore[reportUnknownArgumentType]
+
+    from cli.commands import cmd_update
+
+    assert cmd_update() == 0
     assert "up to date" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
 
 

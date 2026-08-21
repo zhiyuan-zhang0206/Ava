@@ -258,7 +258,9 @@ async def post_cluster_rollout(
             detail="rollout must be triggered on the gateway",
         )
     try:
-        return await asyncio.to_thread(_ops.cluster_rollout_op, body.origin, mode=body.mode)
+        return await asyncio.to_thread(
+            _ops.cluster_rollout_op, body.origin, mode=body.mode, force=body.force
+        )
     except ClusterUpdateInProgress as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except NothingToUpdate as exc:

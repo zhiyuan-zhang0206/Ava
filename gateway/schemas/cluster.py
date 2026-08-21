@@ -22,6 +22,11 @@ class ClusterOpRequest(BaseModel):
     origin: str = "user"
 
     mode: str = "smooth"
+
+    # Rollout only: start even though a deploy is in flight (overrides the
+    # deploy-window check; does NOT clear a crashed rollout's update lock —
+    # that is `ava cluster recover`). Ignored by /api/cluster/restart.
+    force: bool = False
     """Agent-drain policy for the rollout's quiesce step: 'smooth' (default)
     waits out the longest single execute_code then force-reaps stragglers;
     'force' waits ~10s then force-reaps. Both restart every agent onto the new

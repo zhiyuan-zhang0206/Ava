@@ -20,6 +20,25 @@ cached); and LangGraph / Pydantic introspect type hints at runtime via
 import, or an `import torch`-class heavy dependency on a path that does not use
 the type — go in `_TYPE_CHECKING_ALLOWED` with a one-line reason.
 
+### Rule 3: `machine_role()` allowlist
+
+`machine_role()` answers "what does this host serve" and must never be used to
+decide *where an operation runs* — the gateway is the single routing point, and
+every CLI routes to it (user ruling 2026-08-21, issue #216). The line is not
+*where* the function is called but *what the answer is used for*:
+
+- **legitimate** — "what do I serve?": start the right daemons, advertise
+  honestly in register_self, audit this host, guard a capability.
+- **illegitimate** — "should I do this myself, or ask the gateway?": a module
+  that implements an operation must not branch on role.
+
+So instead of banning the call (five legitimate uses exist) we allowlist it:
+`_MACHINE_ROLE_ALLOWED` enumerates the modules that may call `machine_role()`,
+each with a one-line reason naming the question it answers. A call anywhere
+else fails the run; an allowlisted module that stops calling it also fails
+(stale-entry alert, the `unmatched_ignore_imports_alerting` shape from #176)
+so the list cannot rot into a permission wall.
+
 ### Rule 2: per-file line budget (500 soft / 800 hard)
 
 500-800 lines is a transitional zone: tolerated, but surfaced on every full run
@@ -74,6 +93,34 @@ _SCAN_DIRS = (
     "ops",
     "cli",
 )
+
+# Rule 3 allowlist — modules that may call machine_role(), each with the
+# question the call answers ("what do I serve" vs "where does this run").
+# A call site not listed here fails the lint; a listed module whose calls
+# disappear fails too (stale entry). See the module docstring.
+_MACHINE_ROLE_ALLOWED: dict[str, str] = {
+    "shared/machine.py": "defines machine_role() and its capability wrappers is_gateway()/is_agent_runner() — the implementation itself",
+    "cli/commands/start.py": "which daemons do I bring up (what do I serve)",
+    "cli/commands/_repo.py": "resolve this host's capability set, None when unset, for stop/status/converge (what do I serve)",
+    "cli/commands/_gateway_ready.py": "audit this host's role for the readiness report (what do I serve)",
+    "services/agent_ops/_boot.py": "what do I advertise in register_self (what do I serve)",
+    "ops/ops_inventory.py": "capability guard: inventory ops are agent-runner-only (what do I serve)",
+    "gateway/routers/config.py": "for the gateway itself, local role is authoritative (what do I serve)",
+}
+
+
+def _machine_role_calls(tree: ast.AST) -> list[int]:
+    """Line numbers of `machine_role(...)` call sites in a parsed module."""
+    hits: list[int] = []
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "machine_role"
+        ):
+            hits.append(node.lineno)
+    return hits
+
 
 # Files allowed to exceed _HARD_CEILING — naturally cohesive single units that
 # splitting would only scatter:
@@ -198,8 +245,10 @@ def _scan_file(path: Path, rel_path: str) -> list[tuple[int, str, str]]:
     text = path.read_text(encoding="utf-8")
     out: list[tuple[int, str, str]] = []
 
+    tree = ast.parse(text, filename=rel_path)
+
     if rel_path not in _TYPE_CHECKING_ALLOWED:
-        for lineno in _type_checking_violations(ast.parse(text, filename=rel_path)):
+        for lineno in _type_checking_violations(tree):
             out.append(
                 (
                     lineno,
@@ -208,6 +257,34 @@ def _scan_file(path: Path, rel_path: str) -> list[tuple[int, str, str]]:
                     "introspect type hints at runtime (deferred imports NameError). "
                     "Real circular-import / heavy-dep cases: refactor, or add this file "
                     "to _TYPE_CHECKING_ALLOWED in scripts/lint_code_structure.py with a reason.",
+                    "error",
+                )
+            )
+
+    role_calls = _machine_role_calls(tree)
+    if rel_path in _MACHINE_ROLE_ALLOWED:
+        if not role_calls:
+            out.append(
+                (
+                    1,
+                    f"stale machine_role() allowlist entry — {rel_path} no longer calls "
+                    "machine_role(); remove it from _MACHINE_ROLE_ALLOWED in "
+                    "scripts/lint_code_structure.py (the list must match reality, "
+                    "issue #216).",
+                    "error",
+                )
+            )
+    elif role_calls:
+        for lineno in role_calls:
+            out.append(
+                (
+                    lineno,
+                    "machine_role() may only be called from modules in "
+                    "_MACHINE_ROLE_ALLOWED (scripts/lint_code_structure.py) — the "
+                    "gateway is the single routing point and no operation may branch "
+                    "on role (user ruling 2026-08-21, issue #216). Add the module "
+                    "deliberately with the question the call answers, or route the "
+                    "operation to the gateway instead.",
                     "error",
                 )
             )
