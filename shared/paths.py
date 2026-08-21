@@ -220,6 +220,15 @@ def workspace_dir(agent_id: int) -> Path:
     return target
 
 
+def exec_run_dir() -> Path:
+    """Per-unit exec-subprocess scratch dir ($AVA_HOME/run/exec) — request /
+    result envelopes for one execute_code run each (agent/graph/_exec_protocol.py),
+    pruned per agent subdir. Create if missing."""
+    target = run_dir() / "exec"
+    target.mkdir(parents=True, exist_ok=True)
+    return target
+
+
 def monitors_dir() -> Path:
     """Per-unit monitor-script directory ($AVA_HOME/monitors)."""
     return ava_home() / "monitors"

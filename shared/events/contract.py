@@ -137,6 +137,14 @@ class ExecFailed(TypedDict):
     body: str
 
 
+class ExecSubprocessKilled(TypedDict):
+    """`exec_subprocess_killed` payload — a child survived the signal grace
+    and the parent SIGKILLed its process group."""
+
+    pid: int
+    grace: float
+
+
 class Halt(TypedDict):
     """`halt` payload — compact/idle detection reads the body."""
 
@@ -536,6 +544,11 @@ EVENTS: dict[str, EventSpec] = {
     "exec_thread_stuck": _telemetry("exec_thread_stuck", "exec thread stuck"),
     "exec_thread_unreapable": _telemetry(
         "exec_thread_unreapable", "orphan exec thread survived the reap window"
+    ),
+    "exec_subprocess_killed": _telemetry(
+        "exec_subprocess_killed",
+        "exec child survived the signal grace period and was SIGKILLed",
+        payload=ExecSubprocessKilled,
     ),
     # hosted runner (future/infra/agent-runner-as-server.md) — the dispatcher
     # that turns an inbound wake into a turn task, and the turn tasks it runs
