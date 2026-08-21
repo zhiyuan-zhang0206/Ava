@@ -1094,6 +1094,58 @@ def test_timezone_validated_at_construction(monkeypatch: pytest.MonkeyPatch) -> 
     assert GeneralSettings().timezone == "Asia/Shanghai"
 
 
+def _capture_loguru_warnings() -> tuple[list[str], int]:
+    """A loguru sink collecting WARNING+ records; returns (records, sink_id).
+
+    The timezone-default warning fires during the Settings singleton build,
+    before any stdlib -> loguru bridge exists, so it goes to loguru directly —
+    caplog (stdlib) cannot see it."""
+    from loguru import logger
+
+    records: list[str] = []
+
+    class _Sink:
+        def write(self, message: str) -> None:
+            records.append(message)
+
+    return records, logger.add(_Sink(), level="WARNING", format="{message}")
+
+
+def test_timezone_default_warns_when_unset(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A missing AVA_TIMEZONE must not drift silently onto the
+    America/Los_Angeles default: a schedule runner with that default fires cron
+    jobs at PT midnight instead of the cluster's midnight (2026-08-21 incident,
+    schedule #3). The warning names the missing key so the operator fixes the
+    cluster .env instead of discovering the wrong fire time."""
+    from loguru import logger
+
+    from shared.config.general import GeneralSettings
+
+    monkeypatch.delitem(os.environ, "AVA_TIMEZONE", raising=False)
+    records, sink_id = _capture_loguru_warnings()
+    try:
+        GeneralSettings()
+    finally:
+        logger.remove(sink_id)
+    assert any("AVA_TIMEZONE is not set" in r and "America/Los_Angeles" in r for r in records)
+
+
+def test_timezone_explicit_value_does_not_warn(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An explicit AVA_TIMEZONE (any zone, including PT) is a deliberate
+    choice — no warning."""
+    from loguru import logger
+
+    from shared.config.general import GeneralSettings
+
+    monkeypatch.setitem(os.environ, "AVA_TIMEZONE", "America/Los_Angeles")
+    records, sink_id = _capture_loguru_warnings()
+    try:
+        GeneralSettings()
+    finally:
+        logger.remove(sink_id)
+    assert not any("AVA_TIMEZONE is not set" in r for r in records)
+
+
 # ─── frontend config-group map alignment (ui/web/src/app/control/_config_groups.ts) ───
 
 

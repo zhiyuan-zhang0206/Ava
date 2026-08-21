@@ -23,6 +23,7 @@ class _FakeBackend:
     def __init__(self) -> None:
         self.live: list[str] = []
         self.killed: list[str] = []
+        self.launch_envs: list[dict[str, object]] = []
 
     def list_sessions(self, prefix: str = "") -> list[str]:
         return [s for s in self.live if s.startswith(prefix)]
@@ -65,6 +66,7 @@ def fake_session(monkeypatch: pytest.MonkeyPatch) -> tuple[_FakeBackend, list[in
         # `... schedule_runner <id>; exit $?`, so argv parsing is a trap.
         sid = int(str(env["AVA_SCHEDULE_ID"]))
         launched.append(sid)
+        backend.launch_envs.append(dict(env))
         backend.live.append(session_name(f"schedule-{sid}"))  # launch => session appears
         return True
 
@@ -104,6 +106,28 @@ def test_launches_enabled_missing_session(
 
     assert launched == [sid]
     assert _status(db_conn, sid) == "running"
+
+
+def test_launch_env_carries_cluster_timezone(
+    db_conn: psycopg.Connection, pool: ConnectionPool, fake_session: tuple[_FakeBackend, list[int]]
+) -> None:
+    """The runner's spawn env carries the gateway's resolved cluster timezone.
+
+    A unit .env that misses AVA_TIMEZONE must not silently leave the runner on
+    the America/Los_Angeles field default (2026-08-21: schedule #3 fired at PT
+    midnight instead of Shanghai midnight). The forward dict deliberately
+    excludes cluster-scope keys, so the launch pins it explicitly from the
+    gateway's own settings — dotenv_boot's authority pass keeps the value
+    (never drops it) and lets a declared .env override it."""
+    backend, launched = fake_session
+    sid = _insert(db_conn, "job-tz")
+
+    sm.ScheduleManager(pool)._launch(sid)
+
+    assert launched == [sid]
+    env = backend.launch_envs[0]
+    assert env["AVA_TIMEZONE"] == settings.general.timezone
+    assert env["AVA_SCHEDULE_ID"] == str(sid)
 
 
 def test_adopts_live_session_without_relaunch(
