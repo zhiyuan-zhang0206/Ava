@@ -307,7 +307,7 @@ class TestUncancellableTurn:
         stand-in for a task that cannot be interrupted, and one that hangs the
         unbounded version of this method forever.
         """
-        monkeypatch.setattr(dispatcher, "_CANCEL_UNWIND_TIMEOUT_S", 0.05)
+        monkeypatch.setattr(dispatcher, "CANCEL_UNWIND_TIMEOUT_S", 0.05)
         stuck = _StuckTurn()
         sched = TurnScheduler(stuck)
         sched.wake(7)
@@ -327,7 +327,7 @@ class TestUncancellableTurn:
         """ "Is anything wedged right now" must be answerable without reading
         logs, so the report carries the agent id and how long the cancel was
         pending as event fields."""
-        monkeypatch.setattr(dispatcher, "_CANCEL_UNWIND_TIMEOUT_S", 0.05)
+        monkeypatch.setattr(dispatcher, "CANCEL_UNWIND_TIMEOUT_S", 0.05)
         records: list[dict[str, object]] = []
 
         def _capture(_msg: str, **kw: object) -> None:
@@ -351,7 +351,7 @@ class TestUncancellableTurn:
     ) -> None:
         """The ordinary case must stay silent, or the report is noise nobody
         reads by the time it matters."""
-        monkeypatch.setattr(dispatcher, "_CANCEL_UNWIND_TIMEOUT_S", 0.05)
+        monkeypatch.setattr(dispatcher, "CANCEL_UNWIND_TIMEOUT_S", 0.05)
         records: list[dict[str, object]] = []
 
         def _capture(_msg: str, **kw: object) -> None:
@@ -379,7 +379,7 @@ class TestUncancellableTurn:
         `MAX(inbound_messages.created_at)` and goes stale during exactly the long
         turns where the question is real (issue #183).
         """
-        monkeypatch.setattr(dispatcher, "_CANCEL_UNWIND_TIMEOUT_S", 0.05)
+        monkeypatch.setattr(dispatcher, "CANCEL_UNWIND_TIMEOUT_S", 0.05)
         records: list[dict[str, object]] = []
 
         def _capture(_msg: str, **kw: object) -> None:
@@ -410,7 +410,7 @@ class TestUncancellableTurn:
         """The clock is an enrichment; the agent id and pending duration are the
         part that cannot be reconstructed later. A DB that is unreachable — quite
         possibly what the turn is stuck on — must not cost the whole report."""
-        monkeypatch.setattr(dispatcher, "_CANCEL_UNWIND_TIMEOUT_S", 0.05)
+        monkeypatch.setattr(dispatcher, "CANCEL_UNWIND_TIMEOUT_S", 0.05)
         records: list[dict[str, object]] = []
 
         def _capture(_msg: str, **kw: object) -> None:
@@ -440,8 +440,8 @@ class TestUncancellableTurn:
         """Same reasoning one step further: a clock read that never returns is
         the shutdown-hang this whole class exists to prevent, reintroduced
         through the diagnostic. It is bounded too."""
-        monkeypatch.setattr(dispatcher, "_CANCEL_UNWIND_TIMEOUT_S", 0.05)
-        monkeypatch.setattr(dispatcher, "_CLOCK_READ_TIMEOUT_S", 0.05)
+        monkeypatch.setattr(dispatcher, "CANCEL_UNWIND_TIMEOUT_S", 0.05)
+        monkeypatch.setattr(dispatcher, "CLOCK_READ_TIMEOUT_S", 0.05)
         records: list[dict[str, object]] = []
 
         def _capture(_msg: str, **kw: object) -> None:
@@ -482,8 +482,8 @@ class TestUncancellableTurn:
         from cli.commands.stop import _reap_agent_sessions
 
         kill_window = inspect.signature(_reap_agent_sessions).parameters["timeout_s"].default
-        assert kill_window > dispatcher._CANCEL_UNWIND_TIMEOUT_S, (
-            f"the host waits {dispatcher._CANCEL_UNWIND_TIMEOUT_S}s for a turn to unwind but "
+        assert kill_window > dispatcher.CANCEL_UNWIND_TIMEOUT_S, (
+            f"the host waits {dispatcher.CANCEL_UNWIND_TIMEOUT_S}s for a turn to unwind but "
             f"the stop path force-kills after {kill_window}s — the uncancellable-turn report "
             "would never be emitted"
         )
@@ -492,7 +492,7 @@ class TestUncancellableTurn:
         # for the rest of shutdown" now that there is a real second term; the
         # remaining headroom covers closing the pool, the healthz server and the
         # pidfile.
-        total_wait = dispatcher._CANCEL_UNWIND_TIMEOUT_S + dispatcher._CLOCK_READ_TIMEOUT_S
+        total_wait = dispatcher.CANCEL_UNWIND_TIMEOUT_S + dispatcher.CLOCK_READ_TIMEOUT_S
         assert kill_window > total_wait * 2, (
             f"the host can wait {total_wait}s before it even starts closing its handles, "
             f"against a {kill_window}s force-kill window — too little headroom for the "

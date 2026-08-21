@@ -52,6 +52,7 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 
 from shared.log import logger
+from shared.stop_timing import CANCEL_UNWIND_TIMEOUT_S, CLOCK_READ_TIMEOUT_S
 
 # The pattern one subscription covers: every agent's inbound channel. Kept
 # derived from `inbound_channel` (via the shared prefix) so the publish side
@@ -70,14 +71,14 @@ _INBOUND_PATTERN_SUFFIX = ":inbound:*"
 #
 # The value is bounded from above by the stop path's own window:
 # `cli/commands/stop.py:_reap_agent_sessions` sends SIGTERM and waits
-# `timeout_s` (15s) before force-killing. This wait plus the rest of shutdown —
-# emitting the report, closing the pool, the healthz server, the pidfile — has to
-# fit inside that, or the host is killed before it can say what was stuck. 5s
-# leaves the remaining ~10s for the rest, and
-# `tests/services/test_turn_dispatcher.py` pins the ordering against the stop
-# path's actual default rather than against this comment.
-_CANCEL_UNWIND_TIMEOUT_S = 5.0
-
+# `REAP_KILL_WINDOW_S` (15s) before force-killing. This wait plus the rest of
+# shutdown — emitting the report, closing the pool, the healthz server, the
+# pidfile — has to fit inside that, or the host is killed before it can say what
+# was stuck. 5s leaves the remaining ~10s for the rest; the ordering is
+# registered in the clock lattice (`shared/timing.py`: CANCEL_UNWIND_TIMEOUT_S +
+# CLOCK_READ_TIMEOUT_S < REAP_KILL_WINDOW_S, issue #196) and pinned against the
+# stop path's actual default by `tests/services/test_turn_dispatcher.py`.
+#
 # Ceiling on reading the stuck agents' activity clocks, on the shutdown path.
 # Small on purpose: this is a diagnostic enrichment of a report already worth
 # emitting without it, and the DB may be exactly what a wedged turn is stuck on.
@@ -85,7 +86,6 @@ _CANCEL_UNWIND_TIMEOUT_S = 5.0
 # adds a flat 2s to the shutdown budget the cancel wait above already bounds —
 # `test_the_unwind_bound_fits_inside_the_stop_paths_kill_window` asserts the SUM
 # of the two against the stop path's force-kill window.
-_CLOCK_READ_TIMEOUT_S = 2.0
 
 
 def _age_seconds(moment: datetime) -> float:
@@ -195,7 +195,7 @@ class TurnScheduler:
         The bound is the point. `cancel()` lands at the task's next await, so a
         turn blocked inside a C call never unwinds, and an unbounded `await task`
         would hang shutdown until the supervisor SIGKILLs the host — leaving no
-        record of which agent was stuck. Waiting `_CANCEL_UNWIND_TIMEOUT_S` and
+        record of which agent was stuck. Waiting `CANCEL_UNWIND_TIMEOUT_S` and
         then REPORTING the stragglers turns a silent hang into a named one.
 
         Returns after the report either way: a turn that will not unwind is not
@@ -219,7 +219,7 @@ class TurnScheduler:
         lets the host report it and keep shutting down.
         """
         started = time.monotonic()
-        _, pending = await asyncio.wait(tasks.values(), timeout=_CANCEL_UNWIND_TIMEOUT_S)
+        _, pending = await asyncio.wait(tasks.values(), timeout=CANCEL_UNWIND_TIMEOUT_S)
         # Retrieving the outcome of the tasks that DID finish keeps asyncio from
         # logging "exception was never retrieved" for a turn that raised on its
         # way out — noise that would sit next to the real report below.
@@ -283,7 +283,7 @@ class TurnScheduler:
 
         try:
             pairs = await asyncio.wait_for(
-                asyncio.gather(*(_one(a) for a in agent_ids)), _CLOCK_READ_TIMEOUT_S
+                asyncio.gather(*(_one(a) for a in agent_ids)), CLOCK_READ_TIMEOUT_S
             )
         except (TimeoutError, Exception):
             logger.warning(

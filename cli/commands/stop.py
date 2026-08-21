@@ -17,6 +17,7 @@ from cli.commands._repo import _repo_root, build_services, session_name
 from cli.commands._session_lifecycle import (
     _stop_sessions,  # re-export: defined with the other lifecycle helpers
 )
+from shared import stop_timing
 from shared.platform import IS_WINDOWS
 
 # `_repo` imported shared.config above, which ran dotenv_boot's eager
@@ -55,7 +56,9 @@ def _stop_data_plane(*, skip_infra: bool, runner_only: bool) -> None:
 
 
 def _reap_agent_sessions(
-    *, timeout_s: float = 15.0, kill_shells: bool = True
+    *,
+    timeout_s: float = stop_timing.REAP_KILL_WINDOW_S,
+    kill_shells: bool = True,
 ) -> list[tuple[str, str]]:
     """Graceful-then-force teardown of THIS cluster's agent processes; with
     kill_shells (default), also their persistent shells.
@@ -273,7 +276,9 @@ def _print_stop_plan(
     else:
         print("  infra (pg/redis): this cluster's own instance stopped (data preserved on disk)")
     if graceful:
-        print("  mode: graceful (SIGTERM + 15s timeout, fallback force-kill)")
+        print(
+            f"  mode: graceful (SIGTERM + {stop_timing.REAP_KILL_WINDOW_S:g}s timeout, fallback force-kill)"
+        )
     print()
 
 
