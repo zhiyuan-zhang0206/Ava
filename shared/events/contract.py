@@ -541,10 +541,6 @@ EVENTS: dict[str, EventSpec] = {
     ),
     "exec_timeout": _telemetry("exec_timeout", "execute_code timed out"),
     "exec_node_timeout": _telemetry("exec_node_timeout", "node-level timeout"),
-    "exec_thread_stuck": _telemetry("exec_thread_stuck", "exec thread stuck"),
-    "exec_thread_unreapable": _telemetry(
-        "exec_thread_unreapable", "orphan exec thread survived the reap window"
-    ),
     "exec_subprocess_killed": _telemetry(
         "exec_subprocess_killed",
         "exec child survived the signal grace period and was SIGKILLed",

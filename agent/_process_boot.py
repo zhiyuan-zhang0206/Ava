@@ -303,10 +303,11 @@ async def _boot_agent_process(
     load_process_extensions()
 
     # ── MCP daemon startup ──
-    # The in-process exec worker thread reaches the daemon via
+    # Agent code in the exec child reaches the daemon via
     # ava.mcps._get_remote_client, which derives the socket path from
-    # ava.self.AGENT_ID (set by establish above) and connects iff the socket
-    # exists. Readiness is awaited just before the graph goes live.
+    # ava.self.AGENT_ID (the child re-establishes its identity from the
+    # request) and connects iff the socket exists. Readiness is awaited just
+    # before the graph goes live.
 
     # Per-agent config, framework-scope: applied BEFORE build_chat_model so
     # `settings.lm.llm_model` reflects it if this agent runs a different model.

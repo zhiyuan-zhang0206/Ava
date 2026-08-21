@@ -11,9 +11,9 @@ one loop, no delegation to `ava._extend.scan_and_load` (that loader is
 external-only and is called once from `agent/loop.py`). A repeat call re-executes
 the module already in `sys.modules` rather than binding a new one, so a plugin
 module's identity is stable for the life of the process. Layer A wrap
-monkey-patches the main process's ava module; worker thread `import ava` hits
-sys.modules cache and sees the wrapped version. Config decides what is imported;
-not imported = not registered.
+monkey-patches the process's ava module; the exec child re-runs plugin loading
+at its own boot, so agent code there sees the wrapped version too. Config
+decides what is imported; not imported = not registered.
 """
 
 from langgraph.checkpoint.base import BaseCheckpointSaver

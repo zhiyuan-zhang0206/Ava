@@ -67,8 +67,9 @@ config.)
 `ainvoke` call, not any code inside a node. LangGraph runs each node in its own
 asyncio task that copies the *loop-level* context, so a contextvar bound inside
 a node does not reach the next one, while one bound around the invocation
-propagates into every node task — and into the exec worker thread, which is
-already started under `contextvars.copy_context()`.
+propagates into every node task. The exec child does not inherit
+contextvars — it re-receives the agent's config through the re-emitted
+overlay env instead, so agent code still resolves the same settings.
 
 Deliberately NOT done: `ava._boot.establish(agent_id)` and
 `os.environ["AVA_AGENT_ID"]`. Both are process-wide, and in a process serving
@@ -268,8 +269,9 @@ class AgentHost:
             self.stats.turns_started += 1
             pins = resolve_agent_config_pins(stored.config_overlay, stored.birth_config)
             plugin_pins = resolve_agent_plugin_pins(stored.config_overlay)
-            # All three binds wrap the whole turn, so every node task and the
-            # exec worker thread copy them (see the module docstring). The
+            # All three binds wrap the whole turn, so every node task copies
+            # them (the exec child gets the agent config via the re-emitted
+            # overlay env instead — see the module docstring). The
             # runtime build is INSIDE them on purpose: build_chat_model reads
             # `turn_settings.lm.llm_model`, which is only this agent's model
             # while the config bind is in effect.

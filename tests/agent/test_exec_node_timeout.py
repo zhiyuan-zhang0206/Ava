@@ -1,7 +1,7 @@
 """Test exec node graph-level timeout shield (asyncio.wait_for).
 
 If the inner per-code-block timeout (exec_timeout_seconds) misses a hang
-inside the execution machinery (e.g. a stuck thread join), the outer
+inside the execution machinery (e.g. a wedged child reaper), the outer
 node-level timeout (exec_node_timeout_seconds) catches it.
 """
 
@@ -46,11 +46,11 @@ def _make_runtime() -> Runtime[AvaContext]:
 async def test_exec_node_timeout_fires_asyncio_wait_for(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """When _exec_with_cancel_event hangs longer than exec_node_timeout_seconds,
+    """When _run_in_subprocess hangs longer than exec_node_timeout_seconds,
     the outer asyncio.wait_for inside _exec_node_impl fires.
 
-    We monkeypatch _exec_with_cancel_event to hang forever — simulating a
-    hang inside the execution machinery (e.g. a stuck thread join) that the
+    We monkeypatch _run_in_subprocess to hang forever — simulating a hang
+    inside the execution machinery (e.g. a wedged child reaper) that the
     inner code-exec timeout missed.
     """
     # Graph-level timeout very short, inner timeout irrelevant (patched out)
@@ -60,7 +60,7 @@ async def test_exec_node_timeout_fires_asyncio_wait_for(
         await asyncio.Future()  # never completes
 
     monkeypatch.setattr(
-        "agent.graph._exec._exec_with_cancel_event",
+        "agent.graph._exec._run_in_subprocess",
         _hang_forever,  # pyright: ignore[reportUnknownArgumentType]
     )
 
@@ -92,18 +92,19 @@ async def test_exec_node_timeout_fires_asyncio_wait_for(
 async def test_exec_node_timeout_does_not_fire_when_fast(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """When _exec_with_cancel_event completes quickly, exec_node_timeout_seconds
+    """When _run_in_subprocess completes quickly, exec_node_timeout_seconds
     does NOT fire — the normal path returns _ExecDone."""
     monkeypatch.setattr("shared.config.settings.sandbox.exec_node_timeout_seconds", 10.0)
     monkeypatch.setattr("shared.config.settings.sandbox.exec_timeout_seconds", 30.0)
 
-    from agent.graph._exec import _ExecDone, _ExecOutcome
+    from agent.graph._exec import _ExecDone, _ExecResult
+    from agent.graph._exec_protocol import ResultPayload
 
-    async def _fast_return(*args, **kwargs) -> _ExecOutcome:
-        return _ExecOutcome(_ExecDone(output="hello"), None)
+    async def _fast_return(*args, **kwargs) -> tuple[_ExecResult, ResultPayload | None]:
+        return (_ExecDone(output="hello"), None)
 
     monkeypatch.setattr(
-        "agent.graph._exec._exec_with_cancel_event",
+        "agent.graph._exec._run_in_subprocess",
         _fast_return,  # pyright: ignore[reportUnknownArgumentType]
     )
 

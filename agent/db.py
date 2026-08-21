@@ -402,10 +402,10 @@ async def has_pending_interrupt(pool: AsyncConnectionPool, agent_id: int) -> boo
 
     Self-initiated lifecycle (`source='self'`, i.e. `ava.self.terminate()` /
     restart from inside the agent's own exec) is EXCLUDED: that path already
-    raises an in-thread `_LifecycleExit` the exec node handles directly, so the
-    watcher must not also fire on the agent's own row — doing so would inject a
-    KeyboardInterrupt into the very thread that is mid-terminate, racing the
-    clean lifecycle exit. Only external interrupts (user / admin / peer) need
+    raises `_LifecycleExit` inside the exec child, which the exec node handles
+    directly, so the watcher must not also fire on the agent's own row — doing
+    so would race the clean lifecycle exit with an external cancel. Only
+    external interrupts (user / admin / peer) need
     the in-flight abort; the self row is still dispatched normally at claim.
     """
     async with pool.connection() as conn, conn.cursor() as cur:

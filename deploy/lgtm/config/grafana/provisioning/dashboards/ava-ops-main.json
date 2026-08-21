@@ -2435,18 +2435,6 @@
             "properties": [
               {
                 "id": "displayName",
-                "value": "thread_stuck"
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "F"
-            },
-            "properties": [
-              {
-                "id": "displayName",
                 "value": "node_timeout"
               }
             ]
@@ -2454,7 +2442,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "G"
+              "options": "F"
             },
             "properties": [
               {
@@ -2490,7 +2478,7 @@
       },
       "title": "Exec outcomes",
       "type": "timeseries",
-      "description": "Exec outcome breakdown per bucket: ok = event_name='exec'; failures split by event_name (exec_failed / exec(timeout) / exec(cancelled) / exec_thread_stuck / exec_node_timeout, legacy parenthesized spellings counted in; unknown exec* events fall into other). event_name='exec', category='telemetry'.",
+      "description": "Exec outcome breakdown per bucket: ok = event_name='exec'; failures split by event_name (exec_failed / exec(timeout) / exec(cancelled) / exec_node_timeout, legacy parenthesized spellings counted in; unknown exec* events fall into other). event_name='exec', category='telemetry'.",
       "targets": [
         {
           "datasource": {
@@ -2538,7 +2526,7 @@
             "uid": "loki"
           },
           "editorMode": "code",
-          "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"exec_thread_stuck\" [$__interval]))",
+          "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"exec_node_timeout\" [$__interval]))",
           "refId": "E",
           "queryType": "range"
         },
@@ -2548,18 +2536,8 @@
             "uid": "loki"
           },
           "editorMode": "code",
-          "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"exec_node_timeout\" [$__interval]))",
+          "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=~\"exec.*\" | event_name!~\"exec|exec_failed|exec[(]failed[)]|exec_timeout|exec[(]timeout[)]|exec_cancelled|exec[(]cancelled[)]|exec_node_timeout\" [$__interval]))",
           "refId": "F",
-          "queryType": "range"
-        },
-        {
-          "datasource": {
-            "type": "loki",
-            "uid": "loki"
-          },
-          "editorMode": "code",
-          "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=~\"exec.*\" | event_name!~\"exec|exec_failed|exec[(]failed[)]|exec_timeout|exec[(]timeout[)]|exec_cancelled|exec[(]cancelled[)]|exec_thread_stuck|exec_node_timeout\" [$__interval]))",
-          "refId": "G",
           "queryType": "range"
         }
       ]

@@ -107,7 +107,9 @@ _LLM_PIPE = f'{_SELECTOR} | agent_id!="" | category=~"telemetry|log" | event_nam
 _TURN_PIPE = f'{_SELECTOR} | agent_id!="" | category=~"telemetry|log" | event_name="turn_end"'
 _EXEC_OK_PIPE = f'{_SELECTOR} | agent_id!="" | event_name="exec"'
 # exec_failed = every exec outcome other than plain 'exec' (exec_failed /
-# exec_thread_stuck / exec(timeout)) — mirrors the old SQL LIKE pair.
+# exec(timeout) / exec_cancelled; the prefix regex also counts legacy
+# exec_thread_stuck rows for historical continuity) — mirrors the old SQL
+# LIKE pair.
 _EXEC_FAILED_PIPE = f'{_SELECTOR} | agent_id!="" | event_name=~"exec_.+|exec\\\\(.*"'
 
 _DAY_S = 86400

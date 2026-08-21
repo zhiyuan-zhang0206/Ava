@@ -110,12 +110,14 @@ class SecurityFindingEntry(BaseModel):
 
 
 # ── in-memory findings buffer ────────────────────────────────────────────
-# Findings accumulate in a process-global list while the exec worker thread
-# runs (agent SDK calls inside the turn are the ingestion surfaces); the exec
-# node drains the buffer right after the worker thread joins and injects each
-# finding as a SECURITY system note in the same exec's messages delta, after
-# the exec-result ToolMessage (the tool_use -> tool_result adjacency invariant
-# forbids interleaving notes between the AIMessage and its ToolMessage).
+# Findings accumulate in a process-global list while agent SDK calls run —
+# in the exec child during a turn, or in the agent process itself for scans
+# outside the turn (inbound injection checks). The exec node drains the
+# parent buffer after the run plus the child-drained findings from the
+# result envelope, and injects each finding as a SECURITY system note in
+# the same exec's messages delta, after the exec-result ToolMessage (the
+# tool_use -> tool_result adjacency invariant forbids interleaving notes
+# between the AIMessage and its ToolMessage).
 # Execs are serial per agent process (cycling topology, one agent per
 # process), so a module-level list is race-free in practice; the drain
 # happens before anything else can append.

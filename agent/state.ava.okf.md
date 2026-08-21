@@ -24,7 +24,7 @@ Ava agent's LangGraph state management system. Base `BaseAgentState` has seven c
 ## Key Dependencies
 
 - [[graph.ava.okf.md]] — `build_agent_state()` called at graph build time
-- [[hooks.ava.okf.md]] — graph edge hooks receive and return the whole `state` parameter (via LangGraph reducer), **not** through `PluginStateHandle` — handle is only available to agent code in the exec_node's worker thread (`ava.state` / `ava.state_update`)
+- [[hooks.ava.okf.md]] — graph edge hooks receive and return the whole `state` parameter (via LangGraph reducer), **not** through `PluginStateHandle` — handle is only available to agent code inside execute_code (`ava.state` / `ava.state_update`)
 
 ## Entry Points
 

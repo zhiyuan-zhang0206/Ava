@@ -8,9 +8,9 @@ which agent's turn is executing. This module holds the third, innermost
 channel: a contextvar the hosted dispatcher binds before creating an agent's
 turn task. `asyncio.create_task` copies the creating context, and LangGraph
 node tasks copy the loop-level context, so one bind at task creation covers
-every node of the turn; exec worker threads are started under
-`contextvars.copy_context()` (see `agent/graph/_exec.py`) so agent code on the
-worker thread sees the same identity.
+every node of the turn; the exec child re-establishes its identity from its
+own boot (agent id carried in the request env) — it cannot inherit the
+parent's contextvar — so agent code in the child sees the same identity.
 
 Resolution order everywhere identity is read:
 

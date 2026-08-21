@@ -40,7 +40,7 @@ from shared.log import logger
 # Event name written to events for one top-level SDK call.
 SDK_CALL_EVENT = "sdk_call"
 
-# Thread-local state, all per exec-worker thread:
+# Thread-local state, all per exec child (single-threaded, one exec at a time):
 #   .active — inside agent-authored code (armed by `recording()`); metering is off
 #             elsewhere so framework-internal ava.* calls are never counted.
 #   .frames — a stack of per-call `detail` dicts, one pushed per metered call. Its

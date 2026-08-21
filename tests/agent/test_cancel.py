@@ -1,19 +1,12 @@
 # pyright: reportOptionalSubscript=false
 # Command.update is dict | None; tests always have an update field, narrowing is too verbose
-"""Cancel + timeout path tests (in-process thread model).
+"""Cancel + timeout path tests (exec subprocess model).
 
 Under the cycling topology, cancel goto="after_exec" — after_exec sees halted=True
 and routes to claim waiting for the next inbound (cancel does not exit the process,
 the agent continues to stand by).
 
 Coverage (cancel/timeout behavior inside nodes):
-- When `_run_in_thread` receives cancel_event, it uses ctypes to async-raise
-  KeyboardInterrupt to interrupt the worker thread; partial output (including
-  traceback) is preserved in result.output
-- `_run_in_thread` 60s timeout uses ctypes to async-raise TimeoutError to interrupt;
-  both pure Python infinite loops and blocking syscalls respond; the fallback for
-  native code stuck (orphaned + daemon=True) is not tested here
-- Cancel has priority over timeout race
 - `llm_node` cancels the entire partial generation: returns halted Command(goto=after_exec)
   without committing any message — generation has no side effects, and since no complete
   tool_use is committed, no tool_result debt is owed; history remains clean (exec cancel
@@ -29,11 +22,7 @@ Coverage (cancel/timeout behavior inside nodes):
 """
 
 import asyncio
-import sys
-import threading
-import time
 from collections.abc import AsyncIterator
-from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -43,7 +32,6 @@ from langgraph.runtime import Runtime
 from langgraph.types import Command
 
 from agent.graph import (
-    _run_in_thread,
     exec_node,
     llm_node,
 )
@@ -53,32 +41,14 @@ from agent.graph._exec import (
     _ExecCrashed,
     _ExecDone,
     _ExecLifecycle,
-    _ExecOutcome,
     _ExecTimedOut,
 )
-from agent.graph._exec_capture import current_capture
 from agent.state import AgentState
 from shared.live_events import EVENT_ADAPTER, Cancelled
 from tests.agent._fakes import make_fake_ops_pool
 
-# Most tests here drive exec_node/llm_node with mocked _run_in_thread / a fake
-# cancel_event, so they are deterministic and run in the parallel pool. Only the
-# tests that spawn a *real* worker thread and rely on real wall-clock
-# timeout/cancel timing keep `@pytest.mark.flaky` to run serial.
-
-
-@pytest.fixture
-def fast_join_grace(monkeypatch: pytest.MonkeyPatch):
-    """Shrink the orphaned-thread join grace for real-thread tests so they don't
-    each pay the full production 2.0s. A worker stuck in a blocking `time.sleep`
-    C syscall never responds to the ctypes async-exc within grace — it always
-    orphans — so a shorter grace only declares the orphan sooner without changing
-    any outcome. Partial output is captured before the sleep, independent of
-    grace. (Mirrors the inline pattern already used by
-    test_orphaned_exec_thread_leaves_process_streams_usable.)"""
-    import agent.graph._exec_thread_backend as _thread_mod
-
-    monkeypatch.setattr(_thread_mod, "_THREAD_JOIN_GRACE_S", 0.25)
+# Most tests here drive exec_node/llm_node with mocked _run_in_subprocess / a
+# fake cancel_event, so they are deterministic and run in the parallel pool.
 
 
 def _has_cancelled_event(pub: MagicMock, agent_id: int) -> bool:
@@ -128,166 +98,7 @@ async def _set_after(ev: asyncio.Event, delay: float) -> None:
 
 
 # ---------------------------------------------------------------------------
-# _run_in_thread direct paths (cancel_event trigger, ctypes async raise)
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.flaky  # real worker thread + ctypes cancel injection
-async def test_run_in_thread_cancel_event_stops_thread(fast_join_grace) -> None:
-    """`_run_in_thread` receives cancel_event then uses ctypes to inject
-    KeyboardInterrupt to interrupt the worker thread, returns _ExecCancelled
-    variant, and overall elapsed time is reasonable.
-
-    `time.sleep(60)` is a blocking syscall, but CPython `time.sleep` periodically
-    returns to the interpreter to check signals, responding to ctypes injection
-    within hundreds of milliseconds."""
-    cancel_event = asyncio.Event()
-    trigger = asyncio.create_task(_set_after(cancel_event, 0.3))
-
-    t0 = time.monotonic()
-    result = await _run_in_thread(
-        code="import time; time.sleep(60)",
-        agent_id="1",
-        cancel_event=cancel_event,
-        timeout=10.0,
-        chunk_publisher=None,
-    )
-    elapsed = time.monotonic() - t0
-    await trigger
-
-    assert isinstance(result, _ExecCancelled), (
-        f"Expected _ExecCancelled, got {type(result).__name__}"
-    )
-    # cancel 0.3s + ctypes injection response + thread join grace ≤ 5s is generous
-    assert elapsed < 5.0, f"cancel overall time {elapsed:.2f}s too long"
-
-
-@pytest.mark.flaky  # real worker thread + ctypes cancel injection
-async def test_run_in_thread_cancel_preserves_partial_output(fast_join_grace) -> None:
-    """stdout/stderr already printed by the worker thread is preserved in
-    result.output after cancel.
-
-    `print` / `sys.stderr.write` are both redirected to the same StreamingTextIO;
-    after cancel injects KeyboardInterrupt, the thread, in the except BaseException
-    handler, also writes the agent-facing (filtered) traceback to the same stream
-    → all in result.output."""
-    code = (
-        "import sys, time\n"
-        "print('hello', flush=True)\n"
-        "print('world', flush=True)\n"
-        "sys.stderr.write('warn!\\n'); sys.stderr.flush()\n"
-        "time.sleep(60)\n"
-    )
-    cancel_event = asyncio.Event()
-    # Leave 0.5s for the thread to write 3 lines to the stream, then set cancel_event
-    trigger = asyncio.create_task(_set_after(cancel_event, 0.5))
-
-    result = await _run_in_thread(
-        code=code,
-        agent_id="1",
-        cancel_event=cancel_event,
-        timeout=10.0,
-        chunk_publisher=None,
-    )
-    await trigger
-
-    assert isinstance(result, _ExecCancelled)
-    output = result.output
-    assert "hello" in output and "world" in output, f"partial stdout lost: {output!r}"
-    assert "warn" in output, f"stderr (merged) lost: {output!r}"
-
-
-async def test_orphaned_exec_thread_leaves_process_streams_usable(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A Stop while the worker is stuck in code that swallows the injected
-    interrupt orphans the thread before its capture binding unwinds. The
-    binding is context-scoped (`agent/graph/_exec_capture.py`), so the
-    process's own sys.stdout/sys.stderr keep resolving to the real streams —
-    the next node's faulthandler stall dump still finds a usable fd. Before
-    the per-context capture landed this was a process-global assignment, and
-    an orphan left sys.stderr pointed at the fileno-less capture buffer for
-    the rest of the process."""
-    import agent.graph._exec_thread_backend as _thread_mod
-
-    monkeypatch.setattr(_thread_mod, "_THREAD_JOIN_GRACE_S", 0.1)
-
-    cancel_event = asyncio.Event()
-    trigger = asyncio.create_task(_set_after(cancel_event, 0.1))
-    # Agent code that catches the injected KeyboardInterrupt and keeps running →
-    # the worker never reaches its redirect's __exit__ → orphaned past the grace.
-    code = (
-        "import time\n"
-        "while True:\n"
-        "    try:\n"
-        "        time.sleep(100)\n"
-        "    except BaseException:\n"
-        "        continue\n"
-    )
-    result = await _run_in_thread(
-        code=code,
-        agent_id="1",
-        cancel_event=cancel_event,
-        timeout=10.0,
-        chunk_publisher=None,
-    )
-    await trigger
-
-    assert isinstance(result, _ExecCancelled)
-    # The orphan is still running and still holds its capture in its own
-    # context. From here — the framework's context — both streams must resolve
-    # to something with a real fd, which the capture buffer does not have.
-    sys.stdout.fileno()
-    sys.stderr.fileno()
-    assert current_capture() is None, "orphaned thread's capture leaked into the caller"
-
-
-async def test_timeout_orphan_is_reaped(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A thread that survives the deadline injection is killed by the bounded
-    reaper instead of leaking until process exit (Task #1058): the one-shot
-    TimeoutError is invisible to a thread inside `time.sleep`, and code that
-    swallows `Exception` survives it forever (TimeoutError IS an Exception).
-    The reaper re-injects KeyboardInterrupt on a cadence — a BaseException, so
-    `except Exception` swallow loops cannot survive it — and the thread dies
-    within the cadence of its native call returning."""
-    import agent.graph._exec_thread_backend as _thread_mod
-
-    monkeypatch.setattr(_thread_mod, "_THREAD_JOIN_GRACE_S", 0.1)
-    import agent.graph._exec_threads as _exec_threads_mod
-
-    monkeypatch.setattr(_exec_threads_mod, "_THREAD_REAP_INTERVAL_S", 0.05)
-    monkeypatch.setattr(_exec_threads_mod, "_THREAD_REAP_WINDOW_S", 5.0)
-
-    cancel_event = asyncio.Event()
-    # The exact #1058 orphan class: a sleep loop that swallows Exception.
-    code = (
-        "import time\n"
-        "while True:\n"
-        "    try:\n"
-        "        time.sleep(0.01)\n"
-        "    except Exception:\n"
-        "        pass\n"
-    )
-    result = await _run_in_thread(
-        code=code,
-        agent_id="reap-test",
-        cancel_event=cancel_event,
-        timeout=0.2,
-        chunk_publisher=None,
-    )
-    assert isinstance(result, _ExecTimedOut)
-
-    workers = [t for t in threading.enumerate() if t.name == "exec-reap-test"]
-    assert len(workers) == 1, f"expected one orphaned worker thread, got {len(workers)}"
-    t = workers[0]
-    deadline = time.monotonic() + 5.0
-    while t.is_alive() and time.monotonic() < deadline:
-        await asyncio.sleep(0.05)
-    assert not t.is_alive(), "the reaper failed to kill the orphaned exec thread"
-
-
-# ---------------------------------------------------------------------------
-# llm_node cancel_event race paths (unrelated to thread changes, ported)
+# llm_node cancel_event race paths
 # ---------------------------------------------------------------------------
 
 
@@ -445,21 +256,23 @@ async def test_llm_node_cancel_event_race_normal_completion(
 
 
 # ---------------------------------------------------------------------------
-# exec_node cancel_event race (mock _exec_with_cancel_event returns sum-type variant)
+# exec_node cancel_event race (mock _run_in_subprocess returns sum-type variant + payload)
 # ---------------------------------------------------------------------------
 
 
-async def test_exec_node_cancel_event_kills_thread(
+async def test_exec_node_cancel_event_returns_cancelled_command(
     fake_cancel_event: asyncio.Event,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """cancel_event triggers → exec_node, via mock, returns cancelled result → Command
     with wrap_code_output cancelled=True + frontend Cancelled event."""
 
-    async def _fake_cancelled(code, agent_id, cancel_event, timeout=60.0, **kwargs):
-        return _ExecOutcome(_ExecCancelled(output="partial work\n"), None)
+    async def _fake_cancelled(
+        code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs
+    ):
+        return (_ExecCancelled(output="partial work\n"), None)
 
-    monkeypatch.setattr("agent.graph._exec._exec_with_cancel_event", _fake_cancelled)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("agent.graph._exec._run_in_subprocess", _fake_cancelled)  # pyright: ignore[reportUnknownArgumentType]
 
     pub = MagicMock()
     state = AgentState(messages=[_ai_with_code('print("x")')], halted=False)
@@ -486,13 +299,15 @@ async def test_exec_node_cancel_event_race_normal_completion(
     fake_cancel_event: asyncio.Event,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """cancel_event not set, thread completes normally → exec_node returns Command with
+    """cancel_event not set, the exec completes normally → exec_node returns Command with
     wrap_code_output format ('Code execution output:'), exit_code=0."""
 
-    async def _fake_normal(code, agent_id, cancel_event, timeout=60.0, **kwargs):
-        return _ExecOutcome(_ExecDone(output="hello\n"), None)
+    async def _fake_normal(
+        code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs
+    ):
+        return (_ExecDone(output="hello\n"), None)
 
-    monkeypatch.setattr("agent.graph._exec._exec_with_cancel_event", _fake_normal)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("agent.graph._exec._run_in_subprocess", _fake_normal)  # pyright: ignore[reportUnknownArgumentType]
 
     state = AgentState(messages=[_ai_with_code('print("hello")')], halted=False)
 
@@ -510,104 +325,11 @@ async def test_exec_node_cancel_event_race_normal_completion(
 
 
 # ---------------------------------------------------------------------------
-# timeout paths (60s default, tests use shorter timeout)
+# timeout dispatch paths (mock returns the timed-out variant)
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.flaky  # real worker thread + ctypes timeout injection
-async def test_run_in_thread_timeout_pure_python_loop() -> None:
-    """Pure Python infinite loop `while True: x += 1` —— every bytecode is an
-    async exc check boundary, ctypes injected TimeoutError responds immediately."""
-    cancel_event = asyncio.Event()
-    t0 = time.monotonic()
-    result = await _run_in_thread(
-        code="x = 0\nwhile True: x += 1\n",
-        agent_id="9999",
-        cancel_event=cancel_event,
-        timeout=0.5,
-        chunk_publisher=None,
-    )
-    elapsed = time.monotonic() - t0
-
-    assert isinstance(result, _ExecTimedOut), f"Expected _ExecTimedOut, got {type(result).__name__}"
-    # deadline = start + timeout, so injection can only fire at/after the timeout,
-    # never before — the lower bound proves the timeout actually waited (didn't
-    # short-circuit / return instantly) rather than pinning a specific duration.
-    assert 0.3 < elapsed < 5.0, f"Expected ~0.5s elapsed, got {elapsed:.2f}s"
-
-
-@pytest.mark.flaky  # real worker thread stuck in a blocking syscall → timeout orphan
-async def test_run_in_thread_timeout_blocking_sleep(fast_join_grace) -> None:
-    """`time.sleep(30)` blocking syscall —— thread stuck in C layer does not respond
-    to ctypes injection, goes through join-grace expiry orphan path and returns timeout
-    result."""
-    cancel_event = asyncio.Event()
-    t0 = time.monotonic()
-    result = await _run_in_thread(
-        code="import time; time.sleep(30)",
-        agent_id="9999",
-        cancel_event=cancel_event,
-        timeout=0.5,
-        chunk_publisher=None,
-    )
-    elapsed = time.monotonic() - t0
-
-    assert isinstance(result, _ExecTimedOut)
-    # elapsed ≈ timeout + join grace; lower bound proves the timeout waited (see
-    # the pure-python variant), upper bound proves it didn't run the full sleep(30).
-    assert 0.3 < elapsed < 5.0, f"Expected ~0.75s elapsed, got {elapsed:.2f}s"
-
-
-@pytest.mark.flaky  # real worker thread: cancel-vs-timeout race
-async def test_run_in_thread_cancel_priority_over_timeout(fast_join_grace) -> None:
-    """cancel_event set before timeout → _ExecCancelled (cancel always wins)."""
-    cancel_event = asyncio.Event()
-    trigger = asyncio.create_task(_set_after(cancel_event, 0.5))
-
-    t0 = time.monotonic()
-    result = await _run_in_thread(
-        code="import time; time.sleep(30)",
-        agent_id="9998",
-        cancel_event=cancel_event,
-        timeout=3.0,
-        chunk_publisher=None,
-    )
-    elapsed = time.monotonic() - t0
-    await trigger
-
-    assert isinstance(result, _ExecCancelled), (
-        f"cancel should have priority, got {type(result).__name__}"
-    )
-    assert elapsed < 3.0, f"cancel should have been ~0.5s, got {elapsed:.2f}s"
-
-
-@pytest.mark.flaky  # real worker thread + ctypes timeout injection
-async def test_run_in_thread_timeout_preserves_partial_output(fast_join_grace) -> None:
-    """When timeout triggers, content already printed by the thread is preserved in
-    result.output."""
-    cancel_event = asyncio.Event()
-    result = await _run_in_thread(
-        code=(
-            "import sys, time\n"
-            "print('before sleep', flush=True)\n"
-            "sys.stderr.write('stderr line\\n'); sys.stderr.flush()\n"
-            "time.sleep(30)\n"
-            "print('after sleep', flush=True)\n"
-        ),
-        agent_id="9997",
-        cancel_event=cancel_event,
-        timeout=0.5,
-        chunk_publisher=None,
-    )
-
-    assert isinstance(result, _ExecTimedOut)
-    output = result.output
-    assert "before sleep" in output, f"stdout should be preserved: {output!r}"
-    assert "stderr line" in output, f"stderr (merged) should be preserved: {output!r}"
-    assert "after sleep" not in output, "print after sleep should not appear"
-
-
-# `test_run_in_thread_timeout_preserves_ava_shell_partial_output` removed: it tested the
+# A timeout-preserves-ava.shell-partial-output test is deliberately absent: the old test
 # old `ava.shell.bash` feature that manually forwarded subprocess pipe contents to parent
 # stdout on timeout. The new `ava.shell.run` uses stdlib `subprocess.run`, subprocess pipe
 # contents are only on `TimeoutExpired.{output,stderr}`, no longer forwarded. Agents wanting
@@ -621,10 +343,12 @@ async def test_exec_node_timeout_path(
     """When timeout triggers, exec_node returns a marker but does not halt — the next
     LLM round reads the feedback and changes strategy."""
 
-    async def _fake_timed_out(code, agent_id, cancel_event, timeout=60.0, **kwargs):
-        return _ExecOutcome(_ExecTimedOut(output="partial work\n"), None)
+    async def _fake_timed_out(
+        code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs
+    ):
+        return (_ExecTimedOut(output="partial work\n"), None)
 
-    monkeypatch.setattr("agent.graph._exec._exec_with_cancel_event", _fake_timed_out)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("agent.graph._exec._run_in_subprocess", _fake_timed_out)  # pyright: ignore[reportUnknownArgumentType]
 
     state = AgentState(messages=[_ai_with_code('print("long task")')], halted=False)
 
@@ -652,10 +376,12 @@ async def test_exec_node_timeout_empty_output(
 ) -> None:
     """timeout triggers and the thread has no output → (no output) marker still appears."""
 
-    async def _fake_empty_timeout(code, agent_id, cancel_event, timeout=60.0, **kwargs):
-        return _ExecOutcome(_ExecTimedOut(output=""), None)
+    async def _fake_empty_timeout(
+        code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs
+    ):
+        return (_ExecTimedOut(output=""), None)
 
-    monkeypatch.setattr("agent.graph._exec._exec_with_cancel_event", _fake_empty_timeout)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("agent.graph._exec._run_in_subprocess", _fake_empty_timeout)  # pyright: ignore[reportUnknownArgumentType]
 
     state = AgentState(messages=[_ai_with_code('print("x")')], halted=False)
 
@@ -667,54 +393,6 @@ async def test_exec_node_timeout_empty_output(
     assert "[timeout after 60s]" in content
     assert "(no output)" in content
     assert msg.additional_kwargs["ava_timed_out"] is True  # pyright: ignore[reportUnknownMemberType]
-
-
-# ---------------------------------------------------------------------------
-# in-process self-modification: sys.modules cache survives disk writes
-# ---------------------------------------------------------------------------
-
-
-async def test_in_process_sys_modules_cache_survives_disk_write(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """After the main process already imported a module, even if a worker thread
-    corrupts the source file on disk, subsequent `import <module>` inside exec
-    still hits the sys.modules cache — it does not read the disk.
-
-    Uses tmp_path to create a temporary module + monkeypatch to inject sys.path
-    and sys.modules, avoiding modification of the real ava/shell.py (so that even
-    if pytest SIGINT / abnormal exit leaves no cleanup, no bad files remain).
-    """
-    import importlib
-
-    # 1. Create a valid module under tmp_path
-    mod_dir = tmp_path / "_smoke_pkg"
-    mod_dir.mkdir()
-    (mod_dir / "__init__.py").write_text("")
-    mod_file = mod_dir / "victim.py"
-    mod_file.write_text("def alive():\n    return True\n")
-
-    monkeypatch.syspath_prepend(str(tmp_path))  # pyright: ignore[reportUnknownMemberType]
-    # cleanup uses monkeypatch.delitem to auto-undo
-    monkeypatch.setitem(sys.modules, "_smoke_pkg", importlib.import_module("_smoke_pkg"))
-    monkeypatch.setitem(
-        sys.modules, "_smoke_pkg.victim", importlib.import_module("_smoke_pkg.victim")
-    )
-
-    # 2. Write a syntax error to the disk version
-    mod_file.write_text("this is not valid python <<<\n")
-
-    # 3. The sys.modules cache still exists → exec's import hits the cache → no error
-    cancel_event = asyncio.Event()
-    result = await _run_in_thread(
-        code=("import _smoke_pkg.victim as v\nprint('cache hit:', v.alive())\n"),
-        agent_id="1",
-        cancel_event=cancel_event,
-        timeout=5.0,
-        chunk_publisher=None,
-    )
-    assert isinstance(result, _ExecDone), f"Expected _ExecDone, got {type(result).__name__}"
-    assert "cache hit: True" in result.output, f"output: {result.output!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -818,11 +496,11 @@ async def test_exec_node_dispatch_system_halt(
     clears)."""
     from shared.lifecycle import _SystemHalt
 
-    async def _fake(code, agent_id, cancel_event, timeout=60.0, **kwargs):
-        return _ExecOutcome(_ExecLifecycle(output="user prep work\n", exc=_SystemHalt()), None)
+    async def _fake(code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs):
+        return (_ExecLifecycle(output="user prep work\n", exc=_SystemHalt()), None)
 
     emitter = MagicMock()
-    monkeypatch.setattr("agent.graph._exec._exec_with_cancel_event", _fake)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("agent.graph._exec._run_in_subprocess", _fake)  # pyright: ignore[reportUnknownArgumentType]
     state = AgentState(messages=[_ai_with_code('ava.self.compact("s")')], halted=False)
     runtime = _make_runtime(event_publisher=emitter)
     result = await exec_node(state, runtime, _CONFIG)
@@ -847,10 +525,10 @@ async def test_exec_node_dispatch_agent_termination(
     from ava.self import AgentTermination
     from shared.exit_codes import IDLE_EXIT_CODE
 
-    async def _fake(code, agent_id, cancel_event, timeout=60.0, **kwargs):
-        return _ExecOutcome(_ExecLifecycle(output="", exc=AgentTermination()), None)
+    async def _fake(code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs):
+        return (_ExecLifecycle(output="", exc=AgentTermination()), None)
 
-    monkeypatch.setattr("agent.graph._exec._exec_with_cancel_event", _fake)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("agent.graph._exec._run_in_subprocess", _fake)  # pyright: ignore[reportUnknownArgumentType]
     state = AgentState(messages=[_ai_with_code("ava.self.terminate()")], halted=False)
     runtime = _make_runtime()
     result = await exec_node(state, runtime, _CONFIG)
@@ -872,10 +550,10 @@ async def test_exec_node_dispatch_agent_restart(
     from ava.self import AgentRestart
     from shared.exit_codes import IDLE_EXIT_CODE
 
-    async def _fake(code, agent_id, cancel_event, timeout=60.0, **kwargs):
-        return _ExecOutcome(_ExecLifecycle(output="", exc=AgentRestart()), None)
+    async def _fake(code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs):
+        return (_ExecLifecycle(output="", exc=AgentRestart()), None)
 
-    monkeypatch.setattr("agent.graph._exec._exec_with_cancel_event", _fake)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("agent.graph._exec._run_in_subprocess", _fake)  # pyright: ignore[reportUnknownArgumentType]
     state = AgentState(messages=[_ai_with_code("ava.self.restart()")], halted=False)
     runtime = _make_runtime()
     result = await exec_node(state, runtime, _CONFIG)
@@ -883,58 +561,6 @@ async def test_exec_node_dispatch_agent_restart(
     assert result.update["halted"] is True
     msg = result.update["messages"][0]
     assert msg.additional_kwargs["ava_exit_code"] == IDLE_EXIT_CODE  # pyright: ignore[reportUnknownMemberType]
-
-
-@pytest.mark.flaky  # real worker thread + ctypes cancel injection
-async def test_run_in_thread_lifecycle_priority_over_cancel() -> None:
-    """lifecycle has priority over cancel: when the worker thread has stored a
-    `_LifecycleExit` (AgentTermination) and the cancel_event is also set,
-    `_run_in_thread` must construct _ExecLifecycle, not _ExecCancelled — moving
-    "lifecycle always wins" into the constructor (mis-inserting an [cancelled by user]
-    envelope marker is now impossible at the type level). Locks the construction order
-    mutation (check cancelled before lifecycle).
-
-    Construction requires exc=_LifecycleExit **and** cancelled=True to both hold true.
-    Previously we used "immediately raise AgentTermination + synchronously set cancel"
-    to create this state, but that was a real GIL race: the injected KeyboardInterrupt
-    often landed on the `raise AgentTermination()` line → exc became KeyboardInterrupt
-    instead of _LifecycleExit (hit rate ~1/3 when coverage tracing slows the worker,
-    and CI serial with coverage would fail). Changed to a deterministic approach: the
-    worker runs in a loop, turning the injected cancel interrupt into AgentTermination —
-    no matter when the injection lands, it's caught by the except and elevated to
-    lifecycle, so exc=_LifecycleExit and cancelled=True are always simultaneously true,
-    no longer depending on scheduling timing. Cancel delay 0.15s ensures the injection
-    lands inside the loop (not during the import phase).
-    """
-    from ava.self import AgentTermination
-
-    cancel_event = asyncio.Event()
-    # cancel arrives after the worker enters the loop; the worker's interrupt handler
-    # elevates to lifecycle.
-    trigger = asyncio.create_task(_set_after(cancel_event, 0.15))
-    code = (
-        "from ava.self import AgentTermination\n"
-        "while True:\n"
-        "    try:\n"
-        "        for _ in range(100_000_000):\n"
-        "            pass\n"
-        "    except BaseException:\n"
-        "        raise AgentTermination()\n"
-    )
-
-    result = await _run_in_thread(
-        code=code,
-        agent_id="1",
-        cancel_event=cancel_event,
-        timeout=5.0,
-        chunk_publisher=None,
-    )
-    await trigger
-
-    assert isinstance(result, _ExecLifecycle), (
-        f"lifecycle must have priority over cancel, got {type(result).__name__}"
-    )
-    assert isinstance(result.exc, AgentTermination)
 
 
 async def test_exec_node_dispatch_ordinary_exception(
@@ -945,8 +571,8 @@ async def test_exec_node_dispatch_ordinary_exception(
     """_ExecCrashed → halted=False + event=exec_failed at INFO (agent
     trial-and-error is not an operator alert; metrics aggregate by event)."""
 
-    async def _fake(code, agent_id, cancel_event, timeout=60.0, **kwargs):
-        return _ExecOutcome(
+    async def _fake(code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs):
+        return (
             _ExecCrashed(
                 output="Traceback...\nValueError: boom\n",
                 exc=ValueError("boom"),
@@ -954,7 +580,7 @@ async def test_exec_node_dispatch_ordinary_exception(
             None,
         )
 
-    monkeypatch.setattr("agent.graph._exec._exec_with_cancel_event", _fake)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("agent.graph._exec._run_in_subprocess", _fake)  # pyright: ignore[reportUnknownArgumentType]
     state = AgentState(messages=[_ai_with_code('raise ValueError("boom")')], halted=False)
     runtime = _make_runtime()
     result = await exec_node(state, runtime, _CONFIG)
@@ -983,94 +609,12 @@ async def test_exec_node_dispatch_unknown_lifecycle_subclass_raises(
         def __init__(self) -> None:
             super().__init__(0)
 
-    async def _fake(code, agent_id, cancel_event, timeout=60.0, **kwargs):
-        return _ExecOutcome(_ExecLifecycle(output="", exc=_MysteryLifecycle()), None)
+    async def _fake(code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs):
+        return (_ExecLifecycle(output="", exc=_MysteryLifecycle()), None)
 
-    monkeypatch.setattr("agent.graph._exec._exec_with_cancel_event", _fake)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("agent.graph._exec._run_in_subprocess", _fake)  # pyright: ignore[reportUnknownArgumentType]
     state = AgentState(messages=[_ai_with_code("...")], halted=False)
     runtime = _make_runtime()
 
     with pytest.raises(TypeError, match="Unrecognized _LifecycleExit subclass"):
         await exec_node(state, runtime, _CONFIG)
-
-
-# ---------------------------------------------------------------------------
-# E2E in-thread lifecycle: real ava.self.* SDK call → _ExecLifecycle variant
-# replaces the historical "agent 141 manual smoke test", automating the entire chain
-# from worker thread → ava import → SDK lifecycle exception → _ExecLifecycle construction.
-# ---------------------------------------------------------------------------
-
-
-async def test_run_in_thread_e2e_ava_self_terminate(monkeypatch: pytest.MonkeyPatch) -> None:
-    """End-to-end: agent code `import ava; ava.self.terminate()` runs in worker
-    thread → SDK INSERT terminate inbound (mocked) → raises AgentTermination →
-    _run_in_thread catches and constructs _ExecLifecycle(exc=AgentTermination).
-
-    This is the most critical invariant of the in-process refactor: the lifecycle
-    SDK call written from the agent's perspective must be able to run completely
-    inside the worker thread, crossing sys.modules + ctypes-eligible Python
-    runtime. Under the subprocess model this used the subprocess exit code 42
-    channel; after moving in-process, it uses exception isinstance dispatch, and
-    the end-to-end posture had no automated test without manual smoke testing."""
-    from ava.self import AgentTermination
-
-    # ava.self.terminate() is a single unconditional INSERT of a terminate
-    # inbound, then raises AgentTermination — no delivery-obligation SELECT gate.
-    # Mock the cursor so the test does not depend on a live Postgres.
-    fake_cursor = MagicMock()
-    fake_cursor.execute.return_value = None
-    fake_cursor_cm = MagicMock()
-    fake_cursor_cm.__enter__ = MagicMock(return_value=fake_cursor)
-    fake_cursor_cm.__exit__ = MagicMock(return_value=None)
-    fake_db = MagicMock()
-    fake_db.cursor.return_value = fake_cursor_cm
-    monkeypatch.setattr("ava.DB", fake_db)
-
-    cancel_event = asyncio.Event()
-    result = await _run_in_thread(
-        code="import ava\nava.self.terminate()",
-        agent_id="1",
-        cancel_event=cancel_event,
-        timeout=5.0,
-        chunk_publisher=None,
-    )
-
-    assert isinstance(result, _ExecLifecycle), (
-        f"Expected _ExecLifecycle, got {type(result).__name__} (result={result})"
-    )
-    assert isinstance(result.exc, AgentTermination)
-    # Exactly one execute — the terminate INSERT — reached the mocked cursor:
-    # the worker thread crossed the sys.modules cache into the ava module and
-    # ava.DB.cursor() worked end-to-end.
-    assert fake_cursor.execute.call_count == 1
-    insert_sql = fake_cursor.execute.call_args.args[0]
-    assert "inbound_messages" in insert_sql
-    assert "'terminate'" in insert_sql
-    assert "'self'" in insert_sql
-
-
-async def test_run_in_thread_e2e_ava_self_restart(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Same as the terminate path, verifying AgentRestart's INSERT (kind='restart')."""
-    from ava.self import AgentRestart
-
-    fake_cursor = MagicMock()
-    fake_cursor_cm = MagicMock()
-    fake_cursor_cm.__enter__ = MagicMock(return_value=fake_cursor)
-    fake_cursor_cm.__exit__ = MagicMock(return_value=None)
-    fake_db = MagicMock()
-    fake_db.cursor.return_value = fake_cursor_cm
-    monkeypatch.setattr("ava.DB", fake_db)
-
-    cancel_event = asyncio.Event()
-    result = await _run_in_thread(
-        code="import ava\nava.self.restart()",
-        agent_id="1",
-        cancel_event=cancel_event,
-        timeout=5.0,
-        chunk_publisher=None,
-    )
-
-    assert isinstance(result, _ExecLifecycle)
-    assert isinstance(result.exc, AgentRestart)
-    insert_sql = fake_cursor.execute.call_args.args[0]
-    assert "'restart'" in insert_sql

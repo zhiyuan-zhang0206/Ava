@@ -82,7 +82,7 @@ async def _race_stream_vs_cancel(
 
         if cancel_task in done:
             # cancel_event arrived first — abort streaming (same-tick race
-            # trade-off as _exec_with_cancel_event: cancel always wins)
+            # trade-off as the exec subprocess poll: cancel always wins)
             stream_task.cancel()
             # Narrow to CancelledError — a real exception in stream_task (e.g. a
             # chunk decode bug) should propagate (through outer BaseException

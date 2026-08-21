@@ -47,7 +47,7 @@ class _PluginConfigView:
 
     The cache is per view (so per turn-task binding, since the host builds one
     view per agent), and it is shared by every context copied from the binding
-    — including the exec worker thread. Concurrent first reads may build the
+    within the agent process. Concurrent first reads may build the
     same instance twice; both are equal frozen models and the last write wins,
     which is why this needs no lock.
     """

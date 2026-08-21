@@ -181,13 +181,11 @@ async def test_stall_guard_cancels_on_exception(monkeypatch: pytest.MonkeyPatch)
 
 async def test_stall_guard_survives_redirected_stderr(monkeypatch: pytest.MonkeyPatch) -> None:
     """Regression: a leaked exec-stream redirect leaves the process-global
-    sys.stderr pointed at a fileno-less capture buffer — this happens when a
-    Stop arrives while the exec worker thread is stuck in native code: the
-    thread is orphaned before its redirect unwinds, so sys.stderr stays the
-    capture stream for the rest of the process. The next node's stall guard must
-    hand faulthandler a stable real-fd stderr, never that live sys.stderr;
-    passing a fileno-less stream raises io.UnsupportedOperation and kills the
-    agent the diagnostic exists to observe."""
+    sys.stderr pointed at a fileno-less capture buffer — a plugin mutating
+    sys.stderr, or any redirect that never unwinds. The next node's stall
+    guard must hand faulthandler a stable real-fd stderr, never that live
+    sys.stderr; passing a fileno-less stream raises io.UnsupportedOperation
+    and kills the agent the diagnostic exists to observe."""
     from agent.graph._exec_stream import StreamingTextIO
 
     monkeypatch.setattr(settings.agent, "node_stall_dump_seconds", 12.0)

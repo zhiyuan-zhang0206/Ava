@@ -1,4 +1,4 @@
-"""Streaming output plumbing for the exec node: capture the worker thread's
+"""Streaming output plumbing for the exec node: capture the exec child's
 stdout/stderr and publish it incrementally for live frontend display.
 
 `StreamingTextIO` is the sink `contextlib.redirect_stdout/stderr` writes into —
@@ -60,7 +60,7 @@ class StreamCap:
 
 
 class StreamingTextIO(io.TextIOBase):
-    """Receiver for worker thread `print(...)` / sys.stderr.write.
+    """Receiver for exec-code `print(...)` / sys.stderr.write.
 
     Accumulates writes under a fixed character budget (thread-safe
     lock-protected — agents rarely write from multiple threads but some stdlib
