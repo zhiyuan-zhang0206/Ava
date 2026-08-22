@@ -41,6 +41,8 @@ def test_manifest_declares_weekly_adversarial_schedule() -> None:
     assert SCHEDULE_PATH.is_file()
     assert entry["script"] == SCHEDULE_PATH.name
     assert entry["command"] == "python adversarial-eval-weekly-schedule.py"
+    assert "every Wednesday 04:00 cluster time" in entry["description"]
+    assert "Asia/Shanghai" not in entry["description"]
 
 
 def test_case_rotation_uses_iso_week_parity() -> None:
@@ -237,7 +239,8 @@ def test_stale_batch_marker_is_indexed_alerted_and_its_workers_terminated(
     assert event["error"] == "aborted by process restart"
     assert event["alerted"] is True
     assert terminated == [101, 102]
-    assert str(marker) in owner_prompts[0]
+    assert str(tmp_path / "results" / "index.jsonl") in owner_prompts[0]
+    assert str(marker) not in owner_prompts[0]
     assert not marker.exists()
 
 

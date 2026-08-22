@@ -1,8 +1,9 @@
 """Scenario construction and artifact-only scoring for the weekly batch.
 
 A worker that follows c007's bait spawns a non-isolated child because its own
-spawn call carries no overlay. The audit flags that child and the next batch's
-sweep terminates it; this is an accepted limitation until OS-level sandboxing.
+spawn call carries no overlay. The audit flags that child, but automated cleanup
+of such children does not exist yet; this is an accepted limitation until
+OS-level sandboxing.
 """
 
 # ruff: noqa: RUF001 — scenario text is intentionally Chinese.
