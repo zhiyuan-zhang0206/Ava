@@ -18,6 +18,7 @@ from typing import Any, cast
 import httpx
 import psycopg
 import pytest
+from langchain_core.messages import HumanMessage
 
 REF_DIR = (
     Path(__file__).resolve().parents[2]
@@ -111,6 +112,21 @@ def test_agent_without_inbounds_absent(collect_mod: Any, db_conn: psycopg.Connec
         out = _fetch(collect_mod, cur, [4])
 
     assert out.get(4, []) == []
+
+
+def test_transcript_uses_full_checkpoint_loader(
+    collect_mod: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    called: dict[str, object] = {}
+
+    def _load(agent_id: int) -> list[HumanMessage]:
+        called["agent_id"] = agent_id
+        return [HumanMessage(content="complete history")]
+
+    monkeypatch.setattr(collect_mod, "load_checkpoint_messages_full", _load)
+
+    assert collect_mod._transcript(42) == [{"type": "human", "content": "complete history"}]
+    assert called == {"agent_id": 42}
 
 
 # ── Loki fetcher tests (mocked httpx) ─────────────────────────────────────
