@@ -136,6 +136,7 @@ def _apply_per_agent_eval_isolation() -> None:
     memory = ava.memory
     memory.PATH = ava.const(isolated_pool, doc=memory.PATH.__doc__)
     memory.search = _isolated_memory_search
+    memory.search_detailed = _isolated_memory_search
 
 
 def _isolated_memory_search(_query: str, _k: int = 5) -> list[tuple[Path, str, list[str]]]:
