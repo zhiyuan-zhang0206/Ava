@@ -131,7 +131,7 @@ async def _set_agent_status_async(pool: "AsyncConnectionPool", agent_id: int, st
     """UPDATE agents_meta.status via `pool` — same pool claim_node uses.
 
     Eliminates the sync db_conn -> async aops_pool visibility window that
-    causes the CI-only `allocated != restarting` flake.  The CAS-free
+    causes the CI-only `idling != restarting` flake.  The CAS-free
     unconditional UPDATE is appropriate for test setup (prod uses CAS because
     concurrent lifecycle ops can race; a test setting up a single agent owns
     the row).
@@ -182,7 +182,7 @@ async def _await_inbound_visible(pool: AsyncConnectionPool, inbound_id: int) -> 
     through `aops_pool` (a different connection). Under `-n auto` there is a
     cross-connection window where a just-committed row is not yet visible on the
     pool, so a single `claim_node` call can read a partial batch and skip the
-    lifecycle flip — surfacing later as a baffling `assert 'allocated' ==
+    lifecycle flip — surfacing later as a baffling `assert 'idling' ==
     'restarting'`. Prod never hits this: claim is Redis-pub/sub-driven and re-claims
     on the next wake, so the still-pending row is picked up. This barrier mirrors
     that guarantee for the test's one-shot call. Waiting on the LAST-committed
@@ -206,7 +206,7 @@ async def _await_status(pool: AsyncConnectionPool, agent_id: int, expected: str)
     reached in 2s, reporting the observed status trail.
 
     (This helper once carried a heavy CI-flake forensic dump for an intermittent
-    `allocated != restarting`. That flake was a reused-id collision, killed at the
+    `idling != restarting`. That flake was a reused-id collision, killed at the
     source by the monotonic-id contract — see
     decisions/2026-06-30-monotonic-test-ids.md — so
     the dump is gone; the status trail is enough for any residual failure.)
@@ -252,11 +252,9 @@ def _config(tid: int) -> RunnableConfig:
 def running_agent(db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch):
     """factory: spawn agent row + directly UPDATE to 'running'.
 
-    Simulates production: when agent process enters claim_node, there must be an agents_meta row
-    (status 'starting' / 'running' / 'idling'), else `leave_starting_state` would fail-loud at the top.
-    The dispatch unit tests previously used `create_agent` which only INSERTed agents without an
-    agents_meta row — the production invariant was inconsistent; this was exposed by the fail-loud
-    `leave_starting_state` in this PR.
+    Simulates production: the bootstrap CAS has already created a running row
+    before the process enters claim_node. Dispatch tests need that row for the
+    same lifecycle invariant as a real agent.
     """
 
     def _make() -> int:
@@ -267,18 +265,16 @@ def running_agent(db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch):
     return _make
 
 
-async def test_claim_first_entry_transitions_starting_to_running(
+async def test_claim_first_entry_keeps_boot_claim_running(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     aredis_inbound_listener: RedisInboundListener,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    """process start → `enter_starting_state` sets status to 'starting' → first entry into
-    claim_node should elevate status to 'running'. Otherwise the subsequent `_wait_for_batch`
-    CAS `running ↔ idling` hitting 'starting' would fail-fast kill the process (agent 172 tested path)."""
+    """The bootstrap claim already sets running before the first graph entry."""
     tid = spawn_agent()
     with db_conn.cursor() as cur:
-        cur.execute("UPDATE agents_meta SET status = 'starting' WHERE id = %s", (tid,))
+        cur.execute("UPDATE agents_meta SET status = 'running' WHERE id = %s", (tid,))
     db_conn.commit()
     insert_inbound_message(db_conn, tid, "hello", source="user")
 
@@ -300,10 +296,7 @@ async def test_claim_subsequent_entry_does_not_disturb_running(
     aredis_inbound_listener: RedisInboundListener,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    """idempotent: status is already 'running' (subsequent turn enters claim_node) → leave_starting_state
-    should be a 0-row no-op and not raise. Lock down the contract that 'the helper is safe across turns,
-    caller does not need to remember first turn or not' — avoid regressing to fail-fast on 0 row that
-    would kill multi-turn paths."""
+    """A subsequent graph entry leaves its already-running row untouched."""
     tid = spawn_agent()
     _set_agent_status(db_conn, tid, "running")
     insert_inbound_message(db_conn, tid, "hello", source="user")
@@ -914,7 +907,7 @@ async def test_claim_hosted_never_enters_idling_status(
     would be told a lie about an agent that has no process at all."""
     tid = spawn_agent()
     with db_conn.cursor() as cur:
-        cur.execute("UPDATE agents_meta SET status = 'starting' WHERE id = %s", (tid,))
+        cur.execute("UPDATE agents_meta SET status = 'running' WHERE id = %s", (tid,))
     db_conn.commit()
 
     await claim_node(
@@ -927,9 +920,8 @@ async def test_claim_hosted_never_enters_idling_status(
         cur.execute("SELECT status FROM agents_meta WHERE id = %s", (tid,))
         row = cur.fetchone()
     assert row is not None
-    # 'running' specifically, not merely "not idling": claim's own
-    # `leave_starting_state` elevates to RUNNING at the top, and the hosted
-    # branch must return without touching status again.
+    # The row was already running from bootstrap; the hosted branch must return
+    # without touching it.
     assert row[0] == "running", f"hosted claim left status {row[0]!r}"
 
 
@@ -1356,7 +1348,7 @@ async def test_claim_restart_kind_marks_restarting_and_no_message(
     does **not** append message (old process writing 'has been restarted' is writing for the future,
     left to the new process's 'restart_completed' kind dispatch)."""
     tid = spawn_agent()
-    # simulate process already up: allocated → running (mark_agent_status 'restarting' expects from='running')
+    # simulate process already up: unclaimed idling → running (mark_agent_status 'restarting' expects from='running')
     _set_agent_status(db_conn, tid, "running")
     restart_id = _insert_inbound_kind(db_conn, tid, "", "restart", source="user")
     await _await_inbound_visible(aops_pool, restart_id)
@@ -1778,12 +1770,12 @@ async def test_claim_compact_summary_batched_with_restart_applies_and_keeps_idle
     # through it.  Every subsequent write goes through `aops_pool` too, so there
     # is no sync→async visibility window — the same pool is used for writes and
     # for the claim_node read.
-    await _await_status(aops_pool, tid, "allocated")
+    await _await_status(aops_pool, tid, "idling")
     await _set_agent_status_async(aops_pool, tid, "running")
     # Confirm the status update is visible before inserting inbounds — a second
     # read-after-write barrier on the same pool eliminates any residual
     # cross-connection visibility gap that could cause claim_node's
-    # leave_starting_state to see a stale status.
+    # claim write to see a stale status.
     await _await_status(aops_pool, tid, "running")
     await _insert_inbound_kind_async(
         aops_pool, tid, "compacted summary", "compact_summary", source="self"
@@ -1805,7 +1797,7 @@ async def test_claim_compact_summary_batched_with_restart_applies_and_keeps_idle
     # external restart + idle before restart → halted=True preserved (respawn silent)
     assert cmd.update["halted"] is True  # type: ignore[index]
     # Read status on the pool claim_node wrote through; _await_status dumps full
-    # state on timeout (the CI-only `allocated != restarting` flake).
+    # state on timeout (the CI-only `idling != restarting` flake).
     await _await_status(aops_pool, tid, "restarting")
 
 
@@ -1979,7 +1971,7 @@ async def test_claim_terminate_then_restart_respawns(
     # terminate lost -> no terminate marker; restart writes no marker either
     assert cmd.update["messages"] == []  # type: ignore[index]
     # Read status on the pool claim_node wrote through; _await_status dumps full
-    # state on timeout (the CI-only `allocated != restarting` flake).
+    # state on timeout (the CI-only `idling != restarting` flake).
     await _await_status(aops_pool, tid, "restarting")
 
 
@@ -2260,7 +2252,7 @@ async def test_claim_marks_idling_during_wait_and_running_after_batch(
     parks in wait_for_inbound; external INSERT wakes → takes batch → 'idling' → 'running'.
     """
     tid = spawn_agent()
-    # simulate process startup: 'allocated' → 'running', so mark_agent_status idling's
+    # simulate process startup: unclaimed 'idling' → 'running', so mark_agent_status idling's
     # expected_from='running' hits
     _set_agent_status(db_conn, tid, "running")
     # Per-agent wake listener: claim parks in wait_for_inbound on this agent's
@@ -3056,52 +3048,47 @@ async def test_claim_node_wrapper_returns_underlying_command(
 
 
 # ────────────────────────────────────────────────────────────────────────
-# enter_starting_or_die_on_stale_schema — schema gate ahead of the row-claim
+# claim_agent_row_or_die_on_stale_schema — schema gate ahead of the row claim
 # ────────────────────────────────────────────────────────────────────────
 # Boot must verify the central DB schema matches this code BEFORE flipping the
-# row 'allocated' -> 'starting'. A doomed boot that already claimed 'starting'
-# strands an orphan (the row carries its pid and only the run loop or a reaper
-# clears it); gating first keeps it out of 'starting' entirely.
+# row directly to running. Gating first keeps a doomed child unclaimed.
 
 
-def test_claim_or_die_current_schema_claims_starting(
+def test_claim_or_die_current_schema_claims_running(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ):
     """Schema current -> assert_schema_current is a no-op -> the row is claimed
-    'allocated' -> 'starting' with this process's pid, exactly as the bare
+    unclaimed idling -> running with this process's pid, exactly as the bare
     claim would."""
     monkeypatch.setattr("agent._starting.assert_schema_current", lambda _url: None)  # pyright: ignore[reportUnknownArgumentType]
-    from agent._starting import enter_starting_or_die_on_stale_schema
+    from agent._starting import claim_agent_row_or_die_on_stale_schema
 
-    tid = spawn_agent()  # row starts 'allocated'
-    enter_starting_or_die_on_stale_schema(tid)
+    tid = spawn_agent()
+    claim_agent_row_or_die_on_stale_schema(tid)
 
     with db_conn.cursor() as cur:
         cur.execute("SELECT status, pid FROM agents_meta WHERE id = %s", (tid,))
         status, pid = cur.fetchone()  # type: ignore[misc]
-    assert status == "starting"
+    assert status == "running"
     assert pid == os.getpid()
 
 
 def test_claim_or_die_stale_schema_marks_terminated_without_claiming(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ):
-    """Schema behind the migrated DB -> the row must never advertise 'starting'
-    for a pid about to die. claim_or_die marks the still-'allocated' row
-    'terminated' and re-raises; status never passes through 'starting', pid
-    stays unset (never claimed)."""
+    """A stale-schema child terminates its still-unclaimed row without a pid."""
     from shared.migrations import CodeBehindSchema
 
     def _boom(_url: object) -> None:
         raise CodeBehindSchema("DB schema version 24, code only up to 23")
 
     monkeypatch.setattr("agent._starting.assert_schema_current", _boom)
-    from agent._starting import enter_starting_or_die_on_stale_schema
+    from agent._starting import claim_agent_row_or_die_on_stale_schema
 
-    tid = spawn_agent()  # 'allocated'
+    tid = spawn_agent()
 
     with pytest.raises(CodeBehindSchema):
-        enter_starting_or_die_on_stale_schema(tid)
+        claim_agent_row_or_die_on_stale_schema(tid)
 
     with db_conn.cursor() as cur:
         cur.execute("SELECT status, pid FROM agents_meta WHERE id = %s", (tid,))
@@ -3116,8 +3103,8 @@ def test_claim_or_die_code_ahead_of_db_marks_terminated_without_claiming(
     """Code ahead of the DB (`SchemaVersionMismatch` — pending migrations the DB
     has not seen, e.g. the prod checkout switched to a feature branch) is the
     other mismatch direction and must be gated identically: the row is marked
-    'terminated', never advertises 'starting', and the error re-raises so the
-    process exits instead of stranding the row in 'allocated' until a 10s
+    'terminated', never claims a pid, and the error re-raises so the process
+    exits instead of stranding the unclaimed row until a 10s
     spawn-poll timeout."""
     from shared.migrations import SchemaVersionMismatch
 
@@ -3125,12 +3112,12 @@ def test_claim_or_die_code_ahead_of_db_marks_terminated_without_claiming(
         raise SchemaVersionMismatch("DB schema version 23, code requires 24 (pending: 1)")
 
     monkeypatch.setattr("agent._starting.assert_schema_current", _boom)
-    from agent._starting import enter_starting_or_die_on_stale_schema
+    from agent._starting import claim_agent_row_or_die_on_stale_schema
 
-    tid = spawn_agent()  # 'allocated'
+    tid = spawn_agent()
 
     with pytest.raises(SchemaVersionMismatch):
-        enter_starting_or_die_on_stale_schema(tid)
+        claim_agent_row_or_die_on_stale_schema(tid)
 
     with db_conn.cursor() as cur:
         cur.execute("SELECT status, pid FROM agents_meta WHERE id = %s", (tid,))
@@ -3139,24 +3126,24 @@ def test_claim_or_die_code_ahead_of_db_marks_terminated_without_claiming(
     assert pid is None
 
 
-def test_enter_starting_placement_mismatch_marks_terminated_without_claiming(
+def test_claim_placement_mismatch_marks_terminated_without_claiming(
     db_conn: psycopg.Connection,
 ):
     """agents_meta.machine != this host -> the placement gate marks the
-    still-'allocated' row 'terminated' (same as the schema gate) and raises, so
+    still-unclaimed row 'terminated' (same as the schema gate) and raises, so
     the launcher's confirm poll fails fast on 'terminated'+no-pid instead of
     waiting out its full timeout on a row that will never be claimed (the
     agent-1513 wrong-host crash loop)."""
-    from agent._starting import enter_starting_state
+    from agent._starting import claim_agent_row
 
-    tid = spawn_agent()  # 'allocated', machine = this host
+    tid = spawn_agent()
     with db_conn.cursor() as cur:
         cur.execute("UPDATE agents_meta SET machine = 'other-host' WHERE id = %s", (tid,))
         assert cur.rowcount == 1
     db_conn.commit()
 
     with pytest.raises(RuntimeError, match="placement mismatch"):
-        enter_starting_state(tid)
+        claim_agent_row(tid)
 
     with db_conn.cursor() as cur:
         cur.execute("SELECT status, pid FROM agents_meta WHERE id = %s", (tid,))
@@ -3165,17 +3152,16 @@ def test_enter_starting_placement_mismatch_marks_terminated_without_claiming(
     assert pid is None
 
 
-def test_mark_allocated_terminated_guarded_to_allocated(
+def test_mark_preclaim_terminated_guarded_to_unclaimed_idling(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ):
-    """_mark_allocated_terminated is guarded `WHERE status = 'allocated'` — it
-    must not clobber a row another process already advanced past 'allocated'."""
-    from agent._starting import _mark_allocated_terminated
+    """The pre-claim terminal write cannot clobber an already-running row."""
+    from agent._starting import _mark_preclaim_terminated
 
     tid = spawn_agent()
     _set_agent_status(db_conn, tid, "running")
 
-    _mark_allocated_terminated(tid)  # row is 'running', not 'allocated'
+    _mark_preclaim_terminated(tid)
 
     with db_conn.cursor() as cur:
         cur.execute("SELECT status FROM agents_meta WHERE id = %s", (tid,))
@@ -3361,19 +3347,19 @@ async def test_flip_to_restarting_cas_lost_retries_from_idling(
     await _await_status(aops_pool, tid, "restarting")
 
 
-def test_enter_starting_state_grants_the_liveness_lease(db_conn: psycopg.Connection) -> None:
+def test_claim_agent_row_grants_the_liveness_lease(db_conn: psycopg.Connection) -> None:
     """R1 (Task #1021): the claim UPDATE writes `lease_expires_at` (now + TTL)
-    in the same statement as 'starting' — the claim is the lease's birth, and
+    in the same statement as running — the claim is the lease's birth, and
     the run loop's renewer keeps it fresh from there."""
-    from agent._starting import enter_starting_state
+    from agent._starting import claim_agent_row
 
-    tid = spawn_agent()  # 'allocated', machine = this host
-    enter_starting_state(tid)
+    tid = spawn_agent()
+    claim_agent_row(tid)
 
     with db_conn.cursor() as cur:
         cur.execute(
             "SELECT status, lease_expires_at > now() FROM agents_meta WHERE id = %s", (tid,)
         )
         status, lease_live = cur.fetchone()  # type: ignore[misc]
-    assert status == "starting"
+    assert status == "running"
     assert lease_live is True

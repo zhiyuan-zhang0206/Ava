@@ -45,8 +45,6 @@ class AgentRow:
 
 | Value | Meaning |
 |----|------|
-| `ALLOCATED` | Allocated, not yet started |
-| `STARTING` | Starting up |
 | `RUNNING` | Executing |
 | `IDLING` | Idle, waiting for wake-up |
 | `RESTARTING` | Restarting |

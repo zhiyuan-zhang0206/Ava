@@ -4,17 +4,16 @@ Each OS process runs one agent, permanently bound to one agent_id.
 Entry point `python -m agent --agent-id N`:
 
 1. argparse picks up `--agent-id N` (required, no default)
-2. UPDATE N from 'allocated' to 'starting' in `agents_meta` (also fills pid +
-   started_at) → 0-row affected raises (does not exist / not allocated state /
-   claimed by another process). 'starting' = process started but still in
-   setup phase.
+2. UPDATE N from unclaimed 'idling' to 'running' in `agents_meta` (also fills
+   pid + started_at) → 0-row affected raises (does not exist / not an unclaimed
+   idling row / claimed by another process). 'running' covers both bootstrap and
+   the run loop.
 3. ainvoke graph once per TURN — the graph self-cycles within a turn (claim →
    before_llm → llm → before_exec → exec → after_exec), and claim ends the
    invocation at the turn boundary (goto END, `exit_requested=False`); the
    runloop re-invokes on the same checkpointer thread, so each turn gets its
-   own root span/trace. claim_node idempotently bumps 'starting' → 'running'
-   at the top (init done, entering graph); the fresh invocation's claim
-   long-awaits on Redis pub/sub for inbound, flipping agents_meta.status from
+   own root span/trace. The fresh invocation's claim long-awaits on Redis pub/sub
+   for inbound, flipping agents_meta.status from
    'running' to 'idling', back to 'running' after claiming a batch.
 4. On receiving a `terminate` kind inbound (unless a newer/unseen message
    vetoes it — see the veto block in `agent/graph/_claim.py`), claim → goto
@@ -29,7 +28,7 @@ SDK / frontend / `scripts/start_agent.py` all three entry points share this
 HTTP path.
 
 Sub-modules (the loop file split by boot / run-loop / exit):
-- `agent/_starting.py` — early starting-state entry / row claim (run from `__main__.py` before the heavy imports)
+- `agent/_starting.py` — early row claim (run from `__main__.py` before the heavy imports)
 - `agent/_process_boot.py` — one-shot boot phases (framework config, MCP daemon, SDK identity, data plane, checkpointer, graph build)
 - `agent/_runloop.py` — graph run loop (ainvoke lifecycle logging, fatal-LLM abort, DB-outage pause-and-recover)
 - `agent/mcp_daemon.py` — `_MCPDaemon` subprocess manager + socket path helper
@@ -317,7 +316,7 @@ def run() -> None:
         type=int,
         required=True,
         help="Required: the agent_id this process is bound to. "
-        "Pre-INSERTed as 'allocated' row by spawn_agent / resurrect_agent.",
+        "Pre-INSERTed as unclaimed 'idling' row by spawn_agent / resurrect_agent.",
     )
     args = parser.parse_args()
 
@@ -342,7 +341,7 @@ def run() -> None:
     store_config_maps(overlay, birth)
 
     # DB schema version out of sync with code blows up early — otherwise
-    # subsequent enter_starting_state / checkpointer.setup hitting drift
+    # subsequent claim_agent_row / checkpointer.setup hitting drift
     # would give a more obscure error than SchemaVersionMismatch.
     assert_schema_current(settings.data_plane.db_url)
     _install_lifecycle_signal_handlers()

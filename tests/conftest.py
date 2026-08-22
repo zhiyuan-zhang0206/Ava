@@ -372,7 +372,7 @@ settings.general.ava_home = _TEST_AVA_HOME
 # read or write the operator's prod registry.
 settings.general.cluster_registry = _TEST_AVA_HOME / "clusters.json"
 os.environ["AVA_CLUSTER_REGISTRY"] = str(_TEST_AVA_HOME / "clusters.json")
-# multi-machine setup: spawn_agent / enter_starting_state reads machine_name()
+# multi-machine setup: spawn_agent / claim_agent_row reads machine_name()
 # from `$AVA_HOME/machine_name`; must write one into tmpfs first otherwise MachineNameMissing.
 (_TEST_AVA_HOME / "machine_name").write_text(f"test-{_SESSION_SUFFIX}")
 # machine capabilities default to agent-runner-only: gateway lifespan +
@@ -673,7 +673,7 @@ def _clean_state(
                     # the whole worker-session and are never reused across tests. Reuse
                     # (every test's first spawn = id 1) was the amplifier that turned a
                     # background writer leaked from a prior test into a live-row corruption
-                    # of the next test's reused id (the CI-only `allocated != restarting`
+                    # of the next test's reused id (the CI-only lifecycle-state collision
                     # flake class). Monotonic ids make a straggler write land on a dead id
                     # instead. Tests that need a stable self-identity take `self_agent`.
                     cur.execute("TRUNCATE " + ", ".join(_PER_TEST_TRUNCATE_TABLES) + " CASCADE")
@@ -1219,7 +1219,7 @@ def _guard_agent_launch(request: pytest.FixtureRequest, monkeypatch: pytest.Monk
     # confirms only after commit. The launch spy never advances the row, so its
     # matching confirm must be a no-op too. Tests of the real wait opt out with
     # `real_agent_launch`.
-    monkeypatch.setattr("ops.agent_launch._wait_for_status_to_leave_allocated", lambda _id: None)
+    monkeypatch.setattr("ops.agent_launch._wait_for_agent_claim", lambda _id: None)
     monkeypatch.setattr("ops.agent_launch.schedule_launch_confirm", lambda _id: None)
     request.node.stash[_LAUNCH_RECORDER] = calls
 

@@ -21,11 +21,13 @@ Two signals, merged per agent:
 - **Process lease** — `agents_meta.lease_expires_at` (R1, Task #1021): the
   agent process renews it every 60s while alive, so expiry with the machine up
   means a dead/wedged process. `hibernating` is lease-exempt by design (swapped
-  out, no renewal); `allocated`/`starting`/`restarting` are transitional and
-  hold no lease — both judge on machine reachability alone.
+  out, no renewal). An unclaimed `idling` row has no process yet, so it stays
+  `unknown` until its atomic claim writes `started_at`; `restarting` judges on
+  machine reachability alone.
 
 Per-agent merge (`liveness_state`):
 
+- unclaimed idling -> 'unknown' (no process ownership yet)
 - machine offline  -> 'offline' (whole host unreachable)
 - running/idling with an expired (or never granted) lease -> 'offline'
 - everything else on a reachable machine -> 'online'
@@ -256,8 +258,9 @@ def _merge_liveness(pool: ConnectionPool) -> list[int]:
             "), desired AS ("
             "  SELECT a.id, a.liveness_state AS old_liveness_state,"
             "    CASE "
+            "      WHEN a.status = 'idling' AND a.started_at IS NULL THEN 'unknown' "
             "      WHEN p.cf >= %s THEN 'offline' "
-            "      WHEN a.status IN ('running', 'idling') "
+            "      WHEN a.status IN ('running', 'idling') AND a.started_at IS NOT NULL "
             "           AND (a.lease_expires_at IS NULL OR a.lease_expires_at <= now()) "
             "        THEN 'offline' "
             "      ELSE 'online' "

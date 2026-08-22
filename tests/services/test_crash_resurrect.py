@@ -19,7 +19,7 @@ Covers the pieces that make crash recovery correct and bounded:
   eligibility tests each passed while the gates wrote rows the claim could never
   select, which is how the original hole survived.
 - **the resurrect clear**: `resurrect_agent` clears termination_source on the
-  terminated->allocated transition, so the mark is strictly per-death.
+  terminated->idling transition, so the mark is strictly per-death.
 - **the controller**: resurrects eligible corpses (stamping the backoff clock),
   gateway-health gated, 30s-throttled, no-op when disabled.
 
@@ -67,7 +67,12 @@ def sync_pool():
 
 
 def _park(
-    db: psycopg.Connection, *, status: str, pid: int | None = None, live_lease: bool = True
+    db: psycopg.Connection,
+    *,
+    status: str,
+    pid: int | None = None,
+    live_lease: bool = True,
+    produced_message: bool = True,
 ) -> int:
     """Seed a row in `status` with `pid`. `live_lease` grants the R1 liveness
     lease (default True — controllers that now gate on it see the row as
@@ -78,8 +83,9 @@ def _park(
     lease = datetime.now(UTC) + timedelta(seconds=600) if live_lease else None
     with db.cursor() as cur:
         cur.execute(
-            "UPDATE agents_meta SET status=%s, pid=%s, lease_expires_at=%s WHERE id=%s",
-            (status, pid, lease, aid),
+            "UPDATE agents_meta SET status=%s, pid=%s, lease_expires_at=%s, "
+            "last_message_text = CASE WHEN %s THEN 'done' ELSE NULL END WHERE id=%s",
+            (status, pid, lease, produced_message, aid),
         )
     db.commit()
     return aid
@@ -177,34 +183,34 @@ class TestTerminationSourceStamping:
         monkeypatch: pytest.MonkeyPatch,
         launched_agents: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
     ) -> None:
-        """G5 (Task #689): a dead 'running' row is no longer reaped to
+        """G5 (Task #689): a dead post-message 'running' row is no longer reaped to
         'terminated' + stamped 'reaper' — the revive pass relaunches it in place
-        (CAS to 'allocated', launch). Crash-resurrect's stamping contract now
-        only covers 'starting'/'allocated' deaths."""
+        (CAS to unclaimed 'idling', launch). Boot-phase deaths enter the separate
+        crash-resurrect backoff path."""
         monkeypatch.setattr(rd, "probe_agent_process", lambda _pid, _aid: AgentProcessIdentity.GONE)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
         aid = _park(db_conn, status="running", pid=_DEAD_PID)
         launched_agents.clear()
         assert aid in rd._revive_local_dead_running_idling(sync_pool, _LOCAL, max_revive=50)
-        assert _row(db_conn, aid)[0] == "allocated"  # revived, no 'reaper' stamp
+        assert _row(db_conn, aid)[0] == "idling"  # revived, no 'reaper' stamp
         assert any(c.agent_id == aid for c in launched_agents)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType, reportUnknownVariableType]
 
-    def test_reaper_dead_starting_stamps_reaper(
+    def test_reaper_dead_boot_phase_stamps_reaper(
         self,
         db_conn: psycopg.Connection,
         sync_pool: ConnectionPool,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         monkeypatch.setattr(rd, "probe_agent_process", lambda _pid, _aid: AgentProcessIdentity.GONE)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-        aid = _park(db_conn, status="starting", pid=_DEAD_PID)
-        assert aid in rd._reap_local_dead_starting(sync_pool, _LOCAL)
+        aid = _park(db_conn, status="running", pid=_DEAD_PID, produced_message=False)
+        assert aid in rd._reap_local_dead_boot_phase_agents(sync_pool, _LOCAL)
         assert _row(db_conn, aid) == ("terminated", "reaper")
 
-    def test_reaper_stale_allocated_stamps_reaper(
+    def test_reaper_stale_unclaimed_idling_stamps_reaper(
         self, db_conn: psycopg.Connection, sync_pool: ConnectionPool
     ) -> None:
-        aid = _park(db_conn, status="allocated")
-        # grace 0 → any allocated row is stale
-        assert aid in rd._reap_local_stale_allocated(sync_pool, _LOCAL, 0.0)
+        aid = _park(db_conn, status="idling", pid=None, live_lease=False)
+        # grace 0 → any unclaimed idling row is stale
+        assert aid in rd._reap_local_unclaimed_idling(sync_pool, _LOCAL, 0.0)
         assert _row(db_conn, aid) == ("terminated", "reaper")
 
     def test_force_mark_stamps_user(
@@ -225,18 +231,18 @@ class TestTerminationSourceStamping:
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """`_confirm_launch_or_force_terminated` (spawn off-path: child never claimed)
-        forces the 'allocated' row terminated + stamps 'launch-confirm'."""
+        forces the unclaimed 'idling' row terminated + stamps 'launch-confirm'."""
 
         def _never_claims(_id: int) -> None:
             raise RuntimeError("confirm timeout")
 
-        monkeypatch.setattr(agent_launch, "_wait_for_status_to_leave_allocated", _never_claims)
-        aid = _park(db_conn, status="allocated")
+        monkeypatch.setattr(agent_launch, "_wait_for_agent_claim", _never_claims)
+        aid = _park(db_conn, status="idling", pid=None, live_lease=False)
         _open_page(db_conn, aid)
         closed = _capture_page_closed(monkeypatch, agent_launch)
         agent_launch._confirm_launch_or_force_terminated(aid)
         assert _row(db_conn, aid) == ("terminated", "launch-confirm")
-        # audit B2: an 'allocated' row can hold pages (resurrect cascade_open) —
+        # audit B2: an unclaimed 'idling' row can hold pages (resurrect cascade_open) —
         # the force-terminate must clear the frontend popover via PageClosed.
         assert closed == [(aid, "report")]
         with db_conn.cursor() as cur:
@@ -249,9 +255,9 @@ class TestTerminationSourceStamping:
         """`_launch_or_force_terminated` (resurrect/respawn relaunch) forces terminated
         + stamps 'launch-confirm' after retries are exhausted."""
 
-        # Create the 'allocated' row BEFORE swapping in the failing launch (spawn
+        # Create the unclaimed 'idling' row BEFORE swapping in the failing launch (spawn
         # itself launches through the autouse spy — the boom is only for the relaunch).
-        aid = _park(db_conn, status="allocated")
+        aid = _park(db_conn, status="idling", pid=None, live_lease=False)
 
         def _boom(_id: int, config_overlay=None, **_kw: object) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
             raise RuntimeError("launch failed")
@@ -276,7 +282,7 @@ class TestTerminationSourceStamping:
 
         Left unstamped (the original defect) the corpse is unresurrectable forever.
         """
-        aid = _park(db_conn, status="allocated")
+        aid = _park(db_conn, status="idling", pid=None, live_lease=False)
 
         def _behind(_url: str) -> None:
             raise CodeBehindSchema("applied 3 > required 2")
@@ -285,7 +291,7 @@ class TestTerminationSourceStamping:
         _open_page(db_conn, aid)
         closed = _capture_page_closed(monkeypatch, _starting)
         with pytest.raises(CodeBehindSchema):
-            _starting.enter_starting_or_die_on_stale_schema(aid)
+            _starting.claim_agent_row_or_die_on_stale_schema(aid)
         assert _row(db_conn, aid) == ("terminated", "launch-confirm")
         # audit B2: the boot gate clears the popover for pages reopened by a
         # prior resurrect the same way every other terminated-write does.
@@ -296,14 +302,14 @@ class TestTerminationSourceStamping:
     ) -> None:
         """The placement gate (agents_meta.machine names another host) rejects the boot
         before claiming and stamps 'launch-confirm'."""
-        aid = _park(db_conn, status="allocated")
+        aid = _park(db_conn, status="idling", pid=None, live_lease=False)
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET machine = 'other-host' WHERE id = %s", (aid,))
         db_conn.commit()
         _open_page(db_conn, aid)
         closed = _capture_page_closed(monkeypatch, _starting)
         with pytest.raises(RuntimeError, match="placement mismatch"):
-            _starting.enter_starting_state(aid)
+            _starting.claim_agent_row(aid)
         assert _row(db_conn, aid) == ("terminated", "launch-confirm")
         # audit B2: PageClosed for the open page.
         assert closed == [(aid, "report")]
@@ -311,7 +317,7 @@ class TestTerminationSourceStamping:
     def test_boot_gate_leaves_a_row_some_other_process_took_alone(
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """The `WHERE status='allocated'` guard still scopes the write: a row that has
+        """The unclaimed-idling guard still scopes the write: a row that has
         already moved on (another process legitimately took it) is not clobbered, and
         crucially not mis-stamped 'launch-confirm' on top of its real source. Its open
         pages stay open too — no PageClosed may be published for a row that did not
@@ -319,7 +325,7 @@ class TestTerminationSourceStamping:
         aid = _park(db_conn, status="running", pid=_DEAD_PID)
         _open_page(db_conn, aid)
         closed = _capture_page_closed(monkeypatch, _starting)
-        _starting._mark_allocated_terminated(aid)
+        _starting._mark_preclaim_terminated(aid)
         assert _row(db_conn, aid) == ("running", None)
         assert closed == []  # no transition -> pages stay open -> no events
         with db_conn.cursor() as cur:
@@ -444,7 +450,7 @@ class TestBootGateCorpseIsResurrectable:
         """A schema-mismatch boot rejection with work still queued is picked up by
         CrashResurrectController — so it retries once the host catches its code up
         (`ava cluster update`) instead of stranding the queue forever."""
-        aid = _park(db_conn, status="allocated")
+        aid = _park(db_conn, status="idling", pid=None, live_lease=False)
         _add_pending_inbound(db_conn, aid)
 
         def _behind(_url: str) -> None:
@@ -452,7 +458,7 @@ class TestBootGateCorpseIsResurrectable:
 
         monkeypatch.setattr(_starting, "assert_schema_current", _behind)
         with pytest.raises(CodeBehindSchema):
-            _starting.enter_starting_or_die_on_stale_schema(aid)
+            _starting.claim_agent_row_or_die_on_stale_schema(aid)
 
         assert aid in _claim_ids(cr._claim_crash_resurrect_candidates(sync_pool, _LOCAL, _BACKOFF))
 
@@ -462,14 +468,14 @@ class TestBootGateCorpseIsResurrectable:
         """A placement-mismatch corpse is claimed by the machine the ROW names, not the
         one that mis-launched it — the scan is machine-scoped, so resurrecting is what
         puts the agent on its correct host. That is the repair, not a retry loop."""
-        aid = _park(db_conn, status="allocated")
+        aid = _park(db_conn, status="idling", pid=None, live_lease=False)
         _add_pending_inbound(db_conn, aid)
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET machine = 'other-host' WHERE id = %s", (aid,))
         db_conn.commit()
 
         with pytest.raises(RuntimeError, match="placement mismatch"):
-            _starting.enter_starting_state(aid)
+            _starting.claim_agent_row(aid)
 
         # The wrong host (the one that ran the doomed launch) must NOT claim it...
         assert aid not in _claim_ids(
@@ -676,13 +682,13 @@ class TestResurrectClearsSource:
         monkeypatch: pytest.MonkeyPatch,
         launched_agents: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
     ) -> None:
-        """The mark is per-death: bringing a corpse back to 'allocated' clears
+        """The mark is per-death: bringing a corpse back to unclaimed 'idling' clears
         termination_source, so a write site that later forgets to stamp leaves NULL
         (not eligible) instead of a stale 'reaper'."""
         monkeypatch.setattr("ops.agent_launch._kill_stale_session", lambda _id: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
         aid = _corpse(db_conn, source="reaper")
         resurrect_agent(aid, resurrected_by="system")
-        assert _row(db_conn, aid) == ("allocated", None)
+        assert _row(db_conn, aid) == ("idling", None)
 
 
 # ── controller reconcile ─────────────────────────────────────────────────────
@@ -718,7 +724,7 @@ class TestControllerReconcile:
         result = cr.CrashResurrectController(sync_pool).reconcile("agent-runner")
 
         assert result.acted is True
-        assert _row(db_conn, aid) == ("allocated", None)  # resurrected + source cleared
+        assert _row(db_conn, aid) == ("idling", None)  # resurrected + source cleared
         assert _last_resurrect_at(db_conn, aid) is not None  # backoff clock stamped
         assert aid in [c.agent_id for c in launched_agents]  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
 
@@ -740,7 +746,7 @@ class TestControllerReconcile:
         result = cr.CrashResurrectController(sync_pool).reconcile("agent-runner")
 
         assert result.acted is True
-        assert _row(db_conn, aid) == ("allocated", None)  # resurrected + source cleared
+        assert _row(db_conn, aid) == ("idling", None)  # resurrected + source cleared
         assert aid in [c.agent_id for c in launched_agents]  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
 
     def test_does_not_resurrect_user_terminate(
@@ -855,7 +861,7 @@ class TestBootRevivePass:
         result = cr.CrashResurrectController(sync_pool).reconcile("agent-runner")
 
         assert result.acted is True
-        assert _row(db_conn, aid) == ("allocated", None)  # resurrected + source cleared
+        assert _row(db_conn, aid) == ("idling", None)  # resurrected + source cleared
         assert _last_resurrect_at(db_conn, aid) is not None
         assert aid in [c.agent_id for c in launched_agents]  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
 
@@ -929,7 +935,7 @@ class TestBootRevivePass:
         monkeypatch.setattr(cr, "_gateway_healthy", lambda: True)
         result = controller.reconcile("agent-runner")
         assert result.acted is True
-        assert _row(db_conn, aid) == ("allocated", None)
+        assert _row(db_conn, aid) == ("idling", None)
         assert aid in [c.agent_id for c in launched_agents]  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
 
     def test_boot_pass_respects_backoff(

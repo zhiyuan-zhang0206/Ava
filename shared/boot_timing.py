@@ -10,7 +10,7 @@ progressing".
 ## The chain
 
     BOOT_STALL_SEC (30) < LAUNCH_CONFIRM_TIMEOUT_SEC (45) < BOOT_BUDGET_SEC (90)
-        < ALLOCATED_REAP_GRACE_SEC (120)
+        < BOOT_REAP_GRACE_SEC (120)
 
 - **BOOT_STALL_SEC < LAUNCH_CONFIRM_TIMEOUT_SEC**: the child's own boot watchdog
   must fire before the launcher gives up. The launcher treats a live process as a
@@ -19,17 +19,17 @@ progressing".
   launcher reaches its deadline while a wedged child still holds a pid, reads it
   as "slow boot on a loaded box", and grants its one extension — spending the
   whole reap grace on a boot that stopped moving long before.
-- **LAUNCH_CONFIRM_TIMEOUT_SEC < ALLOCATED_REAP_GRACE_SEC**: the reaper must not
+- **LAUNCH_CONFIRM_TIMEOUT_SEC < BOOT_REAP_GRACE_SEC**: the reaper must not
   take a row the launcher is still legitimately waiting on. The 2026-07-30 spawn
   incident is exactly this pair inverted: the confirm window was raised without
-  the grace, and the restarter's allocated-reaper started reaping rows from
+  the grace, and the restarter's dead-birth reaper started reaping rows from
   launches that were still waiting.
 - **BOOT_STALL_SEC < BOOT_BUDGET_SEC**: the stall window bounds ONE phase, so it
   bounds the whole boot only at phases x stall — arithmetic over a number that
   moves whenever a boot phase is added. The budget is the hard ceiling on the
   whole pre-claim boot; a budget below the stall window would make the stall
   window unreachable.
-- **BOOT_BUDGET_SEC < ALLOCATED_REAP_GRACE_SEC**: the child must be gone before
+- **BOOT_BUDGET_SEC < BOOT_REAP_GRACE_SEC**: the child must be gone before
   the reaper could claim its row. The reaper's clock is `status_changed_at`,
   which only a status flip resets, so a boot that outlived the grace would have
   its row reaped out from under a live, progressing child — the 2026-07-30
@@ -58,7 +58,7 @@ from shared.config import settings
 BOOT_STALL_SEC = settings.gateway.agent_boot_stall_seconds
 
 # The launcher's confirm window: how long `ops.agent_launch` polls the row for
-# `allocated -> starting` before force-terminating the launch. Must cover the
+# row claim before force-terminating the launch. Must cover the
 # child's whole pre-flip segment (python startup, imports, schema assert,
 # placement SELECT).
 LAUNCH_CONFIRM_TIMEOUT_SEC = settings.gateway.launch_confirm_timeout_seconds
@@ -67,8 +67,8 @@ LAUNCH_CONFIRM_TIMEOUT_SEC = settings.gateway.launch_confirm_timeout_seconds
 # the child watchdog alongside the stall window — whichever comes first.
 BOOT_BUDGET_SEC = settings.gateway.agent_boot_budget_seconds
 
-# The restarter's allocated-reaper grace: how long a row may sit 'allocated'
+# The restarter's boot-reaper grace: how long an unclaimed row may sit idling
 # before it is reaped. Also the ceiling on the launcher's one live-child
 # extension (`ops/agent_launch.py`), so the confirm never outlives the point
 # where the reaper takes the row.
-ALLOCATED_REAP_GRACE_SEC = settings.daemon.allocated_reap_grace_seconds
+BOOT_REAP_GRACE_SEC = settings.daemon.boot_reap_grace_seconds

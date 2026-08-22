@@ -306,10 +306,9 @@ async def _boot_agent_process(
     build_graph's bind_from_disk has populated _PLUGIN_CONFIGS — see the
     second apply_config_overlay call in `_build_graph`.
     """
-    # enter_starting_state is called early in __main__.py before the heavy
-    # import chain; status is already 'starting' by the time we reach here (the
-    # boot stage). leave_starting_state bumps it to 'running' later in the claim
-    # node (the run loop going live).
+    # claim_agent_row is called early in __main__.py before the heavy import
+    # chain. It atomically takes an unclaimed idling row into 'running' before
+    # this boot phase proceeds.
     init_agent_process(agent_id=agent_id)
 
     mcp_daemon = _MCPDaemon(agent_id)

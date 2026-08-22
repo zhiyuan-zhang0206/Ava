@@ -24,7 +24,7 @@ Today's gaps fall out of the frame: agents have a registry but no lease; watcher
 
 **Watcher rebuild**: `ava.watcher.at/cron/launch` writes a registry row at creation; agent boot reconciles — row exists but session missing → rebuild (cron restores from its expression; missed one-shots mark `missed` + alert). Lease expiry → reaper collects.
 
-**Single predicate**: `alive := status ∈ {starting, running, idling} ∧ lease unexpired` — defined once, imported everywhere. `running + lease expired = zombie` → reaper collects. `hibernating` (swapped out): no renewal, reaper-exempt.
+**Single predicate**: `alive := status ∈ {running, idling} ∧ lease unexpired` — defined once, imported everywhere. `running + lease expired = zombie` → reaper collects. `hibernating` (swapped out): no renewal, reaper-exempt.
 
 
 Parent: [[okf/design/r1-state-liveness/r1-state-liveness.ava.okf.md|R1 state & liveness design]].

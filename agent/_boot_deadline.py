@@ -1,7 +1,7 @@
 """The child's own boot watchdog: die when the boot stops making progress.
 
-Everything an agent does before its `allocated -> starting` CAS is invisible from
-outside. The row reads 'allocated' with no pid whether the child is halfway
+Everything an agent does before its `idling -> running` claim is invisible from
+outside. The row reads 'idling' with no pid whether the child is halfway
 through its import chain or died on the first import, so the launcher
 (`ops/agent_launch.py`) could only ask the platform supervisor "does the process
 still exist" — and a process that exists is not a process that is getting
@@ -37,8 +37,8 @@ Three properties make this work where a progress *report* would not:
 A second bound, `budget_seconds`, exists precisely because the first one bounds
 nothing on its own: a boot that keeps reaching phases can live for
 phases x stall, and that product moves the day someone adds a mark. Past
-`allocated_reap_grace_seconds` the restarter's allocated-reaper takes an
-'allocated' row on age alone — its clock is `status_changed_at`, which only a
+`boot_reap_grace_seconds` the restarter's dead-birth reaper takes an unclaimed
+'idling' row on age alone — its clock is `status_changed_at`, which only a
 status flip resets, so no amount of pre-flip progress holds it off. A boot that
 outlived the grace would therefore have its row reaped out from under a live,
 progressing child: the 2026-07-30 incident again, relocated from the launcher to
@@ -50,8 +50,8 @@ data plane cannot be relied on to write to it — the write would hang in exactl
 the case the watchdog exists for. Exiting is the one action that always
 succeeds, and it lands the launcher on its fastest path: a dead process fails the
 confirm immediately, which force-terminates the row with `termination_source =
-'launch-confirm'` and hands it to crash-resurrect. The restarter's
-allocated-reaper is unaffected and stays the backstop for a row whose process was
+'launch-confirm'` and hands it to crash-resurrect. The restarter's dead-birth
+reaper is unaffected and stays the backstop for a row whose process was
 never launched at all.
 """
 
@@ -82,7 +82,7 @@ def consume_flags(argv: list[str]) -> tuple[float, float]:
     Removal is not tidiness. `agent/loop.py:run()` parses whatever is left with a
     strict `parse_args()`, and it runs *after* the row is claimed — so an argument
     it does not recognise is a `SystemExit(2)` for every agent the box launches,
-    at the one moment the row reads 'starting' under a pid that is on its way out.
+    at the one moment the row reads 'running' under a pid that is on its way out.
     Declaring the flags on that parser instead is not an option: they have to be
     read before the import chain that builds the parser exists at all.
 
@@ -118,7 +118,7 @@ def arm(agent_id: int, stall_seconds: float, budget_seconds: float) -> None:
     boot, and it exists because the stall window alone does not actually bound
     anything: a boot that keeps reaching phases can live for phases x stall, a
     product that grows silently the day someone adds a mark. Past
-    `allocated_reap_grace_seconds` the restarter's allocated-reaper takes the row
+    `boot_reap_grace_seconds` the restarter's dead-birth reaper takes the row
     out from under a child that is alive and progressing — the 2026-07-30 incident
     exactly, moved from the launcher to the reaper — so the budget is held below
     that grace and the reaper never meets a live child.
@@ -144,7 +144,7 @@ def disarm() -> None:
     """Stop watching — the row is claimed, so the row itself is now the signal.
 
     Past the CAS the agent is observable the ordinary way: the row carries its
-    pid and status, and the restarter's `starting`/`running` reapers own it. A
+    pid and status, and the restarter's boot-phase/process reapers own it. A
     boot watchdog that outlived the claim would be a second, blinder authority
     over a row that already has one.
     """

@@ -302,7 +302,7 @@ async def _flip_to_restarting(pool: AsyncConnectionPool, agent_id: int) -> None:
     of dying: re-read the row and retry the flip from the actual live state
     (running or idling -- the restarter respawns 'restarting' rows regardless
     of which it came from); any other state (terminated / hibernating /
-    allocated / starting) means another op owns the row, so the restart is
+    unclaimed idling) means another op owns the row, so the restart is
     moot -- log and let the process END normally.
     """
     try:

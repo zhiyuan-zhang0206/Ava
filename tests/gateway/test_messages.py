@@ -14,7 +14,7 @@ from gateway.app import app
 from shared.machine import machine_name
 
 
-def _seed_agent(db_conn: psycopg.Connection, status: str = "allocated") -> int:
+def _seed_agent(db_conn: psycopg.Connection, status: str = "idling") -> int:
     """Insert agents + agents_meta rows directly in DB without triggering a session launch.
     Writes the local machine name, close to the real spawn path (auto-resurrect uses
     machine to decide local execution vs forward; default 'unknown' would be treated

@@ -132,13 +132,11 @@ describe("useFleetGraph", () => {
   it("projects raw fleet-node lifecycle states to the same public three-state model", async () => {
     const raw = {
       nodes: [
-        { ...API_GRAPH.nodes[0], agent_id: 1, status: "allocated" },
-        { ...API_GRAPH.nodes[0], agent_id: 2, status: "starting" },
-        { ...API_GRAPH.nodes[0], agent_id: 3, status: "running" },
-        { ...API_GRAPH.nodes[0], agent_id: 4, status: "idling" },
-        { ...API_GRAPH.nodes[0], agent_id: 5, status: "restarting" },
-        { ...API_GRAPH.nodes[0], agent_id: 6, status: "terminated" },
-        { ...API_GRAPH.nodes[0], agent_id: 7, status: "hibernating" },
+        { ...API_GRAPH.nodes[0], agent_id: 1, status: "running" },
+        { ...API_GRAPH.nodes[0], agent_id: 2, status: "idling" },
+        { ...API_GRAPH.nodes[0], agent_id: 3, status: "restarting" },
+        { ...API_GRAPH.nodes[0], agent_id: 4, status: "terminated" },
+        { ...API_GRAPH.nodes[0], agent_id: 5, status: "hibernating" },
       ],
       edges: [],
     } as unknown as WireFleetGraph;
@@ -150,8 +148,6 @@ describe("useFleetGraph", () => {
 
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.graph.nodes.map((node) => node.status)).toEqual([
-      "idling",
-      "idling",
       "running",
       "idling",
       "idling",

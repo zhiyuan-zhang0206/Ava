@@ -1,10 +1,10 @@
 """A redis publish failure must never crash an agent lifecycle write.
 
-`mark_agent_status` and `enter_starting_state` both do their durable
+`mark_agent_status` and `claim_agent_row` both do their durable
 agents_meta write, commit, then publish an AgentUpdated snapshot for the live
 UI. A raise from that tail publish used to propagate — killing the claim node
 mid-turn (`mark_agent_status`) or crash-churning spawn/resurrect during a redis
-outage (`enter_starting_state`). Now the publish is best-effort: the DB effect
+outage (`claim_agent_row`). Now the publish is best-effort: the DB effect
 must stand and no exception may escape when redis is throwing.
 """
 
@@ -83,21 +83,21 @@ async def test_mark_agent_status_survives_publish_failure(
     assert any("skipped" in r["message"] for r in loguru_records), "best-effort skip not logged"
 
 
-def test_enter_starting_state_survives_publish_failure(
+def test_claim_agent_row_survives_publish_failure(
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
     loguru_records: list[dict],
 ) -> None:
-    """A throwing sync redis must not stop the allocated→starting claim from
-    committing, and no exception may escape enter_starting_state (spawn/resurrect
+    """A throwing sync redis must not stop the idling→running claim from
+    committing, and no exception may escape claim_agent_row (spawn/resurrect
     must not crash-churn during a redis outage)."""
-    from agent._starting import enter_starting_state
+    from agent._starting import claim_agent_row
 
     tid = create_agent(db_conn)
     with db_conn.cursor() as cur:
         cur.execute(
-            "INSERT INTO agents_meta (id, status, machine) VALUES (%s, 'allocated', %s) "
-            "ON CONFLICT (id) DO UPDATE SET status = 'allocated', machine = EXCLUDED.machine",
+            "INSERT INTO agents_meta (id, status, machine) VALUES (%s, 'idling', %s) "
+            "ON CONFLICT (id) DO UPDATE SET status = 'idling', machine = EXCLUDED.machine",
             (tid, machine_name()),
         )
     db_conn.commit()
@@ -109,13 +109,13 @@ def test_enter_starting_state_survives_publish_failure(
     )
 
     # Must NOT raise despite the publish blowing up.
-    enter_starting_state(tid)
+    claim_agent_row(tid)
 
-    assert _fetch_status(db_conn, tid) == "starting"
+    assert _fetch_status(db_conn, tid) == "running"
     assert any("skipped" in r["message"] for r in loguru_records), "best-effort skip not logged"
 
 
-def test_enter_starting_state_publish_failure_uses_real_settings_channel(
+def test_claim_agent_row_publish_failure_uses_real_settings_channel(
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -123,13 +123,13 @@ def test_enter_starting_state_publish_failure_uses_real_settings_channel(
     NOPERM-class ResponseError (WARNING path) must not escape."""
     from redis.exceptions import NoPermissionError
 
-    from agent._starting import enter_starting_state
+    from agent._starting import claim_agent_row
 
     tid = create_agent(db_conn)
     with db_conn.cursor() as cur:
         cur.execute(
-            "INSERT INTO agents_meta (id, status, machine) VALUES (%s, 'allocated', %s) "
-            "ON CONFLICT (id) DO UPDATE SET status = 'allocated', machine = EXCLUDED.machine",
+            "INSERT INTO agents_meta (id, status, machine) VALUES (%s, 'idling', %s) "
+            "ON CONFLICT (id) DO UPDATE SET status = 'idling', machine = EXCLUDED.machine",
             (tid, machine_name()),
         )
     db_conn.commit()
@@ -140,6 +140,6 @@ def test_enter_starting_state_publish_failure_uses_real_settings_channel(
         lambda **_: _BoomSyncClient(NoPermissionError("NOPERM")),  # pyright: ignore[reportUnknownArgumentType]
     )
     _ = settings.data_plane.events_channel  # the channel the real publish would use
-    enter_starting_state(tid)  # must not raise
+    claim_agent_row(tid)  # must not raise
 
-    assert _fetch_status(db_conn, tid) == "starting"
+    assert _fetch_status(db_conn, tid) == "running"

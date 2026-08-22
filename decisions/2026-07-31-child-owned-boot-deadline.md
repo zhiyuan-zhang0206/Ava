@@ -135,3 +135,7 @@ launcher still adjudicates, but it adjudicates a fact rather than a guess.
   `agent_boot_budget_seconds` (90) < `allocated_reap_grace_seconds` (120). The
   first inequality makes the launcher's liveness probe decisive; the last makes
   the reaper unreachable by a live child.
+
+Forward link (2026-08-22): the grace is now named boot_reap_grace_seconds and
+the current status model is recorded in
+[agent status model](../docs/history/2026-08-22/agent-status-model.md).

@@ -6,7 +6,7 @@
     "spawner": "user",
     "fork_source_agent_id": null,
     "fork_source_checkpoint_id": null,
-    "status": "allocated",
+    "status": "idling",
     "pid": null,
     "spawned_at": "2026-01-01T00:00:00Z",
     "started_at": null,

@@ -180,7 +180,7 @@ def create_agent_row(
     row must be created by the GATEWAY as the main data-plane identity — the
     target runner's ops server runs as the least-privilege `ava_runner` role,
     which by design cannot INSERT agents / agents_meta. The gateway resolves
-    the fork checkpoint, creates the row (status='allocated'), and forwards a
+    the fork checkpoint, creates the row (unclaimed status='idling'), and forwards a
     launch-only op to the target runner; `_launch_agent_process` + the
     launch-confirm then run on the runner (agents_meta UPDATE is within the
     runner role). `machine` is the TARGET host (the row's placement) — always
@@ -279,7 +279,7 @@ def create_agent_row(
         cur.execute(
             "INSERT INTO agents_meta (id, spawner, fork_source_agent_id, "
             "fork_source_checkpoint_id, status, machine, config_overlay, birth_config) "
-            "VALUES (%s, %s, %s, %s, 'allocated', %s, %s::jsonb, %s::jsonb)",
+            "VALUES (%s, %s, %s, %s, 'idling', %s, %s::jsonb, %s::jsonb)",
             (
                 new_id,
                 spawner,
@@ -345,7 +345,7 @@ def create_agent_row(
                 prompt = f"{prompt}\n\nYour label has been set to {label}."
             insert_inbound_message(conn, new_id, prompt, source=prompt_source)
         # Publish AgentSpawned right after DB commit — the frontend sidebar adds
-        # the new row immediately (status='allocated'); the agent process's own
+        # the new row immediately (unclaimed status='idling'); the agent process's own
         # status transitions later publish AgentUpdated to advance it.
         publish_agent_spawned_sync(conn, new_id)
     # Launch is the runner's job now (the launch op) — the row is created and

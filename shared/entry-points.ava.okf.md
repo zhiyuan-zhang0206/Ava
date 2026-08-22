@@ -13,7 +13,7 @@ tags:
 - `shared/lm/factory.py:build_chat_model` — dispatches to the appropriate LangChain chat model based on model name prefix
 - `shared/lm/factory.py:validate_model_config` — model/key pre-check at spawn boundary
 - `shared/lm/pricing.py:tally_tokens` / `cost_usd` — token usage and three-tier cost calculation
-- `shared/agents.py:AgentStatus` — agent lifecycle status enum (ALLOCATED→…→TERMINATED)
+- `shared/agents.py:AgentStatus` — agent lifecycle status enum (RUNNING / IDLING / RESTARTING / TERMINATED, plus ops-only HIBERNATING)
 - `shared/message_kwargs.py:read_ava_kwargs` — typed reading entry point for message `additional_kwargs`
 - `shared/metrics_aggregate.py:build_report_from_aggregate` — assemble metrics report
 - `shared/bootstrap.py` — system boot entry point

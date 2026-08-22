@@ -92,7 +92,6 @@ async def test_claim_drains_before_turn_boundary_wait(
     runtime = Runtime(context=_context("deepseek-v4-flash-vision-exp"))
     config: RunnableConfig = {"configurable": {"thread_id": "42"}}
 
-    monkeypatch.setattr("agent.graph._claim.leave_starting_state", AsyncMock())
     monkeypatch.setattr("agent.graph._claim.claim_inbound_batch", AsyncMock(return_value=[]))
 
     command = await _claim_node_impl(state, runtime, config)
@@ -114,7 +113,6 @@ async def test_claim_does_not_drain_mid_turn(
     runtime = Runtime(context=_context("deepseek-v4-flash-vision-exp"))
     config: RunnableConfig = {"configurable": {"thread_id": "42"}}
 
-    monkeypatch.setattr("agent.graph._claim.leave_starting_state", AsyncMock())
     monkeypatch.setattr("agent.graph._claim.claim_inbound_batch", AsyncMock(return_value=[]))
 
     command = await _claim_node_impl(state, runtime, config)

@@ -36,7 +36,7 @@ tags:
 
 ### Data Types
 - `AgentRow`: agent_id, label, status, spawner, machine, spawned_at, started_at, last_active_at, pid, heartbeat_paused_until
-- `AgentStatus`: ALLOCATED / STARTING / RUNNING / IDLING / RESTARTING / TERMINATED. The enum also has HIBERNATING (ops-layer memory swap-out state, #618), but the SDK **projects it to IDLING** before any status filtering (`ava/_gateway_client.py:_project_ops_status`) — peer agents never observe the swapped-out state, `list_agents(IDLING)` also won't miss hibernated agents; the true value is only visible via ops tools / raw gateway list (see [[process-lifecycle.ava.okf.md]])
+- `AgentStatus`: RUNNING / IDLING / RESTARTING / TERMINATED. The enum also has HIBERNATING (ops-layer memory swap-out state, #618), but the SDK **projects it to IDLING** before any status filtering (`ava/_gateway_client.py:_project_ops_status`) — peer agents never observe the swapped-out state, `list_agents(IDLING)` also won't miss hibernated agents; the true value is only visible via ops tools / raw gateway list (see [[process-lifecycle.ava.okf.md]])
 - `Neighbor`: agent_id, label, status, depth (hops from the queried agent — out for neighbors, up for ancestors), score (connection strength)
 - `Machine`: name, description, live (detected at call time, not cached)
 

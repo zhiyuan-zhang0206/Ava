@@ -214,12 +214,13 @@ async def mark_agent_exited_op(agent_id: int, db_pool: ConnectionPool) -> list[s
     SIGHUP/SIGTERM). The agent used to do this inline; it now notifies the
     gateway so it never writes agents_meta or reads the pages table itself.
 
-    Guarded `WHERE status IN ('starting','running','idling')` — the same
+    Guarded `WHERE status IN ('running','idling')` — the same
     invariant the inline version held:
     - 'restarting' is left untouched (reserved for the restarter daemon; a
       restart goes claim -> 'restarting' -> END -> process exit -> this call,
       and clobbering it to 'terminated' would strand the restart).
-    - 'allocated' is left untouched (process died before claiming its row).
+    - an unclaimed 'idling' row has no process to send this callback; a normal
+      pre-claim death is instead handled by the dead-birth reaper.
     - already 'terminated' -> rowcount 0, idempotent (finally may run twice).
 
     Differs from `_force_mark_terminated` (used by the force-kill / zombie-reap
@@ -230,7 +231,7 @@ async def mark_agent_exited_op(agent_id: int, db_pool: ConnectionPool) -> list[s
     agent_terminated event + PageClosed for each cascade-closed page; returns
     those page names.
     rowcount==0: benign skip; debug-log the actual status to tell
-    restarting / already-terminated / allocated apart.
+    restarting / already-terminated / idling apart.
     other: the PK guarantees <=1 row; anything else is table corruption -> raise.
     """
     rowcount, page_names, actual_status = await asyncio.to_thread(
@@ -277,11 +278,10 @@ def _mark_exited_blocking(
                 # catches that dead pid and stamps 'reaper' instead.
                 "UPDATE agents_meta SET status = %s, termination_source = 'exit', "
                 "heartbeat_paused_until = NULL, lease_expires_at = NULL "
-                "WHERE id = %s AND status IN (%s, %s, %s)",
+                "WHERE id = %s AND status IN (%s, %s)",
                 (
                     AgentStatus.TERMINATED,
                     agent_id,
-                    AgentStatus.STARTING,
                     AgentStatus.RUNNING,
                     AgentStatus.IDLING,
                 ),
@@ -326,8 +326,9 @@ async def mark_agent_hibernating_op(agent_id: int, db_pool: ConnectionPool) -> N
       SIGUSR1 delivered during `_wait_for_batch`'s inbound wait unwinds through
       that finally, which flips IDLING->RUNNING before main()'s finally reaches
       here — the same reason `mark_agent_exited_op` accepts 'running'.
-    - 'restarting' / 'allocated' / 'terminated' / already-'hibernating' -> rowcount
-      0, benign no-op (a concurrent restart / terminate / double-finalize won).
+    - 'restarting' / 'terminated' / already-'hibernating' -> rowcount 0, benign
+      no-op (a concurrent restart / terminate / double-finalize won). An
+      unclaimed `idling` row cannot normally send this process callback.
 
     rowcount==1: publish AgentUpdated so ops/frontend SSE reflect the parked row
     (the frontend projects 'hibernating' -> 'idling', so no visible change). No
@@ -568,7 +569,7 @@ async def resurrect_agent_op(
     trigger_inbound_id: int | None = None,
     trigger_inbound_kind: Literal["chat", "compact_request"] | None = None,
 ) -> ResurrectAgentResponse:
-    """Local-target resurrect (UPDATE terminated -> allocated + detached process launch).
+    """Local-target resurrect (UPDATE terminated -> idling + detached process launch).
 
     `trigger_inbound_id` carries the internal auto-resurrect CAS to the home
     runner; manual resurrects omit it and retain their unconditional contract.
@@ -614,7 +615,7 @@ async def resurrect_if_terminated(
     `trigger_inbound_id` plus its expected kind. They travel on the distinct
     internal `resurrect-if-pending-work-v2` lifecycle path so an older runner
     rejects the unknown path (version skew fails closed), then the home runner's
-    final terminated -> allocated UPDATE verifies that exact work is still
+    final terminated -> idling UPDATE verifies that exact work is still
     pending, newer than the current termination, and above the force-intent
     fence. Explicit manual resurrection uses `resurrect-explicit-v2`; crash and
     wedged recovery use their exact controller claims in the local runner.

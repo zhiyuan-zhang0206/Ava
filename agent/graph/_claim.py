@@ -51,7 +51,7 @@ from langgraph.runtime import Runtime
 from langgraph.types import Command
 
 from agent import state as _state
-from agent.db import claim_inbound_batch, leave_starting_state
+from agent.db import claim_inbound_batch
 from agent.graph._attach_drain import build_attach_drain
 from agent.graph._claim_batch import LifecycleCasLostError, _wait_for_batch
 from agent.graph._claim_decide import decide
@@ -95,7 +95,6 @@ async def _claim_node_impl(
         return Command[ClaimGoto](update={"halted": False}, goto=BEFORE_LLM)
 
     agent_id = agent_id_from_config(config)
-    await leave_starting_state(ctx.ops_pool, agent_id)
 
     # ── First SELECT: try uncontended claim before pub/sub wait ──
     batch = await claim_inbound_batch(ctx.ops_pool, agent_id)

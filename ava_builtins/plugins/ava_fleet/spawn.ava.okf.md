@@ -79,16 +79,16 @@ Presets are used to reuse common configurations — for example, a "gmail-agent"
 ## Lifecycle States
 
 ```
-ALLOCATED ──→ STARTING ──→ RUNNING ──→ IDLING
+IDLING (unclaimed) ──claim──→ RUNNING ──→ IDLING
                 │              │           │
                 │              │  restart  │
                 │              ↓           │
-                │         RESTARTING ──→ STARTING
+                │         RESTARTING ──→ IDLING (unclaimed)
                 │
                 ↓ (fails)
            TERMINATED ←── terminate (from any state)
                 │
-                └── resurrect ──→ ALLOCATED (retains conversation state)
+                └── resurrect ──→ IDLING (unclaimed; retains conversation state)
 ```
 
 ## Typical Usage Patterns

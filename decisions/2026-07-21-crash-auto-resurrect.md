@@ -138,3 +138,7 @@ claim so an outage does not burn the backoff clock; and on `AVA_AUTO_RESURRECT_E
   bring it back *for*; it stays a visible corpse.
 - **No e2e** covers the real crash → real relaunch chain across processes; the unit
   tests stub the process launch.
+
+Forward link (2026-08-22): boot-phase deaths now use the crash-resurrect backoff
+path and the current status model is documented in
+[agent status model](../docs/history/2026-08-22/agent-status-model.md).

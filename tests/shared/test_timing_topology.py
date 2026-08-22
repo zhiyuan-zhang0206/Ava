@@ -41,15 +41,15 @@ def test_boot_chain_is_registered_and_pinned() -> None:
     stall = CLOCKS["BOOT_STALL_SEC"].get()
     confirm = CLOCKS["LAUNCH_CONFIRM_TIMEOUT_SEC"].get()
     budget = CLOCKS["BOOT_BUDGET_SEC"].get()
-    grace = CLOCKS["ALLOCATED_REAP_GRACE_SEC"].get()
+    grace = CLOCKS["BOOT_REAP_GRACE_SEC"].get()
     assert stall < confirm < budget < grace, (
         f"expected BOOT_STALL_SEC ({stall}s) < LAUNCH_CONFIRM_TIMEOUT_SEC "
-        f"({confirm}s) < BOOT_BUDGET_SEC ({budget}s) < ALLOCATED_REAP_GRACE_SEC "
+        f"({confirm}s) < BOOT_BUDGET_SEC ({budget}s) < BOOT_REAP_GRACE_SEC "
         f"({grace}s)"
     )
 
 
-def test_allocated_reap_grace_exceeds_the_launch_confirm_window() -> None:
+def test_boot_reap_grace_exceeds_the_launch_confirm_window() -> None:
     """The reap grace must outlast the launch confirm, by construction.
 
     Two defaults in two files with an ordering between them, described only in
@@ -61,8 +61,8 @@ def test_allocated_reap_grace_exceeds_the_launch_confirm_window() -> None:
     makes the extension a no-op, silently restoring the behavior this test's
     incident was about.
     """
-    assert boot.LAUNCH_CONFIRM_TIMEOUT_SEC < boot.ALLOCATED_REAP_GRACE_SEC, (
-        f"allocated_reap_grace_seconds ({boot.ALLOCATED_REAP_GRACE_SEC}s) must "
+    assert boot.LAUNCH_CONFIRM_TIMEOUT_SEC < boot.BOOT_REAP_GRACE_SEC, (
+        f"boot_reap_grace_seconds ({boot.BOOT_REAP_GRACE_SEC}s) must "
         f"exceed launch_confirm_timeout_seconds ({boot.LAUNCH_CONFIRM_TIMEOUT_SEC}s) "
         "— with headroom for the boot that runs between them"
     )
@@ -93,17 +93,17 @@ def test_boot_budget_stays_under_the_reaper_grace() -> None:
     The stall window bounds one phase, so it bounds the whole boot only at
     phases x stall — arithmetic over a number that moves whenever a boot phase is
     added, and which at 4 phases x 30s already equals the grace exactly. The
-    restarter's allocated-reaper takes an 'allocated' row on age alone: its clock
+    restarter's dead-birth reaper takes an unclaimed 'idling' row on age alone: its clock
     is `status_changed_at`, which only a status flip resets, so no amount of
     pre-flip progress holds it off. A boot allowed to outlive the grace would have
     its row reaped out from under a live, progressing child — the 2026-07-30
     incident again, relocated from the launcher to the reaper, and the reason that
     incident's fix capped the launcher's own extension at this same grace.
     """
-    assert boot.BOOT_STALL_SEC < boot.BOOT_BUDGET_SEC < boot.ALLOCATED_REAP_GRACE_SEC, (
+    assert boot.BOOT_STALL_SEC < boot.BOOT_BUDGET_SEC < boot.BOOT_REAP_GRACE_SEC, (
         f"expected agent_boot_stall_seconds ({boot.BOOT_STALL_SEC}s) < "
         f"agent_boot_budget_seconds ({boot.BOOT_BUDGET_SEC}s) < "
-        f"allocated_reap_grace_seconds ({boot.ALLOCATED_REAP_GRACE_SEC}s); a "
+        f"boot_reap_grace_seconds ({boot.BOOT_REAP_GRACE_SEC}s); a "
         "budget at or above the grace lets the reaper take the row of a child "
         "that is still alive, and a budget below the stall window makes the "
         "stall window unreachable"
@@ -151,7 +151,7 @@ def test_assert_clock_lattice_raises_on_violation(monkeypatch: pytest.MonkeyPatc
     """The fail-fast entry point raises, never returns, on a violation."""
     from shared.timing import ClockLatticeError
 
-    monkeypatch.setattr(boot, "BOOT_STALL_SEC", boot.ALLOCATED_REAP_GRACE_SEC + 10)
+    monkeypatch.setattr(boot, "BOOT_STALL_SEC", boot.BOOT_REAP_GRACE_SEC + 10)
     with pytest.raises(ClockLatticeError):
         assert_clock_lattice()
 

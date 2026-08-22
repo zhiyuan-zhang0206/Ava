@@ -366,8 +366,6 @@
     "spawning": "创建中",
     "agentId": "#{id} · {label}",
     "forceKillConfirm": "强制结束 Agent #{id}？这将立即 SIGKILL 进程——任何进行中的回合都会丢失。仅在 Terminate 无效时使用。",
-    "statusAllocated": "已分配",
-    "statusStarting": "启动中",
     "statusRunning": "运行中",
     "statusIdling": "空闲中",
     "statusRestarting": "重启中",

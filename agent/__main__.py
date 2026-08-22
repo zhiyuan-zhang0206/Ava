@@ -3,7 +3,7 @@ import sys
 
 # `agent/__init__` is import-light (no `from .loop import ...`), so importing
 # these two boot helpers does NOT pull the heavy chain — they just anchor the
-# clock and arm the boot watchdog before the starting-state entry.
+# clock and arm the boot watchdog before the row claim.
 from agent import _boot_deadline, _boot_timing
 
 _boot_timing.mark("start")
@@ -17,8 +17,8 @@ _boot_timing.mark("start")
 _boot_stall_seconds, _boot_budget_seconds = _boot_deadline.consume_flags(sys.argv)
 
 # Parse --agent-id from sys.argv BEFORE importing agent.loop (which triggers
-# heavy langgraph imports). This lets us enter the starting state (claim the
-# allocated row) early so the gateway's spawn poller returns quickly instead of
+# heavy langgraph imports). This lets us claim the unowned row early so the
+# gateway's spawn poller returns quickly instead of
 # waiting for the full langgraph import chain.
 _agent_id = None
 for _i, _arg in enumerate(sys.argv):
@@ -33,15 +33,15 @@ if _agent_id is not None:
     # makes the launcher's liveness probe decisive. See agent/_boot_deadline.py.
     _boot_deadline.arm(_agent_id, _boot_stall_seconds, _boot_budget_seconds)
 
-    from agent._starting import enter_starting_or_die_on_stale_schema
+    from agent._starting import claim_agent_row_or_die_on_stale_schema
 
     _boot_timing.mark("starting_import")
-    enter_starting_or_die_on_stale_schema(_agent_id)
-    _boot_timing.mark("enter_starting")
+    claim_agent_row_or_die_on_stale_schema(_agent_id)
+    _boot_timing.mark("claim_row")
     _boot_deadline.disarm()
 
-# E402: this import is deliberately placed after entering the starting state
-# above — it triggers the heavy langgraph chain we want to defer until the row
+# E402: this import is deliberately placed after claiming the row above — it
+# triggers the heavy langgraph chain we want to defer until the row
 # is claimed.
 from .loop import run  # noqa: E402
 

@@ -34,7 +34,7 @@ def test_literal_terminated_with_source_is_clean():
     src = (
         "cur.execute(\n"
         "    \"UPDATE agents_meta SET status = 'terminated', \"\n"
-        "    \"termination_source = 'launch-confirm' WHERE id = %s AND status = 'allocated'\",\n"
+        "    \"termination_source = 'launch-confirm' WHERE id = %s AND status = 'idling' AND pid IS NULL\",\n"
         "    (agent_id,),\n"
         ")\n"
     )
@@ -48,32 +48,32 @@ def test_parameterized_terminated_without_source_is_flagged():
     src = (
         "cur.execute(\n"
         '    "UPDATE agents_meta SET status = %s WHERE id = %s AND status = %s",\n'
-        "    (AgentStatus.TERMINATED, agent_id, AgentStatus.ALLOCATED),\n"
+        "    (AgentStatus.TERMINATED, agent_id, AgentStatus.IDLING),\n"
         ")\n"
     )
     assert len(_violations(src)) == 1
 
 
 def test_parameterized_non_terminated_status_write_is_clean():
-    # enter_starting_state's own allocated -> starting flip: same SQL shape, but the
+    # claim_agent_row's own idling -> running flip: same SQL shape, but the
     # bound value is not TERMINATED, so it must not be dragged in.
     src = (
         "cur.execute(\n"
         '    "UPDATE agents_meta SET status = %s, pid = %s WHERE id = %s AND status = %s",\n'
-        "    (AgentStatus.STARTING, os.getpid(), agent_id, AgentStatus.ALLOCATED),\n"
+        "    (AgentStatus.RUNNING, os.getpid(), agent_id, AgentStatus.IDLING),\n"
         ")\n"
     )
     assert _violations(src) == []
 
 
 def test_terminated_only_in_where_clause_is_clean():
-    # resurrect_agent's terminated -> allocated transition: TERMINATED appears as a
+    # resurrect_agent's terminated -> idling transition: TERMINATED appears as a
     # WHERE filter (a read), and the SET clause legitimately clears the source.
     src = (
         "cur.execute(\n"
         '    "UPDATE agents_meta SET status = %s, termination_source = NULL "\n'
         '    "WHERE id = %s AND status = %s",\n'
-        "    (AgentStatus.ALLOCATED, agent_id, AgentStatus.TERMINATED),\n"
+        "    (AgentStatus.IDLING, agent_id, AgentStatus.TERMINATED),\n"
         ")\n"
     )
     assert _violations(src) == []
@@ -111,7 +111,7 @@ def test_multirow_reaper_claim_with_source_is_clean():
     src = (
         "cur.execute(\n"
         "    \"UPDATE agents_meta SET status = 'terminated', termination_source = 'reaper' \"\n"
-        "    \"WHERE machine = %s AND status = 'starting' RETURNING id\",\n"
+        "    \"WHERE machine = %s AND status = 'idling' AND pid IS NULL RETURNING id\",\n"
         "    (local_machine,),\n"
         ")\n"
     )

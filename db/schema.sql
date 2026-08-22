@@ -28,8 +28,8 @@
 --                       the value is fed via str(id) into config["configurable"]["thread_id"];
 --                       compact modifies messages in place, **does not create a new agent**)
 --   agents_meta       — agent process lifecycle (1:1 with agents.id).
---                       spawn_agent INSERT 'allocated' → process starts UPDATE
---                       'starting' → init done, enters claim wait → 'idling' →
+--                       spawn_agent INSERT unclaimed 'idling' → process claim
+--                       UPDATE to 'running' → claim wait returns to 'idling' →
 --                       got batch → 'running' → terminate path UPDATE 'terminated'
 --   inbound_messages  — any trigger entering the agent (kinds enumerated in the CHECK constraint below)
 
@@ -64,33 +64,27 @@ CREATE TABLE agents (
 -- a single agents row, and the concepts "agent" and "conversation" are unified.
 --
 -- State machine:
---   allocated  — spawn_agent / resurrect_agent has already INSERTed/UPDATEd; the agent process
---                hasn't started yet / hasn't claimed the row yet
---   starting   — the process has claimed the allocated row (written by `_claim_allocated_row`),
---                still in setup llm / db / redis / mcp daemon, not yet in graph
---   running    — the process has entered the graph (lifted up by `leave_starting_state` at the top of claim),
+--   idling     — either unclaimed (pid / started_at / lease are NULL) or a claimed process waiting
+--                for inbound work
+--   running    — a claimed process, including bootstrap and active execution;
 --                running an LLM / exec turn (any node: claim got a batch / before_llm / llm /
 --                before_exec / exec / after_exec)
---   idling     — the process is parked on the long Redis pub/sub await at the claim node,
---                with nothing to do. `ava.agents.send_message` seeing idling knows the message will
---                be processed immediately (the inbound publish wakes it → SELECT batch → enter running)
 --   restarting — UPDATE before graceful exit, after the agent receives a restart inbound. The gateway
 --                restart watcher sees this state → auto-resurrects to spawn a fresh process
 --                attached to the same agent (new PID, LangGraph state preserved)
+--   hibernating — ops-only memory swap-out state, projected as idling to SDK and frontend consumers
 --   terminated — UPDATE before graceful exit, after the process receives a terminate inbound
 --
--- After launch, `_launch_agent_process` polls status for a few seconds to confirm the child python actually got to
--- `_claim_allocated_row` (i.e. status leaves 'allocated'). No movement within the timeout → raise:
--- on the spawn path, the raise is propagated up so the caller sees it (the row stays 'allocated' for ops diagnostics);
+-- After launch, `_launch_agent_process` polls pid to confirm the child claimed the row. No claim within the
+-- timeout raises: on the spawn path, the raise is propagated up so the caller sees it (the row remains
+-- unclaimed idling for the boot reaper);
 -- on the resurrect/respawn path, `_launch_or_force_terminated` catches it and changes to 'terminated'
--- so the caller can retry. This avoids "spawn returncode 0 but child crash" leaving permanent 'allocated'
--- petrification (agent 137 / 44 incidents).
+-- so the caller can retry. This avoids "spawn returncode 0 but child crash" leaving permanent unclaimed rows.
 --
--- pid + started_at are meaningful during 'starting' / 'running' / 'idling': when spawn /
--- resurrect / respawn switches status back to 'allocated', it **simultaneously** UPDATEs pid=NULL,
--- started_at=NULL to avoid the previous running's fields becoming ghost data misleading ops ps/kill.
+-- Wake paths set pid, started_at, and lease to NULL before launch. `claim_agent_row` writes all three
+-- atomically, avoiding previous-session ghost data in ops ps/kill views.
 --
--- A "terminated" row can be UPDATEd back to 'allocated' by resurrect_agent and respawned as a new process
+-- A "terminated" row can be UPDATEd back to 'idling' by resurrect_agent and respawned as a new process
 -- (agent + checkpoints + messages all present, the agent picks up from its last state when woken).
 --
 -- Lineage fields:
@@ -109,19 +103,19 @@ CREATE TABLE agents_meta (
     spawner                    TEXT NOT NULL DEFAULT 'user',
     fork_source_agent_id       BIGINT REFERENCES agents(id),
     fork_source_checkpoint_id  TEXT,
-    status                     TEXT NOT NULL CHECK (status IN ('allocated', 'starting', 'running', 'idling', 'restarting', 'terminated', 'hibernating')),
-    pid                        INTEGER,                  -- filled during starting/running/idling, for ops ps lookup / force kill
+    status                     TEXT NOT NULL CHECK (status IN ('running', 'idling', 'restarting', 'terminated', 'hibernating')),
+    pid                        INTEGER,                  -- filled while a process owns the running/idling row, for ops ps lookup / force kill
     spawned_at                 TIMESTAMPTZ NOT NULL DEFAULT now(),
-    started_at                 TIMESTAMPTZ,              -- filled by the process itself on UPDATE (synced with status transition to starting, filled alongside pid in _claim_allocated_row)
+    started_at                 TIMESTAMPTZ,              -- filled alongside pid and lease by agent._starting.claim_agent_row
     session_index              BIGINT NOT NULL DEFAULT 0,  -- unified shell+watcher session sequence number, auto-incrementing; ava.shell.new()/ava.watcher.launch() atomically take the next via UPDATE ... RETURNING
-    machine                    TEXT NOT NULL DEFAULT 'unknown',  -- physical machine identifier, for multi-machine deployment (private network + central Postgres); source = $AVA_HOME/machine_name, written on INSERT in the create path (spawn_agent), _claim_allocated_row only verifies
-    status_changed_at          TIMESTAMPTZ NOT NULL DEFAULT now(),  -- when the row last entered its current status; maintained by the agents_meta_status_changed_at trigger. Lets the restarter reap 'allocated' rows older than a grace (unlike spawned_at, this resets on resurrect's terminated -> allocated)
+    machine                    TEXT NOT NULL DEFAULT 'unknown',  -- physical machine identifier, for multi-machine deployment (private network + central Postgres); source = $AVA_HOME/machine_name, written on INSERT in the create path (spawn_agent), claim_agent_row only verifies
+    status_changed_at          TIMESTAMPTZ NOT NULL DEFAULT now(),  -- when the row last entered its current status; maintained by the agents_meta_status_changed_at trigger. Lets the restarter reap unclaimed idling rows older than a grace (unlike spawned_at, this resets on resurrect's terminated -> idling)
     last_active_at             TIMESTAMPTZ NOT NULL DEFAULT now(),  -- when the agent last did REAL work: written = now() by the agent process on every completed LLM turn (agent/graph/_llm.py). Deliberately NOT touched by ops lifecycle churn (rollout quiesce / restarter respawn / self.update / stop-start) — for an idle agent that whole cycle runs without an LLM turn, so this survives it. The heartbeat daemon's idle clock reads THIS (not status_changed_at, which every status flip incl. ops restarts bumps) so an ops event never resets an agent's idle timer. Backfilled from status_changed_at at add time.
     heartbeat_paused_until     TIMESTAMPTZ,              -- pause window for the gateway heartbeat daemon; set to now()+duration by ava.self.pause_heartbeat(). While in the future, the daemon skips this agent's idle-nudge. NULL = never paused.
     last_message_text          TEXT,                     -- text of the last AI message produced by this agent; survives compact (which replaces the entire checkpoint). Written by the agent process after each LLM turn; read by get_last_message API. NULL = no AI message yet.
     config_overlay             JSONB,                    -- per-agent config overlay (currently llm_model); authoritative source read by spawn/respawn/resurrect, passed to the child as --config-overlay. NULL = cluster defaults.
     birth_config               JSONB,                    -- the values the cluster defaults resolved to at THIS agent's birth, for every per-agent field the registry declares lifecycle="frozen" (shared/config: the brain + the system-prompt-shaping set). Stamped once at the spawn boundary (shared/birth_config.py), replayed on every restart/respawn/resurrect/compact, and inherited verbatim by a fork. Deliberately a SEPARATE column from config_overlay so provenance survives: config_overlay = "someone chose this for this agent", birth_config = "nobody chose; this was merely the cluster default that day". Resolution order everywhere is config_overlay > birth_config > current config. NULL = resolve every frozen field live (pre-column rows the backfill skipped). A migration that rewrites a frozen field's stored VALUE must rewrite this column too — it is a second home for values that used to live only in config_overlay (precedent: 20260725T060802_pin-haiku-dated-model-id.sql rewrites config_overlay->>'llm_model'). The skill-name renames are NOT such a case: they canonicalize agent_presets.config only, since shared/skill_names.py folds dash and underscore so an already-stored per-agent value still resolves. See migrations/20260731T071400_agent-birth-config.sql.
-    termination_source         TEXT CHECK (termination_source IN ('user', 'exit', 'reaper', 'launch-confirm', 'integrity')),  -- WHO/WHAT terminated the row; meaningful only while status='terminated'. Value set = shared.agents.TerminationSource (locked by tests/test_db_check_enum_sync.py); stamped in the SAME statement as the status flip by every terminated-write site (enforced by scripts/lint_termination_source.py). 'user' = force-kill / terminate-of-already-dead (ops_lifecycle._force_mark_terminated); 'exit' = agent's own graceful process-exit finalize (mark_agent_exited_op); 'reaper' = restarter corpse reaper forced it (dead pid / stale allocated); 'launch-confirm' = a launch that never confirmed forced it — the launcher's confirm poll timing out (agent_launch) or the child's own early-boot schema/placement gate rejecting the boot before it claimed the row (agent/_starting.py); 'integrity' = the framework found the row's own state self-inconsistent and killed it (respawn_agent: status='restarting' with no 'restart' inbound), deliberately NOT resurrectable since the row's history is corrupt and a retry loop would bury a one-time fault. CrashResurrectController resurrects ONLY 'reaper' + 'launch-confirm' (involuntary/system-detected + self-healing); 'user'/'exit'/'integrity'/NULL are never auto-resurrected. NULL = pre-column legacy row → conservatively not eligible. Cleared to NULL on the terminated→allocated resurrect transition (per-death). CHECK permits NULL.
+    termination_source         TEXT CHECK (termination_source IN ('user', 'exit', 'reaper', 'launch-confirm', 'integrity')),  -- WHO/WHAT terminated the row; meaningful only while status='terminated'. Value set = shared.agents.TerminationSource (locked by tests/test_db_check_enum_sync.py); stamped in the SAME statement as the status flip by every terminated-write site (enforced by scripts/lint_termination_source.py). 'user' = force-kill / terminate-of-already-dead (ops_lifecycle._force_mark_terminated); 'exit' = agent's own graceful process-exit finalize (mark_agent_exited_op); 'reaper' = restarter corpse reaper forced it (dead pid / stale unclaimed idling row); 'launch-confirm' = a launch that never confirmed forced it — the launcher's confirm poll timing out (agent_launch) or the child's own early-boot schema/placement gate rejecting the boot before it claimed the row (agent/_starting.py); 'integrity' = the framework found the row's own state self-inconsistent and killed it (respawn_agent: status='restarting' with no 'restart' inbound), deliberately NOT resurrectable since the row's history is corrupt and a retry loop would bury a one-time fault. CrashResurrectController resurrects ONLY 'reaper' + 'launch-confirm' (involuntary/system-detected + self-healing); 'user'/'exit'/'integrity'/NULL are never auto-resurrected. NULL = pre-column legacy row → conservatively not eligible. Cleared to NULL on the terminated→idling resurrect transition (per-death). CHECK permits NULL.
     last_force_terminate_inbound_id BIGINT,              -- monotonic explicit-kill fence: every force termination (including an already-terminated row) inserts a kind='terminate' inbound under the agents_meta row lock and stores its id here. Pending-work resurrection (chat/compact_request) requires its exact pending inbound id to be greater than this fence, so older work cannot reverse a later kill. No FK on purpose: inbound retention must not erase lifecycle intent. Never cleared; NULL = no force intent recorded.
     last_resurrect_at          TIMESTAMPTZ,              -- when CrashResurrectController last auto-resurrected this agent; the per-agent backoff clock (pin-heal shape). A crash corpse is skipped until now() - last_resurrect_at exceeds AVA_AUTO_RESURRECT_BACKOFF_SECONDS, so a resurrect that keeps failing (outage / poison message) retries on a fixed cadence instead of a tight loop and self-heals when the cause clears. NULL = never auto-resurrected.
     last_wedged_check_at       TIMESTAMPTZ,              -- when WedgedAgentController last attempted recovery of this agent; the per-agent backoff clock (same shape as last_resurrect_at). Stamped by the claiming UPDATE in ops/controllers/wedged.py; a wedged candidate is skipped until now() - last_wedged_check_at exceeds the backoff, preventing a poison-message loop from becoming a kill-spawn cycle. NULL = never checked. See the add-last-wedged-check-at migration.
