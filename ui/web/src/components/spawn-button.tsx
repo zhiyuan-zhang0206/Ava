@@ -100,6 +100,10 @@ export function SpawnButton({ onSpawn, variant }: Props) {
   // (superseded_by — replaced by a newer model, still config-valid) are
   // excluded from the picker.
   const hiddenModels: string[] = (settings["models.hidden"] as string[] | undefined) ?? [];
+  const rosterModels = new Set(Object.values(modelsData?.providers ?? {}).flat());
+  const hiddenModelCount = new Set(
+    hiddenModels.filter((model) => rosterModels.has(model)),
+  ).size;
   const modelGroups = groupedModels(
     modelsData,
     (m) => !hiddenModels.includes(m) && !isSuperseded(modelsData, m),
@@ -227,6 +231,11 @@ export function SpawnButton({ onSpawn, variant }: Props) {
                 </Fragment>
               ))}
             </ul>
+            {hiddenModelCount > 0 && (
+              <div className="px-3 py-2 border-t border-border text-xs font-medium text-muted-foreground">
+                {t("hiddenModels", { count: hiddenModelCount })}
+              </div>
+            )}
           </Popover.Content>
         </Popover.Portal>
       </Popover.Root>

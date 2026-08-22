@@ -78,6 +78,7 @@
   },
   "spawn": {
     "models": "模型",
+    "hiddenModels": "已隐藏 {count} 个 — 前往控制 > 显示管理",
     "effortDefault": "推理强度：默认",
     "presets": "预设",
     "noPreset": "无预设",
