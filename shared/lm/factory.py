@@ -127,20 +127,18 @@ class _LLMFactory(Protocol):
     def __call__(self, model: str) -> BaseChatModel: ...
 
 
-# Prefix fallback for UNREGISTERED model ids — the registry's per-model
-# `ModelSpec.vision` flag is authoritative for registered ids (see
-# `model_supports_vision`). claude / gemini / gpt are multimodal on the endpoints
-# Ava binds; kimi accepts image input on its OpenAI-compatible endpoint,
-# and every Qwen model in the registry is natively multimodal (Alibaba made the
-# mainline models multimodal from Qwen3.5 on — the text-only/`-vl-` split ended
-# there). deepseek (bound to its anthropic-compatible endpoint above), mimo, and
+# Prefix fallback for UNREGISTERED model ids — registered ids are authoritative
+# in `ModelSpec.media_types` (see `model_supports_vision`). claude / gemini / gpt
+# are multimodal on the endpoints Ava binds; kimi accepts image input on its
+# OpenAI-compatible endpoint, and every Qwen model in the registry accepts native
+# images. deepseek (bound to its anthropic-compatible endpoint above), mimo, and
 # glm are text-only there, so a HumanMessage carrying an image block would 400
-# (or be silently dropped) mid-turn. The message endpoint gates on this to 422
-# an image addressed to a text-only agent up front, rather than letting the LLM
-# call fail after the inbound is already queued. A prefix is only correct while
-# every model under it shares one answer — the deepseek family no longer does
-# (v4-flash-vision-exp is multimodal, pro/flash are not), which is exactly why
-# the gate is per-model for registered ids.
+# (or be silently dropped) mid-turn. The message endpoint gates on this to 422 an
+# image addressed to a text-only agent up front, rather than letting the LLM call
+# fail after the inbound is already queued. A prefix is only correct while every
+# unregistered model under it shares one answer — the deepseek family no longer
+# does (v4-flash-vision-exp is multimodal, pro/flash are not), which is exactly
+# why the registered gate is per-model.
 _VISION_MODEL_PREFIXES: tuple[str, ...] = (
     "claude-",
     "gemini-",
@@ -150,27 +148,29 @@ _VISION_MODEL_PREFIXES: tuple[str, ...] = (
 )
 
 
-def model_supports_vision(model: str) -> bool:
-    """Whether `model`'s provider binding accepts native image content blocks.
+def media_types_for_model(model: str) -> frozenset[str]:
+    """Native media capability for `model` across the three provider tiers.
 
-    Registered ids answer from the registry's per-model `ModelSpec.vision` flag
-    (the message-endpoint gate must not treat text-only `deepseek-v4-pro` as
-    vision-capable just because `deepseek-v4-flash-vision-exp` is). Unregistered
-    ids — config_overlay experiments, retired aliases — fall back to the prefix
-    table. Plugin bindings answer from their registration-level `vision` flag
-    only for unregistered ids; registered plugin models use `ModelSpec.vision`
-    so a family can express endpoint-level splits. A model matching no core or
-    plugin prefix is text-only by default — the message endpoint 422s images up
-    front rather than letting the provider 400 mid-turn.
+    Core and registered plugin models use their per-model
+    ``ModelSpec.media_types``. An unregistered plugin id gets the plugin
+    binding's v1 image-only ``vision`` capability; other unregistered ids use
+    the core prefix fallback. No match means text-only.
     """
     ensure_provider_plugins_loaded()
     spec = MODELS.get(model)
     if spec is not None:
-        return spec.vision
+        return spec.media_types
     for prefix, binding in provider_api.REGISTRY.bindings.items():
         if model.startswith(prefix):
-            return binding.vision
-    return model.startswith(_VISION_MODEL_PREFIXES)
+            return frozenset({"image"}) if binding.vision else frozenset()
+    if model.startswith(_VISION_MODEL_PREFIXES):
+        return frozenset({"image"})
+    return frozenset()
+
+
+def model_supports_vision(model: str) -> bool:
+    """Whether `model` accepts images via registry media types, plugin vision, or fallback."""
+    return "image" in media_types_for_model(model)
 
 
 def vision_capable_provider_names() -> list[str]:

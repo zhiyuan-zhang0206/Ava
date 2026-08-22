@@ -187,10 +187,11 @@ class ModelSpec:
     # extended thinking (budget_tokens; default OFF) and that 400 on `effort`
     streaming: bool = True  # construction-time streaming default; False only where a
     # model's streaming path is known-worse than its non-streaming one
-    vision: bool = False  # accepts native image content blocks on the provider
-    # binding `factory.py` constructs; drives the message-endpoint capability gate
-    # (`model_supports_vision`). Prefix-based gating could not express the deepseek
-    # family's split: v4-flash-vision-exp is multimodal while pro/flash are text-only.
+    media_types: frozenset[str] = frozenset()
+    """Media types the model's provider binding accepts natively. Members are
+    "image" / "pdf" / "audio" / "video". Empty (default) = text-only. Supersedes
+    the per-model `vision` bool (Task #1342): one field carries the whole capability
+    matrix, and `model_supports_vision` derives from it."""
     tuning: ModelTuning = field(default_factory=ModelTuning)
 
 
@@ -263,7 +264,7 @@ MODELS: dict[str, ModelSpec] = {
         knowledge_cutoff="2026-04",
         model_identity="You are running on DeepSeek V4 Flash Vision (experimental).",
         effort_levels=("high", "max"),
-        vision=True,
+        media_types=frozenset({"image"}),
         tuning=ModelTuning(
             reasoning_effort="max",  # same as pro/flash: Ava is not an auto-promoted harness
             llm_stream_ttft_timeout_seconds=600.0,  # same documented 10-minute queue
@@ -289,7 +290,7 @@ MODELS: dict[str, ModelSpec] = {
             # the parameter, whose default is high). NOT the ladder floor.
             reasoning_effort="high",
         ),
-        vision=True,
+        media_types=frozenset({"image", "pdf"}),
     ),
     "claude-haiku-4-5-20251001": ModelSpec(
         provider="claude",
@@ -306,7 +307,7 @@ MODELS: dict[str, ModelSpec] = {
             # default 0) — the honest concrete default is the off rung.
             reasoning_effort="none",
         ),
-        vision=True,
+        media_types=frozenset({"image", "pdf"}),
     ),
     "claude-opus-5": ModelSpec(
         provider="claude",
@@ -320,7 +321,7 @@ MODELS: dict[str, ModelSpec] = {
             # family default (see claude-sonnet-5).
             reasoning_effort="high",
         ),
-        vision=True,
+        media_types=frozenset({"image", "pdf"}),
     ),
     "claude-fable-5": ModelSpec(
         provider="claude",
@@ -344,7 +345,7 @@ MODELS: dict[str, ModelSpec] = {
             # (but healthy) request looks identical to a hung one at 30s.
             llm_stream_ttft_timeout_seconds=120.0,
         ),
-        vision=True,
+        media_types=frozenset({"image", "pdf"}),
     ),
     # -- gemini --
     "gemini-3.7-flash": ModelSpec(
@@ -360,7 +361,7 @@ MODELS: dict[str, ModelSpec] = {
             # is `medium` (decisions/2026-07-25-per-model-tuning-values.md).
             reasoning_effort="medium",
         ),
-        vision=True,
+        media_types=frozenset({"image", "pdf", "audio", "video"}),
     ),
     "gemini-3.5-flash": ModelSpec(
         provider="gemini",
@@ -373,7 +374,7 @@ MODELS: dict[str, ModelSpec] = {
             # `medium` (see gemini-3.7-flash).
             reasoning_effort="medium",
         ),
-        vision=True,
+        media_types=frozenset({"image", "pdf", "audio", "video"}),
     ),
     "gemini-3.1-pro-preview": ModelSpec(
         provider="gemini",
@@ -404,7 +405,7 @@ MODELS: dict[str, ModelSpec] = {
             # Vertex degradation.
             llm_stream_ttft_timeout_seconds=90.0,
         ),
-        vision=True,
+        media_types=frozenset({"image", "pdf", "audio", "video"}),
     ),
     # -- gpt --
     "gpt-5.6-sol": ModelSpec(
@@ -421,7 +422,7 @@ MODELS: dict[str, ModelSpec] = {
             # tuning-values.md Decision 4).
             reasoning_effort="medium",
         ),
-        vision=True,
+        media_types=frozenset({"image"}),
     ),
     "gpt-5.6-terra": ModelSpec(
         provider="gpt",
@@ -432,7 +433,7 @@ MODELS: dict[str, ModelSpec] = {
         # Same window, same effort ladder across all three tiers — OpenAI
         # documents no per-tier difference in anything Ava tunes.
         tuning=ModelTuning(reasoning_effort="medium"),  # OpenAI default (see gpt-5.6-sol)
-        vision=True,
+        media_types=frozenset({"image"}),
     ),
     "gpt-5.6-luna": ModelSpec(
         provider="gpt",
@@ -441,7 +442,7 @@ MODELS: dict[str, ModelSpec] = {
         knowledge_cutoff="2026-02",
         effort_levels=_GPT_EFFORT,
         tuning=ModelTuning(reasoning_effort="medium"),  # OpenAI default (see gpt-5.6-sol)
-        vision=True,
+        media_types=frozenset({"image"}),
     ),
     # -- mimo --
     "mimo-v2.5-pro": ModelSpec(
@@ -513,7 +514,7 @@ MODELS: dict[str, ModelSpec] = {
             # streaming — no bytes, so 30s TTFT fired before the retry could land.
             llm_stream_ttft_timeout_seconds=120.0,
         ),
-        vision=True,
+        media_types=frozenset({"image"}),
     ),
     # -- glm --
     "glm-5.2": ModelSpec(
@@ -563,7 +564,7 @@ MODELS: dict[str, ModelSpec] = {
             # model unless `enable_thinking=false` is sent.
             reasoning_effort="high",
         ),
-        vision=True,
+        media_types=frozenset({"image"}),
     ),
     "qwen3.8-27b": ModelSpec(
         provider="qwen",
@@ -583,7 +584,7 @@ MODELS: dict[str, ModelSpec] = {
             # `enable_thinking: false` is honored rather than rejected.
             reasoning_effort="high",
         ),
-        vision=True,
+        media_types=frozenset({"image"}),
     ),
     # -- legacy / non-spawnable (facts kept for old agents) --
     "claude-opus-4-8": ModelSpec(
@@ -592,7 +593,7 @@ MODELS: dict[str, ModelSpec] = {
         max_output_tokens=128_000,
         knowledge_cutoff="2026-01",
         effort_levels=_CLAUDE_ADAPTIVE_EFFORT,
-        vision=True,
+        media_types=frozenset({"image", "pdf"}),
     ),
     "claude-sonnet-4-6": ModelSpec(
         provider="claude",
@@ -600,17 +601,17 @@ MODELS: dict[str, ModelSpec] = {
         max_output_tokens=128_000,
         knowledge_cutoff="2025-08",
         effort_levels=("low", "medium", "high", "max"),  # xhigh arrived with opus-4-7
-        vision=True,
+        media_types=frozenset({"image", "pdf"}),
     ),
     "claude-opus-4-7": ModelSpec(
         provider="claude",
         max_output_tokens=128_000,
         effort_levels=_CLAUDE_ADAPTIVE_EFFORT,
-        vision=True,
+        media_types=frozenset({"image", "pdf"}),
     ),
     "claude-opus-4-6": ModelSpec(
         provider="claude",
-        vision=True,
+        media_types=frozenset({"image", "pdf"}),
     ),
     # Bare alias of the dated snapshot above, kept for old agent configs.
     # Carries the same extended-thinking-only flag as the dated entry: without
@@ -619,27 +620,27 @@ MODELS: dict[str, ModelSpec] = {
     "claude-haiku-4-5": ModelSpec(
         provider="claude",
         extended_thinking_only=True,
-        vision=True,
+        media_types=frozenset({"image", "pdf"}),
     ),
     "gemini-2.5-pro": ModelSpec(
         provider="gemini",
-        vision=True,
+        media_types=frozenset({"image", "pdf", "audio", "video"}),
     ),
     "gemini-2.5-flash": ModelSpec(
         provider="gemini",
-        vision=True,
+        media_types=frozenset({"image", "pdf", "audio", "video"}),
     ),
     "gpt-5.5": ModelSpec(
         provider="gpt",
         context_window=256_000,
         knowledge_cutoff="2025-12",
-        vision=True,
+        media_types=frozenset({"image"}),
     ),
     "gpt-5.4-mini": ModelSpec(
         provider="gpt",
         context_window=256_000,
         knowledge_cutoff="2025-08",
-        vision=True,
+        media_types=frozenset({"image"}),
     ),
 }
 

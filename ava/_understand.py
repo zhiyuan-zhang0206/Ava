@@ -43,6 +43,7 @@ from shared.lm._effort import (
     _clamp_effort,
     coerce_effort,
 )
+from shared.lm.attach import ATTACH_MEDIA_MIME
 from shared.lm.factory import provider_key_of_model
 
 # Provider split by modality is config-driven: settings.lm.understand_text_model
@@ -57,33 +58,7 @@ _INLINE_MAX_BYTES = 20 * 1024 * 1024
 # Suffix → MIME for the binary-media path. A file whose suffix is NOT listed
 # here is read as UTF-8 text instead, so .txt/.md/.csv/.json/.py/... and
 # extensionless files all flow through the text path.
-_VIDEO_MIME = {
-    ".mp4": "video/mp4",
-    ".mov": "video/quicktime",
-    ".webm": "video/webm",
-    ".avi": "video/x-msvideo",
-    ".mkv": "video/x-matroska",
-    ".m4v": "video/x-m4v",
-}
-_IMAGE_MIME = {
-    ".jpg": "image/jpeg",
-    ".jpeg": "image/jpeg",
-    ".png": "image/png",
-    ".webp": "image/webp",
-    ".gif": "image/gif",
-    ".heic": "image/heic",
-    ".heif": "image/heif",
-}
-_AUDIO_MIME = {
-    ".mp3": "audio/mpeg",
-    ".wav": "audio/wav",
-    ".m4a": "audio/mp4",
-    ".aac": "audio/aac",
-    ".flac": "audio/flac",
-    ".ogg": "audio/ogg",
-}
-_PDF_MIME = {".pdf": "application/pdf"}
-_MEDIA_MIME = {**_VIDEO_MIME, **_IMAGE_MIME, **_AUDIO_MIME, **_PDF_MIME}
+_MEDIA_MIME = ATTACH_MEDIA_MIME
 
 # ── auto-save output to workspace ──────────────────────────────────────────
 _OVERFLOW_DIRNAME = ".exec_output"

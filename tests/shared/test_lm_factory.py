@@ -68,13 +68,14 @@ def test_unknown_model_still_fails(env_file: Path) -> None:
 class TestModelSupportsVision:
     """The gate answers per-model from the registry, with the prefix table as
     fallback for unregistered ids. The deepseek family is the live case that
-    forced the per-model move: one multimodal member under a text-only prefix."""
+    forced the per-model media matrix: one multimodal member under a text-only
+    prefix."""
 
     def test_registered_vision_model_passes(self) -> None:
         assert model_supports_vision("deepseek-v4-flash-vision-exp") is True
 
     def test_registered_text_only_deepseek_fails(self) -> None:
-        # Same prefix as the vision model — the per-model flag, not the prefix,
+        # Same prefix as the vision model — the per-model media types, not the prefix,
         # decides: an image to a v4-flash agent must still 422 up front.
         assert model_supports_vision("deepseek-v4-flash") is False
         assert model_supports_vision("deepseek-v4-pro") is False
