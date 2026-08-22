@@ -72,7 +72,7 @@ import psutil
 
 from shared.log import logger
 from shared.pty_sessions._paths import DEFAULT_COLS, DEFAULT_ROWS, err, ok, write_record
-from shared.session_record import SessionRecord
+from shared.session_record import SessionRecord, pid_starttime_ticks
 
 # A pid is "the same process we launched" only if its start-time matches to
 # within this tolerance — guards against the OS recycling the pid onto an
@@ -257,13 +257,11 @@ class PtySession:
             return self._dead
 
     def pid_matches(self) -> bool:
-        """True if the recorded pid is still the same process we launched.
-
-        Guards kill/signal against pid recycling: a dead shell whose pid was
-        reused must never receive a killpg aimed at the shell's group.
-        """
+        """True when this shell's pid has not been recycled."""
         try:
             proc = psutil.Process(self.pid)
+            if self.record.starttime is not None:
+                return proc.is_running() and self.record.identifies(self.pid) is True
             return proc.is_running() and (
                 abs(proc.create_time() - self.record.create_time) <= _CREATE_TIME_TOLERANCE_S
             )
@@ -771,15 +769,16 @@ def _bring_up(
         create_time = psutil.Process(pid).create_time()
     except psutil.NoSuchProcess:
         create_time = _DEAD_CHILD_SENTINEL
-    record = SessionRecord(
-        pid=pid,
-        create_time=create_time,
-        cmd="/bin/bash -l -i",
-        cwd=cwd,
-        started_at=time.time(),
-    )
+    starttime = None if create_time == _DEAD_CHILD_SENTINEL else pid_starttime_ticks(pid)
+    record = SessionRecord(pid, create_time, "/bin/bash -l -i", cwd, time.time(), starttime)
     session = PtySession(name, pid, master, cols, rows, record, rec_path, transcript)
-    write_record(rec_path, record, host_pid=os.getpid(), host_create_time=_own_create_time())
+    write_record(
+        rec_path,
+        record,
+        host_pid=os.getpid(),
+        host_create_time=_own_create_time(),
+        host_starttime=pid_starttime_ticks(os.getpid()),
+    )
     threading.Thread(target=_reader_loop, args=(session, sock_file), daemon=True).start()
     logger.info(
         "pty session started: {name} (pid={pid}, host={host})", name=name, pid=pid, host=os.getpid()

@@ -28,11 +28,12 @@ from pathlib import Path
 import psutil
 import pytest
 
-from shared.platform import IS_WINDOWS
+from shared.platform import IS_LINUX, IS_WINDOWS
+from shared.pty_sessions import cli as pty_cli
 from shared.pty_sessions._paths import host_identity, record_path, socket_path
 from shared.pty_sessions.cli import write_env_file
 from shared.pty_sessions.host import PtySession, _parse_request
-from shared.session_record import SessionRecord
+from shared.session_record import SessionRecord, pid_starttime_ticks
 
 pytestmark = pytest.mark.skipif(IS_WINDOWS, reason="pty sessions are POSIX-only")
 
@@ -355,6 +356,71 @@ def test_has_defeats_pid_reuse(sessions: Path) -> None:
         live.wait(timeout=5)
         with contextlib.suppress(OSError):
             rec_path.unlink()
+
+
+@pytest.mark.skipif(not IS_LINUX, reason="Linux /proc start-time identity")
+def test_record_starttime_survives_wall_clock_drift(sessions: Path) -> None:
+    """A pty shell stays live when its stable ticks match but its epoch does not."""
+    name = "ava-test-starttime-drift"
+    starttime = pid_starttime_ticks(os.getpid())
+    assert starttime is not None
+    rec = SessionRecord(
+        pid=os.getpid(),
+        create_time=1.0,
+        cmd="test",
+        cwd=str(sessions),
+        started_at=time.time(),
+        starttime=starttime,
+    )
+    rec.write(record_path(name))
+
+    assert rec.identifies(os.getpid()) is True
+    assert pty_cli._record_alive(rec) is True
+    assert pty_cli.live_sessions(prefix="ava-test-starttime-") == {name: rec}
+    assert record_path(name).exists()
+
+
+@pytest.mark.skipif(not IS_LINUX, reason="Linux /proc start-time identity")
+def test_live_sessions_reaps_starttime_pid_reuse(sessions: Path) -> None:
+    """Different clock ticks prove a live shell pid has been recycled."""
+    name = "ava-test-starttime-reuse"
+    rec = SessionRecord(
+        pid=os.getpid(),
+        create_time=psutil.Process().create_time(),
+        cmd="test",
+        cwd=str(sessions),
+        started_at=time.time(),
+        starttime=0,
+    )
+    rec.write(record_path(name))
+
+    assert rec.identifies(os.getpid()) is False
+    assert pty_cli._record_alive(rec) is False
+    assert pty_cli.live_sessions(prefix="ava-test-starttime-") == {}
+    assert not record_path(name).exists()
+
+
+def test_live_sessions_keeps_live_legacy_record_with_clock_drift(
+    sessions: Path,
+    loguru_records: list[dict[str, object]],
+) -> None:
+    """A legacy epoch mismatch cannot make a live pty shell unowned."""
+    name = "ava-test-legacy-drift"
+    rec = SessionRecord(
+        pid=os.getpid(),
+        create_time=1.0,
+        cmd="test",
+        cwd=str(sessions),
+        started_at=time.time(),
+    )
+    rec.write(record_path(name))
+
+    assert pty_cli._record_alive(rec) is False
+    assert pty_cli.live_sessions(prefix="ava-test-legacy-") == {}
+    assert record_path(name).exists()
+    assert any(
+        "pty retaining live session record" in str(record["message"]) for record in loguru_records
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -747,13 +813,23 @@ def test_record_carries_host_identity(sessions: Path) -> None:
     name = "ava-test-rec-1"
     _new(home, name)
     raw = json.loads(record_path(name).read_text())
-    assert {"pid", "create_time", "host_pid", "host_create_time"} <= set(raw)
+    assert {
+        "pid",
+        "create_time",
+        "starttime",
+        "host_pid",
+        "host_create_time",
+        "host_starttime",
+    } <= set(raw)
     rec = SessionRecord.read(record_path(name))
     assert rec is not None and rec.pid == raw["pid"]
     identity = host_identity(record_path(name))
     assert identity is not None
     host_pid, host_create = identity
     assert abs(psutil.Process(host_pid).create_time() - host_create) <= 2.0
+    if IS_LINUX:
+        assert rec.starttime == pid_starttime_ticks(rec.pid)
+        assert raw["host_starttime"] == pid_starttime_ticks(host_pid)
 
 
 def test_kill_then_immediate_same_name_new_is_a_real_session(sessions: Path) -> None:

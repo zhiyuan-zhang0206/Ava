@@ -45,7 +45,7 @@ import psutil
 from shared.log import logger
 from shared.paths import logs_dir, run_dir
 from shared.platform import CREATE_NO_WINDOW
-from shared.session_record import SessionRecord
+from shared.session_record import SessionRecord, pid_starttime_ticks
 
 # psutil exceptions that mean "the process is already gone / not ours to touch" —
 # benign during a teardown race.
@@ -92,11 +92,13 @@ def _process_for_record(rec: SessionRecord) -> psutil.Process | None:
     different (recycled) process now holds the pid."""
     try:
         proc = psutil.Process(rec.pid)
-        # create_time defeats pid recycling: a new process on the same pid has a
-        # later start time than the one we recorded.
-        if abs(proc.create_time() - rec.create_time) > _CREATE_TIME_TOLERANCE_S:
-            return None
         if not proc.is_running():
+            return None
+        if rec.starttime is not None:
+            return proc if rec.identifies(rec.pid) is True else None
+        # create_time defeats pid recycling for legacy records and platforms
+        # without Linux's clock-stable `/proc/<pid>/stat` field 22.
+        if abs(proc.create_time() - rec.create_time) > _CREATE_TIME_TOLERANCE_S:
             return None
     except (psutil.NoSuchProcess, psutil.AccessDenied):
         return None
@@ -182,12 +184,16 @@ def new_session(
         # could then SIGKILL an unrelated process tree (audit 2026-08-08 P2).
         # The record still forms (the caller's readiness probe sees it die).
         create_time = _DEAD_CHILD_SENTINEL
+        starttime = None
+    else:
+        starttime = pid_starttime_ticks(child_pid)
     SessionRecord(
         pid=child_pid,
         create_time=create_time,
         cmd=cmd if isinstance(cmd, str) else " ".join(cmd),
         cwd=str(cwd),
         started_at=time.time(),
+        starttime=starttime,
     ).write(_record_path(name))
     return True
 
@@ -299,6 +305,23 @@ def session_started_at(name: str) -> float | None:
     return rec.started_at
 
 
+def _record_reapable(rec: SessionRecord) -> tuple[bool, str]:
+    """Whether a failed liveness check proves a record can be discarded."""
+    if _process_for_record(rec) is not None:
+        return False, "process is still live"
+    try:
+        proc = psutil.Process(rec.pid)
+        if not proc.is_running():
+            return True, "pid is no longer running"
+    except psutil.NoSuchProcess:
+        return True, "pid is gone"
+    except (psutil.AccessDenied, OSError):
+        return False, "pid could not be inspected"
+    if rec.identifies(rec.pid) is False:
+        return True, "pid was reused by another process"
+    return False, "live pid did not satisfy the legacy identity check"
+
+
 def list_sessions(prefix: str = "") -> list[str]:
     """Names of all live sessions, optionally filtered by `prefix`.
 
@@ -309,8 +332,19 @@ def list_sessions(prefix: str = "") -> list[str]:
         name = rec_file.stem
         if prefix and not name.startswith(prefix):
             continue
-        if has_session(name):
+        rec = SessionRecord.read(rec_file)
+        if rec is None:
+            rec_file.unlink(missing_ok=True)
+        elif _process_for_record(rec) is not None:
             out.append(name)
         else:
+            reapable, why = _record_reapable(rec)
+            if not reapable:
+                logger.warning(
+                    "posixproc retaining live session record {name}: {why}",
+                    name=name,
+                    why=why,
+                )
+                continue
             rec_file.unlink(missing_ok=True)
     return out

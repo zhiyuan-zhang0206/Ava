@@ -64,16 +64,18 @@ from typing import Any, cast
 
 import psutil
 
+from shared.log import logger
 from shared.paths import run_dir
 from shared.pty_sessions._paths import (
     host_identity,
     host_log_path,
+    host_starttime,
     pty_dir,
     record_path,
     socket_path,
     transcript_path,
 )
-from shared.session_record import SessionRecord
+from shared.session_record import SessionRecord, pid_starttime_ticks
 
 # ---------------------------------------------------------------------------
 # Key translation — the classic send-keys vocabulary (prototype _KEYMAP, with
@@ -230,9 +232,11 @@ _CREATE_TIME_TOLERANCE_S = 2.0
 def _record_alive(rec: SessionRecord) -> bool:
     try:
         proc = psutil.Process(rec.pid)
-        return proc.is_running() and (
-            abs(proc.create_time() - rec.create_time) <= _CREATE_TIME_TOLERANCE_S
-        )
+        if not proc.is_running():
+            return False
+        if rec.starttime is not None:
+            return rec.identifies(rec.pid) is True
+        return abs(proc.create_time() - rec.create_time) <= _CREATE_TIME_TOLERANCE_S
     except psutil.Error:
         return False
 
@@ -254,11 +258,38 @@ def session_started_at(name: str) -> float | None:
 
 
 def _sweep_dead(name: str) -> None:
-    """Drop a dead session's record + socket (its host is gone too)."""
+    """Drop a provably dead session's record + socket (its host is gone too)."""
+    rec = SessionRecord.read(record_path(name))
+    if rec is not None:
+        reapable, why = _record_reapable(rec)
+        if not reapable:
+            logger.warning(
+                "pty retaining live session record {name}: {why}",
+                name=name,
+                why=why,
+            )
+            return
     with contextlib.suppress(OSError):
         record_path(name).unlink(missing_ok=True)
     with contextlib.suppress(OSError):
         socket_path(name).unlink(missing_ok=True)
+
+
+def _record_reapable(rec: SessionRecord) -> tuple[bool, str]:
+    """Whether a pty record that failed liveness can safely be swept."""
+    if _record_alive(rec):
+        return False, "shell is still live"
+    try:
+        proc = psutil.Process(rec.pid)
+        if not proc.is_running():
+            return True, "shell pid is no longer running"
+    except psutil.NoSuchProcess:
+        return True, "shell pid is gone"
+    except (psutil.AccessDenied, OSError):
+        return False, "shell pid could not be inspected"
+    if rec.identifies(rec.pid) is False:
+        return True, "shell pid was reused by another process"
+    return False, "live shell pid did not satisfy the legacy identity check"
 
 
 def live_sessions(prefix: str = "") -> dict[str, SessionRecord]:
@@ -496,7 +527,8 @@ def _kill_by_record(name: str) -> int:
     The host owns the orderly kill; this fallback keeps `kill` authoritative
     against a wedged or SIGKILLed host: signal the shell's group and the
     host pid (both identity-checked against recorded start-times so a
-    recycled pid is never signalled), then drop the record + socket.
+    recycled pid is never signalled), then sweep the record + socket only
+    when they are provably stale.
     """
     rec = SessionRecord.read(record_path(name))
     if rec is not None and _record_alive(rec):
@@ -509,10 +541,13 @@ def _kill_by_record(name: str) -> int:
         host_pid, host_create = identity
         with contextlib.suppress(psutil.Error):
             proc = psutil.Process(host_pid)
-            if (
-                proc.is_running()
-                and abs(proc.create_time() - host_create) <= _CREATE_TIME_TOLERANCE_S
-            ):
+            recorded_starttime = host_starttime(record_path(name))
+            matches = (
+                pid_starttime_ticks(host_pid) == recorded_starttime
+                if recorded_starttime is not None
+                else abs(proc.create_time() - host_create) <= _CREATE_TIME_TOLERANCE_S
+            )
+            if proc.is_running() and matches:
                 proc.kill()
     deadline = time.monotonic() + 3.0
     while time.monotonic() < deadline:

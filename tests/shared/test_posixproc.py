@@ -16,7 +16,8 @@ import psutil
 import pytest
 
 from shared import posixproc
-from shared.platform import IS_WINDOWS
+from shared.platform import IS_LINUX, IS_WINDOWS
+from shared.session_record import SessionRecord, pid_starttime_ticks
 
 pytestmark = pytest.mark.skipif(IS_WINDOWS, reason="posixproc is the POSIX supervisor")
 
@@ -57,6 +58,7 @@ def test_new_session_reparents_to_init_no_zombie(unit_home) -> None:  # pyright:
     try:
         rec = posixproc._read_record(name)
         assert rec is not None
+        assert rec.starttime == pid_starttime_ticks(rec.pid)
         child = psutil.Process(rec.pid)
         # The record is written the instant the reparent helper reports the
         # grandchild pid, which can be microseconds BEFORE that grandchild
@@ -174,6 +176,70 @@ def test_list_sessions_reaps_dead_record(unit_home) -> None:  # pyright: ignore[
     assert not posixproc._record_path(name).exists()
 
 
+@pytest.mark.skipif(not IS_LINUX, reason="Linux /proc start-time identity")
+def test_starttime_identity_survives_wall_clock_drift(unit_home: Path) -> None:
+    """A stable kernel start tick keeps a live record despite a bad epoch time."""
+    name = "ava-test-agent-starttime-drift"
+    starttime = pid_starttime_ticks(os.getpid())
+    assert starttime is not None
+    rec = SessionRecord(
+        pid=os.getpid(),
+        create_time=1.0,
+        cmd="test",
+        cwd=str(unit_home),
+        started_at=time.time(),
+        starttime=starttime,
+    )
+    rec.write(posixproc._record_path(name))
+
+    assert rec.identifies(os.getpid()) is True
+    assert posixproc.has_session(name) is True
+    assert posixproc.list_sessions(prefix="ava-test-agent-starttime-") == [name]
+    assert posixproc._record_path(name).exists()
+
+
+@pytest.mark.skipif(not IS_LINUX, reason="Linux /proc start-time identity")
+def test_list_sessions_reaps_starttime_pid_reuse(unit_home: Path) -> None:
+    """A live pid with different start ticks is a recycled pid and is reaped."""
+    name = "ava-test-agent-starttime-reuse"
+    rec = SessionRecord(
+        pid=os.getpid(),
+        create_time=psutil.Process().create_time(),
+        cmd="test",
+        cwd=str(unit_home),
+        started_at=time.time(),
+        starttime=0,
+    )
+    rec.write(posixproc._record_path(name))
+
+    assert rec.identifies(os.getpid()) is False
+    assert posixproc.has_session(name) is False
+    assert posixproc.list_sessions(prefix="ava-test-agent-starttime-") == []
+    assert not posixproc._record_path(name).exists()
+
+
+def test_list_sessions_keeps_live_legacy_record_with_clock_drift(
+    unit_home: Path,
+    loguru_records: list[dict[str, object]],
+) -> None:
+    """A legacy timestamp mismatch cannot make a live session unowned."""
+    name = "ava-test-agent-legacy-drift"
+    SessionRecord(
+        pid=os.getpid(),
+        create_time=1.0,
+        cmd="test",
+        cwd=str(unit_home),
+        started_at=time.time(),
+    ).write(posixproc._record_path(name))
+
+    assert posixproc.has_session(name) is False
+    assert posixproc.list_sessions(prefix="ava-test-agent-legacy-") == []
+    assert posixproc._record_path(name).exists()
+    assert any(
+        "retaining live session record" in str(record["message"]) for record in loguru_records
+    )
+
+
 def test_new_session_idempotent_when_live(unit_home) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
     """A second new_session for a still-live name is a no-op (returns True without
     relaunching) — matching winproc + the has-session guard at the call site."""
@@ -279,6 +345,7 @@ def test_new_session_dead_child_records_sentinel(
     _new(name, argv, unit_home)  # pyright: ignore[reportUnknownArgumentType]
     rec = posixproc._read_record(name)
     assert rec is not None and rec.create_time == posixproc._DEAD_CHILD_SENTINEL
+    assert rec.starttime is None
     assert not posixproc.has_session(name), "sentinel record must read as dead from birth"
 
     # The real child is still alive (the patch only faked the create_time
