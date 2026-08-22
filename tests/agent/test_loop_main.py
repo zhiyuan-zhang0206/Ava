@@ -17,7 +17,7 @@ main() test strategy — boundary mock:
 Locked contract:
 1. order: init_agent_process → set AGENT_ID → wraps.scan_and_load →
    MCP start → build_chat_model → create pool → connect redis →
-   checkpointer.setup → build_graph → (overlay) → write_effective_config → graph.ainvoke
+   construct checkpointer → build_graph → (overlay) → write_effective_config → graph.ainvoke
 2. finally block runs inbound_listener.close +
    _notify_exit + mcp_daemon.stop, whether ainvoke returns normally or raises (redis is process singleton, no aclose).
    shell/watcher session no longer reaped on exit (durable background work, PR1)
@@ -148,7 +148,10 @@ def _setup_main_boundary_mocks(  # noqa: PLR0915 — single helper concentrating
     # no longer via `from_conn_string` classmethod CM. Patch the class itself
     # to return our checkpointer stub.
     checkpointer = MagicMock(name="checkpointer")
-    checkpointer.setup = AsyncMock()
+    checkpoint_setup = AsyncMock(
+        side_effect=AssertionError("agent boot must never run checkpoint schema DDL")
+    )
+    checkpointer.setup = checkpoint_setup
     # Startup reconcile reads state.messages via aget(); returning None means
     # "no prior checkpoint" → reconcile sees an empty committed-set, no-ops
     # on the pool stubs.
@@ -271,6 +274,7 @@ def _setup_main_boundary_mocks(  # noqa: PLR0915 — single helper concentrating
         "apply_overlay": fake_apply_overlay,
         "invoke": fake_invoke,
         "checkpointer": checkpointer,
+        "checkpoint_setup": checkpoint_setup,
         "db_pool": db_pool,
         "listener": listener,
         "listener_cls": fake_listener_cls,
@@ -285,17 +289,46 @@ def _setup_main_boundary_mocks(  # noqa: PLR0915 — single helper concentrating
 # ───────────────────────────────────────────────────────────────────────────
 
 
+async def test_build_checkpointer_never_probes_or_mutates_schema(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Agent boot treats checkpoint schema as a deployment precondition."""
+    from agent._process_boot import _build_checkpointer
+
+    pool = MagicMock(name="least_privilege_pool")
+    pool.connection = MagicMock(
+        side_effect=AssertionError("agent boot must not probe schema to decide whether to DDL")
+    )
+    checkpointer = MagicMock(name="checkpointer")
+    checkpoint_setup = AsyncMock(
+        side_effect=AssertionError("agent boot must never run checkpoint schema DDL")
+    )
+    checkpointer.setup = checkpoint_setup
+    monkeypatch.setattr(
+        "agent._process_boot.AsyncPostgresSaver", MagicMock(return_value=checkpointer)
+    )
+    monkeypatch.setattr("agent._process_boot._reconcile_claimed_inbounds_at_startup", AsyncMock())
+
+    built = await _build_checkpointer(pool, 42)  # pyright: ignore[reportArgumentType]
+
+    assert built is checkpointer
+    pool.connection.assert_not_called()
+    checkpoint_setup.assert_not_awaited()
+
+
 class TestMainHappyPath:
     """main() normal return path (graph.ainvoke returns due to terminate inbound) — verify full order + finally."""
 
     async def test_calls_boundary_fns_in_order(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Boot order: claim → init_proc → scan_load → MCP start →
-        build_chat → create pool → get_async_redis → checkpointer.setup →
+        build_chat → create pool → get_async_redis → construct checkpointer →
         build_graph → write_eff → invoke; finally:
         inbound_listener.close → mark_term → mcp.stop (redis is process-wide singleton, no aclose)."""
         spies = _setup_main_boundary_mocks(monkeypatch)
 
         await main(agent_id=42)
+
+        spies["checkpoint_setup"].assert_not_awaited()
 
         names = [c[0] for c in spies["calls"]]
         # Boot phase ordering — index must be monotonic
@@ -633,6 +666,7 @@ class TestMainExceptionPath:
         )
         with pytest.raises(RuntimeError, match="boom"):
             await main(agent_id=42)
+        spies["checkpoint_setup"].assert_not_awaited()
         # All finally cleanup must have run
         names = [c[0] for c in spies["calls"]]
         for cleanup in (

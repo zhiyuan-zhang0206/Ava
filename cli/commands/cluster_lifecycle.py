@@ -26,11 +26,13 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
-def _provision(identity: str, *, base_admin_url: str, cluster_secret: str) -> None:
+def _provision(identity: str, *, base_admin_url: str, cluster_secret: str) -> bool:
     """Thin wrapper around cluster.provision_database for monkeypatching in tests."""
     from shared import cluster as cl
 
-    cl.provision_database(identity, base_admin_url=base_admin_url, cluster_secret=cluster_secret)
+    return cl.provision_database(
+        identity, base_admin_url=base_admin_url, cluster_secret=cluster_secret
+    )
 
 
 def _ensure_cluster_instance(
