@@ -356,6 +356,7 @@ function HomeContent({
         <div data-testid="timeline-surface" className={cn("relative", FLEX, FLEX_COL, FLEX_1, MIN_H_0, MIN_W_0)}>
           <TimelineView
             items={items}
+            threadKey={activeId != null ? String(activeId) : undefined}
             streamingCode={streamingCode}
             turnActive={agentBusy}
             onFork={activeId != null ? handleFork : null}
@@ -396,6 +397,7 @@ function HomeContent({
               softCompactTokens={softCompactTokens}
               hardCompactTokens={hardCompactTokens}
               agentId={activeId}
+              agentTerminated={activeAgent?.status === "terminated"}
               details={<ContentToggle />}
               inspect={
                 <>

@@ -2537,6 +2537,78 @@ describe("turn-collapse (always on — Turns toggle controls expand/collapse)", 
 
   const runToggle = () => screen.getByTestId("turn-toggle");
 
+  it("drops a pinned turn expansion when the timeline thread changes", () => {
+    setToggleState({ detailsMode: "none" });
+    const threadAItems = [
+      makeItem({ item_id: "1.0", kind: "agent_reasoning", payload: "thread A thinking" }),
+      makeItem({ item_id: "1.1", kind: "agent_code", payload: "thread A code" }),
+    ];
+    const { rerender } = render(
+      <TimelineView threadKey="1" items={threadAItems} />,
+    );
+
+    expect(runToggle().getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(runToggle());
+    expect(runToggle().getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByTestId("python-code").textContent).toBe("thread A code");
+
+    // A normal refresh of the same thread preserves the user's pin.
+    rerender(
+      <TimelineView
+        threadKey="1"
+        items={[
+          makeItem({ item_id: "1.0", kind: "agent_reasoning", payload: "thread A update" }),
+          makeItem({ item_id: "1.1", kind: "agent_code", payload: "thread A updated code" }),
+        ]}
+      />,
+    );
+    expect(runToggle().getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByTestId("python-code").textContent).toBe("thread A updated code");
+
+    // Item ids restart in each thread; the matching id must not resurrect A's pin in B.
+    rerender(
+      <TimelineView
+        threadKey="2"
+        items={[
+          makeItem({ item_id: "1.0", kind: "agent_reasoning", payload: "thread B thinking" }),
+          makeItem({ item_id: "1.1", kind: "agent_code", payload: "thread B code" }),
+        ]}
+      />,
+    );
+    expect(runToggle().getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByTestId("python-code")).toBeNull();
+  });
+
+  it("drops a pinned inner-card collapse when the timeline thread changes", () => {
+    setToggleState({ detailsMode: "all" });
+    const { rerender } = render(
+      <TimelineView
+        threadKey="1"
+        items={[
+          makeItem({ item_id: "1.0", kind: "agent_reasoning", payload: "thread A thinking" }),
+          makeItem({ item_id: "1.1", kind: "agent_code", payload: "thread A code" }),
+        ]}
+      />,
+    );
+
+    expect(runToggle().getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByTestId("python-code").textContent).toBe("thread A code");
+    fireEvent.click(screen.getAllByTestId("card-toggle")[1]);
+    expect(screen.queryByTestId("python-code")).toBeNull();
+
+    rerender(
+      <TimelineView
+        threadKey="2"
+        items={[
+          makeItem({ item_id: "1.0", kind: "agent_reasoning", payload: "thread B thinking" }),
+          makeItem({ item_id: "1.1", kind: "agent_code", payload: "thread B code" }),
+        ]}
+      />,
+    );
+    expect(runToggle().getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByTestId("python-code").textContent).toBe("thread B code");
+  });
+
   it("folds a run of ≥2 secondary items into an expanded turn block by default", () => {
     render(
       <TimelineView

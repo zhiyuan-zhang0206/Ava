@@ -19,6 +19,8 @@
     "checkGateway": "加载失败——请检查 gateway 后刷新。",
     "removeImage": "移除 {name}",
     "composerInput": "给 agent 发送消息",
+    "composerPlaceholder": "发送消息",
+    "composerPlaceholderResurrect": "发送消息以复活此 agent",
     "deliveryUnconfirmedStatus": "消息是否送达尚未确认。请先核对这条消息，再发送下一条。",
     "deliveryUnconfirmedToast": "消息是否送达尚未确认。请重试同一条消息进行核对，或明确选择发送另一条。",
     "retrySameMessage": "重试同一条消息",

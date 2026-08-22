@@ -68,6 +68,9 @@ interface Props {
   // the active agent id — makes the context readout a button that expands the
   // breakdown panel. null = no active agent (readout is non-interactive).
   agentId?: number | null;
+  /** Whether the active agent is terminated. Sending resurrects it, so the
+   *  textarea explains that behavior in its placeholder. */
+  agentTerminated?: boolean;
   // CSS max-width for the composer root, from the timeline-width user setting
   // (lib/timeline-width.ts timelineMaxWidthCss) — aligned with the timeline
   // column (#723-⑧). The home page passes the viewport-ratio-derived cap on
@@ -180,7 +183,7 @@ function newClientMessageId(): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
-export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, focusToken, contextTokens, maxContextTokens = 0, softCompactTokens = 0, hardCompactTokens = 0, agentId = null, maxWidthCss, children, details, inspect }: Props) {
+export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, focusToken, contextTokens, maxContextTokens = 0, softCompactTokens = 0, hardCompactTokens = 0, agentId = null, agentTerminated = false, maxWidthCss, children, details, inspect }: Props) {
   const t = useTranslations("common");
   const prevAgentIdRef = useRef(agentId);
   const [value, setValue] = useState(() => {
@@ -736,6 +739,7 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
           ref={taRef}
           data-testid="composer-input"
           aria-label={t("composerInput")}
+          placeholder={agentTerminated ? t("composerPlaceholderResurrect") : t("composerPlaceholder")}
           value={value}
           readOnly={composerLocked}
           onChange={(e) => {
