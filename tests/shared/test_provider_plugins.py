@@ -76,7 +76,7 @@ _MODEL_LINE = """\"{model}\": ModelSpec(
             knowledge_cutoff="2026-01",
             effort_levels=("low", "high"),
             tuning=ModelTuning(reasoning_effort="high"),
-            vision={model_vision},
+            media_types={model_media_types},
         )"""
 
 _PRICE_LINE = """\"{model}\": PriceRates(
@@ -121,7 +121,7 @@ def provider_plugin() -> Generator[Callable[..., None], None, None]:
             _MODEL_LINE.format(
                 model=model,
                 provider=prefix.rstrip("-"),
-                model_vision="True" if model_vision else "False",
+                model_media_types='frozenset({"image"})' if model_vision else "frozenset()",
             )
             if model
             else ""

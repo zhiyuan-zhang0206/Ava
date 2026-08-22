@@ -166,8 +166,9 @@ def test_superseded_chain_validation_accepts_valid_link(
 
 def test_deepseek_vision_exp_registry_facts() -> None:
     """The new multimodal deepseek entry carries the v4-flash facts (window,
-    output cap, cutoff, effort vocabulary, compact thresholds) plus vision=True —
-    it is the same text model with still-image input added, not a new family."""
+    output cap, cutoff, effort vocabulary, compact thresholds) plus image
+    media support — it is the same text model with still-image input added,
+    not a new family."""
     spec = MODELS["deepseek-v4-flash-vision-exp"]
     assert spec.provider == "deepseek"
     assert spec.spawnable
@@ -175,7 +176,7 @@ def test_deepseek_vision_exp_registry_facts() -> None:
     assert spec.max_output_tokens == 384_000
     assert spec.knowledge_cutoff == "2026-04"
     assert spec.effort_levels == ("high", "max")
-    assert spec.vision is True
+    assert spec.media_types == frozenset({"image"})
     # Same compact decision as every deepseek entry (task #581): soft 374k /
     # hard 512k on the 1M window.
     assert resolve_setting("auto_compact_fraction", model="deepseek-v4-flash-vision-exp") == 0.512
@@ -184,23 +185,35 @@ def test_deepseek_vision_exp_registry_facts() -> None:
     )
 
 
-def test_vision_flag_matches_prefix_gate_except_deepseek_split() -> None:
-    """The per-model vision flag must reproduce the old prefix-based gate for
-    every registered id — the migration is behavior-preserving by construction.
-    The single deliberate exception is deepseek-v4-flash-vision-exp: True under a
-    prefix whose other members are text-only (the reason the gate went per-model)."""
-    from shared.lm.factory import _VISION_MODEL_PREFIXES
-
-    for model, spec in MODELS.items():
-        prefix_decision = model.startswith(_VISION_MODEL_PREFIXES)
-        if model == "deepseek-v4-flash-vision-exp":
-            assert spec.vision is True and prefix_decision is False, model
-        else:
-            assert spec.vision == prefix_decision, (
-                model,
-                spec.vision,
-                prefix_decision,
-            )
+def test_image_media_types_match_the_verified_model_matrix() -> None:
+    """Image-capable ids are fixed by their provider bindings, not a broad
+    prefix: the DeepSeek vision experiment is the only multimodal deepseek."""
+    expected = {
+        "deepseek-v4-flash-vision-exp",
+        "claude-sonnet-5",
+        "claude-haiku-4-5-20251001",
+        "claude-opus-5",
+        "claude-fable-5",
+        "claude-opus-4-8",
+        "claude-sonnet-4-6",
+        "claude-opus-4-7",
+        "claude-opus-4-6",
+        "claude-haiku-4-5",
+        "gemini-3.7-flash",
+        "gemini-3.5-flash",
+        "gemini-3.1-pro-preview",
+        "gemini-2.5-pro",
+        "gemini-2.5-flash",
+        "gpt-5.6-sol",
+        "gpt-5.6-terra",
+        "gpt-5.6-luna",
+        "gpt-5.5",
+        "gpt-5.4-mini",
+        "kimi-k3",
+        "qwen3.8-max",
+        "qwen3.8-27b",
+    }
+    assert {model for model, spec in MODELS.items() if "image" in spec.media_types} == expected
 
 
 def test_qwen_roster_is_exactly_the_two_flat_tier_models() -> None:
