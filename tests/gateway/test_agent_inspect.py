@@ -186,6 +186,24 @@ class _FakeLoki:
     def count_events(self, **kwargs: Any) -> int:
         return len(self._match(**kwargs))
 
+    def count_by_event_name(self, **kwargs: Any) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for row in self._match(**kwargs):
+            event_name = str(row["event_name"])
+            counts[event_name] = counts.get(event_name, 0) + 1
+        return counts
+
+    def attribute_distribution(self, **kwargs: Any) -> list[tuple[float, int]]:
+        field = kwargs["field"]
+        counts: dict[float, int] = {}
+        for row in self._match(**kwargs):
+            raw = row["attributes"].get(field)
+            if raw is None:
+                continue
+            value = float(raw)
+            counts[value] = counts.get(value, 0) + 1
+        return sorted(counts.items())
+
     def attribute_aggregate(self, **kwargs: Any) -> Any:
         rows = self._match(**kwargs)
         field = kwargs["field"]
@@ -231,6 +249,8 @@ def fake_loki(monkeypatch: pytest.MonkeyPatch) -> _FakeLoki:
     fake = _FakeLoki()
     monkeypatch.setattr(loki_events, "query_events", fake.query_events)
     monkeypatch.setattr(loki_events, "count_events", fake.count_events)
+    monkeypatch.setattr(loki_events, "count_by_event_name", fake.count_by_event_name)
+    monkeypatch.setattr(loki_events, "attribute_distribution", fake.attribute_distribution)
     monkeypatch.setattr(loki_events, "attribute_aggregate", fake.attribute_aggregate)
     _agent_cost.cache_clear()
     agent_inspect.cache_clear()
@@ -272,6 +292,37 @@ def _ledger_row(
                 cost,
                 calls if costed is None else costed,
                 unpriced,
+            ),
+        )
+
+
+def _metrics_ledger_row(
+    db: psycopg.Connection,
+    *,
+    agent_id: int,
+    days_ago: int,
+    turn_total: int,
+    turn_ok: int,
+    turn_duration_seconds: float,
+    exec_ok: int = 0,
+    exec_failed: int = 0,
+) -> None:
+    """Insert one completed UTC day for PG-backed inspector stats."""
+    with db.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agent_metrics_daily "
+            "(agent_id, day, turn_total, turn_ok, turn_dur_sum, turn_dur_min, turn_dur_max, exec_ok, exec_failed) "
+            "VALUES (%s, (now() AT TIME ZONE 'UTC')::date - %s, %s, %s, %s, %s, %s, %s, %s)",
+            (
+                agent_id,
+                days_ago,
+                turn_total,
+                turn_ok,
+                turn_duration_seconds,
+                turn_duration_seconds,
+                turn_duration_seconds,
+                exec_ok,
+                exec_failed,
             ),
         )
 
@@ -854,6 +905,62 @@ def test_inspect_turn_stats(db_conn: psycopg.Connection, fake_loki: _FakeLoki) -
     assert stats["turn_max_seconds"] == 100.0
 
 
+def test_inspect_windowed_duration_stats_keep_exact_float_values(
+    db_conn: psycopg.Connection, fake_loki: _FakeLoki
+) -> None:
+    """A single live source keeps fractional durations exact (Task #1394)."""
+    aid = _insert_agent(db_conn)
+    for duration in (2.48, 2.48, 96.04):
+        fake_loki.add(
+            event="turn_end",
+            agent_id=aid,
+            payload={"duration_seconds": duration, "ok": True},
+        )
+    db_conn.commit()
+    with TestClient(app) as client:
+        stats = client.get(f"/api/agents/{aid}/inspect?hours=24").json()["stats"]
+    assert stats["turn_p50_seconds"] == 2.48
+    assert stats["turn_p90_seconds"] == 77.33
+    assert stats["turn_min_seconds"] == 2.48
+    assert stats["turn_max_seconds"] == 96.04
+
+
+def test_inspect_whole_life_stats_read_completed_days_from_the_ledger(
+    db_conn: psycopg.Connection, fake_loki: _FakeLoki
+) -> None:
+    """No-hours inspect keeps pre-tail turn/exec counts in Postgres, not Loki."""
+    aid = _insert_agent(db_conn)
+    _metrics_ledger_row(
+        db_conn,
+        agent_id=aid,
+        days_ago=2,
+        turn_total=7,
+        turn_ok=6,
+        turn_duration_seconds=3.0,
+        exec_ok=4,
+        exec_failed=2,
+    )
+    # The newest ledger day ends at yesterday 00:00, so this completed-day
+    # live event must be read from its watermark through now (not just today).
+    fake_loki.add(
+        event="turn_end",
+        agent_id=aid,
+        payload={"duration_seconds": 4.0, "ok": True},
+        ts_offset_hours=27,
+    )
+    fake_loki.add(event="turn_end", agent_id=aid, payload={"duration_seconds": 5.0, "ok": True})
+    fake_loki.add(event="exec", agent_id=aid)
+    db_conn.commit()
+    with TestClient(app) as client:
+        response = client.get(f"/api/agents/{aid}/inspect")
+    assert response.status_code == 200
+    stats = response.json()["stats"]
+    assert stats["turn_total"] == 9
+    assert stats["turn_ok"] == 8
+    assert stats["exec_ok"] == 5
+    assert stats["exec_failed"] == 2
+
+
 def test_inspect_exec_ok_fail_split(db_conn: psycopg.Connection, fake_loki: _FakeLoki) -> None:
     """exec_ok = plain 'exec'; exec_failed = exec_failed / exec(timeout) /
     exec_cancelled (the prefix regex also counts legacy exec_thread_stuck rows
@@ -911,6 +1018,14 @@ def test_inspect_hours_windows_cost_and_stats(
         agent_id=aid,
         payload={"duration_seconds": 2.0, "ok": True},
         ts_offset_hours=25,
+    )
+    _metrics_ledger_row(
+        db_conn,
+        agent_id=aid,
+        days_ago=1,
+        turn_total=1,
+        turn_ok=1,
+        turn_duration_seconds=2.0,
     )
     # 1h ago — inside the window
     fake_loki.add(

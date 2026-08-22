@@ -36,7 +36,7 @@ import { cn } from "@/lib/utils";
 import { BAR_HEIGHT_CLASS, FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0, OVERFLOW_HIDDEN } from "@/lib/layout";
 
 // Window options for the cost + activity sections. `null` = cumulative since
-// spawn (the default); the hour values are a subset of the backend whitelist
+// spawn (available as All); the hour values are a subset of the backend whitelist
 // (StatsWindowHours: 1/6/24/72/168). -1 is a local sentinel for the
 // since-last-compact window — it never reaches the backend as `hours`, it
 // selects the `since_compact` query param instead.
@@ -60,7 +60,7 @@ const WINDOWS: { label: string; value: number | null }[] = [
  * the panel OPENS (refetchOnMount:"always"), refreshes on the header's
  * manual refresh button, and drifts on a slow 60s background interval while
  * the panel stays open. Notice SSE events invalidate immediately. The header
- * window selector re-scopes cost (default: cumulative since spawn).
+ * window selector re-scopes cost (default: the recent 24h window).
  *
  * Responsive: on desktop (≥ lg) it's a side panel; on mobile (< lg) it
  * becomes a full-screen overlay with a backdrop — same pattern as the
@@ -80,7 +80,7 @@ function StaleDot() {
 
 export function InspectorPanel({ agentId }: { agentId: number }) {
   const { open, toggle } = useInspectorOpen();
-  const [hours, setHours] = useState<number | null>(null);
+  const [hours, setHours] = useState<number | null>(24);
   const queryClient = useQueryClient();
 
   // Context-bar style floating panel (user ruling 2026-08-05 21:50): the

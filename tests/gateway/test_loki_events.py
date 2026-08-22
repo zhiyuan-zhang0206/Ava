@@ -733,6 +733,68 @@ class TestCountEvents:
         assert client.calls == []
 
 
+class TestInspectorAggregates:
+    def test_count_by_event_name_consolidates_related_counters(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        client = _install(
+            monkeypatch,
+            {
+                "data": {
+                    "result": [
+                        {"metric": {"event_name": "turn_end"}, "value": [1, "4"]},
+                        {"metric": {"event_name": "exec"}, "value": [1, "2"]},
+                        {"metric": {"event_name": "exec_failed"}, "value": [1, "1"]},
+                    ]
+                }
+            },
+        )
+        counts = loki_events.count_by_event_name(
+            agent_id=7,
+            event_names=["^turn_end$", "^exec$", "^exec_.*"],
+            categories=["telemetry", "log"],
+            attribute_filters=None,
+            from_=datetime(2026, 8, 1, tzinfo=UTC),
+            to=datetime(2026, 8, 1, 3, tzinfo=UTC),
+        )
+        assert counts == {"turn_end": 4, "exec": 2, "exec_failed": 1}
+        query = client.calls[0][1]["query"]
+        assert query.startswith("sum by (event_name) (count_over_time((")
+        assert "[10800s]))" in query
+
+    def test_attribute_distribution_relabels_the_bucketed_series_limit_fallback(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        client = _install(
+            monkeypatch,
+            [
+                _SeriesLimitResponse(),
+                {
+                    "data": {
+                        "result": [
+                            {
+                                "metric": {"duration_seconds_bucket": "2"},
+                                "value": [1, "3"],
+                            }
+                        ]
+                    }
+                },
+            ],
+        )
+        distribution = loki_events.attribute_distribution(
+            field="duration_seconds",
+            agent_id=7,
+            event_names=["^turn_end$"],
+            categories=["telemetry", "log"],
+            attribute_filters=None,
+            from_=datetime(2026, 8, 1, tzinfo=UTC),
+            to=datetime(2026, 8, 1, 3, tzinfo=UTC),
+        )
+        assert distribution == [(2.5, 3)]
+        assert len(client.calls) == 2
+        assert "topk(500" in client.calls[1][1]["query"]
+
+
 # ─── attribute filters + attribute_aggregate ─────────────────────────────────
 
 
