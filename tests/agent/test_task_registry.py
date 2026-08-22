@@ -256,6 +256,121 @@ def test_update_nothing_raises(db_conn: psycopg.Connection) -> None:
         ava._boot._agent_id = original
 
 
+@pytest.mark.parametrize("closing_status", ["done", "cancelled"])
+def test_update_rejects_closing_parent_with_open_child(
+    db_conn: psycopg.Connection, closing_status: str
+) -> None:
+    agent_id = _seed_agent(db_conn)
+    original = ava._boot._agent_id
+    ava._boot._agent_id = agent_id
+    try:
+        parent = task_registry.create(f"parent-{closing_status}", "detail")
+        child = task_registry.create(f"open-child-{closing_status}", "detail", parent=parent.id)
+        message = (
+            f"task {parent.id} has 1 open/in_progress child tasks (e.g. #{child.id}) — "
+            "close or cancel them first"
+        )
+
+        with pytest.raises(ValueError, match=re.escape(message)):
+            task_registry.update(parent.id, status=closing_status)
+
+        assert task_registry.get(parent.id).status == "open"
+    finally:
+        ava._boot._agent_id = original
+
+
+def test_update_rejects_closing_parent_with_in_progress_child(
+    db_conn: psycopg.Connection,
+) -> None:
+    agent_id = _seed_agent(db_conn)
+    original = ava._boot._agent_id
+    ava._boot._agent_id = agent_id
+    try:
+        parent = task_registry.create("parent-with-active-child", "detail")
+        child = task_registry.create("active-child", "detail", parent=parent.id)
+        task_registry.update(child.id, status="in_progress")
+
+        with pytest.raises(ValueError, match=rf"task {parent.id} has 1 .*#{child.id}"):
+            task_registry.update(parent.id, status="done")
+
+        assert task_registry.get(parent.id).status == "open"
+    finally:
+        ava._boot._agent_id = original
+
+
+def test_update_closes_parent_when_all_children_are_closed(
+    db_conn: psycopg.Connection,
+) -> None:
+    agent_id = _seed_agent(db_conn)
+    original = ava._boot._agent_id
+    ava._boot._agent_id = agent_id
+    try:
+        parent = task_registry.create("parent-with-closed-children", "detail")
+        done_child = task_registry.create("done-child", "detail", parent=parent.id)
+        cancelled_child = task_registry.create("cancelled-child", "detail", parent=parent.id)
+        task_registry.update(done_child.id, status="done")
+        task_registry.update(cancelled_child.id, status="cancelled")
+
+        task_registry.update(parent.id, status="done")
+
+        assert task_registry.get(parent.id).status == "done"
+    finally:
+        ava._boot._agent_id = original
+
+
+@pytest.mark.parametrize("closing_status", ["done", "cancelled"])
+def test_update_closes_parent_without_children(
+    db_conn: psycopg.Connection, closing_status: str
+) -> None:
+    agent_id = _seed_agent(db_conn)
+    original = ava._boot._agent_id
+    ava._boot._agent_id = agent_id
+    try:
+        task = task_registry.create(f"parent-without-children-{closing_status}", "detail")
+
+        task_registry.update(task.id, status=closing_status)
+
+        assert task_registry.get(task.id).status == closing_status
+    finally:
+        ava._boot._agent_id = original
+
+
+def test_update_starts_parent_with_open_child(db_conn: psycopg.Connection) -> None:
+    agent_id = _seed_agent(db_conn)
+    original = ava._boot._agent_id
+    ava._boot._agent_id = agent_id
+    try:
+        parent = task_registry.create("parent-to-start", "detail")
+        task_registry.create("open-child-of-started-parent", "detail", parent=parent.id)
+
+        task_registry.update(parent.id, status="in_progress")
+
+        assert task_registry.get(parent.id).status == "in_progress"
+    finally:
+        ava._boot._agent_id = original
+
+
+def test_update_title_and_note_on_parent_with_open_child(
+    db_conn: psycopg.Connection,
+) -> None:
+    agent_id = _seed_agent(db_conn)
+    original = ava._boot._agent_id
+    ava._boot._agent_id = agent_id
+    try:
+        parent = task_registry.create("parent-to-edit", "detail")
+        task_registry.create("open-child-of-edited-parent", "detail", parent=parent.id)
+
+        task_registry.update(parent.id, title="edited-parent", note="still active")
+
+        updated = task_registry.get(parent.id)
+        assert updated.status == "open"
+        assert updated.title == "edited-parent"
+        assert updated.results is not None
+        assert updated.results.splitlines()[-1].endswith("still active")
+    finally:
+        ava._boot._agent_id = original
+
+
 def test_log_appends_timestamped_lines(db_conn: psycopg.Connection) -> None:
     agent_id = _seed_agent(db_conn)
     original = ava._boot._agent_id

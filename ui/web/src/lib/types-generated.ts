@@ -3181,6 +3181,9 @@ export interface paths {
          *     The system root task is immutable: any PATCH targeting it is rejected with
          *     422 (mirrors the SDK update() guard), so the task-tree anchor can never be
          *     reassigned, completed, cancelled, or otherwise edited.
+         *
+         *     A status change to done or cancelled is rejected with 422 while any direct
+         *     child remains open or in progress. Close or cancel those children first.
          */
         patch: operations["patch_task_api_tasks__task_id__patch"];
         trace?: never;

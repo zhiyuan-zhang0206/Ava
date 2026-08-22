@@ -450,6 +450,7 @@ def _collect_update_fields(
 def _write_task_update(
     cur: psycopg.Cursor,
     task_id: int,
+    status: str | None,
     sets: builtins.list[str],
     params: builtins.list[object],
     payload: dict[str, object],
@@ -462,9 +463,10 @@ def _write_task_update(
 ) -> tuple[int | None, str, int | None]:
     """Apply an update() row write inside the caller's transaction.
 
-    Holds the row FOR UPDATE, enforces root immutability and title uniqueness,
-    writes the row + optional note, and records the event log. Returns
-    (old_owner, current_title, new_owner) for the post-commit notification."""
+    Holds the row FOR UPDATE, enforces root immutability, parent-close, and
+    title-uniqueness rules, writes the row + optional note, and records the
+    event log. Returns (old_owner, current_title, new_owner) for the post-commit
+    notification."""
     # FOR UPDATE holds the row across the read -> write so two concurrent
     # reassignments cannot both act on the same stale owner.
     cur.execute(
@@ -483,6 +485,20 @@ def _write_task_update(
             f"task {task_id} is the system root task and is immutable — "
             f"it cannot be reassigned, completed, cancelled, or otherwise edited"
         )
+    if status in ("done", "cancelled"):
+        cur.execute(
+            "SELECT id, count(*) OVER () FROM agent_tasks "
+            "WHERE parent_id = %s AND status IN ('open', 'in_progress') "
+            "ORDER BY id LIMIT 1",
+            (task_id,),
+        )
+        active_child = cur.fetchone()
+        if active_child is not None:
+            child_id, child_count = active_child
+            raise ValueError(
+                f"task {task_id} has {child_count} open/in_progress child tasks "
+                f"(e.g. #{child_id}) — close or cancel them first"
+            )
     # A rename must keep create()'s invariant: no two open/in_progress
     # tasks share a title.
     if title is not None:
@@ -575,7 +591,8 @@ def update(
     owner, the owner is notified of the change and its author.
 
     Args:
-        status: one of "open", "in_progress", "done", "cancelled".
+        status: one of "open", "in_progress", "done", "cancelled". Closing a
+            task is rejected while any direct child is open or in progress.
         title: unique among open/in_progress tasks.
         results: replaces the whole field; use note to append instead.
         owner: agent id to reassign to. None means no change — a task always
@@ -607,7 +624,18 @@ def update(
             sets.append("parent_id = %s")
             params.append(resolve_reparent(cur, task_id, parent_id))
         old_owner, current_title, new_owner = _write_task_update(
-            cur, task_id, sets, params, payload, changes, title, note, owner, owner_changing, actor
+            cur,
+            task_id,
+            status,
+            sets,
+            params,
+            payload,
+            changes,
+            title,
+            note,
+            owner,
+            owner_changing,
+            actor,
         )
         if parent_id is not _UNSET:
             changes.append("parent → root" if parent_id is None else f"parent → #{parent_id}")
