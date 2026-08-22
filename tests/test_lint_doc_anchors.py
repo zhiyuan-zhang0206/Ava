@@ -137,7 +137,7 @@ def test_unparseable_target_is_a_violation_not_a_crash(lint, tmp_path):
 
 
 def test_symlinked_skill_directory_is_descended(lint, tmp_path):
-    # 21 of the 38 entries under the real `.agents/skills/` are symlinks to the
+    # 26 of the 37 entries under the real `.agents/skills/` are symlinks to the
     # built-in skills. `Path.rglob` does not follow them, so most of that scan
     # root would be silently unscanned.
     mod, _, skills, _ = lint
