@@ -145,6 +145,10 @@ def test_anonymous_viewer_can_open_tempo_trace_in_explore(tmp_path: Path) -> Non
     base_url = f"http://127.0.0.1:{port}/grafana"
     admin_user = "native-contract-admin"
     admin_password = f"native-contract-{TRACE_ID}"
+    admin_headers = {
+        "Authorization": "Basic "
+        + base64.b64encode(f"{admin_user}:{admin_password}".encode()).decode()
+    }
     env = os.environ.copy()
     env.update(shipped)
     env.update(
@@ -181,14 +185,28 @@ def test_anonymous_viewer_can_open_tempo_trace_in_explore(tmp_path: Path) -> Non
         assert settings["liveEnabled"] is False
         admin_status, _, admin_body = _request(
             f"{base_url}/api/admin/settings",
-            headers={
-                "Authorization": "Basic "
-                + base64.b64encode(f"{admin_user}:{admin_password}".encode()).decode()
-            },
+            headers=admin_headers,
         )
         assert admin_status == 200
         admin_settings = json.loads(admin_body)
         assert admin_settings["database"]["query_retries"] == "5"
+
+        # Import the exact shipped dashboard into this disposable instance so
+        # its Grafana-13 JSON schema and the user-facing subpath are both real.
+        dashboard = json.loads(
+            (
+                REPO_ROOT / "deploy/lgtm/config/grafana/provisioning/dashboards/ava-ops-main.json"
+            ).read_text(encoding="utf-8")
+        )
+        import_status, _, import_body = _request(
+            f"{base_url}/api/dashboards/db",
+            data=json.dumps({"dashboard": dashboard, "overwrite": True}).encode(),
+            headers={**admin_headers, "Content-Type": "application/json"},
+        )
+        assert import_status == 200, (import_status, import_body[:500])
+        dashboard_status, dashboard_location, _ = _request(f"{base_url}/d/ava-ops-main/ava-ops")
+        assert dashboard_status == 200
+        assert dashboard_location == ""
 
         explore_url = _explore_url(base_url)
         status, location, body = _request(explore_url)
