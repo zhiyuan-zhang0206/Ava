@@ -56,6 +56,8 @@ def test_eval_isolation_disables_network_and_result_sdk_surfaces() -> None:
 
         assert not hasattr(ava, "web")
         assert not hasattr(ava, "understand")
+        assert not hasattr(ava, "mcps")
+        assert not hasattr(ava, "ui")
         assert not hasattr(ava.agents, "get_last_message")
         assert not hasattr(ava, "tasks")
         assert ava.memory.PATH.name == "memory-pool"
@@ -111,6 +113,8 @@ def test_eval_isolation_off_leaves_sdk_and_memory_unchanged() -> None:
 
         assert hasattr(ava, "web")
         assert hasattr(ava, "understand")
+        assert hasattr(ava, "mcps")
+        assert hasattr(ava, "ui")
         assert hasattr(ava.agents, "get_last_message")
         assert ava.memory.PATH == original_path
         print("ok")

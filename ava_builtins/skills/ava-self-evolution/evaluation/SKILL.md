@@ -109,7 +109,7 @@ Layer map — responsibility, leak boundary, and current status:
 | Data isolation | Eval run never touches production data | **Open** — `evaluate.launch` spawns ordinary cluster agents | Planned |
 | Side-effect containment | Agent's file/OS effects stay contained | Container mode (effects die with the container) | Implemented in harness; not used by `evaluate.launch` |
 | Memory isolation | Eval agent cannot read eval-relevant pool notes | Empty per-agent `ava.memory` pool; shared index and passive recall suppressed | Implemented at the SDK layer; raw filesystem and DB reads need next-phase OS sandboxing |
-| Network restriction | Eval agent cannot web-search the answer | `ava.web` / `ava.understand` removed unless explicitly allowlisted | Implemented at the SDK layer; raw outbound network needs next-phase container mode |
+| Network restriction | Eval agent cannot web-search the answer or drive connected clients | `ava.web` / `ava.understand` removed unless explicitly allowlisted; `ava.mcps` / `ava.ui` always removed | Implemented at the SDK layer; raw outbound network needs next-phase container mode |
 | Result separation | Eval agent cannot read original-run artifacts | SDK hides task and last-message reads; gateway rejects isolated last-message callers | Implemented at the SDK + gateway layers; raw filesystem and DB reads need next-phase OS sandboxing |
 | Trace audit | Score is verified against what the agent actually did | Read of `tools_called`, file reads, messages per run | Partially — signals in rubric/label; manual deep-dive reads traces |
 
@@ -128,4 +128,7 @@ datasets and the run's own workspace instead of trusting the transcript alone
 
 The structure above is the standard; enforcement is deliberately staged. The
 SDK and gateway boundaries are live today; OS-level filesystem, database, and
-raw-network containment remains the named container-mode next phase.
+raw-network containment remains the named container-mode next phase. Until
+then, `caller` on the result endpoint is client-reported and can be spoofed
+under the accepted peer-trust model, and an isolated agent can ask a
+non-isolated helper to read results; container mode is the mitigation for both.

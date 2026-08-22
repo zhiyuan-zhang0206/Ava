@@ -254,7 +254,8 @@ def spawn(
     never re-brains it. Operational knobs (compaction thresholds, timeouts) stay
     live and follow the cluster. `config_overlay={"eval_isolation": True,
     "eval_network_allowlist": ["web"]}` starts an eval-isolated agent and
-    explicitly permits only the listed network-facing SDK capability.
+    explicitly permits only the listed `web` or `understand` capability; `mcps`
+    and `ui` are always disabled for isolated agents.
     """
     return _spawn_impl(
         prompt=prompt,
