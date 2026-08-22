@@ -16,18 +16,29 @@ use tauri::{AppHandle, Manager, Runtime};
 /// `identifier` in `tauri.conf.json`, which is what the Android project's
 /// package name is derived from.
 const PLUGIN_PACKAGE: &str = "com.ava.shell";
-const PLUGIN_CLASS: &str = "AvaBackgroundPlugin";
-const PLUGIN_NAME: &str = "avabackground";
+const BACKGROUND_PLUGIN_CLASS: &str = "AvaBackgroundPlugin";
+const BACKGROUND_PLUGIN_NAME: &str = "avabackground";
+const SECRET_PLUGIN_CLASS: &str = "AvaSecretPlugin";
+const SECRET_PLUGIN_NAME: &str = "avasecret";
 
 /// Managed handle to the Kotlin side. Absent when the plugin failed to load,
 /// which must degrade to "no background residency", never to a failed launch.
 struct BackgroundPlugin<R: Runtime>(PluginHandle<R>);
 
+/// Managed handle to the Keystore plugin. A missing handle is never treated as
+/// an empty secret when saving: storing a credential must fail closed.
+struct SecretPlugin<R: Runtime>(PluginHandle<R>);
+
+#[derive(serde::Deserialize)]
+struct StoredSecret {
+    secret: Option<String>,
+}
+
 /// Register the Kotlin foreground-service plugin.
 pub fn background_plugin<R: Runtime>() -> TauriPlugin<R> {
-    PluginBuilder::new(PLUGIN_NAME)
+    PluginBuilder::new(BACKGROUND_PLUGIN_NAME)
         .setup(|app, api| {
-            match api.register_android_plugin(PLUGIN_PACKAGE, PLUGIN_CLASS) {
+            match api.register_android_plugin(PLUGIN_PACKAGE, BACKGROUND_PLUGIN_CLASS) {
                 Ok(handle) => {
                     app.manage(BackgroundPlugin(handle));
                 }
@@ -35,6 +46,21 @@ pub fn background_plugin<R: Runtime>() -> TauriPlugin<R> {
                 // this build. Losing background residency is bad; refusing to
                 // start is worse.
                 Err(err) => log::error!("foreground-service plugin unavailable: {err}"),
+            }
+            Ok(())
+        })
+        .build()
+}
+
+/// Register the Kotlin Android-Keystore plugin.
+pub fn secret_plugin<R: Runtime>() -> TauriPlugin<R> {
+    PluginBuilder::new(SECRET_PLUGIN_NAME)
+        .setup(|app, api| {
+            match api.register_android_plugin(PLUGIN_PACKAGE, SECRET_PLUGIN_CLASS) {
+                Ok(handle) => {
+                    app.manage(SecretPlugin(handle));
+                }
+                Err(err) => log::error!("Keystore secret plugin unavailable: {err}"),
             }
             Ok(())
         })
@@ -57,6 +83,41 @@ pub fn set_background_service<R: Runtime>(app: &AppHandle<R>, enabled: bool) {
     {
         log::error!("foreground service {command} failed: {err}");
     }
+}
+
+/// Store the cluster secret after a successful native login only.
+pub fn save_secret<R: Runtime>(app: &AppHandle<R>, secret: &str) -> Result<(), String> {
+    let plugin = app
+        .try_state::<SecretPlugin<R>>()
+        .ok_or_else(|| "secure cluster-secret storage is unavailable".to_string())?;
+    plugin
+        .0
+        .run_mobile_plugin::<serde_json::Value>("save", serde_json::json!({ "secret": secret }))
+        .map(|_| ())
+        .map_err(|_| "could not save the cluster secret securely".to_string())
+}
+
+/// Return the decrypted stored secret, if Keystore has one and can read it.
+/// A startup failure simply falls back to the console's regular login page.
+pub fn stored_secret<R: Runtime>(app: &AppHandle<R>) -> Option<String> {
+    let plugin = app.try_state::<SecretPlugin<R>>()?;
+    plugin
+        .0
+        .run_mobile_plugin::<StoredSecret>("get", serde_json::json!({}))
+        .ok()?
+        .secret
+}
+
+/// Clear an explicitly removed Android secret without affecting settings.json.
+pub fn clear_secret<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
+    let plugin = app
+        .try_state::<SecretPlugin<R>>()
+        .ok_or_else(|| "secure cluster-secret storage is unavailable".to_string())?;
+    plugin
+        .0
+        .run_mobile_plugin::<serde_json::Value>("clear", serde_json::json!({}))
+        .map(|_| ())
+        .map_err(|_| "could not clear the cluster secret".to_string())
 }
 
 /// Ask for the notification permission after the user enables notifications.

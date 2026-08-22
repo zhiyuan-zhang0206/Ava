@@ -5,9 +5,11 @@
 //! whenever the resolved endpoints change, because the injected prelude carries
 //! those endpoints into the page and a stale prelude is worse than a reload.
 
-use std::net::{TcpStream, ToSocketAddrs};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
+use reqwest::blocking::Client;
+use reqwest::redirect::Policy;
+use reqwest::StatusCode;
 use tauri::{AppHandle, Manager, Url, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 
 use crate::commands::ShellConfig;
@@ -17,19 +19,16 @@ use crate::{external, urls};
 
 pub const MAIN_WINDOW: &str = "main";
 
-/// Retry budget for the entry URL. The gate is briefly unavailable during a
-/// cluster update, so the shell waits it out instead of showing a dead window —
-/// 10 attempts, 3 s apart.
-const RETRY_ATTEMPTS: u32 = 10;
+/// Overall entry probe budget. A failed connection must settle to a readable
+/// recovery screen within the same 30-second budget the shell UI displays.
+const RETRY_BUDGET: Duration = Duration::from_secs(30);
 const RETRY_INTERVAL: Duration = Duration::from_secs(3);
-/// Per-attempt reachability probe budget. Short: this is a TCP connect on the
-/// local network, and a slow probe just delays the retry that follows it.
-const PROBE_TIMEOUT: Duration = Duration::from_secs(2);
+/// HTTP answers matter here: TCP can accept then leave a webview hanging.
+const PROBE_TIMEOUT: Duration = Duration::from_secs(4);
 
 /// Bundled screens, addressed by fragment on the shell's own `index.html`.
 const SETUP_PAGE: &str = "index.html#setup";
 const CONNECTING_PAGE: &str = "index.html#connecting";
-const UNREACHABLE_PAGE: &str = "index.html#unreachable";
 
 /// Build (or rebuild) the main window for the current settings and start the
 /// reachability watchdog.
@@ -70,7 +69,13 @@ pub fn open_entry(app: &AppHandle) {
     if let Some(endpoints) = endpoints {
         #[cfg(desktop)]
         if state.settings().auto_login {
-            crate::autologin::start(window.clone(), endpoints.clone());
+            if let Some(secret) = crate::autologin::cluster_secret() {
+                crate::autologin::start(window.clone(), endpoints.clone(), secret);
+            }
+        }
+        #[cfg(target_os = "android")]
+        if let Some(secret) = crate::android::stored_secret(app) {
+            crate::autologin::start(window.clone(), endpoints.clone(), secret);
         }
         watch_entry(window, endpoints.entry);
     }
@@ -175,49 +180,105 @@ pub fn open_settings(app: &AppHandle) {
     }
 }
 
+/// The user-facing category for an exhausted HTTP probe budget.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum EntryFailure {
+    Unreachable,
+    Http,
+    UpdateWindow,
+}
+
+impl EntryFailure {
+    const fn query_value(self) -> &'static str {
+        match self {
+            Self::Unreachable => "unreachable",
+            Self::Http => "http",
+            Self::UpdateWindow => "update-window",
+        }
+    }
+
+    /// Preserve the most actionable observation across retry attempts.
+    const fn combine(self, next: Self) -> Self {
+        match (self, next) {
+            (_, Self::UpdateWindow) | (Self::UpdateWindow, _) => Self::UpdateWindow,
+            (_, Self::Http) | (Self::Http, _) => Self::Http,
+            _ => Self::Unreachable,
+        }
+    }
+}
+
 /// Watch the entry URL and swap the window between the console and the bundled
 /// status screens.
 ///
 /// The first probe runs against a window that is already loading the gate: if
 /// the gate answers, nothing happens at all and the user never sees a shell
-/// screen. Only a failure escalates to "Connecting…", and only an exhausted
-/// budget to "Cannot reach Ava".
+/// screen. Only a failure escalates to "Connecting…"; the 30-second budget
+/// then ends at a classified recovery screen.
 fn watch_entry(window: WebviewWindow, entry: Url) {
     std::thread::spawn(move || {
-        for attempt in 0..RETRY_ATTEMPTS {
-            if reachable(&entry) {
-                // Recovered after a visible failure — put the console back.
-                if attempt > 0 {
-                    let _ = window.navigate(entry.clone());
+        let deadline = Instant::now() + RETRY_BUDGET;
+        let mut attempt = 0;
+        let mut failure = EntryFailure::Unreachable;
+        loop {
+            match probe_entry(&entry) {
+                Ok(()) => {
+                    // Recovered after a visible failure — put the console back.
+                    if attempt > 0 {
+                        let _ = window.navigate(entry.clone());
+                    }
+                    return;
                 }
-                return;
+                Err(next) => failure = failure.combine(next),
             }
             if attempt == 0 {
                 navigate_to_page(&window, CONNECTING_PAGE);
             }
-            std::thread::sleep(RETRY_INTERVAL);
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                log::error!(
+                    "{entry} did not answer within {} seconds",
+                    RETRY_BUDGET.as_secs()
+                );
+                navigate_to_page(&window, &unreachable_page(failure));
+                return;
+            }
+            std::thread::sleep(RETRY_INTERVAL.min(remaining));
+            attempt += 1;
         }
-        log::error!("{entry} did not answer after {RETRY_ATTEMPTS} attempts");
-        navigate_to_page(&window, UNREACHABLE_PAGE);
     });
 }
 
-/// TCP-connect probe. The failure this retry loop exists for is "the gate
-/// process is not listening yet", which a connect answers directly — no HTTP
-/// client, no TLS, and no opinion about what the server replies.
-fn reachable(url: &Url) -> bool {
-    let Some(host) = url.host_str() else {
-        return false;
-    };
-    let Some(port) = url.port_or_known_default() else {
-        return false;
-    };
-    let Ok(addresses) = (host, port).to_socket_addrs() else {
-        return false;
-    };
-    addresses
-        .into_iter()
-        .any(|address| TcpStream::connect_timeout(&address, PROBE_TIMEOUT).is_ok())
+/// HTTP GET probe for the console root. A listening TCP socket is insufficient:
+/// it can accept a webview connection then hang forever. The console's normal
+/// signed-out answers (401/403) are still healthy HTTP responses.
+fn probe_entry(url: &Url) -> Result<(), EntryFailure> {
+    let client = Client::builder()
+        .timeout(PROBE_TIMEOUT)
+        .redirect(Policy::none())
+        .build()
+        .map_err(|_| EntryFailure::Http)?;
+    let response = client
+        .get(url.as_str())
+        .send()
+        .map_err(|_| EntryFailure::Unreachable)?;
+    classify_probe_status(response.status())
+}
+
+fn classify_probe_status(status: StatusCode) -> Result<(), EntryFailure> {
+    if status.is_success()
+        || status.is_redirection()
+        || matches!(status, StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN)
+    {
+        return Ok(());
+    }
+    if status == StatusCode::SERVICE_UNAVAILABLE {
+        return Err(EntryFailure::UpdateWindow);
+    }
+    Err(EntryFailure::Http)
+}
+
+fn unreachable_page(failure: EntryFailure) -> String {
+    format!("index.html?reason={}#unreachable", failure.query_value())
 }
 
 /// Navigate to one of the bundled screens, whose origin differs per platform.
@@ -237,7 +298,8 @@ fn navigate_to_page(window: &WebviewWindow, page: &str) {
 
 #[cfg(test)]
 mod tests {
-    use super::capability_identifier;
+    use super::{capability_identifier, classify_probe_status, unreachable_page, EntryFailure};
+    use reqwest::StatusCode;
 
     #[test]
     fn runtime_capability_identifiers_are_valid_and_origin_specific() {
@@ -246,5 +308,33 @@ mod tests {
         assert!(first.starts_with("remote-console-"));
         assert!(first.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'));
         assert_ne!(first, second);
+    }
+
+    #[test]
+    fn http_probe_accepts_console_and_login_responses() {
+        for status in [
+            StatusCode::OK,
+            StatusCode::FOUND,
+            StatusCode::UNAUTHORIZED,
+            StatusCode::FORBIDDEN,
+        ] {
+            assert_eq!(classify_probe_status(status), Ok(()));
+        }
+        assert_eq!(
+            classify_probe_status(StatusCode::INTERNAL_SERVER_ERROR),
+            Err(EntryFailure::Http)
+        );
+        assert_eq!(
+            classify_probe_status(StatusCode::SERVICE_UNAVAILABLE),
+            Err(EntryFailure::UpdateWindow)
+        );
+    }
+
+    #[test]
+    fn failure_page_carries_a_machine_readable_reason() {
+        assert_eq!(
+            unreachable_page(EntryFailure::Unreachable),
+            "index.html?reason=unreachable#unreachable"
+        );
     }
 }
