@@ -51,7 +51,7 @@ Ava's web user interface — Next.js 16 (App Router) + React 19 + Tailwind CSS 4
 
 `<html lang="zh-CN">` → `Providers` (QueryClientProvider → AuthProvider → EventStreamProvider → [fold owner + `SettingsMigration`] → ThemeProvider → `AppConnectionBanner` + `ToastHost`) → `AuthGuard` → page.
 
-- **QueryClient**: `staleTime` default 5min, `gcTime` 30min, `refetchOnWindowFocus` off (SSE-driven queries set `staleTime: Infinity`; those that need poll explicitly set `refetchInterval`).
+- **QueryClient**: `staleTime` default 5min, `gcTime` 30min, `refetchOnWindowFocus` off (SSE-driven queries set `staleTime: Infinity`; those that need poll explicitly set `refetchInterval`); a 401 is never retried and globally invalidates the session so `AuthGuard` redirects to `/login` and unmounts polling observers (Task #1326).
 - **EventStreamProvider** sits above the route tree: global `/api/system` broadcast persists across page navigation (one persistent EventSource).
 - **Fold owner** (`useFoldOwner`, inside `EventStreamProvider`): the SOLE root writer — one subscriber folds every global-broadcast event into the query caches (`["agents"]` / `["notices"]` / `["agent-pages"]` / `["tasks"]` / `["fleet-graph"]` families, debounced per family) and runs the central reconnect reconcile. Hooks only read their keys now.
 - **ToastHost**: root-level renderer for the store's toast slot, so error toasts reach the user on every route (not just Home).

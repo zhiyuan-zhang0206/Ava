@@ -1,8 +1,10 @@
-// Providers: mounts QueryClient + EventStreamProvider + ThemeProvider — smoke
-// test (children pass through + no throw).
+// Providers: QueryClient defaults + root provider composition.
 
-import { cleanup, render, screen } from "@testing-library/react";
+import { QueryClientProvider, useQuery } from "@tanstack/react-query";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+import type * as ApiModule from "@/lib/api";
 
 // EventStreamProvider opens a real EventSource (happy-dom ships one that hits
 // the network); stub it to a pass-through so the smoke test stays offline. The
@@ -28,16 +30,67 @@ vi.mock("@/lib/use-alerts", () => ({
 //   - AuthProvider's mount-time session check → api.checkAuth()
 // Stub both to never-resolving promises: this smoke test only checks the
 // initial render, not status- or auth-driven content.
-vi.mock("@/lib/api", () => ({
-  api: {
-    getClusterStatus: vi.fn(() => new Promise(() => undefined)),
-    checkAuth: vi.fn(() => new Promise(() => undefined)),
-  },
-}));
+vi.mock("@/lib/api", async (importOriginal) => {
+  const actual = await importOriginal<typeof ApiModule>();
+  return {
+    ...actual,
+    api: {
+      getClusterStatus: vi.fn(() => new Promise(() => undefined)),
+      checkAuth: vi.fn(() => new Promise(() => undefined)),
+    },
+  };
+});
 
-import { Providers } from "./providers";
+import { ApiError } from "@/lib/api";
+import { setSessionInvalidHandler } from "@/lib/auth-context";
 
-afterEach(cleanup);
+import { createQueryClient, Providers } from "./providers";
+
+afterEach(() => {
+  cleanup();
+  setSessionInvalidHandler(null);
+  vi.useRealTimers();
+});
+
+function QueryProbe({ queryFn }: { queryFn: () => Promise<unknown> }) {
+  useQuery({ queryKey: ["query-client-probe"], queryFn });
+  return null;
+}
+
+describe("QueryClient defaults", () => {
+  it("routes a 401 to auth without retrying the query", async () => {
+    const sessionInvalidHandler = vi.fn();
+    const queryFn = vi
+      .fn()
+      .mockRejectedValue(new ApiError(401, "authentication required"));
+    setSessionInvalidHandler(sessionInvalidHandler);
+
+    render(
+      <QueryClientProvider client={createQueryClient()}>
+        <QueryProbe queryFn={queryFn} />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => expect(sessionInvalidHandler).toHaveBeenCalledTimes(1));
+    expect(queryFn).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the default three retries for network errors", async () => {
+    vi.useFakeTimers();
+    const queryFn = vi.fn().mockRejectedValue(new TypeError("Failed to fetch"));
+
+    render(
+      <QueryClientProvider client={createQueryClient()}>
+        <QueryProbe queryFn={queryFn} />
+      </QueryClientProvider>,
+    );
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+    expect(queryFn).toHaveBeenCalledTimes(4);
+  });
+});
 
 describe("Providers", () => {
   it("passes children through", () => {
