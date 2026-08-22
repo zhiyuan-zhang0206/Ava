@@ -349,6 +349,16 @@ describe("stats / config / timeline / system status", () => {
     expect(calls[0].url).toMatch(/\/api\/agents\/33\/token-usage$/);
   });
 
+  it("getCommands GETs the global command list without query params", async () => {
+    await api.getCommands();
+    expect(calls[0].url).toMatch(/\/api\/commands$/);
+  });
+
+  it("getCommands scopes the command list to an agent", async () => {
+    await api.getCommands(7);
+    expect(calls[0].url).toMatch(/\/api\/commands\?agent_id=7$/);
+  });
+
   it("getMemoryGraph GETs /api/memory/graph", async () => {
     await api.getMemoryGraph();
     expect(calls[0].url).toMatch(/\/api\/memory\/graph$/);
