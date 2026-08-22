@@ -63,6 +63,7 @@ import psutil
 from shared.log import logger
 from shared.paths import logs_dir, run_dir
 from shared.session_record import SessionRecord
+from shared.winjob import in_attached_exec_job
 
 # psutil exceptions that mean "the process is already gone / not ours to touch" —
 # benign during a teardown race.
@@ -76,6 +77,10 @@ _GONE = (psutil.NoSuchProcess, psutil.AccessDenied, OSError)
 #
 # Own process group, so we can deliver Ctrl-Break to it (and only it).
 _NEW_GROUP = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
+# A persistent session spawned by a one-shot exec must leave that exec's Job
+# Object. The flag is added only in the explicit exec-job context; outside it,
+# an unrelated outer Job may forbid breakaway and reject the launch.
+_BREAKAWAY = getattr(subprocess, "CREATE_BREAKAWAY_FROM_JOB", 0x01000000)
 # No console at all — correct for a process we launch ourselves and whose
 # stdout/stderr handles we own.
 _DETACHED_FLAGS = getattr(subprocess, "DETACHED_PROCESS", 0x00000008) | _NEW_GROUP
@@ -266,6 +271,9 @@ def new_session(
     if has_session(name):
         return True
     launch = _plan_launch(cmd, cwd)
+    creationflags = launch.creationflags
+    if in_attached_exec_job():
+        creationflags |= _BREAKAWAY
     out = session_log_path(name).open("ab")
     try:
         err = stderr_append.open("ab") if stderr_append is not None else out
@@ -277,7 +285,7 @@ def new_session(
                 stdin=subprocess.DEVNULL,
                 stdout=out,
                 stderr=err,
-                creationflags=launch.creationflags,
+                creationflags=creationflags,
                 close_fds=True,
             )
         finally:

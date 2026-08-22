@@ -1,16 +1,14 @@
 """Exec subprocess mechanics — the parent side: spawn / poll / signal / kill /
 collect one disposable child per execute_code call.
 
-Model (`python -I -X utf8 -m agent.exec_child`, same venv,
-`start_new_session=True` on POSIX so a process group exists to kill): isolated mode
-keeps the inherited process cwd and Python environment out of bootstrap import
-resolution; explicit UTF-8 mode keeps output portable after isolated mode
-ignores the host's `PYTHONUTF8` / `PYTHONIOENCODING`. The parent stays
-authoritative on cancel/timeout — 50ms cadence, SIGINT for cancel, SIGTERM for
-timeout, SIGKILL(-pgid) after a grace period — and the child's envelope kind
-is advisory except for lifecycle outcomes (only the child can know which
-`_LifecycleExit` subclass ran). Output streams back through the merged pipe
-into a `StreamingTextIO`, so chunk publishing to the frontend is unchanged.
+The parent polls every 50ms and owns teardown through direct-child reap,
+root-independent process-domain close, and a bounded output-reader join. POSIX
+owns a new process group; Windows owns a Job Object. The child's result
+envelope stays advisory except for lifecycle outcomes. It spawns
+`python -I -X utf8 -m agent.exec_child`: isolated mode keeps the inherited cwd
+and Python environment out of bootstrap import resolution, and explicit UTF-8
+mode keeps output portable after isolated mode ignores encoding environment
+variables.
 """
 
 from __future__ import annotations
@@ -25,6 +23,7 @@ import subprocess
 import sys
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -45,18 +44,15 @@ from agent.graph._exec_result import (
 )
 from agent.graph._exec_stream import ExecOutputChunkPublisher, StreamCap, StreamingTextIO
 from shared.env_registry import AGENT_BIRTH_CONFIG_ENV, AGENT_CONFIG_OVERLAY_ENV
-from shared.log import logger
 from shared.paths import exec_run_dir
 from shared.platform import CREATE_NO_WINDOW, IS_WINDOWS
+from shared.winjob import EXEC_JOB_GATE_ENV, WindowsJob, publish_parent_job_gate
+
+from . import _exec_process
 
 # Same cadence as the old worker-thread poll loop: near-free, and cancel /
 # timeout response latency stays <= 50ms + signal delivery.
 _POLL_INTERVAL_S = 0.05
-
-# How long the reader thread may lag behind the child's exit (a grandchild
-# holding fd 1 open delays pipe EOF). Bounded so a stuck reader never blocks
-# the result path; the thread is daemon and dies with the agent process.
-_READER_JOIN_TIMEOUT_S = 5.0
 
 
 def _build_child_env(
@@ -66,6 +62,7 @@ def _build_child_env(
     *,
     config_overlay: dict[str, object] | None = None,
     birth_config: dict[str, object] | None = None,
+    windows_job_gate: Path | None = None,
 ) -> dict[str, str]:
     """The child's environment: the parent's own (settings already materialized
     by dotenv_boot), plus the identity the session env allowlist deliberately
@@ -78,6 +75,8 @@ def _build_child_env(
     env["AVA_PROCESS_PROFILE"] = "agent"
     env["AVA_EXEC_REQUEST_FILE"] = str(request_path)
     env["AVA_EXEC_RESULT_FILE"] = str(result_path)
+    if windows_job_gate is not None:
+        env[EXEC_JOB_GATE_ENV] = str(windows_job_gate)
     if config_overlay:
         env[AGENT_CONFIG_OVERLAY_ENV] = json.dumps(config_overlay, sort_keys=True)
     if birth_config:
@@ -92,69 +91,74 @@ def _spawn(
     *,
     config_overlay: dict[str, object] | None = None,
     birth_config: dict[str, object] | None = None,
-) -> subprocess.Popen[bytes]:
-    """Spawn the exec child. `start_new_session=True` puts it in its own
-    POSIX process group (pgid = pid), so cancel/timeout can kill that tree.
-    Windows termination currently targets the direct child only."""
+    windows_job_gate: Path | None = None,
+) -> tuple[subprocess.Popen[bytes], _exec_process.ExecProcessDomain]:
+    """Spawn one child. POSIX raw subprocesses stay in its process group;
+    persistent ``ava.shell.sessions`` are backend-hosted and outside it."""
     env = _build_child_env(
         agent_id,
         request_path,
         result_path,
         config_overlay=config_overlay,
         birth_config=birth_config,
+        windows_job_gate=windows_job_gate,
     )
-    return subprocess.Popen(
-        [sys.executable, "-I", "-X", "utf8", "-m", "agent.exec_child"],
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,  # OS-level merge — preserves print/traceback order
-        env=env,
-        creationflags=CREATE_NO_WINDOW,
-        start_new_session=not IS_WINDOWS,
-    )
-
-
-def _signal_child(proc: subprocess.Popen[bytes], sig: int) -> None:
-    """Signal the child's process group (POSIX); Windows has no process groups
-    — terminate the process itself (best-effort, agent-runner-only platform)."""
-    if IS_WINDOWS:
-        proc.terminate()
-        return
-    # Already-gone races the poll loop observes as exit — suppress, don't log.
-    with contextlib.suppress(ProcessLookupError):
-        os.killpg(proc.pid, sig)
-
-
-def _kill_child(proc: subprocess.Popen[bytes]) -> None:
-    """SIGKILL the whole group — the guarantee the thread model never had: a
-    native-stuck child (or one swallowing every exception) dies regardless."""
-    if IS_WINDOWS:
-        proc.kill()
-        return
-    with contextlib.suppress(ProcessLookupError):
-        os.killpg(proc.pid, signal.SIGKILL)
-
-
-async def _wait_with_grace(proc: subprocess.Popen[bytes], grace_s: float) -> bool:
-    """Wait for the child up to `grace_s` (letting its KeyboardInterrupt /
-    TimeoutError handler write the envelope + unwind); return True if it exited
-    within the grace period. Past it, SIGKILL the group and wait for reaping."""
+    windows_job = WindowsJob.create() if IS_WINDOWS else None
     try:
-        await asyncio.wait_for(asyncio.to_thread(proc.wait), timeout=grace_s)
-        return True
-    except TimeoutError:
-        _kill_child(proc)
-        logger.warning(
-            "[{label}] exec child {pid} survived the {grace}s grace period — "
-            "SIGKILLed the process group (native-stuck code or a swallowed "
-            "signal; this is the kill the thread model could not perform)",
-            label="exec-subprocess-killed",
-            pid=proc.pid,
-            grace=grace_s,
-            event="exec_subprocess_killed",
+        proc = subprocess.Popen(
+            [sys.executable, "-I", "-X", "utf8", "-m", "agent.exec_child"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,  # OS-level merge — preserves print/traceback order
+            env=env,
+            creationflags=CREATE_NO_WINDOW,
+            start_new_session=not IS_WINDOWS,
         )
-        await asyncio.to_thread(proc.wait)
-        return False
+    except BaseException as original:
+        if windows_job is not None:
+            _attempt_spawn_cleanup(original, "job_close", windows_job.close)
+        raise
+
+    if windows_job is not None:
+        if windows_job_gate is None:
+            original = RuntimeError("Windows exec spawn requires an attach gate")
+            _abort_failed_windows_spawn(proc, windows_job, original)
+            raise original
+        try:
+            windows_job.assign(proc)
+            publish_parent_job_gate(windows_job_gate)
+        except BaseException as original:
+            _abort_failed_windows_spawn(proc, windows_job, original)
+            raise
+    return proc, _exec_process.ExecProcessDomain(proc=proc, windows_job=windows_job)
+
+
+def _abort_failed_windows_spawn(
+    proc: subprocess.Popen[bytes],
+    windows_job: WindowsJob,
+    original: BaseException,
+) -> None:
+    """Fail closed without letting one cleanup failure skip or mask another."""
+    _attempt_spawn_cleanup(original, "job_close", windows_job.close)
+    _attempt_spawn_cleanup(original, "root_kill", proc.kill)
+    _attempt_spawn_cleanup(original, "root_reap", lambda: proc.wait(timeout=5.0))
+    if proc.stdout is not None:
+        _attempt_spawn_cleanup(original, "stdout_close", proc.stdout.close)
+
+
+def _attempt_spawn_cleanup(
+    original: BaseException,
+    stage: str,
+    action: Callable[[], object],
+) -> None:
+    """Attempt one pre-owner cleanup stage, preserving the work failure."""
+    try:
+        action()
+    except Exception as cleanup_error:
+        original.add_note(
+            "exec spawn cleanup also failed "
+            f"({stage}: {type(cleanup_error).__name__}: {cleanup_error})"
+        )
 
 
 def _drain_output(proc: subprocess.Popen[bytes], stream: StreamingTextIO) -> None:
@@ -181,17 +185,18 @@ def _drain_output(proc: subprocess.Popen[bytes], stream: StreamingTextIO) -> Non
 
 async def _poll_child(
     proc: subprocess.Popen[bytes],
+    root_exit_task: asyncio.Task[None],
     stream: StreamingTextIO,
     chunk_publisher: ExecOutputChunkPublisher | None,
     cancel_event: asyncio.Event,
     timeout: float,
+    domain_close: _exec_process.DomainCloseOwner,
 ) -> tuple[bool, bool]:
-    """Poll the child every 50ms: publish accumulated stream chunks, SIGINT on
-    cancel (user Stop), SIGTERM on deadline. Returns (cancelled, timed_out); on
-    a same-tick race cancel wins (priority enforced by the result
-    construction)."""
+    """Poll every 50ms and publish chunks. POSIX signals SIGINT on cancel and
+    SIGTERM on deadline; Windows requests immediate Job close. Returns
+    (cancelled, timed_out); on a same-tick race cancel wins."""
     deadline = time.monotonic() + timeout
-    while proc.poll() is None:
+    while not root_exit_task.done():
         # Incrementally publish accumulated stream chunks to frontend.
         if chunk_publisher is not None:
             pending = stream.take_pending()
@@ -199,10 +204,10 @@ async def _poll_child(
                 chunk_publisher.publish(pending)
 
         if cancel_event.is_set():
-            _signal_child(proc, signal.SIGINT)
+            _exec_process.signal_child(proc, signal.SIGINT, domain_close)
             return True, False
         if time.monotonic() > deadline:
-            _signal_child(proc, signal.SIGTERM)
+            _exec_process.signal_child(proc, signal.SIGTERM, domain_close)
             return False, True
         await asyncio.sleep(_POLL_INTERVAL_S)
     return False, False
@@ -212,28 +217,47 @@ async def _collect_child(
     proc: subprocess.Popen[bytes],
     stream: StreamingTextIO,
     chunk_publisher: ExecOutputChunkPublisher | None,
-    reader: threading.Thread,
     *,
     cancelled: bool,
     timed_out: bool,
+    root_exit_task: asyncio.Task[None],
+    reap_task: asyncio.Task[int],
+    domain_close: _exec_process.DomainCloseOwner,
+    reader_join_task: asyncio.Task[None],
 ) -> None:
-    """Reap the child (grace period then SIGKILL for a signalled exit),
-    drain the reader to EOF, and publish the final stream increment."""
+    """Settle every process resource, then publish the final stream chunk."""
     if cancelled or timed_out:
-        await _wait_with_grace(proc, KILL_GRACE_S)
-    else:
-        await asyncio.to_thread(proc.wait)  # natural exit — reap
-
-    # Give the reader the EOF flush; a grandchild still holding fd 1 open
-    # can delay EOF past the child's exit — bounded, never blocking, and never
-    # raising into the caller (the output captured so far stands).
-    with contextlib.suppress(TimeoutError):
-        await asyncio.wait_for(asyncio.to_thread(reader.join), timeout=_READER_JOIN_TIMEOUT_S)
+        await _exec_process.wait_with_grace(proc, root_exit_task, KILL_GRACE_S, domain_close)
+    failures = await _exec_process.settle_resources(
+        root_exit_task,
+        reap_task,
+        domain_close,
+        reader_join_task,
+        request_stop=False,
+    )
+    if failures:
+        raise _exec_process.ExecTeardownError(failures)
 
     if chunk_publisher is not None:
         pending = stream.take_pending()
         if pending:
             chunk_publisher.publish(pending)
+
+
+async def _finish_failed_run(
+    original: BaseException,
+    root_exit_task: asyncio.Task[None] | None,
+    reap_task: asyncio.Task[int] | None,
+    domain_close: _exec_process.DomainCloseOwner | None,
+    reader_join_task: asyncio.Task[None] | None,
+) -> None:
+    """Settle an interrupted run without replacing its primary failure."""
+    if root_exit_task is None or reap_task is None or domain_close is None:
+        return
+    failures = await _exec_process.finish_teardown_despite_cancellation(
+        root_exit_task, reap_task, domain_close, reader_join_task
+    )
+    _exec_process.annotate_original_failure(original, failures)
 
 
 async def _run_in_subprocess(
@@ -263,6 +287,7 @@ async def _run_in_subprocess(
         exec_dir = exec_run_dir()
     request_path = make_request_path(exec_dir, agent_id)
     result_path = make_result_path(exec_dir, agent_id)
+    windows_job_gate = request_path.with_suffix(".job-ready.json") if IS_WINDOWS else None
 
     try:
         write_request(
@@ -284,20 +309,30 @@ async def _run_in_subprocess(
     cancelled = False
     timed_out = False
     proc: subprocess.Popen[bytes] | None = None
+    reader: threading.Thread | None = None
+    root_exit_task: asyncio.Task[None] | None = None
+    reap_task: asyncio.Task[int] | None = None
+    domain_close: _exec_process.DomainCloseOwner | None = None
+    reader_join_task: asyncio.Task[None] | None = None
     try:
         try:
-            proc = _spawn(
+            proc, domain = _spawn(
                 request_path,
                 result_path,
                 agent_id,
                 config_overlay=config_overlay,
                 birth_config=birth_config,
+                windows_job_gate=windows_job_gate,
             )
         except OSError as exc:
             return _ExecCrashed(
                 output=f"exec subprocess could not be spawned: {exc}",
                 exc=exc,
             ), None
+
+        root_exit_task = _exec_process.start_root_exit_observer(proc)
+        domain_close = _exec_process.DomainCloseOwner(domain, root_exit_task)
+        reap_task = _exec_process.start_reap(proc, domain_close)
 
         reader = threading.Thread(
             target=_drain_output,
@@ -307,11 +342,27 @@ async def _run_in_subprocess(
         )
         reader.start()
 
+        reader_join_task = _exec_process.start_reader_join(reap_task, reader, proc.pid)
+
         cancelled, timed_out = await _poll_child(
-            proc, stream, chunk_publisher, cancel_event, timeout
+            proc,
+            root_exit_task,
+            stream,
+            chunk_publisher,
+            cancel_event,
+            timeout,
+            domain_close,
         )
         await _collect_child(
-            proc, stream, chunk_publisher, reader, cancelled=cancelled, timed_out=timed_out
+            proc,
+            stream,
+            chunk_publisher,
+            cancelled=cancelled,
+            timed_out=timed_out,
+            root_exit_task=root_exit_task,
+            reap_task=reap_task,
+            domain_close=domain_close,
+            reader_join_task=reader_join_task,
         )
 
         payload, envelope_error = _read_result_envelope(result_path, proc.returncode)
@@ -324,14 +375,25 @@ async def _run_in_subprocess(
             stream_cap=stream.cap(),
         )
         return result, payload
-    except asyncio.CancelledError:
+    except asyncio.CancelledError as original:
         # The exec node's outer shield (asyncio.wait_for) cancels this task on
-        # node timeout — the child must not survive its parent's decision.
-        if proc is not None and proc.poll() is None:
-            _kill_child(proc)
+        # node timeout. Cancellation is not complete until every owned resource
+        # is settled; otherwise the next exec inherits a zombie/thread leak.
+        await _finish_failed_run(
+            original, root_exit_task, reap_task, domain_close, reader_join_task
+        )
+        raise
+    except _exec_process.ExecTeardownError:
+        raise
+    except Exception as original:
+        await _finish_failed_run(
+            original, root_exit_task, reap_task, domain_close, reader_join_task
+        )
         raise
     finally:
-        for path in (request_path, result_path):
+        for path in (request_path, result_path, windows_job_gate):
+            if path is None:
+                continue
             with contextlib.suppress(FileNotFoundError):
                 path.unlink()
 

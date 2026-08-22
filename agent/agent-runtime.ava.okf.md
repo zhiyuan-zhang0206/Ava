@@ -18,7 +18,7 @@ The architecture is an **8-node self-looping topology**: `after_init → init_co
 - **Main loop** (`agent/loop.py`): Process entry point, parses `--agent-id`, initializes DB/Redis/LLM, starts the LangGraph graph loop
 - **Inbound listening** (`agent/graph/_claim.py`): Waits for messages via Redis pub/sub, dispatches to corresponding processing paths
 - **LLM invocation** (`agent/graph/_llm.py`): Streaming LLM inference with retry strategy and cancellation support
-- **Code execution** (`agent/graph/_exec.py`): Runs `execute_code` in one disposable subprocess (SIGINT/SIGTERM → SIGKILL(-pgid) escalation)
+- **Code execution** (`agent/graph/_exec.py`): Runs `execute_code` in one disposable subprocess; every exit closes its owned domain (POSIX process group / Windows Job Object), reaps the direct child, and boundedly joins the output reader before cleanup
 - **State management** (`agent/state.py`): LangGraph State, supports plugins registering their own BaseModel state blocks
 - **Message construction** (`agent/messages.py`): Ava-style HumanMessage/ToolMessage with metadata classification
 
