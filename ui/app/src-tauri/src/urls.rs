@@ -25,6 +25,7 @@ const GATE_PORT: u16 = 3000;
 
 /// The primary server field names a cluster, not an arbitrary service. Custom
 /// ports remain available through the advanced gateway override.
+#[cfg(any(target_os = "android", test))]
 pub(crate) const CUSTOM_ENTRY_PORT_ERROR: &str =
     "控制台端口为 3000，网关端口 8000 自动推导；自定义端口请走高级设置。";
 
@@ -72,6 +73,7 @@ pub fn parse_entry(raw: &str) -> Option<Url> {
 /// A cluster has one user-facing address: the console. Pasting its default
 /// gateway URL therefore maps to the console, while arbitrary ports belong to
 /// the explicit advanced override instead of being guessed here.
+#[cfg(any(target_os = "android", test))]
 pub(crate) fn normalize_entry_address(raw: &str) -> Result<String, String> {
     normalize_address(raw, GATE_PORT, true)
 }
@@ -80,10 +82,12 @@ pub(crate) fn normalize_entry_address(raw: &str) -> Result<String, String> {
 ///
 /// Custom ports deliberately pass through here; existing `settings.json`
 /// overrides are a supported advanced escape hatch.
+#[cfg(any(target_os = "android", test))]
 pub(crate) fn normalize_gateway_address(raw: &str) -> Result<String, String> {
     normalize_address(raw, DEFAULT_GATEWAY_PORT, false)
 }
 
+#[cfg(any(target_os = "android", test))]
 fn normalize_address(
     raw: &str,
     target_port: u16,
@@ -127,6 +131,7 @@ fn normalize_address(
     Ok(url.to_string())
 }
 
+#[cfg(any(target_os = "android", test))]
 fn alternate_cluster_port(target_port: u16) -> u16 {
     match target_port {
         GATE_PORT => DEFAULT_GATEWAY_PORT,
@@ -137,6 +142,7 @@ fn alternate_cluster_port(target_port: u16) -> u16 {
 
 /// `Url` removes a scheme's default port while parsing, but an explicitly
 /// entered `:80` or `:443` is still a custom port in the primary field.
+#[cfg(any(target_os = "android", test))]
 fn explicit_port(raw: &str) -> Option<u16> {
     let authority = raw
         .split_once("://")
