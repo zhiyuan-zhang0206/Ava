@@ -54,8 +54,9 @@ always carry the identity username, with or without a password.
   writes the checkout's `.ava_home` pointer. Refuses the default home and any
   already-claimed home.
 - `--seed --seed-source ENV` — copies the `seed_allowlist()` allowlist from the
-  stated source (LLM + web-search keys, plus the DashScope base URL a workspace
-  key is minted against). The **cluster secret is never seeded**;
+  stated source (LLM + web-search keys, enabled provider-plugin keys, plus the
+  DashScope base URL a workspace key is minted against). The **cluster secret is
+  never seeded**;
   `--seed-source` is required (no default).
 
 ## Notes

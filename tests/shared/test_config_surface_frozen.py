@@ -85,11 +85,13 @@ def test_effective_config_snapshot_is_flat_framework_keys() -> None:
     assert "data_plane" not in snap
 
 
-def test_bootstrap_payload_keys_are_exactly_env_aliases() -> None:
-    """Every key the gateway serves to an agent-runner is a field's env alias, so
-    the recipient re-parses it straight into its own `.env`/environment."""
+def test_bootstrap_payload_keys_are_modeled_or_enabled_plugin_aliases() -> None:
+    """Bootstrap serves Settings aliases plus declared enabled-provider keys."""
+    from shared.env_registry import _enabled_provider_key_envs
+
     served = config.bootstrap_config_values()
     valid = {config.field_alias(name) for name in config.BOOTSTRAP_FIELDS}
+    valid |= _enabled_provider_key_envs()
     assert set(served) <= valid
 
 

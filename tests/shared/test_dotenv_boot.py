@@ -743,6 +743,25 @@ def test_gateway_marker_still_drops_provider_keys_for_other_daemons(
     assert "DEEPSEEK_API_KEY" not in os.environ
 
 
+def test_agent_profile_keeps_an_unmodeled_provider_key_from_dotenv(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The authority pass leaves a plugin key in the agent parent's live env.
+
+    Provider bindings deliberately do not add Settings fields, so this is the
+    prerequisite for `child_env("agent", ...)` to forward their declared key.
+    """
+    monkeypatch.setitem(os.environ, "AVA_PROCESS_PROFILE", "agent")
+    monkeypatch.delitem(os.environ, "TESTP_API_KEY", raising=False)
+    env_file = tmp_path / ".env"
+    env_file.write_text("TESTP_API_KEY=sk-plugin-test\n")
+    _point_env_at(monkeypatch, env_file, tmp_path)
+
+    dotenv_boot.load_ava_env()
+
+    assert os.environ["TESTP_API_KEY"] == "sk-plugin-test"
+
+
 # ─── legacy inverted AVA_SKIP_* alias translation ───
 
 

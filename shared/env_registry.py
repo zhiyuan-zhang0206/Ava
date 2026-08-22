@@ -1,7 +1,8 @@
 """The env-key registry and its projections (R2 design, convergence point A).
 
 Every env key this system forwards, forces, drops, or seeds is declared here or
-in the Settings class metadata — the two halves of the EnvRegistry:
+in the Settings class metadata — except removable provider keys, whose enabled
+plugin binding is their declaration:
 
 - **Settings fields** declare themselves in `shared/config/<domain>.py`
   (`json_schema_extra` metadata); `shared/config_registry.py` builds the flat
@@ -345,17 +346,46 @@ def seed_allowlist() -> frozenset[str]:
     the one non-secret a key is useless without (`AVA_DASHSCOPE_BASE_URL` — a
     dedicated Model Studio workspace mints its key for its own host). Derived
     from the `seed: True` field marker (declared once on each such field in
-    shared/config/lm.py + web.py), so a new provider key is seedable by adding
-    the marker — no second set to edit. Structurally disjoint from
+    shared/config/lm.py + web.py), plus each enabled provider binding's key when
+    it is either unmodeled or already seedable as a Settings field. A removable
+    provider is therefore seedable without becoming a Settings field, but cannot
+    turn an unrelated modeled setting into a seed credential. The runner database
+    password is also explicitly excluded. Structurally disjoint from
     derived_env_keys() | env_identity_keys() (guarded by
     tests/shared/test_cluster_env.py): a seeded worktree must never inherit
     prod's data-plane identity or its cluster secret (always freshly minted),
     and never a singleton credential like AVA_TELEGRAM_BOT_TOKEN."""
-    return frozenset(
+    seed_keys = frozenset(
         field_alias(name)
         for name, ref in _fields().items()
         if _schema_extra(ref.info).get("seed") is True
     )
+    settings_aliases = frozenset(field_alias(name) for name in _fields())
+    from shared.cluster.derive import RUNNER_DB_PASSWORD_ENV
+
+    plugin_seed_keys = (
+        _enabled_provider_key_envs()
+        - (settings_aliases - seed_keys)
+        - derived_env_keys()
+        - env_identity_keys()
+        - {RUNNER_DB_PASSWORD_ENV}
+    )
+    return seed_keys | plugin_seed_keys
+
+
+def _enabled_provider_key_envs() -> frozenset[str]:
+    """The key variables declared by enabled provider plugins, loaded lazily.
+
+    Provider keys deliberately have no Settings field: a provider plugin must
+    be removable without widening core configuration. The binding contract is
+    their sole declaration, and this helper is called only at env-delivery
+    boundaries that need that declaration.
+    """
+    from shared.lm import provider_api
+    from shared.lm._plugin_providers import ensure_provider_plugins_loaded
+
+    ensure_provider_plugins_loaded()
+    return frozenset(binding.key_env for binding in provider_api.REGISTRY.bindings.values())
 
 
 @lru_cache(maxsize=1)
@@ -437,6 +467,12 @@ def child_env(role: ProcessRole, platform: str) -> dict[str, str]:
         agent_forward_keys() if role == "agent" else session_forward_keys()
     )  # gateway / runner — the daemon/session view
     env = {k: os.environ[k] for k in keys if k in os.environ}
+    if role == "agent":
+        # Provider keys are non-modeled secrets. Only an agent process may need
+        # them at build time; daemon/session children retain the narrower view.
+        env.update(
+            {key: os.environ[key] for key in _enabled_provider_key_envs() if key in os.environ}
+        )
     for key in HOST_PASSTHROUGH_KEYS | _TEMP_DIR_KEYS:
         if os.environ.get(key):
             env[key] = os.environ[key]

@@ -1,13 +1,13 @@
 # Model providers as plugins
 
 > **Status: the mechanics are built** (extension points below, provider.py
-> contract + loader; 2026-08, `provider_api.py`). Nothing is extracted yet —
-> all eight providers still live in core; the grok pilot is the first planned
-> extraction. Onboarding a model provider is a core edit today,
-> spread across up to eight files — seven of them under `shared/` — in this repo,
-> for every vendor. This doc commits to making provider onboarding a plugin
-> concern and names the exact extension points the mechanics must open. It does
-> not open them.
+> contract + loader; 2026-08, `provider_api.py`). The Grok pilot is extracted;
+> the remaining eight providers still live in core. A new provider onboarded as
+> a plugin registers its binding, models, prices, and declared key without a
+> core edit across the former per-vendor surfaces. This doc commits to making
+> provider onboarding a plugin
+> concern and records its implemented extension points. It does not extract a
+> provider.
 >
 > One thing is already true and worth keeping: downstream of the registry the
 > roster is **data, not code**. Pricing, the spawn dropdown, context budgets and
@@ -90,10 +90,10 @@ preserving through any refactor:
 - `shared/lm/context_budget.py:resolve_context_budget` and the per-model config
   view (`gateway/routers/config.py`, via `registry.explain_setting`) likewise.
 
-So the edit is small, but it is a **core** edit in this repo: a private provider
-means carrying a diff across every `git pull`, and the vendor's SDK lands in the
-shared `pyproject.toml` for every install whether or not that vendor is used.
-That is the cost the plugin path removes.
+That was a **core** edit in this repo: a private provider meant carrying a diff
+across every `git pull`, and the vendor's SDK landed in the shared `pyproject.toml`
+for every install whether or not that vendor was used. The plugin path removes
+that per-provider core cost; dependency installation remains an open concern.
 
 ## Why the existing plugin mechanism cannot carry it
 
@@ -170,7 +170,7 @@ it `provider.py` — discovered the same way, importable from `shared/lm`.
 
 ## The extension points
 
-What the mechanics work must open, in dependency order.
+The mechanics' implemented extension points, in dependency order.
 
 1. **`shared/lm/registry.py` — a registration entry for `MODELS`.** A
    `register_models(...)` that merges `ModelSpec` entries under a plugin's
@@ -196,16 +196,19 @@ What the mechanics work must open, in dependency order.
    conditional one (a plugin binding an existing client class inherits an
    existing key), but leaving it unregisterable means a plugin that ships its
    own client class cannot complete a single turn.
-4. **The API key.** This is the open one. Today a provider key is a framework
-   `Settings` field whose `scope: "cluster-pinned"` puts it in `BOOTSTRAP_FIELDS`,
-   which is how it reaches a split agent-runner through `/api/bootstrap`
-   (`shared/config/__init__.py:bootstrap_config_values`). Plugin config
-   (`shared/plugin_config_registry.py`) is a different channel: a per-plugin
-   JSON image under `~/.ava/configs/<plugin>/config.json`, with no scope axis and
-   no bootstrap distribution — and writing a vendor API key into a plaintext disk
-   image is its own decision. Either plugin config grows a secret/scope class, or
-   a plugin-declared key registers into the existing `.env` + bootstrap surface.
-   Not decided here.
+4. **The API key — decided: the existing `.env` channel.** `key_env` on the
+   binding is the declaration; the gateway spawn boundary reads that key from
+   the cluster `.env` file. A split runner receives only enabled bindings'
+   present keys, verbatim, in the
+   authenticated `/api/bootstrap` payload. On a single box, the agent child-env
+   allowlist forwards only enabled bindings' keys from its parent's live env;
+   arbitrary variables remain excluded. The install-time seed allowlist also
+   includes an unmodeled declared key, or one already seedable as a Settings
+   alias. It excludes every other modeled setting, cluster identity/data-plane
+   aliases, and the runner database password, so a fresh worktree receives the
+   same provider credential surface without inheriting its source cluster's
+   identity or unrelated credentials. Plugin config remains a separate
+   plaintext config-image channel and is not a secret-distribution mechanism.
 5. **The load call.** Whoever registers must run before the first
    `build_chat_model` / `validate_model_config` in *each* process that has one —
    agent, gateway, labeler, evals. A lazy load inside the factory (first call
@@ -276,7 +279,6 @@ allows a ninth.
 
 ## Open
 
-- The API key channel (extension point 4) — the one real blocker.
 - Whether a provider plugin may ship its own dependency, and how it gets
   installed. `pyproject.toml` is the repo's; a plugin that needs
   `langchain-<vendor>` has nowhere to declare it today.
