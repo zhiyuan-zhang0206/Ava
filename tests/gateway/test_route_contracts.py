@@ -125,6 +125,10 @@ def test_sdk_inherits_idempotency_from_contracts() -> None:
         is Idempotency.AT_LEAST_ONCE_WITH_KEY
     )
     assert contracts.idempotency_for("GET", "/api/agents/7") is Idempotency.IDEMPOTENT
+    message_contract = contracts.contract_for("POST", "/api/agents/7/messages")
+    assert message_contract is not None and message_contract.transactional_idempotency
+    reconcile_contract = contracts.contract_for("POST", "/api/agents/7/messages/reconcile")
+    assert reconcile_contract is not None and not reconcile_contract.transactional_idempotency
 
 
 def test_unknown_route_defaults_to_non_idempotent() -> None:

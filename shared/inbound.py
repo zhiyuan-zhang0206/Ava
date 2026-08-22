@@ -5,7 +5,8 @@ reach for: the timeline renderer matches on it and the claim node dispatches
 on it. The transactional claim / reconcile / status-transition SQL stays in
 `agent/db.py` (kernel-only, async).
 
-Wake is Redis pub/sub: `insert_inbound_message` (`shared/db.py`) publishes to
+Wake is Redis pub/sub: `insert_inbound_message` (`shared/db.py`) and the
+transactionally keyed chat path (`shared/chat_delivery.py`) publish to
 the cluster-scoped channel `<prefix>:inbound:<agent_id>`
 (`shared.cluster.inbound_channel`) on every inbound INSERT, and the claim node
 blocks on `RedisInboundListener.wait_one(timeout=...)` (`shared/redis_listener.py`)

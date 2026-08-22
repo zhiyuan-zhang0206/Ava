@@ -73,6 +73,9 @@ import type { NoticesFeed,
   UploadedBatch,
 } from "./types";
 import { projectAgentStatus } from "./types";
+import { sendMessageWithReconciliation } from "./message-delivery";
+
+export { MessageDeliveryUnknownError } from "./message-delivery";
 
 export const API_BASE = ((): string => {
   if (process.env.NEXT_PUBLIC_API_BASE) return process.env.NEXT_PUBLIC_API_BASE;
@@ -119,6 +122,36 @@ export const assetUrl = (path: string): string => `${API_BASE}${path}`;
 // session cookie on cross-origin requests (frontend :3000 -> gateway :8000).
 function f(path: string, init?: RequestInit): Promise<Response> {
   return fetch(url(path), { ...init, credentials: "include" });
+}
+
+async function jsonWithTimeout<T>(
+  path: string,
+  init: RequestInit,
+  timeoutMs: number,
+): Promise<T> {
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      reject(new DOMException(`request exceeded ${timeoutMs}ms`, "TimeoutError"));
+    }, timeoutMs);
+  });
+  try {
+    // The bound covers BOTH fetch and body consumption. Clearing the timer when
+    // headers arrive leaves `res.json()` able to hang the Composer forever.
+    return await Promise.race([
+      f(path, { ...init, signal: controller.signal }).then(ok<T>),
+      timeout,
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
+function isAmbiguousDeliveryError(error: unknown): boolean {
+  if (!(error instanceof ApiError)) return true;
+  return error.status === 408 || error.status === 429 || error.status >= 500;
 }
 
 const POST: RequestInit = { method: "POST" };
@@ -210,9 +243,14 @@ export const api = {
   sendMessage: (
     agentId: number,
     content: string | ContentBlock[],
+    clientMessageId: string,
   ): Promise<AgentMessageEnqueued> => {
-    return f(`/api/agents/${agentId}/messages`, POST_JSON({ content, source: "user" })).then(
-      ok<AgentMessageEnqueued>,
+    return sendMessageWithReconciliation(
+      agentId,
+      content,
+      clientMessageId,
+      jsonWithTimeout,
+      isAmbiguousDeliveryError,
     );
   },
 

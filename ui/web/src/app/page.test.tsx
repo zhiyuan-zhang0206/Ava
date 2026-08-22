@@ -157,6 +157,11 @@ vi.mock("@/lib/timeline-store", () => ({
 
 vi.mock("@/lib/api", () => ({
   API_BASE: "",
+  MessageDeliveryUnknownError: class MessageDeliveryUnknownError extends Error {
+    constructor(readonly clientMessageId: string) {
+      super("delivery unconfirmed");
+    }
+  },
   api: {
     sendMessage: vi.fn().mockResolvedValue(undefined),
     cancel: vi.fn().mockResolvedValue(undefined),
@@ -208,7 +213,7 @@ vi.mock("@/components/composer", () => ({
     maxWidthCss,
   }: {
     mode: string;
-    onSend: (s: string, imageUrls: string[]) => Promise<boolean>;
+    onSend: (s: string, imageUrls: string[], clientMessageId: string) => Promise<boolean>;
     children?: React.ReactNode;
     maxWidthCss?: string;
   }) => (
@@ -217,11 +222,11 @@ vi.mock("@/components/composer", () => ({
       data-mode={mode}
       data-max-width={maxWidthCss ?? "undefined"}
     >
-      <button data-testid="composer-send" onClick={() => void onSend("hi", [])}>send</button>
-      <button data-testid="composer-send-multi" onClick={() => void onSend("/compact /update", [])}>send multi</button>
-      <button data-testid="composer-send-multi-args" onClick={() => void onSend("/search hello world /compact", [])}>send multi args</button>
-      <button data-testid="composer-send-plain" onClick={() => void onSend("plain text", [])}>send plain</button>
-      <button data-testid="composer-send-multi-image" onClick={() => void onSend("/compact /update", ["/api/agents/5/uploads/a.png"])}>send multi image</button>
+      <button data-testid="composer-send" onClick={() => void onSend("hi", [], "test-client-message-id")}>send</button>
+      <button data-testid="composer-send-multi" onClick={() => void onSend("/compact /update", [], "test-client-message-id")}>send multi</button>
+      <button data-testid="composer-send-multi-args" onClick={() => void onSend("/search hello world /compact", [], "test-client-message-id")}>send multi args</button>
+      <button data-testid="composer-send-plain" onClick={() => void onSend("plain text", [], "test-client-message-id")}>send plain</button>
+      <button data-testid="composer-send-multi-image" onClick={() => void onSend("/compact /update", ["/api/agents/5/uploads/a.png"], "test-client-message-id")}>send multi image</button>
       {children}
     </div>
   ),
@@ -526,7 +531,9 @@ describe("force-scroll on send", () => {
     hooksState.agents = [makeAgent({ agent_id: 5, status: "idling" })];
     wrap(<HomePage />);
     fireEvent.click(screen.getByTestId("composer-send"));
-    await waitFor(() => expect(vi.mocked(api.sendMessage)).toHaveBeenCalledWith(5, "hi"));
+    await waitFor(() =>
+      expect(vi.mocked(api.sendMessage)).toHaveBeenCalledWith(5, "hi", expect.any(String)),
+    );
     await act(() => Promise.resolve());
     expect(hooksState.requestScrollToBottom).toHaveBeenCalledTimes(1);
   });
@@ -569,7 +576,11 @@ describe("multi-command dispatch", () => {
     wrap(<HomePage />);
     fireEvent.click(screen.getByTestId("composer-send-multi"));
     await waitFor(() => expect(vi.mocked(api.sendMessage)).toHaveBeenCalledTimes(1));
-    expect(vi.mocked(api.sendMessage)).toHaveBeenCalledWith(5, "/compact /update");
+    expect(vi.mocked(api.sendMessage)).toHaveBeenCalledWith(
+      5,
+      "/compact /update",
+      expect.any(String),
+    );
     await act(() => Promise.resolve());
     expect(hooksState.requestScrollToBottom).toHaveBeenCalledTimes(1);
   });
@@ -580,7 +591,11 @@ describe("multi-command dispatch", () => {
     wrap(<HomePage />);
     fireEvent.click(screen.getByTestId("composer-send-multi-args"));
     await waitFor(() => expect(vi.mocked(api.sendMessage)).toHaveBeenCalledTimes(1));
-    expect(vi.mocked(api.sendMessage)).toHaveBeenCalledWith(5, "/search hello world /compact");
+    expect(vi.mocked(api.sendMessage)).toHaveBeenCalledWith(
+      5,
+      "/search hello world /compact",
+      expect.any(String),
+    );
   });
 
   it("sends a single message for plain text (no slash prefix)", async () => {
@@ -589,7 +604,11 @@ describe("multi-command dispatch", () => {
     wrap(<HomePage />);
     fireEvent.click(screen.getByTestId("composer-send-plain"));
     await waitFor(() => expect(vi.mocked(api.sendMessage)).toHaveBeenCalledTimes(1));
-    expect(vi.mocked(api.sendMessage)).toHaveBeenCalledWith(5, "plain text");
+    expect(vi.mocked(api.sendMessage)).toHaveBeenCalledWith(
+      5,
+      "plain text",
+      expect.any(String),
+    );
   });
 
   it("attaches images to the one command message", async () => {
@@ -600,10 +619,14 @@ describe("multi-command dispatch", () => {
     wrap(<HomePage />);
     fireEvent.click(screen.getByTestId("composer-send-multi-image"));
     await waitFor(() => expect(vi.mocked(api.sendMessage)).toHaveBeenCalledTimes(1));
-    expect(vi.mocked(api.sendMessage)).toHaveBeenCalledWith(5, [
-      { type: "text", text: "/compact /update" },
-      { type: "image_url", image_url: { url: "/api/agents/5/uploads/a.png" } },
-    ]);
+    expect(vi.mocked(api.sendMessage)).toHaveBeenCalledWith(
+      5,
+      [
+        { type: "text", text: "/compact /update" },
+        { type: "image_url", image_url: { url: "/api/agents/5/uploads/a.png" } },
+      ],
+      expect.any(String),
+    );
   });
 
   it("does not scroll when the send fails", async () => {

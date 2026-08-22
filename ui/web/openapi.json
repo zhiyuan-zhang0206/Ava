@@ -612,7 +612,7 @@
     "/api/agents/{agent_id}/messages": {
       "post": {
         "summary": "Post Agent Message",
-        "description": "Deliver a chat inbound to the specified agent.\n\n`content` is either a plain string or a list of OpenAI-shaped content blocks\n(multimodal: text + `image_url` referencing an upload of this agent). A\nstring is a pure INSERT + return; a block list is capability-gated (422 if\nthe agent's model cannot see images) and stored with the blocks in the\ninbound's JSONB payload for the claim node to inline natively.\n\nAuto-resurrect in `deliver_chat_inbound` ensures the message always reaches\na live agent — the caller does not branch on status. The endpoint returns\n`AgentMessageEnqueued` for backward compatibility; the SDK ignores status.\n\n404: agent_id does not exist (AgentNotFound -> handler returns 404 + reason).\n422: a block list gated out (non-vision model) or referencing a bad upload.",
+        "description": "Deliver a chat inbound to the specified agent.\n\n`content` is either a plain string or a list of OpenAI-shaped content blocks\n(multimodal: text + `image_url` referencing an upload of this agent). A\nstring is a pure INSERT + return; a block list is capability-gated (422 if\nthe agent's model cannot see images) and stored with the blocks in the\ninbound's JSONB payload for the claim node to inline natively.\n\nAuto-resurrect in `deliver_chat_inbound` ensures the message always reaches\na live agent — the caller does not branch on status. An optional\n`Idempotency-Key` is stored transactionally with the inbound; same-key\nretries return the same `inbound_id` and mismatched key reuse fails 409.\n\n404: agent_id does not exist (AgentNotFound -> handler returns 404 + reason).\n409: the key already identifies a different agent/body/source.\n422: a block list gated out (non-vision model) or referencing a bad upload.",
         "operationId": "post_agent_message_api_agents__agent_id__messages_post",
         "parameters": [
           {
@@ -622,6 +622,24 @@
             "schema": {
               "type": "integer",
               "title": "Agent Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
             }
           }
         ],
@@ -715,6 +733,67 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/AgentMessagesResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/agents/{agent_id}/messages/reconcile": {
+      "post": {
+        "summary": "Reconcile Agent Message",
+        "description": "Resolve a timed-out POST and heal its still-pending delivery tail.",
+        "operationId": "reconcile_agent_message_api_agents__agent_id__messages_reconcile_post",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentMessageIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentMessageEnqueued"
                 }
               }
             }
@@ -6029,6 +6108,17 @@
         "properties": {
           "status": {
             "$ref": "#/components/schemas/AgentStatus"
+          },
+          "inbound_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inbound Id"
           }
         },
         "type": "object",
@@ -6036,7 +6126,7 @@
           "status"
         ],
         "title": "AgentMessageEnqueued",
-        "description": "POST /api/agents/{id}/messages response — agent status (at delivery time).\n\nSDK send_message returns `status` directly to the caller for\nbranching: on TERMINATED the caller calls resurrect; other states\nmean \"delivered, will be dispatched naturally\"."
+        "description": "POST /messages receipt — durable inbound id plus current agent status.\n\nSame-key retries return the same `inbound_id`; `status` may be recomputed\nbecause auto-resurrection can advance while the client reconciles."
       },
       "AgentMessageIn": {
         "properties": {

@@ -497,11 +497,10 @@ def send_message(
     default) so a large message body or a gateway-side auto-resurrect
     does not trigger a read timeout.
 
-    AtLeastOnceWithKey (doorplate): the route is a pure INSERT, so a bare
-    retry could deliver a duplicate message — but the server dedups by the
-    `Idempotency-Key` header this call generates (one key per logical
-    message, shared by all retries), so the full transient family is
-    retried safely.
+    AtLeastOnceWithKey (doorplate): `client_message_id` is committed on the
+    inbound row under a unique constraint. Every retry uses the same generated
+    `Idempotency-Key`, so it returns that row's stable id instead of duplicating
+    the message even if the first HTTP response was lost.
     """
     import httpx
 

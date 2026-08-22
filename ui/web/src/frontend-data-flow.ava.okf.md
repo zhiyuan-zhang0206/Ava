@@ -40,6 +40,13 @@ The full stream `/api/system/all` is **always connected** (not bound to activeId
 | `useAgentPages` | single agent opened pages (InspectorPanel, SSE folds page_opened/closed into cache, replaces deleted PageDock/use-fleet-pages) |
 | `useAllPages` (#655) | fleet-wide opened pages fetched once + SSE incremental fold (Inbox attaches associated page links to notices, avoids N+1 per-agent requests) |
 | `usePendingMessages` | pending inbound messages count |
+
+Message POSTs are bounded across both headers and body consumption. A timeout,
+transport loss, 429, or 5xx is an ambiguous outcome: the client looks up the
+same `Idempotency-Key` through `/messages/reconcile`, may resubmit the original
+body once under that same key, and never silently generates a replacement key.
+The returned `inbound_id` is the durable receipt; exhaustion leaves the draft in
+an explicit unconfirmed state for same-message retry or deliberate abandonment.
 | `useClusterHealth` | cluster paused polling + SSE reconnect coordination |
 | `useNotices` | the unified Inbox feed — one request carries the open queue (FYI + awaiting) and a keyset page of resolved history (R4 layer 2 single contract); notice_* events invalidate-refetch |
 | ~~`usePrefetchTimelines`~~ | removed (Aw-Snap fix) — the fleet-wide full-timeline prefetch retained one ~128KB system prompt + history per agent for gcTime=30min, the dominant renderer-heap source; timelines now fetch on demand when an agent is opened |

@@ -1,11 +1,12 @@
 """AtLeastOnceWithKey dedup middleware — doorplate ① server side (R3).
 
-Routes that declare `Idempotency.AT_LEAST_ONCE_WITH_KEY` promise: a client
-may retry freely as long as every retry carries the same `Idempotency-Key`
-header — the first request with a key executes and its response is stored
-in the shared `api_idempotency` table; same-key retries replay it instead
-of re-executing. This is the cluster_rpc idempotency mechanism generalized
-into one shared table (design decision 1).
+Routes that declare `Idempotency.AT_LEAST_ONCE_WITH_KEY` promise a keyed
+exactly-once effect. Most routes implement that by storing/replaying the first
+successful response in `api_idempotency`. A route marked
+`transactional_idempotency` instead owns the key in its business transaction
+and bypasses this middleware: message delivery stores `client_message_id` on
+the inbound row and retries return its stable inbound id. Its delivery-time
+status is allowed to reflect current state rather than replaying old bytes.
 
 Concurrency: the first request INSERTs a placeholder row (status NULL =
 executing); a same-key retry that finds the placeholder polls until the
@@ -23,8 +24,8 @@ between claim and store releases the row. The claim is scoped to
 absent and re-claimed, so two endpoints sharing a key never replay each
 other's responses.
 
-The middleware only engages for routes whose contract declares
-AT_LEAST_ONCE_WITH_KEY **and** requests that actually carry an
+The middleware only engages for non-transactional routes whose contract
+declares AT_LEAST_ONCE_WITH_KEY **and** requests that actually carry an
 Idempotency-Key header — everything else passes through untouched.
 """
 
@@ -180,7 +181,15 @@ async def idempotency_middleware(
     this middleware).
     """
     contract = contracts.contract_for(request.method, request.url.path)
-    if contract is None or contract.idempotency is not Idempotency.AT_LEAST_ONCE_WITH_KEY:
+    if (
+        contract is None
+        or contract.idempotency is not Idempotency.AT_LEAST_ONCE_WITH_KEY
+        or contract.transactional_idempotency
+    ):
+        # A transactionally idempotent handler owns the key at the same commit
+        # as its business row. Putting a response-cache placeholder in front of
+        # it would recreate the crash window that transactional ownership closes:
+        # committed business row, fresh placeholder, retries blocked for days.
         return await call_next(request)
     key = request.headers.get("Idempotency-Key")
     if not key:

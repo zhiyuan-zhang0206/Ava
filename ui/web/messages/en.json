@@ -18,7 +18,11 @@
     "noData": "(no data)",
     "checkGateway": "Couldn't load — check the gateway and reload.",
     "removeImage": "Remove {name}",
-    "composerInput": "Message your agent"
+    "composerInput": "Message your agent",
+    "deliveryUnconfirmedStatus": "Delivery unconfirmed. Reconcile this message before sending another.",
+    "deliveryUnconfirmedToast": "Delivery unconfirmed. Retry the same message to reconcile it, or explicitly send another.",
+    "retrySameMessage": "Retry same message",
+    "sendAnotherAnyway": "Send another anyway"
   },
   "alerts": { "unresolved": "unresolved" },
   "nav": {
