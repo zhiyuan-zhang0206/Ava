@@ -3,7 +3,7 @@
 // visibility (the badge clears with it). Alert is separate from Notice.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import AlertsSection from "@/components/ops/alerts-section";
@@ -62,7 +62,15 @@ describe("AlertsSection", () => {
       response({
         alerts: [
           ROW,
-          { ...ROW, id: 8, alertname: "machine offline", annotations: { summary: "wsl back online" }, status: "resolved", severity: "warning", source: "machine-probe", read_at: "2026-08-12T21:00:00Z" },
+          {
+            ...ROW,
+            id: 8,
+            alertname: "machine offline",
+            annotations: { summary: "wsl back online" },
+            status: "resolved",
+            source: "machine-probe",
+            read_at: "2026-08-12T21:00:00Z",
+          },
         ],
         meta: {
           window: "24h",
@@ -77,10 +85,18 @@ describe("AlertsSection", () => {
     await waitFor(() => screen.getByTestId("alert-row-7"));
     expect(screen.getByText("cluster health")).toBeTruthy();
     expect(screen.getByText("gateway down")).toBeTruthy();
-    expect(screen.getByText("error")).toBeTruthy();
+    expect(screen.getAllByText("error")).toHaveLength(2);
     expect(screen.getByText("unresolved")).toBeTruthy();
     expect(screen.getByText("resolved")).toBeTruthy();
     expect(screen.getByText("health-probe")).toBeTruthy();
+
+    const unresolvedSeverity = within(screen.getByTestId("alert-row-7")).getByText("error");
+    expect(unresolvedSeverity.className).toContain("bg-orange-500");
+
+    const resolvedSeverity = within(screen.getByTestId("alert-row-8")).getByText("error");
+    expect(resolvedSeverity.className).toContain("bg-muted");
+    expect(resolvedSeverity.className).toContain("text-muted-foreground");
+    expect(resolvedSeverity.className).not.toContain("bg-orange-500");
   });
 
   it("shows the empty state when there are no alerts", async () => {
