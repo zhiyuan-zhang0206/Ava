@@ -24,7 +24,12 @@ import type { AgentInspect } from "@/lib/types";
 const { getAgentInspect, listPages, resolveNotice } = vi.hoisted(() => ({
   getAgentInspect:
     vi.fn<
-      (agentId: number, hours?: number | null, sinceCompact?: boolean) => Promise<AgentInspect>
+      (
+        agentId: number,
+        hours?: number | null,
+        sinceCompact?: boolean,
+        signal?: AbortSignal,
+      ) => Promise<AgentInspect>
     >(),
   // useAgentPages fetches the open-pages list; default to none so the Page
   // section renders its empty state and these render tests stay focused on the
@@ -128,6 +133,66 @@ function fixture(overrides: Partial<AgentInspect> = {}): AgentInspect {
 }
 
 describe("InspectorPanel", () => {
+  it("never renders the previous agent while the new agent inspect is pending", async () => {
+    let resolveAgentB: ((value: AgentInspect) => void) | undefined;
+    getAgentInspect.mockImplementation((agentId) => {
+      if (agentId === 1) {
+        return Promise.resolve(
+          fixture({
+            agent_id: 1,
+            shells: [
+              {
+                id: 91,
+                name: "agent-a-private-shell",
+                created_at: null,
+                uptime_seconds: 10,
+              },
+            ],
+            notice: {
+              id: 92,
+              title: "Agent A private notice",
+              content: "Only Agent A may answer this",
+              priority: "P1",
+              require_response: true,
+              blocking: true,
+              created_at: "2026-06-14T12:00:00Z",
+            },
+          }),
+        );
+      }
+      return new Promise<AgentInspect>((resolve) => {
+        resolveAgentB = resolve;
+      });
+    });
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const view = rtlRender(
+      <QueryClientProvider client={qc}>
+        <InspectorPanel agentId={1} />
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect(screen.getByText("agent-a-private-shell")).toBeTruthy());
+    expect(screen.getByText("Agent A private notice")).toBeTruthy();
+    expect(screen.getByRole("textbox")).toBeTruthy();
+
+    view.rerender(
+      <QueryClientProvider client={qc}>
+        <InspectorPanel agentId={2} />
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect(getAgentInspect).toHaveBeenCalledWith(2, null, false, expect.any(AbortSignal)));
+
+    // B has not answered yet. React Query may supply A through
+    // keepPreviousData, but no A-owned shell/notice/reply surface may render
+    // under B's selected identity.
+    expect(screen.queryByText("agent-a-private-shell")).toBeNull();
+    expect(screen.queryByText("Agent A private notice")).toBeNull();
+    expect(screen.queryByText("Only Agent A may answer this")).toBeNull();
+    expect(screen.queryByRole("textbox")).toBeNull();
+
+    resolveAgentB?.(fixture({ agent_id: 2, shells: [] }));
+    await waitFor(() => expect(screen.getByText("None open")).toBeTruthy());
+  });
+
   it("renders all sections from the /inspect response", async () => {
     getAgentInspect.mockResolvedValue(fixture());
     render(<InspectorPanel agentId={1} />);
@@ -440,11 +505,13 @@ describe("InspectorPanel", () => {
     render(<InspectorPanel agentId={1} />);
 
     await waitFor(() => expect(screen.getByText("Persistent shells")).toBeTruthy());
-    expect(getAgentInspect).toHaveBeenCalledWith(1, null, false);
+    expect(getAgentInspect).toHaveBeenCalledWith(1, null, false, expect.any(AbortSignal));
 
     fireEvent.change(screen.getByLabelText("Cost + activity window"), { target: { value: "24" } });
 
-    await waitFor(() => expect(getAgentInspect).toHaveBeenCalledWith(1, 24, false));
+    await waitFor(() =>
+      expect(getAgentInspect).toHaveBeenCalledWith(1, 24, false, expect.any(AbortSignal)),
+    );
     // The select reflects the chosen window (the cost scope line was removed).
     await waitFor(() =>
       expect(screen.getByLabelText<HTMLSelectElement>("Cost + activity window").value).toBe("24"),
@@ -461,7 +528,9 @@ describe("InspectorPanel", () => {
 
     fireEvent.change(screen.getByLabelText("Cost + activity window"), { target: { value: "-1" } });
 
-    await waitFor(() => expect(getAgentInspect).toHaveBeenCalledWith(1, null, true));
+    await waitFor(() =>
+      expect(getAgentInspect).toHaveBeenCalledWith(1, null, true, expect.any(AbortSignal)),
+    );
     await waitFor(() =>
       expect(screen.getByLabelText<HTMLSelectElement>("Cost + activity window").value).toBe("-1"),
     );
@@ -498,16 +567,18 @@ describe("InspectorPanel", () => {
     expect(screen.queryByText("refresh failed")).toBeNull();
   });
 
-  it("renders shell rows as plain text when agent_id is invalid", async () => {
-    // agent_id is NaN — the ShellRow guard should render a <span> not a <Link>
+  it("refuses an inspect payload whose agent_id does not match the selection", async () => {
+    // A malformed/misrouted response must obey the same identity boundary as
+    // keepPreviousData. Rendering it as plain text would still disclose one
+    // agent's inspector under another selection.
     getAgentInspect.mockResolvedValue(
       fixture({ agent_id: Number.NaN }),
     );
     render(<InspectorPanel agentId={1} />);
 
-    await waitFor(() => expect(screen.getByText("dev-server")).toBeTruthy());
-    // The row should NOT be wrapped in an anchor — closest("a") returns null
-    expect(screen.getByText("dev-server").closest("a")).toBeNull();
+    await waitFor(() => expect(getAgentInspect).toHaveBeenCalled());
+    expect(screen.queryByText("dev-server")).toBeNull();
+    await waitFor(() => expect(screen.getByText("No data")).toBeTruthy());
   });
 
   it("renders shell rows as plain text when a shell id is invalid", async () => {
@@ -680,6 +751,77 @@ describe("InspectorPanel mobile", () => {
     panelState.open = false;
     const { container } = render(<InspectorPanel agentId={1} />);
     expect(container.querySelector("aside")).toBeNull();
+    expect(getAgentInspect).not.toHaveBeenCalled();
+  });
+
+  it("multiple hidden inspector observers issue zero inspect requests", () => {
+    panelState.open = false;
+    render(
+      <>
+        <InspectorPanel agentId={1} />
+        <InspectorPanel agentId={1} />
+      </>,
+    );
+    expect(getAgentInspect).not.toHaveBeenCalled();
+  });
+
+  it("multiple open inspector observers share one initial request", async () => {
+    getAgentInspect.mockResolvedValue(fixture());
+    render(
+      <>
+        <InspectorPanel agentId={1} />
+        <InspectorPanel agentId={1} />
+      </>,
+    );
+
+    await waitFor(() => expect(screen.getAllByText("Persistent shells")).toHaveLength(2));
+    expect(getAgentInspect).toHaveBeenCalledOnce();
+  });
+
+  it("aborts the in-flight inspect request when the panel closes", async () => {
+    let requestSignal: AbortSignal | undefined;
+    getAgentInspect.mockImplementation((_agentId, _hours, _sinceCompact, signal) => {
+      requestSignal = signal;
+      return new Promise<AgentInspect>(() => undefined);
+    });
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const view = rtlRender(
+      <QueryClientProvider client={qc}>
+        <InspectorPanel agentId={1} />
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect(requestSignal).toBeDefined());
+
+    panelState.open = false;
+    view.rerender(
+      <QueryClientProvider client={qc}>
+        <InspectorPanel agentId={1} />
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect(requestSignal?.aborted).toBe(true));
+  });
+
+  it("aborts the previous agent's inspect request before switching", async () => {
+    const signals = new Map<number, AbortSignal | undefined>();
+    getAgentInspect.mockImplementation((agentId, _hours, _sinceCompact, signal) => {
+      signals.set(agentId, signal);
+      return new Promise<AgentInspect>(() => undefined);
+    });
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const view = rtlRender(
+      <QueryClientProvider client={qc}>
+        <InspectorPanel agentId={1} />
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect(signals.get(1)).toBeDefined());
+
+    view.rerender(
+      <QueryClientProvider client={qc}>
+        <InspectorPanel agentId={2} />
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect(signals.get(2)).toBeDefined());
+    expect(signals.get(1)?.aborted).toBe(true);
   });
 });
 
@@ -704,18 +846,14 @@ describe("InspectorToggle", () => {
     expect(chevrons).not.toContain("m15 14-3 3-3-3");
   });
 
-  it("prefetches the inspect data on pointer intent (replaces the selection-time preload)", async () => {
+  it("does not prefetch while closed, even on pointer intent", () => {
+    panelState.open = false;
     getAgentInspect.mockResolvedValue(fixture());
-    render(<InspectorToggle agentId={7} />);
-    const btn = screen.getByRole("button", { name: "Close inspector" });
+    render(<InspectorToggle />);
+    const btn = screen.getByRole("button", { name: "Open inspector" });
     expect(getAgentInspect).not.toHaveBeenCalled();
     fireEvent.pointerEnter(btn);
-    await waitFor(() => expect(getAgentInspect).toHaveBeenCalledWith(7, null, false));
-  });
-
-  it("does not prefetch without an agent selected", () => {
-    render(<InspectorToggle agentId={null} />);
-    fireEvent.pointerEnter(screen.getByRole("button", { name: "Close inspector" }));
+    fireEvent.focus(btn);
     expect(getAgentInspect).not.toHaveBeenCalled();
   });
 });

@@ -31,15 +31,26 @@ network, because they are operator tools and the SDK surface is for agents.
 ## `GET /api/stats/dashboard?hours=`
 
 Backs the stat cards at the top of the frontend sidebar in **one** round trip,
-polled every 5s. `hours` is the aggregation window, whitelisted to
+polled on one page-wide 30s cadence regardless of how many sidebar consumers
+are mounted. `hours` is the aggregation window, whitelisted to
 1 / 6 / 24 / 72 / 168 (default 24).
 
 | Card data | Source |
 |---|---|
-| `live_count` | `agents_meta` — running + idling + starting |
-| windowed tokens, average turn duration, warning/error counts | `events` |
+| `live_count`, lifetime event estimate | Postgres metadata |
+| windowed tokens + cost | Prometheus counters |
+| average turn duration, warning/error counts | Loki event history |
 
-No standalone daemon and no cache: the gateway aggregates off the DB on demand.
+No standalone daemon: the gateway aggregates on demand. Loki work runs before
+the short Postgres metadata read, so waiting for the global Loki budget never
+holds a pooled DB connection.
+
+`GET /api/agents/{id}/inspect` draws the same boundary per agent: its 75s
+single-flight TTL retains only Loki/ledger aggregates. Every request freshly
+reads machine, config overlay, status/heartbeat inputs, liveness and probe
+timestamp, releases that DB borrow, then joins/loads the aggregate. Thus both
+manual refresh and the 60s panel poll see control-plane changes immediately
+without re-running the historical fan-out.
 
 ## Key Dependencies
 

@@ -900,10 +900,12 @@ export interface paths {
          *     the agent runs on cluster defaults (the column is NULL).
          *
          *     Latency discipline: the event-history sections run on parallel workers
-         *     (one Loki fan-out per section, overlapped), and the assembled rows ride a
-         *     10s TTL cache keyed by (agent_id, hours, since_compact) — the panel
-         *     refetches in bursts (open, notice SSE events, 60s interval), and a burst
-         *     must not re-run the ~20-query fan-out per request. `notice` and `shells`
+         *     (one Loki fan-out per section, overlapped), and only those aggregates ride
+         *     a 75s TTL cache keyed by (agent_id, hours, since_compact), with concurrent
+         *     misses sharing one single-flight Future — the panel refetches in bursts
+         *     (open, notice SSE events, 60s interval), and a burst must not re-run the
+         *     ~20-query fan-out per request. The agents_meta projection (machine,
+         *     config, heartbeat inputs, liveness and timestamps), `notice`, and `shells`
          *     are fetched fresh on every call and never ride the cache. `shells` is probed
          *     on the agent's own machine via the `shell_probe` cluster op (the gateway
          *     never runs sessions itself; every machine — its own included — is dialed at its
@@ -2872,7 +2874,8 @@ export interface paths {
          *     - `live_count`: agents_meta table — all non-terminated agents (allocated/starting/running/idling/restarting/hibernating)
          *     - `tokens` / `cost_usd`: Prometheus (task #1197 — the OTLP-mapped
          *       llm_usage counters via gateway/prom_metrics, windowed by `increase`)
-         *     - rest: events append-only table (category=telemetry/log) — written by the unified emitter
+         *     - average turn duration + warning/error counts: Loki's unified event stream
+         *     - `total_events`: Postgres archive partition estimates (a coarse growth gauge)
          *
          *     `?hours=` selects the aggregation window (`ts > now() - hours`), whitelisted
          *     by `StatsWindowHours` (1/6/24/72/168; anything else 422s). Zero-data

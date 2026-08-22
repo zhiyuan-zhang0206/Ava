@@ -11,8 +11,8 @@
 // background to generate a short label when spawn carries a prompt;
 // user overrides go through `api.patchAgentLabel`.
 
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { useCallback } from "react";
+import { keepPreviousData, type QueryClient, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useCallback, useEffect } from "react";
 
 import { api } from "./api";
 import type { StatsDashboard } from "./types";
@@ -163,18 +163,71 @@ export function useStatsWindow(): {
 // poll interval.
 const STATS_POLL_MS = 30_000;
 
+interface StatsPollEntry {
+  subscribers: number;
+  timer: ReturnType<typeof setInterval>;
+}
+
+// One coordinator per browser QueryClient (therefore per page). React Query
+// deduplicates requests that overlap exactly, but separate observers each own
+// their refetchInterval and can drift out of phase after responsive remounts.
+// The coordinator gives all consumers of one window a single 30s clock while
+// the query cache remains the shared server-truth store.
+const statsPollers = new WeakMap<QueryClient, Map<StatsWindowHours, StatsPollEntry>>();
+
+function subscribeStatsPoll(queryClient: QueryClient, windowHours: StatsWindowHours): () => void {
+  let byWindow = statsPollers.get(queryClient);
+  if (byWindow === undefined) {
+    byWindow = new Map();
+    statsPollers.set(queryClient, byWindow);
+  }
+  let entry = byWindow.get(windowHours);
+  if (entry === undefined) {
+    const timer = setInterval(() => {
+      void queryClient
+        .fetchQuery({
+          queryKey: ["stats", "dashboard", windowHours],
+          queryFn: () => api.getStatsDashboard(windowHours),
+          staleTime: 0,
+        })
+        // React Query records the error for every observer to render; consume
+        // the timer-owned Promise so a failed poll is not an unhandled rejection.
+        .catch(() => undefined);
+    }, STATS_POLL_MS);
+    entry = { subscribers: 0, timer };
+    byWindow.set(windowHours, entry);
+  }
+  entry.subscribers += 1;
+  return () => {
+    const current = byWindow.get(windowHours);
+    if (current === undefined) return;
+    current.subscribers -= 1;
+    if (current.subscribers === 0) {
+      clearInterval(current.timer);
+      byWindow.delete(windowHours);
+    }
+  };
+}
+
 export function useStatsDashboard(windowHours: StatsWindowHours): {
   stats: StatsDashboard | undefined;
   error: unknown;
 } {
+  const queryClient = useQueryClient();
   const { data: stats, error } = useQuery({
     queryKey: ["stats", "dashboard", windowHours],
     queryFn: () => api.getStatsDashboard(windowHours),
-    refetchInterval: STATS_POLL_MS,
+    // A staggered second observer must consume the page's current snapshot,
+    // not start a second request/cadence of its own.
+    staleTime: STATS_POLL_MS,
     // Keep previous data visible when switching the window (e.g. 24h → 7d)
     // so the stat cards never flicker to "—" placeholders.
     placeholderData: keepPreviousData,
   });
+  useEffect(
+    () => subscribeStatsPoll(queryClient, windowHours),
+    [queryClient, windowHours],
+  );
   return { stats, error };
 }
 

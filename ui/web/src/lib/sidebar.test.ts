@@ -5,9 +5,15 @@
 // localStorage → DB migration is centralized and covered in
 // settings-migration.test.ts.
 
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, renderHook } from "@testing-library/react";
+import { createElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+const { getStatsDashboard } = vi.hoisted(() => ({
+  getStatsDashboard: vi.fn(),
+}));
+vi.mock("@/lib/api", () => ({ api: { getStatsDashboard } }));
 vi.mock("@/lib/use-user-settings", () => import("@/test-support/user-settings-mock"));
 
 import { mockSetSettingCalls, resetMockSettings, setMockSetting } from "@/test-support/user-settings-mock";
@@ -18,11 +24,16 @@ import {
   STATS_WINDOW_DEFAULT,
   useSidebarSort,
   useSidebarWidth,
+  useStatsDashboard,
   useStatsWindow,
 } from "./sidebar";
 
 beforeEach(() => resetMockSettings());
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  getStatsDashboard.mockReset();
+  vi.useRealTimers();
+});
 
 describe("useSidebarSort (DB-backed)", () => {
   it("default sort is id descending", () => {
@@ -95,5 +106,47 @@ describe("useStatsWindow (DB-backed, validated)", () => {
     setMockSetting("display.stats_window_hours", 999);
     const { result } = renderHook(() => useStatsWindow());
     expect(result.current.windowHours).toBe(STATS_WINDOW_DEFAULT);
+  });
+});
+
+describe("useStatsDashboard shared polling", () => {
+  it("uses one 30s cadence for staggered observers of the same page cache", async () => {
+    vi.useFakeTimers();
+    getStatsDashboard.mockResolvedValue({
+      live_count: 1,
+      window_hours: 24,
+      tokens: { input: 0, output: 0, cache_read: 0, cache_hit_pct: 0 },
+      cost_usd: 0,
+      avg_turn_seconds: null,
+      warnings: 0,
+      errors: 0,
+      total_events: 0,
+    });
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const wrapper = ({ children }: { children: ReactNode }) =>
+      createElement(QueryClientProvider, { client: queryClient }, children);
+
+    const first = renderHook(() => useStatsDashboard(24), { wrapper });
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(getStatsDashboard).toHaveBeenCalledTimes(1);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
+    const second = renderHook(() => useStatsDashboard(24), { wrapper });
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(getStatsDashboard).toHaveBeenCalledTimes(1);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
+    expect(getStatsDashboard).toHaveBeenCalledTimes(2);
+    await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
+    expect(getStatsDashboard).toHaveBeenCalledTimes(2);
+    await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
+    expect(getStatsDashboard).toHaveBeenCalledTimes(3);
+
+    first.unmount();
+    second.unmount();
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+    expect(getStatsDashboard).toHaveBeenCalledTimes(3);
   });
 });

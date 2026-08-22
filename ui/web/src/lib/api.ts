@@ -213,12 +213,15 @@ export const api = {
     agentId: number,
     hours?: number | null,
     sinceCompact?: boolean,
+    signal?: AbortSignal,
   ): Promise<AgentInspect> => {
     const params = new URLSearchParams();
     if (hours != null) params.set("hours", String(hours));
     if (sinceCompact) params.set("since_compact", "true");
     const qs = params.toString();
-    return f(`/api/agents/${agentId}/inspect${qs ? `?${qs}` : ""}`).then(ok<AgentInspect>);
+    return f(`/api/agents/${agentId}/inspect${qs ? `?${qs}` : ""}`, { signal }).then(
+      ok<AgentInspect>,
+    );
   },
 
   // A recent tail of one of the agent's persistent shells — the terminal

@@ -94,7 +94,8 @@ def get_stats_dashboard(
     - `live_count`: agents_meta table — all non-terminated agents (allocated/starting/running/idling/restarting/hibernating)
     - `tokens` / `cost_usd`: Prometheus (task #1197 — the OTLP-mapped
       llm_usage counters via gateway/prom_metrics, windowed by `increase`)
-    - rest: events append-only table (category=telemetry/log) — written by the unified emitter
+    - average turn duration + warning/error counts: Loki's unified event stream
+    - `total_events`: Postgres archive partition estimates (a coarse growth gauge)
 
     `?hours=` selects the aggregation window (`ts > now() - hours`), whitelisted
     by `StatsWindowHours` (1/6/24/72/168; anything else 422s). Zero-data
@@ -124,46 +125,40 @@ def get_stats_dashboard(
         window_cost_usd += cost_usd(model, round(g_in), round(g_out), round(g_cached)) or 0.0
     cache_hit_pct = round(cache_read / in_total * 100, 2) if in_total else 0.0
 
+    # The turn / W/E stats read Loki (task #1197 LGTM read side): the PG
+    # `events` table is a frozen pre-cutover archive, so a live window queried
+    # there flatlines to zero. Do not hold a pooled DB connection while these
+    # bounded-but-slow network queries wait for the global Loki budget.
+    window_start = datetime.now(UTC) - timedelta(hours=hours)
+    turn_end_sum = loki_events.attribute_aggregate(
+        field="duration_seconds",
+        agg="sum",
+        event_names=["turn_end"],
+        attribute_filters={"ok": "true"},
+        from_=window_start,
+    )
+    turn_end_count = loki_events.count_events(
+        event_names=["turn_end"],
+        attribute_filters={"ok": "true"},
+        from_=window_start,
+    )
+    avg_turn_seconds: float | None = turn_end_sum / turn_end_count if turn_end_count else None
+
+    # events.level is lowercase (W9 switch; agent_events stored loguru's
+    # uppercase 'WARNING'/'ERROR'). critical folds into 'error' so the
+    # operator gauge sees daemon/schema-drift failures.
+    warn_err: dict[str, int] = {
+        "warning": loki_events.count_events(
+            level="warning", categories=["telemetry", "log"], from_=window_start
+        ),
+        "error": loki_events.count_events(
+            level_min="error", categories=["telemetry", "log"], from_=window_start
+        ),
+    }
+
     with request.app.state.db_pool.connection() as conn, conn.cursor() as cur:
         cur.execute("SELECT COUNT(*) FROM agents_meta WHERE status != 'terminated'")
         live_count = int(cur.fetchone()[0])
-
-        # The turn / W/E stats read Loki (task #1197 LGTM read side): the PG
-        # `events` table is a frozen pre-cutover archive, so a live window
-        # queried there flatlines to zero. The `ok` payload key = 'true'
-        # filters out exception turns (raise / cancel / partial) so they do
-        # not pollute the "per-turn average time" — `_llm.py:llm_node`'s
-        # finally marks abnormal paths with ok=False; the sidebar number
-        # represents the average wall time of "successfully completed turns".
-        window_start = datetime.now(UTC) - timedelta(hours=hours)
-        turn_end_sum = loki_events.attribute_aggregate(
-            field="duration_seconds",
-            agg="sum",
-            event_names=["turn_end"],
-            attribute_filters={"ok": "true"},
-            from_=window_start,
-        )
-        turn_end_count = loki_events.count_events(
-            event_names=["turn_end"],
-            attribute_filters={"ok": "true"},
-            from_=window_start,
-        )
-        avg_turn_seconds: float | None = turn_end_sum / turn_end_count if turn_end_count else None
-
-        # events.level is lowercase (W9 switch; agent_events stored loguru's
-        # uppercase 'WARNING'/'ERROR') — the level vocabulary is documented on
-        # gateway/schemas/events.py and db/schema.sql.
-        # critical folds into 'error' — the sidebar's warning/error gauge
-        # must see critical-level events (daemon schema-drift exits etc.),
-        # which used to be an observability blind spot (audit 2026-08-08).
-        warn_err: dict[str, int] = {
-            "warning": loki_events.count_events(
-                level="warning", categories=["telemetry", "log"], from_=window_start
-            ),
-            "error": loki_events.count_events(
-                level_min="error", categories=["telemetry", "log"], from_=window_start
-            ),
-        }
 
         # total_events is a coarse growth gauge, not an exact figure — sum the
         # planner's per-partition row estimates instead of a full-table COUNT(*) on

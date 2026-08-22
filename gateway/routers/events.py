@@ -36,7 +36,7 @@ from typing import Annotated
 import httpx
 from fastapi import APIRouter, HTTPException, Query
 
-from gateway import loki_events
+from gateway import loki_events, loki_query_budget
 from gateway.schemas import EventRow, EventsMeta, EventsResponse
 
 router = APIRouter()
@@ -206,6 +206,10 @@ def get_events(
             limit=limit,
             offset=offset,
         )
+    except loki_query_budget.LokiQueryBudgetError:
+        # Local admission saturation has its own typed 503 contract and
+        # transition metrics; the global handler preserves that reason.
+        raise
     except httpx.HTTPError as exc:
         # The events backend (Loki) timed out or dropped the connection — a
         # retriable backend failure, not a client error (task #1289: the

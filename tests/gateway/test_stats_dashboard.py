@@ -14,13 +14,17 @@ empty fake; tests that need token values re-install a richer one over it).
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
+from typing import Any, Literal
 
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
-from gateway import loki_events, prom_metrics
+from gateway import loki_events, loki_query_budget, prom_metrics
 from gateway.app import app
+from gateway.routers import status
+from gateway.schemas import StatsWindowHours
 from tests.gateway.loki_fake import FakeLoki
 
 # The OTLP-mapped llm_usage counters the dashboard reads (must match
@@ -117,6 +121,81 @@ def _insert_event(
                 category,
             ),
         )
+
+
+def test_dashboard_does_not_hold_db_connection_during_loki_queries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Waiting/running under the global Loki budget must not consume a DB slot."""
+
+    class FakeCursor:
+        def __init__(self) -> None:
+            self.rows = [(2,), (10,)]
+
+        def __enter__(self) -> FakeCursor:
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def execute(self, query: str) -> None:
+            return None
+
+        def fetchone(self) -> tuple[int]:
+            return self.rows.pop(0)
+
+    class FakeConnection:
+        def __init__(self) -> None:
+            self.cursor_value = FakeCursor()
+
+        def __enter__(self) -> FakeConnection:
+            pool.active = True
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pool.active = False
+
+        def cursor(self) -> FakeCursor:
+            return self.cursor_value
+
+    class FakePool:
+        active = False
+
+        def connection(self) -> FakeConnection:
+            return FakeConnection()
+
+    pool = FakePool()
+
+    def assert_db_released(*args: Any, **kwargs: Any) -> int:
+        assert pool.active is False
+        return 0
+
+    monkeypatch.setattr(loki_events, "attribute_aggregate", assert_db_released)
+    monkeypatch.setattr(loki_events, "count_events", assert_db_released)
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(db_pool=pool)))
+    result = status.get_stats_dashboard(request, StatsWindowHours.H24)  # type: ignore[arg-type]
+    assert result.live_count == 2
+    assert result.total_events == 10
+
+
+@pytest.mark.parametrize("reason", ["queue_full", "acquire_timeout"])
+def test_dashboard_local_loki_budget_rejection_is_503(
+    db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+    reason: Literal["queue_full", "acquire_timeout"],
+) -> None:
+    """Dashboard saturation uses the same retriable 503 wire contract."""
+
+    def reject(*args: Any, **kwargs: Any) -> float:
+        raise loki_query_budget.LokiQueryBudgetError(reason)
+
+    monkeypatch.setattr(loki_events, "attribute_aggregate", reject)
+    db_conn.commit()
+    with TestClient(app) as client:
+        response = client.get("/api/stats/dashboard")
+    assert response.status_code == 503
+    assert response.json()["detail"] == f"Loki query budget unavailable ({reason}); retry"
+    assert response.headers["retry-after"] == "1"
 
 
 def test_dashboard_empty_db_returns_zeros(db_conn: psycopg.Connection) -> None:

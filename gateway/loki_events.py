@@ -30,6 +30,7 @@ from typing import Any, overload
 
 import httpx
 
+from gateway import loki_query_budget
 from shared import telemetry
 from shared.config import settings
 from shared.log import logger
@@ -99,9 +100,16 @@ def _get_json(url: str, params: dict[str, Any], *, endpoint: str) -> dict[str, A
     """
     started = time.perf_counter()
     try:
-        resp = _client().get(url, params=params)
-        resp.raise_for_status()
-        payload = resp.json()
+        with loki_query_budget.query_budget.slot():
+            resp = _client().get(url, params=params)
+            resp.raise_for_status()
+            payload = resp.json()
+    except loki_query_budget.LokiQueryBudgetError:
+        # A local admission refusal means the backend was never called. Its
+        # own budget transition event/counters already identify queue_full vs
+        # acquire_timeout; recording it as loki_query_failed would falsely
+        # blame the transport and double-count one failure class.
+        raise
     except (httpx.TimeoutException, httpx.TransportError, httpx.HTTPStatusError) as exc:
         duration_s = time.perf_counter() - started
         _log_loki_failure(

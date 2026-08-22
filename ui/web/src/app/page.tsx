@@ -399,7 +399,7 @@ function HomeContent({
               details={<ContentToggle />}
               inspect={
                 <>
-                  <InspectorToggle agentId={activeId} />
+                  <InspectorToggle />
                   {inspectorOpen && activeId != null && (
                     <InspectorPanel agentId={activeId} />
                   )}

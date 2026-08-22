@@ -10,14 +10,19 @@ on the LogQL text, the query params, and the parse/paging semantics
 
 from __future__ import annotations
 
+import asyncio
 import json
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import httpx
 import pytest
 
-from gateway import loki_events
+from gateway import loki_events, loki_query_budget
 
 # ─── fake httpx transport ────────────────────────────────────────────────────
 
@@ -88,6 +93,13 @@ def _install(
     return client
 
 
+@pytest.fixture(autouse=True)
+def _fresh_query_budget() -> Any:
+    loki_query_budget.reset_for_tests()
+    yield
+    loki_query_budget.reset_for_tests()
+
+
 def _loki_payload(lines: list[tuple[str, str]]) -> dict[str, Any]:
     """One stream with (ts_ns_str, line) values, the shape Loki returns."""
     return {"data": {"result": [{"stream": {}, "values": [[ts, line] for ts, line in lines]}]}}
@@ -112,6 +124,323 @@ def _event_line(
     }
     body.update(extra)
     return json.dumps(body, separators=(",", ":"))
+
+
+def _wait_for_budget_waiters(expected: int) -> None:
+    """Synchronize concurrency tests on the queue state, never wall time."""
+    budget: Any = loki_query_budget.query_budget
+    deadline = time.monotonic() + 1.0
+    while time.monotonic() < deadline:
+        with budget._condition:
+            if len(budget._queue) == expected:
+                return
+        time.sleep(0.001)
+    pytest.fail(f"Loki budget did not reach {expected} waiters")
+
+
+class TestGlobalQueryBudget:
+    def test_matches_loki_real_max_concurrent(self) -> None:
+        config = (Path(__file__).parents[2] / "deploy/lgtm/config/loki.yaml").read_text()
+        assert "max_concurrent: 4" in config
+        assert loki_query_budget.LOKI_QUERY_CONCURRENCY == 4
+
+    def test_observes_every_transition_and_types_local_rejections(self) -> None:
+        """Saturation is observable and distinguishable without touching Loki.
+
+        The observer runs after the budget lock is released; a monitoring
+        callback therefore cannot deadlock the state machine. Rejection
+        reasons are typed so routers can map local capacity to 503 without
+        misclassifying it as a Loki transport failure.
+        """
+        observations: list[Any] = []
+        budget_ref: list[Any] = []
+
+        def observe(observation: Any) -> None:
+            budget = budget_ref[0]
+            assert budget._condition.acquire(blocking=False)
+            budget._condition.release()
+            observations.append(observation)
+
+        budget = loki_query_budget.FairQueryBudget(
+            capacity=1,
+            max_waiters=1,
+            wait_timeout_s=0.05,
+            observer=observe,
+        )
+        budget_ref.append(budget)
+        holder_entered = threading.Event()
+        release_holder = threading.Event()
+
+        def hold_slot() -> None:
+            with budget.slot():
+                holder_entered.set()
+                assert release_holder.wait(timeout=2)
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            holder = executor.submit(hold_slot)
+            assert holder_entered.wait(timeout=1)
+            waiter = executor.submit(lambda: budget.slot().__enter__())
+            deadline = time.monotonic() + 1.0
+            while time.monotonic() < deadline:
+                if budget.metrics().queued == 1:
+                    break
+                time.sleep(0.001)
+            else:
+                pytest.fail("waiter never entered the budget queue")
+            with (
+                pytest.raises(loki_query_budget.LokiQueryBudgetError) as overflow,
+                budget.slot(),
+            ):
+                pass
+            assert overflow.value.reason == "queue_full"
+            with pytest.raises(loki_query_budget.LokiQueryBudgetError) as timed_out:
+                waiter.result(timeout=1)
+            assert timed_out.value.reason == "acquire_timeout"
+            release_holder.set()
+            holder.result(timeout=1)
+
+        metrics = budget.metrics()
+        assert metrics.active == 0
+        assert metrics.queued == 0
+        assert metrics.high_water == 1
+        assert metrics.acquired == 1
+        assert metrics.queue_full == 1
+        assert metrics.wait_timeout == 1
+        assert any(item.outcome == "acquired" and item.acquired == 1 for item in observations)
+        assert any(item.outcome == "queue_full" and item.queue_full == 1 for item in observations)
+        assert any(
+            item.outcome == "wait_timeout" and item.wait_timeout == 1 for item in observations
+        )
+        assert observations[-1].outcome == "released"
+        assert observations[-1].active == 0
+
+    def test_local_budget_rejection_is_not_logged_as_loki_failure(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        gate = threading.Event()
+        entered = threading.Event()
+        failures: list[dict[str, Any]] = []
+
+        class BlockingClient:
+            def get(self, url: str, params: dict[str, Any]) -> _FakeResponse:
+                entered.set()
+                assert gate.wait(timeout=2)
+                return _FakeResponse({"data": {"result": []}})
+
+        monkeypatch.setattr(loki_events, "_client", _accessor(BlockingClient()))
+
+        def log_failure(**kwargs: Any) -> None:
+            failures.append(kwargs)
+
+        monkeypatch.setattr(loki_events, "_log_loki_failure", log_failure)
+        loki_query_budget.reset_for_tests(capacity=1, max_waiters=1, wait_timeout_s=1.0)
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            holder = executor.submit(
+                loki_events._get_json,
+                "http://loki/query",
+                {"query": "holder"},
+                endpoint="query",
+            )
+            assert entered.wait(timeout=1)
+            waiter = executor.submit(
+                loki_events._get_json,
+                "http://loki/query",
+                {"query": "waiter"},
+                endpoint="query",
+            )
+            _wait_for_budget_waiters(1)
+            with pytest.raises(loki_query_budget.LokiQueryBudgetError) as rejected:
+                loki_events._get_json("http://loki/query", {"query": "overflow"}, endpoint="query")
+            assert rejected.value.reason == "queue_full"
+            assert failures == []
+            gate.set()
+            holder.result(timeout=1)
+            waiter.result(timeout=1)
+
+    def test_caps_all_loki_http_calls_at_four(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        gate = threading.Event()
+        state_lock = threading.Lock()
+        active_peak: list[int] = [0, 0]
+
+        class BlockingClient:
+            def get(self, url: str, params: dict[str, Any]) -> _FakeResponse:
+                with state_lock:
+                    active_peak[0] += 1
+                    active_peak[1] = max(active_peak)
+                assert gate.wait(timeout=2)
+                with state_lock:
+                    active_peak[0] -= 1
+                return _FakeResponse({"data": {"result": []}})
+
+        monkeypatch.setattr(loki_events, "_client", _accessor(BlockingClient()))
+        loki_query_budget.reset_for_tests(capacity=4, wait_timeout_s=1.0)
+        with ThreadPoolExecutor(max_workers=12) as executor:
+            futures = [
+                executor.submit(
+                    loki_events._get_json,
+                    "http://loki/query",
+                    {"query": f"q-{i}"},
+                    endpoint="query",
+                )
+                for i in range(12)
+            ]
+            deadline = time.monotonic() + 1.0
+            while time.monotonic() < deadline:
+                with state_lock:
+                    if active_peak[1] == 4:
+                        break
+                time.sleep(0.001)
+            assert active_peak[1] == 4
+            gate.set()
+            assert all(future.result(timeout=2) == {"data": {"result": []}} for future in futures)
+
+    def test_wait_timeout_and_transport_error_release_capacity(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        gate = threading.Event()
+        entered = threading.Event()
+        calls = 0
+
+        class SequencedClient:
+            def get(self, url: str, params: dict[str, Any]) -> _FakeResponse:
+                nonlocal calls
+                calls += 1
+                if calls == 1:
+                    entered.set()
+                    assert gate.wait(timeout=2)
+                if params["query"] == "transport-error":
+                    raise httpx.ReadTimeout("loki read timeout")
+                return _FakeResponse({"data": {"result": []}})
+
+        monkeypatch.setattr(loki_events, "_client", _accessor(SequencedClient()))
+        loki_query_budget.reset_for_tests(capacity=1, wait_timeout_s=0.05)
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            holder = executor.submit(
+                loki_events._get_json,
+                "http://loki/query",
+                {"query": "holder"},
+                endpoint="query",
+            )
+            assert entered.wait(timeout=1)
+            with pytest.raises(loki_query_budget.LokiQueryBudgetError) as timeout:
+                loki_events._get_json("http://loki/query", {"query": "queued"}, endpoint="query")
+            assert timeout.value.reason == "acquire_timeout"
+            gate.set()
+            holder.result(timeout=1)
+
+        with pytest.raises(httpx.ReadTimeout):
+            loki_events._get_json(
+                "http://loki/query", {"query": "transport-error"}, endpoint="query"
+            )
+
+        class CancelThenSucceed:
+            def get(self, url: str, params: dict[str, Any]) -> _FakeResponse:
+                if params["query"] == "cancelled":
+                    raise asyncio.CancelledError
+                return _FakeResponse({"data": {"result": []}})
+
+        monkeypatch.setattr(loki_events, "_client", _accessor(CancelThenSucceed()))
+        with pytest.raises(asyncio.CancelledError):
+            loki_events._get_json("http://loki/query", {"query": "cancelled"}, endpoint="query")
+        assert loki_events._get_json(
+            "http://loki/query", {"query": "after-errors"}, endpoint="query"
+        ) == {"data": {"result": []}}
+        metrics = loki_query_budget.query_budget.metrics()
+        assert metrics.active == 0
+        assert metrics.queued == 0
+        # holder, transport failure, cancellation, and final success all
+        # acquired then released the only slot.
+        assert metrics.acquired == 4
+        assert metrics.wait_timeout == 1
+
+    def test_wait_queue_is_bounded(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        gate = threading.Event()
+        entered = threading.Event()
+
+        class BlockingClient:
+            def get(self, url: str, params: dict[str, Any]) -> _FakeResponse:
+                entered.set()
+                assert gate.wait(timeout=2)
+                return _FakeResponse({"data": {"result": []}})
+
+        monkeypatch.setattr(loki_events, "_client", _accessor(BlockingClient()))
+        loki_query_budget.reset_for_tests(capacity=1, max_waiters=1, wait_timeout_s=1.0)
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            holder = executor.submit(
+                loki_events._get_json,
+                "http://loki/query",
+                {"query": "holder"},
+                endpoint="query",
+            )
+            assert entered.wait(timeout=1)
+            waiter = executor.submit(
+                loki_events._get_json,
+                "http://loki/query",
+                {"query": "waiter"},
+                endpoint="query",
+            )
+            _wait_for_budget_waiters(1)
+            with pytest.raises(httpx.PoolTimeout, match="queue is full"):
+                loki_events._get_json("http://loki/query", {"query": "overflow"}, endpoint="query")
+            gate.set()
+            holder.result(timeout=1)
+            waiter.result(timeout=1)
+
+    def test_fifo_lets_stats_run_before_an_inspect_worker_reacquires(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        gate = threading.Event()
+        inspect_started = threading.Event()
+        order: list[str] = []
+        order_lock = threading.Lock()
+
+        class OrderedClient:
+            def get(self, url: str, params: dict[str, Any]) -> _FakeResponse:
+                query = str(params["query"])
+                with order_lock:
+                    order.append(query)
+                if query == "holder":
+                    assert gate.wait(timeout=2)
+                return _FakeResponse({"data": {"result": []}})
+
+        def inspect_chain() -> None:
+            inspect_started.set()
+            loki_events._get_json("http://loki/query", {"query": "inspect-1"}, endpoint="query")
+            loki_events._get_json("http://loki/query", {"query": "inspect-2"}, endpoint="query")
+
+        monkeypatch.setattr(loki_events, "_client", _accessor(OrderedClient()))
+        loki_query_budget.reset_for_tests(capacity=1, wait_timeout_s=1.0)
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            holder = executor.submit(
+                loki_events._get_json,
+                "http://loki/query",
+                {"query": "holder"},
+                endpoint="query",
+            )
+            deadline = time.monotonic() + 1.0
+            while time.monotonic() < deadline:
+                with order_lock:
+                    if order == ["holder"]:
+                        break
+                time.sleep(0.001)
+            else:
+                pytest.fail("holder never entered the Loki client")
+            inspect = executor.submit(inspect_chain)
+            assert inspect_started.wait(timeout=1)
+            _wait_for_budget_waiters(1)
+            stats = executor.submit(
+                loki_events._get_json,
+                "http://loki/query",
+                {"query": "stats"},
+                endpoint="query",
+            )
+            _wait_for_budget_waiters(2)
+            gate.set()
+            holder.result(timeout=1)
+            inspect.result(timeout=1)
+            stats.result(timeout=1)
+
+        assert order == ["holder", "inspect-1", "stats", "inspect-2"]
 
 
 # ─── _build_logql ────────────────────────────────────────────────────────────

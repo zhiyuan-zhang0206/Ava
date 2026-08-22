@@ -36,7 +36,7 @@ from fastapi import HTTPException
 from psycopg import Connection, Cursor
 from psycopg_pool import ConnectionPool
 
-from gateway import loki_events
+from gateway import loki_events, loki_query_budget
 from gateway.schemas import MetricPoint, PluginMetricResult
 from shared import core_metrics
 from shared.metrics_logql import validate_logql
@@ -264,6 +264,10 @@ def _execute_metric_logql(spec: MetricSpec, query: str) -> PluginMetricResult:
             to=datetime.now(UTC),
             step_s=3600,
         )
+    except loki_query_budget.LokiQueryBudgetError:
+        # Local capacity saturation applies to the endpoint, not this metric;
+        # preserve the typed 503 instead of burying it in a 200 error row.
+        raise
     except (httpx.HTTPError, ValueError) as exc:
         return base.model_copy(update={"error": f"query failed: {exc}"})
     if spec.panel == "stat":
@@ -273,8 +277,11 @@ def _execute_metric_logql(spec: MetricSpec, query: str) -> PluginMetricResult:
 
 
 def metrics_for_agent(pool: ConnectionPool[Any], agent_id: int) -> list[PluginMetricResult]:
-    """Sync twin of the metrics endpoint — runs via asyncio.to_thread. One
-    read-only transaction for the agent check + every metric query.
+    """Sync twin of the metrics endpoint — runs via asyncio.to_thread.
+
+    SQL metrics share one read-only transaction. LogQL metrics execute only
+    after that connection returns to the pool: waiting for the global Loki
+    budget or for Loki itself must never consume a scarce Postgres slot.
 
     Read-only is enforced server-side per transaction (`SET TRANSACTION READ
     ONLY` as the FIRST statement — a requirement of the command), NOT via
@@ -283,19 +290,22 @@ def metrics_for_agent(pool: ConnectionPool[Any], agent_id: int) -> list[PluginMe
     inherit a read-only session and its writes would fail. The SET TRANSACTION
     form leaves nothing behind when the transaction rolls back."""
     specs = [s for s in _load_plugin_metrics() if "inspector" in s.output]
+    results: dict[int, PluginMetricResult] = {}
+    deferred_logql: list[tuple[int, MetricSpec, str]] = []
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute("SET TRANSACTION READ ONLY")
         cur.execute("SELECT 1 FROM agents_meta WHERE id = %s", (agent_id,))
         if cur.fetchone() is None:
             raise HTTPException(status_code=404, detail=f"agent {agent_id} not found")
-        return [
-            _execute_metric(
-                conn,
-                cur,
-                spec,
-                _translate_macros(
-                    _render_metric_query(spec, agent_id), logql=spec.query_type == "logql"
-                ),
+        for index, spec in enumerate(specs):
+            query = _translate_macros(
+                _render_metric_query(spec, agent_id), logql=spec.query_type == "logql"
             )
-            for spec in specs
-        ]
+            if spec.query_type == "logql":
+                deferred_logql.append((index, spec, query))
+            else:
+                results[index] = _execute_metric(conn, cur, spec, query)
+
+    for index, spec, query in deferred_logql:
+        results[index] = _execute_metric_logql(spec, query)
+    return [results[index] for index in range(len(specs))]

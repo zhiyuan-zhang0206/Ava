@@ -81,6 +81,7 @@ function StaleDot() {
 export function InspectorPanel({ agentId }: { agentId: number }) {
   const { open, toggle } = useInspectorOpen();
   const [hours, setHours] = useState<number | null>(null);
+  const queryClient = useQueryClient();
 
   // Context-bar style floating panel (user ruling 2026-08-05 21:50): the
   // panel pops up from the composer's top-right corner (anchored to the
@@ -113,21 +114,23 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
 
   const { data, error, isLoading, refetch, isFetching } = useQuery({
     queryKey: ["agent-inspect", agentId, hours],
-    queryFn: () =>
+    queryFn: ({ signal }) =>
       api.getAgentInspect(
         agentId,
         hours === COMPACT_WINDOW ? null : hours,
         hours === COMPACT_WINDOW,
+        signal,
       ),
     // Slow background drift only — the endpoint is expensive (~25 Loki
     // aggregations + a shell-probe RPC per call), so the interval is a floor
     // for "numbers don't rot while the panel sits open", not the freshness
     // mechanism. Freshness comes from refetchOnMount on open, the header's
     // manual refresh, and SSE-driven invalidation (notices below).
-    refetchInterval: 60_000,
+    enabled: open,
+    refetchInterval: open ? 60_000 : false,
     // Fetch once on open, not just cold. The global 5min staleTime otherwise
-    // treats cached inspect data (from the toggle's intent prefetch or a
-    // previous open) as fresh, so opening the panel would show stale numbers;
+    // treats cached inspect data from a previous open as fresh, so opening
+    // the panel would show stale numbers;
     // "always" pulls immediately (cached data stays on screen meanwhile via
     // placeholderData).
     refetchOnMount: "always",
@@ -139,10 +142,19 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
     placeholderData: keepPreviousData,
   });
 
+  // Disabling an observer does not itself guarantee transport cancellation.
+  // Consume React Query's AbortSignal above and explicitly cancel when the
+  // panel closes so a hidden inspector cannot leave its expensive fan-out
+  // running in the gateway.
+  useEffect(() => {
+    if (!open) {
+      void queryClient.cancelQueries({ queryKey: ["agent-inspect", agentId] });
+    }
+  }, [agentId, open, queryClient]);
+
   // Open pages: SSE-driven cache (page_opened/page_closed fold in live), not a
   // poll — see useAgentPages.
   const pages = useAgentPages(agentId);
-  const queryClient = useQueryClient();
 
   // Keep the inspect query fresh on notice events — notice_posted/notice_resolved
   // SSE arrive long before the slow 60s interval, so the notice section updates
@@ -168,11 +180,13 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
   useEventStream(onSystemEvent, onConnectionEvent);
 
   // Keep the last successfully loaded data so the panel never blanks when the
-  // query key resets (agentId / hours change). During the fetch the previous
-  // agent's data stays on screen; the new data replaces it the moment it lands.
+  // query key resets for a same-agent window change. React Query's
+  // keepPreviousData is intentionally broader than that: it can also hand the
+  // observer agent A's result while agent B is pending, so both the query value
+  // and our local fallback are identity-checked before either can render.
   const [lastData, setLastData] = useState<AgentInspect>();
   // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: cache last successful data to avoid blanking
-  useEffect(() => { if (data) setLastData(data); }, [data]);
+  useEffect(() => { if (data?.agent_id === agentId) setLastData(data); }, [agentId, data]);
   // Cross-agent guard (Task #1051): on agent switch, drop the previous
   // agent's snapshot immediately — while the new query is in flight, `data`
   // is undefined for a COLD key and effectiveData would otherwise fall back
@@ -180,12 +194,14 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
   // NoticeReplySection reply/read writes) under agent B's name.
   // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: stale snapshot must not survive an agent switch
   useEffect(() => { setLastData(undefined); }, [agentId]);
-  const effectiveData = data ?? lastData;
+  const matchingData = data?.agent_id === agentId ? data : undefined;
+  const matchingLastData = lastData?.agent_id === agentId ? lastData : undefined;
+  const effectiveData = matchingData ?? matchingLastData;
 
   // Renders nothing while closed — the panel floats above the layout (fixed),
   // so it leaves the flex column entirely instead of reserving width. All
-  // hooks run regardless (rules-of-hooks); the toggle's intent prefetch keeps
-  // the cache warm for the next open.
+  // hooks run regardless (rules-of-hooks), but the query is disabled so a
+  // closed panel cannot produce inspect traffic.
   if (!open) return null;
 
   // Context-bar style floating panel (user ruling 2026-08-05 21:50):
@@ -259,33 +275,15 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
 }
 
 /** Header toggle button — opens/closes the inspector. Rendered in the
- *  composer's top-right corner (user ruling 2026-08-05).
- *
- *  Prefetch-on-intent: hovering/focusing the toggle prefetches the default
- *  inspect window so the panel opens populated — this replaces the old
- *  selection-time preload, which fired the expensive /inspect call for every
- *  agent clicked in the sidebar whether or not the panel ever opened. Intent
- *  (pointer on the toggle) is the earliest signal that the data will actually
- *  be looked at. */
-export function InspectorToggle({ agentId = null }: { agentId?: number | null }) {
+ *  composer's top-right corner (user ruling 2026-08-05). Closed means no
+ *  inspect traffic: the panel's enabled query performs the first fetch only
+ *  after this button opens it. */
+export function InspectorToggle() {
   const { open, toggle } = useInspectorOpen();
-  const queryClient = useQueryClient();
-  const prefetch = useCallback(() => {
-    if (agentId == null) return;
-    void queryClient.prefetchQuery({
-      queryKey: ["agent-inspect", agentId, null],
-      queryFn: () => api.getAgentInspect(agentId, null, false),
-      // Don't re-fire on every pointer wiggle; the panel's own
-      // refetchOnMount:"always" pulls a fresh snapshot when it opens.
-      staleTime: 10_000,
-    });
-  }, [agentId, queryClient]);
   return (
     <button
       type="button"
       onClick={toggle}
-      onPointerEnter={prefetch}
-      onFocus={prefetch}
       data-inspector-toggle=""
       aria-label={open ? "Close inspector" : "Open inspector"}
       className={cn(

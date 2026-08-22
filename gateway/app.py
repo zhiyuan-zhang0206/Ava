@@ -67,7 +67,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 import shared.db
-from gateway import _idempotency, _latency, _pause_policy
+from gateway import _idempotency, _latency, _pause_policy, loki_query_budget
 from gateway import mcp_endpoint as _mcp_endpoint
 from gateway.routers import (
     _machine_pause as machine_pause_router,
@@ -577,6 +577,19 @@ def _cors_headers(request: Request) -> dict[str, str]:
         "Vary": "Origin",
         "Access-Control-Allow-Credentials": "true",
     }
+
+
+@app.exception_handler(loki_query_budget.LokiQueryBudgetError)
+async def _loki_query_budget_error_handler(
+    request: Request,  # noqa: ARG001 — FastAPI exception-handler signature
+    exc: loki_query_budget.LokiQueryBudgetError,
+) -> JSONResponse:
+    """Map local Loki admission saturation to one retriable wire contract."""
+    return JSONResponse(
+        status_code=503,
+        content={"detail": f"Loki query budget unavailable ({exc.reason}); retry"},
+        headers={"Retry-After": "1"},
+    )
 
 
 @app.exception_handler(Exception)
