@@ -50,6 +50,14 @@ def test_offset_is_rendered_from_the_setting(monkeypatch: pytest.MonkeyPatch) ->
     assert re.search(r"\(UTC-0[78]:00\)", la), la
 
 
+def test_warns_about_pre_cutover_pacific_history(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert (
+        "Messages persisted before the 2026-08-22 cluster update carry explicit PDT/PST "
+        "suffixes with US-Pacific wall-clock values (UTC-7 / UTC-8) — convert them "
+        "(Shanghai = PDT + 15h / PST + 16h) before comparing with current timestamps."
+    ) in _content(monkeypatch, "Asia/Shanghai")
+
+
 def test_carries_the_timezone_note_tag(monkeypatch: pytest.MonkeyPatch) -> None:
     """The tag drives the UI chip; an unmapped one renders as a loud alarm
     (`scripts/lint_note_tags.py` enforces the frontend half)."""
