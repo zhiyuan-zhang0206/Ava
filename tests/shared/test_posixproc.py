@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import contextlib
 import os
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -180,22 +181,31 @@ def test_list_sessions_reaps_dead_record(unit_home) -> None:  # pyright: ignore[
 def test_starttime_identity_survives_wall_clock_drift(unit_home: Path) -> None:
     """A stable kernel start tick keeps a live record despite a bad epoch time."""
     name = "ava-test-agent-starttime-drift"
-    starttime = pid_starttime_ticks(os.getpid())
-    assert starttime is not None
-    rec = SessionRecord(
-        pid=os.getpid(),
-        create_time=1.0,
-        cmd="test",
-        cwd=str(unit_home),
-        started_at=time.time(),
-        starttime=starttime,
-    )
-    rec.write(posixproc._record_path(name))
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(300)"])
+    try:
+        assert _wait(lambda: psutil.pid_exists(child.pid))
+        starttime = pid_starttime_ticks(child.pid)
+        assert starttime is not None
+        rec = SessionRecord(
+            pid=child.pid,
+            create_time=1.0,
+            cmd="test",
+            cwd=str(unit_home),
+            started_at=time.time(),
+            starttime=starttime,
+        )
+        rec.write(posixproc._record_path(name))
 
-    assert rec.identifies(os.getpid()) is True
-    assert posixproc.has_session(name) is True
-    assert posixproc.list_sessions(prefix="ava-test-agent-starttime-") == [name]
-    assert posixproc._record_path(name).exists()
+        assert rec.identifies(child.pid) is True
+        assert posixproc.has_session(name) is True
+        assert posixproc.list_sessions(prefix="ava-test-agent-starttime-") == [name]
+        assert posixproc._record_path(name).exists()
+    finally:
+        try:
+            child.kill()
+            child.wait(timeout=5)
+        finally:
+            posixproc._record_path(name).unlink(missing_ok=True)
 
 
 @pytest.mark.skipif(not IS_LINUX, reason="Linux /proc start-time identity")
