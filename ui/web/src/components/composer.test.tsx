@@ -102,6 +102,20 @@ function renderComposerAgent(agentId: number) {
   return screen.getByTestId("composer-input") as HTMLTextAreaElement;
 }
 
+describe("Composer placeholder", () => {
+  it("explains that messaging a terminated agent resurrects it", () => {
+    const { rerender } = render(<Composer {...baseProps} mode="idle" />);
+    expect(screen.getByTestId("composer-input").getAttribute("placeholder")).toBe(
+      "send a message",
+    );
+
+    rerender(<Composer {...baseProps} mode="idle" agentTerminated />);
+    expect(screen.getByTestId("composer-input").getAttribute("placeholder")).toBe(
+      "send a message to resurrect this agent",
+    );
+  });
+});
+
 describe("Composer button mode dispatch", () => {
   // Layout regression (task #714 + #715): the composer is width-capped and
   // centered inside the timeline column. The cap comes from the

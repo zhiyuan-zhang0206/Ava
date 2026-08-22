@@ -95,6 +95,9 @@ import { TimelineRow, cardConfigFor } from "./row";
 
 interface Props {
   items: BackendTimelineItem[];
+  /** Identity of the timeline thread / active agent. A change means a new
+   *  conversation is displayed, so all per-item and per-turn pins are dropped. */
+  threadKey?: string;
   // Streaming-code flag: pass true when the last item is an agent_code
   // that is still streaming, so PythonCode shows a cursor
   streamingCode?: boolean;
@@ -131,6 +134,7 @@ const LOAD_OLDER_TRIGGER_PX = 200;
 
 export function TimelineView({
   items,
+  threadKey,
   streamingCode = false,
   turnActive = false,
   onFork,
@@ -659,6 +663,16 @@ export function TimelineView({
   const [prevDetailsMode, setPrevDetailsMode] = useState(effectiveDetailsMode);
   if (prevDetailsMode !== effectiveDetailsMode) {
     setPrevDetailsMode(effectiveDetailsMode);
+    setOverrides(new Set());
+    setTurnOverrides(new Map());
+  }
+
+  // item_ids are message indexes local to each thread, so the same ids recur
+  // across agents. Scope pinned state to the thread or an agent switch can
+  // resurrect another conversation's expansion choices.
+  const [prevThreadKey, setPrevThreadKey] = useState(threadKey);
+  if (prevThreadKey !== threadKey) {
+    setPrevThreadKey(threadKey);
     setOverrides(new Set());
     setTurnOverrides(new Map());
   }
