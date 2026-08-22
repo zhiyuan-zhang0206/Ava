@@ -2,7 +2,7 @@
 // a TanStack Query cache (mirrors the agents-cache pattern). Covers the initial
 // fetch, page_opened/page_closed folding, replace-by-name, the empty-cache
 // guard (no partial seed before the fetch lands), cross-agent filtering, and
-// reconnect reconciliation. Same mock strategy as use-timeline.test.ts.
+// reconnect reconciliation. Same mock strategy as flaky/use-timeline.test.ts.
 
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import React from "react";

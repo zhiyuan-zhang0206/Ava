@@ -1,3 +1,8 @@
+// Quarantined after "a frame batch folds in one store update (same visible result as
+// per-event)" flaked on CI 2026-08-22 under parallel-runner load
+// (AssertionError: expected vi.fn() to be called 1 time, but got 2). It passes
+// locally and serially.
+//
 // useTimeline hook integration tests — React Testing Library + happy-dom.
 //
 // Complements timeline-scenarios.test.ts:
@@ -20,12 +25,12 @@ import React from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { api } from "./api";
-import type { BackendTimelineItem, SystemEvent, TimelineResponse } from "./types";
-import { parseItemId } from "./timeline";
-import { useTimelineStore } from "./timeline-store";
-import { useTimeline } from "./use-timeline";
-import type { ConnectionEvent } from "./useEventStream";
+import { api } from "../api";
+import type { BackendTimelineItem, SystemEvent, TimelineResponse } from "../types";
+import { parseItemId } from "../timeline";
+import { useTimelineStore } from "../timeline-store";
+import { useTimeline } from "../use-timeline";
+import type { ConnectionEvent } from "../useEventStream";
 
 // -- mock layer ────────────────────────────────────────────────────────────
 
@@ -46,7 +51,7 @@ vi.mock("react", async (importOriginal) => {
   };
 });
 
-vi.mock("./api", () => ({
+vi.mock("../api", () => ({
   api: {
     getTimeline: vi.fn(),
   },
@@ -59,7 +64,7 @@ vi.mock("./api", () => ({
 let currentEventHandler: ((ev: SystemEvent) => void) | null = null;
 let currentConnectionHandler: ((ev: ConnectionEvent) => void) | null = null;
 let currentBatchHandler: ((evs: SystemEvent[]) => void) | null = null;
-vi.mock("./useEventStream", () => ({
+vi.mock("../useEventStream", () => ({
   // Both Providers pass children through — when useTimeline calls
   // useAgentEventStream, we stub the handlers into module-level vars
   // and skip the real Context.
