@@ -237,8 +237,9 @@ export const api = {
     return f(`/api/agents/${agentId}/pending`).then(ok<PendingInbound[]>);
   },
 
-  getCommands: (): Promise<CommandItem[]> => {
-    return f("/api/commands").then(ok<CommandItem[]>);
+  getCommands: (agentId?: number | null): Promise<CommandItem[]> => {
+    const qs = agentId != null ? `?agent_id=${encodeURIComponent(agentId)}` : "";
+    return f(`/api/commands${qs}`).then(ok<CommandItem[]>);
   },
 
   // `content` is a plain string, or a list of OpenAI-shaped content blocks for

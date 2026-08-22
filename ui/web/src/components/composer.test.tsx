@@ -12,7 +12,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { MessageDeliveryUnknownError } from "@/lib/api";
+import { api, MessageDeliveryUnknownError } from "@/lib/api";
 
 import { Composer } from "./composer";
 
@@ -29,7 +29,7 @@ vi.mock("@/lib/api", () => ({
     }
   },
   api: {
-    getCommands: () => Promise.resolve(commandList),
+    getCommands: vi.fn((_agentId?: number | null) => Promise.resolve(commandList)),
     getContextBreakdown: () =>
       Promise.resolve({
         total_input_tokens: 1000,
@@ -43,9 +43,18 @@ vi.mock("@/lib/api", () => ({
   },
 }));
 
+const getCommandsMock = vi.mocked(api.getCommands);
+
+beforeEach(() => {
+  getCommandsMock.mockImplementation((_agentId?: number | null) =>
+    Promise.resolve(commandList),
+  );
+});
+
 afterEach(() => {
   cleanup();
   commandList = [];
+  getCommandsMock.mockReset();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -778,6 +787,67 @@ describe("Composer slash commands", () => {
     fireEvent.change(ta, { target: { value } }); // leaves the caret at the end
     if (caret >= 0 && caret !== value.length) moveCaret(ta, caret);
   }
+
+  it("requests the global command list when no agent is selected", async () => {
+    render(<Composer {...baseProps} mode="idle" agentId={null} />);
+
+    await waitFor(() => expect(getCommandsMock).toHaveBeenCalledTimes(1));
+    expect(getCommandsMock).toHaveBeenCalledWith();
+  });
+
+  it("requests the selected agent's command list", async () => {
+    render(<Composer {...baseProps} mode="idle" agentId={7} />);
+
+    await waitFor(() => expect(getCommandsMock).toHaveBeenCalledWith(7));
+  });
+
+  it("fetches each agent once and reuses the cached list when switching back", async () => {
+    const compact = {
+      name: "compact",
+      description: "compact context",
+      instruction_hint: "a focus",
+    };
+    getCommandsMock.mockImplementation((selectedAgentId?: number | null) =>
+      Promise.resolve(selectedAgentId === 7 ? [recap] : [compact]),
+    );
+    const { rerender } = render(<Composer {...baseProps} mode="idle" agentId={7} />);
+
+    fireEvent.change(input(), { target: { value: "/" } });
+    expect(await screen.findByTestId("slash-option-recap")).toBeTruthy();
+
+    rerender(<Composer {...baseProps} mode="idle" agentId={8} />);
+    fireEvent.change(input(), { target: { value: "/" } });
+    expect(await screen.findByTestId("slash-option-compact")).toBeTruthy();
+
+    rerender(<Composer {...baseProps} mode="idle" agentId={7} />);
+    fireEvent.change(input(), { target: { value: "/" } });
+    expect(await screen.findByTestId("slash-option-recap")).toBeTruthy();
+    expect(getCommandsMock.mock.calls).toEqual([[7], [8]]);
+  });
+
+  it("logs an agent command fetch failure and retries it after switching back", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    getCommandsMock.mockImplementation((selectedAgentId?: number | null) =>
+      selectedAgentId === 7
+        ? Promise.reject(new Error("catalog unavailable"))
+        : Promise.resolve([]),
+    );
+    const { rerender } = render(<Composer {...baseProps} mode="idle" agentId={7} />);
+
+    await waitFor(() =>
+      expect(warn).toHaveBeenCalledWith(
+        "[composer] getCommands failed: catalog unavailable",
+      ),
+    );
+    expect(screen.getByTestId("composer-input")).toBeTruthy();
+
+    rerender(<Composer {...baseProps} mode="idle" agentId={8} />);
+    await waitFor(() => expect(getCommandsMock).toHaveBeenCalledTimes(2));
+    rerender(<Composer {...baseProps} mode="idle" agentId={7} />);
+
+    await waitFor(() => expect(getCommandsMock).toHaveBeenCalledTimes(3));
+    expect(getCommandsMock.mock.calls).toEqual([[7], [8], [7]]);
+  });
 
   it("typing '/' opens the dropdown with available commands", async () => {
     commandList = [recap];
