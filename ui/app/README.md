@@ -52,15 +52,16 @@ network-security configuration, and optional release signing. A CI keystore is
 enabled only when `src-tauri/gen/android/keystore.properties` exists; see the
 release workflow for the three Android signing secrets.
 
-The shared onboarding page has one primary server field: a bare host means
-`http://host:3000`, and a pasted default gateway URL (`:8000`) becomes that
-console URL. Paths, queries, and fragments are stripped; `https` is preserved;
-other primary-field ports point the user to the advanced gateway override,
-which keeps existing manual `gatewayUrl` settings compatible. Android also
-offers an optional cluster secret: Rust logs in natively, stores it in Android
-Keystore only after that login succeeds, and injects only the resulting
-HTTP-only session cookie into the webview. Desktop has no secret field and
-keeps its `.env` login flow.
+The shared onboarding page has one primary server field. On Android, a bare
+host means `http://host:3000`, and a pasted default gateway URL (`:8000`)
+becomes that console URL. Paths, queries, and fragments are stripped; `https`
+is preserved; other primary-field ports point the user to the advanced gateway
+override, which keeps existing manual `gatewayUrl` settings compatible. Desktop
+uses the same page without a secret field but preserves its existing arbitrary
+entry and gateway URLs for worktree development. Android's optional cluster
+secret is logged in natively, saved to Android Keystore only after that login
+succeeds, and exposed to the webview only as the resulting HTTP-only session
+cookie.
 
 Saving switches immediately to a 30-second connecting screen, then queues the
 native window rebuild after its IPC response. The entry watchdog makes an HTTP

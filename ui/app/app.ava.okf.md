@@ -23,16 +23,17 @@ shell owns the native window and capabilities that a browser tab cannot supply.
 `settings.json` in the platform app-config directory is the persisted
 non-credential configuration. `entryUrl` names the gate; `gatewayUrl` is
 optional and otherwise derives from the same host on port 8000. Desktop defaults
-to `localhost:3000`; Android starts on onboarding. The primary server field
-normalizes a bare host or a
-default gateway URL into the console origin on 3000, preserves `https`, and
-removes paths, queries, and fragments. Other primary-field ports are refused
-with an advanced-options hint; the optional `gatewayUrl` override keeps its
-existing custom-port capability (and maps a bare host or `:3000` to `:8000`).
+to `localhost:3000`; Android starts on onboarding. Android's primary server
+field normalizes a bare host or a default gateway URL into the console origin
+on 3000, preserves `https`, and removes paths, queries, and fragments. Other
+Android primary-field ports are refused with an advanced-options hint; the
+optional `gatewayUrl` override keeps its existing custom-port capability (and
+maps a bare host or `:3000` to `:8000`). Desktop shares the one-field page but
+preserves its existing arbitrary entry and gateway URLs for worktree clusters.
 
 The bundled Chinese onboarding page immediately changes to a 30-second
-connecting state while saving. `shell_save_settings` persists the normalized
-settings, then queues its window rebuild after the synchronous IPC reply, so it
+connecting state while saving. `shell_save_settings` persists Android-normalized
+settings, then queues its window rebuild after the asynchronous IPC reply, so it
 cannot destroy the webview that must receive that reply. `window.rs` probes the
 console root with a four-second HTTP GET rather than TCP, treats
 2xx/3xx/401/403 as healthy, and sends a final `reason=unreachable|http|update-window`
@@ -53,7 +54,10 @@ only in the bundled form; after the first successful native login it encrypts
 the value with Android Keystore and stores ciphertext in SharedPreferences. In
 both cases the webview receives only the resulting HTTP-only session cookie;
 401/403 falls back to the console login without retrying or clearing Android's
-stored credential.
+stored credential. Android loads that credential through an asynchronous native
+plugin call into a process-local cache; a first window prelude may report
+`autoLogin: false` while loading, but startup login uses the same loader and
+does not block the Android main looper.
 
 ## Desktop
 
@@ -70,7 +74,8 @@ checked-in Kotlin plugins control a non-exported `specialUse` foreground service
 and the Android-Keystore secret bridge. The injected SSE bridge listens to
 `/api/system` and notifies only on busy-to-idle completion or a newly
 awaiting-response notice. Notification IPC also rechecks persisted consent
-natively.
+natively. All Android plugin calls leave the main looper before waiting for
+their JNI response; direct synchronous mobile-plugin calls would deadlock it.
 
 Android's network-security XML cannot express IP prefixes, so it permits
 cleartext transport while Rust refuses to persist an HTTP endpoint unless all

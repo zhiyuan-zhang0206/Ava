@@ -74,8 +74,15 @@ pub fn open_entry(app: &AppHandle) {
             }
         }
         #[cfg(target_os = "android")]
-        if let Some(secret) = crate::android::stored_secret(app) {
-            crate::autologin::start(window.clone(), endpoints.clone(), secret);
+        if !state.take_skip_next_android_autologin() {
+            let handle = app.clone();
+            let login_window = window.clone();
+            let login_endpoints = endpoints.clone();
+            tauri::async_runtime::spawn(async move {
+                if let Some(secret) = crate::android::load_stored_secret(&handle).await {
+                    crate::autologin::start(login_window, login_endpoints, secret);
+                }
+            });
         }
         watch_entry(window, endpoints.entry);
     }
@@ -215,12 +222,24 @@ impl EntryFailure {
 /// screen. Only a failure escalates to "Connecting…"; the 30-second budget
 /// then ends at a classified recovery screen.
 fn watch_entry(window: WebviewWindow, entry: Url) {
+    let client = match Client::builder()
+        .timeout(PROBE_TIMEOUT)
+        .redirect(Policy::none())
+        .build()
+    {
+        Ok(client) => client,
+        Err(err) => {
+            log::error!("could not build the entry probe client: {err}");
+            navigate_to_page(&window, &unreachable_page(EntryFailure::Http));
+            return;
+        }
+    };
     std::thread::spawn(move || {
         let deadline = Instant::now() + RETRY_BUDGET;
         let mut attempt = 0;
         let mut failure = EntryFailure::Unreachable;
         loop {
-            match probe_entry(&entry) {
+            match probe_entry(&client, &entry) {
                 Ok(()) => {
                     // Recovered after a visible failure — put the console back.
                     if attempt > 0 {
@@ -251,12 +270,7 @@ fn watch_entry(window: WebviewWindow, entry: Url) {
 /// HTTP GET probe for the console root. A listening TCP socket is insufficient:
 /// it can accept a webview connection then hang forever. The console's normal
 /// signed-out answers (401/403) are still healthy HTTP responses.
-fn probe_entry(url: &Url) -> Result<(), EntryFailure> {
-    let client = Client::builder()
-        .timeout(PROBE_TIMEOUT)
-        .redirect(Policy::none())
-        .build()
-        .map_err(|_| EntryFailure::Http)?;
+fn probe_entry(client: &Client, url: &Url) -> Result<(), EntryFailure> {
     let response = client
         .get(url.as_str())
         .send()

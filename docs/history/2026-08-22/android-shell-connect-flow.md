@@ -17,3 +17,12 @@ Connection readiness is an HTTP probe of the console rather than a bare TCP
 connect. This distinguishes a live console, a normal signed-out response, a
 failed HTTP service, and a rollout window. Rebuilding the webview is deferred
 until after the settings IPC reply so Android can settle the submit promise.
+
+## Update
+
+The follow-up review established that Android mobile-plugin calls made from the
+main looper deadlock waiting for the JNI response that same looper must deliver.
+The shell now uses asynchronous native plugin calls or the blocking executor,
+and mirrors the Keystore result in transient process state for startup login and
+the prelude. Desktop keeps its existing arbitrary worktree entry and gateway
+ports; the strict console/gateway normalization applies only to Android.

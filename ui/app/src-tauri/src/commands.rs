@@ -50,7 +50,7 @@ impl ShellConfig {
                 }
                 #[cfg(target_os = "android")]
                 {
-                    crate::android::stored_secret(app).is_some()
+                    state.android_secret().is_some()
                 }
                 #[cfg(not(any(desktop, target_os = "android")))]
                 {
@@ -61,6 +61,34 @@ impl ShellConfig {
             background_service: cfg!(target_os = "android") && settings.background_service,
             releases_api: cfg!(target_os = "android").then(|| RELEASES_API.to_string()),
         }
+    }
+}
+
+/// Preserve desktop's existing arbitrary-address behavior while Android's
+/// onboarding field identifies a cluster and therefore normalizes its ports.
+fn entry_url_for_save(raw: &str) -> Result<String, String> {
+    #[cfg(target_os = "android")]
+    {
+        crate::urls::normalize_entry_address(raw)
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        crate::urls::parse_entry(raw).ok_or_else(|| format!("'{raw}' is not a server address"))?;
+        Ok(raw.to_string())
+    }
+}
+
+/// Match the entry-address compatibility boundary for the optional gateway
+/// override: Android normalizes onboarding input; desktop keeps prior values.
+fn gateway_url_for_save(raw: &str) -> Result<String, String> {
+    #[cfg(target_os = "android")]
+    {
+        crate::urls::normalize_gateway_address(raw)
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        crate::urls::parse_entry(raw).ok_or_else(|| format!("'{raw}' is not a server address"))?;
+        Ok(raw.to_string())
     }
 }
 
@@ -110,7 +138,7 @@ fn check_cleartext_target(url: &tauri::Url) -> Result<(), String> {
 
 /// Persist a settings patch and queue a window rebuild for the resulting entry URL.
 #[tauri::command]
-pub fn shell_save_settings(
+pub async fn shell_save_settings(
     app: AppHandle,
     state: State<'_, ShellState>,
     patch: SettingsPatch,
@@ -119,7 +147,7 @@ pub fn shell_save_settings(
     if let Some(raw) = patch.entry_url {
         // Validate before persisting: a stored address that cannot be parsed
         // would strand the app on the onboarding screen with no way back.
-        let entry_url = crate::urls::normalize_entry_address(&raw)?;
+        let entry_url = entry_url_for_save(&raw)?;
         let url = crate::urls::parse_entry(&entry_url)
             .ok_or_else(|| format!("'{entry_url}' is not a server address"))?;
         check_cleartext_target(&url)?;
@@ -129,7 +157,7 @@ pub fn shell_save_settings(
         if raw.trim().is_empty() {
             settings.gateway_url = None;
         } else {
-            let gateway_url = crate::urls::normalize_gateway_address(&raw)?;
+            let gateway_url = gateway_url_for_save(&raw)?;
             let url = crate::urls::parse_entry(&gateway_url)
                 .ok_or_else(|| format!("'{gateway_url}' is not a server address"))?;
             check_cleartext_target(&url)?;
@@ -150,7 +178,8 @@ pub fn shell_save_settings(
     {
         if let Some(secret) = patch.cluster_secret {
             if secret.is_empty() {
-                crate::android::clear_secret(&app)?;
+                crate::android::clear_secret_async(&app).await?;
+                state.cache_android_secret(None);
             } else {
                 let endpoints = state
                     .endpoints()
@@ -158,18 +187,25 @@ pub fn shell_save_settings(
                 let window = app
                     .get_webview_window(window::MAIN_WINDOW)
                     .ok_or_else(|| "connection window is unavailable".to_string())?;
-                crate::autologin::login(&window, &endpoints, &secret)
-                    .map_err(|err| err.message())?;
+                let login_secret = secret.clone();
+                tauri::async_runtime::spawn_blocking(move || {
+                    crate::autologin::login(&window, &endpoints, &login_secret)
+                })
+                .await
+                .map_err(|err| format!("native login task failed: {err}"))?
+                .map_err(|err| err.message())?;
                 // Keep a submitted credential only after its native login has
                 // succeeded; settings.json never receives this value.
-                crate::android::save_secret(&app, &secret)?;
+                crate::android::save_secret_async(&app, &secret).await?;
+                state.cache_android_secret(Some(secret));
+                state.skip_next_android_autologin();
             }
         }
         if let Some(value) = patch.background_service {
-            crate::android::set_background_service(&app, value);
+            crate::android::set_background_service_async(&app, value).await;
         }
         if patch.notifications == Some(true) {
-            crate::android::request_notification_permission(&app);
+            crate::android::request_notification_permission_async(app.clone()).await;
         }
     }
     let handle = app.clone();
@@ -200,34 +236,32 @@ pub fn shell_open_settings(app: AppHandle) {
 /// Raise a local notification. Android only — on desktop the console window is
 /// already the notification surface, so this logs and returns.
 #[tauri::command]
-pub fn shell_notify(app: AppHandle, state: State<'_, ShellState>, title: String, body: String) {
+pub async fn shell_notify(
+    app: AppHandle,
+    state: State<'_, ShellState>,
+    title: String,
+    body: String,
+) -> Result<(), String> {
     #[cfg(target_os = "android")]
     {
-        use tauri_plugin_notification::NotificationExt;
         if !state.settings().notifications {
-            return;
+            return Ok(());
         }
         let title = title.chars().take(120).collect::<String>();
         let body = body.chars().take(500).collect::<String>();
-        if let Err(err) = app
-            .notification()
-            .builder()
-            .title(&title)
-            .body(&body)
-            .show()
-        {
-            log::error!("could not show a notification: {err}");
-        }
+        crate::android::show_notification(app, title, body).await;
     }
     #[cfg(not(target_os = "android"))]
     {
         let _ = (&app, &state, &title, &body);
         log::debug!("notification suppressed off Android: {title}");
     }
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
+    use super::{entry_url_for_save, gateway_url_for_save};
     use crate::command_names::COMMANDS;
     use crate::window::REMOTE_PERMISSIONS;
 
@@ -274,5 +308,22 @@ mod tests {
     #[test]
     fn no_ipc_command_can_read_the_cluster_secret() {
         assert!(!COMMANDS.iter().any(|command| command.contains("secret")));
+    }
+
+    #[cfg(not(target_os = "android"))]
+    #[test]
+    fn desktop_keeps_legacy_custom_entry_and_gateway_addresses() {
+        assert_eq!(
+            entry_url_for_save("http://worktree.local:3100/api"),
+            Ok("http://worktree.local:3100/api".to_string())
+        );
+        assert_eq!(
+            entry_url_for_save("http://worktree.local:8000"),
+            Ok("http://worktree.local:8000".to_string())
+        );
+        assert_eq!(
+            gateway_url_for_save("http://worktree.local:3000/api"),
+            Ok("http://worktree.local:3000/api".to_string())
+        );
     }
 }
