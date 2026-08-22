@@ -27,9 +27,9 @@ import { cn } from "@/lib/utils";
 
 import { useSectionVisible } from "@/app/control/_visibility";
 
-// Severity pill fill — critical = destructive, error = orange, warning =
-// yellow. Text is always white and the word is inside the pill, so color is
-// never the only signal.
+// Unresolved severity pill fill — critical = destructive, error = orange,
+// warning = yellow. Resolved pills use muted tokens below; the word stays
+// visible, so color is never the only signal.
 const SEVERITY_BG: Record<AlertSeverity, string> = {
   critical: "bg-destructive",
   error: "bg-orange-500",
@@ -115,7 +115,12 @@ export default function AlertsSection() {
                 >
                   <TableCell>
                     <span
-                      className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold text-white ${SEVERITY_BG[a.severity]}`}
+                      className={cn(
+                        "inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold",
+                        a.status === "resolved"
+                          ? "bg-muted text-muted-foreground"
+                          : cn("text-white", SEVERITY_BG[a.severity]),
+                      )}
                     >
                       {a.severity}
                     </span>

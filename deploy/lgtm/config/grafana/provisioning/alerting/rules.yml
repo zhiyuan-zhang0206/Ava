@@ -353,10 +353,11 @@ groups:
           metric: llm_latency_p95
           team: ava-ops
         annotations:
-          summary: "LLM call latency p95 at {{ $values.C }} ms (threshold 60000 ms)"
+          summary: "LLM call latency p95 at {{ $values.C }} ms — value at last evaluation (threshold 60000 ms)"
           description: >-
-            The p95 of llm_usage latency over the last 10 minutes is
-            {{ $values.C }} ms, above 60s (histogram_quantile over the
+            The latest p95 of llm_usage latency over the last 10 minutes is
+            {{ $values.C }} ms. The alert fires after this value remains above
+            60s for 10 minutes (histogram_quantile over the
             ava_llm_usage_latency histogram — an approximation of the exact
             SQL percentile, same as the Ops panel). Usually a provider-side
             failure or slow request pile-up. No alert fires when the metric is
