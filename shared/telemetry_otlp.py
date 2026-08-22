@@ -8,9 +8,11 @@ decision). The Postgres `events` copy was retired with the LGTM cutover
 
 The endpoint (``AVA_TELEMETRY_OTLP_ENDPOINT``, default 127.0.0.1:4318) is the
 LOCAL OTel Collector sidecar on every machine (task #1266, 2026-08-14):
-agents never dial a backend directly; the sidecar fans out logs -> Loki and
-metrics -> Prometheus from its own config. A remote machine keeps the default
-— its own sidecar is local.
+agents never dial a backend directly. A gateway collector fans out logs ->
+loopback Loki and metrics -> loopback Prometheus; a pure runner collector
+relays them to the gateway collector's authenticated private-address OTLP
+receiver. A remote agent keeps the localhost producer endpoint — its first hop
+is still its own sidecar.
 Three signals:
 
 - **logs** — every ``Event`` becomes one OTLP LogRecord (Loki). The body is the
@@ -27,11 +29,10 @@ Three signals:
   extras — a per-event msg string would split every counter into its own
   series). Log/audit events produce no metrics: they are the event stream,
   not a measurement.
-- **traces** — NOT exported here. The trace mirror (``shared/trace.py``) is
-  already standard OTLP/JSON; shipping to Tempo is the separate replay step
-  ``ava trace ship`` (``cli/commands/trace.py``), chosen over a
-  live second exporter so recording stays network-free (see the PR description
-  for the evaluation).
+- **traces** — NOT exported here. ``shared/trace.py`` exports them to the same
+  local collector, whose file exporter writes the standard OTLP/JSON mirror.
+  ``ava trace ship`` is the separate recovery replay: gateway units dial Tempo
+  directly; pure runners use the authenticated gateway collector ingress.
 
 Failure isolation — the contract this module exists to keep: **the OTLP side
 must never block, break, or slow the PG write.** Three layers:

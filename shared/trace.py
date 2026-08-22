@@ -6,12 +6,13 @@ the Anthropic/OpenAI/Google SDKs + LangChain/LangGraph, and every span is
 exported over OTLP/HTTP (protobuf wire format) to the local OTel Collector sidecar
 (`AVA_TELEMETRY_OTLP_ENDPOINT`, default 127.0.0.1:4318) by
 `OtlpJsonHttpSpanExporter`. The sidecar (one per machine, supervised like every
-other Ava service) fans out traces to Tempo and writes the local JSONL mirror
-under `$AVA_HOME/traces/` via its file exporter — each line one standard
-OTLP/JSON `ExportTraceServiceRequest` (the same wire shape any OTLP backend
-ingests), so the mirror stays durable, vendor-neutral and grep-able. The
-collector's persistent file-backed queue absorbs backend outages; a window the
-queue had to shed can be replayed from the mirror with `ava trace ship`.
+other Ava service) writes the local JSONL mirror under `$AVA_HOME/traces/` via
+its file exporter. A gateway sidecar fans out to loopback Tempo; a pure runner
+sidecar relays to the gateway collector's authenticated private receiver. Each
+line is one standard OTLP/JSON `ExportTraceServiceRequest` (the same wire shape
+any OTLP backend ingests), giving accepted batches a vendor-neutral, grep-able
+local recovery copy. A gap present in the mirror can be replayed with
+`ava trace ship`.
 
   **Metadata-only by default (trace v2, 2026-08-05)**: spans record chain
   metadata (span names, langgraph paths, checkpoint refs, agent_id, durations,
@@ -26,8 +27,9 @@ queue had to shed can be replayed from the mirror with `ava trace ship`.
   see `shared/checkpoint.py` / the gateway trace endpoint.
 
 - **Ship** (`cli/commands/trace.py`, `ava trace ship`): replays a time window of
-  the sidecar's JSONL mirror straight to Tempo's OTLP endpoint
-  (`AVA_TELEMETRY_TEMPO_ENDPOINT`). This is the recovery path (backend down
+  the sidecar's JSONL mirror to Tempo directly on a gateway, or through the
+  gateway collector's authenticated receiver on a pure runner. This is the
+  recovery path (backend down
   longer than the collector queue held, offline machines) — the live fan-out is
   the collector's job. It is resumable via a watermark, and it gates on
   `telemetry_otlp_enabled` — one kill switch for the whole OTLP surface (with
@@ -446,12 +448,13 @@ def initialize_tracing() -> None:
     (see turn_span()). LangGraph is instrumented through the LangChain
     instrumentor (callback handler), not a separate one.
 
-    Recording is one OTLP/HTTP hop to the LOCAL sidecar; the sidecar fans out
-    to Tempo and writes the JSONL mirror (its file exporter), so a backend
-    outage never affects recording. If the sidecar itself is not answering at
-    init, recording stays off for this process (reported) — the same
-    init-time tradeoff the events exporter makes; the watchdog revives the
-    sidecar within a minute and the next process start re-checks.
+    Recording is one OTLP/HTTP hop to the LOCAL sidecar; the sidecar writes the
+    JSONL mirror and either fans out locally or relays to the gateway. Its
+    queues decouple ordinary backend outages, while prolonged pressure can
+    still return backpressure before the mirror. If the sidecar itself is not
+    answering at init, recording stays off for this process (reported) — the
+    same init-time tradeoff the events exporter makes; the watchdog revives
+    the sidecar within a minute and the next process start re-checks.
 
     Guards (each independently configurable):
     - disk watermark (`trace_disk_watermark`): data disk over the fraction ->

@@ -75,11 +75,14 @@ log/metrics，且 UI 单独一套）；SigNoz（ClickHouse 过重）；Zipkin（
 
 No otel-collector container since task #1266: the OTLP entry is the **native
 per-machine sidecar** (`ava-otel-collector` session, supervised by the
-watchdog) on host 4318 (OTLP/HTTP). It fans out traces → Tempo (host 14318 OTLP/HTTP),
-logs → Loki (3100 `/otlp/v1/logs`), metrics → Prometheus (9090 OTLP receiver),
-and mirrors traces to `$AVA_HOME/traces/spans.jsonl` (rotated) for local grep.
-The sidecar buffers in a file-backed queue while this stack is down, so
-`stop.sh` no longer loses in-flight telemetry.
+watchdog) on host 4318 (OTLP/HTTP). On the gateway it fans out to these
+loopback backends. A pure runner instead relays all three signals to the
+gateway collector's bearer-authenticated receiver bound only to the exact
+`AVA_MACHINE_HOST:4318`; backend ports are never exposed. Every collector
+mirrors locally produced traces to `$AVA_HOME/traces/spans.jsonl`. Trace/log
+exporters use persistent file-backed queues with unlimited retry; metrics use
+a bounded in-memory queue and retry window, then shed old points (cumulative
+metrics repair on the next successful sample).
 
 Data lives in docker named volumes (`tempo-data`, `loki-data`, `prom-data`,
 `grafana-data`) — `docker compose down` keeps them, `down -v` wipes them.
@@ -93,13 +96,12 @@ every container carries explicit `cpus`/`mem_limit` caps (~5.5 cores / ~4GB
 ceiling in total), Loki's query fan-out is bounded (24h splits, parallelism 4,
 embedded result caches), Prometheus retention is explicit (90d time / 8GB
 size — whichever hits first), and Tempo states its 168h block retention
-instead of inheriting the upstream default. Backend ports (Loki 3100,
-Prometheus 9090, Tempo 3200/14318) bind `${LGTM_BIND_HOST:-127.0.0.1}` —
-loopback-only on a single box; a split deployment sets `LGTM_BIND_HOST` to
-this host's private reachable address in the gitignored `.env` here (the
-backends are unauthenticated, so that address must face a trusted private
-network only — the same trust model as `AVA_TRUSTED_CIDRS`). Grafana (3003)
-keeps the wide bind: it is the one anonymous-but-read-only surface.
+instead of inheriting the upstream default. The unauthenticated backend ports
+(Loki 3100, Prometheus 9090, Tempo 3200/14318) are unconditionally bound to
+127.0.0.1. Remote writers cross only the authenticated collector receiver on
+the gateway's exact private address; no `0.0.0.0`/`::` listener and no backend
+bind override exist. Grafana (3003) keeps the wider bind: it is the one
+anonymous-but-read-only surface.
 
 ## Start / stop
 
@@ -115,7 +117,9 @@ there is `ava lgtm off` (removes the marker, then runs `stop.sh`);
 `ava start --disable-service lgtm` remains the durable skip that keeps the
 designation. While the stack is down the gateway's /ops + inspect reads,
 ops alerting, and the events-maintenance rollup degrade; the native sidecar
-buffers telemetry in its file-backed queue, so nothing is lost.
+persists accepted trace/log batches for later delivery. Metrics retry in
+bounded memory for 15 minutes and may shed old points; cumulative series
+repair on a later successful sample.
 
 ## Session logs in Loki (2026-08-12)
 
@@ -179,11 +183,12 @@ curl -G -s http://127.0.0.1:3100/loki/api/v1/query \
     exporter ships traces
   - Loki datasource — Explore > Logs
   - Prometheus datasource — Explore > Metrics
-- OTLP ingest: the NATIVE sidecar (ava-otel-collector session) owns
-  `http://localhost:4318` — /v1/traces → Tempo (14318), /v1/logs → Loki,
-  /v1/metrics → Prometheus. This is the contract of
-  `AVA_TELEMETRY_OTLP_ENDPOINT` (default http://127.0.0.1:4318) for the live
-  exporters; `ava trace ship` replays straight to Tempo's 14318.
+- OTLP ingest: every producer uses its NATIVE local sidecar at
+  `http://127.0.0.1:4318`. The gateway additionally serves an authenticated
+  receiver at its exact `AVA_MACHINE_HOST:4318` for pure-runner collectors.
+  `ava trace ship` bypasses its local sidecar to avoid re-mirroring: gateway
+  units send to loopback Tempo; pure runners send to that authenticated remote
+  receiver with the cluster bearer.
 
 ## Write-side contract (and what "required" means)
 
@@ -206,7 +211,9 @@ Copy `.env.example` to `.env` (gitignored) to customize:
 | Variable | Default | Purpose |
 |---|---|---|
 | `GRAFANA_ROOT_URL` | `http://localhost:3003` | Public URL of the Grafana UI, used for redirects |
-| `LGTM_BIND_HOST` | `127.0.0.1` | Host address the backend ports (3100/9090/3200/14318) bind; a split deployment sets the host's private reachable address |
+
+Backend bind addresses are deliberately not configurable: Tempo, Loki and
+Prometheus stay on loopback in every topology.
 
 ## Verify
 

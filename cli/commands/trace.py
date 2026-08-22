@@ -5,17 +5,17 @@ Collector sidecar, whose file exporter mirrors them to `$AVA_HOME/traces/`:
 the active `spans.jsonl` plus rotated `spans-<ISO-timestamp>.jsonl` backups,
 each line a standard OTLP/JSON `ExportTraceServiceRequest`. This command is
 the RECOVERY consumer: it reads the mirror and POSTs each line back over
-OTLP/HTTP (protobuf) straight to Tempo's OTLP endpoint
-(`AVA_TELEMETRY_TEMPO_ENDPOINT`, default http://127.0.0.1:14318 on the LGTM
-host):
+OTLP/HTTP (protobuf). A gateway/single-box unit sends straight to its loopback
+Tempo endpoint (`AVA_TELEMETRY_TEMPO_ENDPOINT`); a pure runner sends to the
+gateway collector's private-address receiver with the cluster bearer:
 
-- **why bypass the sidecar**: the live fan-out is the sidecar's job, with a
+- **why bypass the local sidecar**: live delivery is the collector's job, with a
   persistent file-backed queue for backend outages. Ship exists for the gaps
   the queue could not hold (backend down longer than the queue, offline
   machines, re-import of a past window). Replaying through the sidecar would
   write the replayed lines back into the mirror (the file exporter mirrors
   everything it receives), looping the watermark — so ship dials Tempo
-  directly.
+  directly on a gateway, or the gateway's relay receiver on a pure runner.
 - **gating**: refuses while `AVA_TELEMETRY_OTLP_ENABLED=false` (one kill
   switch for the whole OTLP surface — with the sidecar architecture that also
   stops recording, so there is nothing to replay either).
@@ -36,12 +36,14 @@ are still read — a host upgraded mid-window replays its old files too.
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
 
 import httpx
 
 from shared.config import settings
+from shared.machine import machine_role
 from shared.paths import traces_dir
 
 _WATERMARK_NAME = ".ship-watermark.json"
@@ -53,8 +55,15 @@ class TraceShipError(RuntimeError):
     """Shipping config is incomplete — AVA_TELEMETRY_OTLP_ENABLED is false."""
 
 
-def _require_ship_config() -> str:
-    """Validate the consumer config, returning the OTLP traces endpoint.
+@dataclass(frozen=True)
+class _ShipTarget:
+    endpoint: str
+    headers: dict[str, str]
+    label: str
+
+
+def _require_ship_config() -> _ShipTarget:
+    """Validate config and return the role-correct OTLP replay target.
 
     Raises:
         TraceShipError: AVA_TELEMETRY_OTLP_ENABLED=false (the whole-OTLP kill
@@ -66,7 +75,30 @@ def _require_ship_config() -> str:
             "(live exporter + trace ship) is off. Set it true to ship the "
             "mirror to Tempo."
         )
-    return settings.observability.telemetry_tempo_endpoint.rstrip("/") + _OTLP_V1_PATH
+    if machine_role() == frozenset({"agent-runner"}):
+        from cli.commands._otel_collector import gateway_otel_ingress_endpoint
+        from shared.cluster_auth import bearer_header
+
+        secret = settings.data_plane.cluster_secret
+        if not secret:
+            raise TraceShipError(
+                "a pure runner needs AVA_CLUSTER_SECRET to replay through the "
+                "gateway's authenticated OTLP receiver"
+            )
+        try:
+            base = gateway_otel_ingress_endpoint()
+        except RuntimeError as exc:
+            raise TraceShipError(str(exc)) from exc
+        return _ShipTarget(
+            endpoint=base + _OTLP_V1_PATH,
+            headers=bearer_header(secret),
+            label="gateway OTLP relay",
+        )
+    return _ShipTarget(
+        endpoint=settings.observability.telemetry_tempo_endpoint.rstrip("/") + _OTLP_V1_PATH,
+        headers={},
+        label="tempo",
+    )
 
 
 def _file_day(path: Path) -> date:
@@ -99,7 +131,7 @@ def _save_watermark(marks: dict[str, int]) -> None:
     path.write_text(json.dumps(marks, indent=2, sort_keys=True), encoding="utf-8")
 
 
-def _post_line(client: httpx.Client, endpoint: str, line: str) -> int:
+def _post_line(client: httpx.Client, target: _ShipTarget, line: str) -> int:
     """POST one OTLP/JSON line as protobuf; return the span count in it.
 
     Reconstructs the OTLP `ExportTraceServiceRequest` from the stored JSON and
@@ -111,8 +143,8 @@ def _post_line(client: httpx.Client, endpoint: str, line: str) -> int:
 
     request = Parse(line, ExportTraceServiceRequest())
     body = request.SerializeToString()
-    headers = {"Content-Type": "application/x-protobuf"}
-    resp = client.post(endpoint, content=body, headers=headers)
+    headers = {"Content-Type": "application/x-protobuf", **target.headers}
+    resp = client.post(target.endpoint, content=body, headers=headers)
     resp.raise_for_status()
     return sum(len(ss.spans) for rs in request.resource_spans for ss in rs.scope_spans)
 
@@ -121,7 +153,7 @@ def _ship_files(
     files: list[Path],
     marks: dict[str, int],
     *,
-    endpoint: str | None,
+    target: _ShipTarget | None,
     windowed: bool,
     dry_run: bool,
 ) -> tuple[int, int, int]:
@@ -155,11 +187,11 @@ def _ship_files(
                     if dry_run:
                         file_lines += 1
                         continue
-                    if endpoint is None:  # pragma: no cover — unreachable
+                    if target is None:  # pragma: no cover — unreachable
                         # _require_ship_config ran above when not dry_run; keep the
                         # narrowing honest instead of casting None to str.
                         raise TraceShipError("ship config required for a real ship")
-                    file_spans += _post_line(client, endpoint, line)
+                    file_spans += _post_line(client, target, line)
                     file_lines += 1
                     # Advance the watermark per line so a crash never re-sends or
                     # skips. Windowed re-imports are idempotent, so skip the bump.
@@ -175,16 +207,15 @@ def _ship_files(
 
 
 def cmd_trace_ship(*, since: str | None, until: str | None, dry_run: bool) -> int:
-    """Ship the local trace mirror to Tempo (the only viewer backend).
+    """Ship the local trace mirror toward Tempo over the role-correct transport.
 
     With no --since/--until, ships incrementally from the per-file watermark.
     With a window, ships matching files whole (watermark untouched).
 
     ``dry_run`` reads the mirror only and needs no backend config — it is the
-    one way to inspect what is recorded when the backend is off (the mirror is
-    the durable record either way).
+    one way to inspect what reached the mirror when the backend is off.
     """
-    endpoint = _require_ship_config() if not dry_run else None
+    target = _require_ship_config() if not dry_run else None
     windowed = since is not None or until is not None
     lo = datetime.strptime(since, "%Y-%m-%d").date() if since else date.min  # noqa: DTZ007 — date-only
     hi = datetime.strptime(until, "%Y-%m-%d").date() if until else date.max  # noqa: DTZ007 — date-only
@@ -199,14 +230,16 @@ def cmd_trace_ship(*, since: str | None, until: str | None, dry_run: bool) -> in
 
     marks = _load_watermark()
     total_lines, total_spans, shipped_files = _ship_files(
-        files, marks, endpoint=endpoint, windowed=windowed, dry_run=dry_run
+        files, marks, target=target, windowed=windowed, dry_run=dry_run
     )
 
     verb = "would ship" if dry_run else "shipped"
     scope = f"window {since or '-inf'}..{until or '+inf'}" if windowed else "incremental"
     print(f"{verb} ({scope}): {shipped_files} files, {total_lines} batches, {total_spans} spans")
     if dry_run:
-        print("target: (dry-run — would ship to tempo, no backend config required)")
+        print("target: (dry-run — role-correct target not resolved)")
     else:
-        print(f"target: tempo -> {endpoint}")
+        if target is None:  # pragma: no cover — non-dry-run resolves it above
+            raise RuntimeError("trace ship target was not resolved")
+        print(f"target: {target.label} -> {target.endpoint}")
     return 0
