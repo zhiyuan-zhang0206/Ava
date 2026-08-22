@@ -19,6 +19,7 @@ def _h_cluster_update(args: argparse.Namespace) -> int:
         local=args.local,
         force=args.force,
         origin=args.origin,
+        rollout_log=args.rollout_log,
         mode=args.mode,
     )
 
@@ -255,6 +256,11 @@ def _add_cluster_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
         help="who triggered this update (e.g. 'agent:9'); recorded in the rollout log "
         "and the cluster pin's updated_by. Defaults to cli:<machine>; the detached "
         "rollout session threads it automatically.",
+    )
+    cluster_update_p.add_argument(
+        "--rollout-log",
+        default=None,
+        help=argparse.SUPPRESS,
     )
     cluster_update_p.add_argument(
         "--force",
