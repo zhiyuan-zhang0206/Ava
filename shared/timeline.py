@@ -183,9 +183,10 @@ def _inbound_text(content: str | list[str | dict[str, Any]]) -> str:
 def needs_chat_anchors(messages: Sequence[BaseMessage]) -> bool:
     """Whether rendering *messages* consumes chat inbound anchors at all.
 
-    ``build_timeline_items`` pulls one ``kind='chat'`` inbound row per INBOUND
-    HumanMessage; the anchor supplies the real ts + inbound id for LEGACY rows
-    that predate ``ava_created_at``. Modern messages carry their own ts, so an
+    ``build_timeline_items`` matches each INBOUND HumanMessage to its
+    ``kind='chat'`` row by ``ava_inbound_id``; the anchor supplies the real ts
+    for LEGACY rows that predate ``ava_created_at``. Modern messages carry
+    their own ts and id, so an
     all-modern window renders identically with ``[]`` anchors — and querying
     the inbound table for it (one round trip per full-window snapshot, per
     node enter) is pure waste. Callers skip the DB query when this is False.
@@ -211,10 +212,12 @@ def build_timeline_items(
     """Render state.messages into timeline items + return msg_count.
 
     `chat_anchors` are the agent's `kind='chat'` inbound rows in created_at
-    ascending order; each inbound HumanMessage consumes the next anchor to
-    show its real ts + inbound id. Pass `[]` when no inbound table is
-    available (container / eval mode); inbound items then fall back to a
-    synthetic ts.
+    ascending order. An inbound HumanMessage carrying `ava_inbound_id` advances
+    to that exact anchor; only a legacy message without the id consumes the
+    next row positionally. This matters after compaction, where the surviving
+    checkpoint starts after many historical DB rows. Pass `[]` when no inbound
+    table is available (container / eval mode); modern inbound items still
+    retain their embedded id and timestamp.
 
     `start` renders only `messages[start:]` (incremental snapshot path: the
     caller holds a per-agent cursor of the last published msg_idx). Item ids
@@ -333,7 +336,16 @@ def _inbound_item(
     payload. Its image urls ride on ava_image_urls. Returns the item plus the
     advanced anchor state (the anchor advances only when an anchor exists).
     """
-    nxt = next(inbound_iter, None)
+    embedded_id = kwargs.get("ava_inbound_id")
+    if isinstance(embedded_id, int):
+        # A compacted checkpoint no longer starts at the first inbound row.
+        # Advance past compacted-away anchors until the message's durable DB id
+        # matches; pairing by list position would attach an unrelated old id.
+        nxt = next((anchor for anchor in inbound_iter if anchor.id == embedded_id), None)
+    else:
+        # Pre-ava_inbound_id checkpoints have no correlation key. Preserve the
+        # historical best-effort positional fallback for those rows only.
+        nxt = next(inbound_iter, None)
     if nxt is not None:
         current_anchor = nxt.created_at
         sub_offset = 0
@@ -346,7 +358,7 @@ def _inbound_item(
         created_at=(
             kwargs.get("ava_created_at") or (current_anchor.isoformat() if nxt else next_ts(None))
         ),
-        inbound_id=nxt.id if nxt else None,
+        inbound_id=embedded_id if isinstance(embedded_id, int) else (nxt.id if nxt else None),
         images=images if images else None,
     )
     return item, current_anchor, sub_offset

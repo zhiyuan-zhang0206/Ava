@@ -1042,6 +1042,58 @@ def test_inbound_with_real_ts_still_advances_anchor_for_legacy_siblings() -> Non
     assert not sibling_ts.startswith("1970")
 
 
+def test_compacted_inbound_uses_its_embedded_id_instead_of_oldest_anchor() -> None:
+    """A compacted checkpoint can start long after the agent's first DB inbound.
+
+    The message's ``ava_inbound_id`` is the durable correlation key.  Timeline
+    rendering must use it to select the matching row rather than pairing the
+    surviving message with the oldest historical anchor by list position.
+    """
+    from datetime import UTC, datetime
+
+    from langchain_core.messages import HumanMessage, ToolMessage
+
+    from shared.db import InboundRow
+    from shared.timeline import build_timeline_items
+
+    stale_anchor = InboundRow(
+        4516,
+        "old compacted-away message",
+        "chat",
+        "ui:web",
+        "done",
+        datetime(2026, 6, 18, 9, 0, tzinfo=UTC),
+    )
+    matching_anchor = InboundRow(
+        70598,
+        "current message",
+        "chat",
+        "user",
+        "claimed",
+        datetime(2026, 8, 22, 17, 47, tzinfo=UTC),
+    )
+    inbound = HumanMessage(
+        content="current message",
+        additional_kwargs={
+            "ava_msg_type": "inbound",
+            "ava_source": "user",
+            "ava_inbound_id": 70598,
+            "ava_created_at": "2026-08-22T17:47:00+00:00",
+        },
+    )
+    legacy_sibling = ToolMessage(
+        content="output",
+        tool_call_id="t1",
+        additional_kwargs={"ava_msg_type": "exec_output"},
+    )
+
+    items, _ = build_timeline_items([inbound, legacy_sibling], [stale_anchor, matching_anchor])
+
+    assert items[0].inbound_id == 70598
+    assert items[1].created_at is not None
+    assert items[1].created_at.startswith("2026-08-22T17:47:00")
+
+
 def test_aimessage_blocks_share_one_real_ava_created_at() -> None:
     """All blocks of one AIMessage carry the message's single real ts — the
     timeline no longer fans its reasoning/text/code items out across synthetic
