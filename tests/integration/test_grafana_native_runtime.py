@@ -7,10 +7,10 @@ Grafana.  CI downloads the checksum-pinned 13.1.3 release and points the two
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import socket
-import sqlite3
 import subprocess
 import time
 import urllib.error
@@ -115,7 +115,7 @@ def test_shipped_grafana_runtime_contract() -> None:
 
     assert grafana["env_file"] == ["./config/grafana/runtime.env"]
     assert environment["GF_USERS_VIEWERS_CAN_EDIT"] == "true"
-    assert environment["GF_DATABASE_WAL"] == "true"
+    assert environment["GF_DATABASE_QUERY_RETRIES"] == "5"
     assert environment["GF_LIVE_MAX_CONNECTIONS"] == "0"
     assert float(grafana["cpus"]) >= 2
     assert grafana["mem_limit"] == "2g"
@@ -143,6 +143,8 @@ def test_anonymous_viewer_can_open_tempo_trace_in_explore(tmp_path: Path) -> Non
     shipped = _grafana_environment()
     port = _free_port()
     base_url = f"http://127.0.0.1:{port}/grafana"
+    admin_user = "native-contract-admin"
+    admin_password = f"native-contract-{TRACE_ID}"
     env = os.environ.copy()
     env.update(shipped)
     env.update(
@@ -156,6 +158,8 @@ def test_anonymous_viewer_can_open_tempo_trace_in_explore(tmp_path: Path) -> Non
             "GF_PATHS_PROVISIONING": str(tmp_path / "provisioning"),
             "GF_LOG_LEVEL": "error",
             "GF_LOG_MODE": "console",
+            "GF_SECURITY_ADMIN_USER": admin_user,
+            "GF_SECURITY_ADMIN_PASSWORD": admin_password,
         }
     )
     for directory in ("data", "logs", "plugins", "provisioning"):
@@ -175,8 +179,16 @@ def test_anonymous_viewer_can_open_tempo_trace_in_explore(tmp_path: Path) -> Non
         settings = json.loads(settings_body)
         assert settings["viewersCanEdit"] is True
         assert settings["liveEnabled"] is False
-        with sqlite3.connect(f"file:{tmp_path / 'data/grafana.db'}?mode=ro", uri=True) as database:
-            assert database.execute("PRAGMA journal_mode").fetchone() == ("wal",)
+        admin_status, _, admin_body = _request(
+            f"{base_url}/api/admin/settings",
+            headers={
+                "Authorization": "Basic "
+                + base64.b64encode(f"{admin_user}:{admin_password}".encode()).decode()
+            },
+        )
+        assert admin_status == 200
+        admin_settings = json.loads(admin_body)
+        assert admin_settings["database"]["query_retries"] == "5"
 
         explore_url = _explore_url(base_url)
         status, location, body = _request(explore_url)
