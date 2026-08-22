@@ -1,4 +1,4 @@
-"""Tests for .agents/skills/ava-deep-research/scripts/audit_research.py."""
+"""Tests for ava_builtins/skills/ava-deep-research/scripts/audit_research.py."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from pathlib import Path
 
 SCRIPT = (
     Path(__file__).resolve().parent.parent.parent
-    / ".agents"
+    / "ava_builtins"
     / "skills"
     / "ava-deep-research"
     / "scripts"

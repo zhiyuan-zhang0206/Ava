@@ -146,9 +146,10 @@ def test_skill_backtick_ref_to_existing_file_is_clean(tmp_path: Path) -> None:
 
 def test_nested_skill_resolves_against_ancestor_library(tmp_path: Path) -> None:
     """A nested skill shares its parent's references/ library — the
-    ava-serious-engineering tree's ai-era/ and principles/ skills all point at
+    ava_builtins/skills/ava-serious-engineering tree's ai-era/ and principles/
+    skills all point at
     the root library."""
-    root = tmp_path / ".agents" / "skills" / "serious"
+    root = tmp_path / "ava_builtins" / "skills" / "serious"
     (root / "references").mkdir(parents=True)
     (root / "references" / "book.md").write_text("hi")
     nested = root / "ai-era" / "child"
@@ -160,7 +161,7 @@ def test_nested_skill_resolves_against_ancestor_library(tmp_path: Path) -> None:
 
 
 def test_nested_skill_own_library_shadows_ancestor(tmp_path: Path) -> None:
-    root = tmp_path / ".agents" / "skills" / "serious"
+    root = tmp_path / "ava_builtins" / "skills" / "serious"
     (root / "references").mkdir(parents=True)
     (root / "references" / "book.md").write_text("old")
     nested = root / "child"

@@ -83,7 +83,7 @@ Three doc axes get exemptions, not a blanket skip:
 
    In `future/`, a dangling link followed immediately by a `(planned)`
    marker is not reported — see "A pre-commit hook" above.
-3. **Skill `references/` backtick refs.** A `.agents/skills/**/SKILL.md`
+3. **Skill `references/` backtick refs.** A repo-shipped `SKILL.md`
    writes its reference-library pointers as backticked
    `` `references/<file>.md` `` — prose, not markdown links, so axis 2 skips
    them, yet unlike a runtime path they are unambiguous: the target lives in a
@@ -285,18 +285,22 @@ def _indented_code(line: str, *, open_now: bool, prev_blank: bool, in_list: bool
 # markdown links). Unlike the deliberately-unsafe generic backtick path, this
 # shape is unambiguous: it must resolve to a `references/` dir of the skill or
 # one of its ancestors (a nested skill shares its parent's library — the
-# ava-serious-engineering tree's ai-era/ and principles/ skills all point at
+# ava_builtins/skills/ava-serious-engineering tree's ai-era/ and principles/
+# skills all point at
 # the root library). Three review rounds lost two of these to library moves
 # (Task #939).
 _SKILL_REF = re.compile(r"`references/([A-Za-z0-9._/-]+\.md)`")
 
 
-_SKILLS_ROOT = REPO / ".agents" / "skills"
+_SKILL_ROOTS = (
+    REPO / "ava_builtins" / "skills",
+    REPO / ".agents" / "skills",
+)
 
 
 def _resolve_skill_reference(skill_dir: Path, name: str) -> bool:
     """True when `references/<name>` exists in `skill_dir` or any ancestor up to
-    the skills root. The nearest match wins, so a nested skill with its own
+    either repo skill root. The nearest match wins, so a nested skill with its own
     library shadows the parent's for that file.
 
     The walk also stops at the filesystem root — a doc under a test's tmp_path
@@ -306,7 +310,7 @@ def _resolve_skill_reference(skill_dir: Path, name: str) -> bool:
     while True:
         if (cur / "references" / name).exists():
             return True
-        if cur in (_SKILLS_ROOT, REPO) or cur.parent == cur:
+        if cur in (*_SKILL_ROOTS, REPO) or cur.parent == cur:
             return False
         cur = cur.parent
 

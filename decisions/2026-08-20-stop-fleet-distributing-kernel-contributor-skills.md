@@ -66,3 +66,9 @@ warning); `ava skill update` stops treating them as repo-native sources;
 describe the project-local mount as the family's only distribution path. The
 project-local mount itself (`project_skill_roots`) predates this change and
 needed no code work — only the converge source was removed.
+
+Update 2026-08-22: this remains the distribution decision for the real
+repo-development workflow and Ava-cluster-operations skills. The prior
+classification was too broad for five general skills that happened to be in
+`.agents/skills/`; see
+[`2026-08-22-reclassify-general-skills-as-builtins.md`](2026-08-22-reclassify-general-skills-as-builtins.md).
