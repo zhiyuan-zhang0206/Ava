@@ -151,7 +151,9 @@ services:
       GF_USERS_AUTO_ASSIGN_ORG_ROLE: "Viewer"
       GF_USERS_ALLOW_SIGN_UP: "false"
       GF_AUTH_BASIC_ENABLED: "false"
-      GF_AUTH_DISABLE_LOGIN: "true"
+      # Keep Grafana's internal login service enabled: auth-proxy auto-signup
+      # uses its Grafana proxy client. The browser login surfaces are still
+      # closed by basic=false + disable_login_form=true below.
       GF_AUTH_DISABLE_LOGIN_FORM: "true"
       GF_AUTH_DISABLE_SIGNOUT_MENU: "true"
       GF_SECURITY_ALLOW_EMBEDDING: "true"

@@ -154,7 +154,9 @@ def test_grafana_requires_gateway_auth_proxy() -> None:
     assert env["GF_USERS_AUTO_ASSIGN_ORG_ROLE"] == "Viewer"
     assert env["GF_USERS_ALLOW_SIGN_UP"] == "false"
     assert env["GF_AUTH_BASIC_ENABLED"] == "false"
-    assert env["GF_AUTH_DISABLE_LOGIN"] == "true"
+    # GF_AUTH_DISABLE_LOGIN must stay unset: Grafana's auth-proxy auto-signup
+    # depends on the internal Grafana proxy client that this flag removes.
+    assert "GF_AUTH_DISABLE_LOGIN" not in env
     assert env["GF_AUTH_DISABLE_LOGIN_FORM"] == "true"
     assert env["GF_AUTH_DISABLE_SIGNOUT_MENU"] == "true"
     assert "AVA_CLUSTER_SECRET" not in env

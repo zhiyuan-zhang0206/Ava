@@ -43,8 +43,11 @@ The Ava gateway is the only externally reachable observability user entry.
    local receiver remain loopback-only. The lifecycle derives Grafana
    `root_url` from `AVA_GATEWAY_URL` plus `/grafana/`; `:3003` is never a public
    URL.
-2. Grafana anonymous and basic authentication, its built-in login/sign-out, and auth
-   proxy login tokens are disabled. The gateway first verifies the existing
+2. Grafana anonymous and basic authentication, its browser login form/sign-out,
+   and auth-proxy login tokens are disabled. Grafana's internal login service
+   remains enabled because auth-proxy auto-signup uses its Grafana proxy client;
+   neither basic nor form authentication registers a browser client. The gateway
+   first verifies the existing
    Ava session cookie or cluster-secret Bearer, then removes Cookie,
    Authorization, and every caller-provided auth-proxy header and injects one
    fixed `ava-cluster-viewer` / `Viewer` identity. Auto-signup creates that

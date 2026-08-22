@@ -1035,7 +1035,7 @@ loopback (`127.0.0.1:3003`); it is not a Tailnet/LAN UI. Operators browse
 `${AVA_GATEWAY_URL}/grafana/` after the normal Ava login. The gateway verifies
 the Ava session cookie or cluster-secret Bearer, strips Cookie/Authorization
 and caller-supplied auth-proxy headers, and injects one fixed Grafana Viewer
-identity. Grafana anonymous/basic/login/sign-out/login-token paths are off and
+identity. Grafana anonymous/basic/login-form/sign-out/login-token paths are off and
 Grafana never receives the cluster secret. HTTP exposes only reads plus
 datasource query; Grafana Live is an Origin-checked, bounded WebSocket bridge.
 Gateway restart — including secret rotation — closes its old Live sockets.
