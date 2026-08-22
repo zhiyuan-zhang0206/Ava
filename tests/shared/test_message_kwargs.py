@@ -22,6 +22,7 @@ from shared.message_kwargs import AvaMsgType, NoteTag, read_ava_kwargs
 def test_msg_type_value_set() -> None:
     """The discriminator value set is the wire contract — lock it explicitly."""
     assert {t.value for t in AvaMsgType} == {
+        "attach",
         "inbound",
         "system_note",
         "exec_output",

@@ -8,7 +8,7 @@ one line per type per process start. The framework's saver (`agent/loop.py`)
 now passes `allowed_msgpack_modules=checkpoint_msgpack_allowlist()`.
 
 Guards:
-- the four nested sub-states round-trip silently under the allowlist serde
+- the five nested sub-states round-trip silently under the allowlist serde
   (and warn under the default permissive serde — the regression this fixes);
 - plugin classes registered via `register_plugin_state` enter the allowlist
   automatically (a plugin field holding a BaseModel instance crosses the
@@ -26,6 +26,8 @@ from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from pydantic import BaseModel
 
 from agent.state import (
+    AttachEntry,
+    AttachState,
     CapabilitiesState,
     CompactState,
     ContextReset,
@@ -58,12 +60,14 @@ def _warning_messages(caplog: pytest.LogCaptureFixture) -> list[str]:
     ]
 
 
-# ── the four nested sub-states round-trip silently under the allowlist ────
+# ── the five nested sub-states round-trip silently under the allowlist ────
 
 
 @pytest.mark.parametrize(
     "state",
     [
+        AttachEntry(path="/example/render.png", label="render"),
+        AttachState(pending=[AttachEntry(path="/example/render.png", label="render")]),
         CompactState(version=3, reminder_shown=True, reminder_seen_version=2),
         MemoryState(injected_paths={"a.md", "b.md"}),
         ContextReset(resume="claim"),
@@ -91,6 +95,8 @@ def test_legacy_checkpoint_envelopes_still_resolve() -> None:
     allowlist serde."""
     serde = _allowlist_serde()
     cases = [
+        (AttachEntry, lambda c: c(path="/example/render.png", label=None)),
+        (AttachState, lambda c: c(pending=[AttachEntry(path="/example/render.png", label=None)])),
         (CompactState, lambda c: c(version=2)),
         (MemoryState, lambda c: c(injected_paths={"a.md"})),
         (ContextReset, lambda c: c(resume="claim")),
@@ -108,7 +114,14 @@ def test_legacy_allowlist_entries_stay_present() -> None:
     """The legacy `("agent.state", ...)` pairs must remain allowlisted — old
     checkpoints carry those names and would warn (then block) without them."""
     allow = checkpoint_msgpack_allowlist()
-    for name in ("CompactState", "MemoryState", "ContextReset", "CapabilitiesState"):
+    for name in (
+        "AttachState",
+        "AttachEntry",
+        "CompactState",
+        "MemoryState",
+        "ContextReset",
+        "CapabilitiesState",
+    ):
         assert ("agent.state", name) in allow
         assert ("agent.state_channels", name) in allow
 
@@ -130,6 +143,8 @@ def test_default_permissive_serde_warns_for_same_types(
     )
     serde = JsonPlusSerializer()
     states = [
+        AttachEntry(path="/example/render.png", label=None),
+        AttachState(),
         ContextReset(),
         CapabilitiesState(),
         CompactState(),
@@ -139,11 +154,18 @@ def test_default_permissive_serde_warns_for_same_types(
         for s in states:
             serde.loads_typed(serde.dumps_typed(s))
     msgs = _warning_messages(caplog)  # pyright: ignore[reportUnknownArgumentType]
-    assert len(msgs) == 4
+    assert len(msgs) == 6
     # Issue #156 split: freshly-written checkpoints carry the models' real module
     # (agent.state_channels); the legacy agent.state names only appear in
     # checkpoints written before the split.
-    for name in ("ContextReset", "CapabilitiesState", "CompactState", "MemoryState"):
+    for name in (
+        "AttachEntry",
+        "AttachState",
+        "ContextReset",
+        "CapabilitiesState",
+        "CompactState",
+        "MemoryState",
+    ):
         assert any(f"agent.state_channels.{name}" in m for m in msgs)
 
 
@@ -164,6 +186,8 @@ def test_allowlist_covers_registered_plugin_state_classes() -> None:
 def test_allowlist_static_entries_always_present() -> None:
     allow = checkpoint_msgpack_allowlist()
     assert ("agent.state", "CompactState") in allow
+    assert ("agent.state", "AttachState") in allow
+    assert ("agent.state", "AttachEntry") in allow
     assert ("agent.state", "MemoryState") in allow
     assert ("agent.state", "ContextReset") in allow
     assert ("agent.state", "CapabilitiesState") in allow

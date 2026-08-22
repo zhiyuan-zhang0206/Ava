@@ -27,7 +27,7 @@ An agent has only one tool—`execute_code(code: str)`—but obtains all capabil
 - [[watcher.ava.okf.md]] — Background listener: at / cron / launch (wake self = `ava.agents.send_message`)
 
 ### Self & User
-- [[self.ava.okf.md]] — Agent self (**core** ava.self): AGENT_ID / MACHINE_SPEC / SELF_MACHINE_NAME / pause_heartbeat / compact / restart / terminate; `log` / `set_label` / `get_label` are separately injected by ava_fleet plugin
+- [[self.ava.okf.md]] — Agent self (**core** ava.self): AGENT_ID / MACHINE_SPEC / SELF_MACHINE_NAME / attach / pause_heartbeat / compact / restart / terminate; `log` / `set_label` / `get_label` are separately injected by ava_fleet plugin
 - [[ui.ava.okf.md]] — User interface: serve / notify / show / close
 - [[ava_builtins/plugins/ava_memory/memory-api.ava.okf.md]] — Long-term memory pool: semantic search
 - [[ava/skills.ava.okf.md]] — Skill registry: ava.help(ava.skills.<name>)

@@ -14,7 +14,7 @@ future version" — once per type per process start; a future langgraph blocks
 unregistered types outright.
 """
 
-# (module, name) pairs. `agent.state`'s four nested sub-states are the only
+# (module, name) pairs. `agent.state`'s five nested sub-states are the only
 # framework channel values serialized as pydantic-v2 ext objects today; the
 # dynamic `AgentState` subclass name is registered defensively (the state
 # object itself is not a channel value, but naming it costs nothing and
@@ -26,12 +26,16 @@ STATIC_CHECKPOINT_MSGPACK_TYPES: frozenset[tuple[str, str]] = frozenset(
         # `("agent.state", ...)` envelopes; `agent.state` re-exports the models
         # from `agent.state_channels`, so these must stay for old checkpoints to
         # keep deserializing.
+        ("agent.state", "AttachState"),
+        ("agent.state", "AttachEntry"),
         ("agent.state", "CompactState"),
         ("agent.state", "MemoryState"),
         ("agent.state", "ContextReset"),
         ("agent.state", "CapabilitiesState"),
         ("agent.state", "AgentState"),
         # Current pairs: freshly-written checkpoints carry the real module.
+        ("agent.state_channels", "AttachState"),
+        ("agent.state_channels", "AttachEntry"),
         ("agent.state_channels", "CompactState"),
         ("agent.state_channels", "MemoryState"),
         ("agent.state_channels", "ContextReset"),

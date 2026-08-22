@@ -6,6 +6,7 @@ import json as _json
 from typing import NoReturn
 
 import ava
+from ava._attach import attach as attach
 from shared.config import settings
 from shared.config.turn_view import turn_settings
 from shared.lifecycle import AgentRestart, AgentTermination, _SystemHalt
@@ -22,6 +23,7 @@ __all_for_ava__ = [
     "AGENT_ID",
     "MACHINE_SPEC",
     "SELF_MACHINE_NAME",
+    "attach",
     "compact",
     "pause_heartbeat",
     "restart",

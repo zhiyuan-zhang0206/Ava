@@ -99,8 +99,8 @@ class ResultPayload:
     `state_update` carries the raw `ava.state_update` delta (typed-blob
     decoded); `state_update_error` is set when the agent tampered with the
     slot (left it a non-dict) — the parent then raises the same TypeError the
-    old in-process path raised. `findings` are plain dicts of
-    `ava.security.SecurityFindingEntry`."""
+    old in-process path raised. `findings` and `attachments` are plain JSON
+    dicts drained from child-local buffers."""
 
     kind: ResultKind
     lifecycle_type: str | None = None
@@ -110,6 +110,7 @@ class ResultPayload:
     state_update: dict[str, Any] | None = None
     state_update_error: str | None = None
     findings: list[dict[str, Any]] | None = None
+    attachments: list[dict[str, Any]] | None = None
 
 
 def make_request_path(exec_dir: Path, agent_id: int | None) -> Path:
@@ -199,6 +200,7 @@ def write_result(path: Path, payload: ResultPayload) -> None:
         "full_traceback": payload.full_traceback,
         "state_update_error": payload.state_update_error,
         "findings": payload.findings,
+        "attachments": payload.attachments,
     }
     if payload.state_update is not None:
         tag, blob = dumps_typed(payload.state_update)
@@ -235,6 +237,7 @@ def read_result(path: Path) -> ResultPayload:
         state_update=cast("dict[str, Any] | None", state_update),
         state_update_error=envelope.get("state_update_error"),
         findings=envelope.get("findings"),
+        attachments=cast("list[dict[str, Any]] | None", envelope.get("attachments")),
     )
 
 

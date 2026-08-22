@@ -46,6 +46,8 @@ from agent.graph._context import AvaContext
 from agent.graph._exec import _exec_node_impl
 from agent.messages_guard import MessagesMutationError
 from agent.state import (
+    AttachEntry,
+    AttachState,
     BaseAgentState,
     build_agent_state,
     clear_plugin_registrations,
@@ -815,7 +817,29 @@ async def test_exec_node_orders_tool_security_then_plugin_notes(fake_cancel_even
     assert msgs[2].content == "project note"  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
 
 
-async def test_exec_node_compact_path_drops_notes_and_clears_findings(fake_cancel_event):
+async def test_exec_node_checkpoints_child_attachment(fake_cancel_event, tmp_path: Path):
+    """A normal child registration reaches the parent attachment channel.
+
+    Packing is deliberately deferred to the claim boundary, so the exec update
+    must contain only the resolved path and label rather than media bytes.
+    """
+    image = tmp_path / "render.png"
+    image.write_bytes(b"png")
+    code = f"import ava\nava.self.attach({str(image)!r}, label='render result')"
+    state = BaseAgentState(messages=[_ai_message_with_code(code)], halted=False)
+    runtime, config = _make_runtime_and_config(AsyncMock())
+
+    cmd = await _exec_node_impl(state, runtime, config)
+
+    update = cast(dict[str, Any], cmd.update)
+    assert update["attach"] == AttachState(
+        pending=[AttachEntry(path=str(image.resolve()), label="render result")]
+    )
+
+
+async def test_exec_node_compact_path_drops_notes_and_clears_findings(
+    fake_cancel_event, tmp_path: Path
+):
     """The compact path (_SystemHalt) writes nothing back — claim REMOVE_ALLs
     the whole history — so notes must not leak into the update, and the
     findings buffer must still be cleared (never misattributed to a later
@@ -823,14 +847,21 @@ async def test_exec_node_compact_path_drops_notes_and_clears_findings(fake_cance
 
     _register_messages_plugin()
     _seed_security_findings("shell.run")
+    image = tmp_path / "render.png"
+    image.write_bytes(b"png")
     code = (
         "import ava\n"
         "from langchain_core.messages import HumanMessage\n"
         "ava.state_update['messages'] = [HumanMessage(content='x')]\n"
+        f"ava.self.attach({str(image)!r})\n"
         "from shared.lifecycle import _SystemHalt\n"
         "raise _SystemHalt()\n"
     )
-    state = BaseAgentState(messages=[_ai_message_with_code(code)], halted=False)
+    state = BaseAgentState(
+        messages=[_ai_message_with_code(code)],
+        halted=False,
+        attach=AttachState(pending=[AttachEntry(path="/previous.png", label=None)]),
+    )
     runtime, config = _make_runtime_and_config(AsyncMock())
 
     cmd = await _exec_node_impl(state, runtime, config)
@@ -840,6 +871,7 @@ async def test_exec_node_compact_path_drops_notes_and_clears_findings(fake_cance
         f"compact path must write no messages back, got {update.get('messages')!r}"  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
     )
     assert update.get("halted") is True  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+    assert "attach" not in update  # pyright: ignore[operator]
     # Findings drained even though nothing was injected
     from ava import security as _security
 

@@ -138,6 +138,21 @@ def system_note_message(
     )
 
 
+def attach_message(
+    *, blocks: list[dict[str, object]], text: str, created_at: datetime
+) -> HumanMessage:
+    """Add files prepared during the preceding turn to the conversation.
+
+    The message is available to your next response. Its first content block
+    explains every file; following blocks carry any media your model can use.
+    """
+    content_blocks = blocks or [{"type": "text", "text": text}]
+    return HumanMessage(
+        content=cast("str | list[str | dict[str, Any]]", content_blocks),
+        additional_kwargs=_stamp_created_at({"ava_msg_type": AvaMsgType.ATTACH.value}, created_at),
+    )
+
+
 def exec_output_message(
     *,
     content: str,

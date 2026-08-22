@@ -22,6 +22,7 @@ tags:
 - `SELF_MACHINE_NAME: str` — Current machine name, also the default value for `ava.agents.spawn(machine=...)`.
 
 ### Lifecycle
+- `attach(path, label=None)` — Register a local media file for the next turn. The file is read when the current turn ends; supported media reaches the configured model natively, while unsupported media is delivered as a text note. Limits are 20 MiB per file, 8 files, and 48 MiB per turn.
 - `pause_heartbeat(duration: float)` — Pause idle heartbeat for `duration` seconds (0, 86400]. For waiting on a known external event only (watcher / peer reply / scheduled callback / user answer), never as a substitute for terminating when the work is done; docstring guides agent to exponentially back off each time (30 min → 2 hours → longer) to save tokens. Only suppresses heartbeats, real wake-ups still arrive; subsequent calls replace the window.
 - `compact(summary) → NoReturn` — Replace entire conversation history with summary, irreversible. First write durable state to MEMORY.md + shared memory pool, then write summary (first person, covering Requests/Progress/In flight/Dead ends/Pitfalls/Verbatim tail).
 - `restart(config_overlay=None) → NoReturn` — Replace current process with a new process. `config_overlay` merges into persistent settings.
