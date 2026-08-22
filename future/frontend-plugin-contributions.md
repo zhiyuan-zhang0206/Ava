@@ -266,14 +266,13 @@ value is validated as a CSS color literal.
 
 ## Implementation remaining (slices, each independently landable)
 
-### Per-agent composer command view — PR2b
+### Per-agent composer command view — PR2b — **shipped**
 
-The runner-backed read path is available: `GET /api/commands?agent_id=` returns
-the target agent's converged and project-local command view, falling back to the
-gateway-local catalog when its runner is unreachable. PR2b is the frontend-only
-slice: pass the composed-for agent id through the command-autocomplete query and
-refresh it when that identity changes. This is an agent-scoped API consumer,
-not a new composer/plugin extension point.
+The composer passes the composed-for agent id to the runner-backed
+`GET /api/commands?agent_id=` read path and caches each successful catalog for
+the lifetime of that composer. With no selected agent it retains the global
+catalog request. This is an agent-scoped API consumer, not a new
+composer/plugin extension point.
 
 - **U1 — manifest key + validator** — **shipped**: the `contributions.ui`
   schema lives in `shared/plugin_ui_contributions.py` (closed type set, closed

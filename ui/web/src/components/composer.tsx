@@ -215,6 +215,7 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
   // The command list is owned here (not in the dropdown) so it doubles as the
   // lookup for the committed command's instruction hint, shown once the name is
   // followed by whitespace and the dropdown has closed.
+  const commandsCacheRef = useRef(new Map<number | null, CommandItem[]>());
   const [commands, setCommands] = useState<CommandItem[]>([]);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const acRef = useRef<SlashAutocompleteHandle>(null);
@@ -263,13 +264,23 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
     return null;
   }, [value, caret, commands]);
 
-  // Fetch the command list once on mount; it backs both the dropdown's
-  // filtering and the instruction-hint lookup.
+  // The selected agent owns the command catalog. Cache successful lists for
+  // quick agent switching; a failed request stays a miss so returning retries.
   useEffect(() => {
+    const cacheKey = agentId ?? null;
+    const cachedCommands = commandsCacheRef.current.get(cacheKey);
+    if (cachedCommands !== undefined) {
+      setCommands(cachedCommands);
+      return;
+    }
+
+    // Do not show the previous agent's commands while this catalog loads.
+    setCommands([]);
     let alive = true;
-    api
-      .getCommands()
+    const request = agentId == null ? api.getCommands() : api.getCommands(agentId);
+    request
       .then((c) => {
+        commandsCacheRef.current.set(cacheKey, c);
         if (alive) setCommands(c);
       })
       .catch((e: unknown) => {
@@ -281,7 +292,7 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
     return () => {
       alive = false;
     };
-  }, []);
+  }, [agentId]);
 
   useEffect(() => {
     if (focusToken === undefined) return;
