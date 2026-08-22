@@ -1,30 +1,30 @@
 ---
 type: doc
-title: Tool Execution — Code Execution Sandbox
-description: 'The agent''s sole tool—`execute_code(code: str)`—executes Python code in a sandbox. This is the agent''s only way to interact with the outside world.'
+title: Tool Execution — Fault-Isolated Code Execution
+description: 'The agent''s sole tool—`execute_code(code: str)`—executes Python code in a disposable child process. This is the agent''s only way to interact with the outside world.'
 tags: []
 ---
 
-# Tool Execution — Code Execution Sandbox
+# Tool Execution — Fault-Isolated Code Execution
 
 ## What it is
 
-The agent's sole tool—`execute_code(code: str)`—executes Python code in a sandbox. This is the agent's only way to interact with the outside world.
+The agent's sole tool—`execute_code(code: str)`—executes Python code in a disposable child process. This is the agent's only way to interact with the outside world. The process boundary provides cancellation and fault isolation; it is not a security sandbox.
 
 ## Core Mechanism
 
 ### Execution Flow (`_exec.py`)
 - The LLM outputs an `execute_code` tool_call (LangChain native `AIMessage.tool_calls`, normalized by `_tool_calls.py`), extracting `args["code"]`
-- `_run_in_subprocess` (`_exec_subprocess.py`) spawns one disposable child per exec (`python -m agent.exec_child`, same venv, `start_new_session=True`) — a stuck native call is SIGKILLable without touching the agent process (issue #184); the parent polls every 50ms
-- Double-layered hard timeout: per-code `exec_timeout_seconds` (default 300s, SIGTERM) + graph-level `exec_node_timeout_seconds` (default 1200s, defense in depth — the parent-side `asyncio.wait_for` shield above the whole run); the child escalates SIGTERM → SIGKILL(-pgid) after the grace period (`KILL_GRACE_S`, `_exec_protocol.py`)
+- `_run_in_subprocess` (`_exec_subprocess.py`) spawns one disposable child per exec (`python -I -X utf8 -m agent.exec_child`, same venv, `start_new_session=True` on POSIX) — isolated mode keeps the inherited process cwd and `PYTHON*` environment out of trusted bootstrap import resolution, and explicit UTF-8 mode preserves portable text after `-I` ignores encoding env vars; a stuck native call is SIGKILLable without touching the agent process (issue #184); the parent polls every 50ms
+- Double-layered hard timeout: per-code `exec_timeout_seconds` (default 300s, SIGTERM) + graph-level `exec_node_timeout_seconds` (default 1200s, defense in depth — the parent-side `asyncio.wait_for` shield above the whole run); the parent escalates SIGTERM → SIGKILL(-pgid) after the grace period on POSIX and targets the direct child on Windows (`KILL_GRACE_S`, `_exec_protocol.py`)
 - The child writes stdout/stderr line-buffered onto the pipe (chronological merge); the parent drains the pipe into a `StreamingTextIO` (`_exec_stream.py`) and streams chunks to Redis in real time, finally returning the envelope to the LLM
 - `ava.self.attach()` registrations take the same child-result envelope path as plugin state updates. The parent revalidates only file metadata, parks valid paths in `state.attach`, and claim reads the bytes at the completed-turn boundary.
 - **Accumulation cap** (`exec_output_accumulation_max_chars`, default 1,000,000): the accumulator pins its first half and rolls its last half, dropping the middle **as the code runs**, so a runaway `print` loop cannot grow the child until it is OOM-killed. Execution is **not** killed — the output is truncated with an explicit marker and the model self-corrects; the result taxonomy is unchanged. Redis pushes come off the same accumulator so they inherit the bound: past the budget the retained text is a rolling window with no append-only increment, so one notice goes out and streaming stops until the final `ExecOutput` upsert
 
-### Sandbox Environment
+### Execution Environment
 - Each execution uses a fresh `fresh_globals` (`__name__="__agent_code__"`)
 - `ava.*` SDK is available, but **not auto-imported**—agent code must explicitly `import ava`
-- The agent's working directory (workspace) is sandboxed
+- `ava.cwd` is logical plugin state, not a process-global `chdir`: AvaCode's `files` / `shell` / `understand` wrappers resolve it explicitly, while bare `open`, `Path.cwd`, imports, and user subprocesses retain the disposable child's stable OS cwd
 
 ### Output Handling
 - `agent/graph/_exec_output.py:wrap_code_output()` wraps the result (cancelled/timed_out markers)
@@ -44,7 +44,7 @@ The agent's sole tool—`execute_code(code: str)`—executes Python code in a sa
 
 ## Entry Points
 
-- `agent/graph/_exec.py:exec_node()` — Sandbox execution main logic + sum type dispatch
+- `agent/graph/_exec.py:exec_node()` — Code execution main logic + sum type dispatch
 - `agent/graph/_exec_stream.py` — `StreamingTextIO` + `ExecOutputChunkPublisher` (streaming output incremental push)
 - `agent/graph/_tool_calls.py` — Multiple tool_call normalization (merging, not parsing)
 - `agent/graph/_exec_output.py` — Output envelope formatting

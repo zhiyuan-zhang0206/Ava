@@ -63,7 +63,7 @@ state_handle = register_plugin_state(AvaCodeState)
 ```
 
 - `AvaCodeState` besides `cwd: str` (default = agent workspace or `$HOME`) declares the base `messages` channel (exact `BaseAgentState` annotation — the in-memory delivery channel for context notes) and holds context injection dedup state (`injected_paths` / `injected_hashes` / `last_seen_compact`) and note injection state (`cwd_note` / `project_skills_note` / `project_skills_seen_compact`)
-- `cwd` is read/written via `ava.cwd.get() / set()`
+- `cwd` is read/written via `ava.cwd.get() / set()` and is purely logical LangGraph state: `set()` never mutates the parent or disposable child's OS cwd
 - SDK wraps (`ava.files.read/edit/write/append/delete/glob`, `ava.shell.run`, `ava.understand`) resolve relative paths using cwd (for `ava.understand` the wrap walks the batch and resolves each target's `path`)
 
 ### SDK namespace registration
@@ -73,14 +73,15 @@ ava.register_namespace("cwd", _code_namespace)
 ava.register_sdk_expand("cwd")
 ```
 
-- `ava.cwd.get()` → returns current working directory
-- `ava.cwd.set(path)` → changes working directory (relative path resolved based on current directory, `~/...` expanded). After set, writes `cwd_note` (and when git repo has `.claude/skills` / `.agents/skills` / `.ava/skills` project-local skills, writes `project_skills_note`), which are injected as system notes by the above after_exec hook
+- `ava.cwd.get()` → returns the current logical working directory
+- `ava.cwd.set(path)` → changes the logical working directory (relative path resolved against the current logical value, `~/...` expanded). AvaCode's `files` / `shell` / `understand` wrappers read it explicitly; bare `open`, `Path.cwd`, imports, and user subprocesses retain their Python process cwd. After set, writes `cwd_note` (and when git repo has `.claude/skills` / `.agents/skills` / `.ava/skills` project-local skills, writes `project_skills_note`), which are injected as system notes by the above after_exec hook
+- `validate_cwd_after_init` → after checkpoint restore, validates the persisted logical cwd and repairs a stat failure or non-directory value to the agent workspace; it never calls `os.chdir`
 
 ## Key dependencies
 
 - [[system-prompt.ava.okf.md]] — system prompt construction
 - [[agent/hooks/hooks.ava.okf.md]] — hook system
-- [[tool-exec.ava.okf.md]] — code execution sandbox (where after_exec hook runs)
+- [[tool-exec.ava.okf.md]] — fault-isolated code execution (where after_exec hook runs)
 
 ## Configuration
 

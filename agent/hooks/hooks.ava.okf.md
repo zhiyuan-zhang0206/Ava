@@ -38,7 +38,7 @@ Together with SDK wraps (the `ava.extend.wrap` registration primitive in `ava/_e
 
 ## Notes
 
-- **after_init** is the earliest hook point: its container node sits right after `START` and before `init_context`, so its state edits land before the standing message head is laid down (see [[agent/graph/graph.ava.okf.md]] for placement). Example: the ava_code plugin registers `sync_cwd_after_init` here.
+- **after_init** is the earliest hook point: its container node sits right after `START` and before `init_context`, so its state edits land before the standing message head is laid down (see [[agent/graph/graph.ava.okf.md]] for placement). Example: the ava_code plugin registers `validate_cwd_after_init` here to repair a persisted logical cwd that cannot be statted or is not a directory, without mutating the Python process cwd.
 - A hook returning `None` means "no modification"—it produces no state update
 - Hook signatures are uniform, not distinguishing between nodes—the same `Hook` subclass instance can theoretically be registered at multiple hook points
 - Built-in before_llm hooks (compact / repair / capability-index drift) — the three unconditional built-ins and their registration order: [[agent/hooks/builtin-before-llm.ava.okf.md]].

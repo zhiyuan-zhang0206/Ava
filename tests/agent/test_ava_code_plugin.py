@@ -131,8 +131,9 @@ def test_files_module_docstring_keeps_core_path_claim(_load_ava_code_plugin):
     assert "tracked working directory" not in ava.files.__doc__
 
 
-def test_get_cwd_after_set_cwd_reads_new_value(tmp_path: Path):
-    """Within same turn, after set_cwd, get_cwd immediately gets new value (handle.update mutates ava.state)."""
+def test_get_cwd_after_set_cwd_reads_new_value_without_changing_process_cwd(tmp_path: Path):
+    """Within one turn the logical state changes immediately, while the
+    Python process cwd remains an infrastructure property."""
     p1 = tmp_path / "a"
     p2 = tmp_path / "b"
     p1.mkdir()
@@ -140,9 +141,11 @@ def test_get_cwd_after_set_cwd_reads_new_value(tmp_path: Path):
 
     ava.state = _make_state_with_cwd(str(p1))
     ava.state_update = {}
+    process_cwd = Path.cwd()
     try:
         ava.cwd.set(p2)
         assert ava.cwd.get() == p2.resolve()
+        assert Path.cwd() == process_cwd
     finally:
         ava.state = None
         ava.state_update = None
@@ -850,6 +853,31 @@ def test_plugin_wraps_all_files_ops_for_cwd():
         assert [p for p, _ in stack] == ["ava_code"], target
 
 
+def test_shell_run_wrap_passes_logical_cwd_without_changing_process_cwd(tmp_path: Path):
+    """The shell wrapper passes logical state as an explicit subprocess cwd;
+    it never relies on or mutates the Python process cwd."""
+    from ava_builtins.plugins.ava_code.plugin import _wrapped_shell_run
+
+    logical_cwd = tmp_path / "logical"
+    logical_cwd.mkdir()
+    process_cwd = Path.cwd()
+    captured: dict[str, object] = {}
+
+    def fake_inner(cmd: str, *, cwd: str | None, timeout: float) -> str:
+        captured.update(cmd=cmd, cwd=cwd, timeout=timeout)
+        return "ok"
+
+    ava.state = _make_state_with_cwd(str(logical_cwd))
+    ava.state_update = {}
+    try:
+        assert _wrapped_shell_run(fake_inner, "pwd", timeout=7.0) == "ok"
+        assert captured == {"cmd": "pwd", "cwd": str(logical_cwd), "timeout": 7.0}
+        assert Path.cwd() == process_cwd
+    finally:
+        ava.state = None
+        ava.state_update = None
+
+
 # ── project-local skill source (set_cwd surfaces + records) ────────────────
 
 
@@ -1344,14 +1372,14 @@ def test_read_wrap_whitespace_only_agents_md_not_recorded(tmp_path: Path):
         ava.state_update = None
 
 
-# ── _SyncCwdAfterInitHook fallback ───────────────────────────────────────
+# ── persisted-cwd validation after init ──────────────────────────────────
 
 
 async def test_after_init_hook_falls_back_when_cwd_missing(tmp_path: Path, monkeypatch):
     """When persisted cwd no longer exists (worktree deleted etc.), the
     after_init hook falls back to the agent's workspace and persists the
-    new cwd so future restarts don't crash on the same stale path."""
-    from ava_builtins.plugins.ava_code.plugin import _SyncCwdAfterInitHook
+    new logical cwd without changing the Python process cwd."""
+    from ava_builtins.plugins.ava_code.plugin import _ValidateCwdAfterInitHook
 
     nonexistent = str(tmp_path / "nonexistent-dir")
     fallback_dir = str(tmp_path / "workspaces" / "9999")
@@ -1360,7 +1388,8 @@ async def test_after_init_hook_falls_back_when_cwd_missing(tmp_path: Path, monke
     monkeypatch.setattr("ava_builtins.plugins.ava_code.plugin._default_cwd", lambda: fallback_dir)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
     Path(fallback_dir).mkdir(parents=True, exist_ok=True)
 
-    hook = _SyncCwdAfterInitHook()
+    process_cwd = Path.cwd()
+    hook = _ValidateCwdAfterInitHook()
     state = _make_state_with_cwd(nonexistent)
 
     result = await hook(state, None, None)
@@ -1368,24 +1397,48 @@ async def test_after_init_hook_falls_back_when_cwd_missing(tmp_path: Path, monke
     # Hook returned a state update that overwrites the stale cwd.
     assert result is not None
     assert result["ava_code__cwd"] == fallback_dir
-    # OS cwd was synced to the fallback.
-    assert Path.cwd() == Path(fallback_dir)
+    assert Path.cwd() == process_cwd
 
 
 async def test_after_init_hook_noop_when_cwd_valid(tmp_path: Path):
-    """When the persisted cwd exists, the hook syncs os cwd and returns None
-    (no state update needed)."""
-    from ava_builtins.plugins.ava_code.plugin import _SyncCwdAfterInitHook
+    """A valid persisted logical cwd needs no repair and never changes the
+    Python process cwd."""
+    from ava_builtins.plugins.ava_code.plugin import _ValidateCwdAfterInitHook
 
     valid_dir = str(tmp_path)
-    hook = _SyncCwdAfterInitHook()
+    process_cwd = Path.cwd()
+    hook = _ValidateCwdAfterInitHook()
     state = _make_state_with_cwd(valid_dir)
 
     result = await hook(state, None, None)
 
-    # Valid cwd → no state update, just os.chdir side effect.
     assert result is None
-    assert Path.cwd() == Path(valid_dir)
+    assert Path.cwd() == process_cwd
+
+
+async def test_after_init_hook_falls_back_when_cwd_is_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A persisted file path is not a logical directory and is repaired
+    without changing the Python process cwd."""
+    from ava_builtins.plugins.ava_code.plugin import _ValidateCwdAfterInitHook
+
+    persisted_file = tmp_path / "not-a-directory"
+    persisted_file.write_text("file")
+    fallback_dir = tmp_path / "workspaces" / "9999"
+    fallback_dir.mkdir(parents=True)
+    monkeypatch.setattr(
+        "ava_builtins.plugins.ava_code.plugin._default_cwd",
+        lambda: fallback_dir,
+    )
+
+    process_cwd = Path.cwd()
+    result = await _ValidateCwdAfterInitHook()(
+        _make_state_with_cwd(str(persisted_file)), None, None
+    )
+
+    assert result == {"ava_code__cwd": str(fallback_dir)}
+    assert Path.cwd() == process_cwd
 
 
 # ── oversized context file: truncate + archive (user ruling 2026-08-11) ─────
