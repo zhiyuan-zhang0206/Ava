@@ -78,6 +78,53 @@ async def test_subprocess_done(tmp_path: Path) -> None:
     assert not list((tmp_path / "exec" / str(_AGENT_ID)).iterdir())
 
 
+async def test_subprocess_bootstrap_ignores_agent_package_in_process_cwd(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A persisted coding cwd may itself be an old Ava checkout. Its
+    top-level ``agent`` package must not shadow the exec-child entry, and
+    spawning the disposable child must not change the parent's OS cwd."""
+    old_checkout = tmp_path / "old-checkout"
+    (old_checkout / "agent").mkdir(parents=True)
+    (old_checkout / "agent" / "__init__.py").write_text("# old checkout\n")
+    monkeypatch.chdir(old_checkout)
+    monkeypatch.setenv("PYTHONPATH", str(old_checkout))
+
+    result = await _run(
+        tmp_path,
+        ("import agent.exec_child as entry\nprint('exec-child', entry.__file__)\n"),
+    )
+
+    assert isinstance(result, _ExecDone)
+    expected_entry = Path(__file__).resolve().parents[2] / "agent" / "exec_child.py"
+    assert str(expected_entry) in result.output
+    assert Path.cwd() == old_checkout.resolve()
+
+
+async def test_subprocess_bootstrap_forces_utf8_when_python_env_is_ignored(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Isolated mode ignores Python encoding env vars, so the production
+    child command itself must force UTF-8 on every platform, including Windows."""
+    monkeypatch.setenv("PYTHONUTF8", "0")
+    monkeypatch.setenv("PYTHONIOENCODING", "cp1252")
+
+    result = await _run(
+        tmp_path,
+        (
+            "import sys\n"
+            "print('utf8-mode', sys.flags.utf8_mode)\n"
+            "print('stdout-encoding', sys.stdout.encoding)\n"
+            "print('cjk', '子进程')\n"
+        ),
+    )
+
+    assert isinstance(result, _ExecDone)
+    assert "utf8-mode 1" in result.output
+    assert "stdout-encoding utf-8" in result.output.lower()
+    assert "cjk 子进程" in result.output
+
+
 async def test_subprocess_merged_stream_preserves_order(tmp_path: Path) -> None:
     """stderr=STDOUT at spawn level keeps print/traceback interleaving — the
     same chronological merge the old in-thread capture gave."""

@@ -8,9 +8,10 @@ continue multi-step based on pending inbound + state.halted.
 
 Core mechanisms:
   - Subprocess backend (`agent/graph/_exec_subprocess.py`): the parent spawns
-    one `python -m agent.exec_child` per exec, polls every 50ms, streams
+    one `python -I -X utf8 -m agent.exec_child` per exec, polls every 50ms, streams
     output through the chunk pipeline, and escalates cancel/timeout via
-    SIGINT/SIGTERM to SIGKILL(-pgid) after a grace period. The child rebuilds
+    SIGINT/SIGTERM to SIGKILL(-pgid) after a grace period on POSIX (Windows
+    targets the direct child). The child rebuilds
     the state snapshot from the request envelope; the plugin state-update
     delta and the drained security findings ride the result envelope back
     and are validated here.

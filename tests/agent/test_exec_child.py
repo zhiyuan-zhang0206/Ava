@@ -75,7 +75,7 @@ def _spawn(
     result_path = make_result_path(exec_dir, agent_id=_AGENT_ID)
     write_request(request_path, code=code, agent_id=_AGENT_ID, timeout_s=timeout_s, state=state)
     proc = subprocess.run(
-        [sys.executable, "-m", "agent.exec_child"],
+        [sys.executable, "-I", "-X", "utf8", "-m", "agent.exec_child"],
         capture_output=True,
         text=True,
         env=_child_env(
@@ -125,16 +125,20 @@ def test_child_state_slot_and_plugin_delta_round_trip(tmp_path: Path) -> None:
     proj = tmp_path / "proj"
     proj.mkdir()
     code = f"""
+from pathlib import Path
 import ava
+process_cwd = Path.cwd()
 print("messages in snapshot:", len(ava.state.messages))
 print("first message:", ava.state.messages[0].content)
 ava.cwd.set({str(proj)!r})
 print("cwd after set:", ava.cwd.get())
+print("process cwd stable:", Path.cwd() == process_cwd)
 """
     proc, _request, result = _spawn(tmp_path, code, state=state)
     assert proc.returncode == 0, proc.stderr
     assert "first message: hi from snapshot" in proc.stdout
     assert "cwd after set:" in proc.stdout
+    assert "process cwd stable: True" in proc.stdout
     payload = read_result(result)
     assert payload.kind == "done"
     assert payload.state_update is not None
@@ -170,7 +174,7 @@ def test_child_sigterm_writes_timed_out_envelope(tmp_path: Path) -> None:
     )
     env = _child_env(tmp_path, request_path, result_path)
     proc = subprocess.Popen(
-        [sys.executable, "-m", "agent.exec_child"],
+        [sys.executable, "-I", "-X", "utf8", "-m", "agent.exec_child"],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
