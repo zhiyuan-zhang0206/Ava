@@ -47,6 +47,7 @@ afterEach(() => {
   cleanup();
   commandList = [];
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 const baseProps = {
@@ -54,6 +55,22 @@ const baseProps = {
   onSend: vi.fn(() => Promise.resolve(true)),
   onStop: vi.fn(),
 };
+
+function storageWith(
+  persistent: Storage,
+  overrides: Partial<Pick<Storage, "getItem" | "setItem" | "removeItem">>,
+): Storage {
+  return {
+    get length() {
+      return persistent.length;
+    },
+    clear: persistent.clear.bind(persistent),
+    getItem: overrides.getItem ?? persistent.getItem.bind(persistent),
+    key: persistent.key.bind(persistent),
+    removeItem: overrides.removeItem ?? persistent.removeItem.bind(persistent),
+    setItem: overrides.setItem ?? persistent.setItem.bind(persistent),
+  };
+}
 
 // Once contextTokens > 0, the meta row mounts ContextButton, which reads the
 // context-meter-width display setting via useUserSettings (react-query) —
@@ -438,7 +455,8 @@ describe("Composer input lifecycle", () => {
   it("storage failure falls back to memory without changing retry identity", async () => {
     const agentId = 7071;
     const attemptKey = `composer-send-attempt-${agentId}`;
-    sessionStorage.setItem(
+    const persistentStorage = sessionStorage;
+    persistentStorage.setItem(
       attemptKey,
       JSON.stringify({
         signature: JSON.stringify([agentId, "stale body", []]),
@@ -448,12 +466,11 @@ describe("Composer input lifecycle", () => {
         imageUrls: [],
       }),
     );
-    expect(sessionStorage.getItem(attemptKey)).toContain("stale-client-id");
-    const setItem = vi
-      .spyOn(Object.getPrototypeOf(sessionStorage) as Storage, "setItem")
-      .mockImplementation(() => {
+    expect(persistentStorage.getItem(attemptKey)).toContain("stale-client-id");
+    const setItem = vi.fn((_key: string, _value: string) => {
       throw new DOMException("quota", "QuotaExceededError");
-      });
+    });
+    vi.stubGlobal("sessionStorage", storageWith(persistentStorage, { setItem }));
     const onSend = vi
       .fn<(content: string, imageUrls: string[], clientMessageId: string) => Promise<boolean>>()
       .mockImplementationOnce((_content, _imageUrls, clientMessageId) =>
@@ -503,11 +520,11 @@ describe("Composer input lifecycle", () => {
     const attemptKey = `composer-send-attempt-${agentId}`;
     const persistedAttempt = sessionStorage.getItem(attemptKey);
     expect(persistedAttempt).toContain("uncertain");
-    const removeItem = vi
-      .spyOn(Object.getPrototypeOf(sessionStorage) as Storage, "removeItem")
-      .mockImplementation(() => {
-        throw new DOMException("blocked", "SecurityError");
-      });
+    const persistentStorage = sessionStorage;
+    const removeItem = vi.fn((_key: string) => {
+      throw new DOMException("blocked", "SecurityError");
+    });
+    vi.stubGlobal("sessionStorage", storageWith(persistentStorage, { removeItem }));
     fireEvent.click(screen.getByRole("button", { name: "Send another anyway" }));
     expect(removeItem).toHaveBeenCalledWith(attemptKey);
     expect(sessionStorage.getItem(attemptKey)).toBe(persistedAttempt);
