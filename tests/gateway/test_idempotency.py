@@ -27,6 +27,7 @@ from starlette.requests import Request
 
 from gateway import _idempotency
 from gateway.app import app
+from ops.rpc_schemas import ContentBlock
 from shared.agents import AgentStatus
 from shared.contracts import Idempotency
 
@@ -143,10 +144,16 @@ def test_concurrent_same_key_requests_land_once(
         return response.status_code, response.json()
 
     with ThreadPoolExecutor(max_workers=2) as executor:
-        responses = list(executor.map(lambda _n: _send(), range(2)))
+        futures = [executor.submit(_send) for _index in range(2)]
+        responses = [future.result() for future in futures]
 
     assert [status for status, _body in responses] == [201, 201]
-    assert len({int(body["inbound_id"]) for _status, body in responses}) == 1
+    inbound_ids: set[int] = set()
+    for _status, body in responses:
+        inbound_id = body["inbound_id"]
+        assert isinstance(inbound_id, int)
+        inbound_ids.add(inbound_id)
+    assert len(inbound_ids) == 1
     assert _count_inbounds(db_conn, agent_id, "from two tabs") == 1
 
 
@@ -392,10 +399,18 @@ def test_reconcile_does_not_repeat_mutable_multimodal_validation(
         "source": "user",
     }
     original_normalize = agents_state._normalize_message_content
+
+    def _normalize_without_mutable_gates(
+        _request: Request,
+        _agent_id: int,
+        content: str | list[ContentBlock],
+    ) -> tuple[str, dict[str, object] | None]:
+        return original_normalize(content)
+
     monkeypatch.setattr(
         agents_state,
         "_prepare_message_content",
-        lambda _request, _agent_id, content: original_normalize(content),
+        _normalize_without_mutable_gates,
     )
     sent = client.post(
         f"/api/agents/{agent_id}/messages",
@@ -564,6 +579,10 @@ class _FakeTransactionalAlwkContract:
     transactional_idempotency = True
 
 
+def _fake_transactional_contract_for(_method: str, _path: str) -> _FakeTransactionalAlwkContract:
+    return _FakeTransactionalAlwkContract()
+
+
 def _fake_contract_for(_method: str, _path: str) -> _FakeAlwkContract:
     """contract_for stand-in: every route declares ALWK (the tests drive the
     middleware directly, bypassing the real contract table)."""
@@ -645,7 +664,7 @@ def test_only_transactional_route_bypasses_generic_response_cache(
     monkeypatch.setattr(
         _idempotency.contracts,
         "contract_for",
-        lambda _method, _path: _FakeTransactionalAlwkContract(),
+        _fake_transactional_contract_for,
     )
     _run_middleware_once(key, path, call_next)
     _run_middleware_once(key, path, call_next)
