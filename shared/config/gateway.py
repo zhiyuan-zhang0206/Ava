@@ -6,7 +6,7 @@ env alias so the .env surface is unchanged. Aggregated by shared/config.
 
 from __future__ import annotations
 
-from pydantic import AliasChoices, Field
+from pydantic import AliasChoices, Field, field_validator
 
 from shared.config._base import EnvSettings
 
@@ -255,15 +255,16 @@ class GatewaySettings(EnvSettings):
     )
 
     grafana_proxy_enabled: bool = Field(
-        default=False,
+        default=True,
         alias="AVA_GRAFANA_PROXY_ENABLED",
         description=(
             "Reverse-proxy /grafana/* on the gateway to a co-located Grafana "
-            "instance (see grafana_host / grafana_port). Off by default so a "
-            "cluster without Grafana is unaffected; the browser then 404s on "
-            "/grafana/*. When on, the proxy is auth-gated by the same session "
+            "instance (see grafana_host / grafana_port). On by default: a host "
+            "without Grafana returns an explicit upstream-unavailable response. "
+            "The proxy is auth-gated by the same session "
             "cookie / bearer middleware as every other API route and streams "
-            "the upstream response chunk-by-chunk."
+            "the upstream response chunk-by-chunk. The gateway injects a fixed "
+            "Grafana Viewer identity; Grafana never receives the cluster secret."
         ),
         json_schema_extra={
             "restart_required": "gateway",
@@ -279,9 +280,9 @@ class GatewaySettings(EnvSettings):
         alias="AVA_GRAFANA_HOST",
         description=(
             "Host of the co-located Grafana instance the gateway reverse-proxies "
-            "to when grafana_proxy_enabled is on. Loopback by default — Grafana "
-            "binds the gateway host itself and the browser never dials it "
-            "directly."
+            "to when grafana_proxy_enabled is on. Must be 127.0.0.1 — Grafana "
+            "is not a cluster-network service; the browser enters through the "
+            "gateway only."
         ),
         json_schema_extra={
             "restart_required": "gateway",
@@ -291,6 +292,14 @@ class GatewaySettings(EnvSettings):
             "remote_writable": False,
         },
     )
+
+    @field_validator("grafana_host")
+    @classmethod
+    def _grafana_host_must_be_loopback(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized != "127.0.0.1":
+            raise ValueError("AVA_GRAFANA_HOST must be 127.0.0.1")
+        return normalized
 
     mcp_endpoint_enabled: bool = Field(
         default=False,
@@ -311,13 +320,13 @@ class GatewaySettings(EnvSettings):
     )
 
     grafana_port: int = Field(
-        default=3001,
+        default=3003,
+        ge=1,
+        le=65535,
         alias="AVA_GRAFANA_PORT",
         description=(
-            "Port of the co-located Grafana instance the gateway reverse-proxies "
-            "to when grafana_proxy_enabled is on. Grafana's default HTTP port is "
-            "3000; Ava reserves 3001 so the proxy default matches a Grafana "
-            "configured to sit outside the frontend's port."
+            "Loopback host port of the co-located Grafana instance. This is an "
+            "internal gateway upstream, not a browser-visible public URL."
         ),
         json_schema_extra={
             "restart_required": "gateway",

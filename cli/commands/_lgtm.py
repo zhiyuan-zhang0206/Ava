@@ -22,8 +22,11 @@ from services.healthchecks.lgtm import (
     is_lgtm_host,
     lgtm_compose_dir,
     lgtm_host_marker,
+    lgtm_start_command,
     probe_statuses,
+    remove_obsolete_grafana_root,
 )
+from shared.machine import machine_role
 
 __all__ = [
     "cmd_lgtm_off",
@@ -48,15 +51,19 @@ def ensure_lgtm_stack_step(ctx: ConvergeCtx) -> None:
     """
     if not (ctx.ava_home / "lgtm-host").exists():
         return
+    if ctx.roles is None or "gateway" not in ctx.roles:
+        raise RuntimeError("lgtm-host marker requires the gateway capability on this unit")
     if shutil.which("docker") is None:
         print(
             "  ! lgtm: docker CLI not found — observability stack not started",
             file=sys.stderr,
         )
         return
+    compose_dir = lgtm_compose_dir(ctx.repo)
+    remove_obsolete_grafana_root(compose_dir)
     result = subprocess.run(
-        ["bash", "start.sh"],
-        cwd=lgtm_compose_dir(ctx.repo),
+        lgtm_start_command(),
+        cwd=compose_dir,
         check=False,
         timeout=600,
     )
@@ -71,6 +78,9 @@ def cmd_lgtm_on() -> int:
     deploy/lgtm/start.sh. Safe to re-run; volumes persist across off/on."""
     import cli.commands as _ns
 
+    if "gateway" not in machine_role():
+        print("✗ ava lgtm on requires the gateway capability on this unit", file=sys.stderr)
+        return 1
     if shutil.which("docker") is None:
         print("✗ docker CLI not found — install docker (OrbStack on macOS) first", file=sys.stderr)
         return 1
@@ -78,9 +88,11 @@ def cmd_lgtm_on() -> int:
     if not marker.exists():
         marker.touch()
         print(f"✓ marker written: {marker}")
+    compose_dir = lgtm_compose_dir(_ns._repo_root())
+    remove_obsolete_grafana_root(compose_dir)
     result = subprocess.run(
-        ["bash", "start.sh"],
-        cwd=lgtm_compose_dir(_ns._repo_root()),
+        lgtm_start_command(),
+        cwd=compose_dir,
         check=False,
         timeout=600,
     )

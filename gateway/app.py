@@ -15,7 +15,7 @@ The non-JSON response surface is deliberately small and enumerated:
 - `/api/agents/{id}/pages/{name}/...` (`gateway/routers/pages.py`) — a
   streaming reverse proxy to an agent's own page server (arbitrary content).
 - `/grafana/*` (`gateway/routers/grafana.py`) — streaming reverse proxy to a
-  co-located Grafana instance (HTML dashboard, default off → 404).
+  co-located Grafana instance (HTML dashboard; loopback backend required).
 All four sit behind the normal session-cookie / bearer-secret middleware.
 
 Design-wise, the gateway (spawn / send_message) is centralized under
@@ -310,6 +310,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
             yield
     finally:
         app.state.mcp_manager = None
+        # Restart (including cluster-secret rotation) revokes every Grafana
+        # Live handshake made by this process before its listener disappears.
+        await grafana_router.close_live_websockets()
         await app.state.grafana_client.aclose()
         app.state.latency_flusher.cancel()
         with suppress(asyncio.CancelledError):
@@ -757,4 +760,6 @@ def main() -> None:
         reload=reload,
         reload_dirs=["gateway", "shared", "ava", "agent"] if reload else None,
         log_config=None,
+        ws_max_size=grafana_router.MAX_WS_MESSAGE_BYTES,
+        ws_max_queue=1,
     )

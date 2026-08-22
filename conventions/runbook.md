@@ -1030,6 +1030,20 @@ probes. Unmarked homes (dev worktree clusters) never touch the containers.
 Deliberate stop: remove the marker or `ava start --disable-service lgtm`,
 then `deploy/lgtm/stop.sh` — see `deploy/lgtm/README.md`.
 
+**Observability access boundary** — Grafana joins Loki/Tempo/Prometheus on
+loopback (`127.0.0.1:3003`); it is not a Tailnet/LAN UI. Operators browse
+`${AVA_GATEWAY_URL}/grafana/` after the normal Ava login. The gateway verifies
+the Ava session cookie or cluster-secret Bearer, strips Cookie/Authorization
+and caller-supplied auth-proxy headers, and injects one fixed Grafana Viewer
+identity. Grafana anonymous/basic/login/sign-out/login-token paths are off and
+Grafana never receives the cluster secret. HTTP exposes only reads plus
+datasource query; Grafana Live is an Origin-checked, bounded WebSocket bridge.
+Gateway restart — including secret rotation — closes its old Live sockets.
+The marker is legal only on a gateway-capable unit; a pure runner fails fast.
+Remote collectors still write all three signals only through the gateway's
+Bearer-authenticated exact-address `:4318` receiver. Decision and alternatives:
+`decisions/2026-08-22-observability-access-boundary.md`.
+
 **Recording is one local hop from the producer** (sidecar architecture, task #1266). The
 previous inline-POST design raised `Exception while exporting Span.` whenever
 the POST failed; the agent-side mirror (record/ship split 2026-06-16) fixed

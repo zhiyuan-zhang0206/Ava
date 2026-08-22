@@ -173,6 +173,13 @@ const PUT_JSON = (body: unknown): RequestInit => ({
 });
 
 export const api = {
+  // Credentialed liveness probe for the gateway-only Grafana entry. Keep this
+  // in the shared wrapper: a raw cross-origin fetch omits the Ava session
+  // cookie and makes a healthy authenticated proxy look down.
+  probeGrafana: (path: string): Promise<boolean> => {
+    return f(path, { method: "HEAD" }).then((response) => response.ok);
+  },
+
   // One task's computer-use desktop-action trail (Phase 3, task #1101):
   // session envelope + chronological computer_action rows for a task_id.
   getComputerTrace: (taskId: number): Promise<ComputerTraceResponse> => {

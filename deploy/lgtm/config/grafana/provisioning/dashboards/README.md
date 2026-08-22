@@ -286,8 +286,8 @@ frontend no longer polls this endpoint (section removed 2026-08-05).
 
 ## Syncing to the live Grafana
 
-There is no sync: the LGTM Grafana container (host port 3003, `deploy/lgtm`
-compose) mounts this directory read-only and its file provider reloads a
+There is no sync: the LGTM Grafana container (loopback host port 3003,
+`deploy/lgtm` compose) mounts this directory read-only and its file provider reloads a
 changed file within ~30s — editing here and checking out on the LGTM host
 IS the deployment. The `uid` must stay `ava-ops-main` (the embed URL
 depends on it); the datasource reference `{type: postgres, uid: "ops"}`
@@ -307,21 +307,17 @@ the provisioner reloads within ~30s. Manual UI import is only for ad-hoc
 inspection on a non-LGTM Grafana — pick the Postgres datasource for
 `DS_AVA_PG` and keep the uid.
 
-## Embed requirements (deployment-side, to verify)
+## Embed boundary
 
-Grafana is not deployed yet (2026-08-03); this dashboard is written against
-the Grafana 8+ JSON schema but **untested against a live instance**. The
-deployment (W1) must also provide:
-
-- **Gateway reverse proxy** `/grafana/*` → the Grafana instance, behind the
-  normal cluster auth (session cookie / bearer) so the iframe request is
-  authorized like every other API route. The frontend only ever dials
-  `{API_BASE}/grafana/...`.
+- **Gateway reverse proxy** `/grafana/*` → loopback Grafana, behind normal Ava
+  session/Bearer auth. The gateway strips browser credentials and injects a
+  fixed Viewer auth-proxy identity; HTTP mutation endpoints are not exposed.
+  The frontend only ever dials `{API_BASE}/grafana/...`.
 - **`allow_embedding = true`** in Grafana config (default `false` sends
   `X-Frame-Options: deny`, which blocks the iframe).
 - **Postgres datasource** reachable from Grafana with read access to
   `events` (and the `postgres` plugin enabled).
-- Verify in the browser: embed renders at `/insights#ops` in light and dark
+- Browser verification: the embed renders at `/insights#ops` in light and dark
   theme, `&kiosk` hides Grafana chrome (sidemenu/topnav) while the dashboard
   timepicker stays usable, panels render at natural size, the iframe is
   full-height (no inner scrollbar; page scrolls; **EMBED_HEIGHT needs

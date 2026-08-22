@@ -214,21 +214,12 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
         note="telemetry ingest — pure INSERT per event; a retry duplicates rows (client never retries)",
     ),
     # ── gateway/routers/grafana.py ───────────────────────────────────
-    ("GET", "/grafana"): RouteContract(note="reverse proxy — semantics follow upstream"),
+    ("GET", "/grafana"): RouteContract(note="authenticated read-only Grafana proxy"),
     ("GET", "/grafana/{rest:path}"): RouteContract(
-        note="reverse proxy — semantics follow upstream"
+        note="authenticated read-only Grafana UI/assets proxy"
     ),
     ("POST", "/grafana/{rest:path}"): RouteContract(
-        note="reverse proxy — semantics follow upstream"
-    ),
-    ("PATCH", "/grafana/{rest:path}"): RouteContract(
-        note="reverse proxy — semantics follow upstream"
-    ),
-    ("DELETE", "/grafana/{rest:path}"): RouteContract(
-        note="reverse proxy — semantics follow upstream"
-    ),
-    ("PUT", "/grafana/{rest:path}"): RouteContract(
-        note="reverse proxy — semantics follow upstream"
+        note="Grafana datasource-query only; every write endpoint is rejected"
     ),
     # ── gateway/routers/guide.py ───────────────────────────────────
     ("POST", "/api/guide/draft"): RouteContract(

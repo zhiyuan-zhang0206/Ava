@@ -80,15 +80,17 @@ symptom ──▶ Loki: one agent's event river ──▶ a trace_id ──▶ T
 ## Hand the user a link
 
 For anything a human should look at themselves, build the Grafana Explore URL
-rather than pasting a span dump. Grafana runs on the LGTM host at
-`http://localhost:3003` (anonymous viewer; `ava lgtm status` to check it is up,
-`ava lgtm on` to bring it up). Override with `AVA_GRAFANA_URL` when it is on
-another box.
+rather than pasting a span dump. Grafana is reached only through the
+authenticated gateway at `${AVA_GATEWAY_URL}/grafana/`; port 3003 is a
+loopback upstream, not a link for users. `ava lgtm status` checks the stack and
+`ava lgtm on` brings it up. `AVA_GRAFANA_URL` remains an explicit report-link
+override.
 
 ```python
 import json, os, urllib.parse
 
-grafana = os.environ.get("AVA_GRAFANA_URL", "http://localhost:3003")
+gateway = os.environ.get("AVA_GATEWAY_URL", "http://localhost:8000").rstrip("/")
+grafana = os.environ.get("AVA_GRAFANA_URL", f"{gateway}/grafana")
 pane = {"explore": {"datasource": "tempo",
                     "queries": [{"refId": "A", "queryType": "traceId", "query": trace_id}],
                     "range": {"from": "now-1d", "to": "now"}}}

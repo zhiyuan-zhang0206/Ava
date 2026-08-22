@@ -104,7 +104,9 @@ _MACHINE_ROLE_ALLOWED: dict[str, str] = {
     "cli/commands/_repo.py": "resolve this host's capability set, None when unset, for stop/status/converge (what do I serve)",
     "cli/commands/_gateway_ready.py": "audit this host's role for the readiness report (what do I serve)",
     "cli/commands/trace.py": "which recovery ingress does this host serve: gateway-local Tempo or a pure-runner relay target (what do I serve)",
+    "cli/commands/_lgtm.py": "capability guard: only a gateway unit may own the host-local LGTM backend marker (what do I serve)",
     "services/agent_ops/_boot.py": "what do I advertise in register_self (what do I serve)",
+    "services/healthchecks/lgtm.py": "capability guard: a marked unit must serve the gateway whose read boundary the host-local LGTM backend supports (what do I serve)",
     "ops/ops_inventory.py": "capability guard: inventory ops are agent-runner-only (what do I serve)",
     "gateway/routers/config.py": "for the gateway itself, local role is authoritative (what do I serve)",
 }

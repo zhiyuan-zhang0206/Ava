@@ -3083,8 +3083,7 @@ export interface paths {
         };
         /**
          * Grafana Root
-         * @description Trailing-slash canonicalization: `/grafana` redirects to `/grafana/`
-         *     so the app's relative asset links resolve against the proxy root.
+         * @description Canonicalize only after Ava's HTTP auth middleware has succeeded.
          */
         get: operations["grafana_root_grafana_get"];
         put?: never;
@@ -3104,35 +3103,23 @@ export interface paths {
         };
         /**
          * Grafana Proxy Get
-         * @description GET /grafana/{rest} — forward to Grafana (dashboard pages, static assets).
+         * @description Serve Grafana UI, dashboards, datasource reads, and static assets.
          */
         get: operations["grafana_proxy_get_grafana__rest__get"];
-        /**
-         * Grafana Proxy Put
-         * @description PUT /grafana/{rest} — forward.
-         */
-        put: operations["grafana_proxy_put_grafana__rest__put"];
+        put?: never;
         /**
          * Grafana Proxy Post
-         * @description POST /grafana/{rest} — forward (Grafana's datasource-query API).
+         * @description Forward only the datasource-query POST required by the read-only UI.
          */
         post: operations["grafana_proxy_post_grafana__rest__post"];
-        /**
-         * Grafana Proxy Delete
-         * @description DELETE /grafana/{rest} — forward.
-         */
-        delete: operations["grafana_proxy_delete_grafana__rest__delete"];
+        delete?: never;
         options?: never;
         /**
          * Grafana Proxy Head
-         * @description HEAD /grafana/{rest} — forward (asset probes).
+         * @description Forward credentialed asset/dashboard probes.
          */
         head: operations["grafana_proxy_head_grafana__rest__head"];
-        /**
-         * Grafana Proxy Patch
-         * @description PATCH /grafana/{rest} — forward.
-         */
-        patch: operations["grafana_proxy_patch_grafana__rest__patch"];
+        patch?: never;
         trace?: never;
     };
     "/api/okf/graph": {
@@ -10365,37 +10352,6 @@ export interface operations {
             };
         };
     };
-    grafana_proxy_put_grafana__rest__put: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                rest: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     grafana_proxy_post_grafana__rest__post: {
         parameters: {
             query?: never;
@@ -10427,69 +10383,7 @@ export interface operations {
             };
         };
     };
-    grafana_proxy_delete_grafana__rest__delete: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                rest: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     grafana_proxy_head_grafana__rest__head: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                rest: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    grafana_proxy_patch_grafana__rest__patch: {
         parameters: {
             query?: never;
             header?: never;

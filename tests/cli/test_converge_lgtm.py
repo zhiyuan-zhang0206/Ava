@@ -54,7 +54,37 @@ def test_marker_runs_start_sh(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -
     monkeypatch.setattr(_lgtm.subprocess, "run", fake_run)  # pyright: ignore[reportUnknownArgumentType]
 
     _lgtm.ensure_lgtm_stack_step(ctx)
-    assert calls == [(["bash", "start.sh"], ctx.repo / "deploy" / "lgtm")]
+    assert len(calls) == 1
+    assert calls[0][0][-2:] == ["bash", "start.sh"]
+    assert calls[0][1] == ctx.repo / "deploy" / "lgtm"
+
+
+def test_hybrid_gateway_runner_marker_runs_start_sh(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    base = _ctx(tmp_path)
+    ctx = ConvergeCtx(
+        repo=base.repo,
+        ava_home=base.ava_home,
+        roles=frozenset({"gateway", "agent-runner"}),
+    )
+    ctx.ava_home.mkdir(parents=True)
+    (ctx.ava_home / "lgtm-host").touch()
+    monkeypatch.setattr(_lgtm.shutil, "which", lambda _name: "/usr/local/bin/docker")  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+
+    class _Result:
+        returncode = 0
+
+    calls: list[list[str]] = []
+    monkeypatch.setattr(
+        _lgtm.subprocess,
+        "run",
+        lambda cmd, **_kw: calls.append(cmd) or _Result(),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType, reportUnknownMemberType]
+    )
+
+    _lgtm.ensure_lgtm_stack_step(ctx)
+    assert len(calls) == 1
+    assert calls[0][-2:] == ["bash", "start.sh"]
 
 
 def test_marker_without_docker_warns_and_skips(
@@ -102,3 +132,53 @@ def test_backend_ports_are_unconditionally_loopback_only() -> None:
     assert services["tempo"]["ports"] == ["127.0.0.1:3200:3200", "127.0.0.1:14318:4318"]
     assert services["loki"]["ports"] == ["127.0.0.1:3100:3100"]
     assert services["prometheus"]["ports"] == ["127.0.0.1:9090:9090"]
+    assert services["grafana"]["ports"] == ["127.0.0.1:3003:3000"]
+
+
+def test_grafana_requires_gateway_auth_proxy() -> None:
+    """Grafana holds no cluster secret and has no direct anonymous/login path.
+
+    Local processes are inside the machine boundary and can assert an auth
+    proxy header; the externally reachable gateway is responsible for
+    stripping spoofed identity and injecting only the fixed Viewer. Grafana
+    must not mint a second browser session cookie.
+    """
+    compose_path = Path(__file__).resolve().parents[2] / "deploy/lgtm/docker-compose.yml"
+    compose = yaml.safe_load(compose_path.read_text(encoding="utf-8"))
+    env = compose["services"]["grafana"]["environment"]
+    assert env["GF_AUTH_ANONYMOUS_ENABLED"] == "false"
+    assert env["GF_AUTH_PROXY_ENABLED"] == "true"
+    assert env["GF_AUTH_PROXY_HEADER_NAME"] == "X-Ava-Grafana-User"
+    assert env["GF_AUTH_PROXY_AUTO_SIGN_UP"] == "true"
+    assert env["GF_AUTH_PROXY_ENABLE_LOGIN_TOKEN"] == "false"  # noqa: S105
+    assert env["GF_USERS_AUTO_ASSIGN_ORG_ROLE"] == "Viewer"
+    assert env["GF_USERS_ALLOW_SIGN_UP"] == "false"
+    assert env["GF_AUTH_BASIC_ENABLED"] == "false"
+    assert env["GF_AUTH_DISABLE_LOGIN"] == "true"
+    assert env["GF_AUTH_DISABLE_LOGIN_FORM"] == "true"
+    assert env["GF_AUTH_DISABLE_SIGNOUT_MENU"] == "true"
+    assert "AVA_CLUSTER_SECRET" not in env
+
+
+def test_grafana_root_url_has_no_direct_port_fallback() -> None:
+    """Grafana's browser URL is supplied by lifecycle as gateway + /grafana/;
+    compose must never fall back to a second public :3003 address."""
+    compose_path = Path(__file__).resolve().parents[2] / "deploy/lgtm/docker-compose.yml"
+    text = compose_path.read_text(encoding="utf-8")
+    compose = yaml.safe_load(text)
+    root = compose["services"]["grafana"]["environment"]["GF_SERVER_ROOT_URL"]
+    assert root == "${GRAFANA_ROOT_URL:?gateway-derived GRAFANA_ROOT_URL is required}"
+    assert "http://localhost:3003" not in text
+
+
+def test_pure_runner_marker_fails_fast(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """LGTM must be co-located with a gateway; a stale marker on a pure runner
+    is a configuration error, not permission to start a second backend."""
+    ctx = _ctx(tmp_path)
+    ctx = ConvergeCtx(repo=ctx.repo, ava_home=ctx.ava_home, roles=frozenset({"agent-runner"}))
+    ctx.ava_home.mkdir(parents=True)
+    (ctx.ava_home / "lgtm-host").touch()
+    monkeypatch.setattr(_lgtm.shutil, "which", lambda _name: "/usr/local/bin/docker")  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+
+    with pytest.raises(RuntimeError, match="requires the gateway capability"):
+        _lgtm.ensure_lgtm_stack_step(ctx)

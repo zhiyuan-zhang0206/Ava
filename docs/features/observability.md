@@ -19,6 +19,7 @@ agent process ── OTLP/HTTP ──▶ local collector ──▶ local JSONL t
 pure runner collector ── Bearer ──────┤ gateway AVA_MACHINE_HOST:4318
                                       ▼
 gateway collector ──▶ loopback Tempo + Loki + Prometheus ──▶ Grafana/read paths
+browser ── Ava session/Bearer ──▶ gateway /grafana ── fixed Viewer ──▶ loopback Grafana
 ```
 
 - **Traces** — OpenLLMetry auto-instruments the LLM SDKs; every span is
@@ -39,6 +40,13 @@ gateway collector ──▶ loopback Tempo + Loki + Prometheus ──▶ Grafana
   inspect endpoints, ops alerting, and the events-maintenance rollup read
   from it, so it is required serving infrastructure, not a stop-anytime
   viewer.
+- **Read boundary** — Grafana also binds loopback. The browser uses the
+  gateway's `/grafana/` path and existing Ava login; the gateway discards the
+  Ava cookie/Bearer before injecting one fixed Grafana Viewer identity.
+  Grafana stores no cluster secret, cannot mint a browser login token through
+  the proxy, and mutation endpoints are not exposed. Grafana Live uses the
+  same session decision in an Origin-checked WebSocket bridge. See
+  `../../decisions/2026-08-22-observability-access-boundary.md`.
 
 ## Trace format — why JSONL, and is it required?
 
@@ -77,6 +85,11 @@ of agent processes. A pure runner relays to one authenticated gateway ingress;
 the unauthenticated Tempo/Loki/Prometheus ports remain loopback-only. The JSONL
 mirror remains useful for offline inspection and gap replay, but scheduled
 shipping is not the live delivery mechanism.
+
+The authenticated gateway collector receiver is the only cross-machine
+observability write surface. Grafana, Loki, Tempo, and Prometheus are all
+loopback-only; Tailnet/LAN reachability alone grants neither UI nor backend
+access.
 
 ## Design decisions
 

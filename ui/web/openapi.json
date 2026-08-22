@@ -5264,7 +5264,7 @@
     "/grafana": {
       "get": {
         "summary": "Grafana Root",
-        "description": "Trailing-slash canonicalization: `/grafana` redirects to `/grafana/`\nso the app's relative asset links resolve against the proxy root.",
+        "description": "Canonicalize only after Ava's HTTP auth middleware has succeeded.",
         "operationId": "grafana_root_grafana_get",
         "responses": {
           "200": {
@@ -5281,7 +5281,7 @@
     "/grafana/{rest}": {
       "get": {
         "summary": "Grafana Proxy Get",
-        "description": "GET /grafana/{rest} — forward to Grafana (dashboard pages, static assets).",
+        "description": "Serve Grafana UI, dashboards, datasource reads, and static assets.",
         "operationId": "grafana_proxy_get_grafana__rest__get",
         "parameters": [
           {
@@ -5317,116 +5317,8 @@
       },
       "post": {
         "summary": "Grafana Proxy Post",
-        "description": "POST /grafana/{rest} — forward (Grafana's datasource-query API).",
+        "description": "Forward only the datasource-query POST required by the read-only UI.",
         "operationId": "grafana_proxy_post_grafana__rest__post",
-        "parameters": [
-          {
-            "name": "rest",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Rest"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      },
-      "put": {
-        "summary": "Grafana Proxy Put",
-        "description": "PUT /grafana/{rest} — forward.",
-        "operationId": "grafana_proxy_put_grafana__rest__put",
-        "parameters": [
-          {
-            "name": "rest",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Rest"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      },
-      "patch": {
-        "summary": "Grafana Proxy Patch",
-        "description": "PATCH /grafana/{rest} — forward.",
-        "operationId": "grafana_proxy_patch_grafana__rest__patch",
-        "parameters": [
-          {
-            "name": "rest",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Rest"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      },
-      "delete": {
-        "summary": "Grafana Proxy Delete",
-        "description": "DELETE /grafana/{rest} — forward.",
-        "operationId": "grafana_proxy_delete_grafana__rest__delete",
         "parameters": [
           {
             "name": "rest",
@@ -5461,7 +5353,7 @@
       },
       "head": {
         "summary": "Grafana Proxy Head",
-        "description": "HEAD /grafana/{rest} — forward (asset probes).",
+        "description": "Forward credentialed asset/dashboard probes.",
         "operationId": "grafana_proxy_head_grafana__rest__head",
         "parameters": [
           {

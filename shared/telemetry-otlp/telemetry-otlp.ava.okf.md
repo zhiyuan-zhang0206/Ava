@@ -27,6 +27,10 @@ unexposed. Every collector mirrors its locally produced traces to local JSONL
 surface, and the local recovery record `ava trace ship` replays when the live
 fan-out missed data.
 
+The browser read boundary is the authenticated gateway Grafana proxy
+([[gateway/routers/grafana.ava.okf.md]]). Remote OTLP on the gateway collector
+remains the only cross-machine observability write entry.
+
 - `shared/telemetry_otlp.py` — events → OTLP logs + metrics when enabled
   (default **on**); disposable exec children (`AVA_EXEC_REQUEST_FILE`) always
   skip this export.

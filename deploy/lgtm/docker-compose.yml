@@ -27,7 +27,7 @@
 #   docker compose down -v   # WIPE data (traces/logs/metrics history)
 #
 # Ports (host):
-#   3003  Grafana UI (anonymous viewer; 3000/3002 already taken by frontend/ops Grafana)
+#   3003  Grafana loopback upstream (gateway /grafana is the only UI entry)
 #   3100  Loki API (+ OTLP /otlp/v1/logs, sidecar logs fan-out)
 #   3200  Tempo query API (Grafana datasource target)
 #   14318 Tempo OTLP/HTTP intake (sidecar traces fan-out + `ava trace ship` replay)
@@ -50,11 +50,11 @@
 # RECREATE: after updating, run `docker compose up -d` (a plain restart does
 # not re-apply resource limits).
 #
-# Bind address: every unauthenticated backend port is unconditionally
-# loopback-only. Remote sidecars and `ava trace ship` enter through the native
-# collector's bearer-authenticated receiver on AVA_MACHINE_HOST:4318, never by
-# exposing Tempo/Loki/Prometheus directly. Grafana (3003) keeps the wider bind
-# for remote viewing; it is the one anonymous-but-read-only surface.
+# Bind address: every backend port is unconditionally loopback-only. Remote
+# sidecars and `ava trace ship` enter through the native collector's
+# bearer-authenticated receiver on AVA_MACHINE_HOST:4318. Browser reads enter
+# only through the authenticated gateway /grafana proxy; Grafana trusts the
+# fixed Viewer identity header that gateway injects after Ava authentication.
 services:
   # No otel-collector container: since task #1266 the OTLP entry is the
   # NATIVE collector sidecar (ava-otel-collector session, supervised by the
@@ -134,10 +134,26 @@ services:
     image: grafana/grafana:13.1.3
     environment:
       GF_SERVER_HTTP_PORT: "3000"
-      GF_SERVER_ROOT_URL: "${GRAFANA_ROOT_URL:-http://localhost:3003}"
-      GF_AUTH_ANONYMOUS_ENABLED: "true"
-      GF_AUTH_ANONYMOUS_ORG_ROLE: "Viewer"
+      # Lifecycle derives this from AVA_GATEWAY_URL + /grafana/. No :3003
+      # public fallback: the loopback host port is not a browser entry point.
+      GF_SERVER_ROOT_URL: "${GRAFANA_ROOT_URL:?gateway-derived GRAFANA_ROOT_URL is required}"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_AUTH_PROXY_ENABLED: "true"
+      GF_AUTH_PROXY_HEADER_NAME: "X-Ava-Grafana-User"
+      GF_AUTH_PROXY_HEADER_PROPERTY: "username"
+      GF_AUTH_PROXY_AUTO_SIGN_UP: "true"
+      GF_AUTH_PROXY_SYNC_TTL: "0"
+      GF_AUTH_PROXY_HEADERS: "Role:X-Ava-Grafana-Role"
+      # A Grafana cookie would outlive Ava's auth decision. The gateway sends
+      # the fixed proxy identity on every request and strips Set-Cookie.
+      GF_AUTH_PROXY_ENABLE_LOGIN_TOKEN: "false"
+      GF_USERS_AUTO_ASSIGN_ORG: "true"
+      GF_USERS_AUTO_ASSIGN_ORG_ROLE: "Viewer"
       GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_BASIC_ENABLED: "false"
+      GF_AUTH_DISABLE_LOGIN: "true"
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+      GF_AUTH_DISABLE_SIGNOUT_MENU: "true"
       GF_SECURITY_ALLOW_EMBEDDING: "true"
       # Grafana 13 needs serve_from_sub_path for the /grafana/* proxy
       # prefix (the ops/metrics iframes reach 3003 through it).
@@ -156,7 +172,7 @@ services:
       - ./config/grafana/provisioning:/etc/grafana/provisioning:ro
       - grafana-data:/var/lib/grafana
     ports:
-      - "3003:3000"
+      - "127.0.0.1:3003:3000"
     restart: unless-stopped
     cpus: 1.0
     mem_limit: 512m

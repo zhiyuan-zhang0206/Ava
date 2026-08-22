@@ -49,6 +49,13 @@ A home without the marker never touches the containers — a dev worktree
 cluster's converge/watchdog no-op here, so they cannot recreate prod's
 running containers from a dev checkout's configs.
 
+`start.sh` does not treat Grafana's public `/api/health` as authentication
+evidence. Before it reports success, it injects the fixed auth-proxy headers,
+parses `/api/user` as `ava-cluster-viewer` and non-Grafana-admin, requires every
+`/api/user/orgs` membership to be `Viewer`, and parses a read-only `/api/search`
+response. Anonymous mode, a broken auth-proxy header, or role drift therefore
+fails bring-up even while the health endpoint remains 200.
+
 ## Why this stack
 
 | Criterion | Choice |
@@ -71,7 +78,7 @@ log/metrics，且 UI 单独一套）；SigNoz（ClickHouse 过重）；Zipkin（
 | loki | grafana/loki:3.7.6 | 3100 | log backend (filesystem, 7d retention; native OTLP ingest at /otlp/v1/logs) |
 | promtail | grafana/promtail:3.6.0 | — | tails `$AVA_HOME/logs/*.out.log` + updater/rollout tees into Loki |
 | prometheus | prom/prometheus:v3.13.2 | 9090 | metrics (self-scrape + OTLP receiver) |
-| grafana | grafana/grafana:13.1.3 | 3003 | unified UI (anonymous viewer) |
+| grafana | grafana/grafana:13.1.3 | 127.0.0.1:3003 | gateway-authenticated unified UI |
 
 No otel-collector container since task #1266: the OTLP entry is the **native
 per-machine sidecar** (`ava-otel-collector` session, supervised by the
@@ -96,17 +103,20 @@ every container carries explicit `cpus`/`mem_limit` caps (~5.5 cores / ~4GB
 ceiling in total), Loki's query fan-out is bounded (24h splits, parallelism 4,
 embedded result caches), Prometheus retention is explicit (90d time / 8GB
 size — whichever hits first), and Tempo states its 168h block retention
-instead of inheriting the upstream default. The unauthenticated backend ports
-(Loki 3100, Prometheus 9090, Tempo 3200/14318) are unconditionally bound to
+instead of inheriting the upstream default. Every backend port (Loki 3100,
+Prometheus 9090, Tempo 3200/14318, Grafana 3003) is unconditionally bound to
 127.0.0.1. Remote writers cross only the authenticated collector receiver on
 the gateway's exact private address; no `0.0.0.0`/`::` listener and no backend
-bind override exist. Grafana (3003) keeps the wider bind: it is the one
-anonymous-but-read-only surface.
+bind override exist. Browser readers authenticate once to Ava and enter
+Grafana through the gateway's `/grafana/` proxy as a fixed Viewer; see
+`../../decisions/2026-08-22-observability-access-boundary.md`.
 
 ## Start / stop
 
 ```bash
-bash deploy/lgtm/start.sh   # idempotent; auto-starts OrbStack if needed (macOS)
+ava lgtm on                 # derives Grafana root from AVA_GATEWAY_URL
+# low-level equivalent (normally lifecycle-only):
+GRAFANA_ROOT_URL="${AVA_GATEWAY_URL%/}/grafana/" bash deploy/lgtm/start.sh
 bash deploy/lgtm/stop.sh    # stops; data persists
 ```
 
@@ -158,7 +168,7 @@ bash start.sh`.
 Query paths:
 
 ```bash
-# Grafana (anonymous viewer) — Explore > Loki datasource:
+# Grafana through the authenticated gateway — Explore > Loki datasource:
 {job="ava-sessions"} |= "error"
 {service="ava-gateway"}
 {service=~"ava-agent-.+"} |~ "(?i)traceback"
@@ -176,9 +186,10 @@ curl -G -s http://127.0.0.1:3100/loki/api/v1/query \
 
 ## Access
 
-- Grafana: http://localhost:3003 (anonymous viewer, no login; set
-  `GRAFANA_ROOT_URL` in `.env` when the UI is reached through a different
-  host, e.g. a VPN overlay address)
+- Grafana: `${AVA_GATEWAY_URL}/grafana/` after the normal Ava login. The
+  lifecycle derives Grafana's root URL; port 3003 is a loopback-only upstream,
+  never a browser address. The gateway strips Ava credentials and caller
+  auth-proxy headers, then injects one fixed Viewer identity.
   - Tempo datasource (default) — Explore > Traces: search/waterfall once the
     exporter ships traces
   - Loki datasource — Explore > Logs
@@ -204,22 +215,22 @@ curl -G -s http://127.0.0.1:3100/loki/api/v1/query \
 - The old Jaeger v2 experiment (an earlier viewer-only role, replaced by this
   stack) is archived at `~/.ava/traces-viewer/` — stopped, harmless, removable.
 
-## Environment (optional `.env`)
+## Environment
 
-Copy `.env.example` to `.env` (gitignored) to customize:
-
-| Variable | Default | Purpose |
-|---|---|---|
-| `GRAFANA_ROOT_URL` | `http://localhost:3003` | Public URL of the Grafana UI, used for redirects |
-
-Backend bind addresses are deliberately not configurable: Tempo, Loki and
-Prometheus stay on loopback in every topology.
+`GRAFANA_ROOT_URL` is not operator configuration. Converge, `ava lgtm on`, and
+the LGTM watchdog derive it from `AVA_GATEWAY_URL` plus `/grafana/` and pass it
+to compose. They also remove that one obsolete key from an existing local
+`deploy/lgtm/.env` while preserving its secret lines and comments. Invoke
+`start.sh`, not bare `docker compose up`, for manual bring-up. Backend bind
+addresses are deliberately not configurable: Grafana,
+Tempo, Loki, and Prometheus stay on loopback in every topology.
 
 ## Verify
 
 ```bash
-curl -s http://127.0.0.1:3003/api/health          # Grafana: {"database":"ok"}
-curl -s 'http://127.0.0.1:3003/api/datasources'   # 3 datasources provisioned
+# Direct Grafana without the gateway-injected identity is not authenticated.
+curl -i http://127.0.0.1:3003/grafana/api/datasources
+# User verification goes through Ava auth at ${AVA_GATEWAY_URL}/grafana/.
 curl -s http://127.0.0.1:9090/api/v1/targets      # 4 scrape targets up
 curl -s http://127.0.0.1:3200/ready               # Tempo ready
 curl -s http://127.0.0.1:3100/ready               # Loki ready
