@@ -198,6 +198,49 @@ async def test_dispatch_shell_probe_bad_payload_fails(
 
 
 @pytest.mark.asyncio
+async def test_dispatch_agent_skill_view_calls_machine_op(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """agent_skill_view kind -> ops_cluster.agent_skill_view_op(agent_id, pool)."""
+    from ops.rpc_schemas import AgentSkillViewResult, OpsCommandItem
+
+    pool = _stub_pool()
+    monkeypatch.setattr(daemon, "_db_pool", pool)
+    seen: dict[str, object] = {}
+
+    def _fake_view(agent_id: int, received_pool: object) -> AgentSkillViewResult:
+        seen["agent_id"] = agent_id
+        seen["pool"] = received_pool
+        return AgentSkillViewResult(
+            commands=[OpsCommandItem(name="project", description="d", instruction_hint="h")]
+        )
+
+    monkeypatch.setattr(daemon.ops_cluster, "agent_skill_view_op", _fake_view)
+    status, result = await daemon._dispatch("agent_skill_view", {"agent_id": 42})
+    assert status == "completed"
+    assert seen == {"agent_id": 42, "pool": pool}
+    assert result == {
+        "commands": [{"name": "project", "description": "d", "instruction_hint": "h"}]
+    }
+
+
+@pytest.mark.asyncio
+async def test_dispatch_agent_skill_view_bad_payload_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """agent_skill_view without an id is rejected before it reaches the op."""
+    monkeypatch.setattr(daemon, "_db_pool", _stub_pool())
+    monkeypatch.setattr(
+        daemon.ops_cluster,
+        "agent_skill_view_op",
+        lambda *_a, **_kw: pytest.fail("must not dispatch on bad payload"),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    )
+    status, result = await daemon._dispatch("agent_skill_view", {})
+    assert status == "failed"
+    assert "agent_id" in str(result["error"])
+
+
+@pytest.mark.asyncio
 async def test_dispatch_shell_capture_calls_shell_capture_op(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

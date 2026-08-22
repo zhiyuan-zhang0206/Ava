@@ -26,7 +26,7 @@ The three are loosely coupled via HTTP + SSE: frontend directly calls Gateway AP
 - [[db.ava.okf.md]] — Gateway connects to Postgres via psycopg_pool
 - [[sse.ava.okf.md]] — SSE pub/sub based on Redis
 - [[loop.ava.okf.md]] — Gateway's `/api/agents/*` endpoints trigger agent lifecycle
-- [[shared/lm/lm.ava.okf.md]] — Gateway does not directly run LLM; also does **not** import any `agent.*` (`/`-autocomplete reuses `ava._commands.discover_commands`, `gateway/routers/commands.py:14`)
+- [[shared/lm/lm.ava.okf.md]] — Gateway does not directly run LLM; also does **not** import any `agent.*`: unscoped `/`-autocomplete reuses its local `ava._commands.discover_commands` catalog, while `GET /api/commands?agent_id=` uniformly dispatches `agent_skill_view` to that agent's runner so its converged load dir, persisted cwd project roots, and per-agent narrowing determine the view (the local catalog is the availability fallback)
 - [[../cli/cli.ava.okf.md]] — CLI command surface details (cluster lifecycle + operational commands)
 - [[ui/web/src/frontend.ava.okf.md]] — frontend architecture details (routing, state, SSE data flow)
 

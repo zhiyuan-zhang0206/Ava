@@ -3205,19 +3205,47 @@
     "/api/commands": {
       "get": {
         "summary": "Get Commands",
-        "description": "All composer commands, deduped by name and sorted — name + description +\ninstruction-hint only (the dropdown's needs).",
+        "description": "Composer commands, globally by default or as one agent sees them.\n\nAn agent view always dials the machine recorded on ``agents_meta`` (including\nthe gateway's own machine).  A missing/offline/version-skewed runner falls\nback to the historical gateway-local catalog so autocomplete remains usable.",
         "operationId": "get_commands_api_commands_get",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Agent Id"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
+                  "type": "array",
                   "items": {
                     "$ref": "#/components/schemas/CommandItem"
                   },
-                  "type": "array",
                   "title": "Response Get Commands Api Commands Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }

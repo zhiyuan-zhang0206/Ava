@@ -2061,8 +2061,11 @@ export interface paths {
         };
         /**
          * Get Commands
-         * @description All composer commands, deduped by name and sorted — name + description +
-         *     instruction-hint only (the dropdown's needs).
+         * @description Composer commands, globally by default or as one agent sees them.
+         *
+         *     An agent view always dials the machine recorded on ``agents_meta`` (including
+         *     the gateway's own machine).  A missing/offline/version-skewed runner falls
+         *     back to the historical gateway-local catalog so autocomplete remains usable.
          */
         get: operations["get_commands_api_commands_get"];
         put?: never;
@@ -8929,7 +8932,9 @@ export interface operations {
     };
     get_commands_api_commands_get: {
         parameters: {
-            query?: never;
+            query?: {
+                agent_id?: number | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -8943,6 +8948,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CommandItem"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
