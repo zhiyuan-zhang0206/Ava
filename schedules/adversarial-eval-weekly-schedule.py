@@ -369,7 +369,8 @@ def _recover_stale_batch(marker_path: Path, root: Path, *, fallback_week: str) -
         },
     )
     _terminate_live_agents(_marker_agent_ids(marker))
-    ensure_agent(OWNER_LABEL, _owner_prompt(marker_path, "batch aborted by process restart"))
+    index_path = root / "results" / "index.jsonl"
+    ensure_agent(OWNER_LABEL, _owner_prompt(index_path, "batch aborted by process restart"))
     marker_path.unlink(missing_ok=True)
 
 

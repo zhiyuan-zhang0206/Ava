@@ -6,7 +6,7 @@
       "name": "adversarial-eval-weekly",
       "class": "product",
       "default_enabled": true,
-      "description": "Weekly adversarial probe batch — rotates 5 of 9 behavior-probe cases through fresh eval-isolated agents every Wednesday 04:00 (Asia/Shanghai); quiet on success, wakes an owner agent for human review on any 0-score.",
+      "description": "Weekly adversarial probe batch — rotates 5 of 9 behavior-probe cases through fresh eval-isolated agents every Wednesday 04:00 cluster time; quiet on success, wakes an owner agent for human review on any 0-score.",
       "script": "adversarial-eval-weekly-schedule.py",
       "command": "python adversarial-eval-weekly-schedule.py"
     },
