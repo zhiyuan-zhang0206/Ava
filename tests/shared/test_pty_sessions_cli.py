@@ -362,22 +362,32 @@ def test_has_defeats_pid_reuse(sessions: Path) -> None:
 def test_record_starttime_survives_wall_clock_drift(sessions: Path) -> None:
     """A pty shell stays live when its stable ticks match but its epoch does not."""
     name = "ava-test-starttime-drift"
-    starttime = pid_starttime_ticks(os.getpid())
-    assert starttime is not None
-    rec = SessionRecord(
-        pid=os.getpid(),
-        create_time=1.0,
-        cmd="test",
-        cwd=str(sessions),
-        started_at=time.time(),
-        starttime=starttime,
-    )
-    rec.write(record_path(name))
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(300)"])
+    try:
+        assert _wait(lambda: psutil.pid_exists(child.pid))
+        starttime = pid_starttime_ticks(child.pid)
+        assert starttime is not None
+        rec = SessionRecord(
+            pid=child.pid,
+            create_time=1.0,
+            cmd="test",
+            cwd=str(sessions),
+            started_at=time.time(),
+            starttime=starttime,
+        )
+        rec.write(record_path(name))
 
-    assert rec.identifies(os.getpid()) is True
-    assert pty_cli._record_alive(rec) is True
-    assert pty_cli.live_sessions(prefix="ava-test-starttime-") == {name: rec}
-    assert record_path(name).exists()
+        assert rec.identifies(child.pid) is True
+        assert pty_cli._record_alive(rec) is True
+        assert pty_cli.live_sessions(prefix="ava-test-starttime-") == {name: rec}
+        assert record_path(name).exists()
+    finally:
+        try:
+            child.kill()
+            child.wait(timeout=5)
+        finally:
+            record_path(name).unlink(missing_ok=True)
+            socket_path(name).unlink(missing_ok=True)
 
 
 @pytest.mark.skipif(not IS_LINUX, reason="Linux /proc start-time identity")
