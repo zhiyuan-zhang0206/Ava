@@ -29,7 +29,6 @@
   "alerts": { "unresolved": "条未解决" },
   "nav": {
     "openSidebar": "打开侧边栏",
-    "computerTraces": "电脑回放",
     "memoryGraph": "记忆图谱",
     "fleet": "Fleet",
     "insights": "洞察",

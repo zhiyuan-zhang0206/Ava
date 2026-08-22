@@ -29,7 +29,6 @@
   "alerts": { "unresolved": "unresolved" },
   "nav": {
     "openSidebar": "Open sidebar",
-    "computerTraces": "Computer traces",
     "memoryGraph": "Memory graph",
     "fleet": "Fleet",
     "insights": "Insights",
