@@ -58,8 +58,11 @@ running containers from a dev checkout's configs.
 | 本地部署 | docker compose 单机跑 5 容器；OrbStack 已装 |
 | UI | Grafana 13（统一 trace/log/metric 探索，Tempo 数据源原生支持 trace 瀑布图） |
 
-Tempo 官方不发布 macOS 二进制（仅 linux/windows），所以本栈走 docker
-compose；Loki/Prometheus/Grafana 亦有原生二进制，但统一容器化便于复现。
+Tempo 官方不发布 macOS 二进制（仅 linux/windows），所以当前启动器走
+docker compose。容器不是配置边界：Grafana 的固定运行时行为在
+`config/grafana/runtime.env`，由当前 compose 启动器和后续 native 启动器
+共同消费；CI 也用官方原生 Grafana 二进制验证该文件。Loki/Prometheus/
+Grafana 均有原生二进制，启动器原生化时不得把这些行为重新写成一份。
 被否决的候选：Jaeger v2（原生 macOS、CNCF 毕业，但只有 trace 没有
 log/metrics，且 UI 单独一套）；SigNoz（ClickHouse 过重）；Zipkin（老、UI 弱）。
 
@@ -92,7 +95,7 @@ containers come back with the docker daemon after a reboot; a clean `stop.sh`
 see the watchdog note below.
 
 Resource + retention posture (single 16GB box shared with the prod cluster):
-every container carries explicit `cpus`/`mem_limit` caps (~5.5 cores / ~4GB
+every container carries explicit `cpus`/`mem_limit` caps (~6.5 cores / ~6GB
 ceiling in total), Loki's query fan-out is bounded (24h splits, parallelism 4,
 embedded result caches), Prometheus retention is explicit (90d time / 8GB
 size — whichever hits first), and Tempo states its 168h block retention
@@ -101,7 +104,9 @@ instead of inheriting the upstream default. The unauthenticated backend ports
 127.0.0.1. Remote writers cross only the authenticated collector receiver on
 the gateway's exact private address; no `0.0.0.0`/`::` listener and no backend
 bind override exist. Grafana (3003) keeps the wider bind: it is the one
-anonymous-but-read-only surface.
+anonymous-but-read-only surface. Grafana has a 2-core / 2GB ceiling; its SQLite
+metadata store runs in WAL mode so dashboard readers do not block provisioning
+writes. Grafana Live is disabled because no shipped dashboard uses it.
 
 ## Start / stop
 
@@ -176,7 +181,8 @@ curl -G -s http://127.0.0.1:3100/loki/api/v1/query \
 
 ## Access
 
-- Grafana: http://localhost:3003 (anonymous viewer, no login; set
+- Grafana: http://localhost:3003 (anonymous viewer, no login; Viewer may use
+  Explore and temporary panel edits but still cannot save dashboards; set
   `GRAFANA_ROOT_URL` in `.env` when the UI is reached through a different
   host, e.g. a VPN overlay address)
   - Tempo datasource (default) — Explore > Traces: search/waterfall once the
