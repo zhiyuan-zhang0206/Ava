@@ -162,7 +162,12 @@ _SPAWN_SITES: tuple[tuple[str, Callable[[pytest.MonkeyPatch], None], str, str], 
         "ava restart --quiesce --mode smooth & if errorlevel",
     ),
     ("rollout", _drive_rollout, "ava-test-rollout", "ava cluster update --local"),
-    ("restart", _drive_restart, "ava-test-cluster-restart", "ava cluster update --restart-only"),
+    (
+        "restart",
+        _drive_restart,
+        "ava-test-cluster-restart",
+        "ava cluster update --local --restart-only",
+    ),
 )
 
 
