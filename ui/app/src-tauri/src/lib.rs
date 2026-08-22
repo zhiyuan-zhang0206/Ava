@@ -2,13 +2,12 @@
 //!
 //! The shell renders no product UI of its own: it loads the cluster's console
 //! over the network and adds only what a browser tab cannot give it — tray
-//! residency and auto-login on the desktop, background residency and local
-//! notifications on Android, and an update path on both. Everything the user
-//! actually looks at is served by `ui/web` behind the gate.
+//! residency and auto-login on desktop, Keystore-backed auto-login, background
+//! residency and local notifications on Android, and an update path on both.
+//! Everything the user actually looks at is served by `ui/web` behind the gate.
 
 #[cfg(target_os = "android")]
 mod android;
-#[cfg(desktop)]
 mod autologin;
 mod command_names;
 mod commands;
@@ -47,7 +46,8 @@ pub fn run() {
     #[cfg(target_os = "android")]
     let builder = builder
         .plugin(tauri_plugin_notification::init())
-        .plugin(android::background_plugin());
+        .plugin(android::background_plugin())
+        .plugin(android::secret_plugin());
 
     builder
         .invoke_handler(tauri::generate_handler![

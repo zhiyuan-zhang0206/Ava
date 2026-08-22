@@ -5,6 +5,8 @@
 //! shell grants for the configured gate origin — see `window::grant_remote_ipc`.
 
 use serde::{Deserialize, Serialize};
+#[cfg(target_os = "android")]
+use tauri::Manager;
 use tauri::{AppHandle, Runtime, State};
 
 use crate::state::ShellState;
@@ -19,7 +21,7 @@ pub struct ShellConfig {
     pub platform: &'static str,
     pub entry_url: Option<String>,
     pub gateway_url: Option<String>,
-    /// True only where auto-login can actually happen: desktop, setting on.
+    /// True only when this platform has a usable native-login secret.
     pub auto_login: bool,
     pub notifications: bool,
     pub background_service: bool,
@@ -41,7 +43,20 @@ impl ShellConfig {
             platform: std::env::consts::OS,
             entry_url: endpoints.as_ref().map(|e| e.entry.to_string()),
             gateway_url: endpoints.as_ref().map(|e| e.gateway.to_string()),
-            auto_login: cfg!(desktop) && settings.auto_login,
+            auto_login: {
+                #[cfg(desktop)]
+                {
+                    settings.auto_login && crate::autologin::cluster_secret().is_some()
+                }
+                #[cfg(target_os = "android")]
+                {
+                    crate::android::stored_secret(app).is_some()
+                }
+                #[cfg(not(any(desktop, target_os = "android")))]
+                {
+                    false
+                }
+            },
             notifications: cfg!(target_os = "android") && settings.notifications,
             background_service: cfg!(target_os = "android") && settings.background_service,
             releases_api: cfg!(target_os = "android").then(|| RELEASES_API.to_string()),
@@ -56,6 +71,8 @@ impl ShellConfig {
 pub struct SettingsPatch {
     pub entry_url: Option<String>,
     pub gateway_url: Option<String>,
+    /// Android only: optional first-login credential; never persisted here.
+    pub cluster_secret: Option<String>,
     pub auto_login: Option<bool>,
     pub background_service: Option<bool>,
     pub notifications: Option<bool>,
@@ -91,7 +108,7 @@ fn check_cleartext_target(url: &tauri::Url) -> Result<(), String> {
     Ok(())
 }
 
-/// Persist a settings patch and re-point the window at the resulting entry URL.
+/// Persist a settings patch and queue a window rebuild for the resulting entry URL.
 #[tauri::command]
 pub fn shell_save_settings(
     app: AppHandle,
@@ -102,19 +119,21 @@ pub fn shell_save_settings(
     if let Some(raw) = patch.entry_url {
         // Validate before persisting: a stored address that cannot be parsed
         // would strand the app on the onboarding screen with no way back.
-        let url = crate::urls::parse_entry(&raw)
-            .ok_or_else(|| format!("'{raw}' is not a server address"))?;
+        let entry_url = crate::urls::normalize_entry_address(&raw)?;
+        let url = crate::urls::parse_entry(&entry_url)
+            .ok_or_else(|| format!("'{entry_url}' is not a server address"))?;
         check_cleartext_target(&url)?;
-        settings.entry_url = Some(raw);
+        settings.entry_url = Some(entry_url);
     }
     if let Some(raw) = patch.gateway_url {
         if raw.trim().is_empty() {
             settings.gateway_url = None;
         } else {
-            let url = crate::urls::parse_entry(&raw)
-                .ok_or_else(|| format!("'{raw}' is not a server address"))?;
+            let gateway_url = crate::urls::normalize_gateway_address(&raw)?;
+            let url = crate::urls::parse_entry(&gateway_url)
+                .ok_or_else(|| format!("'{gateway_url}' is not a server address"))?;
             check_cleartext_target(&url)?;
-            settings.gateway_url = Some(raw);
+            settings.gateway_url = Some(gateway_url);
         }
     }
     if let Some(value) = patch.auto_login {
@@ -129,6 +148,23 @@ pub fn shell_save_settings(
     state.update(settings)?;
     #[cfg(target_os = "android")]
     {
+        if let Some(secret) = patch.cluster_secret {
+            if secret.is_empty() {
+                crate::android::clear_secret(&app)?;
+            } else {
+                let endpoints = state
+                    .endpoints()
+                    .ok_or_else(|| "saved server address cannot be resolved".to_string())?;
+                let window = app
+                    .get_webview_window(window::MAIN_WINDOW)
+                    .ok_or_else(|| "connection window is unavailable".to_string())?;
+                crate::autologin::login(&window, &endpoints, &secret)
+                    .map_err(|err| err.message())?;
+                // Keep a submitted credential only after its native login has
+                // succeeded; settings.json never receives this value.
+                crate::android::save_secret(&app, &secret)?;
+            }
+        }
         if let Some(value) = patch.background_service {
             crate::android::set_background_service(&app, value);
         }
@@ -136,7 +172,14 @@ pub fn shell_save_settings(
             crate::android::request_notification_permission(&app);
         }
     }
-    window::open_entry(&app);
+    let handle = app.clone();
+    // Rebuilding inline destroys the webview before its invoke response can
+    // flush, leaving Android's submit promise pending and its button disabled.
+    // Queue the rebuild on the next main-thread turn after this command returns.
+    tauri::async_runtime::spawn(async move {
+        let window_handle = handle.clone();
+        let _ = handle.run_on_main_thread(move || window::open_entry(&window_handle));
+    });
     Ok(())
 }
 

@@ -1,10 +1,10 @@
 //! Shell settings — `settings.json` in the platform config directory.
 //!
-//! The file carries the desktop connection keys (`entryUrl`, `gatewayUrl`,
-//! `autoLogin`) plus the two Android residency switches. Every key is optional: a
-//! missing or unparseable file falls back to [`Settings::default`] rather than
-//! failing the launch — a shell that cannot start is worse than a shell on
-//! defaults.
+//! The file carries the connection keys (`entryUrl`, `gatewayUrl`, `autoLogin`)
+//! plus the two Android residency switches. Android credentials deliberately
+//! live outside this file in Keystore. Every key is optional: a missing or
+//! unparseable file falls back to [`Settings::default`] rather than failing the
+//! launch — a shell that cannot start is worse than a shell on defaults.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -32,6 +32,7 @@ pub struct Settings {
     pub entry_url: Option<String>,
     pub gateway_url: Option<String>,
     /// Desktop only: log in with the local cluster secret when one exists.
+    /// Android starts from its Keystore-held secret instead.
     pub auto_login: bool,
     /// Android only: keep a foreground service alive so the console stays
     /// connected while the app is backgrounded.
