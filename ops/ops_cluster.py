@@ -353,10 +353,13 @@ def agent_skill_view_op(agent_id: int, pool: Any) -> AgentSkillViewResult:
     Converged skills are discovered on the target runner, with the agent's
     checkpointed cwd contributing project-local roots only for this call.  The
     provider registry is process-global, so cleanup is unconditional to prevent
-    one request leaking its project skills into a later agent's result.
+    one request leaking its project skills into a later agent's result.  The
+    result also carries this runner's enabled MCP names as phase-2 groundwork.
     """
     from ava import skills
     from ava._commands import discover_commands
+    from ava._mcp_config import load_mcp_config
+    from shared.mcp_enabled import read_enabled
 
     cwd, wanted = _agent_skill_view_inputs(pool, agent_id)
     skills.register_skill_source(lambda: _project_skill_roots(cwd))
@@ -364,6 +367,8 @@ def agent_skill_view_op(agent_id: int, pool: Any) -> AgentSkillViewResult:
         commands = _narrow_commands(discover_commands(), wanted)
     finally:
         skills.clear_skill_sources()
+    merged_mcp = load_mcp_config(include_disabled=True)
+    mcp_overlay = read_enabled()
     return AgentSkillViewResult(
         commands=[
             OpsCommandItem(
@@ -372,7 +377,8 @@ def agent_skill_view_op(agent_id: int, pool: Any) -> AgentSkillViewResult:
                 instruction_hint=command["instruction_hint"],
             )
             for command in commands
-        ]
+        ],
+        mcp_names=sorted(name for name in merged_mcp if mcp_overlay.get(name, True)),
     )
 
 

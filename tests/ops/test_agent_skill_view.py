@@ -15,8 +15,10 @@ from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.postgres import PostgresSaver
 from psycopg.types.json import Jsonb
 
+import ava._mcp_config as mcp_config
 from ava import _commands, skills
 from ops import ops_cluster
+from shared import mcp_enabled
 from shared.db import create_agent
 
 
@@ -63,6 +65,22 @@ def _view_inputs(
         return cwd, wanted
 
     return _inputs
+
+
+def _mcp_source(
+    servers: dict[str, dict[str, Any]],
+) -> Callable[..., dict[str, dict[str, Any]]]:
+    def _load(*, include_disabled: bool = False) -> dict[str, dict[str, Any]]:
+        assert include_disabled is True
+        return servers
+
+    return _load
+
+
+@pytest.fixture(autouse=True)
+def _empty_mcp_sources(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(mcp_config, "load_mcp_config", _mcp_source({}))
+    monkeypatch.setattr(mcp_enabled, "read_enabled", dict)
 
 
 class _OneConnectionPool:
@@ -189,3 +207,48 @@ def test_agent_skill_view_honors_per_agent_skill_narrowing(
     view = ops_cluster.agent_skill_view_op(42, object())
 
     assert [command.name for command in view.commands] == ["load-skill"]
+
+
+def test_agent_skill_view_includes_sorted_enabled_mcp_names(
+    monkeypatch: pytest.MonkeyPatch, load_dir: Path
+) -> None:
+    """The runner view carries its effective enabled MCP server names."""
+    monkeypatch.setattr(
+        mcp_config,
+        "load_mcp_config",
+        _mcp_source({"zeta": {"command": "z"}, "alpha": {"command": "a"}}),
+    )
+    monkeypatch.setattr(mcp_enabled, "read_enabled", lambda: {"zeta": True})
+    monkeypatch.setattr(ops_cluster, "_agent_skill_view_inputs", _view_inputs(None, ["*"]))
+
+    view = ops_cluster.agent_skill_view_op(42, object())
+
+    assert view.mcp_names == ["alpha", "zeta"]
+
+
+def test_agent_skill_view_excludes_disabled_mcp_names(
+    monkeypatch: pytest.MonkeyPatch, load_dir: Path
+) -> None:
+    """The host overlay removes disabled servers from the runner view."""
+    monkeypatch.setattr(
+        mcp_config,
+        "load_mcp_config",
+        _mcp_source({"disabled": {"command": "off"}, "enabled": {"command": "on"}}),
+    )
+    monkeypatch.setattr(mcp_enabled, "read_enabled", lambda: {"disabled": False})
+    monkeypatch.setattr(ops_cluster, "_agent_skill_view_inputs", _view_inputs(None, ["*"]))
+
+    view = ops_cluster.agent_skill_view_op(42, object())
+
+    assert view.mcp_names == ["enabled"]
+
+
+def test_agent_skill_view_without_mcp_config_returns_empty_names(
+    monkeypatch: pytest.MonkeyPatch, load_dir: Path
+) -> None:
+    """An empty merged MCP map leaves the command op successful."""
+    monkeypatch.setattr(ops_cluster, "_agent_skill_view_inputs", _view_inputs(None, ["*"]))
+
+    view = ops_cluster.agent_skill_view_op(42, object())
+
+    assert view.mcp_names == []

@@ -625,9 +625,14 @@ class OpsCommandItem(BaseModel):
 
 
 class AgentSkillViewResult(BaseModel):
-    """`agent_skill_view` result — commands visible to one agent on this host."""
+    """`agent_skill_view` result — commands visible to one agent on this host.
+
+    ``mcp_names`` is groundwork for the phase-2 per-agent MCP view: the enabled
+    MCP server names on the runner host. Nothing consumes the field yet.
+    """
 
     commands: list[OpsCommandItem]
+    mcp_names: list[str] = Field(default_factory=list)
 
 
 class ShellCaptureResult(BaseModel):
