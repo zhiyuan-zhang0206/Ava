@@ -392,7 +392,6 @@ _REMOTE_WRITABLE_ALLOWLIST = frozenset(
         "permissions_helper_enabled",
         "ops_concurrency",
         "task_maintenance_enabled",
-        "telemetry_tempo_endpoint",
         "watchdog_interval_seconds",
         "wedged_agent_enabled",
     }

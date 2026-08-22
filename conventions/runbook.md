@@ -492,7 +492,7 @@ supervisor socket for agent shells / watchers).
 | `gateway-watchdog` ★ (gateway only) | `.venv/bin/python -m services.watchdog.daemon --role gateway` (asyncio imports + runs the gateway-capability healthchecks above — redis-acl first (re-affirms the cluster's redis ACL user (the identifier its redis_url carries), which a redis-server restart silently drops), then pgbouncer (restarts the per-cluster pooler when its listener stops answering OR its reachable-address listener is missing — a silently degraded double bind, task #1288; when the pooler is enabled it is every consumer's AVA_DB_URL, so it comes before any service that would be revived without a database), then gateway/labeler/heartbeat/events-maintenance/task-maintenance/report/milvus/memory-indexer/frontend — every 60s) | the OS-scheduled **watchdog probe** (`ava cluster watchdog-probe --role gateway`, launchd / crontab / schtasks, every 60s) respawns it when its pidfile shows it dead |
 | `agent-runner-watchdog` ★ (agent-runner only) | `.venv/bin/python -m services.watchdog.daemon --role agent-runner` (asyncio imports + runs the agent-runner-capability healthchecks above — ops/restarter (+browser, browser-mcp) — every 60s) | the OS-scheduled **watchdog probe** (`ava cluster watchdog-probe --role agent-runner`, launchd / crontab / schtasks, every 60s) respawns it when its pidfile shows it dead |
 | `browser` (agent-runner only, auto-detect display; opt-out `AVA_BROWSER_ENABLED=false`) | `.venv/bin/python -m services.browser.daemon` (headed real Chrome, dedicated profile `~/.ava/chrome-profile/`, CDP :9222) | `services.healthchecks.browser` (HTTP probe `/json/version` :9222) |
-| `otel-collector` | `<otel-collector-dir>/otelcol-contrib --config <otel-collector-dir>/config.yaml` (native Go binary installed by converge; one per machine — the local OTLP entry every agent exports to, fanning out to Tempo/Loki/Prometheus + the local JSONL trace mirror; file-backed queue absorbs backend outages) | `services.healthchecks.otel_collector` (OTLP POST probe on 4318) |
+| `otel-collector` | `<otel-collector-dir>/otelcol-contrib --config <otel-collector-dir>/config.yaml` (native Go binary installed by converge; one per machine — the local OTLP entry every agent exports to; gateway collectors fan out to loopback backends, pure runners relay with bearer auth; traces mirror locally; trace/log queues are file-backed while metrics use bounded memory) | `services.healthchecks.otel_collector` (valid empty OTLP POST must return 2xx on 4318) |
 | `browser-mcp` (agent-runner only, gated with `browser`) | `.venv/bin/python -m services.browser.mcp_daemon` (one shared `chrome-devtools-mcp` upstream attached to the headed Chrome, multiplexed over a Unix socket `~/.ava/chrome-mcp.<cdp_port>.sock` to every agent's chrome bridge — serial, with per-connection page affinity so one Chrome client is shared instead of one per browser-using agent) | `services.healthchecks.browser_mcp` (Unix-socket `list_tools` probe) |
 | `computer-mcp` (agent-runner only, platform-gated: signed permissions helper enabled + capable, AF_UNIX transport, non-Windows host — Windows is the phase-3 pilot) | `.venv/bin/python -m services.computer.mcp_daemon` (computer-use executor: every desktop action through the signed permissions helper — serialized machine-wide, screen-coordinated (lease + FIFO queue + `release_control`), Vision OCR on snapshots, audited as `computer_action` + `computer_session_start/end` events, served over `~/.ava/run/computer-mcp.sock`) | `services.healthchecks.computer_mcp` (Unix-socket lock-free `ping` probe) |
 | `mcp-daemon` (agent-runner only) | `.venv/bin/python -m ava._mcps_daemon` (ONE shared MCP daemon per machine, serving every agent over `~/.ava/run/mcp_daemon.sock` — sessions isolated per client connection, replacing the old one-daemon-per-agent children) | `services.healthchecks.mcp_daemon` (Unix-socket `ping` probe) |
@@ -946,7 +946,15 @@ Collector sidecar** (`ava-otel-collector` session, supervised by the
 watchdog, binary + config installed by converge from
 `deploy/otel-collector/`); agents export OTLP/HTTP to their LOCAL sidecar
 (`AVA_TELEMETRY_OTLP_ENDPOINT`, default `http://127.0.0.1:4318`) and never
-dial a backend directly. The sidecar fans out:
+dial a backend directly. Delivery after that local hop is role-specific: a
+gateway collector writes to gateway-loopback Tempo/Loki/Prometheus; a pure
+runner collector keeps the same three exporter component IDs and relays each
+signal to the gateway collector at the host from `AVA_GATEWAY_URL`, port 4318,
+with `Authorization: Bearer $AVA_CLUSTER_SECRET`. The remote receiver binds
+only the exact non-loopback `AVA_MACHINE_HOST`, never `0.0.0.0`/`::`; the
+local receiver remains `127.0.0.1:4318` without auth. Combined single-box
+deployments keep only the local receiver, including when their secret is set.
+The gateway collector fans out:
 
 - **traces** → Tempo OTLP/HTTP (`AVA_TELEMETRY_TEMPO_ENDPOINT`, default
   `http://127.0.0.1:14318` on the LGTM host) + local JSONL mirror
@@ -969,6 +977,12 @@ dial a backend directly. The sidecar fans out:
   label = the OS hostname. A pure agent-runner's DB/Redis URLs point at the
   gateway's data plane, so its config omits those two receivers entirely
   rather than duplicating the gateway's series.
+- **collector delivery metrics** — every sidecar scrapes its loopback `:8888`
+  endpoint every 30s into `metrics/infra`. Grafana rules alert on current
+  queue pressure, new enqueue failures over 5m (counter delta, never lifetime
+  absolute value), and a recently-seen host whose collector stopped reporting
+  for 5m. The local watchdog logs current full queues but does not restart a
+  healthy receiver for remote backpressure.
 
 **One time-series store.** Prometheus holds the host history; nothing else
 retains one. `ava status` and the status page carry a single LIVE psutil
@@ -1016,16 +1030,19 @@ probes. Unmarked homes (dev worktree clusters) never touch the containers.
 Deliberate stop: remove the marker or `ava start --disable-service lgtm`,
 then `deploy/lgtm/stop.sh` — see `deploy/lgtm/README.md`.
 
-**Recording is one local hop** (sidecar architecture, task #1266). The
+**Recording is one local hop from the producer** (sidecar architecture, task #1266). The
 previous inline-POST design raised `Exception while exporting Span.` whenever
 the POST failed; the agent-side mirror (record/ship split 2026-06-16) fixed
 that but left the mirror as the only durable copy. Now recording is an OTLP
-export to the local sidecar, whose **file-backed sending queue** (file_storage
-extension) absorbs backend outages — a dead Tempo/Loki/Prometheus never drops
-what the sidecar accepted, and the queue survives sidecar restarts. The
-events/metrics exporter follows the same rule: `shared/telemetry_otlp.py`
-sheds (counted) instead of blocking, so an unreachable sidecar never touches
-the Postgres write (see its docstring for the full isolation contract).
+export to the local sidecar. Trace and log exporters use **file-backed sending
+queues** (file_storage) with unlimited retry, so their accepted backlog
+survives sidecar restarts. Metrics intentionally use a bounded in-memory queue
+and a 15-minute retry window, then shed old points; cumulative instruments
+repair their totals on a later successful sample. `shared/telemetry_otlp.py`
+also sheds (counted) instead of blocking, so an unreachable sidecar never
+touches the main write path. Exporter IDs stay `otlphttp/tempo`,
+`otlphttp/loki` and `otlphttp/prometheus`; in particular, renaming Tempo/Loki
+would orphan their file_storage backlog during an upgrade.
 
 **Record** — `shared/trace.py:initialize_tracing`, gated by `AVA_TRACE_ENABLED`
 (default **on**). Instrumentation is OpenLLMetry (`traceloop-sdk`); the sole span
@@ -1040,11 +1057,14 @@ directory by size/day/backups, and the agent-start prune enforces
 sidecar not answering at agent init disables recording for that process
 (reported) — the same init-time tradeoff the events exporter makes.
 
-**Ship** — `ava trace ship` (`cli/commands/trace.py`). Recovery replay: reads
-the mirror and POSTs each line as OTLP/HTTP protobuf straight to
-`{AVA_TELEMETRY_TEMPO_ENDPOINT}/v1/traces` (Tempo, no auth) — bypassing the
-sidecar, because replaying through it would write the replayed lines back
-into the mirror (watermark loop). Needed only for gaps the queue could not
+**Ship** — `ava trace ship` (`cli/commands/trace.py`). Recovery replay reads
+the mirror and bypasses the LOCAL sidecar, because replaying through it would
+write the replayed lines back into the mirror (watermark loop). A gateway or
+single-box unit POSTs straight to loopback
+`{AVA_TELEMETRY_TEMPO_ENDPOINT}/v1/traces` without auth; a pure runner POSTs
+to the gateway collector's private port 4318 with the cluster bearer. The
+remote trace pipeline writes Tempo only and never the gateway mirror, avoiding
+a second copy and replay ambiguity. Needed only for gaps the queue could not
 hold (backend down longer than the queue, offline machines, past windows).
 Gated by `AVA_TELEMETRY_OTLP_ENABLED` (refuses while off — one kill switch
 for the whole OTLP surface). The old 5-minute ship schedule (gateway
@@ -1058,11 +1078,11 @@ only if you want scheduled gap-replay.
   ignoring the watermark — the "shipping was off, import a past range" path. Span
   ingestion is idempotent by span id, so re-shipping is safe.
 
-The toggle gates *shipping*, not *recording*: a window recorded while
-`AVA_TELEMETRY_OTLP_ENABLED=false` is still on disk and ships later via the
-windowed mode. (Bench containers record to their ephemeral-FS mirror, which
-dies with the container — a host that wants bench traces in Tempo ships its
-own mirror after the run.)
+The OTLP toggle gates both recording and shipping in the collector
+architecture: recording itself is export to the local sidecar. Existing mirror
+files remain on disk while disabled and can ship after re-enabling. (Bench
+containers record to their ephemeral-FS mirror, which dies with the container
+— a host that wants bench traces in Tempo ships its own mirror after the run.)
 
 **Explicit instruments + per-turn turn_span**: `Traceloop.init` is called
 with `instruments={ANTHROPIC, OPENAI, LANGCHAIN, GOOGLE_GENERATIVEAI}` —

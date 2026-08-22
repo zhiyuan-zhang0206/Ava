@@ -52,20 +52,25 @@ def test_runner_audits_only_the_interpreter(monkeypatch: pytest.MonkeyPatch) -> 
 
 
 def test_gateway_audits_the_data_plane_too(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """postgres and redis-server bind the cluster's off-box pg/redis ports."""
-    from shared import pg_tools
+    """postgres, redis and the authenticated remote OTLP receiver bind this
+    split gateway's off-box addresses."""
+    from shared import paths, pg_tools
 
     pg = tmp_path / "postgres"
     pg.write_text("#!/bin/sh\n")
     brew = tmp_path / "brew-redis"
     (brew / "bin").mkdir(parents=True)
     (brew / "bin" / "redis-server").write_text("#!/bin/sh\n")
+    otelcol = tmp_path / "otelcol-contrib"
+    otelcol.write_text("#!/bin/sh\n")
     monkeypatch.setattr(pg_tools, "pg_tool", lambda _name: pg)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(pg_tools, "brew_prefix", lambda _formula="": brew)
+    monkeypatch.setattr(paths, "otel_collector_binary", lambda: otelcol)
     assert cfw.serving_binaries(frozenset({"gateway"})) == (
         Path(sys.executable),
         pg,
         brew / "bin" / "redis-server",
+        otelcol,
     )
 
 
@@ -77,10 +82,13 @@ def test_nonexistent_resolved_paths_are_dropped(
     Auditing that phantom path would manufacture a permanent "missing rule" on
     every host without brew, so only paths that exist are audited.
     """
-    from shared import pg_tools
+    from shared import paths, pg_tools
 
     monkeypatch.setattr(pg_tools, "pg_tool", lambda name: tmp_path / "nope" / name)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(pg_tools, "brew_prefix", lambda _formula="": tmp_path / "nope")
+    monkeypatch.setattr(
+        paths, "otel_collector_binary", lambda: tmp_path / "nope" / "otelcol-contrib"
+    )
     assert cfw.serving_binaries(frozenset({"gateway"})) == (Path(sys.executable),)
 
 

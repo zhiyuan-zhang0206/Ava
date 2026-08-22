@@ -28,6 +28,10 @@ and the matching GitHub Releases, cut by `scripts/release_cut.py`.
 - `install.sh --mirror cn`: route PyPI / npm / Homebrew through China mirrors.
 
 ### Changed
+- Pure agent-runners now relay OTLP traces/logs/metrics through a
+  bearer-authenticated gateway collector receiver instead of writing to
+  nonexistent loopback LGTM backends. Tempo/Loki/Prometheus stay gateway-local;
+  collector queue/drop/silence alerts cover delivery failures.
 - Session stdout (`$AVA_HOME/logs/*.out.log` plus updater/rollout tees) is
   ingested into the local LGTM stack's Loki via promtail (label `service` =
   session name, ANSI stripped) with 7-day retention in `loki.yaml` — raw

@@ -1,7 +1,7 @@
 ---
 type: doc
 title: "Infrastructure metrics — the sidecar's own scrapes"
-description: "The traditional SRE layer (issue #46): the per-machine OTel Collector sidecar scrapes host_metrics everywhere plus postgresql + redis on a gateway-capable unit, on its own `metrics/infra` pipeline, landing in Prometheus under `job=\"ava-infra\"` with a `host` label — no node_exporter, no Ava producer code, and exactly one retained host history."
+description: "The traditional SRE layer (issue #46): each OTel Collector scrapes host metrics and its own queue/drop/uptime metrics; a gateway-capable unit also scrapes its Postgres + Redis. The dedicated `metrics/infra` pipeline attaches `host` and lands in central Prometheus without extra exporter binaries."
 tags:
 - shared
 - telemetry
@@ -23,6 +23,11 @@ Ava code participates and a box with no agents running still reports.
 - `host_metrics`, on **every** machine, every 30 s — cpu (utilization ratio
   only; the per-core cumulative `system.cpu.time` is disabled), load, memory,
   disk, filesystem, network.
+- `prometheus/otelcol`, on **every** machine, every 30 s from the collector's
+  loopback `127.0.0.1:8888` endpoint — exporter queue size/capacity, enqueue
+  failure counters and process uptime. These are the delivery path's own
+  observability: queue pressure and new drops must not hide behind a receiver
+  that merely remains alive.
 - `postgresql` + `redis`, every 60 s, on a **gateway-capable unit only** —
   this cluster's own data plane. Postgres is dialed DIRECT (never PgBouncer:
   `pg_stat_*` over a transaction-pooled session is not trustworthy) as the
@@ -77,7 +82,9 @@ are the collector's own, so a machine reports host health even with the event
 stream on Postgres only. Silencing them means stopping the sidecar
 (`ava start --disable-service otel-collector`) or the backend (`ava lgtm off`);
 with no backend reachable the Prometheus exporter's bounded retry drops them,
-the same shed path app metrics already take.
+the same shed path app metrics already take. On a pure runner the exporter
+targets the gateway collector's authenticated private receiver; only the
+gateway collector writes to loopback Prometheus.
 
 ## Gaps
 
@@ -90,8 +97,13 @@ the same shed path app metrics already take.
 
 ## Notes
 
-- Alert rules R8-R12 and the `ava-host-dataplane` Grafana dashboard read these
-  series; both live in `deploy/lgtm/config/grafana/provisioning/`.
+- Alert rules R8-R12 read host/data-plane series. R14-R16 read collector
+  delivery series: current queue ratio over 0.80, `increase` of the translated
+  `otelcol_exporter_enqueue_failed_*_total` counters over 5 minutes, and a host
+  seen in 24h whose `otelcol_process_uptime_total` disappeared for 5 minutes.
+  The suffixes are Prometheus 3's OTLP translation, not the raw `:8888` names.
+  Rules and the `ava-host-dataplane` dashboard live in
+  `deploy/lgtm/config/grafana/provisioning/`.
 - Metric names were read off a live Prometheus 3.13.2, not inferred from the
   OTLP names: `system_cpu_utilization_ratio`,
   `system_filesystem_utilization_ratio`, `postgresql_backends`,

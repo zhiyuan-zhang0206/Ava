@@ -50,20 +50,16 @@
 # RECREATE: after updating, run `docker compose up -d` (a plain restart does
 # not re-apply resource limits).
 #
-# Bind address: ports bind ${LGTM_BIND_HOST:-127.0.0.1}, mirroring the
-# cluster's own data-plane posture — a single box is loopback-only with zero
-# config; a split deployment sets LGTM_BIND_HOST to this host's private
-# reachable address in deploy/lgtm/.env (gitignored) and remote
-# sidecars/`ava trace ship` dial that address. The backends themselves are
-# unauthenticated (Loki auth_enabled: false, Prometheus OTLP receiver), so a
-# non-loopback bind must face a trusted private network only — the same
-# trust model as AVA_TRUSTED_CIDRS. Grafana (3003) keeps the wider default
-# bind for remote viewing; it is the one anonymous-but-read-only surface.
+# Bind address: every unauthenticated backend port is unconditionally
+# loopback-only. Remote sidecars and `ava trace ship` enter through the native
+# collector's bearer-authenticated receiver on AVA_MACHINE_HOST:4318, never by
+# exposing Tempo/Loki/Prometheus directly. Grafana (3003) keeps the wider bind
+# for remote viewing; it is the one anonymous-but-read-only surface.
 services:
   # No otel-collector container: since task #1266 the OTLP entry is the
-  # NATIVE per-machine sidecar (ava-otel-collector session, supervised by the
-  # watchdog) on host 4318 (OTLP/HTTP). The sidecar fans out traces -> Tempo OTLP
-  # (host 14318), logs -> Loki (3100), metrics -> Prometheus (9090).
+  # NATIVE collector sidecar (ava-otel-collector session, supervised by the
+  # watchdog) on the gateway. It accepts local OTLP on loopback and authenticated
+  # runner relays on AVA_MACHINE_HOST, then fans out to these loopback backends.
   tempo:
     image: grafana/tempo:3.0.2
     command: ["-config.file=/etc/tempo.yaml"]
@@ -71,10 +67,10 @@ services:
       - ./config/tempo.yaml:/etc/tempo.yaml:ro
       - tempo-data:/var/tempo
     ports:
-      - "${LGTM_BIND_HOST:-127.0.0.1}:3200:3200"
+      - "127.0.0.1:3200:3200"
       # OTLP/HTTP intake for the native sidecar's traces pipeline + `ava trace
       # ship` replay. Non-standard host port: 4318 belongs to the sidecar.
-      - "${LGTM_BIND_HOST:-127.0.0.1}:14318:4318"
+      - "127.0.0.1:14318:4318"
     restart: unless-stopped
     cpus: 1.0
     mem_limit: 768m
@@ -87,7 +83,7 @@ services:
       - ./config/loki.yaml:/etc/loki.yaml:ro
       - loki-data:/loki
     ports:
-      - "${LGTM_BIND_HOST:-127.0.0.1}:3100:3100"
+      - "127.0.0.1:3100:3100"
     restart: unless-stopped
     # 2g while the task #1281 archive stream (365d retention_stream) is
     # queryable; tighten to 1g when the archive-era loki.yaml settings go.
@@ -128,7 +124,7 @@ services:
       - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prom-data:/prometheus
     ports:
-      - "${LGTM_BIND_HOST:-127.0.0.1}:9090:9090"
+      - "127.0.0.1:9090:9090"
     restart: unless-stopped
     cpus: 1.0
     mem_limit: 1g

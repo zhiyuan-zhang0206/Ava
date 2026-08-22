@@ -23,7 +23,7 @@ directory is mounted read-only into the container at
 point's webhook URL uses `host.docker.internal` because the container
 reaches the gateway on the host.
 
-## Rules (13)
+## Rules (16)
 
 Application layer — the Loki event stream plus the LLM latency histogram:
 
@@ -51,6 +51,23 @@ thresholds are deployment facts, not framework constants — what counts as
 | `ava-ops-host-disk-watermark` | filesystem utilization | max by host+mountpoint > 0.90 (Prometheus) | 15m | warning |
 | `ava-ops-pg-connection-saturation` | Postgres backends vs max | ratio > 0.80 (Prometheus) | 15m | warning |
 | `ava-ops-redis-memory` | Redis resident set | > 2 GiB (Prometheus) | 15m | warning |
+
+Collector delivery layer — each sidecar scrapes its own loopback `:8888`
+metrics and relays them through `metrics/infra`. Prometheus's OTLP translation
+adds `_total` to the raw monotonic counters:
+
+| uid | Metric | Condition | `for` | Severity |
+|-----|--------|-----------|-------|----------|
+| `ava-ops-otelcol-queue-pressure` | exporter queue size/capacity | current ratio > 0.80 per host+exporter+signal | 5m | error |
+| `ava-ops-otelcol-enqueue-failures` | new enqueue rejections | `increase(otelcol_exporter_enqueue_failed_*_total[5m]) > 0` | 0m | error |
+| `ava-ops-otelcol-host-silent` | recently-seen collector absent | host seen in 24h has no `otelcol_process_uptime_total` in 5m | 0m | error |
+
+The queue rule uses current gauges so it resolves after recovery; the reject
+rule uses a bounded counter delta so one historical drop does not keep
+alerting until the process restarts — it resolves after a clean 5-minute
+window. The silence query's 5-minute absence window is already its
+debounce, hence no second `for` delay. Its 24-hour historical host set expires
+retired machines naturally; the fleet heartbeat owns permanent membership.
 
 Severity follows the alert-system vocabulary (Task #1224):
 critical/warning/error — all three push to IM, no gate. Thresholds are

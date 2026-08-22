@@ -29,6 +29,9 @@ def _enable_tempo_config(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(
         "shared.config.settings.observability.telemetry_tempo_endpoint", "http://tempo.test:14318"
     )
+    monkeypatch.setattr(
+        "cli.commands.trace.machine_role", lambda: frozenset({"gateway", "agent-runner"})
+    )
 
 
 def _otlp_line(span_name: str) -> str:
@@ -186,39 +189,43 @@ def test_windowed_ship_filters_by_file_day_and_ignores_watermark(
     assert len(posts) == 1  # only the in-window file, shipped whole despite the watermark
 
 
-def test_ship_posts_to_otlp_traces_without_auth(monkeypatch, tmp_path):
-    """Ship POSTs each mirror line straight to <AVA_TELEMETRY_TEMPO_ENDPOINT>/v1/traces
-    (bypassing the sidecar — replaying through it would loop the JSONL mirror)
-    with no Authorization header, and advances the watermark."""
+def test_gateway_ship_posts_to_local_tempo_without_auth(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A gateway replays straight to its loopback Tempo, bypassing its local
+    collector because that collector would mirror the replay again."""
     monkeypatch.setattr("shared.trace.traces_dir", lambda: tmp_path)  # pyright: ignore[reportUnknownMemberType]
     monkeypatch.setattr("cli.commands.trace.traces_dir", lambda: tmp_path)  # pyright: ignore[reportUnknownMemberType]
     monkeypatch.setattr("shared.config.settings.observability.telemetry_otlp_enabled", True)  # pyright: ignore[reportUnknownMemberType]
     monkeypatch.setattr(  # pyright: ignore[reportUnknownMemberType]
         "shared.config.settings.observability.telemetry_tempo_endpoint", "http://tempo.test:14318"
     )
+    monkeypatch.setattr(  # pyright: ignore[reportUnknownMemberType]
+        "cli.commands.trace.machine_role", lambda: frozenset({"gateway"})
+    )
 
     (tmp_path / "spans.jsonl").write_text(  # pyright: ignore[reportUnknownMemberType]
         _otlp_line("a") + "\n" + _otlp_line("b") + "\n", encoding="utf-8"
     )
 
-    posts: list[tuple[str, dict]] = []
+    posts: list[tuple[str, dict[str, str]]] = []
 
     class _Resp:
-        def raise_for_status(self):
-            pass
+        def raise_for_status(self) -> None:
+            return None
 
     class _Client:
-        def __init__(self, *a, **k):
-            pass
+        def __init__(self, *_a: object, **_kw: object) -> None:
+            return None
 
-        def __enter__(self):
+        def __enter__(self) -> _Client:
             return self
 
-        def __exit__(self, *a):
-            pass
+        def __exit__(self, *_a: object) -> None:
+            return None
 
-        def post(self, endpoint, *, content, headers):
-            posts.append((endpoint, headers))  # pyright: ignore[reportUnknownMemberType]
+        def post(self, endpoint: str, *, content: bytes, headers: dict[str, str]) -> _Resp:
+            posts.append((endpoint, headers))
             return _Resp()
 
     monkeypatch.setattr("httpx.Client", _Client)  # pyright: ignore[reportUnknownMemberType]
@@ -232,3 +239,57 @@ def test_ship_posts_to_otlp_traces_without_auth(monkeypatch, tmp_path):
 
     wm = json.loads((tmp_path / ".ship-watermark.json").read_text())  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
     assert wm["spans.jsonl"] > 0
+
+
+def test_runner_ship_posts_to_gateway_relay_with_cluster_bearer(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A pure runner cannot dial loopback Tempo. It replays to the gateway's
+    authenticated remote trace pipeline, which deliberately has no file exporter."""
+    monkeypatch.setattr("cli.commands.trace.traces_dir", lambda: tmp_path)  # pyright: ignore[reportUnknownMemberType]
+    monkeypatch.setattr(  # pyright: ignore[reportUnknownMemberType]
+        "shared.config.settings.observability.telemetry_otlp_enabled", True
+    )
+    monkeypatch.setattr(  # pyright: ignore[reportUnknownMemberType]
+        "shared.config.settings.gateway.gateway_url", "http://100.64.0.10:8000"
+    )
+    monkeypatch.setattr(  # pyright: ignore[reportUnknownMemberType]
+        "shared.config.settings.data_plane.cluster_secret", "cluster-token"
+    )
+    monkeypatch.setattr(  # pyright: ignore[reportUnknownMemberType]
+        "cli.commands.trace.machine_role", lambda: frozenset({"agent-runner"})
+    )
+    (tmp_path / "spans.jsonl").write_text(_otlp_line("remote") + "\n", encoding="utf-8")  # pyright: ignore[reportUnknownMemberType]
+
+    posts: list[tuple[str, dict[str, str]]] = []
+
+    class _Resp:
+        def raise_for_status(self) -> None:
+            return None
+
+    class _Client:
+        def __init__(self, *_a: object, **_kw: object) -> None:
+            return None
+
+        def __enter__(self) -> _Client:
+            return self
+
+        def __exit__(self, *_a: object) -> None:
+            return None
+
+        def post(self, endpoint: str, *, content: bytes, headers: dict[str, str]) -> _Resp:
+            posts.append((endpoint, headers))
+            return _Resp()
+
+    monkeypatch.setattr("httpx.Client", _Client)  # pyright: ignore[reportUnknownMemberType]
+
+    assert cmd_trace_ship(since=None, until=None, dry_run=False) == 0
+    assert posts == [
+        (
+            "http://100.64.0.10:4318/v1/traces",
+            {
+                "Content-Type": "application/x-protobuf",
+                "Authorization": "Bearer cluster-token",
+            },
+        )
+    ]

@@ -14,21 +14,25 @@ gateway's /ops + inspect endpoints.
 ## How it works
 
 ```
-agent process ── OTel spans ──▶ local OTLP/JSON mirror ($AVA_HOME/traces/*.jsonl)
-agent process ── events ──────▶ OTLP/HTTP (protobuf) ──▶ Loki (logs) + Prometheus (metrics)
-ava trace ship ── replay mirror ──▶ OTLP/HTTP ──▶ Tempo (traces)
-Grafana ◀── Tempo + Loki + Prometheus ── one UI + gateway read paths (deploy/lgtm/)
+agent process ── OTLP/HTTP ──▶ local collector ──▶ local JSONL trace mirror
+                                      │
+pure runner collector ── Bearer ──────┤ gateway AVA_MACHINE_HOST:4318
+                                      ▼
+gateway collector ──▶ loopback Tempo + Loki + Prometheus ──▶ Grafana/read paths
 ```
 
 - **Traces** — OpenLLMetry auto-instruments the LLM SDKs; every span is
-  recorded to a local JSONL mirror, one standard OTLP `ExportTraceServiceRequest`
-  per line. LLM content is stripped at the source (metadata only by default).
-  A scheduled `ava trace ship` replays the mirror to Tempo over OTLP/HTTP,
-  resumable via watermark.
+  sent to the machine-local collector. Its file exporter writes one standard
+  OTLP `ExportTraceServiceRequest` per JSONL line while the live exporter sends
+  to Tempo (directly from a gateway; through the authenticated gateway
+  collector from a pure runner). LLM content is stripped at the source.
 - **Logs + metrics** — the unified event stream exports live over OTLP/HTTP:
   each event becomes a LogRecord (Loki), telemetry events become metrics
   (Prometheus), with `trace_id`/`span_id` riding along so logs correlate with
   traces.
+- **Recovery replay** — `ava trace ship` bypasses the local collector so a
+  replay cannot write itself back into the mirror. Gateway units dial loopback
+  Tempo; pure runners dial the gateway collector with the cluster bearer.
 - **Backend** — `../../deploy/lgtm/` runs the Tempo + Loki + Prometheus +
   Grafana stack (lifecycle-owned on the marked host — see its README). It
   writes nothing to the mirror or the main flow, but the gateway's /ops +
@@ -38,54 +42,41 @@ Grafana ◀── Tempo + Loki + Prometheus ── one UI + gateway read paths (
 
 ## Trace format — why JSONL, and is it required?
 
-No — JSONL is not required, and the standard network form is in use today.
+No — JSONL is a recovery/inspection mirror, and standard OTLP/HTTP is the live
+network form.
 
 - The mirror is **standard OTLP/JSON**: each line is an OTLP
   `ExportTraceServiceRequest`, the same wire shape any OTLP backend ingests —
   not a custom format.
-- The **standard network form (OTLP protobuf over HTTP)** is used by the live
-  log/metric exporters (OTLP/HTTP to Loki/Prometheus) and by `ava trace ship`
-  (OTLP/HTTP to Tempo's `/v1/traces`).
-- Recording to a local file first is a **durability choice** (record/ship
-  split, 2026-06-16): writing a file cannot fail the way a network POST can,
-  so recording never drops spans to a backend outage — and shipping can be
-  turned off without stopping recording.
+- The **standard network form (OTLP over HTTP)** is used from every producer to
+  its local collector and from collectors onward. The local receiver is the
+  only endpoint an agent process knows.
+- The collector's file exporter writes JSONL in parallel with live delivery.
+  Trace/log exporters use persistent queues; metrics use bounded in-memory
+  retry and may shed stale points. The memory limiter can also return
+  backpressure before the mirror, so the system makes no absolute no-loss
+  promise.
 - Distinct from the pre-compact conversation dump (`../../agent/history_dump.py`):
   that JSONL holds full conversation content for audit/replay (opt-in), while
   the trace mirror is metadata-only OTel.
 
 ### Who consumes the mirror
 
-1. `ava trace ship` — the only viewer backend path; scheduled incremental
-   replay to Tempo (watermark-resumable, windowed backfill, idempotent).
+1. `ava trace ship` — recovery replay to Tempo (watermark-resumable, windowed
+   backfill, idempotent); live collector export is the normal backend path.
 2. `fetch_trace.py --source mirror` (trace toolchain) — complete offline span
    retrieval with no size cap and no network, for trace reports and analysis
    (Tempo's full-trace API fails above its cap).
-3. Nothing else reads it in-repo; retention is 14 days
-   (`AVA_TRACE_RETENTION_DAYS`), pruned on agent start.
+3. Nothing else reads it in-repo; retention defaults to 3 days and is
+   configurable with `AVA_TRACE_RETENTION_DAYS`, pruned on agent start.
 
-### Why record+ship instead of live export (documented)
+### Why local collectors plus recovery replay
 
-`../../conventions/runbook.md` / `../../shared/trace.py`: "a private-network blip can no
-longer error mid-run or drop spans — the previous design pushed every span inline
-over OTLP and raised `Exception while exporting Span.` whenever the POST
-failed." Motivations, all documented: backend-outage degradation, no agent
-hot-path blocking, resumable/backfillable shipping.
-
-### Industry comparison and migration options
-
-Standard OTel SDK buffers in memory only (BatchSpanProcessor, retry-5-then-
-drop); durable buffering lives in the Collector layer (persistent queue /
-file storage), with agents exporting OTLP protobuf over the network. Ava
-moves durability into the agent process as a JSONL file — standard OTLP/JSON
-format, nonstandard plumbing. To move closer to the standard: run a local
-otel-collector per host (the LGTM stack already ships one) with a persistent
-queue and switch the span exporter to OTLP/HTTP localhost (the live
-log/metric exporters already POST to the same collector). To keep the status
-quo: the mirror stays, with the answer "durability choice, not a format
-limitation." — and the full three-question analysis of the mirror, its
-   consumers, and the migration options lives in the observability design
-   thread.
+The collector keeps network retries, backpressure and backend credentials out
+of agent processes. A pure runner relays to one authenticated gateway ingress;
+the unauthenticated Tempo/Loki/Prometheus ports remain loopback-only. The JSONL
+mirror remains useful for offline inspection and gap replay, but scheduled
+shipping is not the live delivery mechanism.
 
 ## Design decisions
 
