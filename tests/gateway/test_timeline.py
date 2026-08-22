@@ -1042,6 +1042,165 @@ def test_inbound_with_real_ts_still_advances_anchor_for_legacy_siblings() -> Non
     assert not sibling_ts.startswith("1970")
 
 
+def test_compacted_inbound_uses_its_embedded_id_instead_of_oldest_anchor() -> None:
+    """A compacted checkpoint can start long after the agent's first DB inbound.
+
+    The message's ``ava_inbound_id`` is the durable correlation key.  Timeline
+    rendering must use it to select the matching row rather than pairing the
+    surviving message with the oldest historical anchor by list position.
+    """
+    from datetime import UTC, datetime
+
+    from langchain_core.messages import HumanMessage, ToolMessage
+
+    from shared.db import InboundRow
+    from shared.timeline import build_timeline_items
+
+    stale_anchor = InboundRow(
+        4516,
+        "old compacted-away message",
+        "chat",
+        "ui:web",
+        "done",
+        datetime(2026, 6, 18, 9, 0, tzinfo=UTC),
+    )
+    matching_anchor = InboundRow(
+        70598,
+        "current message",
+        "chat",
+        "user",
+        "claimed",
+        datetime(2026, 8, 22, 17, 47, tzinfo=UTC),
+    )
+    inbound = HumanMessage(
+        content="current message",
+        additional_kwargs={
+            "ava_msg_type": "inbound",
+            "ava_source": "user",
+            "ava_inbound_id": 70598,
+            "ava_created_at": "2026-08-22T17:47:00+00:00",
+        },
+    )
+    legacy_sibling = ToolMessage(
+        content="output",
+        tool_call_id="t1",
+        additional_kwargs={"ava_msg_type": "exec_output"},
+    )
+
+    items, _ = build_timeline_items([inbound, legacy_sibling], [stale_anchor, matching_anchor])
+
+    assert items[0].inbound_id == 70598
+    assert items[1].created_at is not None
+    assert items[1].created_at.startswith("2026-08-22T17:47:00")
+
+
+@pytest.mark.parametrize("malformed_id", ["70598", True, False, 0, -1, None])
+def test_inbound_rejects_malformed_embedded_id(malformed_id: object) -> None:
+    """A present correlation key is contractual, never a legacy fallback hint."""
+    from langchain_core.messages import HumanMessage
+
+    from shared.timeline import build_timeline_items
+
+    inbound = HumanMessage(
+        content="message",
+        additional_kwargs={
+            "ava_msg_type": "inbound",
+            "ava_source": "user",
+            "ava_inbound_id": malformed_id,
+            "ava_created_at": "2026-08-22T17:47:00+00:00",
+        },
+    )
+
+    with pytest.raises(ValueError, match="ava_inbound_id"):
+        build_timeline_items([inbound], [])
+
+
+def test_missing_embedded_anchor_does_not_consume_legacy_fallback() -> None:
+    """A missing exact match leaves later positional legacy anchors intact."""
+    from datetime import UTC, datetime
+
+    from langchain_core.messages import HumanMessage, ToolMessage
+
+    from shared.db import InboundRow
+    from shared.timeline import build_timeline_items
+
+    missing_modern = HumanMessage(
+        content="row no longer present",
+        additional_kwargs={
+            "ava_msg_type": "inbound",
+            "ava_source": "user",
+            "ava_inbound_id": 99,
+            "ava_created_at": "2026-08-22T17:47:00+00:00",
+        },
+    )
+    legacy_inbound = HumanMessage(
+        content="legacy",
+        additional_kwargs={"ava_msg_type": "inbound", "ava_source": "ui:web"},
+    )
+    legacy_output = ToolMessage(
+        content="output",
+        tool_call_id="t1",
+        additional_kwargs={"ava_msg_type": "exec_output"},
+    )
+    legacy_anchor = InboundRow(
+        10,
+        "legacy",
+        "chat",
+        "ui:web",
+        "done",
+        datetime(2026, 8, 22, 18, 0, tzinfo=UTC),
+    )
+
+    items, _ = build_timeline_items(
+        [missing_modern, legacy_inbound, legacy_output], [legacy_anchor]
+    )
+
+    assert [item.inbound_id for item in items[:2]] == [99, 10]
+    assert items[2].created_at is not None
+    assert items[2].created_at.startswith("2026-08-22T18:00:00")
+
+
+def test_out_of_order_and_duplicate_embedded_ids_preserve_anchor_cursor() -> None:
+    """Exact lookups never rewind or exhaust the legacy positional cursor."""
+    from datetime import UTC, datetime
+
+    from langchain_core.messages import HumanMessage
+
+    from shared.db import InboundRow
+    from shared.timeline import build_timeline_items
+
+    def modern(inbound_id: int) -> HumanMessage:
+        return HumanMessage(
+            content=str(inbound_id),
+            additional_kwargs={
+                "ava_msg_type": "inbound",
+                "ava_source": "user",
+                "ava_inbound_id": inbound_id,
+                "ava_created_at": f"2026-08-22T18:{inbound_id}:00+00:00",
+            },
+        )
+
+    legacy = HumanMessage(
+        content="legacy",
+        additional_kwargs={"ava_msg_type": "inbound", "ava_source": "ui:web"},
+    )
+    anchors = [
+        InboundRow(
+            inbound_id,
+            str(inbound_id),
+            "chat",
+            "user",
+            "done",
+            datetime(2026, 8, 22, 18, minute, tzinfo=UTC),
+        )
+        for inbound_id, minute in [(10, 10), (20, 20), (30, 30)]
+    ]
+
+    items, _ = build_timeline_items([modern(20), modern(10), modern(20), legacy], anchors)
+
+    assert [item.inbound_id for item in items] == [20, 10, 20, 30]
+
+
 def test_aimessage_blocks_share_one_real_ava_created_at() -> None:
     """All blocks of one AIMessage carry the message's single real ts — the
     timeline no longer fans its reasoning/text/code items out across synthetic
@@ -1377,3 +1536,24 @@ class TestBuildTimelineItemsStartOffset:
         assert items[0].item_id == "1.0"
         assert items[0].created_at == "2026-01-01T00:00:00+00:00"
         assert items[0].inbound_id is None
+
+    def test_start_offset_keeps_modern_embedded_inbound_id_without_anchors(self):
+        from langchain_core.messages import HumanMessage, SystemMessage
+
+        from shared.timeline import build_timeline_items
+
+        msg = HumanMessage(
+            content="hi",
+            additional_kwargs={
+                "ava_msg_type": "inbound",
+                "ava_source": "user",
+                "ava_inbound_id": 70598,
+                "ava_created_at": "2026-01-01T00:00:00+00:00",
+            },
+        )
+
+        items, msg_count = build_timeline_items([SystemMessage(content="p"), msg], [], start=1)
+
+        assert msg_count == 2
+        assert items[0].item_id == "1.0"
+        assert items[0].inbound_id == 70598
