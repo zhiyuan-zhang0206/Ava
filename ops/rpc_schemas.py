@@ -397,6 +397,7 @@ OpKind = Literal[
     "inventory_write",
     "cluster_fetch",
     "shell_probe",
+    "agent_skill_view",
     "shell_capture",
     "upload_receive",
 ]
@@ -482,6 +483,12 @@ class InventoryWritePayload(BaseModel):
 
 class ShellProbePayload(BaseModel):
     """`shell_probe` op payload: whose live persistent shells to list."""
+
+    agent_id: int
+
+
+class AgentSkillViewPayload(BaseModel):
+    """`agent_skill_view` op payload: whose command view to build."""
 
     agent_id: int
 
@@ -602,6 +609,25 @@ class ShellProbeResult(BaseModel):
     returns; the gateway forwards it into the inspector panel)."""
 
     shells: list[ShellInfo]
+
+
+class OpsCommandItem(BaseModel):
+    """One command-autocomplete item returned by an agent-runner op.
+
+    Kept in the RPC contract rather than importing the gateway's REST schema:
+    ops is the machine-side boundary and returns only the three fields the
+    autocomplete consumer needs.
+    """
+
+    name: str
+    description: str
+    instruction_hint: str
+
+
+class AgentSkillViewResult(BaseModel):
+    """`agent_skill_view` result — commands visible to one agent on this host."""
+
+    commands: list[OpsCommandItem]
 
 
 class ShellCaptureResult(BaseModel):

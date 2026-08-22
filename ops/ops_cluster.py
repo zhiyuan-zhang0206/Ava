@@ -12,6 +12,11 @@ this layer is the agent-runner-callable RPC surface the ops server dispatches
 
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Any, cast
+
+from langgraph.checkpoint.postgres import PostgresSaver
+
 from ops.cluster import (
     ClusterStatus,
     ClusterUpdateInProgress,
@@ -25,8 +30,15 @@ from ops.cluster import (
     update_check,
 )
 from ops.cluster_status import agent_shell_sessions, capture_shell
-from ops.rpc_schemas import ShellCaptureResult, ShellProbeResult
+from ops.rpc_schemas import (
+    AgentSkillViewResult,
+    OpsCommandItem,
+    ShellCaptureResult,
+    ShellProbeResult,
+)
+from shared.checkpoint_serde import STATIC_CHECKPOINT_MSGPACK_TYPES
 from shared.cluster_lock import force_release_update_lock, read_update_lease
+from shared.config.turn_view import resolve_agent_config_pins
 from shared.gitenv import git_env
 from shared.host_deploy_state import updater_lease_live
 from shared.log import logger
@@ -257,6 +269,111 @@ def shell_probe_op(agent_id: int) -> ShellProbeResult:
     on the gateway would always read empty for a remote agent).
     """
     return ShellProbeResult(shells=agent_shell_sessions(agent_id))
+
+
+def _agent_skill_view_inputs(pool: Any, agent_id: int) -> tuple[Path | None, list[str] | None]:
+    """The persisted cwd and effective skill-index narrowing for one agent.
+
+    The daemon's shared pool keeps this read on the agent's machine.  ``cwd`` is
+    the ava-code plugin's private channel key, following ``PluginStateHandle``'s
+    ``<plugin>__<field>`` convention in ``agent/state.py``.  An old agent with
+    no checkpoint has no project-local roots; an old row with no frozen/overlay
+    value falls through to the normal unfiltered (``["*"]``) command view.
+    """
+    from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
+
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT config_overlay, birth_config FROM agents_meta WHERE id = %s", (agent_id,)
+        )
+        row = cur.fetchone()
+        if row is None:
+            return None, None
+        overlay = cast(dict[str, Any], row[0]) if isinstance(row[0], dict) else {}
+        birth = cast(dict[str, Any], row[1]) if isinstance(row[1], dict) else {}
+        pins = resolve_agent_config_pins(overlay, birth)
+        wanted = pins.get("skills_to_inject_into_system_prompt")
+
+        saver = PostgresSaver(
+            conn=conn,
+            serde=JsonPlusSerializer(allowed_msgpack_modules=STATIC_CHECKPOINT_MSGPACK_TYPES),
+        )
+        checkpoint = saver.get({"configurable": {"thread_id": str(agent_id)}})
+
+    cwd = checkpoint["channel_values"].get("ava_code__cwd") if checkpoint else None
+    narrowed = cast(list[str], wanted) if isinstance(wanted, list) else None
+    return (Path(cwd) if isinstance(cwd, str) else None), narrowed
+
+
+def _project_skill_roots(cwd: Path | None) -> list[Path]:
+    """Best-effort project roots; an absent ava-code plugin is not an op failure."""
+    if cwd is None:
+        return []
+    try:
+        from ava_builtins.plugins.ava_code._walk import project_skill_roots
+    except ImportError:
+        logger.debug("agent_skill_view: ava-code plugin unavailable; skipping project skills")
+        return []
+    return project_skill_roots(cwd)
+
+
+def _narrow_commands(commands: list[Any], wanted: list[str] | None) -> list[Any]:
+    """Keep explicit commands plus skill commands selected as prompt capabilities.
+
+    This intentionally mirrors ``agent.graph._capabilities.resolve_prompt_skills``:
+    ``*`` selects all loaded skills; otherwise a configured value matches the
+    dotted identifier first and then the bare frontmatter name under the common
+    dash/underscore fold.  Only skill-as-command entries are narrowed; explicit
+    command files remain available to every agent as they are not capabilities.
+    """
+    if wanted is None or "*" in wanted:
+        return commands
+
+    from ava import skills
+    from shared.skill_names import match_key
+
+    loaded = skills._names()
+    by_ident = {match_key(skills.identifier(skill)): skill for skill in loaded}
+    by_name = {match_key(skill["name"]): skill for skill in loaded}
+    selected_targets = {
+        skills.target(skill)
+        for name in wanted
+        if (skill := by_ident.get(match_key(name)) or by_name.get(match_key(name))) is not None
+    }
+    return [
+        command
+        for command in commands
+        if command["skill_target"] is None or command["skill_target"] in selected_targets
+    ]
+
+
+def agent_skill_view_op(agent_id: int, pool: Any) -> AgentSkillViewResult:
+    """Build the command-autocomplete view that ``agent_id`` sees on this host.
+
+    Converged skills are discovered on the target runner, with the agent's
+    checkpointed cwd contributing project-local roots only for this call.  The
+    provider registry is process-global, so cleanup is unconditional to prevent
+    one request leaking its project skills into a later agent's result.
+    """
+    from ava import skills
+    from ava._commands import discover_commands
+
+    cwd, wanted = _agent_skill_view_inputs(pool, agent_id)
+    skills.register_skill_source(lambda: _project_skill_roots(cwd))
+    try:
+        commands = _narrow_commands(discover_commands(), wanted)
+    finally:
+        skills.clear_skill_sources()
+    return AgentSkillViewResult(
+        commands=[
+            OpsCommandItem(
+                name=command["name"],
+                description=command["description"],
+                instruction_hint=command["instruction_hint"],
+            )
+            for command in commands
+        ]
+    )
 
 
 def shell_capture_op(agent_id: int, session_id: int, lines: int = 200) -> ShellCaptureResult:

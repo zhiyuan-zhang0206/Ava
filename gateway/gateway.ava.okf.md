@@ -23,6 +23,7 @@ Ava cluster HTTP API gateway—FastAPI service running on **port 8000** (loopbac
 - **SSE event push**: Redis pub/sub → SSE bridge, pushing agent events to the browser in real time
 - **Schedule keep-alive**: built-in ScheduleManager, keeping schedule resident processes alive in their own sessions (not a timer trigger — timing logic is inside the script, the manager only ensures stay-up)
 - **Cluster ops API**: cluster, config, inventory, metrics, system and other management endpoints
+- **Per-agent command views**: `GET /api/commands?agent_id=` resolves the agent's runner then asks its `agent_skill_view` op for the command catalog that runner discovers from its own converged load dir plus the agent's persisted cwd; an unavailable, unknown, or version-skewed runner falls back to the gateway-local catalog
 - **Authentication**: auth follows the cluster secret. With a secret set, every `/api/*` request requires a session cookie or `Authorization: Bearer <cluster secret>` — except the `_AUTH_BYPASS_PATHS` set (`/api/health` for host probing, `/api/auth/login` / `check` / `logout` for the browser session flow); `auth_middleware_enabled=false` bypasses for testing/e2e. An EMPTY `cluster_secret` is the no-auth posture (single-box default): the API serves unauthenticated, `/check` reports authenticated, and the gateway binds loopback only (`main()`). `/api/bootstrap` used for agent-runner registration
 
 ## Architecture

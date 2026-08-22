@@ -135,6 +135,13 @@ above relies on.
 
 ## Open (not now)
 
+- **PR2c — MCP groundwork for the per-agent command view.** The runner-backed
+  `agent_skill_view` op now resolves an agent's converged load dir, persisted
+  cwd project roots, and prompt-skill narrowing. Decide whether MCP exposes a
+  sibling read model or consumes that op directly only after the per-entry
+  scope contract below is settled; do not let an MCP server reconstruct the
+  catalog from the gateway's filesystem.
+
 - Machine-level daemon: lifetime / ownership (who starts it, ref-count teardown
   when the last agent disconnects), socket location, and the in-process →
   machine-daemon connect path.
