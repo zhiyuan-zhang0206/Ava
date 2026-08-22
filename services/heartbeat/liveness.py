@@ -283,7 +283,7 @@ def _merge_liveness(pool: ConnectionPool) -> list[int]:
     return [
         int(agent_id)
         for agent_id, old_state, new_state in rows
-        if old_state == "offline" or new_state == "offline"
+        if old_state != new_state and (old_state == "offline" or new_state == "offline")
     ]
 
 
