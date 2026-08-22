@@ -298,6 +298,23 @@ class HeartbeatNudged(TypedDict):
     idle_minutes: int
 
 
+class TaskReminderDigest(TypedDict):
+    """`task_reminder_digest` payload — task-maintenance daemon."""
+
+    owner_id: int
+    task_count: int
+    task_ids: list[int]
+
+
+class TaskEscalation(TypedDict):
+    """`task_escalation` payload — task-maintenance daemon."""
+
+    owner_id: int
+    task_count: int
+    task_ids: list[int]
+    leg: Literal["delegator", "user"]
+
+
 class DeliveryStalled(TypedDict):
     """`delivery_stalled` payload — services/delivery_watchdog/daemon.py."""
 
@@ -603,6 +620,12 @@ EVENTS: dict[str, EventSpec] = {
     "agent_restarted": _telemetry("agent_restarted", "agent restarted (phase2 done)"),
     "heartbeat_nudged": _telemetry(
         "heartbeat_nudged", "heartbeat reminder", payload=HeartbeatNudged
+    ),
+    "task_reminder_digest": _telemetry(
+        "task_reminder_digest", "overdue-task owner digest", payload=TaskReminderDigest
+    ),
+    "task_escalation": _telemetry(
+        "task_escalation", "stalled-task escalation", payload=TaskEscalation
     ),
     "delivery_stalled": _telemetry("delivery_stalled", "delivery backlog", payload=DeliveryStalled),
     "restart_cas_lost": _telemetry("restart_cas_lost", "restart CAS race lost"),
