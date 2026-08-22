@@ -233,13 +233,13 @@
         connectingTimer = window.setInterval(update, 1_000);
       }
 
-      // Mirrors the small entry_url_for_save normalization in Rust so this page
-      // can reach the console when Android's native post-save pipe is wedged.
+      // Mirrors Rust normalize_entry_address: missing and gateway port 8000
+      // become console port 3000; save rejects other custom ports first.
       function normalizedEntryUrl(raw) {
         const address = raw.trim();
         const withScheme = address.includes("://") ? address : `http://${address}`;
         const url = new URL(withScheme);
-        if (!url.port) url.port = "3000";
+        if (!url.port || url.port === "8000") url.port = "3000";
         return url.toString();
       }
 

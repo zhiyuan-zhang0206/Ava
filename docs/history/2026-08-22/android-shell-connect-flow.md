@@ -35,3 +35,12 @@ webview prelude and navigates it only after the settings response flushes;
 desktop retains its rebuild behavior. The Android overlay also carries ProGuard
 rules that preserve JNI-named Tauri plugin classes and `@Command` metadata in
 minified release builds.
+
+## Round 4 update
+
+The original in-place-navigation repair left two build-time snapshots behind:
+the native allowlist still rejected the newly saved console origin, and the
+page's initialization script still exposed the old notification configuration.
+Navigation now resolves endpoints from live state; every page load refreshes
+the prelude and signals consumers, allowing the notification bridge to wait
+once for the current configuration.

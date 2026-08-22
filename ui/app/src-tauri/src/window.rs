@@ -74,7 +74,7 @@ pub fn open_entry(app: &AppHandle) {
         None => WebviewUrl::App(SETUP_PAGE.into()),
     };
 
-    let window = match build(app, target, endpoints.clone()) {
+    let window = match build(app, target) {
         Ok(window) => window,
         Err(err) => {
             log::error!("could not create the main window: {err}");
@@ -114,13 +114,9 @@ fn attach_entry(app: &AppHandle, window: WebviewWindow, endpoints: Endpoints) {
 }
 
 /// Create the window with the platform's script set attached.
-fn build(
-    app: &AppHandle,
-    target: WebviewUrl,
-    endpoints: Option<Endpoints>,
-) -> tauri::Result<WebviewWindow> {
-    let allowed = endpoints;
-    let handle = app.clone();
+fn build(app: &AppHandle, target: WebviewUrl) -> tauri::Result<WebviewWindow> {
+    let navigation_handle = app.clone();
+    let page_load_handle = app.clone();
 
     #[allow(unused_mut)]
     let mut builder = WebviewWindowBuilder::new(app, MAIN_WINDOW, target)
@@ -130,15 +126,25 @@ fn build(
         .background_color(tauri::webview::Color(0x0e, 0x0e, 0x12, 0xff))
         .initialization_script(prelude(app))
         .initialization_script(include_str!("../scripts/nav-guard.js"))
-        // Same-window navigation stays on the gate/gateway hosts; anything
-        // else is cancelled here and handed to the external opener. This is
-        // the native guard — it holds even if the injected JS never installs.
+        // Same-window navigation resolves its allowlist from live settings, so
+        // Android's in-place post-save navigation reaches the new gate. Other
+        // URLs are cancelled here and handed to the external opener.
         .on_navigation(move |url| {
+            let allowed = navigation_handle.state::<ShellState>().endpoints();
             if urls::is_allowed_nav(url, allowed.as_ref()) {
                 return true;
             }
-            let _ = external::open_external(&handle, url.as_str());
+            let _ = external::open_external(&navigation_handle, url.as_str());
             false
+        })
+        .on_page_load(move |window, _payload| {
+            let script = format!(
+                "{}window.dispatchEvent(new Event('ava-shell-config'));",
+                prelude(&page_load_handle),
+            );
+            if let Err(err) = window.eval(&script) {
+                log::error!("could not refresh the shell config after page load: {err}");
+            }
         });
 
     #[cfg(target_os = "android")]

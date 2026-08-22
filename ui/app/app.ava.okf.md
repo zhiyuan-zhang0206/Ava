@@ -35,7 +35,9 @@ The bundled Chinese onboarding page immediately changes to a 30-second
 connecting state while saving. `shell_save_settings` persists Android-normalized
 settings, then defers the window change until the asynchronous IPC reply flushes.
 Android refreshes the existing webview's prelude and navigates it rather than
-destroying it; desktop keeps its rebuild. A hidden Android page retains its
+destroying it; its navigation allowlist and page-load prelude resolve from live
+settings so the new console origin and notification bridge see the saved
+configuration. Desktop keeps its rebuild. A hidden Android page retains its
 timeout recovery until it becomes visible. `window.rs` probes the console root
 with a four-second HTTP GET rather than TCP, treats
 2xx/3xx/401/403 as healthy, and sends a final `reason=unreachable|http|update-window`
@@ -78,7 +80,8 @@ Tauri plugin classes and reflectively discovered commands through release
 minification. The injected SSE bridge listens to
 `/api/system` and notifies only on busy-to-idle completion or a newly
 awaiting-response notice. Notification IPC also rechecks persisted consent
-natively. All Android plugin calls leave the main looper before waiting for
+natively. The bridge starts from a fresh prelude or waits once for its
+`ava-shell-config` event. All Android plugin calls leave the main looper before waiting for
 their JNI response; direct synchronous mobile-plugin calls would deadlock it.
 
 Android's network-security XML cannot express IP prefixes, so it permits
