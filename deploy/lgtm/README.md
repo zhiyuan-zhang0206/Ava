@@ -105,8 +105,10 @@ instead of inheriting the upstream default. The unauthenticated backend ports
 the gateway's exact private address; no `0.0.0.0`/`::` listener and no backend
 bind override exist. Grafana (3003) keeps the wider bind: it is the one
 anonymous-but-read-only surface. Grafana has a 2-core / 2GB ceiling; its SQLite
-metadata store runs in WAL mode so dashboard readers do not block provisioning
-writes. Grafana Live is disabled because no shipped dashboard uses it.
+metadata store retries lock-conflicted queries up to five times with Grafana's
+bounded backoff. (`wal=true` is not used: Grafana 13.1.3's modernc SQLite DSN
+adapter does not correctly apply that pragma.) Grafana Live is disabled because
+no shipped dashboard uses it.
 
 ## Start / stop
 
