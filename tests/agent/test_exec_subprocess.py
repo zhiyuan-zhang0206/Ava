@@ -32,6 +32,7 @@ from agent.graph._exec_result import (
 )
 from agent.graph._exec_stream import ExecOutputChunkPublisher
 from agent.graph._exec_subprocess import (
+    _build_child_env,
     _run_in_subprocess,
 )
 from shared.config import settings
@@ -39,6 +40,22 @@ from shared.lifecycle import AgentRestart, AgentTermination, _SystemHalt
 from shared.proc import kill_process_tree
 
 _AGENT_ID = 424242
+
+
+def test_child_env_disables_otlp_without_mutating_parent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # This is the live subprocess handoff, not the startup-frozen Settings field.
+    monkeypatch.setitem(os.environ, "AVA_TELEMETRY_OTLP_ENABLED", "true")
+
+    child_env = _build_child_env(
+        _AGENT_ID,
+        tmp_path / "request.json",
+        tmp_path / "result.json",
+    )
+
+    assert child_env["AVA_TELEMETRY_OTLP_ENABLED"] == "false"
+    assert os.environ["AVA_TELEMETRY_OTLP_ENABLED"] == "true"
 
 
 def _seed_agent_for_self_lifecycle() -> None:
