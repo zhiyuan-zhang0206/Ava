@@ -149,8 +149,8 @@ def test_lease_zombie_pass_skipped_within_grace_window(
     process)."""
     calls: list[object] = []
     monkeypatch.setattr(respawn_mod, "_select_local_restarting_ids", lambda *_a: [])  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(respawn_mod, "_reap_local_dead_starting", lambda *_a: [])  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(respawn_mod, "_reap_local_stale_allocated", lambda *_a: [])  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(respawn_mod, "_reap_local_dead_boot_phase_agents", lambda *_a: [])  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(respawn_mod, "_reap_local_unclaimed_idling", lambda *_a: [])  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(respawn_mod, "_revive_local_dead_running_idling", lambda *_a: [])  # pyright: ignore[reportUnknownArgumentType]
 
     def _collect(*_args: object, **_kwargs: object) -> list[int]:
@@ -173,8 +173,8 @@ def test_lease_zombie_pass_runs_after_grace_expires(
     whose lease lapsed under normal operation is still collected."""
     calls: list[dict[str, Any]] = []
     monkeypatch.setattr(respawn_mod, "_select_local_restarting_ids", lambda *_a: [])  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(respawn_mod, "_reap_local_dead_starting", lambda *_a: [])  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(respawn_mod, "_reap_local_stale_allocated", lambda *_a: [])  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(respawn_mod, "_reap_local_dead_boot_phase_agents", lambda *_a: [])  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(respawn_mod, "_reap_local_unclaimed_idling", lambda *_a: [])  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(respawn_mod, "_revive_local_dead_running_idling", lambda *_a: [])  # pyright: ignore[reportUnknownArgumentType]
 
     def _collect(*_args: object, **_kwargs: object) -> list[int]:
@@ -196,8 +196,8 @@ def test_lease_zombie_grace_defaults_to_no_skip(monkeypatch: pytest.MonkeyPatch)
     the grace is opt-in from the daemon."""
     calls: list[dict[str, Any]] = []
     monkeypatch.setattr(respawn_mod, "_select_local_restarting_ids", lambda *_a: [])  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(respawn_mod, "_reap_local_dead_starting", lambda *_a: [])  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(respawn_mod, "_reap_local_stale_allocated", lambda *_a: [])  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(respawn_mod, "_reap_local_dead_boot_phase_agents", lambda *_a: [])  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(respawn_mod, "_reap_local_unclaimed_idling", lambda *_a: [])  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(respawn_mod, "_revive_local_dead_running_idling", lambda *_a: [])  # pyright: ignore[reportUnknownArgumentType]
 
     def _collect(*_args: object, **_kwargs: object) -> list[int]:

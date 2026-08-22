@@ -188,7 +188,7 @@ class TestSpawn:
         new_id = resp.json()["id"]
         row = _agent_row(db_conn, new_id)  # pyright: ignore[reportUnknownVariableType]
         # spawner defaults to 'user' (triggered by UI button)
-        assert row == (new_id, "user", None, None, "allocated")
+        assert row == (new_id, "user", None, None, "idling")
         # No inbound delivered
         assert _inbound_rows(db_conn, new_id) == []
 
@@ -562,7 +562,7 @@ class TestList:
         rows = resp.json()
         assert len(rows) == 2
         by_id = {r["agent_id"]: r for r in rows}
-        assert by_id[a_id]["status"] == "allocated"
+        assert by_id[a_id]["status"] == "idling"
         assert by_id[a_id]["spawner"] == "user"
         assert by_id[b_id]["status"] == "idling"
         assert by_id[b_id]["spawner"] == f"agent:{a_id}"

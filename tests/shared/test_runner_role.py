@@ -160,7 +160,7 @@ def test_runner_grant_matrix(runner_db: str) -> None:
         assert agent_row is not None
         agent_id: int = agent_row[0]
         conn.execute(
-            "INSERT INTO agents_meta (id, spawner, status) VALUES (%s, 'user', 'allocated')",
+            "INSERT INTO agents_meta (id, spawner, status) VALUES (%s, 'user', 'idling')",
             (agent_id,),
         )
         inbound_row = conn.execute(

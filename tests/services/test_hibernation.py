@@ -2,7 +2,7 @@
 
 Covers the pieces that make hibernation safe and invisible:
 - `swap_in_agent` (ops.agents): the clean-restart wake — CAS 'hibernating' ->
-  'allocated', clears pid, launches, and inserts NO lifecycle inbound (the agent
+  unclaimed 'idling', clears pid, launches, and inserts NO lifecycle inbound (the agent
   must not be able to tell it was ever swapped out).
 - `mark_agent_hibernating_op` (ops.ops_lifecycle): the swap-out finalize — parks
   'running'/'idling' -> 'hibernating', leaves pages OPEN, writes no exit event;
@@ -121,7 +121,7 @@ def _inbound_kinds(db: psycopg.Connection, aid: int) -> list[str]:
 
 
 class TestSwapInAgent:
-    def test_hibernating_flips_to_allocated_clears_pid_and_launches(
+    def test_hibernating_flips_to_unclaimed_idling_clears_pid_and_launches(
         self,
         db_conn: psycopg.Connection,
         launched_agents: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
@@ -131,7 +131,7 @@ class TestSwapInAgent:
 
         assert swap_in_agent(aid) is True
 
-        assert _status(db_conn, aid) == "allocated"  # launch stubbed, no claim to 'starting'
+        assert _status(db_conn, aid) == "idling"  # launch stubbed, no claim yet
         assert _pid(db_conn, aid) is None  # stale pre-hibernation pid cleared
         assert [c.agent_id for c in launched_agents] == [aid]  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
 
@@ -170,13 +170,13 @@ class TestSwapInAgent:
     ) -> None:
         """Idempotent under a double-trigger (e.g. a chat and a heartbeat land in
         the same tick, both routed to swap-in): the CAS `WHERE status='hibernating'`
-        picks a single winner — the first flips it to 'allocated' and launches, the
+        picks a single winner — the first flips it to unclaimed 'idling' and launches, the
         second sees a non-hibernating row and no-ops. Exactly one launch."""
         aid = _park(db_conn, status="hibernating", pid=_DEAD_PID)
         launched_agents.clear()
 
         first = swap_in_agent(aid)
-        second = swap_in_agent(aid)  # the row is now 'allocated' — loses the CAS
+        second = swap_in_agent(aid)  # the row is now 'idling' — loses the CAS
 
         assert (first, second) == (True, False)
         assert [c.agent_id for c in launched_agents] == [  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
@@ -271,6 +271,15 @@ class TestSwapOutSelection:
         self, db_conn: psycopg.Connection, sync_pool: ConnectionPool
     ) -> None:
         aid = _park(db_conn, status="idling", pid=_LIVE_PID, idle_s_ago=30)
+        rows = hib._select_local_swap_out_candidates(sync_pool, machine_name(), 60.0, 0)
+        assert aid not in [r[0] for r in rows]
+
+    def test_preclaim_idling_without_pid_is_not_selected(
+        self, db_conn: psycopg.Connection, sync_pool: ConnectionPool
+    ) -> None:
+        """The shared idling status is not enough for swap-out: an unclaimed
+        birth row has no process to signal and must stay out of this selector."""
+        aid = _park(db_conn, status="idling", pid=None, idle_s_ago=120)
         rows = hib._select_local_swap_out_candidates(sync_pool, machine_name(), 60.0, 0)
         assert aid not in [r[0] for r in rows]
 
@@ -474,7 +483,7 @@ class TestControllerReconcile:
         result = hib.HibernateController(sync_pool).reconcile("agent-runner")
 
         assert result.acted is True
-        assert _status(db_conn, aid) == "allocated"
+        assert _status(db_conn, aid) == "idling"
         assert aid in [c.agent_id for c in launched_agents]  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
 
     def test_signals_swap_out_when_enabled(
@@ -540,7 +549,7 @@ class TestControllerReconcile:
 
         assert sent == []  # no swap-out signal while disabled
         assert _status(db_conn, idle) == "idling"  # idle agent left resident
-        assert _status(db_conn, hibd) == "allocated"  # hibernating one still swapped in
+        assert _status(db_conn, hibd) == "idling"  # hibernating one still swapped in
         assert hibd in [c.agent_id for c in launched_agents]  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
 
 
@@ -565,7 +574,7 @@ class TestReaperImmunity:
         assert aid not in revived
         assert _status(db_conn, aid) == "hibernating"
 
-    def test_starting_and_allocated_reapers_ignore_hibernating(
+    def test_boot_phase_and_dead_birth_reapers_ignore_hibernating(
         self,
         db_conn: psycopg.Connection,
         sync_pool: ConnectionPool,
@@ -573,8 +582,8 @@ class TestReaperImmunity:
     ) -> None:
         _stub_identity(monkeypatch, rd, AgentProcessIdentity.GONE)
         aid = _park(db_conn, status="hibernating", pid=_DEAD_PID, idle_s_ago=9999)
-        assert aid not in rd._reap_local_dead_starting(sync_pool, machine_name())
-        assert aid not in rd._reap_local_stale_allocated(sync_pool, machine_name(), 0.0)
+        assert aid not in rd._reap_local_dead_boot_phase_agents(sync_pool, machine_name())
+        assert aid not in rd._reap_local_unclaimed_idling(sync_pool, machine_name(), 0.0)
         assert _status(db_conn, aid) == "hibernating"
 
 
@@ -618,6 +627,6 @@ class TestHeartbeatWakeChain:
         result = hib.HibernateController(sync_pool).reconcile("agent-runner")
 
         assert result.acted is True
-        assert _status(db_conn, aid) == "allocated"
+        assert _status(db_conn, aid) == "idling"
         assert aid in [c.agent_id for c in launched_agents]  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
         assert _inbound_kinds(db_conn, aid) == ["heartbeat"]  # no resurrect/restart marker added

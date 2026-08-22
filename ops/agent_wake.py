@@ -2,7 +2,7 @@
 
 The other lifecycle half from `ops/agent_spawn.py` (which creates new rows);
 both are reached through `ops/agents.py`. Three wake paths, one shape: a CAS on
-`agents_meta.status` into 'allocated' (clearing pid / started_at), an optional
+`agents_meta.status` into unclaimed 'idling' (clearing pid / started_at), an optional
 lifecycle inbound, then a relaunch attached to the same `agent_id` — LangGraph's
 checkpointer restores the message history, so the process resumes rather than
 starts over. Resurrection creates the detached session while its machine and
@@ -14,7 +14,7 @@ hibernation is deliberately invisible to the agent. The *mechanics* of launching
 the child live in `ops/agent_launch.py`, reached via module-qualified access
 (`agent_launch._launch_or_force_terminated`).
 
-- **resurrect_agent(...)** — a 'terminated' row -> 'allocated' + launch.
+- **resurrect_agent(...)** — a 'terminated' row -> unclaimed 'idling' + launch.
   INSERTs a kind='resurrect' inbound so the LLM sees why it resumed; an
   optional `prompt` adds a chat in the same transaction. The child cannot claim
   or process either inbound
@@ -26,7 +26,7 @@ the child live in `ops/agent_launch.py`, reached via module-qualified access
   later kill therefore wins without a marker or launch. Crash and wedged
   recovery instead carry an exact controller claim for the current death;
   explicit manual resurrection has neither automatic-work guard.
-- **respawn_agent(agent_id)** — 'restarting' -> 'allocated' + launch process,
+- **respawn_agent(agent_id)** — 'restarting' -> unclaimed 'idling' + launch process,
   same pattern as resurrect. **Automatically INSERTs one
   kind='restart_completed' inbound** (source taken from the original 'restart'
   inbound, empty content), used by the restarter daemon, race-safe.
@@ -123,7 +123,7 @@ def _lock_active_home_machine(cur: psycopg.Cursor, agent_id: int) -> None:
         )
 
 
-def _transition_terminated_to_allocated(
+def _transition_terminated_to_unclaimed_idling(
     cur: psycopg.Cursor,
     agent_id: int,
     *,
@@ -132,7 +132,7 @@ def _transition_terminated_to_allocated(
     auto_claim: AutoResurrectClaim | None,
 ) -> datetime:
     """Run the one final resurrection CAS with a fully static SQL shape."""
-    base_params = (AgentStatus.ALLOCATED, agent_id, AgentStatus.TERMINATED)
+    base_params = (AgentStatus.IDLING, agent_id, AgentStatus.TERMINATED)
     if trigger_inbound_id is not None:
         assert trigger_inbound_kind is not None  # validated at public helper boundary  # noqa: S101
         cur.execute(
@@ -242,7 +242,7 @@ def _prepare_resurrect_attempt(
             raise ResurrectAlreadyAlive(
                 f"agent {agent_id} is in {current.value!r} state, not 'terminated'"
             )
-        allocation_epoch = _transition_terminated_to_allocated(
+        allocation_epoch = _transition_terminated_to_unclaimed_idling(
             cur,
             agent_id,
             trigger_inbound_id=trigger_inbound_id,
@@ -290,14 +290,15 @@ def _retry_resurrect_session(agent_id: int, prepared: _PreparedResurrect) -> boo
     with shared.db.connect() as conn, conn.cursor() as cur:
         _lock_active_home_machine(cur, agent_id)
         cur.execute(
-            "SELECT status, status_changed_at FROM agents_meta WHERE id = %s FOR UPDATE",
+            "SELECT status, status_changed_at, pid FROM agents_meta WHERE id = %s FOR UPDATE",
             (agent_id,),
         )
         row = cur.fetchone()
         if (
             row is None
-            or row[0] != AgentStatus.ALLOCATED.value
+            or row[0] != AgentStatus.IDLING.value
             or row[1] != prepared.allocation_epoch
+            or row[2] is not None
         ):
             return False
         agent_launch._launch_agent_process(
@@ -315,17 +316,17 @@ def _mark_resurrect_launch_failed(agent_id: int, prepared: _PreparedResurrect) -
     changed = False
     with shared.db.connect() as conn, conn.cursor() as cur:
         cur.execute(
-            "SELECT status, status_changed_at FROM agents_meta WHERE id = %s FOR UPDATE",
+            "SELECT status, status_changed_at, pid FROM agents_meta WHERE id = %s FOR UPDATE",
             (agent_id,),
         )
         row = cur.fetchone()
-        if row == (AgentStatus.ALLOCATED.value, prepared.allocation_epoch):
+        if row == (AgentStatus.IDLING.value, prepared.allocation_epoch, None):
             page_names = list_open_page_names(conn, agent_id)
             agent_launch._kill_stale_session(agent_id)
             cur.execute(
                 "UPDATE agents_meta SET status = 'terminated', "
                 "termination_source = 'launch-confirm' "
-                "WHERE id = %s AND status = 'allocated' AND status_changed_at = %s",
+                "WHERE id = %s AND status = 'idling' AND pid IS NULL AND status_changed_at = %s",
                 (agent_id, prepared.allocation_epoch),
             )
             changed = cur.rowcount == 1
@@ -344,7 +345,7 @@ def _confirm_resurrect_with_retries(
     attempt = first_attempt
     while True:
         try:
-            agent_launch._wait_for_status_to_leave_allocated(agent_id)
+            agent_launch._wait_for_agent_claim(agent_id)
             return True
         except RuntimeError as exc:
             if attempt >= agent_launch._LAUNCH_MAX_RETRIES:
@@ -381,7 +382,7 @@ def resurrect_agent(
     trigger_inbound_kind: Literal["chat", "compact_request"] | None = None,
     auto_claim: AutoResurrectClaim | None = None,
 ) -> int:
-    """Resurrect an already-terminated agent: UPDATE 'terminated' -> 'allocated'
+    """Resurrect an already-terminated agent: UPDATE 'terminated' -> unclaimed 'idling'
     + INSERT one kind='resurrect' inbound (source=resurrected_by) +
     (optionally) one 'chat' prompt inbound + launch process.
 
@@ -423,7 +424,7 @@ def resurrect_agent(
             'resurrect' inbound, so the agent knows why it was resurrected and
             what to do. None (the UI event path) delivers only the marker.
         trigger_inbound_id: optional pending-work auto-resurrect guard. When
-            set with `trigger_inbound_kind`, the terminated -> allocated
+            set with `trigger_inbound_kind`, the terminated -> idling
             transition wins only if this exact chat or compact request is still
             pending, was created after the current death, and has an id above
             the latest explicit-kill fence. Explicit manual and controller
@@ -441,7 +442,7 @@ def resurrect_agent(
     Raises:
         AgentNotFound: agent_id does not exist.
         ResurrectAlreadyAlive: agent is in a non-'terminated' state
-            (allocated / starting / running / idling / restarting) — any state
+            (running / idling / restarting) — any state
             that means "still alive or not fully dead" should not spawn a
             second process.
         ResurrectTriggerStaleError: `trigger_inbound_id` no longer names the
@@ -498,7 +499,7 @@ def resurrect_agent(
 
 
 def respawn_agent(agent_id: int) -> bool:
-    """Called by the restarter daemon: UPDATE 'restarting' -> 'allocated' +
+    """Called by the restarter daemon: UPDATE 'restarting' -> unclaimed 'idling' +
     INSERT one kind='restart_completed' inbound + start a fresh process
     attached to the same agent_id (new PID, LangGraph state preserved).
 
@@ -512,9 +513,9 @@ def respawn_agent(agent_id: int) -> bool:
     WHERE winner launches the process; others return False and skip.
 
     The UPDATE commit happens **before** the SELECT/INSERT phase — once
-    status='allocated' commit takes effect, restarter no longer polls this
+    status='idling' commit takes effect, restarter no longer polls this
     agent, and a raise in subsequent steps will not trigger infinite retry
-    (on raise, agent is stuck at 'allocated', matching launch-failure
+    (on raise, agent is stuck unclaimed at 'idling', matching launch-failure
     semantics — ops reads logs and cleans up manually).
 
     Returns:
@@ -530,14 +531,14 @@ def respawn_agent(agent_id: int) -> bool:
         cur.execute(
             "UPDATE agents_meta SET status = %s, pid = NULL, started_at = NULL, "
             "lease_expires_at = NULL WHERE id = %s AND status = %s",
-            (AgentStatus.ALLOCATED, agent_id, AgentStatus.RESTARTING),
+            (AgentStatus.IDLING, agent_id, AgentStatus.RESTARTING),
         )
         won_race = cur.rowcount == 1
         conn.commit()
         if not won_race:
             return False
         logger.info(
-            "agent {agent_id} respawn won race, committing phase 1 (restarting -> allocated)",
+            "agent {agent_id} respawn won race, committing phase 1 (restarting -> idling)",
             event="respawn_phase1",
             agent_id=agent_id,
         )
@@ -548,7 +549,7 @@ def respawn_agent(agent_id: int) -> bool:
         # "restart" branch only marks RESTARTING after receiving a restart
         # inbound). row is None = DB integrity violation (ops manually
         # UPDATEd bypassing the inbound path / migration bug); raise to make
-        # it visible to ops. At this point status is 'allocated', restarter
+        # it visible to ops. At this point status is unclaimed 'idling', restarter
         # will not retrigger (raise once and stop).
         #
         # Source passthrough: `ava.self.restart()` posts empty content with
@@ -675,7 +676,7 @@ def respawn_agent(agent_id: int) -> bool:
 
 def swap_in_agent(agent_id: int) -> bool:
     """Swap a hibernating agent's process back in: UPDATE 'hibernating' ->
-    'allocated' (clearing pid/started_at) + launch a fresh process attached to
+    unclaimed 'idling' (clearing pid/started_at) + launch a fresh process attached to
     the same agent_id, with NO lifecycle inbound.
 
     The clean-restart counterpart to `resurrect_agent` / `respawn_agent`: the same
@@ -691,7 +692,7 @@ def swap_in_agent(agent_id: int) -> bool:
     Race-safe noop: the CAS `WHERE status='hibernating'` picks a single winner, so
     two concurrent swap-in attempts (the controller's poll racing its own next
     tick) cannot both launch. pid/started_at are cleared on the flip to
-    'allocated' so a dead prior pid never lingers as ghost data (agent 44
+    unclaimed 'idling' so a dead prior pid never lingers as ghost data (agent 44
     incident), matching resurrect/respawn.
 
     The caller MUST run this on the agent's home machine (`agents_meta.machine`) —
@@ -704,13 +705,13 @@ def swap_in_agent(agent_id: int) -> bool:
         False: lost the race / the row was not 'hibernating' — noop, does not raise.
     """
     with shared.db.connect() as conn, conn.cursor() as cur:
-        # Race-safe gate: flip + commit so a concurrent swap-in sees 'allocated'
+        # Race-safe gate: flip + commit so a concurrent swap-in sees unclaimed 'idling'
         # and loses. Clears pid/started_at (parked from the pre-hibernation
-        # process), same as resurrect/respawn returning to 'allocated'.
+        # process), same as resurrect/respawn returning to unclaimed 'idling'.
         cur.execute(
             "UPDATE agents_meta SET status = %s, pid = NULL, started_at = NULL, "
             "lease_expires_at = NULL WHERE id = %s AND status = %s",
-            (AgentStatus.ALLOCATED, agent_id, AgentStatus.HIBERNATING),
+            (AgentStatus.IDLING, agent_id, AgentStatus.HIBERNATING),
         )
         won_race = cur.rowcount == 1
         conn.commit()
@@ -736,7 +737,7 @@ def swap_in_agent(agent_id: int) -> bool:
 
 
 def revive_agent(agent_id: int, dead_pid: int) -> bool:
-    """Revive a dead 'running'/'idling' row: CAS to 'allocated' + launch a fresh
+    """Revive a dead 'running'/'idling' row: CAS to unclaimed 'idling' + launch a fresh
     process, with NO lifecycle inbound.
 
     The boot-revive half of Task #689 G5. A machine reboot / power-off leaves
@@ -756,7 +757,7 @@ def revive_agent(agent_id: int, dead_pid: int) -> bool:
     `machine = local`.
 
     Crash-loop bound: if the revived process dies again at boot, the row lands
-    'starting'/'allocated' and the existing reapers + launch-confirm force it to
+    as a boot-phase death and the reapers + launch-confirm force it to
     'terminated' -- at most one extra revive cycle per dead agent.
 
     Returns:
@@ -766,13 +767,14 @@ def revive_agent(agent_id: int, dead_pid: int) -> bool:
     """
     with shared.db.connect() as conn, conn.cursor() as cur:
         # Race-safe gate, pid-reasserted (ABA-closed like the reaper): flip +
-        # commit so a concurrent revive/reap/launch sees 'allocated' and loses.
+        # commit so a concurrent revive/reap/launch sees unclaimed 'idling' and loses.
         # Clears pid/started_at -- the probed pid is a corpse (or recycled), it
         # must not linger as ghost data (agent 44 incident).
         cur.execute(
-            "UPDATE agents_meta SET status = %s, pid = NULL, started_at = NULL "
+            "UPDATE agents_meta SET status = %s, pid = NULL, started_at = NULL, "
+            "lease_expires_at = NULL "
             "WHERE id = %s AND status IN ('running', 'idling') AND pid = %s",
-            (AgentStatus.ALLOCATED, agent_id, dead_pid),
+            (AgentStatus.IDLING, agent_id, dead_pid),
         )
         won_race = cur.rowcount == 1
         conn.commit()

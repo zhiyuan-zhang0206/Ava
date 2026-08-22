@@ -560,20 +560,18 @@ def insert_inbound_message(
 # live in ONE constant, passed as a parameter (`status = ANY(%s)`), so a "live"
 # semantics change (e.g. adding hibernating) touches one line, not three literal
 # copies (audit 05-gateway-lifecycle A3).
-# R1 (Task #1021): the single "alive" predicate — status in {starting, running,
-# idling} AND lease unexpired. The lease (`agents_meta.lease_expires_at`, written
-# at claim by `agent._starting.enter_starting_state`, renewed by the agent's loop)
+# R1 (Task #1021): the single "alive" predicate — status in {running, idling}
+# AND lease unexpired. The lease (`agents_meta.lease_expires_at`, written at
+# claim by `agent._starting.claim_agent_row`, renewed by the agent's loop)
 # is the liveness authority: a process that died without writing 'terminated'
 # leaves its status behind and the lease expires; a process that cannot renew
-# (wedged, pre-lease code) is a zombie the reaper collects. 'starting' is alive —
-# the process is up and booting. 'hibernating' is deliberately excluded: swapped
-# out, no process, reaper-exempt.
+# (wedged, pre-lease code) is a zombie the reaper collects. 'hibernating' is
+# deliberately excluded: swapped out, no process, reaper-exempt.
 #
 # The statuses live in ONE constant and the lease condition in ONE fragment
 # (`ALIVE_SQL`), so a "live" semantics change touches one line, not the literal
 # copies (audit 05-gateway-lifecycle A3 + r1-state-liveness).
 ALIVE_STATUSES: tuple[str, ...] = (
-    AgentStatus.STARTING.value,
     AgentStatus.RUNNING.value,
     AgentStatus.IDLING.value,
 )

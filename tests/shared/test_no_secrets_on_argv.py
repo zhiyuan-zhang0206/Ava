@@ -312,7 +312,7 @@ def test_agent_process_launch(monkeypatch: pytest.MonkeyPatch) -> None:
             return (True, "noop")
 
     monkeypatch.setattr("ops.agent_launch.native_proc", lambda: _FakeSupervisor)
-    monkeypatch.setattr("ops.agent_launch._wait_for_status_to_leave_allocated", lambda _id: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr("ops.agent_launch._wait_for_agent_claim", lambda _id: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     monkeypatch.setattr("ops.agent_launch.agent_spawn_env_dict", lambda: dict(_SECRET_ENV))
 
     _launch_agent_process(11, config_overlay={"deepseek_api_key": _API_KEY})

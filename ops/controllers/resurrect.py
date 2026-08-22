@@ -193,7 +193,7 @@ def _claim_boot_revive_candidates(
     The machine-reboot half of the involuntary-death story (Task #694 G5): a
     rebooted host's fleet is revived by the running/idling revive pass
     (RespawnController), but corpses already forced to 'terminated' -- the
-    'starting'/'allocated' reapers, or legacy reaps predating the revive pass --
+    boot-phase/dead-birth reapers, or legacy reaps predating the revive pass --
     only ever came back when a NEW inbound arrived (the delivery-path
     resurrect) or when one was already queued (CrashResurrectController). A
     resident agent reaped with no pending work stayed dead across reboots

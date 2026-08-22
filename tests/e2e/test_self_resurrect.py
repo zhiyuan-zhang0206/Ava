@@ -5,7 +5,7 @@ Full cycle:
   2. test calls POST /api/agents/{id}/messages → deliver_chat_inbound
      → auto-resurrect (resurrect_if_terminated) INSERT 'resurrect' inbound
      + session spawn starts fresh process
-  3. new process starts, enter_starting_state UPDATE 'allocated'→'running'
+  3. new process starts, claim_agent_row UPDATE 'idling'→'running'
      → claim processes 'resurrect', writes marker → idle (status='idling')
 
 Verifies:

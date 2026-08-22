@@ -214,7 +214,7 @@ def _e2e_process_env(_provisioned_db: str, _provisioned_redis: str) -> Iterator[
     _AVA_HOME.mkdir(parents=True, exist_ok=True)
     _LOG_DIR.mkdir(parents=True, exist_ok=True)
     os.environ["AVA_HOME"] = str(_AVA_HOME)
-    # multi-machine setup: spawn_agent / enter_starting_state / post_agents read
+    # multi-machine setup: spawn_agent / claim_agent_row / post_agents read
     # $AVA_HOME/machine_name + the serve-capability files; write them or resolution
     # raises.
     (_AVA_HOME / "machine_name").write_text(f"e2e-{_E2E_SUFFIX}")
@@ -630,7 +630,7 @@ def ops_proc(gateway_proc: None) -> Iterator[None]:
 
 @pytest.fixture
 def spawned_agent(ops_proc: None, truncated_db: None) -> Iterator[int]:
-    """POST /api/agents asks gateway to spawn agent; poll until IDLING; teardown terminates.
+    """POST /api/agents asks gateway to spawn agent; poll until claimed IDLING; teardown terminates.
 
     On timeout, force terminate + raise with last_status diagnostic——avoid zombie agent
     process leak into next test.
@@ -640,24 +640,26 @@ def spawned_agent(ops_proc: None, truncated_db: None) -> Iterator[int]:
     agent_id = int(resp.json()["id"])
 
     try:
-        # poll until status=IDLING (claim node up waiting inbound). 90s matches
-        # _db.py wait_for_status ceiling——spawn full chain (dispatch -> boot ->
-        # first claim) occasionally exceeds 30s on loaded runner.
+        # A new, unclaimed row is also IDLING. Poll for both IDLING and the PID
+        # written by the first claim, so callers receive a running process up
+        # waiting inbound. 90s matches _db.py wait_for_status ceiling——the
+        # spawn full chain occasionally exceeds 30s on a loaded runner.
         deadline = time.monotonic() + 90.0
         last_status: str | None = None
-        last_body: str | None = None
+        last_pid: int | None = None
         while time.monotonic() < deadline:
-            r = httpx.get(f"{GATEWAY_URL}/api/agents/{agent_id}", timeout=2.0)
-            last_body = r.text
-            if r.status_code == 200:
-                last_status = r.json().get("status")
-                if last_status == AgentStatus.IDLING.value:
+            with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:
+                cur.execute("SELECT status, pid FROM agents_meta WHERE id = %s", (agent_id,))
+                row = cur.fetchone()
+            if row is not None:
+                last_status, last_pid = row
+                if last_status == AgentStatus.IDLING.value and last_pid is not None:
                     break
             time.sleep(0.3)
         else:
             raise RuntimeError(
-                f"agent {agent_id} did not reach idling within 90s: "
-                f"last_status={last_status!r} last_body={last_body!r}; "
+                f"agent {agent_id} did not reach claimed idling within 90s: "
+                f"last_status={last_status!r} last_pid={last_pid!r}; "
                 f"see $AVA_HOME/logs/agent-{agent_id}.log "
                 f"(CI: the e2e-logs artifact)"
             )

@@ -30,8 +30,6 @@ from typing import ClassVar
 
 
 class AgentStatus(StrEnum):
-    ALLOCATED = "allocated"
-    STARTING = "starting"
     RUNNING = "running"
     IDLING = "idling"
     RESTARTING = "restarting"
@@ -51,7 +49,7 @@ class TerminationSource(StrEnum):
     that writes it, and the sole input to "may this corpse be auto-resurrected".
 
     Meaningful only while status='terminated'; cleared to NULL on the
-    terminated -> allocated resurrect transition, so the mark is per-death.
+    terminated -> idling resurrect transition, so the mark is per-death.
 
     The write sites embed these as SQL literals (a terminated-write stamps status
     and source in ONE statement, so the pair can never come apart); this enum is
@@ -69,7 +67,7 @@ class TerminationSource(StrEnum):
     # Intentional — the agent's own graceful process-exit finalize (self-terminate,
     # or a caught SIGTERM/SIGHUP that ran the exit finally). Never auto-resurrected.
     EXIT = "exit"
-    # Involuntary — a restarter corpse reaper found a dead pid / a stale 'allocated'
+    # Involuntary — a restarter corpse reaper found a dead pid / stale unclaimed idling
     # row (OOM/SIGKILL/crash leaves no finally, so it never reaches EXIT).
     REAPER = "reaper"
     # Involuntary — a launch that never confirmed: the launcher's confirm poll timed

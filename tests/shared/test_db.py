@@ -67,12 +67,12 @@ def _inbound_rows(db_conn: psycopg.Connection, agent_id: int) -> list[tuple[str,
 
 def test_signal_live_agents_restart_only_live(db_conn: psycopg.Connection) -> None:
     """One restart inbound (content='', the given source) per running/idling agent;
-    terminated/restarting/allocated get none. Returns the ids signalled."""
+    terminated/restarting/hibernating get none. Returns the ids signalled."""
     running = _seed_agent(db_conn, "running")
     idling = _seed_agent(db_conn, "idling")
     terminated = _seed_agent(db_conn, "terminated")
     restarting = _seed_agent(db_conn, "restarting")
-    allocated = _seed_agent(db_conn, "allocated")
+    hibernating = _seed_agent(db_conn, "hibernating")
 
     ids = db.signal_live_agents_restart(source="system:update")
 
@@ -81,7 +81,7 @@ def test_signal_live_agents_restart_only_live(db_conn: psycopg.Connection) -> No
     assert _inbound_rows(db_conn, idling) == [("restart", "system:update", "")]
     assert _inbound_rows(db_conn, terminated) == []
     assert _inbound_rows(db_conn, restarting) == []
-    assert _inbound_rows(db_conn, allocated) == []
+    assert _inbound_rows(db_conn, hibernating) == []
 
 
 def test_signal_live_agents_restart_requires_an_unexpired_lease(
@@ -112,12 +112,10 @@ def test_agent_is_alive_predicate() -> None:
 
     assert db.agent_is_alive("running", future) is True
     assert db.agent_is_alive("idling", future) is True
-    assert db.agent_is_alive("starting", future) is True
     assert db.agent_is_alive("running", None) is False  # pre-lease row
     assert db.agent_is_alive("running", past) is False  # expired
     assert db.agent_is_alive("hibernating", future) is False  # reaper-exempt
     assert db.agent_is_alive("terminated", future) is False
-    assert db.agent_is_alive("allocated", future) is False
     assert db.agent_is_alive("restarting", future) is False
 
 

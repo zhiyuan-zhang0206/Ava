@@ -1,11 +1,9 @@
-"""Restarter orphan-'starting' reaper unit tests.
+"""Restarter dead-birth and dead-process reaper unit tests.
 
-A process flips its row 'allocated' -> 'starting' (writing its pid) early in
-boot and only reaches 'running' once it enters the run loop. If it dies in
-between (boot crash, OOM, SIGKILL, schema drift), the row strands at 'starting'
-forever: the restart dispatch only touches 'restarting', and the gateway
-zombie-reap is lazy. The restarter sweeps these — a 'starting' row whose pid is
-no longer that agent's own process is forced to 'terminated'.
+An unclaimed idling row has NULL ownership columns and is reaped by age. A
+claimed running/idling row with a dead pid and no produced message is reaped
+into the crash-resurrect backoff path. Post-message process deaths retain their
+direct revive behavior.
 
 The reapers' predicate is process IDENTITY, not liveness (`ops.agent_identity`),
 so it is the identity probe that is monkeypatched here rather than a pid check —
@@ -45,26 +43,27 @@ def sync_pool():
         pool.close()
 
 
-def _make_starting(db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch) -> int:
-    """Spawn an agent row and force it to 'starting' with a fixed pid."""
+def _make_dead_boot_phase_agent(db_conn: psycopg.Connection) -> int:
+    """Create a claimed row that died before producing any AI output."""
     tid = spawn_agent()
     with db_conn.cursor() as cur:
         cur.execute(
-            "UPDATE agents_meta SET status = 'starting', pid = %s WHERE id = %s",
+            "UPDATE agents_meta SET status = 'running', pid = %s, last_message_text = NULL "
+            "WHERE id = %s",
             (_DEAD_PID, tid),
         )
     db_conn.commit()
     return tid
 
 
-def test_reaps_starting_row_with_dead_pid(
+def test_reaps_dead_boot_phase_row_with_dead_pid(
     db_conn: psycopg.Connection, sync_pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """'starting' + dead pid -> forced to 'terminated', returned in the list."""
+    """A pre-message running row with a dead pid enters crash-resurrect backoff."""
     _stub_probe(monkeypatch, AgentProcessIdentity.GONE)
-    tid = _make_starting(db_conn, monkeypatch)
+    tid = _make_dead_boot_phase_agent(db_conn)
 
-    reaped = rd._reap_local_dead_starting(sync_pool, machine_name())
+    reaped = rd._reap_local_dead_boot_phase_agents(sync_pool, machine_name())
 
     assert reaped == [tid]
     with db_conn.cursor() as cur:
@@ -83,14 +82,14 @@ def _open_page(db_conn: psycopg.Connection, aid: int, name: str = "report") -> N
     db_conn.commit()
 
 
-def test_reaping_starting_row_publishes_page_closed(
+def test_reaping_dead_boot_phase_row_publishes_page_closed(
     db_conn: psycopg.Connection, sync_pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A reaped 'starting' row holding open pages emits one PageClosed per page
+    """A reaped boot-phase row holding open pages emits one PageClosed per page
     (audit B2) — the cascade trigger closes the page rows, the events clear the
     frontend popover instead of leaving stale entries until the next refresh."""
     _stub_probe(monkeypatch, AgentProcessIdentity.GONE)
-    tid = _make_starting(db_conn, monkeypatch)
+    tid = _make_dead_boot_phase_agent(db_conn)
     _open_page(db_conn, tid)
 
     closed: list[tuple[int, str]] = []
@@ -100,7 +99,7 @@ def test_reaping_starting_row_publishes_page_closed(
         lambda aid, name: closed.append((aid, name)),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     )
 
-    reaped = rd._reap_local_dead_starting(sync_pool, machine_name())
+    reaped = rd._reap_local_dead_boot_phase_agents(sync_pool, machine_name())
 
     assert reaped == [tid]
     assert closed == [(tid, "report")]
@@ -109,19 +108,19 @@ def test_reaping_starting_row_publishes_page_closed(
         assert cur.fetchone()[0] is True  # type: ignore[index]
 
 
-def test_leaves_starting_row_with_live_pid(
+def test_leaves_boot_phase_row_with_live_pid(
     db_conn: psycopg.Connection, sync_pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """'starting' + live pid = still mid-boot -> left untouched."""
+    """A live boot-phase process is left untouched."""
     _stub_probe(monkeypatch, AgentProcessIdentity.OWNED)
-    tid = _make_starting(db_conn, monkeypatch)
+    tid = _make_dead_boot_phase_agent(db_conn)
 
-    reaped = rd._reap_local_dead_starting(sync_pool, machine_name())
+    reaped = rd._reap_local_dead_boot_phase_agents(sync_pool, machine_name())
 
     assert reaped == []
     with db_conn.cursor() as cur:
         cur.execute("SELECT status FROM agents_meta WHERE id = %s", (tid,))
-        assert cur.fetchone()[0] == "starting"  # type: ignore[index]
+        assert cur.fetchone()[0] == "running"  # type: ignore[index]
 
 
 def test_ignores_other_machines_rows(
@@ -130,54 +129,54 @@ def test_ignores_other_machines_rows(
     """A row homed on another machine is never probed/reaped — its pid lives in
     a different host's pid space and is not ours to judge."""
     _stub_probe(monkeypatch, AgentProcessIdentity.GONE)
-    tid = _make_starting(db_conn, monkeypatch)
+    tid = _make_dead_boot_phase_agent(db_conn)
     with db_conn.cursor() as cur:
         cur.execute("UPDATE agents_meta SET machine = 'other-host' WHERE id = %s", (tid,))
     db_conn.commit()
 
-    reaped = rd._reap_local_dead_starting(sync_pool, machine_name())
+    reaped = rd._reap_local_dead_boot_phase_agents(sync_pool, machine_name())
 
     assert reaped == []
     with db_conn.cursor() as cur:
         cur.execute("SELECT status FROM agents_meta WHERE id = %s", (tid,))
-        assert cur.fetchone()[0] == "starting"  # type: ignore[index]
+        assert cur.fetchone()[0] == "running"  # type: ignore[index]
 
 
-def test_leaves_starting_row_with_null_pid(
+def test_leaves_boot_phase_scan_row_with_null_pid(
     db_conn: psycopg.Connection, sync_pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A 'starting' row with no pid (invariant violation — claim always writes
+    """A running row with no pid (invariant violation — claim always writes
     one) is left for manual attention, not guessed dead. The pid-pinned UPDATE
     could not safely match it anyway."""
     _stub_probe(monkeypatch, AgentProcessIdentity.GONE)
     tid = spawn_agent()
     with db_conn.cursor() as cur:
-        cur.execute("UPDATE agents_meta SET status = 'starting', pid = NULL WHERE id = %s", (tid,))
+        cur.execute("UPDATE agents_meta SET status = 'running', pid = NULL WHERE id = %s", (tid,))
     db_conn.commit()
 
-    reaped = rd._reap_local_dead_starting(sync_pool, machine_name())
+    reaped = rd._reap_local_dead_boot_phase_agents(sync_pool, machine_name())
 
     assert reaped == []
     with db_conn.cursor() as cur:
         cur.execute("SELECT status FROM agents_meta WHERE id = %s", (tid,))
-        assert cur.fetchone()[0] == "starting"  # type: ignore[index]
+        assert cur.fetchone()[0] == "running"  # type: ignore[index]
 
 
-def test_leaves_non_starting_rows(
+def test_boot_phase_scan_leaves_post_message_rows(
     db_conn: psycopg.Connection, sync_pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The 'starting' sweep only touches 'starting' — a 'running' row (even with
-    a dead pid) is the running/idling reaper's job, not this one's."""
+    """A row with an AI message remains on the ordinary revive path."""
     _stub_probe(monkeypatch, AgentProcessIdentity.GONE)
     tid = spawn_agent()
     with db_conn.cursor() as cur:
         cur.execute(
-            "UPDATE agents_meta SET status = 'running', pid = %s WHERE id = %s",
+            "UPDATE agents_meta SET status = 'running', pid = %s, last_message_text = 'done' "
+            "WHERE id = %s",
             (_DEAD_PID, tid),
         )
     db_conn.commit()
 
-    reaped = rd._reap_local_dead_starting(sync_pool, machine_name())
+    reaped = rd._reap_local_dead_boot_phase_agents(sync_pool, machine_name())
 
     assert reaped == []
     with db_conn.cursor() as cur:
@@ -186,18 +185,17 @@ def test_leaves_non_starting_rows(
 
 
 # ────────────────────────────────────────────────────────────────────────
-# _reap_local_stale_allocated — age-based sweep of 'allocated' orphans
+# _reap_local_unclaimed_idling — age-based sweep of unclaimed idling rows
 # ────────────────────────────────────────────────────────────────────────
-# 'allocated' carries no pid, so liveness is judged by age: status_changed_at
-# (stamped by the DB trigger on entry into 'allocated') older than a grace.
+# Unclaimed idling rows carry no pid, so liveness is judged by age.
 
 _GRACE_S = 60.0
 
 
-def _make_allocated_aged(
+def _make_unclaimed_idling_aged(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, *, age_s: float
 ) -> int:
-    """Spawn an 'allocated' row and backdate its status_changed_at by age_s.
+    """Spawn an unclaimed idling row and backdate its status_changed_at by age_s.
 
     The backdating UPDATE touches only status_changed_at, not status, so the
     BEFORE-UPDATE-OF-status trigger does not fire and the planted value sticks.
@@ -213,13 +211,13 @@ def _make_allocated_aged(
     return tid
 
 
-def test_reaps_allocated_row_older_than_grace(
+def test_reaps_unclaimed_idling_row_older_than_grace(
     db_conn: psycopg.Connection, sync_pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """'allocated' past the grace = the launched process never claimed -> reap."""
-    tid = _make_allocated_aged(db_conn, monkeypatch, age_s=2 * _GRACE_S)
+    """The dead-birth predicate is idling + NULL pid + age past grace."""
+    tid = _make_unclaimed_idling_aged(db_conn, monkeypatch, age_s=2 * _GRACE_S)
 
-    reaped = rd._reap_local_stale_allocated(sync_pool, machine_name(), _GRACE_S)
+    reaped = rd._reap_local_unclaimed_idling(sync_pool, machine_name(), _GRACE_S)
 
     assert reaped == [tid]
     with db_conn.cursor() as cur:
@@ -227,13 +225,13 @@ def test_reaps_allocated_row_older_than_grace(
         assert cur.fetchone()[0] == "terminated"  # type: ignore[index]
 
 
-def test_reaping_stale_allocated_publishes_page_closed(
+def test_reaping_unclaimed_idling_publishes_page_closed(
     db_conn: psycopg.Connection, sync_pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A reaped stale-'allocated' row holding open pages emits one PageClosed per
-    page (audit B2) — an 'allocated' row can hold pages reopened by resurrect's
+    """A reaped stale unclaimed row holding open pages emits one PageClosed per
+    page (audit B2) — an unclaimed row can hold pages reopened by resurrect's
     cascade_open, and the frontend popover must drop them on the reap."""
-    tid = _make_allocated_aged(db_conn, monkeypatch, age_s=2 * _GRACE_S)
+    tid = _make_unclaimed_idling_aged(db_conn, monkeypatch, age_s=2 * _GRACE_S)
     _open_page(db_conn, tid, name="panel")
 
     closed: list[tuple[int, str]] = []
@@ -243,7 +241,7 @@ def test_reaping_stale_allocated_publishes_page_closed(
         lambda aid, name: closed.append((aid, name)),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     )
 
-    reaped = rd._reap_local_stale_allocated(sync_pool, machine_name(), _GRACE_S)
+    reaped = rd._reap_local_unclaimed_idling(sync_pool, machine_name(), _GRACE_S)
 
     assert reaped == [tid]
     assert closed == [(tid, "panel")]
@@ -252,69 +250,67 @@ def test_reaping_stale_allocated_publishes_page_closed(
         assert cur.fetchone()[0] is True  # type: ignore[index]
 
 
-def test_leaves_recent_allocated_row(
+def test_leaves_recent_unclaimed_idling_row(
     db_conn: psycopg.Connection, sync_pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A freshly 'allocated' row (within grace) is a normal mid-launch state —
+    """A freshly unclaimed idling row (within grace) is a normal mid-launch state —
     left alone so a merely-slow boot is never reaped."""
-    tid = _make_allocated_aged(db_conn, monkeypatch, age_s=1.0)
+    tid = _make_unclaimed_idling_aged(db_conn, monkeypatch, age_s=1.0)
 
-    reaped = rd._reap_local_stale_allocated(sync_pool, machine_name(), _GRACE_S)
+    reaped = rd._reap_local_unclaimed_idling(sync_pool, machine_name(), _GRACE_S)
 
     assert reaped == []
     with db_conn.cursor() as cur:
         cur.execute("SELECT status FROM agents_meta WHERE id = %s", (tid,))
-        assert cur.fetchone()[0] == "allocated"  # type: ignore[index]
+        assert cur.fetchone()[0] == "idling"  # type: ignore[index]
 
 
-def test_allocated_reaper_ignores_other_machines(
+def test_dead_birth_reaper_ignores_other_machines(
     db_conn: psycopg.Connection, sync_pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A stale 'allocated' row homed elsewhere belongs to that host's reaper."""
-    tid = _make_allocated_aged(db_conn, monkeypatch, age_s=2 * _GRACE_S)
+    """A stale unclaimed row homed elsewhere belongs to that host's reaper."""
+    tid = _make_unclaimed_idling_aged(db_conn, monkeypatch, age_s=2 * _GRACE_S)
     with db_conn.cursor() as cur:
         cur.execute("UPDATE agents_meta SET machine = 'other-host' WHERE id = %s", (tid,))
     db_conn.commit()
 
-    reaped = rd._reap_local_stale_allocated(sync_pool, machine_name(), _GRACE_S)
+    reaped = rd._reap_local_unclaimed_idling(sync_pool, machine_name(), _GRACE_S)
 
     assert reaped == []
     with db_conn.cursor() as cur:
         cur.execute("SELECT status FROM agents_meta WHERE id = %s", (tid,))
-        assert cur.fetchone()[0] == "allocated"  # type: ignore[index]
+        assert cur.fetchone()[0] == "idling"  # type: ignore[index]
 
 
-def test_allocated_reaper_ignores_starting(
+def test_dead_birth_reaper_ignores_claimed_idling_row(
     db_conn: psycopg.Connection, sync_pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The allocated sweep only touches 'allocated' — a long-lived 'starting'
-    row is the dead-pid reaper's job, judged by pid not age."""
-    tid = _make_allocated_aged(db_conn, monkeypatch, age_s=2 * _GRACE_S)
+    """The dead-birth sweep must not reap an idling row that has a pid."""
+    tid = _make_unclaimed_idling_aged(db_conn, monkeypatch, age_s=2 * _GRACE_S)
     with db_conn.cursor() as cur:
         cur.execute(
-            "UPDATE agents_meta SET status = 'starting', pid = %s WHERE id = %s",
+            "UPDATE agents_meta SET status = 'idling', pid = %s WHERE id = %s",
             (_DEAD_PID, tid),
         )
     db_conn.commit()
 
-    reaped = rd._reap_local_stale_allocated(sync_pool, machine_name(), _GRACE_S)
+    reaped = rd._reap_local_unclaimed_idling(sync_pool, machine_name(), _GRACE_S)
 
     assert reaped == []
     with db_conn.cursor() as cur:
         cur.execute("SELECT status FROM agents_meta WHERE id = %s", (tid,))
-        assert cur.fetchone()[0] == "starting"  # type: ignore[index]
+        assert cur.fetchone()[0] == "idling"  # type: ignore[index]
 
 
 # ────────────────────────────────────────────────────────────────────────
-# status_changed_at trigger — the clock the allocated reaper reads
+# status_changed_at trigger — the clock the dead-birth reaper reads
 # ────────────────────────────────────────────────────────────────────────
 
 
 def test_status_change_bumps_status_changed_at(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A real status transition re-stamps status_changed_at (so resurrect's
-    terminated -> allocated resets the reaper clock)."""
+    """A real status transition re-stamps status_changed_at."""
     tid = spawn_agent()
     with db_conn.cursor() as cur:
         cur.execute(
@@ -323,7 +319,7 @@ def test_status_change_bumps_status_changed_at(
             (tid,),
         )
         db_conn.commit()
-        cur.execute("UPDATE agents_meta SET status = 'starting' WHERE id = %s", (tid,))
+        cur.execute("UPDATE agents_meta SET status = 'running' WHERE id = %s", (tid,))
         db_conn.commit()
         cur.execute(
             "SELECT now() - status_changed_at < make_interval(secs => 5) "
@@ -337,7 +333,7 @@ def test_non_status_update_does_not_bump_status_changed_at(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A pid-only / index-only UPDATE must NOT bump status_changed_at — otherwise
-    routine writes would keep resetting the allocated reaper's clock."""
+    routine writes would keep resetting the dead-birth reaper's clock."""
     tid = spawn_agent()
     with db_conn.cursor() as cur:
         cur.execute(
@@ -359,10 +355,10 @@ def test_non_status_update_does_not_bump_status_changed_at(
 # ────────────────────────────────────────────────────────────────────────
 # _revive_local_dead_running_idling — revive pass for silently-dead live agents
 # ────────────────────────────────────────────────────────────────────────
-# 'running'/'idling' both mean "the process owning this row exists". When it
-# dies silently (OOM / SIGKILL / crash) the row keeps its status and the agent
-# masquerades as alive. A row whose pid is dead is forced to 'terminated'. The
-# safety floor: a normal idle agent has a LIVE pid -> never reaped.
+# A claimed 'running'/'idling' row owns a process. When it dies silently
+# (OOM / SIGKILL / crash), revive clears its ownership columns, returns it to
+# unclaimed 'idling', and launches a replacement. The safety floor: a normal
+# idle agent has a LIVE pid -> never reaped.
 
 
 def _make_live_status(db_conn: psycopg.Connection, *, status: str, pid: int) -> int:
@@ -370,7 +366,8 @@ def _make_live_status(db_conn: psycopg.Connection, *, status: str, pid: int) -> 
     tid = spawn_agent()
     with db_conn.cursor() as cur:
         cur.execute(
-            "UPDATE agents_meta SET status = %s, pid = %s WHERE id = %s",
+            "UPDATE agents_meta SET status = %s, pid = %s, last_message_text = 'done' "
+            "WHERE id = %s",
             (status, pid, tid),
         )
     db_conn.commit()
@@ -386,7 +383,7 @@ def test_revives_live_status_row_with_dead_pid(
     launched_agents: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
 ) -> None:
     """G5: 'running'/'idling' + dead pid -> relaunched in place (CAS to
-    'allocated' + launch) instead of reaped to 'terminated' — a rebooted
+    'idling' + launch) instead of reaped to 'terminated' — a rebooted
     machine's fleet comes back by itself."""
     launched_agents.clear()  # drop the spawn-setup launch; track only the revive
     _stub_probe(monkeypatch, AgentProcessIdentity.GONE)
@@ -397,7 +394,7 @@ def test_revives_live_status_row_with_dead_pid(
     assert revived == [tid]
     with db_conn.cursor() as cur:
         cur.execute("SELECT status, pid FROM agents_meta WHERE id = %s", (tid,))
-        assert cur.fetchone() == ("allocated", None)  # type: ignore[index]  # launch stubbed, no claim to 'starting'
+        assert cur.fetchone() == ("idling", None)  # type: ignore[index]  # launch stubbed, no claim yet
     assert any(
         c.agent_id == tid  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
         for c in launched_agents  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType, reportUnknownVariableType]
@@ -444,7 +441,7 @@ def test_reaps_live_status_row_whose_pid_was_recycled(
     assert revived == [tid]
     with db_conn.cursor() as cur:
         cur.execute("SELECT status, pid FROM agents_meta WHERE id = %s", (tid,))
-        assert cur.fetchone() == ("allocated", None)  # type: ignore[index]  # revived, pid cleared
+        assert cur.fetchone() == ("idling", None)  # type: ignore[index]  # revived, pid cleared
 
 
 @pytest.mark.parametrize("status", ["running", "idling"])
@@ -580,10 +577,11 @@ def test_revive_cap_defers_remainder(
 
     assert len(revived) == 1
     with db_conn.cursor() as cur:
-        cur.execute("SELECT status FROM agents_meta WHERE id IN (%s, %s) ORDER BY id", (t1, t2))
-        statuses = [r[0] for r in cur.fetchall()]
-    assert statuses.count("allocated") == 1
-    assert statuses.count("running") + statuses.count("idling") == 1
+        cur.execute(
+            "SELECT status, pid FROM agents_meta WHERE id IN (%s, %s) ORDER BY id", (t1, t2)
+        )
+        rows = cur.fetchall()
+    assert rows == [("idling", None), ("idling", _DEAD_PID)]
 
 
 # ── revive_agent (G5: dead-pid row relaunched in place, no lifecycle inbound) ──
@@ -694,12 +692,12 @@ def test_collector_ignores_hibernating_and_other_statuses(
 
 
 class TestReviveAgent:
-    def test_running_row_flips_to_allocated_clears_pid_and_launches(
+    def test_running_row_flips_to_idling_clears_pid_and_launches(
         self,
         db_conn: psycopg.Connection,
         launched_agents: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
     ) -> None:
-        """A 'running' row behind a dead pid -> CAS to 'allocated' (pid cleared)
+        """A 'running' row behind a dead pid -> CAS to unclaimed idling (pid cleared)
         + one launch; the checkpoint survives, so the revived agent resumes."""
         from ops.agent_wake import revive_agent
 
@@ -710,10 +708,10 @@ class TestReviveAgent:
 
         with db_conn.cursor() as cur:
             cur.execute("SELECT status, pid FROM agents_meta WHERE id = %s", (tid,))
-            assert cur.fetchone() == ("allocated", None)  # type: ignore[index]
+            assert cur.fetchone() == ("idling", None)  # type: ignore[index]
         assert any(c.agent_id == tid for c in launched_agents)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType, reportUnknownVariableType]
 
-    def test_idling_row_flips_to_allocated(
+    def test_idling_row_flips_to_unclaimed_idling(
         self,
         db_conn: psycopg.Connection,
         launched_agents: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
@@ -727,7 +725,7 @@ class TestReviveAgent:
 
         with db_conn.cursor() as cur:
             cur.execute("SELECT status FROM agents_meta WHERE id = %s", (tid,))
-            assert cur.fetchone()[0] == "allocated"  # type: ignore[index]
+            assert cur.fetchone()[0] == "idling"  # type: ignore[index]
 
     def test_inserts_no_lifecycle_inbound(
         self,
@@ -793,16 +791,16 @@ class TestReviveAgent:
         launched_agents: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
     ) -> None:
         """Idempotent under a double-trigger (two reap passes racing): the CAS
-        picks a single winner; the second call sees 'allocated' and no-ops."""
+        picks a single winner; the second call sees an unclaimed idling row and no-ops."""
         from ops.agent_wake import revive_agent
 
         tid = _make_live_status(db_conn, status="idling", pid=_DEAD_PID)
         launched_agents.clear()
 
         first = revive_agent(tid, _DEAD_PID)
-        second = revive_agent(tid, _DEAD_PID)  # row is now 'allocated'
+        second = revive_agent(tid, _DEAD_PID)  # row has no matching pid
 
         assert (first, second) == (True, False)
         with db_conn.cursor() as cur:
             cur.execute("SELECT status FROM agents_meta WHERE id = %s", (tid,))
-            assert cur.fetchone()[0] == "allocated"  # type: ignore[index]
+            assert cur.fetchone()[0] == "idling"  # type: ignore[index]

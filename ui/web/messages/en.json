@@ -366,8 +366,6 @@
     "spawning": "Spawning",
     "agentId": "#{id} · {label}",
     "forceKillConfirm": "Force kill Agent #{id}? This SIGKILLs the process immediately — any in-flight turn is lost. Use this only when Terminate did not work.",
-    "statusAllocated": "Allocated",
-    "statusStarting": "Starting",
     "statusRunning": "Running",
     "statusIdling": "Idling",
     "statusRestarting": "Restarting",

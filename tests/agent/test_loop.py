@@ -2,7 +2,7 @@
 
 Running `main()` end-to-end requires LangGraph + Redis + LLM mocks which are too heavy; only test the three extracted helpers:
 
-- `enter_starting_state`: DB operation fail-fast behavior; `_notify_exit`: notify gateway finalize
+- `claim_agent_row`: DB operation fail-fast behavior; `_notify_exit`: notify gateway finalize
   (race-safe process start / terminate path correctly reflects in agents_meta table)
 - `_invoke_graph_with_lifecycle_logging`: on ainvoke cancel/exception, write traceback
   to file sink then re-raise — regression guard for agent #45 incident
@@ -24,7 +24,7 @@ from agent._runloop import (
     _probe_db_reachable,
     _wait_for_db_recovery,
 )
-from agent._starting import enter_starting_state
+from agent._starting import claim_agent_row
 from agent.graph._context import AvaContext
 from agent.graph._llm import FatalLLMStreamError, FatalProviderError
 from agent.hooks.compact import CompactionFailedError
@@ -50,48 +50,45 @@ def _agent_status(db: psycopg.Connection, agent_id: int) -> tuple[str, int | Non
     return row[0], row[1]
 
 
-class TestClaimAllocatedRow:
-    def test_allocated_to_starting_with_pid(
+class TestClaimAgentRow:
+    def test_unclaimed_idling_to_running_with_pid(
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Normal path: 'allocated' → 'starting', pid + started_at are filled in synchronously."""
+        """Normal path: unclaimed idling → running with ownership columns filled."""
         agent_id = spawn_agent()
-        # Call enter_starting_state to simulate process startup
-        enter_starting_state(agent_id)
+        claim_agent_row(agent_id)
         status, pid = _agent_status(db_conn, agent_id)
-        assert status == "starting"
+        assert status == "running"
         assert pid == os.getpid()
 
     def test_nonexistent_id_raises(self, db_conn: psycopg.Connection) -> None:
         # PR-0 (multi-machine) added agents_meta SELECT before UPDATE to get machine validation;
         # nonexistent id raises "agents_meta row does not exist" at SELECT stage, never reaching
-        # the "not in 'allocated' state" path in UPDATE.
+        # the failed idling-claim UPDATE path.
         with pytest.raises(RuntimeError, match="agents_meta row does not exist"):
-            enter_starting_state(9999)
+            claim_agent_row(9999)
 
-    def test_already_starting_raises(
+    def test_second_claim_raises(
         self,
         db_conn: psycopg.Connection,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """'starting' row cannot be claimed again — prevent starting two processes for the same agent_id."""
+        """A claimed row cannot be claimed again by a second process."""
         agent_id = spawn_agent()
-        enter_starting_state(agent_id)  # first call succeeds → 'starting'
-        with pytest.raises(RuntimeError, match="row does not exist or not in 'allocated' state"):
-            enter_starting_state(
-                agent_id
-            )  # second call fails (status is already 'starting', not 'allocated')
+        claim_agent_row(agent_id)
+        with pytest.raises(RuntimeError, match="rowcount=0"):
+            claim_agent_row(agent_id)
 
     def test_terminated_row_raises(
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """'terminated' row cannot be claimed directly — must first go through resurrect_agent to transition back to 'allocated'."""
+        """A terminated row must go through resurrection before it can be claimed."""
         agent_id = spawn_agent()
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
         db_conn.commit()
-        with pytest.raises(RuntimeError, match="row does not exist or not in 'allocated' state"):
-            enter_starting_state(agent_id)
+        with pytest.raises(RuntimeError, match="rowcount=0"):
+            claim_agent_row(agent_id)
 
 
 class TestNotifyExit:
@@ -831,7 +828,7 @@ class TestRunEntry:
 
         This parser is strict and it runs AFTER the row is claimed, so an argument
         it does not recognise is a `SystemExit(2)` for every agent on the box, at
-        the one moment the row says 'starting' under a pid that is leaving. The
+        the one moment the row says 'running' under a pid that is leaving. The
         launcher passes `--boot-stall-seconds` on every launch, and nothing here
         declares it — `agent/_boot_deadline.consume_stall_flag` strips it first.
         This test runs that exact sequence over the argv the launcher really
@@ -918,7 +915,7 @@ class TestRunEntry:
         names = [c[0] for c in calls]
         assert names.index("assert_schema_current") < names.index("install_handlers"), (  # pyright: ignore[reportUnknownMemberType]
             "schema check must precede signal handler installation — wrong-version db should blow up earlier "
-            "before handlers are installed, so that handler isn't set up only to see SQL error in enter_starting_state"
+            "before handlers are installed, so that handler isn't set up only to see SQL error in claim_agent_row"
         )
         main_calls = [c for c in calls if c[0] == "main"]
         assert main_calls and main_calls[0][1] == 777

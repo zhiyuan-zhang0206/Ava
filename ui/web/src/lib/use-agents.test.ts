@@ -990,7 +990,7 @@ describe("useAgents SSE merge (regression)", () => {
       spawner: "user",
       fork_source_agent_id: null,
       fork_source_checkpoint_id: null,
-      status: "allocated",
+      status: "idling",
       pid: null,
       spawned_at: "2026-05-25T12:00:00Z",
       started_at: null,
@@ -1074,7 +1074,7 @@ describe("useAgents SSE merge (regression)", () => {
       spawner: "user",
       fork_source_agent_id: null,
       fork_source_checkpoint_id: null,
-      status: "allocated",
+      status: "idling",
       pid: null,
       spawned_at: "2026-05-25T12:00:00Z",
       started_at: null,
@@ -1130,7 +1130,7 @@ describe("useAgents SSE merge (regression)", () => {
       spawner: "user",
       fork_source_agent_id: null,
       fork_source_checkpoint_id: null,
-      status: "allocated",
+      status: "idling",
       pid: null,
       spawned_at: "2026-05-25T12:00:00Z",
       started_at: null,
@@ -1165,13 +1165,13 @@ describe("useAgents SSE merge (regression)", () => {
     });
   });
 
-  it("spawn → allocated row arrives via SSE while POST still in flight → in-flight placeholder yields (no two rows)", async () => {
-    // The "two rows on allocated" bug: the gateway publishes AgentSpawned
+  it("spawn → idling row arrives via SSE while POST still in flight → in-flight placeholder yields (no two rows)", async () => {
+    // The "two rows on idling" bug: the gateway publishes AgentSpawned
     // right after DB commit, well before the HTTP response resolves (it
-    // launches the agent process in between). So the allocated row lands in
+    // launches the agent process in between). So the idling row lands in
     // cache while spawnMutation.isPending is still true. The in-flight
     // placeholder must yield to that real row — otherwise the placeholder
-    // and the allocated row render at the same time (two rows for one spawn).
+    // and the idling row render at the same time (two rows for one spawn).
     let resolveSpawn: ((v: { id: number }) => void) | undefined;
     vi.mocked(api.spawnAgent).mockImplementation(
       () => new Promise((res) => { resolveSpawn = res; }),
@@ -1190,13 +1190,13 @@ describe("useAgents SSE merge (regression)", () => {
       expect(result.current.pendingSpawnCount).toBe(1);
     });
 
-    // SSE delivers the allocated row BEFORE the POST resolves.
+    // SSE delivers the idling row BEFORE the POST resolves.
     const snapshot: WireAgentRow = {
       agent_id: 99,
       spawner: "user",
       fork_source_agent_id: null,
       fork_source_checkpoint_id: null,
-      status: "allocated",
+      status: "idling",
       pid: null,
       spawned_at: "2026-05-25T12:00:00Z",
       started_at: null,
@@ -1215,7 +1215,7 @@ describe("useAgents SSE merge (regression)", () => {
       expect(result.current.agents.find((a) => a.agent_id === 99)).toBeTruthy();
     });
 
-    // The real allocated row is in cache while isPending is still true.
+    // The real idling row is in cache while isPending is still true.
     // The in-flight placeholder must already be gone — total spawn rows = 1,
     // not 2. (Pre-fix this was 1: spawnMutation.isPending blindly added a
     // placeholder on top of the row.)
@@ -1256,8 +1256,6 @@ describe("public three-state agent status projection", () => {
   const base = MOCK_AGENTS[0];
 
   it.each([
-    ["allocated", "idling"],
-    ["starting", "idling"],
     ["running", "running"],
     ["idling", "idling"],
     ["restarting", "idling"],

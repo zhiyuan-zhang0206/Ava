@@ -50,3 +50,6 @@ sessions are lost" bound was retired for agent shells —
 [per-session pty hosts](2026-08-13-per-session-pty-hosts.md) moved each
 session into its own detached host process, so a dying backend now takes
 down exactly one session, and cluster updates take down none.*
+
+Forward link (2026-08-22): the launch-orphan state is now unclaimed idling; see
+[agent status model](../docs/history/2026-08-22/agent-status-model.md).

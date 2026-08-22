@@ -67,7 +67,7 @@ logical item, so the merge is by identity, not a timestamp heuristic.
 |---|---|---|
 | `inbound_arrived` | any inbound INSERT completed (UI echoes immediately) | `inbound_id`, `kind`, `source`, `content` |
 | `agent_spawned` | new agent row INSERTed (spawn / fork); sidebar upserts | `snapshot` |
-| `agent_updated` | user-visible `agents_meta` UPDATE from any writer — resurrect, respawn, claim-node transitions, terminate cleanup, `enter_starting_state`, `mark_agent_exited_op`, and heartbeat liveness edges entering/leaving `offline` | `snapshot` |
+| `agent_updated` | user-visible `agents_meta` UPDATE from any writer — resurrect, respawn, row claim, claim-node transitions, terminate cleanup, `mark_agent_exited_op`, and heartbeat liveness edges entering/leaving `offline` | `snapshot` |
 | `label_updated` | `agents.label` written (spawn-time generation / rename / reset) | `label` (nullable) |
 | `notice_posted` | `ava.ui.notify()` row created | `notice_id`, `priority`, `title`, `task_id` (nullable) |
 | `notice_resolved` | notice dismissed | `notice_id` |

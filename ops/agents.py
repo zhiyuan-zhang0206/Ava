@@ -18,35 +18,26 @@ process and confirming it came up live in `ops/agent_launch.py`
 
 Agent process / agents row is 1:1 by `agent_id`.
 
-After the process starts, it itself executes `UPDATE agents_meta SET
-status='starting', pid=..., started_at=... WHERE id=N AND status='allocated'`
-— 0 rows raises (prevents a race spawning two processes contending for the
-same id). 'starting' marks "process is up but still initializing" (import /
-setup llm / db / redis); once it enters the graph, the claim_node's top
-`leave_starting_state` promotes to 'running'. After a successful spawn,
-`_launch_agent_process` polls `agents_meta.status` to confirm this UPDATE
-actually happened; on timeout it raises, avoiding "launched but child crash"
-leaving the row permanently stuck in 'allocated' (agent 137 / 44 incident). The
-poll's deadline is load-tolerant — a child whose process is still alive at the
-deadline gets one bounded extension rather than having its row taken away
-mid-boot.
+At process start, `agent._starting.claim_agent_row` executes one CAS from an
+unclaimed idling row to `running`, writing pid, started_at, and the first lease.
+The `status='idling' AND pid IS NULL` predicate admits exactly one process for
+an agent id. `_launch_agent_process` confirms that the claim wrote a pid; a
+timeout leaves an unclaimed row for the boot reaper rather than adding a second
+status value for bootstrap.
 
-`pid` + `started_at` are only set during 'starting' / 'running' / 'idling'.
-Spawn / resurrect / respawn, when switching status back to 'allocated',
-**simultaneously** UPDATE pid=NULL, started_at=NULL — otherwise the previous
-running session's fields become ghost data misleading operators.
-`enter_starting_state` re-fills these two columns when it UPDATEs
-status='starting'.
+Spawn, resurrect, respawn, and swap-in clear pid, started_at, and lease before
+launching a new child. The claim CAS re-fills those ownership columns atomically,
+so a prior process's values never masquerade as the new child.
 
 Two cleanup paths on launch failure:
-- spawn: leave row in 'allocated' and re-raise — gives operators a way to
+- spawn: leave an unclaimed idling row and re-raise — gives operators a way to
   diagnose "why did it never start" (a weekly cleanup task's concern). This
   avoids the non-atomic "INSERT first then launch" failure erasing the thread
   history.
 - resurrect / respawn: `_launch_or_force_terminated` forces status to
   'terminated' and re-raises — the agent already existed; the operator cares
   about "did the wake succeed", and failure lets the caller retry resurrect
-  (re-run starting from 'terminated').
+  (re-run from 'terminated').
 """
 
 from __future__ import annotations

@@ -6,8 +6,8 @@ The bug class this guards: a Python value-set drifts from the DB `CHECK (col IN
 INSERT/UPDATE — a `CheckViolation` that only surfaces against a real database.
 Unit tests that stub the write miss it entirely. Two incidents motivated this:
 
-- `agents_meta.status`: code wrote `'starting'` but the docker CHECK was never
-  ALTERed, so a startup UPDATE 500'd and the agent row petrified at 'allocated'.
+- `agents_meta.status`: code wrote a status absent from the database CHECK, so a
+  startup UPDATE 500'd and the agent row petrified before it could claim.
 - a cross-machine RPC kind drifting from its CHECK: a kind added to a Python
   Literal + the agent-runner dispatch but not the matching DB CHECK 500'd at the
   write in prod while every unit test stubbed the dispatch, so it shipped green.

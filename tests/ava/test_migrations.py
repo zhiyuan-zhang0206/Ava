@@ -312,7 +312,7 @@ def test_force_terminate_fence_migration_backfills_current_death_intent() -> Non
             "(2, 'terminated', 'user', '2026-08-21 10:00:00+00'), "
             "(3, 'terminated', 'user', '2026-08-21 10:00:00+00'), "
             "(4, 'terminated', 'reaper', '2026-08-21 10:00:00+00'), "
-            "(5, 'allocated', 'user', '2026-08-21 10:00:00+00'), "
+            "(5, 'idling', 'user', '2026-08-21 10:00:00+00'), "
             "(6, 'terminated', 'user', '2026-08-21 10:00:00+00')"
         )
 

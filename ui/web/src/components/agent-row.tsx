@@ -1,9 +1,9 @@
 // Single agent row — status dot on the left + tree-guide vertical line +
 // label + time, with persistent action buttons on the right.
 //
-// Status is expressed inline via a colored dot on the left (allocated
-// grey / running green / idling yellow / restarting blue pulse /
-// terminated red) — no separate section per status; the sidebar is laid
+// Status is expressed inline via a colored dot on the left (running green /
+// idling yellow / restarting blue pulse / terminated red) — no separate
+// section per status; the sidebar is laid
 // out by spawn tree. Status colors are opt-in (display.show_agent_status,
 // default off): by default the dot is a neutral static grey so the list
 // shows static presence without broadcasting state changes.

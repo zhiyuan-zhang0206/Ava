@@ -27,7 +27,7 @@ Four jobs on one fast tick (user-confirmed design, 2026-08-02 — see
 
 `running` owners are never dispatched or alerted: a chat queued behind a long
 in-flight turn is normal — the claim's turn-end SELECT picks it up. Boot states
-(starting / restarting / allocated) are left to their own reaper.
+(restarting) is left to its own reaper.
 
 3. **Terminated-owner resurrect retry** — every tick, for each DISTINCT
    terminated agent that still holds a `pending` chat created after its latest
@@ -104,9 +104,8 @@ def select_stale_pending(
 
     An owner mid-turn (status='running') queues inbound legitimately — the
     claim's turn-end SELECT picks them up, so they are NOT stalls (a long LLM
-    turn with a queued user message is normal). 'starting' / 'restarting' /
-    'allocated' are transient boot states with their own reaper
-    (allocated_reap_grace_seconds); alerting at the 30s threshold would fire
+    turn with a queued user message is normal). 'restarting' has its own reaper
+    (boot_reap_grace_seconds); alerting at the 30s threshold would fire
     during a mass rollout. Only waiting/terminal owners signal a real stall:
     'idling' (lost wake), 'hibernating' (swap-in failure), 'terminated'
     (delivery auto-resurrect failed).

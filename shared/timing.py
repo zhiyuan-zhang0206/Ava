@@ -9,7 +9,7 @@ But a subset forms a **partially ordered net**: each clock's value is only safe
 *because* of its position relative to other clocks. Examples:
 
 - agent spawn: `BOOT_STALL_SEC < LAUNCH_CONFIRM_TIMEOUT_SEC < BOOT_BUDGET_SEC
-  < ALLOCATED_REAP_GRACE_SEC` — a stalled child must die before the launcher
+  < BOOT_REAP_GRACE_SEC` — a stalled child must die before the launcher
   adjudicates, and the launcher's wait must never outlive the reaper's grace
   (the 2026-07-30 spawn incident was this chain inverted).
 - deploy: `NO_PROGRESS_TIMEOUT_S < LOCK_TTL_S` — the crash-reclaim bound must
@@ -131,17 +131,17 @@ CLOCKS: dict[str, Clock] = {
     "LAUNCH_CONFIRM_TIMEOUT_SEC": Clock(
         "boot",
         lambda: boot.LAUNCH_CONFIRM_TIMEOUT_SEC,
-        "launcher confirm window: how long a spawn may sit 'allocated' before force-terminate",
+        "launcher confirm window: how long a spawn may remain unclaimed before force-terminate",
     ),
     "BOOT_BUDGET_SEC": Clock(
         "boot",
         lambda: boot.BOOT_BUDGET_SEC,
         "child's hard ceiling on the whole pre-claim boot",
     ),
-    "ALLOCATED_REAP_GRACE_SEC": Clock(
+    "BOOT_REAP_GRACE_SEC": Clock(
         "boot",
-        lambda: boot.ALLOCATED_REAP_GRACE_SEC,
-        "restarter's grace before reaping a stuck 'allocated' row",
+        lambda: boot.BOOT_REAP_GRACE_SEC,
+        "restarter's grace before reaping an unclaimed idling row",
     ),
     # --- deploy family (values in shared/deploy_timing.py / shared/cluster_lock.py) ---
     "NO_PROGRESS_TIMEOUT_S": Clock(
@@ -260,7 +260,7 @@ CONSTRAINTS: list[Constraint] = [
     Constraint(
         "<",
         "LAUNCH_CONFIRM_TIMEOUT_SEC",
-        "ALLOCATED_REAP_GRACE_SEC",
+        "BOOT_REAP_GRACE_SEC",
         "the reaper must not take a row the launcher is still legitimately waiting "
         "on (2026-07-30 spawn incident: confirm raised without the grace)",
     ),
@@ -274,7 +274,7 @@ CONSTRAINTS: list[Constraint] = [
     Constraint(
         "<",
         "BOOT_BUDGET_SEC",
-        "ALLOCATED_REAP_GRACE_SEC",
+        "BOOT_REAP_GRACE_SEC",
         "the child must be gone before the reaper could claim its row — a live, "
         "progressing child must never have its row reaped out from under it",
     ),

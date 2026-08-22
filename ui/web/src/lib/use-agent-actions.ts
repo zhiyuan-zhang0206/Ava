@@ -168,7 +168,7 @@ export function useAgentActions(
 
   // Agent ids present when the most recent spawn was fired. The gateway
   // publishes AgentSpawned right after DB commit — before launching the
-  // process and returning the HTTP response — so the new allocated row
+  // process and returning the HTTP response — so the new unclaimed idling row
   // routinely lands in cache while spawnMutation.isPending is still true.
   // The in-flight placeholder below diffs against this baseline to yield to
   // the real row instead of rendering on top of it (the "two rows" bug).
@@ -200,7 +200,7 @@ export function useAgentActions(
   // Placeholder count = in-flight phase + post-resolve phase.
   //   - in-flight: the spawn POST is unresolved. Show one placeholder
   //     UNLESS this spawn's row already arrived via SSE — a row outside
-  //     spawnBaselineRef means the real allocated row is already in cache,
+  //     spawnBaselineRef means the real idling row is already in cache,
   //     so the placeholder must yield rather than render a second row.
   //   - post-resolve: id is known, held in pendingSpawnIds until its
   //     snapshot lands in cache (then the agents-change effect drops it).

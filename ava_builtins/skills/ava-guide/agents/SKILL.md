@@ -21,7 +21,7 @@ An **agent** is a running AI process — you are one. The lifecycle verbs:
 - `resurrect` — wake a `terminated` agent with its full conversation state
   intact (must include a `prompt` telling it why it was woken).
 
-State machine: `allocated → starting → running ⇄ idling → restarting → terminated`.
+State machine: `idling (unclaimed) → running ⇄ idling → restarting → terminated`.
 
 Agent-to-agent communication: `ava.agents.send_message(agent_id, content)` —
 pure INSERT, no status check, no wait, no delivery receipt. If the target is

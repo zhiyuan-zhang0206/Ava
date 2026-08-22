@@ -11,7 +11,7 @@ the only INSERTer of this kind):
                                 AgentTermination → claim END → process exits
                                 → status='terminated'
   test side: POST /api/agents/{id}/messages (chat)
-    → deliver_chat_inbound → resurrect_if_terminated: status='terminated'→'allocated' + INSERT 'resurrect' inbound
+    → deliver_chat_inbound → resurrect_if_terminated: status='terminated'→'idling' + INSERT 'resurrect' inbound
     → session spawn starts fresh process
   post-resurrect process (new PID, same agent_id):
     ↓ build() sees 'resurrect' → returns IDLE_SCRIPT

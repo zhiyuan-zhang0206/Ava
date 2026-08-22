@@ -147,7 +147,7 @@ def _samples() -> dict[str, dict]:
                 "spawner": "user",
                 "fork_source_agent_id": None,
                 "fork_source_checkpoint_id": None,
-                "status": "allocated",
+                "status": "idling",
                 "pid": None,
                 "spawned_at": "2026-01-01T00:00:00Z",
                 "started_at": None,
