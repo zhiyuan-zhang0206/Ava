@@ -27,6 +27,14 @@
       "command": "python memory-steward-schedule.py"
     },
     {
+      "name": "model-update-tracker",
+      "class": "product",
+      "default_enabled": true,
+      "description": "Daily upstream model detection — pulls each provider's official model list, diffs the registry, and wakes the P0 lead agent on new candidates (06:00 Asia/Shanghai).",
+      "script": "model-update-tracker-schedule.py",
+      "command": "python model-update-tracker-schedule.py"
+    },
+    {
       "name": "trace-ship-tempo",
       "class": "operator",
       "default_enabled": false,

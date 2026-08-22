@@ -51,13 +51,14 @@ def _row(conn: psycopg.Connection, name: str) -> Any:
 
 class TestLoadManifest:
     def test_loads_repo_manifest(self) -> None:
-        """The repo manifest parses: 4 built-ins, product enabled / operator disabled."""
+        """The repo manifest parses: product schedules enabled / operator schedules disabled."""
         scheds = load_manifest()
         by_name = {s.name: s for s in scheds}
         assert set(by_name) == {
             "self-evolution-weekly",
             "self-evolution-daily",
             "memory-arbiter",
+            "model-update-tracker",
             "trace-ship-tempo",
         }
         assert all(

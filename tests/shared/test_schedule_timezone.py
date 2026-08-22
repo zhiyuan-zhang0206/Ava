@@ -32,6 +32,7 @@ _SCHEDULES = Path(__file__).resolve().parents[2] / "schedules"
 # so by passing "UTC" explicitly.
 _CLUSTER_CLOCK_TEMPLATES = {
     "memory-steward-schedule.py": "TIMEZONE",
+    "model-update-tracker-schedule.py": "TZ",
     "self-evolution-daily-schedule.py": "TZ",
     "self-evolution-weekly-schedule.py": "TIMEZONE",
 }
