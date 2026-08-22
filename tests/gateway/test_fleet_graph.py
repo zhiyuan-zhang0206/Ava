@@ -164,6 +164,24 @@ def test_total_tokens_sums_in_plus_out_counters(
     assert nodes[a]["total_tokens"] == 380  # in 300 + out 80
 
 
+def test_node_exposes_canonical_status_and_independent_liveness(
+    db_conn: psycopg.Connection,
+) -> None:
+    a = _seed_agent(db_conn, status="restarting")
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "UPDATE agents_meta SET liveness_state = 'offline' WHERE id = %s",
+            (a,),
+        )
+    db_conn.commit()
+
+    with TestClient(app) as client:
+        nodes = _nodes_by_id(client)  # pyright: ignore[reportUnknownVariableType]
+
+    assert nodes[a]["status"] == "restarting"
+    assert nodes[a]["liveness_state"] == "offline"
+
+
 def test_total_tokens_zero_without_usage(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:

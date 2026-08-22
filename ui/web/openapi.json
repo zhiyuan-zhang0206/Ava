@@ -7969,8 +7969,16 @@
             "title": "Label"
           },
           "status": {
+            "$ref": "#/components/schemas/AgentStatus"
+          },
+          "liveness_state": {
             "type": "string",
-            "title": "Status"
+            "enum": [
+              "online",
+              "offline",
+              "unknown"
+            ],
+            "title": "Liveness State"
           },
           "spawner": {
             "type": "string",
@@ -8001,6 +8009,7 @@
           "agent_id",
           "label",
           "status",
+          "liveness_state",
           "spawner",
           "machine",
           "node_score",

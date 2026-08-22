@@ -43,6 +43,7 @@ function node(agent_id: number, over: Partial<FleetGraphNode> = {}): FleetGraphN
     agent_id,
     label: null,
     status: "running",
+    liveness_state: "online",
     spawner: "user",
     machine: "test",
     node_score: 0,
@@ -57,11 +58,19 @@ function edge(
   event_type: FleetGraphEdge["event_type"],
   over: Partial<FleetGraphEdge> = {},
 ): FleetGraphEdge {
-  return { from_agent, to_agent, event_type, weight: 1, event_count: 1, ...over };
+  return {
+    from_agent,
+    to_agent,
+    event_type,
+    weight: 1,
+    event_count: 1,
+    last_seen_at: "2026-06-17T00:00:00Z",
+    ...over,
+  };
 }
 
 // A graph with: a central node (#1) wired by a spawn + a fork + several message
-// edges (so every edge style paints), and a pulsing node (#2 "starting").
+// edges (so every edge style paints), and an idling node (#2).
 function renderGraph(ui: React.ReactElement) {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -73,7 +82,7 @@ function richGraph(): FleetGraph {
   const seen = "2026-06-17T00:00:00Z";
   const nodes: FleetGraphNode[] = [
     node(1, { label: "alpha", node_score: 50_000, total_tokens: 1_500_000 }),
-    node(2, { status: "starting" }),
+    node(2, { status: "idling" }),
     node(3, {}),
     ...[4, 5, 6, 7, 8, 9].map((id) => node(id)),
   ];
@@ -84,11 +93,11 @@ function richGraph(): FleetGraph {
       edge(1, id, "message", { weight: 5, last_seen_at: seen }),
     ),
   ];
-  return { nodes, edges };
+  return { nodes, edges, stale: false };
 }
 
-function ok(graph: FleetGraph): FleetGraphResult {
-  return { graph, loading: false, error: false };
+function ok(graph: Omit<FleetGraph, "stale"> & { stale?: boolean }): FleetGraphResult {
+  return { graph: { stale: false, ...graph }, loading: false, error: false };
 }
 
 beforeEach(() => {
@@ -209,7 +218,7 @@ describe("GraphView", () => {
         nodes: [
           node(1, { label: "live" }),
           node(2, { label: "dead", status: "terminated" }),
-          node(3, { label: "hibernating", status: "hibernating" }),
+          node(3, { label: "idling", status: "idling" }),
         ],
         edges: [
           edge(2, 1, "spawn"), // touches the terminated node — dropped
@@ -228,6 +237,32 @@ describe("GraphView", () => {
       'svg[aria-label="Fleet relationship graph"]',
     )!;
     expect(svg.querySelectorAll("line").length).toBe(1); // only live-live edge
+  });
+
+  it("renders an offline projected transition node in muted gray", async () => {
+    useFleetGraph.mockReturnValue(
+      ok({
+        nodes: [
+          node(1, {
+            label: "offline-transition",
+            status: "idling",
+            liveness_state: "offline",
+          }),
+        ],
+        edges: [],
+        stale: false,
+      }),
+    );
+    const { container } = renderGraph(
+      <GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />,
+    );
+
+    const label = await waitFor(() => screen.getByText("#1"), { timeout: 4000 });
+    const nodeGroup = label.closest("g")!;
+    expect(nodeGroup.querySelector("circle")?.getAttribute("class")).toContain(
+      "text-muted-foreground",
+    );
+    expect(container.querySelector("title")?.textContent).toContain("Offline");
   });
 
   it("merges multiple lineage kinds per pair into one edge (no duplicate React keys)", async () => {
@@ -264,7 +299,7 @@ describe("GraphView", () => {
   });
 
   it("empty graph (not loading, no error) shows the empty placeholder", () => {
-    useFleetGraph.mockReturnValue({ graph: { nodes: [], edges: [] }, loading: false, error: false });
+    useFleetGraph.mockReturnValue({ graph: { nodes: [], edges: [], stale: false }, loading: false, error: false });
 
     renderGraph(<GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />);
 
@@ -273,7 +308,7 @@ describe("GraphView", () => {
   });
 
   it("empty graph while loading shows the loading placeholder", () => {
-    useFleetGraph.mockReturnValue({ graph: { nodes: [], edges: [] }, loading: true, error: false });
+    useFleetGraph.mockReturnValue({ graph: { nodes: [], edges: [], stale: false }, loading: true, error: false });
 
     renderGraph(<GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />);
 
@@ -281,7 +316,7 @@ describe("GraphView", () => {
   });
 
   it("error (endpoint absent / gateway down) shows the unavailable placeholder", () => {
-    useFleetGraph.mockReturnValue({ graph: { nodes: [], edges: [] }, loading: false, error: true });
+    useFleetGraph.mockReturnValue({ graph: { nodes: [], edges: [], stale: false }, loading: false, error: true });
 
     renderGraph(<GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />);
 

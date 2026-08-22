@@ -5,7 +5,7 @@ import { ChevronRight, PanelRightClose } from "lucide-react";
 
 import { BAR_HEIGHT_CLASS, FLEX, FLEX_1, MIN_W_0 } from "@/lib/layout";
 import type { QueueUnit } from "@/lib/task-notify";
-import type { AgentStatus, NoticeItem, PageRow } from "@/lib/types";
+import type { PublicAgentStatus, NoticeItem, PageRow } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 import { fmtLabel, openKey, resolvedKey, type OpenItem } from "./keys";
@@ -96,7 +96,7 @@ export function QueueList({
   resolved: NoticeItem[];
   resolvedOpen: boolean;
   setResolvedOpen: (fn: (o: boolean) => boolean) => void;
-  agentStatus: Map<number, AgentStatus>;
+  agentStatus: Map<number, PublicAgentStatus>;
   activePageByAgent: Map<number, PageRow>;
   effectiveKey: string | null;
   onSelect: (key: string) => void;
@@ -186,7 +186,7 @@ export function OpenUnits({
   onSelectAgent,
 }: {
   units: QueueUnit<OpenItem>[];
-  agentStatus: Map<number, AgentStatus>;
+  agentStatus: Map<number, PublicAgentStatus>;
   activePageByAgent: Map<number, PageRow>;
   effectiveKey: string | null;
   onSelect: (key: string) => void;

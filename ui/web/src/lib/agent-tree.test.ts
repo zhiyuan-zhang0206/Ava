@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import { buildAgentTree } from "./agent-tree";
-import type { AgentRow, AgentStatus } from "./types";
+import type { AgentRow, PublicAgentStatus } from "./types";
 
 let nextTs = 1000;
 function ag(
   agent_id: number,
   spawner: string,
-  status: AgentStatus = "running",
+  status: PublicAgentStatus = "running",
   /** Test-only last_active override — defaults to monotonically following spawned_at (later-inserted = more recently active). */
   lastActiveOverride?: string,
 ): AgentRow {
@@ -147,16 +147,16 @@ describe("buildAgentTree", () => {
     expect(roots.map((r) => r.agent.agent_id)).toEqual([5, 10]);
   });
 
-  it("status is irrelevant to order — all six statuses sort by id asc", () => {
+  it("status is irrelevant to order — all three public statuses sort by id asc", () => {
     // Order is fixed by id, not status: a row never jumps when its status
     // changes (idling -> running, terminate, resurrect, etc.). Mixed
     // statuses in scrambled id order still come out strictly by id.
     const roots = buildAgentTree([
       ag(1, "user", "terminated"),
-      ag(2, "user", "allocated"),
+      ag(2, "user", "idling"),
       ag(3, "user", "idling"),
-      ag(4, "user", "starting"),
-      ag(5, "user", "restarting"),
+      ag(4, "user", "running"),
+      ag(5, "user", "terminated"),
       ag(6, "user", "running"),
     ]);
     expect(roots.map((r) => r.agent.agent_id)).toEqual([1, 2, 3, 4, 5, 6]);
