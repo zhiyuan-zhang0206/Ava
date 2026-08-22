@@ -69,10 +69,10 @@ def window_bounds(
     """Resolve (from_, window_start) for the Loki-side event aggregates
     (stats / activity / TPS — bounded readers). ``since_compact`` wins: the
     agent's latest compact-halt ts (None = never compacted -> retention
-    floor). Otherwise ``hours`` -> now - N h; neither -> the retention floor
-    (Loki cannot answer further back; the COST whole-life path reads the
-    ledger instead and does not come through here). ``window_start`` is the
-    same instant, None when the request is whole-life (the alive-time clip
+    floor). Otherwise ``hours`` -> now - N h; neither -> None (the inspect
+    path resolves whole life through its PG ledger/archive and a retained Loki
+    tail; the cost path has its own matching ledger read). ``window_start`` is
+    the same instant, None when the request is whole-life (the alive-time clip
     treats None as since-birth)."""
     if since_compact:
         compact_ts = _compact_ts(agent_id)
@@ -82,7 +82,7 @@ def window_bounds(
     if hours is not None:
         window_from = datetime.now(tz=UTC) - timedelta(hours=int(hours))
         return window_from, window_from
-    return _retention_floor(), None
+    return None, None
 
 
 def _compact_ts(agent_id: int) -> datetime | None:

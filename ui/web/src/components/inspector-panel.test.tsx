@@ -97,7 +97,7 @@ function fixture(overrides: Partial<AgentInspect> = {}): AgentInspect {
     machine: "test-host",
     liveness_state: "online",
     last_probe_at: null,
-    window_hours: null,
+    window_hours: 24,
     since_compact: false,
     shells: [
       { id: 0, name: "dev-server", created_at: "2026-06-14T12:00:00Z", uptime_seconds: 8040 },
@@ -212,7 +212,7 @@ describe("InspectorPanel", () => {
         <InspectorPanel agentId={2} />
       </QueryClientProvider>,
     );
-    await waitFor(() => expect(getAgentInspect).toHaveBeenCalledWith(2, null, false, expect.any(AbortSignal)));
+    await waitFor(() => expect(getAgentInspect).toHaveBeenCalledWith(2, 24, false, expect.any(AbortSignal)));
 
     // B has not answered yet. React Query may supply A through
     // keepPreviousData, but no A-owned shell/notice/reply surface may render
@@ -532,27 +532,28 @@ describe("InspectorPanel", () => {
   });
 
   it("window selector re-queries with the chosen hours", async () => {
-    // First load: cumulative. After selecting 24h, the mock echoes window_hours=24.
-    getAgentInspect.mockResolvedValueOnce(fixture());
-    getAgentInspect.mockResolvedValue(fixture({ window_hours: 24 }));
+    // First load defaults to 24h. Switching to 1h re-scopes the request.
+    getAgentInspect.mockResolvedValueOnce(fixture({ window_hours: 24 }));
+    getAgentInspect.mockResolvedValue(fixture({ window_hours: 1 }));
     render(<InspectorPanel agentId={1} />);
 
     await waitFor(() => expect(screen.getByText("Persistent shells")).toBeTruthy());
-    expect(getAgentInspect).toHaveBeenCalledWith(1, null, false, expect.any(AbortSignal));
+    expect(getAgentInspect).toHaveBeenCalledWith(1, 24, false, expect.any(AbortSignal));
+    expect(screen.getByLabelText<HTMLSelectElement>("Cost + activity window").value).toBe("24");
 
-    fireEvent.change(screen.getByLabelText("Cost + activity window"), { target: { value: "24" } });
+    fireEvent.change(screen.getByLabelText("Cost + activity window"), { target: { value: "1" } });
 
     await waitFor(() =>
-      expect(getAgentInspect).toHaveBeenCalledWith(1, 24, false, expect.any(AbortSignal)),
+      expect(getAgentInspect).toHaveBeenCalledWith(1, 1, false, expect.any(AbortSignal)),
     );
     // The select reflects the chosen window (the cost scope line was removed).
     await waitFor(() =>
-      expect(screen.getByLabelText<HTMLSelectElement>("Cost + activity window").value).toBe("24"),
+      expect(screen.getByLabelText<HTMLSelectElement>("Cost + activity window").value).toBe("1"),
     );
   });
 
   it("Compact window selects since_compact instead of hours", async () => {
-    // First load: cumulative. After selecting Compact, the mock echoes since_compact=true.
+    // First load is 24h. After selecting Compact, the mock echoes since_compact=true.
     getAgentInspect.mockResolvedValueOnce(fixture());
     getAgentInspect.mockResolvedValue(fixture({ since_compact: true }));
     render(<InspectorPanel agentId={1} />);
@@ -592,7 +593,7 @@ describe("InspectorPanel", () => {
     // The next poll of the SAME query fails — data is retained, error is set.
     getAgentInspect.mockRejectedValue(new Error("refresh failed"));
     await act(async () => {
-      await qc.refetchQueries({ queryKey: ["agent-inspect", 1, null] });
+      await qc.refetchQueries({ queryKey: ["agent-inspect", 1, 24] });
     });
 
     await waitFor(() => expect(screen.getByLabelText("Live refresh failing")).toBeTruthy());

@@ -717,6 +717,96 @@ def attribute_aggregate(
     return _grouped_or_scalar(result, group_by)
 
 
+def count_by_event_name(
+    *,
+    agent_id: int,
+    event_names: list[str],
+    categories: list[str] | None,
+    attribute_filters: dict[str, str] | None,
+    from_: datetime,
+    to: datetime,
+) -> dict[str, int]:
+    """Count one agent's matching events, grouped by event name.
+
+    This is intentionally narrower than :func:`count_events`: inspector reads
+    use one grouped query for related counters, rather than a query per event
+    shape. Callers split any span larger than three hours before using it.
+    """
+    window = _window(from_, to)
+    if window is None:
+        return {}
+    start, end = window
+    pipeline = _agg_pipeline(
+        agent_id=agent_id,
+        event_names=event_names,
+        categories=categories,
+        attribute_filters=attribute_filters,
+    )
+    duration_s = max(1, int((end - start).total_seconds()))
+    logql = f"sum by (event_name) (count_over_time(({pipeline})[{duration_s}s]))"
+    counts: dict[str, int] = {}
+    for series in _query_instant(logql, end):
+        value = _result_value(series)
+        if value is not None:
+            counts[str(series.get("metric", {}).get("event_name", ""))] = int(value)
+    return counts
+
+
+def attribute_distribution(
+    *,
+    field: str,
+    agent_id: int,
+    event_names: list[str],
+    categories: list[str] | None,
+    attribute_filters: dict[str, str] | None,
+    from_: datetime,
+    to: datetime,
+) -> list[tuple[float, int]]:
+    """Return one numeric payload-attribute distribution from a Loki span.
+
+    The series-limit fallback is shared with ``attribute_aggregate`` so the
+    inspector's merged percentiles retain its existing bounded-cardinality
+    behavior. Callers merge the returned count buckets across small windows.
+    """
+    window = _window(from_, to)
+    if window is None:
+        return []
+    start, end = window
+    pipeline = _agg_pipeline(
+        agent_id=agent_id,
+        event_names=event_names,
+        categories=categories,
+        attribute_filters=attribute_filters,
+    )
+    extract = f' | json {_escape_label(field)}="attributes.{_escape_label(field)}" | __error__=""'
+    duration_s = max(1, int((end - start).total_seconds()))
+    logql = (
+        f"sum by ({_escape_label(field)}) (count_over_time(({pipeline}{extract})[{duration_s}s]))"
+    )
+    try:
+        result = _query_instant(logql, end)
+    except httpx.HTTPStatusError as exc:
+        if not _is_series_limit(exc):
+            raise
+        result = _query_instant(
+            _bucketed_distribution_logql(
+                pipeline=pipeline,
+                extract=extract,
+                field=field,
+                group_by=None,
+                duration_s=duration_s,
+            ),
+            end,
+        )
+        _relabel_buckets(result, field)
+    out: list[tuple[float, int]] = []
+    for series in result:
+        value = _result_value(series)
+        if value is not None:
+            out.append((float(series.get("metric", {}).get(field, 0)), int(value)))
+    return out
+
+
 def _is_series_limit(exc: httpx.HTTPStatusError) -> bool:
     """Whether a Loki rejection is its `max_query_series` cap (the exact
     count-by-value distribution exceeded it) — the one error the bucketed

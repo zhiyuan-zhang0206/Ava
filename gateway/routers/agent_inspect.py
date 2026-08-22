@@ -1,19 +1,4 @@
-"""Per-agent inspector panel — GET /api/agents/{id}/inspect.
-
-The single-agent counterpart to `/api/stats/dashboard` (which aggregates the
-whole fleet): one agent's live persistent shells, its frozen config overlay,
-its LLM cost, and turn/exec statistics. cost/stats are aggregations over the
-unified event stream: the live tail reads Loki (the LGTM read side, task
-#1197), and the pre-cutover history reads the frozen PG `events` archive —
-the two are stitched at the archive's freeze point so whole-life cost/tokens
-stay cumulative (task #1273). By default they cover the agent's whole life
-("the agent's session" is its whole life — agent_id is stable across
-restart/resurrect); `?hours=` narrows them to a recent window. `shells` is
-probed on the agent's own machine via the `shell_probe` cluster op — the
-gateway never touches sessions itself, and every machine (the gateway's own
-included) is dialed at its registered ops URL, so a remote runner's shells
-are visible exactly like a local one's.
-"""
+"""Per-agent inspector panel — GET /api/agents/{id}/inspect."""
 
 from __future__ import annotations
 
@@ -28,7 +13,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from psycopg_pool import ConnectionPool
 
 from gateway import loki_events, loki_query_budget, neighbors
-from gateway.routers import _agent_cost, _plugin_metrics
+from gateway.routers import _agent_cost, _inspect_pg, _inspect_stats, _plugin_metrics
 from gateway.routers._agent_cost import window_bounds
 from gateway.routers._inspect_cache import InspectCacheFullError, InspectQueryCache
 from gateway.routers._inspect_live import db_rows_blocking, notice_blocking
@@ -56,66 +41,18 @@ router = APIRouter()
 HALT_EVENT = "halt"
 
 
-# Shared filter kwargs for the loki_events aggregate calls — a TypedDict so
-# `**common` unpacks with exact types under pyright strict.
-def _agent_stats(agent_id: int, from_: datetime | None, to: datetime | None) -> AgentStats:
-    """Turn + exec counters for one agent, over the window.
-
-    `turn_ok` is turns with ok=true; the percentiles / min / max come from
-    the Loki payload-attribute aggregates over every turn's
-    `duration_seconds` (client-side percentile, `percentile_cont` semantics).
-    exec failure is every exec outcome other than plain `exec`
-    (exec_failed / exec(timeout) / exec_cancelled; the prefix regex still
-    counts legacy exec_thread_stuck rows so 90d historical aggregation
-    stays continuous even though the thread backend no longer emits them) —
-    same exec-ok / exec-failed split as the metrics report.
-    """
-    common: _agent_cost._AggCommon = {
-        "event_names": ["turn_end"],
-        "categories": ["telemetry", "log"],
-        "agent_id": agent_id,
-        "from_": from_,
-        "to": to,
-    }
-    turn_total = loki_events.count_events(**common)
-    turn_ok = loki_events.count_events(**common, attribute_filters={"ok": "true"})
-    p50 = loki_events.attribute_aggregate(
-        field="duration_seconds", agg="quantile", quantile=0.5, **common
-    )
-    p90 = loki_events.attribute_aggregate(
-        field="duration_seconds", agg="quantile", quantile=0.9, **common
-    )
-    tmin = loki_events.attribute_aggregate(field="duration_seconds", agg="min", **common)
-    tmax = loki_events.attribute_aggregate(field="duration_seconds", agg="max", **common)
-
-    exec_ok = loki_events.count_events(
-        event_names=["^exec$"],
-        categories=["telemetry", "log"],
-        agent_id=agent_id,
-        from_=from_,
-        to=to,
-    )
-    exec_failed = loki_events.count_events(
-        event_names=["^exec_.*", "^exec\\(.*"],
-        categories=["telemetry", "log"],
-        agent_id=agent_id,
-        from_=from_,
-        to=to,
-    )
-    return AgentStats(
-        turn_total=int(turn_total),
-        turn_ok=int(turn_ok),
-        turn_p50_seconds=round(float(p50), 2),
-        turn_p90_seconds=round(float(p90), 2),
-        turn_min_seconds=round(float(tmin), 2),
-        turn_max_seconds=round(float(tmax), 2),
-        exec_ok=int(exec_ok),
-        exec_failed=int(exec_failed),
-    )
+def _agent_stats(
+    pool: ConnectionPool[Any], agent_id: int, from_: datetime | None, to: datetime | None
+) -> AgentStats:
+    """Turn + exec counters for one agent, over the requested window."""
+    return _inspect_stats.agent_stats(pool, agent_id, from_, to)
 
 
 def _alive_seconds(
-    agent_id: int, window_start: datetime | None, spawned_at: datetime | None
+    pool: ConnectionPool[Any],
+    agent_id: int,
+    window_start: datetime | None,
+    spawned_at: datetime | None,
 ) -> float:
     """The agent's alive wall-clock, optionally clipped to a window lower bound.
 
@@ -159,20 +96,35 @@ def _alive_seconds(
         hi = min(end, now)
         return max(0.0, (hi - lo).total_seconds())
 
-    rows, _ = loki_events.query_events(
-        agent_id=agent_id,
-        event_names=["agent_spawned", "agent_resurrected", "agent_terminated"],
-        from_=_agent_cost._retention_floor(),
-        limit=1000,
-    )
-    lifecycle_events: list[tuple[str, datetime]] = [
-        (r["event_name"], r["ts"]) for r in reversed(rows)
-    ]
+    with pool.connection() as conn, conn.cursor() as cur:
+        freeze = _inspect_pg.freeze_point(cur)
+        lifecycle_events = _inspect_pg.archive_lifecycle(
+            conn, agent_id=agent_id, from_=None, to=None
+        )
+    live_window = _inspect_pg.retained_live_window(from_=None, to=None, freeze=freeze)
+    if live_window is not None:
+        start, end = live_window
+        live_rows = _inspect_pg.query_loki_shards(
+            start,
+            end,
+            lambda shard_start, shard_end: loki_events.query_events(
+                agent_id=agent_id,
+                event_names=["agent_spawned", "agent_resurrected", "agent_terminated"],
+                from_=shard_start,
+                to=shard_end,
+                limit=1000,
+                direction="forward",
+            )[0],
+        )
+        lifecycle_events.extend(
+            (row["ts"], row["event_name"]) for rows in live_rows for row in rows
+        )
+    lifecycle_events.sort()
 
     alive_seconds = 0.0
     saw_start = False
     current_life_start: datetime | None = None
-    for event, ts in lifecycle_events:
+    for ts, event in lifecycle_events:
         if event in ("agent_spawned", "agent_resurrected"):
             if current_life_start is not None:
                 # A second start with no intervening terminate: the previous
@@ -200,45 +152,58 @@ def _alive_seconds(
 
 
 def _agent_tps(
+    pool: ConnectionPool[Any],
     agent_id: int,
     from_: datetime | None,
     to: datetime | None,
     spawned_at: datetime | None,
+    llm_seconds: float | None = None,
 ) -> AgentTps:
     """LM-stage and agent-lifecycle TPS for one agent.
 
     LM-stage TPS = output tokens / cumulative LLM call wall-clock (sum of
     `turn_end.duration_seconds` within the window). Isolates model generation
     speed excluding execute_code and framework overhead. Numerator and
-    denominator come from the SAME Loki window — the rate is coherent by
-    construction (and bounded by Loki retention like every event read here).
+    denominator come from the same ledger-plus-edge window, so the rate is
+    coherent by construction.
 
     Agent-lifecycle TPS = output tokens / cumulative agent alive time (whole
     life, `_alive_seconds(window_start=None)` — the window narrows only the
     numerator, so this stays a since-birth throughput)."""
-    output_tokens = int(
-        loki_events.attribute_aggregate(
-            field="out_total",
-            agg="sum",
-            event_names=["llm_usage"],
-            categories=["telemetry", "log"],
-            agent_id=agent_id,
-            from_=from_,
-            to=to,
+    if llm_seconds is None:
+        llm_seconds = _inspect_stats.stats_values(pool, agent_id, from_, to).turn_duration_seconds
+    plan = _inspect_stats.full_day_plan(from_, to)
+    if plan.has_full_days:
+        with pool.connection() as conn:
+            ledger_tokens, watermark = _inspect_pg.ledger_tokens(
+                conn, agent_id=agent_id, day_from=plan.day_from, day_to=plan.day_to
+            )
+    else:
+        ledger_tokens = 0
+        watermark = None
+    live_tokens = 0.0
+    for start, end in _inspect_stats.live_edge_spans(plan, watermark, from_, to):
+        live_tokens += sum(
+            _inspect_pg.query_loki_shards(
+                start,
+                end,
+                lambda shard_start, shard_end: float(
+                    loki_events.attribute_aggregate(
+                        field="out_total",
+                        agg="sum",
+                        event_names=["llm_usage"],
+                        categories=["telemetry", "log"],
+                        agent_id=agent_id,
+                        from_=shard_start,
+                        to=shard_end,
+                    )
+                ),
+            )
         )
-    )
-    llm_seconds = loki_events.attribute_aggregate(
-        field="duration_seconds",
-        agg="sum",
-        event_names=["turn_end"],
-        categories=["telemetry", "log"],
-        agent_id=agent_id,
-        from_=from_,
-        to=to,
-    )
+    output_tokens = ledger_tokens + int(live_tokens)
     lm_stage_tps = output_tokens / llm_seconds if llm_seconds > 0 else 0.0
 
-    alive_seconds = _alive_seconds(agent_id, window_start=None, spawned_at=spawned_at)
+    alive_seconds = _alive_seconds(pool, agent_id, window_start=None, spawned_at=spawned_at)
     agent_lifecycle_tps = output_tokens / alive_seconds if alive_seconds > 0 else 0.0
 
     return AgentTps(
@@ -248,11 +213,13 @@ def _agent_tps(
 
 
 def _agent_activity(
+    pool: ConnectionPool[Any],
     agent_id: int,
     from_: datetime | None,
     to: datetime | None,
     window_start: datetime | None,
     spawned_at: datetime | None,
+    llm_seconds: float | None = None,
 ) -> AgentActivity:
     """Active-rate for one agent: fraction of alive time spent actively working
     versus idle-waiting for input (see `AgentActivity` for the full contract).
@@ -264,40 +231,75 @@ def _agent_activity(
     `node_exit.duration_seconds` where node = 'exec'. `alive_seconds` =
     `_alive_seconds(window_start)`. `active_rate` = active/alive capped at 1.0;
     0.0 when alive is 0."""
-    active_seconds = loki_events.attribute_aggregate(
-        field="duration_seconds",
-        agg="sum",
-        event_names=["node_exit"],
-        agent_id=agent_id,
-        from_=from_,
-        to=to,
-        attribute_filters={"node": "!=claim"},
-    )
+    if llm_seconds is None:
+        llm_seconds = _inspect_stats.stats_values(pool, agent_id, from_, to).turn_duration_seconds
+    with pool.connection() as conn, conn.cursor() as cur:
+        freeze = _inspect_pg.freeze_point(cur)
+        active_seconds = _inspect_pg.archive_aggregate(
+            conn,
+            field="duration_seconds",
+            agg="sum",
+            event_names=["^node_exit$"],
+            categories=None,
+            agent_id=agent_id,
+            from_=from_,
+            to=to,
+            attribute_filters={"node": "!=claim"},
+        )
+        exec_seconds = _inspect_pg.archive_aggregate(
+            conn,
+            field="duration_seconds",
+            agg="sum",
+            event_names=["^node_exit$"],
+            categories=None,
+            agent_id=agent_id,
+            from_=from_,
+            to=to,
+            attribute_filters={"node": "exec"},
+        )
+    live_window = _inspect_pg.retained_live_window(from_=from_, to=to, freeze=freeze)
+    if live_window is not None:
+        start, end = live_window
+        active_seconds += sum(
+            _inspect_pg.query_loki_shards(
+                start,
+                end,
+                lambda shard_start, shard_end: float(
+                    loki_events.attribute_aggregate(
+                        field="duration_seconds",
+                        agg="sum",
+                        event_names=["node_exit"],
+                        agent_id=agent_id,
+                        from_=shard_start,
+                        to=shard_end,
+                        attribute_filters={"node": "!=claim"},
+                    )
+                ),
+            )
+        )
+        exec_seconds += sum(
+            _inspect_pg.query_loki_shards(
+                start,
+                end,
+                lambda shard_start, shard_end: float(
+                    loki_events.attribute_aggregate(
+                        field="duration_seconds",
+                        agg="sum",
+                        event_names=["node_exit"],
+                        agent_id=agent_id,
+                        from_=shard_start,
+                        to=shard_end,
+                        attribute_filters={"node": "exec"},
+                    )
+                ),
+            )
+        )
     active_rate = (
         active_seconds / alive_seconds
-        if (alive_seconds := _alive_seconds(agent_id, window_start, spawned_at)) > 0
+        if (alive_seconds := _alive_seconds(pool, agent_id, window_start, spawned_at)) > 0
         else 0.0
     )
     active_rate = min(1.0, active_rate)
-
-    llm_seconds = loki_events.attribute_aggregate(
-        field="duration_seconds",
-        agg="sum",
-        event_names=["turn_end"],
-        categories=["telemetry", "log"],
-        agent_id=agent_id,
-        from_=from_,
-        to=to,
-    )
-    exec_seconds = loki_events.attribute_aggregate(
-        field="duration_seconds",
-        agg="sum",
-        event_names=["node_exit"],
-        agent_id=agent_id,
-        from_=from_,
-        to=to,
-        attribute_filters={"node": "=exec"},
-    )
     return AgentActivity(
         active_seconds=round(active_seconds, 2),
         alive_seconds=round(alive_seconds, 2),
@@ -476,18 +478,37 @@ def _inspect_blocking(
         f_cost = ex.submit(
             _agent_cost.agent_cost, pool, agent_id, hours, since_compact=since_compact
         )
-        f_stats = ex.submit(_agent_stats, agent_id, from_, None)
-        f_tps = ex.submit(_agent_tps, agent_id, from_, None, spawned_at)
-        f_activity = ex.submit(_agent_activity, agent_id, from_, None, window_start, spawned_at)
+        f_stats = ex.submit(_inspect_stats.stats_values, pool, agent_id, from_, None)
         f_heartbeat_last_pause = ex.submit(_heartbeat_last_pause, agent_id)
         cost = f_cost.result()
-        stats = f_stats.result()
+        stats_values = f_stats.result()
+        # Stats supplies the one turn-duration sum shared by TPS and activity,
+        # eliminating two otherwise identical live-tail scans.
+        f_tps = ex.submit(
+            _agent_tps,
+            pool,
+            agent_id,
+            from_,
+            None,
+            spawned_at,
+            stats_values.turn_duration_seconds,
+        )
+        f_activity = ex.submit(
+            _agent_activity,
+            pool,
+            agent_id,
+            from_,
+            None,
+            window_start,
+            spawned_at,
+            stats_values.turn_duration_seconds,
+        )
         tps = f_tps.result()
         activity = f_activity.result()
         heartbeat_last_pause = f_heartbeat_last_pause.result()
     return _InspectAggregates(
         cost=cost,
-        stats=stats,
+        stats=stats_values.stats,
         tps=tps,
         activity=activity,
         heartbeat_last_pause=heartbeat_last_pause,

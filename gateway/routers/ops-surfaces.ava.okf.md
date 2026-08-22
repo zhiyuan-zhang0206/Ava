@@ -46,16 +46,20 @@ the short Postgres metadata read, so waiting for the global Loki budget never
 holds a pooled DB connection.
 
 `GET /api/agents/{id}/inspect` draws the same boundary per agent: its 75s
-single-flight TTL retains only Loki/ledger aggregates. Every request freshly
-reads machine, config overlay, status/heartbeat inputs, liveness and probe
-timestamp, releases that DB borrow, then joins/loads the aggregate. Thus both
-manual refresh and the 60s panel poll see control-plane changes immediately
-without re-running the historical fan-out. The interactive response has a 15s
-aggregate deadline: budget refusal, deadline expiry, and Loki transport/status
-failure are retriable HTTP 503 responses with `Retry-After`; a synchronous
-leader already in progress remains the sole single-flight load and may populate
-the TTL after its original caller has received the bounded failure. Async
-followers await that shared claim without occupying the gateway's worker pool.
+single-flight TTL retains only history aggregates. Completed UTC days read the
+durable Postgres ledger; duration percentiles and lifecycle/node details stitch
+the frozen archive to the retained Loki tail. Live spans are split into <=3h
+queries under the shared Loki budget, rather than rescanning one long window.
+Every request freshly reads machine, config overlay, status/heartbeat inputs,
+liveness and probe timestamp, releases that DB borrow, then joins/loads the
+aggregate. Thus both manual refresh and the 60s panel poll see control-plane
+changes immediately without re-running the historical fan-out. The interactive
+response has a 15s aggregate deadline: budget refusal, deadline expiry, and
+Loki transport/status failure are retriable HTTP 503 responses with
+`Retry-After`; a synchronous leader already in progress remains the sole
+single-flight load and may populate the TTL after its original caller has
+received the bounded failure. Async followers await that shared claim without
+occupying the gateway's worker pool.
 
 ## Key Dependencies
 
