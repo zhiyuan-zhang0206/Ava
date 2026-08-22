@@ -72,6 +72,13 @@ def ensure_provider_plugins_loaded() -> None:
         if _STATE.loaded:
             return
         from shared import paths, plugins_config
+        from shared.lm import provider_api
+        from shared.lm.factory import _MODEL_KEY_MAP
+
+        # Bootstrap can be the first provider consumer. Importing factory here
+        # establishes its core-prefix reservation before any plugin registers;
+        # otherwise bootstrap-first startup could let a plugin claim `claude-`.
+        provider_api.REGISTRY.reserve_core_prefixes(set(_MODEL_KEY_MAP))
 
         discovered = plugins_config._discover_plugins()
         known = set(discovered)

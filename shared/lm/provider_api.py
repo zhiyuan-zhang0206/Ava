@@ -16,6 +16,14 @@ discovery is keyed on ``plugin.py``, so a provider plugin ships one even when
 it contributes nothing agent-side (an empty stub satisfies discovery and the
 enable switch).
 
+``ProviderBinding.key_env`` declares the key's `.env` delivery channel: the
+gateway reads the file at spawn validation, bootstrap relays enabled bindings'
+present keys to split runners, and the single-box agent child allowlist forwards
+only those declared keys. The install seed allowlist uses the same declaration;
+an unmodeled key (or an already seedable Settings alias) may seed, but unrelated
+modeled settings, cluster identity/data-plane aliases, and the runner database
+password cannot. Plugin config images do not carry provider secrets.
+
 Builder contract (plain Python, documented rather than schema'd — see
 ``decisions/2026-07-19-plugin-core-boundary-wrapper-extension.md``):
 

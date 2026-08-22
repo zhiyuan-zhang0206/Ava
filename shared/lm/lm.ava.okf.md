@@ -52,7 +52,8 @@ LangChain types `AIMessage(Chunk).content` weakly as `str | list[str | dict[str,
 - `latest_input_tokens(messages)` → `input_tokens` from the latest AIMessage with `usage_metadata` (provider's true occupancy), `None` if absent (first turn/post-compact fallback chars/4). Shared by compact trigger (`agent/hooks/compact.py`, Option Y) and token-usage endpoint — one unit for gauge/scale/trigger.
 
 ### provider plugins
-- [[shared/lm/provider-plugins.ava.okf.md]] — provider binding contract, lazy loader, registration invariants, and gateway visibility.
+- [[shared/lm/provider-plugins.ava.okf.md]] — plugin binding and `key_env`
+  delivery contract.
 
 ### compatibility layers
 - `_anthropic_compat.py`: `ThinkingTokensChatAnthropic` — ChatAnthropic subclass patching thinking_tokens into usage_metadata (base drops it); shared by claude/deepseek.

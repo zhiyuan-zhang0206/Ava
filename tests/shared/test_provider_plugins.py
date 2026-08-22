@@ -160,6 +160,9 @@ def provider_plugin() -> Generator[Callable[..., None], None, None]:
     stop._BY_PROVIDER.update(stop_snapshot)
     _reset_loaded_for_tests()
     _invalidate_known_provider_keys_cache()
+    from shared.env_registry import seed_allowlist
+
+    seed_allowlist.cache_clear()
 
 
 def test_plugin_model_registers_and_builds(provider_plugin: Callable[..., None]) -> None:
@@ -289,6 +292,22 @@ def test_core_prefix_cannot_be_shadowed(provider_plugin: Callable[..., None]) ->
             models={},
             pricing={},
         )
+
+
+def test_loader_reserves_core_prefixes_before_bootstrap_can_load_a_plugin(
+    provider_plugin: Callable[..., None],
+) -> None:
+    """Bootstrap may be the first provider consumer, before factory import setup."""
+    reserved = set(provider_api.REGISTRY._reserved_prefixes)
+    provider_api.REGISTRY._reserved_prefixes.clear()
+    provider_plugin(prefix="claude-", model="claude-test")
+    try:
+        with pytest.raises(RuntimeError) as excinfo:
+            ensure_provider_plugins_loaded()
+        assert "already claimed" in str(excinfo.value.__cause__)
+    finally:
+        provider_api.REGISTRY._reserved_prefixes.clear()
+        provider_api.REGISTRY._reserved_prefixes.update(reserved)
 
 
 def test_plugin_model_id_must_match_binding_prefix() -> None:

@@ -242,6 +242,7 @@ class TestRegistryInvariants:
             "TEMP",
             "TMP",
         }
+        registered |= er._enabled_provider_key_envs()
         for proj in (
             er.cluster_scope_aliases(),
             er.agent_runner_cluster_aliases(),

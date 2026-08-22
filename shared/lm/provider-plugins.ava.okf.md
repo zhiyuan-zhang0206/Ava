@@ -43,7 +43,12 @@ provider bindings even though they do not import agent-side plugin code.
   `_clamp_effort`; `require_key(key_env)` fails at build time if the bootstrap
   environment lacks the key.
 - The spawn boundary reads a plugin key from the cluster `.env`; split runners
-  receive it through bootstrap plugin-secrets. It is deliberately not a
-  Settings field. `build_chat_model`, `validate_model_config`, model-list and
-  context endpoints, and vision checks ensure the loader has run before they
-  consult registration state.
+  receive enabled bindings' present keys through bootstrap plugin-secrets, and
+  a single-box agent child receives only those declared keys from its parent's
+  env. The install seed allowlist uses the same declaration only for unmodeled
+  keys or already-seedable Settings aliases; it excludes unrelated modeled
+  settings, cluster identity/data-plane aliases, and the runner database
+  password. It is deliberately not a Settings field. `build_chat_model`,
+  `validate_model_config`, model-list and context
+  endpoints, and vision checks ensure the loader has run before they consult
+  registration state.

@@ -46,7 +46,7 @@ These four plans co-locate with the code they plan for, per the 2026-08-12 doc r
 | [Living debt tracker](infra/debt-tracker.md) | Skeleton — a single "what debt is open now" view maintained by the sweeper engine |
 | [DB write batching](infra/db-write-batching.md) | Design draft |
 | [Heartbeat design](infra/heartbeat-design.md) | Research record; Tier 2 shipped as a simpler opt-out design. Kept for the rejected two-tier proposal |
-| [Model providers as plugins](../shared/lm/model-providers-as-plugins.md) | **All of it** — the doc names the extension points (`registry.py:MODELS` registration, factory prefix dispatch, the `_effort.py` / `stop.py` per-provider vocabularies, the API-key channel, the load call); none are open. Blocker is where a plugin-declared provider key lives, since plugin config has no bootstrap distribution |
+| [Model providers as plugins](../shared/lm/model-providers-as-plugins.md) | **Mechanics + Grok pilot landed** — registry, dispatch, vocabularies, key channel, and lazy load are built. Left: plugin dependency installation and deciding which remaining core providers should extract |
 
 ## Top level
 

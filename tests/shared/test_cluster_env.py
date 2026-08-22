@@ -174,17 +174,21 @@ def test_seed_keys_disjoint_from_cluster_identity():
     assert env_registry.seed_allowlist(), "seed allowlist must not be empty"
 
 
-def test_seed_keys_are_real_settings_aliases():
-    """Every seed key must be a live Settings env alias — a provider-key rename
-    that forgets this allowlist would silently stop seeding it."""
+def test_seed_keys_are_declared_by_settings_or_enabled_provider_plugin():
+    """Every seed key is a Settings alias or an enabled provider binding.
+
+    Provider bindings are intentionally the declaration for plugin keys: making
+    them Settings fields would make a removable plugin widen core config.
+    """
     from shared.config import FIELD_INFOS
 
     aliases = {
         field.serialization_alias or field.alias or name.upper()
         for name, field in FIELD_INFOS.items()
     }
-    missing = sorted(env_registry.seed_allowlist() - aliases)
-    assert not missing, f"SEED_ENV_KEYS entries with no Settings alias: {missing}"
+    plugin_keys = env_registry._enabled_provider_key_envs()
+    missing = sorted(env_registry.seed_allowlist() - aliases - plugin_keys)
+    assert not missing, f"seed_allowlist entries with no declaration: {missing}"
 
 
 def test_health_port_env_derives_the_block_from_a_base():
