@@ -18,19 +18,23 @@ surfaced, unreachable machine degraded) is covered below.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, Literal
 
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
-from gateway import loki_events
+from gateway import loki_events, loki_query_budget
 from gateway.app import app
 from gateway.loki_events import _weighted_quantile
 from gateway.routers import _agent_cost, agent_inspect
+from gateway.routers._inspect_cache import InspectCacheFullError, InspectQueryCache
 from shared.config import settings
 
 
@@ -133,7 +137,7 @@ class _FakeLoki:
             raise AssertionError(
                 f"Loki rejects this window (max_query_length=30d1h): from_={from_.isoformat()}"
             )
-        out = []
+        out: list[dict[str, Any]] = []
         for r in self.rows:
             if kwargs.get("agent_id") is not None and r["agent_id"] != kwargs["agent_id"]:
                 continue
@@ -167,7 +171,7 @@ class _FakeLoki:
                 continue
             if kwargs.get("grep") and kwargs["grep"] not in json.dumps(r, default=str):
                 continue
-            out.append(r)  # type: ignore[arg-type]
+            out.append(r)
         return out
 
     def query_events(self, **kwargs: Any) -> tuple[list[dict[str, Any]], bool]:
@@ -290,6 +294,27 @@ def test_inspect_unknown_agent_404(db_conn: psycopg.Connection) -> None:
     with TestClient(app) as client:
         resp = client.get("/api/agents/999999/inspect")
     assert resp.status_code == 404
+
+
+@pytest.mark.parametrize("reason", ["queue_full", "acquire_timeout"])
+def test_inspect_local_loki_budget_rejection_is_503(
+    db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+    reason: Literal["queue_full", "acquire_timeout"],
+) -> None:
+    """Local capacity saturation is retriable, never an unhandled 500."""
+    aid = _insert_agent(db_conn)
+    db_conn.commit()
+
+    def reject(*args: Any, **kwargs: Any) -> Any:
+        raise loki_query_budget.LokiQueryBudgetError(reason)
+
+    monkeypatch.setattr(agent_inspect, "_inspect_rows_cached", reject)
+    with TestClient(app) as client:
+        response = client.get(f"/api/agents/{aid}/inspect")
+    assert response.status_code == 503
+    assert response.json()["detail"] == f"Loki query budget unavailable ({reason}); retry"
+    assert response.headers["retry-after"] == "1"
 
 
 def test_inspect_config_overlay_roundtrips(db_conn: psycopg.Connection) -> None:
@@ -1648,6 +1673,161 @@ def test_inspect_response_cache_absorbs_repeat_burst(
         assert third["notice"]["title"] == "q"
 
 
+def test_inspect_cache_keeps_only_aggregates_and_refreshes_live_db_fields(
+    db_conn: psycopg.Connection,
+    fake_loki: _FakeLoki,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The 75s TTL may retain Loki/ledger aggregates, never live DB state.
+
+    This models both the 60s poll (monotonic +60, still inside the aggregate
+    TTL) and a manual refresh (a second HTTP request): machine, config,
+    heartbeat inputs, and liveness must come from a fresh agents_meta read,
+    while the historical turn aggregate remains cached.
+    """
+    clock = [1_000.0]
+    monkeypatch.setattr(agent_inspect.time_mod, "monotonic", lambda: clock[0])
+    aid = _insert_agent(
+        db_conn,
+        status="idling",
+        config_overlay={"llm_model": "model-a"},
+        status_changed_s_ago=120,
+    )
+    fake_loki.add(event="turn_end", agent_id=aid, payload={"duration_seconds": 2.0, "ok": True})
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "UPDATE agents_meta SET machine = 'runner-a', liveness_state = 'online', "
+            "last_probe_at = now() WHERE id = %s",
+            (aid,),
+        )
+    db_conn.commit()
+
+    with TestClient(app) as client:
+        first = client.get(f"/api/agents/{aid}/inspect").json()
+        assert first["machine"] == "runner-a"
+        assert first["config_overlay"] == {"llm_model": "model-a"}
+        assert first["liveness_state"] == "online"
+        assert first["last_probe_at"] is not None
+        assert first["heartbeat"]["next_at"] is not None
+        assert first["stats"]["turn_total"] == 1
+
+        fake_loki.add(
+            event="turn_end",
+            agent_id=aid,
+            payload={"duration_seconds": 4.0, "ok": True},
+        )
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "UPDATE agents_meta SET machine = 'runner-b', status = 'running', "
+                'config_overlay = \'{"llm_model": "model-b"}\'::jsonb, '
+                "liveness_state = 'offline', last_probe_at = NULL WHERE id = %s",
+                (aid,),
+            )
+        db_conn.commit()
+
+        # Immediate/manual refresh: no monotonic time passes, but every live
+        # field must already be B while the Loki aggregate stays A.
+        manual = client.get(f"/api/agents/{aid}/inspect").json()
+        assert manual["machine"] == "runner-b"
+        assert manual["config_overlay"] == {"llm_model": "model-b"}
+        assert manual["liveness_state"] == "offline"
+        assert manual["last_probe_at"] is None
+        assert manual["heartbeat"]["next_at"] is None
+        assert manual["heartbeat"]["paused_until"] is None
+        assert manual["stats"]["turn_total"] == 1
+
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "UPDATE agents_meta SET machine = 'runner-c', status = 'idling', "
+                'config_overlay = \'{"llm_model": "model-c"}\'::jsonb, '
+                "heartbeat_paused_until = now() + interval '10 minutes', "
+                "liveness_state = 'unknown', last_probe_at = now() WHERE id = %s",
+                (aid,),
+            )
+        db_conn.commit()
+
+        # Background poll at t+60 is still an aggregate-cache hit (TTL=75),
+        # yet the live projection must advance again to C.
+        clock[0] += 60
+        refreshed = client.get(f"/api/agents/{aid}/inspect").json()
+
+    assert refreshed["machine"] == "runner-c"
+    assert refreshed["config_overlay"] == {"llm_model": "model-c"}
+    assert refreshed["liveness_state"] == "unknown"
+    assert refreshed["last_probe_at"] is not None
+    assert refreshed["heartbeat"]["next_at"] is None
+    assert refreshed["heartbeat"]["paused_until"] is not None
+    # The historical aggregate is the only cached part; the new Loki row is
+    # intentionally invisible until the 75s TTL expires.
+    assert refreshed["stats"]["turn_total"] == 1
+
+
+def test_inspect_releases_live_db_borrow_before_cached_loki_fanout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A queued/slow aggregate loader must never pin the live-state DB borrow."""
+    now = datetime.now(UTC)
+
+    class TrackingCursor:
+        def __init__(self) -> None:
+            self.rows: list[tuple[Any, ...]] = [
+                ({}, "runner", "running", now, now, now, None, "online", now),
+                (False,),
+            ]
+
+        def __enter__(self) -> TrackingCursor:
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def execute(self, query: str, params: tuple[int] | None = None) -> None:
+            return None
+
+        def fetchone(self) -> tuple[Any, ...]:
+            return self.rows.pop(0)
+
+    class TrackingConnection:
+        def __enter__(self) -> TrackingConnection:
+            pool.active = True
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pool.active = False
+
+        def cursor(self) -> TrackingCursor:
+            return TrackingCursor()
+
+    class TrackingPool:
+        active = False
+
+        def connection(self) -> TrackingConnection:
+            return TrackingConnection()
+
+    class StopAfterOrderingProofError(RuntimeError):
+        pass
+
+    pool = TrackingPool()
+
+    def cached_loader(*args: Any, **kwargs: Any) -> Any:
+        assert pool.active is False
+        raise StopAfterOrderingProofError
+
+    monkeypatch.setattr(agent_inspect, "_inspect_rows_cached", cached_loader)
+
+    class RequestState:
+        db_pool = pool
+
+    class RequestApp:
+        state = RequestState()
+
+    class FakeRequest:
+        app = RequestApp()
+
+    with pytest.raises(StopAfterOrderingProofError):
+        asyncio.run(agent_inspect.get_agent_inspect(7, FakeRequest()))  # type: ignore[arg-type]
+
+
 def test_inspect_response_cache_keyed_by_window(
     db_conn: psycopg.Connection, fake_loki: _FakeLoki
 ) -> None:
@@ -1693,3 +1873,196 @@ def test_inspect_response_cache_expires(
         fake_loki.add(event="turn_end", agent_id=aid, payload={"duration_seconds": 4.0, "ok": True})
         second = client.get(f"/api/agents/{aid}/inspect").json()
         assert second["stats"]["turn_total"] == 2
+
+
+def test_inspect_singleflight_coalesces_concurrent_identical_fanout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """N simultaneous misses for one agent/window execute one expensive fan-out."""
+    agent_inspect.cache_clear()
+    started = threading.Event()
+    release = threading.Event()
+    calls = 0
+    calls_lock = threading.Lock()
+    expected = object()
+    fake_pool: Any = object()
+    followers_joined = _track_inspect_cache_followers(monkeypatch, expected=7)
+
+    def fake_fanout(*args: Any, **kwargs: Any) -> object:
+        nonlocal calls
+        with calls_lock:
+            calls += 1
+        started.set()
+        assert release.wait(timeout=2)
+        return expected
+
+    monkeypatch.setattr(agent_inspect, "_inspect_blocking", fake_fanout)
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        futures = [
+            executor.submit(
+                agent_inspect._inspect_rows_cached,
+                fake_pool,
+                41,
+                None,
+                since_compact=False,
+            )
+            for _ in range(8)
+        ]
+        assert started.wait(timeout=1)
+        assert followers_joined.wait(timeout=1)
+        assert calls == 1
+        release.set()
+        assert [future.result(timeout=1) for future in futures] == [expected] * 8
+
+
+def test_inspect_fanout_preserves_one_global_loki_slot_for_other_queries() -> None:
+    """One inspector stays parallel without monopolizing Loki's capacity.
+
+    Three workers execute five independent sections in at most two waves for
+    equal-duration queries, while the fourth Loki slot remains available to a
+    queued stats/ops request.
+    """
+    assert agent_inspect._INSPECT_WORKERS == loki_query_budget.LOKI_QUERY_CONCURRENCY - 1
+
+
+def _track_inspect_cache_followers(
+    monkeypatch: pytest.MonkeyPatch, *, expected: int
+) -> threading.Event:
+    """Signal once the requested number of callers joined the leader Future."""
+    cache: Any = agent_inspect._inspect_query_cache
+    original = cache._lookup_or_claim
+    joined = threading.Event()
+    count = 0
+    lock = threading.Lock()
+
+    def tracked(key: Any, current: float) -> Any:
+        nonlocal count
+        claim = original(key, current)
+        if getattr(claim, "leader", None) is False:
+            with lock:
+                count += 1
+                if count == expected:
+                    joined.set()
+        return claim
+
+    monkeypatch.setattr(cache, "_lookup_or_claim", tracked)
+    return joined
+
+
+def test_inspect_singleflight_failure_releases_key_for_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed leader wakes waiters and never leaves the key permanently bricked."""
+    agent_inspect.cache_clear()
+    started = threading.Event()
+    release = threading.Event()
+    calls = 0
+    expected = object()
+    fake_pool: Any = object()
+    follower_joined = _track_inspect_cache_followers(monkeypatch, expected=1)
+
+    def fake_fanout(*args: Any, **kwargs: Any) -> object:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            started.set()
+            assert release.wait(timeout=2)
+            raise RuntimeError("loki unavailable")
+        return expected
+
+    monkeypatch.setattr(agent_inspect, "_inspect_blocking", fake_fanout)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first = executor.submit(
+            agent_inspect._inspect_rows_cached, fake_pool, 42, None, since_compact=False
+        )
+        second = executor.submit(
+            agent_inspect._inspect_rows_cached, fake_pool, 42, None, since_compact=False
+        )
+        assert started.wait(timeout=1)
+        assert follower_joined.wait(timeout=1)
+        release.set()
+        with pytest.raises(RuntimeError, match="loki unavailable"):
+            first.result(timeout=1)
+        with pytest.raises(RuntimeError, match="loki unavailable"):
+            second.result(timeout=1)
+
+    assert agent_inspect._inspect_rows_cached(fake_pool, 42, None, since_compact=False) is expected
+    assert calls == 2
+
+
+def test_inspect_cache_spans_one_sixty_second_poll_tick(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The retention-window fan-out is not repeated on every 60s panel tick."""
+    agent_inspect.cache_clear()
+    clock = [1_000.0]
+    calls = 0
+    fake_pool: Any = object()
+
+    def fake_fanout(*args: Any, **kwargs: Any) -> object:
+        nonlocal calls
+        calls += 1
+        return object()
+
+    monkeypatch.setattr(agent_inspect.time_mod, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(agent_inspect, "_inspect_blocking", fake_fanout)
+    first = agent_inspect._inspect_rows_cached(fake_pool, 43, None, since_compact=False)
+    clock[0] += 60
+    assert agent_inspect._inspect_rows_cached(fake_pool, 43, None, since_compact=False) is first
+    assert calls == 1
+    clock[0] += 20
+    assert agent_inspect._inspect_rows_cached(fake_pool, 43, None, since_compact=False) is not first
+    assert calls == 2
+
+
+def test_inspect_singleflight_cancellation_releases_key_for_retry() -> None:
+    """A cancelled leader never leaves its key in the in-flight map."""
+    cache = InspectQueryCache[str, object](max_entries=2, max_inflight=1)
+    calls = 0
+    expected = object()
+
+    def load() -> object:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise asyncio.CancelledError
+        return expected
+
+    with pytest.raises(asyncio.CancelledError):
+        cache.get_or_load("same", load, ttl_s=10, now=lambda: 0)
+    assert cache.get_or_load("same", load, ttl_s=10, now=lambda: 0) is expected
+    assert calls == 2
+
+
+def test_inspect_cache_bounds_values_and_distinct_inflight_keys() -> None:
+    """Both retained snapshots and active distinct-key loaders stay bounded."""
+    cache = InspectQueryCache[str, str](max_entries=2, max_inflight=1)
+    loads: dict[str, int] = {}
+
+    def load(key: str) -> str:
+        loads[key] = loads.get(key, 0) + 1
+        return f"{key}-{loads[key]}"
+
+    assert cache.get_or_load("a", lambda: load("a"), ttl_s=10, now=lambda: 0) == "a-1"
+    assert cache.get_or_load("b", lambda: load("b"), ttl_s=10, now=lambda: 0) == "b-1"
+    assert cache.get_or_load("c", lambda: load("c"), ttl_s=10, now=lambda: 0) == "c-1"
+    # Insertion-order tie breaking evicts the oldest equal-expiry value.
+    assert cache.get_or_load("a", lambda: load("a"), ttl_s=10, now=lambda: 0) == "a-2"
+
+    started = threading.Event()
+    release = threading.Event()
+
+    def blocking_load() -> str:
+        started.set()
+        assert release.wait(timeout=2)
+        return "held"
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        holder = executor.submit(
+            cache.get_or_load, "holder", blocking_load, ttl_s=10, now=lambda: 0
+        )
+        assert started.wait(timeout=1)
+        with pytest.raises(InspectCacheFullError):
+            cache.get_or_load("overflow", lambda: "no", ttl_s=10, now=lambda: 0)
+        release.set()
+        assert holder.result(timeout=1) == "held"

@@ -404,6 +404,23 @@ class LokiQueryFailed(TypedDict):
     query: str
 
 
+class LokiQueryBudget(TypedDict):
+    """One local Loki-admission transition and its post-transition state.
+
+    Float state/wait fields become OTLP histograms; integer outcome fields are
+    0/1 deltas and become counters. `outcome` is the bounded reason dimension.
+    """
+
+    outcome: Literal["queued", "acquired", "released", "queue_full", "wait_timeout", "cancelled"]
+    active: float
+    queued: float
+    high_water: float
+    wait_ms: float
+    acquired: int
+    queue_full: int
+    wait_timeout: int
+
+
 class LogPayload(TypedDict):
     """`log` payload — bare-log fallback; `msg` rides every loguru-sourced row."""
 
@@ -725,6 +742,11 @@ EVENTS: dict[str, EventSpec] = {
         "gateway_latency",
         "gateway endpoint latency — 60s aggregate per route (p50/p95/max/count)",
         payload=GatewayLatency,
+    ),
+    "loki_query_budget": _telemetry(
+        "loki_query_budget",
+        "local Loki query-admission transition and capacity metrics",
+        payload=LokiQueryBudget,
     ),
     # ── log (category=log) — registry.md §4, the bare-log fallback ──
     "log": EventSpec(name="log", category="log", payload=LogPayload, doc="bare log line"),

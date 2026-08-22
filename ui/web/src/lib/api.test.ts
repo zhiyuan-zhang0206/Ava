@@ -270,6 +270,13 @@ describe("agent label / messages / cancel", () => {
 });
 
 describe("stats / config / timeline / system status", () => {
+  it("getAgentInspect forwards the cancellation signal", async () => {
+    const controller = new AbortController();
+    await api.getAgentInspect(7, 24, false, controller.signal);
+    expect(calls[0].url).toMatch(/\/api\/agents\/7\/inspect\?hours=24$/);
+    expect(calls[0].init?.signal).toBe(controller.signal);
+  });
+
   it("getStatsDashboard GETs /api/stats/dashboard with the hours window", async () => {
     await api.getStatsDashboard(24);
     expect(calls[0].url).toMatch(/\/api\/stats\/dashboard\?hours=24$/);

@@ -73,6 +73,19 @@ whose top-level fields ride as structured metadata.
 - Every query runs through one long-lived module-level `httpx.Client`
   (the lazy `_client()` accessor — the seam tests swap): connection reuse
   across the gateway's fan-out reads instead of a TCP connection per query.
+- Every HTTP query also crosses the process-wide FIFO budget in
+  `gateway/loki_query_budget.py`: four active slots, matching Loki's deployed
+  `querier.max_concurrent`, plus a bounded waiter queue and 10s acquisition
+  deadline. Inspect, stats, events, and ops therefore share one backpressure
+  boundary; timeout/cancellation always releases the slot. `queue_full` and
+  `acquire_timeout` are typed local refusals, mapped uniformly to retriable
+  HTTP 503 without emitting the transport-only `loki_query_failed` event.
+  Every queue/acquire/release/reject transition emits the registered
+  `loki_query_budget` telemetry/metric shape (active, queued, high-water,
+  wait-ms and outcome deltas); the observer only enqueues into telemetry and
+  never calls DB/Loki or runs while the budget lock is held. Routes stage their
+  Postgres reads outside this boundary, so queueing for Loki does not hold a
+  pooled database connection.
 - Tests: `tests/gateway/test_loki_events.py` (httpx-faked unit tests for all
   three functions), `tests/gateway/test_agent_inspect.py` (route tests with
   an in-memory `_FakeLoki`).

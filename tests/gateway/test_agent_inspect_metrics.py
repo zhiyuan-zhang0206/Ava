@@ -19,7 +19,8 @@ from __future__ import annotations
 import importlib
 import json
 import sys
-from typing import Any
+from contextlib import contextmanager
+from typing import Any, Literal
 
 import psycopg
 import pytest
@@ -515,9 +516,80 @@ def test_metrics_logql_loki_failure_is_per_metric(
         resp = client.get(f"/api/agents/{aid}/inspect/metrics")
     assert resp.status_code == 200
     body = resp.json()
+    assert [m["name"] for m in body] == ["agent_llm_cost", "still_fine"]
     names = {m["name"]: m for m in body}
     assert "query failed" in names["agent_llm_cost"]["error"]
     assert names["still_fine"]["error"] is None
+
+
+@pytest.mark.parametrize("reason", ["queue_full", "acquire_timeout"])
+def test_metrics_logql_local_budget_rejection_is_503(
+    db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+    reason: Literal["queue_full", "acquire_timeout"],
+) -> None:
+    """A local budget refusal is endpoint saturation, not a per-metric Loki error."""
+    from gateway import loki_events, loki_query_budget
+
+    aid = _insert_agent(db_conn)
+    _patch_loader(monkeypatch, _logql_metric())
+    db_conn.commit()
+
+    def reject(*args: Any, **kwargs: Any) -> list[tuple[str, float]]:
+        raise loki_query_budget.LokiQueryBudgetError(reason)
+
+    monkeypatch.setattr(loki_events, "metric_range", reject)
+    with TestClient(app) as client:
+        response = client.get(f"/api/agents/{aid}/inspect/metrics")
+    assert response.status_code == 503
+    assert response.json()["detail"] == f"Loki query budget unavailable ({reason}); retry"
+    assert response.headers["retry-after"] == "1"
+
+
+def test_metrics_logql_releases_db_connection_before_waiting_for_loki(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A queued Loki query must not consume a scarce Postgres pool slot."""
+    from gateway import loki_events
+
+    class TrackingCursor:
+        def execute(self, query: str, params: tuple[int] | None = None) -> None:
+            if query == "SET TRANSACTION READ ONLY":
+                assert params is None
+                return
+            assert query == "SELECT 1 FROM agents_meta WHERE id = %s"
+            assert params == (7,)
+
+        def fetchone(self) -> tuple[int]:
+            return (1,)
+
+    class TrackingConnection:
+        @contextmanager
+        def cursor(self) -> Any:
+            yield TrackingCursor()
+
+    class TrackingPool:
+        active = False
+
+        @contextmanager
+        def connection(self) -> Any:
+            self.active = True
+            try:
+                yield TrackingConnection()
+            finally:
+                self.active = False
+
+    pool = TrackingPool()
+    _patch_loader(monkeypatch, _logql_metric())
+
+    def metric_range(*args: Any, **kwargs: Any) -> list[tuple[str, float]]:
+        assert not pool.active
+        return []
+
+    monkeypatch.setattr(loki_events, "metric_range", metric_range)
+    result = _plugin_metrics.metrics_for_agent(pool, 7)  # type: ignore[arg-type]
+    assert len(result) == 1
+    assert result[0].error is None
 
 
 def test_metrics_logql_tampered_query_500(
