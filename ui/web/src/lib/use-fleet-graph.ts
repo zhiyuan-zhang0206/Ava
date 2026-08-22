@@ -12,7 +12,7 @@ import { api } from "./api";
 import { projectAgentStatusValue } from "./types";
 import type { FleetGraph, GraphEventType, WireFleetGraph } from "./types";
 
-const EMPTY_GRAPH: FleetGraph = { nodes: [], edges: [] };
+const EMPTY_GRAPH: FleetGraph = { nodes: [], edges: [], stale: false };
 
 export interface FleetGraphResult {
   readonly graph: FleetGraph;
@@ -34,13 +34,14 @@ function normalizeEventType(raw: string): GraphEventType {
 
 function normalizeGraph(raw: WireFleetGraph): FleetGraph {
   return {
+    ...raw,
     nodes: raw.nodes.map((node) => ({
       ...node,
       status: projectAgentStatusValue(node.status),
     })),
     edges: raw.edges.map((rawEdge) => ({
       ...rawEdge,
-      event_type: normalizeEventType(rawEdge.event_type as string),
+      event_type: normalizeEventType(rawEdge.event_type),
     })),
   };
 }
@@ -70,7 +71,7 @@ export function useFleetGraph(opts?: { hours?: number; decayLambda?: number }): 
     // Stale-while-error: keep serving the last good graph even if the latest poll
     // failed (error carries the failure). Only fall back to the empty graph when
     // nothing has loaded yet.
-    if (data) return { graph: normalizeGraph(data), loading: false, error: isError };
+    if (data) return { graph: normalizeGraph(data), loading: false, error: isError || data.stale };
     return { graph: EMPTY_GRAPH, loading: isLoading, error: isError };
   }, [data, isError, isLoading]);
   return result;

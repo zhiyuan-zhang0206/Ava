@@ -80,6 +80,28 @@ describe("foldAgents", () => {
     expect(noop).toBe(base);
   });
 
+  it("keeps a liveness-only snapshot update even when public status stays idling", () => {
+    const idling = { ...baseAgent, status: "idling" as const };
+    const previous = [idling];
+    const next = foldAgents(previous, {
+      role: "agent_updated",
+      agent_id: 1,
+      snapshot: {
+        ...idling,
+        status: "restarting",
+        liveness_state: "offline",
+        last_probe_at: "2026-05-10T03:00:00Z",
+      },
+    } as unknown as SystemEvent);
+
+    expect(next?.[0]).toMatchObject({
+      status: "idling",
+      liveness_state: "offline",
+      last_probe_at: "2026-05-10T03:00:00Z",
+    });
+    expect(next).not.toBe(previous);
+  });
+
   it("empty-cache guard: never seeds a partial before the initial fetch", () => {
     const ev = {
       role: "agent_spawned",

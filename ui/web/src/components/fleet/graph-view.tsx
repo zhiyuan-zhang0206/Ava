@@ -39,10 +39,13 @@ import { cn } from "@/lib/utils";
 // expressed as text-* so it resolves for SVG fill, incl. the theme `destructive`).
 // Raw lifecycle transitions are projected at graph ingest, so the canvas only
 // accepts the same three public states as the sidebar.
-const STATUS_TEXT: Record<PublicAgentStatus, string> = {
+const OFFLINE_STATUS = "offline";
+type GraphDisplayStatus = PublicAgentStatus | typeof OFFLINE_STATUS;
+const STATUS_TEXT: Record<GraphDisplayStatus, string> = {
   running: "text-sky-500",
   idling: "text-emerald-500",
   terminated: "text-destructive",
+  offline: "text-muted-foreground",
 };
 const STATUS_PULSE: Record<PublicAgentStatus, boolean> = {
   running: false,
@@ -124,9 +127,10 @@ export function GraphView({
       liveNodes.map((n) => ({
         id: n.agent_id,
         label: n.label,
-        status: n.status,
+        status: n.liveness_state === "offline" ? OFFLINE_STATUS : n.status,
         score: n.node_score,
         pulse: STATUS_PULSE[n.status],
+        nodeTitle: n.liveness_state === "offline" ? "Offline" : null,
       })),
     [liveNodes],
   );

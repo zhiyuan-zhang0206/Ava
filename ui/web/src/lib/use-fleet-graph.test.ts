@@ -17,7 +17,7 @@ import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api } from "./api";
-import type { FleetGraph, WireFleetGraph } from "./types";
+import type { WireFleetGraph } from "./types";
 import { useFleetGraph } from "./use-fleet-graph";
 
 vi.mock("./api", () => ({
@@ -35,12 +35,13 @@ vi.mock("./useEventStream", () => ({
 
 const getFleetGraph = vi.mocked(api.getFleetGraph);
 
-const API_GRAPH: FleetGraph = {
+const API_GRAPH: WireFleetGraph = {
   nodes: [
     {
       agent_id: 7,
       label: "from-api",
       status: "running",
+      liveness_state: "online",
       spawner: "user",
       machine: "test",
       node_score: 0,
@@ -48,8 +49,16 @@ const API_GRAPH: FleetGraph = {
     },
   ],
   edges: [
-    { from_agent: 7, to_agent: 7, event_type: "message", weight: 0.5, event_count: 2 },
+    {
+      from_agent: 7,
+      to_agent: 7,
+      event_type: "message",
+      weight: 0.5,
+      event_count: 2,
+      last_seen_at: "2026-06-17T00:00:00Z",
+    },
   ],
+  stale: false,
 };
 
 function withClient(client: QueryClient) {
@@ -71,7 +80,7 @@ afterEach(cleanup);
 describe("useFleetGraph", () => {
   it("while pending: empty graph, loading=true, error=false", () => {
     // Never resolves -> the query stays pending for the duration of the assertion.
-    getFleetGraph.mockReturnValue(new Promise<FleetGraph>(() => {
+    getFleetGraph.mockReturnValue(new Promise<WireFleetGraph>(() => {
       /* never settles — keeps the query pending */
     }));
 
@@ -79,7 +88,7 @@ describe("useFleetGraph", () => {
       wrapper: withClient(freshClient()),
     });
 
-    expect(result.current.graph).toEqual({ nodes: [], edges: [] });
+    expect(result.current.graph).toEqual({ nodes: [], edges: [], stale: false });
     expect(result.current.loading).toBe(true);
     expect(result.current.error).toBe(false);
   });
@@ -151,6 +160,31 @@ describe("useFleetGraph", () => {
     ]);
   });
 
+  it("preserves offline liveness while projecting a restarting node to idling", async () => {
+    const raw = {
+      nodes: [
+        {
+          ...API_GRAPH.nodes[0],
+          status: "restarting",
+          liveness_state: "offline",
+        },
+      ],
+      edges: [],
+      stale: false,
+    } as unknown as WireFleetGraph;
+    getFleetGraph.mockResolvedValue(raw);
+
+    const { result } = renderHook(() => useFleetGraph(), {
+      wrapper: withClient(freshClient()),
+    });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.graph.nodes[0]).toMatchObject({
+      status: "idling",
+      liveness_state: "offline",
+    });
+  });
+
   it("on error: empty graph, loading=false, error=true (no retry)", async () => {
     getFleetGraph.mockRejectedValue(new Error("HTTP 404: no such endpoint"));
 
@@ -160,7 +194,19 @@ describe("useFleetGraph", () => {
 
     await waitFor(() => expect(result.current.error).toBe(true));
     expect(result.current.loading).toBe(false);
-    expect(result.current.graph).toEqual({ nodes: [], edges: [] });
+    expect(result.current.graph).toEqual({ nodes: [], edges: [], stale: false });
+  });
+
+  it("preserves the generated stale flag and renders a degraded 200 as unavailable", async () => {
+    getFleetGraph.mockResolvedValue({ nodes: [], edges: [], stale: true });
+
+    const { result } = renderHook(() => useFleetGraph(), {
+      wrapper: withClient(freshClient()),
+    });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.graph.stale).toBe(true);
+    expect(result.current.error).toBe(true);
   });
 
   it("stale-while-error: a failed poll after data keeps the last good graph (error flagged, not blanked)", async () => {

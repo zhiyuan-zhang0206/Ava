@@ -19,6 +19,12 @@ Gateway's idle agent check scheduler — every `AVA_HEARTBEAT_INTERVAL_SECONDS` 
 - **Deduplication**: skip agents that already have a `pending` inbound (NOT EXISTS guard), avoiding accumulation
 - **Wake notification**: after INSERT of `heartbeat` inbound (kind='heartbeat'), sends a Redis best-effort publish (`shared.db._publish_inbound_wake`) — the target agent's claim loop subscribes to `<prefix>:inbound:<agent_id>` and receives it immediately; even if the publish is lost it doesn't block, the agent's 30s SELECT recheck guarantees delivery. PG `LISTEN/NOTIFY` has been retired (the `inbound_message_insert_notify` trigger has been dropped, no process listens anymore).
 - **Cluster-wide**: not dependent on a local session, cross-machine wake-up (wherever the target agent runs, it is woken in its claim loop on that machine)
+- **Mounted-console liveness**: the one-minute machine/lease pass keeps lifecycle
+  intent and reachability separate in `agents_meta.status` / `liveness_state`.
+  Edges entering or leaving `offline` publish the canonical `agent_updated`
+  snapshot after commit, so the existing frontend fold updates immediately;
+  `unknown → online` is not broadcast because both render online and a
+  fleet-sized first-pass burst would carry no visible change.
 
 ## Key Dependencies
 - [[db.ava.okf.md]] — reads `agents_meta` table + writes `inbound_messages` table

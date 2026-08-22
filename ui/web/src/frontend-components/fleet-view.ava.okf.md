@@ -15,7 +15,7 @@ Full-screen supervision plane: judge 10-20 agents without opening any conversati
 
 ## Sub-components
 
-- **GraphView** (`graph-view.tsx`) — force-directed relationship graph: spawn/fork/resurrect lineage + attenuated message traffic.
+- **GraphView** (`graph-view.tsx`) — force-directed relationship graph: spawn/fork/resurrect lineage + attenuated message traffic. Nodes use the same three public lifecycle statuses as the sidebar; independent `liveness_state=offline` overrides the lifecycle color with muted gray, so an internal starting/restarting transition can never masquerade as a healthy idling node.
 - **TaskGraph** (`task-graph.tsx`) — task tree (child tasks only, Done/Canceled visibility toggle, count consistent with board). Left pane: Graph/Task tabs (persisted).
 - **InboxQueue** (`inbox-queue/`) — right pane single unified stream: all open notices (require_response decisions + FYI) sorted by priority→blocking→created_at, grouped via `groupByTaskSubtree`; items differ only on the action side (shared `OpenNoticeDetail` branches on `require_response`: reply box+Send+Dismiss / Mark read); resolved history behind a collapsed disclosure; counts rolled up from agent snapshots (`notices_awaiting_response` + `unread_notice_count`). Collapsing the panel is the DB-backed `display.fleet_queue_collapsed` of `fleet-view.tsx`.
 - **TaskKanban** (`task-kanban.tsx`) — task board (owner column shows agent label, stale-while-error retains last data).

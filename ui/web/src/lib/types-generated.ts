@@ -4482,8 +4482,12 @@ export interface components {
             agent_id: number;
             /** Label */
             label: string | null;
-            /** Status */
-            status: string;
+            status: components["schemas"]["AgentStatus"];
+            /**
+             * Liveness State
+             * @enum {string}
+             */
+            liveness_state: "online" | "offline" | "unknown";
             /** Spawner */
             spawner: string;
             /** Machine */

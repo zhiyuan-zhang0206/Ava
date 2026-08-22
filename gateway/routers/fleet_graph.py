@@ -311,6 +311,7 @@ def get_fleet_graph(
                 "    a.id, "
                 "    t.label, "
                 "    a.status, "
+                "    a.liveness_state, "
                 "    a.spawner, "
                 "    a.machine "
                 "FROM agents_meta a "
@@ -390,8 +391,9 @@ def get_fleet_graph(
             agent_id=r[0],
             label=r[1],
             status=r[2],
-            spawner=r[3],
-            machine=r[4],
+            liveness_state=r[3],
+            spawner=r[4],
+            machine=r[5],
             total_tokens=round(in_all.get(str(r[0]), 0.0) + out_all.get(str(r[0]), 0.0)),
             node_score=round(in_win.get(str(r[0]), 0.0) * 0.1 + out_win.get(str(r[0]), 0.0), 2),
         )
