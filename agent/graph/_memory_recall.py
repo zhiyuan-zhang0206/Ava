@@ -129,7 +129,7 @@ async def passive_memory_recall(
     Never raises on a failed search: the caller is a before_llm hook, so an
     exception here ends the agent process rather than the recall.
     """
-    if not turn_settings.agent.passive_memory_recall_enabled:
+    if turn_settings.agent.eval_isolation or not turn_settings.agent.passive_memory_recall_enabled:
         return None
     query = _build_query(messages)
     if not query:

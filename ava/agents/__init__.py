@@ -252,7 +252,9 @@ def spawn(
     prompt shaping — is taken from the cluster default at spawn time and frozen
     onto the new agent for its whole life, so a later change to that default
     never re-brains it. Operational knobs (compaction thresholds, timeouts) stay
-    live and follow the cluster.
+    live and follow the cluster. `config_overlay={"eval_isolation": True,
+    "eval_network_allowlist": ["web"]}` starts an eval-isolated agent and
+    explicitly permits only the listed network-facing SDK capability.
     """
     return _spawn_impl(
         prompt=prompt,

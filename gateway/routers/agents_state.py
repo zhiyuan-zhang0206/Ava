@@ -44,6 +44,30 @@ router = APIRouter()
 _log = logging.getLogger(__name__)
 
 
+def _caller_agent_id(caller: str) -> int | None:
+    """Return the agent id in an `agent:<id>` caller marker, if present."""
+    if not caller.startswith("agent:"):
+        return None
+    try:
+        return int(caller.removeprefix("agent:"))
+    except ValueError:
+        return None
+
+
+def caller_eval_isolation(pool: Any, caller_agent_id: int) -> bool:
+    """Whether a caller's stored eval configuration denies result reads."""
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT "
+            "((config_overlay ->> 'eval_isolation')::boolean IS TRUE "
+            "OR (birth_config ->> 'eval_isolation')::boolean IS TRUE) "
+            "FROM agents_meta WHERE id = %s",
+            (caller_agent_id,),
+        )
+        row = cur.fetchone()
+    return bool(row and row[0])
+
+
 def _resolve_agent_model(request: Request, agent_id: int) -> str:
     """The agent's effective LLM model — its per-agent overlay, else the cluster
     default (`settings.lm.llm_model`). Same lookup as the token-usage endpoint."""
@@ -254,12 +278,12 @@ def get_trace_checkpoint_messages(
 def get_last_message(
     agent_id: int,
     request: Request,
-    caller: str = Query(..., description="Caller identifier, e.g. 'agent:240'"),  # noqa: ARG001
+    caller: str = Query(..., description="Caller identifier, e.g. 'agent:240'"),
 ) -> LastMessageResponse:
     """Return the text of the last AI message for an agent.
 
-    Any agent in the same cluster can query any other agent.
-    No spawner-chain restriction.
+    A non-isolated agent in the same cluster can query any other agent; an
+    eval-isolated caller is denied before this result can become a replay leak.
 
     Returns ``text=None`` when the agent has no AI message with text
     content yet (no checkpoint / no AIMessage / content is not a string).
@@ -269,6 +293,14 @@ def get_last_message(
     to scanning the checkpoint when the column is NULL (backward compat
     with agents that have not yet written to it).
     """
+    caller_agent_id = _caller_agent_id(caller)
+    if caller_agent_id is not None and caller_eval_isolation(
+        request.app.state.db_pool, caller_agent_id
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail=f"caller agent {caller_agent_id} is eval-isolated: last-message reads are denied",
+        )
     # --- agent existence check + last_message_text read ---
     # Read last_message_text first as an optimization — it survives compact.
     # When the column is missing (migration not applied), fall through to the

@@ -9,6 +9,7 @@ GET /api/agents (full snapshot of agents_meta table)
 
 from __future__ import annotations
 
+import json
 import signal
 
 import psycopg
@@ -665,6 +666,44 @@ class TestGetLastMessage:
             )
         assert resp.status_code == 200
         assert resp.json()["text"] == "hello from agent A"
+
+    @pytest.mark.parametrize("isolation_column", ["config_overlay", "birth_config"])
+    def test_eval_isolated_caller_is_denied(
+        self, db_conn: psycopg.Connection, isolation_column: str
+    ) -> None:
+        """The gateway denies the result read even if an eval agent bypasses its SDK."""
+        from shared.db import create_agent
+
+        target_id = create_agent(db_conn)
+        caller_id = create_agent(db_conn)
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO agents_meta (id, spawner, status, last_message_text) "
+                "VALUES (%s, 'test', 'running', %s)",
+                (target_id, "source result"),
+            )
+            if isolation_column == "config_overlay":
+                cur.execute(
+                    "INSERT INTO agents_meta (id, spawner, status, config_overlay) "
+                    "VALUES (%s, 'test', 'running', %s::jsonb)",
+                    (caller_id, json.dumps({"eval_isolation": True})),
+                )
+            else:
+                cur.execute(
+                    "INSERT INTO agents_meta (id, spawner, status, birth_config) "
+                    "VALUES (%s, 'test', 'running', %s::jsonb)",
+                    (caller_id, json.dumps({"eval_isolation": True})),
+                )
+        db_conn.commit()
+
+        with TestClient(app) as client:
+            resp = client.get(
+                f"/api/agents/{target_id}/last-message",
+                params={"caller": f"agent:{caller_id}"},
+            )
+
+        assert resp.status_code == 403
+        assert "eval-isolated" in resp.json()["detail"]
 
     def test_none_for_agent_without_ai_message(self, db_conn: psycopg.Connection) -> None:
         """Returns text=None when the agent has no AI message yet."""

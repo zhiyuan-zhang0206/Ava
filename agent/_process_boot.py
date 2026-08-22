@@ -58,6 +58,7 @@ equivalent.
 """
 
 import os
+from pathlib import Path
 from typing import cast
 
 import psycopg
@@ -109,6 +110,37 @@ def _apply_per_agent_sdk_disable() -> None:
     new_disable = [e for e in turn_settings.agent.sdk_disable if e not in env_entries]
     if new_disable:
         ava._apply_sdk_disable(new_disable)
+
+
+def _apply_per_agent_eval_isolation() -> None:
+    """Apply the SDK and memory-pool boundaries for an isolated eval agent.
+
+    This runs after plugins have registered their namespaces: the eval boundary
+    must rebind the live `ava.memory` surface rather than affect the plugin's
+    import-time default path.
+    """
+    if not turn_settings.agent.eval_isolation:
+        return
+
+    allowed_network = set(turn_settings.agent.eval_network_allowlist)
+    disabled = ["agents.get_last_message", "tasks"]
+    if "web" not in allowed_network:
+        disabled.append("web")
+    if "understand" not in allowed_network:
+        disabled.append("understand")
+    ava._apply_sdk_disable(disabled)
+
+    agent_id = int(os.environ["AVA_AGENT_ID"])
+    isolated_pool = workspace_dir(agent_id) / "memory-pool"
+    isolated_pool.mkdir(parents=True, exist_ok=True)
+    memory = ava.memory
+    memory.PATH = ava.const(isolated_pool, doc=memory.PATH.__doc__)
+    memory.search = _isolated_memory_search
+
+
+def _isolated_memory_search(_query: str, _k: int = 5) -> list[tuple[Path, str, list[str]]]:
+    """Return no shared-memory results for an isolated evaluation agent."""
+    return []
 
 
 def _apply_per_agent_framework_config(
@@ -314,6 +346,7 @@ async def _boot_agent_process(
     # Plugin-scope is deferred until after build_graph's bind_from_disk has
     # populated _PLUGIN_CONFIGS — see the second apply_config_overlay call below.
     _apply_per_agent_framework_config(config_overlay, birth_config)
+    _apply_per_agent_eval_isolation()
 
     llm = await boot_agent_scope(agent_id)
     _boot_timing.mark("sdk_mcp_model")

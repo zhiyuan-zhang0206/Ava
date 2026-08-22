@@ -240,6 +240,22 @@ async def test_returns_none_when_disabled(monkeypatch: pytest.MonkeyPatch) -> No
     assert result is None
 
 
+async def test_returns_none_when_eval_isolated(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Eval isolation must stop the direct index call that passive recall bypasses."""
+    monkeypatch.setattr("shared.config.settings.agent.eval_isolation", True)
+    called = False
+
+    def _fake(_q: str, _k: int) -> list[MemorySearchResult]:
+        nonlocal called
+        called = True
+        return []
+
+    monkeypatch.setattr(recall._gateway_client, "memory_search", _fake)
+
+    assert await recall.passive_memory_recall(_conversation()) is None  # pyright: ignore[reportUnknownArgumentType]
+    assert called is False
+
+
 async def test_returns_none_when_no_query(
     memory_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

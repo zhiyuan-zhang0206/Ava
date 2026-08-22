@@ -108,9 +108,9 @@ Layer map — responsibility, leak boundary, and current status:
 | Task selection | Only side-effect-free tasks get re-run | `is_replay_safe` gate (tool-call allowlist) | Implemented |
 | Data isolation | Eval run never touches production data | **Open** — `evaluate.launch` spawns ordinary cluster agents | Planned |
 | Side-effect containment | Agent's file/OS effects stay contained | Container mode (effects die with the container) | Implemented in harness; not used by `evaluate.launch` |
-| Memory isolation | Eval agent cannot read eval-relevant pool notes | Separate memory scope for eval agents | Not enforced |
-| Network restriction | Eval agent cannot web-search the answer | Outbound allowlist / LLM proxy (harness Phase 3) | Not enforced |
-| Result separation | Eval agent cannot read original-run artifacts | Dataset/checkpoint/workspace access denied to eval agents | Not enforced |
+| Memory isolation | Eval agent cannot read eval-relevant pool notes | Empty per-agent `ava.memory` pool; shared index and passive recall suppressed | Implemented at the SDK layer; raw filesystem and DB reads need next-phase OS sandboxing |
+| Network restriction | Eval agent cannot web-search the answer | `ava.web` / `ava.understand` removed unless explicitly allowlisted | Implemented at the SDK layer; raw outbound network needs next-phase container mode |
+| Result separation | Eval agent cannot read original-run artifacts | SDK hides task and last-message reads; gateway rejects isolated last-message callers | Implemented at the SDK + gateway layers; raw filesystem and DB reads need next-phase OS sandboxing |
 | Trace audit | Score is verified against what the agent actually did | Read of `tools_called`, file reads, messages per run | Partially — signals in rubric/label; manual deep-dive reads traces |
 
 Rule of thumb: **anything an eval agent can read that a fresh user could not
@@ -127,6 +127,5 @@ datasets and the run's own workspace instead of trusting the transcript alone
 ## Status of this document
 
 The structure above is the standard; enforcement is deliberately staged. The
-layers marked *Implemented* are live today; the *Not enforced* layers are
-named gaps the harness and the eval loop close incrementally — the structure
-stays clear while the implementation iterates toward completeness.
+SDK and gateway boundaries are live today; OS-level filesystem, database, and
+raw-network containment remains the named container-mode next phase.

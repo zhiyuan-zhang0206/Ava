@@ -611,8 +611,8 @@ export interface paths {
          * Get Last Message
          * @description Return the text of the last AI message for an agent.
          *
-         *     Any agent in the same cluster can query any other agent.
-         *     No spawner-chain restriction.
+         *     A non-isolated agent in the same cluster can query any other agent; an
+         *     eval-isolated caller is denied before this result can become a replay leak.
          *
          *     Returns ``text=None`` when the agent has no AI message with text
          *     content yet (no checkpoint / no AIMessage / content is not a string).
