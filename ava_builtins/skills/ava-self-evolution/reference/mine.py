@@ -29,7 +29,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
+import sys
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
@@ -138,6 +140,7 @@ def render(clusters: dict[str, list[dict[str, Any]]], empty: str = "") -> str:
 
 
 def _default_dataset() -> Path:
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # noqa: PTH100, PTH120
     from collect import _default_week, dataset_path  # sibling script
 
     return dataset_path(_default_week())
