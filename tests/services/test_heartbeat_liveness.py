@@ -216,9 +216,13 @@ class TestLivenessPass:
         _register_machine(db_conn)
         aid = _make_agent(db_conn, status="restarting", lease_s_ahead=None)
         announced: list[int] = []
+
+        def capture_announcement(_conn: psycopg.Connection, agent_id: int) -> None:
+            announced.append(agent_id)
+
         monkeypatch.setattr(
             "services.heartbeat.liveness.publish_agent_updated_sync",
-            lambda _conn, agent_id: announced.append(agent_id),
+            capture_announcement,
         )
         import asyncio
 
