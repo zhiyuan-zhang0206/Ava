@@ -96,6 +96,49 @@ async def _run(
             cancel_task.cancel()
 
 
+async def _assert_tree_gone(pids: list[int], timeout_s: float = 5.0) -> None:
+    # After SIGKILL, dead descendants can remain zombies until their new parent
+    # reaps them, and psutil.pid_exists() still reports those entries. Assert no live
+    # members, not that every process-table entry vanished.
+    deadline = time.monotonic() + timeout_s
+    remaining = set(pids)
+    while remaining and time.monotonic() < deadline:
+        for pid in list(remaining):
+            try:
+                if psutil.Process(pid).status() == psutil.STATUS_ZOMBIE:
+                    remaining.discard(pid)
+            except psutil.NoSuchProcess:
+                remaining.discard(pid)
+        if remaining:
+            await asyncio.sleep(0.05)
+    assert not remaining, f"process(es) still alive after exec teardown: {sorted(remaining)}"
+
+
+async def test_assert_tree_gone_accepts_missing_pid_immediately() -> None:
+    await asyncio.wait_for(_assert_tree_gone([999_999_999]), timeout=0.5)
+
+
+async def test_assert_tree_gone_waits_for_live_pid_to_become_zombie(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    process = MagicMock()
+    process.status.side_effect = [psutil.STATUS_SLEEPING, psutil.STATUS_ZOMBIE]
+    monkeypatch.setattr(psutil, "Process", MagicMock(return_value=process))
+
+    await _assert_tree_gone([12345], timeout_s=0.3)
+
+
+async def test_assert_tree_gone_rejects_pid_still_running_after_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    process = MagicMock()
+    process.status.return_value = psutil.STATUS_RUNNING
+    monkeypatch.setattr(psutil, "Process", MagicMock(return_value=process))
+
+    with pytest.raises(AssertionError, match="still alive after exec teardown"):
+        await _assert_tree_gone([12345], timeout_s=0.3)
+
+
 async def test_subprocess_done(tmp_path: Path) -> None:
     result = await _run(tmp_path, "print('hello from child')")
     assert isinstance(result, _ExecDone)
@@ -235,7 +278,7 @@ async def test_abrupt_root_exit_stops_descendant_before_reader_cleanup(
         result = await _run(tmp_path, code)
         assert isinstance(result, _ExecCrashed)
         descendant_pid = int(pid_file.read_text(encoding="utf-8"))
-        assert not psutil.pid_exists(descendant_pid)
+        await _assert_tree_gone([descendant_pid])
         assert not any(
             thread.name == f"exec-reader-{_AGENT_ID}" for thread in threading.enumerate()
         )
@@ -281,7 +324,7 @@ async def test_natural_exit_reaps_ordinary_descendant_holding_stdout(tmp_path: P
         result = await _run(tmp_path, code)
         assert isinstance(result, _ExecDone)
         descendant_pid = int(pid_file.read_text(encoding="utf-8"))
-        assert not psutil.pid_exists(descendant_pid)
+        await _assert_tree_gone([descendant_pid])
         assert not any(
             thread.name == f"exec-reader-{_AGENT_ID}" for thread in threading.enumerate()
         )
@@ -326,7 +369,7 @@ async def test_outer_task_cancel_reaps_child_and_descendant(tmp_path: Path) -> N
         with pytest.raises(asyncio.CancelledError):
             await asyncio.wait_for(task, timeout=15.0)
 
-        assert all(not psutil.pid_exists(pid) for pid in pids)
+        await _assert_tree_gone(pids)
         assert not any(
             thread.name == f"exec-reader-{_AGENT_ID}" for thread in threading.enumerate()
         )
