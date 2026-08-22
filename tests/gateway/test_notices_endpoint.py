@@ -199,12 +199,19 @@ def test_open_feed_priority_then_newest(db_conn: psycopg.Connection) -> None:
     assert data[0]["resolved_at"] is None
 
 
-def _seed_task(db_conn: psycopg.Connection, owner: int) -> int:
+def _seed_task(
+    db_conn: psycopg.Connection,
+    owner: int,
+    *,
+    title: str = "t",
+    status: str = "open",
+    reminder_count: int = 0,
+) -> int:
     with db_conn.cursor() as cur:
         cur.execute(
-            "INSERT INTO agent_tasks (title, description, created_by, owner) "
-            "VALUES ('t', 'd', 'user', %s) RETURNING id",
-            (owner,),
+            "INSERT INTO agent_tasks (title, description, created_by, owner, status, reminder_count) "
+            "VALUES (%s, 'd', 'user', %s, %s, %s) RETURNING id",
+            (title, owner, status, reminder_count),
         )
         row = cur.fetchone()
     assert row is not None
@@ -365,6 +372,87 @@ def test_task_id_flows_to_snapshot_and_feed(db_conn: psycopg.Connection) -> None
     by_title = {r["title"]: r["task_id"] for r in feed}
     assert by_title["fyi with task"] == tid
     assert by_title["fyi no task"] is None
+
+
+# --- GET /api/notices/escalations (operator queue) --------------------------
+
+
+def test_escalations_return_open_task_notices_with_task_context(
+    db_conn: psycopg.Connection,
+) -> None:
+    """The operator queue is self-sufficient and excludes non-escalations."""
+    owner = _seed_agent(db_conn)
+    with db_conn.cursor() as cur:
+        cur.execute("UPDATE agents SET label = 'stalled-owner' WHERE id = %s", (owner,))
+    db_conn.commit()
+
+    older_task = _seed_task(db_conn, owner, title="older stalled task")
+    newer_task = _seed_task(db_conn, owner, title="newer stalled task")
+    priority_task = _seed_task(
+        db_conn,
+        owner,
+        title="highest-priority stalled task",
+        status="done",
+        reminder_count=3,
+    )
+    older = _insert_notice(
+        db_conn, owner, "older escalation", require_response=True, task_id=older_task
+    )
+    newer = _insert_notice(
+        db_conn, owner, "newer escalation", require_response=True, task_id=newer_task
+    )
+    priority = _insert_notice(
+        db_conn,
+        owner,
+        "priority escalation",
+        priority="P0",
+        require_response=True,
+        task_id=priority_task,
+    )
+    fyi = _insert_notice(db_conn, owner, "fyi", task_id=priority_task)
+    resolved = _insert_notice(
+        db_conn,
+        owner,
+        "resolved escalation",
+        require_response=True,
+        task_id=priority_task,
+        resolved_at="2026-08-22T00:00:00Z",
+        resolution="dismissed",
+    )
+    no_task = _insert_notice(db_conn, owner, "unscoped request", require_response=True)
+
+    with TestClient(app) as client:
+        response = client.get("/api/notices/escalations")
+
+    assert response.status_code == 200
+    items = response.json()
+    assert [item["id"] for item in items] == [priority, newer, older]
+    assert {item["id"] for item in items}.isdisjoint({fyi, resolved, no_task})
+    first = items[0]
+    assert set(first) == {
+        "id",
+        "title",
+        "priority",
+        "created_at",
+        "task_id",
+        "task_title",
+        "task_status",
+        "owner_id",
+        "owner_label",
+        "reminder_count",
+        "updated_at",
+    }
+    assert first["id"] == priority
+    assert first["title"] == "priority escalation"
+    assert first["priority"] == "P0"
+    assert first["created_at"] is not None
+    assert first["task_id"] == priority_task
+    assert first["task_title"] == "highest-priority stalled task"
+    assert first["task_status"] == "done"
+    assert first["owner_id"] == owner
+    assert first["owner_label"] == "stalled-owner"
+    assert first["reminder_count"] == 3
+    assert first["updated_at"] is not None
 
 
 def test_open_feed_excludes_resolved_and_require_response(db_conn: psycopg.Connection) -> None:

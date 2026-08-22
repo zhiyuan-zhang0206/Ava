@@ -275,6 +275,9 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ),
     ("GET", "/api/notices/live"): RouteContract(),
     ("GET", "/api/notices/open"): RouteContract(),
+    ("GET", "/api/notices/escalations"): RouteContract(
+        note="read-only operator escalation queue — one query, no writes"
+    ),
     ("GET", "/api/notices/resolved"): RouteContract(),
     ("POST", "/api/agents/{agent_id}/notices/{notice_id}/resolve"): RouteContract(
         note="CAS resolve — repeats are harmless"

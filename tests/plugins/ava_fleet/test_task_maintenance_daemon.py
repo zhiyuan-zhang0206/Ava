@@ -172,6 +172,34 @@ def _seed_notice(db: psycopg.Connection, agent_id: int) -> None:
 
 
 class TestRemind:
+    def test_delivery_publishes_agent_updated(
+        self,
+        pool: ConnectionPool,
+        db_conn: psycopg.Connection,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        owner = _make_agent(db_conn)
+        published: list[tuple[int, int]] = []
+
+        def _capture_publish(conn: psycopg.Connection, agent_id: int) -> None:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT count(*) FROM inbound_messages WHERE agent_id = %s", (agent_id,)
+                )
+                row = cur.fetchone()
+            assert row is not None
+            published.append((agent_id, int(row[0])))
+
+        monkeypatch.setattr(daemon, "publish_agent_updated_sync", _capture_publish)
+
+        daemon._deliver_message(pool, owner, "reminder")
+
+        # The publisher sees the inbound before this connection commits, proving
+        # the daemon passed its delivery transaction connection rather than
+        # opening a second connection after the insert.
+        assert published == [(owner, 1)]
+        assert _inbound_messages(db_conn, owner) == [("reminder", "chat", "system")]
+
     def test_single_overdue_task_delivers_single_task_digest(
         self,
         pool: ConnectionPool,
