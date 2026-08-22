@@ -54,7 +54,8 @@ without re-running the historical fan-out. The interactive response has a 15s
 aggregate deadline: budget refusal, deadline expiry, and Loki transport/status
 failure are retriable HTTP 503 responses with `Retry-After`; a synchronous
 leader already in progress remains the sole single-flight load and may populate
-the TTL after its original caller has received the bounded failure.
+the TTL after its original caller has received the bounded failure. Async
+followers await that shared claim without occupying the gateway's worker pool.
 
 ## Key Dependencies
 

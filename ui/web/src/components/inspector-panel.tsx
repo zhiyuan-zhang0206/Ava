@@ -127,6 +127,11 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
     // mechanism. Freshness comes from refetchOnMount on open, the header's
     // manual refresh, and SSE-driven invalidation (notices below).
     enabled: open,
+    // The request already has explicit server/client deadlines and the cold
+    // error surface owns a manual Retry action. Inheriting the global three
+    // automatic retries would multiply one 15s overload into a minute-long
+    // spinner and would enqueue more expensive history reads while Loki is ill.
+    retry: false,
     refetchInterval: open ? 60_000 : false,
     // Fetch once on open, not just cold. The global 5min staleTime otherwise
     // treats cached inspect data from a previous open as fresh, so opening
