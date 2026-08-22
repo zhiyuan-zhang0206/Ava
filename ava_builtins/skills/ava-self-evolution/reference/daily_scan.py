@@ -26,12 +26,16 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+# PYTHONSAFEPATH=1 keeps the script's own directory off sys.path — restore
+# it for the sibling import (the reference dir is a script dir, not a package).
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # noqa: PTH100, PTH120
 import collect  # sibling script, resolved via sys.path[0]
 
 from shared.paths import ava_home

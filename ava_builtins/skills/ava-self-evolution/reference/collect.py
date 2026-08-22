@@ -30,6 +30,7 @@ import ast
 import contextlib
 import json
 import os
+import sys
 import time
 from collections import Counter, defaultdict
 from datetime import UTC, datetime, timedelta
@@ -38,6 +39,10 @@ from typing import Any
 
 import httpx
 import psycopg
+
+# PYTHONSAFEPATH=1 keeps the script's own directory off sys.path — restore
+# it for the sibling import (the reference dir is a script dir, not a package).
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # noqa: PTH100, PTH120
 from label import label  # sibling script, resolved via sys.path[0]
 from pydantic import ValidationError
 

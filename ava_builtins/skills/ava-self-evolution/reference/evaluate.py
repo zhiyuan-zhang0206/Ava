@@ -31,10 +31,15 @@ the reference directory to sys.path and `import evaluate`), not as a CLI —
 from __future__ import annotations
 
 import json
+import os
+import sys
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+# PYTHONSAFEPATH=1 keeps the script's own directory off sys.path — restore
+# it for the sibling import (the reference dir is a script dir, not a package).
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # noqa: PTH100, PTH120
 from collect import collect_one
 from rubric import scores
 
