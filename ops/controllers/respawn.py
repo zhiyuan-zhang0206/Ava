@@ -35,9 +35,8 @@ from __future__ import annotations
 
 import logging
 import time
-import urllib.error
-import urllib.request
 
+import httpx
 from psycopg_pool import ConnectionPool
 
 from ops.agent_identity import RESIDENT_IDENTITIES, AgentProcessIdentity, probe_agent_process
@@ -47,6 +46,7 @@ from ops.controllers.base import BlockScope, ReconcileResult
 from ops.pages import list_open_page_names
 from shared.boot_timing import ALLOCATED_REAP_GRACE_SEC
 from shared.config import settings
+from shared.http_dial import get as dial_get
 from shared.live_announce import publish_agent_updated_sync, publish_page_closed_sync
 from shared.machine import MachineRole, machine_name
 from shared.proc import force_kill
@@ -83,9 +83,13 @@ def _gateway_healthy() -> bool:
     are retried next tick.
     """
     try:
-        with urllib.request.urlopen(_GATEWAY_HEALTH_URL, timeout=_GATEWAY_HEALTH_TIMEOUT_S) as resp:  # noqa: S310 — URL from env, internal localhost
-            return resp.status == 200
-    except (urllib.error.URLError, TimeoutError, OSError):
+        response = dial_get(
+            _GATEWAY_HEALTH_URL,
+            timeout=_GATEWAY_HEALTH_TIMEOUT_S,
+            follow_redirects=True,
+        )
+        return response.status_code == 200
+    except (httpx.HTTPError, TimeoutError, OSError):
         return False
 
 

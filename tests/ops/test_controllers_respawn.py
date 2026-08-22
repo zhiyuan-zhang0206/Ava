@@ -12,14 +12,74 @@ logger call.
 
 from __future__ import annotations
 
+import socket
 import time
-from typing import Any, cast
+from typing import Any, Never, cast
 
+import httpx
 import pytest
 from psycopg_pool import ConnectionPool
 
 import ops.controllers.respawn as respawn_mod
+from shared.http_dial import PinnedIPv4Transport
 from shared.log import _install_stdlib_intercept
+
+
+def test_gateway_health_pins_tailnet_ipv4_and_follows_redirects(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The production probe selects the AF_INET-pinned transport for a raw
+    Tailnet IPv4 URL and preserves urllib's redirect-following behavior."""
+    transports: list[httpx.BaseTransport] = []
+    requests: list[tuple[str, float, bool]] = []
+
+    class _Client:
+        def __init__(self, *, transport: httpx.BaseTransport) -> None:
+            transports.append(transport)
+
+        def __enter__(self) -> _Client:
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            pass
+
+        def get(self, url: str, *, timeout: float, follow_redirects: bool) -> httpx.Response:
+            requests.append((url, timeout, follow_redirects))
+            return httpx.Response(200)
+
+    url = "http://100.103.96.72:8000/api/health"
+
+    def _dns_forbidden(*_args: object, **_kwargs: object) -> Never:
+        raise AssertionError("raw IPv4 health probe must not call getaddrinfo")
+
+    monkeypatch.setattr(respawn_mod, "_GATEWAY_HEALTH_URL", url)
+    monkeypatch.setattr(socket, "getaddrinfo", _dns_forbidden)
+    monkeypatch.setattr(httpx, "Client", _Client)
+
+    assert respawn_mod._gateway_healthy() is True
+    assert requests == [(url, respawn_mod._GATEWAY_HEALTH_TIMEOUT_S, True)]
+    assert len(transports) == 1
+    assert isinstance(transports[0], PinnedIPv4Transport)
+
+
+def test_gateway_health_rejects_non_200(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _unavailable(*_args: object, **_kwargs: object) -> httpx.Response:
+        return httpx.Response(503)
+
+    monkeypatch.setattr(respawn_mod, "dial_get", _unavailable)
+
+    assert respawn_mod._gateway_healthy() is False
+
+
+def test_gateway_health_treats_httpx_failure_as_unhealthy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _fail(*_args: object, **_kwargs: object) -> httpx.Response:
+        raise httpx.ConnectError("gateway unavailable")
+
+    monkeypatch.setattr(respawn_mod, "dial_get", _fail)
+
+    assert respawn_mod._gateway_healthy() is False
 
 
 def test_gateway_unhealthy_defers_respawn_and_logs_debug(

@@ -240,5 +240,13 @@ def inject_config_from_gateway() -> None:
             "there is no cached copy. Bring the gateway up (or check AVA_GATEWAY_URL / "
             "the cluster secret / private-network reachability), then retry."
         ) from exc
+    # ``AVA_GATEWAY_HEALTH_URL`` is host-scoped, so the gateway correctly does
+    # not serve it in the cluster bootstrap payload.  A pure runner that was
+    # enrolled without an explicit override must still probe the gateway it
+    # actually fetched from, not ServiceSettings' single-box localhost default.
+    # Keep a deliberate host override; otherwise the enrollment base URL is the
+    # one reachability fact this process already proved.
+    if not os.environ.get("AVA_GATEWAY_HEALTH_URL"):
+        os.environ["AVA_GATEWAY_HEALTH_URL"] = f"{base_url.rstrip('/')}/api/health"
     for key, value in values.items():
         os.environ[key] = value
