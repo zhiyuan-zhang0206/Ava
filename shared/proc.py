@@ -110,7 +110,10 @@ def hosting_supervised_session() -> str | None:
             continue
         try:
             proc = psutil.Process(record.pid)
-            if abs(proc.create_time() - record.create_time) <= _SESSION_CREATE_TIME_TOLERANCE_S:
+            if record.starttime is not None:
+                if record.identifies(record.pid) is True:
+                    return name
+            elif abs(proc.create_time() - record.create_time) <= _SESSION_CREATE_TIME_TOLERANCE_S:
                 return name
         except psutil.Error:
             continue

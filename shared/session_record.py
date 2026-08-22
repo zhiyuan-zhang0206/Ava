@@ -5,6 +5,12 @@ persist a launched background session as JSON under
 `$AVA_HOME/run/sessions/<name>.json`. This is the single shape both sides use —
 `new_session` writes it, `_process_for_record` reads it back — so the field
 contract lives in one typed place instead of two mirrored literal dicts.
+
+On Linux, WSL2 may step `/proc/stat`'s `btime`, which makes psutil's epoch
+`create_time()` drift for a still-live pid. `starttime` records `/proc/<pid>/stat`
+field 22 instead: clock ticks since boot are monotonic and therefore the stable
+process identity when available; `create_time` remains for Windows and legacy
+records.
 """
 
 from __future__ import annotations
@@ -18,12 +24,28 @@ from pathlib import Path
 from typing import Any, cast
 
 
+def pid_starttime_ticks(pid: int) -> int | None:
+    """Linux `/proc` start time in clock ticks since boot, or None when unavailable.
+
+    The command name in field 2 may include spaces or parentheses, so split the
+    stat record only after its final closing parenthesis.
+    """
+    try:
+        line = Path(f"/proc/{pid}/stat").read_text()
+        rest = line.rsplit(")", 1)[1].split()
+        return int(rest[22 - 3])
+    except (IndexError, OSError, ValueError):
+        return None
+
+
 @dataclass(frozen=True)
 class SessionRecord:
     """A launched background session's identity + provenance.
 
-    `pid` + `create_time` are the liveness key — a matching process start-time
-    defeats pid recycling. `cmd` / `cwd` / `started_at` are diagnostic provenance.
+    `pid` + `starttime` are the liveness key on Linux; `create_time` is the
+    compatibility fallback for legacy and Windows records. A matching process
+    start-time defeats pid recycling. `cmd` / `cwd` / `started_at` are diagnostic
+    provenance.
     """
 
     pid: int
@@ -31,6 +53,7 @@ class SessionRecord:
     cmd: str
     cwd: str
     started_at: float
+    starttime: int | None = None
 
     @classmethod
     def read(cls, path: Path) -> SessionRecord | None:
@@ -51,7 +74,24 @@ class SessionRecord:
             cmd=str(record.get("cmd", "")),
             cwd=str(record.get("cwd", "")),
             started_at=float(record.get("started_at", 0.0)),
+            starttime=(None if record.get("starttime") is None else int(record["starttime"])),
         )
+
+    def identifies(self, pid: int) -> bool | None:
+        """Whether `pid` is this record's process by its stable Linux identity.
+
+        False proves the pid is another process; None means a legacy/Windows
+        record or an unavailable `/proc` reading, whose callers fall back to
+        `create_time` where that compatibility behavior is required.
+        """
+        if pid != self.pid:
+            return False
+        if self.starttime is None:
+            return None
+        actual_starttime = pid_starttime_ticks(pid)
+        if actual_starttime is None:
+            return None
+        return actual_starttime == self.starttime
 
     def write(self, path: Path) -> None:
         """Persist as JSON at `path` (the shape `read` parses back), atomically.
