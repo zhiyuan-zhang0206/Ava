@@ -235,6 +235,10 @@ class TestLivenessPass:
         assert announced == [aid]  # online -> offline
 
         announced.clear()
+        asyncio.run(run_liveness_pass(pool, probe=fail))
+        assert announced == []  # offline -> offline is steady state
+
+        announced.clear()
         asyncio.run(run_liveness_pass(pool, probe=FakeProbe({_MACHINE: True})))
         assert announced == [aid]  # offline -> online
 
