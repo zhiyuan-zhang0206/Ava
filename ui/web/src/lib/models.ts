@@ -31,22 +31,33 @@ export function providerLabel(provider: string): string {
 }
 
 /**
- * Models grouped by provider, in API order (both provider order and
- * within-provider model order come straight from `modelsData.providers` —
- * see ModelsResponse). An optional predicate filters individual models
- * (e.g. the spawn picker excludes user-hidden models); a provider left
- * with no models after filtering is dropped rather than rendered empty.
+ * Models grouped in API provider order, with each provider's models ordered
+ * by cache-miss input price descending (most expensive first). An optional
+ * predicate filters individual models before sorting (e.g. the spawn picker
+ * excludes user-hidden models); a provider left with no models after filtering
+ * is dropped rather than rendered empty.
  */
 export function groupedModels(
   modelsData: ModelsResponse | undefined,
   filter?: (model: string) => boolean,
 ): [provider: string, models: string[]][] {
   if (!modelsData) return [];
+  const modelInfoByName: Record<
+    string,
+    ModelsResponse["models"][string] | undefined
+  > = modelsData.models;
   return Object.entries(modelsData.providers)
-    .map(([provider, models]): [string, string[]] => [
-      provider,
-      filter ? models.filter(filter) : models,
-    ])
+    .map(([provider, models]): [string, string[]] => {
+      const filteredModels = filter ? models.filter(filter) : [...models];
+      filteredModels.sort((left, right) => {
+        const leftPrice = modelInfoByName[left]?.pricing?.input;
+        const rightPrice = modelInfoByName[right]?.pricing?.input;
+        if (leftPrice === undefined) return rightPrice === undefined ? 0 : 1;
+        if (rightPrice === undefined) return -1;
+        return rightPrice - leftPrice;
+      });
+      return [provider, filteredModels];
+    })
     .filter(([, models]) => models.length > 0);
 }
 

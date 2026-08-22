@@ -3,8 +3,28 @@ import { describe, expect, it } from "vitest";
 import { groupedModels, isSuperseded, providerLabel } from "./models";
 import type { ModelsResponse } from "./types";
 
-function modelsResponse(providers: Record<string, string[]>): ModelsResponse {
-  return { providers, models: {}, default: "" };
+function modelsResponse(
+  providers: Record<string, string[]>,
+  inputPrices: Record<string, number | undefined> = {},
+): ModelsResponse {
+  const models = Object.fromEntries(
+    Object.entries(providers).flatMap(([provider, providerModels]) =>
+      providerModels.map((model) => {
+        const input = inputPrices[model];
+        return [
+          model,
+          {
+            provider,
+            context_window: 128_000,
+            ...(input === undefined
+              ? {}
+              : { pricing: { input, cache_read: input / 10, output: input * 2 } }),
+          },
+        ];
+      }),
+    ),
+  );
+  return { providers, models, default: "" };
 }
 
 describe("providerLabel", () => {
@@ -25,14 +45,45 @@ describe("providerLabel", () => {
 });
 
 describe("groupedModels", () => {
-  it("groups in API provider + within-provider order", () => {
-    const data = modelsResponse({
-      claude: ["claude-sonnet-5", "claude-haiku-4-5-20251001"],
-      deepseek: ["deepseek-v4-pro", "deepseek-v4-flash"],
-    });
+  it("keeps API provider order while sorting each provider by input price descending", () => {
+    const data = modelsResponse(
+      {
+        claude: ["claude-haiku-4-5-20251001", "claude-sonnet-5", "claude-opus-5"],
+        deepseek: ["deepseek-v4-flash", "deepseek-v4-pro"],
+      },
+      {
+        "claude-haiku-4-5-20251001": 0.2,
+        "claude-sonnet-5": 2.0,
+        "claude-opus-5": 5.0,
+        "deepseek-v4-flash": 0.1,
+        "deepseek-v4-pro": 0.5,
+      },
+    );
     expect(groupedModels(data)).toEqual([
-      ["claude", ["claude-sonnet-5", "claude-haiku-4-5-20251001"]],
+      ["claude", ["claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5-20251001"]],
       ["deepseek", ["deepseek-v4-pro", "deepseek-v4-flash"]],
+    ]);
+  });
+
+  it("puts models with missing pricing after priced models", () => {
+    const data = modelsResponse(
+      { claude: ["claude-unpriced", "claude-haiku", "claude-sonnet"] },
+      { "claude-haiku": 0.2, "claude-sonnet": 2.0 },
+    );
+
+    expect(groupedModels(data)).toEqual([
+      ["claude", ["claude-sonnet", "claude-haiku", "claude-unpriced"]],
+    ]);
+  });
+
+  it("preserves API order for models with equal prices", () => {
+    const data = modelsResponse(
+      { claude: ["claude-first", "claude-second", "claude-third"] },
+      { "claude-first": 2.0, "claude-second": 2.0, "claude-third": 2.0 },
+    );
+
+    expect(groupedModels(data)).toEqual([
+      ["claude", ["claude-first", "claude-second", "claude-third"]],
     ]);
   });
 
@@ -40,13 +91,21 @@ describe("groupedModels", () => {
     expect(groupedModels(undefined)).toEqual([]);
   });
 
-  it("applies a per-model filter and drops providers left with no models", () => {
-    const data = modelsResponse({
-      claude: ["claude-sonnet-5", "claude-haiku-4-5-20251001"],
-      deepseek: ["deepseek-v4-pro"],
-    });
+  it("filters before sorting and drops providers left with no models", () => {
+    const data = modelsResponse(
+      {
+        claude: ["claude-haiku-4-5-20251001", "claude-sonnet-5", "claude-opus-5"],
+        deepseek: ["deepseek-v4-pro"],
+      },
+      {
+        "claude-haiku-4-5-20251001": 0.2,
+        "claude-opus-5": 5.0,
+        "claude-sonnet-5": 2.0,
+        "deepseek-v4-pro": 0.5,
+      },
+    );
     const result = groupedModels(data, (m) => m !== "claude-haiku-4-5-20251001" && m !== "deepseek-v4-pro");
-    expect(result).toEqual([["claude", ["claude-sonnet-5"]]]);
+    expect(result).toEqual([["claude", ["claude-opus-5", "claude-sonnet-5"]]]);
   });
 
   it("drops a provider entirely if every model is filtered out", () => {
