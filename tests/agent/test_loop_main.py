@@ -17,7 +17,7 @@ main() test strategy — boundary mock:
 Locked contract:
 1. order: init_agent_process → set AGENT_ID → wraps.scan_and_load →
    MCP start → build_chat_model → create pool → connect redis →
-   checkpointer.setup → build_graph → (overlay) → write_effective_config → graph.ainvoke
+   construct checkpointer → build_graph → (overlay) → write_effective_config → graph.ainvoke
 2. finally block runs inbound_listener.close +
    _notify_exit + mcp_daemon.stop, whether ainvoke returns normally or raises (redis is process singleton, no aclose).
    shell/watcher session no longer reaped on exit (durable background work, PR1)
@@ -290,7 +290,7 @@ class TestMainHappyPath:
 
     async def test_calls_boundary_fns_in_order(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Boot order: claim → init_proc → scan_load → MCP start →
-        build_chat → create pool → get_async_redis → checkpointer.setup →
+        build_chat → create pool → get_async_redis → construct checkpointer →
         build_graph → write_eff → invoke; finally:
         inbound_listener.close → mark_term → mcp.stop (redis is process-wide singleton, no aclose)."""
         spies = _setup_main_boundary_mocks(monkeypatch)

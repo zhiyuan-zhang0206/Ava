@@ -23,6 +23,12 @@ from the registry record (`shared.db.direct_db_url`); everything else dials
 converge rewrites the URL to the direct port on the next `ava start` and the
 pooler never starts.
 
+The migration phase owns both schema domains: Ava's tracked SQL files and
+LangGraph's versioned checkpoint schema (`PostgresSaver.setup()`). The latter
+runs only on a gateway, under the same migration-authority check and advisory
+lock; checkpoint readers and agent boot never run setup, so the `ava_runner`
+runtime role needs CRUD on checkpoint tables but no schema CREATE privilege.
+
 **Identity is the home path** — there is no cluster name; the display label is
 the home's basename. A cluster's database and the Postgres role that owns it
 share one identifier, carried by its `.env` connection URLs **as data**

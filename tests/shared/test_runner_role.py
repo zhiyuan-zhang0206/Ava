@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from collections.abc import Generator
 from pathlib import Path
+from typing import cast
 
 import psycopg
 import pytest
@@ -147,6 +148,76 @@ def test_ensure_checkpoint_schema_creates_tables_owned_by_identity(runner_db: st
             conn.execute("DROP ROLE IF EXISTS ava_runner_ct2")
 
 
+def test_checkpoint_reads_need_crud_not_schema_ddl(
+    runner_db: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Both checkpoint readers work as ``ava_runner`` without schema CREATE.
+
+    The checkpoint schema is an install / migration concern.  A reader calling
+    ``PostgresSaver.setup()`` first issues ``CREATE TABLE IF NOT EXISTS`` and
+    PostgreSQL correctly rejects it for this least-privilege runtime role even
+    when every table already exists.  Production then loses timeline / inspect
+    history despite the role holding all CRUD privileges the read itself needs.
+    """
+    from langchain_core.messages import HumanMessage
+    from langgraph.checkpoint.base import CheckpointMetadata, empty_checkpoint
+
+    from shared.checkpoint import (
+        load_checkpoint_messages,
+        load_checkpoint_messages_by_trace,
+    )
+    from shared.config import settings
+
+    ensure_runner_role(_IDENTITY, base_admin_url=_admin_url(runner_db), runner_password=_RUNNER_PW)
+
+    trace_id = "f" * 32
+    checkpoint = empty_checkpoint()
+    checkpoint["channel_values"] = {"messages": [HumanMessage(content="runtime read")]}
+    checkpoint["channel_versions"] = {"messages": "1", "__start__": "1"}
+    with PostgresSaver.from_conn_string(runner_db) as saver:
+        saved = saver.put(
+            config={"configurable": {"thread_id": "73", "checkpoint_ns": ""}},
+            checkpoint=checkpoint,
+            metadata=cast(
+                CheckpointMetadata,
+                {"source": "input", "step": 1, "parents": {}, "trace_id": trace_id},
+            ),
+            new_versions={"messages": "1"},
+        )
+
+    monkeypatch.setattr(settings.data_plane, "db_url", _runner_url(runner_db))
+    current = load_checkpoint_messages(73)
+    checkpoint_id, traced = load_checkpoint_messages_by_trace(73, trace_id)
+
+    assert current == [HumanMessage(content="runtime read")]
+    assert checkpoint_id == saved["configurable"]["checkpoint_id"]  # pyright: ignore[reportTypedDictNotRequiredAccess]
+    assert traced == [HumanMessage(content="runtime read")]
+
+
+def test_current_checkpoint_schema_skips_setup(
+    runner_db: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Steady-state gateway starts do one version SELECT, not repeated DDL."""
+    from shared.cluster import migrate_checkpoint_schema
+
+    def setup_must_not_run(_self: PostgresSaver) -> None:
+        raise AssertionError("current checkpoint schema must bypass setup")
+
+    monkeypatch.setattr(PostgresSaver, "setup", setup_must_not_run)
+    assert migrate_checkpoint_schema(runner_db) == []
+
+
+def test_checkpoint_migration_phase_applies_only_missing_versions(runner_db: str) -> None:
+    """A dependency migration is version-gated and reports its exact version."""
+    from shared.cluster import migrate_checkpoint_schema
+
+    latest = len(PostgresSaver.MIGRATIONS) - 1
+    with psycopg.connect(runner_db, autocommit=True) as conn:
+        conn.execute("DELETE FROM checkpoint_migrations WHERE v = %s", (latest,))
+
+    assert migrate_checkpoint_schema(runner_db) == [latest]
+
+
 def test_runner_grant_matrix(runner_db: str) -> None:
     """The design's grant matrix, exercised as ava_runner over the wire."""
     admin = _admin_url(runner_db)
@@ -271,10 +342,8 @@ def test_runner_grant_matrix(runner_db: str) -> None:
         # Agent-boot DDL: PostgresSaver.setup() issues CREATE TABLE IF NOT EXISTS,
         # which Postgres refuses for a role without CREATE on the schema — even on
         # existing tables (verified on PG 17). That refusal is the DESIGNED
-        # behavior (any DDL must fail under ava_runner); the agent boot therefore
-        # skips setup() when the schema is present
-        # (agent/_process_boot._checkpoint_schema_present), which loses nothing —
-        # setup() is a no-op on an up-to-date schema.
+        # behavior (any DDL must fail under ava_runner); install + gateway start
+        # own setup(), while agent boot and checkpoint reads only use CRUD.
         with (
             pytest.raises(psycopg.errors.InsufficientPrivilege),
             PostgresSaver.from_conn_string(_runner_url(runner_db)) as saver,

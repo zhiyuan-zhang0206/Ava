@@ -204,24 +204,73 @@ def drop_database(identity: str, *, base_admin_url: str) -> None:
         conn.execute(pgsql.SQL("DROP ROLE IF EXISTS {}").format(pgsql.Identifier(identity)))
 
 
-def ensure_checkpoint_schema(identity: str, *, base_admin_url: str, cluster_secret: str) -> None:
-    """Create the LangGraph checkpoint tables (idempotent) AS the cluster role.
+def _checkpoint_schema_version(db_url: str) -> int:
+    """Newest applied LangGraph checkpoint migration, or ``-1`` pre-schema."""
+    import psycopg
 
-    Runs the same `PostgresSaver.setup()` an agent boot runs, so the tables are
-    owned by the cluster's MAIN role — the gateway's checkpoint readers dial
-    that role. Called at install birth BEFORE `ensure_runner_role`: the runner's
-    table grants can only target existing tables, and a runner booted as
-    `ava_runner` (post-cutover) finds the tables already present — its boot then
-    skips setup() (`agent/_process_boot._checkpoint_schema_present`), because
-    Postgres refuses `CREATE TABLE IF NOT EXISTS` for a role without CREATE on
-    the schema even when the tables exist (the runner holds no CREATE, by
-    design — any DDL must fail under it).
+    with psycopg.connect(db_url, autocommit=True) as conn:
+        table = conn.execute("SELECT to_regclass('public.checkpoint_migrations')").fetchone()
+        if table is None or table[0] is None:
+            return -1
+        row = conn.execute("SELECT max(v) FROM checkpoint_migrations").fetchone()
+    return -1 if row is None or row[0] is None else int(row[0])
 
-    Idempotent: on an existing cluster whose checkpoint tables exist (created by
-    any earlier agent boot), setup() is a no-op.
+
+def migrate_checkpoint_schema(db_url: str) -> list[int]:
+    """Apply LangGraph's own versioned checkpoint migrations as schema work.
+
+    ``PostgresSaver.setup()`` performs DDL even when the schema is current, so
+    it belongs to install / update startup, never a request or checkpoint read
+    path.  The caller must supply the gateway's direct, DDL-capable role URL and
+    hold Ava's schema-mutation lock + migration-authority guard.  Runtime
+    readers (including ``ava_runner``) only need table CRUD and never call this.
+
+    Returns the numeric LangGraph migration versions newly applied.  The list
+    lets ``ava start`` refresh point-in-time runner grants when this separate
+    migration domain changes without pretending the versions are Ava SQL
+    migration filenames.
     """
     from langgraph.checkpoint.postgres import PostgresSaver
 
+    before = _checkpoint_schema_version(db_url)
+    target = len(PostgresSaver.MIGRATIONS) - 1
+    if before == target:
+        return []
+    if before > target:
+        raise RuntimeError(
+            "checkpoint schema is ahead of this LangGraph build: "
+            f"database version={before}, code version={target}"
+        )
+    with PostgresSaver.from_conn_string(db_url) as saver:
+        saver.setup()
+    after = _checkpoint_schema_version(db_url)
+    if after != target:
+        raise RuntimeError(
+            "checkpoint schema migration did not reach the pinned LangGraph version: "
+            f"database version={after}, code version={target}"
+        )
+    return list(range(before + 1, after + 1))
+
+
+def ensure_checkpoint_schema(
+    identity: str, *, base_admin_url: str, cluster_secret: str
+) -> list[int]:
+    """Create the LangGraph checkpoint tables (idempotent) AS the cluster role.
+
+    Runs `PostgresSaver.setup()` as the cluster's MAIN role, so that role owns
+    the tables while runtime readers may use either it or `ava_runner`. Called
+    at install birth BEFORE `ensure_runner_role`: the runner's
+    table grants can only target existing tables, and a runner booted as
+    `ava_runner` (post-cutover) never runs setup(): Postgres refuses `CREATE
+    TABLE IF NOT EXISTS` for a role without CREATE on the schema even when the
+    tables exist (the runner holds no CREATE, by design — any DDL must fail
+    under it). Gateway `ava start` step 2.5 re-runs this versioned setup for
+    existing clusters when the pinned LangGraph dependency adds a migration.
+
+    Idempotent: on an existing cluster whose checkpoint tables exist (created by
+    any earlier agent boot), setup() applies no new version. Returns the numeric
+    LangGraph migration versions newly applied.
+    """
     from shared.url_secret import url_with_userinfo
 
     # Same role-URL pattern as provision_database: connect AS the cluster role
@@ -229,8 +278,7 @@ def ensure_checkpoint_schema(identity: str, *, base_admin_url: str, cluster_secr
     # from_conn_string owns the connection for the setup (the same construction
     # shared/pg_tools.py uses for throwaway test clusters).
     role_url = url_with_userinfo(_swap_db(base_admin_url, identity), identity, cluster_secret)
-    with PostgresSaver.from_conn_string(role_url) as saver:
-        saver.setup()
+    return migrate_checkpoint_schema(role_url)
 
 
 def ensure_runner_role(identity: str, *, base_admin_url: str, runner_password: str) -> None:

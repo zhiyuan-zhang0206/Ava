@@ -21,7 +21,7 @@
 --     already at the baseline (via one of the paths above), so apply then only
 --     runs whatever deltas accrued since; production self-update goes through it.
 --
--- LangGraph PostgresSaver creates at runtime:
+-- LangGraph PostgresSaver creates during install / gateway start migration phase:
 --   checkpoints / checkpoint_blobs / checkpoint_writes / checkpoint_migrations
 -- Here we only manage our own tables:
 --   agents            — agent identity + label (id also doubles as the LangGraph thread_id,

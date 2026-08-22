@@ -143,6 +143,9 @@ from shared.cluster.provision import (
     ensure_runner_role as ensure_runner_role,
 )
 from shared.cluster.provision import (
+    migrate_checkpoint_schema as migrate_checkpoint_schema,
+)
+from shared.cluster.provision import (
     provision_database as provision_database,
 )
 from shared.cluster.registry import (

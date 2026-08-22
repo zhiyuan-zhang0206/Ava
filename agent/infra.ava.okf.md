@@ -14,6 +14,7 @@ Ava's infrastructure layer—provides underlying capabilities for agent runtime 
 ## Core Responsibilities
 
 - **Persistence**: LangGraph checkpoint of agent message history, inbound message queue, agent metadata
+- **Checkpoint schema authority**: install and gateway `ava start` migration step 2.5 own `PostgresSaver.setup()`; agent boot and checkpoint request/read paths perform no DDL, so `ava_runner` remains a CRUD-only runtime role
 - **Wake-up mechanism**: Real-time agent wake-up via Redis pub/sub, replacing polling
 - **Caching**: Debug-mode LLM response caching (Redis), reducing API calls
 - **MCP protocol**: Subprocess MCP daemon management (spawn / ready-wait / drain / cleanup)

@@ -10,11 +10,17 @@ from __future__ import annotations
 
 
 def cmd_migrations_apply() -> list[str]:
-    """Apply pending migrations in order; called as a step of `ava start`.
+    """Apply Ava + LangGraph checkpoint migrations; step 2.5 of `ava start`.
 
-    Each migration runs in a single transaction; on failure all roll back
-    together. `ava start` invokes this after pg is ready; on the gateway
-    `ava cluster update` reaches it through the trailing `ava start`.
+    Ava SQL files run on every host (a runner normally has nothing pending and
+    the authority guard refuses it if it does). LangGraph's
+    ``PostgresSaver.setup()`` runs only on the gateway, under the same schema
+    lock and authority check. Runtime checkpoint readers must never perform
+    this DDL: they may dial as the least-privilege ``ava_runner`` role.
+
+    Each Ava migration runs in a single transaction. `ava start` invokes this
+    after pg is ready; on the gateway `ava cluster update` reaches it through
+    the trailing `ava start`.
 
     Returns the names applied, NOT an exit code — the `cmd_` prefix is
     vestigial here (see the module docstring: there is no `ava migrations`
@@ -23,7 +29,13 @@ def cmd_migrations_apply() -> list[str]:
     point-in-time read grant went stale; failure is raised, not returned.
     """
     import shared.db
-    from shared.migrations import apply_pending_migrations
+    from shared import cluster
+    from shared.machine import is_gateway
+    from shared.migrations import (
+        apply_pending_migrations,
+        assert_migration_authority,
+        schema_mutation_lock,
+    )
 
     # direct=True — the ONE sanctioned data-plane exemption (user ruling 2026-08:
     # every consumer goes through PgBouncer; see shared/db.py `connect`).
@@ -38,6 +50,20 @@ def cmd_migrations_apply() -> list[str]:
     # ceiling (large-table rebuilds, partition backfills); the applier must
     # stay unbounded (shared/db.py PG_STATEMENT_TIMEOUT_*).
     with shared.db.connect(direct=True, unbounded=True) as conn:
-        done = apply_pending_migrations(conn)
+        if is_gateway():
+            # One lock spans both schema domains. apply_pending_migrations()
+            # re-acquires it on this same session (Postgres advisory locks are
+            # reentrant); keeping the outer acquisition held serializes the
+            # second, autocommit connection LangGraph needs for CREATE INDEX
+            # CONCURRENTLY. Authority is explicit even when Ava has no pending
+            # SQL files because setup() itself is still a schema mutation path.
+            with schema_mutation_lock(conn):
+                assert_migration_authority(conn)
+                done = apply_pending_migrations(conn)
+                checkpoint_versions = cluster.migrate_checkpoint_schema(shared.db.direct_db_url())
+        else:
+            done = apply_pending_migrations(conn)
+            checkpoint_versions = []
+    done.extend(f"langgraph-checkpoint-v{version}" for version in checkpoint_versions)
     print(f"applied {len(done)} migration(s): {done}")
     return done
