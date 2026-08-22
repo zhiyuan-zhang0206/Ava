@@ -22,7 +22,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 
 import { api } from "./api";
 import { useStore } from "./store";
-import type { AgentRow, SystemEvent } from "./types";
+import type { AgentRow, SystemEvent, WireAgentRow } from "./types";
 import { projectAgentStatus } from "./types";
 import { AGENTS_QUERY_KEY, upsertAgent, useAgents } from "./use-agents";
 import { foldAgents } from "./fold/agents";
@@ -493,7 +493,7 @@ describe("useAgents.spawn", () => {
           spawner: "user",
           fork_source_agent_id: null,
           fork_source_checkpoint_id: null,
-          status: "allocated" as const,
+          status: "idling" as const,
           pid: null,
           spawned_at: "2026-05-25T00:00:00Z",
           started_at: null,
@@ -985,7 +985,7 @@ describe("useAgents SSE merge (regression)", () => {
     });
     const fetchesBefore = vi.mocked(api.listAgents).mock.calls.length;
 
-    const newSnapshot: AgentRow = {
+    const newSnapshot: WireAgentRow = {
       agent_id: 42,
       spawner: "user",
       fork_source_agent_id: null,
@@ -1011,7 +1011,10 @@ describe("useAgents SSE merge (regression)", () => {
     });
 
     await waitFor(() => {
-      expect(result.current.agents.find((a) => a.agent_id === 42)).toEqual(newSnapshot);
+      expect(result.current.agents.find((a) => a.agent_id === 42)).toEqual({
+        ...newSnapshot,
+        status: "idling",
+      });
     });
     // No extra listAgents fetch — SSE was the only source of the new row.
     expect(vi.mocked(api.listAgents).mock.calls.length).toBe(fetchesBefore);
@@ -1066,7 +1069,7 @@ describe("useAgents SSE merge (regression)", () => {
     expect(result.current.agents.find((a) => a.agent_id === 99)).toBeUndefined();
 
     // Deliver the AgentSpawned event.
-    const snapshot: AgentRow = {
+    const snapshot: WireAgentRow = {
       agent_id: 99,
       spawner: "user",
       fork_source_agent_id: null,
@@ -1122,7 +1125,7 @@ describe("useAgents SSE merge (regression)", () => {
     });
 
     // SSE lands first.
-    const snapshot: AgentRow = {
+    const snapshot: WireAgentRow = {
       agent_id: 99,
       spawner: "user",
       fork_source_agent_id: null,
@@ -1188,7 +1191,7 @@ describe("useAgents SSE merge (regression)", () => {
     });
 
     // SSE delivers the allocated row BEFORE the POST resolves.
-    const snapshot: AgentRow = {
+    const snapshot: WireAgentRow = {
       agent_id: 99,
       spawner: "user",
       fork_source_agent_id: null,
@@ -1249,37 +1252,50 @@ describe("useAgents SSE merge (regression)", () => {
   });
 });
 
-describe("hibernation status projection", () => {
+describe("public three-state agent status projection", () => {
   const base = MOCK_AGENTS[0];
 
-  it("projectAgentStatus maps hibernating → idling", () => {
-    const row = { ...base, status: "hibernating" as const };
-    expect(projectAgentStatus(row).status).toBe("idling");
+  it.each([
+    ["allocated", "idling"],
+    ["starting", "idling"],
+    ["running", "running"],
+    ["idling", "idling"],
+    ["restarting", "idling"],
+    ["terminated", "terminated"],
+    ["hibernating", "idling"],
+  ] as const)("projects internal %s → public %s", (internal, expected) => {
+    expect(projectAgentStatus({ ...base, status: internal }).status).toBe(expected);
   });
 
-  it("projectAgentStatus leaves non-hibernating statuses untouched (new ref only when it changes)", () => {
+  it("keeps already-public statuses as the same row reference", () => {
     const running = { ...base, status: "running" as const };
-    // unchanged rows are returned as-is (no needless new reference)
     expect(projectAgentStatus(running)).toBe(running);
-    expect(projectAgentStatus({ ...base, status: "terminated" as const }).status).toBe(
-      "terminated",
-    );
+    const idling = { ...base, status: "idling" as const };
+    expect(projectAgentStatus(idling)).toBe(idling);
+    const terminated = { ...base, status: "terminated" as const };
+    expect(projectAgentStatus(terminated)).toBe(terminated);
   });
 
-  it("an SSE hibernating snapshot lands in the cache as idling (invisible to the UI)", () => {
-    const snapshot = { ...base, status: "hibernating" };
+  it("fails fast on an unknown wire status", () => {
+    expect(() =>
+      projectAgentStatus({ ...base, status: "future-state" } as never),
+    ).toThrow(/unknown internal agent status.*future-state/i);
+  });
+
+  it("an SSE restarting snapshot lands in the cache as idling", () => {
+    const snapshot = { ...base, status: "restarting" };
     const next = foldAgents(MOCK_AGENTS, {
       role: "agent_updated",
       snapshot,
     } as unknown as SystemEvent);
     const row = next?.find((a) => a.agent_id === base.agent_id);
-    expect(row?.status).toBe("idling"); // never surfaces the raw 'hibernating'
+    expect(row?.status).toBe("idling");
   });
 
-  it("upsert stores the projected (idling) status, keeping the sort group stable", () => {
-    const projected = projectAgentStatus({ ...base, status: "hibernating" as const });
-    const out = upsertAgent([{ ...base, status: "starting" as const }], projected);
-    expect(out?.[0]?.status).toBe("idling"); // not 'hibernating' — no separate group
+  it("upsert stores only the projected status", () => {
+    const projected = projectAgentStatus({ ...base, status: "restarting" as const });
+    const out = upsertAgent([{ ...base, status: "idling" as const }], projected);
+    expect(out?.[0]?.status).toBe("idling");
   });
 });
 

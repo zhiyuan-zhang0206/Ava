@@ -28,7 +28,7 @@ import { memo, useEffect, useMemo, useState } from "react";
 
 import { PRIORITY_RANK } from "@/lib/notices";
 import { groupByTaskSubtree } from "@/lib/task-notify";
-import type { AgentRow, AgentStatus, NoticeItem, PageRow } from "@/lib/types";
+import type { AgentRow, PublicAgentStatus, NoticeItem, PageRow } from "@/lib/types";
 import { useAllPages } from "@/lib/use-all-pages";
 import { useNotices } from "@/lib/use-notices";
 import { useTasks } from "@/lib/use-tasks";
@@ -110,7 +110,7 @@ export const InboxQueue = memo(function InboxQueue({
 
   // Agent status lookup — index by agent_id.
   const agentStatus = useMemo(() => {
-    const m = new Map<number, AgentStatus>();
+    const m = new Map<number, PublicAgentStatus>();
     for (const a of agents) m.set(a.agent_id, a.status);
     return m;
   }, [agents]);

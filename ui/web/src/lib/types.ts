@@ -1,5 +1,5 @@
-// Frontend type surface — HTTP schemas (Pydantic models) are entirely
-// re-exported from types-generated.ts. The SSE event union (an Annotated
+// Frontend type surface — HTTP wire schemas (Pydantic models) are derived from
+// types-generated.ts; operator-facing projections are explicit overlays. The SSE event union (an Annotated
 // discriminator union that OpenAPI can't fully express) stays hand-written,
 // kept in sync via the task #11 wire-format roundtrip tests.
 //
@@ -21,19 +21,50 @@ export type CompactEnqueued = Schemas["CompactEnqueued"];
 export type CompactMode = CompactEnqueued["mode"];
 export type CancelRequested = Schemas["CancelRequested"];
 
-export type AgentStatus = Schemas["AgentStatus"];
-export type AgentRow = Schemas["AgentRow"];
+/** The persisted lifecycle vocabulary carried on the gateway wire. These are
+ *  control-plane states, not the status vocabulary the console presents. */
+export type WireAgentStatus = Schemas["AgentStatus"];
+export type WireAgentRow = Schemas["AgentRow"];
 
-/** Project ops-only agent statuses to their operator-facing equivalent.
- *  `hibernating` is an ops-layer memory swap-out state (the process was killed
- *  to free RAM while the agent sat idle; it wakes on the next message). The UI
- *  renders a swapped-out agent exactly as `idling` — it is parked and will come
- *  back — so the status is coerced here at ingest and is never distinguished
- *  downstream: no separate colour, no separate sort group, no churn as an agent
- *  swaps in and out. Applied at both cache-writer boundaries (the initial fetch
- *  and the SSE snapshot fold) so no component ever sees the raw value. */
-export function projectAgentStatus(row: AgentRow): AgentRow {
-  return row.status === "hibernating" ? { ...row, status: "idling" } : row;
+/** The console's complete, user-facing agent status model. Liveness remains a
+ *  separate `AgentRow.liveness_state` axis, so an internally restarting agent
+ *  whose runner is unreachable still renders as `idling` + `offline`, rather
+ *  than leaking a control-plane transition or hiding the outage. */
+export type PublicAgentStatus = Extract<
+  WireAgentStatus,
+  "running" | "idling" | "terminated"
+>;
+export type AgentRow = Omit<WireAgentRow, "status"> & {
+  readonly status: PublicAgentStatus;
+};
+
+/** Collapse every known wire lifecycle state into the public three-state model.
+ *  The switch is deliberately exhaustive: adding a backend enum member fails
+ *  type-checking here, and an unknown runtime value throws instead of silently
+ *  inventing a display fallback. */
+export function projectAgentStatusValue(status: WireAgentStatus): PublicAgentStatus {
+  switch (status) {
+    case "running":
+      return "running";
+    case "terminated":
+      return "terminated";
+    case "allocated":
+    case "starting":
+    case "idling":
+    case "restarting":
+    case "hibernating":
+      return "idling";
+    default: {
+      const unknownStatus: never = status;
+      throw new Error(`unknown internal agent status: ${String(unknownStatus)}`);
+    }
+  }
+}
+
+/** Project one raw gateway/SSE row before it enters any frontend cache. */
+export function projectAgentStatus(row: WireAgentRow): AgentRow {
+  const status = projectAgentStatusValue(row.status);
+  return status === row.status ? (row as AgentRow) : { ...row, status };
 }
 // OpenNotice rides the agent snapshot (notices_awaiting_response — the open
 // require_response worklist). NoticeItem is the standalone feed element (the FYI
@@ -316,11 +347,10 @@ export interface TimelineSnapshotEvent extends BaseEvent {
   readonly msg_count: number;
 }
 
-// AgentSnapshot is structurally identical to AgentRow (the HTTP schema)
+// AgentSnapshot is structurally identical to WireAgentRow (the HTTP schema)
 // — see shared/agent_snapshot.py for the canonical Python definition.
-// Reuse the generated AgentRow type rather than re-declaring fields, so
-// schema drift on either side fails the codegen check.
-export type AgentSnapshot = AgentRow;
+// It is projected by the agents fold before entering the public AgentRow cache.
+export type AgentSnapshot = WireAgentRow;
 
 export interface AgentSpawnedEvent extends BaseEvent {
   readonly role: "agent_spawned";
@@ -553,7 +583,7 @@ export type GraphEventType = "spawn" | "fork" | "resurrect" | "message";
 export interface FleetGraphNode {
   readonly agent_id: number;
   readonly label: string | null;
-  readonly status: AgentStatus;
+  readonly status: PublicAgentStatus;
   readonly spawner: string;
   readonly machine: string;
   /** Recent-work score over the selected window (in*0.1 + out*1.0). Drives node size. */
@@ -575,6 +605,16 @@ export interface FleetGraphEdge {
 
 export interface FleetGraph {
   readonly nodes: readonly FleetGraphNode[];
+  readonly edges: readonly FleetGraphEdge[];
+}
+
+/** Raw `/api/fleet/graph` response before node statuses cross the same public
+ *  projection boundary as `/api/agents` and lifecycle SSE snapshots. */
+export type WireFleetGraphNode = Omit<FleetGraphNode, "status"> & {
+  readonly status: WireAgentStatus;
+};
+export interface WireFleetGraph {
+  readonly nodes: readonly WireFleetGraphNode[];
   readonly edges: readonly FleetGraphEdge[];
 }
 // --- Tasks (GET /api/tasks) ---
