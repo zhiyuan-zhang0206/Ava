@@ -34,9 +34,23 @@ interface AuthState {
 }
 
 const AuthContext = createContext<AuthState | null>(null);
+let sessionInvalidHandler: (() => void) | null = null;
+
+export function setSessionInvalidHandler(handler: (() => void) | null): void {
+  sessionInvalidHandler = handler;
+}
+
+export function notifySessionInvalid(): void {
+  sessionInvalidHandler?.();
+}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<AuthStatus>("loading");
+
+  useEffect(() => {
+    setSessionInvalidHandler(() => setStatus("unauthenticated"));
+    return () => setSessionInvalidHandler(null);
+  }, []);
 
   // Check auth on mount
   useEffect(() => {
