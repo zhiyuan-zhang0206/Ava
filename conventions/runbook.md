@@ -844,8 +844,10 @@ The frontend resolves the gateway as `${location.hostname}:8000` (frontend
 ports). Gateway CORS allows all origins — anything that reaches it is already on
 the private network. On a host where another service holds the gateway port, set
 `AVA_GATEWAY_PORT` plus the matching
-`AVA_GATEWAY_HEALTH_URL=http://localhost:<port>/api/agents`
-(two-var contract; `ava status` probes the health URL).
+`AVA_GATEWAY_HEALTH_URL=http://localhost:<port>/api/health`
+(two-var contract; `ava status` probes the health URL). A pure agent-runner
+derives this health URL from the reachable `AVA_GATEWAY_URL` written by
+`ava enroll` unless the host sets an explicit health URL override.
 
 ## Cluster secret rotation
 

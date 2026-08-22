@@ -437,7 +437,7 @@ class ServiceSettings(EnvSettings):
     gateway_health_url: str = Field(
         default="http://localhost:8000/api/health",
         alias="AVA_GATEWAY_HEALTH_URL",
-        description="Gateway healthcheck probe URL. Override this to match when changing AVA_GATEWAY_PORT.",
+        description="Gateway healthcheck probe URL. Pure agent-runners derive it from AVA_GATEWAY_URL when no host override is set; gateway-capable units default to the local gateway.",
         json_schema_extra={
             "restart_required": "",
             "writable": False,

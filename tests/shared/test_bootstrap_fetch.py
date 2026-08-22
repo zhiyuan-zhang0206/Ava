@@ -56,6 +56,36 @@ def test_inject_config_updates_environ(monkeypatch: pytest.MonkeyPatch) -> None:
     assert os.environ["AVA_DB_URL"] == "postgresql://injected/x"
 
 
+def test_inject_derives_missing_gateway_health_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A pure runner probes the remote gateway, never localhost, when enroll
+    carries no explicit health override."""
+    monkeypatch.setitem(os.environ, "AVA_GATEWAY_URL", "http://gateway.tailnet:8123/")
+    monkeypatch.delitem(os.environ, "AVA_GATEWAY_HEALTH_URL", raising=False)
+    monkeypatch.setattr(
+        bootstrap,
+        "fetch_bootstrap_config",
+        lambda *_a, **_k: {},  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    )
+
+    bootstrap.inject_config_from_gateway()
+
+    assert os.environ["AVA_GATEWAY_HEALTH_URL"] == ("http://gateway.tailnet:8123/api/health")
+
+
+def test_inject_preserves_explicit_gateway_health_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(os.environ, "AVA_GATEWAY_URL", "http://gateway.tailnet:8123")
+    monkeypatch.setitem(os.environ, "AVA_GATEWAY_HEALTH_URL", "http://health-proxy.tailnet/ready")
+    monkeypatch.setattr(
+        bootstrap,
+        "fetch_bootstrap_config",
+        lambda *_a, **_k: {},  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    )
+
+    bootstrap.inject_config_from_gateway()
+
+    assert os.environ["AVA_GATEWAY_HEALTH_URL"] == "http://health-proxy.tailnet/ready"
+
+
 def test_inject_overwrites_existing_env(monkeypatch: pytest.MonkeyPatch) -> None:
     # Fetched values are authoritative (2026-08-01): a stale value in env/.env —
     # a pre-cutover materialization `_enforce_cluster_env_authority` pushed in,
