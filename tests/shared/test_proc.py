@@ -17,7 +17,10 @@ from pathlib import Path
 import psutil
 import pytest
 
-from shared.proc import kill_process_tree, process_alive, run_bounded
+from shared.paths import run_dir
+from shared.platform import IS_LINUX
+from shared.proc import hosting_supervised_session, kill_process_tree, process_alive, run_bounded
+from shared.session_record import SessionRecord, pid_starttime_ticks
 
 
 def test_own_pid_is_alive() -> None:
@@ -31,6 +34,29 @@ def test_unused_pid_is_dead() -> None:
     # probe still returns a bool — the assertion below just checks the typical
     # "no such process" path.
     assert process_alive(2_000_000_000) is False
+
+
+@pytest.mark.skipif(not IS_LINUX, reason="Linux /proc start-time identity")
+def test_hosting_supervised_session_uses_starttime_despite_wall_clock_drift(
+    unit_home: Path,
+) -> None:
+    """Update lineage recognizes a matching stable tick even when btime drifted."""
+    starttime = pid_starttime_ticks(os.getpid())
+    assert starttime is not None
+    name = "ava-test-hosting-starttime"
+    path = run_dir() / "sessions" / f"{name}.json"
+    SessionRecord(
+        pid=os.getpid(),
+        create_time=1.0,
+        cmd="test",
+        cwd=str(unit_home),
+        started_at=time.time(),
+        starttime=starttime,
+    ).write(path)
+    try:
+        assert hosting_supervised_session() == name
+    finally:
+        path.unlink(missing_ok=True)
 
 
 # --- run_bounded fixtures -------------------------------------------------

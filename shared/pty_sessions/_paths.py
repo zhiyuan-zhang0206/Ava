@@ -7,11 +7,10 @@ dir): a record scan is the session listing, and sharing the dir would make
 every lister on either side regex-filter the other's records out — the
 pre-2026-08 layout did exactly that and ``stop.py`` carried the filter.
 
-The record is a ``SessionRecord`` (pid/create_time = the SHELL, the liveness
-key — "session alive" means the shell is alive) plus two extra keys naming
-the host process (``host_pid``/``host_create_time``) so a kill can reach a
-wedged host. ``SessionRecord.read`` ignores the extras, so any generic
-record reader still parses a pty record.
+The record is a ``SessionRecord`` (the SHELL is its liveness key) plus extra
+keys naming the host process (``host_pid``/``host_create_time`` and optional
+``host_starttime``) so a kill can reach a wedged host. ``SessionRecord.read``
+ignores the extras, so any generic record reader still parses a pty record.
 """
 
 from __future__ import annotations
@@ -83,14 +82,23 @@ def host_log_path(name: str) -> Path:
 
 
 def write_record(
-    path: Path, record: SessionRecord, *, host_pid: int, host_create_time: float
+    path: Path,
+    record: SessionRecord,
+    *,
+    host_pid: int,
+    host_create_time: float,
+    host_starttime: int | None = None,
 ) -> None:
     """Persist the pty record: SessionRecord fields + the host identity keys.
 
     Same atomic temp-file + rename discipline as ``SessionRecord.write`` (a
     concurrent reader must never see a truncated record).
     """
-    payload = asdict(record) | {"host_pid": host_pid, "host_create_time": host_create_time}
+    payload = asdict(record) | {
+        "host_pid": host_pid,
+        "host_create_time": host_create_time,
+        "host_starttime": host_starttime,
+    }
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.parent / f".{path.name}.tmp"
     tmp.write_text(json.dumps(payload))
@@ -109,6 +117,21 @@ def host_identity(path: Path) -> tuple[int, float] | None:
     if "host_pid" not in data:
         return None
     return int(data["host_pid"]), float(data.get("host_create_time", 0.0))
+
+
+def host_starttime(path: Path) -> int | None:
+    """Optional Linux clock-tick identity for a pty record's host process."""
+    try:
+        raw = json.loads(path.read_text())
+    except (ValueError, OSError):
+        return None
+    if not isinstance(raw, dict):
+        return None
+    value = cast("dict[str, Any]", raw).get("host_starttime")
+    try:
+        return None if value is None else int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def ok(data: dict[str, object] | None = None) -> dict[str, object]:
