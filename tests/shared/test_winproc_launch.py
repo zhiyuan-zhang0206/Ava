@@ -24,7 +24,7 @@ from typing import IO, ClassVar
 
 import pytest
 
-from shared import winproc
+from shared import winjob, winproc
 
 # ── _plan_launch: which commands avoid cmd.exe ──────────────────────────────
 
@@ -309,3 +309,33 @@ def test_new_session_shell_command_reaches_popen_as_a_string(
     assert call.command == 'cmd /s /c "git fetch && ava restart"'
     assert call.creationflags == winproc._CMD_FLAGS
     assert call.stdout == str(winproc.session_log_path("zz-updater"))
+
+
+@pytest.mark.parametrize(
+    ("name", "cmd", "base_flags"),
+    [
+        ("zz-exec-direct", "python -m worker", winproc._DETACHED_FLAGS),
+        ("zz-exec-shell", "build && run", winproc._CMD_FLAGS),
+    ],
+)
+def test_persistent_session_breaks_away_only_from_an_exec_job(
+    unit_home: Path,
+    fake_popen: type[_FakePopen],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    name: str,
+    cmd: str,
+    base_flags: int,
+) -> None:
+    """Only the verified one-shot context adds CREATE_BREAKAWAY_FROM_JOB;
+    ordinary session launches keep their existing outer-Job behavior."""
+    monkeypatch.setattr(winjob._exec_job_state, "attached", False)
+    monkeypatch.setenv("AVA_EXEC_JOB_MEMBER", "1")
+    assert winproc.new_session(f"{name}-plain", cmd, tmp_path, env={})
+    assert fake_popen.calls[-1].creationflags == base_flags
+
+    gate = tmp_path / f"{name}.job-ready"
+    winjob.publish_parent_job_gate(gate)
+    winjob.await_parent_job_gate(str(gate))
+    assert winproc.new_session(name, cmd, tmp_path, env={})
+    assert fake_popen.calls[-1].creationflags == base_flags | winproc._BREAKAWAY

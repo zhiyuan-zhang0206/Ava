@@ -9,12 +9,15 @@ POSIX-only cases (signals, process groups) are skipped on Windows.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
+import threading
 import time
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
+import psutil
 import pytest
 from langchain_core.messages import HumanMessage
 
@@ -26,7 +29,10 @@ from agent.graph._exec_result import (
     _ExecTimedOut,
 )
 from agent.graph._exec_stream import ExecOutputChunkPublisher
-from agent.graph._exec_subprocess import _run_in_subprocess
+from agent.graph._exec_subprocess import (
+    _run_in_subprocess,
+)
+from shared.proc import kill_process_tree
 
 _AGENT_ID = 424242
 
@@ -164,6 +170,39 @@ async def test_subprocess_os_exit_without_envelope_is_crash(tmp_path: Path) -> N
     assert "without writing a result envelope" in str(result.exc)
 
 
+@pytest.mark.parametrize("exit_code", [5, 124])
+async def test_abrupt_root_exit_stops_descendant_before_reader_cleanup(
+    tmp_path: Path, exit_code: int
+) -> None:
+    """Neither user ``os._exit`` nor the watchdog's 124 hard-exit may bypass
+    the parent-owned tree barrier and leave a stdout holder behind."""
+    pid_file = tmp_path / f"abrupt-{exit_code}.pid"
+    code = (
+        "import os, pathlib, subprocess, sys\n"
+        "descendant = subprocess.Popen(\n"
+        "    [sys.executable, '-c', 'import time; time.sleep(60)']\n"
+        ")\n"
+        f"pathlib.Path({str(pid_file)!r}).write_text(\n"
+        "    str(descendant.pid), encoding='utf-8'\n"
+        ")\n"
+        f"os._exit({exit_code})\n"
+    )
+    descendant_pid: int | None = None
+    try:
+        result = await _run(tmp_path, code)
+        assert isinstance(result, _ExecCrashed)
+        descendant_pid = int(pid_file.read_text(encoding="utf-8"))
+        assert not psutil.pid_exists(descendant_pid)
+        assert not any(
+            thread.name == f"exec-reader-{_AGENT_ID}" for thread in threading.enumerate()
+        )
+    finally:
+        if descendant_pid is None and pid_file.exists():
+            descendant_pid = int(pid_file.read_text(encoding="utf-8"))
+        if descendant_pid is not None:
+            kill_process_tree(descendant_pid, grace_s=0.0)
+
+
 async def test_subprocess_timeout(tmp_path: Path) -> None:
     # The deadline must not race child boot: `import ava` alone is ~2s on CI
     # (PR #256 round 4 went red with 1.0s — the group SIGTERM landed while the
@@ -179,6 +218,86 @@ async def test_subprocess_timeout(tmp_path: Path) -> None:
 async def test_subprocess_cancel(tmp_path: Path) -> None:
     result = await _run(tmp_path, "import time\ntime.sleep(60)", cancel_after=0.4)
     assert isinstance(result, _ExecCancelled)
+
+
+async def test_natural_exit_reaps_ordinary_descendant_holding_stdout(tmp_path: Path) -> None:
+    """Returning from agent code ends raw subprocesses in the disposable run;
+    an inherited stdout fd cannot leave a process or reader behind."""
+    pid_file = tmp_path / "natural-descendant.pid"
+    code = (
+        "import pathlib, subprocess, sys\n"
+        "descendant = subprocess.Popen(\n"
+        "    [sys.executable, '-c', 'import time; time.sleep(60)']\n"
+        ")\n"
+        f"pathlib.Path({str(pid_file)!r}).write_text(\n"
+        "    str(descendant.pid), encoding='utf-8'\n"
+        ")\n"
+    )
+    descendant_pid: int | None = None
+    try:
+        result = await _run(tmp_path, code)
+        assert isinstance(result, _ExecDone)
+        descendant_pid = int(pid_file.read_text(encoding="utf-8"))
+        assert not psutil.pid_exists(descendant_pid)
+        assert not any(
+            thread.name == f"exec-reader-{_AGENT_ID}" for thread in threading.enumerate()
+        )
+    finally:
+        if descendant_pid is not None:
+            kill_process_tree(descendant_pid, grace_s=0.0)
+
+
+async def test_outer_task_cancel_reaps_child_and_descendant(tmp_path: Path) -> None:
+    """Graph-task cancellation is a teardown barrier: the direct child and an
+    ordinary descendant are gone and reaped before CancelledError escapes."""
+    pid_file = tmp_path / "exec-tree.pids"
+    code = (
+        "import os, pathlib, subprocess, sys, time\n"
+        "descendant = subprocess.Popen(\n"
+        "    [sys.executable, '-c', 'import time; time.sleep(60)']\n"
+        ")\n"
+        f"pathlib.Path({str(pid_file)!r}).write_text(\n"
+        "    f'{os.getpid()} {descendant.pid}', encoding='utf-8'\n"
+        ")\n"
+        "print('tree-ready', flush=True)\n"
+        "time.sleep(60)\n"
+    )
+    task = asyncio.create_task(
+        _run_in_subprocess(
+            code,
+            _AGENT_ID,
+            asyncio.Event(),
+            60.0,
+            exec_dir=tmp_path / "exec",
+        )
+    )
+    pids: list[int] = []
+    try:
+        deadline = time.monotonic() + 20.0
+        while time.monotonic() < deadline and not pid_file.exists():
+            await asyncio.sleep(0.05)
+        assert pid_file.exists(), "exec child never reached user code"
+        pids = [int(value) for value in pid_file.read_text(encoding="utf-8").split()]
+
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, timeout=15.0)
+
+        assert all(not psutil.pid_exists(pid) for pid in pids)
+        assert not any(
+            thread.name == f"exec-reader-{_AGENT_ID}" for thread in threading.enumerate()
+        )
+        assert not list((tmp_path / "exec" / str(_AGENT_ID)).iterdir())
+    finally:
+        if not task.done():
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+        for pid in reversed(pids):
+            kill_process_tree(pid, grace_s=0.0)
+        if os.name != "nt" and pids:
+            with contextlib.suppress(ChildProcessError, ProcessLookupError):
+                os.waitpid(pids[0], 0)
 
 
 async def test_subprocess_streaming_chunks_published_incrementally(tmp_path: Path) -> None:

@@ -18,9 +18,10 @@ files + signals:
   delta, security findings, and (for a crash) the full traceback text. Written
   on every exit path except `os._exit` (watchdog / the agent's own call) and
   SIGKILL — the parent classifies those from its own cancel/timeout flags.
-- Signals: SIGINT -> KeyboardInterrupt, SIGTERM -> TimeoutError, both raised
+- POSIX signals: SIGINT -> KeyboardInterrupt, SIGTERM -> TimeoutError, both raised
   at the next bytecode boundary (the same semantics the old in-thread ctypes
-  injection had). The parent escalates to SIGKILL(-pgid) after a grace period;
+  injection had). POSIX gets a grace period before the parent closes the
+  process group; Windows cancel/timeout immediately closes the Job Object;
   a watchdog `os._exit(124)` bounds this child's life if the parent dies first.
 
 Identity: `ava._boot.establish(agent_id, owns_loop=True)` — owns_loop stays
@@ -75,6 +76,7 @@ from agent.graph._exec_protocol import (
 )
 from ava import _boot
 from shared.log import init_subprocess_logger, logger
+from shared.winjob import EXEC_JOB_GATE_ENV, await_parent_job_gate
 
 # Watchdog margin beyond (timeout + parent's kill grace) before the child
 # hard-exits — overridable so tests do not wait for the 5s default.
@@ -338,6 +340,7 @@ def main() -> None:
     semantics, not the exit code (a non-zero exit would add nothing the
     envelope does not already say, and the parent treats a missing envelope
     as the crash path anyway)."""
+    await_parent_job_gate(os.environ.get(EXEC_JOB_GATE_ENV))
     request_path = os.environ.get("AVA_EXEC_REQUEST_FILE")
     result_path = os.environ.get("AVA_EXEC_RESULT_FILE")
     if not request_path or not result_path:

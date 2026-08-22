@@ -1,8 +1,8 @@
 """Test exec node graph-level timeout shield (asyncio.wait_for).
 
-If the inner per-code-block timeout (exec_timeout_seconds) misses a hang
-inside the execution machinery (e.g. a wedged child reaper), the outer
-node-level timeout (exec_node_timeout_seconds) catches it.
+If the inner per-code-block timeout (exec_timeout_seconds) misses a cancellable
+framework hang, the outer node-level timeout (exec_node_timeout_seconds)
+requests cancellation and waits for resource teardown before surfacing it.
 """
 
 from __future__ import annotations
@@ -49,9 +49,8 @@ async def test_exec_node_timeout_fires_asyncio_wait_for(
     """When _run_in_subprocess hangs longer than exec_node_timeout_seconds,
     the outer asyncio.wait_for inside _exec_node_impl fires.
 
-    We monkeypatch _run_in_subprocess to hang forever — simulating a hang
-    inside the execution machinery (e.g. a wedged child reaper) that the
-    inner code-exec timeout missed.
+    We monkeypatch _run_in_subprocess to wait forever on a cancellable Future,
+    simulating a framework wait that the inner code-exec timeout missed.
     """
     # Graph-level timeout very short, inner timeout irrelevant (patched out)
     monkeypatch.setattr("shared.config.settings.sandbox.exec_node_timeout_seconds", 0.05)

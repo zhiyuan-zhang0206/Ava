@@ -29,7 +29,7 @@ after_init → init_context → claim → before_llm → llm → before_exec →
 - **before_llm** (hook container): Runs all registered `register_before_llm` hooks—plugins can modify state or inject extra context
 - **llm** (`_llm.py`): Streaming LLM inference, supports mid-stream cancellation (cancel = discard current turn); streaming-first with one non-streaming fallback; fatal provider errors fail-fast to idle
 - **before_exec** (hook container): Runs `register_before_exec` hooks—final checkpoint before tool invocation
-- **exec** (`_exec.py`): Runs Python code in one disposable fault-isolation subprocess (SIGINT/SIGTERM → SIGKILL(-pgid) escalation on POSIX; direct-child termination on Windows)
+- **exec** (`_exec.py`): Runs Python code in one disposable fault-isolation subprocess; cancel/timeout crosses an owned-tree stop → direct-child reap → bounded output-reader join barrier
 - **after_exec** (hook container): Runs `register_after_exec` hooks—cleanup/recording after execution
 
 ## Interrupting a turn: cancel and terminate

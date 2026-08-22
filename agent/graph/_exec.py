@@ -9,12 +9,14 @@ continue multi-step based on pending inbound + state.halted.
 Core mechanisms:
   - Subprocess backend (`agent/graph/_exec_subprocess.py`): the parent spawns
     one `python -I -X utf8 -m agent.exec_child` per exec, polls every 50ms, streams
-    output through the chunk pipeline, and escalates cancel/timeout via
-    SIGINT/SIGTERM to SIGKILL(-pgid) after a grace period on POSIX (Windows
-    targets the direct child). The child rebuilds
-    the state snapshot from the request envelope; the plugin state-update
-    delta and the drained security findings ride the result envelope back
-    and are validated here.
+    output through the chunk pipeline. POSIX cancel/timeout sends a signal then
+    closes the process group after a grace period; Windows immediately closes
+    the Job Object. Natural root exit also closes the domain, so an `os._exit`
+    cannot strand an ordinary descendant holding stdout. Cancellation returns
+    only after the direct child is reaped and the pipe reader gets its bounded
+    join. The child rebuilds the state snapshot from the request envelope; the plugin
+    state-update delta and the drained security findings ride the result
+    envelope back and are validated here.
   - Halt signal uses exception type rather than exit code: agent code raising
     `_LifecycleExit` (AgentTermination / AgentRestart / _SystemHalt) → captured
     in result_holder["lifecycle"] → exec_node decides halted + writes marker
@@ -206,11 +208,12 @@ async def _exec_with_node_shield(
     coro: Awaitable[tuple[_ExecResult, ResultPayload | None]], agent_id: int
 ) -> tuple[_ExecResult, ResultPayload | None]:
     """Graph-level exec node timeout — defense-in-depth above the per-code-block
-    exec_timeout_seconds. If the inner deadline missed a hang inside the
-    execution machinery (e.g. a wedged child reaper), this outer shield
-    catches it and surfaces as a timeout result rather than leaving the agent
-    process stuck. (The interrupt subscription sits outside this wait_for and
-    is bounded by its own watcher exit timeout.)"""
+    exec_timeout_seconds. If the inner deadline misses a cancellable framework
+    hang, this outer shield requests cancellation and surfaces a timeout after
+    the owned process-resource barrier finishes. It is not an independent hard
+    bound on an OS close/reap call that itself wedges. (The interrupt
+    subscription sits outside this wait_for and is bounded by its own watcher
+    exit timeout.)"""
     try:
         return await asyncio.wait_for(coro, timeout=settings.sandbox.exec_node_timeout_seconds)
     except TimeoutError:

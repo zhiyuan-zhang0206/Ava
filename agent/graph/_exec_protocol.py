@@ -2,7 +2,7 @@
 (de)serialization, shared by the parent (`agent/graph/_exec_subprocess.py`)
 and the child entry (`agent/exec_child.py`).
 
-Two files per run, both under `<exec_dir>/<agent_id>/` and chmod 0600 (the
+Two envelope files per run, both under `<exec_dir>/<agent_id>/` and chmod 0600 (the
 snapshot carries the agent's full message history — same sensitivity as the
 logs it shares the home with):
 
@@ -10,6 +10,10 @@ logs it shares the home with):
   state snapshot.
 - result  `<uuid>.json`: the outcome kind, the plugin state-update delta, the
   security findings, and — for a crash — the child-formatted traceback text.
+
+On Windows the parent also creates a short-lived `<uuid>.job-ready.json` gate
+after attaching the child to its Job Object. The child cannot enter user code
+before that file exists; stale gates are pruned with stale envelopes.
 
 The envelope itself is plain JSON (cat-able for postmortem). The two typed
 payloads — the state snapshot (parent -> child) and the state-update delta
