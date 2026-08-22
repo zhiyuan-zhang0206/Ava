@@ -25,6 +25,7 @@ import yaml
 REPO_ROOT = Path(__file__).resolve().parents[2]
 COMPOSE_PATH = REPO_ROOT / "deploy/lgtm/docker-compose.yml"
 RUNTIME_ENV_PATH = REPO_ROOT / "deploy/lgtm/config/grafana/runtime.env"
+DASHBOARD_DIR = REPO_ROOT / "deploy/lgtm/config/grafana/provisioning/dashboards"
 TRACE_ID = "70d53b9c44efa6d116f9b26a950e3309"
 
 
@@ -48,6 +49,35 @@ def _grafana_environment() -> dict[str, str]:
             key, value = line.split("=", 1)
             environment[key] = value
     return environment
+
+
+def _shipped_grafana_version() -> str:
+    compose: dict[str, Any] = yaml.safe_load(COMPOSE_PATH.read_text(encoding="utf-8"))
+    image = str(compose["services"]["grafana"]["image"])
+    prefix = "grafana/grafana:"
+    assert image.startswith(prefix)
+    return image.removeprefix(prefix)
+
+
+def _dashboard(filename: str) -> dict[str, Any]:
+    return json.loads((DASHBOARD_DIR / filename).read_text(encoding="utf-8"))
+
+
+def _tempo_trace_target(dashboard: dict[str, Any]) -> dict[str, Any]:
+    matches = [
+        (panel, target)
+        for panel in dashboard["panels"]
+        for target in panel.get("targets", [])
+        if target.get("queryType") == "traceql"
+        and target.get("datasource", {}).get("uid") == "tempo"
+    ]
+    assert len(matches) == 1
+    panel, target = matches[0]
+    assert panel["title"] == "Recent traces (Tempo)"
+    assert panel["datasource"] == {"type": "tempo", "uid": "tempo"}
+    assert target["datasource"] == panel["datasource"]
+    assert target["query"] == '{resource.service.name="ava"}'
+    return target
 
 
 def _free_port() -> int:
@@ -75,7 +105,9 @@ def _request(
         return response.status, response.headers.get("Location", ""), response.read()
 
 
-def _wait_until_healthy(base_url: str, process: subprocess.Popen[str]) -> None:
+def _wait_until_healthy(
+    base_url: str, process: subprocess.Popen[str], expected_version: str
+) -> None:
     deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
         if process.poll() is not None:
@@ -83,7 +115,9 @@ def _wait_until_healthy(base_url: str, process: subprocess.Popen[str]) -> None:
             pytest.fail(f"Grafana exited {process.returncode} before becoming healthy:\n{stdout}")
         try:
             status, _, body = _request(f"{base_url}/api/health")
-            if status == 200 and json.loads(body)["database"] == "ok":
+            health = json.loads(body)
+            if status == 200 and health["database"] == "ok":
+                assert health["version"] == expected_version
                 return
         except (OSError, ValueError):
             pass
@@ -91,15 +125,16 @@ def _wait_until_healthy(base_url: str, process: subprocess.Popen[str]) -> None:
     pytest.fail("Grafana did not become healthy within 30 seconds")
 
 
-def _explore_url(base_url: str) -> str:
+def _explore_url(base_url: str, trace_target: dict[str, Any]) -> str:
+    datasource = trace_target["datasource"]
     left = {
-        "datasource": "tempo",
+        "datasource": datasource["uid"],
         "queries": [
             {
-                "datasource": {"type": "tempo", "uid": "tempo"},
+                "datasource": datasource,
                 "query": TRACE_ID,
-                "queryType": "traceql",
-                "refId": "A",
+                "queryType": trace_target["queryType"],
+                "refId": trace_target["refId"],
             }
         ],
         "range": {"from": "now-1h", "to": "now"},
@@ -117,13 +152,12 @@ def test_shipped_grafana_runtime_contract() -> None:
     assert environment["GF_USERS_VIEWERS_CAN_EDIT"] == "true"
     assert environment["GF_DATABASE_QUERY_RETRIES"] == "5"
     assert environment["GF_LIVE_MAX_CONNECTIONS"] == "0"
-    assert float(grafana["cpus"]) >= 2
+    assert float(grafana["cpus"]) == 2.0
     assert grafana["mem_limit"] == "2g"
     assert grafana["memswap_limit"] == "2g"
 
 
 def test_default_dashboard_refresh_is_load_bounded() -> None:
-    dashboard_dir = REPO_ROOT / "deploy/lgtm/config/grafana/provisioning/dashboards"
     expected = {
         "ava-host-dataplane.json",
         "ava-ops-main.json",
@@ -132,9 +166,13 @@ def test_default_dashboard_refresh_is_load_bounded() -> None:
     }
     actual = {
         path.name: json.loads(path.read_text(encoding="utf-8"))["refresh"]
-        for path in dashboard_dir.glob("ava-*.json")
+        for path in DASHBOARD_DIR.glob("ava-*.json")
     }
     assert actual == dict.fromkeys(expected, "5m")
+
+
+def test_shipped_trace_dashboard_contract() -> None:
+    _tempo_trace_target(_dashboard("ava-overview.json"))
 
 
 def test_anonymous_viewer_can_open_tempo_trace_in_explore(tmp_path: Path) -> None:
@@ -177,7 +215,7 @@ def test_anonymous_viewer_can_open_tempo_trace_in_explore(tmp_path: Path) -> Non
         text=True,
     )
     try:
-        _wait_until_healthy(base_url, process)
+        _wait_until_healthy(base_url, process, _shipped_grafana_version())
         settings_status, _, settings_body = _request(f"{base_url}/api/frontend/settings")
         assert settings_status == 200
         settings = json.loads(settings_body)
@@ -191,24 +229,26 @@ def test_anonymous_viewer_can_open_tempo_trace_in_explore(tmp_path: Path) -> Non
         admin_settings = json.loads(admin_body)
         assert admin_settings["database"]["query_retries"] == "5"
 
-        # Import the exact shipped dashboard into this disposable instance so
-        # its Grafana-13 JSON schema and the user-facing subpath are both real.
-        dashboard = json.loads(
-            (
-                REPO_ROOT / "deploy/lgtm/config/grafana/provisioning/dashboards/ava-ops-main.json"
-            ).read_text(encoding="utf-8")
-        )
-        import_status, _, import_body = _request(
-            f"{base_url}/api/dashboards/db",
-            data=json.dumps({"dashboard": dashboard, "overwrite": True}).encode(),
-            headers={**admin_headers, "Content-Type": "application/json"},
-        )
-        assert import_status == 200, (import_status, import_body[:500])
-        dashboard_status, dashboard_location, _ = _request(f"{base_url}/d/ava-ops-main/ava-ops")
-        assert dashboard_status == 200
-        assert dashboard_location == ""
+        # Import both user-facing shipped dashboards into this disposable
+        # instance.  Overview carries the Tempo panel; ops-main is the URL that
+        # prompted this incident.
+        overview = _dashboard("ava-overview.json")
+        for dashboard, route in (
+            (_dashboard("ava-ops-main.json"), "/d/ava-ops-main/ava-ops"),
+            (overview, "/d/ava-overview/ava-overview"),
+        ):
+            import_status, _, import_body = _request(
+                f"{base_url}/api/dashboards/db",
+                data=json.dumps({"dashboard": dashboard, "overwrite": True}).encode(),
+                headers={**admin_headers, "Content-Type": "application/json"},
+            )
+            assert import_status == 200, (import_status, import_body[:500])
+            dashboard_status, dashboard_location, _ = _request(f"{base_url}{route}")
+            assert dashboard_status == 200
+            assert dashboard_location == ""
 
-        explore_url = _explore_url(base_url)
+        trace_target = _tempo_trace_target(overview)
+        explore_url = _explore_url(base_url, trace_target)
         status, location, body = _request(explore_url)
 
         assert status == 200, (status, location, body[:500])
@@ -216,9 +256,9 @@ def test_anonymous_viewer_can_open_tempo_trace_in_explore(tmp_path: Path) -> Non
         parsed_left = json.loads(
             urllib.parse.parse_qs(urllib.parse.urlsplit(explore_url).query)["left"][0]
         )
-        assert parsed_left["datasource"] == "tempo"
-        assert parsed_left["queries"][0]["datasource"]["uid"] == "tempo"
-        assert parsed_left["queries"][0]["queryType"] == "traceql"
+        assert parsed_left["datasource"] == trace_target["datasource"]["uid"]
+        assert parsed_left["queries"][0]["datasource"] == trace_target["datasource"]
+        assert parsed_left["queries"][0]["queryType"] == trace_target["queryType"]
         assert parsed_left["queries"][0]["query"] == TRACE_ID
 
         # viewers_can_edit grants Explore and temporary panel edits only.  It
