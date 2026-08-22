@@ -164,6 +164,33 @@ def test_the_orchestration_stamps_the_log_it_was_handed_onto_the_record(
     assert opened["rollout_log"] == "/home/ava/.ava/logs/rollout-1785470000.log"
 
 
+def test_local_dispatch_stamps_the_detached_rollout_log_onto_the_record(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The detached session enters through `cmd_update --local`; every dispatch
+    seam between that entry and the record opener must preserve its log path."""
+    from cli.commands import _update_dispatch as _dispatch
+
+    monkeypatch.setattr(_up, "_repo_root", lambda: Path("/unused"))
+    monkeypatch.setattr(_up, "ava_home", lambda: Path("/home/ava/.ava"))
+    monkeypatch.setattr(_up, "get_record", lambda _home: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_dispatch, "hosting_supervised_session", lambda: None)
+    monkeypatch.setattr(
+        _up,
+        "_rollout_preflight",
+        lambda *_a, **_kw: (None, False, "PINNEDSHA1234567"),  # pyright: ignore[reportUnknownArgumentType]
+    )
+    monkeypatch.setattr(_cli, "_run_gateway_local_update", lambda *_a, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
+    _capture_finalize(monkeypatch)
+    opened: dict[str, Any] = {}
+    monkeypatch.setattr(_up, "_begin_update_record", lambda sha, **kw: opened.update(kw, sha=sha))  # pyright: ignore[reportUnknownArgumentType]
+    log_path = "/home/ava/.ava/logs/rollout-1785470000.log"
+
+    assert _cli.cmd_update(local=True, origin="test-origin", rollout_log=log_path) == 0
+
+    assert opened["rollout_log"] == log_path
+
+
 def test_the_record_write_carries_the_log_through_to_shared_last_update(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
