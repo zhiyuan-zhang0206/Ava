@@ -182,6 +182,7 @@
     <script>
       const invoke = (cmd, args) => window.__TAURI_INTERNALS__.invoke(cmd, args);
       const SAVE_TIMEOUT_MS = 30_000;
+      const SAVE_RESPONSE_TIMEOUT_MS = 2_500;
       const CONNECTING_DEADLINE_MS = 30_000;
       const AUTH_ERROR_PREFIX = "AUTH_FAILED:";
       const failureCopy = {
@@ -230,6 +231,16 @@
         };
         update();
         connectingTimer = window.setInterval(update, 1_000);
+      }
+
+      // Mirrors the small entry_url_for_save normalization in Rust so this page
+      // can reach the console when Android's native post-save pipe is wedged.
+      function normalizedEntryUrl(raw) {
+        const address = raw.trim();
+        const withScheme = address.includes("://") ? address : `http://${address}`;
+        const url = new URL(withScheme);
+        if (!url.port) url.port = "3000";
+        return url.toString();
       }
 
       function showSetupError(message, secretError = false) {
@@ -312,11 +323,35 @@
           document.addEventListener("visibilitychange", whenVisible);
         }, SAVE_TIMEOUT_MS);
         try {
-          await invoke("shell_save_settings", { patch });
+          let responseTimer;
+          const outcome = await Promise.race([
+            invoke("shell_save_settings", { patch }).then(
+              () => ({ kind: "fulfilled" }),
+              (error) => ({ kind: "rejected", error }),
+            ),
+            new Promise((resolve) => {
+              responseTimer = window.setTimeout(
+                () => resolve({ kind: "timed-out" }),
+                SAVE_RESPONSE_TIMEOUT_MS,
+              );
+            }),
+          ]);
+          window.clearTimeout(responseTimer);
           settled = true;
+          if (outcome.kind === "rejected") {
+            window.clearTimeout(timeout);
+            if (timedOut) return;
+            const message = String(outcome.error);
+            const authFailed = message.startsWith(AUTH_ERROR_PREFIX);
+            showSetupError(authFailed ? failureCopy.auth : message, authFailed);
+            submit.disabled = false;
+            return;
+          }
           if (timedOut) return;
-          // Keep the fallback alive: it recovers the old page if rebuilding
-          // the native window fails after the successful IPC response.
+          if (outcome.kind === "fulfilled") window.clearTimeout(timeout);
+          // Android can lose the native post-save pipe after persistence finishes.
+          // This page owns navigation, so it does not depend on that pipe.
+          window.location.replace(normalizedEntryUrl(server));
         } catch (err) {
           settled = true;
           window.clearTimeout(timeout);
