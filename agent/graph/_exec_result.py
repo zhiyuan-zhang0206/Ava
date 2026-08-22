@@ -105,17 +105,21 @@ class _ExecCrashed:
 
 type _ExecResult = _ExecDone | _ExecCancelled | _ExecTimedOut | _ExecLifecycle | _ExecCrashed
 
-# The fixed set of lifecycle classes the child can report by name. A future
-# `_LifecycleExit` subclass missing from this map falls through to the
-# dispatcher's exhaustive TypeError (same fail-fast as the old in-process path).
+# The fixed set of lifecycle classes the child can report by name. The subprocess
+# parent turns a missing name into an ExecChildError crash; the dispatcher's
+# exhaustive TypeError separately guards any in-process `_LifecycleExit` callers.
 _LIFECYCLE_BY_NAME: dict[str, type[_LifecycleExit]] = {
     cls.__name__: cls for cls in (AgentTermination, AgentRestart, _SystemHalt)
 }
 
 
 def lifecycle_exception_from_name(name: str) -> _LifecycleExit | None:
-    """Instantiate the lifecycle exception a child reported by name; None when
-    the name is not one of the three known classes (dispatcher raises then)."""
+    """Instantiate the lifecycle exception a child reported by name.
+
+    Return None for an unknown class name so the subprocess parent can surface
+    a protocol crash. The dispatcher's exhaustive TypeError remains the guard
+    for in-process callers carrying an unknown `_LifecycleExit` subclass.
+    """
     cls = _LIFECYCLE_BY_NAME.get(name)
     return cls() if cls is not None else None
 

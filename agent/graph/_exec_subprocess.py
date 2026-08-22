@@ -451,6 +451,12 @@ def _result_from_payload(
         exc = ExecChildError("exec_result_envelope_invalid", envelope_error, None)
     elif payload is not None and payload.kind == "lifecycle" and payload.lifecycle_type:
         exc = lifecycle_exception_from_name(payload.lifecycle_type)
+        if exc is None:
+            exc = ExecChildError(
+                "unknown_lifecycle_class",
+                "child reported unknown lifecycle class " + repr(payload.lifecycle_type),
+                None,
+            )
     elif payload is not None and payload.exc_type:
         # Crash, or a signal exception the agent raised itself
         # (KeyboardInterrupt / TimeoutError written by its own code): if the

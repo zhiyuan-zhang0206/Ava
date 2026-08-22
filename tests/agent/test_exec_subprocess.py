@@ -18,6 +18,7 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import psutil
+import psycopg
 import pytest
 from langchain_core.messages import HumanMessage
 
@@ -26,15 +27,34 @@ from agent.graph._exec_result import (
     _ExecCancelled,
     _ExecCrashed,
     _ExecDone,
+    _ExecLifecycle,
     _ExecTimedOut,
 )
 from agent.graph._exec_stream import ExecOutputChunkPublisher
 from agent.graph._exec_subprocess import (
     _run_in_subprocess,
 )
+from shared.config import settings
+from shared.lifecycle import AgentRestart, AgentTermination, _SystemHalt
 from shared.proc import kill_process_tree
 
 _AGENT_ID = 424242
+
+
+def _seed_agent_for_self_lifecycle() -> None:
+    with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:
+        cur.execute("INSERT INTO agents (id) VALUES (%s)", (_AGENT_ID,))
+
+
+def _self_inbound_row() -> tuple[str, str, str]:
+    with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT content, kind, source FROM inbound_messages WHERE agent_id = %s ORDER BY id",
+            (_AGENT_ID,),
+        )
+        rows = cur.fetchall()
+    assert len(rows) == 1
+    return rows[0]
 
 
 async def _run(
@@ -325,6 +345,60 @@ async def test_subprocess_state_snapshot_reaches_child(tmp_path: Path) -> None:
     )
     assert isinstance(result, _ExecDone)
     assert "snapshot says hi" in result.output
+
+
+async def test_subprocess_self_terminate_lifecycle_and_inbound(tmp_path: Path) -> None:
+    _seed_agent_for_self_lifecycle()
+
+    result = await _run(tmp_path, "import ava; ava.self.terminate()")
+
+    assert isinstance(result, _ExecLifecycle)
+    assert isinstance(result.exc, AgentTermination)
+    _content, kind, source = _self_inbound_row()
+    assert kind == "terminate"
+    assert source == "self"
+
+
+async def test_subprocess_self_restart_lifecycle_and_inbound(tmp_path: Path) -> None:
+    _seed_agent_for_self_lifecycle()
+
+    result = await _run(tmp_path, "import ava; ava.self.restart()")
+
+    assert isinstance(result, _ExecLifecycle)
+    assert isinstance(result.exc, AgentRestart)
+    _content, kind, source = _self_inbound_row()
+    assert kind == "restart"
+    assert source == "self"
+
+
+async def test_subprocess_self_compact_lifecycle_and_inbound(tmp_path: Path) -> None:
+    _seed_agent_for_self_lifecycle()
+
+    result = await _run(tmp_path, "import ava; ava.self.compact('audit e2e summary')")
+
+    assert isinstance(result, _ExecLifecycle)
+    assert isinstance(result.exc, _SystemHalt)
+    content, kind, _source = _self_inbound_row()
+    assert kind == "compact_summary"
+    assert content == "audit e2e summary"
+
+
+async def test_subprocess_unknown_lifecycle_class_crashes(tmp_path: Path) -> None:
+    result = await _run(
+        tmp_path,
+        (
+            "from shared.lifecycle import _LifecycleExit\n"
+            "class _MysteryLifecycle(_LifecycleExit):\n"
+            "    def __init__(self):\n"
+            "        super().__init__(0)\n"
+            "raise _MysteryLifecycle()\n"
+        ),
+    )
+
+    assert isinstance(result, _ExecCrashed)
+    assert isinstance(result.exc, ExecChildError)
+    assert result.exc.exc_type == "unknown_lifecycle_class"
+    assert result.exc.exc_msg == ("child reported unknown lifecycle class '_MysteryLifecycle'")
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX process groups")
