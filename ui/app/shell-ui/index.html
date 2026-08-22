@@ -323,6 +323,9 @@
           document.addEventListener("visibilitychange", whenVisible);
         }, SAVE_TIMEOUT_MS);
         try {
+          // A secret races the native login probe's 10-second timeout; a missing
+          // response still assumes the save completed and recovers a wedged pipe.
+          const raceWindowMs = secret.value.trim() ? 12_000 : SAVE_RESPONSE_TIMEOUT_MS;
           let responseTimer;
           const outcome = await Promise.race([
             invoke("shell_save_settings", { patch }).then(
@@ -332,7 +335,7 @@
             new Promise((resolve) => {
               responseTimer = window.setTimeout(
                 () => resolve({ kind: "timed-out" }),
-                SAVE_RESPONSE_TIMEOUT_MS,
+                raceWindowMs,
               );
             }),
           ]);
