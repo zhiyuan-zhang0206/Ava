@@ -2,11 +2,9 @@
 
 LLM history is persisted by LangGraph AsyncPostgresSaver — this module only
 handles the kernel-side inbound queue. Cross UI / kernel shared basic agent
-CRUD is in `shared/db.py` (sync API). When the kernel main loop `agent/loop.py`
-starts up, it uses a sync conn to UPDATE the `agents_meta` table status from
-'allocated' to 'starting', then runs all kernel-side SQL through
-`AsyncConnectionPool` (top of claim_node, `leave_starting_state` further bumps
-'starting' → 'running').
+CRUD is in `shared/db.py` (sync API). The early process bootstrap claims its
+row as `running`; this module then runs kernel-side SQL through
+`AsyncConnectionPool`.
 
 Current inbound_messages kinds (see db/schema.sql — this table is the agent's
 unified gateway: every trigger entering an agent goes through it):
@@ -468,84 +466,6 @@ async def mark_agent_status(
     await publish_agent_updated(pool, agent_id)
 
 
-async def leave_starting_state(
-    pool: AsyncConnectionPool,
-    agent_id: int,
-) -> None:
-    """Transition status 'starting' → 'running'; no-op if already 'running' / 'idling'.
-
-    During agent process startup, `enter_starting_state` flips status
-    'allocated' → 'starting' to mark "process is up, still in init / setup,
-    not in graph yet". The first graph claim_node entry must bump 'starting'
-    to 'running' — subsequent turns expect status to already be 'running' to
-    match the strict CAS path.
-
-    Differs from `mark_agent_status`: cross-turn idempotent so the caller does
-    not need to remember "first turn or not" — but idempotency only holds for
-    **known legal subsequent states** 'running' / 'idling'; other illegal
-    states fail-loud. Explicit classification via SELECT first:
-    - row missing → debug log skip only (does not happen in production —
-      `enter_starting_state` upstream forces INSERT/UPDATE; only happens when
-      dev/test fixture didn't set up agents_meta row, not blocking dispatch path tests)
-    - 'running' / 'idling' → no-op (legal subsequent turn path)
-    - 'starting' → CAS UPDATE to 'running' (the core path of this function)
-    - 'allocated' / 'restarting' / 'terminated' → raise (lifecycle invariant broken,
-      concurrent terminate / restart / respawn raced to change status; fail-loud
-      so ops can see)
-    """
-    async with pool.connection() as conn, conn.cursor() as cur:
-        await cur.execute("SELECT status FROM agents_meta WHERE id = %s", (agent_id,))
-        row = await cur.fetchone()
-        if row is None:
-            # Does not happen in production; only hit when test/dev fixture skipped INSERT
-            logger.debug(
-                "leave_starting_state: agent {agent_id} row missing — skip "
-                "(should not happen in production, only dispatch unit-test path)",
-                agent_id=agent_id,
-            )
-            return
-        current = row[0]
-        if current in (AgentStatus.RUNNING, AgentStatus.IDLING):
-            return  # Subsequent turn enters claim_node, status already bumped — idempotent path
-        if current != AgentStatus.STARTING:
-            raise RuntimeError(
-                f"agent {agent_id}: leave_starting_state status={current!r}, "
-                f"expected {AgentStatus.STARTING.value!r} / {AgentStatus.RUNNING.value!r} / "
-                f"{AgentStatus.IDLING.value!r} — lifecycle invariant broken "
-                "(e.g. concurrent terminate / restart / respawn raced to change status)"
-            )
-        await cur.execute(
-            "UPDATE agents_meta SET status = %s WHERE id = %s AND status = %s",
-            (AgentStatus.RUNNING, agent_id, AgentStatus.STARTING),
-        )
-        if cur.rowcount != 1:
-            await cur.execute("SELECT status FROM agents_meta WHERE id = %s", (agent_id,))
-            raced_row = await cur.fetchone()
-            raced = raced_row[0] if raced_row is not None else "<row missing>"
-            raise RuntimeError(
-                f"agent {agent_id}: leave_starting_state CAS "
-                f"{AgentStatus.STARTING.value!r} → {AgentStatus.RUNNING.value!r} "
-                f"0 rows; actual status now {raced!r} "
-                "(race between SELECT and UPDATE, someone changed it)"
-            )
-        logger.info(
-            "[{label}] {body}",
-            label="status-change",
-            body="starting -> running (boot complete)",
-            event="status_change",
-            **{"from": "starting", "to": "running"},
-        )
-        from shared.audit_events import insert_event_log_async
-
-        await insert_event_log_async(
-            event_type="status_change",
-            agent_id=agent_id,
-            source="system",
-            payload={"from": "starting", "to": "running"},
-        )
-    await publish_agent_updated(pool, agent_id)
-
-
 async def enter_idling_state(pool: AsyncConnectionPool, agent_id: int) -> None:
     """Transition to idling; no-op if already idling.
 
@@ -797,7 +717,7 @@ def schedule_self_respawn(agent_id: int) -> None:
             try:
                 with conn.cursor() as cur:
                     cur.execute(
-                        "UPDATE agents_meta SET status = 'allocated', pid = NULL, "
+                        "UPDATE agents_meta SET status = 'idling', pid = NULL, "
                         "started_at = NULL, lease_expires_at = NULL "
                         "WHERE id = %s AND status = 'restarting'",
                         (agent_id,),
@@ -810,8 +730,8 @@ def schedule_self_respawn(agent_id: int) -> None:
                         )
                         return
                     # Commit is automatic (autocommit=True); the row is now
-                    # 'allocated' — the new process will claim it via the normal
-                    # enter_starting_state / leave_starting_state path. Read the
+                    # unclaimed 'idling' — the new process will claim it via the
+                    # normal claim_agent_row path. Read the
                     # per-agent config off the same connection so the replacement
                     # keeps this agent's overlay + birth stamp.
                     env.update(_config_env_updates(cur))

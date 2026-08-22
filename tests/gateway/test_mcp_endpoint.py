@@ -187,9 +187,9 @@ def test_send_message_and_get_messages() -> None:
         sent = _tool_result(
             _tool_call(client, "send_message", {"agent_id": agent_id, "content": "hello"})
         )
-        # "allocated" is the true delivery-time status of a never-claimed
+        # "idling" is the true delivery-time status of a never-claimed
         # agent — the same value the REST endpoint returns in tests.
-        assert sent["status"] in {"queued", "claimed", "allocated"}
+        assert sent["status"] in {"queued", "claimed", "idling"}
 
         payload = _tool_result(
             _tool_call(client, "get_messages", {"agent_id": agent_id, "limit": 10})

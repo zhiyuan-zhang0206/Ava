@@ -36,8 +36,8 @@ from ops.agent_identity import AGENT_ID_FLAG, AGENT_MODULE_ARGV
 from ops.pages import list_open_page_names
 from shared.agents import AgentStatus
 from shared.boot_timing import (
-    ALLOCATED_REAP_GRACE_SEC,
     BOOT_BUDGET_SEC,
+    BOOT_REAP_GRACE_SEC,
     BOOT_STALL_SEC,
     LAUNCH_CONFIRM_TIMEOUT_SEC,
 )
@@ -49,12 +49,11 @@ from shared.paths import logs_dir, repo_root
 from shared.platform import IS_WINDOWS
 from shared.session_backend import native_proc
 
-# After the child is spawned, `_launch_agent_process` polls agents_meta.status
-# to wait for the child python process to actually reach `enter_starting_state`
-# (i.e. status leaves 'allocated'). A successful spawn means "the process was
+# After the child is spawned, `_launch_agent_process` polls `agents_meta.pid`
+# to wait for the child python process to actually claim its row. A successful spawn means "the process was
 # launched", **not** "that process actually started running"; without
 # confirmation "spawn OK but child immediately crashes -> row permanently stuck
-# in 'allocated'" can happen (agent 137 / agent 44 incident).
+# in an unclaimed row can happen (agent 137 / agent 44 incident).
 #
 # The four clocks that order this window — the confirm deadline, the child's
 # stall watchdog and boot budget, and the reaper's grace — live in
@@ -91,7 +90,7 @@ def _launched_process_alive(agent_id: int) -> bool:
     The session record the supervisor wrote at spawn (`$AVA_HOME/run/sessions/
     ava-agent-<id>.json`) carries the child's pid + start time, so this answers
     "is the thing I launched still there" WITHOUT the DB — which is the whole
-    point: during the pre-flip segment the row still says 'allocated' and carries
+    point: during the pre-claim segment the row still says unclaimed 'idling' and carries
     no pid, so the DB cannot distinguish a slow boot from a dead one. Indirected
     through the module namespace so tests can stub the liveness answer.
 
@@ -107,60 +106,12 @@ def _launched_process_alive(agent_id: int) -> bool:
     return native_proc().has_session(session_name(f"agent-{agent_id}"))
 
 
-def _wait_for_status_to_leave_allocated(agent_id: int) -> None:
-    """Poll agents_meta.status until != 'allocated' or timeout raise.
+def _wait_for_agent_claim(agent_id: int) -> None:
+    """Wait for a non-NULL pid that proves the child won the row claim.
 
-    Called by `_launch_agent_process` after the spawn to confirm the child
-    python process actually reached `enter_starting_state` (the synchronous
-    UPDATE status='allocated' -> 'running'). Spawn-success != child-success;
-    without confirmation rows can be permanently fossilized in 'allocated'.
-
-    "Leaving allocated" is looser than "== running" — an extremely
-    fast-turnaround agent could be running -> idling / running -> terminated
-    within the poll interval; as long as the row reached 'starting' (the claim
-    writes a pid), the claim ran and the launch is confirmed.
-
-    The one status that does NOT confirm a claim is 'terminated' with a NULL
-    pid: the early boot gates (`enter_starting_or_die_on_stale_schema` on a
-    schema mismatch, `enter_starting_state` on a placement mismatch) mark a
-    rejected boot 'allocated' -> 'terminated' WITHOUT ever claiming, and the
-    allocated-reaper does the same to a process that died pre-claim. Such a
-    boot never started, so confirmation must fail rather than report success.
-    (A 'terminated' row that still carries a pid did claim and then exited fast
-    — that is a confirmed start.)
-
-    **The deadline is load-tolerant, not merely generous.** Everything the child
-    does before the flip — python startup, its import chain, the schema assert,
-    the placement SELECT — is unobservable in the row, which stays 'allocated'
-    with no pid throughout. Under heavy box load that segment has outrun the
-    window, and the caller then force-terminated a child that was seconds from
-    claiming: the child's own CAS matched 0 rows and died, and crash-resurrect
-    relaunched it into the same too-short window, burning processes and minutes
-    (2026-07-30 incident). So at the deadline we ask the supervisor whether the
-    process we launched is still alive; a live one gets ONE extension, to
-    `ALLOCATED_REAP_GRACE_SEC` measured from the start of the wait. A dead
-    pid still fails immediately — that is the original agent-137/44 case this
-    poll exists for, and nothing about it needs more patience.
-
-    **"Alive" now means "progressing", so the probe runs on a schedule rather
-    than only at the deadline.** The child arms its own boot watchdog before its
-    import chain (`agent/_boot_deadline.py`, driven by `--boot-stall-seconds`)
-    and exits as soon as its boot stops reaching new phases — well inside this
-    wait's first deadline. A process that still exists is therefore one whose
-    boot is moving, which is the inference this poll always wanted and could not
-    previously draw. Every `_LIVENESS_PROBE_INTERVAL_SEC` the wait asks; a child
-    that is gone collapses the deadline to now rather than failing on the spot,
-    so the next iteration re-reads the row first — a child that claimed and then
-    exited inside that window is a confirmed start, not a dead launch — and only
-    then falls into the branch below. Both the crash-on-import case and the
-    wedged case now surface in about a second instead of at the end of a window
-    sized for neither.
-
-    Raises:
-        RuntimeError: status still 'allocated' after the timeout window (child
-            never started / early crash / the spawned process exited fast, or a
-            live child that never claimed within the extended window), or the
-            boot was rejected before claiming ('terminated' with no pid).
+    A terminal row without a pid failed before claim and remains a launch
+    failure. A pid confirms a claim even when a fast process has already moved
+    from running to idling or terminated before this poll sees it.
     """
     started = time.monotonic()
     deadline = started + LAUNCH_CONFIRM_TIMEOUT_SEC
@@ -181,14 +132,15 @@ def _wait_for_status_to_leave_allocated(agent_id: int) -> None:
                     f"watchdog run `ava cluster update` on a code/schema mismatch) and "
                     f"resurrect."
                 )
-            if status != AgentStatus.ALLOCATED:
+            if pid is not None:
                 # Confirmation timing: a creeping boot (import bloat, slow DB)
                 # shows up as this duration drifting toward the timeout long
                 # before launches start failing outright.
                 logger.info(
-                    "agent {id} launch confirmed: status={status} after {dt:.1f}s",
+                    "agent {id} launch confirmed: status={status} pid={pid} after {dt:.1f}s",
                     id=agent_id,
                     status=status,
+                    pid=pid,
                     dt=time.monotonic() - started,
                 )
                 return
@@ -204,23 +156,23 @@ def _wait_for_status_to_leave_allocated(agent_id: int) -> None:
         if time.monotonic() >= deadline:
             # One extension for a live child: `deadline` becomes the hard bound,
             # so this branch cannot be taken twice.
-            hard_deadline = started + ALLOCATED_REAP_GRACE_SEC
+            hard_deadline = started + BOOT_REAP_GRACE_SEC
             if deadline < hard_deadline and _launched_process_alive(agent_id):
                 logger.warning(
-                    "agent {id} still 'allocated' after {dt:.1f}s but its process is alive — "
+                    "agent {id} is still unclaimed after {dt:.1f}s but its process is alive — "
                     "extending the launch confirm to {max:.0f}s (slow pre-flip boot; "
                     "a loaded box, not a failed launch)",
                     id=agent_id,
                     dt=time.monotonic() - started,
-                    max=ALLOCATED_REAP_GRACE_SEC,
+                    max=BOOT_REAP_GRACE_SEC,
                     event="launch_confirm_extended",
                 )
                 deadline = hard_deadline
                 continue
             raise RuntimeError(
-                f"agent {agent_id}: status did not leave 'allocated' within "
+                f"agent {agent_id}: pid stayed NULL within "
                 f"{time.monotonic() - started:.1f}s after launch / child python process did "
-                f"not reach `enter_starting_state` (early import / config / startup crash, "
+                f"not reach `claim_agent_row` (early import / config / startup crash, "
                 f"the spawned process exited immediately, or its own boot watchdog exited "
                 f"it after {BOOT_STALL_SEC:.0f}s with no boot progress). Its stderr "
                 f"is at $AVA_HOME/logs/agent-{agent_id}.stderr.log — a watchdog exit names "
@@ -330,9 +282,9 @@ def _launch_agent_process(
     process ending (agent 152 incident); stdout goes to the session `.out.log`.
 
     With `confirm=True` (resurrect / respawn) it also polls
-    `_wait_for_status_to_leave_allocated` inline: a successful spawn only proves
+    `_wait_for_agent_claim` inline: a successful spawn only proves
     the process launched, not that the child claimed its row — in prod a launched
-    child has crashed immediately and left the row stuck 'allocated' (agent
+    child has crashed immediately and left the row unclaimed in 'idling' (agent
     137/44 incident). Those callers already run off the event loop, so blocking
     on the confirm is fine and gives an immediate "did the wake succeed" answer.
     Spawn passes `confirm=False` and confirms off-path via
@@ -408,7 +360,7 @@ def _launch_agent_process(
     if not ok:
         raise RuntimeError(f"native supervisor failed to launch agent session {agent_session}")
     if confirm:
-        _wait_for_status_to_leave_allocated(agent_id)
+        _wait_for_agent_claim(agent_id)
 
 
 # ── Off-path launch confirm (spawn) ──────────────────────────────────────────
@@ -417,7 +369,7 @@ def _launch_agent_process(
 # launch-confirm then runs as a detached background task (off the event loop, in
 # a worker thread) instead of blocking the spawn response. A confirm that fails
 # forces the row 'terminated' so a silently-failed launch does not linger
-# 'allocated'; the restarter's allocated-reaper is the ultimate backstop if this
+# unclaimed 'idling'; the restarter's dead-birth reaper is the ultimate backstop if this
 # task is ever lost.
 _pending_launch_confirms: set[asyncio.Task[bool]] = set()
 
@@ -427,7 +379,7 @@ def _confirm_launch_or_force_terminated(agent_id: int) -> bool:
     'terminated'. Runs in a worker thread (synchronous poll + DB). Returns
     whether the launch confirmed."""
     try:
-        _wait_for_status_to_leave_allocated(agent_id)
+        _wait_for_agent_claim(agent_id)
         return True
     except Exception:
         logger.warning(
@@ -440,17 +392,17 @@ def _confirm_launch_or_force_terminated(agent_id: int) -> bool:
         # Capture open page names BEFORE the status flip — the
         # cascade_close_agent_pages trigger closes the page rows on
         # 'terminated', after which the open-page query matches nothing.
-        # An 'allocated' row can hold open pages (resurrect's cascade_open
+        # An unclaimed 'idling' row can hold open pages (resurrect's cascade_open
         # reopens them at the flip); the frontend popover needs the
         # PageClosed events to drop them.
         page_names = list_open_page_names(conn, agent_id)
-        # Guard on status='allocated': a child that claimed just after the
+        # Guard on unclaimed idling: a child that claimed just after the
         # confirm timeout is alive (rowcount 0) — leave it be. termination_source=
         # 'launch-confirm': an involuntary launch failure → crash-auto-resurrect
         # eligible (a re-launch attempt, spaced by the resurrect backoff).
         cur.execute(
             "UPDATE agents_meta SET status = 'terminated', termination_source = 'launch-confirm' "
-            "WHERE id = %s AND status = 'allocated'",
+            "WHERE id = %s AND status = 'idling' AND pid IS NULL",
             (agent_id,),
         )
         if cur.rowcount == 1:
@@ -486,12 +438,12 @@ def _launch_or_force_terminated(
     birth_config: dict[str, object] | None = None,
 ) -> None:
     """Launch agent process; retry transient launch failures, and only after
-    exhausting all retries UPDATE a STILL-'allocated' row to 'terminated' +
+    exhausting all retries UPDATE a still-unclaimed 'idling' row to 'terminated' +
     re-raise.
 
     Caller (resurrect_agent / respawn_agent) has already committed DB state
-    (status='allocated', lifecycle inbound INSERT pending). A launch failure
-    leaves the agent stuck in 'allocated' with no process — neither restarter
+    (status='idling', lifecycle inbound INSERT pending). A launch failure
+    leaves the agent stuck in unclaimed 'idling' with no process — neither restarter
     polls touch this state, so the agent would be silently abandoned.
 
     A single launch failure is often transient (the fork momentarily failing,
@@ -506,13 +458,13 @@ def _launch_or_force_terminated(
 
     Forcing status='terminated' after retries are exhausted:
       1. Caller can retry via `resurrect_agent` (which expects 'terminated' →
-         'allocated'); the retry will INSERT a fresh lifecycle inbound on top
+         unclaimed 'idling'); the retry will INSERT a fresh lifecycle inbound on top
          of any leftover one — claim handles a batch of both naturally.
       2. Operator sees 'terminated' status (observable in monitoring) instead
          of an undefined "process never came up" state.
       3. The original launch RuntimeError still surfaces via re-raise so the
          operator gets the full stack trace.
-      4. …but ONLY while the row is still 'allocated'. "Every attempt failed"
+      4. …but ONLY while the row is still unclaimed 'idling'. "Every attempt failed"
          is the launcher's local view; a child it gave up on can have claimed
          the row a moment later, and each terminate-write in this codebase
          carries the status predicate that keeps it from clobbering that.
@@ -544,14 +496,14 @@ def _launch_or_force_terminated(
                     # Capture open page names BEFORE the status flip — the
                     # cascade_close_agent_pages trigger closes the page rows on
                     # 'terminated', after which the open-page query matches nothing
-                    # (an 'allocated' row can hold open pages: resurrect's
+                    # (an unclaimed 'idling' row can hold open pages: resurrect's
                     # cascade_open reopens them at the flip).
                     page_names = list_open_page_names(conn, agent_id)
                     cur.execute(
                         # 'launch-confirm': retries exhausted, the wake never came up
                         # → involuntary → crash-auto-resurrect eligible (backoff-spaced).
                         #
-                        # Guarded on status='allocated' exactly like the off-path
+                        # Guarded on unclaimed idling exactly like the off-path
                         # confirm's write: by the time the last attempt gives up, one
                         # of the children it launched may have claimed the row just
                         # past its deadline and be running. An unguarded write buried
@@ -560,7 +512,7 @@ def _launch_or_force_terminated(
                         # a duplicate launch manufactured by the cleanup itself.
                         "UPDATE agents_meta SET status = 'terminated', "
                         "termination_source = 'launch-confirm' "
-                        "WHERE id = %s AND status = 'allocated'",
+                        "WHERE id = %s AND status = 'idling' AND pid IS NULL",
                         (agent_id,),
                     )
                     if cur.rowcount == 1:
@@ -570,7 +522,7 @@ def _launch_or_force_terminated(
                             publish_page_closed_sync(agent_id, page_name)
                     else:
                         logger.warning(
-                            "agent {id} left 'allocated' while its launch was being "
+                            "agent {id} was claimed while its launch was being "
                             "retried — a child claimed the row late, or the reaper "
                             "took it. Not forcing 'terminated'.",
                             id=agent_id,

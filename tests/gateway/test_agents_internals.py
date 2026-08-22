@@ -33,7 +33,7 @@ from ops import agent_launch
 from ops.agent_launch import (
     _confirm_launch_or_force_terminated,
     _launch_or_force_terminated,
-    _wait_for_status_to_leave_allocated,
+    _wait_for_agent_claim,
 )
 from ops.agent_wake import (
     AutoResurrectClaim,
@@ -235,8 +235,8 @@ class TestSpawnAgent:
         new_id = _spawn_agent()
 
         assert launched == [new_id]
-        # agents row: status='allocated', spawner='user' (default), pid not yet filled
-        assert _agents_row(db_conn, new_id) == (new_id, "user", "allocated", None)
+        # agents row: status='idling', spawner='user' (default), pid not yet filled
+        assert _agents_row(db_conn, new_id) == (new_id, "user", "idling", None)
         # spawn should not insert inbound
         assert _inbound_count(db_conn, new_id) == 0
 
@@ -269,7 +269,7 @@ class TestSpawnAgent:
             cur.execute("SELECT label, label_user_set FROM agents WHERE id=%s", (plain_id,))
             assert cur.fetchone() == (None, False)
 
-    def test_session_failure_leaves_allocated_row(
+    def test_session_failure_leaves_unclaimed_idling_row(
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """When the launch fails, the create+launch helper does **not** clean the DB — that is the job of monitoring / weekly cleanup tasks."""
@@ -286,7 +286,7 @@ class TestSpawnAgent:
             cur.execute("SELECT id, status FROM agents_meta")
             rows = cur.fetchall()
         assert len(rows) == 1
-        assert rows[0][1] == "allocated"
+        assert rows[0][1] == "idling"
 
     def test_persists_config_overlay(
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
@@ -434,7 +434,7 @@ class TestResurrectAgent:
         # The agent came back by another path and was explicitly killed again
         # before the watchdog's original RPC reached its home runner.
         with db_conn.cursor() as cur:
-            cur.execute("UPDATE agents_meta SET status = 'allocated' WHERE id = %s", (agent_id,))
+            cur.execute("UPDATE agents_meta SET status = 'idling' WHERE id = %s", (agent_id,))
         db_conn.commit()
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
@@ -519,7 +519,7 @@ class TestResurrectAgent:
 
         assert returned == agent_id
         row = _agents_row(db_conn, agent_id)
-        assert row is not None and row[2] == "allocated"
+        assert row is not None and row[2] == "idling"
         assert _inbound_rows(db_conn, agent_id) == [
             ("new work after death", "chat", "user"),
             ("", "resurrect", "system"),
@@ -549,7 +549,7 @@ class TestResurrectAgent:
         )
 
         assert returned == agent_id
-        assert _agents_row(db_conn, agent_id)[2] == "allocated"  # type: ignore[index]
+        assert _agents_row(db_conn, agent_id)[2] == "idling"  # type: ignore[index]
         assert _inbound_rows(db_conn, agent_id) == [
             ("", "compact_request", "user"),
             ("", "resurrect", "system"),
@@ -848,7 +848,7 @@ class TestResurrectAgent:
     def test_child_starting_waits_for_resurrect_commit(
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """The child locks by id, waits for the uncommitted allocation, then
+        """The child locks by id, waits for the uncommitted idling transition, then
         claims it after the resurrect transaction releases the row."""
         import threading
 
@@ -869,7 +869,7 @@ class TestResurrectAgent:
         def _observe_child_lock(cursor: Any, query: Any, *args: Any, **kwargs: Any) -> Any:
             if (
                 threading.current_thread().name == "resurrect-child"
-                and "SELECT machine, status FROM agents_meta" in str(query)
+                and "SELECT machine FROM agents_meta" in str(query)
             ):
                 child_backend_pid.append(cursor.connection.info.backend_pid)
                 child_lock_attempted.set()
@@ -879,7 +879,7 @@ class TestResurrectAgent:
 
         def _child() -> None:
             try:
-                _starting.enter_starting_state(agent_id)
+                _starting.claim_agent_row(agent_id)
             except BaseException as exc:
                 child_failures.append(exc)
             finally:
@@ -919,7 +919,7 @@ class TestResurrectAgent:
         assert child_done.is_set() and not child_failures
         with db_conn.cursor() as cur:
             cur.execute("SELECT status FROM agents_meta WHERE id=%s", (agent_id,))
-            assert cur.fetchone() == ("starting",)
+            assert cur.fetchone() == ("running",)
 
     def test_pause_waits_for_initial_resurrect_then_final_sweep_wins(
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
@@ -1031,7 +1031,7 @@ class TestResurrectAgent:
             raise RuntimeError("child did not claim")
 
         monkeypatch.setattr(agent_launch, "_launch_agent_process", _launch)
-        monkeypatch.setattr(agent_launch, "_wait_for_status_to_leave_allocated", _never_confirms)
+        monkeypatch.setattr(agent_launch, "_wait_for_agent_claim", _never_confirms)
         monkeypatch.setattr(agent_launch, "_LAUNCH_RETRY_BASE_BACKOFF_SEC", 0.0)
         monkeypatch.setattr("ops.ops_lifecycle.native_proc", _Supervisor)
         original_execute = cast(Callable[..., Any], psycopg.Cursor.execute)
@@ -1160,7 +1160,7 @@ class TestResurrectAgent:
             ),
         )
 
-        assert _agents_row(db_conn, agent_id)[2] == "allocated"  # type: ignore[index]
+        assert _agents_row(db_conn, agent_id)[2] == "idling"  # type: ignore[index]
         assert _resurrect_inbound_count(db_conn, agent_id) == 1
         assert launched == [agent_id]
 
@@ -1228,7 +1228,7 @@ class TestResurrectAgent:
             claimed_at=claimed_at,
         )
         with db_conn.cursor() as cur:
-            cur.execute("UPDATE agents_meta SET status='allocated' WHERE id=%s", (agent_id,))
+            cur.execute("UPDATE agents_meta SET status='idling' WHERE id=%s", (agent_id,))
             cur.execute(
                 "UPDATE agents_meta SET status='terminated', termination_source='reaper', "
                 "last_wedged_check_at=%s WHERE id=%s",
@@ -1246,11 +1246,11 @@ class TestResurrectAgent:
     def test_resurrects_terminated_agent_and_inserts_resurrect_inbound(
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """terminated → allocated + start process + auto INSERT a kind='resurrect'
+        """terminated → unclaimed idling + start process + auto INSERT a kind='resurrect'
         source=resurrected_by inbound; when the new process starts, claim dispatches it as a lifecycle
         marker appended to messages."""
         agent_id = _spawn_agent()
-        # simulate terminate path: UPDATE 'allocated' → 'terminated' (semantics from loop.py)
+        # simulate terminate path: UPDATE 'idling' → 'terminated' (semantics from loop.py)
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
         db_conn.commit()
@@ -1261,8 +1261,8 @@ class TestResurrectAgent:
         row = _agents_row(db_conn, agent_id)  # pyright: ignore[reportUnknownVariableType]
         assert row is not None
         assert (
-            row[2] == "allocated"
-        )  # back to allocated, waiting for the process to start and UPDATE 'running'
+            row[2] == "idling"
+        )  # unclaimed, waiting for the process to claim and UPDATE 'running'
         # resurrect inserts lifecycle inbound — content empty, trigger written to source field;
         # prompt as chat inbound follows in the same transaction
         rows = _inbound_rows(db_conn, agent_id)  # pyright: ignore[reportUnknownVariableType]
@@ -1339,7 +1339,7 @@ class TestResurrectAgent:
 
     @pytest.mark.parametrize(
         "alive_status",
-        ["allocated", "starting", "running", "idling", "restarting"],
+        ["running", "idling", "restarting", "hibernating"],
     )
     def test_resurrect_alive_agent_raises_already_alive(
         self,
@@ -1350,15 +1350,15 @@ class TestResurrectAgent:
         """Any status other than 'terminated' cannot be resurrected — only 'terminated' is a valid source state.
 
         Full parametrization locks the contract that "resurrect refuses all states that are still alive or not fully dead".
-        Historically only allocated / running were tested; starting / idling / restarting were all covered by
-        the generic `if current is not TERMINATED` guard but not explicitly tested —
+        Historically only running/idling/restarting were tested. The complete current
+        non-terminal set is covered explicitly, including the ops-only hibernating state —
         a regression that changed the guard to `if current in [...]` and missed a value would silently let resurrect
         send a revival notification to an agent that is "still running / still init'ing",
         with the production consequence of a dual-process race on the same agent_id.
         """
         agent_id = _spawn_agent()
-        # the helper leaves 'allocated'; other statuses are explicitly set via UPDATE for the test
-        if alive_status != "allocated":
+        # the helper leaves 'idling'; other statuses are explicitly set via UPDATE for the test
+        if alive_status != "idling":
             with db_conn.cursor() as cur:
                 cur.execute(
                     "UPDATE agents_meta SET status = %s WHERE id = %s",
@@ -1373,14 +1373,14 @@ class TestResurrectAgent:
     def test_resurrect_select_update_race_does_not_insert_inbound(
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """SELECT sees 'terminated' → after SELECT the row is concurrently changed to 'allocated' → UPDATE
+        """SELECT sees 'terminated' → after SELECT the row is concurrently changed to 'idling' → UPDATE
         WHERE status='terminated' hits 0 rows — at this point we must **not** proceed to INSERT a fake revival
         notification for a already-live agent (that would send an hallucination signal to the running process).
 
-        Simulate: make the first fetchone falsely report 'terminated' while the underlying row is actually 'allocated'
+        Simulate: make the first fetchone falsely report 'terminated' while the underlying row is actually 'idling'
         — equivalent to "status was rewritten after SELECT". The code must raise when UPDATE rowcount=0.
         """
-        agent_id = _spawn_agent()  # real status='allocated'
+        agent_id = _spawn_agent()  # real status='idling'
 
         original_execute = cast(Callable[..., Any], psycopg.Cursor.execute)
         original_fetchone = psycopg.Cursor.fetchone
@@ -1409,7 +1409,7 @@ class TestResurrectAgent:
         assert _inbound_count(db_conn, agent_id) == 0
         # key invariant 2: status unchanged (UPDATE 0 rows + raise rolls back entire transaction)
         row = _agents_row(db_conn, agent_id)  # pyright: ignore[reportUnknownVariableType]
-        assert row is not None and row[2] == "allocated"
+        assert row is not None and row[2] == "idling"
 
     def test_subclasses_inherit_from_resurrect_error(
         self,
@@ -1423,11 +1423,11 @@ class TestResurrectAgent:
     def test_resurrect_clears_stale_pid_and_started_at(
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """The UPDATE that changes 'terminated' → 'allocated' must **also clear** pid /
+        """The UPDATE that changes 'terminated' → 'idling' must **also clear** pid /
         started_at — otherwise the fields left from the previous running round become ghost data;
         operations like `ps -p <stale_pid>` / `kill <stale_pid>` would misjudge (agent 44 incident).
 
-        invariant: pid and started_at are only filled during 'running'; any transition back to 'allocated'
+        invariant: pid and started_at are only filled during 'running'; any transition back to 'idling'
         must reset them to NULL, aligning with the new row default from spawn.
         """
         agent_id = _spawn_agent()
@@ -1454,7 +1454,7 @@ class TestResurrectAgent:
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """launch fails → UPDATE status='terminated' + re-raise (avoids being stuck
-        with a permanent 'allocated' residue). The caller can retry resurrect and continue from 'terminated'."""
+        with a permanent 'idling' residue). The caller can retry resurrect and continue from 'terminated'."""
         # first use noop to let the create+launch helper complete; then switch to boom
         agent_id = _spawn_agent()
         with db_conn.cursor() as cur:
@@ -1498,7 +1498,7 @@ class TestRespawnAgent:
     def test_respawn_inserts_restart_completed_with_original_source(
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """respawn 'restarting' → 'allocated' + INSERT kind='restart_completed'
+        """respawn 'restarting' → 'idling' + INSERT kind='restart_completed'
         source=source of original 'restart' inbound. When the new process starts, claim writes
         lifecycle marker using this source to compose a trigger identifier like "by user"."""
         agent_id = self._setup_restarting(db_conn, monkeypatch, original_source="user")
@@ -1506,9 +1506,9 @@ class TestRespawnAgent:
         ok = respawn_agent(agent_id)
         assert ok is True
 
-        # status moved back to allocated, waiting for process to start and UPDATE 'running'
+        # status moved back to unclaimed idling, waiting for process to claim and UPDATE 'running'
         row = _agents_row(db_conn, agent_id)  # pyright: ignore[reportUnknownVariableType]
-        assert row is not None and row[2] == "allocated"
+        assert row is not None and row[2] == "idling"
 
         # restart inbound (status='done') + new restart_completed inbound (status='pending')
         with db_conn.cursor() as cur:
@@ -1526,7 +1526,7 @@ class TestRespawnAgent:
     def test_respawn_clears_stale_pid_and_started_at(
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """respawn 'restarting' → 'allocated' also clears pid/started_at. Restart also
+        """respawn 'restarting' → 'idling' also clears pid/started_at. Restart also
         transitions from running (when claim receives restart inbound, status='running'), so pid/
         started_at inevitably have stale values; not clearing them would cause the same ghost-field problem as resurrect."""
         agent_id = self._setup_restarting(db_conn, monkeypatch, original_source="user")
@@ -1549,21 +1549,21 @@ class TestRespawnAgent:
     ) -> None:
         """respawn returns False for non-'restarting' status (race-safe noop) — does not raise,
         does not INSERT inbound, does not launch process. The restarter should continue polling."""
-        agent_id = _spawn_agent()  # status='allocated'
+        agent_id = _spawn_agent()  # status='idling'
 
         ok = respawn_agent(agent_id)
         assert ok is False
         # no inbound inserted, status unchanged
         assert _inbound_count(db_conn, agent_id) == 0
         row = _agents_row(db_conn, agent_id)  # pyright: ignore[reportUnknownVariableType]
-        assert row is not None and row[2] == "allocated"
+        assert row is not None and row[2] == "idling"
 
     def test_respawn_raises_when_no_prior_restart_inbound_and_forces_terminated(
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """status='restarting' must have a prior 'restart' inbound; if DB integrity is broken
         (manual UPDATE / migration bug), first mark status 'terminated' commit then raise
-        — to avoid the agent being stuck with 'allocated' and no process permanently
+        — to avoid the agent being stuck with 'idling' and no process permanently
         (the restarter won't trigger again because status is no longer 'restarting'; caller can resurrect to retry)."""
         agent_id = _spawn_agent()
         # directly UPDATE 'restarting' but **not** insert 'restart' inbound — breaks invariant
@@ -1574,7 +1574,7 @@ class TestRespawnAgent:
         with pytest.raises(RuntimeError, match="DB integrity violated"):
             respawn_agent(agent_id)
 
-        # before raise, status switched to 'terminated' (avoids stuck 'allocated' with no process)
+        # before raise, status switched to 'terminated' (avoids stuck 'idling' with no process)
         row = _agents_row(db_conn, agent_id)  # pyright: ignore[reportUnknownVariableType]
         assert row is not None and row[2] == "terminated"
 
@@ -1613,7 +1613,7 @@ class TestRespawnAgent:
     def test_respawn_launch_failure_forces_terminated(
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """launch fails → UPDATE status='terminated' + re-raise (avoids permanent 'allocated' residue). Caller can resurrect to retry."""
+        """launch fails → UPDATE status='terminated' + re-raise (avoids permanent 'idling' residue). Caller can resurrect to retry."""
         # _setup_restarting internally monkeypatches lambda → None; then boom after setup
         agent_id = self._setup_restarting(db_conn, monkeypatch, original_source="user")
 
@@ -1634,8 +1634,8 @@ class TestRespawnAgent:
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Both functions perform 'UPDATE status + INSERT lifecycle inbound + launch' —
-        symmetric from the AgentStatus enum perspective: terminated→allocated+resurrect inbound,
-        restarting→allocated+restart_completed inbound.
+        symmetric from the AgentStatus enum perspective: terminated→idling+resurrect inbound,
+        restarting→idling+restart_completed inbound.
         This test locks the symmetry in place so that if one side adds new side effects without updating the other symmetrically, the test will fail."""
 
         # resurrect path
@@ -1649,10 +1649,10 @@ class TestRespawnAgent:
         b = self._setup_restarting(db_conn, monkeypatch, original_source="user")
         respawn_agent(b)
 
-        # both agents back to 'allocated' and each has lifecycle pending inbound
+        # both agents back to 'idling' and each has lifecycle pending inbound
         # (here with prompt, resurrect also has an extra chat inbound)
-        assert _agents_row(db_conn, a)[2] == AgentStatus.ALLOCATED  # type: ignore[index]
-        assert _agents_row(db_conn, b)[2] == AgentStatus.ALLOCATED  # type: ignore[index]
+        assert _agents_row(db_conn, a)[2] == AgentStatus.IDLING  # type: ignore[index]
+        assert _agents_row(db_conn, b)[2] == AgentStatus.IDLING  # type: ignore[index]
         with db_conn.cursor() as cur:
             cur.execute(
                 "SELECT agent_id, kind FROM inbound_messages "
@@ -1666,10 +1666,10 @@ class TestRespawnAgent:
 @pytest.mark.real_agent_launch
 class TestLaunchConfirm:
     """`_launch_agent_process` must confirm that the child python process has actually reached
-    `enter_starting_state` (i.e., status has left 'allocated'), not just "process spawn succeeded".
+    `claim_agent_row` (i.e., status has left 'idling'), not just "process spawn succeeded".
     A successful spawn = "I launched this process", which does **not** equal "that process actually started running".
     In production, spawn succeeded but the child python immediately crashed (early import/config failure
-    / immediate exit) → status stuck 'allocated' permanently fossilized.
+    / immediate exit) → status stuck 'idling' permanently fossilized.
 
     The fake native supervisor makes `new_session` return True (process "launched"), and then nothing
     happens (child never starts, status is never changed by anyone).
@@ -1731,7 +1731,7 @@ class TestLaunchConfirm:
     ) -> None:
         """spawn launches with confirm=False — the spawn reports OK but the child
         never claims, and spawn still returns its id WITHOUT raising (the
-        launch-confirm is off-path now). The row stays 'allocated' for the
+        launch-confirm is off-path now). The row stays 'idling' for the
         off-path confirm / reaper to resolve."""
         self._fake_launch_success(monkeypatch)
 
@@ -1740,13 +1740,13 @@ class TestLaunchConfirm:
         with db_conn.cursor() as cur:
             cur.execute("SELECT id, status FROM agents_meta")
             rows = cur.fetchall()
-        assert rows == [(new_id, "allocated")]
+        assert rows == [(new_id, "idling")]
 
     @pytest.mark.flaky  # real confirm-timeout poll loop (child never claims)
     def test_off_path_confirm_forces_terminated_when_child_never_claims(
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """The off-path confirm forces a row that never leaves 'allocated' to
+        """The off-path confirm forces a row that never leaves 'idling' to
         'terminated' (a silently-failed launch) so it does not linger until the
         reaper. This is the spawn-path replacement for the inline confirm."""
         monkeypatch.setattr("ops.agent_launch._launch_agent_process", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
@@ -1762,7 +1762,7 @@ class TestLaunchConfirm:
     def test_off_path_confirm_leaves_claimed_child_alone(
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """If the child claimed (status left 'allocated'), the off-path confirm
+        """If the child claimed (status left 'idling'), the off-path confirm
         is a no-op — it must not terminate a live agent that merely claimed late."""
         monkeypatch.setattr("ops.agent_launch._launch_agent_process", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
         agent_id = _spawn_agent()
@@ -1772,7 +1772,7 @@ class TestLaunchConfirm:
             )
         db_conn.commit()
         # Verify the UPDATE is visible before proceeding — on slow CI runners
-        # the first poll inside _wait_for_status_to_leave_allocated may race
+        # the first poll inside _wait_for_agent_claim may race
         # with the write becoming visible.
         row_check = _agents_row(db_conn, agent_id)  # pyright: ignore[reportUnknownVariableType]
         assert row_check is not None and row_check[2] == "running", (
@@ -1806,7 +1806,7 @@ class TestLaunchConfirm:
         self._fake_launch_success(monkeypatch)
         self._shrink_confirm_timeout(monkeypatch)
 
-        with pytest.raises(RuntimeError, match=r"did not leave 'allocated'|did not reach"):
+        with pytest.raises(RuntimeError, match=r"pid stayed NULL|did not reach"):
             resurrect_agent(agent_id, resurrected_by="user", prompt="test")
 
         row = _agents_row(db_conn, agent_id)  # pyright: ignore[reportUnknownVariableType]
@@ -1834,7 +1834,7 @@ class TestLaunchConfirm:
         self._fake_launch_success(monkeypatch)
         self._shrink_confirm_timeout(monkeypatch)
 
-        with pytest.raises(RuntimeError, match=r"did not leave 'allocated'|did not reach"):
+        with pytest.raises(RuntimeError, match=r"pid stayed NULL|did not reach"):
             respawn_agent(agent_id)
 
         row = _agents_row(db_conn, agent_id)  # pyright: ignore[reportUnknownVariableType]
@@ -1866,13 +1866,13 @@ class _FakeClock:
 
 
 class TestLaunchConfirmExtension:
-    """A launched process that is still ALIVE at the confirm deadline gets one
+    """A launched process that is still alive at the confirm deadline gets one
     bounded extension instead of having its row taken away mid-boot.
 
     The 2026-07-30 incident: under box load the child's pre-flip segment (python
     startup + imports + `assert_schema_current` + the placement SELECT) outran
     the 10s window. Nothing in the row can distinguish that from a dead launch —
-    'allocated' with no pid either way — so the confirm force-terminated a child
+    'idling' with no pid either way — so the confirm force-terminated a child
     that was seconds from claiming, the child's own CAS then matched 0 rows and
     it died, and crash-resurrect relaunched it into the same window. The
     supervisor's session record IS the missing evidence, so the deadline consults
@@ -1917,7 +1917,7 @@ class TestLaunchConfirmExtension:
         of raising (which is what force-terminated the live child)."""
         agent_id = _spawn_agent()
         claim_at = boot_timing.LAUNCH_CONFIRM_TIMEOUT_SEC + 20.0
-        assert claim_at < boot_timing.ALLOCATED_REAP_GRACE_SEC, (
+        assert claim_at < boot_timing.BOOT_REAP_GRACE_SEC, (
             "test premise: the claim must land inside the extension, not past it"
         )
 
@@ -1926,8 +1926,8 @@ class TestLaunchConfirmExtension:
                 return
             with db_conn.cursor() as cur:
                 cur.execute(
-                    "UPDATE agents_meta SET status = 'starting', pid = 4242 "
-                    "WHERE id = %s AND status = 'allocated'",
+                    "UPDATE agents_meta SET status = 'running', pid = 4242 "
+                    "WHERE id = %s AND status = 'idling'",
                     (agent_id,),
                 )
             db_conn.commit()
@@ -1935,7 +1935,7 @@ class TestLaunchConfirmExtension:
         clock = _FakeClock(on_tick=_claim_when_due)
         probes = self._install(monkeypatch, clock, alive=True)
 
-        _wait_for_status_to_leave_allocated(agent_id)  # no raise
+        _wait_for_agent_claim(agent_id)  # no raise
 
         assert clock.now > boot_timing.LAUNCH_CONFIRM_TIMEOUT_SEC, (
             "the wait must have been extended past the normal deadline, not merely "
@@ -1943,32 +1943,32 @@ class TestLaunchConfirmExtension:
         )
         assert probes["n"] >= 1, "the wait must have consulted the supervisor at all"
         row = _agents_row(db_conn, agent_id)  # pyright: ignore[reportUnknownVariableType]
-        assert row is not None and row[2] == "starting"
+        assert row is not None and row[2] == "running"
 
     def test_extension_is_bounded_by_the_reap_grace(
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """A live child that never claims still fails — at the reap grace, after
-        exactly ONE extension. Past that bound the restarter's allocated-reaper
+        exactly ONE extension. Past that bound the restarter's dead-birth reaper
         owns the row, so waiting longer would be waiting on someone else's row."""
         agent_id = _spawn_agent()
         clock = _FakeClock()
         self._install(monkeypatch, clock, alive=True)
 
-        with pytest.raises(RuntimeError, match=r"did not leave 'allocated'"):
-            _wait_for_status_to_leave_allocated(agent_id)
+        with pytest.raises(RuntimeError, match=r"pid stayed NULL"):
+            _wait_for_agent_claim(agent_id)
 
         # That the wait ENDED at the grace is what proves the extension is granted
         # once rather than renewed on every poll; a renewing extension would never
         # reach this bound at all. (Probe COUNT stopped being the observation when
         # liveness moved onto a schedule — it is now asked ~every second.)
         assert (
-            boot_timing.ALLOCATED_REAP_GRACE_SEC
+            boot_timing.BOOT_REAP_GRACE_SEC
             <= clock.now
-            < boot_timing.ALLOCATED_REAP_GRACE_SEC + agent_launch._LAUNCH_CONFIRM_POLL_INTERVAL_SEC
+            < boot_timing.BOOT_REAP_GRACE_SEC + agent_launch._LAUNCH_CONFIRM_POLL_INTERVAL_SEC
         ), f"waited {clock.now}s, expected the reap grace as the hard bound"
         row = _agents_row(db_conn, agent_id)  # pyright: ignore[reportUnknownVariableType]
-        assert row is not None and row[2] == "allocated", (
+        assert row is not None and row[2] == "idling", (
             "the confirm only raises; forcing 'terminated' is the caller's job"
         )
 
@@ -1989,8 +1989,8 @@ class TestLaunchConfirmExtension:
         clock = _FakeClock()
         probes = self._install(monkeypatch, clock, alive=False)
 
-        with pytest.raises(RuntimeError, match=r"did not leave 'allocated'"):
-            _wait_for_status_to_leave_allocated(agent_id)
+        with pytest.raises(RuntimeError, match=r"pid stayed NULL"):
+            _wait_for_agent_claim(agent_id)
 
         assert probes["n"] >= 1
         assert clock.now < boot_timing.LAUNCH_CONFIRM_TIMEOUT_SEC, (
@@ -2015,7 +2015,7 @@ class TestLaunchConfirmExtension:
             with db_conn.cursor() as cur:
                 cur.execute(
                     "UPDATE agents_meta SET status = 'terminated', pid = 4242 "
-                    "WHERE id = %s AND status = 'allocated'",
+                    "WHERE id = %s AND status = 'idling'",
                     (agent_id,),
                 )
             db_conn.commit()
@@ -2025,7 +2025,7 @@ class TestLaunchConfirmExtension:
         self._install(monkeypatch, clock, alive=False)
         monkeypatch.setattr("ops.agent_launch._launched_process_alive", _claim_then_vanish)
 
-        _wait_for_status_to_leave_allocated(agent_id)  # no raise: it did start
+        _wait_for_agent_claim(agent_id)  # no raise: it did start
 
         assert clock.now < boot_timing.LAUNCH_CONFIRM_TIMEOUT_SEC
 
@@ -2088,7 +2088,7 @@ class TestLaunchRetry:
     ) -> None:
         """First two launches raise RuntimeError, third succeeds -> agent is not force-terminated;
         each retry clears a stale session beforehand. Verify that transient launch jitter can self-heal."""
-        agent_id = _spawn_agent()  # create an 'allocated' row for observation
+        agent_id = _spawn_agent()  # create an 'idling' row for observation
         attempts = {"n": 0}
         kills = {"n": 0}
 
@@ -2134,14 +2134,14 @@ class TestLaunchRetry:
         row = _agents_row(db_conn, agent_id)  # pyright: ignore[reportUnknownVariableType]
         assert row is not None and row[2] == "terminated"
 
-    def test_exhausted_retries_do_not_clobber_a_row_that_left_allocated(
+    def test_exhausted_retries_do_not_clobber_a_claimed_row(
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """The child claims late — between the last attempt's deadline and the
         force-terminate write — and the row it now owns must survive.
 
         "Every attempt failed" is only the launcher's local view: each attempt
-        left a process behind, and one of them can reach `enter_starting_state`
+        left a process behind, and one of them can reach `claim_agent_row`
         a moment after the launcher stopped waiting. This write used to carry no
         status predicate, so it buried that live agent under 'terminated' — and
         crash-resurrect, which claims exactly this `termination_source`, then
@@ -2162,8 +2162,8 @@ class TestLaunchRetry:
         def _claim_then_note(_id: int) -> None:
             with db_conn.cursor() as cur:
                 cur.execute(
-                    "UPDATE agents_meta SET status = 'starting', pid = 777 "
-                    "WHERE id = %s AND status = 'allocated'",
+                    "UPDATE agents_meta SET status = 'running', pid = 777 "
+                    "WHERE id = %s AND status = 'idling'",
                     (agent_id,),
                 )
             db_conn.commit()
@@ -2174,8 +2174,8 @@ class TestLaunchRetry:
             _launch_or_force_terminated(agent_id)
 
         row = _agents_row(db_conn, agent_id)  # pyright: ignore[reportUnknownVariableType]
-        assert row is not None and (row[2], row[3]) == ("starting", 777), (
-            "the force-terminate write must be guarded on status='allocated' — a child "
+        assert row is not None and (row[2], row[3]) == ("running", 777), (
+            "the force-terminate write must be guarded on status='idling' — a child "
             f"that claimed late owns this row, got {row}"
         )
 
@@ -2200,9 +2200,7 @@ class TestLaunchRetry:
 
         assert attempts["n"] == 1, "non-RuntimeError does not retry"
         row = _agents_row(db_conn, agent_id)  # pyright: ignore[reportUnknownVariableType]
-        assert row is not None and row[2] == "allocated", (
-            "non-RuntimeError does not force-terminate"
-        )
+        assert row is not None and row[2] == "idling", "non-RuntimeError does not force-terminate"
 
 
 def _fake_launch_supervisor(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -2245,9 +2243,9 @@ class TestStderrLogsDir:
         assert not fresh_logs_dir.exists()
         monkeypatch.setattr(settings.general, "ava_home", fresh_home)
 
-        # let _wait_for_status_to_leave_allocated return immediately (avoids needing real agents_meta table)
+        # let _wait_for_agent_claim return immediately (avoids needing real agents_meta table)
         monkeypatch.setattr(
-            "ops.agent_launch._wait_for_status_to_leave_allocated",
+            "ops.agent_launch._wait_for_agent_claim",
             lambda _id: None,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
         )
         _fake_launch_supervisor(monkeypatch)  # don't actually start a process
@@ -2270,7 +2268,7 @@ class TestStderrLogsDir:
         existing = tmp_path / "logs"
         existing.mkdir()
         monkeypatch.setattr(
-            "ops.agent_launch._wait_for_status_to_leave_allocated",
+            "ops.agent_launch._wait_for_agent_claim",
             lambda _id: None,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
         )
         _fake_launch_supervisor(monkeypatch)
@@ -2776,7 +2774,7 @@ class TestLaunchAgentProcessConfigOverlay:
 
         monkeypatch.setattr("ops.agent_launch.native_proc", lambda: _FakeSupervisor)
         monkeypatch.setattr(
-            "ops.agent_launch._wait_for_status_to_leave_allocated",
+            "ops.agent_launch._wait_for_agent_claim",
             lambda _id: None,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
         )
         return captured
@@ -2847,7 +2845,7 @@ class TestLaunchAgentProcessConfigOverlay:
 
 @pytest.mark.real_agent_launch
 class TestLaunchConfirmActuallyWaits:
-    """The deadline calculation in `_wait_for_status_to_leave_allocated` must be
+    """The deadline calculation in `_wait_for_agent_claim` must be
     `monotonic() + timeout` (future-oriented), not `monotonic() - timeout` (past-oriented).
 
     The `-` mutation would make the deadline always in the past → immediately hit timeout raise
@@ -2861,7 +2859,7 @@ class TestLaunchConfirmActuallyWaits:
     """
 
     @pytest.mark.flaky  # real _time.sleep bg thread + wall-clock elapsed assertions
-    def test_wait_loops_until_status_leaves_allocated(
+    def test_wait_loops_until_pid_is_claimed(
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """child UPDATEs status='running' after ~150ms (later than the first poll but before the
@@ -2870,16 +2868,16 @@ class TestLaunchConfirmActuallyWaits:
         import threading
         import time as _time
 
-        from ops.agent_launch import _wait_for_status_to_leave_allocated
+        from ops.agent_launch import _wait_for_agent_claim
 
-        # INSERT an 'allocated' row directly — bypassing the helper's launch
+        # INSERT an 'idling' row directly — bypassing the helper's launch
         with db_conn.cursor() as cur:
             cur.execute("INSERT INTO agents DEFAULT VALUES RETURNING id")
             row = cur.fetchone()
             assert row is not None
             agent_id: int = row[0]
             cur.execute(
-                "INSERT INTO agents_meta (id, spawner, status) VALUES (%s, 'user', 'allocated')",
+                "INSERT INTO agents_meta (id, spawner, status) VALUES (%s, 'user', 'idling')",
                 (agent_id,),
             )
         db_conn.commit()
@@ -2899,24 +2897,27 @@ class TestLaunchConfirmActuallyWaits:
                 ) as c,
                 c.cursor() as cur,
             ):
-                cur.execute("UPDATE agents_meta SET status = 'running' WHERE id = %s", (agent_id,))
+                cur.execute(
+                    "UPDATE agents_meta SET status = 'running', pid = 4242 WHERE id = %s",
+                    (agent_id,),
+                )
                 c.commit()
 
         threading.Thread(target=delayed_running, daemon=True).start()
 
         start = _time.monotonic()
-        _wait_for_status_to_leave_allocated(agent_id)  # should return normally
+        _wait_for_agent_claim(agent_id)  # should return normally
         elapsed = _time.monotonic() - start
 
         # Must wait for the child to start (~150ms), not return immediately (deadline should not be in the past)
         assert elapsed >= 0.1, (
-            f"_wait_for_status_to_leave_allocated did not actually wait for the child to start; "
+            f"_wait_for_agent_claim did not actually wait for the child to start; "
             f"elapsed={elapsed:.3f}s — deadline calculation may be inverted (- instead of +)"
         )
         # Should not wait full timeout (returned when child started; upper bound gives generous headroom,
         # just needs to be reliably below the 10s timeout to prove return was due to status flip, not timeout)
         assert elapsed < 4.5, (
-            f"_wait_for_status_to_leave_allocated waited too long (expected ~150-200ms); elapsed={elapsed:.3f}s"
+            f"_wait_for_agent_claim waited too long (expected ~150-200ms); elapsed={elapsed:.3f}s"
         )
 
 
@@ -2933,7 +2934,7 @@ def _set_status(db_conn: psycopg.Connection, agent_id: int, status: str) -> None
         # fail-fast: the row must exist and actually flip. A silent 0-row UPDATE
         # would otherwise surface much later as a baffling `assert <spawn-value> ==
         # <intended>` in the test body (this is how a rare cross-connection
-        # read-your-writes inversion under -n auto once read back 'allocated'
+        # read-your-writes inversion under -n auto once read back 'idling'
         # instead of 'restarting'). Pin it to the setup line that caused it.
         assert cur.rowcount == 1, (
             f"_set_status: agent {agent_id} not updated (rowcount={cur.rowcount})"
@@ -2946,21 +2947,21 @@ class TestExitedEndpoint:
     the gateway finalizes the row. This is where the guarded status flip lives
     now (it used to run inline in the agent's finally block).
 
-    The `WHERE status IN ('starting','running','idling')` guard is
+    The `WHERE status IN ('running','idling')` guard is
     load-bearing: a restart goes claim -> 'restarting' -> END -> process exit
     -> this endpoint, and clobbering 'restarting' to 'terminated' would strand
-    the restarter. 'allocated' (process died before claiming) is likewise left
-    alone. Both negative cases are asserted below alongside the happy paths.
+    the restarter. Hibernating is likewise left alone. Both negative cases are
+    asserted below alongside the happy paths.
     """
 
-    def test_starting_to_terminated(
+    def test_running_to_terminated(
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """'starting' (process died mid-init before claim bumped 'running') →
+        """'running' (including an early boot-phase death) →
         'terminated', so the row never petrifies."""
         monkeypatch.setattr("ops.agent_launch._launch_agent_process", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
         agent_id = _spawn_agent()
-        _set_status(db_conn, agent_id, "starting")
+        _set_status(db_conn, agent_id, "running")
         with TestClient(app) as client:
             resp = client.post(f"/api/agents/{agent_id}/exited")
         assert resp.status_code == 204
@@ -3011,17 +3012,13 @@ class TestExitedEndpoint:
             row = cur.fetchone()
         assert row is not None and row[0] == "restarting"  # untouched
 
-    def test_allocated_unchanged(
+    def test_hibernating_unchanged(
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """'allocated' (process died before claiming its row) is left alone —
-        the guard excludes it."""
+        """The ops-only hibernating state is left alone — the exit guard excludes it."""
         monkeypatch.setattr("ops.agent_launch._launch_agent_process", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-        agent_id = _spawn_agent()  # spawn leaves status 'allocated'
-        # Read back to confirm spawn is visible (synchronous_commit=off guard).
-        assert _status(db_conn, agent_id) == "allocated", (
-            f"create+launch helper wrote 'allocated' but read back {_status(db_conn, agent_id)!r}"
-        )
+        agent_id = _spawn_agent()
+        _set_status(db_conn, agent_id, "hibernating")
         with TestClient(app) as client:
             resp = client.post(f"/api/agents/{agent_id}/exited")
         assert resp.status_code == 204
@@ -3029,7 +3026,7 @@ class TestExitedEndpoint:
         with shared.db.connect() as fresh_conn, fresh_conn.cursor() as cur:
             cur.execute("SELECT status FROM agents_meta WHERE id = %s", (agent_id,))
             row = cur.fetchone()
-        assert row is not None and row[0] == "allocated"
+        assert row is not None and row[0] == "hibernating"
 
     def test_idempotent(self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch) -> None:
         """Calling twice is safe (the finally block may run more than once) —
@@ -3130,9 +3127,9 @@ class TestHibernatedEndpoint:
 
 
 class TestLaunchConfirmTerminatedBoot:
-    """`_wait_for_status_to_leave_allocated` distinguishes a confirmed claim
+    """`_wait_for_agent_claim` distinguishes a confirmed claim
     from a boot rejected before claiming. The early schema gate marks a
-    behind-schema boot 'allocated' -> 'terminated' with no pid; that never
+    behind-schema boot 'idling' -> 'terminated' with no pid; that never
     started, so confirmation must raise rather than report success. A
     'terminated' row that still carries a pid DID claim (then exited fast) and
     is a confirmed start.
@@ -3156,17 +3153,17 @@ class TestLaunchConfirmTerminatedBoot:
         self._set(db_conn, agent_id, "terminated", None)
 
         with pytest.raises(RuntimeError, match=r"boot rejected before claiming"):
-            _wait_for_status_to_leave_allocated(agent_id)
+            _wait_for_agent_claim(agent_id)
 
     def test_terminated_with_pid_returns(
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """'terminated' + a pid = the agent claimed ('starting' wrote the pid)
+        """'terminated' + a pid = the agent claimed ('running' wrote the pid)
         then exited fast; the claim ran, so confirmation succeeds."""
         agent_id = _spawn_agent()
         self._set(db_conn, agent_id, "terminated", 4242)
 
-        _wait_for_status_to_leave_allocated(agent_id)  # returns, no raise
+        _wait_for_agent_claim(agent_id)  # returns, no raise
 
     def test_running_returns(
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
@@ -3175,7 +3172,7 @@ class TestLaunchConfirmTerminatedBoot:
         agent_id = _spawn_agent()
         self._set(db_conn, agent_id, "running", 4242)
 
-        _wait_for_status_to_leave_allocated(agent_id)  # returns, no raise
+        _wait_for_agent_claim(agent_id)  # returns, no raise
 
 
 class TestSpawnerValidation:

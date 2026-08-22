@@ -520,11 +520,14 @@ class TestListAgents:
         ava._boot._agent_id = _spawn_agent()
         a_id = ava.agents.spawn()
         b_id = ava.agents.spawn()
-        _c_id = ava.agents.spawn()  # kept allocated, verify it doesn't appear in default results
+        c_id = ava.agents.spawn()  # terminal rows stay outside the default live filter
         with db_conn.cursor() as cur:
+            cur.execute(
+                "UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (ava.self.AGENT_ID,)
+            )
             cur.execute("UPDATE agents_meta SET status = 'running' WHERE id = %s", (a_id,))
             cur.execute("UPDATE agents_meta SET status = 'idling' WHERE id = %s", (b_id,))
-            # c_id remains allocated
+            cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (c_id,))
         db_conn.commit()
 
         rows = ava.agents.list_agents()
@@ -599,6 +602,9 @@ class TestListAgents:
         ava._boot._agent_id = _spawn_agent()
         a_id = ava.agents.spawn()
         with db_conn.cursor() as cur:
+            cur.execute(
+                "UPDATE agents_meta SET status = 'restarting' WHERE id = %s", (ava.self.AGENT_ID,)
+            )
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (a_id,))
         db_conn.commit()
 
@@ -654,6 +660,9 @@ class TestListAgents:
         ava._boot._agent_id = _spawn_agent()
         a_id = ava.agents.spawn()
         with db_conn.cursor() as cur:
+            cur.execute(
+                "UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (ava.self.AGENT_ID,)
+            )
             cur.execute("UPDATE agents_meta SET status = 'idling' WHERE id = %s", (a_id,))
         db_conn.commit()
 

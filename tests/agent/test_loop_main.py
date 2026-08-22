@@ -299,7 +299,7 @@ class TestMainHappyPath:
 
         names = [c[0] for c in spies["calls"]]
         # Boot phase ordering — index must be monotonic
-        # enter_starting_state runs early in __main__.py before the heavy
+        # claim_agent_row runs early in __main__.py before the heavy
         # import chain; agent.loop does not even import it, so main() cannot
         # call it — the old not-called spy assertion is now structural.
         boot_expected = [

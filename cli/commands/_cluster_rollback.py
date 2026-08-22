@@ -183,7 +183,7 @@ def _notify_agents_of_rollback(from_sha: str, to_sha: str) -> None:
             cur.execute(
                 "INSERT INTO inbound_messages (agent_id, source, kind, content) "
                 "SELECT id, 'system:rollback', 'chat', %s FROM agents_meta "
-                "WHERE status IN ('starting', 'running', 'idling') "
+                "WHERE status IN ('running', 'idling') "
                 "AND lease_expires_at > now() "
                 "RETURNING agent_id",
                 (payload,),

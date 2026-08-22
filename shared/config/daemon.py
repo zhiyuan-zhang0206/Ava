@@ -130,10 +130,10 @@ class DaemonSettings(EnvSettings):
         },
     )
 
-    allocated_reap_grace_seconds: float = Field(
+    boot_reap_grace_seconds: float = Field(
         default=120.0,
         alias="AVA_ALLOCATED_REAP_GRACE_SECONDS",
-        description="Grace (seconds) before the restarter reaps a stuck 'allocated' row to 'terminated' — a process that died before claiming, or was never launched. Must exceed boot plus the launch-confirm window (launch_confirm_timeout_seconds, 45s), pinned by tests/shared/test_timing_topology.py. It is also the ceiling on the launch-confirm's one extension for a still-live child, so that wait never outlives the point where this reaper takes the row.",
+        description="Grace (seconds) before the restarter reaps an unclaimed idling row to 'terminated' — a process that died before claiming or was never launched. The `AVA_ALLOCATED_REAP_GRACE_SECONDS` alias is retained for existing deployment configuration. Must exceed boot plus the launch-confirm window (launch_confirm_timeout_seconds, 45s), pinned by tests/shared/test_timing_topology.py. It is also the ceiling on the launch-confirm's one extension for a still-live child, so that wait never outlives the point where this reaper takes the row.",
         json_schema_extra={
             "capability": "agent-runner",
             "restart_required": "all",

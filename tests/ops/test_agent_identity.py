@@ -163,7 +163,7 @@ def test_launcher_argv_is_recognized_by_the_probe(monkeypatch: pytest.MonkeyPatc
             return (True, "noop")
 
     monkeypatch.setattr("ops.agent_launch.native_proc", lambda: _FakeSupervisor)
-    monkeypatch.setattr("ops.agent_launch._wait_for_status_to_leave_allocated", lambda _id: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("ops.agent_launch._wait_for_agent_claim", lambda _id: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr("ops.agent_launch.agent_spawn_env_dict", dict)
 
     _launch_agent_process(1123)

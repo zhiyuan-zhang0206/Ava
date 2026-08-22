@@ -110,7 +110,7 @@ class OpenNotice(BaseModel):
 class AgentSnapshot(BaseModel):
     """Full lifecycle state of one agent.
 
-    `status` values: allocated / starting / running / idling / restarting /
+    `status` values: running / idling / restarting /
     terminated / hibernating (ops-only memory swap-out).
 
     `spawner` shape: "user" / "agent:<id>" / arbitrary external name — the

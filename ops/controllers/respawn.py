@@ -7,8 +7,9 @@ process behind it. Drift and its heal, one reconcile pass:
   reach the gateway would crash on boot and lose the restart signal);
 - an orphan row whose process is gone → force it to ``terminated`` so it stops
   masquerading as alive and becomes visible + resurrectable. Three reapers cover
-  the three ways a row strands: ``starting`` / ``allocated`` (never claimed) and
-  ``running`` / ``idling`` (silently dead). "Gone" is decided by process
+  the three ways a row strands: unclaimed ``idling`` (never claimed),
+  ``running`` / ``idling`` before its first message, and ``running`` / ``idling``
+  after producing a message. "Gone" is decided by process
   *identity*, not liveness — see ``_process_still_resident``; a pid the OS has
   recycled is alive without being the agent, and reading it as alive is what left
   rows stranded indefinitely (issue #1123).
@@ -21,7 +22,7 @@ whether it respawned or reaped anything this pass.
 
 **Two cadences in one controller.** Restart dispatch runs every ``reconcile`` (the
 daemon's 1s tick) — a restart signal must be acted on promptly. Corpse reaping is
-gated behind ``CONTROLLER_SCAN_INTERVAL_S`` (30s): each of the three reapers full-scans a
+gated behind ``CONTROLLER_SCAN_INTERVAL_S`` (30s): each reaper full-scans a
 status class of local agents and identity-probes every pid (a process-table read),
 which at fleet scale (100-300 agents/box) is O(fleet) work every second for a rare
 condition (a silently-dead agent). Running it on a slower
@@ -45,7 +46,7 @@ from ops.agent_wake import revive_agent
 from ops.agents import respawn_agent
 from ops.controllers.base import BlockScope, ReconcileResult
 from ops.pages import list_open_page_names
-from shared.boot_timing import ALLOCATED_REAP_GRACE_SEC
+from shared.boot_timing import BOOT_REAP_GRACE_SEC
 from shared.config import settings
 from shared.live_announce import publish_agent_updated_sync, publish_page_closed_sync
 from shared.machine import MachineRole, machine_name
@@ -58,8 +59,8 @@ _log = logging.getLogger("ops.controllers.respawn")
 _GATEWAY_HEALTH_URL = settings.services.gateway_health_url
 _GATEWAY_HEALTH_TIMEOUT_S = 2.0
 
-# Grace before a stuck 'allocated' row is reaped — the boot family's
-# ALLOCATED_REAP_GRACE_SEC (env: `AVA_ALLOCATED_REAP_GRACE_SECONDS`), whose
+# Grace before a stuck unclaimed 'idling' row is reaped — the boot family's
+# BOOT_REAP_GRACE_SEC (env legacy alias: `AVA_ALLOCATED_REAP_GRACE_SECONDS`), whose
 # ordering against the launch-confirm window is declared in `shared/timing.py`.
 #
 # Corpse-reaping cadence, decoupled from the per-reconcile (1s) restart dispatch —
@@ -136,73 +137,18 @@ def _process_still_resident(agent_id: int, pid: int) -> bool:
     return identity in RESIDENT_IDENTITIES
 
 
-def _reap_local_dead_starting(pool: ConnectionPool, local_machine: str) -> list[int]:
-    """Reap this host's orphan 'starting' rows whose process is gone.
-
-    A process sets status='starting' + pid in one early-boot step and only flips to
-    'running' once it enters the run loop. If it dies in between (boot crash, OOM,
-    SIGKILL, schema drift), the row strands at 'starting' forever. A 'starting' row
-    whose pid is no longer *this agent's process* is a confirmed orphan; force it
-    to 'terminated'.
-
-    Machine-scoped, so each pid is local and ours to probe. A pid the probe still
-    identifies as this agent means it is mid-boot — left untouched. A NULL pid is
-    left for manual attention.
-
-    The UPDATE re-asserts the exact pid probed (``AND pid = %s``) to close an ABA
-    window: between the SELECT and the UPDATE the row could cycle terminated ->
-    allocated -> 'starting' under a fresh live pid; pinning the pid means the stale
-    reap can only hit the dead process actually observed.
-    """
-    with pool.connection() as conn, conn.cursor() as cur:
-        cur.execute(
-            "SELECT id, pid FROM agents_meta WHERE status = 'starting' AND machine = %s",
-            (local_machine,),
-        )
-        rows = cur.fetchall()
-    reaped: list[int] = []
-    for agent_id, pid in rows:
-        if pid is None or _process_still_resident(agent_id, pid):
-            continue
-        with pool.connection() as conn, conn.cursor() as cur:
-            # Capture open page names BEFORE the status flip — the
-            # cascade_close_agent_pages trigger closes the page rows on
-            # 'terminated', after which the open-page query matches nothing.
-            page_names = list_open_page_names(conn, agent_id)
-            cur.execute(
-                "UPDATE agents_meta SET status = 'terminated', termination_source = 'reaper' "
-                "WHERE id = %s AND status = 'starting' AND pid = %s",
-                (agent_id, pid),
-            )
-            transitioned = cur.rowcount == 1
-        if transitioned:
-            with pool.connection() as conn:
-                publish_agent_updated_sync(conn, agent_id)
-            for page_name in page_names:
-                publish_page_closed_sync(agent_id, page_name)
-            reaped.append(agent_id)
-    return reaped
-
-
-def _reap_local_stale_allocated(
+def _reap_local_unclaimed_idling(
     pool: ConnectionPool, local_machine: str, grace_s: float
 ) -> list[int]:
-    """Reap this host's 'allocated' rows stuck past ``grace_s``.
+    """Reap this host's unclaimed idling rows stuck past ``grace_s``.
 
-    'allocated' is the brief window between spawn/resurrect inserting the row and
-    the launched process claiming it (-> 'starting'); it normally lasts the
-    cold-start 1-2s. A row stuck 'allocated' well beyond that means the process died
-    before claiming or was never launched. Unlike 'starting', 'allocated' carries no
-    pid to probe, so the orphan test is age: status_changed_at older than ``grace_s``.
-
-    Machine-scoped. The UPDATE re-asserts the age predicate so a row that a process
-    claims (-> 'starting') or that resurrect re-stamps between the SELECT and the
-    UPDATE is left alone.
+    The row's null pid is the unclaimed discriminator. Reasserting it with the
+    age predicate keeps a late claimant from being terminated by this reaper.
     """
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT id FROM agents_meta "
-            "WHERE status = 'allocated' AND machine = %s "
+            "WHERE status = 'idling' AND pid IS NULL AND machine = %s "
             "AND status_changed_at < now() - make_interval(secs => %s)",
             (local_machine, grace_s),
         )
@@ -216,9 +162,47 @@ def _reap_local_stale_allocated(
             page_names = list_open_page_names(conn, agent_id)
             cur.execute(
                 "UPDATE agents_meta SET status = 'terminated', termination_source = 'reaper' "
-                "WHERE id = %s AND status = 'allocated' "
+                "WHERE id = %s AND status = 'idling' AND pid IS NULL "
                 "AND status_changed_at < now() - make_interval(secs => %s)",
                 (agent_id, grace_s),
+            )
+            transitioned = cur.rowcount == 1
+        if transitioned:
+            with pool.connection() as conn:
+                publish_agent_updated_sync(conn, agent_id)
+            for page_name in page_names:
+                publish_page_closed_sync(agent_id, page_name)
+            reaped.append(agent_id)
+    return reaped
+
+
+def _reap_local_dead_boot_phase_agents(pool: ConnectionPool, local_machine: str) -> list[int]:
+    """Route dead pre-message processes through crash-resurrect backoff.
+
+    A row with a pid but no produced message died during bootstrap. Reviving it
+    in place would create an unbounded immediate crash loop, so mark it as the
+    existing reaper-sourced involuntary death instead. CrashResurrectController
+    then applies its established per-agent backoff and claim protocol.
+    """
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT id, pid FROM agents_meta "
+            "WHERE status IN ('running', 'idling') AND machine = %s "
+            "AND last_message_text IS NULL",
+            (local_machine,),
+        )
+        rows = cur.fetchall()
+    reaped: list[int] = []
+    for agent_id, pid in rows:
+        if pid is None or _process_still_resident(agent_id, pid):
+            continue
+        with pool.connection() as conn, conn.cursor() as cur:
+            page_names = list_open_page_names(conn, agent_id)
+            cur.execute(
+                "UPDATE agents_meta SET status = 'terminated', termination_source = 'reaper' "
+                "WHERE id = %s AND status IN ('running', 'idling') AND pid = %s "
+                "AND last_message_text IS NULL",
+                (agent_id, pid),
             )
             transitioned = cur.rowcount == 1
         if transitioned:
@@ -248,7 +232,7 @@ def _revive_local_dead_running_idling(
     This pass instead relaunches the agent in place: identity-probe the pid
     (the same safety floor as the old reaper — only positive evidence of death
     revives; UNREADABLE counts as resident), then `revive_agent` CASes the row
-    to 'allocated' + launches a fresh process. The row's checkpoint survives,
+    to unclaimed 'idling' + launches a fresh process. The row's checkpoint survives,
     so the revived agent resumes exactly where it was. Revives are capped per
     pass (`max_revive`, AVA_REVIVE_MAX_PER_PASS) so a mass-death event cannot
     launch the whole fleet in one tick; a backlog drains over successive
@@ -264,7 +248,8 @@ def _revive_local_dead_running_idling(
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT id, pid FROM agents_meta "
-            "WHERE status IN ('running', 'idling') AND machine = %s",
+            "WHERE status IN ('running', 'idling') AND machine = %s "
+            "AND last_message_text IS NOT NULL",
             (local_machine,),
         )
         rows = cur.fetchall()
@@ -403,27 +388,29 @@ class RespawnController:
         return bool(ids)
 
     def _reap_corpses(self, local_machine: str, *, grace_until: float = 0.0) -> bool:
-        """Run the orphan reapers (dead 'starting' / stale 'allocated') plus the
-        dead-'running'|'idling' revive pass. `grace_until` gates ONLY the
+        """Run the dead-birth, boot-death, and normal revive passes.
+
+        ``grace_until`` gates only the
         lease-zombie pass — the pid-based reapers and the revive pass never
         kill a live process, so they are safe to run during a post-outage
         grace window (and the revive pass is what relaunches rows whose
         processes really died in the outage). Returns True if any row was acted on."""
         acted = False
-        for tid in _reap_local_dead_starting(self._pool, local_machine):
+        for tid in _reap_local_unclaimed_idling(self._pool, local_machine, BOOT_REAP_GRACE_SEC):
             acted = True
             _log.warning(
-                "[ops.respawn] reaped orphan agent %s — 'starting' with a dead process; "
+                "[ops.respawn] reaped unclaimed agent %s past %.0fs — "
+                "the process died before claiming or never launched; "
                 "forced to 'terminated'",
                 tid,
+                BOOT_REAP_GRACE_SEC,
             )
-        for tid in _reap_local_stale_allocated(self._pool, local_machine, ALLOCATED_REAP_GRACE_SEC):
+        for tid in _reap_local_dead_boot_phase_agents(self._pool, local_machine):
             acted = True
             _log.warning(
-                "[ops.respawn] reaped orphan agent %s — stuck 'allocated' past %.0fs "
-                "(process died before claiming / never launched); forced to 'terminated'",
+                "[ops.respawn] reaped boot-phase agent %s before its first message; "
+                "crash-resurrect backoff will control any retry",
                 tid,
-                ALLOCATED_REAP_GRACE_SEC,
             )
         if grace_until and time.time() < grace_until:
             # Post-outage grace: every agent's lease expired while the

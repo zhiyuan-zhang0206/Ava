@@ -236,11 +236,11 @@ def test_dashboard_folds_critical_into_error_gauge(
 
 
 def test_dashboard_live_count_excludes_terminated(db_conn: psycopg.Connection) -> None:
-    """live_count = all non-terminated agents, including hibernating / allocated / restarting."""
+    """live_count = all non-terminated agents, including hibernating / idling / restarting."""
     _insert_agent(db_conn, status="running")
     _insert_agent(db_conn, status="idling")
     _insert_agent(db_conn, status="terminated")
-    _insert_agent(db_conn, status="allocated")
+    _insert_agent(db_conn, status="idling")
     _insert_agent(db_conn, status="restarting")
     _insert_agent(db_conn, status="hibernating")
     db_conn.commit()

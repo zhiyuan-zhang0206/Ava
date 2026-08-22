@@ -83,7 +83,7 @@ from ava.agents import AgentStatus as S
 
 def ensure_agent(label: str, prompt: str) -> int:
     mine = [a for a in ava.agents.list_agents(filter_by_status=(
-                S.RUNNING, S.IDLING, S.TERMINATED, S.ALLOCATED, S.STARTING, S.RESTARTING))
+                S.RUNNING, S.IDLING, S.TERMINATED, S.RESTARTING))
             if a.label == label]
     if mine:
         a = max(mine, key=lambda r: r.agent_id)   # label is not unique -> newest
@@ -115,7 +115,7 @@ from shared.watcher import next_fire
 
 def ensure_agent(label, prompt):
     mine = [a for a in ava.agents.list_agents(filter_by_status=(
-                S.RUNNING, S.IDLING, S.TERMINATED, S.ALLOCATED, S.STARTING, S.RESTARTING))
+                S.RUNNING, S.IDLING, S.TERMINATED, S.RESTARTING))
             if a.label == label]
     if mine:
         a = max(mine, key=lambda r: r.agent_id)

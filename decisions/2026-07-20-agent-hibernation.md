@@ -43,7 +43,7 @@ and the metronome model was an underestimate. This set the default `H` (below).
 ## Decision
 
 Introduce a new agents_meta status, **`hibernating`** (a continuous-form name in
-the family of `starting`/`running`/`idling`, not the terminal `-ed` of
+the family of `running`/`idling`, not the terminal `-ed` of
 `terminated` — hibernation is a persisting live state), that exists **only in the
 ops layer**. When an agent has been `idling` longer than `H`
 (`AVA_HIBERNATE_IDLE_THRESHOLD_SECONDS`, default **450s**) with no pending inbound, a
@@ -118,7 +118,8 @@ Two hard invariants:
 ## Consequences
 
 - **The three respawn reapers are deliberately unchanged.** `hibernating` falls
-  outside all of their scan sets (`starting` / `allocated` / `running|idling`),
+  outside all of their scan sets (unclaimed `idling` / boot-phase `running|idling` /
+  post-message `running|idling`),
   so a swapped-out agent — which carries the now-dead pid of its old process — is
   never reaped to `terminated`. This is load-bearing (a reaper touching it would
   tear the mechanism down within 30s) and is locked by a test.

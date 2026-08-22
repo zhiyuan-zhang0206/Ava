@@ -19,7 +19,7 @@ from shared.agents import AgentStatus
 from shared.machine import machine_name
 
 
-def _seed_agent(db_conn: psycopg.Connection, status: str = "allocated") -> int:
+def _seed_agent(db_conn: psycopg.Connection, status: str = "idling") -> int:
     """Directly insert agents + agents_meta rows in DB, no session launch triggered. machine set to
     local machine name, mimics real spawn path (auto-resurrect decides local execution or
     forward based on machine; default 'unknown' would be considered an unreachable remote home machine)."""
@@ -95,7 +95,7 @@ def test_compact_passes_inserted_id_and_kind_to_guarded_resurrect(
         trigger_inbound_kind: str | None = None,
     ) -> AgentStatus:
         calls.append((agent_id, trigger_inbound_id, trigger_inbound_kind))
-        return AgentStatus.ALLOCATED
+        return AgentStatus.IDLING
 
     monkeypatch.setattr(lifecycle._ops, "resurrect_if_terminated", _resurrect)
     with TestClient(app) as client:
@@ -117,7 +117,7 @@ def test_compact_terminated_agent_auto_resurrects(
     """A compact targeting a terminated agent auto-resurrects it (shared with the
     chat path) so the compaction actually runs instead of leaving a compact_request
     row pending forever. The resurrect inserts its own newer 'resurrect' inbound and
-    flips status terminated -> allocated; the claim node's recency routing then lets
+    flips status terminated -> idling; the claim node's recency routing then lets
     the resurrect win while the compact_request still applies."""
 
     def _confirm(_agent_id: int) -> bool:
@@ -134,8 +134,8 @@ def test_compact_terminated_agent_auto_resurrects(
         ("compact_request", "pending"),
         ("resurrect", "pending"),
     ]
-    # terminated -> allocated: a fresh process is being launched (session guarded in tests).
-    assert _status(db_conn, tid) == "allocated"
+    # terminated -> idling: a fresh process is being launched (session guarded in tests).
+    assert _status(db_conn, tid) == "idling"
 
 
 def test_404_when_thread_not_exists(db_conn: psycopg.Connection) -> None:

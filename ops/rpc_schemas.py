@@ -317,12 +317,12 @@ class ResurrectAgentResponse(BaseModel):
     """Resurrect agent response — returned by `POST /api/agents/{id}/resurrect`
     (the frontend resurrect button) and the internal auto-resurrect op.
 
-    `spawned`: agent was dead; UPDATEd 'terminated' -> 'allocated' +
+    `spawned`: agent was dead; UPDATEd 'terminated' -> 'idling' +
         started a fresh process attached to the same agent_id
         (LangGraph state preserved; agent wakes up from where it left
         off).
     `already_alive`: agent is still alive
-        (allocated/starting/running/idling/restarting); resurrect does
+        (running/idling/restarting); resurrect does
         not apply.
     """
 

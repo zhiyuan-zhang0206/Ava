@@ -95,7 +95,7 @@ def _list_agent_rows_for_pause_blocking(pool: ConnectionPool, name: str) -> list
 
     The pause latch is already committed before this sweep. Locking even rows
     that look terminated is deliberate: a pre-latch resurrect may hold an
-    uncommitted terminated -> allocated transition. ``FOR UPDATE`` waits for
+    uncommitted terminated -> idling transition. ``FOR UPDATE`` waits for
     it and rechecks the current row, so the subsequent force fence is ordered
     after that resurrection. Already-terminated rows are included too: pause
     is an explicit kill intent and must fence their older pending work.

@@ -91,8 +91,6 @@ def ensure_agent(label: str, prompt: str) -> int:
                 S.RUNNING,
                 S.IDLING,
                 S.TERMINATED,
-                S.ALLOCATED,
-                S.STARTING,
                 S.RESTARTING,
             )
         )

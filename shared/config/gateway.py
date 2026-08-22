@@ -51,7 +51,7 @@ class GatewaySettings(EnvSettings):
     launch_confirm_timeout_seconds: float = Field(
         default=45.0,
         alias="AVA_LAUNCH_CONFIRM_TIMEOUT_SECONDS",
-        description="Timeout (seconds) for polling agents.status to leave 'allocated' after a launch. It must cover the child's whole pre-flip segment — python startup, imports, the schema assert, the placement SELECT — which on a loaded box has run past the old 10s and cost a live child its row. Not the only defense: if the launched process is still alive at the deadline the wait extends once, up to allocated_reap_grace_seconds. The prompt is delivered pre-launch, so a timeout here never drops it; the restarter still reaps a genuinely stuck row.",
+        description="Timeout (seconds) for polling a launched agent's pid claim. It must cover the child's whole pre-claim segment — python startup, imports, the schema assert, the placement SELECT — which on a loaded box has run past the old 10s and cost a live child its row. Not the only defense: if the launched process is still alive at the deadline the wait extends once, up to boot_reap_grace_seconds. The prompt is delivered pre-launch, so a timeout here never drops it; the restarter still reaps a genuinely stuck row.",
         json_schema_extra={
             "restart_required": "gateway",
             "writable": True,
@@ -75,7 +75,7 @@ class GatewaySettings(EnvSettings):
     agent_boot_budget_seconds: float = Field(
         default=90.0,
         alias="AVA_AGENT_BOOT_BUDGET_SECONDS",
-        description="Hard ceiling on an agent's whole pre-claim boot, enforced by the child's own watchdog alongside agent_boot_stall_seconds — whichever comes first. Must stay below allocated_reap_grace_seconds (pinned by tests/shared/test_timing_topology.py). The stall window alone bounds a boot only at phases x stall, a product that grows silently the moment a boot phase is added; a boot that outlived the grace would have its row taken by the restarter's allocated-reaper while the child was still alive and progressing — the 2026-07-30 incident's exact failure, relocated from the launcher to the reaper. This ceiling makes 'the child is gone before the reaper can claim' true by construction instead of by arithmetic over the phase count.",
+        description="Hard ceiling on an agent's whole pre-claim boot, enforced by the child's own watchdog alongside agent_boot_stall_seconds — whichever comes first. Must stay below boot_reap_grace_seconds (pinned by tests/shared/test_timing_topology.py). The stall window alone bounds a boot only at phases x stall, a product that grows silently the moment a boot phase is added; a boot that outlived the grace would have its row taken by the restarter's dead-birth reaper while the child was still alive and progressing — the 2026-07-30 incident's exact failure, relocated from the launcher to the reaper. This ceiling makes 'the child is gone before the reaper can claim' true by construction instead of by arithmetic over the phase count.",
         json_schema_extra={
             "restart_required": "gateway",
             "writable": True,

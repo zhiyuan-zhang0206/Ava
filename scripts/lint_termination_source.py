@@ -14,8 +14,8 @@ NULL is **permanently** unresurrectable: a write site that forgets to stamp leav
 row that nothing will ever bring back, silently stranding whatever inbound work that
 agent still had queued. The failure is invisible — no error, no log, just an agent
 that never comes back — which is exactly the kind of hole a doc comment does not
-hold. `agent/_starting.py:_mark_allocated_terminated` violated it undetected from
-the day the column landed.
+hold. A prior pre-claim termination path violated it undetected from the day the
+column landed.
 
 So the invariant is a property of the CODE PATHS, not of the stored data, and this
 is a code-level check. A DB `CHECK (status <> 'terminated' OR termination_source IS

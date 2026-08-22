@@ -134,7 +134,7 @@ def _agent_population(min_agents: int) -> bool:
     try:
         with shared.db.connect(autocommit=True) as conn, conn.cursor() as cur:
             cur.execute(
-                "SELECT COUNT(*) FROM agents_meta WHERE status IN ('starting', 'running', 'idling') "
+                "SELECT COUNT(*) FROM agents_meta WHERE status IN ('running', 'idling') "
                 "AND lease_expires_at > now()"
             )
             row = cur.fetchone()

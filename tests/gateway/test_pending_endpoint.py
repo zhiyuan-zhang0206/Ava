@@ -24,7 +24,7 @@ def _seed_agent(db_conn: psycopg.Connection) -> int:
         assert row is not None
         new_id = row[0]
         cur.execute(
-            "INSERT INTO agents_meta (id, spawner, status) VALUES (%s, 'test', 'allocated')",
+            "INSERT INTO agents_meta (id, spawner, status) VALUES (%s, 'test', 'idling')",
             (new_id,),
         )
     db_conn.commit()

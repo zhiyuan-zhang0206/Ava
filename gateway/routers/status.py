@@ -91,7 +91,7 @@ def get_stats_dashboard(
     """Pull all data for the sidebar-top stats card in one shot.
 
     Data sources:
-    - `live_count`: agents_meta table — all non-terminated agents (allocated/starting/running/idling/restarting/hibernating)
+    - `live_count`: agents_meta table — all non-terminated agents (running/idling/restarting/hibernating)
     - `tokens` / `cost_usd`: Prometheus (task #1197 — the OTLP-mapped
       llm_usage counters via gateway/prom_metrics, windowed by `increase`)
     - average turn duration + warning/error counts: Loki's unified event stream

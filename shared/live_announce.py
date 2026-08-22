@@ -50,7 +50,7 @@ from shared.redis_client import publish_best_effort, publish_best_effort_sync
 # The publish is therefore routed through the best-effort primitives, which never
 # raise — a redis outage must degrade to "the frontend refreshes on its next full
 # fetch", never propagate back and crash the caller (a raise at the tail of
-# `mark_agent_status` / `enter_starting_state` used to kill the agent process).
+# `mark_agent_status` / `claim_agent_row` used to kill the agent process).
 
 
 def publish_agent_spawned_sync(conn: psycopg.Connection, agent_id: int) -> None:

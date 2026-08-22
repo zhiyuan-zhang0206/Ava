@@ -114,8 +114,8 @@ async def post_agent_terminate(
 
     Smart liveness detection: if the process corresponding to
     agents_meta.pid is gone (zombie row, commonly from early-stage
-    EmptyInputError residuals / respawn_agent failures leaving
-    'allocated'), force UPDATE status='terminated' directly without the
+    EmptyInputError residuals / respawn_agent failures leaving an unclaimed
+    row), force UPDATE status='terminated' directly without the
     inbound path — an inbound delivered to a dead process is pending
     forever and the user can never clear it.
 
@@ -187,7 +187,7 @@ async def post_agent_resurrect(
     agent_id: int,
     body: ResurrectAgentRequest = Body(default_factory=ResurrectAgentRequest),  # noqa: B008
 ) -> ResurrectAgentResponse:
-    """Resurrect a terminated agent — UPDATE 'terminated' -> 'allocated' +
+    """Resurrect a terminated agent — UPDATE 'terminated' -> 'idling' +
     launch a fresh detached process attached to the same agent_id
     (LangGraph state preserved; the agent wakes and continues from its last
     turn).
@@ -212,7 +212,7 @@ async def post_agent_resurrect(
 
     404: agent_id does not exist (AgentNotFound -> handler returns 404 + reason).
     `already_alive`: agent is still alive
-        (allocated/starting/running/idling/restarting); resurrect does not
+        (running/idling/restarting); resurrect does not
         apply — idempotent.
     """
     forwarded = await _forward_to_home_machine(

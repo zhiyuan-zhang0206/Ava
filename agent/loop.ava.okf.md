@@ -14,7 +14,7 @@ Thin launcher for Ava agent processes. Each OS process is permanently bound to a
 ## Core Responsibilities
 
 - **Process entry point**: `main()` parses `--agent-id`, initializes DB/Redis/LLM/Saver, starts the per-turn run loop (`agent/_runloop.py`): one `graph.ainvoke()` per TURN, each wrapped in its own `turn_span` root span (one trace = one turn); claim ends an invocation at the turn boundary (goto END, `exit_requested=False`) and the loop re-invokes on the same checkpointer thread
-- **State transitions**: `allocated → starting → running` (`_starting.py` declares `starting` before heavy imports, claim_node transitions to `running` on first run)
+- **State transitions**: `idling (unclaimed) → running` (`_starting.py` claims before heavy imports; the run loop needs no second transition)
 - **Inbound messages**: waits for messages via Redis pub/sub channel, `await listener.wait_one()` in claim_node
 - **Normal exit**: receives terminate inbound → claim_node goto END with `exit_requested=True` → the run loop returns → `_notify_exit()` → process exits
 - **Lifecycle signals**: SIGHUP/SIGTERM → SystemExit → `_notify_exit()` in finally block
