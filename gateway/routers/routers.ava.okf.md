@@ -38,7 +38,8 @@ Gateway's 37 route modules, split by business domain under `gateway/routers/<dom
 - **timeline** (`/api/agents/{id}/timeline`) — agent timeline messages
 - **notices** (`/api/notices/*`) — `ava.ui.notify()` user notifications; rows carry `task_id` (`null` when unattached), driving notice→task linkage in the inspector
 - **pages** (`/api/pages`, `/api/agents/{id}/pages`) — `ava.ui.show/close` registered UI pages + the streaming reverse proxy for them (`/api/agents/{id}/pages/{name}/...` → the page server; browser never dials it directly)
-- **grafana** (`/grafana/*`, outside `/api`) — optional streaming reverse proxy to a co-located Grafana instance (`AVA_GRAFANA_PROXY_ENABLED`, `AVA_GRAFANA_HOST`/`AVA_GRAFANA_PORT`, default off → 404), auth-gated by the same cluster middleware, for dashboard iframes
+- **grafana** (`/grafana/*`, outside `/api`) — the authenticated, read-only
+  browser boundary for loopback Grafana: [[gateway/routers/grafana.ava.okf.md]]
 - **ui_contributions** (`/api/ui/contributions`) — the merged, plugin-attributed `contributions.ui` declaration set of the cluster's ENABLED plugins (theme token packs today; nav + agent-inspect sections as those slices land). Read straight from each plugin's `ava-plugin.json` — no plugin code is imported to answer it [[okf/plugins/package-manifest.ava.okf.md]]
 - **plugin_ui** (`/api/plugin-ui/<plugin>/…`) — the sibling mount of `pages`: static files from an ENABLED plugin's own `ui/` directory, for the sandboxed iframe the console embeds. `pages`' segment validation plus a resolved-path containment check
 

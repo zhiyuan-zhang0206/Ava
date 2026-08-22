@@ -108,6 +108,65 @@ def _attrs_of(dp: Any) -> dict[str, Any]:
     return dict(dp.attributes)
 
 
+def test_observable_process_metrics_share_otlp_backend_and_dimensions(otlp_backend) -> None:
+    backend, _log_exporter, metric_reader = otlp_backend
+    state = {"active": 2, "rejected": 3}
+    backend.register_observable_metric(  # pyright: ignore[reportUnknownMemberType]
+        "ava_test_capacity_active",
+        kind="gauge",
+        callback=lambda: [(state["active"], {"resource": "http"})],
+        description="test active capacity",
+    )
+    backend.register_observable_metric(  # pyright: ignore[reportUnknownMemberType]
+        "ava_test_capacity_rejected",
+        kind="counter",
+        callback=lambda: [(state["rejected"], {"resource": "http"})],
+        description="test cumulative rejections",
+    )
+    backend.export_batch([_event()])  # pyright: ignore[reportUnknownMemberType]
+
+    metrics = _metrics(metric_reader)
+    active = metrics["ava_test_capacity_active"].data.data_points[0]
+    rejected = metrics["ava_test_capacity_rejected"].data.data_points[0]
+    assert active.value == 2
+    assert rejected.value == 3
+    assert _attrs_of(active) == {
+        "machine": telemetry.metric_dimensions()["machine"],
+        "process": telemetry.process_name(),
+        "resource": "http",
+    }
+
+    state["active"] = 1
+    state["rejected"] = 4
+    metrics = _metrics(metric_reader)
+    assert metrics["ava_test_capacity_active"].data.data_points[0].value == 1
+    assert metrics["ava_test_capacity_rejected"].data.data_points[0].value == 4
+
+
+def test_observable_callback_failure_reports_once_without_raising(
+    otlp_backend,
+) -> None:
+    backend: Any = otlp_backend[0]
+    metric_reader: Any = otlp_backend[2]
+    reports: list[str] = []
+    backend._report = reports.append
+
+    def fail() -> list[tuple[int, dict[str, str]]]:
+        raise RuntimeError("observer broke")
+
+    backend.register_observable_metric(  # pyright: ignore[reportUnknownMemberType]
+        "ava_test_broken_observer",
+        kind="gauge",
+        callback=fail,
+        description="broken observer test",
+    )
+    backend.export_batch([_event()])  # pyright: ignore[reportUnknownMemberType]
+    _metrics(metric_reader)
+    _metrics(metric_reader)
+    assert len(reports) == 1
+    assert "callback failed" in reports[0]
+
+
 # ── signal mapping ───────────────────────────────────────────────────────────
 
 

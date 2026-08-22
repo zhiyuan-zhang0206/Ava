@@ -17,10 +17,10 @@ import json
 import os
 from pathlib import Path
 
-# The LGTM host's Grafana. Loopback is the single-box default; set
-# AVA_GRAFANA_URL when the stack lives on another machine, so the link in the
-# report is one the reader can actually open.
-_GRAFANA = os.environ.get("AVA_GRAFANA_URL", "http://localhost:3003")
+# Grafana's browser entry is the authenticated gateway subpath, never the
+# loopback :3003 upstream. AVA_GRAFANA_URL remains an explicit report override.
+_GATEWAY = os.environ.get("AVA_GATEWAY_URL", "http://localhost:8000").rstrip("/")
+_GRAFANA = os.environ.get("AVA_GRAFANA_URL", f"{_GATEWAY}/grafana")
 
 
 def _esc(text: object) -> str:

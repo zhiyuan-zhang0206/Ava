@@ -27,6 +27,10 @@ unexposed. Every collector mirrors its locally produced traces to local JSONL
 surface, and the local recovery record `ava trace ship` replays when the live
 fan-out missed data.
 
+The browser read boundary is the authenticated gateway Grafana proxy
+([[gateway/routers/grafana.ava.okf.md]]). Remote OTLP on the gateway collector
+remains the only cross-machine observability write entry.
+
 - `shared/telemetry_otlp.py` — events → OTLP logs + metrics when enabled
   (default **on**); disposable exec children (`AVA_EXEC_REQUEST_FILE`) always
   skip this export.
@@ -54,6 +58,8 @@ fan-out missed data.
   payload fields become Prometheus series via a per-field disposition, a
   per-process Resource, and latency-shaping Views — the full mapping contract
   is its own node: [[shared/telemetry-otlp/metrics-mapping.ava.okf.md]].
+  Process observers share it:
+  [[process-observers.ava.okf.md]].
 - **Traces** — exported by `shared/trace.py` to the sidecar's `/v1/traces`
   (OTLP/JSON, content-stripped before leaving the process); the sidecar's
   file exporter mirrors each batch to `$AVA_HOME/traces/spans.jsonl`

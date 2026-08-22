@@ -66,11 +66,21 @@ import os
 import queue
 import threading
 import time
-from typing import Any
+from collections.abc import Callable, Iterable
+from typing import Any, Literal
 
 from shared.telemetry import Event
 
-__all__ = ["endpoint_reachable", "export_batch", "flush", "shutdown"]
+__all__ = [
+    "endpoint_reachable",
+    "export_batch",
+    "flush",
+    "register_observable_metric",
+    "shutdown",
+]
+
+ObservableKind = Literal["counter", "gauge"]
+ObservableCallback = Callable[[], Iterable[tuple[int | float, dict[str, str]]]]
 
 # ── knobs ─────────────────────────────────────────────────────────────────────
 
@@ -206,6 +216,9 @@ class _OtlpBackend:
         self._metric_provider: Any = None
         self._meter: Any = None
         self._instruments: dict[tuple[str, str], Any] = {}
+        self._observable_specs: dict[str, tuple[ObservableKind, ObservableCallback, str, str]] = {}
+        self._observable_instruments: dict[str, Any] = {}
+        self._observable_failures: set[str] = set()
         self._init_attempted = False
         self._thread: threading.Thread | None = None
 
@@ -305,12 +318,81 @@ class _OtlpBackend:
                     return False
                 self._logs, self._metric_provider = _build_providers(endpoint)
             self._meter = self._metric_provider.get_meter("ava.telemetry")
+            self._ensure_observable_metrics()
             self._thread = threading.Thread(target=self._run, daemon=True, name="otlp-exporter")
             self._thread.start()
             return True
         except Exception as exc:  # report once, disable for the process lifetime
             self._report(f"OTLP backend init failed — OTLP side disabled for this process: {exc!r}")
             return False
+
+    def register_observable_metric(
+        self,
+        name: str,
+        *,
+        kind: ObservableKind,
+        callback: ObservableCallback,
+        description: str,
+        unit: str = "1",
+    ) -> None:
+        """Register one process-state observer without opening an exporter.
+
+        Registration happens during service startup. Collection runs later on
+        the SDK metrics thread; callback failures shed that observation and
+        never reach the service thread.
+        """
+        spec = (kind, callback, description, unit)
+        existing = self._observable_specs.get(name)
+        if existing is not None and existing != spec:
+            raise ValueError(f"observable metric {name!r} registered twice")
+        self._observable_specs[name] = spec
+        if self._meter is not None:
+            self._ensure_observable_metrics()
+
+    def _ensure_observable_metrics(self) -> None:
+        from opentelemetry.metrics import Observation
+
+        from shared.telemetry import metric_dimensions
+
+        for name, (kind, callback, description, unit) in self._observable_specs.items():
+            if name in self._observable_instruments:
+                continue
+
+            def observe(
+                _options: object,
+                callback: ObservableCallback = callback,
+                name: str = name,
+            ) -> Iterable[Any]:
+                try:
+                    base = metric_dimensions()
+                    return [
+                        Observation(value, {**base, **attributes})
+                        for value, attributes in callback()
+                    ]
+                except Exception as exc:
+                    if name not in self._observable_failures:
+                        self._observable_failures.add(name)
+                        self._report(
+                            f"observable metric {name!r} callback failed; observation shed: {exc!r}"
+                        )
+                    return []
+
+            constructor = (
+                self._meter.create_observable_counter
+                if kind == "counter"
+                else self._meter.create_observable_gauge
+            )
+            try:
+                self._observable_instruments[name] = constructor(
+                    name,
+                    callbacks=[observe],
+                    unit=unit,
+                    description=description,
+                )
+            except Exception as exc:
+                if name not in self._observable_failures:
+                    self._observable_failures.add(name)
+                    self._report(f"observable metric {name!r} registration failed: {exc!r}")
 
     def _run(self) -> None:
         """Worker loop: map + emit queued events to the OTel log processor."""
@@ -606,6 +688,27 @@ def export_batch(events: list[Event]) -> None:
     No-op when AVA_TELEMETRY_OTLP_ENABLED is off; otherwise best-effort and
     fully isolated — see the module docstring."""
     backend.export_batch(events)
+
+
+def register_observable_metric(
+    name: str,
+    *,
+    kind: ObservableKind,
+    callback: ObservableCallback,
+    description: str,
+    unit: str = "1",
+) -> None:
+    """Register a process-state metric on the shared OTLP backend."""
+    try:
+        backend.register_observable_metric(
+            name,
+            kind=kind,
+            callback=callback,
+            description=description,
+            unit=unit,
+        )
+    except Exception as exc:
+        backend._report(f"observable metric {name!r} registration failed: {exc!r}")
 
 
 def flush() -> None:

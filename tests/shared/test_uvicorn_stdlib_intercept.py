@@ -80,13 +80,13 @@ def test_uvicorn_access_info_gated_away(loguru_records: list[dict]) -> None:  # 
     )
 
 
-def test_gateway_uvicorn_run_passes_log_config_none() -> None:
+def test_gateway_uvicorn_run_preserves_logging_and_bounds_websocket_frames() -> None:
     """The gateway's `uvicorn.run` call must stay `log_config=None` — the
     whole point of #970. Guarded statically so a future edit cannot silently
     reintroduce uvicorn's dictConfig clobber."""
     src = (_REPO_ROOT / "gateway" / "app.py").read_text()
     tree = ast.parse(src)
-    found: list[ast.keyword] = []
+    found: dict[str | None, ast.expr] = {}
     for node in ast.walk(tree):
         if (
             isinstance(node, ast.Call)
@@ -95,8 +95,11 @@ def test_gateway_uvicorn_run_passes_log_config_none() -> None:
             and isinstance(node.func.value, ast.Name)
             and node.func.value.id == "uvicorn"
         ):
-            found = [k for k in node.keywords if k.arg == "log_config"]
+            found = {keyword.arg: keyword.value for keyword in node.keywords}
             break
     assert found, "uvicorn.run call not found in gateway/app.py"
-    assert len(found) == 1
-    assert isinstance(found[0].value, ast.Constant) and found[0].value.value is None
+    log_config = found["log_config"]
+    assert isinstance(log_config, ast.Constant) and log_config.value is None
+    assert ast.unparse(found["ws_max_size"]) == "grafana_router.MAX_WS_MESSAGE_BYTES"
+    max_queue = found["ws_max_queue"]
+    assert isinstance(max_queue, ast.Constant) and max_queue.value == 1

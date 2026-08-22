@@ -14,8 +14,9 @@ Prometheus translation adds unit suffixes (`_ratio`, `_bytes`) and `_total` on
 monotonic counters, so they cannot be derived from the OTLP names by eye.
 R14-R16 are the collector delivery layer: current queue pressure, NEW enqueue
 failures in a bounded window, and a recently-seen host whose collector stopped
-reporting. They use the collector's own Prometheus endpoint, scraped by that
-same sidecar and relayed with the infrastructure pipeline.
+reporting. R17 watches process-local Grafana proxy capacity. They use
+Prometheus too, but R17 travels through the shared app OTLP metrics pipeline,
+not the collector's `metrics/infra` scrape pipeline.
 """
 
 from __future__ import annotations
@@ -57,6 +58,7 @@ _EXPECTED_UIDS = {
     "ava-ops-otelcol-queue-pressure",
     "ava-ops-otelcol-enqueue-failures",
     "ava-ops-otelcol-host-silent",
+    "ava-ops-grafana-proxy-capacity",
 }
 
 # The infra rules and the metric each one is built on. A rename on the
@@ -105,6 +107,15 @@ def _threshold_params(rule: dict[str, Any]) -> list[list[Any]]:
 def test_rules_have_expected_uids() -> None:
     rules = _load_rules()
     assert {r["uid"] for r in rules} == _EXPECTED_UIDS
+
+
+def test_rule_header_names_the_shipped_lifecycle_and_metric_families() -> None:
+    source = _RULES.read_text(encoding="utf-8")
+    assert "127.0.0.1:3003" in source and "bind-mounted" in source
+    assert "Docker Grafana service" in source
+    assert "GATEWAY PROCESS metrics (R17)" in source
+    assert "INFRASTRUCTURE metrics (R8-R12, R14-R16" in source
+    assert "_update_local.py" not in source and "launchctl" not in source
 
 
 def test_rules_never_query_postgres() -> None:
@@ -382,6 +393,18 @@ def test_collector_silence_rule_tracks_recently_seen_hosts() -> None:
     assert "max by (host)" in expr
     assert rule["for"] == "0m", "the 5m absence window is already the debounce"
     assert "{{ $labels.host }}" in rule["annotations"]["summary"]
+
+
+def test_grafana_capacity_rule_requires_sustained_new_rejections() -> None:
+    rules = {r["uid"]: r for r in _load_rules()}
+    rule = rules["ava-ops-grafana-proxy-capacity"]
+    expr = _exprs(rule, "prometheus")[0]
+    assert "increase(ava_grafana_proxy_capacity_rejected_total[5m])" in expr
+    assert "sum by (machine, resource)" in expr
+    assert _threshold_params(rule) == [[5]]
+    assert rule["for"] == "5m"
+    assert "{{ $labels.machine }}" in rule["annotations"]["summary"]
+    assert "{{ $labels.resource }}" in rule["annotations"]["summary"]
 
 
 def test_every_rule_is_silent_on_no_data_and_datasource_error() -> None:

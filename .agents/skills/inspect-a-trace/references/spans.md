@@ -20,7 +20,7 @@ Three sources, in the order you should reach for them:
 |---|---|---|
 | **Tempo** | `http://localhost:3200` | finding traces (indexed, cross-agent) |
 | **Local mirror** | `$AVA_HOME/traces/spans*.jsonl` | fetching one whole trace (complete, no size cap, no network) |
-| **Grafana** | `http://localhost:3003`, datasource uid `tempo` | letting a human browse |
+| **Grafana** | `${AVA_GATEWAY_URL}/grafana/`, datasource uid `tempo` | letting an Ava-authenticated human browse |
 
 Spans are **metadata-only**. Prompts, completions, tool arguments and results
 are stripped at record time (`shared/trace.py`) — nothing you do to Tempo will

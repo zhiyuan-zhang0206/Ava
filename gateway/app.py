@@ -15,7 +15,7 @@ The non-JSON response surface is deliberately small and enumerated:
 - `/api/agents/{id}/pages/{name}/...` (`gateway/routers/pages.py`) — a
   streaming reverse proxy to an agent's own page server (arbitrary content).
 - `/grafana/*` (`gateway/routers/grafana.py`) — streaming reverse proxy to a
-  co-located Grafana instance (HTML dashboard, default off → 404).
+  co-located Grafana instance (HTML dashboard; loopback backend required).
 All four sit behind the normal session-cookie / bearer-secret middleware.
 
 Design-wise, the gateway (spawn / send_message) is centralized under
@@ -69,6 +69,7 @@ from fastapi.responses import JSONResponse
 import shared.db
 from gateway import _idempotency, _latency, _pause_policy, loki_query_budget
 from gateway import mcp_endpoint as _mcp_endpoint
+from gateway.routers import _grafana_capacity as grafana_capacity
 from gateway.routers import (
     _machine_pause as machine_pause_router,
 )
@@ -242,6 +243,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # Cheap when the proxy is disabled: no connection exists until the first
     # proxied request.
     app.state.grafana_client = grafana_router.build_proxy_client()
+    grafana_capacity.register_metrics()
 
     # Register the OS-level health-probe cron (launchd plist on macOS, crontab
     # on Linux). This is the primary registration path — every gateway start
@@ -310,6 +312,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
             yield
     finally:
         app.state.mcp_manager = None
+        # Restart (including cluster-secret rotation) revokes every Grafana
+        # Live handshake made by this process before its listener disappears.
+        await grafana_router.close_live_websockets()
         await app.state.grafana_client.aclose()
         app.state.latency_flusher.cancel()
         with suppress(asyncio.CancelledError):
@@ -757,4 +762,6 @@ def main() -> None:
         reload=reload,
         reload_dirs=["gateway", "shared", "ava", "agent"] if reload else None,
         log_config=None,
+        ws_max_size=grafana_router.MAX_WS_MESSAGE_BYTES,
+        ws_max_queue=1,
     )

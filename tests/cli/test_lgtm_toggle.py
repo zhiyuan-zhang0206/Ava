@@ -31,7 +31,7 @@ def _wire(
     monkeypatch.setattr(_lgtm, "lgtm_compose_dir", lambda _repo: compose_dir)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     monkeypatch.setattr(commands_ns, "_repo_root", lambda: tmp_path / "repo")
     monkeypatch.setattr(_lgtm.shutil, "which", lambda _name: "/usr/local/bin/docker")  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-
+    monkeypatch.setattr(_lgtm, "machine_role", lambda: frozenset({"gateway"}))
     calls: list[tuple[list[str], Path]] = []
 
     def fake_run(cmd: list[str], **kw: object) -> _Result:
@@ -47,7 +47,7 @@ def test_on_writes_marker_and_runs_start(monkeypatch: pytest.MonkeyPatch, tmp_pa
 
     assert _lgtm.cmd_lgtm_on() == 0
     assert marker.exists()
-    assert [c[0] for c in calls] == [["bash", "start.sh"]]
+    assert calls[0][0][-2:] == ["bash", "start.sh"]
     assert calls[0][1].name == "lgtm"
 
 
@@ -59,7 +59,7 @@ def test_on_is_idempotent_with_existing_marker(
 
     assert _lgtm.cmd_lgtm_on() == 0
     assert marker.exists()
-    assert [c[0] for c in calls] == [["bash", "start.sh"]]
+    assert calls[0][0][-2:] == ["bash", "start.sh"]
 
 
 def test_off_removes_marker_then_stops(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -93,6 +93,17 @@ def test_off_without_marker_still_stops(monkeypatch: pytest.MonkeyPatch, tmp_pat
 def test_on_without_docker_fails_fast(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     marker, calls = _wire(monkeypatch, tmp_path)
     monkeypatch.setattr(_lgtm.shutil, "which", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+
+    assert _lgtm.cmd_lgtm_on() == 1
+    assert not marker.exists()
+    assert calls == []
+
+
+def test_on_pure_runner_fails_before_writing_marker(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    marker, calls = _wire(monkeypatch, tmp_path)
+    monkeypatch.setattr(_lgtm, "machine_role", lambda: frozenset({"agent-runner"}))
 
     assert _lgtm.cmd_lgtm_on() == 1
     assert not marker.exists()

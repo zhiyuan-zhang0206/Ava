@@ -329,8 +329,9 @@ Every agent turn records an OTel trace to a local OTLP/JSON mirror
 source), replayed to Tempo by `ava trace ship`; the unified event stream
 exports live over OTLP/HTTP to Loki (logs) and Prometheus (metrics). The
 LGTM backend (Tempo + Loki + Prometheus + Grafana, docker compose) serves
-Grafana at http://localhost:3003 — traces, logs, and metrics in one UI — and
-backs the gateway's /ops + inspect endpoints:
+traces, logs, and metrics in one UI through the authenticated gateway
+`/grafana/` path; every backend port, including Grafana 3003, is loopback-only.
+It also backs the gateway's /ops + inspect endpoints:
 [`deploy/lgtm/README.md`](../deploy/lgtm/README.md). See
 [`features/observability.md`](features/observability.md) for the
 full design.

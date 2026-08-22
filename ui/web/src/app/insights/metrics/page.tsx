@@ -10,10 +10,10 @@
 // The backend /api/metrics + /api/metrics/agents endpoints are intentionally
 // left in place: scripts/metrics.py (the CLI mirror of shared/metrics.py) and
 // any script consumers still read them, and the redirect notice points there
-// as the fallback when the Grafana proxy is off (AVA_GRAFANA_PROXY_ENABLED).
+// as the fallback when the Grafana backend is unavailable.
 //
 // The auto-redirect is CONDITIONAL on the /grafana proxy actually answering
-// (HEAD probe): when the proxy is off or Grafana is down, redirecting would
+// (HEAD probe): when Grafana is down, redirecting would
 // land the user on a broken /insights#ops embed and destroy this page — the
 // only place carrying the fallback (CLI / /api/metrics). The probe keeps the
 // notice (and its fallback) alive in that case.
@@ -24,7 +24,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { buttonVariants } from "@/components/ui/button";
-import { API_BASE } from "@/lib/api";
+import { API_BASE, api } from "@/lib/api";
 import { FLEX } from "@/lib/layout";
 import { cn } from "@/lib/utils";
 
@@ -34,12 +34,13 @@ const REDIRECT_DELAY_MS = 1200;
 
 // Direct Grafana entry (same dashboard + default window the Ops section
 // embeds; the Ops section adds the theme + refresh controls).
-const GRAFANA_DIRECT = `${API_BASE}/grafana/d/ava-ops-main?from=now-24h&to=now&kiosk`;
+const GRAFANA_PATH = "/grafana/d/ava-ops-main?from=now-24h&to=now&kiosk";
+const GRAFANA_DIRECT = `${API_BASE}${GRAFANA_PATH}`;
 
 export default function MetricsRedirectPage() {
   const router = useRouter();
   // null = probe in flight; true = proxy reachable (redirect will fire);
-  // false = proxy off / Grafana down (stay on the fallback notice).
+  // false = Grafana down (stay on the fallback notice).
   const [proxyUp, setProxyUp] = useState<boolean | null>(null);
 
   useEffect(() => {
@@ -48,7 +49,7 @@ export default function MetricsRedirectPage() {
     void (async () => {
       let up: boolean;
       try {
-        up = (await fetch(GRAFANA_DIRECT, { method: "HEAD" })).ok;
+        up = await api.probeGrafana(GRAFANA_PATH);
       } catch {
         up = false; // probe failed — stay on the fallback notice
       }
@@ -83,7 +84,7 @@ export default function MetricsRedirectPage() {
             errors, restarts, delivery backlog) and the plugin metrics
             dashboards.{" "}
             {proxyUp === false
-              ? "Grafana 未响应（反代可能未开启）— 已停留本页，见下方回退路径。"
+              ? "Grafana 未响应 — 已停留本页，见下方回退路径。"
               : "Redirecting…"}
           </p>
         </div>
@@ -100,8 +101,8 @@ export default function MetricsRedirectPage() {
           </a>
         </div>
         <p className="text-[11px] leading-relaxed text-muted-foreground">
-          If Grafana doesn&apos;t load, the gateway&apos;s /grafana proxy may be off
-          (AVA_GRAFANA_PROXY_ENABLED). The raw aggregates are still available via
+          If Grafana doesn&apos;t load, the gateway observability backend may be down.
+          The raw aggregates are still available via
           <code className="mx-1 rounded bg-muted px-1 py-0.5 font-mono">scripts/metrics.py</code>
           and
           <code className="ml-1 rounded bg-muted px-1 py-0.5 font-mono">GET /api/metrics</code>.

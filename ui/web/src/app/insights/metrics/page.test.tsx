@@ -48,10 +48,11 @@ describe("Metrics redirect page", () => {
     expect(direct.getAttribute("href")).toContain("/grafana/d/ava-ops-main?from=now-24h&to=now&kiosk");
     // Fallback note: CLI / API path survives the retirement.
     expect(screen.getByText(/scripts\/metrics\.py/)).toBeTruthy();
-    // Probe: HEAD on the direct Grafana URL.
+    // Probe: HEAD on the gateway Grafana URL through the credentialed API
+    // wrapper, so the cross-origin Ava session cookie is included.
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining("/grafana/d/ava-ops-main"),
-      { method: "HEAD" },
+      { method: "HEAD", credentials: "include" },
     );
   });
 
