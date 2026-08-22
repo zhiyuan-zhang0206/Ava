@@ -14,6 +14,40 @@ import pytest
 from cli.commands import _pgbouncer as pg
 
 
+class _CompletedOk:
+    """A successful stand-in for the PgBouncer launch subprocess."""
+
+    returncode = 0
+    stderr = ""
+
+
+def _ensure_from_home_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Run the fresh-start path while keeping config writes real and local."""
+    monkeypatch.setattr(pg, "ava_home", lambda: tmp_path)
+    monkeypatch.setattr(pg, "pgbouncer_bin", lambda: str(Path(__file__)))
+    monkeypatch.setattr(pg, "_live_pg_socket_dir", lambda _port: tmp_path / "pg-socket")  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(pg, "_bind_addrs", lambda _secret: ["127.0.0.1"])  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(pg, "_running_pid", lambda: None)
+    monkeypatch.setattr(pg, "_wait_for_reachable_bind_gated", lambda _secret: True)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(pg.subprocess, "run", lambda *_args, **_kwargs: _CompletedOk())  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(pg, "_admin_reachable", lambda *_args, **_kwargs: True)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(pg, "pgbouncer_public_listener_reachable", lambda *_args: True)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(pg, "_report_backend_verification", lambda *_args: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+
+    assert (
+        pg.ensure_pgbouncer(
+            pg_port=5433,
+            listen_port=6433,
+            db_name="ava_main",
+            role="ava_main",
+            cluster_secret="sec",  # noqa: S106 — test fixture
+            runner_password=None,
+        )
+        == 0
+    )
+    return pg._userlist_path()
+
+
 def test_render_userlist_without_runner_entry_is_unchanged() -> None:
     assert pg._render_userlist("ava_main", "sec") == '"ava_main" "sec"\n'
 
@@ -46,3 +80,25 @@ def test_runner_password_from_env_absent_is_empty(
     monkeypatch.setattr(pg, "ava_home", lambda: tmp_path)
     (tmp_path / ".env").write_text("AVA_CLUSTER_SECRET=cs\n")
     assert pg.runner_password_from_env() == ""
+
+
+def test_ensure_pgbouncer_keeps_runner_entry_from_home_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    env_path = tmp_path / ".env"
+    env_path.write_text("AVA_RUNNER_DB_PASSWORD=" + "abc123" + "\n")
+    env_path.chmod(0o400)
+
+    userlist = _ensure_from_home_env(tmp_path, monkeypatch)
+
+    assert userlist.read_text() == '"ava_main" "sec"\n"ava_runner" "abc123"\n'
+
+
+def test_ensure_pgbouncer_without_runner_password_keeps_legacy_userlist(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / ".env").write_text("AVA_CLUSTER_SECRET=cs\n")
+
+    userlist = _ensure_from_home_env(tmp_path, monkeypatch)
+
+    assert userlist.read_text() == '"ava_main" "sec"\n'

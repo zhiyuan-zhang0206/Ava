@@ -466,8 +466,13 @@ def ensure_pgbouncer(
     so a transient network blip cannot hold `ava start` hostage. After any
     (re)start the pooler must prove it listens on the reachable address too.
 
+    When `runner_password` is omitted, it is resolved from this home's `.env`
+    before the userlist rewrite.
+
     Only called when AVA_PGBOUNCER_ENABLED (gated by the caller in
     `ensure_cluster_instance`)."""
+    if runner_password is None:
+        runner_password = runner_password_from_env()
     binary = pgbouncer_bin()
     if not Path(binary).exists() and shutil.which(binary) is None:
         # Enabled but pgbouncer is not installed. Fail fast (do NOT silently fall back
