@@ -56,14 +56,19 @@ def _free_port() -> int:
         return int(listener.getsockname()[1])
 
 
-def _request(url: str, *, data: bytes | None = None) -> tuple[int, str, bytes]:
+def _request(
+    url: str, *, data: bytes | None = None, headers: dict[str, str] | None = None
+) -> tuple[int, str, bytes]:
     class NoRedirect(urllib.request.HTTPRedirectHandler):
         def redirect_request(self, *_args: object, **_kwargs: object) -> None:
             return None
 
     opener = urllib.request.build_opener(NoRedirect)
+    request = urllib.request.Request(  # noqa: S310 - loopback URL assembled by this test
+        url, data=data, headers=headers or {}
+    )
     try:
-        response = opener.open(url, data=data, timeout=5)
+        response = opener.open(request, timeout=5)
     except urllib.error.HTTPError as error:
         return error.code, error.headers.get("Location", ""), error.read()
     with response:
@@ -191,6 +196,7 @@ def test_anonymous_viewer_can_open_tempo_trace_in_explore(tmp_path: Path) -> Non
         save_status, _, _ = _request(
             f"{base_url}/api/dashboards/db",
             data=b'{"dashboard":{"title":"must-not-save"},"overwrite":false}',
+            headers={"Content-Type": "application/json"},
         )
         assert save_status == 403
     finally:
