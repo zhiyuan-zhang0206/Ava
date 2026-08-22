@@ -47,18 +47,21 @@ must never block, break, or slow the PG write.** Three layers:
    call again (``_export_otlp``) — even a programming error here cannot cost a
    batch its PG copy.
 
-Flag semantics: ``AVA_TELEMETRY_OTLP_ENABLED`` / ``AVA_TELEMETRY_OTLP_ENDPOINT``
-are read from the startup-frozen settings singleton (``restart_required`` on
-the config fields). This is **startup-applied**, matching every other config
-field in the system — there is no live-reload mechanism in ``shared/config``,
-and the isolation above makes the flag a rare emergency kill switch, not the
-primary defense. Flipping it + restarting is the documented apply path.
+Flag semantics: disposable exec children (identified by their
+``AVA_EXEC_REQUEST_FILE`` handshake) are always off. Other processes read
+``AVA_TELEMETRY_OTLP_ENABLED`` / ``AVA_TELEMETRY_OTLP_ENDPOINT`` from the
+startup-frozen settings singleton (``restart_required`` on the config fields).
+This is **startup-applied**, matching every other config field in the system —
+there is no live-reload mechanism in ``shared/config``, and the isolation above
+makes the flag a rare emergency kill switch, not the primary defense. Flipping
+it + restarting is the documented apply path.
 """
 
 from __future__ import annotations
 
 import contextlib
 import json
+import os
 import queue
 import threading
 import time
@@ -261,9 +264,11 @@ class _OtlpBackend:
 
     @staticmethod
     def _enabled() -> bool:
-        """The AVA_TELEMETRY_OTLP_ENABLED flag, read from the startup-frozen
-        settings singleton. Any read failure degrades to off — the OTLP side
-        must never be the reason an emit path breaks."""
+        """Disable OTLP in disposable exec children; otherwise read the flag
+        from startup-frozen settings. Any read failure degrades to off — the
+        OTLP side must never be the reason an emit path breaks."""
+        if "AVA_EXEC_REQUEST_FILE" in os.environ:
+            return False
         with contextlib.suppress(Exception):
             from shared.config import settings
 

@@ -65,18 +65,14 @@ def _build_child_env(
     windows_job_gate: Path | None = None,
 ) -> dict[str, str]:
     """The child's environment: the parent's own (settings already materialized
-    by dotenv_boot), with OTLP export disabled, plus the identity the session env
-    allowlist deliberately drops (Task #856) and the two envelope paths. The
-    per-agent config maps the agent process popped at boot are re-emitted here so
-    the child's SDK calls see the same effective settings (json in env, never
-    argv — issue #974)."""
+    by dotenv_boot), plus the identity the session env allowlist deliberately
+    drops (Task #856) and the two envelope paths. The per-agent config maps the
+    agent process popped at boot are re-emitted here so the child's SDK calls
+    see the same effective settings (json in env, never argv — issue #974)."""
     env = os.environ.copy()
     if agent_id is not None:
         env["AVA_AGENT_ID"] = str(agent_id)
     env["AVA_PROCESS_PROFILE"] = "agent"
-    # OTLP export belongs to the long-lived agent process. Avoid first constructing
-    # the OTel SDK while this disposable child is in interpreter shutdown.
-    env["AVA_TELEMETRY_OTLP_ENABLED"] = "false"
     env["AVA_EXEC_REQUEST_FILE"] = str(request_path)
     env["AVA_EXEC_RESULT_FILE"] = str(result_path)
     if windows_job_gate is not None:
