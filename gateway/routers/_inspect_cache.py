@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import threading
 from collections.abc import Callable
 from concurrent.futures import Future
@@ -47,6 +48,44 @@ class InspectQueryCache[K, V]:
         if not claim.leader:
             return claim.future.result()
         return self._load_claim(key, claim.future, loader, ttl_s=ttl_s, now=now)
+
+    async def get_or_load_async(
+        self,
+        key: K,
+        loader: Callable[[], V],
+        *,
+        ttl_s: float,
+        now: Callable[[], float],
+    ) -> V:
+        """Async request path: only the leader occupies a worker thread.
+
+        Followers await the loop-neutral concurrent Future directly. Shielding
+        is required because a response deadline cancels the follower task, not
+        the shared claim the synchronous leader will eventually complete.
+        """
+        claim = self._lookup_or_claim(key, now())
+        if isinstance(claim, _CacheHit):
+            return claim.value
+        if not claim.leader:
+            return await asyncio.shield(asyncio.wrap_future(claim.future))
+        # Schedule before the next cancellation point, then shield it. A
+        # response timeout must not land between claiming leadership and
+        # starting the worker, which would leave the key permanently in-flight.
+        leader = asyncio.create_task(
+            asyncio.to_thread(
+                self._load_claim,
+                key,
+                claim.future,
+                loader,
+                ttl_s=ttl_s,
+                now=now,
+            )
+        )
+        # A timed-out caller stops awaiting this task; retrieve a possible late
+        # exception so asyncio does not emit an unobserved-task warning. The
+        # concurrent claim Future still delivers that exception to followers.
+        leader.add_done_callback(lambda task: None if task.cancelled() else task.exception())
+        return await asyncio.shield(leader)
 
     def _lookup_or_claim(self, key: K, current: float) -> _CacheHit[V] | _CacheClaim[V]:
         with self._lock:

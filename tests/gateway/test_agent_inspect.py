@@ -308,10 +308,10 @@ def test_inspect_local_loki_budget_rejection_is_503(
     aid = _insert_agent(db_conn)
     db_conn.commit()
 
-    def reject(*args: Any, **kwargs: Any) -> Any:
+    async def reject(*args: Any, **kwargs: Any) -> Any:
         raise loki_query_budget.LokiQueryBudgetError(reason)
 
-    monkeypatch.setattr(agent_inspect, "_inspect_rows_cached", reject)
+    monkeypatch.setattr(agent_inspect, "_inspect_rows_cached_async", reject)
     with TestClient(app) as client:
         response = client.get(f"/api/agents/{aid}/inspect")
     assert response.status_code == 503
@@ -327,10 +327,10 @@ def test_inspect_loki_transport_failure_is_retriable_503(
     aid = _insert_agent(db_conn)
     db_conn.commit()
 
-    def reject(*args: Any, **kwargs: Any) -> Any:
+    async def reject(*args: Any, **kwargs: Any) -> Any:
         raise httpx.RemoteProtocolError("Loki closed the response")
 
-    monkeypatch.setattr(agent_inspect, "_inspect_rows_cached", reject)
+    monkeypatch.setattr(agent_inspect, "_inspect_rows_cached_async", reject)
     with TestClient(app) as client:
         response = client.get(f"/api/agents/{aid}/inspect")
     assert response.status_code == 503
@@ -1870,11 +1870,11 @@ def test_inspect_releases_live_db_borrow_before_cached_loki_fanout(
 
     pool = TrackingPool()
 
-    def cached_loader(*args: Any, **kwargs: Any) -> Any:
+    async def cached_loader(*args: Any, **kwargs: Any) -> Any:
         assert pool.active is False
         raise StopAfterOrderingProofError
 
-    monkeypatch.setattr(agent_inspect, "_inspect_rows_cached", cached_loader)
+    monkeypatch.setattr(agent_inspect, "_inspect_rows_cached_async", cached_loader)
 
     class RequestState:
         db_pool = pool
@@ -2093,6 +2093,64 @@ def test_inspect_singleflight_cancellation_releases_key_for_retry() -> None:
         cache.get_or_load("same", load, ttl_s=10, now=lambda: 0)
     assert cache.get_or_load("same", load, ttl_s=10, now=lambda: 0) is expected
     assert calls == 2
+
+
+@pytest.mark.asyncio
+async def test_inspect_async_followers_timeout_without_retaining_executor_workers() -> None:
+    """Timed-out followers wait on the shared Future without blocking threads."""
+    cache = InspectQueryCache[str, object](max_entries=2, max_inflight=1)
+    started = threading.Event()
+    release = threading.Event()
+    expected = object()
+    calls = 0
+
+    def blocking_load() -> object:
+        nonlocal calls
+        calls += 1
+        started.set()
+        assert release.wait(timeout=2)
+        return expected
+
+    leader = asyncio.create_task(
+        cache.get_or_load_async("same", blocking_load, ttl_s=10, now=lambda: 0)
+    )
+    for _ in range(100):
+        if started.is_set():
+            break
+        await asyncio.sleep(0.001)
+    assert started.is_set()
+
+    followers = [
+        asyncio.create_task(
+            asyncio.wait_for(
+                cache.get_or_load_async(
+                    "same",
+                    lambda: pytest.fail("a follower must not load"),
+                    ttl_s=10,
+                    now=lambda: 0,
+                ),
+                timeout=0.01,
+            )
+        )
+        for _ in range(64)
+    ]
+    results = await asyncio.gather(*followers, return_exceptions=True)
+    assert all(isinstance(result, TimeoutError) for result in results)
+
+    # A to_thread probe still starts immediately. An implementation that puts
+    # every follower's Future.result() in the shared executor exhausts all of
+    # its workers here until the leader is released.
+    assert await asyncio.wait_for(asyncio.to_thread(lambda: "free"), timeout=1) == "free"
+    assert calls == 1
+
+    release.set()
+    assert await asyncio.wait_for(leader, timeout=1) is expected
+    assert (
+        await cache.get_or_load_async(
+            "same", lambda: pytest.fail("late result must be cached"), ttl_s=10, now=lambda: 0
+        )
+        is expected
+    )
 
 
 def test_inspect_cache_bounds_values_and_distinct_inflight_keys() -> None:

@@ -84,6 +84,13 @@ function render(ui: React.ReactElement) {
   return rtlRender(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
 }
 
+function renderWithGlobalRetries(ui: React.ReactElement) {
+  const qc = new QueryClient({
+    defaultOptions: { queries: { retry: 3, retryDelay: 0 } },
+  });
+  return rtlRender(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
+}
+
 function fixture(overrides: Partial<AgentInspect> = {}): AgentInspect {
   return {
     agent_id: 1,
@@ -133,6 +140,18 @@ function fixture(overrides: Partial<AgentInspect> = {}): AgentInspect {
 }
 
 describe("InspectorPanel", () => {
+  it("owns manual retry instead of inheriting the global automatic retry policy", async () => {
+    getAgentInspect.mockRejectedValue(
+      new Error("HTTP 503: inspector history query timed out; retry"),
+    );
+    renderWithGlobalRetries(<InspectorPanel agentId={1} />);
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Retry inspector" })).toBeTruthy(),
+    );
+    expect(getAgentInspect).toHaveBeenCalledTimes(1);
+  });
+
   it("shows a failed cold load with an explicit retry action", async () => {
     getAgentInspect
       .mockRejectedValueOnce(new Error("HTTP 503: inspector history query timed out; retry"))

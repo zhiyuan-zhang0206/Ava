@@ -546,6 +546,33 @@ def _inspect_rows_cached(
         raise HTTPException(status_code=503, detail="inspect query queue is full") from exc
 
 
+async def _inspect_rows_cached_async(
+    pool: ConnectionPool[Any],
+    agent_id: int,
+    hours: StatsWindowHours | None,
+    *,
+    since_compact: bool,
+    spawned_at: datetime | None = None,
+) -> _InspectAggregates:
+    """Async request twin: followers await single-flight without a worker."""
+    key: _InspectKey = (agent_id, None if hours is None else int(hours), since_compact)
+    try:
+        return await _inspect_query_cache.get_or_load_async(
+            key,
+            lambda: _inspect_blocking(
+                pool,
+                agent_id,
+                hours,
+                since_compact=since_compact,
+                spawned_at=spawned_at,
+            ),
+            ttl_s=_INSPECT_CACHE_TTL_S,
+            now=time_mod.monotonic,
+        )
+    except InspectCacheFullError as exc:
+        raise HTTPException(status_code=503, detail="inspect query queue is full") from exc
+
+
 def cache_clear() -> None:
     """Test seam: drop the inspect response cache."""
     _inspect_query_cache.clear()
@@ -596,8 +623,7 @@ async def get_agent_inspect(
     db = await asyncio.to_thread(db_rows_blocking, pool, agent_id)
     try:
         aggregates = await asyncio.wait_for(
-            asyncio.to_thread(
-                _inspect_rows_cached,
+            _inspect_rows_cached_async(
                 pool,
                 agent_id,
                 hours,
