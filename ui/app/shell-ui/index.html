@@ -294,10 +294,22 @@
         let settled = false;
         let timedOut = false;
         const timeout = window.setTimeout(() => {
-          if (document.visibilityState !== "visible" || (settled && window.location.hash !== "#connecting")) return;
-          timedOut = true;
-          submit.disabled = false;
-          showSetupError("连接超时，请重试。");
+          const recover = () => {
+            if (settled && window.location.hash !== "#connecting") return;
+            timedOut = true;
+            submit.disabled = false;
+            showSetupError("连接超时，请重试。");
+          };
+          if (document.visibilityState === "visible") {
+            recover();
+            return;
+          }
+          const whenVisible = () => {
+            if (document.visibilityState !== "visible") return;
+            document.removeEventListener("visibilitychange", whenVisible);
+            recover();
+          };
+          document.addEventListener("visibilitychange", whenVisible);
         }, SAVE_TIMEOUT_MS);
         try {
           await invoke("shell_save_settings", { patch });

@@ -33,9 +33,11 @@ preserves its existing arbitrary entry and gateway URLs for worktree clusters.
 
 The bundled Chinese onboarding page immediately changes to a 30-second
 connecting state while saving. `shell_save_settings` persists Android-normalized
-settings, then queues its window rebuild after the asynchronous IPC reply, so it
-cannot destroy the webview that must receive that reply. `window.rs` probes the
-console root with a four-second HTTP GET rather than TCP, treats
+settings, then defers the window change until the asynchronous IPC reply flushes.
+Android refreshes the existing webview's prelude and navigates it rather than
+destroying it; desktop keeps its rebuild. A hidden Android page retains its
+timeout recovery until it becomes visible. `window.rs` probes the console root
+with a four-second HTTP GET rather than TCP, treats
 2xx/3xx/401/403 as healthy, and sends a final `reason=unreachable|http|update-window`
 query into the bundled failure screen within the retry budget.
 
@@ -71,7 +73,9 @@ and reloads after its native cookie store receives the session.
 Android has opt-in background residency and local notifications. A generated
 Tauri Gradle project is patched at build time by `android/apply_overlay.py`; the
 checked-in Kotlin plugins control a non-exported `specialUse` foreground service
-and the Android-Keystore secret bridge. The injected SSE bridge listens to
+and the Android-Keystore secret bridge. The overlay also keeps the JNI-named
+Tauri plugin classes and reflectively discovered commands through release
+minification. The injected SSE bridge listens to
 `/api/system` and notifies only on busy-to-idle completion or a newly
 awaiting-response notice. Notification IPC also rechecks persisted consent
 natively. All Android plugin calls leave the main looper before waiting for
@@ -107,6 +111,6 @@ network prefixes.
 - `src-tauri/src/` — Rust lifecycle, settings, ACL, navigation, platform wiring
 - `src-tauri/scripts/` — scripts injected into the remote console
 - `shell-ui/index.html` — bundled onboarding/retry/settings UI
-- `android/` — Kotlin/XML foreground-service and Keystore overlay plus deterministic patcher
+- `android/` — Kotlin/XML/ProGuard foreground-service and Keystore overlay plus deterministic patcher
 - [README](README.md) — local build and signing commands
 - [Future distribution work](../../future/ui-shell.md) — remaining external work

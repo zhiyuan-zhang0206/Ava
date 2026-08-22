@@ -215,3 +215,19 @@ def test_apply_copies_the_keystore_sources_into_the_generated_package(tmp_path: 
     package = main / "java" / Path(*overlay.PACKAGE.split("."))
     assert (package / "AvaSecretStore.kt").is_file()
     assert (package / "AvaSecretPlugin.kt").is_file()
+
+
+def test_apply_copies_the_proguard_rules_that_preserve_plugin_reflection(
+    tmp_path: Path,
+) -> None:
+    main = tmp_path / "app" / "src" / "main"
+    main.mkdir(parents=True)
+    (main / "AndroidManifest.xml").write_text(GENERATED_MANIFEST)
+    gradle = tmp_path / "app" / "build.gradle.kts"
+    gradle.write_text(GENERATED_GRADLE)
+
+    overlay.apply(_OVERLAY.parent, tmp_path)
+    overlay.apply(_OVERLAY.parent, tmp_path)
+
+    rules = (tmp_path / "app" / "proguard-ava.pro").read_text()
+    assert "-keep class com.ava.shell.** { *; }" in rules
