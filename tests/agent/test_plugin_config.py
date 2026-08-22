@@ -331,6 +331,21 @@ def test_skills_to_inject_is_per_agent_overlayable(isolated_registry, unit_home)
     }
 
 
+def test_eval_isolation_fields_are_per_agent_overlayable(isolated_registry, unit_home) -> None:
+    """The eval boundary is selected at spawn and its network exceptions are explicit."""
+    targets = resolve_overlay_targets({"eval_isolation": True, "eval_network_allowlist": ["web"]})
+    assert targets == {
+        "eval_isolation": (None, "eval_isolation"),
+        "eval_network_allowlist": (None, "eval_network_allowlist"),
+    }
+    validate_config_overlay({"eval_isolation": True, "eval_network_allowlist": ["web"]})
+
+
+def test_eval_network_allowlist_rejects_unknown_capability(isolated_registry, unit_home) -> None:
+    with pytest.raises(InvalidConfigOverlay, match="only accepts"):
+        validate_config_overlay({"eval_network_allowlist": ["web", "shell"]})
+
+
 def test_effective_config_snapshot_namespaces_plugin_fields(isolated_registry, unit_home):
     """snapshot prefixes plugin fields with `<plugin>.<field>` to avoid collisions with same-named framework fields."""
     _setup_overlayable_plugin()

@@ -98,7 +98,9 @@ def launch(skill: str, tasks: list[dict[str, Any]], *, model: str | None = None)
         if not safe:
             skipped.append({"source_agent_id": task["agent_id"], "reason": why})
             continue
-        overlay: dict[str, object] | None = {"llm_model": model} if model else None
+        overlay: dict[str, object] = {"eval_isolation": True}
+        if model:
+            overlay["llm_model"] = model
         eval_id = ava.agents.spawn(prompt=task["task_prompt"], config_overlay=overlay)
         runs.append(
             {

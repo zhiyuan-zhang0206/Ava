@@ -111,6 +111,8 @@ class TestRealRoster:
             "system_prompt_extra",
             "agent_communication_style",
             "sdk_disable",
+            "eval_isolation",
+            "eval_network_allowlist",
         }
 
     def test_lifecycle_lookup_rejects_a_non_per_agent_field(self) -> None:

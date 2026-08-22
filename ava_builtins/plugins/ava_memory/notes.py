@@ -29,6 +29,7 @@ from langchain_core.messages import HumanMessage
 
 from agent.messages import NoteTag, system_note_message
 from shared.config import settings
+from shared.config.turn_view import turn_settings
 from shared.log import logger
 from shared.paths import memory_dir, workspace_dir
 
@@ -56,7 +57,7 @@ _FRAMING = (
 def memory_index_note() -> HumanMessage | None:
     """The shared `MEMORY.md` pointer index, or `None` when there is nothing to
     inject (the layer is off, or the pool has no index yet)."""
-    if not settings.agent.memory_index_inject_enabled:
+    if turn_settings.agent.eval_isolation or not settings.agent.memory_index_inject_enabled:
         return None
     path = memory_dir() / _MEMORY_INDEX_FILE
     if not path.is_file():

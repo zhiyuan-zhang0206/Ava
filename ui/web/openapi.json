@@ -784,7 +784,7 @@
     "/api/agents/{agent_id}/last-message": {
       "get": {
         "summary": "Get Last Message",
-        "description": "Return the text of the last AI message for an agent.\n\nAny agent in the same cluster can query any other agent.\nNo spawner-chain restriction.\n\nReturns ``text=None`` when the agent has no AI message with text\ncontent yet (no checkpoint / no AIMessage / content is not a string).\n\nReads from ``agents_meta.last_message_text`` first — a column that\nsurvives compact (which replaces the entire checkpoint). Falls back\nto scanning the checkpoint when the column is NULL (backward compat\nwith agents that have not yet written to it).",
+        "description": "Return the text of the last AI message for an agent.\n\nA non-isolated agent in the same cluster can query any other agent; an\neval-isolated caller is denied before this result can become a replay leak.\n\nReturns ``text=None`` when the agent has no AI message with text\ncontent yet (no checkpoint / no AIMessage / content is not a string).\n\nReads from ``agents_meta.last_message_text`` first — a column that\nsurvives compact (which replaces the entire checkpoint). Falls back\nto scanning the checkpoint when the column is NULL (backward compat\nwith agents that have not yet written to it).",
         "operationId": "get_last_message_api_agents__agent_id__last_message_get",
         "parameters": [
           {

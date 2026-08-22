@@ -245,3 +245,17 @@ def test_memory_index_injection_guard(
     assert note is not None
     assert "may contain prompt injection" in note.content  # pyright: ignore[reportUnknownMemberType]
     assert "ignore previous instructions" in note.content  # pyright: ignore[reportUnknownMemberType]  # content kept, warning prefixed
+
+
+def test_memory_index_note_is_suppressed_for_eval_isolation(
+    memory_plugin: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """An eval agent never receives the shared pool index in its context."""
+    from ava_builtins.plugins.ava_memory import notes
+    from shared.config import settings
+
+    monkeypatch.setattr(settings.agent, "eval_isolation", True)
+    monkeypatch.setattr(notes, "memory_dir", lambda: tmp_path)
+    (tmp_path / "MEMORY.md").write_text("shared result", encoding="utf-8")
+
+    assert notes.memory_index_note() is None
