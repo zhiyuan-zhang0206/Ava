@@ -12,10 +12,12 @@ from __future__ import annotations
 
 import http.server
 import json
+import os
 import socket
 import threading
 import time
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 import psycopg
@@ -25,6 +27,12 @@ from shared import telemetry, telemetry_otlp
 from shared.telemetry import Event
 
 _AGENT = 8902
+
+
+@pytest.fixture(autouse=True)
+def _outside_exec_child(monkeypatch: pytest.MonkeyPatch) -> None:
+    """This module exercises the long-lived-process OTLP backend by default."""
+    monkeypatch.delenv("AVA_EXEC_REQUEST_FILE", raising=False)
 
 
 def _event(
@@ -315,6 +323,23 @@ def test_non_telemetry_events_produce_no_metrics(otlp_backend) -> None:
 
 
 # ── flag ─────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("configured", [False, True])
+def test_enabled_follows_setting_outside_exec_child(
+    monkeypatch: pytest.MonkeyPatch, configured: bool
+) -> None:
+    monkeypatch.delenv("AVA_EXEC_REQUEST_FILE", raising=False)
+    monkeypatch.setattr("shared.config.settings.observability.telemetry_otlp_enabled", configured)
+
+    assert telemetry_otlp._OtlpBackend._enabled() is configured
+
+
+def test_enabled_is_false_in_exec_child(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr("shared.config.settings.observability.telemetry_otlp_enabled", True)
+    monkeypatch.setitem(os.environ, "AVA_EXEC_REQUEST_FILE", str(tmp_path / "request.json"))
+
+    assert telemetry_otlp._OtlpBackend._enabled() is False
 
 
 def test_flag_off_disables_export(otlp_backend, monkeypatch) -> None:
