@@ -24,9 +24,9 @@ Prometheus (OTLP receiver), and mirrors traces to local JSONL
 surface, and the durable record `ava trace ship` replays when the live
 fan-out missed data.
 
-- `shared/telemetry_otlp.py` — events → OTLP logs (Loki) + telemetry payloads
-  → OTLP metrics (Prometheus), POSTed to the sidecar when
-  `AVA_TELEMETRY_OTLP_ENABLED=true` (default **on**).
+- `shared/telemetry_otlp.py` — events → OTLP logs + metrics when enabled
+  (default **on**); disposable exec children (`AVA_EXEC_REQUEST_FILE`) always
+  skip this export.
 - `shared/trace.py` — spans → OTLP/HTTP (protobuf wire, content-stripped) to
   the sidecar's `/v1/traces`; the sidecar's file exporter writes the mirror.
   A missing sidecar at agent init disables recording for that process
@@ -81,12 +81,12 @@ counter queries behind the fleet graph and the dashboard) is documented in
 its own node:
 [[gateway/prom-metrics.ava.okf.md|Prometheus telemetry-aggregate read path]].
 
-**Flag semantics** — `AVA_TELEMETRY_OTLP_ENABLED` /
-`AVA_TELEMETRY_OTLP_ENDPOINT` (default `http://127.0.0.1:4318` — the LOCAL
-sidecar on every machine, standard OTLP HTTP port) are startup-applied
-(`restart_required=all`); `shared/config` has no live-reload — flip +
-restart is the apply path. The sidecar's fan-out endpoints are baked into
-its config at converge: `AVA_TELEMETRY_TEMPO_ENDPOINT` (default
+**Flag semantics** — exec children always skip export based on their request
+handshake, not cluster config. Elsewhere `AVA_TELEMETRY_OTLP_ENABLED` /
+`AVA_TELEMETRY_OTLP_ENDPOINT` (default `http://127.0.0.1:4318`, the local
+sidecar) are startup-applied (`restart_required=all`); flip + restart is the
+apply path. Sidecar fan-out endpoints are baked at converge:
+`AVA_TELEMETRY_TEMPO_ENDPOINT` (default
 `http://127.0.0.1:14318`, host OTLP port of the LGTM stack), plus
 `AVA_TELEMETRY_LOKI_URL` / `AVA_TELEMETRY_PROMETHEUS_URL` (bases; `/otlp` and
 `/api/v1/otlp` appended). A remote machine sets those three to the LGTM
