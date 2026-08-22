@@ -52,12 +52,19 @@ def serving_binaries(roles: frozenset[str]) -> tuple[Path, ...]:
     wrong-but-harmless default (`brew_prefix` does this when brew is absent)
     contributes a phantom "missing rule" instead of a real one.
     """
+    from shared.paths import otel_collector_binary
     from shared.pg_tools import brew_prefix, pg_tool
 
     candidates = [Path(sys.executable)]
     if "gateway" in roles:
         candidates.append(pg_tool("postgres"))
         candidates.append(brew_prefix("redis") / "bin" / "redis-server")
+        # A gateway with a cluster secret serves the collector's authenticated
+        # remote OTLP receiver on AVA_MACHINE_HOST. Auditing it unconditionally
+        # for gateway capability is harmless on a loopback-only single box (the
+        # host-level audit exits before reading ALF there) and prevents a hybrid
+        # gateway+runner from silently accepting only local telemetry.
+        candidates.append(otel_collector_binary())
     return tuple(p for p in candidates if p.exists())
 
 

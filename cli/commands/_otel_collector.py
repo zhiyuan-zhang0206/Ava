@@ -1,8 +1,10 @@
 """OTel Collector sidecar install — pinned binary download + config generation.
 
 One collector per machine (task #1266): every agent on the host sends OTLP to
-its 127.0.0.1:4318 (OTLP/HTTP); the collector fans out to Tempo/Loki/Prometheus and
-mirrors traces to local JSONL. This module is the converge step's engine —
+its 127.0.0.1:4318 (OTLP/HTTP). A gateway collector fans out to its loopback
+Tempo/Loki/Prometheus backends; a pure runner collector relays each signal to
+the gateway collector's authenticated private-address receiver. Every machine
+mirrors its local traces to JSONL. This module is the converge step's engine —
 idempotent: an already-installed, version-matching binary is a no-op; the
 config is regenerated on every converge so fan-out/retention setting changes
 propagate on the next `ava start`.
@@ -17,6 +19,8 @@ SHA256-pinned.
 from __future__ import annotations
 
 import hashlib
+import ipaddress
+import os
 import platform
 import shutil
 import sys
@@ -65,6 +69,7 @@ _DOWNLOAD_ATTEMPT_TIMEOUT_S = 600.0
 _DOWNLOAD_ATTEMPTS = 3
 _DOWNLOAD_RETRY_BACKOFF_S = 5.0
 _DOWNLOAD_PROGRESS_INTERVAL_S = 15.0
+_OTLP_HTTP_PORT = 4318
 
 
 def platform_tag() -> str | None:
@@ -99,6 +104,22 @@ def _config_template(repo: Path) -> str:
 def _yaml_quote(value: str) -> str:
     """A single-quoted YAML scalar — the form that needs no escaping but ''."""
     return "'" + value.replace("'", "''") + "'"
+
+
+def _unspecified_address(host: str) -> bool:
+    """True for wildcard IP literals (0.0.0.0 / ::), never hostnames."""
+    candidate = host.strip().removeprefix("[").removesuffix("]")
+    try:
+        return ipaddress.ip_address(candidate).is_unspecified
+    except ValueError:
+        return False
+
+
+def _host_port(host: str, port: int) -> str:
+    """Render host:port without making IPv6 literals ambiguous."""
+    bare = host.strip().removeprefix("[").removesuffix("]")
+    rendered = f"[{bare}]" if ":" in bare else bare
+    return f"{rendered}:{port}"
 
 
 # The data-plane receiver block, rendered into $DATA_PLANE_RECEIVERS. Scrape
@@ -176,23 +197,250 @@ def _data_plane_receivers(roles: MachineRoles | None) -> tuple[str, str]:
     return block, ", postgresql, redis"
 
 
+def gateway_otel_ingress_endpoint() -> str:
+    """The authenticated OTLP/HTTP ingress a pure runner dials.
+
+    `AVA_GATEWAY_URL` is already the runner's cluster-private route to the
+    gateway. OTLP owns a separate fixed port on that same host; it does not
+    inherit the gateway API's port or path. The receiver is deliberately HTTP:
+    the cluster private network (normally Tailnet) supplies transport privacy,
+    while the cluster bearer authenticates the sender exactly like the gateway
+    API already does.
+    """
+    from shared.config import settings
+    from shared.netutil import is_loopback_host
+
+    gateway_url = settings.gateway.gateway_url.strip()
+    parts = urlsplit(gateway_url)
+    host = parts.hostname or ""
+    if not host or is_loopback_host(host) or _unspecified_address(host):
+        raise RuntimeError(
+            "cannot build runner OTLP relay: gateway URL (AVA_GATEWAY_URL) must name the "
+            f"gateway's non-loopback private address (got {gateway_url!r})"
+        )
+    return f"http://{_host_port(host, _OTLP_HTTP_PORT)}"
+
+
+def _cluster_bearer() -> str:
+    from shared.config import settings
+
+    secret = settings.data_plane.cluster_secret
+    if not secret:
+        raise RuntimeError(
+            "cannot build split-cluster OTLP relay without a cluster secret "
+            "(AVA_CLUSTER_SECRET); "
+            "remote ingress must fail closed"
+        )
+    return f"Bearer {secret}"
+
+
+def _remote_receiver_fragments(roles: MachineRoles | None) -> dict[str, str]:
+    """Template fragments for the gateway's authenticated remote ingress.
+
+    An empty cluster secret is the zero-config single-box posture and keeps
+    every listener on loopback. Any gateway-capable host with a non-empty
+    secret and a non-loopback address may serve remote runners — including a
+    hybrid gateway+runner such as production. Remote traces use a separate
+    pipeline so they cannot be mirrored a second time on the gateway.
+    """
+    no_remote = {
+        "REMOTE_OTLP_RECEIVER": "",
+        "CLUSTER_AUTH_EXTENSION": "",
+        "CLUSTER_AUTH_SERVICE_EXTENSION": "",
+        "REMOTE_OTLP_PIPELINE_RECEIVER": "",
+        "REMOTE_TRACE_PIPELINE": "",
+    }
+    if roles is None or "gateway" not in roles:
+        return no_remote
+
+    from shared.config import settings
+    from shared.machine import reachable_host
+    from shared.netutil import is_loopback_host
+
+    secret = settings.data_plane.cluster_secret
+    if not secret:
+        if roles == frozenset({"gateway"}):
+            raise RuntimeError(
+                "cannot build split-gateway OTLP ingress without a cluster secret "
+                "(AVA_CLUSTER_SECRET); "
+                "remote ingress must fail closed"
+            )
+        return no_remote
+    host = reachable_host()
+    if is_loopback_host(host):
+        if roles == frozenset({"gateway"}):
+            raise RuntimeError(
+                "cannot expose authenticated gateway OTLP ingress: reachable host is "
+                "loopback; set AVA_MACHINE_HOST to this gateway's exact private address"
+            )
+        # A combined gateway+runner is a valid secret-set single box. Just as
+        # its data-plane binds collapse to loopback, it needs no remote OTLP
+        # receiver until AVA_MACHINE_HOST becomes a reachable address.
+        return no_remote
+    if _unspecified_address(host):
+        raise RuntimeError(
+            "cannot expose authenticated gateway OTLP ingress: reachable host is "
+            "wildcard; set AVA_MACHINE_HOST to this gateway's exact "
+            "private address"
+        )
+    return {
+        "REMOTE_OTLP_RECEIVER": f"""
+  otlp/remote:
+    protocols:
+      http:
+        endpoint: {_yaml_quote(_host_port(host, _OTLP_HTTP_PORT))}
+        auth:
+          authenticator: bearertokenauth/cluster
+""",
+        "CLUSTER_AUTH_EXTENSION": f"""
+  bearertokenauth/cluster:
+    token: {_yaml_quote(secret)}
+""",
+        "CLUSTER_AUTH_SERVICE_EXTENSION": ", bearertokenauth/cluster",
+        "REMOTE_OTLP_PIPELINE_RECEIVER": ", otlp/remote",
+        "REMOTE_TRACE_PIPELINE": """
+    # A runner already writes its own durable trace mirror. The remote pipeline
+    # therefore fans out only to Tempo; adding file/traces here duplicates every
+    # remote span in the gateway mirror and makes replay provenance ambiguous.
+    traces/remote:
+      receivers: [otlp/remote]
+      processors: [memory_limiter, batch]
+      exporters: [otlphttp/tempo]
+""",
+    }
+
+
+_BACKEND_EXPORTERS = """
+  otlphttp/tempo:
+    endpoint: {tempo_endpoint}
+    tls:
+      insecure: true
+    sending_queue:
+      enabled: true
+      queue_size: 5000
+      storage: file_storage
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 0s
+  otlphttp/loki:
+    endpoint: {loki_base}
+    tls:
+      insecure: true
+    sending_queue:
+      enabled: true
+      queue_size: 5000
+      storage: file_storage
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 0s
+  otlphttp/prometheus:
+    endpoint: {prom_base}
+    tls:
+      insecure: true
+    sending_queue:
+      enabled: true
+      queue_size: 1000
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 15m
+"""
+
+
+_RUNNER_RELAY_EXPORTERS = """
+  # Keep all three component IDs stable across the direct-backend -> relay
+  # cutover. In particular, file_storage keys the Tempo/Loki persisted queues
+  # by exporter ID; renaming either would strand the backlog this repair drains.
+  # Prometheus stays stable too, while retaining its bounded in-memory policy.
+  otlphttp/tempo:
+    endpoint: {gateway_endpoint}
+    headers:
+      Authorization: {authorization}
+    tls:
+      insecure: true
+    sending_queue:
+      enabled: true
+      queue_size: 5000
+      storage: file_storage
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 0s
+  otlphttp/loki:
+    endpoint: {gateway_endpoint}
+    headers:
+      Authorization: {authorization}
+    tls:
+      insecure: true
+    sending_queue:
+      enabled: true
+      queue_size: 5000
+      storage: file_storage
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 0s
+  otlphttp/prometheus:
+    endpoint: {gateway_endpoint}
+    headers:
+      Authorization: {authorization}
+    tls:
+      insecure: true
+    sending_queue:
+      enabled: true
+      queue_size: 1000
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 15m
+"""
+
+
+def _otlp_exporters(roles: MachineRoles | None) -> str:
+    """Role-specific fan-out with stable component/queue identities."""
+    from shared.config import settings
+
+    if roles == frozenset({"agent-runner"}):
+        return _RUNNER_RELAY_EXPORTERS.format(
+            gateway_endpoint=_yaml_quote(gateway_otel_ingress_endpoint()),
+            authorization=_yaml_quote(_cluster_bearer()),
+        )
+    obs = settings.observability
+    return _BACKEND_EXPORTERS.format(
+        tempo_endpoint=_yaml_quote(obs.telemetry_tempo_endpoint.rstrip("/")),
+        loki_base=_yaml_quote(obs.telemetry_loki_url.rstrip("/") + "/otlp"),
+        prom_base=_yaml_quote(obs.telemetry_prometheus_url.rstrip("/") + "/api/v1/otlp"),
+    )
+
+
 def generate_config(repo: Path, ava_home: Path, roles: MachineRoles | None) -> str:
     """Render the sidecar config from the repo template + this unit's settings."""
     from shared.config import settings
 
     obs = settings.observability
-    loki_base = obs.telemetry_loki_url.rstrip("/") + "/otlp"
-    prom_base = obs.telemetry_prometheus_url.rstrip("/") + "/api/v1/otlp"
     data_plane_block, data_plane_pipeline = _data_plane_receivers(roles)
-    return Template(_config_template(repo)).substitute(
-        AVA_HOME=str(ava_home),
-        TEMPO_ENDPOINT=obs.telemetry_tempo_endpoint.rstrip("/"),
-        LOKI_BASE=loki_base,
-        PROM_BASE=prom_base,
-        RETENTION_DAYS=str(obs.trace_retention_days),
-        DATA_PLANE_RECEIVERS=data_plane_block,
-        DATA_PLANE_PIPELINE_RECEIVERS=data_plane_pipeline,
-    )
+    substitutions = {
+        "AVA_HOME": str(ava_home),
+        # Kept as named generation inputs for small downstream/custom templates;
+        # the shipped template consumes the role-specific OTLP_EXPORTERS block.
+        "TEMPO_ENDPOINT": obs.telemetry_tempo_endpoint.rstrip("/"),
+        "LOKI_BASE": obs.telemetry_loki_url.rstrip("/") + "/otlp",
+        "PROM_BASE": obs.telemetry_prometheus_url.rstrip("/") + "/api/v1/otlp",
+        "RETENTION_DAYS": str(obs.trace_retention_days),
+        "DATA_PLANE_RECEIVERS": data_plane_block,
+        "DATA_PLANE_PIPELINE_RECEIVERS": data_plane_pipeline,
+        "OTLP_EXPORTERS": _otlp_exporters(roles),
+    }
+    substitutions.update(_remote_receiver_fragments(roles))
+    return Template(_config_template(repo)).substitute(substitutions)
 
 
 def _stream_download(url: str, dest: Path) -> None:
@@ -290,6 +538,26 @@ def _download_and_verify(tag: str, dest_dir: Path) -> None:
     (dest_dir / _VERSION_MARKER).write_text(OTELCOL_CONTRIB_VERSION + "\n", encoding="utf-8")
 
 
+def _write_config(path: Path, rendered: str) -> None:
+    """Atomically publish a config that is owner-only from first creation.
+
+    Split runners carry the cluster bearer and gateways may additionally carry
+    data-plane credentials. ``write_text`` then ``chmod`` briefly exposes a
+    newly-created file through the process umask; ``mkstemp`` creates 0600 and
+    replacement publishes only the fully-written private file.
+    """
+    fd, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            stream.write(rendered)
+            stream.flush()
+            os.fsync(stream.fileno())
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
 def ensure_otel_collector(repo: Path, ava_home: Path, roles: MachineRoles | None) -> None:
     """Idempotent install: pinned binary present + config regenerated.
 
@@ -318,12 +586,7 @@ def ensure_otel_collector(repo: Path, ava_home: Path, roles: MachineRoles | None
         print(f"  · otel-collector: installed otelcol-contrib {OTELCOL_CONTRIB_VERSION} ({tag})")
     else:
         print(f"  · otel-collector: otelcol-contrib {OTELCOL_CONTRIB_VERSION} present")
-    config = dest_dir / "config.yaml"
-    config.write_text(generate_config(repo, ava_home, roles), encoding="utf-8")
-    # On a gateway unit the rendered config carries the cluster secret (the
-    # pg/redis receiver credentials), same as the cluster .env beside it.
-    if platform.system() != "Windows":
-        config.chmod(0o600)
+    _write_config(dest_dir / "config.yaml", generate_config(repo, ava_home, roles))
 
 
 def ensure_otel_collector_step(ctx: ConvergeCtx) -> None:

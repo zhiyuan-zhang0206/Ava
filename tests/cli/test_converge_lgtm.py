@@ -11,6 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import yaml
 
 from cli.commands import _lgtm
 from cli.commands._converge_spec import ConvergeCtx
@@ -88,3 +89,16 @@ def test_failing_start_sh_propagates(monkeypatch: pytest.MonkeyPatch, tmp_path: 
 
     with pytest.raises(RuntimeError, match=r"start\.sh exited 1"):
         _lgtm.ensure_lgtm_stack_step(ctx)
+
+
+def test_backend_ports_are_unconditionally_loopback_only() -> None:
+    """Remote runners enter through the authenticated gateway collector;
+    unauthenticated Tempo/Loki/Prometheus APIs must never become off-box."""
+    compose_path = Path(__file__).resolve().parents[2] / "deploy/lgtm/docker-compose.yml"
+    text = compose_path.read_text(encoding="utf-8")
+    assert "LGTM_BIND_HOST" not in text
+    compose = yaml.safe_load(text)
+    services = compose["services"]
+    assert services["tempo"]["ports"] == ["127.0.0.1:3200:3200", "127.0.0.1:14318:4318"]
+    assert services["loki"]["ports"] == ["127.0.0.1:3100:3100"]
+    assert services["prometheus"]["ports"] == ["127.0.0.1:9090:9090"]

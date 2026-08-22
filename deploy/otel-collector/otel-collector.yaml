@@ -4,16 +4,18 @@
 # the dollar placeholders below are baked from this unit's settings, so the file
 # is static at runtime — no env substitution dependency on the session env.
 #
-# Architecture (task #1266, user ruling 2026-08-14): every agent process on
-# this host sends OTLP/HTTP to 127.0.0.1:4318; this collector fans out
-#   traces  -> Tempo OTLP/HTTP      (TEMPO_ENDPOINT placeholder)
-#   logs    -> Loki native OTLP     (LOKI_BASE placeholder, /v1/logs appended)
-#   metrics -> Prometheus OTLP recv (PROM_BASE placeholder, /v1/metrics appended)
-# and mirrors traces to a local JSONL ($AVA_HOME/traces/spans.jsonl, rotated)
-# so agents can grep spans without any backend. file_storage backs every
-# fan-out exporter's sending queue: a backend outage buffers on disk (the
-# queue survives collector restarts), and only a queue overflow sheds — the
-# mirror keeps everything, `ava trace ship` replays the gap straight to Tempo.
+# Architecture: every agent process sends OTLP/HTTP to its local
+# 127.0.0.1:4318 receiver. On a gateway/single-box collector the pipelines fan
+# out to loopback Tempo/Loki/Prometheus. A pure runner keeps the same exporter
+# component IDs and queues but points them at the gateway collector's separate,
+# authenticated remote receiver; the gateway then fans those batches into its
+# loopback backends. Backend ports never need an off-box bind.
+# Every collector also mirrors locally produced traces to JSONL
+# ($AVA_HOME/traces/spans.jsonl, rotated), so agents can grep spans without a
+# backend. Trace/log exporters use file_storage queues + unlimited retry;
+# metrics deliberately use a bounded in-memory queue + 15m retry, then shed
+# stale points (cumulative metrics repair on a later successful sample).
+# `ava trace ship` replays a mirrored gap without re-entering the local mirror.
 #
 # The sidecar also scrapes the traditional SRE layer (issue #46) into the same
 # metrics fan-out: `host_metrics` on every machine, plus `postgresql` + `redis`
@@ -28,6 +30,7 @@ receivers:
     protocols:
       http:
         endpoint: 127.0.0.1:4318
+$REMOTE_OTLP_RECEIVER
 
   # ── The traditional SRE layer (issue #46) ────────────────────────────────
   # Host metrics come from the collector's own receiver, not a node_exporter
@@ -88,11 +91,25 @@ receivers:
           interfaces:
             ["^(awdl|llw|utun|bridge|gif|stf|ap|anpi|p2p|vmenet|XHC)[0-9]*$$"]
           match_type: regexp
+
+  # Collector queue depth/capacity and enqueue/send failure counters are part
+  # of the delivery contract, not debug-only internals. Scrape the pinned
+  # collector's loopback Prometheus endpoint and relay the cumulative evidence
+  # with the rest of this host's infra metrics. When the relay is down the next
+  # successful scrape still carries monotone enqueue-failure counters.
+  prometheus/otelcol:
+    config:
+      scrape_configs:
+        - job_name: ava-otel-collector
+          scrape_interval: 30s
+          static_configs:
+            - targets: [127.0.0.1:8888]
 $DATA_PLANE_RECEIVERS
 processors:
   # memory_limiter runs FIRST in every pipeline: under memory pressure it
-  # refuses new data (producers retry / the JSONL mirror keeps everything)
-  # instead of letting the collector balloon on a 16GB shared box.
+  # returns retryable backpressure and bounds shedding instead of letting the
+  # collector balloon on a 16GB shared box. Because it precedes file/traces,
+  # data rejected here is not promised to reach the JSONL mirror.
   memory_limiter:
     check_interval: 1s
     limit_mib: 512
@@ -133,54 +150,13 @@ extensions:
     directory: $AVA_HOME/otel-collector/queue
     create_directory: true
     timeout: 1s
-    # fsync off by default: the queue is a buffer, not the durable record —
-    # the JSONL mirror is. Durability comes from the mirror + replay.
+    # fsync off: this is a retry buffer, not an fsync durability boundary.
+    # The separate trace mirror covers batches that reach file/traces; upstream
+    # backpressure may still reject before either exporter.
+$CLUSTER_AUTH_EXTENSION
 
 exporters:
-  otlphttp/tempo:
-    endpoint: $TEMPO_ENDPOINT
-    tls:
-      insecure: true
-    sending_queue:
-      enabled: true
-      queue_size: 5000
-      storage: file_storage
-    retry_on_failure:
-      enabled: true
-      initial_interval: 5s
-      max_interval: 30s
-      # Unlimited retry: never give up on a batch while the backend is down —
-      # overflow is the only shed, and the mirror covers it.
-      max_elapsed_time: 0s
-  otlphttp/loki:
-    endpoint: $LOKI_BASE
-    tls:
-      insecure: true
-    sending_queue:
-      enabled: true
-      queue_size: 5000
-      storage: file_storage
-    retry_on_failure:
-      enabled: true
-      initial_interval: 5s
-      max_interval: 30s
-      max_elapsed_time: 0s
-  otlphttp/prometheus:
-    endpoint: $PROM_BASE
-    tls:
-      insecure: true
-    # Metrics differ from traces/logs: cumulative counters are self-healing —
-    # the next export carries the full cumulative value — so buffering stale
-    # datapoints on disk forever is wrong (they would land out of order and
-    # add nothing). Small in-memory queue, bounded retry, no file_storage.
-    sending_queue:
-      enabled: true
-      queue_size: 1000
-    retry_on_failure:
-      enabled: true
-      initial_interval: 5s
-      max_interval: 30s
-      max_elapsed_time: 15m
+$OTLP_EXPORTERS
   # Local JSONL mirror — the grep surface (user ruling: "agent debug 时 grep
   # 最方便"). One line per export batch, each line a standard OTLP/JSON
   # ExportTraceServiceRequest. Rotation (lumberjack) gives append semantics
@@ -202,25 +178,25 @@ exporters:
       max_backups: 16
 
 service:
-  extensions: [file_storage]
+  extensions: [file_storage$CLUSTER_AUTH_SERVICE_EXTENSION]
   pipelines:
     traces:
       receivers: [otlp]
       processors: [memory_limiter, batch]
       exporters: [otlphttp/tempo, file/traces]
     logs:
-      receivers: [otlp]
+      receivers: [otlp$REMOTE_OTLP_PIPELINE_RECEIVER]
       processors: [memory_limiter, batch]
       exporters: [otlphttp/loki]
     metrics:
-      receivers: [otlp]
+      receivers: [otlp$REMOTE_OTLP_PIPELINE_RECEIVER]
       processors: [memory_limiter, batch]
       exporters: [otlphttp/prometheus]
     # Infra metrics ride their own pipeline so the host-identity processors
     # touch only them: app metrics already carry `machine`/`agent_id`
     # datapoint attributes from the emitter and must not be relabelled.
     metrics/infra:
-      receivers: [host_metrics$DATA_PLANE_PIPELINE_RECEIVERS]
+      receivers: [host_metrics, prometheus/otelcol$DATA_PLANE_PIPELINE_RECEIVERS]
       processors:
         [
           memory_limiter,
@@ -230,3 +206,4 @@ service:
           batch,
         ]
       exporters: [otlphttp/prometheus]
+$REMOTE_TRACE_PIPELINE

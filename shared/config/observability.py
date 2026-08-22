@@ -116,8 +116,9 @@ class ObservabilitySettings(EnvSettings):
             "The live exporter appends /v1/logs + /v1/metrics and the trace "
             "exporter appends /v1/traces. Always points at the local sidecar, "
             "on every machine — agents never dial a backend directly; the "
-            "sidecar's own config carries the fan-out endpoints. "
-            "`ava trace ship` uses AVA_TELEMETRY_TEMPO_ENDPOINT instead."
+            "gateway sidecar fans out to loopback backends while a pure runner "
+            "sidecar relays to the gateway's authenticated OTLP receiver. "
+            "`ava trace ship` bypasses the local sidecar to avoid re-mirroring."
         ),
         json_schema_extra={
             "restart_required": "all",
@@ -131,21 +132,19 @@ class ObservabilitySettings(EnvSettings):
         default="http://127.0.0.1:14318",
         alias="AVA_TELEMETRY_TEMPO_ENDPOINT",
         description=(
-            "Tempo OTLP/HTTP base URL (host port 14318 on the LGTM host) — the "
-            "fan-out target of the local OTel Collector sidecar's traces "
-            "pipeline AND the endpoint `ava trace ship` replays the JSONL "
-            "mirror to. Ship must bypass the sidecar: replaying through it "
-            "would write the replayed lines back into the mirror (watermark "
-            "loop). Default 127.0.0.1:14318 (the LGTM host); on a remote "
-            "machine set it to the LGTM host's reachable address — the same "
-            "value converge bakes into that machine's sidecar config."
+            "Gateway-local Tempo OTLP/HTTP base URL (host port 14318). The "
+            "gateway collector's traces pipelines and gateway/single-box "
+            "`ava trace ship` use it. A pure runner ignores this loopback URL: "
+            "its collector and trace replay instead use the gateway's "
+            "authenticated private-address OTLP receiver. Backends therefore "
+            "stay loopback-only."
         ),
         json_schema_extra={
             "restart_required": "all",
             "writable": True,
             "sensitive": False,
             "scope": "host",
-            "remote_writable": True,
+            "remote_writable": False,
         },
     )
 

@@ -525,21 +525,21 @@ def build_services() -> tuple[ServiceSpec, ...]:
     # Services a gateway-only host AND an agent-runner-only host each run.
     #
     # otel-collector: one per machine (task #1266). Every agent exports OTLP to
-    # its LOCAL sidecar; the sidecar fans out to the LGTM stack (Tempo/Loki/
-    # Prometheus) and writes the local JSONL trace mirror. An agent-runner
-    # never dials the gateway's collector — its own sidecar is the endpoint,
-    # and the fan-out endpoints in the sidecar's config point at the LGTM host.
-    # Not DB-dependent by design: the whole point of the local file-backed
-    # queue is to buffer while the (remote) backends are unreachable.
+    # its LOCAL sidecar and writes the local JSONL trace mirror. A gateway
+    # collector fans out to gateway-loopback Tempo/Loki/Prometheus; a pure
+    # runner collector relays to the gateway collector's authenticated
+    # private-address receiver. Backend ports never leave gateway loopback.
+    # Not DB-dependent by design: trace/log queues buffer persistently while a
+    # route is unavailable; the bounded metrics queue sheds rather than making
+    # collector lifecycle depend on the data plane.
     both_services: tuple[ServiceSpec, ...] = (
         ServiceSpec(
             session="otel-collector",
             cmd=f"{otel_collector_binary()} --config {otel_collector_config()}",
             capabilities=_BOTH,
             requires_db=False,
-            # OTLP/HTTP receiver port — the healthcheck probes the OTLP path,
-            # not just the TCP port (a 415 from /v1/traces proves an OTLP
-            # listener answered; a bare TCP connect does not).
+            # The healthcheck POSTs a valid empty ExportTraceServiceRequest and
+            # requires 2xx; a bare TCP connect, 401, or 415 is not ingestion.
             tcp_port=4318,
             healthcheck_module="services.healthchecks.otel_collector",
         ),

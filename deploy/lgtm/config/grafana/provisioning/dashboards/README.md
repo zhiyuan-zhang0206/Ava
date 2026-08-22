@@ -331,13 +331,17 @@ deployment (W1) must also provide:
 ## Alerting
 
 **Live** (2026-08-04): Grafana Alerting rules, as code in
-[`../alerting/rules.yml`](../alerting/rules.yml) — twelve rules evaluated every minute
+[`../alerting/rules.yml`](../alerting/rules.yml) — sixteen rules evaluated every minute
 over Loki and Prometheus: WARNING+ERROR
 spike, sse_drop/event_log_drop backlog, agent_restarted spike, LLM latency
 p95, delivery_stalled fresh-backlog, events-table freshness, trace-disk
 watermark, and the infrastructure five (issue #46 — host CPU, host memory,
-per-volume disk watermark, Postgres connection saturation, Redis memory). Synced to
-`~/.ava/grafana/provisioning/alerting/`; see `alerts/README.md` for the rule
+per-volume disk watermark, Postgres connection saturation, Redis memory).
+Those are joined by three collector-delivery rules:
+current exporter queue pressure, new enqueue failures in a 5-minute window,
+and a recently-seen host whose collector stopped reporting. Synced to
+`~/.ava/grafana/provisioning/alerting/`; see
+[`../alerting/README.md`](../alerting/README.md) for the rule
 table, threshold calibration, and the notification-channel follow-up. The
 reserved `ops_alert_rules` config store is
 **retired** — Grafana is the
