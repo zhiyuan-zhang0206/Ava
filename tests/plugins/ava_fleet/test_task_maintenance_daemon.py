@@ -2,19 +2,18 @@
 
 Two cluster-wide passes, gateway-owned:
 
-- `_run_reminders` finds in-progress tasks past their remind_interval_seconds and delivers a
-  chat reminder to the owner through the gateway (`_deliver_message` → POST
-  /api/agents/{id}/messages), which auto-resurrects a terminated owner. Each
-  overdue window gets at most one reminder per backoff period; the counters advance
-  only after delivery succeeds.
+- `_run_reminders` finds in-progress tasks past their remind_interval_seconds and delivers one
+  chat digest per owner through a direct inbound insert. Terminated owners keep
+  their inbox row without being revived. Each overdue window gets at most one
+  reminder per backoff period; the counters advance only after delivery succeeds.
 - `_run_escalate` notifies the parent task's owner when reminder_count reaches the
   escalation threshold.
 
-Delivery is exercised against a stubbed `_deliver_message` (the real one needs a
-live gateway; auto-resurrect is covered by the gateway delivery tests). These
-tests assert who the daemon delivers to and that the counters advance. No stale
-sweep, no automatic cancellation. History is preserved: rows are UPDATEd, never
-DELETEd.
+Delivery is normally exercised against a stubbed `_deliver_message`; the
+terminated-owner test keeps the direct write real. These tests assert digest
+recipients, message contents, counters, telemetry, and no-resurrect delivery. No
+stale sweep, no automatic cancellation. History is preserved: rows are UPDATEd,
+never DELETEd.
 """
 
 from __future__ import annotations
@@ -28,6 +27,7 @@ from psycopg_pool import ConnectionPool
 
 from ava_builtins.plugins.ava_fleet.task_maintenance import daemon
 from ava_builtins.plugins.ava_fleet.task_maintenance.daemon import _run_escalate, _run_reminders
+from shared import telemetry
 from shared.config import settings
 
 _DAY_S = 86400.0
@@ -46,15 +46,27 @@ def pool():
 def deliver(monkeypatch: pytest.MonkeyPatch) -> list[tuple[int, str]]:
     """Stub `_deliver_message`, recording (agent_id, message) per call.
 
-    The real one POSTs to the gateway; here we only assert the daemon's own
-    responsibility — which owner it delivers to and that the counters advance."""
+    The real one writes an inbound row; here we only assert the daemon's own
+    responsibility — digest recipients, content, and counter updates."""
     calls: list[tuple[int, str]] = []
 
-    def _fake(agent_id: int, message: str) -> None:
+    def _fake(pool_: ConnectionPool, agent_id: int, message: str) -> None:
         calls.append((agent_id, message))
 
     monkeypatch.setattr(daemon, "_deliver_message", _fake)
     return calls
+
+
+@pytest.fixture
+def emitted_events(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str, dict[str, Any]]]:
+    """Capture maintenance telemetry without starting an event pipeline."""
+    events: list[tuple[str, str, dict[str, Any]]] = []
+
+    def _capture(category: str, event_name: str, **kwargs: Any) -> None:
+        events.append((category, event_name, kwargs))
+
+    monkeypatch.setattr(telemetry, "emit", _capture)
+    return events
 
 
 def _make_agent(db: psycopg.Connection, *, status: str = "running") -> int:
@@ -137,6 +149,17 @@ def _open_notices(db: psycopg.Connection, agent_id: int) -> list[tuple[str, str,
         return cur.fetchall()
 
 
+def _inbound_messages(db: psycopg.Connection, agent_id: int) -> list[tuple[str, str, str]]:
+    """Inbound rows for an agent: (content, kind, source)."""
+    db.rollback()  # the daemon committed on its own connection; refresh our view
+    with db.cursor() as cur:
+        cur.execute(
+            "SELECT content, kind, source FROM inbound_messages WHERE agent_id = %s ORDER BY id",
+            (agent_id,),
+        )
+        return cur.fetchall()
+
+
 def _seed_notice(db: psycopg.Connection, agent_id: int) -> None:
     """Give an agent one pre-existing open FYI notice."""
     with db.cursor() as cur:
@@ -149,8 +172,12 @@ def _seed_notice(db: psycopg.Connection, agent_id: int) -> None:
 
 
 class TestRemind:
-    def test_reminds_overdue_owner(
-        self, pool: ConnectionPool, db_conn: psycopg.Connection, deliver: list[tuple[int, str]]
+    def test_single_overdue_task_delivers_single_task_digest(
+        self,
+        pool: ConnectionPool,
+        db_conn: psycopg.Connection,
+        deliver: list[tuple[int, str]],
+        emitted_events: list[tuple[str, str, dict[str, Any]]],
     ) -> None:
         owner = _make_agent(db_conn)
         tid = _make_task(db_conn, owner=owner, remind_interval_seconds=1800, updated_s_ago=3600)
@@ -158,12 +185,68 @@ class TestRemind:
         assert len(deliver) == 1
         delivered_owner, message = deliver[0]
         assert delivered_owner == owner
+        assert "Task reminders — you have 1 overdue task(s):" in message
         assert f"#{tid}" in message
+        assert emitted_events == [
+            (
+                "telemetry",
+                "task_reminder_digest",
+                {
+                    "agent_id": owner,
+                    "source": "system",
+                    "attributes": {"owner_id": owner, "task_count": 1, "task_ids": [tid]},
+                },
+            )
+        ]
         row = _task_row(db_conn, tid)
         assert row is not None
         _status, _owner, reminder_count, last_reminded_at = row
         assert reminder_count == 1
         assert last_reminded_at is not None
+
+    def test_owner_receives_one_digest_for_all_overdue_tasks(
+        self, pool: ConnectionPool, db_conn: psycopg.Connection, deliver: list[tuple[int, str]]
+    ) -> None:
+        """A per-task send would deliver three messages and leave this digest absent."""
+        owner = _make_agent(db_conn)
+        task_ids = [
+            _make_task(
+                db_conn,
+                owner=owner,
+                title=f"overdue-{number}",
+                remind_interval_seconds=1800,
+                updated_s_ago=3600,
+            )
+            for number in range(3)
+        ]
+
+        assert _run_reminders(pool, 3600.0) == 1
+        assert len(deliver) == 1
+        delivered_owner, message = deliver[0]
+        assert delivered_owner == owner
+        assert "Task reminders — you have 3 overdue task(s):" in message
+        assert all(f"#{task_id}" in message for task_id in task_ids)
+        for task_id in task_ids:
+            row = _task_row(db_conn, task_id)
+            assert row is not None
+            assert row[2] == 1
+            assert row[3] is not None
+
+    def test_owners_receive_separate_digests(
+        self, pool: ConnectionPool, db_conn: psycopg.Connection, deliver: list[tuple[int, str]]
+    ) -> None:
+        """Grouping all overdue tasks together would leak one owner's work to another."""
+        first_owner = _make_agent(db_conn)
+        second_owner = _make_agent(db_conn)
+        _make_task(db_conn, owner=first_owner, remind_interval_seconds=1800, updated_s_ago=3600)
+        _make_task(db_conn, owner=first_owner, remind_interval_seconds=1800, updated_s_ago=3600)
+        _make_task(db_conn, owner=second_owner, remind_interval_seconds=1800, updated_s_ago=3600)
+
+        assert _run_reminders(pool, 3600.0) == 2
+        messages_by_owner = dict(deliver)
+        assert set(messages_by_owner) == {first_owner, second_owner}
+        assert "2 overdue task(s)" in messages_by_owner[first_owner]
+        assert "1 overdue task(s)" in messages_by_owner[second_owner]
 
     def test_not_yet_overdue_is_skipped(
         self, pool: ConnectionPool, db_conn: psycopg.Connection, deliver: list[tuple[int, str]]
@@ -173,15 +256,21 @@ class TestRemind:
         assert _run_reminders(pool, 3600.0) == 0
         assert deliver == []
 
-    def test_terminated_owner_is_reminded(
-        self, pool: ConnectionPool, db_conn: psycopg.Connection, deliver: list[tuple[int, str]]
+    def test_terminated_owner_receives_inbound_without_resurrection(
+        self, pool: ConnectionPool, db_conn: psycopg.Connection
     ) -> None:
         dead = _make_agent(db_conn, status="terminated")
-        _make_task(db_conn, owner=dead, remind_interval_seconds=1800, updated_s_ago=3600)
-        # Terminated owners ARE reminded — the gateway delivery path auto-resurrects
-        # them; the daemon's SELECT does not filter on owner status.
+        task_id = _make_task(db_conn, owner=dead, remind_interval_seconds=1800, updated_s_ago=3600)
         assert _run_reminders(pool, 3600.0) == 1
-        assert [c[0] for c in deliver] == [dead]
+        inbounds = _inbound_messages(db_conn, dead)
+        assert len(inbounds) == 1
+        content, kind, source = inbounds[0]
+        assert f"#{task_id}" in content
+        assert kind == "chat"
+        assert source == "system"
+        with db_conn.cursor() as cur:
+            cur.execute("SELECT status FROM agents_meta WHERE id = %s", (dead,))
+            assert cur.fetchone() == ("terminated",)
 
     def test_delivery_failure_leaves_counters_untouched(
         self,
@@ -194,8 +283,8 @@ class TestRemind:
         owner = _make_agent(db_conn)
         tid = _make_task(db_conn, owner=owner, remind_interval_seconds=1800, updated_s_ago=3600)
 
-        def _boom(agent_id: int, message: str) -> None:
-            raise RuntimeError("gateway down")
+        def _boom(pool_: ConnectionPool, agent_id: int, message: str) -> None:
+            raise RuntimeError("inbound insert failed")
 
         monkeypatch.setattr(daemon, "_deliver_message", _boom)
         assert _run_reminders(pool, 3600.0) == 0
@@ -291,36 +380,42 @@ class TestRemind:
         one reminder, not a duplicate minutes later."""
         monkeypatch.setattr(daemon, "_pending_counter_writes", {})
         owner = _make_agent(db_conn)
-        tid = _make_task(db_conn, owner=owner, remind_interval_seconds=1800, updated_s_ago=3600)
+        task_ids = [
+            _make_task(db_conn, owner=owner, remind_interval_seconds=1800, updated_s_ago=3600)
+            for _ in range(2)
+        ]
 
         real = daemon._advance_reminder_counters
         attempts = {"n": 0}
 
         def _flaky(pool_: ConnectionPool, task_id: int) -> None:
-            attempts["n"] += 1
-            if attempts["n"] == 1:
+            if task_id == task_ids[0] and attempts["n"] == 0:
+                attempts["n"] += 1
                 raise psycopg.OperationalError("db blip")
             real(pool_, task_id)
 
         monkeypatch.setattr(daemon, "_advance_reminder_counters", _flaky)
 
-        # First sweep: the message is delivered, the counter write fails.
+        # First sweep: one digest lands; one task counter fails while the
+        # other succeeds. The next sweep must only retry the failed counter.
+        _run_reminders(pool, 3600.0)
+        assert len(deliver) == 1
+        failed_row = _task_row(db_conn, task_ids[0])
+        advanced_row = _task_row(db_conn, task_ids[1])
+        assert failed_row is not None
+        assert advanced_row is not None
+        assert failed_row[2:] == (0, None)
+        assert advanced_row[2] == 1
+        assert advanced_row[3] is not None
+
+        # Second sweep: the failed counter advances, with no second digest.
         assert _run_reminders(pool, 3600.0) == 0
         assert len(deliver) == 1
-        row = _task_row(db_conn, tid)
-        assert row is not None
-        _status, _owner, reminder_count, last_reminded_at = row
-        assert reminder_count == 0
-        assert last_reminded_at is None
-
-        # Second sweep: counters advance, no second message is delivered.
-        assert _run_reminders(pool, 3600.0) == 0
-        assert len(deliver) == 1  # still exactly one reminder delivered
-        row = _task_row(db_conn, tid)
-        assert row is not None
-        _status, _owner, reminder_count, last_reminded_at = row
-        assert reminder_count == 1
-        assert last_reminded_at is not None
+        for task_id in task_ids:
+            row = _task_row(db_conn, task_id)
+            assert row is not None
+            assert row[2] == 1
+            assert row[3] is not None
 
     def test_expired_counter_mark_does_not_suppress_new_reminder(
         self,
@@ -376,6 +471,53 @@ class TestRemind:
 
 
 class TestEscalate:
+    def test_delegator_receives_one_digest_for_all_stalled_subtasks(
+        self,
+        pool: ConnectionPool,
+        db_conn: psycopg.Connection,
+        deliver: list[tuple[int, str]],
+        emitted_events: list[tuple[str, str, dict[str, Any]]],
+    ) -> None:
+        """Per-subtask escalation would produce two chats instead of one digest."""
+        delegator = _make_agent(db_conn)
+        parent = _make_task(db_conn, owner=delegator, remind_interval_seconds=None)
+        first_owner = _make_agent(db_conn)
+        second_owner = _make_agent(db_conn)
+        task_ids = [
+            _make_task(
+                db_conn,
+                owner=owner,
+                parent_id=parent,
+                remind_interval_seconds=1800,
+                updated_s_ago=7200,
+                reminder_count=3,
+            )
+            for owner in (first_owner, second_owner)
+        ]
+
+        assert _run_escalate(pool, 3) == 1
+        assert len(deliver) == 1
+        delivered_owner, message = deliver[0]
+        assert delivered_owner == delegator
+        assert "Stalled subtasks — owner(s) unresponsive after repeated reminders:" in message
+        assert all(f"#{task_id}" in message for task_id in task_ids)
+        assert emitted_events == [
+            (
+                "telemetry",
+                "task_escalation",
+                {
+                    "attributes": {
+                        "owner_id": delegator,
+                        "task_count": 2,
+                        "task_ids": task_ids,
+                        "leg": "delegator",
+                    },
+                    "agent_id": delegator,
+                    "source": "system",
+                },
+            )
+        ]
+
     def test_escalates_at_threshold(
         self, pool: ConnectionPool, db_conn: psycopg.Connection, deliver: list[tuple[int, str]]
     ) -> None:
@@ -447,7 +589,11 @@ class TestEscalate:
         assert deliver == []
 
     def test_user_task_escalates_to_human_queue(
-        self, pool: ConnectionPool, db_conn: psycopg.Connection, deliver: list[tuple[int, str]]
+        self,
+        pool: ConnectionPool,
+        db_conn: psycopg.Connection,
+        deliver: list[tuple[int, str]],
+        emitted_events: list[tuple[str, str, dict[str, Any]]],
     ) -> None:
         """A stalled top-level task whose parent is ownerless (the system root)
         has no delegator to catch it — it escalates to the user as a
@@ -474,6 +620,22 @@ class TestEscalate:
         assert task_id == child  # grouped under the stalled task
         assert priority == "P1"  # inherits the task's priority
         assert "stalled" in title.lower()
+        assert emitted_events == [
+            (
+                "telemetry",
+                "task_escalation",
+                {
+                    "attributes": {
+                        "owner_id": owner,
+                        "task_count": 1,
+                        "task_ids": [child],
+                        "leg": "user",
+                    },
+                    "agent_id": owner,
+                    "source": "system",
+                },
+            )
+        ]
 
     def test_user_escalation_skipped_when_owner_has_open_notice(
         self, pool: ConnectionPool, db_conn: psycopg.Connection, deliver: list[tuple[int, str]]

@@ -24,7 +24,7 @@ generated from it and never hand-synced. event_names that violate the naming rul
 | mechanism | table/channel | registered event_names | destination | retention |
 |------|------|-------------|------|------|
 | audit (category=audit) | `events` | 20 | events table | 365d+ |
-| telemetry (category=telemetry) | `events` | 98 | events table | 90d |
+| telemetry (category=telemetry) | `events` | 100 | events table | 90d |
 | log (category=log) | `events` | 4 | events table | 30d |
 | file-only (destination=file) | file log | 1 | file only (not the events table) | — |
 | SSE live | Redis → frontend (not persisted) | 27 role | live projection | ephemeral |
@@ -87,7 +87,7 @@ Emit sites and consumers: see the comments at each emit point.
 | `computer_session_end` | computer-use task session closed (idle timeout) | task_id, action_count, first_action_at, last_action_at, outcome | 365d | events |
 | `mcp_tool_call` | MCP tool invoked through the gateway /mcp endpoint (agent_id NULL — external client) | — | 365d | events |
 
-## 3. Telemetry events (category=telemetry, 98)
+## 3. Telemetry events (category=telemetry, 100)
 
 Telemetry-side event name resolution (`shared/log.py`): **explicit `event=` →
 `label=` fallback → default `"log"`**. Payload = logger extra fields + `msg`
@@ -134,6 +134,8 @@ consumers: see the comments at each emit point.
 | `halt` | turn stopped (idle/compact/system) | body | — | 90d | events |
 | `agent_restarted` | agent restarted (phase2 done) | — | — | 90d | events |
 | `heartbeat_nudged` | heartbeat reminder | idle_minutes | — | 90d | events |
+| `task_reminder_digest` | overdue-task owner digest | owner_id, task_count, task_ids | — | 90d | events |
+| `task_escalation` | stalled-task escalation | owner_id, task_count, task_ids, leg | — | 90d | events |
 | `delivery_stalled` | delivery backlog | inbound_id, age_s | — | 90d | events |
 | `restart_cas_lost` | restart CAS race lost | — | — | 90d | events |
 | `claim_cas_lost` | claim CAS race lost — another lifecycle op owns the row | — | — | 90d | events |

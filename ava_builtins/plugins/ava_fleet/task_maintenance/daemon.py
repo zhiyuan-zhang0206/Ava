@@ -5,22 +5,18 @@ Fleet-domain gateway daemon, registered into the ops service roster by the
 `ops/spec.py`: the whole remind/escalate surface is fleet, so it lives under the
 plugin namespace and is discovered only when the plugin is enabled.
 
-One gateway-side loop, cluster-wide. Reminders and escalations are delivered
-through the gateway's `POST /api/agents/{id}/messages` path (not a raw INSERT)
-so a terminated owner is auto-resurrected: a bare inbound INSERT only wakes a
-live subscriber (Redis pub/sub) and would never revive a dead process, whereas
-the gateway route runs `resurrect_if_terminated` after the insert. Counter updates
-(`last_reminded_at` / `reminder_count`) stay direct DB writes. Runs once per cluster,
-like the heartbeat daemon.
+One gateway-side loop, cluster-wide. Reminders and escalations directly insert
+into `inbound_messages` and then best-effort wake via Redis, modeled on heartbeat.
+They must not resurrect terminated agents: per the 2026-08-22 user ruling, an old
+agent remains terminated with its reminder unclaimed while the task escalates;
+whoever takes over spawns a new agent. Counter updates stay direct DB writes.
 
 - Remind: every `AVA_TASK_MAINTENANCE_INTERVAL_SECONDS` (default 5 min), find
   in-progress tasks whose owner has not touched them within their
-  `remind_interval_seconds` window and deliver a chat reminder to the owner (terminated
-  owners are resurrected by the delivery path). An overdue window repeats at
-  the task's own cadence — max(backoff, remind_interval_seconds) — so a P3
-  task (4h interval) is not nagged hourly; `last_reminded_at` gates it. A
-  delivered reminder whose counter write failed is retried without
-  re-delivering (same-cause dedup).
+  `remind_interval_seconds` window and deliver one chat digest per owner. An
+  overdue window repeats at max(backoff, remind_interval_seconds), so a P3 task
+  (4h interval) is not nagged hourly; `last_reminded_at` gates it. A failed
+  task-counter write is retried without re-delivering (same-cause dedup).
 - Escalate: when `reminder_count` reaches `AVA_TASK_ESCALATE_N` (default 3),
   notify the parent task's owner (the delegator) that the current owner is
   unresponsive. A top-level task has no delegating parent owner (its parent is
@@ -45,12 +41,14 @@ import logging
 import os
 import sys
 import time
+from collections import defaultdict
 
 import psycopg
 from psycopg_pool import ConnectionPool
 
 import shared.db
 from services._pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
+from shared import telemetry
 from shared.config import settings
 from shared.daemon_health import (
     Liveness,
@@ -59,10 +57,8 @@ from shared.daemon_health import (
     stop_health_server,
 )
 from shared.daemon_shutdown import install_graceful_shutdown
-from shared.http_dial import post as dial_post
 from shared.live_announce import publish_agent_updated_sync
 from shared.log import init_gateway_process
-from shared.machine import gateway_api_base, gateway_auth_headers
 from shared.paths import legacy_pid_path
 
 _log = logging.getLogger("ava_builtins.plugins.ava_fleet.task_maintenance.daemon")
@@ -71,27 +67,22 @@ _PIDFILE = settings.services.task_maintenance_pidfile
 _LIVENESS_TIMEOUT_S = 60.0
 _LIVENESS_BEAT_STEP_S = 30.0
 
-# Reminders/escalations go through the gateway so a terminated owner is
-# auto-resurrected. The gateway host is co-located; a generous timeout covers a
-# gateway-side resurrect (process launch) without wedging the sweep.
-_DELIVER_TIMEOUT_S = 120.0
 
+def _deliver_message(pool: ConnectionPool, agent_id: int, message: str) -> None:
+    """Insert a system chat inbound, commit it, then wake its agent.
 
-def _deliver_message(agent_id: int, message: str) -> None:
-    """Deliver a system chat inbound to `agent_id` through the gateway.
-
-    Routing through `POST /api/agents/{id}/messages` (rather than a raw INSERT)
-    is what gives a terminated owner auto-resurrect -- the endpoint runs
-    `resurrect_if_terminated` after the insert; a bare INSERT only publishes a
-    Redis wake, which a dead process never hears (it holds no subscription). Raises on any
-    non-2xx so the caller skips the counter update and retries next sweep."""
-    resp = dial_post(
-        f"{gateway_api_base()}/api/agents/{agent_id}/messages",
-        json={"content": message, "source": "system"},
-        headers=gateway_auth_headers(),
-        timeout=_DELIVER_TIMEOUT_S,
-    )
-    resp.raise_for_status()
+    Direct delivery intentionally cannot resurrect a terminated agent; its inbox
+    row remains inspectable while escalation directs the work onward."""
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO inbound_messages (agent_id, content, kind, source) "
+            "VALUES (%s, %s, 'chat', 'system') RETURNING id",
+            (agent_id, message),
+        )
+        inbound_id = int(cur.fetchone()[0])  # type: ignore[index]
+    # The connection context commits before the best-effort wake. A missing
+    # subscriber is expected for a terminated agent and does not resurrect it.
+    shared.db.publish_inbound_wake(agent_id, str(inbound_id))
 
 
 # ── Reminder pass ──────────────────────────────────────────────────────────────
@@ -99,7 +90,7 @@ def _deliver_message(agent_id: int, message: str) -> None:
 # Tasks whose remind_interval_seconds has elapsed AND the owner hasn't been reminded
 # within this overdue window (last_reminded_at gates it within
 # max(backoff, remind_interval_seconds) — each task repeats at its own cadence).
-# Terminated owners are NOT excluded — the gateway delivery path resurrects them.
+# Terminated owners remain eligible: direct delivery records without reviving them.
 _REMINDER_SQL = """
     SELECT id, owner, title, remind_interval_seconds,
            EXTRACT(EPOCH FROM (now() - updated_at))::bigint AS elapsed
@@ -144,8 +135,19 @@ def _advance_reminder_counters(pool: ConnectionPool, task_id: int) -> None:
         )
 
 
+def _reminder_digest_message(tasks: list[tuple[int, str, int, int]]) -> str:
+    """Format one owner's overdue tasks without a single-task special case."""
+    lines = [f"Task reminders — you have {len(tasks)} overdue task(s):"]
+    for task_id, title, remind_interval_seconds, elapsed in tasks:
+        lines.append(
+            f'- #{task_id} "{title}" — idle {elapsed / 3600:.1f}h '
+            f"(reminder interval: {remind_interval_seconds // 60}min)"
+        )
+    return "\n".join(lines)
+
+
 def _run_reminders(pool: ConnectionPool, backoff_seconds: float) -> int:
-    """Remind every overdue in-progress task's owner. Returns reminders sent."""
+    """Deliver one overdue-task digest per owner. Returns fully recorded digests."""
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(_REMINDER_SQL, (backoff_seconds,))
         overdue = cur.fetchall()
@@ -158,6 +160,7 @@ def _run_reminders(pool: ConnectionPool, backoff_seconds: float) -> int:
     for marked_task_id, marked_at in list(_pending_counter_writes.items()):
         if now_mono - marked_at > _DELIVER_DEDUP_WINDOW_S:
             del _pending_counter_writes[marked_task_id]
+    overdue_by_owner: dict[int, list[tuple[int, str, int, int]]] = defaultdict(list)
     for task_id, owner, title, remind_interval_seconds, elapsed in overdue:
         if task_id in _pending_counter_writes:
             # Delivered on an earlier sweep but the counter write failed, so
@@ -179,40 +182,48 @@ def _run_reminders(pool: ConnectionPool, backoff_seconds: float) -> int:
                 task_id,
             )
             continue
-        hours = elapsed / 3600
-        message = (
-            f'Task #{task_id} "{title}" has not been updated in '
-            f"{hours:.1f}h (reminder interval: {remind_interval_seconds // 60}min). "
-            "Please update its status or results."
-        )
+        overdue_by_owner[owner].append((task_id, title, remind_interval_seconds, elapsed))
+    for owner, tasks in overdue_by_owner.items():
+        task_ids = [task_id for task_id, _, _, _ in tasks]
         try:
-            # Deliver first (auto-resurrects a terminated owner); only advance
-            # the counters once the message is in. A failed delivery leaves the
-            # counters untouched, so the task is retried on the next sweep.
-            _deliver_message(owner, message)
+            # Deliver before counters, so a failed digest leaves every task eligible.
+            _deliver_message(pool, owner, _reminder_digest_message(tasks))
         except Exception as exc:
-            _log.error("[task-maintenance] reminder for task %s failed: %r", task_id, exc)
-            continue
-        try:
-            _advance_reminder_counters(pool, task_id)
-            sent += 1
-            _log.info(
-                "[task-maintenance] reminded owner %s about task %s (idle %.1fh)",
-                owner,
-                task_id,
-                hours,
-            )
-        except Exception as exc:
-            # Message delivered but the counters did not advance: remember the
-            # task so the next sweep retries the counter write WITHOUT
-            # re-delivering the message (same-cause dedup).
-            _pending_counter_writes[task_id] = time.monotonic()
             _log.error(
-                "[task-maintenance] reminder counters for task %s failed after "
-                "delivery: %r — retrying without re-delivery next sweep",
-                task_id,
+                "[task-maintenance] reminder digest for owner %s (tasks %s) failed: %r",
+                owner,
+                task_ids,
                 exc,
             )
+            continue
+        telemetry.emit(
+            "telemetry",
+            "task_reminder_digest",
+            agent_id=owner,
+            source="system",
+            attributes={"owner_id": owner, "task_count": len(tasks), "task_ids": task_ids},
+        )
+        counter_failed = False
+        for task_id in task_ids:
+            try:
+                _advance_reminder_counters(pool, task_id)
+                _log.info(
+                    "[task-maintenance] recorded reminder digest for owner %s, task %s",
+                    owner,
+                    task_id,
+                )
+            except Exception as exc:
+                # Retry this bookkeeping without re-delivering the digest.
+                _pending_counter_writes[task_id] = time.monotonic()
+                counter_failed = True
+                _log.error(
+                    "[task-maintenance] reminder counters for task %s failed after "
+                    "delivery: %r — retrying without re-delivery next sweep",
+                    task_id,
+                    exc,
+                )
+        if not counter_failed:
+            sent += 1
     return sent
 
 
@@ -278,6 +289,14 @@ def _escalate_to_user_queue(
     return True
 
 
+def _delegator_digest_message(tasks: list[tuple[int, str, int, int]]) -> str:
+    """Format one delegator's stalled subtasks without a per-task path."""
+    lines = ["Stalled subtasks — owner(s) unresponsive after repeated reminders:"]
+    for task_id, title, owner, reminder_count in tasks:
+        lines.append(f'- #{task_id} "{title}" — owner #{owner}, {reminder_count} reminders')
+    return "\n".join(lines)
+
+
 def _run_escalate(pool: ConnectionPool, escalate_n: int) -> int:
     """Escalate unresponsive subtask owners.
 
@@ -291,6 +310,7 @@ def _run_escalate(pool: ConnectionPool, escalate_n: int) -> int:
         rows = cur.fetchall()
 
     escalated = 0
+    stalled_by_delegator: dict[int, list[tuple[int, str, int, int]]] = defaultdict(list)
     for task_id, title, owner, reminder_count, priority, parent_owner in rows:
         try:
             if parent_owner is not None:
@@ -300,21 +320,7 @@ def _run_escalate(pool: ConnectionPool, escalate_n: int) -> int:
                 # the next reminder pushes reminder_count past the threshold.
                 if reminder_count != escalate_n:
                     continue
-                message = (
-                    f'Your subtask #{task_id} "{title}" — owner agent #{owner} '
-                    f"has not responded to {reminder_count} reminders. "
-                    "Please decide whether to reassign or cancel this task."
-                )
-                _deliver_message(parent_owner, message)
-                _log.info(
-                    "[task-maintenance] escalated task %s to parent owner %s "
-                    "(owner %s unresponsive after %d reminders)",
-                    task_id,
-                    parent_owner,
-                    owner,
-                    reminder_count,
-                )
-                escalated += 1
+                stalled_by_delegator[parent_owner].append((task_id, title, owner, reminder_count))
             else:
                 # Top-level task -> surface in the human queue. Use
                 # >= (not ==): a sweep that cannot post yet (the owner already
@@ -326,6 +332,18 @@ def _run_escalate(pool: ConnectionPool, escalate_n: int) -> int:
                 if reminder_count < escalate_n:
                     continue
                 if _escalate_to_user_queue(pool, task_id, owner, priority, title):
+                    telemetry.emit(
+                        "telemetry",
+                        "task_escalation",
+                        agent_id=owner,
+                        source="system",
+                        attributes={
+                            "owner_id": owner,
+                            "task_count": 1,
+                            "task_ids": [task_id],
+                            "leg": "user",
+                        },
+                    )
                     _log.info(
                         "[task-maintenance] escalated user task %s to the human queue "
                         "(owner %s unresponsive after %d reminders)",
@@ -338,6 +356,35 @@ def _run_escalate(pool: ConnectionPool, escalate_n: int) -> int:
             _log.error(
                 "[task-maintenance] escalation for task %s failed: %r",
                 task_id,
+                exc,
+            )
+    for delegator, tasks in stalled_by_delegator.items():
+        task_ids = [task_id for task_id, _, _, _ in tasks]
+        try:
+            _deliver_message(pool, delegator, _delegator_digest_message(tasks))
+            telemetry.emit(
+                "telemetry",
+                "task_escalation",
+                agent_id=delegator,
+                source="system",
+                attributes={
+                    "owner_id": delegator,
+                    "task_count": len(tasks),
+                    "task_ids": task_ids,
+                    "leg": "delegator",
+                },
+            )
+            _log.info(
+                "[task-maintenance] escalated tasks %s to delegator %s",
+                task_ids,
+                delegator,
+            )
+            escalated += 1
+        except Exception as exc:
+            _log.error(
+                "[task-maintenance] escalation digest for delegator %s (tasks %s) failed: %r",
+                delegator,
+                task_ids,
                 exc,
             )
     return escalated

@@ -41,6 +41,8 @@ _SQL_OR_DYNAMIC_KINDS = frozenset(
         "delivery_stalled",  # services/delivery_watchdog/daemon.py:242
         "heartbeat_nudged",  # services/heartbeat/daemon.py:187
         # 动态 emit：位置参数形式，无 `event=` 字面量。
+        "task_reminder_digest",  # task_maintenance/daemon.py:_run_reminders
+        "task_escalation",  # task_maintenance/daemon.py:_run_escalate
         "heartbeat_paused",  # ava/self.py:258 telemetry.emit("telemetry", ...)
         "frontend_interaction",  # gateway/routers/frontend_telemetry.py telemetry.emit("telemetry", ...)
         "pgbouncer_repaired",  # services/healthchecks/pgbouncer.py:_emit_repaired
