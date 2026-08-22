@@ -321,7 +321,7 @@ export default function DisplaySettingsPage() {
         <ToggleRow
           icon={CalendarClock}
           label="Show weekday in timestamps"
-          description="Show the weekday in timeline card timestamps (e.g. [2026-05-06 Tue 16:56:29 PDT])"
+          description="Show the weekday in timeline card timestamps (e.g. [2026-05-06 Tue 16:56:29 GMT+8])"
           value={settings["display.show_timestamp_weekday"] as boolean}
           onChange={(v) => setSetting("display.show_timestamp_weekday", v)}
         />
