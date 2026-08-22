@@ -1,6 +1,6 @@
 "use client";
 
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryCache, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ThemeProvider } from "next-themes";
 import { useState } from "react";
 
@@ -8,7 +8,8 @@ import { AppConnectionBanner } from "@/components/app-connection-banner";
 import { ThemePackTokens } from "@/components/theme-pack-tokens";
 import { ToastHost } from "@/components/toast";
 import { LanguageProvider } from "@/i18n/language-provider";
-import { AuthProvider } from "@/lib/auth-context";
+import { AuthProvider, notifySessionInvalid } from "@/lib/auth-context";
+import { ApiError } from "@/lib/api";
 import { SettingsMigration } from "@/lib/settings-migration";
 import { EventStreamProvider } from "@/lib/useEventStream";
 import { AlertsProvider } from "@/lib/use-alerts";
@@ -40,30 +41,43 @@ import { AlertsProvider } from "@/lib/use-alerts";
 // AppConnectionBanner also rides that connection here at the root, so the
 // SSE-disconnect / cluster-updating / stranded-recovery chrome (and the
 // cluster-health poller behind it) protects every page, not just the home view.
-export function Providers({ children }: { children: React.ReactNode }) {
-  const [queryClient] = useState(
-    () =>
-      new QueryClient({
-        defaultOptions: {
-          queries: {
-            // Page switches should hit cache, not refetch: with the global
-            // connection now persistent, a 5min staleTime keeps a just-visited
-            // page's data warm across navigation (SSE-driven queries override
-            // to Infinity; polling queries set their own refetchInterval).
-            staleTime: 5 * 60_000,
-            // Retain inactive (unobserved) query caches long enough that
-            // returning to a page after a detour still hot-hits instead of
-            // cold-fetching with a spinner.
-            gcTime: 30 * 60_000,
-            // Default-refetch-on-window-focus would shadow SSE-pushed
-            // live data (e.g. timeline) with stray GETs; turn it off and
-            // declare refetchInterval explicitly on useQueries that
-            // actually want polling (e.g. status).
-            refetchOnWindowFocus: false,
-          },
+export function createQueryClient(): QueryClient {
+  return new QueryClient({
+    queryCache: new QueryCache({
+      onError: (error) => {
+        if (error instanceof ApiError && error.status === 401) {
+          notifySessionInvalid();
+        }
+      },
+    }),
+    defaultOptions: {
+      queries: {
+        // Page switches should hit cache, not refetch: with the global
+        // connection now persistent, a 5min staleTime keeps a just-visited
+        // page's data warm across navigation (SSE-driven queries override
+        // to Infinity; polling queries set their own refetchInterval).
+        staleTime: 5 * 60_000,
+        // Retain inactive (unobserved) query caches long enough that
+        // returning to a page after a detour still hot-hits instead of
+        // cold-fetching with a spinner.
+        gcTime: 30 * 60_000,
+        // Default-refetch-on-window-focus would shadow SSE-pushed
+        // live data (e.g. timeline) with stray GETs; turn it off and
+        // declare refetchInterval explicitly on useQueries that
+        // actually want polling (e.g. status).
+        refetchOnWindowFocus: false,
+        retry: (failureCount, error) => {
+          // Task #1326: a 401 is not transient; retrying amplifies it into a poll storm.
+          if (error instanceof ApiError && error.status === 401) return false;
+          return failureCount < 3;
         },
-      }),
-  );
+      },
+    },
+  });
+}
+
+export function Providers({ children }: { children: React.ReactNode }) {
+  const [queryClient] = useState(() => createQueryClient());
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
