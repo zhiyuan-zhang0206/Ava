@@ -15,12 +15,13 @@ directory. The manifest is the single expression of the built-in policy
 
 | Schedule | Script | Class | Default |
 |----------|--------|-------|---------|
-| `self-evolution-weekly` | `self-evolution-weekly-schedule.py` | product | **enabled** |
-| `self-evolution-daily` | `self-evolution-daily-schedule.py` | product | **enabled** |
+| `adversarial-eval-weekly` | `adversarial-eval-weekly-schedule.py` | product | **enabled** |
 | `memory-arbiter` | `memory-steward-schedule.py` | product | **enabled** |
+| `self-evolution-daily` | `self-evolution-daily-schedule.py` | product | **enabled** |
+| `self-evolution-weekly` | `self-evolution-weekly-schedule.py` | product | **enabled** |
 | `trace-ship-tempo` | `trace-ship-tempo-schedule.py` | operator | **disabled** (present, not started) |
 
-- **product** schedules (self-evolution, memory) are Ava's own improvement
+- **product** schedules (adversarial evaluation, self-evolution, memory) are Ava's own improvement
   loops — they ship and start by default.
 - **operator** schedules (cluster-operator tooling, e.g. shipping OTel traces
   to a local Tempo viewer) ship with the product but start **disabled**: they

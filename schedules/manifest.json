@@ -1,14 +1,22 @@
 {
   "version": 1,
-  "policy": "Built-in schedules ship with Ava. Product schedules (self-evolution, memory) are created enabled by default; cluster-operator schedules are created but disabled. provision_builtin_schedules() (gateway boot + `ava schedules provision`) creates missing built-ins keyed by name and never modifies existing rows.",
+  "policy": "Built-in schedules ship with Ava. Product schedules (adversarial evaluation, self-evolution, memory) are created enabled by default; cluster-operator schedules are created but disabled. provision_builtin_schedules() (gateway boot + `ava schedules provision`) creates missing built-ins keyed by name and never modifies existing rows.",
   "builtin_schedules": [
     {
-      "name": "self-evolution-weekly",
+      "name": "adversarial-eval-weekly",
       "class": "product",
       "default_enabled": true,
-      "description": "Weekly self-evolution — fires the self-evolution agent when the past week's event volume clears a minimum threshold (dynamic; busy weeks get a mid-week follow-up).",
-      "script": "self-evolution-weekly-schedule.py",
-      "command": "python self-evolution-weekly-schedule.py"
+      "description": "Weekly adversarial probe batch — rotates 5 of 9 behavior-probe cases through fresh eval-isolated agents every Wednesday 04:00 (Asia/Shanghai); quiet on success, wakes an owner agent for human review on any 0-score.",
+      "script": "adversarial-eval-weekly-schedule.py",
+      "command": "python adversarial-eval-weekly-schedule.py"
+    },
+    {
+      "name": "memory-arbiter",
+      "class": "product",
+      "default_enabled": true,
+      "description": "Memory pool daily maintenance — 4AM consolidation (commit + push + PR merge) and 7AM health check (OKF, size, dedup, stale).",
+      "script": "memory-steward-schedule.py",
+      "command": "python memory-steward-schedule.py"
     },
     {
       "name": "self-evolution-daily",
@@ -19,12 +27,12 @@
       "command": "python self-evolution-daily-schedule.py"
     },
     {
-      "name": "memory-arbiter",
+      "name": "self-evolution-weekly",
       "class": "product",
       "default_enabled": true,
-      "description": "Memory pool daily maintenance — 4AM consolidation (commit + push + PR merge) and 7AM health check (OKF, size, dedup, stale).",
-      "script": "memory-steward-schedule.py",
-      "command": "python memory-steward-schedule.py"
+      "description": "Weekly self-evolution — fires the self-evolution agent when the past week's event volume clears a minimum threshold (dynamic; busy weeks get a mid-week follow-up).",
+      "script": "self-evolution-weekly-schedule.py",
+      "command": "python self-evolution-weekly-schedule.py"
     },
     {
       "name": "model-update-tracker",
