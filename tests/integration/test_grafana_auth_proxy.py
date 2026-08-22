@@ -1,8 +1,8 @@
 """Pinned runtime proof of the shipped Grafana auth-proxy service contract.
 
 The disposable container consumes the compose service's actual image, GF_*
-environment, and provisioning bind. Docker must work in CI; local machines
-without it skip explicitly.
+environment, and a temporary copy of its shipped provisioning. Docker must
+work in CI; local machines without it skip explicitly.
 """
 
 from __future__ import annotations
@@ -57,7 +57,7 @@ def _run_docker(docker: str, *args: str, timeout: int = 300) -> subprocess.Compl
     )
 
 
-def _shipped_service() -> tuple[str, dict[str, str], str]:
+def _shipped_service() -> tuple[str, dict[str, str], Path]:
     compose = yaml.safe_load(_COMPOSE_PATH.read_text(encoding="utf-8"))
     service = compose["services"]["grafana"]
     image = service["image"]
@@ -74,7 +74,7 @@ def _shipped_service() -> tuple[str, dict[str, str], str]:
     source, target, mode = provisioning.split(":")
     source_path = (_COMPOSE_PATH.parent / source).resolve()
     assert source_path.is_dir() and target == "/etc/grafana/provisioning" and mode == "ro"
-    return image, environment, f"{source_path}:{target}:{mode}"
+    return image, environment, source_path
 
 
 def _published_port(docker: str, name: str) -> int:
@@ -84,9 +84,11 @@ def _published_port(docker: str, name: str) -> int:
     return int(mapping.stdout.strip().rsplit(":", 1)[1])
 
 
-def _query_proof_datasource(tmp_path: Path) -> str:
-    """Add deterministic TestData beside, never instead of, shipped provisioning."""
-    path = tmp_path / "ava-ci-query-proof.yml"
+def _combined_provisioning(shipped: Path, tmp_path: Path) -> Path:
+    """Copy shipped provisioning and add the isolated TestData datasource."""
+    combined = tmp_path / "provisioning"
+    shutil.copytree(shipped, combined)
+    path = combined / "datasources" / "ava-ci-query-proof.yml"
     path.write_text(
         "apiVersion: 1\n"
         "datasources:\n"
@@ -95,7 +97,17 @@ def _query_proof_datasource(tmp_path: Path) -> str:
         "    type: grafana-testdata-datasource\n"
         "    access: proxy\n"
     )
-    return f"{path}:/etc/grafana/provisioning/datasources/ava-ci-query-proof.yml:ro"
+    return combined
+
+
+def test_combined_provisioning_preserves_shipped_tree(tmp_path: Path) -> None:
+    _, _, shipped = _shipped_service()
+    combined = _combined_provisioning(shipped, tmp_path)
+    shipped_datasources = shipped / "datasources" / "datasources.yml"
+    combined_datasources = combined / "datasources" / "datasources.yml"
+    assert combined_datasources.read_bytes() == shipped_datasources.read_bytes()
+    assert not (shipped / "datasources" / "ava-ci-query-proof.yml").exists()
+    assert (combined / "datasources" / "ava-ci-query-proof.yml").is_file()
 
 
 def _wait_for_grafana(client: httpx.Client, root: str) -> dict[str, object]:
@@ -207,7 +219,8 @@ def _assert_live(port: int) -> None:
 
 def test_real_grafana_fixed_viewer_auth_proxy(tmp_path: Path) -> None:
     docker = _docker_or_skip()
-    image, environment, provisioning = _shipped_service()
+    image, environment, shipped_provisioning = _shipped_service()
+    provisioning = _combined_provisioning(shipped_provisioning, tmp_path)
     name = f"ava-grafana-auth-{uuid.uuid4().hex[:12]}"
     args = ["run", "--detach", "--name", name, "--publish", "127.0.0.1::3000"]
     for key, value in environment.items():
@@ -215,9 +228,7 @@ def test_real_grafana_fixed_viewer_auth_proxy(tmp_path: Path) -> None:
     args.extend(
         (
             "--volume",
-            provisioning,
-            "--volume",
-            _query_proof_datasource(tmp_path),
+            f"{provisioning}:/etc/grafana/provisioning:ro",
             image,
         )
     )
