@@ -18,7 +18,6 @@ import type { NoticesFeed,
   UserSettingListResponse,
   UserSettingRow,
   AgentInspect,
-  ComputerTraceResponse,
   AgentMachineRow,
   AgentMessageEnqueued,
   AgentRow,
@@ -173,12 +172,6 @@ const PUT_JSON = (body: unknown): RequestInit => ({
 });
 
 export const api = {
-  // One task's computer-use desktop-action trail (Phase 3, task #1101):
-  // session envelope + chronological computer_action rows for a task_id.
-  getComputerTrace: (taskId: number): Promise<ComputerTraceResponse> => {
-    return f(`/api/computer/traces?task_id=${taskId}`).then(ok<ComputerTraceResponse>);
-  },
-
   // Returns one tail window of the timeline (newest `limit` items). Pass
   // `before` = the oldest item_id currently held to page further back for
   // scroll-up history; `has_more` reports whether older items remain.

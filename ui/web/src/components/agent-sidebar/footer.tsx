@@ -1,6 +1,6 @@
 "use client";
 
-import { Activity, BarChart3, NotebookText, Settings, Waypoints , MonitorPlay } from "lucide-react";
+import { Activity, BarChart3, NotebookText, Settings, Waypoints } from "lucide-react";
 import * as Popover from "@radix-ui/react-popover";
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
@@ -170,12 +170,6 @@ export function SidebarFooter() {
           label={navT("memoryGraph")}
         >
           <NotebookText className="size-4" />
-        </SidebarNavButton>
-        <SidebarNavButton
-          onClick={() => router.push("/computer-traces")}
-          label={navT("computerTraces")}
-        >
-          <MonitorPlay className="size-4" />
         </SidebarNavButton>
         <SidebarNavButton onClick={() => router.push("/fleet")} label={navT("fleet")}>
           <Waypoints className="size-4" />

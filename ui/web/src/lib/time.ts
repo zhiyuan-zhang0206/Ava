@@ -9,7 +9,7 @@
 //
 // Three shapes, one job each:
 //   - formatAbsolute — full precision + timezone name, for a dedicated
-//     "when exactly" slot (inspector detail, computer-trace rows).
+//     "when exactly" slot (inspector detail).
 //   - formatShort — compact, no timezone, for space-constrained rows
 //     (sidebar time column, a wall-clock cell).
 //   - formatRelative — one signed wording scheme ("in 4m" / "5m ago" / "now")

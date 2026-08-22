@@ -718,38 +718,3 @@ export type ContextMeterWidth = "compact" | "comfortable" | "wide";
 
 /** Date format mode. */
 export type DateFormat = "relative" | "absolute";
-
-
-// ── computer-use trace (Phase 3, task #1101) ────────────────────────────────
-
-export interface ComputerTraceAction {
-  id: number;
-  ts: string | null;
-  agent_id: number;
-  event: string;
-  action?: string;
-  app?: string | null;
-  outcome?: string;
-  coords?: string | null;
-  path?: string | null;
-  error?: string | null;
-}
-
-export interface ComputerTraceEnvelope {
-  event?: string;
-  ts?: string | null;
-  agent_id?: number;
-  task_id?: number;
-  first_tool?: string;
-  first_action_at?: string;
-  action_count?: number;
-  last_action_at?: string;
-  outcome?: string;
-}
-
-export interface ComputerTraceResponse {
-  task_id: number;
-  start: ComputerTraceEnvelope | null;
-  end: ComputerTraceEnvelope | null;
-  actions: ComputerTraceAction[];
-}
