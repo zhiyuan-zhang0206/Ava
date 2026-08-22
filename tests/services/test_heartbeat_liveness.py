@@ -206,6 +206,38 @@ class TestLivenessPass:
         asyncio.run(run_liveness_pass(pool, probe=FakeProbe({_MACHINE: True})))
         assert _state(db_conn, aid)[0] == "online"  # success resets
 
+    def test_pass_announces_only_liveness_edges(
+        self,
+        pool: ConnectionPool,
+        db_conn: psycopg.Connection,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A mounted frontend receives online/offline truth without a poll storm."""
+        _register_machine(db_conn)
+        aid = _make_agent(db_conn, status="restarting", lease_s_ahead=None)
+        announced: list[int] = []
+        monkeypatch.setattr(
+            "services.heartbeat.liveness.publish_agent_updated_sync",
+            lambda _conn, agent_id: announced.append(agent_id),
+        )
+        import asyncio
+
+        asyncio.run(run_liveness_pass(pool, probe=FakeProbe({_MACHINE: True})))
+        assert announced == []  # unknown already renders as online
+
+        announced.clear()
+        asyncio.run(run_liveness_pass(pool, probe=FakeProbe({_MACHINE: True})))
+        assert announced == []  # last_probe_at alone never broadcasts the fleet
+
+        fail = FakeProbe({_MACHINE: False})
+        asyncio.run(run_liveness_pass(pool, probe=fail))
+        asyncio.run(run_liveness_pass(pool, probe=fail))
+        assert announced == [aid]  # online -> offline
+
+        announced.clear()
+        asyncio.run(run_liveness_pass(pool, probe=FakeProbe({_MACHINE: True})))
+        assert announced == [aid]  # offline -> online
+
     def test_hibernating_is_lease_exempt(
         self, pool: ConnectionPool, db_conn: psycopg.Connection
     ) -> None:

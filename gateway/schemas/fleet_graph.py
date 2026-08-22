@@ -4,10 +4,14 @@ Split out of the former monolithic ops/schemas.py; FastAPI registers these
 unchanged, so the OpenAPI codegen is byte-identical to the wire before.
 """
 
+from typing import Literal
+
 from pydantic import (
     BaseModel,
     ConfigDict,
 )
+
+from shared.agents import AgentStatus
 
 
 class FleetGraphNode(BaseModel):
@@ -17,7 +21,8 @@ class FleetGraphNode(BaseModel):
 
     agent_id: int
     label: str | None
-    status: str
+    status: AgentStatus
+    liveness_state: Literal["online", "offline", "unknown"]
     spawner: str
     machine: str | None
     # Recent-work score over the selected window: in_total * 0.1 + out_total * 1.0

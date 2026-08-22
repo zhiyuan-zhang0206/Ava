@@ -571,52 +571,32 @@ export type CommandItem = Schemas["CommandItem"];
 // agent-to-agent message traffic (one edge per (from,to,event_type),
 // event_count accumulating repeats, weight a recency*frequency score).
 //
-// Hand-written here (not re-exported from the generated layer) because the
-// backend endpoint is not part of the committed schema yet. Once it lands,
-// regenerate and switch these to `Schemas[...]` re-exports.
+// The raw endpoint types come from OpenAPI below. The console overlays only
+// its public lifecycle vocabulary and normalized edge-event vocabulary; every
+// other field (including liveness, nullable machine, and stale) stays pinned to
+// the generated wire contract.
 
 // Lineage ties (spawn / fork / resurrect) + the message tie. The backend emits
 // the raw event_log value `send_message`; normalizeGraph maps it to `message`
 // (the graph's vocabulary), so the view keys on `message` here.
 export type GraphEventType = "spawn" | "fork" | "resurrect" | "message";
 
-export interface FleetGraphNode {
-  readonly agent_id: number;
-  readonly label: string | null;
+export type WireFleetGraphNode = Schemas["FleetGraphNode"];
+export type WireFleetGraphEdge = Schemas["FleetGraphEdge"];
+export type WireFleetGraph = Schemas["FleetGraphResponse"];
+
+export type FleetGraphNode = Omit<WireFleetGraphNode, "status"> & {
   readonly status: PublicAgentStatus;
-  readonly spawner: string;
-  readonly machine: string;
-  /** Recent-work score over the selected window (in*0.1 + out*1.0). Drives node size. */
-  readonly node_score: number;
-  /** Cumulative tokens consumed (input + output, all-time). Shown in the tooltip. */
-  readonly total_tokens: number;
-}
+};
 
-export interface FleetGraphEdge {
-  readonly from_agent: number;
-  readonly to_agent: number;
+export type FleetGraphEdge = Omit<WireFleetGraphEdge, "event_type"> & {
   readonly event_type: GraphEventType;
-  /** recency_decay * frequency_factor * event-type base weight. */
-  readonly weight: number;
-  readonly event_count: number;
-  /** Most recent time this (from,to,event_type) fired. */
-  readonly last_seen_at?: string | null;
-}
+};
 
-export interface FleetGraph {
+export type FleetGraph = Omit<WireFleetGraph, "nodes" | "edges"> & {
   readonly nodes: readonly FleetGraphNode[];
   readonly edges: readonly FleetGraphEdge[];
-}
-
-/** Raw `/api/fleet/graph` response before node statuses cross the same public
- *  projection boundary as `/api/agents` and lifecycle SSE snapshots. */
-export type WireFleetGraphNode = Omit<FleetGraphNode, "status"> & {
-  readonly status: WireAgentStatus;
 };
-export interface WireFleetGraph {
-  readonly nodes: readonly WireFleetGraphNode[];
-  readonly edges: readonly FleetGraphEdge[];
-}
 // --- Tasks (GET /api/tasks) ---
 //
 // The task registry — persistent, process-decoupled work items that outlive

@@ -34,7 +34,7 @@ Gateway's 37 route modules, split by business domain under `gateway/routers/<dom
 - **guide** (`POST /api/guide/draft`) — same-shaped ops entry: spawn an `ava-guide` agent to handle natural-language ops requests
 
 ### Frontend UI data
-- **fleet_graph** (`/api/fleet/graph`) — weighted agent relationship graph; nodes from `agents_meta` + Prometheus counters, edges stitch frozen PG `events` + Loki
+- **fleet_graph** (`/api/fleet/graph`) — weighted agent relationship graph; nodes carry canonical lifecycle `status` plus independent `liveness_state` from `agents_meta` and Prometheus counters, edges stitch frozen PG `events` + Loki
 - **timeline** (`/api/agents/{id}/timeline`) — agent timeline messages
 - **notices** (`/api/notices/*`) — `ava.ui.notify()` user notifications; rows carry `task_id` (`null` when unattached), driving notice→task linkage in the inspector
 - **pages** (`/api/pages`, `/api/agents/{id}/pages`) — `ava.ui.show/close` registered UI pages + the streaming reverse proxy for them (`/api/agents/{id}/pages/{name}/...` → the page server; browser never dials it directly)

@@ -21,6 +21,8 @@ export function upsertAgent(prev: AgentRow[] | undefined, next: AgentRow): Agent
     (cur, nxt) =>
       cur === nxt ||
       (cur.status === nxt.status &&
+        cur.liveness_state === nxt.liveness_state &&
+        cur.last_probe_at === nxt.last_probe_at &&
         cur.label === nxt.label &&
         cur.pid === nxt.pid &&
         cur.unread_notice_count === nxt.unread_notice_count &&

@@ -50,6 +50,7 @@ from psycopg_pool import ConnectionPool
 
 from ops import cluster_rpc
 from shared.config import settings
+from shared.live_announce import publish_agent_updated_sync
 from shared.machines import list_agent_runners
 
 _log = logging.getLogger("services.heartbeat.liveness")
@@ -234,9 +235,10 @@ async def _record_probe(pool: ConnectionPool, name: str, *, ok: bool) -> None:
         _machine_alert_edges(conn, name, ok=ok, old_online=old_online, new_cf=new_cf)
 
 
-def _merge_liveness(pool: ConnectionPool) -> None:
+def _merge_liveness(pool: ConnectionPool) -> list[int]:
     """Recompute `liveness_state` for every non-terminated row whose machine is
-    registered, from the current machine_probe rows and lease state.
+    registered, from the current machine_probe rows and lease state. Return the
+    ids whose user-visible liveness crossed into or out of `offline`.
 
     Pure SQL so the merge is one statement, atomic and O(agents) — the same
     shape the reaper's passes use. A machine with no probe row yet (never
@@ -251,20 +253,38 @@ def _merge_liveness(pool: ConnectionPool) -> None:
             "         COALESCE(mp.consecutive_failures, 0) AS cf"
             "  FROM machines m"
             "  LEFT JOIN machine_probe mp ON mp.machine_name = m.name"
-            ") "
-            "UPDATE agents_meta a "
-            "SET liveness_state = CASE "
+            "), desired AS ("
+            "  SELECT a.id, a.liveness_state AS old_liveness_state,"
+            "    CASE "
             "      WHEN p.cf >= %s THEN 'offline' "
             "      WHEN a.status IN ('running', 'idling') "
             "           AND (a.lease_expires_at IS NULL OR a.lease_expires_at <= now()) "
             "        THEN 'offline' "
             "      ELSE 'online' "
-            "    END, "
+            "    END AS new_liveness_state "
+            "  FROM agents_meta a "
+            "  JOIN probe p ON a.machine = p.machine_name "
+            "  WHERE a.status != 'terminated'"
+            ") "
+            "UPDATE agents_meta a "
+            "SET liveness_state = d.new_liveness_state, "
             "    last_probe_at = now() "
-            "FROM probe p "
-            "WHERE a.machine = p.machine_name AND a.status != 'terminated'",
+            "FROM desired d "
+            "WHERE a.id = d.id "
+            "RETURNING a.id, d.old_liveness_state, d.new_liveness_state",
             (_OFFLINE_AFTER_FAILURES,),
         )
+        rows = cur.fetchall()
+    # `unknown` is already rendered conservatively as online, so the first
+    # judgement unknown -> online is not a user-visible edge and must not emit
+    # a fleet-sized startup burst. Broadcast only edges entering/leaving the
+    # offline state; one snapshot per changed agent lets the existing R4 fold
+    # update mounted clients without inventing a second liveness transport.
+    return [
+        int(agent_id)
+        for agent_id, old_state, new_state in rows
+        if old_state == "offline" or new_state == "offline"
+    ]
 
 
 async def run_liveness_pass(
@@ -282,7 +302,14 @@ async def run_liveness_pass(
     results = await asyncio.gather(*(_probe_machine(name, probe=probe) for name, _url in runners))
     for (name, _url), ok in zip(runners, results, strict=True):
         await _record_probe(pool, name, ok=ok)
-    _merge_liveness(pool)
+    changed_agent_ids = _merge_liveness(pool)
+    if changed_agent_ids:
+        # `_merge_liveness` committed before this best-effort live projection.
+        # Reuse one connection for the canonical snapshots so a host edge does
+        # not open one Postgres connection per affected agent.
+        with pool.connection() as conn:
+            for agent_id in changed_agent_ids:
+                publish_agent_updated_sync(conn, agent_id)
     _log.info(
         "[heartbeat] liveness pass: %d machines probed (%d reachable), agents_meta merged",
         len(runners),
