@@ -48,9 +48,10 @@ cargo tauri android build --apk
 ```
 
 The overlay adds the foreground service, notification/network permissions,
-network-security configuration, and optional release signing. A CI keystore is
-enabled only when `src-tauri/gen/android/keystore.properties` exists; see the
-release workflow for the three Android signing secrets.
+network-security configuration, JNI/reflection-safe ProGuard rules, and
+optional release signing. A CI keystore is enabled only when
+`src-tauri/gen/android/keystore.properties` exists; see the release workflow
+for the three Android signing secrets.
 
 The shared onboarding page has one primary server field. On Android, a bare
 host means `http://host:3000`, and a pasted default gateway URL (`:8000`)
@@ -63,8 +64,11 @@ secret is logged in natively, saved to Android Keystore only after that login
 succeeds, and exposed to the webview only as the resulting HTTP-only session
 cookie.
 
-Saving switches immediately to a 30-second connecting screen, then queues the
-native window rebuild after its IPC response. The entry watchdog makes an HTTP
+Saving switches immediately to a 30-second connecting screen, then defers the
+post-save window change until its IPC response flushes. Android refreshes the
+existing webview's prelude and navigates it rather than rebuilding it; desktop
+keeps the native rebuild. If the page is hidden when that screen times out, it
+recovers as soon as the page is visible again. The entry watchdog makes an HTTP
 GET (four-second per-attempt timeout) rather than a TCP connect, accepting
 2xx/3xx/401/403 answers and ending with an unreachable, HTTP, or rollout-window
 recovery state within 30 seconds. Plain HTTP is accepted only when the resolved

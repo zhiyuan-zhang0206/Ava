@@ -26,3 +26,12 @@ The shell now uses asynchronous native plugin calls or the blocking executor,
 and mirrors the Keystore result in transient process state for startup login and
 the prelude. Desktop keeps its existing arbitrary worktree entry and gateway
 ports; the strict console/gateway normalization applies only to Android.
+
+## Further update
+
+Android wry 0.55 can wedge the main-pipe IPC after a destroy-and-rebuild during
+the post-connect response burst. Android therefore refreshes the existing
+webview prelude and navigates it only after the settings response flushes;
+desktop retains its rebuild behavior. The Android overlay also carries ProGuard
+rules that preserve JNI-named Tauri plugin classes and `@Command` metadata in
+minified release builds.

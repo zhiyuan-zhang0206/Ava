@@ -136,7 +136,7 @@ fn check_cleartext_target(url: &tauri::Url) -> Result<(), String> {
     Ok(())
 }
 
-/// Persist a settings patch and queue a window rebuild for the resulting entry URL.
+/// Persist a settings patch and queue the resulting entry-window update.
 #[tauri::command]
 pub async fn shell_save_settings(
     app: AppHandle,
@@ -209,12 +209,20 @@ pub async fn shell_save_settings(
         }
     }
     let handle = app.clone();
-    // Rebuilding inline destroys the webview before its invoke response can
-    // flush, leaving Android's submit promise pending and its button disabled.
-    // Queue the rebuild on the next main-thread turn after this command returns.
+    // Deferring lets the invoke response flush before the window changes.
+    // Android refreshes its prelude then navigates the responding webview;
+    // desktop keeps its existing main-thread rebuild.
     tauri::async_runtime::spawn(async move {
-        let window_handle = handle.clone();
-        let _ = handle.run_on_main_thread(move || window::open_entry(&window_handle));
+        #[cfg(target_os = "android")]
+        window::open_entry(&handle);
+        #[cfg(not(target_os = "android"))]
+        {
+            let window_handle = handle.clone();
+            if let Err(err) = handle.run_on_main_thread(move || window::open_entry(&window_handle))
+            {
+                log::error!("could not schedule the entry-window rebuild: {err}");
+            }
+        }
     });
     Ok(())
 }

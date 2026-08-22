@@ -1,9 +1,9 @@
 //! The main window: what it loads, what it may navigate to, and what happens
 //! when the gate is not there.
 //!
-//! The shell owns exactly one window. It is rebuilt (rather than navigated)
-//! whenever the resolved endpoints change, because the injected prelude carries
-//! those endpoints into the page and a stale prelude is worse than a reload.
+//! The shell owns exactly one window. Desktop rebuilds it whenever the resolved
+//! endpoints change; Android refreshes the injected prelude and navigates the
+//! existing webview because rebuilding wedges wry's Android IPC pipe.
 
 use std::time::{Duration, Instant};
 
@@ -30,13 +30,34 @@ const PROBE_TIMEOUT: Duration = Duration::from_secs(4);
 const SETUP_PAGE: &str = "index.html#setup";
 const CONNECTING_PAGE: &str = "index.html#connecting";
 
-/// Build (or rebuild) the main window for the current settings and start the
-/// reachability watchdog.
+/// Open the main window for the current settings and start the reachability
+/// watchdog.
 ///
 /// With no server configured this opens the onboarding page instead; with one
 /// configured it opens the gate directly, so the happy path costs no extra
 /// round trip.
 pub fn open_entry(app: &AppHandle) {
+    let state = app.state::<ShellState>();
+    let endpoints = state.endpoints();
+
+    #[cfg(target_os = "android")]
+    if let (Some(window), Some(endpoints)) =
+        (app.get_webview_window(MAIN_WINDOW), endpoints.clone())
+    {
+        grant_remote_ipc(app, &endpoints.entry);
+        let navigation_window = window.clone();
+        let entry_url = endpoints.entry.clone();
+        if let Err(err) = window.eval_with_callback(prelude(app), move |_| {
+            if let Err(err) = navigation_window.navigate(entry_url.clone()) {
+                log::error!("could not navigate the Android window to {entry_url}: {err}");
+            }
+        }) {
+            log::error!("could not refresh the Android window prelude: {err}");
+        }
+        attach_entry(app, window, endpoints);
+        return;
+    }
+
     if let Some(existing) = app.get_webview_window(MAIN_WINDOW) {
         // destroy(), not close(): close() goes through the CloseRequested
         // handler, which on desktop means "hide to tray" — the opposite of what
@@ -44,8 +65,6 @@ pub fn open_entry(app: &AppHandle) {
         let _ = existing.destroy();
     }
 
-    let state = app.state::<ShellState>();
-    let endpoints = state.endpoints();
     if let Some(endpoints) = &endpoints {
         grant_remote_ipc(app, &endpoints.entry);
     }
@@ -67,25 +86,31 @@ pub fn open_entry(app: &AppHandle) {
     crate::desktop::attach_window_behavior(&window);
 
     if let Some(endpoints) = endpoints {
-        #[cfg(desktop)]
-        if state.settings().auto_login {
-            if let Some(secret) = crate::autologin::cluster_secret() {
-                crate::autologin::start(window.clone(), endpoints.clone(), secret);
-            }
-        }
-        #[cfg(target_os = "android")]
-        if !state.take_skip_next_android_autologin() {
-            let handle = app.clone();
-            let login_window = window.clone();
-            let login_endpoints = endpoints.clone();
-            tauri::async_runtime::spawn(async move {
-                if let Some(secret) = crate::android::load_stored_secret(&handle).await {
-                    crate::autologin::start(login_window, login_endpoints, secret);
-                }
-            });
-        }
-        watch_entry(window, endpoints.entry);
+        attach_entry(app, window, endpoints);
     }
+}
+
+/// Start platform login and readiness work after a window starts or its Android
+/// prelude has refreshed and it has navigated to the current entry URL.
+fn attach_entry(app: &AppHandle, window: WebviewWindow, endpoints: Endpoints) {
+    #[cfg(desktop)]
+    if app.state::<ShellState>().settings().auto_login {
+        if let Some(secret) = crate::autologin::cluster_secret() {
+            crate::autologin::start(window.clone(), endpoints.clone(), secret);
+        }
+    }
+    #[cfg(target_os = "android")]
+    if !app.state::<ShellState>().take_skip_next_android_autologin() {
+        let handle = app.clone();
+        let login_window = window.clone();
+        let login_endpoints = endpoints.clone();
+        tauri::async_runtime::spawn(async move {
+            if let Some(secret) = crate::android::load_stored_secret(&handle).await {
+                crate::autologin::start(login_window, login_endpoints, secret);
+            }
+        });
+    }
+    watch_entry(window, endpoints.entry);
 }
 
 /// Create the window with the platform's script set attached.
