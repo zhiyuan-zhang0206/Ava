@@ -293,9 +293,11 @@ IS the deployment. The `uid` must stay `ava-ops-main` (the embed URL
 depends on it); the datasource reference `{type: postgres, uid: "ops"}`
 must match the provisioned `ops` datasource.
 
-`refresh` is `1m` (dashboard-level) — the embed stays live without frontend
-polling. Bucket width follows Grafana's `$__interval` (auto-computed from
-the time range), so a window change via the URL also changes resolution.
+`refresh` is `5m` (dashboard-level) across every shipped dashboard — the embed
+stays live without frontend polling while a single browser cannot continuously
+re-run the full 24-hour Loki/Tempo query set. Bucket width follows Grafana's
+`$__interval` (auto-computed from the time range), so a window change via the
+URL also changes resolution.
 
 ## Import / update
 
