@@ -425,6 +425,35 @@ def _derive_server_name(raw_name: str) -> str:
     return raw_name.replace("_", "-").strip("-")
 
 
+def _main_module_candidates(search_dirs: list[Path]) -> list[str]:
+    """Return the first package with a ``__main__.py``, in search order."""
+    for base in search_dirs:
+        for child in sorted(base.iterdir()):
+            if (
+                child.is_dir()
+                and not child.name.startswith(".")
+                and child.name != "src"
+                and (child / "__main__.py").is_file()
+            ):
+                return [child.name]
+    return []
+
+
+def _package_candidates(search_dirs: list[Path]) -> list[str]:
+    """Return Python package directories in deterministic search order."""
+    packages: list[str] = []
+    for base in search_dirs:
+        for child in sorted(base.iterdir()):
+            if (
+                child.is_dir()
+                and not child.name.startswith(".")
+                and child.name != "src"
+                and (child / "__init__.py").is_file()
+            ):
+                packages.append(child.name)
+    return packages
+
+
 def _detect_module(pkg_dir: Path, project: dict[str, Any], fallback_name: str) -> str:
     """Detect the Python module to run via ``-m`` from a package tree.
 
@@ -444,15 +473,9 @@ def _detect_module(pkg_dir: Path, project: dict[str, Any], fallback_name: str) -
         search_dirs.append(src_dir)
 
     # 1. __main__.py
-    for base in search_dirs:
-        for child in sorted(base.iterdir()):
-            if (
-                child.is_dir()
-                and not child.name.startswith(".")
-                and child.name != "src"
-                and (child / "__main__.py").is_file()
-            ):
-                return child.name
+    main_modules = _main_module_candidates(search_dirs)
+    if main_modules:
+        return main_modules[0]
 
     # 2. [project.scripts] first entry -> module part before ':'
     scripts = project.get("scripts")
@@ -464,16 +487,7 @@ def _detect_module(pkg_dir: Path, project: dict[str, Any], fallback_name: str) -
                 return module
 
     # 3. Single top-level Python package (__init__.py)
-    packages: list[str] = []
-    for base in search_dirs:
-        for child in sorted(base.iterdir()):
-            if (
-                child.is_dir()
-                and not child.name.startswith(".")
-                and child.name != "src"
-                and (child / "__init__.py").is_file()
-            ):
-                packages.append(child.name)
+    packages = _package_candidates(search_dirs)
     if len(packages) == 1:
         return packages[0]
 
