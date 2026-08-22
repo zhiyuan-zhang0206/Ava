@@ -436,6 +436,39 @@ def test_repair_run_on_existing_record_never_rolls_it_back(
     assert get_record(home) == rec, "an existing record must survive a failed repair run"
 
 
+def test_incomplete_birth_retry_carries_repair_not_database_creation_authority(
+    isolated_registry: Path,
+    noop_infra: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Existing record + incomplete env re-enters birth and may resume a prefix.
+
+    It must not claim this invocation created the existing private database; the
+    two authorities have distinct cleanup consequences.
+    """
+    import cli.commands.cluster_lifecycle as gw
+
+    home = tmp_path / ".ava-interrupted-birth"
+    assert _install(home) == 0
+    (home / ".env").write_text("AVA_CLUSTER_SECRET=still-incomplete\n")
+    captured: dict[str, object] = {}
+
+    def existing_database(_identity: str, **_kwargs: object) -> bool:
+        return False
+
+    monkeypatch.setattr(gw, "_provision", existing_database)
+
+    def capture_checkpoint_authority(*_args: object, **kwargs: object) -> None:
+        captured.update(kwargs)
+
+    monkeypatch.setattr(cl, "ensure_checkpoint_schema", capture_checkpoint_authority)
+
+    assert _install(home) == 0
+    assert captured["resume_partial"] is True
+    assert captured["database_created"] is False
+
+
 def test_worktree_install_is_turnkey_for_start(
     isolated_registry: Path, noop_infra: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
