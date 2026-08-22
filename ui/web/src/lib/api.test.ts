@@ -270,11 +270,33 @@ describe("agent label / messages / cancel", () => {
 });
 
 describe("stats / config / timeline / system status", () => {
-  it("getAgentInspect forwards the cancellation signal", async () => {
+  it("getAgentInspect propagates caller cancellation to its bounded request", () => {
     const controller = new AbortController();
-    await api.getAgentInspect(7, 24, false, controller.signal);
+    vi.stubGlobal("fetch", vi.fn((url: string, init?: RequestInit) => {
+      calls.push({ url, init });
+      return new Promise<Response>(() => undefined);
+    }));
+    void api.getAgentInspect(7, 24, false, controller.signal);
     expect(calls[0].url).toMatch(/\/api\/agents\/7\/inspect\?hours=24$/);
-    expect(calls[0].init?.signal).toBe(controller.signal);
+    expect(calls[0].init?.signal).not.toBe(controller.signal);
+    expect(calls[0].init?.signal?.aborted).toBe(false);
+    controller.abort();
+    expect(calls[0].init?.signal?.aborted).toBe(true);
+  });
+
+  it("getAgentInspect aborts fetch and rejects when its response deadline expires", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("fetch", vi.fn((url: string, init?: RequestInit) => {
+      calls.push({ url, init });
+      return new Promise<Response>(() => undefined);
+    }));
+
+    const request = api.getAgentInspect(7);
+    const timedOut = expect(request).rejects.toThrow("Inspector request exceeded 20000ms");
+    await vi.runAllTimersAsync();
+
+    expect(calls[0].init?.signal?.aborted).toBe(true);
+    await timedOut;
   });
 
   it("getStatsDashboard GETs /api/stats/dashboard with the hours window", async () => {

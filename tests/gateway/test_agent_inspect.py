@@ -22,10 +22,12 @@ import asyncio
 import json
 import re
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
+import httpx
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
@@ -315,6 +317,65 @@ def test_inspect_local_loki_budget_rejection_is_503(
     assert response.status_code == 503
     assert response.json()["detail"] == f"Loki query budget unavailable ({reason}); retry"
     assert response.headers["retry-after"] == "1"
+
+
+def test_inspect_loki_transport_failure_is_retriable_503(
+    db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A dropped Loki response is a retriable dependency failure, not a 500."""
+    aid = _insert_agent(db_conn)
+    db_conn.commit()
+
+    def reject(*args: Any, **kwargs: Any) -> Any:
+        raise httpx.RemoteProtocolError("Loki closed the response")
+
+    monkeypatch.setattr(agent_inspect, "_inspect_rows_cached", reject)
+    with TestClient(app) as client:
+        response = client.get(f"/api/agents/{aid}/inspect")
+    assert response.status_code == 503
+    assert response.json()["detail"] == "inspector history backend unavailable; retry"
+    assert response.headers["retry-after"] == "1"
+
+
+def test_inspect_total_deadline_returns_503_then_cached_loader_can_finish(
+    db_conn: psycopg.Connection,
+    fake_loki: _FakeLoki,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A cold aggregate miss has a response deadline without bricking its cache key.
+
+    The synchronous leader is deliberately allowed to finish after the caller
+    receives 503: cancelling a Python worker thread is unsafe. Single-flight
+    keeps later callers from starting duplicate Loki fan-outs, and the completed
+    value becomes the normal TTL hit.
+    """
+    aid = _insert_agent(db_conn)
+    fake_loki.add(event="turn_end", agent_id=aid, payload={"duration_seconds": 1.0, "ok": True})
+    db_conn.commit()
+    agent_inspect.cache_clear()
+    original = agent_inspect._inspect_blocking
+    loader_finished = threading.Event()
+
+    def delayed_loader(*args: Any, **kwargs: Any) -> Any:
+        time.sleep(0.05)
+        try:
+            return original(*args, **kwargs)
+        finally:
+            loader_finished.set()
+
+    monkeypatch.setattr(agent_inspect, "_INSPECT_RESPONSE_TIMEOUT_S", 0.01)
+    monkeypatch.setattr(agent_inspect, "_inspect_blocking", delayed_loader)
+    with TestClient(app) as client:
+        timed_out = client.get(f"/api/agents/{aid}/inspect")
+        assert timed_out.status_code == 503
+        assert timed_out.json()["detail"] == "inspector history query timed out; retry"
+        assert timed_out.headers["retry-after"] == "1"
+        assert loader_finished.wait(timeout=1)
+        cached = client.get(f"/api/agents/{aid}/inspect")
+
+    assert cached.status_code == 200
+    assert cached.json()["stats"]["turn_total"] == 1
 
 
 def test_inspect_config_overlay_roundtrips(db_conn: psycopg.Connection) -> None:

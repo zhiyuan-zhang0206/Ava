@@ -50,7 +50,11 @@ single-flight TTL retains only Loki/ledger aggregates. Every request freshly
 reads machine, config overlay, status/heartbeat inputs, liveness and probe
 timestamp, releases that DB borrow, then joins/loads the aggregate. Thus both
 manual refresh and the 60s panel poll see control-plane changes immediately
-without re-running the historical fan-out.
+without re-running the historical fan-out. The interactive response has a 15s
+aggregate deadline: budget refusal, deadline expiry, and Loki transport/status
+failure are retriable HTTP 503 responses with `Retry-After`; a synchronous
+leader already in progress remains the sole single-flight load and may populate
+the TTL after its original caller has received the bounded failure.
 
 ## Key Dependencies
 

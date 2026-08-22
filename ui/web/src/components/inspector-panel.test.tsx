@@ -133,6 +133,20 @@ function fixture(overrides: Partial<AgentInspect> = {}): AgentInspect {
 }
 
 describe("InspectorPanel", () => {
+  it("shows a failed cold load with an explicit retry action", async () => {
+    getAgentInspect
+      .mockRejectedValueOnce(new Error("HTTP 503: inspector history query timed out; retry"))
+      .mockResolvedValueOnce(fixture());
+    render(<InspectorPanel agentId={1} />);
+
+    await waitFor(() =>
+      expect(screen.getByText("HTTP 503: inspector history query timed out; retry")).toBeTruthy(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Retry inspector" }));
+    await waitFor(() => expect(screen.getByText("Persistent shells")).toBeTruthy());
+    expect(getAgentInspect).toHaveBeenCalledTimes(2);
+  });
+
   it("never renders the previous agent while the new agent inspect is pending", async () => {
     let resolveAgentB: ((value: AgentInspect) => void) | undefined;
     getAgentInspect.mockImplementation((agentId) => {

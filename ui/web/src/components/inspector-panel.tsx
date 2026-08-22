@@ -250,9 +250,18 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
 
         <div className={cn("max-h-[65vh] overflow-y-auto px-4 py-3 text-xs", MIN_H_0)}>
           {error && !effectiveData ? (
-            <p className="font-mono text-[11px] text-destructive">
-              {error instanceof Error ? error.message : "Failed to load"}
-            </p>
+            <div className="space-y-2 font-mono text-[11px] text-destructive" role="alert">
+              <p>{error instanceof Error ? error.message : "Failed to load"}</p>
+              <button
+                type="button"
+                onClick={() => void refetch()}
+                disabled={isFetching}
+                aria-label="Retry inspector"
+                className="rounded border border-destructive/40 px-2 py-1 hover:bg-destructive/10 disabled:opacity-50"
+              >
+                {isFetching ? "Retrying…" : "Retry"}
+              </button>
+            </div>
           ) : !effectiveData ? (
             <p className="font-mono text-[11px] text-muted-foreground">
               {isLoading ? "Loading…" : "No data"}
