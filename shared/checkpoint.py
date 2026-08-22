@@ -6,6 +6,13 @@ id. Gateway cold-load read paths share this single deserialized view of
 `list[BaseMessage]`; this is the one place that opens the store and pulls
 them out.
 
+Compaction replaces the live messages channel, but `checkpoint_cleanup`
+retains every pre-compaction checkpoint marked `compact_boundary`. Because
+each retained checkpoint stores a full messages snapshot,
+`load_checkpoint_messages_full` losslessly stitches the segments: it removes
+only the repeated SystemMessage at a join, retaining compaction summaries and
+framework session notes as part of the conversation.
+
 Cold-load tolerance: these reads run on page-mount / ops-query paths, not on
 the live-streaming path. A read can coincide with an in-flight commit; the
 store returns the last committed snapshot, so a slightly stale view is
@@ -33,7 +40,7 @@ from __future__ import annotations
 import logging
 from typing import Any, cast
 
-from langchain_core.messages import BaseMessage
+from langchain_core.messages import BaseMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
@@ -99,6 +106,77 @@ def load_checkpoint_messages(agent_id: int) -> list[BaseMessage]:
     # (that happens when the first super-step commits). Absence there is a valid
     # "no messages yet" state, not schema drift, so fall back to [].
     return ckpt["channel_values"].get("messages", [])
+
+
+def load_checkpoint_messages_full(agent_id: int) -> list[BaseMessage]:
+    """Reconstruct one agent's full history across compaction segments.
+
+    With no retained compaction boundary, returns the latest messages snapshot
+    unchanged. Otherwise, the oldest boundary is the initial segment; each
+    following boundary and the latest snapshot can repeat the system prompt,
+    which is dropped at the join. Every other message, including compaction
+    summaries and framework session notes, remains in the conversation.
+
+    Raises:
+        CheckpointReadError: the store read or blob deserialize failed.
+    """
+    config: RunnableConfig = {"configurable": {"thread_id": str(agent_id)}}
+    serde = JsonPlusSerializer(allowed_msgpack_modules=STATIC_CHECKPOINT_MSGPACK_TYPES)
+    try:
+        with connect(
+            settings.data_plane.db_url,
+            autocommit=True,
+            prepare_threshold=None,
+            row_factory=cast(Any, dict_row),
+        ) as conn:
+            saver = PostgresSaver(conn=cast(Connection[DictRow], conn), serde=serde)
+            latest = saver.get(config)
+            if not latest:
+                return []
+            boundaries = cast(
+                list[dict[str, str]],
+                conn.execute(
+                    "SELECT checkpoint_id FROM checkpoints"
+                    " WHERE thread_id = %s AND metadata->>'compact_boundary' = 'true'"
+                    " ORDER BY checkpoint_id ASC",
+                    (str(agent_id),),
+                ).fetchall(),
+            )
+            if not boundaries:
+                return latest["channel_values"].get("messages", [])
+
+            segments: list[list[BaseMessage]] = []
+            for boundary in boundaries:
+                checkpoint_id = boundary["checkpoint_id"]
+                checkpoint_tuple = saver.get_tuple(
+                    {
+                        **config,
+                        "configurable": {
+                            **config["configurable"],
+                            "checkpoint_id": checkpoint_id,
+                        },
+                    }
+                )
+                if checkpoint_tuple is not None:
+                    segments.append(
+                        checkpoint_tuple.checkpoint["channel_values"].get("messages", [])
+                    )
+    except Exception as exc:
+        raise CheckpointReadError(f"full checkpoint read failed for agent {agent_id}") from exc
+
+    if len(segments) != len(boundaries):
+        raise CheckpointReadError(f"compaction boundary disappeared for agent {agent_id}")
+    full_history = list(segments[0])
+    latest_is_boundary = any(str(row["checkpoint_id"]) == str(latest["id"]) for row in boundaries)
+    following_segments = segments[1:]
+    if not latest_is_boundary:
+        following_segments = [*following_segments, latest["channel_values"].get("messages", [])]
+    for segment in following_segments:
+        remainder = segment
+        if remainder and isinstance(remainder[0], SystemMessage):
+            remainder = remainder[1:]
+        full_history.extend(remainder)
+    return full_history
 
 
 def load_checkpoint_messages_by_trace(

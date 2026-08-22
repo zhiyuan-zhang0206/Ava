@@ -165,7 +165,9 @@ Only the **replay-safe subset** is ever re-run — tasks whose tool calls are
 pure read/compute (the `is_replay_safe` gate in `evaluate.py`). The OS and
 network are not sandboxed, so tasks that ran a shell command, sent a message,
 edited files, or hit an external API are deliberately skipped. Skip this
-whole step unless a proposal earns the cost.
+whole step unless a proposal earns the cost. Gather verifies every completed
+replay against its original tool profile; degenerate or side-effecting runs are
+listed as `invalid` and excluded from the mean.
 
 ### 5. Report
 
@@ -245,7 +247,8 @@ report = evaluate.gather(state)          # {"mean": {...}, "per_task": [...]}
 Compare `report["mean"]["overall"]` before vs after your edit. `rubric.py`
 scores two dimensions in [0, 1]: **completion** (output produced, no breach,
 clean exec) and **efficiency** (few tokens/turns, no exec failures, no
-compaction, no re-prompts); `overall` weights completion higher.
+compaction, no re-prompts); `overall` weights completion higher. Use only the
+verified mean: invalid replays are reported separately and do not affect it.
 
 ## Data source
 

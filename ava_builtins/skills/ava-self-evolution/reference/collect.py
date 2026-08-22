@@ -8,7 +8,9 @@ existing tables only (no new schema): the unified `events` stream —
 carries compaction, delivery breach, and the future
 `skill_invoked` hard signal), `inbound_messages` (the user's task prompt and
 any follow-up corrections), `agents_meta` (spawner, terminal status, final
-message), and the stored checkpoint (the full message transcript).
+message), and the stored checkpoint (the full transcript reconstructed across
+compaction boundaries retained by Task #1125; only duplicate system prompts
+are removed, fixing the 2026-08-10 truncation without hiding lived messages).
 
 The dataset is the durable asset this whole skill iterates on: real tasks,
 real traces, real outcomes. It lives under `$AVA_HOME` (per-deployment,
@@ -47,7 +49,8 @@ from label import label  # sibling script, resolved via sys.path[0]
 from pydantic import ValidationError
 
 from shared.audit_events import SkillInvokedPayload
-from shared.checkpoint import CheckpointReadError, load_checkpoint_messages
+from shared.checkpoint import CheckpointReadError, load_checkpoint_messages_full
+from shared.config import settings
 from shared.db import connect
 from shared.paths import ava_home
 
@@ -216,9 +219,10 @@ def _msg_text(content: Any) -> str:
 
 
 def _transcript(agent_id: int) -> list[dict[str, str]]:
-    """Full stored message list for one agent, or [] if unreadable."""
+    """Full Task #1125 conversation, retaining summary and session-note messages.
+    Fixes the 2026-08-10 latest-only truncation; returns [] if unreadable."""
     try:
-        msgs = load_checkpoint_messages(agent_id)
+        msgs = load_checkpoint_messages_full(agent_id)
     except CheckpointReadError:
         return []
     return [{"type": m.type, "content": _msg_text(m.content)} for m in msgs]
@@ -241,7 +245,7 @@ def _gateway_headers() -> dict[str, str]:
 
 
 def _gateway_url() -> str:
-    return os.environ.get("AVA_GATEWAY_URL", "http://localhost:8000")
+    return settings.gateway.gateway_url or "http://localhost:8000"
 
 
 def _events_page(

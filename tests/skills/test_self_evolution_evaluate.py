@@ -6,7 +6,7 @@ import importlib.util
 import sys
 from pathlib import Path
 from types import ModuleType
-from typing import cast
+from typing import Any, cast
 
 import pytest
 
@@ -60,3 +60,100 @@ def test_launch_spawns_eval_isolated_agents(
 
     assert overlays == [expected_overlay]
     assert state["runs"][0]["eval_agent_id"] == 42
+    assert state["runs"][0]["original_tools_called"] == []
+
+
+@pytest.mark.parametrize(
+    ("original", "replayed", "expected"),
+    [
+        (
+            {"tools_called": {"ava.files.read": 1}},
+            {"turns": 1, "final_output": "done", "tools_called": {}},
+            False,
+        ),
+        (
+            {"tools_called": {"ava.files.read": 1}},
+            {
+                "turns": 1,
+                "final_output": "done",
+                "tools_called": {"ava.files.read": 1, "ava.web.search": 1},
+            },
+            True,
+        ),
+        (
+            {"tools_called": {"ava.files.read": 1}},
+            {"turns": 1, "final_output": "done", "tools_called": {"ava.shell.run": 1}},
+            False,
+        ),
+        (
+            {"tools_called": {}},
+            {"turns": 1, "final_output": "done", "tools_called": {}},
+            True,
+        ),
+        (
+            {"tools_called": {}},
+            {"turns": 0, "final_output": "done", "tools_called": {}},
+            False,
+        ),
+        (
+            {"tools_called": {}},
+            {"turns": 1, "final_output": "   ", "tools_called": {}},
+            False,
+        ),
+    ],
+)
+def test_verify_replay(
+    original: dict[str, object], replayed: dict[str, object], expected: bool
+) -> None:
+    evaluate = _evaluate_module()
+
+    ok, _reason = evaluate.verify_replay(original, replayed)
+
+    assert ok is expected
+
+
+def test_gather_excludes_invalid_replays_from_mean(monkeypatch: pytest.MonkeyPatch) -> None:
+    evaluate = _evaluate_module()
+    state: dict[str, Any] = {
+        "skill": "ava-goal",
+        "stamp": "2026-08-23T00-00-00Z",
+        "runs": [
+            {"eval_agent_id": 41, "source_agent_id": 1, "original_tools_called": {}},
+            {
+                "eval_agent_id": 42,
+                "source_agent_id": 2,
+                "original_tools_called": {"ava.files.read": 1},
+            },
+        ],
+        "skipped": [],
+    }
+    records: dict[int, dict[str, Any]] = {
+        41: {"label": "ok", "turns": 1, "final_output": "done", "tools_called": {}},
+        42: {"label": "ok", "turns": 1, "final_output": "done", "tools_called": {}},
+    }
+
+    def _poll(_state: dict[str, Any]) -> dict[str, list[int]]:
+        return {"done": [41, 42], "pending": []}
+
+    def _collect_one(agent_id: int) -> dict[str, Any]:
+        return records[agent_id]
+
+    def _scores(rec: dict[str, Any]) -> dict[str, float]:
+        if rec is records[41]:
+            return {"completion": 1.0, "efficiency": 1.0, "overall": 1.0}
+        return {"completion": 0.0, "efficiency": 0.0, "overall": 0.0}
+
+    monkeypatch.setattr(evaluate, "poll", _poll)
+    monkeypatch.setattr(evaluate, "collect_one", _collect_one)
+    monkeypatch.setattr(
+        evaluate,
+        "scores",
+        _scores,
+    )
+
+    report = evaluate.gather(state)
+
+    assert report["n"] == 1
+    assert report["mean"] == {"completion": 1.0, "efficiency": 1.0, "overall": 1.0}
+    assert [entry["valid"] for entry in report["per_task"]] == [True, False]
+    assert report["invalid"][0]["eval_agent_id"] == 42

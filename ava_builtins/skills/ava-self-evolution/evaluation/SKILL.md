@@ -69,6 +69,11 @@ design: spawn the whole batch up front, let the agents run, then gather
 (`evaluate.poll` → `evaluate.gather`). Each agent receives its case's task prompt and nothing else — no hints, no
 context from the original run.
 
+Gather calls `verify_replay` to compare each completed run with the original
+tool profile. Degenerate or side-effecting replays are excluded from the mean
+and listed as `invalid`; this is a real verification step, not a completion
+smoke test.
+
 ## Trace audit: fine-grained, anti-cheat by structure
 
 The audit reads the resulting trace, not just the score: what the agent

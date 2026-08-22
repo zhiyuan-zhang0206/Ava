@@ -75,6 +75,28 @@ def is_replay_safe(rec: dict[str, Any]) -> tuple[bool, str]:
     return True, "pure read/compute"
 
 
+def verify_replay(original: dict[str, Any], replayed: dict[str, Any]) -> tuple[bool, str]:
+    """Check that a completed replay attempted the original task safely."""
+    if replayed["turns"] < 1:
+        return False, "replay never ran a turn"
+    if not replayed["final_output"].strip():
+        return False, "replay produced no output"
+
+    replay_tools = set(replayed.get("tools_called", {}))
+    unsafe = sorted(tool for tool in replay_tools if tool.startswith(UNSAFE_PREFIXES))
+    if unsafe:
+        return False, "replay used side-effect tools: " + ", ".join(unsafe)
+
+    original_tools = set(original.get("tools_called", {}))
+    if original_tools and not replay_tools & original_tools:
+        return False, (
+            "replay tool profile diverges from original "
+            f"(original: {', '.join(sorted(original_tools))}, "
+            f"replay: {', '.join(sorted(replay_tools))})"
+        )
+    return True, "ok"
+
+
 # A spawned eval agent is finished once it stops working: it either idled after
 # delivering, or terminated.
 DONE_STATUSES = ("idling", "terminated")
@@ -112,6 +134,7 @@ def launch(skill: str, tasks: list[dict[str, Any]], *, model: str | None = None)
                 "eval_agent_id": eval_id,
                 "source_agent_id": task["agent_id"],
                 "prompt": task["task_prompt"],
+                "original_tools_called": task.get("tools_called", {}),
             }
         )
     stamp = datetime.now(UTC).strftime("%Y-%m-%dT%H-%M-%SZ")
@@ -148,28 +171,39 @@ def _mean(score_dicts: list[dict[str, float]]) -> dict[str, float]:
 
 
 def gather(state: dict[str, Any]) -> dict[str, Any]:
-    """Collect + score every finished eval agent. Agents still running are
-    listed under `pending` and left out of the mean."""
+    """Collect + score every finished eval agent.
+
+    Agents still running are listed under `pending`. Finished replays that do
+    not produce output, use side-effect tools, or diverge from the original
+    tool profile remain in `per_task` and `invalid`, but are excluded from the
+    mean and `n`.
+    """
     progress = poll(state)
     per_task = []
     for run in state["runs"]:
         if run["eval_agent_id"] not in progress["done"]:
             continue
         rec = collect_one(run["eval_agent_id"])
+        ok, reason = verify_replay({"tools_called": run.get("original_tools_called", {})}, rec)
         per_task.append(
             {
                 "eval_agent_id": run["eval_agent_id"],
                 "source_agent_id": run["source_agent_id"],
                 "label": rec["label"],
                 "scores": scores(rec),
+                "valid": ok,
+                "verification": {"ok": ok, "reason": reason},
             }
         )
+    invalid = [task for task in per_task if not task["valid"]]
+    valid = [task for task in per_task if task["valid"]]
     return {
         "skill": state["skill"],
         "stamp": state["stamp"],
-        "n": len(per_task),
-        "mean": _mean([t["scores"] for t in per_task]),
+        "n": len(valid),
+        "mean": _mean([task["scores"] for task in valid]),
         "per_task": per_task,
+        "invalid": invalid,
         "pending": progress["pending"],
         "skipped": state["skipped"],
     }
