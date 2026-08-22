@@ -82,3 +82,6 @@ This scenario is not easily triggered in the normal path of `ava.self.update()` 
 ## Modified Files
 - `ops/agents.py` (+13/-5): respawn_agent() source priority
 - `agent/graph/_claim.py` (+30/-5): RESTART_COMPLETED handler + idle gate
+
+Forward link (2026-08-22): respawn now returns a row to unclaimed idling; see
+[agent status model](../docs/history/2026-08-22/agent-status-model.md).

@@ -68,17 +68,20 @@ def _make_agent(
     status: str = "idling",
     lease_s_ahead: float | None = 600.0,
     machine: str = _MACHINE,
+    claimed: bool = True,
 ) -> int:
     """Spawn an agent on `machine`. `lease_s_ahead` sets lease_expires_at
-    relative to now() (None = NULL, negative = expired)."""
+    relative to now() (None = NULL, negative = expired). `claimed=False`
+    models a freshly created idling row whose ownership columns are all NULL."""
     aid = spawn_agent(spawner="user")
     with db.cursor() as cur:
         cur.execute(
             "UPDATE agents_meta SET status = %s, machine = %s, "
+            "started_at = CASE WHEN %s THEN now() ELSE NULL END, "
             "lease_expires_at = CASE WHEN %s::float IS NULL THEN NULL "
             "  ELSE now() + make_interval(secs => %s::float) END "
             "WHERE id = %s",
-            (status, machine, lease_s_ahead, lease_s_ahead, aid),
+            (status, machine, claimed, lease_s_ahead, lease_s_ahead, aid),
         )
     db.commit()
     return aid
@@ -258,17 +261,17 @@ class TestLivenessPass:
         asyncio.run(run_liveness_pass(pool, probe=FakeProbe({_MACHINE: True})))
         assert _state(db_conn, aid)[0] == "online"
 
-    def test_transitional_statuses_judge_on_machine_only(
+    def test_preclaim_idling_stays_unknown(
         self, pool: ConnectionPool, db_conn: psycopg.Connection
     ) -> None:
-        """allocated/starting/restarting hold no lease yet — machine up = online."""
+        """A freshly born idling row has no process claim, so it must not flash
+        offline while the launcher is still waiting for the child to claim it."""
         _register_machine(db_conn)
-        for status in ("allocated", "starting", "restarting"):
-            aid = _make_agent(db_conn, status=status, lease_s_ahead=None)
-            import asyncio
+        aid = _make_agent(db_conn, status="idling", lease_s_ahead=None, claimed=False)
+        import asyncio
 
-            asyncio.run(run_liveness_pass(pool, probe=FakeProbe({_MACHINE: True})))
-            assert _state(db_conn, aid)[0] == "online", status
+        asyncio.run(run_liveness_pass(pool, probe=FakeProbe({_MACHINE: True})))
+        assert _state(db_conn, aid)[0] == "unknown"
 
     def test_terminated_rows_are_never_judged(
         self, pool: ConnectionPool, db_conn: psycopg.Connection

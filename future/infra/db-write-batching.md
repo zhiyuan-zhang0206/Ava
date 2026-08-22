@@ -42,7 +42,7 @@ Reviewed all database write paths in the `~/Ava` project, covering the following
 | `shared/db.py:insert_inbound_message()` | Every inbound message |
 | `shared/db.py:insert_compact_request_inbound()` | Low frequency (user manually initiates compact) |
 | `agent/db.py:mark_agent_status()` | Every status switch (running↔idling) |
-| `agent/db.py:leave_starting_state()` | Every agent start |
+| `agent/_starting.py:claim_agent_row()` | Every agent start |
 | `ava/self.py:compact()` | Low frequency |
 | `ava_builtins/plugins/ava_fleet/task_registry.py:create()/update()` | Low frequency |
 | `ava_builtins/plugins/ava_fleet/plugin.py:log()` | Once per turn |

@@ -2,7 +2,7 @@
 timeout that actually bounds the work (`run_bounded`).
 
 `process_alive` is shared by the gateway's lazy zombie-reap (graceful-terminate
-path) and the restarter's orphan-'starting' reaper: both decide whether the
+path) and the restarter's dead-process reaper: both decide whether the
 process that owns an agent row is still alive *on the local host* before forcing
 the row to 'terminated'. Only meaningful for same-host pids — a pid from another
 machine is not ours to probe.

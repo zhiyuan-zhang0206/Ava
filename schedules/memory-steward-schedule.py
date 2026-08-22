@@ -47,8 +47,6 @@ def ensure_agent(label, prompt):
                 S.RUNNING,
                 S.IDLING,
                 S.TERMINATED,
-                S.ALLOCATED,
-                S.STARTING,
                 S.RESTARTING,
             )
         )
@@ -61,7 +59,7 @@ def ensure_agent(label, prompt):
         else:
             ava.agents.send_message(a.agent_id, prompt)
         return a.agent_id
-    return ava.agents.spawn(prompt=prompt, label=label)
+    return ava.agents.spawn(prompt=prompt, label=label)  # pyright: ignore[reportCallIssue] — fleet plugin wraps spawn with label
 
 
 def main():

@@ -211,7 +211,7 @@ async def _notify_screen_capture_at_startup() -> None:
 
     status_path = status_file_path()
     processing_path = status_path.with_suffix(".processing")
-    # Atomic claim: only one of several concurrently-starting agents wins the
+    # Atomic claim: only one of several concurrent agents wins the
     # rename. The losers raise FileNotFoundError (source already moved) and skip.
     try:
         status_path.rename(processing_path)

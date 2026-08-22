@@ -469,11 +469,11 @@ class TestRunnability:
         assert host.stats.wakes_skipped == 1
         assert host.stats.turns_started == 0
 
-    @pytest.mark.parametrize("status", ["terminated", "allocated", "restarting"])
+    @pytest.mark.parametrize("status", ["terminated", "restarting"])
     async def test_unrunnable_statuses_are_skipped(self, wired: _Build, status: str) -> None:
         """A terminated agent's wake belongs to the delivery watchdog's resurrect
-        path; `allocated` and `restarting` belong to the boot/respawn path. Any
-        of the three means someone else owns this row right now."""
+        path; `restarting` belongs to the respawn path. Either state means someone
+        else owns this row right now."""
         host, graph, _ = wired({1: _Row(status=status)})
         await asyncio.wait_for(host.run_turn(1), 2)
         assert graph.observations == []

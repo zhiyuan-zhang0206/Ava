@@ -55,8 +55,6 @@ describe("lifecycle endpoints", () => {
 
   it("listAgents projects every internal transition to the public three-state model", async () => {
     const statuses = [
-      "allocated",
-      "starting",
       "running",
       "idling",
       "restarting",
@@ -83,8 +81,6 @@ describe("lifecycle endpoints", () => {
     const rows = await api.listAgents();
 
     expect(rows.map((row) => row.status)).toEqual([
-      "idling",
-      "idling",
       "running",
       "idling",
       "idling",

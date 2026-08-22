@@ -5,8 +5,8 @@ Full cycle:
   agent code: ava.self.restart() → exec AgentRestart + INSERT 'restart' inbound
   → claim marks agents.status='restarting' + goto END → ainvoke returns → process exits
   → services/restarter daemon 1s poll sees 'restarting' → respawn_agent
-  → INSERT 'restart_completed' inbound + status='allocated' + session spawn
-  → new process starts, enter_starting_state UPDATE 'allocated'→'running'
+  → INSERT 'restart_completed' inbound + status='idling' + session spawn
+  → new process starts, claim_agent_row UPDATE 'idling'→'running'
   → claim processes 'restart_completed', writes "[system ts] You have been restarted" marker
   → idles waiting for next inbound (status='idling')
 

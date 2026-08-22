@@ -83,3 +83,7 @@ liveness probe described above is unchanged, but "alive" now implies "progressin
 — so it is consulted on a schedule rather than only at the deadline, and the
 alive-but-wedged case named in the rejected alternatives no longer waits out the
 extension.
+
+Forward link (2026-08-22): launch confirmation now observes pid claim rather
+than a historical status transition; see
+[agent status model](../docs/history/2026-08-22/agent-status-model.md).

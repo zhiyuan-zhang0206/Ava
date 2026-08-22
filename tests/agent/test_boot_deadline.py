@@ -2,7 +2,7 @@
 
 What is under test is one guarantee the rest of the launch machinery leans on:
 **while an agent process is alive, its pre-claim boot is progressing.** The
-launcher cannot check that (the row reads 'allocated' with no pid the whole
+launcher cannot check that (the row reads unclaimed 'idling' with no pid the whole
 time), so the child enforces it by exiting when it stops being true, and
 `ops/agent_launch.py` reads "the process exists" as "the boot is moving".
 
@@ -146,13 +146,13 @@ def test_the_budget_stops_a_boot_that_progresses_forever(
 ) -> None:
     """The bound the stall window cannot supply.
 
-    Progress resets the stall clock, so a boot that keeps reaching phases is
-    unbounded by it — "the phase count is finite" only bounds the boot at
-    phases x stall, arithmetic over a number that moves whenever someone adds a
-    mark. Meanwhile the restarter's allocated-reaper takes an 'allocated' row on
-    age alone (its clock is `status_changed_at`, which only a status flip resets),
-    so a boot that outran that grace would have its row reaped out from under a
-    live, progressing child. The budget clock never resets, which is the point.
+        Progress resets the stall clock, so a boot that keeps reaching phases is
+        unbounded by it — "the phase count is finite" only bounds the boot at
+        phases x stall, arithmetic over a number that moves whenever someone adds a
+    mark. Meanwhile the restarter's dead-birth reaper takes an unclaimed 'idling' row on
+        age alone (its clock is `status_changed_at`, which only a status flip resets),
+        so a boot that outran that grace would have its row reaped out from under a
+        live, progressing child. The budget clock never resets, which is the point.
     """
     ticks = {"n": 0}
 

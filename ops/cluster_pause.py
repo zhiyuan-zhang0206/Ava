@@ -78,22 +78,24 @@ def pause_local_cluster() -> None:
 
     set_posture("paused")
 
-    # Snapshot agent status counts before killing the restarter. An 'allocated'
-    # agent is mid-launch (respawn / resurrect committed status='allocated' but
-    # the child has not yet claimed): killing the restarter here can race that
-    # window, leaving the agent stuck 'allocated' until the reaper flips it
-    # 'terminated'. Logging the snapshot makes that race visible in the pause
-    # log (a nonzero 'allocated' count at pause time is the smoking gun).
+    # Snapshot agent status counts before killing the restarter. An idling row
+    # with no pid is mid-launch (respawn / resurrect committed its wake but the
+    # child has not yet claimed): killing the restarter here can leave it for
+    # the boot reaper. Logging that count makes the race visible in the pause
+    # log.
     # Best-effort: this is pure observability on the rollout-critical pause path,
     # so a transient DB blip must not abort the pause — log and carry on.
     try:
         with shared.db.connect() as conn, conn.cursor() as cur:
             cur.execute("SELECT status, count(*) FROM agents_meta GROUP BY status ORDER BY status")
             status_counts = dict(cur.fetchall())
+            cur.execute("SELECT count(*) FROM agents_meta WHERE status = 'idling' AND pid IS NULL")
+            unclaimed_row = cur.fetchone()
+            unclaimed_count = 0 if unclaimed_row is None else unclaimed_row[0]
         _log.info(
-            "[cluster] pausing: agent status snapshot %s (allocated=%d in-flight launch)",
+            "[cluster] pausing: agent status snapshot %s (unclaimed_idling=%d in-flight launch)",
             status_counts,
-            status_counts.get("allocated", 0),
+            unclaimed_count,
         )
     except Exception:  # fail-fast-ok: status snapshot is logging-only, never blocks pause
         _log.warning("[cluster] pausing: agent status snapshot failed", exc_info=True)

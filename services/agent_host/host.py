@@ -138,10 +138,10 @@ _HostGraph = CompiledStateGraph[BaseAgentState, AvaContext, BaseAgentState, Base
 
 # Statuses whose owner must not be handed a turn. `terminated` is the real one:
 # a wake for a dead agent is the delivery watchdog's resurrect business, and
-# running a turn would revive it behind the gateway's back. `allocated` and
+# running a turn would revive it behind the gateway's back. Unclaimed `idling` and
 # `restarting` belong to the boot / respawn path, which owns the row until it
 # reaches a running state.
-_UNRUNNABLE_STATUSES = frozenset({"terminated", "allocated", "restarting"})
+_UNRUNNABLE_STATUSES = frozenset({"terminated", "restarting"})
 
 # Spare connections above the concurrent-turn bound. Every running turn may hold
 # one for its checkpoint writes and kernel SQL; the spares cover the wake reads

@@ -332,8 +332,8 @@ export interface paths {
          *
          *     Smart liveness detection: if the process corresponding to
          *     agents_meta.pid is gone (zombie row, commonly from early-stage
-         *     EmptyInputError residuals / respawn_agent failures leaving
-         *     'allocated'), force UPDATE status='terminated' directly without the
+         *     EmptyInputError residuals / respawn_agent failures leaving an unclaimed
+         *     row), force UPDATE status='terminated' directly without the
          *     inbound path — an inbound delivered to a dead process is pending
          *     forever and the user can never clear it.
          *
@@ -436,7 +436,7 @@ export interface paths {
         put?: never;
         /**
          * Post Agent Resurrect
-         * @description Resurrect a terminated agent — UPDATE 'terminated' -> 'allocated' +
+         * @description Resurrect a terminated agent — UPDATE 'terminated' -> 'idling' +
          *     launch a fresh detached process attached to the same agent_id
          *     (LangGraph state preserved; the agent wakes and continues from its last
          *     turn).
@@ -461,7 +461,7 @@ export interface paths {
          *
          *     404: agent_id does not exist (AgentNotFound -> handler returns 404 + reason).
          *     `already_alive`: agent is still alive
-         *         (allocated/starting/running/idling/restarting); resurrect does not
+         *         (running/idling/restarting); resurrect does not
          *         apply — idempotent.
          */
         post: operations["post_agent_resurrect_api_agents__agent_id__resurrect_post"];
@@ -2871,7 +2871,7 @@ export interface paths {
          * @description Pull all data for the sidebar-top stats card in one shot.
          *
          *     Data sources:
-         *     - `live_count`: agents_meta table — all non-terminated agents (allocated/starting/running/idling/restarting/hibernating)
+         *     - `live_count`: agents_meta table — all non-terminated agents (running/idling/restarting/hibernating)
          *     - `tokens` / `cost_usd`: Prometheus (task #1197 — the OTLP-mapped
          *       llm_usage counters via gateway/prom_metrics, windowed by `increase`)
          *     - average turn duration + warning/error counts: Loki's unified event stream
@@ -3753,7 +3753,7 @@ export interface components {
          * AgentStatus
          * @enum {string}
          */
-        AgentStatus: "allocated" | "starting" | "running" | "idling" | "restarting" | "terminated" | "hibernating";
+        AgentStatus: "running" | "idling" | "restarting" | "terminated" | "hibernating";
         /**
          * AgentTps
          * @description Token-per-second metrics for one agent — two views of throughput.
@@ -5888,12 +5888,12 @@ export interface components {
          * @description Resurrect agent response — returned by `POST /api/agents/{id}/resurrect`
          *     (the frontend resurrect button) and the internal auto-resurrect op.
          *
-         *     `spawned`: agent was dead; UPDATEd 'terminated' -> 'allocated' +
+         *     `spawned`: agent was dead; UPDATEd 'terminated' -> 'idling' +
          *         started a fresh process attached to the same agent_id
          *         (LangGraph state preserved; agent wakes up from where it left
          *         off).
          *     `already_alive`: agent is still alive
-         *         (allocated/starting/running/idling/restarting); resurrect does
+         *         (running/idling/restarting); resurrect does
          *         not apply.
          */
         ResurrectAgentResponse: {

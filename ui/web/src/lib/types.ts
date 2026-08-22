@@ -48,8 +48,6 @@ export function projectAgentStatusValue(status: WireAgentStatus): PublicAgentSta
       return "running";
     case "terminated":
       return "terminated";
-    case "allocated":
-    case "starting":
     case "idling":
     case "restarting":
     case "hibernating":

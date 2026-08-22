@@ -68,3 +68,6 @@ reused-id-collision theory is confirmed).
   disjoint-and-non-recycling by design, not the reuse anti-pattern.
 - The full contract lives in
   `docs/current/test-isolation.md` (since removed).
+
+Forward link (2026-08-22): the status literals in this incident narrative are
+historical; see [agent status model](../docs/history/2026-08-22/agent-status-model.md).
