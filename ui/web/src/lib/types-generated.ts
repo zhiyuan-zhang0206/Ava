@@ -553,13 +553,35 @@ export interface paths {
          *     inbound's JSONB payload for the claim node to inline natively.
          *
          *     Auto-resurrect in `deliver_chat_inbound` ensures the message always reaches
-         *     a live agent — the caller does not branch on status. The endpoint returns
-         *     `AgentMessageEnqueued` for backward compatibility; the SDK ignores status.
+         *     a live agent — the caller does not branch on status. An optional
+         *     `Idempotency-Key` is stored transactionally with the inbound; same-key
+         *     retries return the same `inbound_id` and mismatched key reuse fails 409.
          *
          *     404: agent_id does not exist (AgentNotFound -> handler returns 404 + reason).
+         *     409: the key already identifies a different agent/body/source.
          *     422: a block list gated out (non-vision model) or referencing a bad upload.
          */
         post: operations["post_agent_message_api_agents__agent_id__messages_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/agents/{agent_id}/messages/reconcile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reconcile Agent Message
+         * @description Resolve a timed-out POST and heal its still-pending delivery tail.
+         */
+        post: operations["reconcile_agent_message_api_agents__agent_id__messages_reconcile_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3516,14 +3538,15 @@ export interface components {
         };
         /**
          * AgentMessageEnqueued
-         * @description POST /api/agents/{id}/messages response — agent status (at delivery time).
+         * @description POST /messages receipt — durable inbound id plus current agent status.
          *
-         *     SDK send_message returns `status` directly to the caller for
-         *     branching: on TERMINATED the caller calls resurrect; other states
-         *     mean "delivered, will be dispatched naturally".
+         *     Same-key retries return the same `inbound_id`; `status` may be recomputed
+         *     because auto-resurrection can advance while the client reconciles.
          */
         AgentMessageEnqueued: {
             status: components["schemas"]["AgentStatus"];
+            /** Inbound Id */
+            inbound_id?: number | null;
         };
         /**
          * AgentMessageIn
@@ -7316,7 +7339,9 @@ export interface operations {
     post_agent_message_api_agents__agent_id__messages_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
             path: {
                 agent_id: number;
             };
@@ -7330,6 +7355,43 @@ export interface operations {
         responses: {
             /** @description Successful Response */
             201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentMessageEnqueued"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reconcile_agent_message_api_agents__agent_id__messages_reconcile_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                agent_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentMessageIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };

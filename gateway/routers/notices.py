@@ -398,7 +398,7 @@ async def post_notice_resolve(
     # (shared/envelope.py), so no User-role message is consumed and nothing is
     # shaped like a reply request; read-without-reply still delivers nothing.
     deliver_source = "system:notice-reply" if reply is not None else "system:notice-dismiss"
-    s = await deliver_chat_inbound(
+    delivery = await deliver_chat_inbound(
         request.app.state.db_pool,
         agent_id,
         prepare=_resolve,
@@ -408,7 +408,7 @@ async def post_notice_resolve(
     # Drop the row from the FYI feed (no-op by id for a require_response notice,
     # which lives on the snapshot, not the feed).
     await _ops.publish_notice_resolved(agent_id, notice_id)
-    return AgentMessageEnqueued(status=s)
+    return AgentMessageEnqueued(status=delivery.status, inbound_id=delivery.inbound_id)
 
 
 # ── unified notice write API (R3 door ④) ─────────────────────────────────

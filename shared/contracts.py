@@ -35,9 +35,11 @@ class Idempotency(StrEnum):
     NON_IDEMPOTENT: never auto-retry — a retry can duplicate the effect
         (pure INSERTs: spawn, create, upload).
     AT_LEAST_ONCE_WITH_KEY: safe to retry because the server dedups by an
-        ``Idempotency-Key`` header — the first request with a key wins and
-        same-key retries replay its response (the cluster_rpc mechanism
-        generalized to one shared table; design decision 1).
+        ``Idempotency-Key`` header. The route's ``transactional_idempotency``
+        selects either response replay from ``api_idempotency`` or keyed effect
+        exactly-once in the business transaction. Transactional message sends
+        return the same durable inbound id; mutable response fields such as the
+        agent's current status may be recomputed on a retry.
     """
 
     IDEMPOTENT = "idempotent"
@@ -66,12 +68,15 @@ class RouteContract:
     Declared with the defaults most routes need (idempotent, data-plane),
     so a route author writes only the exceptions — the non-default
     idempotency, the exemption, and the reason that used to live in
-    middleware comments.
+    middleware comments. ``transactional_idempotency`` means the handler owns
+    the key in the same commit as its business effect; generic response-cache
+    middleware must then stay out of the crash-sensitive interval.
     """
 
     idempotency: Idempotency = Idempotency.IDEMPOTENT
     pause: PauseSemantics = PauseSemantics.DATA_PLANE
     note: str = ""
+    transactional_idempotency: bool = False
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -370,6 +375,10 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("POST", "/api/agents/{agent_id}/messages"): RouteContract(
         Idempotency.AT_LEAST_ONCE_WITH_KEY,
         note="enqueue chat inbound — one logical message must land exactly once; clients retry with an Idempotency-Key",
+        transactional_idempotency=True,
+    ),
+    ("POST", "/api/agents/{agent_id}/messages/reconcile"): RouteContract(
+        note="idempotent receipt recovery — heals the pending wake/resurrection tail for an uncertain same-key delivery"
     ),
     # ── gateway/routers/status.py ───────────────────────────────────
     ("GET", "/api/stats/dashboard"): RouteContract(),

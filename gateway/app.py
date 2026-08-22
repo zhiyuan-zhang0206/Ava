@@ -388,10 +388,9 @@ async def _cluster_is_paused(request: Request) -> bool:
     return paused
 
 
-# AtLeastOnceWithKey dedup (doorplate ①): routes whose contract declares
-# AT_LEAST_ONCE_WITH_KEY dedup by the Idempotency-Key header — the first
-# request with a key executes and stores its response, same-key retries
-# replay it (the cluster_rpc mechanism generalized to one shared table).
+# AtLeastOnceWithKey dedup (doorplate ①): generic keyed routes store/replay a
+# response here. Transactional keyed routes (chat message delivery) bypass this
+# layer and own the key in the same commit as their durable business row.
 # Registered BEFORE the pause middleware below: Starlette's middleware stack
 # runs in REVERSE registration order, so with this order a paused cluster
 # answers 503 before dedup engages (audit P2-1 — the previous order let

@@ -11,7 +11,7 @@ import {
 } from "@/components/slash-autocomplete";
 import { SendButton } from "@/components/ui/send-button";
 import { Textarea } from "@/components/ui/textarea";
-import { api } from "@/lib/api";
+import { api, MessageDeliveryUnknownError } from "@/lib/api";
 import { errMsg } from "@/lib/errors";
 import { track } from "@/lib/telemetry";
 import type { CommandItem } from "@/lib/types";
@@ -39,7 +39,7 @@ interface Props {
    *  on false the user's text and images are preserved to avoid loss.
    *  `imageUrls` are the reference urls of attached images (empty for a
    *  plain-text send). */
-  onSend: (content: string, imageUrls: string[]) => Promise<boolean>;
+  onSend: (content: string, imageUrls: string[], clientMessageId: string) => Promise<boolean>;
   onStop: () => void;
   // Non-image files dragged onto / pasted into the composer are uploaded
   // through this (same path as the paperclip button — a text notification to
@@ -92,13 +92,100 @@ interface PendingImage {
 
 /** sessionStorage key for per-agent draft persistence across agent switches. */
 const draftKey = (id: number) => `composer-draft-${id}`;
+const sendAttemptKey = (id: number) => `composer-send-attempt-${id}`;
+
+interface SendAttempt {
+  signature: string;
+  clientMessageId: string;
+  agentId: number | null;
+  content: string;
+  imageUrls: string[];
+  uncertain?: boolean;
+}
+
+function isAttempt(attempt: SendAttempt | null, clientMessageId: string): boolean {
+  return attempt?.clientMessageId === clientMessageId;
+}
+
+// sessionStorage is optional browser infrastructure: privacy policies and
+// quota failures can throw from any operation. Keep an in-memory mirror so
+// persistence degradation never blocks a send or leaves its spinner latched.
+const memorySession = new Map<string, string | null>();
+
+function readSession(key: string): string | null {
+  if (memorySession.has(key)) return memorySession.get(key) ?? null;
+  try {
+    return sessionStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeSession(key: string, value: string): void {
+  memorySession.set(key, value);
+  try {
+    sessionStorage.setItem(key, value);
+    memorySession.delete(key);
+  } catch {
+    // The in-memory mirror preserves this tab's retry identity.
+  }
+}
+
+function removeSession(key: string): void {
+  memorySession.set(key, null);
+  try {
+    sessionStorage.removeItem(key);
+    memorySession.delete(key);
+  } catch {
+    // The tombstone is newer than any stale persisted value removeItem left.
+  }
+}
+
+function readSendAttempt(agentId: number): SendAttempt | null {
+  try {
+    const parsed = JSON.parse(readSession(sendAttemptKey(agentId)) ?? "null") as unknown;
+    if (
+      typeof parsed !== "object" ||
+      parsed === null ||
+      !("signature" in parsed) ||
+      typeof parsed.signature !== "string" ||
+      !("clientMessageId" in parsed) ||
+      typeof parsed.clientMessageId !== "string" ||
+      !("content" in parsed) ||
+      typeof parsed.content !== "string" ||
+      !("imageUrls" in parsed) ||
+      !Array.isArray(parsed.imageUrls) ||
+      !parsed.imageUrls.every((url) => typeof url === "string")
+    ) {
+      return null;
+    }
+    return parsed as SendAttempt;
+  } catch {
+    return null;
+  }
+}
+
+function newClientMessageId(): string {
+  const browserCrypto = crypto as unknown as {
+    randomUUID?: () => string;
+    getRandomValues<T extends ArrayBufferView>(array: T): T;
+  };
+  if (browserCrypto.randomUUID) return browserCrypto.randomUUID();
+  // randomUUID is secure-context-only in some private-HTTP browsers;
+  // getRandomValues remains available and gives the same collision posture.
+  const bytes = browserCrypto.getRandomValues(new Uint8Array(16));
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
 
 export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, focusToken, contextTokens, maxContextTokens = 0, softCompactTokens = 0, hardCompactTokens = 0, agentId = null, maxWidthCss, children, details, inspect }: Props) {
   const t = useTranslations("common");
   const prevAgentIdRef = useRef(agentId);
   const [value, setValue] = useState(() => {
     if (agentId == null) return '';
-    return sessionStorage.getItem(draftKey(agentId)) ?? '';
+    return readSession(draftKey(agentId)) ?? '';
   });
   // Caret offset in `value`. The slash dropdown and the instruction hint are
   // both scoped to the token / command segment the caret is in, so the caret is
@@ -115,6 +202,16 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
   // user can keep clicking send → keep the button disabled + spinner
   // during sending to physically block repeats.
   const [sending, setSending] = useState(false);
+  const sendingRef = useRef(false);
+  const [initialSendAttempt] = useState<SendAttempt | null>(() =>
+    agentId == null ? null : readSendAttempt(agentId),
+  );
+  const sendAttemptRef = useRef<SendAttempt | null>(initialSendAttempt);
+  const [uncertainAttempt, setUncertainAttempt] = useState<SendAttempt | null>(
+    initialSendAttempt?.uncertain ? initialSendAttempt : null,
+  );
+  const activeUncertain = uncertainAttempt?.agentId === agentId;
+  const composerLocked = sending || activeUncertain;
   // The command list is owned here (not in the dropdown) so it doubles as the
   // lookup for the committed command's instruction hint, shown once the name is
   // followed by whitespace and the dropdown has closed.
@@ -236,16 +333,19 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
     if (prevId != null && prevId !== agentId) {
       const trimmed = value.trim();
       if (trimmed) {
-        sessionStorage.setItem(draftKey(prevId), value);
+        writeSession(draftKey(prevId), value);
       } else {
-        sessionStorage.removeItem(draftKey(prevId));
+        removeSession(draftKey(prevId));
       }
     }
     // Load the draft for the newly-selected agent.
     if (agentId != null && agentId !== prevId) {
-      const draft = sessionStorage.getItem(draftKey(agentId)) ?? "";
+      const draft = readSession(draftKey(agentId)) ?? "";
       setValue(draft);
       setCaret(draft.length); // resume at the end, like the browser does
+      const attempt = readSendAttempt(agentId);
+      sendAttemptRef.current = attempt;
+      setUncertainAttempt(attempt?.uncertain ? attempt : null);
     }
     prevAgentIdRef.current = agentId;
     // `value` is intentionally omitted — we only want to react to agentId
@@ -259,13 +359,14 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
     if (agentId == null) return;
     const trimmed = value.trim();
     if (trimmed) {
-      sessionStorage.setItem(draftKey(agentId), value);
+      writeSession(draftKey(agentId), value);
     } else {
-      sessionStorage.removeItem(draftKey(agentId));
+      removeSession(draftKey(agentId));
     }
   }, [value, agentId]);
 
   const removeImage = (key: string) => {
+    if (composerLocked) return;
     setImages((prev) => {
       const gone = prev.find((i) => i.key === key);
       if (gone) URL.revokeObjectURL(gone.previewUrl);
@@ -276,7 +377,7 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
   // Attach each image: show a thumbnail immediately, upload silently, then
   // stamp the resolved reference url (or mark the upload failed).
   const attachImages = (files: File[]) => {
-    if (!onAttachImage) return;
+    if (composerLocked || !onAttachImage) return;
     for (const file of files) {
       const key = `${file.name}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
       const previewUrl = URL.createObjectURL(file);
@@ -295,23 +396,83 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
     }
   };
 
-  const send = async (content: string, imageUrls: string[]) => {
-    if (sending) return; // Physical dedup against repeated clicks
+  const send = async (
+    content: string,
+    imageUrls: string[],
+    forcedAttempt?: SendAttempt,
+  ) => {
+    if (sendingRef.current) return; // synchronous physical dedup against repeated dispatch
+    sendingRef.current = true;
     setSending(true);
+    const sendingAgentId = agentId;
+    let activeAttempt: SendAttempt | null = forcedAttempt ?? null;
+    let retryingUncertain = forcedAttempt?.uncertain === true;
     try {
-      const ok = await onSend(content, imageUrls);
+      const signature = JSON.stringify([sendingAgentId, content, imageUrls]);
+      let candidate = activeAttempt ?? sendAttemptRef.current;
+      if (candidate?.signature !== signature && sendingAgentId != null) {
+        const persisted = readSendAttempt(sendingAgentId);
+        candidate = persisted?.signature === signature ? persisted : null;
+      }
+      retryingUncertain ||= candidate?.uncertain === true;
+      const attempt: SendAttempt =
+        candidate?.signature === signature
+          ? { ...candidate, uncertain: false }
+          : {
+              signature,
+              clientMessageId: newClientMessageId(),
+              agentId: sendingAgentId,
+              content,
+              imageUrls: [...imageUrls],
+            };
+      activeAttempt = attempt;
+      sendAttemptRef.current = attempt;
+      setUncertainAttempt(null);
+      if (sendingAgentId != null) {
+        writeSession(sendAttemptKey(sendingAgentId), JSON.stringify(attempt));
+      }
+      const ok = await onSend(content, imageUrls, attempt.clientMessageId);
       // Only clear on success — keep the user's text + images on failure
       // (a network error isn't the user's fault)
       if (ok) {
         track("composer-send");
-        setValue("");
-        setCaret(0);
-        clearImages();
+        // A request for A can finish after the user switched to B. Clear only
+        // the still-visible snapshot belonging to A, never B's current draft.
+        if (prevAgentIdRef.current === sendingAgentId) {
+          setValue((current) => (current.trim() === content ? "" : current));
+          setCaret(0);
+          clearImages();
+        }
         // Clear the persisted draft so a future switch back doesn't restore
         // already-sent text.
-        if (agentId != null) sessionStorage.removeItem(draftKey(agentId));
+        if (sendingAgentId != null) {
+          removeSession(draftKey(sendingAgentId));
+          removeSession(sendAttemptKey(sendingAgentId));
+        }
+        if (isAttempt(sendAttemptRef.current, attempt.clientMessageId)) {
+          sendAttemptRef.current = null;
+          setUncertainAttempt(null);
+        }
+      } else if (retryingUncertain) {
+        const uncertain = { ...attempt, uncertain: true };
+        sendAttemptRef.current = uncertain;
+        if (uncertain.agentId != null) {
+          writeSession(sendAttemptKey(uncertain.agentId), JSON.stringify(uncertain));
+        }
+        setUncertainAttempt(uncertain);
+      }
+    } catch (error: unknown) {
+      if (!(error instanceof MessageDeliveryUnknownError)) throw error;
+      if (activeAttempt != null) {
+        const uncertain = { ...activeAttempt, uncertain: true };
+        sendAttemptRef.current = uncertain;
+        if (uncertain.agentId != null) {
+          writeSession(sendAttemptKey(uncertain.agentId), JSON.stringify(uncertain));
+        }
+        setUncertainAttempt(uncertain);
       }
     } finally {
+      sendingRef.current = false;
       setSending(false);
     }
   };
@@ -322,10 +483,31 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
   const uploadingImages = images.some((i) => i.status === "uploading");
 
   const submit = () => {
+    if (composerLocked) return;
     const content = value.trim();
     if (uploadingImages) return; // wait for in-flight uploads so none are dropped
     if (!content && readyImageUrls.length === 0) return;
     void send(content, readyImageUrls);
+  };
+
+  const retryUncertain = () => {
+    if (!activeUncertain) return;
+    void send(
+      uncertainAttempt.content,
+      uncertainAttempt.imageUrls,
+      uncertainAttempt,
+    );
+  };
+
+  const abandonUncertain = () => {
+    if (!activeUncertain) return;
+    if (uncertainAttempt.agentId != null) {
+      removeSession(sendAttemptKey(uncertainAttempt.agentId));
+    }
+    if (sendAttemptRef.current?.clientMessageId === uncertainAttempt.clientMessageId) {
+      sendAttemptRef.current = null;
+    }
+    setUncertainAttempt(null);
   };
 
   // Picking a command does NOT send — every command takes a natural-language
@@ -340,6 +522,7 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
   // space: that is both where the instruction goes and what closes the dropdown
   // (the caret is no longer inside a `/token`).
   const runCommand = (cmd: CommandItem) => {
+    if (composerLocked) return;
     const token = parseSlash(value, caret);
     if (!token) return; // unreachable: the dropdown is only open on a token
     const head = `${value.slice(0, token.start)}/${cmd.name}`;
@@ -356,6 +539,7 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
   // back to the file-upload path. dragOver drives the drop-zone highlight; only
   // file drags (not text / selection drags) arm it.
   const routeFiles = (files: File[]) => {
+    if (composerLocked) return;
     const imgs = files.filter((f) => f.type.startsWith("image/"));
     const others = files.filter((f) => !f.type.startsWith("image/"));
     if (imgs.length > 0) {
@@ -364,7 +548,7 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
     }
     if (others.length > 0) onUploadFiles?.(others);
   };
-  const canReceiveFiles = !!onUploadFiles || !!onAttachImage;
+  const canReceiveFiles = !composerLocked && (!!onUploadFiles || !!onAttachImage);
   const handleDrop = (e: React.DragEvent) => {
     if (!canReceiveFiles) return;
     e.preventDefault();
@@ -401,9 +585,9 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
   // A message is sendable with text OR at least one uploaded image. Stop is
   // narrowed to the truly-empty composer (no text, no attachments).
   const hasContent = !!trimmed || readyImageUrls.length > 0;
-  const showStop = mode === "busy" && !hasContent && !sending;
+  const showStop = mode === "busy" && !hasContent && !composerLocked;
   const buttonDisabled =
-    sending || mode === "disabled" || uploadingImages || (!showStop && !hasContent);
+    composerLocked || mode === "disabled" || uploadingImages || (!showStop && !hasContent);
 
   return (
     // No <form>: browser extensions (iOS Quark etc.) inject attributes
@@ -502,12 +686,30 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
                 type="button"
                 aria-label={t("removeImage", { name: img.name })}
                 onClick={() => removeImage(img.key)}
+                disabled={composerLocked}
                 className={cn("absolute -right-1.5 -top-1.5 h-4 w-4 items-center justify-center rounded-full bg-foreground/80 text-background text-[10px] leading-none", FLEX)}
               >
                 ×
               </button>
             </div>
           ))}
+        </div>
+      ) : null}
+      {activeUncertain ? (
+        <div
+          role="status"
+          className={cn(
+            "flex-wrap items-center gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1.5 text-xs",
+            FLEX,
+          )}
+        >
+          <span>{t("deliveryUnconfirmedStatus")}</span>
+          <button type="button" className="underline" onClick={retryUncertain}>
+            {t("retrySameMessage")}
+          </button>
+          <button type="button" className="underline" onClick={abandonUncertain}>
+            {t("sendAnotherAnyway")}
+          </button>
         </div>
       ) : null}
       <div className="relative">
@@ -524,7 +726,9 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
           data-testid="composer-input"
           aria-label={t("composerInput")}
           value={value}
+          readOnly={composerLocked}
           onChange={(e) => {
+            if (composerLocked) return;
             setValue(e.target.value);
             syncCaret(e.target);
           }}

@@ -8,7 +8,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { api } from "./api";
+import { api, MessageDeliveryUnknownError } from "./api";
 
 interface FetchCall {
   url: string;
@@ -38,6 +38,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -117,14 +118,141 @@ describe("agent label / messages / cancel", () => {
     await expect(api.patchAgentLabel(5, "x")).rejects.toThrow(/HTTP 500/);
   });
 
-  it("sendMessage POSTs JSON {content, source} to /api/agents/{id}/messages", async () => {
-    await api.sendMessage(3, "hello");
+  it("sendMessage POSTs one stable client message id with the message", async () => {
+    await api.sendMessage(3, "hello", "client-message-123");
     expect(calls[0].url).toMatch(/\/api\/agents\/3\/messages$/);
     expect(calls[0].init?.method).toBe("POST");
+    expect(calls[0].init?.headers).toEqual({
+      "content-type": "application/json",
+      "Idempotency-Key": "client-message-123",
+    });
     expect(JSON.parse(calls[0].init?.body as string)).toEqual({
       content: "hello",
       source: "user",
     });
+  });
+
+  it("a timed-out POST reconciles by the same client message id", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn((_url: string, init?: RequestInit) => {
+      calls.push({ url: _url, init });
+      if (calls.length === 1) {
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => {
+            reject(new DOMException("timed out", "AbortError"));
+          });
+        });
+      }
+      return Promise.resolve(
+        new Response(JSON.stringify({ status: "running", inbound_id: 77 }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const delivery = api.sendMessage(3, "hello", "client-timeout-123");
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    await expect(delivery).resolves.toEqual({ status: "running", inbound_id: 77 });
+    expect(calls).toHaveLength(2);
+    expect(calls[1].url).toMatch(/\/api\/agents\/3\/messages\/reconcile$/);
+    expect(new Headers(calls[0].init?.headers).get("Idempotency-Key")).toBe(
+      "client-timeout-123",
+    );
+    expect(new Headers(calls[1].init?.headers).get("Idempotency-Key")).toBe(
+      "client-timeout-123",
+    );
+  });
+
+  it("times out when headers arrive but the response body never completes", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: string, init?: RequestInit) => {
+        calls.push({ url, init });
+        if (calls.length === 1) {
+          return Promise.resolve({
+            ok: true,
+            status: 201,
+            statusText: "Created",
+            json: () => new Promise<never>(() => undefined),
+          } as unknown as Response);
+        }
+        return Promise.resolve(
+          new Response(JSON.stringify({ status: "running", inbound_id: 79 }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          }),
+        );
+      }),
+    );
+
+    const delivery = api.sendMessage(3, "body hangs", "client-body-timeout");
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    await expect(delivery).resolves.toEqual({ status: "running", inbound_id: 79 });
+    expect(calls[1].url).toMatch(/\/messages\/reconcile$/);
+  });
+
+  it("a missing receipt resends the original body with the same id", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((_url: string, init?: RequestInit) => {
+        calls.push({ url: _url, init });
+        if (calls.length === 1) return Promise.reject(new TypeError("gateway restarted"));
+        if (calls.length === 2) {
+          return Promise.resolve(new Response("not found", { status: 404 }));
+        }
+        return Promise.resolve(
+          new Response(JSON.stringify({ status: "running", inbound_id: 88 }), {
+            status: 201,
+            headers: { "content-type": "application/json" },
+          }),
+        );
+      }),
+    );
+
+    await expect(api.sendMessage(3, "retry me", "client-retry-123")).resolves.toEqual({
+      status: "running",
+      inbound_id: 88,
+    });
+    expect(calls).toHaveLength(3);
+    expect(calls[0].url).toMatch(/\/messages$/);
+    expect(calls[1].url).toMatch(/\/messages\/reconcile$/);
+    expect(calls[2].url).toMatch(/\/messages$/);
+    expect(
+      calls.map((call) => new Headers(call.init?.headers).get("Idempotency-Key")),
+    ).toEqual(["client-retry-123", "client-retry-123", "client-retry-123"]);
+    expect(calls[2].init?.body).toBe(calls[0].init?.body);
+  });
+
+  it("keeps a post-resend 404 ambiguous through the reconciliation deadline", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: string, init?: RequestInit) => {
+        calls.push({ url, init });
+        if (calls.length === 1 || calls.length === 3) {
+          return Promise.reject(new TypeError("response lost"));
+        }
+        return Promise.resolve(new Response("not found", { status: 404 }));
+      }),
+    );
+
+    const delivery = api.sendMessage(3, "still uncertain", "client-uncertain-123");
+    const assertion = expect(delivery).rejects.toBeInstanceOf(MessageDeliveryUnknownError);
+    await vi.runAllTimersAsync();
+    await assertion;
+
+    expect(calls.map((call) => call.url.replace(/^.*\/api/, "/api"))).toEqual([
+      "/api/agents/3/messages",
+      "/api/agents/3/messages/reconcile",
+      "/api/agents/3/messages",
+      "/api/agents/3/messages/reconcile",
+      "/api/agents/3/messages/reconcile",
+    ]);
   });
 
   it("cancel POSTs JSON {agent_id} to /api/cancel (global endpoint)", async () => {

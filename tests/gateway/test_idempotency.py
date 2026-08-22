@@ -1,10 +1,10 @@
 """AtLeastOnceWithKey dedup middleware (R3 door ① server side).
 
 The endpoint POST /api/agents/{id}/messages declares
-Idempotency.AT_LEAST_ONCE_WITH_KEY: the first request with an
-Idempotency-Key header executes and stores its response in the shared
-api_idempotency table; a same-key retry replays it instead of re-executing
-— one logical message lands exactly once no matter how many retries.
+Idempotency.AT_LEAST_ONCE_WITH_KEY: the caller gives one logical message a
+stable key. The inbound INSERT owns that key in its transaction, and a same-key
+retry resolves the durable row instead of inserting again — even when the
+gateway died after COMMIT and before returning its response.
 
 Tests run against the real app + test DB (TestClient + lifespan), plus
 direct unit coverage of the middleware's DB helpers for the failure paths
@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import AsyncGenerator, Awaitable, Callable, Iterator
+from concurrent.futures import ThreadPoolExecutor
 
 import psycopg
 import pytest
@@ -26,6 +27,7 @@ from starlette.requests import Request
 
 from gateway import _idempotency
 from gateway.app import app
+from shared.agents import AgentStatus
 from shared.contracts import Idempotency
 
 
@@ -78,7 +80,74 @@ def test_same_key_retry_lands_once(
         headers={"Idempotency-Key": "key-1"},
     )
     assert resp2.status_code == 201, resp2.text
+    assert resp1.json()["inbound_id"] == resp2.json()["inbound_id"]
     assert _count_inbounds(db_conn, agent_id, "hello once") == 1
+
+
+def test_same_key_different_body_fails_closed(client: TestClient, agent_id: int) -> None:
+    """A key identifies one immutable logical message, not merely one slot."""
+    first = client.post(
+        f"/api/agents/{agent_id}/messages",
+        json={"content": "first body", "source": "user"},
+        headers={"Idempotency-Key": "key-body-conflict"},
+    )
+    second = client.post(
+        f"/api/agents/{agent_id}/messages",
+        json={"content": "different body", "source": "user"},
+        headers={"Idempotency-Key": "key-body-conflict"},
+    )
+    assert first.status_code == 201, first.text
+    assert second.status_code == 409, second.text
+
+
+def test_same_key_different_agent_fails_closed(
+    client: TestClient, db_conn: psycopg.Connection, agent_id: int
+) -> None:
+    """Client message ids are cluster-wide; cross-agent reuse cannot twin a message."""
+    with db_conn.cursor() as cur:
+        cur.execute("INSERT INTO agents (label) VALUES ('idem-other') RETURNING id")
+        other_row = cur.fetchone()
+        assert other_row is not None
+        other_id = int(other_row[0])
+        cur.execute(
+            "INSERT INTO agents_meta (id, status) VALUES (%s, 'running')",
+            (other_id,),
+        )
+    db_conn.commit()
+
+    first = client.post(
+        f"/api/agents/{agent_id}/messages",
+        json={"content": "same body", "source": "user"},
+        headers={"Idempotency-Key": "key-agent-conflict"},
+    )
+    second = client.post(
+        f"/api/agents/{other_id}/messages",
+        json={"content": "same body", "source": "user"},
+        headers={"Idempotency-Key": "key-agent-conflict"},
+    )
+    assert first.status_code == 201, first.text
+    assert second.status_code == 409, second.text
+
+
+def test_concurrent_same_key_requests_land_once(
+    client: TestClient, db_conn: psycopg.Connection, agent_id: int
+) -> None:
+    """Two tabs racing the same logical submit converge on one durable inbound."""
+
+    def _send() -> tuple[int, dict[str, object]]:
+        response = client.post(
+            f"/api/agents/{agent_id}/messages",
+            json={"content": "from two tabs", "source": "user"},
+            headers={"Idempotency-Key": "key-two-tabs"},
+        )
+        return response.status_code, response.json()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        responses = list(executor.map(lambda _n: _send(), range(2)))
+
+    assert [status for status, _body in responses] == [201, 201]
+    assert len({int(body["inbound_id"]) for _status, body in responses}) == 1
+    assert _count_inbounds(db_conn, agent_id, "from two tabs") == 1
 
 
 def test_different_keys_land_twice(
@@ -96,6 +165,33 @@ def test_different_keys_land_twice(
     )
     assert resp1.status_code == 201 and resp2.status_code == 201
     assert _count_inbounds(db_conn, agent_id, "twice") == 2
+
+
+def test_client_message_unique_index_allows_nulls_but_rejects_duplicate_keys(
+    db_conn: psycopg.Connection, agent_id: int
+) -> None:
+    """The partial unique index preserves legacy key-less callers."""
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO inbound_messages (agent_id, content, kind, source) "
+            "VALUES (%s, 'null one', 'chat', 'user'), "
+            "(%s, 'null two', 'chat', 'user')",
+            (agent_id, agent_id),
+        )
+        cur.execute(
+            "INSERT INTO inbound_messages "
+            "(agent_id, content, kind, source, client_message_id) "
+            "VALUES (%s, 'keyed', 'chat', 'user', 'db-unique-key')",
+            (agent_id,),
+        )
+        with pytest.raises(psycopg.errors.UniqueViolation), db_conn.transaction():
+            cur.execute(
+                "INSERT INTO inbound_messages "
+                "(agent_id, content, kind, source, client_message_id) "
+                "VALUES (%s, 'duplicate', 'chat', 'user', 'db-unique-key')",
+                (agent_id,),
+            )
+    db_conn.commit()
 
 
 def test_no_key_passes_through(
@@ -219,6 +315,180 @@ def test_stale_placeholder_never_bricks_key(
     assert _count_inbounds(db_conn, agent_id, "after crash") == 1
 
 
+def test_fresh_response_cache_placeholder_cannot_hide_committed_inbound(
+    client: TestClient,
+    db_conn: psycopg.Connection,
+    agent_id: int,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Crash after inbound commit but before response-cache store reconciles immediately.
+
+    This is the production ambiguity window: the durable message exists while
+    the old generic idempotency cache still contains a fresh executing
+    placeholder. The retry must reach the inbound transaction instead of
+    polling that placeholder for 15 seconds (and potentially for seven days).
+    """
+    key = "key-commit-before-response"
+    path = f"/api/agents/{agent_id}/messages"
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO inbound_messages "
+            "(agent_id, content, kind, source, client_message_id) "
+            "VALUES (%s, %s, 'chat', 'user', %s) RETURNING id",
+            (agent_id, "already committed", key),
+        )
+        committed = cur.fetchone()
+    db_conn.commit()
+    assert committed is not None
+    assert _idempotency._claim(app.state.db_pool, key, "POST", path)
+    # Keep a regression from taking the middleware's full 15-second wait.
+    monkeypatch.setattr(_idempotency, "_MAX_WAIT_SECONDS", 0.01)
+
+    response = client.post(
+        path,
+        json={"content": "already committed", "source": "user"},
+        headers={"Idempotency-Key": key},
+    )
+
+    assert response.status_code == 201, response.text
+    assert response.json()["inbound_id"] == committed[0]
+    assert _count_inbounds(db_conn, agent_id, "already committed") == 1
+
+
+def test_reconcile_endpoint_finds_the_durable_inbound(client: TestClient, agent_id: int) -> None:
+    """A browser whose POST timed out can resolve the unknown outcome by key."""
+    sent = client.post(
+        f"/api/agents/{agent_id}/messages",
+        json={"content": "reconcile me", "source": "user"},
+        headers={"Idempotency-Key": "key-reconcile"},
+    )
+    assert sent.status_code == 201, sent.text
+
+    receipt = client.post(
+        f"/api/agents/{agent_id}/messages/reconcile",
+        json={"content": "reconcile me", "source": "user"},
+        headers={"Idempotency-Key": "key-reconcile"},
+    )
+
+    assert receipt.status_code == 200, receipt.text
+    assert receipt.json()["inbound_id"] == sent.json()["inbound_id"]
+
+
+def test_reconcile_does_not_repeat_mutable_multimodal_validation(
+    client: TestClient,
+    agent_id: int,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A receipt survives model/upload changes after the original commit."""
+    from gateway.routers import agents_state
+
+    body = {
+        "content": [
+            {
+                "type": "image_url",
+                "image_url": {"url": f"/api/agents/{agent_id}/uploads/gone.png"},
+            }
+        ],
+        "source": "user",
+    }
+    original_normalize = agents_state._normalize_message_content
+    monkeypatch.setattr(
+        agents_state,
+        "_prepare_message_content",
+        lambda _request, _agent_id, content: original_normalize(content),
+    )
+    sent = client.post(
+        f"/api/agents/{agent_id}/messages",
+        json=body,
+        headers={"Idempotency-Key": "key-multimodal-reconcile"},
+    )
+    assert sent.status_code == 201, sent.text
+
+    def _mutable_gate_must_not_run(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("same-key receipt lookup re-ran current model/upload validation")
+
+    monkeypatch.setattr(agents_state, "_prepare_message_content", _mutable_gate_must_not_run)
+    retried = client.post(
+        f"/api/agents/{agent_id}/messages",
+        json=body,
+        headers={"Idempotency-Key": "key-multimodal-reconcile"},
+    )
+    assert retried.status_code == 201, retried.text
+    assert retried.json()["inbound_id"] == sent.json()["inbound_id"]
+
+    receipt = client.post(
+        f"/api/agents/{agent_id}/messages/reconcile",
+        json=body,
+        headers={"Idempotency-Key": "key-multimodal-reconcile"},
+    )
+    assert receipt.status_code == 200, receipt.text
+    assert receipt.json()["inbound_id"] == sent.json()["inbound_id"]
+
+
+def test_reconcile_heals_crash_after_commit_before_resurrect(
+    client: TestClient,
+    db_conn: psycopg.Connection,
+    agent_id: int,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A lost first response heals one pending chat and its terminated owner."""
+    import gateway.routers._delivery as delivery
+
+    with db_conn.cursor() as cur:
+        cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
+    db_conn.commit()
+    calls = 0
+
+    async def _crash_then_heal(
+        aid: int,
+        *,
+        trigger_inbound_id: int,
+        trigger_inbound_kind: str,
+    ) -> AgentStatus:
+        nonlocal calls
+        calls += 1
+        assert aid == agent_id
+        assert trigger_inbound_kind == "chat"
+        if calls == 1:
+            raise RuntimeError("gateway died after commit")
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "UPDATE agents_meta SET status = 'idling' WHERE id = %s AND status = 'terminated'",
+                (aid,),
+            )
+            if cur.rowcount == 1:
+                cur.execute(
+                    "INSERT INTO inbound_messages (agent_id, content, kind, source) "
+                    "VALUES (%s, '', 'resurrect', 'system')",
+                    (aid,),
+                )
+        db_conn.commit()
+        return AgentStatus.IDLING
+
+    monkeypatch.setattr(delivery._ops, "resurrect_if_terminated", _crash_then_heal)
+    with pytest.raises(RuntimeError, match="gateway died after commit"):
+        client.post(
+            f"/api/agents/{agent_id}/messages",
+            json={"content": "survive crash", "source": "user"},
+            headers={"Idempotency-Key": "key-crash-heal"},
+        )
+
+    receipt = client.post(
+        f"/api/agents/{agent_id}/messages/reconcile",
+        json={"content": "survive crash", "source": "user"},
+        headers={"Idempotency-Key": "key-crash-heal"},
+    )
+    assert receipt.status_code == 200, receipt.text
+    assert receipt.json()["status"] == "idling"
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "SELECT kind, count(*) FROM inbound_messages WHERE agent_id = %s "
+            "GROUP BY kind ORDER BY kind",
+            (agent_id,),
+        )
+        assert cur.fetchall() == [("chat", 1), ("resurrect", 1)]
+
+
 def test_prune_removes_stale_placeholder(
     client: TestClient, db_conn: psycopg.Connection, agent_id: int
 ) -> None:
@@ -284,6 +554,14 @@ class _FakeAlwkContract:
     """A minimal RouteContract stand-in declaring AT_LEAST_ONCE_WITH_KEY."""
 
     idempotency = Idempotency.AT_LEAST_ONCE_WITH_KEY
+    transactional_idempotency = False
+
+
+class _FakeTransactionalAlwkContract:
+    """A keyed effect owned by the handler's business transaction."""
+
+    idempotency = Idempotency.AT_LEAST_ONCE_WITH_KEY
+    transactional_idempotency = True
 
 
 def _fake_contract_for(_method: str, _path: str) -> _FakeAlwkContract:
@@ -343,6 +621,42 @@ def test_owner_drain_failure_releases_key(
     )
     assert _idempotency._claim(pool, key, "POST", path), "the key must be claimable again"
     _idempotency._release(pool, key)
+
+
+def test_only_transactional_route_bypasses_generic_response_cache(
+    client: TestClient,
+    agent_id: int,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Transactional handlers execute; ordinary ALWK handlers claim/replay."""
+    key = "key-strategy-boundary"
+    path = f"/api/agents/{agent_id}/messages"
+    executions = 0
+
+    async def call_next(_request: Request) -> Response:
+        nonlocal executions
+        executions += 1
+
+        async def _body() -> AsyncGenerator[bytes, None]:
+            yield b'{"ok": true}'
+
+        return StreamingResponse(_body(), media_type="application/json")
+
+    monkeypatch.setattr(
+        _idempotency.contracts,
+        "contract_for",
+        lambda _method, _path: _FakeTransactionalAlwkContract(),
+    )
+    _run_middleware_once(key, path, call_next)
+    _run_middleware_once(key, path, call_next)
+    assert executions == 2
+    assert _idempotency._fetch(app.state.db_pool, key, "POST", path) is None
+
+    monkeypatch.setattr(_idempotency.contracts, "contract_for", _fake_contract_for)
+    _run_middleware_once(key, path, call_next)
+    _run_middleware_once(key, path, call_next)
+    assert executions == 3, "ordinary ALWK second call must replay without executing"
+    _idempotency._release(app.state.db_pool, key)
 
 
 def test_owner_non_streaming_response_releases_key(
