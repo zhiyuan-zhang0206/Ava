@@ -84,6 +84,20 @@ def _published_port(docker: str, name: str) -> int:
     return int(mapping.stdout.strip().rsplit(":", 1)[1])
 
 
+def _query_proof_datasource(tmp_path: Path) -> str:
+    """Add deterministic TestData beside, never instead of, shipped provisioning."""
+    path = tmp_path / "ava-ci-query-proof.yml"
+    path.write_text(
+        "apiVersion: 1\n"
+        "datasources:\n"
+        "  - name: Ava CI query proof\n"
+        "    uid: ava-ci-query-proof\n"
+        "    type: grafana-testdata-datasource\n"
+        "    access: proxy\n"
+    )
+    return f"{path}:/etc/grafana/provisioning/datasources/ava-ci-query-proof.yml:ro"
+
+
 def _wait_for_grafana(client: httpx.Client, root: str) -> dict[str, object]:
     deadline = time.monotonic() + 90
     while time.monotonic() < deadline:
@@ -126,14 +140,37 @@ def _assert_viewer(client: httpx.Client, root: str) -> tuple[dict[str, object], 
         assert org.get("role") == "Viewer"
         roles.append("Viewer")
     assert client.get(f"{root}/api/search?limit=1", headers=_VIEWER_HEADERS).status_code == 200
-    assert client.get(f"{root}/api/datasources", headers=_VIEWER_HEADERS).status_code == 200
+    datasources_response = client.get(f"{root}/api/datasources", headers=_VIEWER_HEADERS)
+    assert datasources_response.status_code == 200
+    datasources = datasources_response.json()
+    assert any(
+        source.get("uid") == "prometheus" and source.get("type") == "prometheus"
+        for source in datasources
+    )
     datasource_query = client.post(
         f"{root}/api/ds/query",
         headers=_VIEWER_HEADERS,
-        json={"queries": [], "from": "0", "to": "1"},
+        json={
+            "queries": [
+                {
+                    "datasource": {
+                        "type": "grafana-testdata-datasource",
+                        "uid": "ava-ci-query-proof",
+                    },
+                    "intervalMs": 1000,
+                    "maxDataPoints": 10,
+                    "refId": "A",
+                    "scenarioId": "random_walk",
+                    "seriesCount": 1,
+                }
+            ],
+            "from": "0",
+            "to": "60000",
+        },
     )
     assert datasource_query.status_code == 200
-    assert datasource_query.json() == {"results": {}}
+    results = datasource_query.json()["results"]
+    assert results["A"]["frames"]
     mutation = client.post(
         f"{root}/api/dashboards/db",
         headers=_VIEWER_HEADERS,
@@ -168,14 +205,22 @@ def _assert_live(port: int) -> None:
         pass
 
 
-def test_real_grafana_fixed_viewer_auth_proxy() -> None:
+def test_real_grafana_fixed_viewer_auth_proxy(tmp_path: Path) -> None:
     docker = _docker_or_skip()
     image, environment, provisioning = _shipped_service()
     name = f"ava-grafana-auth-{uuid.uuid4().hex[:12]}"
     args = ["run", "--detach", "--name", name, "--publish", "127.0.0.1::3000"]
     for key, value in environment.items():
         args.extend(("--env", f"{key}={value}"))
-    args.extend(("--volume", provisioning, image))
+    args.extend(
+        (
+            "--volume",
+            provisioning,
+            "--volume",
+            _query_proof_datasource(tmp_path),
+            image,
+        )
+    )
     started = _run_docker(docker, *args)
     if started.returncode != 0:
         pytest.fail(f"failed to start shipped Grafana image: {started.stderr[-1000:]}")
@@ -193,6 +238,7 @@ def test_real_grafana_fixed_viewer_auth_proxy() -> None:
         proof = {
             "auth_proxy_login": user["login"],
             "compose_service": "grafana",
+            "datasource_query": "random-walk-ok",
             "grafana_admin": user["isGrafanaAdmin"],
             "grafana_version": health["version"],
             "image": image,

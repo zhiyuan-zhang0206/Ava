@@ -327,7 +327,7 @@ inspection on a non-LGTM Grafana — pick the Postgres datasource for
 ## Alerting
 
 **Live** (2026-08-04): Grafana Alerting rules, as code in
-[`../alerting/rules.yml`](../alerting/rules.yml) — sixteen rules evaluated every minute
+[`../alerting/rules.yml`](../alerting/rules.yml) — seventeen rules evaluated every minute
 over Loki and Prometheus: WARNING+ERROR
 spike, sse_drop/event_log_drop backlog, agent_restarted spike, LLM latency
 p95, delivery_stalled fresh-backlog, events-table freshness, trace-disk

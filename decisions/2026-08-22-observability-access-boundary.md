@@ -56,10 +56,13 @@ The Ava gateway is the only externally reachable observability user entry.
 3. The HTTP proxy exposes only the UI read surface: GET/HEAD and the
    `POST /api/ds/query` call dashboards need. Mutating API methods and POST
    targets are rejected at the gateway even if Grafana permissions drift.
-   Request bodies, connections, redirects, and response streaming are bounded.
-   Ordinary bodies have a between-chunk deadline. Only a response Grafana
-   identifies as `text/event-stream` may stay quiet, and those streams have a
-   separate four-connection ceiling so they cannot exhaust the HTTP pool.
+   A 32-slot HTTP reservation is acquired before any request-body byte is read
+   and held through response cleanup; combined with the 2 MiB per-request cap,
+   retained completed bodies are capped at 64 MiB (128 MiB conservative peak
+   while mutable buffers become immutable bytes). Ordinary response streams
+   have a between-chunk deadline. Only a response Grafana identifies as
+   `text/event-stream` may stay quiet, and those streams have a separate
+   four-connection ceiling inside the same HTTP budget.
 4. `/grafana/api/live/ws` has a dedicated bridge. Its handshake re-validates
    the Ava session/Bearer, requires Origin to equal the canonical
    `AVA_GATEWAY_URL` scheme/host/effective-port, and rejects credential query
@@ -80,7 +83,11 @@ The Ava gateway is the only externally reachable observability user entry.
    IDs and file-backed queues remain unchanged.
 
 Measurement boundary: gateway latency covers authentication through upstream
-response headers; collector delivery metrics cover local acceptance through
+response headers. Lock-free OTLP observable gauges publish active/capacity for
+HTTP, SSE, and WebSocket reservations, while one observable monotonic counter
+publishes fast rejections; there is no per-transition event or LGTM query that
+could create an observer feedback loop. A provisioned alert requires sustained
+new rejections. Collector delivery metrics cover local acceptance through
 remote export queue outcome. The periodic Grafana healthcheck certifies only
 the loopback listener. `start.sh` additionally proves the auth proxy maps the
 fixed non-admin identity to Viewer and that it can perform a read before

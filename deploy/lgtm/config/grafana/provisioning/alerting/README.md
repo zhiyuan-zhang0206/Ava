@@ -23,7 +23,7 @@ directory is mounted read-only into the container at
 point's webhook URL uses `host.docker.internal` because the container
 reaches the gateway on the host.
 
-## Rules (16)
+## Rules (17)
 
 Application layer — the Loki event stream plus the LLM latency histogram:
 
@@ -62,12 +62,23 @@ adds `_total` to the raw monotonic counters:
 | `ava-ops-otelcol-enqueue-failures` | new enqueue rejections | `increase(otelcol_exporter_enqueue_failed_*_total[5m]) > 0` | 0m | error |
 | `ava-ops-otelcol-host-silent` | recently-seen collector absent | host seen in 24h has no `otelcol_process_uptime_total` in 5m | 0m | error |
 
+Gateway resource layer — lock-free observable snapshots from the gateway
+process. There is no per-request event emission and therefore no Grafana/LGTM
+feedback loop:
+
+| uid | Metric | Condition | `for` | Severity |
+|-----|--------|-----------|-------|----------|
+| `ava-ops-grafana-proxy-capacity` | HTTP/SSE/WebSocket rejected reservations | `increase(ava_grafana_proxy_capacity_rejected_total[5m]) > 5` per machine+resource | 5m | warning |
+
 The queue rule uses current gauges so it resolves after recovery; the reject
 rule uses a bounded counter delta so one historical drop does not keep
 alerting until the process restarts — it resolves after a clean 5-minute
 window. The silence query's 5-minute absence window is already its
 debounce, hence no second `for` delay. Its 24-hour historical host set expires
 retired machines naturally; the fleet heartbeat owns permanent membership.
+Grafana capacity exports active/capacity gauges and a cumulative rejection
+counter for each of three fixed resource labels. Reservations never wait, so
+there is no wait-time histogram; saturation fails fast instead.
 
 Severity follows the alert-system vocabulary (Task #1224):
 critical/warning/error — all three push to IM, no gate. Thresholds are

@@ -105,7 +105,9 @@ def test_loopback_probe_ignores_process_proxy_environment(
     assert hc._endpoint_answers(f"http://127.0.0.1:{local_http_server}/") is True
 
 
-def test_obsolete_grafana_root_cleanup_preserves_secret_env(tmp_path: Path) -> None:
+def test_obsolete_grafana_root_cleanup_preserves_secret_env_and_tightens_mode(
+    tmp_path: Path,
+) -> None:
     env_path = tmp_path / ".env"
     env_path.write_text(
         "# preserve this comment\n"
@@ -113,7 +115,7 @@ def test_obsolete_grafana_root_cleanup_preserves_secret_env(tmp_path: Path) -> N
         "GRAFANA_ROOT_URL=http://localhost:3003/grafana/\n"
         "GRAFANA_PG_PASSWORD=also-keep-me\n"
     )
-    env_path.chmod(0o600)
+    env_path.chmod(0o644)
     assert hc.remove_obsolete_grafana_root(tmp_path) is True
     assert env_path.read_text() == (
         "# preserve this comment\n"

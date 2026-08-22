@@ -17,6 +17,7 @@ from starlette.requests import Request
 from starlette.types import Scope
 from starlette.websockets import WebSocketState
 
+from gateway.routers import _grafana_capacity as grafana_capacity
 from gateway.routers import grafana
 from shared import config
 from shared.config.gateway import GatewaySettings
@@ -140,6 +141,192 @@ def test_slow_request_body_has_total_deadline(monkeypatch: pytest.MonkeyPatch) -
     with pytest.raises(HTTPException) as raised:
         asyncio.run(grafana._bounded_request_body(request))  # pyright: ignore[reportPrivateUsage]
     assert raised.value.status_code == 408
+
+
+def test_http_capacity_is_reserved_before_slow_bodies_and_released(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The N+1 request is rejected before reading a byte; N bounded bodies
+    keep their slots through response cleanup, then release exactly once."""
+
+    async def scenario() -> None:
+        assert grafana_capacity.reserved["http"] == 0
+        release_bodies = asyncio.Event()
+        body_started = [asyncio.Event(), asyncio.Event()]
+
+        def upstream(_request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, content=b"ok")
+
+        client = httpx.AsyncClient(transport=httpx.MockTransport(upstream))
+
+        def request(index: int) -> tuple[Request, Scope]:
+            scope = cast(
+                Scope,
+                {
+                    "type": "http",
+                    "asgi": {"spec_version": "2.4"},
+                    "http_version": "1.1",
+                    "method": "POST",
+                    "scheme": "http",
+                    "path": "/grafana/api/ds/query",
+                    "raw_path": b"/grafana/api/ds/query",
+                    "query_string": b"",
+                    "headers": [],
+                    "client": ("127.0.0.1", 1234 + index),
+                    "server": ("testserver", 8000),
+                    "app": SimpleNamespace(
+                        state=SimpleNamespace(grafana_client=client),
+                    ),
+                },
+            )
+
+            async def receive() -> dict[str, object]:
+                body_started[index].set()
+                await release_bodies.wait()
+                return {
+                    "type": "http.request",
+                    "body": b"x" * grafana._MAX_REQUEST_BODY_BYTES,  # pyright: ignore[reportPrivateUsage]
+                    "more_body": False,
+                }
+
+            return Request(scope, receive), scope
+
+        calls = [request(0), request(1)]
+        tasks = [
+            asyncio.create_task(grafana._proxy("api/ds/query", request_))  # pyright: ignore[reportPrivateUsage]
+            for request_, _scope in calls
+        ]
+        try:
+            await asyncio.gather(*(event.wait() for event in body_started))
+            assert grafana_capacity.reserved["http"] == 2
+
+            rejected_receive_called = False
+
+            async def rejected_receive() -> dict[str, object]:
+                nonlocal rejected_receive_called
+                rejected_receive_called = True
+                return {"type": "http.request", "body": b"", "more_body": False}
+
+            rejected_scope = cast(
+                Scope,
+                {
+                    "type": "http",
+                    "method": "POST",
+                    "path": "/grafana/api/ds/query",
+                    "headers": [],
+                },
+            )
+            with pytest.raises(HTTPException) as raised:
+                await grafana._proxy(  # pyright: ignore[reportPrivateUsage]
+                    "api/ds/query",
+                    Request(rejected_scope, rejected_receive),
+                )
+            assert raised.value.status_code == 503
+            assert not rejected_receive_called
+
+            release_bodies.set()
+            responses = await asyncio.gather(*tasks)
+            assert grafana_capacity.reserved["http"] == 2
+
+            async def send(_message: dict[str, object]) -> None:
+                return None
+
+            for response, (request_, scope) in zip(responses, calls, strict=True):
+                await response(scope, request_.receive, send)  # pyright: ignore[reportArgumentType]
+            assert grafana_capacity.reserved["http"] == 0
+        finally:
+            release_bodies.set()
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            await client.aclose()
+
+    monkeypatch.setattr(config.settings.gateway, "grafana_proxy_enabled", True)
+    monkeypatch.setattr(config.settings.gateway, "grafana_host", "127.0.0.1")
+    monkeypatch.setattr(grafana_capacity, "HTTP_LIMIT", 2)
+    asyncio.run(scenario())
+
+
+def test_http_body_memory_ceiling_is_explicit() -> None:
+    assert grafana_capacity.HTTP_LIMIT == 32
+    assert (  # 64 MiB retained; conversion can transiently double body storage.
+        grafana_capacity.HTTP_LIMIT * grafana._MAX_REQUEST_BODY_BYTES  # pyright: ignore[reportPrivateUsage]
+        == 64 * 1024 * 1024
+    )
+
+
+def test_slow_body_timeout_releases_http_capacity(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def scenario() -> None:
+        baseline = grafana_capacity.reserved["http"]
+
+        async def receive() -> dict[str, object]:
+            await asyncio.sleep(0.05)
+            return {"type": "http.request", "body": b"{}", "more_body": False}
+
+        scope = cast(
+            Scope,
+            {
+                "type": "http",
+                "method": "POST",
+                "path": "/grafana/api/ds/query",
+                "headers": [],
+                "app": SimpleNamespace(state=SimpleNamespace(grafana_client=None)),
+            },
+        )
+        with pytest.raises(HTTPException) as raised:
+            await grafana._proxy(  # pyright: ignore[reportPrivateUsage]
+                "api/ds/query", Request(scope, receive)
+            )
+        assert raised.value.status_code == 408
+        assert grafana_capacity.reserved["http"] == baseline
+
+    monkeypatch.setattr(config.settings.gateway, "grafana_proxy_enabled", True)
+    monkeypatch.setattr(config.settings.gateway, "grafana_host", "127.0.0.1")
+    monkeypatch.setattr(grafana, "_REQUEST_BODY_TIMEOUT_SECONDS", 0.01)
+    asyncio.run(scenario())
+
+
+def test_capacity_metrics_cover_all_resources_and_use_lock_free_snapshots(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registered: dict[str, tuple[str, object]] = {}
+
+    def register(name: str, *, kind: str, callback: object, **_kwargs: object) -> None:
+        registered[name] = (kind, callback)
+
+    monkeypatch.setattr(grafana_capacity, "register_observable_metric", register)
+    grafana_capacity.register_metrics()
+    assert {name.rsplit("_", 1)[-1] for name in registered} == {
+        "active",
+        "capacity",
+        "rejected",
+    }
+    assert registered["ava_grafana_proxy_capacity_rejected"][0] == "counter"
+
+    # Metric collection cannot wait behind a request-side reservation lock.
+    with grafana_capacity._lock:  # pyright: ignore[reportPrivateUsage]
+        points = list(grafana_capacity._active_points())  # pyright: ignore[reportPrivateUsage]
+    assert {attributes["resource"] for _value, attributes in points} == {
+        "http",
+        "sse",
+        "websocket",
+    }
+
+
+def test_capacity_rejection_counter_is_monotonic() -> None:
+    before = {
+        attributes["resource"]: value
+        for value, attributes in grafana_capacity._rejected_points()  # pyright: ignore[reportPrivateUsage]
+    }
+    assert not grafana_capacity.reserve("http", 0)
+    after = {
+        attributes["resource"]: value
+        for value, attributes in grafana_capacity._rejected_points()  # pyright: ignore[reportPrivateUsage]
+    }
+    assert after["http"] == before["http"] + 1
+    assert grafana_capacity.reserve("http", grafana_capacity.HTTP_LIMIT)
+    grafana_capacity.release("http")
 
 
 def test_websocket_text_limit_counts_utf8_bytes(monkeypatch: pytest.MonkeyPatch) -> None:

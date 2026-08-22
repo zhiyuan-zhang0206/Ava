@@ -365,7 +365,8 @@ def test_response_start_disconnect_closes_unstarted_upstream(
         async def fail_on_start(_message: dict[str, object]) -> None:
             raise OSError("client disconnected before headers")
 
-        baseline = grafana._reserved_capacity["sse"]  # pyright: ignore[reportPrivateUsage]
+        sse_baseline = grafana.capacity.reserved["sse"]
+        http_baseline = grafana.capacity.reserved["http"]
         try:
             response = await grafana._proxy(  # pyright: ignore[reportPrivateUsage]
                 "disconnect",
@@ -374,7 +375,8 @@ def test_response_start_disconnect_closes_unstarted_upstream(
             with pytest.raises(ClientDisconnect):
                 await response(scope, receive, fail_on_start)  # pyright: ignore[reportArgumentType]
             assert tracker.closed
-            assert grafana._reserved_capacity["sse"] == baseline  # pyright: ignore[reportPrivateUsage]
+            assert grafana.capacity.reserved["sse"] == sse_baseline
+            assert grafana.capacity.reserved["http"] == http_baseline
         finally:
             await client.aclose()
 
@@ -714,7 +716,7 @@ def test_live_websocket_capacity_counts_pending_upstream_handshakes(
             async def __aenter__(self) -> _Upstream:
                 nonlocal entered
                 entered += 1
-                if entered >= grafana._MAX_WS_CONNECTIONS:  # pyright: ignore[reportPrivateUsage]
+                if entered >= grafana.capacity.WEBSOCKET_LIMIT:
                     enough_pending.set()
                 await release.wait()
                 return _Upstream()
@@ -734,14 +736,14 @@ def test_live_websocket_capacity_counts_pending_upstream_handshakes(
         monkeypatch.setattr(config.settings.gateway, "auth_middleware_enabled", False)
         monkeypatch.setattr(grafana, "connect", slow_connect)
         monkeypatch.setattr(grafana, "_relay_websocket", relay_immediately)
-        sockets = [_Socket() for _ in range(grafana._MAX_WS_CONNECTIONS + 1)]  # pyright: ignore[reportPrivateUsage]
+        sockets = [_Socket() for _ in range(grafana.capacity.WEBSOCKET_LIMIT + 1)]
         tasks = [
             asyncio.create_task(grafana.grafana_live(socket))  # pyright: ignore[reportArgumentType]
             for socket in sockets
         ]
         await asyncio.wait_for(enough_pending.wait(), timeout=1)
         await asyncio.sleep(0)
-        assert entered == grafana._MAX_WS_CONNECTIONS  # pyright: ignore[reportPrivateUsage]
+        assert entered == grafana.capacity.WEBSOCKET_LIMIT
         assert sockets[-1].close_calls == [(1013, "grafana live capacity reached")]
         release.set()
         await asyncio.gather(*tasks)

@@ -69,6 +69,7 @@ from fastapi.responses import JSONResponse
 import shared.db
 from gateway import _idempotency, _latency, _pause_policy, loki_query_budget
 from gateway import mcp_endpoint as _mcp_endpoint
+from gateway.routers import _grafana_capacity as grafana_capacity
 from gateway.routers import (
     _machine_pause as machine_pause_router,
 )
@@ -242,6 +243,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # Cheap when the proxy is disabled: no connection exists until the first
     # proxied request.
     app.state.grafana_client = grafana_router.build_proxy_client()
+    grafana_capacity.register_metrics()
 
     # Register the OS-level health-probe cron (launchd plist on macOS, crontab
     # on Linux). This is the primary registration path — every gateway start

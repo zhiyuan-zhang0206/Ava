@@ -76,6 +76,7 @@ __all__ = [
     "emit",
     "flush",
     "init_telemetry",
+    "metric_dimensions",
     "stop",
 ]
 
@@ -478,6 +479,14 @@ def process_name() -> str:
     so same-named counters from different process kinds cannot collide into
     one Prometheus series."""
     return str(_state["process"])
+
+
+def metric_dimensions() -> dict[str, str]:
+    """The bounded process dimensions shared by all OTLP metric producers."""
+    return {
+        "machine": str(_state["machine"] or _resolve_machine()),
+        "process": process_name(),
+    }
 
 
 def init_telemetry(*, process: str = "unknown", agent_id: int | None = None) -> None:

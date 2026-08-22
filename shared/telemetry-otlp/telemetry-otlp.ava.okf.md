@@ -58,6 +58,8 @@ remains the only cross-machine observability write entry.
   payload fields become Prometheus series via a per-field disposition, a
   per-process Resource, and latency-shaping Views — the full mapping contract
   is its own node: [[shared/telemetry-otlp/metrics-mapping.ava.okf.md]].
+  Process observers share it:
+  [[process-observers.ava.okf.md]].
 - **Traces** — exported by `shared/trace.py` to the sidecar's `/v1/traces`
   (OTLP/JSON, content-stripped before leaving the process); the sidecar's
   file exporter mirrors each batch to `$AVA_HOME/traces/spans.jsonl`

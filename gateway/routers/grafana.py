@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import threading
 from collections.abc import AsyncGenerator
 from urllib.parse import parse_qsl, unquote, urljoin, urlsplit, urlunsplit
 
@@ -17,6 +16,7 @@ from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import ConnectionClosed, WebSocketException
 from websockets.typing import Origin
 
+from gateway.routers import _grafana_capacity as capacity
 from gateway.routers._grafana_origin import normalized_origin as _normalized_origin
 from shared.cluster_auth import cookie_name, verify_bearer, verify_session
 from shared.config import settings
@@ -30,7 +30,6 @@ _AUTH_PROXY_ROLE = "Viewer"
 _MAX_REQUEST_BODY_BYTES = 2 * 1024 * 1024
 _REQUEST_BODY_TIMEOUT_SECONDS = 30.0
 MAX_WS_MESSAGE_BYTES = 8 * 1024 * 1024
-_MAX_WS_CONNECTIONS = 32
 _WRITE_LIMIT = 64 * 1024
 
 # Headers and ordinary response chunks each have a bounded wait. The transport
@@ -40,13 +39,9 @@ _WRITE_LIMIT = 64 * 1024
 _HEADER_TIMEOUT_SECONDS = 120.0
 _CHUNK_TIMEOUT_SECONDS = 120.0
 _PROXY_TIMEOUT = httpx.Timeout(connect=5.0, read=None, write=5.0, pool=5.0)
-_MAX_SSE_CONNECTIONS = 4
 
-# A process restart (including cluster-secret rotation) runs lifespan cleanup
-# and closes every accepted Grafana Live connection before the old process exits.
+# Restart cleanup closes every accepted Grafana Live connection before exit.
 _live_websockets: set[WebSocket] = set()
-_capacity_lock = threading.Lock()
-_reserved_capacity = {"websocket": 0, "sse": 0}
 
 
 def build_proxy_client() -> httpx.AsyncClient:
@@ -120,21 +115,6 @@ async def _bounded_request_body(request: Request) -> bytes:
     except TimeoutError:
         raise HTTPException(status_code=408, detail="grafana request body timed out") from None
     return bytes(body)
-
-
-def _reserve_capacity(counter: str, limit: int) -> bool:
-    with _capacity_lock:
-        if _reserved_capacity[counter] >= limit:
-            return False
-        _reserved_capacity[counter] += 1
-        return True
-
-
-def _release_capacity(counter: str) -> None:
-    with _capacity_lock:
-        if _reserved_capacity[counter] <= 0:
-            raise RuntimeError(f"grafana {counter} capacity released without reservation")
-        _reserved_capacity[counter] -= 1
 
 
 def _is_event_stream(response: httpx.Response) -> bool:
@@ -230,8 +210,11 @@ class _GrafanaStreamingResponse(StreamingResponse):
         try:
             await self._upstream.aclose()
         finally:
-            if self._event_stream:
-                _release_capacity("sse")
+            try:
+                if self._event_stream:
+                    capacity.release("sse")
+            finally:
+                capacity.release("http")
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         try:
@@ -294,16 +277,25 @@ async def _streaming_response(
 ) -> _GrafanaStreamingResponse:
     """Reserve the optional SSE slot and transfer response ownership."""
     event_stream = _is_event_stream(response)
-    if event_stream and not _reserve_capacity("sse", _MAX_SSE_CONNECTIONS):
+    sse_reserved = False
+    if event_stream:
+        sse_reserved = capacity.reserve("sse", capacity.SSE_LIMIT)
+        if not sse_reserved:
+            await response.aclose()
+            raise HTTPException(status_code=503, detail="grafana stream capacity reached")
+    try:
+        return _GrafanaStreamingResponse(
+            _iter_upstream(response, request_path, event_stream=event_stream),
+            response,
+            event_stream=event_stream,
+            status_code=response.status_code,
+            headers=headers,
+        )
+    except BaseException:
         await response.aclose()
-        raise HTTPException(status_code=503, detail="grafana stream capacity reached")
-    return _GrafanaStreamingResponse(
-        _iter_upstream(response, request_path, event_stream=event_stream),
-        response,
-        event_stream=event_stream,
-        status_code=response.status_code,
-        headers=headers,
-    )
+        if sse_reserved:
+            capacity.release("sse")
+        raise
 
 
 async def _proxy(rest: str, request: Request) -> Response:
@@ -312,17 +304,25 @@ async def _proxy(rest: str, request: Request) -> Response:
         raise HTTPException(status_code=404, detail="grafana proxy is disabled")
     if request.method == "POST" and rest not in _ALLOWED_POST_PATHS:
         raise HTTPException(status_code=403, detail="grafana write endpoint is not exposed")
-
-    upstream_origin = _upstream_http_origin()
-    target = f"{upstream_origin}/grafana/{rest}"
-    if request.url.query:
-        target += f"?{request.url.query}"
-    response = await _send_upstream(request, target)
-    return await _streaming_response(
-        response,
-        request.url.path,
-        await _response_headers(response, target, upstream_origin),
-    )
+    if not capacity.reserve("http", capacity.HTTP_LIMIT):
+        raise HTTPException(status_code=503, detail="grafana proxy capacity reached")
+    owns_reservation = True
+    try:
+        upstream_origin = _upstream_http_origin()
+        target = f"{upstream_origin}/grafana/{rest}"
+        if request.url.query:
+            target += f"?{request.url.query}"
+        response = await _send_upstream(request, target)
+        streaming = await _streaming_response(
+            response,
+            request.url.path,
+            await _response_headers(response, target, upstream_origin),
+        )
+        owns_reservation = False
+        return streaming
+    finally:
+        if owns_reservation:
+            capacity.release("http")
 
 
 @router.get("/grafana/{rest:path}")
@@ -444,7 +444,7 @@ async def grafana_live(websocket: WebSocket) -> None:
     if not _websocket_query_allowed(websocket.url.query):
         await websocket.close(code=1008, reason="credentials are forbidden in query strings")
         return
-    if not _reserve_capacity("websocket", _MAX_WS_CONNECTIONS):
+    if not capacity.reserve("websocket", capacity.WEBSOCKET_LIMIT):
         await websocket.close(code=1013, reason="grafana live capacity reached")
         return
 
@@ -481,7 +481,7 @@ async def grafana_live(websocket: WebSocket) -> None:
             ):
                 await websocket.close(code=1011, reason="grafana live unavailable")
     finally:
-        _release_capacity("websocket")
+        capacity.release("websocket")
 
 
 async def close_live_websockets() -> None:

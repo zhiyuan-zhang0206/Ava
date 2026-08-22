@@ -24,7 +24,6 @@ lost meanwhile — the native sidecar buffers in its file-backed queue.
 from __future__ import annotations
 
 import re
-import stat
 import subprocess
 import sys
 import urllib.error
@@ -112,11 +111,10 @@ def remove_obsolete_grafana_root(compose_dir: Path) -> bool:
     path = compose_dir / ".env"
     if not path.exists() or not _OBSOLETE_ROOT_ASSIGNMENT.search(path.read_text()):
         return False
-    mode = stat.S_IMODE(path.stat().st_mode)
     removed, _key = unset_key(path, "GRAFANA_ROOT_URL")
     if not removed:
         raise RuntimeError(f"failed to remove obsolete GRAFANA_ROOT_URL from {path}")
-    path.chmod(mode)
+    path.chmod(0o600)
     return True
 
 
