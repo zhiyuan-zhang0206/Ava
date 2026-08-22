@@ -94,16 +94,6 @@ def test_moonshot_length_truncated():
     assert cat is StopCategory.TRUNCATED
 
 
-def test_xai_stop_normal():
-    cat, raw = classify_stop(_msg({"model_provider": "xai", "finish_reason": "stop"}))
-    assert cat is StopCategory.NORMAL and raw == "stop"
-
-
-def test_xai_length_truncated():
-    cat, _ = classify_stop(_msg({"model_provider": "xai", "finish_reason": "length"}))
-    assert cat is StopCategory.TRUNCATED
-
-
 def test_unknown_provider_raises():
     with pytest.raises(ValueError, match="unknown model_provider"):
         classify_stop(_msg({"model_provider": "cohere", "finish_reason": "stop"}))

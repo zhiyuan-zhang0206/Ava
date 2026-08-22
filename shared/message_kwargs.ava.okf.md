@@ -39,4 +39,4 @@ LangChain forces `BaseMessage.additional_kwargs` into a bare `dict`, which canno
 
 ## Notes
 
-- Non-exhaustive: third-party keys (e.g., `reasoning_content` written by `ChatMoonshot`/`ChatXAI`) also share this dict, intentionally left outside the contract.
+- Non-exhaustive: third-party keys (e.g., `reasoning_content` written by `ChatMoonshot`) also share this dict, intentionally left outside the contract.

@@ -161,7 +161,7 @@ class LmSettings(EnvSettings):
             "Per-provider outbound LLM concurrency caps, format "
             "'provider:limit,provider:limit' (e.g. 'deepseek:400,anthropic:200'; "
             "provider keys are the model prefixes: deepseek/claude/gpt/gemini/"
-            "mimo/kimi/glm/grok/qwen). Empty = unlimited (default). The cap wraps "
+            "mimo/kimi/glm/qwen). Empty = unlimited (default). The cap wraps "
             "the whole SDK call (SDK-internal retries included) and queues "
             "excess calls instead of 429ing the provider. Reserved for when "
             "agent count or batch jobs approach a provider's account "
@@ -558,19 +558,6 @@ class LmSettings(EnvSettings):
         default=None,
         alias="GLM_API_KEY",
         description="Zhipu GLM API key. Empty = glm-* models unavailable.",
-        json_schema_extra={
-            "restart_required": "agent",
-            "writable": True,
-            "sensitive": True,
-            "scope": "cluster-pinned",
-            "seed": True,
-        },
-    )
-
-    xai_api_key: SecretStr | None = Field(
-        default=None,
-        alias="XAI_API_KEY",
-        description="xAI Grok API key. Empty = grok-* models unavailable.",
         json_schema_extra={
             "restart_required": "agent",
             "writable": True,

@@ -20,7 +20,7 @@ Two acquire flavors, both pass-through when the provider is unconfigured:
 
 Provider keys are the model-prefix keys of `shared/lm/factory.py` with any
 trailing dash stripped (`deepseek` / `claude` / `gpt` / `gemini` / `mimo` /
-`kimi` / `glm` / `grok` / `qwen`); the config rejects unknown keys at parse time
+`kimi` / `glm` / `qwen`); the config rejects unknown keys at parse time
 (fail fast). `None` as a provider key is always a pass-through, so call
 sites that cannot resolve a provider degrade to unlimited rather than
 crash.

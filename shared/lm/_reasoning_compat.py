@@ -4,10 +4,9 @@ Used by two providers that lack suitable community packages: Xiaomi MiMo (no
 community package exists) and Zhipu GLM (`langchain-zhipuai` v0.0.1 is
 unmaintained; `langchain_zhipu` v4.1.8 requires `langchain<0.3.0`).
 
-Kimi and Grok have been migrated to their community packages (`langchain-moonshot`
-and `langchain-xai` respectively), which capture reasoning in
-`additional_kwargs["reasoning_content"]`. The streaming fan-out and timeline
-handle both styles, so this subclass is only needed for the remaining providers.
+Kimi uses its community package (`langchain-moonshot`), which captures reasoning
+in `additional_kwargs["reasoning_content"]`. The streaming fan-out and timeline
+handle that style, so this subclass is only needed for the remaining providers.
 
 OpenAI-compatible providers that stream reasoning in the delta's
 `reasoning_content` field (the DeepSeek convention). langchain-openai deliberately

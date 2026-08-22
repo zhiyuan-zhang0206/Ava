@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import sys
 import types
-import uuid
 
 import pytest
 from langchain_anthropic import ChatAnthropic
@@ -21,7 +20,6 @@ from langchain_core.outputs import ChatResult
 from pydantic import SecretStr
 
 from shared.config import settings
-from shared.lm import factory
 from shared.lm.factory import _resolve_override, build_chat_model, validate_model_config
 from shared.lm.registry import SUPPORTED_MODELS, resolve_setting
 
@@ -457,55 +455,6 @@ class TestBuildChatModel:
         with pytest.raises(RuntimeError, match="DASHSCOPE_API_KEY"):
             build_chat_model("qwen3.8-max")
 
-    def test_grok_returns_chat_xai(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """grok-* (xAI) returns ChatXAI from langchain-xai.
-        Reasoning streams in `additional_kwargs["reasoning_content"]` — the
-        streaming fan-out and timeline handle both styles."""
-        monkeypatch.setattr(settings.lm, "llm_override", "")
-        monkeypatch.setattr(settings.lm, "xai_api_key", SecretStr("sk-grok"))
-        from langchain_xai import ChatXAI
-
-        m = build_chat_model("grok-4.5")
-        assert isinstance(m, ChatXAI)
-
-    def test_grok_missing_key_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(settings.lm, "llm_override", "")
-        monkeypatch.setattr(settings.lm, "xai_api_key", None)
-        with pytest.raises(RuntimeError, match="XAI_API_KEY"):
-            build_chat_model("grok-4.5")
-
-    def test_grok_conv_id_header_from_agent_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """With AVA_AGENT_ID in env, grok sends a deterministic uuid5
-        x-grok-conv-id — stable per agent across restarts (cache affinity)."""
-        monkeypatch.setattr(settings.lm, "llm_override", "")
-        monkeypatch.setattr(settings.lm, "xai_api_key", SecretStr("sk-grok"))
-        monkeypatch.setenv("AVA_AGENT_ID", "42")
-        from langchain_xai import ChatXAI
-
-        m = build_chat_model("grok-4.5")
-        assert isinstance(m, ChatXAI)
-        expected = str(uuid.uuid5(factory._GROK_CONV_ID_NAMESPACE, "ava-agent-42"))
-        assert m.default_headers == {"x-grok-conv-id": expected}
-        # deterministic across builds (restart-stable)
-        m2 = build_chat_model("grok-4.5")
-        assert isinstance(m2, ChatXAI)
-        assert m2.default_headers == m.default_headers
-
-    def test_grok_conv_id_header_process_fallback(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Without AVA_AGENT_ID (cli / gateway / tests), the header falls back
-        to one random UUID per process — still present, still a valid UUID."""
-        monkeypatch.setattr(settings.lm, "llm_override", "")
-        monkeypatch.setattr(settings.lm, "xai_api_key", SecretStr("sk-grok"))
-        monkeypatch.delenv("AVA_AGENT_ID", raising=False)
-        from langchain_xai import ChatXAI
-
-        m = build_chat_model("grok-4.5")
-        assert isinstance(m, ChatXAI)
-        assert m.default_headers is not None
-        conv_id = m.default_headers["x-grok-conv-id"]
-        assert conv_id == factory._PROCESS_CONV_ID
-        uuid.UUID(conv_id)  # raises if malformed
-
     # ── per-model default streaming ─────────────────────────────────────
 
     def test_kimi_defaults_to_streaming(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -551,16 +500,6 @@ class TestBuildChatModel:
 
         m = build_chat_model("glm-5.2")
         assert isinstance(m, ReasoningContentChatModel)
-        assert m.disable_streaming is False
-
-    def test_grok_defaults_to_streaming(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """grok-* carries no registry streaming opt-out → default streaming=True."""
-        monkeypatch.setattr(settings.lm, "llm_override", "")
-        monkeypatch.setattr(settings.lm, "xai_api_key", SecretStr("sk-test"))
-        from langchain_xai import ChatXAI
-
-        m = build_chat_model("grok-4.5")
-        assert isinstance(m, ChatXAI)
         assert m.disable_streaming is False
 
     def test_qwen_defaults_to_streaming(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -961,40 +900,6 @@ class TestReasoningEffortDispatch:
         assert m.extra_body == {"thinking": {"type": "disabled"}}
         assert m.reasoning_effort is None
 
-    # ── grok ────────────────────────────────────────────────────────────
-
-    def test_grok_effort_injected_via_extra_body(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """grok-4.5 defaults high (highest tier) — effort allows cheaper agents to go lower."""
-        monkeypatch.setattr(settings.lm, "llm_override", "")
-        monkeypatch.setattr(settings.lm, "xai_api_key", SecretStr("sk-grok"))
-        monkeypatch.setattr(settings.lm, "reasoning_effort", "low")
-        from langchain_xai import ChatXAI
-
-        m = build_chat_model("grok-4.5")
-        assert isinstance(m, ChatXAI)
-        assert m.extra_body == {"reasoning_effort": "low"}
-
-    def test_grok_max_clamps_to_high(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(settings.lm, "llm_override", "")
-        monkeypatch.setattr(settings.lm, "xai_api_key", SecretStr("sk-grok"))
-        monkeypatch.setattr(settings.lm, "reasoning_effort", "max")
-        from langchain_xai import ChatXAI
-
-        m = build_chat_model("grok-4.5")
-        assert isinstance(m, ChatXAI)
-        assert m.extra_body == {"reasoning_effort": "high"}
-
-    def test_grok_thinking_disabled_ignored(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """grok reasoning cannot be turned off — a disabled request warns and ignores, not passed through."""
-        monkeypatch.setattr(settings.lm, "llm_override", "")
-        monkeypatch.setattr(settings.lm, "xai_api_key", SecretStr("sk-grok"))
-        monkeypatch.setattr(settings.lm, "reasoning_effort", "")
-        from langchain_xai import ChatXAI
-
-        m = build_chat_model("grok-4.5", thinking={"type": "disabled"})
-        assert isinstance(m, ChatXAI)
-        assert m.extra_body is None
-
     # ── qwen ────────────────────────────────────────────────────────────
 
     def test_qwen_none_effort_disables_thinking(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1251,7 +1156,6 @@ class TestValidateModelConfig:
             "xiaomi_api_key",
             "moonshot_api_key",
             "zhipu_api_key",
-            "xai_api_key",
             "dashscope_api_key",
         ):
             monkeypatch.setattr(settings.lm, attr, None)
@@ -1331,7 +1235,6 @@ class TestValidateModelConfig:
             monkeypatch.setattr(settings.lm, "xiaomi_api_key", SecretStr("sk-test-mimo"))
             monkeypatch.setattr(settings.lm, "moonshot_api_key", SecretStr("sk-test-moonshot"))
             monkeypatch.setattr(settings.lm, "zhipu_api_key", SecretStr("sk-test-zhipu"))
-            monkeypatch.setattr(settings.lm, "xai_api_key", SecretStr("sk-test-xai"))
             monkeypatch.setattr(settings.lm, "dashscope_api_key", SecretStr("sk-test-dashscope"))
             result = validate_model_config(model=m)
             assert result == m
@@ -1393,12 +1296,6 @@ class TestValidateModelConfig:
         self._clear_all_keys(monkeypatch)
         with pytest.raises(ValueError, match="GLM_API_KEY"):
             validate_model_config(model="glm-5.2")
-
-    def test_missing_grok_key_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """XAI_API_KEY not set → ValueError."""
-        self._clear_all_keys(monkeypatch)
-        with pytest.raises(ValueError, match="XAI_API_KEY"):
-            validate_model_config(model="grok-4.5")
 
     def test_missing_qwen_key_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """DASHSCOPE_API_KEY not set → ValueError."""
@@ -1466,7 +1363,6 @@ class TestThinkingDisabledAcrossRoster:
         "xiaomi_api_key",
         "moonshot_api_key",
         "zhipu_api_key",
-        "xai_api_key",
         "dashscope_api_key",
     )
 

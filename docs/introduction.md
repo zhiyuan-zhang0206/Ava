@@ -314,7 +314,7 @@ cluster; that has to come from outside Ava today. Full policy and reporting:
 | Cache | Redis 8.8 |
 | Framework | LangGraph (8-node self-looping graph) |
 | SDK | `ava` (this repo) |
-| Models | 9 providers side by side (DeepSeek, Claude, Gemini, GPT, MiMo, Kimi, GLM, Grok, Qwen) — picked once per agent at spawn, never routed at runtime ([why](../conventions/non-goals.md)) |
+| Models | 8 providers side by side (DeepSeek, Claude, Gemini, GPT, MiMo, Kimi, GLM, Qwen) — picked once per agent at spawn, never routed at runtime ([why](../conventions/non-goals.md)) |
 | Package manager | uv |
 | Frontend | Next.js 16 + React 19 + Tailwind 4 + shadcn/ui |
 

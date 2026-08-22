@@ -20,7 +20,6 @@ const PROVIDER_LABELS: Record<string, string> = {
   mimo: "MiMo",
   kimi: "Kimi",
   glm: "GLM",
-  grok: "Grok",
   qwen: "Qwen",
 };
 

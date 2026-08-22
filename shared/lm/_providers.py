@@ -11,7 +11,6 @@ before dispatch. See the factory module docstring for the provider matrix.
 
 from __future__ import annotations
 
-import uuid
 from typing import Any, Literal, NotRequired, TypedDict
 
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -27,7 +26,6 @@ from shared.lm._effort import (
     qwen_extra_body,
 )
 from shared.lm.registry import MODELS, ModelSpec, resolve_setting
-from shared.turn_identity import effective_agent_id
 
 
 class ThinkingConfig(TypedDict):
@@ -40,7 +38,7 @@ class ThinkingConfig(TypedDict):
     vs signature-only. Only the claude / deepseek branches pass the dict
     through on the wire; every other branch reads `type` and mirrors
     disabled onto its own switch (gemini thinking_level, gpt
-    reasoning.effort, mimo / glm body thinking) — kimi / grok cannot
+    reasoning.effort, mimo / glm body thinking) — kimi cannot
     disable reasoning and log a warning instead.
     """
 
@@ -53,26 +51,6 @@ class ThinkingConfig(TypedDict):
 # for model name → endpoint resolution; not written twice — to change the
 # endpoint, change here.
 _DEEPSEEK_ANTHROPIC_BASE_URL = "https://api.deepseek.com/anthropic"
-
-
-# xAI cache-affinity routing: xAI recommends a stable `x-grok-conv-id` header
-# so repeated requests land on the same backend cache shard (~5pp better
-# prompt-cache hit rate). Ava scopes the id per agent — an agent's turns are
-# exactly the continuity worth pinning. Agent processes carry AVA_AGENT_ID in
-# env (set by the launcher), so a deterministic uuid5 survives restarts;
-# outside an agent process (cli / gateway / tests) fall back to one random
-# UUID per process.
-_GROK_CONV_ID_NAMESPACE = uuid.UUID("fe5c4bbc-c3a6-514c-92a0-5d99fa6d242f")
-_PROCESS_CONV_ID = str(uuid.uuid4())
-
-
-def _grok_conv_id() -> str:
-    # Turn contextvar > AVA_AGENT_ID env: in the hosted runner one process
-    # serves many agents, and cache affinity must follow the turn's agent.
-    agent_id = effective_agent_id()
-    if agent_id is not None:
-        return str(uuid.uuid5(_GROK_CONV_ID_NAMESPACE, f"ava-agent-{agent_id}"))
-    return _PROCESS_CONV_ID
 
 
 def _build_claude_model(
@@ -543,59 +521,6 @@ def _build_glm_model(
         disable_streaming=disable_streaming,
         timeout=timeout,
         **glm_kwargs,
-    )
-
-
-def _build_grok_model(
-    model: str,
-    *,
-    thinking: ThinkingConfig | None,
-    resolved_effort: str,
-    disable_streaming: bool,
-    timeout: float | None = None,
-) -> BaseChatModel:
-    """grok-* branch: ChatXAI (OpenAI-compatible). Grok 4.5's reasoning
-    cannot be turned off — a caller disabling it gets a warning. A stable
-    `x-grok-conv-id` header pins the agent's requests to the same backend
-    cache shard."""
-    from langchain_xai import ChatXAI
-
-    # xAI Grok API is OpenAI-compatible (https://api.x.ai/v1),
-    # standard `Authorization: Bearer` auth. Grok streams thinking in the
-    # delta's `reasoning_content` field. ChatXAI captures reasoning in
-    # `additional_kwargs["reasoning_content"]`; the streaming fan-out
-    # (`RedisStreamHandler`) and timeline (`shared/timeline.py`) both read
-    # that key so reasoning renders through the same path.
-    if settings.lm.xai_api_key is None:
-        raise RuntimeError(
-            "XAI_API_KEY not set — grok-* model needs this key; "
-            "configure in ~/.ava/.env or export before starting"
-        )
-    # Grok 4.5's reasoning cannot be turned off — warn instead of silently
-    # dropping the caller's intent.
-    if thinking is not None and thinking.get("type") == "disabled":
-        logger.warning(f"{model} cannot disable reasoning; thinking={{'type': 'disabled'}} ignored")
-    # Reasoning effort rides the top-level `reasoning_effort` body field,
-    # delivered via extra_body — the langchain-xai documented shape.
-    # (Grok's enum is low/medium/high, default high.)
-    grok_kwargs: dict[str, Any] = {}
-    if resolved_effort:
-        grok_kwargs["extra_body"] = {
-            "reasoning_effort": _clamp_effort(
-                resolved_effort,
-                _PROVIDER_EFFORT_LEVELS["grok"],
-                target="grok",
-            )
-        }
-    # Cache-affinity routing header — see _grok_conv_id above.
-    grok_kwargs["default_headers"] = {"x-grok-conv-id": _grok_conv_id()}
-    return ChatXAI(
-        model=model,  # type: ignore[call-arg]
-        xai_api_key=settings.lm.xai_api_key.get_secret_value(),  # type: ignore[arg-type]
-        stream_usage=True,
-        disable_streaming=disable_streaming,
-        timeout=timeout,
-        **grok_kwargs,
     )
 
 
