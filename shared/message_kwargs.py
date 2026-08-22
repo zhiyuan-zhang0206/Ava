@@ -13,8 +13,8 @@ readers in `shared/timeline.py`, `gateway/context_breakdown.py`,
 and the gateway import it without an agent <-> gateway package cycle.
 
 Not exhaustive of `additional_kwargs`: third-party keys ride there too — e.g.
-community langchain packages (ChatMoonshot / ChatXAI) write `reasoning_content`
-— and are deliberately outside this contract.
+the community `ChatMoonshot` package writes `reasoning_content` — and is
+deliberately outside this contract.
 """
 
 from __future__ import annotations

@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Language Model Provider Layer
-description: '`shared/lm/` — unified LLM provider abstraction above LangChain; nine providers behind one factory.'
+description: '`shared/lm/` — unified LLM provider abstraction above LangChain; eight providers behind one factory.'
 tags:
 - shared
 - library
@@ -10,7 +10,7 @@ tags:
 
 # Language Model Provider Layer
 
-`shared/lm/` — unified LLM provider abstraction above LangChain, below the agent kernel: nine providers, provider-agnostic upper layers. Adding a provider is a core edit across up to eight files (`config/lm.py` key field, `registry.py` `MODELS` entries, `_providers.py` builder, `factory.py` `_MODEL_KEY_MAP` + branch, `_effort.py` vocabulary, `stop.py` terminal-reason entry when the client emits an unseen `model_provider`, `pricing_catalog.json` prices, `pyproject.toml` dep) — or a **provider plugin**: a `provider.py` beside a plugin's `plugin.py`, registering a binding + models + prices against the contract in [provider_api](provider_api.py), loaded once per process by `_plugin_providers.py`. Design: [model-providers-as-plugins](model-providers-as-plugins.md).
+`shared/lm/` — unified LLM provider abstraction above LangChain, below the agent kernel: eight core providers, provider-agnostic upper layers. A **provider plugin** supplies a `provider.py` beside its `plugin.py`, registering a binding + models + prices against the contract in [provider_api](provider_api.py), loaded once per process by `_plugin_providers.py`. Design: [model-providers-as-plugins](model-providers-as-plugins.md).
 
 ## Core Responsibilities
 
@@ -26,12 +26,11 @@ tags:
 | `mimo-` | ReasoningContentChatModel (Xiaomi) | MIMO_API_KEY |
 | `kimi-` | ChatMoonshot (`langchain-moonshot`) | MOONSHOT_API_KEY |
 | `glm-` | ReasoningContentChatModel (Zhipu) | GLM_API_KEY |
-| `grok-` | ChatXAI (`langchain-xai`) | XAI_API_KEY |
 | `qwen` | ReasoningContentChatModel (Alibaba) | DASHSCOPE_API_KEY + `AVA_DASHSCOPE_BASE_URL` |
 
 - SSOT is `shared/lm/registry.py:MODELS`, one `ModelSpec` per model id; `SUPPORTED_MODELS` (spawn dropdown), `MODEL_CONTEXT_WINDOW`, `MODEL_KNOWLEDGE_CUTOFF`, `MODEL_IDENTITY` are derived views re-exported through factory. Per-PROVIDER tables stay in factory (`_MODEL_KEY_MAP`, `_VISION_MODEL_PREFIXES`) / `_effort.py` (`_PROVIDER_EFFORT_LEVELS`).
 - `validate_model_config()` — spawn-boundary pre-check (`POST /api/agents`): model registered + key configured, else 400 (fail-fast vs silent hang).
-- `model_supports_vision()` — the message-endpoint image gate. Registered ids answer per-model from `ModelSpec.vision` (claude/gemini/gpt/kimi/grok/qwen native images; deepseek split — only `deepseek-v4-flash-vision-exp` is multimodal; mimo/glm text-only); unregistered ids fall back to the `_VISION_MODEL_PREFIXES` table.
+- `model_supports_vision()` — the message-endpoint image gate. Registered ids answer per-model from `ModelSpec.vision` (claude/gemini/gpt/kimi/qwen native images; deepseek split — only `deepseek-v4-flash-vision-exp` is multimodal; mimo/glm text-only); unregistered ids fall back to the `_VISION_MODEL_PREFIXES` table.
 - `AVA_LLM_OVERRIDE=mod:factory` injects a fake factory (e2e/multi-instance); key checks skipped.
 - `thinking: ThinkingConfig | None` — `TypedDict` for Anthropic extended-thinking (`{"type":"disabled"}`/`{"type":"enabled","budget_tokens":N}`); gemini-*/gpt-* read only `type`, mirroring on/off to reasoning toggles.
 
@@ -43,7 +42,7 @@ LangChain types `AIMessage(Chunk).content` weakly as `str | list[str | dict[str,
 - `extract_reasoning_tokens()` — `usage_metadata.output_token_details` preferred, else char estimates.
 
 ### stop classification (`stop.py`)
-- `classify_stop()` → `StopCategory` (NORMAL/TRUNCATED/UNEXPECTED/CORRUPTED) by `model_provider`; `_BY_PROVIDER` has five keys for nine providers (anthropic ← claude+deepseek, openai ← gpt+mimo+glm+qwen, google_genai, moonshot, xai). TRUNCATED retries with raised max_tokens; unknown provider fail-fast.
+- `classify_stop()` → `StopCategory` (NORMAL/TRUNCATED/UNEXPECTED/CORRUPTED) by `model_provider`; `_BY_PROVIDER` has four keys for eight providers (anthropic ← claude+deepseek, openai ← gpt+mimo+glm+qwen, google_genai, moonshot). TRUNCATED retries with raised max_tokens; unknown provider fail-fast.
 
 ### billing (`pricing.py` + `pricing_catalog.json`) — [[pricing.ava.okf.md]]
 - A reviewed, network-free JSON catalog with official-source provenance is the sole volatile price source; `quote()` returns the selected rates and the cost atomically. Selection rules, the CNY-conversion and tier-boundary traps, and region sensitivity live in the child node.
@@ -57,7 +56,7 @@ LangChain types `AIMessage(Chunk).content` weakly as `str | list[str | dict[str,
 
 ### compatibility layers
 - `_anthropic_compat.py`: `ThinkingTokensChatAnthropic` — ChatAnthropic subclass patching thinking_tokens into usage_metadata (base drops it); shared by claude/deepseek.
-- `_reasoning_compat.py`: `ReasoningContentChatModel` — ChatOpenAI subclass folding delta `reasoning_content` into canonical thinking blocks; **used by glm / mimo / qwen**. kimi / grok use `langchain-moonshot` / `langchain-xai`; reasoning lands in `additional_kwargs["reasoning_content"]`, handled by fan-out + timeline.
+- `_reasoning_compat.py`: `ReasoningContentChatModel` — ChatOpenAI subclass folding delta `reasoning_content` into canonical thinking blocks; **used by glm / mimo / qwen**. kimi uses `langchain-moonshot`; reasoning lands in `additional_kwargs["reasoning_content"]`, handled by fan-out + timeline.
 
 ## Notes
 

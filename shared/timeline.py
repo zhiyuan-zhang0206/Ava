@@ -530,7 +530,7 @@ def _ai_message_items(
     # native for the provider round-trip; only this render reads the normalized
     # view, so the loop below only ever sees text / thinking.
     content = to_canonical_reasoning(message_content(msg))
-    # Community packages (ChatMoonshot / ChatXAI) carry reasoning in
+    # The community ChatMoonshot package carries reasoning in
     # `additional_kwargs["reasoning_content"]` rather than content blocks.
     # Fold it into the normalized content list as a thinking block so the
     # loop below never branches on provider style.

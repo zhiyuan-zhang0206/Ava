@@ -535,20 +535,6 @@ MODELS: dict[str, ModelSpec] = {
             llm_retry_max_attempts=10,
         ),
     ),
-    # -- grok --
-    "grok-4.5": ModelSpec(
-        provider="grok",
-        spawnable=True,
-        context_window=500_000,
-        knowledge_cutoff="2026-02",
-        effort_levels=("low", "medium", "high"),
-        tuning=ModelTuning(
-            # Pinned 2026-08-01 (task #568): xAI documents `high` as the
-            # default (decisions/2026-07-25-per-model-tuning-values.md).
-            reasoning_effort="high",
-        ),
-        vision=True,
-    ),
     # -- qwen --
     "qwen3.8-max": ModelSpec(
         provider="qwen",

@@ -384,6 +384,10 @@ RETIRED_MODEL_PRICING: dict[str, tuple[float, float, float]] = {
     # commits 630fe6b65/bc60f0151). Official ¥6.50 / ¥1.30 / ¥27.00 per 1M
     # converted at ~6.77 CNY/USD (the price the registry entry carried).
     "kimi-k2.7-code": (0.96, 0.19, 3.99),
+    # grok-4.5 — retired with the provider-plugin extraction commit. Final
+    # published rate $2.00 / $0.50 / $6.00 per 1M; source
+    # https://docs.x.ai/docs/models checked 2026-06-27.
+    "grok-4.5": (2.0, 0.5, 6.0),
 }
 
 

@@ -46,7 +46,6 @@ _CLAUDE_EXTENDED_THINKING_DEFAULT_BUDGET = 8192
 # (`ModelSpec.effort_levels`) since claude models genuinely diverge.
 _PROVIDER_EFFORT_LEVELS: dict[str, tuple[str, ...]] = {
     "gemini": ("minimal", "low", "medium", "high"),
-    "grok": ("low", "medium", "high"),
     "kimi": ("low", "high", "max"),
     "glm": ("high", "max"),
     "mimo": ("none", "high"),

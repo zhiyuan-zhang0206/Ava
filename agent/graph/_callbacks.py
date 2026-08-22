@@ -177,7 +177,7 @@ class RedisStreamHandler:
 
         Reasoning may arrive via canonical `thinking` content blocks
         (ReasoningContentChatModel / Anthropic / Gemini) or via
-        `additional_kwargs["reasoning_content"]` (ChatMoonshot / ChatXAI).
+        `additional_kwargs["reasoning_content"]` (ChatMoonshot).
         Both paths are handled — the `additional_kwargs` variant uses
         block_idx=0 since the reasoning is not embedded in content blocks.
         """
@@ -197,7 +197,7 @@ class RedisStreamHandler:
     def _process_additional_reasoning(self, additional_kwargs: dict[str, Any]) -> None:
         """Extract reasoning from `additional_kwargs["reasoning_content"]`.
 
-        Community packages (ChatMoonshot / ChatXAI) carry reasoning in
+        The community ChatMoonshot package carries reasoning in
         `additional_kwargs` rather than canonical content blocks. Each chunk
         carries the raw delta fragment (not accumulated), so the fragment is
         published directly as a reasoning delta at block_idx=0 — the same

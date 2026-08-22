@@ -563,9 +563,9 @@ def test_seed_only_reseeds_installed_home(tmp_path: Path) -> None:
     home.mkdir()
     (home / ".env").write_text("AVA_CLUSTER=t9\n")
     source = tmp_path / "prod.env"
-    source.write_text("XAI_API_KEY=xk\n")
+    source.write_text("GLM_API_KEY=xk\n")
     assert ic.cmd_seed_only(home=home, seed_source=source) == 0
-    assert dotenv_values(home / ".env")["XAI_API_KEY"] == "xk"
+    assert dotenv_values(home / ".env")["GLM_API_KEY"] == "xk"
 
 
 # ---------------------------------------------------------------------------

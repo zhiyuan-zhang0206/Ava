@@ -16,13 +16,12 @@ Current provider matrix:
 | `mimo-*`     | Xiaomi    | `ReasoningContentChatModel`| `MIMO_API_KEY`      | `https://api.xiaomimimo.com/v1`   |
 | `kimi-*`     | Moonshot  | `langchain-moonshot`        | `MOONSHOT_API_KEY`  | (default)                         |
 | `glm-*`      | Zhipu     | `ReasoningContentChatModel`| `GLM_API_KEY`       | `https://open.bigmodel.cn/api/paas/v4` |
-| `grok-*`     | xAI       | `langchain-xai`             | `XAI_API_KEY`       | (default)                         |
 | `qwen*`      | Alibaba   | `ReasoningContentChatModel`| `DASHSCOPE_API_KEY` | `AVA_DASHSCOPE_BASE_URL` (default `https://dashscope.aliyuncs.com/compatible-mode/v1`) |
 
-kimi uses `ChatMoonshot` (`langchain-moonshot`); grok uses `ChatXAI`
-(`langchain-xai`). Both capture reasoning in `additional_kwargs["reasoning_content"]`
-(not canonical content blocks) — the streaming fan-out (`RedisStreamHandler`)
-and timeline (`shared/timeline.py`) handle both styles.
+kimi uses `ChatMoonshot` (`langchain-moonshot`) and captures reasoning in
+`additional_kwargs["reasoning_content"]` (not canonical content blocks) — the
+streaming fan-out (`RedisStreamHandler`) and timeline (`shared/timeline.py`)
+handle that style. The pilot provider extraction's binding belongs in a plugin.
 
 glm / mimo / qwen use `ReasoningContentChatModel` (`shared/lm/_reasoning_compat.py`), a
 ChatOpenAI subclass folding `reasoning_content` deltas into canonical
@@ -88,19 +87,12 @@ from shared.lm._plugin_providers import (
     ensure_provider_plugins_loaded as ensure_provider_plugins_loaded,
 )  # re-exported (gateway entry points call it before reading the registry)
 from shared.lm._providers import (
-    _GROK_CONV_ID_NAMESPACE as _GROK_CONV_ID_NAMESPACE,  # re-exported (tests use it)
-)
-from shared.lm._providers import (
-    _PROCESS_CONV_ID as _PROCESS_CONV_ID,  # re-exported (tests use it)
-)
-from shared.lm._providers import (
     ThinkingConfig,
     _build_claude_model,
     _build_deepseek_model,
     _build_gemini_model,
     _build_glm_model,
     _build_gpt_model,
-    _build_grok_model,
     _build_kimi_model,
     _build_mimo_model,
     _build_qwen_model,
@@ -138,7 +130,7 @@ class _LLMFactory(Protocol):
 # Prefix fallback for UNREGISTERED model ids — the registry's per-model
 # `ModelSpec.vision` flag is authoritative for registered ids (see
 # `model_supports_vision`). claude / gemini / gpt are multimodal on the endpoints
-# Ava binds; kimi / grok accept image input on their OpenAI-compatible endpoints,
+# Ava binds; kimi accepts image input on its OpenAI-compatible endpoint,
 # and every Qwen model in the registry is natively multimodal (Alibaba made the
 # mainline models multimodal from Qwen3.5 on — the text-only/`-vl-` split ended
 # there). deepseek (bound to its anthropic-compatible endpoint above), mimo, and
@@ -154,7 +146,6 @@ _VISION_MODEL_PREFIXES: tuple[str, ...] = (
     "gemini-",
     "gpt-",
     "kimi-",
-    "grok-",
     "qwen",
 )
 
@@ -242,7 +233,6 @@ _MODEL_KEY_MAP: dict[str, tuple[str, str, str]] = {
     "mimo-": ("Xiaomi", "xiaomi_api_key", "MIMO_API_KEY"),
     "kimi-": ("Moonshot", "moonshot_api_key", "MOONSHOT_API_KEY"),
     "glm-": ("Zhipu", "zhipu_api_key", "GLM_API_KEY"),
-    "grok-": ("xAI", "xai_api_key", "XAI_API_KEY"),
     "qwen": ("Alibaba", "dashscope_api_key", "DASHSCOPE_API_KEY"),
 }
 
@@ -444,7 +434,7 @@ def build_chat_model(
             thinking is slow/expensive and turns content into list-of-blocks);
             it also skips reasoning-effort injection where both would conflict
             (deepseek 400) or contradict intent (claude / glm / gemini /
-            mimo / qwen). kimi-k3 / grok-4.5 cannot disable reasoning — logged
+            mimo / qwen). kimi-k3 cannot disable reasoning — logged
             and ignored. `{"type": "enabled", "budget_tokens": N}` is manual
             extended thinking — see the claude helper for the per-model rules.
             None = provider default.
@@ -558,14 +548,6 @@ def build_chat_model(
         )
     if model.startswith("glm-"):
         return _build_glm_model(
-            model,
-            thinking=thinking,
-            resolved_effort=resolved_effort,
-            disable_streaming=disable_streaming,
-            timeout=timeout,
-        )
-    if model.startswith("grok-"):
-        return _build_grok_model(
             model,
             thinking=thinking,
             resolved_effort=resolved_effort,

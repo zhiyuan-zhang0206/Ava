@@ -170,7 +170,6 @@ class TestConsumptionMatrixDeclarations:
             "MIMO_API_KEY",
             "MOONSHOT_API_KEY",
             "GLM_API_KEY",
-            "XAI_API_KEY",
             "DASHSCOPE_API_KEY",
             "AVA_DASHSCOPE_BASE_URL",
             "BRAVE_API_KEY",

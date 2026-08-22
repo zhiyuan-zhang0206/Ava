@@ -915,7 +915,6 @@ whether a restart is required — see
 | `OPENAI_API_KEY` | platform.openai.com -> API keys |
 | `GEMINI_API_KEY` | aistudio.google.com -> API keys |
 | `DEEPSEEK_API_KEY` | platform.deepseek.com -> API keys |
-| `XAI_API_KEY` | console.x.ai -> API keys |
 | `GLM_API_KEY` | open.bigmodel.cn -> API keys |
 | `MOONSHOT_API_KEY` | platform.moonshot.cn -> API keys |
 | `MIMO_API_KEY` | this provider's own developer console |

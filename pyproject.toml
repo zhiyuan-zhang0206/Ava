@@ -31,7 +31,6 @@ dependencies = [
     "langchain-google-genai>=4.2.4",
     "langchain-openai>=0.3",
     "langchain-moonshot>=0.1.0",
-    "langchain-xai>=1.2.0",
     "croniter>=6.2.2",
     "google-genai>=2.0",
     "watchdog>=6.0.0",
