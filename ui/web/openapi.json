@@ -1998,6 +1998,29 @@
         }
       }
     },
+    "/api/notices/escalations": {
+      "get": {
+        "summary": "Get Escalation Notices",
+        "description": "Open task escalations with their task and current-owner review context.\n\nThis is the operator's read-only queue: only response-required notices that\nname a task are included. Escalations never run the FYI lazy-expiry sweep.",
+        "operationId": "get_escalation_notices_api_notices_escalations_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/EscalationNoticeItem"
+                  },
+                  "type": "array",
+                  "title": "Response Get Escalation Notices Api Notices Escalations Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/notices/live": {
       "get": {
         "summary": "Get Notices Live",
@@ -7499,6 +7522,85 @@
         ],
         "title": "DefaultModelWrite",
         "description": "PUT /api/config/default-model body. `model` must be a spawnable id from the\nregistry roster; anything else is rejected rather than stored."
+      },
+      "EscalationNoticeItem": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "priority": {
+            "$ref": "#/components/schemas/Priority"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "task_id": {
+            "type": "integer",
+            "title": "Task Id"
+          },
+          "task_title": {
+            "type": "string",
+            "title": "Task Title"
+          },
+          "task_status": {
+            "type": "string",
+            "title": "Task Status"
+          },
+          "owner_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Id"
+          },
+          "owner_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Label"
+          },
+          "reminder_count": {
+            "type": "integer",
+            "title": "Reminder Count"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "priority",
+          "created_at",
+          "task_id",
+          "task_title",
+          "task_status",
+          "owner_id",
+          "owner_label",
+          "reminder_count",
+          "updated_at"
+        ],
+        "title": "EscalationNoticeItem",
+        "description": "One open task escalation for GET /api/notices/escalations.\n\nThe operator queue joins the escalation notice to its task and current\nowner, so its consumer can decide whether to reassign, cancel, or retain\nthe task without fetching another resource."
       },
       "EventRow": {
         "properties": {
