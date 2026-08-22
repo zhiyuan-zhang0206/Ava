@@ -125,9 +125,10 @@ def _credentials(env: Mapping[str, str] | None = None) -> tuple[str, int]:
     """
 
     token, owner = _credentials_from_env(env if env is not None else os.environ)
-    if not token and settings.has_domain("telegram"):
-        token = settings.telegram.telegram_bot_token
-        owner = settings.telegram.telegram_owner_id
+    if settings.has_domain("telegram"):  # noqa: SIM102 - required domain guard shape
+        if not token:
+            token = settings.telegram.telegram_bot_token
+            owner = settings.telegram.telegram_owner_id
     return token, owner
 
 
