@@ -1124,10 +1124,12 @@ describe("SpawnButton model dropdown", () => {
     expect(within(list).getByText("claude-opus-4-8")).toBeTruthy();
   });
 
-  it("hidden models are excluded, and their provider header drops if that empties the group", async () => {
+  it("roster-hidden models are counted and excluded, with empty providers dropped", async () => {
     vi.mocked(api.getSystemStatus).mockResolvedValue(singleMachineStatus());
-    vi.mocked(api.getModels).mockResolvedValue(modelsDefault());
-    setMockSetting("models.hidden", ["claude-opus-4-8"]);
+    const roster = modelsDefault();
+    roster.providers.deepseek.push("deepseek-v4-flash");
+    vi.mocked(api.getModels).mockResolvedValue(roster);
+    setMockSetting("models.hidden", ["claude-opus-4-8", "deepseek-v4-flash"]);
     wrap(<SpawnButton variant="sm" onSpawn={vi.fn()} />);
 
     await waitFor(() => {
@@ -1137,7 +1139,32 @@ describe("SpawnButton model dropdown", () => {
 
     const list = await screen.findByRole("list");
     expect(within(list).getByText("deepseek-v4-pro")).toBeTruthy();
+    expect(within(list).queryByText("deepseek-v4-flash")).toBeNull();
     expect(within(list).queryByText("claude-opus-4-8")).toBeNull();
     expect(within(list).queryByText("Claude")).toBeNull();
+    expect(screen.getByText("2 hidden — manage in Control > Display")).toBeTruthy();
+  });
+
+  it("no hidden models → no hidden-model footer", async () => {
+    vi.mocked(api.getSystemStatus).mockResolvedValue(singleMachineStatus());
+    vi.mocked(api.getModels).mockResolvedValue(modelsDefault());
+    wrap(<SpawnButton variant="sm" onSpawn={vi.fn()} />);
+
+    fireEvent.click(await screen.findByLabelText("Model"));
+    await screen.findByRole("list");
+
+    expect(screen.queryByText(/hidden — manage in Control > Display/)).toBeNull();
+  });
+
+  it("stale hidden model ids outside the roster do not produce a footer", async () => {
+    vi.mocked(api.getSystemStatus).mockResolvedValue(singleMachineStatus());
+    vi.mocked(api.getModels).mockResolvedValue(modelsDefault());
+    setMockSetting("models.hidden", ["claude-opus-4-7-retired"]);
+    wrap(<SpawnButton variant="sm" onSpawn={vi.fn()} />);
+
+    fireEvent.click(await screen.findByLabelText("Model"));
+    await screen.findByRole("list");
+
+    expect(screen.queryByText(/hidden — manage in Control > Display/)).toBeNull();
   });
 });

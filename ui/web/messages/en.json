@@ -78,6 +78,7 @@
   },
   "spawn": {
     "models": "Models",
+    "hiddenModels": "{count} hidden — manage in Control > Display",
     "effortDefault": "Effort: default",
     "presets": "Presets",
     "noPreset": "No preset",
