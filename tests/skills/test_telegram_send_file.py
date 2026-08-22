@@ -22,7 +22,7 @@ from shared.config import settings
 
 _PATH = (
     Path(__file__).parents[2]
-    / ".agents"
+    / "ava_builtins"
     / "skills"
     / "telegram-send-file"
     / "scripts"

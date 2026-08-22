@@ -167,8 +167,8 @@ Five axes, one fact per place: `*.ava.okf.md` next to the code = what the system
 7. **No new dependencies or upgrades unless necessary.**
 
 Rules 1–2 and 5–7 are referenced, not restated, by
-[serious-engineering implementation](.agents/skills/ava-serious-engineering/practices/implementation/SKILL.md),
-[serious-engineering dependency-management](.agents/skills/ava-serious-engineering/principles/dependency-management/SKILL.md),
+[serious-engineering implementation](ava_builtins/skills/ava-serious-engineering/practices/implementation/SKILL.md),
+[serious-engineering dependency-management](ava_builtins/skills/ava-serious-engineering/principles/dependency-management/SKILL.md),
 and the `ava.skills.ava-code:testing` discipline; rule 4's ask-first loop is [workflow align](ava_builtins/skills/ava-workflow/align/SKILL.md).
 
 ## Workflow (mandatory)
