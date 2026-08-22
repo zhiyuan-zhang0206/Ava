@@ -1292,6 +1292,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/notices/escalations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Escalation Notices
+         * @description Open task escalations with their task and current-owner review context.
+         *
+         *     This is the operator's read-only queue: only response-required notices that
+         *     name a task are included. Escalations never run the FYI lazy-expiry sweep.
+         */
+        get: operations["get_escalation_notices_api_notices_escalations_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/notices/live": {
         parameters: {
             query?: never;
@@ -4275,6 +4298,43 @@ export interface components {
         DefaultModelWrite: {
             /** Model */
             model: string;
+        };
+        /**
+         * EscalationNoticeItem
+         * @description One open task escalation for GET /api/notices/escalations.
+         *
+         *     The operator queue joins the escalation notice to its task and current
+         *     owner, so its consumer can decide whether to reassign, cancel, or retain
+         *     the task without fetching another resource.
+         */
+        EscalationNoticeItem: {
+            /** Id */
+            id: number;
+            /** Title */
+            title: string;
+            priority: components["schemas"]["Priority"];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Task Id */
+            task_id: number;
+            /** Task Title */
+            task_title: string;
+            /** Task Status */
+            task_status: string;
+            /** Owner Id */
+            owner_id: number | null;
+            /** Owner Label */
+            owner_label: string | null;
+            /** Reminder Count */
+            reminder_count: number;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
         };
         /**
          * EventRow
@@ -8090,6 +8150,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_escalation_notices_api_notices_escalations_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EscalationNoticeItem"][];
                 };
             };
         };

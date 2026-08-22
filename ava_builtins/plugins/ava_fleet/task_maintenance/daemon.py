@@ -69,7 +69,7 @@ _LIVENESS_BEAT_STEP_S = 30.0
 
 
 def _deliver_message(pool: ConnectionPool, agent_id: int, message: str) -> None:
-    """Insert a system chat inbound, commit it, then wake its agent.
+    """Insert a system chat inbound, refresh its badge, then wake its agent.
 
     Direct delivery intentionally cannot resurrect a terminated agent; its inbox
     row remains inspectable while escalation directs the work onward."""
@@ -80,6 +80,7 @@ def _deliver_message(pool: ConnectionPool, agent_id: int, message: str) -> None:
             (agent_id, message),
         )
         inbound_id = int(cur.fetchone()[0])  # type: ignore[index]
+        publish_agent_updated_sync(conn, agent_id)
     # The connection context commits before the best-effort wake. A missing
     # subscriber is expected for a terminated agent and does not resurrect it.
     shared.db.publish_inbound_wake(agent_id, str(inbound_id))
