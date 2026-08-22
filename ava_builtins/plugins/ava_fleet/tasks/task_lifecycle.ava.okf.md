@@ -63,7 +63,7 @@ Filter the task list, ordered by `created_at` ascending. All parameters are opti
 Modify task fields, **pass only what you want to change**—omitted fields remain unchanged. `results` is replaced wholesale; to append progress, use `note=` or `log()`.
 
 - `title`: rename; must be unique among `open`/`in_progress` tasks, conflict raises `ValueError` (same duplicate check as `create`, checked inside row lock).
-
+- `status`: changing to `done` or `cancelled` is rejected while any direct child remains `open` or `in_progress`; close or cancel those children first. Other status changes and non-status updates are unaffected.
 - `owner`: pass an agent id to transfer/claim; **not passing or passing `None` both mean "unchanged"**—a task always has an owner, `owner=None` no longer releases a task.
 - `remind_interval_seconds`: **not passing or passing `None` both mean "unchanged"**—reminders cannot be disabled; only passing a positive integer (≤24h) changes it, exceeding raises `ValueError`.
 - `priority`: `None` (default) means "unchanged"; passing `"P0"`..`"P3"` writes it, illegal value raises `ValueError` (#663).

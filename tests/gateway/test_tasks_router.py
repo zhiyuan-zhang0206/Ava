@@ -9,6 +9,8 @@ owned-task invariants at the HTTP boundary:
   owner reassigns with a plain column write (no message to the affected agents).
 - title: renames; a title colliding with another open/in_progress task's is
   rejected (mirrors the SDK duplicate-title invariant).
+- parent close: status done/cancelled is rejected while a direct child remains
+  open/in_progress.
 - root task: the system root task (is_root=TRUE) is immutable — any PATCH
   targeting it is rejected with 422 before any write.
 """
@@ -34,13 +36,20 @@ def _make_agent(db: psycopg.Connection) -> int:
 
 
 def _make_task(
-    db: psycopg.Connection, *, owner: int, remind_interval_seconds: int = 1800, title: str = "t"
+    db: psycopg.Connection,
+    *,
+    owner: int,
+    remind_interval_seconds: int = 1800,
+    title: str = "t",
+    status: str = "in_progress",
+    parent_id: int | None = None,
 ) -> int:
     with db.cursor() as cur:
         cur.execute(
-            "INSERT INTO agent_tasks (title, description, status, owner, created_by, remind_interval_seconds) "
-            "VALUES (%s, 'd', 'in_progress', %s, 'user', %s) RETURNING id",
-            (title, owner, remind_interval_seconds),
+            "INSERT INTO agent_tasks "
+            "(title, description, status, owner, created_by, remind_interval_seconds, parent_id) "
+            "VALUES (%s, 'd', %s, %s, 'user', %s, %s) RETURNING id",
+            (title, status, owner, remind_interval_seconds, parent_id),
         )
         tid = cur.fetchone()[0]  # type: ignore[index]
     db.commit()
@@ -220,6 +229,69 @@ class TestRootTaskImmutable:
         with TestClient(app) as client:
             resp = client.patch("/api/tasks/999999", json={"status": "done"})
         assert resp.status_code == 404
+
+
+class TestParentClose:
+    def test_done_with_open_child_is_rejected_and_unchanged(
+        self, db_conn: psycopg.Connection
+    ) -> None:
+        owner = _make_agent(db_conn)
+        parent = _make_task(db_conn, owner=owner, title="parent-open-child")
+        child = _make_task(
+            db_conn,
+            owner=owner,
+            title="open-child",
+            status="open",
+            parent_id=parent,
+        )
+        with TestClient(app) as client:
+            resp = client.patch(f"/api/tasks/{parent}", json={"status": "done"})
+        assert resp.status_code == 422
+        assert resp.json()["detail"] == (
+            f"task {parent} has 1 open/in_progress child tasks (e.g. #{child}) — "
+            "close or cancel them first"
+        )
+        assert _status(db_conn, parent) == "in_progress"
+
+    def test_cancelled_with_in_progress_child_is_rejected(
+        self, db_conn: psycopg.Connection
+    ) -> None:
+        owner = _make_agent(db_conn)
+        parent = _make_task(db_conn, owner=owner, title="parent-active-child")
+        child = _make_task(
+            db_conn,
+            owner=owner,
+            title="active-child",
+            status="in_progress",
+            parent_id=parent,
+        )
+        with TestClient(app) as client:
+            resp = client.patch(f"/api/tasks/{parent}", json={"status": "cancelled"})
+        assert resp.status_code == 422
+        assert f"#{child}" in resp.json()["detail"]
+        assert _status(db_conn, parent) == "in_progress"
+
+    def test_all_children_closed_allows_parent_close(self, db_conn: psycopg.Connection) -> None:
+        owner = _make_agent(db_conn)
+        parent = _make_task(db_conn, owner=owner, title="parent-closed-children")
+        _make_task(
+            db_conn,
+            owner=owner,
+            title="done-child",
+            status="done",
+            parent_id=parent,
+        )
+        _make_task(
+            db_conn,
+            owner=owner,
+            title="cancelled-child",
+            status="cancelled",
+            parent_id=parent,
+        )
+        with TestClient(app) as client:
+            resp = client.patch(f"/api/tasks/{parent}", json={"status": "done"})
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "done"
 
 
 def _parent(db: psycopg.Connection, tid: int) -> int | None:

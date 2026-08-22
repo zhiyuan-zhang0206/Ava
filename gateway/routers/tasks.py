@@ -2,7 +2,8 @@
 
 GET /api/tasks — the full task list (the registry).
 PATCH /api/tasks/{id} — partial update (status / title / description /
-results / remind_interval_seconds / owner).
+results / remind_interval_seconds / owner). Closing a parent is rejected while
+any child remains open or in progress.
 """
 
 from __future__ import annotations
@@ -138,6 +139,9 @@ def patch_task(task_id: int, body: TaskUpdateRequest, request: Request) -> TaskR
     The system root task is immutable: any PATCH targeting it is rejected with
     422 (mirrors the SDK update() guard), so the task-tree anchor can never be
     reassigned, completed, cancelled, or otherwise edited.
+
+    A status change to done or cancelled is rejected with 422 while any direct
+    child remains open or in progress. Close or cancel those children first.
     """
     sets, params = _collect_updates(body)
     if "parent_id" in body.model_fields_set:
@@ -160,7 +164,7 @@ def patch_task(task_id: int, body: TaskUpdateRequest, request: Request) -> TaskR
         # The system root task is immutable (the task-tree anchor / default
         # parent) — reject any edit before writing, same rule as the SDK
         # update() path. Check existence here too so a missing task still 404s.
-        cur.execute("SELECT is_root FROM agent_tasks WHERE id = %s", (task_id,))
+        cur.execute("SELECT is_root FROM agent_tasks WHERE id = %s FOR UPDATE", (task_id,))
         guard = cur.fetchone()
         if guard is None:
             raise HTTPException(status_code=404, detail=f"Task {task_id} not found.")
@@ -169,6 +173,21 @@ def patch_task(task_id: int, body: TaskUpdateRequest, request: Request) -> TaskR
                 status_code=422,
                 detail=f"Task {task_id} is the system root task and is immutable.",
             )
+        if body.status in ("done", "cancelled"):
+            cur.execute(
+                "SELECT id, count(*) OVER () FROM agent_tasks "
+                "WHERE parent_id = %s AND status IN ('open', 'in_progress') "
+                "ORDER BY id LIMIT 1",
+                (task_id,),
+            )
+            active_child = cur.fetchone()
+            if active_child is not None:
+                child_id, child_count = active_child
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"task {task_id} has {child_count} open/in_progress child tasks "
+                    f"(e.g. #{child_id}) — close or cancel them first",
+                )
         # Reparenting mirrors the SDK update() checks (shared validation):
         # an explicit null moves the task under the system root; the parent
         # must exist, must not be the task itself, not a descendant.
