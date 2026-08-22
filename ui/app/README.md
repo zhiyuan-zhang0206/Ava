@@ -66,10 +66,11 @@ cookie.
 
 Saving switches immediately to a 30-second connecting screen, then defers the
 post-save window change until its IPC response flushes. Android refreshes the
-existing webview's prelude and navigates it rather than rebuilding it; desktop
-keeps the native rebuild. If the page is hidden when that screen times out, it
-recovers as soon as the page is visible again. The entry watchdog makes an HTTP
-GET (four-second per-attempt timeout) rather than a TCP connect, accepting
+existing webview's prelude and navigates it rather than rebuilding it; its
+native navigation guard and page-load prelude use the newly saved settings.
+Desktop keeps the native rebuild. If the page is hidden when that screen times
+out, it recovers as soon as the page is visible again. The entry watchdog makes
+an HTTP GET (four-second per-attempt timeout) rather than a TCP connect, accepting
 2xx/3xx/401/403 answers and ending with an unreachable, HTTP, or rollout-window
 recovery state within 30 seconds. Plain HTTP is accepted only when the resolved
 target is private (loopback, link-local, RFC1918, or `100.64.0.0/10`); public
