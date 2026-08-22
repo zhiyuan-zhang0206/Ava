@@ -857,9 +857,9 @@ class TestSpawnRollout:
 @pytest.mark.real_cluster_spawn
 class TestSpawnRestart:
     """spawn_restart() launches the `ava-cluster-restart` orchestration session
-    through the service session backend, running `ava cluster update --restart-only`
-    (no pull); spawn_update(restart_only=True) swaps the inner command to the
-    in-process entry with `--restart-only`."""
+    through the service session backend, running `ava cluster update --local
+    --restart-only` (no pull, no recursive POST); spawn_update(restart_only=True)
+    swaps the inner command to the in-process entry with `--restart-only`."""
 
     def test_spawn_restart_runs_ava_update_restart_only(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, spawn_backend: _FakeSessionBackend
@@ -870,8 +870,57 @@ class TestSpawnRestart:
         assert result["session"] == "ava-test-cluster-restart"
         name, cmd, _cwd = spawn_backend.spawn_calls[0]
         assert name == "ava-test-cluster-restart"
-        assert "ava cluster update --restart-only" in cmd
+        assert "ava cluster update --local --restart-only" in cmd
         assert "git pull" not in cmd
+
+    def test_spawn_restart_rejects_its_active_same_name_even_with_force(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, spawn_backend: _FakeSessionBackend
+    ) -> None:
+        """`--force` skips only the cluster-wide window, never the precise local
+        mutex: an active canonical restart session cannot be replaced or killed."""
+        monkeypatch.setattr("shared.paths.ava_home", lambda: tmp_path)
+        spawn_backend.alive_by_name["ava-test-cluster-restart"] = True
+
+        with pytest.raises(cluster_mod.ClusterUpdateInProgress, match="ava-test-cluster-restart"):
+            cluster_mod.spawn_restart("test-origin", force=True)
+
+        assert spawn_backend.spawn_calls == []
+        assert spawn_backend.killed == []
+
+    def test_spawn_restart_reuses_canonical_name_after_stale_session(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, spawn_backend: _FakeSessionBackend
+    ) -> None:
+        """A stale record reads as not alive at the backend boundary, so the
+        canonical name is reusable without renaming or deleting a session."""
+        monkeypatch.setattr("shared.paths.ava_home", lambda: tmp_path)
+        spawn_backend.alive_by_name["ava-test-cluster-restart"] = False
+
+        result = cluster_mod.spawn_restart("test-origin")
+
+        assert result["session"] == "ava-test-cluster-restart"
+        assert [call[0] for call in spawn_backend.spawn_calls] == ["ava-test-cluster-restart"]
+        assert spawn_backend.killed == []
+
+    def test_spawn_restart_failure_leaves_cleanup_to_backend_and_can_retry(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, spawn_backend: _FakeSessionBackend
+    ) -> None:
+        """A declined launch is not license to kill a same-name process. Once
+        the backend reports no live session, a retry may reuse the same name."""
+        monkeypatch.setattr("shared.paths.ava_home", lambda: tmp_path)
+        spawn_backend.alive_by_name["ava-test-cluster-restart"] = False
+        spawn_backend.spawn_ok = False
+
+        with pytest.raises(cluster_mod.OrchestrationSpawnFailed):
+            cluster_mod.spawn_restart("test-origin")
+
+        assert spawn_backend.killed == []
+        spawn_backend.spawn_ok = True
+        result = cluster_mod.spawn_restart("test-origin")
+        assert result["session"] == "ava-test-cluster-restart"
+        assert [call[0] for call in spawn_backend.spawn_calls] == [
+            "ava-test-cluster-restart",
+            "ava-test-cluster-restart",
+        ]
 
     def test_spawn_restart_rejects_if_rollout_or_updater_alive(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, spawn_backend: _FakeSessionBackend
@@ -947,7 +996,7 @@ class TestSpawnSessionsResolveAvaFromVenv:
             (
                 "cluster-restart",
                 partial(cluster_mod.spawn_restart, "test-origin"),
-                "ava cluster update --restart-only",
+                "ava cluster update --local --restart-only",
             ),
             ("update", cluster_mod.spawn_update, "python -m cli.commands._update_agent_runner"),
             (

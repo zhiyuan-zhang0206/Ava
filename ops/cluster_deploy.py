@@ -749,14 +749,14 @@ def spawn_restart(origin: str, *, force: bool = False, mode: str = "smooth") -> 
     """Trigger a whole-cluster *restart* (no pull) via a detached session.
 
     Runs a detached shell command — `{ cd <repo> && <venv-activation> ava
-    cluster update --restart-only; } 2>&1 | tee -a <log>` — hosted on the
+    cluster update --local --restart-only; } 2>&1 | tee -a <log>` — hosted on the
     service session backend (`get_backend()`; `ava` from this checkout's
     `.venv/bin`, never a login PATH — see `spawn_rollout`).
-    `ava cluster update --restart-only` drives the same three-phase orchestration as a
-    rollout — pause every agent-runner, gracefully quiesce agents, stop / start
-    this host, fan out the agent-runner bounces — but skips the git pull / uv sync
-    / migration entirely. It bounces services on the current code so config
-    changes take effect, without touching the checked-out revision.
+    `--local` keeps the detached child in-process; without it, the default
+    `--restart-only` route would POST again and collide with this child's live
+    session. The three-phase orchestration pauses every runner, quiesces agents,
+    stops / starts this host, and fans out runner bounces, but skips git pull /
+    uv sync / migration; services bounce without touching the checked-out revision.
 
     `origin` names the trigger, same convention as `spawn_rollout` (heads the
     log; no pin involvement — a restart pins nothing).
@@ -780,13 +780,13 @@ def spawn_restart(origin: str, *, force: bool = False, mode: str = "smooth") -> 
     inner_cmd = (
         f"{{ echo {shlex.quote(f'[cluster-restart] triggered by: {origin}')}; "
         f"cd {shlex.quote(str(repo))} && {venv_activation_prefix()}"
-        f"ava cluster update --restart-only --mode {shlex.quote(mode)}; "
+        f"ava cluster update --local --restart-only --mode {shlex.quote(mode)}; "
         f'echo "[session-exit] rc=$?"; }} '
         f"2>&1 | tee -a {shlex.quote(str(log_path))}"
     )
     native_cmd = (
         f"echo [cluster-restart] triggered by {_native_arg(origin)}"
-        f" & ava cluster update --restart-only --mode {_native_arg(mode)}"
+        f" & ava cluster update --local --restart-only --mode {_native_arg(mode)}"
     )
     cluster_session._spawn_detached_session(
         restart_sess, shell_cmd=inner_cmd, native_cmd=native_cmd
