@@ -151,6 +151,27 @@ class NoticeItem(BaseModel):
     task_id: int | None = None
 
 
+class EscalationNoticeItem(BaseModel):
+    """One open task escalation for GET /api/notices/escalations.
+
+    The operator queue joins the escalation notice to its task and current
+    owner, so its consumer can decide whether to reassign, cancel, or retain
+    the task without fetching another resource.
+    """
+
+    id: int
+    title: str
+    priority: Priority
+    created_at: datetime
+    task_id: int
+    task_title: str
+    task_status: str
+    owner_id: int | None
+    owner_label: str | None
+    reminder_count: int
+    updated_at: datetime
+
+
 class NoticesCursor(BaseModel):
     """Keyset cursor for the resolved-history page of GET /api/notices —
     mirror of the (resolved_at, id) cursor the standalone
