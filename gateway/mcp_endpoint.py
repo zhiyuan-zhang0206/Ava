@@ -309,7 +309,7 @@ def _register_fleet_tools(server: MCPServer, pool: Any) -> None:
         # deliver_chat_inbound then auto-resurrects a terminated target.
         try:
             await asyncio.to_thread(get_agent_status, agent_id)
-            status = await deliver_chat_inbound(
+            delivery = await deliver_chat_inbound(
                 pool,
                 agent_id,
                 prepare=lambda _conn: content,
@@ -318,7 +318,7 @@ def _register_fleet_tools(server: MCPServer, pool: Any) -> None:
             )
         except AvaAgentError as exc:
             raise ToolError(str(exc)) from exc
-        return {"status": status}
+        return {"status": delivery.status}
 
     @server.tool()
     async def get_messages(agent_id: int, limit: int = _DEFAULT_MESSAGE_LIMIT) -> dict[str, Any]:

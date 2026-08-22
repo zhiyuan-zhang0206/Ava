@@ -27,6 +27,7 @@
 //   all-events SSE connection (isEventForThread routes events per agent).
 
 import { useQuery } from "@tanstack/react-query";
+import { useTranslations } from "next-intl";
 import { useCallback, useState } from "react";
 
 import { AgentSidebar } from "@/components/agent-sidebar";
@@ -40,7 +41,7 @@ import { InspectorPanel, InspectorToggle } from "@/components/inspector-panel";
 import { PendingStrip } from "@/components/pending-strip";
 import { UploadButton } from "@/components/upload-button";
 import { TimelineView } from "@/components/timeline";
-import { api } from "@/lib/api";
+import { api, MessageDeliveryUnknownError } from "@/lib/api";
 import { errMsg } from "@/lib/errors";
 import { useInspectorOpen } from "@/lib/inspector-panel-store";
 import { useBreakpoint } from "@/lib/breakpoint";
@@ -194,6 +195,7 @@ function HomeContent({
   handleFork,
   inspectorOpen,
 }: HomeContentProps) {
+  const t = useTranslations("common");
   const composerFocusToken = useStore((s) => s.composerFocusToken);
   // Timeline content-column width — user-adjustable fraction of the viewport
   // (display.timeline_width_ratio, default 0.4). The composer gets the same
@@ -258,7 +260,11 @@ function HomeContent({
   const pendingMessages = usePendingMessages(activeId, showError);
 
   const handleSend = useCallback(
-    async (content: string, imageUrls: string[]): Promise<boolean> => {
+    async (
+      content: string,
+      imageUrls: string[],
+      clientMessageId: string,
+    ): Promise<boolean> => {
       if (activeId == null) return false;
       try {
         // One send is one message, whatever was typed. Text invoking several
@@ -266,14 +272,14 @@ function HomeContent({
         // inside that single inbound, so the agent reads the commands as one
         // composite instruction rather than as unrelated turns.
         if (imageUrls.length === 0) {
-          await api.sendMessage(activeId, content);
+          await api.sendMessage(activeId, content, clientMessageId);
         } else {
           // Multimodal: an optional leading text block, then one image_url block
           // per attachment (the backend gates + inlines them for the model).
           const blocks: ContentBlock[] = [];
           if (content) blocks.push({ type: "text", text: content });
           for (const u of imageUrls) blocks.push({ type: "image_url", image_url: { url: u } });
-          await api.sendMessage(activeId, blocks);
+          await api.sendMessage(activeId, blocks, clientMessageId);
         }
         // Scroll to the bottom on every send so the user sees the latest
         // exchange regardless of prior scroll position. This also re-enables
@@ -281,11 +287,15 @@ function HomeContent({
         requestScrollToBottom();
         return true;
       } catch (e: unknown) {
+        if (e instanceof MessageDeliveryUnknownError) {
+          showError(t("deliveryUnconfirmedToast"));
+          throw e;
+        }
         showError(`Send failed: ${errMsg(e)}`);
         return false;
       }
     },
-    [activeId, showError, requestScrollToBottom],
+    [activeId, showError, requestScrollToBottom, t],
   );
 
   // Upload one pasted / dropped image silently and hand its reference url back

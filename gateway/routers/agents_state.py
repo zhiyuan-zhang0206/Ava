@@ -12,9 +12,9 @@ import asyncio
 import logging
 from typing import Any, cast
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Header, HTTPException, Query, Request
 
-from gateway.routers._delivery import deliver_chat_inbound
+from gateway.routers._delivery import deliver_chat_inbound, reconcile_chat_delivery
 from gateway.schemas import (
     AgentMessageEnqueued,
     AgentMessagesResponse,
@@ -29,6 +29,7 @@ from gateway.schemas import (
 from ops.agents import get_agent_status
 from ops.rpc_schemas import AgentMessageIn, ContentBlock, ImageUrlContentBlock, TextContentBlock
 from shared import agent_snapshot
+from shared.chat_delivery import ClientMessageConflictError
 from shared.checkpoint import (
     CheckpointReadError,
     load_checkpoint_messages,
@@ -128,17 +129,41 @@ def _prepare_message_content(
             if isinstance(b, ImageUrlContentBlock):
                 _validate_image_ref(agent_id, b.image_url.url)
 
-    text = "\n".join(b.text for b in blocks if isinstance(b, TextContentBlock) and b.text.strip())
+    return _normalize_message_content(content)
+
+
+def _normalize_message_content(
+    content: str | list[ContentBlock],
+) -> tuple[str, dict[str, object] | None]:
+    """Map the validated wire body to its immutable database representation.
+
+    Unlike `_prepare_message_content`, this pure step does not re-read the
+    agent's current model or uploaded files. Reconciliation must compare the
+    original body with the durable row even if those mutable facts changed
+    after the first POST committed.
+    """
+    if isinstance(content, str):
+        return content, None
+    text = "\n".join(
+        block.text
+        for block in content
+        if isinstance(block, TextContentBlock) and block.text.strip()
+    )
     # An image-only message stores a placeholder so the content column / envelope
     # / timeline text is never empty; the image conveys the real content.
     text = text or "[image]"
-    payload: dict[str, object] = {"content_blocks": [b.model_dump() for b in blocks]}
+    payload: dict[str, object] = {"content_blocks": [block.model_dump() for block in content]}
     return text, payload
 
 
 @router.post("/api/agents/{agent_id}/messages", status_code=201)
 async def post_agent_message(
-    agent_id: int, body: AgentMessageIn, request: Request
+    agent_id: int,
+    body: AgentMessageIn,
+    request: Request,
+    idempotency_key: str | None = Header(
+        default=None, alias="Idempotency-Key", min_length=1, max_length=128
+    ),
 ) -> AgentMessageEnqueued:
     """Deliver a chat inbound to the specified agent.
 
@@ -149,10 +174,12 @@ async def post_agent_message(
     inbound's JSONB payload for the claim node to inline natively.
 
     Auto-resurrect in `deliver_chat_inbound` ensures the message always reaches
-    a live agent — the caller does not branch on status. The endpoint returns
-    `AgentMessageEnqueued` for backward compatibility; the SDK ignores status.
+    a live agent — the caller does not branch on status. An optional
+    `Idempotency-Key` is stored transactionally with the inbound; same-key
+    retries return the same `inbound_id` and mismatched key reuse fails 409.
 
     404: agent_id does not exist (AgentNotFound -> handler returns 404 + reason).
+    409: the key already identifies a different agent/body/source.
     422: a block list gated out (non-vision model) or referencing a bad upload.
     """
     # AgentNotFound is returned 404 + reason by the handler; first SELECT
@@ -161,15 +188,68 @@ async def post_agent_message(
     # true "delivery time" status — see docstring. Off the event loop:
     # get_agent_status opens a fresh DB connection.
     await asyncio.to_thread(get_agent_status, agent_id)
+    if idempotency_key is not None:
+        # Resolve a committed receipt before consulting mutable delivery
+        # prerequisites. The original upload can disappear or the agent's model
+        # can change after COMMIT; neither invalidates the durable identity. A
+        # missing receipt still takes the normal validation + INSERT path, with
+        # the unique index closing a concurrent first-delivery race.
+        normalized_text, normalized_payload = _normalize_message_content(body.content)
+        try:
+            existing = await reconcile_chat_delivery(
+                request.app.state.db_pool,
+                agent_id,
+                client_message_id=idempotency_key,
+                content=normalized_text,
+                source=body.source,
+                payload=normalized_payload,
+            )
+        except ClientMessageConflictError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        if existing is not None:
+            return AgentMessageEnqueued(
+                status=existing.status,
+                inbound_id=existing.inbound_id,
+            )
     text, payload = _prepare_message_content(request, agent_id, body.content)
-    s = await deliver_chat_inbound(
-        request.app.state.db_pool,
-        agent_id,
-        prepare=lambda _conn: text,
-        source=body.source,
-        payload=payload,
-    )
-    return AgentMessageEnqueued(status=s)
+    try:
+        delivery = await deliver_chat_inbound(
+            request.app.state.db_pool,
+            agent_id,
+            prepare=lambda _conn: text,
+            source=body.source,
+            payload=payload,
+            client_message_id=idempotency_key,
+        )
+    except ClientMessageConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return AgentMessageEnqueued(status=delivery.status, inbound_id=delivery.inbound_id)
+
+
+@router.post("/api/agents/{agent_id}/messages/reconcile")
+async def reconcile_agent_message(
+    agent_id: int,
+    body: AgentMessageIn,
+    request: Request,
+    idempotency_key: str = Header(alias="Idempotency-Key", min_length=1, max_length=128),
+) -> AgentMessageEnqueued:
+    """Resolve a timed-out POST and heal its still-pending delivery tail."""
+    await asyncio.to_thread(get_agent_status, agent_id)
+    text, payload = _normalize_message_content(body.content)
+    try:
+        delivery = await reconcile_chat_delivery(
+            request.app.state.db_pool,
+            agent_id,
+            client_message_id=idempotency_key,
+            content=text,
+            source=body.source,
+            payload=payload,
+        )
+    except ClientMessageConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if delivery is None:
+        raise HTTPException(status_code=404, detail="client message not committed")
+    return AgentMessageEnqueued(status=delivery.status, inbound_id=delivery.inbound_id)
 
 
 @router.get("/api/agents/{agent_id}/messages")

@@ -268,6 +268,15 @@ CREATE TABLE inbound_messages (
     -- restart_completed carries {"effective_config": {...}}. Other kinds leave NULL.
     -- See future/plugin-system-redesign.md PR-E section.
     payload    JSONB,
+    -- Caller-generated identity for one logical chat delivery. NULL keeps
+    -- internal / legacy writers unchanged; non-NULL keys are cluster-wide
+    -- unique so a timeout retry can reconcile at the same transaction that
+    -- owns the inbound INSERT (not in a later response cache).
+    client_message_id TEXT
+               CONSTRAINT inbound_messages_client_message_id_check CHECK (
+                   client_message_id IS NULL
+                   OR char_length(client_message_id) BETWEEN 1 AND 128
+               ),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     -- When the claim node grabbed this row (pending -> claimed for chat,
     -- pending -> done for lifecycle kinds); NULL = never claimed. Lets the
@@ -278,6 +287,9 @@ CREATE TABLE inbound_messages (
 
 COMMENT ON COLUMN inbound_messages.claimed_at IS
     'When the claim node grabbed this row (pending -> claimed for chat, pending -> done for lifecycle kinds). NULL = never claimed. Pickup latency = claimed_at - created_at.';
+
+COMMENT ON COLUMN inbound_messages.client_message_id IS
+    'Caller-generated id for one logical chat delivery. Non-NULL values are cluster-wide unique; same-id retries must match the original agent, content, source, kind, and payload.';
 
 CREATE TABLE delivery_watchdog_alerted (
     inbound_id BIGINT PRIMARY KEY REFERENCES inbound_messages(id) ON DELETE CASCADE,
@@ -298,6 +310,10 @@ CREATE INDEX inbound_messages_agent_id_created_at_idx
 -- index covers all hot path queries.
 CREATE INDEX idx_inbound_per_agent_pending ON inbound_messages (agent_id, created_at)
     WHERE status = 'pending';
+
+CREATE UNIQUE INDEX idx_inbound_messages_client_message_id
+    ON inbound_messages (client_message_id)
+    WHERE client_message_id IS NOT NULL;
 
 -- ─────────────── events Since-Birth rollup ───────────────
 -- Day-grain rollups that preserve the `events` "since-birth" aggregates

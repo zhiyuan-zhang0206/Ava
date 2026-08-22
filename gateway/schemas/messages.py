@@ -68,14 +68,14 @@ class CancelRequest(BaseModel):
 
 
 class AgentMessageEnqueued(BaseModel):
-    """POST /api/agents/{id}/messages response — agent status (at delivery time).
+    """POST /messages receipt — durable inbound id plus current agent status.
 
-    SDK send_message returns `status` directly to the caller for
-    branching: on TERMINATED the caller calls resurrect; other states
-    mean "delivered, will be dispatched naturally".
+    Same-key retries return the same `inbound_id`; `status` may be recomputed
+    because auto-resurrection can advance while the client reconciles.
     """
 
     status: AgentStatus
+    inbound_id: int | None = None
 
 
 class ResolveNoticeIn(BaseModel):

@@ -6,6 +6,7 @@ AFTER the delivery transaction commits (commit-before-publish).
 from __future__ import annotations
 
 import asyncio
+from typing import Literal
 
 import psycopg
 import pytest
@@ -102,11 +103,13 @@ async def test_deliver_degrades_when_badge_step_raises(
     monkeypatch.setattr("gateway.routers._delivery.publish_agent_updated_sync", _boom_badge)
 
     with _sync_pool() as pool:
-        status = await deliver_chat_inbound(pool, tid, prepare=lambda _c: "hi", refresh_badge=True)
+        delivery = await deliver_chat_inbound(
+            pool, tid, prepare=lambda _c: "hi", refresh_badge=True
+        )
         await asyncio.sleep(0.05)
 
     # Delivery-time status returned (resurrect tail ran) — not a 500.
-    assert status == AgentStatus.IDLING
+    assert delivery.status == AgentStatus.IDLING
     with db_conn.cursor() as cur:
         cur.execute("SELECT content FROM inbound_messages WHERE agent_id = %s", (tid,))
         assert cur.fetchall() == [("hi",)]
@@ -135,7 +138,7 @@ async def test_deliver_passes_inserted_chat_as_auto_resurrect_guard(
     monkeypatch.setattr(delivery._ops, "resurrect_if_terminated", _resurrect)
 
     with _sync_pool() as pool:
-        status = await deliver_chat_inbound(pool, tid, prepare=lambda _c: "guard me")
+        delivery = await deliver_chat_inbound(pool, tid, prepare=lambda _c: "guard me")
 
     with db_conn.cursor() as cur:
         cur.execute(
@@ -144,8 +147,155 @@ async def test_deliver_passes_inserted_chat_as_auto_resurrect_guard(
         )
         row = cur.fetchone()
     assert row is not None
-    assert status is AgentStatus.IDLING
+    assert delivery.status is AgentStatus.IDLING
     assert calls == [(tid, row[0], "chat")]
+
+
+async def test_retried_client_message_resurrects_terminated_agent_once(
+    db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A same-key retry reuses one chat and cannot create two resurrection effects."""
+    import gateway.routers._delivery as delivery
+
+    tid = create_agent(db_conn)
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agents_meta (id, status) VALUES (%s, 'terminated') "
+            "ON CONFLICT (id) DO UPDATE SET status = 'terminated'",
+            (tid,),
+        )
+    db_conn.commit()
+
+    async def _resurrect_once(
+        agent_id: int,
+        *,
+        trigger_inbound_id: int,
+        trigger_inbound_kind: Literal["chat", "compact_request"],
+    ) -> AgentStatus:
+        assert trigger_inbound_kind == "chat"
+        with db_conn.cursor() as cur:
+            cur.execute("SELECT status FROM agents_meta WHERE id = %s FOR UPDATE", (agent_id,))
+            row = cur.fetchone()
+            assert row is not None
+            if row[0] == "terminated":
+                cur.execute(
+                    "INSERT INTO inbound_messages (agent_id, content, kind, source) "
+                    "VALUES (%s, '', 'resurrect', 'system')",
+                    (agent_id,),
+                )
+                cur.execute(
+                    "UPDATE agents_meta SET status = 'idling' WHERE id = %s",
+                    (agent_id,),
+                )
+        db_conn.commit()
+        return AgentStatus.IDLING
+
+    monkeypatch.setattr(delivery._ops, "resurrect_if_terminated", _resurrect_once)
+
+    with _sync_pool() as pool:
+        first = await deliver_chat_inbound(
+            pool,
+            tid,
+            prepare=lambda _c: "wake once",
+            client_message_id="client-wake-once",
+        )
+        second = await deliver_chat_inbound(
+            pool,
+            tid,
+            prepare=lambda _c: "wake once",
+            client_message_id="client-wake-once",
+        )
+
+    assert first.inbound_id == second.inbound_id
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "SELECT kind, count(*) FROM inbound_messages WHERE agent_id = %s "
+            "GROUP BY kind ORDER BY kind",
+            (tid,),
+        )
+        assert cur.fetchall() == [("chat", 1), ("resurrect", 1)]
+
+
+async def test_concurrent_same_key_terminated_delivery_has_one_resurrect_effect(
+    db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two requests that both observe terminated create at most one wake effect.
+
+    The exact-trigger/fence SQL itself has real-DB coverage in
+    test_agents_internals; this test concentrates on the delivery fan-in.
+    """
+    import gateway.routers._delivery as delivery
+
+    tid = create_agent(db_conn)
+    with db_conn.cursor() as cur:
+        cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (tid,))
+    db_conn.commit()
+    both_observed_terminated = asyncio.Event()
+    effect_lock = asyncio.Lock()
+    arrivals = 0
+    observed_status = AgentStatus.TERMINATED
+
+    async def _real_guard(
+        agent_id: int,
+        *,
+        trigger_inbound_id: int,
+        trigger_inbound_kind: Literal["chat", "compact_request"],
+    ) -> AgentStatus:
+        nonlocal arrivals, observed_status
+        assert observed_status is AgentStatus.TERMINATED
+        arrivals += 1
+        if arrivals == 2:
+            both_observed_terminated.set()
+        await both_observed_terminated.wait()
+        async with effect_lock:
+            if observed_status is AgentStatus.TERMINATED:
+                assert trigger_inbound_kind == "chat"
+                with db_conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT status, kind FROM inbound_messages WHERE id = %s",
+                        (trigger_inbound_id,),
+                    )
+                    assert cur.fetchone() == ("pending", "chat")
+                    cur.execute(
+                        "INSERT INTO inbound_messages (agent_id, content, kind, source) "
+                        "VALUES (%s, '', 'resurrect', 'system')",
+                        (agent_id,),
+                    )
+                    cur.execute(
+                        "UPDATE agents_meta SET status = 'idling' WHERE id = %s",
+                        (agent_id,),
+                    )
+                db_conn.commit()
+                observed_status = AgentStatus.IDLING
+        return observed_status
+
+    monkeypatch.setattr(delivery._ops, "resurrect_if_terminated", _real_guard)
+    with _sync_pool() as pool:
+        first, second = await asyncio.gather(
+            deliver_chat_inbound(
+                pool,
+                tid,
+                prepare=lambda _c: "concurrent wake",
+                client_message_id="client-concurrent-wake",
+            ),
+            deliver_chat_inbound(
+                pool,
+                tid,
+                prepare=lambda _c: "concurrent wake",
+                client_message_id="client-concurrent-wake",
+            ),
+        )
+
+    assert first.inbound_id == second.inbound_id
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "SELECT kind, count(*) FROM inbound_messages WHERE agent_id = %s "
+            "GROUP BY kind ORDER BY kind",
+            (tid,),
+        )
+        assert cur.fetchall() == [("chat", 1), ("resurrect", 1)]
 
 
 async def test_badge_publish_happens_after_commit(

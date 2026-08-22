@@ -12,6 +12,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { MessageDeliveryUnknownError } from "@/lib/api";
+
 import { Composer } from "./composer";
 
 // The Composer mounts SlashAutocomplete, which fetches the command list on
@@ -21,6 +23,11 @@ import { Composer } from "./composer";
 // when that panel is expanded).
 let commandList: { name: string; description: string; instruction_hint: string }[] = [];
 vi.mock("@/lib/api", () => ({
+  MessageDeliveryUnknownError: class MessageDeliveryUnknownError extends Error {
+    constructor(readonly clientMessageId: string) {
+      super("delivery unconfirmed");
+    }
+  },
   api: {
     getCommands: () => Promise.resolve(commandList),
     getContextBreakdown: () =>
@@ -39,6 +46,8 @@ vi.mock("@/lib/api", () => ({
 afterEach(() => {
   cleanup();
   commandList = [];
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 const baseProps = {
@@ -46,6 +55,22 @@ const baseProps = {
   onSend: vi.fn(() => Promise.resolve(true)),
   onStop: vi.fn(),
 };
+
+function storageWith(
+  persistent: Storage,
+  overrides: Partial<Pick<Storage, "getItem" | "setItem" | "removeItem">>,
+): Storage {
+  return {
+    get length() {
+      return persistent.length;
+    },
+    clear: persistent.clear.bind(persistent),
+    getItem: overrides.getItem ?? persistent.getItem.bind(persistent),
+    key: persistent.key.bind(persistent),
+    removeItem: overrides.removeItem ?? persistent.removeItem.bind(persistent),
+    setItem: overrides.setItem ?? persistent.setItem.bind(persistent),
+  };
+}
 
 // Once contextTokens > 0, the meta row mounts ContextButton, which reads the
 // context-meter-width display setting via useUserSettings (react-query) —
@@ -117,7 +142,7 @@ describe("Composer button mode dispatch", () => {
     // await microtask for async onSend
     await Promise.resolve();
     await Promise.resolve();
-    expect(onSend).toHaveBeenCalledWith("hello", []);
+    expect(onSend).toHaveBeenCalledWith("hello", [], expect.any(String));
     expect(onStop).not.toHaveBeenCalled();
   });
 
@@ -133,7 +158,7 @@ describe("Composer button mode dispatch", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
     await Promise.resolve();
     await Promise.resolve();
-    expect(onSend).toHaveBeenCalledWith("draft", []);
+    expect(onSend).toHaveBeenCalledWith("draft", [], expect.any(String));
     expect(onStop).not.toHaveBeenCalled();
   });
 
@@ -203,7 +228,7 @@ describe("Composer Enter / IME / Shift+Enter", () => {
     fireEvent.keyDown(ta, { key: "Enter" });
     await Promise.resolve();
     await Promise.resolve();
-    expect(onSend).toHaveBeenCalledWith("msg", []);
+    expect(onSend).toHaveBeenCalledWith("msg", [], expect.any(String));
   });
 
   it("Enter in mode='busy' goes to onSend, not onStop (stop is click-only)", async () => {
@@ -216,7 +241,7 @@ describe("Composer Enter / IME / Shift+Enter", () => {
     fireEvent.keyDown(ta, { key: "Enter" });
     await Promise.resolve();
     await Promise.resolve();
-    expect(onSend).toHaveBeenCalledWith("draft", []);
+    expect(onSend).toHaveBeenCalledWith("draft", [], expect.any(String));
     expect(onStop).not.toHaveBeenCalled();
   });
 
@@ -329,6 +354,258 @@ describe("Composer input lifecycle", () => {
     // Resolve the promise → button returns to send state
     deferred.resolve(true);
     await waitFor(() => expect(ta.value).toBe(""));
+  });
+
+  it("retrying an uncertain send reuses its client message id", async () => {
+    const onSend = vi
+      .fn<(content: string, imageUrls: string[], clientMessageId: string) => Promise<boolean>>()
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+    render(<Composer {...baseProps} mode="idle" onSend={onSend} />);
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
+    const ta = screen.getByTestId("composer-input") as HTMLTextAreaElement;
+    fireEvent.change(ta, { target: { value: "uncertain delivery" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Send message" })).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(2));
+
+    const firstId = onSend.mock.calls[0][2];
+    const retryId = onSend.mock.calls[1][2];
+    expect(firstId).toEqual(expect.any(String));
+    expect(firstId.length).toBeGreaterThan(0);
+    expect(retryId).toBe(firstId);
+  });
+
+  it("shows an explicit unknown state and retries the same logical message", async () => {
+    const onSend = vi
+      .fn<(content: string, imageUrls: string[], clientMessageId: string) => Promise<boolean>>()
+      .mockImplementationOnce((_content, _imageUrls, clientMessageId) =>
+        Promise.reject(new MessageDeliveryUnknownError(clientMessageId)),
+      )
+      .mockResolvedValueOnce(true);
+    render(<Composer {...baseProps} mode="idle" agentId={7} onSend={onSend} />);
+    const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
+    fireEvent.change(ta, { target: { value: "uncertain delivery" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await screen.findByText(/Delivery unconfirmed/);
+    expect(ta.readOnly).toBe(true);
+    expect(
+      screen.getByRole<HTMLButtonElement>("button", { name: "Send message" }).disabled,
+    ).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry same message" }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(2));
+    expect(onSend.mock.calls[1][2]).toBe(onSend.mock.calls[0][2]);
+    await waitFor(() => expect(ta.value).toBe(""));
+    expect(screen.queryByText(/Delivery unconfirmed/)).toBeNull();
+  });
+
+  it("keeps an unknown attempt locked when a retry returns false", async () => {
+    const onSend = vi
+      .fn<(content: string, imageUrls: string[], clientMessageId: string) => Promise<boolean>>()
+      .mockImplementationOnce((_content, _imageUrls, clientMessageId) =>
+        Promise.reject(new MessageDeliveryUnknownError(clientMessageId)),
+      )
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+    render(<Composer {...baseProps} mode="idle" agentId={7} onSend={onSend} />);
+    const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
+    fireEvent.change(ta, { target: { value: "still ambiguous" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await screen.findByText(/Delivery unconfirmed/);
+    const clientMessageId = onSend.mock.calls[0][2];
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry same message" }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(2));
+    expect(onSend.mock.calls[1][2]).toBe(clientMessageId);
+    expect(await screen.findByText(/Delivery unconfirmed/)).toBeTruthy();
+    expect(ta.readOnly).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry same message" }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(3));
+    expect(onSend.mock.calls[2][2]).toBe(clientMessageId);
+    await waitFor(() => expect(screen.queryByText(/Delivery unconfirmed/)).toBeNull());
+  });
+
+  it("requires explicit abandon before changed text gets a new id", async () => {
+    const onSend = vi
+      .fn<(content: string, imageUrls: string[], clientMessageId: string) => Promise<boolean>>()
+      .mockImplementationOnce((_content, _imageUrls, clientMessageId) =>
+        Promise.reject(new MessageDeliveryUnknownError(clientMessageId)),
+      )
+      .mockResolvedValueOnce(true);
+    render(<Composer {...baseProps} mode="idle" agentId={7} onSend={onSend} />);
+    const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
+    fireEvent.change(ta, { target: { value: "old uncertain" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await screen.findByText(/Delivery unconfirmed/);
+
+    fireEvent.click(screen.getByRole("button", { name: "Send another anyway" }));
+    expect(ta.readOnly).toBe(false);
+    fireEvent.change(ta, { target: { value: "new explicit message" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(2));
+    expect(onSend.mock.calls[1][2]).not.toBe(onSend.mock.calls[0][2]);
+  });
+
+  it("storage failure falls back to memory without changing retry identity", async () => {
+    const agentId = 7071;
+    const attemptKey = `composer-send-attempt-${agentId}`;
+    const persistentStorage = sessionStorage;
+    persistentStorage.setItem(
+      attemptKey,
+      JSON.stringify({
+        signature: JSON.stringify([agentId, "stale body", []]),
+        clientMessageId: "stale-client-id",
+        agentId,
+        content: "stale body",
+        imageUrls: [],
+      }),
+    );
+    expect(persistentStorage.getItem(attemptKey)).toContain("stale-client-id");
+    const setItem = vi.fn((_key: string, _value: string) => {
+      throw new DOMException("quota", "QuotaExceededError");
+    });
+    vi.stubGlobal("sessionStorage", storageWith(persistentStorage, { setItem }));
+    const onSend = vi
+      .fn<(content: string, imageUrls: string[], clientMessageId: string) => Promise<boolean>>()
+      .mockImplementationOnce((_content, _imageUrls, clientMessageId) =>
+        Promise.reject(new MessageDeliveryUnknownError(clientMessageId)),
+      )
+      .mockResolvedValueOnce(true);
+    const first = render(
+      <Composer {...baseProps} mode="idle" agentId={agentId} onSend={onSend} />,
+    );
+    const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
+    fireEvent.change(ta, { target: { value: "send despite storage" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    await screen.findByText(/Delivery unconfirmed/);
+    const firstId = onSend.mock.calls[0][2];
+    expect(firstId).not.toBe("stale-client-id");
+    expect(setItem).toHaveBeenCalled();
+    expect(sessionStorage.getItem(attemptKey)).toContain("stale-client-id");
+    first.unmount();
+
+    render(<Composer {...baseProps} mode="idle" agentId={agentId} onSend={onSend} />);
+    await screen.findByText(/Delivery unconfirmed/);
+    fireEvent.click(screen.getByRole("button", { name: "Retry same message" }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(2));
+    expect(onSend.mock.calls[1][2]).toBe(firstId);
+    const restored = screen.getByTestId<HTMLTextAreaElement>("composer-input");
+    await waitFor(() => expect(restored.value).toBe(""));
+    expect(screen.queryByRole("button", { name: "Sending" })).toBeNull();
+  });
+
+  it("remove failure keeps an authoritative tombstone across remount", async () => {
+    const agentId = 7072;
+    const onSend = vi
+      .fn<(content: string, imageUrls: string[], clientMessageId: string) => Promise<boolean>>()
+      .mockImplementationOnce((_content, _imageUrls, clientMessageId) =>
+        Promise.reject(new MessageDeliveryUnknownError(clientMessageId)),
+      );
+    const first = render(
+      <Composer {...baseProps} mode="idle" agentId={agentId} onSend={onSend} />,
+    );
+    const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
+    fireEvent.change(ta, { target: { value: "abandon this unknown" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await screen.findByText(/Delivery unconfirmed/);
+
+    const attemptKey = `composer-send-attempt-${agentId}`;
+    const persistedAttempt = sessionStorage.getItem(attemptKey);
+    expect(persistedAttempt).toContain("uncertain");
+    const persistentStorage = sessionStorage;
+    const removeItem = vi.fn((_key: string) => {
+      throw new DOMException("blocked", "SecurityError");
+    });
+    vi.stubGlobal("sessionStorage", storageWith(persistentStorage, { removeItem }));
+    fireEvent.click(screen.getByRole("button", { name: "Send another anyway" }));
+    expect(removeItem).toHaveBeenCalledWith(attemptKey);
+    expect(sessionStorage.getItem(attemptKey)).toBe(persistedAttempt);
+    first.unmount();
+
+    render(<Composer {...baseProps} mode="idle" agentId={agentId} onSend={onSend} />);
+    expect(screen.queryByText(/Delivery unconfirmed/)).toBeNull();
+    expect(screen.getByTestId<HTMLTextAreaElement>("composer-input").readOnly).toBe(false);
+  });
+
+  it("an A send completing after switch to B does not clear B's draft", async () => {
+    let resolveSend: (value: boolean) => void = () => undefined;
+    const onSend = vi.fn(
+      () => new Promise<boolean>((resolve) => { resolveSend = resolve; }),
+    );
+    const { rerender } = render(
+      <Composer {...baseProps} mode="idle" agentId={7} onSend={onSend} />,
+    );
+    const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
+    fireEvent.change(ta, { target: { value: "message for A" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+
+    sessionStorage.setItem("composer-draft-9", "draft for B");
+    rerender(<Composer {...baseProps} mode="idle" agentId={9} onSend={onSend} />);
+    await waitFor(() => expect(ta.value).toBe("draft for B"));
+    resolveSend(true);
+
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Sending" })).toBeNull());
+    expect(ta.value).toBe("draft for B");
+  });
+
+  it("locks same-agent edits and attachments while a send is in flight", async () => {
+    let resolveSend: (value: boolean) => void = () => undefined;
+    const onSend = vi.fn(
+      () => new Promise<boolean>((resolve) => { resolveSend = resolve; }),
+    );
+    const onAttachImage = vi.fn(() => Promise.resolve("/api/agents/7/uploads/new.png"));
+    render(
+      <Composer
+        {...baseProps}
+        mode="idle"
+        agentId={7}
+        onSend={onSend}
+        onAttachImage={onAttachImage}
+      />,
+    );
+    const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
+    fireEvent.change(ta, { target: { value: "original snapshot" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await screen.findByRole("button", { name: "Sending" });
+    expect(ta.readOnly).toBe(true);
+
+    fireEvent.change(ta, { target: { value: "later edit" } });
+    const image = new File(["png"], "later.png", { type: "image/png" });
+    fireEvent.drop(screen.getByTestId("composer"), {
+      dataTransfer: { files: [image], types: ["Files"] },
+    });
+    expect(onAttachImage).not.toHaveBeenCalled();
+
+    resolveSend(true);
+    await waitFor(() => expect(ta.value).toBe(""));
+    expect(screen.queryByRole("button", { name: "Sending" })).toBeNull();
+  });
+
+  it("editing a failed draft creates a new client message id", async () => {
+    const onSend = vi
+      .fn<(content: string, imageUrls: string[], clientMessageId: string) => Promise<boolean>>()
+      .mockResolvedValue(false);
+    render(<Composer {...baseProps} mode="idle" onSend={onSend} />);
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
+    const ta = screen.getByTestId("composer-input") as HTMLTextAreaElement;
+    fireEvent.change(ta, { target: { value: "first draft" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+
+    fireEvent.change(ta, { target: { value: "changed draft" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(2));
+
+    expect(onSend.mock.calls[1][2]).not.toBe(onSend.mock.calls[0][2]);
   });
 
   it("whitespace-only input → does not trigger onSend (button also disabled)", async () => {
@@ -510,6 +787,26 @@ describe("Composer slash commands", () => {
     expect(await screen.findByTestId("slash-option-recap")).toBeTruthy();
   });
 
+  it("cannot apply an open slash option while the send snapshot is locked", async () => {
+    commandList = [recap];
+    let resolveSend: (value: boolean) => void = () => undefined;
+    const onSend = vi.fn(
+      () => new Promise<boolean>((resolve) => { resolveSend = resolve; }),
+    );
+    render(<Composer {...baseProps} mode="idle" onSend={onSend} />);
+    const ta = input();
+    typeInto(ta, "/rec");
+    const option = await screen.findByTestId("slash-option-recap");
+
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await screen.findByRole("button", { name: "Sending" });
+    fireEvent.mouseDown(option);
+    expect(ta.value).toBe("/rec");
+
+    resolveSend(true);
+    await waitFor(() => expect(ta.value).toBe(""));
+  });
+
   const abc = [
     { name: "alpha", description: "", instruction_hint: "" },
     { name: "beta", description: "", instruction_hint: "" },
@@ -615,7 +912,9 @@ describe("Composer slash commands", () => {
     // User types the natural-language instruction after the name, then sends.
     fireEvent.change(ta, { target: { value: "/recap just the PRs" } });
     fireEvent.keyDown(ta, { key: "Enter" });
-    await waitFor(() => expect(onSend).toHaveBeenCalledWith("/recap just the PRs", []));
+    await waitFor(() =>
+      expect(onSend).toHaveBeenCalledWith("/recap just the PRs", [], expect.any(String)),
+    );
   });
 
   it("a fully-typed slash message (whitespace present) sends raw — dropdown is open but Enter sends", async () => {
@@ -629,7 +928,9 @@ describe("Composer slash commands", () => {
     expect(screen.queryByTestId("slash-option-recap")).toBeNull();
     // Enter sends the raw text, not re-selects a command.
     fireEvent.keyDown(ta, { key: "Enter" });
-    await waitFor(() => expect(onSend).toHaveBeenCalledWith("/recap just the PRs", []));
+    await waitFor(() =>
+      expect(onSend).toHaveBeenCalledWith("/recap just the PRs", [], expect.any(String)),
+    );
   });
 
   it("clicking a command option fills `/<name> ` and waits — does not send", async () => {
@@ -655,7 +956,9 @@ describe("Composer slash commands", () => {
     fireEvent.keyDown(ta, { key: "Escape" });
     await waitFor(() => expect(screen.queryByTestId("slash-option-recap")).toBeNull());
     fireEvent.keyDown(ta, { key: "Enter" });
-    await waitFor(() => expect(onSend).toHaveBeenCalledWith("/recap", []));
+    await waitFor(() =>
+      expect(onSend).toHaveBeenCalledWith("/recap", [], expect.any(String)),
+    );
   });
 
   it("a non-matching /token sends as plain text (no dropdown)", async () => {
@@ -667,7 +970,9 @@ describe("Composer slash commands", () => {
     await Promise.resolve();
     expect(screen.queryByTestId("slash-option-recap")).toBeNull();
     fireEvent.keyDown(ta, { key: "Enter" });
-    await waitFor(() => expect(onSend).toHaveBeenCalledWith("/nope", []));
+    await waitFor(() =>
+      expect(onSend).toHaveBeenCalledWith("/nope", [], expect.any(String)),
+    );
   });
 
   // ── Multi-command messages (#836) ──
@@ -688,7 +993,9 @@ describe("Composer slash commands", () => {
     expect(screen.queryByTestId("slash-option-compact")).toBeNull();
     // Enter sends the raw text as-is
     fireEvent.keyDown(ta, { key: "Enter" });
-    await waitFor(() => expect(onSend).toHaveBeenCalledWith("/compact /update", []));
+    await waitFor(() =>
+      expect(onSend).toHaveBeenCalledWith("/compact /update", [], expect.any(String)),
+    );
   });
 
   it("a slash mid-message never opens the dropdown — Enter sends the raw text (user ruling #836)", async () => {
@@ -702,7 +1009,9 @@ describe("Composer slash commands", () => {
     await Promise.resolve();
     expect(screen.queryByTestId("slash-option-compact")).toBeNull();
     fireEvent.keyDown(ta, { key: "Enter" });
-    await waitFor(() => expect(onSend).toHaveBeenCalledWith("hello /compact", []));
+    await waitFor(() =>
+      expect(onSend).toHaveBeenCalledWith("hello /compact", [], expect.any(String)),
+    );
   });
 
   it("the instruction hint follows the FIRST command only (#836)", async () => {
@@ -770,7 +1079,9 @@ describe("Composer slash commands", () => {
     await Promise.resolve();
     expect(screen.queryByTestId("slash-option-recap")).toBeNull();
     fireEvent.keyDown(ta, { key: "Enter" });
-    await waitFor(() => expect(onSend).toHaveBeenCalledWith("/compact ping /rec", []));
+    await waitFor(() =>
+      expect(onSend).toHaveBeenCalledWith("/compact ping /rec", [], expect.any(String)),
+    );
   });
 
   it("selecting mid-message keeps both sides and reuses the existing space", async () => {
@@ -809,7 +1120,9 @@ describe("Composer slash commands", () => {
     await Promise.resolve();
     expect(screen.queryByTestId("slash-option-recap")).toBeNull();
     fireEvent.keyDown(ta, { key: "Enter" });
-    await waitFor(() => expect(onSend).toHaveBeenCalledWith("read /etc/hosts", []));
+    await waitFor(() =>
+      expect(onSend).toHaveBeenCalledWith("read /etc/hosts", [], expect.any(String)),
+    );
   });
 });
 
@@ -850,8 +1163,53 @@ describe("Composer image attachments", () => {
     fireEvent.change(ta, { target: { value: "what is this" } });
     fireEvent.keyDown(ta, { key: "Enter" });
     await waitFor(() =>
-      expect(onSend).toHaveBeenCalledWith("what is this", ["/api/agents/7/uploads/shot.png"]),
+      expect(onSend).toHaveBeenCalledWith(
+        "what is this",
+        ["/api/agents/7/uploads/shot.png"],
+        expect.any(String),
+      ),
     );
+  });
+
+  it("locks an unknown image snapshot against drop and removal before retry", async () => {
+    const onSend = vi
+      .fn<(content: string, imageUrls: string[], clientMessageId: string) => Promise<boolean>>()
+      .mockImplementationOnce((_content, _imageUrls, clientMessageId) =>
+        Promise.reject(new MessageDeliveryUnknownError(clientMessageId)),
+      )
+      .mockResolvedValueOnce(true);
+    const onAttachImage = vi.fn(() => Promise.resolve("/api/agents/7/uploads/shot.png"));
+    render(
+      <Composer
+        {...baseProps}
+        mode="idle"
+        agentId={7}
+        onSend={onSend}
+        onAttachImage={onAttachImage}
+      />,
+    );
+    const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
+    fireEvent.paste(ta, { clipboardData: { files: [imageFile()], types: ["Files"] } });
+    await waitFor(() => expect(onAttachImage).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await screen.findByText(/Delivery unconfirmed/);
+
+    const remove = screen.getByRole<HTMLButtonElement>("button", { name: "Remove shot.png" });
+    expect(remove.disabled).toBe(true);
+    fireEvent.click(remove);
+    fireEvent.drop(screen.getByTestId("composer"), {
+      dataTransfer: {
+        files: [new File(["new"], "new.png", { type: "image/png" })],
+        types: ["Files"],
+      },
+    });
+    expect(onAttachImage).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("img", { name: "shot.png" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry same message" }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(2));
+    expect(onSend.mock.calls[1][1]).toEqual(["/api/agents/7/uploads/shot.png"]);
+    expect(onSend.mock.calls[1][2]).toBe(onSend.mock.calls[0][2]);
   });
 
   it("send stays disabled while an image is still uploading", async () => {
@@ -878,7 +1236,11 @@ describe("Composer image attachments", () => {
     await waitFor(() => expect(onAttachImage).toHaveBeenCalled());
     fireEvent.keyDown(ta, { key: "Enter" });
     await waitFor(() =>
-      expect(onSend).toHaveBeenCalledWith("", ["/api/agents/7/uploads/a.png"]),
+      expect(onSend).toHaveBeenCalledWith(
+        "",
+        ["/api/agents/7/uploads/a.png"],
+        expect.any(String),
+      ),
     );
   });
 });
