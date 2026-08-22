@@ -11,6 +11,12 @@ the live-streaming path. A read can coincide with an in-flight commit; the
 store returns the last committed snapshot, so a slightly stale view is
 acceptable on cold-load paths.
 
+Schema is a precondition, not a read-side effect. Install and gateway
+``ava start`` migration step 2.5 run ``PostgresSaver.setup()``. These helpers
+only perform SELECTs so they also work under the least-privilege
+``ava_runner`` role; a missing/outdated schema is a store failure, never an
+invitation for a request path to attempt DDL.
+
 Read contract:
   - no checkpoint (agent never ran a turn) -> empty list.
   - store readable, latest checkpoint committed but the messages channel not
@@ -80,7 +86,6 @@ def load_checkpoint_messages(agent_id: int) -> list[BaseMessage]:
             row_factory=cast(Any, dict_row),
         ) as conn:
             saver = PostgresSaver(conn=cast(Connection[DictRow], conn), serde=serde)
-            saver.setup()
             ckpt = saver.get(config)
     except Exception as exc:
         raise CheckpointReadError(f"checkpoint read failed for agent {agent_id}") from exc
@@ -149,7 +154,6 @@ def load_checkpoint_messages_by_trace(
             row_factory=cast(Any, dict_row),
         ) as conn:
             saver = PostgresSaver(conn=cast(Connection[DictRow], conn), serde=serde)
-            saver.setup()
             ckpt = saver.get_tuple(
                 {
                     **config,

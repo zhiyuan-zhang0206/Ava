@@ -747,6 +747,30 @@ def _assert_migration_authority(conn: psycopg.Connection) -> None:
     )
 
 
+def assert_migration_authority(conn: psycopg.Connection) -> None:
+    """Public authority gate for schema mutators outside Ava's SQL-file loop.
+
+    LangGraph owns a second versioned schema domain for checkpoint storage.
+    Its ``PostgresSaver.setup()`` runs beside Ava migrations, on another
+    autocommit connection, so it must explicitly reuse the same gateway-owner
+    check instead of acquiring DDL capability merely because a URL can.
+    """
+    _assert_migration_authority(conn)
+
+
+@contextlib.contextmanager
+def schema_mutation_lock(conn: psycopg.Connection) -> Generator[None]:
+    """Public serialization guard for non-SQL-file schema mutation phases.
+
+    The lock is session-level and therefore also serializes work performed on
+    a second connection while this context remains open. It is reentrant, so
+    ``apply_pending_migrations()`` may acquire its existing inner guard while a
+    caller spans Ava SQL and LangGraph checkpoint migrations with this one.
+    """
+    with _schema_mutation_lock(conn):
+        yield
+
+
 def apply_pending_migrations(conn: psycopg.Connection) -> list[str]:
     """Apply every git-tracked migration file whose name is not yet in the DB's
     applied set, in name (≈ chronological) order; return the list of names

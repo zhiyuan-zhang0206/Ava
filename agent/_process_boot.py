@@ -372,34 +372,6 @@ async def _build_data_plane(agent_id: int) -> tuple[RedisInboundListener, AgentE
     return inbound_listener, event_publisher
 
 
-async def _checkpoint_schema_present(db_pool: AsyncConnectionPool[psycopg.AsyncConnection]) -> bool:
-    """Whether every LangGraph checkpoint table already exists.
-
-    The agent boot SKIPS `checkpointer.setup()` when they do (Task #1236): the
-    runner process dials as the least-privilege `ava_runner` role, which holds
-    no CREATE on the schema — by design — and Postgres refuses
-    `CREATE TABLE IF NOT EXISTS` for such a role even on existing tables.
-    setup() is otherwise a semantic no-op on an up-to-date schema (the
-    IF NOT EXISTS creates + a pending-migration scan that finds none), so the
-    skip loses nothing. The gateway-side setup() calls (shared/checkpoint.py,
-    dialing the main role) remain the owner of langgraph's own migrations.
-
-    All four tables must be present: a half-created schema (a crash between
-    setup()'s creates) must NOT be skipped — it should run setup() and fail
-    loudly on whatever is missing, not limp on.
-    """
-    async with db_pool.connection() as conn:
-        row = await (
-            await conn.execute(
-                "SELECT to_regclass('public.checkpoints') IS NOT NULL"
-                " AND to_regclass('public.checkpoint_blobs') IS NOT NULL"
-                " AND to_regclass('public.checkpoint_writes') IS NOT NULL"
-                " AND to_regclass('public.checkpoint_migrations') IS NOT NULL"
-            )
-        ).fetchone()
-    return bool(row and row[0])
-
-
 async def _build_checkpointer(
     db_pool: AsyncConnectionPool[psycopg.AsyncConnection], agent_id: int
 ) -> AsyncPostgresSaver:
@@ -418,13 +390,13 @@ async def _build_checkpointer(
     for re-delivery on the next claim cycle. See
     decisions/2026-04-26-inbound-queue.md.
     """
+    # Schema creation/versioning is a gateway migration-phase precondition:
+    # install and `ava start` step 2.5 call PostgresSaver.setup() under the
+    # DDL-capable cluster owner. Agent processes dial as least-privilege
+    # ava_runner and must never attempt DDL. A missing/outdated schema therefore
+    # fails on the first real saver operation instead of being mutated here.
     saver_pool = cast(AsyncConnectionPool[psycopg.AsyncConnection[DictRow]], db_pool)
     checkpointer = AsyncPostgresSaver(conn=saver_pool, serde=build_checkpoint_serde())
-    if not await _checkpoint_schema_present(db_pool):
-        # First boot on a fresh schema: create the checkpoint tables. Skipped
-        # when they exist — the runner role holds no CREATE (Task #1236), and
-        # setup() would be a no-op anyway.
-        await checkpointer.setup()
     _wrap_saver_writes_with_loud_failure(checkpointer, agent_id)
     await _reconcile_claimed_inbounds_at_startup(db_pool, checkpointer, agent_id)
     _boot_timing.mark("db_reconcile")
