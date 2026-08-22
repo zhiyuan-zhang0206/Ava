@@ -262,7 +262,7 @@ def _birth(*, home: Path, secret: str) -> int:
 
         base_admin_url = pg_admin_url(rec.ports["postgres"])
         base_db_url, base_redis_url = cl.per_cluster_base_urls(rec)
-        lifecycle._provision(
+        database_created = lifecycle._provision(
             cl.DATA_PLANE_IDENTITY, base_admin_url=base_admin_url, cluster_secret=secret
         )
         # The runner's least-privilege surface: checkpoint tables first (created
@@ -270,7 +270,11 @@ def _birth(*, home: Path, secret: str) -> int:
         # then the ava_runner role + grants — a fresh birth has no pre-existing
         # checkpoint tables, so the grants must come after the schema ensure.
         cl.ensure_checkpoint_schema(
-            cl.DATA_PLANE_IDENTITY, base_admin_url=base_admin_url, cluster_secret=secret
+            cl.DATA_PLANE_IDENTITY,
+            base_admin_url=base_admin_url,
+            cluster_secret=secret,
+            database_created=database_created,
+            resume_partial=True,
         )
         cl.ensure_runner_role(
             cl.DATA_PLANE_IDENTITY,

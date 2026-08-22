@@ -67,6 +67,9 @@ def _schema_tables() -> set[str]:
     tables: set[str] = set()
     schema = (_REPO_ROOT / "db" / "schema.sql").read_text(encoding="utf-8")
     tables.update(_CREATE_TABLE_RE.findall(schema))
+    # LangGraph owns these declarations outside db/schema.sql. Three carry
+    # per-test checkpoint data; checkpoint_migrations is infra bookkeeping.
+    tables.update({"checkpoints", "checkpoint_blobs", "checkpoint_writes", "checkpoint_migrations"})
     for mig in sorted(_MIGRATIONS_DIR.glob("*.sql")):
         if mig.name.endswith(".down.sql"):
             continue
@@ -121,6 +124,7 @@ def _cascade_closure(seed: set[str], edges: list[tuple[str, str]]) -> set[str]:
 # list, an FK-cascade from it, or this list.
 _EXEMPT: dict[str, str] = {
     "schema_migrations": "migration bookkeeping — never test data",
+    "checkpoint_migrations": "LangGraph migration bookkeeping — never test data",
     "cluster_pin": "cluster singleton state — infra, not test data",
     "cluster_last_update": "cluster singleton outcome row — infra (mirrored into "
     "deployment_state by the R1 migration)",

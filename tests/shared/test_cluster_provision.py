@@ -45,7 +45,9 @@ def test_provision_database_creates_db_and_applies_schema(_provisioned_db: str) 
     db_url = f"{base_url}/{expected_db}"
 
     try:
-        provision_database(identity, base_admin_url=admin_url, cluster_secret=_SECRET)
+        assert (
+            provision_database(identity, base_admin_url=admin_url, cluster_secret=_SECRET) is True
+        )
 
         # Verify the database was created
         with psycopg.connect(admin_url, autocommit=True) as conn:
@@ -108,9 +110,13 @@ def test_provision_database_idempotent(_provisioned_db: str) -> None:
     admin_url = _admin_url()
 
     try:
-        provision_database(identity, base_admin_url=admin_url, cluster_secret=_SECRET)
+        assert (
+            provision_database(identity, base_admin_url=admin_url, cluster_secret=_SECRET) is True
+        )
         # Second call: DB already exists — must be a no-op, no exception.
-        provision_database(identity, base_admin_url=admin_url, cluster_secret=_SECRET)
+        assert (
+            provision_database(identity, base_admin_url=admin_url, cluster_secret=_SECRET) is False
+        )
 
         # DB still exists after both calls.
         with psycopg.connect(admin_url, autocommit=True) as conn:

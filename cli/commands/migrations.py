@@ -10,11 +10,16 @@ from __future__ import annotations
 
 
 def cmd_migrations_apply() -> list[str]:
-    """Apply pending migrations in order; called as a step of `ava start`.
+    """Apply Ava migrations and verify checkpoint schema; `ava start` step 2.5.
 
-    Each migration runs in a single transaction; on failure all roll back
-    together. `ava start` invokes this after pg is ready; on the gateway
-    `ava cluster update` reaches it through the trailing `ava start`.
+    Ava SQL files run on every host (a runner normally has nothing pending and
+    the authority guard refuses it if it does). Every host then verifies the
+    complete LangGraph checkpoint migration set read-only. Runtime checkpoint
+    readers and agent boot may dial as ``ava_runner`` and never perform DDL.
+
+    Each Ava migration runs in a single transaction. `ava start` invokes this
+    after pg is ready; on the gateway `ava cluster update` reaches it through
+    the trailing `ava start`.
 
     Returns the names applied, NOT an exit code — the `cmd_` prefix is
     vestigial here (see the module docstring: there is no `ava migrations`
@@ -23,7 +28,13 @@ def cmd_migrations_apply() -> list[str]:
     point-in-time read grant went stale; failure is raised, not returned.
     """
     import shared.db
+    from shared import cluster
     from shared.migrations import apply_pending_migrations
+
+    # Dependency drift is a pre-DB gate: a new upstream checkpoint migration
+    # must first be mirrored in a paired Ava up/down migration. Failing before
+    # Ava SQL runs keeps update recovery on the old code + old schema.
+    cluster.assert_checkpoint_dependency_pinned()
 
     # direct=True — the ONE sanctioned data-plane exemption (user ruling 2026-08:
     # every consumer goes through PgBouncer; see shared/db.py `connect`).
@@ -39,5 +50,6 @@ def cmd_migrations_apply() -> list[str]:
     # stay unbounded (shared/db.py PG_STATEMENT_TIMEOUT_*).
     with shared.db.connect(direct=True, unbounded=True) as conn:
         done = apply_pending_migrations(conn)
+    cluster.assert_checkpoint_schema_current(shared.db.direct_db_url())
     print(f"applied {len(done)} migration(s): {done}")
     return done
