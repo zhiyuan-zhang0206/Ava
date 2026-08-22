@@ -53,6 +53,46 @@ describe("lifecycle endpoints", () => {
     expect(calls[0].init?.method).toBeUndefined();
   });
 
+  it("listAgents projects every internal transition to the public three-state model", async () => {
+    const statuses = [
+      "allocated",
+      "starting",
+      "running",
+      "idling",
+      "restarting",
+      "terminated",
+      "hibernating",
+    ];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        Promise.resolve(
+          new Response(
+            JSON.stringify(
+              statuses.map((status, index) => ({
+                agent_id: index + 1,
+                status,
+              })),
+            ),
+            { status: 200, headers: { "content-type": "application/json" } },
+          ),
+        ),
+      ),
+    );
+
+    const rows = await api.listAgents();
+
+    expect(rows.map((row) => row.status)).toEqual([
+      "idling",
+      "idling",
+      "running",
+      "idling",
+      "idling",
+      "terminated",
+      "idling",
+    ]);
+  });
+
   it("spawnAgent POSTs JSON body to /api/agents", async () => {
     await api.spawnAgent({ prompt: "Search X", spawner: "claude-code", prompt_source: "user" });
     // After happy-dom provides window, API_BASE is inferred as http://localhost:8000;

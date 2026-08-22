@@ -21,6 +21,7 @@ import type { NoticesFeed,
   AgentMachineRow,
   AgentMessageEnqueued,
   AgentRow,
+  WireAgentRow,
   ContextBreakdownResponse,
   DefaultModelView,
   AlertsResponse,
@@ -35,7 +36,7 @@ import type { NoticesFeed,
   CompactMode,
   ConfigView,
   ConfigWriteResult,
-  FleetGraph,
+  WireFleetGraph,
   GuideDraftResponse,
   TaskListResponse,
   InventoryAggregate,
@@ -311,7 +312,7 @@ export const api = {
 
   listAgents: (): Promise<AgentRow[]> => {
     return f("/api/agents")
-      .then(ok<AgentRow[]>)
+      .then(ok<WireAgentRow[]>)
       .then((rows) => rows.map(projectAgentStatus));
   },
 
@@ -392,12 +393,12 @@ export const api = {
   // `hours` windows both node score and edge events (whitelisted backend-side,
   // 1/6/24/72/168; omitted = all-time). `decayLambda` is the per-day edge-weight
   // decay constant (default 0.5 backend-side).
-  getFleetGraph: (opts?: { hours?: number; decayLambda?: number }): Promise<FleetGraph> => {
+  getFleetGraph: (opts?: { hours?: number; decayLambda?: number }): Promise<WireFleetGraph> => {
     const params = new URLSearchParams();
     if (opts?.hours != null) params.set("hours", String(opts.hours));
     if (opts?.decayLambda != null) params.set("decay_lambda", String(opts.decayLambda));
     const qs = params.toString();
-    return f(`/api/fleet/graph${qs ? `?${qs}` : ""}`).then(ok<FleetGraph>);
+    return f(`/api/fleet/graph${qs ? `?${qs}` : ""}`).then(ok<WireFleetGraph>);
   },
 
   // --- tasks ---

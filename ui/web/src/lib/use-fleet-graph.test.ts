@@ -17,7 +17,7 @@ import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api } from "./api";
-import type { FleetGraph } from "./types";
+import type { FleetGraph, WireFleetGraph } from "./types";
 import { useFleetGraph } from "./use-fleet-graph";
 
 vi.mock("./api", () => ({
@@ -106,7 +106,7 @@ describe("useFleetGraph", () => {
         { from_agent: 1, to_agent: 2, event_type: "send_message", weight: 0.5, event_count: 3, last_seen_at: "2026-06-30T00:00:00Z" },
         { from_agent: 2, to_agent: 3, event_type: "resurrect", weight: 4, event_count: 2 },
       ],
-    } as unknown as FleetGraph;
+    } as unknown as WireFleetGraph;
     getFleetGraph.mockResolvedValue(raw);
 
     const { result } = renderHook(() => useFleetGraph(), {
@@ -117,6 +117,37 @@ describe("useFleetGraph", () => {
     expect(result.current.graph.edges).toEqual([
       { from_agent: 1, to_agent: 2, event_type: "message", weight: 0.5, event_count: 3, last_seen_at: "2026-06-30T00:00:00Z" },
       { from_agent: 2, to_agent: 3, event_type: "resurrect", weight: 4, event_count: 2 },
+    ]);
+  });
+
+  it("projects raw fleet-node lifecycle states to the same public three-state model", async () => {
+    const raw = {
+      nodes: [
+        { ...API_GRAPH.nodes[0], agent_id: 1, status: "allocated" },
+        { ...API_GRAPH.nodes[0], agent_id: 2, status: "starting" },
+        { ...API_GRAPH.nodes[0], agent_id: 3, status: "running" },
+        { ...API_GRAPH.nodes[0], agent_id: 4, status: "idling" },
+        { ...API_GRAPH.nodes[0], agent_id: 5, status: "restarting" },
+        { ...API_GRAPH.nodes[0], agent_id: 6, status: "terminated" },
+        { ...API_GRAPH.nodes[0], agent_id: 7, status: "hibernating" },
+      ],
+      edges: [],
+    } as unknown as WireFleetGraph;
+    getFleetGraph.mockResolvedValue(raw);
+
+    const { result } = renderHook(() => useFleetGraph(), {
+      wrapper: withClient(freshClient()),
+    });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.graph.nodes.map((node) => node.status)).toEqual([
+      "idling",
+      "idling",
+      "running",
+      "idling",
+      "idling",
+      "terminated",
+      "idling",
     ]);
   });
 

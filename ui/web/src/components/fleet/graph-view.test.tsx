@@ -61,7 +61,7 @@ function edge(
 }
 
 // A graph with: a central node (#1) wired by a spawn + a fork + several message
-// edges (so every edge style paints), and a pulsing node (#2 "starting").
+// edges (so every edge style paints), and an idling node (#2).
 function renderGraph(ui: React.ReactElement) {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -73,7 +73,7 @@ function richGraph(): FleetGraph {
   const seen = "2026-06-17T00:00:00Z";
   const nodes: FleetGraphNode[] = [
     node(1, { label: "alpha", node_score: 50_000, total_tokens: 1_500_000 }),
-    node(2, { status: "starting" }),
+    node(2, { status: "idling" }),
     node(3, {}),
     ...[4, 5, 6, 7, 8, 9].map((id) => node(id)),
   ];
@@ -209,7 +209,7 @@ describe("GraphView", () => {
         nodes: [
           node(1, { label: "live" }),
           node(2, { label: "dead", status: "terminated" }),
-          node(3, { label: "hibernating", status: "hibernating" }),
+          node(3, { label: "idling", status: "idling" }),
         ],
         edges: [
           edge(2, 1, "spawn"), // touches the terminated node — dropped

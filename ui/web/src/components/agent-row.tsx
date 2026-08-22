@@ -49,50 +49,29 @@ import type { TimeMode, DateFormat } from "@/lib/types";
 import { PRIORITY_BG, topNoticePriority } from "@/lib/notices";
 import { formatRelativeTime } from "@/lib/sidebar";
 import { formatShort } from "@/lib/time";
-import type { AgentRow, AgentStatus } from "@/lib/types";
+import type { AgentRow, PublicAgentStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { FLEX, FLEX_1, FLEX_COL, MIN_W_0 } from "@/lib/layout";
 
 export type PendingAction = "restarting" | "terminating" | "resurrecting" | "compacting";
 
-// Color semantics:
-//   Stable states — static colors (avoid amber; UI convention = Warning,
-//   doesn't fit "healthy standby"):
-//     sky      = running (actively working, blue = in motion)
-//     emerald  = idling  (healthy standby, green = quietly waiting)
-//     red      = terminated (dead)
-//   Transition states — pulse animation (briefly visible, amber fits here —
-//   the state really is attention-worthy "not yet stable", doesn't
-//   conflict with the stable-state color rule):
-//     slate pulse  = allocated (process not started yet, brief)
-//     amber pulse  = starting  (process claimed, initializing, brief)
-//     violet pulse = restarting (gateway watcher respawning, brief)
-// `hibernating` is the ops-only memory swap-out state; it is projected to
-// `idling` at cache ingest (projectAgentStatus), so a row never reaches these
-// maps carrying it. The entries exist only to satisfy Record<AgentStatus> after
-// the enum gained the value — they alias idling's rendering, matching the
-// "render a swapped-out agent exactly as idle" decision.
-export const STATUS_DOT: Record<AgentStatus, string> = {
-  allocated: "bg-slate-400 animate-pulse",
-  starting: "bg-amber-400 animate-pulse",
+// Public status semantics: sky = actively running, emerald = idling/waiting,
+// red = terminated. Internal launch/restart/hibernation states are projected
+// to idling before a row reaches this component; offline remains a separate
+// liveness badge.
+export const STATUS_DOT: Record<PublicAgentStatus, string> = {
   running: "bg-sky-500",
   idling: "bg-emerald-500",
-  restarting: "bg-violet-500 animate-pulse",
   terminated: "bg-destructive",
-  hibernating: "bg-emerald-500",
 };
 
 // i18n keys (under the "agentRow" namespace) for the status titles — the row
 // renders the translated title when the component has a translator. (The
 // pre-i18n STATUS_TITLE literal map was removed as dead.).
-export const STATUS_TITLE_KEY: Record<AgentStatus, string> = {
-  allocated: "statusAllocated",
-  starting: "statusStarting",
+export const STATUS_TITLE_KEY: Record<PublicAgentStatus, string> = {
   running: "statusRunning",
   idling: "statusIdling",
-  restarting: "statusRestarting",
   terminated: "statusTerminated",
-  hibernating: "statusHibernating",
 };
 
 export interface AgentRowProps {

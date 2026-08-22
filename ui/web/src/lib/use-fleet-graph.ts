@@ -9,7 +9,8 @@ import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 
 import { api } from "./api";
-import type { FleetGraph, GraphEventType } from "./types";
+import { projectAgentStatusValue } from "./types";
+import type { FleetGraph, GraphEventType, WireFleetGraph } from "./types";
 
 const EMPTY_GRAPH: FleetGraph = { nodes: [], edges: [] };
 
@@ -31,9 +32,12 @@ function normalizeEventType(raw: string): GraphEventType {
   return raw === "send_message" ? "message" : (raw as GraphEventType);
 }
 
-function normalizeGraph(raw: FleetGraph): FleetGraph {
+function normalizeGraph(raw: WireFleetGraph): FleetGraph {
   return {
-    nodes: raw.nodes,
+    nodes: raw.nodes.map((node) => ({
+      ...node,
+      status: projectAgentStatusValue(node.status),
+    })),
     edges: raw.edges.map((rawEdge) => ({
       ...rawEdge,
       event_type: normalizeEventType(rawEdge.event_type as string),

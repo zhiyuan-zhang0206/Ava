@@ -5,7 +5,7 @@ import { AppWindow } from "lucide-react";
 import { STATUS_DOT } from "@/components/agent-row";
 import { PRIORITY_BG } from "@/lib/notices";
 import { formatRelativeTime } from "@/lib/sidebar";
-import type { AgentStatus, OpenNotice, PageRow } from "@/lib/types";
+import type { PublicAgentStatus, OpenNotice, PageRow } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { FLEX, FLEX_1, MIN_W_0 } from "@/lib/layout";
 
@@ -23,7 +23,7 @@ export function PriorityBadge({ priority, muted }: { priority: OpenNotice["prior
 }
 
 
-export function AgentStatusDot({ status }: { status: AgentStatus | null }) {
+export function AgentStatusDot({ status }: { status: PublicAgentStatus | null }) {
   if (!status) return null;
   return (
     <span
@@ -85,7 +85,7 @@ export function NoticeListRow({
   title: string;
   agentLabel: string;
   agentId: number;
-  agentStatus: AgentStatus | null;
+  agentStatus: PublicAgentStatus | null;
   agentPage?: PageRow;
   createdAt?: string;
   muted?: boolean;
@@ -147,7 +147,7 @@ export function AgentContextHeader({
   createdAt,
 }: {
   agentLabel: string;
-  agentStatus: AgentStatus | null;
+  agentStatus: PublicAgentStatus | null;
   agentPage?: PageRow;
   createdAt?: string;
 }) {

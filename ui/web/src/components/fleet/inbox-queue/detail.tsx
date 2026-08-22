@@ -5,7 +5,7 @@ import { ArrowLeft } from "lucide-react";
 import { ChatMarkdown } from "@/components/markdown";
 import { OpenNoticeDetail } from "@/components/open-notice-detail";
 import { formatRelativeTime } from "@/lib/sidebar";
-import type { AgentStatus, NoticeItem, PageRow } from "@/lib/types";
+import type { PublicAgentStatus, NoticeItem, PageRow } from "@/lib/types";
 
 import { fmtLabel, openKey, type OpenItem } from "./keys";
 import { AgentContextHeader, PriorityBadge } from "./rows";
@@ -49,7 +49,7 @@ export function OpenDetail({
 }: {
   item: OpenItem;
   openItems: OpenItem[];
-  agentStatus: AgentStatus | null;
+  agentStatus: PublicAgentStatus | null;
   agentPage?: PageRow;
   onAdvance: (key: string | null) => void;
   onSelectAgent?: (agentId: number | null) => void;
@@ -102,7 +102,7 @@ export function ResolvedDetail({
   agentStatus,
 }: {
   notice: NoticeItem;
-  agentStatus: AgentStatus | null;
+  agentStatus: PublicAgentStatus | null;
 }) {
   const label =
     notice.resolution === "dismissed" ? "Dismissed" : notice.resolution === "read" ? "Read" : "Your answer";

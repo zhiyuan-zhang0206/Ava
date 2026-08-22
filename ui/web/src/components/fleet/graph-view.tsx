@@ -19,7 +19,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { STATS_WINDOW_LABELS, STATS_WINDOWS, type StatsWindowHours } from "@/lib/sidebar";
-import type { AgentStatus } from "@/lib/types";
+import type { PublicAgentStatus } from "@/lib/types";
 import { useFleetGraph } from "@/lib/use-fleet-graph";
 
 import {
@@ -37,26 +37,17 @@ import { cn } from "@/lib/utils";
 // Status -> text-color class; the circle paints with fill="currentColor" so the
 // node palette stays identical to the sidebar's STATUS_DOT (same tokens, just
 // expressed as text-* so it resolves for SVG fill, incl. the theme `destructive`).
-// `hibernating` is projected to `idling` at cache ingest (projectAgentStatus), so
-// a node never carries it here; the entry aliases idling only to satisfy
-// Record<AgentStatus> after the enum gained the value.
-const STATUS_TEXT: Record<AgentStatus, string> = {
-  allocated: "text-slate-400",
-  starting: "text-amber-400",
+// Raw lifecycle transitions are projected at graph ingest, so the canvas only
+// accepts the same three public states as the sidebar.
+const STATUS_TEXT: Record<PublicAgentStatus, string> = {
   running: "text-sky-500",
   idling: "text-emerald-500",
-  restarting: "text-violet-500",
   terminated: "text-destructive",
-  hibernating: "text-emerald-500",
 };
-const STATUS_PULSE: Record<AgentStatus, boolean> = {
-  allocated: true,
-  starting: true,
+const STATUS_PULSE: Record<PublicAgentStatus, boolean> = {
   running: false,
   idling: false,
-  restarting: true,
   terminated: false,
-  hibernating: false,
 };
 
 // Per-day decay constant for the edge weight (see the backend formula). Held as a
