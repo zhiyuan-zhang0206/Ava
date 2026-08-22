@@ -23,10 +23,11 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, NamedTuple
 
+import httpx
 from fastapi import APIRouter, HTTPException, Query, Request
 from psycopg_pool import ConnectionPool
 
-from gateway import loki_events, neighbors
+from gateway import loki_events, loki_query_budget, neighbors
 from gateway.routers import _agent_cost, _plugin_metrics
 from gateway.routers._agent_cost import window_bounds
 from gateway.routers._inspect_cache import InspectCacheFullError, InspectQueryCache
@@ -504,6 +505,13 @@ def _inspect_blocking(
 _INSPECT_CACHE_TTL_S = 75.0
 _INSPECT_CACHE_MAX = 1024
 _INSPECT_SINGLEFLIGHT_MAX = 1024
+# A panel request is an interactive read, not a batch job. One healthy
+# aggregate fan-out finishes well below this bound; overloaded Loki must fail
+# visibly so the browser never waits through the 60s per-query transport bound
+# multiplied across several sequential queries. asyncio cannot safely kill the
+# synchronous leader thread: single-flight keeps it as the one background load
+# for this key, and a late successful result still populates the short TTL.
+_INSPECT_RESPONSE_TIMEOUT_S = 15.0
 _InspectKey = tuple[int, int | None, bool]
 _inspect_query_cache = InspectQueryCache[_InspectKey, _InspectAggregates](
     max_entries=_INSPECT_CACHE_MAX,
@@ -586,14 +594,35 @@ async def get_agent_inspect(
     # Loki fan-out. This fresh read is the live half of the response and must
     # execute even when the historical aggregate is a TTL hit.
     db = await asyncio.to_thread(db_rows_blocking, pool, agent_id)
-    aggregates = await asyncio.to_thread(
-        _inspect_rows_cached,
-        pool,
-        agent_id,
-        hours,
-        since_compact=since_compact,
-        spawned_at=db.spawned_at,
-    )
+    try:
+        aggregates = await asyncio.wait_for(
+            asyncio.to_thread(
+                _inspect_rows_cached,
+                pool,
+                agent_id,
+                hours,
+                since_compact=since_compact,
+                spawned_at=db.spawned_at,
+            ),
+            timeout=_INSPECT_RESPONSE_TIMEOUT_S,
+        )
+    except TimeoutError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="inspector history query timed out; retry",
+            headers={"Retry-After": "1"},
+        ) from exc
+    except loki_query_budget.LokiQueryBudgetError:
+        # Preserve the process-wide admission handler's machine-readable reason.
+        raise
+    except httpx.HTTPError as exc:
+        # Loki timed out, rejected, or dropped a response. The query layer has
+        # already emitted its query shape; the panel contract is retriable 503.
+        raise HTTPException(
+            status_code=503,
+            detail="inspector history backend unavailable; retry",
+            headers={"Retry-After": "1"},
+        ) from exc
     # The notice is read fresh on every call (it never rides the cache): the
     # panel's reply surface must clear the moment a notice resolves, and the
     # SELECT is cheap. The shell probe is equally cheap and always live.

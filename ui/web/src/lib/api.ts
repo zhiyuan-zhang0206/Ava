@@ -127,13 +127,18 @@ async function jsonWithTimeout<T>(
   path: string,
   init: RequestInit,
   timeoutMs: number,
+  callerSignal?: AbortSignal,
+  timeoutLabel = "request",
 ): Promise<T> {
   const controller = new AbortController();
+  const abortFromCaller = () => controller.abort();
+  if (callerSignal?.aborted) controller.abort();
+  else callerSignal?.addEventListener("abort", abortFromCaller, { once: true });
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_resolve, reject) => {
     timer = setTimeout(() => {
+      reject(new DOMException(`${timeoutLabel} exceeded ${timeoutMs}ms`, "TimeoutError"));
       controller.abort();
-      reject(new DOMException(`request exceeded ${timeoutMs}ms`, "TimeoutError"));
     }, timeoutMs);
   });
   try {
@@ -145,8 +150,14 @@ async function jsonWithTimeout<T>(
     ]);
   } finally {
     if (timer !== undefined) clearTimeout(timer);
+    callerSignal?.removeEventListener("abort", abortFromCaller);
   }
 }
+
+// The backend's aggregate deadline is 15s. This slightly wider client bound
+// covers response serialization/network transit while still bounding a dead
+// gateway or a response body that never completes.
+const INSPECT_REQUEST_TIMEOUT_MS = 20_000;
 
 function isAmbiguousDeliveryError(error: unknown): boolean {
   if (!(error instanceof ApiError)) return true;
@@ -212,8 +223,12 @@ export const api = {
     if (hours != null) params.set("hours", String(hours));
     if (sinceCompact) params.set("since_compact", "true");
     const qs = params.toString();
-    return f(`/api/agents/${agentId}/inspect${qs ? `?${qs}` : ""}`, { signal }).then(
-      ok<AgentInspect>,
+    return jsonWithTimeout<AgentInspect>(
+      `/api/agents/${agentId}/inspect${qs ? `?${qs}` : ""}`,
+      {},
+      INSPECT_REQUEST_TIMEOUT_MS,
+      signal,
+      "Inspector request",
     );
   },
 
