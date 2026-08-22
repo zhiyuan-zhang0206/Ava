@@ -124,7 +124,7 @@ def _adopt_database(base_admin_url: str, target: str, owner: str) -> None:
             conn.execute(pgsql.SQL("REASSIGN OWNED BY ava TO {}").format(pgsql.Identifier(owner)))
 
 
-def provision_database(identity: str, *, base_admin_url: str, cluster_secret: str) -> None:
+def provision_database(identity: str, *, base_admin_url: str, cluster_secret: str) -> bool:
     """Atomically provision a cluster's Postgres database AND its owning role:
     ensure role `identity`, CREATE DATABASE `identity` OWNED BY it, and apply
     db/schema.sql *as that role* so every object is role-owned. `identity` is the
@@ -137,6 +137,11 @@ def provision_database(identity: str, *, base_admin_url: str, cluster_secret: st
     prior apply crashed mid-way), this raises rather than silently treating it as
     ready. Provisioning is atomic: if schema apply fails on a freshly-created DB,
     the DB is dropped so a retry starts clean.
+
+    Returns:
+        True only when this call created the database; False when it adopted an
+        already-provisioned database. Birth uses this exact database provenance
+        to decide whether a later checkpoint-setup failure may drop the database.
 
     Raises:
         RuntimeError: the DB exists but schema_migrations is missing (half-provisioned).
@@ -151,7 +156,7 @@ def provision_database(identity: str, *, base_admin_url: str, cluster_secret: st
         ).fetchone()
     if exists:
         if _schema_applied(base_admin_url, identity):
-            return  # ensure_cluster_role already (re)affirmed the role + adopted ownership
+            return False  # role already re-affirmed and ownership adopted
         raise RuntimeError(
             f"database {identity!r} exists but its schema is incomplete (a prior "
             f"provision failed mid-apply). Drop it and retry: "
@@ -182,6 +187,7 @@ def provision_database(identity: str, *, base_admin_url: str, cluster_secret: st
         # rather than tripping the "exists but incomplete" guard above.
         drop_database(identity, base_admin_url=base_admin_url)
         raise
+    return True
 
 
 def drop_database(identity: str, *, base_admin_url: str) -> None:
@@ -204,21 +210,143 @@ def drop_database(identity: str, *, base_admin_url: str) -> None:
         conn.execute(pgsql.SQL("DROP ROLE IF EXISTS {}").format(pgsql.Identifier(identity)))
 
 
-def ensure_checkpoint_schema(identity: str, *, base_admin_url: str, cluster_secret: str) -> None:
+# Frozen at the upstream schema present when Ava adopted reversible checkpoint
+# migrations. Never bump this baseline: future versions belong in the manifest
+# below and must name their paired Ava up/down migration.
+CHECKPOINT_SCHEMA_UPSTREAM_BASELINE_VERSION = 9
+CHECKPOINT_SCHEMA_AVA_MIGRATIONS: dict[int, str] = {}
+
+
+class CheckpointSchemaError(RuntimeError):
+    """The LangGraph checkpoint schema cannot safely serve this checkout."""
+
+
+class CheckpointDependencyDriftError(CheckpointSchemaError):
+    """The dependency added schema migrations without a paired Ava migration."""
+
+
+class CheckpointSchemaMismatchError(CheckpointSchemaError):
+    """The database checkpoint migration set is not exactly current."""
+
+
+def _expected_checkpoint_schema_versions() -> frozenset[int]:
+    """The upstream versions explicitly approved by Ava's rollback contract."""
+    from langgraph.checkpoint.postgres import PostgresSaver
+
+    from shared import migrations as ava_migrations
+
+    declared_versions = sorted(CHECKPOINT_SCHEMA_AVA_MIGRATIONS)
+    expected_declared = list(
+        range(
+            CHECKPOINT_SCHEMA_UPSTREAM_BASELINE_VERSION + 1,
+            CHECKPOINT_SCHEMA_UPSTREAM_BASELINE_VERSION + 1 + len(declared_versions),
+        )
+    )
+    if declared_versions != expected_declared:
+        raise CheckpointDependencyDriftError(
+            "checkpoint migration manifest must be contiguous after the frozen "
+            f"upstream baseline {CHECKPOINT_SCHEMA_UPSTREAM_BASELINE_VERSION}: "
+            f"declared={declared_versions}, expected={expected_declared}"
+        )
+
+    declared_names = [CHECKPOINT_SCHEMA_AVA_MIGRATIONS[version] for version in declared_versions]
+    if declared_names != sorted(declared_names):
+        raise CheckpointDependencyDriftError(
+            "checkpoint migration manifest names must follow upstream version order: "
+            f"declared={declared_names}, sorted={sorted(declared_names)}"
+        )
+
+    tracked = ava_migrations.required_migration_set()
+    for version, name in CHECKPOINT_SCHEMA_AVA_MIGRATIONS.items():
+        up = ava_migrations.MIGRATIONS_DIR / f"{name}.sql"
+        down = ava_migrations.MIGRATIONS_DIR / f"{name}.down.sql"
+        if name not in tracked or not up.is_file() or not down.is_file():
+            raise CheckpointDependencyDriftError(
+                f"checkpoint version {version} must name a git-tracked paired Ava "
+                f"migration: name={name!r}, up_exists={up.is_file()}, "
+                f"down_exists={down.is_file()}, tracked={name in tracked}"
+            )
+
+    approved_target = CHECKPOINT_SCHEMA_UPSTREAM_BASELINE_VERSION + len(declared_versions)
+    dependency_target = len(PostgresSaver.MIGRATIONS) - 1
+    if dependency_target != approved_target:
+        raise CheckpointDependencyDriftError(
+            "LangGraph checkpoint migrations changed without an Ava rollback migration: "
+            f"dependency target={dependency_target}, "
+            f"approved target={approved_target}. Mirror every new "
+            "upstream migration in a paired Ava timestamp migration (including the "
+            "checkpoint_migrations row), then add it to "
+            "CHECKPOINT_SCHEMA_AVA_MIGRATIONS."
+        )
+    return frozenset(range(approved_target + 1))
+
+
+def assert_checkpoint_dependency_pinned() -> None:
+    """Fail before any DB work when the dependency schema contract drifted."""
+    _expected_checkpoint_schema_versions()
+
+
+def _checkpoint_schema_versions(db_url: str) -> frozenset[int] | None:
+    """Return the complete applied set, or ``None`` when no schema exists."""
+    import psycopg
+
+    with psycopg.connect(db_url, autocommit=True) as conn:
+        table = conn.execute("SELECT to_regclass('public.checkpoint_migrations')").fetchone()
+        if table is None or table[0] is None:
+            return None
+        rows = conn.execute("SELECT v FROM checkpoint_migrations").fetchall()
+    return frozenset(int(row[0]) for row in rows)
+
+
+def assert_checkpoint_schema_current(db_url: str) -> None:
+    """Require the exact approved checkpoint migration set, without mutation.
+
+    Every start role calls this after Ava migrations.  A pure runner therefore
+    detects behind, ahead, empty, or internally-gapped checkpoint state without
+    acquiring DDL capability.  Ahead is also refused: upstream gives no old-
+    runtime/new-schema compatibility guarantee, while Ava rollback can safely
+    reverse only schema changes represented by paired Ava migrations.
+    """
+    expected = _expected_checkpoint_schema_versions()
+    actual = _checkpoint_schema_versions(db_url)
+    if actual != expected:
+        found: frozenset[int] = frozenset() if actual is None else actual
+        raise CheckpointSchemaMismatchError(
+            "checkpoint schema is not current: "
+            f"missing={sorted(expected - found)}, unexpected={sorted(found - expected)}, "
+            f"table_present={actual is not None}. Run `ava start` on the gateway; "
+            "do not grant schema CREATE to runtime roles."
+        )
+
+
+def ensure_checkpoint_schema(
+    identity: str,
+    *,
+    base_admin_url: str,
+    cluster_secret: str,
+    database_created: bool = False,
+    resume_partial: bool = False,
+) -> None:
     """Create the LangGraph checkpoint tables (idempotent) AS the cluster role.
 
-    Runs the same `PostgresSaver.setup()` an agent boot runs, so the tables are
-    owned by the cluster's MAIN role — the gateway's checkpoint readers dial
-    that role. Called at install birth BEFORE `ensure_runner_role`: the runner's
+    Runs `PostgresSaver.setup()` as the cluster's MAIN role, so that role owns
+    the tables while runtime readers may use either it or `ava_runner`. Called
+    at install birth BEFORE `ensure_runner_role`: the runner's
     table grants can only target existing tables, and a runner booted as
-    `ava_runner` (post-cutover) finds the tables already present — its boot then
-    skips setup() (`agent/_process_boot._checkpoint_schema_present`), because
-    Postgres refuses `CREATE TABLE IF NOT EXISTS` for a role without CREATE on
-    the schema even when the tables exist (the runner holds no CREATE, by
-    design — any DDL must fail under it).
+    `ava_runner` (post-cutover) never runs setup(): Postgres refuses `CREATE
+    TABLE IF NOT EXISTS` for a role without CREATE on the schema even when the
+    tables exist (the runner holds no CREATE, by design — any DDL must fail
+    under it).
 
-    Idempotent: on an existing cluster whose checkpoint tables exist (created by
-    any earlier agent boot), setup() is a no-op.
+    Setup is install-only. ``database_created`` is the exact result of this
+    birth's ``provision_database`` call, not registry state. Upstream setup is
+    autocommit, so a failure can leave a contiguous prefix; when this call owns
+    the newly-created DB it drops that DB and role, making retry start clean.
+    ``resume_partial`` is separate, explicit install-birth authority: a hard
+    process death cannot run cleanup, so an idempotent birth retry may continue
+    only an exact contiguous prefix. Existing cluster/operator paths leave it
+    off and never repair, resume, or drop a partial/older/newer schema. Gaps and
+    unknown versions are never resumable.
     """
     from langgraph.checkpoint.postgres import PostgresSaver
 
@@ -229,8 +357,23 @@ def ensure_checkpoint_schema(identity: str, *, base_admin_url: str, cluster_secr
     # from_conn_string owns the connection for the setup (the same construction
     # shared/pg_tools.py uses for throwaway test clusters).
     role_url = url_with_userinfo(_swap_db(base_admin_url, identity), identity, cluster_secret)
-    with PostgresSaver.from_conn_string(role_url) as saver:
-        saver.setup()
+    expected = _expected_checkpoint_schema_versions()
+    actual = _checkpoint_schema_versions(role_url)
+    if actual == expected:
+        return
+    may_setup = database_created or resume_partial
+    resumable = actual is None or actual == frozenset(range(len(actual)))
+    if not may_setup or not resumable:
+        assert_checkpoint_schema_current(role_url)
+        return
+    try:
+        with PostgresSaver.from_conn_string(role_url) as saver:
+            saver.setup()
+        assert_checkpoint_schema_current(role_url)
+    except Exception:
+        if database_created:
+            drop_database(identity, base_admin_url=base_admin_url)
+        raise
 
 
 def ensure_runner_role(identity: str, *, base_admin_url: str, runner_password: str) -> None:

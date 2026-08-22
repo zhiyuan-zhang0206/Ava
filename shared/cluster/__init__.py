@@ -128,6 +128,12 @@ from shared.cluster.provision import (
     _swap_db as _swap_db,
 )
 from shared.cluster.provision import (
+    assert_checkpoint_dependency_pinned as assert_checkpoint_dependency_pinned,
+)
+from shared.cluster.provision import (
+    assert_checkpoint_schema_current as assert_checkpoint_schema_current,
+)
+from shared.cluster.provision import (
     drop_database as drop_database,
 )
 from shared.cluster.provision import (

@@ -23,6 +23,24 @@ from the registry record (`shared.db.direct_db_url`); everything else dials
 converge rewrites the URL to the direct port on the next `ava start` and the
 pooler never starts.
 
+Fresh install creates LangGraph's checkpoint schema with
+`PostgresSaver.setup()` as the cluster owner. Start never calls setup: after
+applying Ava's tracked SQL files, every capability reads the complete
+`checkpoint_migrations` set and requires the explicitly approved version.
+Checkpoint readers and agent boot therefore need CRUD but no schema CREATE.
+
+An upstream dependency bump that adds checkpoint migration version N must ship
+that DDL as a paired Ava timestamp migration and advance
+`CHECKPOINT_SCHEMA_AVA_MIGRATIONS` (the upstream baseline stays frozen at 9).
+The up SQL must be idempotent when fresh
+install setup already created both its schema effects and its
+`checkpoint_migrations` row, while still letting Ava record its own migration
+name; the down SQL reverses the schema effect and deletes the upstream version
+row. Real-Postgres tests must cover both existing-N-1 update/down and fresh-N
+birth -> first-start registration/down. Until all of that ships together, the
+dependency-drift gate fails before any database mutation, preserving update
+recovery and automatic rollback.
+
 **Identity is the home path** — there is no cluster name; the display label is
 the home's basename. A cluster's database and the Postgres role that owns it
 share one identifier, carried by its `.env` connection URLs **as data**

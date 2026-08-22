@@ -14,12 +14,18 @@ from __future__ import annotations
 
 from collections.abc import Generator
 from pathlib import Path
+from typing import cast
 
 import psycopg
 import pytest
 from langgraph.checkpoint.postgres import PostgresSaver
 
-from shared.cluster import ensure_checkpoint_schema, ensure_runner_role
+from shared.cluster import (
+    drop_database,
+    ensure_checkpoint_schema,
+    ensure_runner_role,
+    provision_database,
+)
 from shared.pg_tools import throwaway_postgres
 from shared.url_secret import url_with_userinfo
 
@@ -106,7 +112,12 @@ def test_ensure_checkpoint_schema_creates_tables_owned_by_identity(runner_db: st
             autocommit=True,
         ) as conn:
             conn.execute(_schema_sql())  # type: ignore[arg-type]
-        ensure_checkpoint_schema(identity, base_admin_url=admin, cluster_secret=_CLUSTER_SECRET)
+        ensure_checkpoint_schema(
+            identity,
+            base_admin_url=admin,
+            cluster_secret=_CLUSTER_SECRET,
+            database_created=True,
+        )
         with psycopg.connect(
             url_with_userinfo(
                 runner_db.rsplit("/", 1)[0] + "/" + identity, identity, _CLUSTER_SECRET
@@ -145,6 +156,316 @@ def test_ensure_checkpoint_schema_creates_tables_owned_by_identity(runner_db: st
             )
             conn.execute("DROP DATABASE IF EXISTS ava_runner_ct2")
             conn.execute("DROP ROLE IF EXISTS ava_runner_ct2")
+
+
+def test_fresh_install_dependency_drift_precedes_checkpoint_setup(
+    runner_db: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A new upstream migration cannot mutate even a fresh cluster by surprise."""
+    from shared.cluster.provision import CheckpointDependencyDriftError
+
+    admin = _admin_url(runner_db)
+    identity = "ava_runner_ct3"
+    db_url = url_with_userinfo(
+        runner_db.rsplit("/", 1)[0] + "/" + identity, identity, _CLUSTER_SECRET
+    )
+    with psycopg.connect(admin, autocommit=True) as conn:
+        conn.execute("CREATE ROLE ava_runner_ct3 LOGIN")
+        conn.execute("CREATE DATABASE ava_runner_ct3 OWNER ava_runner_ct3")
+    try:
+        with psycopg.connect(db_url, autocommit=True) as conn:
+            conn.execute(_schema_sql())  # type: ignore[arg-type]
+
+        monkeypatch.setattr(PostgresSaver, "MIGRATIONS", [*PostgresSaver.MIGRATIONS, "SELECT 1"])
+        with pytest.raises(CheckpointDependencyDriftError, match="paired Ava timestamp migration"):
+            ensure_checkpoint_schema(identity, base_admin_url=admin, cluster_secret=_CLUSTER_SECRET)
+
+        with psycopg.connect(db_url, autocommit=True) as conn:
+            row = conn.execute("SELECT to_regclass('public.checkpoint_migrations')").fetchone()
+        assert row == (None,)
+    finally:
+        with psycopg.connect(admin, autocommit=True) as conn:
+            conn.execute(
+                "SELECT pg_terminate_backend(pid) FROM pg_stat_activity"
+                " WHERE datname = 'ava_runner_ct3' AND pid <> pg_backend_pid()"
+            )
+            conn.execute("DROP DATABASE IF EXISTS ava_runner_ct3")
+            conn.execute("DROP ROLE IF EXISTS ava_runner_ct3")
+
+
+def test_default_missing_schema_refuses_setup(
+    runner_db: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Operator/default paths cannot turn a missing table into DDL authority."""
+    from shared.cluster.provision import CheckpointSchemaMismatchError
+
+    with psycopg.connect(runner_db, autocommit=True) as conn:
+        conn.execute("DROP TABLE checkpoint_migrations")
+
+    def setup_must_not_run(_self: PostgresSaver) -> None:
+        raise AssertionError("missing schema without birth authority must not run setup")
+
+    monkeypatch.setattr(PostgresSaver, "setup", setup_must_not_run)
+    with pytest.raises(CheckpointSchemaMismatchError):
+        ensure_checkpoint_schema(
+            _IDENTITY, base_admin_url=_admin_url(runner_db), cluster_secret=_CLUSTER_SECRET
+        )
+
+    with psycopg.connect(runner_db, autocommit=True) as conn:
+        row = conn.execute("SELECT to_regclass('public.checkpoint_migrations')").fetchone()
+    assert row == (None,)
+
+
+def test_default_schema_check_never_setup_after_concurrent_repair(
+    runner_db: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A concurrent repair between both reads cannot grant this call DDL authority."""
+    from shared.cluster import provision
+
+    expected = frozenset(range(len(PostgresSaver.MIGRATIONS)))
+    observed = iter((expected - {9}, expected))
+
+    def checkpoint_versions(_db_url: str) -> frozenset[int]:
+        return next(observed)
+
+    def setup_must_not_run(_self: PostgresSaver) -> None:
+        raise AssertionError("a successful read-only recheck must return before setup")
+
+    monkeypatch.setattr(provision, "_checkpoint_schema_versions", checkpoint_versions)
+    monkeypatch.setattr(PostgresSaver, "setup", setup_must_not_run)
+
+    ensure_checkpoint_schema(
+        _IDENTITY, base_admin_url=_admin_url(runner_db), cluster_secret=_CLUSTER_SECRET
+    )
+    with pytest.raises(StopIteration):
+        next(observed)
+
+
+def test_new_database_setup_failure_is_dropped_then_retry_converges(
+    runner_db: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Real PG: caught autocommit setup failure leaves no half-born database."""
+    admin = _admin_url(runner_db)
+    identity = "ava_runner_ct4"
+    db_url = url_with_userinfo(
+        runner_db.rsplit("/", 1)[0] + "/" + identity, identity, _CLUSTER_SECRET
+    )
+    original_setup = PostgresSaver.setup
+
+    assert (
+        provision_database(identity, base_admin_url=admin, cluster_secret=_CLUSTER_SECRET) is True
+    )
+
+    def fail_after_v0(_self: PostgresSaver) -> None:
+        with psycopg.connect(db_url, autocommit=True) as conn:
+            conn.execute(PostgresSaver.MIGRATIONS[0])  # pyright: ignore[reportCallIssue, reportArgumentType]
+            conn.execute("INSERT INTO checkpoint_migrations (v) VALUES (0)")
+        raise RuntimeError("injected setup crash after v0")
+
+    monkeypatch.setattr(PostgresSaver, "setup", fail_after_v0)
+    with pytest.raises(RuntimeError, match="injected setup crash"):
+        ensure_checkpoint_schema(
+            identity,
+            base_admin_url=admin,
+            cluster_secret=_CLUSTER_SECRET,
+            database_created=True,
+        )
+    with psycopg.connect(admin, autocommit=True) as conn:
+        row = conn.execute("SELECT 1 FROM pg_database WHERE datname = %s", (identity,)).fetchone()
+    assert row is None
+
+    monkeypatch.setattr(PostgresSaver, "setup", original_setup)
+    try:
+        assert (
+            provision_database(identity, base_admin_url=admin, cluster_secret=_CLUSTER_SECRET)
+            is True
+        )
+        ensure_checkpoint_schema(
+            identity,
+            base_admin_url=admin,
+            cluster_secret=_CLUSTER_SECRET,
+            database_created=True,
+        )
+        with psycopg.connect(db_url, autocommit=True) as conn:
+            rows = conn.execute("SELECT v FROM checkpoint_migrations").fetchall()
+        assert {row[0] for row in rows} == set(range(10))
+    finally:
+        drop_database(identity, base_admin_url=admin)
+
+
+def test_checkpoint_reads_need_crud_not_schema_ddl(
+    runner_db: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Both checkpoint readers work as ``ava_runner`` without schema CREATE.
+
+    The checkpoint schema is an install / migration concern.  A reader calling
+    ``PostgresSaver.setup()`` first issues ``CREATE TABLE IF NOT EXISTS`` and
+    PostgreSQL correctly rejects it for this least-privilege runtime role even
+    when every table already exists.  Production then loses timeline / inspect
+    history despite the role holding all CRUD privileges the read itself needs.
+    """
+    from langchain_core.messages import HumanMessage
+    from langgraph.checkpoint.base import CheckpointMetadata, empty_checkpoint
+
+    from shared.checkpoint import (
+        load_checkpoint_messages,
+        load_checkpoint_messages_by_trace,
+    )
+    from shared.config import settings
+
+    ensure_runner_role(_IDENTITY, base_admin_url=_admin_url(runner_db), runner_password=_RUNNER_PW)
+
+    trace_id = "f" * 32
+    checkpoint = empty_checkpoint()
+    checkpoint["channel_values"] = {"messages": [HumanMessage(content="runtime read")]}
+    checkpoint["channel_versions"] = {"messages": "1", "__start__": "1"}
+    with PostgresSaver.from_conn_string(runner_db) as saver:
+        saved = saver.put(
+            config={"configurable": {"thread_id": "73", "checkpoint_ns": ""}},
+            checkpoint=checkpoint,
+            metadata=cast(
+                CheckpointMetadata,
+                {"source": "input", "step": 1, "parents": {}, "trace_id": trace_id},
+            ),
+            new_versions={"messages": "1"},
+        )
+
+    monkeypatch.setattr(settings.data_plane, "db_url", _runner_url(runner_db))
+    current = load_checkpoint_messages(73)
+    checkpoint_id, traced = load_checkpoint_messages_by_trace(73, trace_id)
+
+    assert current == [HumanMessage(content="runtime read")]
+    assert checkpoint_id == saved["configurable"]["checkpoint_id"]  # pyright: ignore[reportTypedDictNotRequiredAccess]
+    assert traced == [HumanMessage(content="runtime read")]
+
+
+def test_current_checkpoint_schema_skips_setup(
+    runner_db: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Re-running install provisioning on a current schema performs no DDL."""
+
+    def setup_must_not_run(_self: PostgresSaver) -> None:
+        raise AssertionError("current checkpoint schema must bypass setup")
+
+    monkeypatch.setattr(PostgresSaver, "setup", setup_must_not_run)
+    ensure_checkpoint_schema(
+        _IDENTITY, base_admin_url=_admin_url(runner_db), cluster_secret=_CLUSTER_SECRET
+    )
+
+
+@pytest.mark.parametrize(
+    "corruption_sql",
+    [
+        "DROP TABLE checkpoint_migrations",
+        "DELETE FROM checkpoint_migrations",
+        "DELETE FROM checkpoint_migrations WHERE v = 9",
+        "DELETE FROM checkpoint_migrations WHERE v = 4",
+        "INSERT INTO checkpoint_migrations (v) VALUES (10)",
+        "INSERT INTO checkpoint_migrations (v) VALUES (-1)",
+    ],
+    ids=["table-missing", "empty", "behind", "internal-gap", "ahead", "unknown"],
+)
+def test_runner_checkpoint_schema_assertion_requires_exact_set(
+    runner_db: str, corruption_sql: str
+) -> None:
+    """The CRUD-only runner detects every schema drift shape without setup."""
+    from shared.cluster import assert_checkpoint_schema_current
+    from shared.cluster.provision import CheckpointSchemaMismatchError
+
+    ensure_runner_role(_IDENTITY, base_admin_url=_admin_url(runner_db), runner_password=_RUNNER_PW)
+    with psycopg.connect(runner_db, autocommit=True) as conn:
+        conn.execute(corruption_sql)  # type: ignore[arg-type]
+
+    with pytest.raises(CheckpointSchemaMismatchError):
+        assert_checkpoint_schema_current(_runner_url(runner_db))
+
+
+def test_runner_accepts_exact_checkpoint_schema_read_only(runner_db: str) -> None:
+    """A pure runner can pass the start gate with checkpoint SELECT alone."""
+    from shared.cluster import assert_checkpoint_schema_current
+
+    ensure_runner_role(_IDENTITY, base_admin_url=_admin_url(runner_db), runner_password=_RUNNER_PW)
+    assert_checkpoint_schema_current(_runner_url(runner_db))
+
+
+def test_existing_behind_schema_never_falls_back_to_setup(
+    runner_db: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only an absent fresh-install schema may invoke upstream setup."""
+    from shared.cluster.provision import CheckpointSchemaMismatchError
+
+    with psycopg.connect(runner_db, autocommit=True) as conn:
+        conn.execute("DELETE FROM checkpoint_migrations WHERE v = 9")
+
+    def setup_must_not_run(_self: PostgresSaver) -> None:
+        raise AssertionError("existing schemas must use paired Ava migrations")
+
+    monkeypatch.setattr(PostgresSaver, "setup", setup_must_not_run)
+    with pytest.raises(CheckpointSchemaMismatchError):
+        ensure_checkpoint_schema(
+            _IDENTITY, base_admin_url=_admin_url(runner_db), cluster_secret=_CLUSTER_SECRET
+        )
+
+
+def test_birth_retry_resumes_contiguous_prefix_after_setup_crash(
+    runner_db: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Real PG: a hard-crash-shaped partial birth converges on install retry."""
+    with psycopg.connect(runner_db, autocommit=True) as conn:
+        conn.execute("DELETE FROM checkpoint_migrations")
+
+    original_setup = PostgresSaver.setup
+
+    def fail_after_v0(_self: PostgresSaver) -> None:
+        with psycopg.connect(runner_db, autocommit=True) as conn:
+            conn.execute("INSERT INTO checkpoint_migrations (v) VALUES (0)")
+        raise RuntimeError("injected setup crash after v0")
+
+    monkeypatch.setattr(PostgresSaver, "setup", fail_after_v0)
+    with pytest.raises(RuntimeError, match="injected setup crash"):
+        ensure_checkpoint_schema(
+            _IDENTITY,
+            base_admin_url=_admin_url(runner_db),
+            cluster_secret=_CLUSTER_SECRET,
+            resume_partial=True,
+        )
+
+    with psycopg.connect(runner_db, autocommit=True) as conn:
+        rows = conn.execute("SELECT v FROM checkpoint_migrations").fetchall()
+    assert rows == [(0,)]
+
+    monkeypatch.setattr(PostgresSaver, "setup", original_setup)
+    ensure_checkpoint_schema(
+        _IDENTITY,
+        base_admin_url=_admin_url(runner_db),
+        cluster_secret=_CLUSTER_SECRET,
+        resume_partial=True,
+    )
+    with psycopg.connect(runner_db, autocommit=True) as conn:
+        rows = conn.execute("SELECT v FROM checkpoint_migrations").fetchall()
+    assert {row[0] for row in rows} == set(range(10))
+
+
+def test_birth_retry_refuses_non_prefix_checkpoint_state(
+    runner_db: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Install repair authority never blesses a gap as a resumable prefix."""
+    from shared.cluster.provision import CheckpointSchemaMismatchError
+
+    with psycopg.connect(runner_db, autocommit=True) as conn:
+        conn.execute("DELETE FROM checkpoint_migrations WHERE v = 4")
+
+    def setup_must_not_run(_self: PostgresSaver) -> None:
+        raise AssertionError("gapped checkpoint state must not be repaired")
+
+    monkeypatch.setattr(PostgresSaver, "setup", setup_must_not_run)
+    with pytest.raises(CheckpointSchemaMismatchError):
+        ensure_checkpoint_schema(
+            _IDENTITY,
+            base_admin_url=_admin_url(runner_db),
+            cluster_secret=_CLUSTER_SECRET,
+            resume_partial=True,
+        )
 
 
 def test_runner_grant_matrix(runner_db: str) -> None:
@@ -271,10 +592,8 @@ def test_runner_grant_matrix(runner_db: str) -> None:
         # Agent-boot DDL: PostgresSaver.setup() issues CREATE TABLE IF NOT EXISTS,
         # which Postgres refuses for a role without CREATE on the schema — even on
         # existing tables (verified on PG 17). That refusal is the DESIGNED
-        # behavior (any DDL must fail under ava_runner); the agent boot therefore
-        # skips setup() when the schema is present
-        # (agent/_process_boot._checkpoint_schema_present), which loses nothing —
-        # setup() is a no-op on an up-to-date schema.
+        # behavior (any DDL must fail under ava_runner); install + gateway start
+        # own setup(), while agent boot and checkpoint reads only use CRUD.
         with (
             pytest.raises(psycopg.errors.InsufficientPrivilege),
             PostgresSaver.from_conn_string(_runner_url(runner_db)) as saver,

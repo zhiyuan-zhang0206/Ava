@@ -572,7 +572,6 @@ _PER_TEST_TRUNCATE_TABLES = (
     "checkpoint_blobs",
     "checkpoint_writes",
     "checkpoints",
-    "checkpoint_migrations",
     "user_settings",  # no FK, per-test key/value data (audit round-2 cc-docs-tests P2)
     # The cluster extension registry (issue #39 S2). `extensions` FKs to
     # `extension_blobs`, so truncating the blobs cascades to the rows — but both
@@ -987,8 +986,8 @@ def cluster_defaults_unset(db_conn: psycopg.Connection) -> Iterator[None]:
 @pytest.fixture
 def db_conn() -> Iterator[psycopg.Connection]:
     """A sync psycopg.Connection on the session's test DB. Per-test isolation
-    (TRUNCATE + checkpoint re-setup) is handled by the autouse `_clean_state`, so
-    this fixture only opens and closes the connection."""
+    is handled by the autouse `_clean_state`, so this fixture only opens and
+    closes the connection."""
     conn = psycopg.connect(settings.data_plane.db_url)
     try:
         yield conn
