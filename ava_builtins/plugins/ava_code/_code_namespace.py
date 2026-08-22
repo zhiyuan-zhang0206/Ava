@@ -1,4 +1,4 @@
-"""Your persistent working directory; starts at your workspace."""
+"""Your persistent logical working directory; starts at your workspace."""
 
 # Audience = agent. Dev-perspective implementation details (state_handle /
 # LangGraph reducer / deepcopy isolation, etc.) live in the top-of-file
@@ -11,7 +11,7 @@ __all_for_ava__ = ["get", "set"]
 
 
 def get() -> Path:
-    """Return the current working directory."""
+    """Return the current logical working directory."""
     # state_handle binding happens after register_namespace in plugin.py; lazy
     # import here keeps `from . import _code_namespace` cycle-free.
     from .plugin import state_handle
@@ -20,13 +20,15 @@ def get() -> Path:
 
 
 def set(path: str | Path) -> None:
-    """Change the working directory. Persistent across turns and restarts.
+    """Change the logical working directory. Persistent across turns and restarts.
+
+    AvaCode SDK wrappers resolve relative paths against this value. The
+    Python process working directory is unchanged.
 
     Args:
-        path: relative paths resolve against the current directory;
+        path: relative paths resolve against the current logical directory;
             `~/...` is expanded.
     """
-    import os as _os
     import stat as _stat
 
     import ava.skills as _ava_skills
@@ -44,7 +46,6 @@ def set(path: str | Path) -> None:
     if not _stat.S_ISDIR(st.st_mode):
         raise NotADirectoryError(f"ava.cwd.set: path is not a directory: {p}")
     state_handle.update({"cwd": str(p)})
-    _os.chdir(str(p))  # sync process cwd with tracked cwd
 
     # Set a cwd-note for the after-exec hook to inject as a system note.
     # Same-turn dedup: each call overwrites cwd_note; only the final

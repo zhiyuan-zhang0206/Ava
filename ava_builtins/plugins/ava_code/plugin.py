@@ -40,7 +40,7 @@ __description__ = "Ava Code conventions — maintains cwd and auto-injects proje
 
 import contextlib
 import io
-import os
+import stat
 from collections.abc import Callable
 from pathlib import Path
 
@@ -647,11 +647,25 @@ class _InjectCwdNotesAfterExecHook(Hook):
         return None
 
 
-# ── after_init hook: sync os cwd from persisted state ──────────────────
-class _SyncCwdAfterInitHook(Hook):
-    """After state is restored from checkpoint (process restart / first turn),
-    sync the OS-level cwd to the persisted ava.cwd so bare open() / subprocess
-    calls in agent code resolve against the correct directory."""
+# ── after_init hook: validate persisted logical cwd ─────────────────────
+def _logical_cwd_error(cwd: Path) -> OSError | None:
+    """Return why ``cwd`` cannot serve as a logical directory, or None."""
+    try:
+        mode = cwd.stat().st_mode
+    except OSError as exc:
+        return exc
+    if not stat.S_ISDIR(mode):
+        return NotADirectoryError(f"persisted ava.cwd is not a directory: {cwd}")
+    return None
+
+
+class _ValidateCwdAfterInitHook(Hook):
+    """Repair a persisted logical cwd that cannot be statted or is not a directory.
+
+    The Python process cwd is deliberately outside plugin state: SDK wrappers
+    resolve against ``ava.cwd`` explicitly, while bare Python filesystem and
+    subprocess calls retain the process's stable startup cwd.
+    """
 
     async def __call__(
         self,
@@ -660,30 +674,29 @@ class _SyncCwdAfterInitHook(Hook):
         _config: object,
         /,
     ) -> dict | None:
-        cwd: str = state.ava_code__cwd  # pyright: ignore[reportAttributeAccessIssue]
-        try:
-            os.chdir(cwd)
-        except (FileNotFoundError, NotADirectoryError, PermissionError) as exc:
-            # The persisted cwd no longer exists (worktree deleted after
-            # PR merge / task cleanup, drive unmounted, etc.). Fall back
+        cwd = Path(state.ava_code__cwd)  # pyright: ignore[reportAttributeAccessIssue]
+        exc = _logical_cwd_error(cwd)
+        if exc is not None:
+            # The persisted cwd is no longer usable (worktree deleted after
+            # PR merge / task cleanup, drive unmounted, replaced by a file,
+            # etc.). Fall back
             # to the agent's workspace and persist the new cwd so future
             # turns and restarts don't crash on the same stale path.
             fallback = _default_cwd()
             logger.warning(
-                "[ava_code] after_init: persisted cwd {cwd!r} is unreachable "
+                "[ava_code] after_init: persisted cwd {cwd!r} failed validation "
                 "({exc!r}), falling back to {fallback!r} — state updated so "
                 "future restarts use the new cwd",
-                cwd=cwd,
+                cwd=str(cwd),
                 exc=exc,
                 fallback=str(fallback),
             )
-            os.chdir(fallback)
             return {"ava_code__cwd": str(fallback)}
         return None
 
 
-sync_cwd_after_init = _SyncCwdAfterInitHook()
-register_after_init(sync_cwd_after_init)
+validate_cwd_after_init = _ValidateCwdAfterInitHook()
+register_after_init(validate_cwd_after_init)
 
 inject_cwd_notes_after_exec = _InjectCwdNotesAfterExecHook()
 register_after_exec(inject_cwd_notes_after_exec)

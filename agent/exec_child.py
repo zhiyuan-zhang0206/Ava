@@ -1,4 +1,4 @@
-"""Exec subprocess entry — `python -m agent.exec_child`.
+"""Exec subprocess entry — `python -I -X utf8 -m agent.exec_child`.
 
 Each execute_code call runs here, in a fresh process the exec node spawns, so
 a stuck native call (numpy / ctypes / an `except BaseException` swallow loop)
@@ -62,7 +62,7 @@ from typing import Any, Literal, cast
 import shared.log  # noqa: F401  # pyright: ignore[reportUnusedImport]  # side effect is the point
 
 # isort: split
-# The child runs `python -m agent.exec_child` from the same venv as the agent
+# The child runs `python -I -X utf8 -m agent.exec_child` from the same venv as the agent
 # process, so `import ava` below costs ~750ms (measured; accepted — user
 # ruling 2026-08-21: cold start is fine, no warm pool, lazy import deferred).
 import ava

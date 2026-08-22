@@ -11,7 +11,7 @@ tags:
 
 ## Graph-Edge Hooks (`agent/hooks/_registry.py`)
 Four hook container nodes sit in the LangGraph execution graph (topology: START → after_init → init_context → claim → before_llm → llm → before_exec → exec → after_exec → claim):
-- `after_init` — runs once after the checkpoint is loaded, before `claim` (e.g., restores `os.chdir` on agent restart; introduced 2026-07-23, used by ava_code's `register_after_init(sync_cwd_after_init)`)
+- `after_init` — runs once after the checkpoint is loaded, before `claim` (e.g., ava_code's `register_after_init(validate_cwd_after_init)` repairs a persisted logical cwd that cannot be statted or is not a directory, without mutating the Python process cwd)
 - `before_llm` — after claim completion, before LLM invocation
 - `before_exec` — after LLM completion, before code execution
 - `after_exec` — after code execution completion, before the next node

@@ -24,7 +24,7 @@ worktree in one step. `git worktree add <path> main` fails when `main` is
 already the primary checkout — use `-b` or the two-step alternative:
 `git branch ava-<id>-<task> main` then `git worktree add .worktrees/ava-<id>-<task> ava-<id>-<task>`.
 
-Run it from the repo root: the path resolves against your current directory,
+Run it from the repo root: the path resolves against your current logical directory,
 so running it from inside another worktree silently nests the new worktree
 there instead of placing it under the repo root's `.worktrees/`.
 
