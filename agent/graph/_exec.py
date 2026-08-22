@@ -66,6 +66,7 @@ from langgraph.types import Command
 
 from agent import state as _state
 from agent._config_carrier import get_config_maps
+from agent.graph._attach_merge import merge_attachments
 from agent.graph._exec_notes import merge_exec_notes
 from agent.messages import exec_output_message
 from agent.state import _validate_plugin_state_keys
@@ -240,7 +241,9 @@ async def _run_agent_code(
     agent_id: int,
     code: str,
     chunk_publisher: ExecOutputChunkPublisher,
-) -> tuple[_ExecResult, dict[str, Any], int, list[SecurityFindingEntry]]:
+) -> tuple[
+    _ExecResult, dict[str, Any], int, list[SecurityFindingEntry], list[dict[str, Any]] | None
+]:
     """Run the agent's code in one disposable child process.
 
     The parent does not touch the ava.state slot — the child rebuilds the
@@ -249,7 +252,7 @@ async def _run_agent_code(
     envelope back. Validation is fail-fast on a tampered slot, and the child
     re-receives the agent's popped per-agent config maps so its SDK calls
     resolve the same settings. Returns
-    (result, plugin_state_update, exec_ms, findings)."""
+    (result, plugin_state_update, exec_ms, findings, attachments)."""
     config_overlay, birth_config = get_config_maps()
     exec_started = time.monotonic()
     async with subscribe_interrupt(ctx.ops_pool, agent_id) as cancel_event:
@@ -281,7 +284,8 @@ async def _run_agent_code(
         if payload is not None and payload.findings
         else []
     )
-    return result, plugin_state_update, exec_ms, findings
+    attachments = payload.attachments if payload is not None else None
+    return result, plugin_state_update, exec_ms, findings, attachments
 
 
 def _dispatch_exec_result(
@@ -415,9 +419,13 @@ async def _exec_node_impl(
         item_id=f"{exec_msg_idx}.0",
     )
 
-    result, plugin_state_update, exec_ms, envelope_findings = await _run_agent_code(
-        state, ctx, agent_id, resolved.code, chunk_publisher
-    )
+    (
+        result,
+        plugin_state_update,
+        exec_ms,
+        envelope_findings,
+        envelope_attachments,
+    ) = await _run_agent_code(state, ctx, agent_id, resolved.code, chunk_publisher)
     halted, result_text, exit_code_for_msg = _dispatch_exec_result(result, ctx, agent_id)
 
     # Pop the plugin's messages delta out of the state update — merged below
@@ -432,7 +440,8 @@ async def _exec_node_impl(
 
     # Compact path (_SystemHalt): write nothing back — claim REMOVE_ALLs the
     # whole history this turn, so ToolMessage/notes would be wiped anyway.
-    if not (isinstance(result, _ExecLifecycle) and isinstance(result.exc, _SystemHalt)):
+    compact_halt = isinstance(result, _ExecLifecycle) and isinstance(result.exc, _SystemHalt)
+    if not compact_halt:
         # The UI shows exactly what the agent sees in exec output — same blob
         # fed back to the LLM below (ExecOutput shares item_id with the chunk).
         ctx.event_publisher.emit(
@@ -458,11 +467,11 @@ async def _exec_node_impl(
         # findings + plugin context notes merge into this exec's delta, after
         # the ToolMessage (ordering rationale: _exec_notes.py).
         state_messages_update = merge_exec_notes(state_messages_update, plugin_messages, findings)
-    return Command[ExecGoto](
-        update={
-            "messages": state_messages_update,
-            "halted": halted,
-            **plugin_state_update,
-        },
-        goto=AFTER_EXEC,
-    )
+    update: dict[str, Any] = {
+        "messages": state_messages_update,
+        "halted": halted,
+        **plugin_state_update,
+    }
+    if not compact_halt:
+        update["attach"] = merge_attachments(state.attach, envelope_attachments)
+    return Command[ExecGoto](update=update, goto=AFTER_EXEC)

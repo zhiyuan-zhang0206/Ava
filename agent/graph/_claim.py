@@ -52,6 +52,7 @@ from langgraph.types import Command
 
 from agent import state as _state
 from agent.db import claim_inbound_batch, leave_starting_state
+from agent.graph._attach_drain import build_attach_drain
 from agent.graph._claim_batch import LifecycleCasLostError, _wait_for_batch
 from agent.graph._claim_decide import decide
 from agent.graph._claim_dispatch import _BatchState, dispatch_batch
@@ -100,6 +101,9 @@ async def _claim_node_impl(
     batch = await claim_inbound_batch(ctx.ops_pool, agent_id)
     if not batch:
         if state.halted or not has_conversation(state.messages):
+            drain = build_attach_drain(state, ctx)
+            if drain is not None:
+                return Command[ClaimGoto](update=drain, goto=CLAIM)
             if state.turn_active:
                 # Turn boundary: one graph invocation = one turn. This
                 # invocation already routed work (turn_active), and the next

@@ -30,6 +30,10 @@ Message formats exchanged between agent, LLM, users, and other agents. `messages
 - Wraps sandbox execution results from `execute_code`
 - Contains merged stdout/stderr output
 
+### Attachments (`attach_message`)
+- Appends one HumanMessage at the completed-turn boundary for files registered with `ava.self.attach`
+- Starts with the packer's text caption and follows with model-native media blocks; `ava_msg_type="attach"` distinguishes it without image URL metadata
+
 ### Chat Inbound Assembly (`_chat_inbound.py`)
 - Assembles `kind='chat'` inbound rows into `HumanMessage`: plain text via envelope wrapper as string message; multimodal inbound places text as first block, then uploads referenced images as native base64 blocks inline to the model
 - Split out from `_claim.py`, focused on multimodal image inline path
@@ -44,4 +48,5 @@ Message formats exchanged between agent, LLM, users, and other agents. `messages
 - `agent/messages.py:inbound_message(*, content, source, inbound_id, created_at=, image_urls=)` — envelope-wrapped inbound message
 - `agent/messages.py:system_note_message(...)` — system notification (with `NoteTag`)
 - `agent/messages.py:exec_output_message(...)` — execution output
+- `agent/messages.py:attach_message(...)` — attached media for the next turn
 - `agent/graph/_chat_inbound.py` — chat inbound → HumanMessage assembly (multimodal inline)

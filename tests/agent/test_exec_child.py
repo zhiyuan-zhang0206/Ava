@@ -100,6 +100,21 @@ def test_child_simple_code_done_envelope(tmp_path: Path) -> None:
     assert payload.kind == "done"
     assert payload.state_update is None
     assert payload.findings == []
+    assert payload.attachments == []
+
+
+def test_child_attach_registration_reaches_result_envelope(tmp_path: Path) -> None:
+    image = tmp_path / "render.png"
+    image.write_bytes(b"png")
+    proc, _request, result = _spawn(
+        tmp_path,
+        f"import ava\nava.self.attach({str(image)!r}, label='render result')",
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    assert read_result(result).attachments == [
+        {"path": str(image.resolve()), "label": "render result"}
+    ]
 
 
 def test_child_crash_writes_envelope_with_traceback(tmp_path: Path) -> None:

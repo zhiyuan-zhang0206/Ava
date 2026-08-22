@@ -1,7 +1,7 @@
 """Nested sub-state channel models for `BaseAgentState` — split out of
 `agent/state.py` (issue #156) to keep that module under the 800-line ceiling.
 
-Why these four live here and NOT in their own package: they are checkpoint
+Why these five live here and NOT in their own package: they are checkpoint
 channel values. LangGraph's `JsonPlusSerializer` writes a pydantic-v2 channel
 value as an ext object carrying its class's `(module, name)`, and
 `shared/checkpoint_serde.py` allowlists the pairs that may deserialize. Moving
@@ -41,6 +41,23 @@ class CompactState(BaseModel):
     version: int = 0
     reminder_shown: bool = False
     reminder_seen_version: int = 0
+
+
+class AttachEntry(BaseModel):
+    """One resolved local file awaiting delivery in the next turn."""
+
+    path: str
+    label: str | None
+
+
+def _new_pending_attachments() -> list[AttachEntry]:
+    return []
+
+
+class AttachState(BaseModel):
+    """Files registered during a turn, held until the claim boundary drains them."""
+
+    pending: list[AttachEntry] = Field(default_factory=_new_pending_attachments)
 
 
 class MemoryState(BaseModel):
@@ -116,6 +133,8 @@ class ContextReset(BaseModel):
 
 
 __all__ = [
+    "AttachEntry",
+    "AttachState",
     "CapabilitiesState",
     "CompactState",
     "ContextReset",

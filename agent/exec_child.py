@@ -287,6 +287,7 @@ def _run_code(code: str, payload: ResultPayload) -> None:
 def _run(request_path: str, result_path: str) -> None:
     """Child body: read the request, set up identity + plugins + state, run the
     code, write the result envelope."""
+    from ava._attach import take_attachments
     from ava.security import take_findings
 
     request = read_request(Path(request_path))
@@ -321,6 +322,7 @@ def _run(request_path: str, result_path: str) -> None:
     finally:
         _take_result_state_update(payload, state_injected=request.state is not None)
         payload.findings = [f.model_dump() for f in take_findings()]
+        payload.attachments = take_attachments()
         try:
             write_result(Path(result_path), payload)
         except BaseException as write_exc:

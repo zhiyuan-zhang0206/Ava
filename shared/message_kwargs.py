@@ -38,6 +38,7 @@ class AvaMsgType(StrEnum):
     as a custom type (a persisted-format change plus a deprecation warning on
     load), so `AvaMessageKwargs` types the field as `str`, mirroring storage."""
 
+    ATTACH = "attach"
     INBOUND = "inbound"
     SYSTEM_NOTE = "system_note"
     EXEC_OUTPUT = "exec_output"

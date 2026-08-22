@@ -8,6 +8,7 @@ BaseAgentState (framework layer, static):
     turn_idle        — hosted mode: claim found nothing and did not park, so the host ends the turn task
     update_initiated — this agent kicked off a cluster self-update
     compact          — nested compaction bookkeeping (CompactState, agent/state_channels.py)
+    attach           — nested next-turn attachment queue (AttachState, agent/state_channels.py)
     memory           — nested passive-recall bookkeeping (MemoryState, agent/state_channels.py)
     capabilities     — nested capability-index snapshot (CapabilitiesState, agent/state_channels.py)
     context_reset    — nested pending-context-reset bookkeeping (ContextReset, agent/state_channels.py)
@@ -62,7 +63,7 @@ from pydantic.fields import FieldInfo
 
 from agent.messages_guard import guarded_add_messages
 
-# The four nested sub-state channel models live in agent/state_channels
+# The five nested sub-state channel models live in agent/state_channels
 # (issue #156 — this module sat at the 800-line ceiling). They are RE-EXPORTED
 # here, never re-defined: LangGraph checkpoints written before the split carry
 # ("agent.state", "<Name>") ext envelopes, and the serializer resolves them by
@@ -70,7 +71,9 @@ from agent.messages_guard import guarded_add_messages
 # these names stay importable from agent.state. New checkpoints carry
 # ("agent.state_channels", "<Name>") and are allowlisted in
 # shared/checkpoint_serde.py alongside the legacy pairs.
+from agent.state_channels import AttachEntry as _AttachEntry
 from agent.state_channels import (
+    AttachState,
     CapabilitiesState,
     CompactState,
     ContextReset,
@@ -81,14 +84,16 @@ from shared import plugin_contributions
 from shared.checkpoint_serde import STATIC_CHECKPOINT_MSGPACK_TYPES
 from shared.plugin_context import current_plugin_name
 
+AttachEntry = _AttachEntry
+
 
 class BaseAgentState(BaseModel):
     """Framework static state — base fields all agents have.
 
     Flat fields (messages / halted / update_initiated) sit at the top level;
-    compaction, passive-recall, and pending-context-reset bookkeeping are
-    grouped into the nested `compact` / `memory` / `context_reset` sub-states,
-    each its own LangGraph channel holding a BaseModel.
+    compaction, attachments, passive-recall, and pending-context-reset
+    bookkeeping are grouped into nested sub-states, each its own LangGraph
+    channel holding a BaseModel.
     """
 
     # The messages channel runs the guarded reducer: add_messages + the
@@ -127,6 +132,9 @@ class BaseAgentState(BaseModel):
 
     compact: CompactState = Field(default_factory=CompactState)
     """Compaction bookkeeping — nested last-value channel (see CompactState)."""
+
+    attach: AttachState = Field(default_factory=AttachState)
+    """Pending files — nested last-value channel (see AttachState)."""
 
     memory: Annotated[MemoryState, _memory_state_merge] = Field(default_factory=MemoryState)
     """Passive-recall bookkeeping — nested union-reducer channel (see MemoryState)."""
@@ -701,7 +709,7 @@ def checkpoint_msgpack_allowlist() -> frozenset[tuple[str, str]]:
     """LangGraph checkpoint msgpack allowlist — `(module, name)` pairs the
     framework's checkpoint serde may deserialize.
 
-    Every nested sub-state channel value (`compact` / `memory` /
+    Every nested sub-state channel value (`compact` / `attach` / `memory` /
     `context_reset` / `capabilities`) is a Pydantic v2 model, and
     `JsonPlusSerializer` serializes such values as an ext object carrying the
     class's `(module, name)`; without an explicit registration the serializer
