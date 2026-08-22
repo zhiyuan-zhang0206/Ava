@@ -261,7 +261,100 @@ async def _connect_http(
     return session, local_stack
 
 
-async def _handle_client(  # noqa: PLR0915
+async def _handle_ping(req_id: Any) -> dict[str, Any]:
+    """Return the daemon watchdog healthcheck response without opening a session."""
+    # Lock-free liveness probe for the watchdog healthcheck: no server session
+    # involved, so a slow MCP server can never false-kill a busy daemon.
+    return {"id": req_id, "ok": True, "result": "pong"}
+
+
+async def _handle_list_tools(
+    req_id: Any,
+    server: str,
+    sessions: dict[str, Any],
+    stacks: dict[str, AsyncExitStack],
+    session_locks: dict[str, asyncio.Lock],
+) -> dict[str, Any]:
+    """List the configured server's tools in the daemon wire format."""
+    session = await _get_session(server, sessions, stacks, session_locks)
+    result = await session.list_tools()
+    tools = [
+        {
+            "name": t.name,
+            "description": t.description or "",
+            "input_schema": t.input_schema or {},
+        }
+        for t in result.tools
+    ]
+    return {"id": req_id, "ok": True, "result": tools}
+
+
+async def _handle_call_tool(
+    req: dict[str, Any],
+    req_id: Any,
+    params: dict[str, Any],
+    server: str,
+    sessions: dict[str, Any],
+    stacks: dict[str, AsyncExitStack],
+    session_locks: dict[str, asyncio.Lock],
+) -> dict[str, Any]:
+    """Call one MCP tool and serialize its result for the daemon wire protocol."""
+    tool = params.get("tool", "")
+    args = params.get("args") or {}
+    session = await _get_session(server, sessions, stacks, session_locks)
+    # The computer-mcp direct-dial session carries the calling agent's identity
+    # to the computer daemon (governance + audit). Duck-typed: only
+    # ComputerLineSession has the attribute.
+    if hasattr(session, "client_agent_id"):
+        session.client_agent_id = req.get("agent_id")
+    result = await session.call_tool(tool, args)
+    content = []
+    for c in result.content or []:
+        # Same fail-fast as ava/mcps.py:_dump_content: the MCP
+        # SDK contract requires ContentBlock to be a pydantic
+        # model; absence of model_dump means the SDK type
+        # changed or we missed a new type — silently turning
+        # it into {"type": "unknown"} would let the agent
+        # mis-parse it as legal data. The outer try catches
+        # and returns ok=False; the daemon stays alive.
+        if not hasattr(c, "model_dump"):
+            raise TypeError(
+                f"Unrecognized MCP content block type {type(c).__name__!r} "
+                f"({c!r}); ContentBlock should be a pydantic model — SDK upgrade or new type?"
+            )
+        content.append(c.model_dump(mode="python", exclude_none=True, by_alias=True))
+    return {
+        "id": req_id,
+        "ok": True,
+        "result": {
+            "content": content,
+            "isError": bool(result.is_error),
+            "structuredContent": result.structured_content,
+        },
+    }
+
+
+async def _dispatch_request(
+    req: dict[str, Any],
+    req_id: Any,
+    method: Any,
+    params: dict[str, Any],
+    server: str,
+    sessions: dict[str, Any],
+    stacks: dict[str, AsyncExitStack],
+    session_locks: dict[str, asyncio.Lock],
+) -> dict[str, Any]:
+    """Dispatch one parsed client request to its protocol method handler."""
+    if method == "ping":
+        return await _handle_ping(req_id)
+    if method == "list_tools":
+        return await _handle_list_tools(req_id, server, sessions, stacks, session_locks)
+    if method == "call_tool":
+        return await _handle_call_tool(req, req_id, params, server, sessions, stacks, session_locks)
+    return {"id": req_id, "ok": False, "error": f"Unknown method: {method}"}
+
+
+async def _handle_client(
     reader: asyncio.StreamReader,
     writer: asyncio.StreamWriter,
     sessions: dict[str, Any],
@@ -296,73 +389,16 @@ async def _handle_client(  # noqa: PLR0915
                     resp = None
                     for _attempt in range(3):
                         try:
-                            if method == "ping":
-                                # Lock-free liveness probe for the watchdog
-                                # healthcheck: no server session involved, so a
-                                # slow MCP server can never false-kill a busy
-                                # daemon.
-                                resp = {"id": req_id, "ok": True, "result": "pong"}
-                            elif method == "list_tools":
-                                session = await _get_session(
-                                    server, sessions, stacks, session_locks
-                                )
-                                result = await session.list_tools()
-                                tools = [
-                                    {
-                                        "name": t.name,
-                                        "description": t.description or "",
-                                        "input_schema": t.input_schema or {},
-                                    }
-                                    for t in result.tools
-                                ]
-                                resp = {"id": req_id, "ok": True, "result": tools}
-                            elif method == "call_tool":
-                                tool = params.get("tool", "")
-                                args = params.get("args") or {}
-                                session = await _get_session(
-                                    server, sessions, stacks, session_locks
-                                )
-                                # The computer-mcp direct-dial session carries
-                                # the calling agent's identity to the computer
-                                # daemon (governance + audit). Duck-typed:
-                                # only ComputerLineSession has the attribute.
-                                if hasattr(session, "client_agent_id"):
-                                    session.client_agent_id = req.get("agent_id")
-                                result = await session.call_tool(tool, args)
-                                content = []
-                                for c in result.content or []:
-                                    # Same fail-fast as ava/mcps.py:_dump_content: the MCP
-                                    # SDK contract requires ContentBlock to be a pydantic
-                                    # model; absence of model_dump means the SDK type
-                                    # changed or we missed a new type — silently turning
-                                    # it into {"type": "unknown"} would let the agent
-                                    # mis-parse it as legal data. The outer try catches
-                                    # and returns ok=False; the daemon stays alive.
-                                    if not hasattr(c, "model_dump"):
-                                        raise TypeError(  # noqa: TRY301
-                                            f"Unrecognized MCP content block type {type(c).__name__!r} "
-                                            f"({c!r}); ContentBlock should be a pydantic model — SDK upgrade or new type?"
-                                        )
-                                    content.append(
-                                        c.model_dump(
-                                            mode="python", exclude_none=True, by_alias=True
-                                        )
-                                    )
-                                resp = {
-                                    "id": req_id,
-                                    "ok": True,
-                                    "result": {
-                                        "content": content,
-                                        "isError": bool(result.is_error),
-                                        "structuredContent": result.structured_content,
-                                    },
-                                }
-                            else:
-                                resp = {
-                                    "id": req_id,
-                                    "ok": False,
-                                    "error": f"Unknown method: {method}",
-                                }
+                            resp = await _dispatch_request(
+                                req,
+                                req_id,
+                                method,
+                                params,
+                                server,
+                                sessions,
+                                stacks,
+                                session_locks,
+                            )
                             break
                         except Exception as e:
                             if _attempt == 2 or not _is_transport_error(e):
