@@ -65,6 +65,9 @@ from collections import defaultdict
 from pathlib import Path
 
 import yaml
+
+# PYTHONSAFEPATH=1 keeps the script's own directory off sys.path — restore it for the sibling import.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # noqa: PTH100, PTH120
 from build_okf_data import resolve_wikilink
 
 # ── config ──────────────────────────────────────────────────────────

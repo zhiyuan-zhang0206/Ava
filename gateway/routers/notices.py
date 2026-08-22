@@ -1,6 +1,7 @@
 """The ava.ui.notify() agent_notices endpoints (user-facing).
 
 - GET  /api/notices/open     — cross-fleet open FYI notices (require_response false).
+- GET  /api/notices/escalations — open task escalations for operator review.
 - GET  /api/notices/resolved — recently-resolved notices across the fleet (history).
 - POST /api/agents/{id}/notices/{notice_id}/resolve — resolve one open notice.
 
@@ -36,6 +37,7 @@ from psycopg_pool import ConnectionPool
 from gateway.routers._delivery import deliver_chat_inbound
 from gateway.schemas import (
     AgentMessageEnqueued,
+    EscalationNoticeItem,
     NoticeCreateIn,
     NoticeEditIn,
     NoticeItem,
@@ -54,6 +56,14 @@ _SELECT = (
     "n.require_response, n.blocking, n.created_at, n.updated_at, "
     "n.resolved_at, n.resolution, n.reply, n.task_id "
     "FROM agent_notices n JOIN agents t ON t.id = n.agent_id "
+)
+
+_ESCALATIONS_SELECT = (
+    "SELECT n.id, n.title, n.priority, n.created_at, n.task_id, task.title, task.status, "
+    "task.owner, owner.label, task.reminder_count, task.updated_at "
+    "FROM agent_notices n "
+    "JOIN agent_tasks task ON task.id = n.task_id "
+    "LEFT JOIN agents owner ON owner.id = task.owner "
 )
 
 # action -> stored resolution. Explicit map (never inferred from reply presence).
@@ -76,6 +86,22 @@ def _row_to_item(r: tuple[Any, ...]) -> NoticeItem:
         resolution=r[11],
         reply=r[12],
         task_id=r[13],
+    )
+
+
+def _row_to_escalation_item(r: tuple[Any, ...]) -> EscalationNoticeItem:
+    return EscalationNoticeItem(
+        id=r[0],
+        title=r[1],
+        priority=r[2],
+        created_at=r[3],
+        task_id=r[4],
+        task_title=r[5],
+        task_status=r[6],
+        owner_id=r[7],
+        owner_label=r[8],
+        reminder_count=r[9],
+        updated_at=r[10],
     )
 
 
@@ -111,6 +137,17 @@ def _open_notices_blocking(
         return cur.fetchall()
 
 
+def _escalation_notices_blocking(pool: ConnectionPool) -> list[tuple[Any, ...]]:
+    """Sync open task-escalations query — via to_thread, without FYI expiry."""
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            _ESCALATIONS_SELECT
+            + "WHERE n.require_response AND n.task_id IS NOT NULL AND n.resolved_at IS NULL "
+            + "ORDER BY n.priority ASC, n.created_at DESC, n.id DESC"
+        )
+        return cur.fetchall()
+
+
 def _resolved_notices_blocking(
     pool: ConnectionPool, sql: str, params: list[object]
 ) -> list[tuple[Any, ...]]:
@@ -140,6 +177,17 @@ async def get_open_notices(
         _open_notices_blocking, request.app.state.db_pool, limit, include_awaiting=include_awaiting
     )
     return [_row_to_item(r) for r in rows]
+
+
+@router.get("/api/notices/escalations")
+async def get_escalation_notices(request: Request) -> list[EscalationNoticeItem]:
+    """Open task escalations with their task and current-owner review context.
+
+    This is the operator's read-only queue: only response-required notices that
+    name a task are included. Escalations never run the FYI lazy-expiry sweep.
+    """
+    rows = await asyncio.to_thread(_escalation_notices_blocking, request.app.state.db_pool)
+    return [_row_to_escalation_item(r) for r in rows]
 
 
 def _notices_after_blocking(pool: ConnectionPool, after: int, limit: int) -> list[tuple[Any, ...]]:
