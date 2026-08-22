@@ -34,6 +34,7 @@ def cmd_update(
     local: bool = False,
     force: bool = False,
     origin: str | None = None,
+    rollout_log: str | None = None,
     mode: str = "smooth",
 ) -> int:
     """`ava cluster update` — POST the operation to the gateway, from any host.
@@ -59,6 +60,10 @@ def cmd_update(
     `origin` (`--origin <who>`) names the trigger; recorded in the rollout
     log and the cluster pin's `updated_by`. Defaults to `cli:<machine>`.
 
+    `rollout_log` (`--rollout-log <path>`) is internal metadata from the
+    detached rollout session. The local orchestration stamps it onto the
+    last-update record so status surfaces can identify this run's log.
+
     `force=True` (`--force`) starts the rollout even though a deploy is in
     flight somewhere in the cluster (overrides the deploy-window check only —
     a crashed rollout still holds cluster_update_lock, which `--force` does
@@ -70,13 +75,20 @@ def cmd_update(
     if local:
         # --local wins over --restart-only (their historical combination was the
         # in-process restart-only orchestration).
-        return _run_in_process(restart_only=restart_only, origin=origin, mode=mode)
+        return _run_in_process(
+            restart_only=restart_only,
+            origin=origin,
+            rollout_log=rollout_log,
+            mode=mode,
+        )
     if restart_only:
         return _post_cluster_restart(origin=origin, mode=mode)
     return _post_cluster_rollout(origin=origin, mode=mode, force=force)
 
 
-def _run_in_process(*, restart_only: bool, origin: str | None, mode: str) -> int:
+def _run_in_process(
+    *, restart_only: bool, origin: str | None, rollout_log: str | None, mode: str
+) -> int:
     """The foreground orchestration leg (`--local`, optionally combined with
     `--restart-only`). No role check: the user explicitly asked for the local
     leg on whatever host they are on; a host that cannot run the orchestration
@@ -121,7 +133,7 @@ def _run_in_process(*, restart_only: bool, origin: str | None, mode: str) -> int
         repo,
         restart_only=restart_only,
         origin=origin or f"cli:{machine_name()}",
-        rollout_log=None,
+        rollout_log=rollout_log,
         mode=mode,
     )
 
