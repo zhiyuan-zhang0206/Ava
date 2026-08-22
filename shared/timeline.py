@@ -17,7 +17,7 @@ and produced a snapshot missing the just-claimed inbound.
 from __future__ import annotations
 
 import ast as _ast
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
@@ -183,9 +183,10 @@ def _inbound_text(content: str | list[str | dict[str, Any]]) -> str:
 def needs_chat_anchors(messages: Sequence[BaseMessage]) -> bool:
     """Whether rendering *messages* consumes chat inbound anchors at all.
 
-    ``build_timeline_items`` pulls one ``kind='chat'`` inbound row per INBOUND
-    HumanMessage; the anchor supplies the real ts + inbound id for LEGACY rows
-    that predate ``ava_created_at``. Modern messages carry their own ts, so an
+    ``build_timeline_items`` matches each INBOUND HumanMessage to its
+    ``kind='chat'`` row by ``ava_inbound_id``; the anchor supplies the real ts
+    for LEGACY rows that predate ``ava_created_at``. Modern messages carry
+    their own ts and id, so an
     all-modern window renders identically with ``[]`` anchors — and querying
     the inbound table for it (one round trip per full-window snapshot, per
     node enter) is pure waste. Callers skip the DB query when this is False.
@@ -211,10 +212,12 @@ def build_timeline_items(
     """Render state.messages into timeline items + return msg_count.
 
     `chat_anchors` are the agent's `kind='chat'` inbound rows in created_at
-    ascending order; each inbound HumanMessage consumes the next anchor to
-    show its real ts + inbound id. Pass `[]` when no inbound table is
-    available (container / eval mode); inbound items then fall back to a
-    synthetic ts.
+    ascending order. An inbound HumanMessage carrying `ava_inbound_id` advances
+    to that exact anchor; only a legacy message without the id consumes the
+    next row positionally. This matters after compaction, where the surviving
+    checkpoint starts after many historical DB rows. Pass `[]` when no inbound
+    table is available (container / eval mode); modern inbound items still
+    retain their embedded id and timestamp.
 
     `start` renders only `messages[start:]` (incremental snapshot path: the
     caller holds a per-agent cursor of the last published msg_idx). Item ids
@@ -233,7 +236,8 @@ def build_timeline_items(
     a missing branch immediately instead of a silently truncated timeline.
     """
     items: list[TimelineItem] = []
-    inbound_iter = iter(chat_anchors)
+    anchor_positions = {anchor.id: index for index, anchor in enumerate(chat_anchors)}
+    next_anchor_idx = 0
     # Fallback anchor for "no inbound seen yet" — epoch 0 sorts these items
     # before all real-ts items. In practice only framework-INSERTed 'system'
     # source takes this path.
@@ -278,8 +282,16 @@ def build_timeline_items(
         kwargs = read_ava_kwargs(msg)
         ava_type = kwargs.get("ava_msg_type")
         if ava_type == AvaMsgType.INBOUND:
-            item, current_anchor, sub_offset = _inbound_item(
-                msg_idx, raw_content, kwargs, inbound_iter, current_anchor, sub_offset, next_ts
+            item, current_anchor, sub_offset, next_anchor_idx = _inbound_item(
+                msg_idx,
+                raw_content,
+                kwargs,
+                chat_anchors,
+                anchor_positions,
+                next_anchor_idx,
+                current_anchor,
+                sub_offset,
+                next_ts,
             )
             items.append(item)
         elif ava_type == AvaMsgType.EXEC_OUTPUT:
@@ -321,19 +333,38 @@ def _inbound_item(
     msg_idx: int,
     raw_content: str | list[str | dict[str, Any]],
     kwargs: AvaMessageKwargs,
-    inbound_iter: Iterator[InboundRow],
+    chat_anchors: list[InboundRow],
+    anchor_positions: dict[int, int],
+    next_anchor_idx: int,
     current_anchor: datetime,
     sub_offset: int,
     next_ts: Callable[[BaseMessage | None], str],
-) -> tuple[TimelineItem, datetime, int]:
-    """Render one inbound HumanMessage, consuming the next chat anchor.
+) -> tuple[TimelineItem, datetime, int, int]:
+    """Render one inbound HumanMessage and advance the legacy anchor cursor.
 
     A multimodal inbound carries list content (a text block + base64 image
     blocks); render the text part only, never str()-ing the base64 into the
     payload. Its image urls ride on ava_image_urls. Returns the item plus the
-    advanced anchor state (the anchor advances only when an anchor exists).
+    advanced anchor state.
     """
-    nxt = next(inbound_iter, None)
+    if "ava_inbound_id" in kwargs:
+        embedded_id = kwargs["ava_inbound_id"]
+        if type(embedded_id) is not int or embedded_id <= 0:
+            raise ValueError(f"inbound ava_inbound_id must be a positive int, got {embedded_id!r}")
+        # Exact lookup is non-destructive: a missing, duplicate, or out-of-order
+        # modern id cannot exhaust or rewind the cursor used by truly legacy
+        # messages. A forward match does advance past compacted-away rows.
+        anchor_idx = anchor_positions.get(embedded_id)
+        nxt = chat_anchors[anchor_idx] if anchor_idx is not None else None
+        if anchor_idx is not None:
+            next_anchor_idx = max(next_anchor_idx, anchor_idx + 1)
+    else:
+        # Pre-ava_inbound_id checkpoints have no correlation key. Preserve the
+        # historical best-effort positional fallback for those rows only.
+        embedded_id = None
+        nxt = chat_anchors[next_anchor_idx] if next_anchor_idx < len(chat_anchors) else None
+        if nxt is not None:
+            next_anchor_idx += 1
     if nxt is not None:
         current_anchor = nxt.created_at
         sub_offset = 0
@@ -346,10 +377,10 @@ def _inbound_item(
         created_at=(
             kwargs.get("ava_created_at") or (current_anchor.isoformat() if nxt else next_ts(None))
         ),
-        inbound_id=nxt.id if nxt else None,
+        inbound_id=embedded_id if embedded_id is not None else (nxt.id if nxt else None),
         images=images if images else None,
     )
-    return item, current_anchor, sub_offset
+    return item, current_anchor, sub_offset, next_anchor_idx
 
 
 def _exec_output_item(msg_idx: int, content: str, created_at: str, exec_ms: Any) -> TimelineItem:
