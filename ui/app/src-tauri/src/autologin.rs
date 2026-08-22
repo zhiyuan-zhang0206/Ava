@@ -1,15 +1,14 @@
-//! Desktop auto-login — exchange the local cluster secret for a short-lived
-//! session cookie without exposing the long-lived secret to remote web code.
+//! Native login — exchange a cluster secret for a short-lived session cookie
+//! without exposing the long-lived secret to remote web code.
 //!
-//! The request runs in native Rust. Only the gateway's `Set-Cookie` result is
-//! installed in the webview store, then the console is reloaded. Consequently
-//! a compromised console origin can reach only the same seven-day HTTP-only
-//! session it already runs inside; it cannot invoke an IPC command to extract
-//! the cluster-wide credential.
-//!
-//! A machine with no local cluster (`.env` absent) simply gets the login page.
+//! Desktop reads its local cluster secret from `$AVA_HOME/.env`; Android passes
+//! a secret held by its Keystore plugin. In both cases Rust sends the password
+//! directly to the gateway, installs only the returned HTTP-only cookie in the
+//! webview store, and loads the console after a successful exchange.
 
+#[cfg(desktop)]
 use std::env;
+#[cfg(desktop)]
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -21,63 +20,105 @@ use tauri::{Url, WebviewWindow};
 
 use crate::urls::Endpoints;
 
-/// Env key carrying the cluster secret in `$AVA_HOME/.env`.
+/// Env key carrying the desktop cluster secret in `$AVA_HOME/.env`.
+#[cfg(desktop)]
 const SECRET_KEY: &str = "AVA_CLUSTER_SECRET";
 
-/// Keep a stalled gateway from pinning the login helper thread indefinitely.
+/// Keep a stalled gateway from pinning the native login helper indefinitely.
 const LOGIN_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// A login failure that is safe to report without exposing the secret.
+#[derive(Debug)]
+pub enum LoginError {
+    /// The gateway received the secret and explicitly rejected it.
+    Rejected,
+    /// Transport, protocol, or cookie-installation failure.
+    Unavailable(String),
+}
+
+#[cfg(target_os = "android")]
+impl LoginError {
+    /// User-safe command error text; no variant carries the submitted secret.
+    pub fn message(&self) -> String {
+        match self {
+            Self::Rejected => "AUTH_FAILED: cluster secret was rejected".to_string(),
+            Self::Unavailable(message) => message.clone(),
+        }
+    }
+}
 
 /// Start one native login attempt and reload the console if it succeeds.
 ///
-/// Transport/auth failures deliberately fall back to the ordinary login page.
-/// In particular, an invalid local secret is never retried: repeated guesses
-/// would trip the gateway's brute-force lockout.
-pub fn start(window: WebviewWindow, endpoints: Endpoints) {
-    let Some(secret) = cluster_secret() else {
-        return;
-    };
-
-    std::thread::spawn(move || match login_cookie(&endpoints.gateway, &secret) {
-        Ok(cookie) => {
-            if let Err(err) = window.set_cookie(cookie) {
-                log::error!("could not install the auto-login session: {err}");
-                return;
-            }
+/// Startup callers intentionally do not retry failures: a rejected stored
+/// secret must fall back to the regular console login instead of risking the
+/// gateway's brute-force protections.
+pub fn start(window: WebviewWindow, endpoints: Endpoints, secret: String) {
+    std::thread::spawn(move || match login(&window, &endpoints, &secret) {
+        Ok(()) => {
             if let Err(err) = window.navigate(endpoints.entry) {
                 log::error!("could not reload the console after auto-login: {err}");
             }
         }
-        Err(err) => log::warn!("desktop auto-login unavailable: {err}"),
+        Err(LoginError::Rejected) => {
+            log::warn!("stored auto-login secret was rejected; showing the console login");
+        }
+        Err(LoginError::Unavailable(err)) => log::warn!("native auto-login unavailable: {err}"),
     });
+}
+
+/// Exchange `secret` for a session cookie and install it into `window`.
+///
+/// This intentionally leaves navigation to the caller: onboarding needs to
+/// persist a Keystore secret only after the cookie exchange has succeeded,
+/// while startup reloads the already-created console window afterwards.
+pub fn login(
+    window: &WebviewWindow,
+    endpoints: &Endpoints,
+    secret: &str,
+) -> Result<(), LoginError> {
+    let cookie = login_cookie(&endpoints.gateway, secret)?;
+    window
+        .set_cookie(cookie)
+        .map_err(|err| LoginError::Unavailable(format!("could not install session cookie: {err}")))
 }
 
 /// Exchange the secret for a cookie. The response body is intentionally
 /// ignored; the status and cookie header are the complete login contract.
-fn login_cookie(gateway: &Url, secret: &str) -> Result<Cookie<'static>, String> {
+fn login_cookie(gateway: &Url, secret: &str) -> Result<Cookie<'static>, LoginError> {
     let login_url = gateway
         .join("/api/auth/login")
-        .map_err(|err| format!("invalid gateway login URL: {err}"))?;
+        .map_err(|err| LoginError::Unavailable(format!("invalid gateway login URL: {err}")))?;
     let client = Client::builder()
         .timeout(LOGIN_TIMEOUT)
         // Never follow a redirect with the cluster secret in the POST body.
         // The configured gateway endpoint itself must answer the login.
         .redirect(Policy::none())
         .build()
-        .map_err(|err| format!("could not build login client: {err}"))?;
+        .map_err(|err| LoginError::Unavailable(format!("could not build login client: {err}")))?;
     let response = client
         .post(login_url.as_str())
         .json(&serde_json::json!({ "password": secret }))
         .send()
-        .map_err(|err| format!("gateway login request failed: {err}"))?;
+        .map_err(|err| LoginError::Unavailable(format!("gateway login request failed: {err}")))?;
+    if matches!(response.status().as_u16(), 401 | 403) {
+        return Err(LoginError::Rejected);
+    }
     if !response.status().is_success() {
-        return Err(format!("gateway rejected login ({})", response.status()));
+        return Err(LoginError::Unavailable(format!(
+            "gateway rejected login ({})",
+            response.status()
+        )));
     }
     let header = response
         .headers()
         .get(SET_COOKIE)
-        .ok_or_else(|| "gateway login returned no session cookie".to_string())?
+        .ok_or_else(|| {
+            LoginError::Unavailable("gateway login returned no session cookie".to_string())
+        })?
         .to_str()
-        .map_err(|_| "gateway login returned a non-text cookie".to_string())?;
+        .map_err(|_| {
+            LoginError::Unavailable("gateway login returned a non-text cookie".to_string())
+        })?;
     cookie_for_gateway(header, gateway)
 }
 
@@ -85,12 +126,13 @@ fn login_cookie(gateway: &Url, secret: &str) -> Result<Cookie<'static>, String> 
 /// the native webview store. WebKit and WebView2 distinguish an exact domain
 /// (`gateway.example`) from a subdomain-matching one (`.gateway.example`); the
 /// URL host can never carry that leading dot. Cookie domains contain no port.
-fn cookie_for_gateway(header: &str, gateway: &Url) -> Result<Cookie<'static>, String> {
+fn cookie_for_gateway(header: &str, gateway: &Url) -> Result<Cookie<'static>, LoginError> {
     let host = gateway
         .host_str()
-        .ok_or_else(|| "gateway URL has no host".to_string())?;
-    let parsed = cookie::Cookie::parse(header.to_string())
-        .map_err(|err| format!("gateway returned an invalid cookie: {err}"))?;
+        .ok_or_else(|| LoginError::Unavailable("gateway URL has no host".to_string()))?;
+    let parsed = cookie::Cookie::parse(header.to_string()).map_err(|err| {
+        LoginError::Unavailable(format!("gateway returned an invalid cookie: {err}"))
+    })?;
     let mut builder =
         cookie::Cookie::build((parsed.name().to_string(), parsed.value().to_string()))
             .domain(host.to_string())
@@ -110,8 +152,8 @@ fn cookie_for_gateway(header: &str, gateway: &Url) -> Result<Cookie<'static>, St
     Ok(builder.build().into_owned())
 }
 
-/// The `.env` the local cluster writes at install time: `$AVA_HOME/.env`,
-/// falling back to the default home `~/.ava/.env`.
+/// The desktop `.env` path: `$AVA_HOME/.env`, falling back to `~/.ava/.env`.
+#[cfg(desktop)]
 fn env_file() -> Option<PathBuf> {
     let home = match env::var("AVA_HOME") {
         Ok(value) if !value.trim().is_empty() => PathBuf::from(value),
@@ -122,18 +164,21 @@ fn env_file() -> Option<PathBuf> {
 
 /// Home directory without pulling in a crate for it: `$HOME` on unix,
 /// `%USERPROFILE%` on Windows.
+#[cfg(desktop)]
 fn dirs_home() -> Option<PathBuf> {
     #[cfg(windows)]
     let raw = env::var("USERPROFILE").ok();
     #[cfg(not(windows))]
     let raw = env::var("HOME").ok();
-    raw.filter(|v| !v.trim().is_empty()).map(PathBuf::from)
+    raw.filter(|value| !value.trim().is_empty())
+        .map(PathBuf::from)
 }
 
-/// Read `AVA_CLUSTER_SECRET` from the local cluster `.env`.
+/// Read the desktop cluster secret from `$AVA_HOME/.env`.
 ///
-/// `None` means "no local cluster here" — a frontend-only machine — and is a
-/// normal outcome, not an error. The value is never logged.
+/// `None` means "no local cluster here" and is normal for a frontend-only
+/// desktop machine. The value is never logged.
+#[cfg(desktop)]
 pub fn cluster_secret() -> Option<String> {
     let path = env_file()?;
     let text = std::fs::read_to_string(path).ok()?;
@@ -141,8 +186,8 @@ pub fn cluster_secret() -> Option<String> {
 }
 
 /// Extract the secret from `.env` text. Tolerates surrounding whitespace and
-/// `export ` prefixes; an empty assignment counts as absent (an empty secret is
-/// the cluster's no-auth mode, where auto-login has nothing to present).
+/// `export ` prefixes; an empty assignment is the no-auth cluster mode.
+#[cfg(desktop)]
 fn parse_secret(text: &str) -> Option<String> {
     for line in text.lines() {
         let line = line.trim();
@@ -163,10 +208,13 @@ fn parse_secret(text: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{cookie_for_gateway, parse_secret};
+    use super::cookie_for_gateway;
+    #[cfg(desktop)]
+    use super::parse_secret;
     use tauri::webview::cookie::SameSite;
     use tauri::Url;
 
+    #[cfg(desktop)]
     #[test]
     fn reads_the_secret_line() {
         assert_eq!(
@@ -175,6 +223,7 @@ mod tests {
         );
     }
 
+    #[cfg(desktop)]
     #[test]
     fn tolerates_export_prefix_quotes_and_padding() {
         assert_eq!(
@@ -183,17 +232,20 @@ mod tests {
         );
     }
 
+    #[cfg(desktop)]
     #[test]
     fn empty_assignment_is_the_no_auth_cluster_and_yields_nothing() {
         assert!(parse_secret("AVA_CLUSTER_SECRET=\n").is_none());
         assert!(parse_secret("AVA_CLUSTER_SECRET=   \n").is_none());
     }
 
+    #[cfg(desktop)]
     #[test]
     fn a_similarly_named_key_is_not_the_secret() {
         assert!(parse_secret("AVA_CLUSTER_SECRET_FILE=/tmp/x\n").is_none());
     }
 
+    #[cfg(desktop)]
     #[test]
     fn absent_key_yields_nothing() {
         assert!(parse_secret("AVA_DB_URL=postgresql://x\n").is_none());

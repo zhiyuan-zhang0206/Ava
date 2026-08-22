@@ -189,3 +189,45 @@ def test_the_kotlin_sources_match_the_package_the_patcher_installs_into() -> Non
 
     rust = (_REPO_ROOT / "ui" / "app" / "src-tauri" / "src" / "android.rs").read_text()
     assert f'PLUGIN_PACKAGE: &str = "{overlay.PACKAGE}"' in rust
+
+
+def test_overlay_carries_the_keystore_secret_plugin() -> None:
+    """The generated Android tree is ignored, so the source overlay is the
+    only durable home for the Keystore implementation and its plugin bridge."""
+    java_dir = _OVERLAY.parent / "java"
+    store = (java_dir / "AvaSecretStore.kt").read_text()
+    plugin = (java_dir / "AvaSecretPlugin.kt").read_text()
+    assert "AndroidKeyStore" in store
+    assert "AES/GCM/NoPadding" in store
+    assert "class AvaSecretPlugin" in plugin
+    assert all(command in plugin for command in ("fun save", "fun get", "fun clear"))
+
+
+def test_apply_copies_the_keystore_sources_into_the_generated_package(tmp_path: Path) -> None:
+    main = tmp_path / "app" / "src" / "main"
+    main.mkdir(parents=True)
+    (main / "AndroidManifest.xml").write_text(GENERATED_MANIFEST)
+    gradle = tmp_path / "app" / "build.gradle.kts"
+    gradle.write_text(GENERATED_GRADLE)
+
+    overlay.apply(_OVERLAY.parent, tmp_path)
+
+    package = main / "java" / Path(*overlay.PACKAGE.split("."))
+    assert (package / "AvaSecretStore.kt").is_file()
+    assert (package / "AvaSecretPlugin.kt").is_file()
+
+
+def test_apply_copies_the_proguard_rules_that_preserve_plugin_reflection(
+    tmp_path: Path,
+) -> None:
+    main = tmp_path / "app" / "src" / "main"
+    main.mkdir(parents=True)
+    (main / "AndroidManifest.xml").write_text(GENERATED_MANIFEST)
+    gradle = tmp_path / "app" / "build.gradle.kts"
+    gradle.write_text(GENERATED_GRADLE)
+
+    overlay.apply(_OVERLAY.parent, tmp_path)
+    overlay.apply(_OVERLAY.parent, tmp_path)
+
+    rules = (tmp_path / "app" / "proguard-ava.pro").read_text()
+    assert "-keep class com.ava.shell.** { *; }" in rules

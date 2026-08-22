@@ -5,14 +5,15 @@
 version's own templates. That tree is a build output, not source: committing it
 would freeze a generated Gradle project against one Tauri version and make every
 upgrade a merge. So the release workflow regenerates it and this script layers
-the three things the shell needs on top:
+the four things the shell needs on top:
 
-  1. the Kotlin foreground service + its Tauri plugin (`java/`);
-  2. the network security config (`network_security_config.xml`);
-  3. the manifest edits that make (1) and (2) take effect — permissions, the
+  1. the Kotlin foreground service and Keystore plugins (`java/`);
+  2. ProGuard rules that preserve the JNI/reflection surface (`proguard-ava.pro`);
+  3. the network security config (`network_security_config.xml`);
+  4. the manifest edits that make (1) and (3) take effect — permissions, the
      `<service>` declaration, and the `android:networkSecurityConfig` attribute.
 
-Only (3) is delicate, because it edits a generated file. It is written to be
+Only (4) is delicate, because it edits a generated file. It is written to be
 idempotent (re-running changes nothing) and to fail loudly if the generated
 manifest stops looking the way it does today, rather than silently producing an
 APK with no background residency.
@@ -179,8 +180,9 @@ def patch_gradle(build_gradle: str) -> str:
 
 
 def apply(overlay_dir: Path, gen_dir: Path) -> None:
-    """Copy the Kotlin + resource overlay into `gen_dir` and patch its manifest."""
-    main = gen_dir / "app" / "src" / "main"
+    """Copy the Kotlin, resource, and ProGuard overlay into `gen_dir`."""
+    app_dir = gen_dir / "app"
+    main = app_dir / "src" / "main"
     if not main.is_dir():
         raise SystemExit(
             f"{main} does not exist — run `cargo tauri android init` before this script"
@@ -190,6 +192,7 @@ def apply(overlay_dir: Path, gen_dir: Path) -> None:
     package_dir.mkdir(parents=True, exist_ok=True)
     for source in sorted((overlay_dir / "java").glob("*.kt")):
         shutil.copy2(source, package_dir / source.name)
+    shutil.copy2(overlay_dir / "proguard-ava.pro", app_dir / "proguard-ava.pro")
 
     xml_dir = main / "res" / "xml"
     xml_dir.mkdir(parents=True, exist_ok=True)
@@ -201,7 +204,7 @@ def apply(overlay_dir: Path, gen_dir: Path) -> None:
     manifest = main / "AndroidManifest.xml"
     manifest.write_text(patch_manifest(manifest.read_text(encoding="utf-8")) + "\n")
 
-    gradle = gen_dir / "app" / "build.gradle.kts"
+    gradle = app_dir / "build.gradle.kts"
     gradle.write_text(patch_gradle(gradle.read_text(encoding="utf-8")), encoding="utf-8")
 
 

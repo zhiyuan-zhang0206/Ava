@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
@@ -30,7 +30,7 @@
       h1 { margin: 0 0 6px; font-size: 1.35rem; }
       p { margin: 0 0 20px; color: var(--muted); }
       label { display: block; margin-bottom: 6px; font-size: 0.85rem; color: var(--muted); }
-      input[type="text"] {
+      input[type="text"], input[type="password"] {
         width: 100%;
         padding: 11px 12px;
         border: 1px solid var(--line);
@@ -39,10 +39,8 @@
         color: var(--fg);
         font: inherit;
       }
-      input[type="text"]:focus {
-        outline: 2px solid var(--accent);
-        outline-offset: 1px;
-      }
+      input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+      input.invalid { border-color: var(--danger); }
       button {
         width: 100%;
         margin-top: 14px;
@@ -56,8 +54,22 @@
       }
       button.secondary { background: transparent; color: var(--muted); font-weight: 400; }
       button:disabled { opacity: 0.55; }
-      .error { color: var(--danger); font-size: 0.85rem; min-height: 1.2em; }
-      .hint { font-size: 0.8rem; color: var(--muted); margin-top: 14px; }
+      .secret-input { display: flex; gap: 8px; }
+      .secret-input input { min-width: 0; }
+      .secret-toggle {
+        width: auto;
+        flex: 0 0 auto;
+        margin: 0;
+        padding-inline: 12px;
+        background: #24242c;
+        font-weight: 400;
+      }
+      .error { color: var(--danger); font-size: 0.85rem; min-height: 1.2em; margin: 14px 0 0; }
+      .hint { font-size: 0.8rem; color: var(--muted); margin: 6px 0 0; }
+      .optional { color: var(--muted); font-weight: 400; }
+      details { margin-top: 18px; border-top: 1px solid var(--line); }
+      summary { padding-top: 14px; cursor: pointer; color: var(--muted); }
+      details > div { padding-top: 14px; }
       .toggle {
         display: flex;
         align-items: center;
@@ -75,18 +87,20 @@
         border-radius: 50%;
         animation: spin 0.9s linear infinite;
       }
+      .steps { margin: 0 0 14px; padding-left: 1.4rem; color: var(--muted); text-align: left; }
+      .steps li.active { color: var(--fg); }
+      .countdown { font-variant-numeric: tabular-nums; }
       @keyframes spin { to { transform: rotate(360deg); } }
       [hidden] { display: none !important; }
     </style>
   </head>
   <body>
     <main>
-      <!-- First run (Android) / "change server": ask where the cluster is. -->
       <section id="setup" hidden>
-        <h1>Connect to Ava</h1>
-        <p>Enter the address of your cluster's console — the gate, normally port 3000.</p>
+        <h1>连接到 Ava</h1>
+        <p>填 Ava 服务器地址；密钥可选，填了直达已登录</p>
         <form id="setup-form">
-          <label for="server">Server address</label>
+          <label for="server">服务器地址</label>
           <input
             id="server"
             name="server"
@@ -95,105 +109,267 @@
             autocapitalize="none"
             autocorrect="off"
             spellcheck="false"
-            placeholder="http://192.168.1.10:3000"
+            placeholder="100.103.96.72"
             required
           />
-          <label for="gateway" style="margin-top: 14px">Gateway address (optional)</label>
-          <input
-            id="gateway"
-            name="gateway"
-            type="text"
-            inputmode="url"
-            autocapitalize="none"
-            autocorrect="off"
-            spellcheck="false"
-            placeholder="Derived from the server address"
-          />
-          <label class="toggle">
-            <input id="background-service" type="checkbox" />
-            Keep Ava connected in the background
-          </label>
-          <label class="toggle">
-            <input id="notifications" type="checkbox" />
-            Notify when an agent finishes or needs input
-          </label>
-          <p class="error" id="setup-error"></p>
-          <button type="submit" id="setup-submit">Connect</button>
-          <button type="button" class="secondary" id="setup-cancel" hidden>Cancel</button>
+          <div id="secret-field" style="margin-top: 14px">
+            <label for="cluster-secret">集群密钥 <span class="optional">（可选）</span></label>
+            <div class="secret-input">
+              <input
+                id="cluster-secret"
+                name="cluster-secret"
+                type="password"
+                autocomplete="new-password"
+                autocapitalize="none"
+                autocorrect="off"
+                spellcheck="false"
+              />
+              <button type="button" class="secret-toggle" id="secret-visibility" aria-pressed="false">显示</button>
+            </div>
+            <p class="hint">不填则连接后到网页登录页输入</p>
+          </div>
+          <details id="advanced-options">
+            <summary>高级选项</summary>
+            <div>
+              <label for="gateway">网关地址覆盖（可选）</label>
+              <input
+                id="gateway"
+                name="gateway"
+                type="text"
+                inputmode="url"
+                autocapitalize="none"
+                autocorrect="off"
+                spellcheck="false"
+                placeholder="默认从服务器地址推导"
+              />
+              <label class="toggle">
+                <input id="background-service" type="checkbox" />
+                后台驻留
+              </label>
+              <label class="toggle">
+                <input id="notifications" type="checkbox" />
+                通知
+              </label>
+            </div>
+          </details>
+          <p class="error" id="setup-error" aria-live="polite"></p>
+          <button type="submit" id="setup-submit">连接</button>
+          <button type="button" class="secondary" id="setup-cancel" hidden>取消</button>
         </form>
-        <p class="hint">
-          A bare host works too — <code>box.local</code> becomes
-          <code>http://box.local:3000</code>. The gateway is assumed to be the same host on
-          port 8000 unless you enter one above.
-        </p>
       </section>
 
-      <!-- The gate is down (a rollout, usually): the retry loop is running. -->
       <section id="connecting" hidden style="text-align: center">
         <div class="spinner" style="margin-inline: auto"></div>
-        <h1>Connecting…</h1>
+        <h1>正在连接…</h1>
         <p id="connecting-target"></p>
+        <ol class="steps" id="connecting-steps">
+          <li>探测控制台</li>
+          <li>交换会话</li>
+          <li>载入界面</li>
+        </ol>
+        <p class="countdown" id="connecting-countdown"></p>
       </section>
 
-      <!-- The retry budget ran out. -->
       <section id="unreachable" hidden style="text-align: center">
-        <h1>Cannot reach Ava</h1>
+        <h1>连接失败</h1>
         <p id="unreachable-target"></p>
-        <button type="button" id="retry">Try again</button>
-        <button type="button" class="secondary" id="change-server">Change server</button>
+        <p id="unreachable-reason"></p>
+        <button type="button" id="retry">重试</button>
+        <button type="button" class="secondary" id="change-server">修改地址</button>
       </section>
     </main>
 
     <script>
       const invoke = (cmd, args) => window.__TAURI_INTERNALS__.invoke(cmd, args);
+      const SAVE_TIMEOUT_MS = 30_000;
+      const SAVE_RESPONSE_TIMEOUT_MS = 2_500;
+      const CONNECTING_DEADLINE_MS = 30_000;
+      const AUTH_ERROR_PREFIX = "AUTH_FAILED:";
+      const failureCopy = {
+        unreachable: "手机网络到不了这个地址——检查 Tailscale 登录、局域网、地址抄写",
+        http: "服务器在但控制台没起来——稍后重试",
+        auth: "密钥不对——重输或清空跳过到网页登录页",
+        "update-window": "服务器可能正在升级或回滚，请稍后重试。",
+      };
+      let connectingTimer = null;
+
       const show = (id) => {
         for (const section of document.querySelectorAll("main > section")) {
           section.hidden = section.id !== id;
         }
+        if (id !== "connecting" && connectingTimer) {
+          window.clearInterval(connectingTimer);
+          connectingTimer = null;
+        }
       };
 
-      /** The Rust side picks the screen by fragment; setup is the fallback. */
+      /** Rust selects bundled screens by fragment; setup is the safe fallback. */
       const screenFromHash = () => {
         const hash = window.location.hash.replace("#", "");
         return ["setup", "connecting", "unreachable"].includes(hash) ? hash : "setup";
       };
 
+      const failureReason = () => new URLSearchParams(window.location.search).get("reason") || "unreachable";
+
+      function renderFailure() {
+        const reason = failureReason();
+        document.getElementById("unreachable-reason").textContent = failureCopy[reason] || failureCopy.unreachable;
+      }
+
+      function beginConnecting(target) {
+        document.getElementById("connecting-target").textContent = target;
+        if (window.location.hash !== "#connecting") window.location.hash = "connecting";
+        show("connecting");
+        if (connectingTimer) window.clearInterval(connectingTimer);
+        const deadline = Date.now() + CONNECTING_DEADLINE_MS;
+        const steps = [...document.querySelectorAll("#connecting-steps li")];
+        const update = () => {
+          const seconds = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+          const activeStep = seconds > 20 ? 0 : seconds > 10 ? 1 : 2;
+          steps.forEach((step, index) => step.classList.toggle("active", index === activeStep));
+          document.getElementById("connecting-countdown").textContent = `最多再等待 ${seconds} 秒`;
+        };
+        update();
+        connectingTimer = window.setInterval(update, 1_000);
+      }
+
+      // Mirrors Rust normalize_entry_address: missing and gateway port 8000
+      // become console port 3000; save rejects other custom ports first.
+      function normalizedEntryUrl(raw) {
+        const address = raw.trim();
+        const withScheme = address.includes("://") ? address : `http://${address}`;
+        const url = new URL(withScheme);
+        if (!url.port || url.port === "8000") url.port = "3000";
+        return url.toString();
+      }
+
+      function showSetupError(message, secretError = false) {
+        const secret = document.getElementById("cluster-secret");
+        secret.classList.toggle("invalid", secretError);
+        document.getElementById("setup-error").textContent = message;
+        if (window.location.hash !== "#setup") window.location.hash = "setup";
+        show("setup");
+      }
+
       async function render() {
         const config = await invoke("shell_config");
         const target = config.entryUrl || "";
+        const desktop = ["macos", "windows"].includes(config.platform);
         document.getElementById("connecting-target").textContent = target;
         document.getElementById("unreachable-target").textContent = target;
         document.getElementById("server").value = target;
         document.getElementById("gateway").value = config.gatewayUrl || "";
         document.getElementById("background-service").checked = config.backgroundService;
         document.getElementById("notifications").checked = config.notifications;
+        document.getElementById("secret-field").hidden = desktop;
         document.getElementById("setup-cancel").hidden = !target;
-        document.getElementById("setup-submit").textContent = target ? "Save" : "Connect";
-        show(screenFromHash());
+
+        const screen = screenFromHash();
+        if (screen === "connecting") {
+          beginConnecting(target);
+        } else if (screen === "unreachable") {
+          renderFailure();
+          show(screen);
+        } else {
+          show(screen);
+        }
       }
+
+      document.getElementById("secret-visibility").addEventListener("click", () => {
+        const secret = document.getElementById("cluster-secret");
+        const visible = secret.type === "password";
+        secret.type = visible ? "text" : "password";
+        const button = document.getElementById("secret-visibility");
+        button.textContent = visible ? "隐藏" : "显示";
+        button.setAttribute("aria-pressed", String(visible));
+      });
 
       document.getElementById("setup-form").addEventListener("submit", async (event) => {
         event.preventDefault();
         const submit = document.getElementById("setup-submit");
-        const error = document.getElementById("setup-error");
-        error.textContent = "";
+        const server = document.getElementById("server").value;
+        const secret = document.getElementById("cluster-secret");
+        const desktop = document.getElementById("secret-field").hidden;
+        const patch = {
+          entryUrl: server,
+          gatewayUrl: document.getElementById("gateway").value,
+          backgroundService: document.getElementById("background-service").checked,
+          notifications: document.getElementById("notifications").checked,
+        };
+        if (!desktop) patch.clusterSecret = secret.value;
+
+        secret.classList.remove("invalid");
+        document.getElementById("setup-error").textContent = "";
         submit.disabled = true;
+        beginConnecting(server);
+        let settled = false;
+        let timedOut = false;
+        const timeout = window.setTimeout(() => {
+          const recover = () => {
+            if (settled && window.location.hash !== "#connecting") return;
+            timedOut = true;
+            submit.disabled = false;
+            showSetupError("连接超时，请重试。");
+          };
+          if (document.visibilityState === "visible") {
+            recover();
+            return;
+          }
+          const whenVisible = () => {
+            if (document.visibilityState !== "visible") return;
+            document.removeEventListener("visibilitychange", whenVisible);
+            recover();
+          };
+          document.addEventListener("visibilitychange", whenVisible);
+        }, SAVE_TIMEOUT_MS);
         try {
-          await invoke("shell_save_settings", {
-            patch: {
-              entryUrl: document.getElementById("server").value,
-              gatewayUrl: document.getElementById("gateway").value,
-              backgroundService: document.getElementById("background-service").checked,
-              notifications: document.getElementById("notifications").checked,
-            },
-          });
+          // A secret races the native login probe's 10-second timeout; a missing
+          // response still assumes the save completed and recovers a wedged pipe.
+          const raceWindowMs = secret.value.trim() ? 12_000 : SAVE_RESPONSE_TIMEOUT_MS;
+          let responseTimer;
+          const outcome = await Promise.race([
+            invoke("shell_save_settings", { patch }).then(
+              () => ({ kind: "fulfilled" }),
+              (error) => ({ kind: "rejected", error }),
+            ),
+            new Promise((resolve) => {
+              responseTimer = window.setTimeout(
+                () => resolve({ kind: "timed-out" }),
+                raceWindowMs,
+              );
+            }),
+          ]);
+          window.clearTimeout(responseTimer);
+          settled = true;
+          if (outcome.kind === "rejected") {
+            window.clearTimeout(timeout);
+            if (timedOut) return;
+            const message = String(outcome.error);
+            const authFailed = message.startsWith(AUTH_ERROR_PREFIX);
+            showSetupError(authFailed ? failureCopy.auth : message, authFailed);
+            submit.disabled = false;
+            return;
+          }
+          if (timedOut) return;
+          if (outcome.kind === "fulfilled") window.clearTimeout(timeout);
+          // Android can lose the native post-save pipe after persistence finishes.
+          // This page owns navigation, so it does not depend on that pipe.
+          window.location.replace(normalizedEntryUrl(server));
         } catch (err) {
-          error.textContent = String(err);
+          settled = true;
+          window.clearTimeout(timeout);
+          if (timedOut) return;
+          const message = String(err);
+          const authFailed = message.startsWith(AUTH_ERROR_PREFIX);
+          showSetupError(authFailed ? failureCopy.auth : message, authFailed);
           submit.disabled = false;
         }
       });
 
-      document.getElementById("retry").addEventListener("click", () => invoke("shell_retry_entry"));
+      document.getElementById("retry").addEventListener("click", () => {
+        beginConnecting(document.getElementById("server").value);
+        invoke("shell_retry_entry");
+      });
       document
         .getElementById("setup-cancel")
         .addEventListener("click", () => invoke("shell_retry_entry"));
@@ -202,7 +378,17 @@
         show("setup");
       });
 
-      window.addEventListener("hashchange", () => show(screenFromHash()));
+      window.addEventListener("hashchange", () => {
+        const screen = screenFromHash();
+        if (screen === "connecting") {
+          beginConnecting(document.getElementById("connecting-target").textContent);
+        } else if (screen === "unreachable") {
+          renderFailure();
+          show(screen);
+        } else {
+          show(screen);
+        }
+      });
       render();
     </script>
   </body>
