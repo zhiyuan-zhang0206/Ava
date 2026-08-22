@@ -220,7 +220,8 @@ async def test_dispatch_agent_skill_view_calls_machine_op(
     assert status == "completed"
     assert seen == {"agent_id": 42, "pool": pool}
     assert result == {
-        "commands": [{"name": "project", "description": "d", "instruction_hint": "h"}]
+        "commands": [{"name": "project", "description": "d", "instruction_hint": "h"}],
+        "mcp_names": [],
     }
 
 

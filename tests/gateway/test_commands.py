@@ -49,12 +49,15 @@ def test_endpoint_agent_view_dispatches_to_agents_machine(monkeypatch: pytest.Mo
 
     async def _dispatch(
         machine: str, kind: str, payload: dict[str, int], *, timeout_s: float
-    ) -> dict[str, list[dict[str, str]]]:
+    ) -> dict[str, object]:
         seen["machine"] = machine
         seen["kind"] = kind
         seen["payload"] = payload
         seen["timeout_s"] = timeout_s
-        return {"commands": [{"name": "project", "description": "d", "instruction_hint": "h"}]}
+        return {
+            "commands": [{"name": "project", "description": "d", "instruction_hint": "h"}],
+            "mcp_names": ["runner-only-groundwork"],
+        }
 
     monkeypatch.setattr(commands_router._cluster_rpc, "dispatch_to_machine", _dispatch)  # pyright: ignore[reportUnknownArgumentType]
     with TestClient(app) as client:
