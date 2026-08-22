@@ -1,7 +1,7 @@
 // timeline-store.ts direct unit tests — the SSE-driven streaming timeline
 // store, split out of store.ts (which now holds only UI + cluster state).
 //
-// Complements the use-timeline.test.ts integration tests:
+// Complements the flaky/use-timeline.test.ts integration tests:
 //   - use-timeline: renderHook actually runs React state, tests hook wiring
 //   - here:          direct act on `useTimelineStore.getState()` actions,
 //                    locking down pure-state-machine behavior — SSE role × flag
