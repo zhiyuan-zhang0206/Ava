@@ -141,6 +141,50 @@ def test_restart_only_posts_even_inside_supervised_session(
     assert _cli.cmd_update(restart_only=True) == 0
 
 
+def test_local_restart_only_runs_gateway_orchestration_without_posting(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The detached restart session's `--local --restart-only` route enters
+    the gateway orchestration directly; the plain form above remains a POST."""
+    _stub_in_process_gateway_leg(monkeypatch, tmp_path)
+    captured: dict[str, object] = {}
+
+    def _capture(
+        repo: Path,
+        *,
+        restart_only: bool,
+        origin: str,
+        rollout_log: str | None,
+        mode: str,
+    ) -> int:
+        captured.update(
+            repo=repo,
+            restart_only=restart_only,
+            origin=origin,
+            rollout_log=rollout_log,
+            mode=mode,
+        )
+        return 0
+
+    monkeypatch.setattr(_cli, "_run_gateway_orchestration", _capture)
+    monkeypatch.setattr(
+        "cli.commands._update_dispatch._post_cluster_restart",
+        _fail_if_called("the gateway restart POST"),
+    )
+
+    assert (
+        _cli.cmd_update(local=True, restart_only=True, origin="detached:restart", mode="force") == 0
+    )
+    assert captured == {
+        "repo": tmp_path,
+        "restart_only": True,
+        "origin": "detached:restart",
+        "rollout_log": None,
+        "mode": "force",
+    }
+
+
 def test_ancestor_lineage_is_walked_not_just_self(
     monkeypatch: pytest.MonkeyPatch,
     write_session_record: Callable[..., Path],

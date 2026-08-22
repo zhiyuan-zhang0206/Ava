@@ -11,10 +11,11 @@ enforces it) — routing an operation by role is exactly what the ruling bans.
 - default        -> POST /api/cluster/rollout  (origin / mode / force)
 - --restart-only -> POST /api/cluster/restart  (origin / mode)
 - --local        -> in-process orchestration, no POST — the escape hatch the
-                    detached ava-rollout session itself runs (`spawn_rollout`
-                    starts `ava cluster update --local`), and the debugging
-                    path. An explicit flag, not a role branch: the user asked
-                    for the foreground leg on whatever host they are on.
+                    detached rollout/restart sessions themselves run
+                    (`spawn_rollout` uses `--local`; `spawn_restart` uses
+                    `--local --restart-only`), and the debugging path. An
+                    explicit flag, not a role branch: the user asked for the
+                    foreground leg on whatever host they are on.
 
 Re-imported by `cli/commands/update.py` (and re-exported through `cli.commands`)
 so `cli.commands(.update).cmd_update` keeps resolving.
@@ -49,11 +50,11 @@ def cmd_update(
 
     `local=True` (`--local`) runs the in-process orchestration in this
     foreground process instead of POSTing. This is what the detached
-    `ava-rollout` session runs (so it does not re-POST and recurse), and it
-    is the debugging path. Refused with exit 2 when this process is hosted
-    inside a supervised session — the stop leg would kill its own
-    orchestration (`shared.proc.hosting_supervised_session`); the detached
-    orchestration sessions themselves are exempt.
+    `ava-rollout` and `ava-cluster-restart` sessions run (so neither re-POSTs
+    and recurses), and it is the debugging path. Refused with exit 2 when this
+    process is hosted inside a supervised session — the stop leg would kill
+    its own orchestration (`shared.proc.hosting_supervised_session`); the
+    detached orchestration sessions themselves are exempt.
 
     `origin` (`--origin <who>`) names the trigger; recorded in the rollout
     log and the cluster pin's `updated_by`. Defaults to `cli:<machine>`.
@@ -76,8 +77,8 @@ def cmd_update(
 
 
 def _run_in_process(*, restart_only: bool, origin: str | None, mode: str) -> int:
-    """The foreground orchestration leg (`--local`, and `--restart-only`'s
-    in-process twin). No role check: the user explicitly asked for the local
+    """The foreground orchestration leg (`--local`, optionally combined with
+    `--restart-only`). No role check: the user explicitly asked for the local
     leg on whatever host they are on; a host that cannot run the orchestration
     fails loudly inside it."""
     from cli.commands import update as _up_mod
