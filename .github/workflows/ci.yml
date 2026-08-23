@@ -27,6 +27,8 @@
 # "e2e (Playwright happy path)". The backend and e2e names are AGGREGATOR jobs
 # that fan in their shards (and, for backend, combine coverage and apply the
 # gate), so sharding never touches the protection/queue configuration.
+# Flaky-marked backend tests run in their own serial job; the parallel shards
+# exclude them with `-m "not flaky"`, mirroring the frontend flaky isolation.
 #
 # AVA_DB_URL / AVA_REDIS_URL are pointed at unreachable sentinel ports on
 # purpose. The suite must provision its own throwaway cluster; a sentinel turns
@@ -59,8 +61,8 @@ concurrency:
 
 jobs:
   classify:
-    # Which sides does this diff touch? Runs shared/repo_change.py (stdlib-only,
-    # exec'd directly — no venv) over the PR's changed paths. push/dispatch
+    # Which sides does this diff touch? Imports shared/repo_change.py directly
+    # (stdlib-only — no venv) over the PR's changed paths. push/dispatch
     # events always report both sides changed: main must always verify fully.
     name: classify change
     runs-on: ubuntu-24.04
@@ -89,11 +91,14 @@ jobs:
           fi
           git diff --name-only "$(git merge-base "$BASE_SHA" HEAD)"...HEAD > /tmp/changed.txt
           python3 - <<'EOF' >> "$GITHUB_OUTPUT"
+          import sys
           from pathlib import Path
-          ns: dict[str, object] = {}
-          exec(Path("shared/repo_change.py").read_text(), ns)
+
+          sys.path.insert(0, ".")
+          from shared.repo_change import classify_change
+
           paths = Path("/tmp/changed.txt").read_text().splitlines()
-          frontend, backend = ns["classify_change"](paths)
+          frontend, backend = classify_change(paths)
           print(f"frontend={str(frontend).lower()}")
           print(f"backend={str(backend).lower()}")
           EOF
@@ -187,7 +192,7 @@ jobs:
 
       - name: Run pytest shard
         run: >
-          uv run pytest tests/ -q --ignore=tests/e2e -n 4
+          uv run pytest tests/ -q --ignore=tests/e2e -m "not flaky" -n 4
           --splits 8 --group ${{ matrix.group }}
           --cov=agent --cov=ava --cov=gateway --cov=shared --cov=ui
 
@@ -207,6 +212,47 @@ jobs:
           if-no-files-found: ignore
           path: tmp/pg-fixture-logs/
 
+  backend-serial:
+    name: backend serial (flaky)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    needs: [classify]
+    if: ${{ needs.classify.outputs.backend == 'true' }}
+    env:
+      AVA_DB_URL: postgresql://unused@127.0.0.1:1/unused
+      AVA_REDIS_URL: redis://127.0.0.1:1/0
+      COVERAGE_FILE: coverage-data-serial
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+
+      - name: Install Postgres 17 + Redis (server binaries on PATH)
+        uses: ./.github/actions/install-pg-redis
+
+      - name: Install Python deps
+        run: uv sync --frozen
+
+      - name: Run flaky pytest bucket serially
+        run: >
+          uv run pytest tests/ -m flaky --ignore=tests/e2e -q
+          --cov=agent --cov=ava --cov=gateway --cov=shared --cov=ui
+
+      - name: Upload coverage data
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-shard-serial
+          path: coverage-data-serial
+
+      - name: Upload pg fixture logs on failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pg-fixture-logs-serial
+          if-no-files-found: ignore
+          path: tmp/pg-fixture-logs/
+
   backend:
     # The aggregator carrying the branch-protection / Mergify check name:
     # skipped (= satisfied) when the diff has no backend side; otherwise green
@@ -215,13 +261,13 @@ jobs:
     name: backend (pytest + pyright)
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    needs: [classify, backend-static, backend-shard]
+    needs: [classify, backend-static, backend-shard, backend-serial]
     if: ${{ always() && needs.classify.result == 'success' && needs.classify.outputs.backend == 'true' }}
     steps:
       - name: Verify shard results
-        if: ${{ needs.backend-static.result != 'success' || needs.backend-shard.result != 'success' }}
+        if: ${{ needs.backend-static.result != 'success' || needs.backend-shard.result != 'success' || needs.backend-serial.result != 'success' }}
         run: |
-          echo "a backend job did not succeed: static=${{ needs.backend-static.result }} shards=${{ needs.backend-shard.result }}"
+          echo "a backend job did not succeed: static=${{ needs.backend-static.result }} shards=${{ needs.backend-shard.result }} serial=${{ needs.backend-serial.result }}"
           exit 1
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -240,14 +286,18 @@ jobs:
 
       - name: Combine coverage + gate
         env:
-          BACKEND_COVERAGE_THRESHOLD: "80"
+          BACKEND_COVERAGE_THRESHOLD: "85"
         run: |
+          # 90.5% combined coverage on 2026-08-23 supports an 85% gate: about
+          # five points of buffer for shard-drop/flake variance. Do not aim for
+          # 100% — line coverage is not quality; this gate only sees shard data
+          # that reached the combine step (including coverage-data-serial).
           uv run coverage combine coverage-data-*
           uv run coverage xml
           uv run python -c "
           import sys, xml.etree.ElementTree as ET, os
           pct = round(float(ET.parse('coverage.xml').getroot().attrib['line-rate']) * 100, 1)
-          threshold = float(os.environ.get('BACKEND_COVERAGE_THRESHOLD', 75))
+          threshold = float(os.environ.get('BACKEND_COVERAGE_THRESHOLD', 85))
           print(f'Backend line coverage: {pct}% (threshold: {threshold}%)')
           sys.exit(1) if pct < threshold else None
           "
@@ -291,6 +341,29 @@ jobs:
       - name: Unit tests (vitest run)
         working-directory: ui/web
         run: npx vitest run --coverage
+      # vitest.config.ts already emits json-summary for this gate. Quarantined
+      # src/**/flaky/** tests run serially below with coverage disabled, so this
+      # checks the stable parallel denominator. Raise toward the measured value
+      # over time (tests/README.md), never toward 100: line coverage is not quality.
+      - name: Frontend coverage gate
+        working-directory: ui/web
+        env:
+          FRONTEND_COVERAGE_THRESHOLD: "81"
+        run: |
+          python3 - <<'EOF'
+          import json
+          import os
+          from pathlib import Path
+
+          summary = json.loads(Path("coverage/coverage-summary.json").read_text())
+          coverage = float(summary["total"]["lines"]["pct"])
+          threshold = float(os.environ.get("FRONTEND_COVERAGE_THRESHOLD", "81"))
+          print(f"Frontend line coverage: {coverage}% (threshold: {threshold}%)")
+          if coverage < threshold:
+              raise SystemExit(
+                  f"Frontend coverage {coverage}% is below threshold {threshold}%"
+              )
+          EOF
       # Quarantined timing-sensitive tests (src/**/flaky/**) run serially in
       # their own vitest process — see ui/web/vitest.flaky.config.ts.
       - name: Flaky unit tests (vitest run, serial)

@@ -115,16 +115,14 @@ state = AgentState(messages=[HumanMessage(content="hello")])
 
 ## Coverage Thresholds
 
-| Module | Current | Target |
-|------|------|------|
-| `agent/` | ~80% | 85% |
-| `ava/` | ~75% | 85% |
-| `gateway/` | ~90% | 90% |
-| `shared/` | ~95% | 95% |
-| `ui/` | ~45% | 70% |
-| **Overall** | **74%** | **85%** |
+`ci.yml` is the source of truth. The backend has an 85% hard line-coverage
+gate across all shards (about 90.5% measured on 2026-08-23). The frontend has
+an 81% hard line-coverage gate (86.14% measured on 2026-08-24).
 
-No hard threshold set in CI for now — first stabilize data, then gradually raise.
+Each release cycle, an owner re-measures while the gate stays green and raises
+the threshold by about one point toward the measured value. Never converge to
+100%: line coverage is not quality, so retain a buffer. Per-module numbers live
+in the CI coverage report and `coverage.xml`, not here.
 
 ## CI Pipeline
 
@@ -133,7 +131,7 @@ Push/PR → CI
   ├── backend: pytest + pyright + coverage
   │   coverage output to CI log + xml (can be integrated with external services)
   ├── frontend: tsc + vitest
-  └── e2e: Playwright (separate job, does not block merge)
+  └── e2e: Playwright (Mergify requires success or skipped; skips only on docs-only diffs)
 ```
 
 Pre-commit does not run pytest (needs DB), but runs ruff + pyright + frontend tsc + frontend vitest.
