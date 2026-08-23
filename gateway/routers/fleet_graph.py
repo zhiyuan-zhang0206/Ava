@@ -37,7 +37,13 @@ from gateway import (
     prom_metrics,
     telemetry_staleness,
 )
-from gateway.schemas import FleetGraphEdge, FleetGraphNode, FleetGraphResponse, StatsWindowHours
+from gateway.schemas import (
+    FleetGraphEdge,
+    FleetGraphNode,
+    FleetGraphResponse,
+    StatsWindowHours,
+    window_delta,
+)
 from shared.log import logger
 from shared.redis_client import sync_redis
 
@@ -111,7 +117,7 @@ def _edge_filter_plan(
     if hours is None:
         return _EdgeFilterPlan(None, "", (), edge_live)
 
-    win_start = now - timedelta(hours=hours)
+    win_start = now - window_delta(hours)
     return _EdgeFilterPlan(
         win_start,
         " AND (event_name <> 'send_message' OR ts >= %s)",
@@ -412,14 +418,14 @@ def _fetch_prom_tokens(
                 prom_metrics.sum_by,
                 _IN_METRIC,
                 "agent_id",
-                window_hours=hours,
+                window=window_delta(hours) if hours is not None else None,
                 timeout_s=_TELEMETRY_READ_TIMEOUT_S,
             ),
             "out_window": executor.submit(
                 prom_metrics.sum_by,
                 _OUT_METRIC,
                 "agent_id",
-                window_hours=hours,
+                window=window_delta(hours) if hours is not None else None,
                 timeout_s=_TELEMETRY_READ_TIMEOUT_S,
             ),
         }
@@ -484,15 +490,15 @@ def get_fleet_graph(
     saves ~90% of the payload; pass `?include_terminated=true` for the full
     archive.
 
-    `?hours=` (whitelisted 1/6/24/72/168; omitted = all-time) windows both the
-    node score and the edge events. `?decay_lambda=` (>= 0, default 0.5) is the
-    per-day decay constant for the message edge weight.
+    `?hours=` (0 = last 5m; 1/6/24/72/168 = hours; omitted = all-time) windows
+    both the node score and the edge events. `?decay_lambda=` (>= 0, default
+    0.5) is the per-day decay constant for the message edge weight.
 
     Node score (windowed, drives node size):
         node_score = SUM(in_total) * 0.1 + SUM(out_total) * 1.0
     over the agent's `llm_usage` counters in the window — read from
     Prometheus (`ava_llm_usage_in_total` / `ava_llm_usage_out_total`,
-    windowed via `increase(...[Nh])`). `total_tokens` is the all-time sum of
+    windowed via `increase(...)`). `total_tokens` is the all-time sum of
     the same two counters (cumulative since the exporting process started).
 
     Edge weight:
@@ -504,7 +510,7 @@ def get_fleet_graph(
     # Windowed-filter fragment spliced into the edge SQL below. Kept as a literal
     # (not an f-string) so the composed query stays a LiteralString for psycopg.
     # None => all-time (no filter, no param). The node token window is applied in
-    # PromQL (increase over [Nh]) instead — see the Prometheus block below.
+    # PromQL (increase over the selected duration) instead — see the Prometheus block below.
     now = datetime.now(UTC)
     not_terminated: LiteralString = "" if include_terminated else "WHERE a.status != 'terminated'"
     # Same live-frontier rule for edges: an edge touching a terminated agent can

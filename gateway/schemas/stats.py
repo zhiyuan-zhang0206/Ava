@@ -4,6 +4,7 @@ Split out of the former monolithic ops/schemas.py; FastAPI registers these
 unchanged, so the OpenAPI codegen is byte-identical to the wire before.
 """
 
+from datetime import timedelta
 from enum import IntEnum
 from typing import Any
 
@@ -16,17 +17,23 @@ from pydantic import (
 
 
 class StatsWindowHours(IntEnum):
-    """Whitelisted `?hours=` windows for /api/stats/dashboard — 1h / 6h /
-    24h / 3d / 7d. An enum (not `int` + range check) so FastAPI 422s any
-    other value instead of silently aggregating an arbitrary window.
+    """Whitelisted `?hours=` windows for stats, inspect, and fleet — 0 = last
+    5 minutes / 1h / 6h / 24h / 3d / 7d. An enum (not `int` + range check)
+    so FastAPI 422s any other value instead of silently aggregating an arbitrary window.
     (A `Literal[1, 6, ...]` won't do: query params arrive as strings and
     int-literal validation doesn't coerce them, 422ing even valid values.)"""
 
+    M5 = 0
     H1 = 1
     H6 = 6
     H24 = 24
     D3 = 72
     D7 = 168
+
+
+def window_delta(hours: StatsWindowHours) -> timedelta:
+    """Resolve the `?hours=` wire value to its actual aggregation duration."""
+    return timedelta(minutes=5) if hours == StatsWindowHours.M5 else timedelta(hours=int(hours))
 
 
 class StatsTokens(BaseModel):
@@ -47,8 +54,8 @@ class StatsDashboard(BaseModel):
     """GET /api/stats/dashboard response — sidebar-top stats card data pulled in one shot.
 
     All windowed fields (`tokens` / `cost_usd` / `avg_turn_seconds` /
-    `warnings` / `errors`) aggregate over the past `window_hours` hours —
-    the request's `?hours=` parameter echoed back.
+    `warnings` / `errors`) aggregate over the selected `window_hours` value —
+    `0` means five minutes; all other values are hours.
 
     - `live_count`: current non-terminated count (from agents_meta, not
       events; not windowed)

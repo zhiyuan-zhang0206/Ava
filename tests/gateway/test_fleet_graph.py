@@ -16,6 +16,7 @@ live, so it is exercised against a real DB here. Covers:
 """
 
 import math
+from datetime import timedelta
 
 import httpx
 import psycopg
@@ -71,7 +72,7 @@ def _mock_prom(monkeypatch: pytest.MonkeyPatch) -> None:
     runs first, the per-test install wins)."""
 
     def fake_sum_by(
-        metric: str, by: str, *, window_hours: int | None = None, timeout_s: float | None = None
+        metric: str, by: str, *, window: timedelta | None = None, timeout_s: float | None = None
     ) -> dict[str, float]:
         return {}
 
@@ -102,13 +103,13 @@ def _install_prom(
     windowed: dict[str, dict[str, float]] | None = None,
 ) -> None:
     """Fake gateway.prom_metrics.sum_by: `all_time` maps metric ->
-    {agent_id: value} for window_hours=None calls, `windowed` for windowed
+    {agent_id: value} for window=None calls, `windowed` for windowed
     calls. A metric absent from both maps reads as {} (no llm_usage series)."""
 
     def fake_sum_by(
-        metric: str, by: str, *, window_hours: int | None = None, timeout_s: float | None = None
+        metric: str, by: str, *, window: timedelta | None = None, timeout_s: float | None = None
     ) -> dict[str, float]:
-        src = windowed if window_hours is not None else all_time
+        src = windowed if window is not None else all_time
         return (src or {}).get(metric, {})
 
     monkeypatch.setattr(prom_metrics, "sum_by", fake_sum_by)

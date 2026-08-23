@@ -96,10 +96,10 @@ describe("useSidebarWidth (fixed width, task #750)", () => {
 });
 
 describe("useStatsWindow (DB-backed, validated)", () => {
-  it("keeps a valid whitelisted window", () => {
-    setMockSetting("display.stats_window_hours", 72);
+  it("keeps the valid five-minute window", () => {
+    setMockSetting("display.stats_window_hours", 0);
     const { result } = renderHook(() => useStatsWindow());
-    expect(result.current.windowHours).toBe(72);
+    expect(result.current.windowHours).toBe(0);
   });
 
   it("rejects an out-of-whitelist window → default", () => {
