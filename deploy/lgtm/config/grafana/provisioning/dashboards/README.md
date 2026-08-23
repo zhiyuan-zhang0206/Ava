@@ -14,7 +14,7 @@ dashboard"). `uid` is fixed at `ava-ops-main` — the dashboard link and user
 bookmarks depend on it; never change it.
 
 Seven sections, one row per section — `core` is the 2026-08-06 user-ruling
-row header; sections 2–7 are **collapsed by default** (`collapsed: true`):
+row header; all seven sections are **expanded by default** (`collapsed: false`):
 
 1. **`core`** — the user's daily first screen: the eight windowed stat
    tiles (LLM calls / Warning / Error / Unresolved Warning / Unresolved

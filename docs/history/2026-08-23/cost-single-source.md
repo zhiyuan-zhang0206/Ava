@@ -19,3 +19,8 @@ Update (delegator review pass 1): `llm_usage` is telemetry-only, so the status
 card applies the same category filter as every Grafana LLM panel. Its four
 windowed token/cost sums now have a 30-second per-window TTL cache, matching
 the sidebar's 5-second polling cadence without caching turn or alert gauges.
+
+Update (QA review pass): the sidebar polls every 30 seconds, so the token/cost
+cache now lasts 60 seconds. Each of its four fields uses one full-window Loki
+instant aggregate; only turn and alert reads retain their <=3-hour sharding.
+Cost analysis now follows the dashboard-wide expanded-row convention.

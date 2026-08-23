@@ -43,7 +43,7 @@ def fake_loki(monkeypatch: pytest.MonkeyPatch) -> FakeLoki:
 
 @pytest.fixture(autouse=True)
 def clear_llm_usage_sums_cache() -> None:
-    """Keep every FakeLoki test isolated from the route's 30-second cache."""
+    """Keep every FakeLoki test isolated from the route's 60-second cache."""
     _stats_dashboard.cache_clear()
 
 
@@ -199,7 +199,7 @@ def test_dashboard_shards_long_loki_windows_and_merges_aggregates(
     fake_loki: FakeLoki,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Long dashboard windows sum exact, contiguous three-hour Loki shards."""
+    """Only turn and alert reads shard; llm_usage fields use full-window instants."""
     aid = _insert_agent(db_conn, status="running")
     fake_loki.add(
         event="turn_end",
@@ -226,13 +226,19 @@ def test_dashboard_shards_long_loki_windows_and_merges_aggregates(
         ts_offset_hours=0.5,
     )
 
-    aggregate_spans: list[tuple[datetime, datetime]] = []
+    llm_usage_windows: list[tuple[datetime, datetime]] = []
+    sharded_aggregate_spans: list[tuple[datetime, datetime]] = []
     count_spans: list[tuple[datetime, datetime]] = []
     real_aggregate = fake_loki.attribute_aggregate
     real_count = fake_loki.count_events
 
     def spy_aggregate(**kwargs: Any) -> float | list[tuple[str, float]]:
-        aggregate_spans.append((kwargs["from_"], kwargs["to"]))
+        spans = (
+            llm_usage_windows
+            if kwargs.get("event_names") == ["llm_usage"]
+            else sharded_aggregate_spans
+        )
+        spans.append((kwargs["from_"], kwargs["to"]))
         return real_aggregate(**kwargs)
 
     def spy_count(**kwargs: Any) -> int:
@@ -250,13 +256,16 @@ def test_dashboard_shards_long_loki_windows_and_merges_aggregates(
     assert body["errors"] == 1
     assert body["tokens"] == {"input": 110, "output": 22, "cache_read": 55, "cache_hit_pct": 50}
     assert body["cost_usd"] == 2.0
-    aggregate_counts = Counter(aggregate_spans)
+    assert len(llm_usage_windows) == 4
+    assert len(set(llm_usage_windows)) == 1
+    assert llm_usage_windows[0][1] - llm_usage_windows[0][0] == timedelta(hours=6)
+    aggregate_counts = Counter(sharded_aggregate_spans)
     spans = sorted(aggregate_counts)
     assert len(spans) > 1
     assert sum((end - start for start, end in spans), timedelta()) == timedelta(hours=6)
     assert all(end - start <= timedelta(hours=3) for start, end in spans)
     assert all(end == next_start for (_, end), (next_start, _) in pairwise(spans))
-    assert set(aggregate_counts.values()) == {5}
+    assert set(aggregate_counts.values()) == {1}
     assert Counter(count_spans) == Counter(dict.fromkeys(spans, 3))
 
 
@@ -390,7 +399,8 @@ def test_dashboard_cost_uses_usage_time_snapshots(
 def test_dashboard_caches_llm_usage_sums_per_window(
     db_conn: psycopg.Connection, fake_loki: FakeLoki, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The 5s sidebar poll reuses only its matching window's four Loki sums."""
+    """The 30s sidebar poll reuses only its matching window's four Loki sums."""
+    assert _stats_dashboard._CACHE_TTL_S == 60.0
     fake_loki.add(
         event="llm_usage",
         payload={"in_total": 10, "out_total": 5, "cache_read": 0, "cost_usd": 1.0},
