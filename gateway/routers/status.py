@@ -17,12 +17,13 @@ import time
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Query, Request
+import httpx
+from fastapi import APIRouter, HTTPException, Query, Request
 from psycopg import Cursor
 from pydantic import ValidationError
 
-from gateway import loki_events, prom_metrics
-from gateway.routers import _roster_rows
+from gateway import loki_events, loki_query_budget, prom_metrics
+from gateway.routers import _inspect_pg, _roster_rows
 from gateway.schemas import (
     ClusterPanel,
     MachineStatus,
@@ -129,32 +130,79 @@ def get_stats_dashboard(
     # `events` table is a frozen pre-cutover archive, so a live window queried
     # there flatlines to zero. Do not hold a pooled DB connection while these
     # bounded-but-slow network queries wait for the global Loki budget.
-    window_start = datetime.now(UTC) - timedelta(hours=hours)
-    turn_end_sum = loki_events.attribute_aggregate(
-        field="duration_seconds",
-        agg="sum",
-        event_names=["turn_end"],
-        attribute_filters={"ok": "true"},
-        from_=window_start,
-    )
-    turn_end_count = loki_events.count_events(
-        event_names=["turn_end"],
-        attribute_filters={"ok": "true"},
-        from_=window_start,
-    )
-    avg_turn_seconds: float | None = turn_end_sum / turn_end_count if turn_end_count else None
+    now = datetime.now(UTC)
+    window_start = now - timedelta(hours=hours)
+    try:
+        # Keep each Loki range vector at most three hours wide. The shared helper
+        # returns one span for short windows and partitions longer ones exactly.
+        turn_end_sum = sum(
+            _inspect_pg.query_loki_shards(
+                window_start,
+                now,
+                lambda shard_start, shard_end: loki_events.attribute_aggregate(
+                    field="duration_seconds",
+                    agg="sum",
+                    event_names=["turn_end"],
+                    attribute_filters={"ok": "true"},
+                    from_=shard_start,
+                    to=shard_end,
+                ),
+            )
+        )
+        turn_end_count = sum(
+            _inspect_pg.query_loki_shards(
+                window_start,
+                now,
+                lambda shard_start, shard_end: loki_events.count_events(
+                    event_names=["turn_end"],
+                    attribute_filters={"ok": "true"},
+                    from_=shard_start,
+                    to=shard_end,
+                ),
+            )
+        )
+        avg_turn_seconds: float | None = turn_end_sum / turn_end_count if turn_end_count else None
 
-    # events.level is lowercase (W9 switch; agent_events stored loguru's
-    # uppercase 'WARNING'/'ERROR'). critical folds into 'error' so the
-    # operator gauge sees daemon/schema-drift failures.
-    warn_err: dict[str, int] = {
-        "warning": loki_events.count_events(
-            level="warning", categories=["telemetry", "log"], from_=window_start
-        ),
-        "error": loki_events.count_events(
-            level_min="error", categories=["telemetry", "log"], from_=window_start
-        ),
-    }
+        # events.level is lowercase (W9 switch; agent_events stored loguru's
+        # uppercase 'WARNING'/'ERROR'). critical folds into 'error' so the
+        # operator gauge sees daemon/schema-drift failures.
+        warn_err: dict[str, int] = {
+            "warning": sum(
+                _inspect_pg.query_loki_shards(
+                    window_start,
+                    now,
+                    lambda shard_start, shard_end: loki_events.count_events(
+                        level="warning",
+                        categories=["telemetry", "log"],
+                        from_=shard_start,
+                        to=shard_end,
+                    ),
+                )
+            ),
+            "error": sum(
+                _inspect_pg.query_loki_shards(
+                    window_start,
+                    now,
+                    lambda shard_start, shard_end: loki_events.count_events(
+                        level_min="error",
+                        categories=["telemetry", "log"],
+                        from_=shard_start,
+                        to=shard_end,
+                    ),
+                )
+            ),
+        }
+    except loki_query_budget.LokiQueryBudgetError:
+        # Preserve the process-wide admission handler's machine-readable reason.
+        raise
+    except httpx.HTTPError as exc:
+        # loki_events already emitted the failing query shape; the dashboard only
+        # translates the transport failure into its retriable API contract.
+        raise HTTPException(
+            status_code=503,
+            detail=(f"stats backend unavailable ({type(exc).__name__}); retry in a moment"),
+            headers={"Retry-After": "1"},
+        ) from exc
 
     with request.app.state.db_pool.connection() as conn, conn.cursor() as cur:
         cur.execute("SELECT COUNT(*) FROM agents_meta WHERE status != 'terminated'")
