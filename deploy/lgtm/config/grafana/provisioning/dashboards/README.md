@@ -17,17 +17,28 @@ Seven sections, one row per section — `core` is the 2026-08-06 user-ruling
 row header. All sections are **expanded by default** (`collapsed: false`,
 2026-08-23 #382):
 
+<<<<<<< HEAD
 1. **`core`** — the user's daily first screen: twelve windowed stat tiles
    cover the entire Statistics popover (LLM calls / Warning / Error /
    Unresolved Warning / Unresolved Error / Live agents / LLM cost (24h) /
    Tokens (24h) / LLM input tokens (24h) / LLM output tokens (24h) / Cache
    hit rate (24h) / Avg turn duration (24h)). It then shows Event health,
    Event rate, Token usage — Input, Token usage — Output + Reasoning, Cache
-   hit, Turn success rate, and the full-width **Ava events (Loki)** logs
-   panel. Token input and cache hit moved here because they are first-class
-   operational statistics.
+   hit, Turn success rate, and the three full-width **Events** panels:
+   business/anomaly logs, a 24-hour event-type table, and the parse-clean
+   raw stream for debugging.
 2. **`LLM`** — throughput tokens/s, the three TPS series, calls/bucket,
    cost USD, LLM errors, and per-agent Top 20.
+=======
+1. **`core`** — the user's daily first screen: the eight windowed stat
+   tiles (LLM calls / Warning / Error / Unresolved Warning / Unresolved
+   Error / Live agents / LLM cost (24h) / Tokens (24h)), then Event
+   health, Event rate, Token usage — Output + Reasoning, Turn success rate,
+   then the three full-width **Events** panels: business/anomaly logs, a
+   24-hour event-type table, and the parse-clean raw stream for debugging.
+2. **`LLM`** — throughput tokens/s, token input, the three TPS series,
+   cache hit, calls/bucket, cost USD, LLM errors, per-agent Top 20.
+>>>>>>> ad820f10 ([Ava-3240] feat: tier events API and Grafana panels 2201-2203)
 3. **`Gateway & execution`** — gateway latency p50/p95/max + by route,
    turn duration, exec outcomes, syntax-fix triggers, halt classes, SDK
    Top 20, frontend interactions ×3, settings changes.
@@ -43,6 +54,7 @@ row header. All sections are **expanded by default** (`collapsed: false`,
    usage-time `attributes_cost_usd` snapshots from telemetry `llm_usage`
    events (2026-08-23 #384).
 
+<<<<<<< HEAD
 The dashboard timezone is `Asia/Shanghai` (2026-08-23 #384). The daily cost
 panel uses a `now-7d/d` relative override plus `interval: 24h`, so its
 `$__interval` range vectors are daily buckets aligned to that timezone
@@ -50,8 +62,17 @@ rather than the browser's local clock.
 
 The dashboard now has 74 panels: core ids remain below 1000 (the four new
 stat tiles are 44–47), plugin ids are >= 1000, host/data-plane panels are
-2101–2112, the cost-analysis panels are 38–43, and the logs panel is 2201. The duplicate plugin spawn-rate panel
-(1006) was removed because the Fleet summaries cover the same information.
+2101–2112, the cost-analysis panels are 38–43, and the event panels are
+2201–2203 (business/anomaly logs, event-type table, raw stream). The
+duplicate plugin spawn-rate panel (1006) was removed because the Fleet
+summaries cover the same information.
+=======
+Panel content is preserved verbatim, dedup only — nothing was dropped
+except the `Recent traces (Tempo)` panel (the Tempo trace UI phase was cut
+by decision; it returns in a later phase). Panel ids keep the old ranges:
+core < 1000, plugin panels >= 1000; the merged host & data-plane panels
+live at 2101–2112 and the event panels at 2201–2203.
+>>>>>>> ad820f10 ([Ava-3240] feat: tier events API and Grafana panels 2201-2203)
 
 ## Files
 
@@ -156,8 +177,9 @@ empty ratio / error ratio).
 ## Layout
 
 Greedy 24-column grid, **no overlapping gridPos**: stats 8x4 (three per
-row), charts/tables 12x7 (two per row), the logs panel 24x10, row headers
-h=1 w=24. Rows start exactly at the previous block's bottom (no gap row).
+row), charts/tables 12x7 (two per row), primary/raw event logs 24x10, the
+event-type table 24x7, row headers h=1 w=24. Rows start exactly at the
+previous block's bottom (no gap row).
 
 **Do not add `autofitpanels`**: on Grafana 13.1.x it collapses every panel
 to a 30px title bar at narrow window widths.

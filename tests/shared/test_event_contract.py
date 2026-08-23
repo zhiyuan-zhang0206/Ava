@@ -7,16 +7,20 @@ payload keys, retention) is a pure function of it.
 
 from __future__ import annotations
 
+import pytest
+
 from shared.events.contract import (
     EVENTS,
     LLM_ERROR_FAMILY,
     OPS_BUCKET_S,
     OPS_GRID_ORIGIN,
+    TIER_BY_EVENT,
     category_for_kind,
     family_events,
     payload_keys,
     retention_days,
     telemetry_events,
+    tier_for,
 )
 
 
@@ -31,6 +35,30 @@ def test_categories_are_valid() -> None:
     for spec in EVENTS.values():
         assert spec.category in ("audit", "telemetry", "log")
         assert spec.extra_categories <= frozenset({"audit", "telemetry", "log"})
+
+
+def test_tier_registry_covers_every_registered_event() -> None:
+    assert set(TIER_BY_EVENT) == set(EVENTS)
+    assert set(TIER_BY_EVENT.values()) == {"business", "anomaly", "observation", "noise"}
+
+
+def test_tier_for_applies_priority_rules_and_unknown_fallback() -> None:
+    assert tier_for("spawn", "audit", "info") == "business"
+    assert tier_for("spawn", "audit", "warning") == "anomaly"
+    assert tier_for("status_change", "audit", "info") == "business"
+    assert tier_for("status_change", "telemetry", "info") == "noise"
+    assert tier_for("node_exit", "telemetry", "info") == "noise"
+    assert tier_for("llm_usage", "telemetry", "info") == "observation"
+    assert tier_for("unregistered", "telemetry", "info") == "observation"
+
+
+def test_tier_for_fails_fast_when_a_registered_event_lacks_a_tier(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delitem(TIER_BY_EVENT, "llm_usage")
+
+    with pytest.raises(KeyError):
+        tier_for("llm_usage", "telemetry", "info")
 
 
 def test_dual_category_status_change() -> None:

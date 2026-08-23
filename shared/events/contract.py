@@ -11,7 +11,8 @@ SQL-key lint); shared/events/registry.md is generated from this module.
 
 Derived views live here and nowhere else: ``category_for_kind``,
 ``telemetry_events``, ``family_events``, ``payload_keys``, ``retention_days``,
-plus the folded ``_LLM_ERROR_EVENTS`` family and the ops grid constants.
+event tiers, plus the folded ``_LLM_ERROR_EVENTS`` family and the ops grid
+constants.
 """
 
 from __future__ import annotations
@@ -21,6 +22,20 @@ from datetime import UTC, datetime
 from typing import Any, Literal, LiteralString, TypedDict, get_type_hints
 
 Category = Literal["audit", "telemetry", "log"]
+EventTier = Literal["business", "anomaly", "observation", "noise"]
+
+# Event tiers control the human-facing event stream, independently from the
+# category that controls retention and access semantics:
+#
+# - business: an audit fact a human normally performed or requested;
+# - anomaly: a warning/error or a problem-shaped signal needing attention;
+# - observation: useful runtime progress that is folded by default; and
+# - noise: implementation-detail telemetry retained for debugging.
+#
+# ``tier_for`` below applies the row-level priority: warning+ levels always
+# win, then audit category, then the declared name. This lets ``status_change``
+# remain one registry entry while its audit rows are business and its telemetry
+# rows are noise.
 
 # The ops-monitor bucket grid (the Insights Ops panel): 60s buckets on a fixed
 # origin, shared by the LGTM reader (gateway/ops_series_lgtm.py) and the
@@ -449,7 +464,9 @@ class EventSpec:
     ``extra_categories``: a name that genuinely carries more than one category
     (status_change: the loguru side emits telemetry, audit_events emits audit).
 
-    ``destination``: ``"events"`` (default — lands in the ``events`` table) or
+    ``tier``: the default human-facing event tier. ``tier_for`` may override
+    it for an anomaly level or an audit row. ``destination``: ``"events"``
+    (default — lands in the ``events`` table) or
     ``"file"`` (log-file only, e.g. ``node_enter`` after PR #1758's sink
     filter). ``family`` groups events the ops panels / rollups treat as one
     family (e.g. LLM_ERROR). ``doc`` is the one-line registry.md description.
@@ -457,6 +474,7 @@ class EventSpec:
 
     name: str
     category: Category
+    tier: EventTier
     extra_categories: frozenset[Category] = frozenset()
     payload: Any | None = None
     retention_days: int | None = None  # None -> RETENTION_BY_CATEGORY[category]
@@ -466,7 +484,7 @@ class EventSpec:
 
 
 def _audit(name: str, doc: str, *, payload: Any | None = None) -> EventSpec:
-    return EventSpec(name=name, category="audit", payload=payload, doc=doc)
+    return EventSpec(name=name, category="audit", tier="business", payload=payload, doc=doc)
 
 
 def _telemetry_audit(name: str, doc: str, *, payload: Any | None = None) -> EventSpec:
@@ -475,6 +493,7 @@ def _telemetry_audit(name: str, doc: str, *, payload: Any | None = None) -> Even
     return EventSpec(
         name=name,
         category="telemetry",
+        tier="noise",
         extra_categories=frozenset({"audit"}),
         payload=payload,
         doc=doc,
@@ -488,10 +507,12 @@ def _telemetry(
     payload: Any | None = None,
     family: str | None = None,
     destination: Literal["events", "file"] = "events",
+    tier: EventTier = "observation",
 ) -> EventSpec:
     return EventSpec(
         name=name,
         category="telemetry",
+        tier=tier,
         payload=payload,
         family=family,
         destination=destination,
@@ -547,73 +568,89 @@ EVENTS: dict[str, EventSpec] = {
         "frontend_interaction",
         "tracked frontend interaction (click / page view / settings change)",
         payload=FrontendInteraction,
+        tier="noise",
     ),
     # turn lifecycle
     "llm_usage": _telemetry("llm_usage", "LLM call metering", payload=LlmUsage),
     "turn_end": _telemetry("turn_end", "one turn finished", payload=TurnEnd),
     "llm_turn_aborted": _telemetry(
-        "llm_turn_aborted", "turn aborted after retries", family=LLM_ERROR_FAMILY
+        "llm_turn_aborted", "turn aborted after retries", family=LLM_ERROR_FAMILY, tier="anomaly"
     ),
     "compact_turn_aborted": _telemetry(
-        "compact_turn_aborted", "turn aborted because compaction failed"
+        "compact_turn_aborted", "turn aborted because compaction failed", tier="anomaly"
     ),
     "llm_provider_error": _telemetry(
         "llm_provider_error",
         "LLM provider failure",
         payload=LlmProviderError,
         family=LLM_ERROR_FAMILY,
+        tier="anomaly",
     ),
     "stream_stalled_retry": _telemetry(
-        "stream_stalled_retry", "stream stalled, retried", family=LLM_ERROR_FAMILY
+        "stream_stalled_retry", "stream stalled, retried", family=LLM_ERROR_FAMILY, tier="anomaly"
     ),
     "stream_overloaded_retry": _telemetry(
-        "stream_overloaded_retry", "stream overloaded, retried", family=LLM_ERROR_FAMILY
+        "stream_overloaded_retry",
+        "stream overloaded, retried",
+        family=LLM_ERROR_FAMILY,
+        tier="anomaly",
     ),
-    "thinking_block_sanitized": _telemetry("thinking_block_sanitized", "thinking block sanitized"),
+    "thinking_block_sanitized": _telemetry(
+        "thinking_block_sanitized", "thinking block sanitized", tier="noise"
+    ),
     "multiple_tool_calls_merged": _telemetry(
         "multiple_tool_calls_merged", "concurrent tool calls merged"
     ),
-    "llm_cancelled": _telemetry("llm_cancelled", "LLM call cancelled"),
+    "llm_cancelled": _telemetry("llm_cancelled", "LLM call cancelled", tier="anomaly"),
     # exec lifecycle
     "exec": _telemetry("exec", "execute_code succeeded", payload=ExecPayload),
-    "exec_failed": _telemetry("exec_failed", "execute_code failed", payload=ExecFailed),
-    "exec_cancelled": _telemetry("exec_cancelled", "execute_code cancelled"),
-    "exec(timeout)": _telemetry(
-        "exec(timeout)", "historical parenthesized name (migration target)"
+    "exec_failed": _telemetry(
+        "exec_failed", "execute_code failed", payload=ExecFailed, tier="anomaly"
     ),
-    "exec(failed)": _telemetry("exec(failed)", "historical parenthesized name (migration target)"),
+    "exec_cancelled": _telemetry("exec_cancelled", "execute_code cancelled", tier="anomaly"),
+    "exec(timeout)": _telemetry(
+        "exec(timeout)", "historical parenthesized name (migration target)", tier="anomaly"
+    ),
+    "exec(failed)": _telemetry(
+        "exec(failed)", "historical parenthesized name (migration target)", tier="anomaly"
+    ),
     "exec(cancelled)": _telemetry(
-        "exec(cancelled)", "historical parenthesized name (migration target)"
+        "exec(cancelled)", "historical parenthesized name (migration target)", tier="anomaly"
     ),
     "exec(thread-stuck)": _telemetry(
-        "exec(thread-stuck)", "historical parenthesized name (migration target)"
+        "exec(thread-stuck)", "historical parenthesized name (migration target)", tier="anomaly"
     ),
-    "exec_timeout": _telemetry("exec_timeout", "execute_code timed out"),
-    "exec_node_timeout": _telemetry("exec_node_timeout", "node-level timeout"),
+    "exec_timeout": _telemetry("exec_timeout", "execute_code timed out", tier="anomaly"),
+    "exec_node_timeout": _telemetry("exec_node_timeout", "node-level timeout", tier="anomaly"),
     "exec_subprocess_killed": _telemetry(
         "exec_subprocess_killed",
         "exec child survived the signal grace period and was SIGKILLed",
         payload=ExecSubprocessKilled,
+        tier="anomaly",
     ),
     # hosted runner (future/infra/agent-runner-as-server.md) — the dispatcher
     # that turns an inbound wake into a turn task, and the turn tasks it runs
     "host_dispatcher_subscribed": _telemetry(
         "host_dispatcher_subscribed",
         "hosted dispatcher subscribed to the inbound wake pattern",
+        tier="noise",
     ),
     "host_dispatcher_reconnect": _telemetry(
         "host_dispatcher_reconnect",
         "hosted dispatcher's wake subscription dropped — reconnecting (wakes published "
         "while down are lost; the delivery watchdog re-publish covers them)",
+        tier="noise",
     ),
     "host_dispatcher_bad_channel": _telemetry(
         "host_dispatcher_bad_channel",
         "hosted dispatcher ignored a wake whose channel name carried no agent id",
+        tier="anomaly",
     ),
     "host_turn_crashed": _telemetry(
         "host_turn_crashed",
         "a hosted turn task raised — the task is dropped and the next wake retries "
         "from the checkpoint; neighbours are unaffected",
+        tier="anomaly",
     ),
     "host_agent_prepared": _telemetry(
         "host_agent_prepared",
@@ -621,10 +658,12 @@ EVENTS: dict[str, EventSpec] = {
         "on a cold path — carries duration_ms and a reason of cold / config_changed / "
         "evicted, so a wake that pays the cold cost is distinguishable from one that "
         "does not, and a cache thrashing on config churn is visible as reason mix",
+        tier="noise",
     ),
     "host_started": _telemetry(
         "host_started",
         "the hosted agent-runner finished process-scope boot and its dispatcher is live",
+        tier="noise",
     ),
     "host_turn_uncancellable": _telemetry(
         "host_turn_uncancellable",
@@ -636,144 +675,198 @@ EVENTS: dict[str, EventSpec] = {
         "turns — issue #183) so a slow shutdown is distinguishable from a genuine wedge. The "
         "turn resumes from its checkpoint on restart. Process mode had no equivalent because "
         "SIGKILL always lands",
+        tier="anomaly",
     ),
     # node / process lifecycle
     "node_enter": _telemetry(
         "node_enter",
         "LangGraph node entered — sink-filtered out of the events table (PR #1758); log files only",
         destination="file",
+        tier="noise",
     ),
-    "node_exit": _telemetry("node_exit", "LangGraph node exited", payload=NodeExit),
-    "process_exit": _telemetry("process_exit", "agent process exited", payload=ProcessExit),
+    "node_exit": _telemetry("node_exit", "LangGraph node exited", payload=NodeExit, tier="noise"),
+    "process_exit": _telemetry(
+        "process_exit", "agent process exited", payload=ProcessExit, tier="noise"
+    ),
     "service_started": _telemetry(
-        "service_started", "gateway/daemon started", payload=ServiceStarted
+        "service_started", "gateway/daemon started", payload=ServiceStarted, tier="noise"
     ),
-    "halt": _telemetry("halt", "turn stopped (idle/compact/system)", payload=Halt),
+    "halt": _telemetry("halt", "turn stopped (idle/compact/system)", payload=Halt, tier="noise"),
     "agent_restarted": _telemetry("agent_restarted", "agent restarted (phase2 done)"),
     "heartbeat_nudged": _telemetry(
-        "heartbeat_nudged", "heartbeat reminder", payload=HeartbeatNudged
+        "heartbeat_nudged", "heartbeat reminder", payload=HeartbeatNudged, tier="noise"
     ),
     "task_reminder_digest": _telemetry(
-        "task_reminder_digest", "overdue-task owner digest", payload=TaskReminderDigest
+        "task_reminder_digest",
+        "overdue-task owner digest",
+        payload=TaskReminderDigest,
+        tier="noise",
     ),
     "task_escalation": _telemetry(
         "task_escalation", "stalled-task escalation", payload=TaskEscalation
     ),
-    "delivery_stalled": _telemetry("delivery_stalled", "delivery backlog", payload=DeliveryStalled),
-    "restart_cas_lost": _telemetry("restart_cas_lost", "restart CAS race lost"),
+    "delivery_stalled": _telemetry(
+        "delivery_stalled", "delivery backlog", payload=DeliveryStalled, tier="anomaly"
+    ),
+    "restart_cas_lost": _telemetry("restart_cas_lost", "restart CAS race lost", tier="anomaly"),
     "claim_cas_lost": _telemetry(
-        "claim_cas_lost", "claim CAS race lost — another lifecycle op owns the row"
+        "claim_cas_lost", "claim CAS race lost — another lifecycle op owns the row", tier="anomaly"
     ),
     "claim_cas_lost_exit": _telemetry(
-        "claim_cas_lost_exit", "claim wait aborted by a lost CAS — process exiting cleanly"
+        "claim_cas_lost_exit",
+        "claim wait aborted by a lost CAS — process exiting cleanly",
+        tier="anomaly",
     ),
-    "idle_cas_lost": _telemetry("idle_cas_lost", "idle-flip CAS race lost — degraded, not fatal"),
-    "boot_timing": _telemetry("boot_timing", "boot duration"),
+    "idle_cas_lost": _telemetry(
+        "idle_cas_lost", "idle-flip CAS race lost — degraded, not fatal", tier="anomaly"
+    ),
+    "boot_timing": _telemetry("boot_timing", "boot duration", tier="noise"),
     "dangling_tool_use_repaired": _telemetry(
-        "dangling_tool_use_repaired", "dangling tool_use repaired"
+        "dangling_tool_use_repaired", "dangling tool_use repaired", tier="anomaly"
     ),
     "agent_spawned": _telemetry("agent_spawned", "agent process started", payload=AgentSpawned),
     "agent_resurrected": _telemetry("agent_resurrected", "agent resurrected"),
     "agent_terminated": _telemetry("agent_terminated", "agent terminated"),
-    "agent_hibernating": _telemetry("agent_hibernating", "agent hibernated"),
-    "agent_swapped_in": _telemetry("agent_swapped_in", "process swapped in"),
-    "agent_revived": _telemetry("agent_revived", "agent revived"),
-    "respawn_phase1": _telemetry("respawn_phase1", "restart phase 1"),
-    "respawn_phase2_launch": _telemetry("respawn_phase2_launch", "restart phase 2 launch"),
-    "launch_confirm_extended": _telemetry("launch_confirm_extended", "launch confirm extended"),
-    "launch_confirm_failed": _telemetry("launch_confirm_failed", "launch confirm failed"),
-    "launch_confirm_task_crashed": _telemetry(
-        "launch_confirm_task_crashed", "launch confirm task crashed"
+    "agent_hibernating": _telemetry("agent_hibernating", "agent hibernated", tier="noise"),
+    "agent_swapped_in": _telemetry("agent_swapped_in", "process swapped in", tier="noise"),
+    "agent_revived": _telemetry("agent_revived", "agent revived", tier="noise"),
+    "respawn_phase1": _telemetry("respawn_phase1", "restart phase 1", tier="noise"),
+    "respawn_phase2_launch": _telemetry(
+        "respawn_phase2_launch", "restart phase 2 launch", tier="noise"
     ),
-    "launch_force_terminated": _telemetry("launch_force_terminated", "launch force-terminated"),
+    "launch_confirm_extended": _telemetry(
+        "launch_confirm_extended", "launch confirm extended", tier="noise"
+    ),
+    "launch_confirm_failed": _telemetry(
+        "launch_confirm_failed", "launch confirm failed", tier="anomaly"
+    ),
+    "launch_confirm_task_crashed": _telemetry(
+        "launch_confirm_task_crashed", "launch confirm task crashed", tier="anomaly"
+    ),
+    "launch_force_terminated": _telemetry(
+        "launch_force_terminated", "launch force-terminated", tier="anomaly"
+    ),
     "launch_force_terminated_skipped": _telemetry(
-        "launch_force_terminated_skipped", "launch force-terminate skipped"
+        "launch_force_terminated_skipped", "launch force-terminate skipped", tier="noise"
     ),
     "launch_retry": _telemetry("launch_retry", "launch retried"),
     # sdk / channel health
-    "sdk_call": _telemetry("sdk_call", "SDK call metering", payload=SdkCall),
+    "sdk_call": _telemetry("sdk_call", "SDK call metering", payload=SdkCall, tier="noise"),
     "plugin_activation": _telemetry(
         "plugin_activation",
         "a plugin injection surface fired (hook / wrap / prompt section)",
         payload=PluginActivation,
+        tier="noise",
     ),
-    "sse_drop": _telemetry("sse_drop", "SSE event dropped", payload=SseDrop),
-    "event_log_drop": _telemetry("event_log_drop", "event-pipeline row shed", payload=EventLogDrop),
+    "sse_drop": _telemetry("sse_drop", "SSE event dropped", payload=SseDrop, tier="anomaly"),
+    "event_log_drop": _telemetry(
+        "event_log_drop", "event-pipeline row shed", payload=EventLogDrop, tier="anomaly"
+    ),
     "heartbeat_paused": _telemetry("heartbeat_paused", "heartbeat paused", payload=HeartbeatPaused),
-    "code": _telemetry("code", "LLM generated code block", payload=ExecPayload),
+    "code": _telemetry("code", "LLM generated code block", payload=ExecPayload, tier="noise"),
     # label-fallback events kept in the registry (90d retention classification)
-    "text": _telemetry("text", "LLM text output"),
-    "syntax_fix": _telemetry("syntax_fix", "syntax repair executed", payload=SyntaxFix),
-    "inbound_reconcile": _telemetry("inbound_reconcile", "inbound reconciliation"),
+    "text": _telemetry("text", "LLM text output", tier="noise"),
+    "syntax_fix": _telemetry(
+        "syntax_fix", "syntax repair executed", payload=SyntaxFix, tier="noise"
+    ),
+    "inbound_reconcile": _telemetry("inbound_reconcile", "inbound reconciliation", tier="noise"),
     "screen_capture_notify_failed": _telemetry(
-        "screen_capture_notify_failed", "screenshot notify failed"
+        "screen_capture_notify_failed", "screenshot notify failed", tier="anomaly"
     ),
     # ava.ui.serve page-restore
-    "page_restore_alive": _telemetry("page_restore_alive", "page restore alive"),
-    "page_restore_reserved": _telemetry("page_restore_reserved", "page restore reserved"),
+    "page_restore_alive": _telemetry("page_restore_alive", "page restore alive", tier="noise"),
+    "page_restore_reserved": _telemetry(
+        "page_restore_reserved", "page restore reserved", tier="noise"
+    ),
     "page_restore_query_failed": _telemetry(
-        "page_restore_query_failed", "page restore query failed"
+        "page_restore_query_failed", "page restore query failed", tier="anomaly"
     ),
-    "page_restore_failed": _telemetry("page_restore_failed", "page restore failed"),
-    "page_restore_closed": _telemetry("page_restore_closed", "page restore closed"),
+    "page_restore_failed": _telemetry("page_restore_failed", "page restore failed", tier="anomaly"),
+    "page_restore_closed": _telemetry("page_restore_closed", "page restore closed", tier="noise"),
     # db resilience
-    "db_outage_wait": _telemetry("db_outage_wait", "db outage wait"),
-    "db_outage_pause": _telemetry("db_outage_pause", "db outage pause"),
+    "db_outage_wait": _telemetry("db_outage_wait", "db outage wait", tier="anomaly"),
+    "db_outage_pause": _telemetry("db_outage_pause", "db outage pause", tier="anomaly"),
     "db_outage_reconcile_retry": _telemetry(
-        "db_outage_reconcile_retry", "db outage reconcile retry"
+        "db_outage_reconcile_retry", "db outage reconcile retry", tier="anomaly"
     ),
-    "db_recovered": _telemetry("db_recovered", "db recovered"),
-    "db_pool_acquire_timeout": _telemetry("db_pool_acquire_timeout", "db pool acquire timeout"),
-    "db_pool_acquire_slow": _telemetry("db_pool_acquire_slow", "db pool acquire slow"),
-    "checkpoint_write_failed": _telemetry("checkpoint_write_failed", "checkpoint write failed"),
-    "pgbouncer_repaired": _telemetry("pgbouncer_repaired", "pgbouncer watchdog repair"),
+    "db_recovered": _telemetry("db_recovered", "db recovered", tier="anomaly"),
+    "db_pool_acquire_timeout": _telemetry(
+        "db_pool_acquire_timeout", "db pool acquire timeout", tier="anomaly"
+    ),
+    "db_pool_acquire_slow": _telemetry(
+        "db_pool_acquire_slow", "db pool acquire slow", tier="anomaly"
+    ),
+    "checkpoint_write_failed": _telemetry(
+        "checkpoint_write_failed", "checkpoint write failed", tier="anomaly"
+    ),
+    "pgbouncer_repaired": _telemetry(
+        "pgbouncer_repaired", "pgbouncer watchdog repair", tier="anomaly"
+    ),
     # labeler / trace housekeeping
-    "label_generated": _telemetry("label_generated", "label auto-generated"),
-    "label_generate_failed": _telemetry("label_generate_failed", "label generation failed"),
-    "label_generate_skipped": _telemetry("label_generate_skipped", "label generation skipped"),
-    "label_generate_empty": _telemetry("label_generate_empty", "label generation empty"),
+    "label_generated": _telemetry("label_generated", "label auto-generated", tier="noise"),
+    "label_generate_failed": _telemetry(
+        "label_generate_failed", "label generation failed", tier="anomaly"
+    ),
+    "label_generate_skipped": _telemetry(
+        "label_generate_skipped", "label generation skipped", tier="noise"
+    ),
+    "label_generate_empty": _telemetry(
+        "label_generate_empty", "label generation empty", tier="noise"
+    ),
     "label_generate_rejected": _telemetry(
-        "label_generate_rejected", "label generation rejected as not a label"
+        "label_generate_rejected", "label generation rejected as not a label", tier="noise"
     ),
     "label_generate_retired": _telemetry(
-        "label_generate_retired", "label generation given up on after repeated failures"
+        "label_generate_retired",
+        "label generation given up on after repeated failures",
+        tier="noise",
     ),
-    "trace": _telemetry("trace", "otel span export"),
+    "trace": _telemetry("trace", "otel span export", tier="noise"),
     # agent lifecycle / state
-    "idle_wake": _telemetry("idle_wake", "agent woken from idle", payload=IdleWake),
+    "idle_wake": _telemetry("idle_wake", "agent woken from idle", payload=IdleWake, tier="noise"),
     # compact / checkpoint / memory housekeeping
-    "compact_request": _telemetry("compact_request", "compact requested"),
-    "auto_compact": _telemetry("auto_compact", "auto-compact"),
-    "compact_reminder": _telemetry("compact_reminder", "compact reminder"),
-    "history_dump": _telemetry("history_dump", "pre-compact history dumped to workspace"),
-    "checkpoint_trim": _telemetry("checkpoint_trim", "checkpoint trimmed"),
-    "recall_filter": _telemetry("recall_filter", "memory recall filter", payload=RecallFilter),
-    "passive_recall": _telemetry("passive_recall", "passive memory recall"),
-    "silent_idle": _telemetry("silent_idle", "silent idle verdict"),
-    "last_msg": _telemetry("last_msg", "last-message check"),
+    "compact_request": _telemetry("compact_request", "compact requested", tier="noise"),
+    "auto_compact": _telemetry("auto_compact", "auto-compact", tier="noise"),
+    "compact_reminder": _telemetry("compact_reminder", "compact reminder", tier="noise"),
+    "history_dump": _telemetry(
+        "history_dump", "pre-compact history dumped to workspace", tier="noise"
+    ),
+    "checkpoint_trim": _telemetry("checkpoint_trim", "checkpoint trimmed", tier="noise"),
+    "recall_filter": _telemetry(
+        "recall_filter", "memory recall filter", payload=RecallFilter, tier="noise"
+    ),
+    "passive_recall": _telemetry("passive_recall", "passive memory recall", tier="noise"),
+    "silent_idle": _telemetry("silent_idle", "silent idle verdict", tier="noise"),
+    "last_msg": _telemetry("last_msg", "last-message check", tier="noise"),
     # gateway endpoint latency metering (Task #1091): 60s aggregates emitted
     # by gateway/_latency.py — one event per (route, bucket), never per request
     "gateway_latency": _telemetry(
         "gateway_latency",
         "gateway endpoint latency — 60s aggregate per route (p50/p95/max/count)",
         payload=GatewayLatency,
+        tier="noise",
     ),
     "loki_query_budget": _telemetry(
         "loki_query_budget",
         "local Loki query-admission transition and capacity metrics",
         payload=LokiQueryBudget,
+        tier="noise",
     ),
     # ── log (category=log) — registry.md §4, the bare-log fallback ──
-    "log": EventSpec(name="log", category="log", payload=LogPayload, doc="bare log line"),
+    "log": EventSpec(
+        name="log", category="log", tier="noise", payload=LogPayload, doc="bare log line"
+    ),
     "loki_query_failed": EventSpec(
         name="loki_query_failed",
         category="log",
+        tier="anomaly",
         payload=LokiQueryFailed,
         doc="a Loki HTTP query failed (timeout / disconnect / non-2xx) — carries the request shape",
     ),
     "page_serve_dir_missing": EventSpec(
         name="page_serve_dir_missing",
         category="log",
+        tier="anomaly",
         payload=PageServeDirMissing,
         doc="a served page directory disappeared; emitted on degradation and auto-close",
     ),
@@ -782,12 +875,14 @@ EVENTS: dict[str, EventSpec] = {
     "warning_resolved": EventSpec(
         name="warning_resolved",
         category="log",
+        tier="anomaly",
         payload=ResolvedMarker,
         doc="mark a warning (or class of warnings, via attributes.match) resolved",
     ),
     "error_resolved": EventSpec(
         name="error_resolved",
         category="log",
+        tier="anomaly",
         payload=ResolvedMarker,
         doc="mark an error (or class of errors, via attributes.match) resolved",
     ),
@@ -795,6 +890,26 @@ EVENTS: dict[str, EventSpec] = {
 
 
 # ── derived views — the only spellings consumers may use ───────────────────
+
+
+TIER_BY_EVENT: dict[str, EventTier] = {name: spec.tier for name, spec in EVENTS.items()}
+
+
+def tier_for(event_name: str, category: str, level: str) -> EventTier:
+    """Human-facing tier for one persisted event row.
+
+    A registered name always reads through ``TIER_BY_EVENT`` first, so a
+    registry/mapping drift raises instead of silently changing the events
+    page. Unknown historical names remain useful observations. The row's
+    severity and category deliberately take priority over that default tier:
+    warning-or-higher is an anomaly, and an audit row is a business fact.
+    """
+    declared = TIER_BY_EVENT[event_name] if event_name in EVENTS else None
+    if level.lower() in {"warning", "error", "critical"}:
+        return "anomaly"
+    if category == "audit":
+        return "business"
+    return declared if declared is not None else "observation"
 
 
 def category_for_kind(event_name: str) -> Category:

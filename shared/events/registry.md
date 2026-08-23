@@ -64,28 +64,28 @@ more often than payload. Payload keys other than those listed have no Pydantic m
 (display-surface use; see the payload tiering rules in `shared/audit_events.py`).
 Emit sites and consumers: see the comments at each emit point.
 
-| event_name | meaning | key payload fields | retention | destination |
-|------|------|-----------------|------|------|
-| `spawn` | new agent born | machine, fork_from, fork_checkpoint | 365d | events |
-| `fork` | agent forked from another | — | 365d | events |
-| `send_message` | message sent to an agent | — | 365d | events |
-| `terminate` | agent terminated | — | 365d | events |
-| `restart` | agent restart initiated | — | 365d | events |
-| `cancel` | in-flight turn cancelled | — | 365d | events |
-| `resurrect` | terminated agent woken | — | 365d | events |
-| `restart_completed` | restart finished | — | 365d | events |
-| `compact` | agent context compacted | — | 365d | events |
-| `report_activity` | activity report | — | 365d | events |
-| `exit` | agent process exited | — | 365d | events |
-| `label_change` | agent label changed | — | 365d | events |
-| `skill_invoked` | skill invoked by an agent | — | 365d | events |
-| `task_create` | task created | — | 365d | events |
-| `task_update` | task updated | status | 365d | events |
-| `report_breached` | guarantee report breached | — | 365d | events |
-| `computer_action` | computer-use desktop action (executed or refused) | action, app, outcome, error, coords, path, task_id | 365d | events |
-| `computer_session_start` | computer-use task session opened (first action with a task_id) | task_id, first_tool, first_action_at | 365d | events |
-| `computer_session_end` | computer-use task session closed (idle timeout) | task_id, action_count, first_action_at, last_action_at, outcome | 365d | events |
-| `mcp_tool_call` | MCP tool invoked through the gateway /mcp endpoint (agent_id NULL — external client) | — | 365d | events |
+| event_name | meaning | tier | key payload fields | retention | destination |
+|------|------|------|-----------------|------|------|
+| `spawn` | new agent born | business | machine, fork_from, fork_checkpoint | 365d | events |
+| `fork` | agent forked from another | business | — | 365d | events |
+| `send_message` | message sent to an agent | business | — | 365d | events |
+| `terminate` | agent terminated | business | — | 365d | events |
+| `restart` | agent restart initiated | business | — | 365d | events |
+| `cancel` | in-flight turn cancelled | business | — | 365d | events |
+| `resurrect` | terminated agent woken | business | — | 365d | events |
+| `restart_completed` | restart finished | business | — | 365d | events |
+| `compact` | agent context compacted | business | — | 365d | events |
+| `report_activity` | activity report | business | — | 365d | events |
+| `exit` | agent process exited | business | — | 365d | events |
+| `label_change` | agent label changed | business | — | 365d | events |
+| `skill_invoked` | skill invoked by an agent | business | — | 365d | events |
+| `task_create` | task created | business | — | 365d | events |
+| `task_update` | task updated | business | status | 365d | events |
+| `report_breached` | guarantee report breached | business | — | 365d | events |
+| `computer_action` | computer-use desktop action (executed or refused) | business | action, app, outcome, error, coords, path, task_id | 365d | events |
+| `computer_session_start` | computer-use task session opened (first action with a task_id) | business | task_id, first_tool, first_action_at | 365d | events |
+| `computer_session_end` | computer-use task session closed (idle timeout) | business | task_id, action_count, first_action_at, last_action_at, outcome | 365d | events |
+| `mcp_tool_call` | MCP tool invoked through the gateway /mcp endpoint (agent_id NULL — external client) | business | — | 365d | events |
 
 ## 3. Telemetry events (category=telemetry, 101)
 
@@ -96,119 +96,119 @@ Telemetry-side event name resolution (`shared/log.py`): **explicit `event=` →
 write SQL directly — both are annotated in the registry doc field. Emit sites and
 consumers: see the comments at each emit point.
 
-| event_name | meaning | key payload fields | family | retention | destination |
-|------|------|-----------------|----|------|------|
-| `status_change` | agent status transition — both telemetry (loguru) and audit (audit_events) sides emit this name | from, to | — | 90d | events |
-| `frontend_interaction` | tracked frontend interaction (click / page view / settings change) | page, element, session_id, key, value | — | 90d | events |
-| `llm_usage` | LLM call metering | model, calls, in_total, out_total, cache_read, reasoning, latency_ms, decode_ms, cost_usd, price_miss, price_hit, price_out, unpriced | — | 90d | events |
-| `turn_end` | one turn finished | ok, duration_seconds | — | 90d | events |
-| `llm_turn_aborted` | turn aborted after retries | — | LLM_ERROR | 90d | events |
-| `compact_turn_aborted` | turn aborted because compaction failed | — | — | 90d | events |
-| `llm_provider_error` | LLM provider failure | error_class, provider, status, error_type, fatal, billing, vendor, model | LLM_ERROR | 90d | events |
-| `stream_stalled_retry` | stream stalled, retried | — | LLM_ERROR | 90d | events |
-| `stream_overloaded_retry` | stream overloaded, retried | — | LLM_ERROR | 90d | events |
-| `thinking_block_sanitized` | thinking block sanitized | — | — | 90d | events |
-| `multiple_tool_calls_merged` | concurrent tool calls merged | — | — | 90d | events |
-| `llm_cancelled` | LLM call cancelled | — | — | 90d | events |
-| `exec` | execute_code succeeded | body, ok, duration_seconds | — | 90d | events |
-| `exec_failed` | execute_code failed | exc_type, body | — | 90d | events |
-| `exec_cancelled` | execute_code cancelled | — | — | 90d | events |
-| `exec(timeout)` | historical parenthesized name (migration target) | — | — | 90d | events |
-| `exec(failed)` | historical parenthesized name (migration target) | — | — | 90d | events |
-| `exec(cancelled)` | historical parenthesized name (migration target) | — | — | 90d | events |
-| `exec(thread-stuck)` | historical parenthesized name (migration target) | — | — | 90d | events |
-| `exec_timeout` | execute_code timed out | — | — | 90d | events |
-| `exec_node_timeout` | node-level timeout | — | — | 90d | events |
-| `exec_subprocess_killed` | exec child survived the signal grace period and was SIGKILLed | pid, grace | — | 90d | events |
-| `host_dispatcher_subscribed` | hosted dispatcher subscribed to the inbound wake pattern | — | — | 90d | events |
-| `host_dispatcher_reconnect` | hosted dispatcher's wake subscription dropped — reconnecting (wakes published while down are lost; the delivery watchdog re-publish covers them) | — | — | 90d | events |
-| `host_dispatcher_bad_channel` | hosted dispatcher ignored a wake whose channel name carried no agent id | — | — | 90d | events |
-| `host_turn_crashed` | a hosted turn task raised — the task is dropped and the next wake retries from the checkpoint; neighbours are unaffected | — | — | 90d | events |
-| `host_agent_prepared` | the host built an agent's per-agent runtime (chat model + startup reconcile) on a cold path — carries duration_ms and a reason of cold / config_changed / evicted, so a wake that pays the cold cost is distinguishable from one that does not, and a cache thrashing on config churn is visible as reason mix | — | — | 90d | events |
-| `host_started` | the hosted agent-runner finished process-scope boot and its dispatcher is live | — | — | 90d | events |
-| `host_turn_uncancellable` | a hosted turn did not unwind after being cancelled — it is blocked where asyncio cannot interrupt it (a C call), so the host stopped waiting and exited. Carries the agent, how long the cancel was pending (waited_s), and the agent's real activity clock (last_active_at / idle_s from agents_meta, NOT the /api/agents field of the same name, which is MAX(inbound_messages.created_at) and goes stale during long turns — issue #183) so a slow shutdown is distinguishable from a genuine wedge. The turn resumes from its checkpoint on restart. Process mode had no equivalent because SIGKILL always lands | — | — | 90d | events |
-| `node_enter` | LangGraph node entered — sink-filtered out of the events table (PR #1758); log files only | — | — | 90d | file |
-| `node_exit` | LangGraph node exited | node, outcome, duration_seconds, exc_name | — | 90d | events |
-| `process_exit` | agent process exited | reason, pid | — | 90d | events |
-| `service_started` | gateway/daemon started | name, pid | — | 90d | events |
-| `halt` | turn stopped (idle/compact/system) | body | — | 90d | events |
-| `agent_restarted` | agent restarted (phase2 done) | — | — | 90d | events |
-| `heartbeat_nudged` | heartbeat reminder | idle_minutes | — | 90d | events |
-| `task_reminder_digest` | overdue-task owner digest | owner_id, task_count, task_ids | — | 90d | events |
-| `task_escalation` | stalled-task escalation | owner_id, task_count, task_ids, leg | — | 90d | events |
-| `delivery_stalled` | delivery backlog | inbound_id, age_s | — | 90d | events |
-| `restart_cas_lost` | restart CAS race lost | — | — | 90d | events |
-| `claim_cas_lost` | claim CAS race lost — another lifecycle op owns the row | — | — | 90d | events |
-| `claim_cas_lost_exit` | claim wait aborted by a lost CAS — process exiting cleanly | — | — | 90d | events |
-| `idle_cas_lost` | idle-flip CAS race lost — degraded, not fatal | — | — | 90d | events |
-| `boot_timing` | boot duration | — | — | 90d | events |
-| `dangling_tool_use_repaired` | dangling tool_use repaired | — | — | 90d | events |
-| `agent_spawned` | agent process started | spawner, forked_from | — | 90d | events |
-| `agent_resurrected` | agent resurrected | — | — | 90d | events |
-| `agent_terminated` | agent terminated | — | — | 90d | events |
-| `agent_hibernating` | agent hibernated | — | — | 90d | events |
-| `agent_swapped_in` | process swapped in | — | — | 90d | events |
-| `agent_revived` | agent revived | — | — | 90d | events |
-| `respawn_phase1` | restart phase 1 | — | — | 90d | events |
-| `respawn_phase2_launch` | restart phase 2 launch | — | — | 90d | events |
-| `launch_confirm_extended` | launch confirm extended | — | — | 90d | events |
-| `launch_confirm_failed` | launch confirm failed | — | — | 90d | events |
-| `launch_confirm_task_crashed` | launch confirm task crashed | — | — | 90d | events |
-| `launch_force_terminated` | launch force-terminated | — | — | 90d | events |
-| `launch_force_terminated_skipped` | launch force-terminate skipped | — | — | 90d | events |
-| `launch_retry` | launch retried | — | — | 90d | events |
-| `sdk_call` | SDK call metering | fn, duration | — | 90d | events |
-| `plugin_activation` | a plugin injection surface fired (hook / wrap / prompt section) | plugin, surface, identifier, detail, model | — | 90d | events |
-| `sse_drop` | SSE event dropped | kind, n | — | 90d | events |
-| `event_log_drop` | event-pipeline row shed | n | — | 90d | events |
-| `heartbeat_paused` | heartbeat paused | duration_s | — | 90d | events |
-| `code` | LLM generated code block | body, ok, duration_seconds | — | 90d | events |
-| `text` | LLM text output | — | — | 90d | events |
-| `syntax_fix` | syntax repair executed | fixes | — | 90d | events |
-| `inbound_reconcile` | inbound reconciliation | — | — | 90d | events |
-| `screen_capture_notify_failed` | screenshot notify failed | — | — | 90d | events |
-| `page_restore_alive` | page restore alive | — | — | 90d | events |
-| `page_restore_reserved` | page restore reserved | — | — | 90d | events |
-| `page_restore_query_failed` | page restore query failed | — | — | 90d | events |
-| `page_restore_failed` | page restore failed | — | — | 90d | events |
-| `page_restore_closed` | page restore closed | — | — | 90d | events |
-| `db_outage_wait` | db outage wait | — | — | 90d | events |
-| `db_outage_pause` | db outage pause | — | — | 90d | events |
-| `db_outage_reconcile_retry` | db outage reconcile retry | — | — | 90d | events |
-| `db_recovered` | db recovered | — | — | 90d | events |
-| `db_pool_acquire_timeout` | db pool acquire timeout | — | — | 90d | events |
-| `db_pool_acquire_slow` | db pool acquire slow | — | — | 90d | events |
-| `checkpoint_write_failed` | checkpoint write failed | — | — | 90d | events |
-| `pgbouncer_repaired` | pgbouncer watchdog repair | — | — | 90d | events |
-| `label_generated` | label auto-generated | — | — | 90d | events |
-| `label_generate_failed` | label generation failed | — | — | 90d | events |
-| `label_generate_skipped` | label generation skipped | — | — | 90d | events |
-| `label_generate_empty` | label generation empty | — | — | 90d | events |
-| `label_generate_rejected` | label generation rejected as not a label | — | — | 90d | events |
-| `label_generate_retired` | label generation given up on after repeated failures | — | — | 90d | events |
-| `trace` | otel span export | — | — | 90d | events |
-| `idle_wake` | agent woken from idle | degraded, elapsed_s, rounds, timeout_s | — | 90d | events |
-| `compact_request` | compact requested | — | — | 90d | events |
-| `auto_compact` | auto-compact | — | — | 90d | events |
-| `compact_reminder` | compact reminder | — | — | 90d | events |
-| `history_dump` | pre-compact history dumped to workspace | — | — | 90d | events |
-| `checkpoint_trim` | checkpoint trimmed | — | — | 90d | events |
-| `recall_filter` | memory recall filter | body | — | 90d | events |
-| `passive_recall` | passive memory recall | — | — | 90d | events |
-| `silent_idle` | silent idle verdict | — | — | 90d | events |
-| `last_msg` | last-message check | — | — | 90d | events |
-| `gateway_latency` | gateway endpoint latency — 60s aggregate per route (p50/p95/max/count) | route, p50_ms, p95_ms, max_ms, count | — | 90d | events |
-| `loki_query_budget` | local Loki query-admission transition and capacity metrics | outcome, active, queued, high_water, wait_ms, acquired, queue_full, wait_timeout | — | 90d | events |
+| event_name | meaning | tier | key payload fields | family | retention | destination |
+|------|------|------|-----------------|----|------|------|
+| `status_change` | agent status transition — both telemetry (loguru) and audit (audit_events) sides emit this name | noise | from, to | — | 90d | events |
+| `frontend_interaction` | tracked frontend interaction (click / page view / settings change) | noise | page, element, session_id, key, value | — | 90d | events |
+| `llm_usage` | LLM call metering | observation | model, calls, in_total, out_total, cache_read, reasoning, latency_ms, decode_ms, cost_usd, price_miss, price_hit, price_out, unpriced | — | 90d | events |
+| `turn_end` | one turn finished | observation | ok, duration_seconds | — | 90d | events |
+| `llm_turn_aborted` | turn aborted after retries | anomaly | — | LLM_ERROR | 90d | events |
+| `compact_turn_aborted` | turn aborted because compaction failed | anomaly | — | — | 90d | events |
+| `llm_provider_error` | LLM provider failure | anomaly | error_class, provider, status, error_type, fatal, billing, vendor, model | LLM_ERROR | 90d | events |
+| `stream_stalled_retry` | stream stalled, retried | anomaly | — | LLM_ERROR | 90d | events |
+| `stream_overloaded_retry` | stream overloaded, retried | anomaly | — | LLM_ERROR | 90d | events |
+| `thinking_block_sanitized` | thinking block sanitized | noise | — | — | 90d | events |
+| `multiple_tool_calls_merged` | concurrent tool calls merged | observation | — | — | 90d | events |
+| `llm_cancelled` | LLM call cancelled | anomaly | — | — | 90d | events |
+| `exec` | execute_code succeeded | observation | body, ok, duration_seconds | — | 90d | events |
+| `exec_failed` | execute_code failed | anomaly | exc_type, body | — | 90d | events |
+| `exec_cancelled` | execute_code cancelled | anomaly | — | — | 90d | events |
+| `exec(timeout)` | historical parenthesized name (migration target) | anomaly | — | — | 90d | events |
+| `exec(failed)` | historical parenthesized name (migration target) | anomaly | — | — | 90d | events |
+| `exec(cancelled)` | historical parenthesized name (migration target) | anomaly | — | — | 90d | events |
+| `exec(thread-stuck)` | historical parenthesized name (migration target) | anomaly | — | — | 90d | events |
+| `exec_timeout` | execute_code timed out | anomaly | — | — | 90d | events |
+| `exec_node_timeout` | node-level timeout | anomaly | — | — | 90d | events |
+| `exec_subprocess_killed` | exec child survived the signal grace period and was SIGKILLed | anomaly | pid, grace | — | 90d | events |
+| `host_dispatcher_subscribed` | hosted dispatcher subscribed to the inbound wake pattern | noise | — | — | 90d | events |
+| `host_dispatcher_reconnect` | hosted dispatcher's wake subscription dropped — reconnecting (wakes published while down are lost; the delivery watchdog re-publish covers them) | noise | — | — | 90d | events |
+| `host_dispatcher_bad_channel` | hosted dispatcher ignored a wake whose channel name carried no agent id | anomaly | — | — | 90d | events |
+| `host_turn_crashed` | a hosted turn task raised — the task is dropped and the next wake retries from the checkpoint; neighbours are unaffected | anomaly | — | — | 90d | events |
+| `host_agent_prepared` | the host built an agent's per-agent runtime (chat model + startup reconcile) on a cold path — carries duration_ms and a reason of cold / config_changed / evicted, so a wake that pays the cold cost is distinguishable from one that does not, and a cache thrashing on config churn is visible as reason mix | noise | — | — | 90d | events |
+| `host_started` | the hosted agent-runner finished process-scope boot and its dispatcher is live | noise | — | — | 90d | events |
+| `host_turn_uncancellable` | a hosted turn did not unwind after being cancelled — it is blocked where asyncio cannot interrupt it (a C call), so the host stopped waiting and exited. Carries the agent, how long the cancel was pending (waited_s), and the agent's real activity clock (last_active_at / idle_s from agents_meta, NOT the /api/agents field of the same name, which is MAX(inbound_messages.created_at) and goes stale during long turns — issue #183) so a slow shutdown is distinguishable from a genuine wedge. The turn resumes from its checkpoint on restart. Process mode had no equivalent because SIGKILL always lands | anomaly | — | — | 90d | events |
+| `node_enter` | LangGraph node entered — sink-filtered out of the events table (PR #1758); log files only | noise | — | — | 90d | file |
+| `node_exit` | LangGraph node exited | noise | node, outcome, duration_seconds, exc_name | — | 90d | events |
+| `process_exit` | agent process exited | noise | reason, pid | — | 90d | events |
+| `service_started` | gateway/daemon started | noise | name, pid | — | 90d | events |
+| `halt` | turn stopped (idle/compact/system) | noise | body | — | 90d | events |
+| `agent_restarted` | agent restarted (phase2 done) | observation | — | — | 90d | events |
+| `heartbeat_nudged` | heartbeat reminder | noise | idle_minutes | — | 90d | events |
+| `task_reminder_digest` | overdue-task owner digest | noise | owner_id, task_count, task_ids | — | 90d | events |
+| `task_escalation` | stalled-task escalation | observation | owner_id, task_count, task_ids, leg | — | 90d | events |
+| `delivery_stalled` | delivery backlog | anomaly | inbound_id, age_s | — | 90d | events |
+| `restart_cas_lost` | restart CAS race lost | anomaly | — | — | 90d | events |
+| `claim_cas_lost` | claim CAS race lost — another lifecycle op owns the row | anomaly | — | — | 90d | events |
+| `claim_cas_lost_exit` | claim wait aborted by a lost CAS — process exiting cleanly | anomaly | — | — | 90d | events |
+| `idle_cas_lost` | idle-flip CAS race lost — degraded, not fatal | anomaly | — | — | 90d | events |
+| `boot_timing` | boot duration | noise | — | — | 90d | events |
+| `dangling_tool_use_repaired` | dangling tool_use repaired | anomaly | — | — | 90d | events |
+| `agent_spawned` | agent process started | observation | spawner, forked_from | — | 90d | events |
+| `agent_resurrected` | agent resurrected | observation | — | — | 90d | events |
+| `agent_terminated` | agent terminated | observation | — | — | 90d | events |
+| `agent_hibernating` | agent hibernated | noise | — | — | 90d | events |
+| `agent_swapped_in` | process swapped in | noise | — | — | 90d | events |
+| `agent_revived` | agent revived | noise | — | — | 90d | events |
+| `respawn_phase1` | restart phase 1 | noise | — | — | 90d | events |
+| `respawn_phase2_launch` | restart phase 2 launch | noise | — | — | 90d | events |
+| `launch_confirm_extended` | launch confirm extended | noise | — | — | 90d | events |
+| `launch_confirm_failed` | launch confirm failed | anomaly | — | — | 90d | events |
+| `launch_confirm_task_crashed` | launch confirm task crashed | anomaly | — | — | 90d | events |
+| `launch_force_terminated` | launch force-terminated | anomaly | — | — | 90d | events |
+| `launch_force_terminated_skipped` | launch force-terminate skipped | noise | — | — | 90d | events |
+| `launch_retry` | launch retried | observation | — | — | 90d | events |
+| `sdk_call` | SDK call metering | noise | fn, duration | — | 90d | events |
+| `plugin_activation` | a plugin injection surface fired (hook / wrap / prompt section) | noise | plugin, surface, identifier, detail, model | — | 90d | events |
+| `sse_drop` | SSE event dropped | anomaly | kind, n | — | 90d | events |
+| `event_log_drop` | event-pipeline row shed | anomaly | n | — | 90d | events |
+| `heartbeat_paused` | heartbeat paused | observation | duration_s | — | 90d | events |
+| `code` | LLM generated code block | noise | body, ok, duration_seconds | — | 90d | events |
+| `text` | LLM text output | noise | — | — | 90d | events |
+| `syntax_fix` | syntax repair executed | noise | fixes | — | 90d | events |
+| `inbound_reconcile` | inbound reconciliation | noise | — | — | 90d | events |
+| `screen_capture_notify_failed` | screenshot notify failed | anomaly | — | — | 90d | events |
+| `page_restore_alive` | page restore alive | noise | — | — | 90d | events |
+| `page_restore_reserved` | page restore reserved | noise | — | — | 90d | events |
+| `page_restore_query_failed` | page restore query failed | anomaly | — | — | 90d | events |
+| `page_restore_failed` | page restore failed | anomaly | — | — | 90d | events |
+| `page_restore_closed` | page restore closed | noise | — | — | 90d | events |
+| `db_outage_wait` | db outage wait | anomaly | — | — | 90d | events |
+| `db_outage_pause` | db outage pause | anomaly | — | — | 90d | events |
+| `db_outage_reconcile_retry` | db outage reconcile retry | anomaly | — | — | 90d | events |
+| `db_recovered` | db recovered | anomaly | — | — | 90d | events |
+| `db_pool_acquire_timeout` | db pool acquire timeout | anomaly | — | — | 90d | events |
+| `db_pool_acquire_slow` | db pool acquire slow | anomaly | — | — | 90d | events |
+| `checkpoint_write_failed` | checkpoint write failed | anomaly | — | — | 90d | events |
+| `pgbouncer_repaired` | pgbouncer watchdog repair | anomaly | — | — | 90d | events |
+| `label_generated` | label auto-generated | noise | — | — | 90d | events |
+| `label_generate_failed` | label generation failed | anomaly | — | — | 90d | events |
+| `label_generate_skipped` | label generation skipped | noise | — | — | 90d | events |
+| `label_generate_empty` | label generation empty | noise | — | — | 90d | events |
+| `label_generate_rejected` | label generation rejected as not a label | noise | — | — | 90d | events |
+| `label_generate_retired` | label generation given up on after repeated failures | noise | — | — | 90d | events |
+| `trace` | otel span export | noise | — | — | 90d | events |
+| `idle_wake` | agent woken from idle | noise | degraded, elapsed_s, rounds, timeout_s | — | 90d | events |
+| `compact_request` | compact requested | noise | — | — | 90d | events |
+| `auto_compact` | auto-compact | noise | — | — | 90d | events |
+| `compact_reminder` | compact reminder | noise | — | — | 90d | events |
+| `history_dump` | pre-compact history dumped to workspace | noise | — | — | 90d | events |
+| `checkpoint_trim` | checkpoint trimmed | noise | — | — | 90d | events |
+| `recall_filter` | memory recall filter | noise | body | — | 90d | events |
+| `passive_recall` | passive memory recall | noise | — | — | 90d | events |
+| `silent_idle` | silent idle verdict | noise | — | — | 90d | events |
+| `last_msg` | last-message check | noise | — | — | 90d | events |
+| `gateway_latency` | gateway endpoint latency — 60s aggregate per route (p50/p95/max/count) | noise | route, p50_ms, p95_ms, max_ms, count | — | 90d | events |
+| `loki_query_budget` | local Loki query-admission transition and capacity metrics | noise | outcome, active, queued, high_water, wait_ms, acquired, queue_full, wait_timeout | — | 90d | events |
 
 ## 4. Log (bare logs, category=log)
 
-| event_name | meaning | key payload fields | retention | destination |
-|------|------|-----------------|------|------|
-| `log` | bare log line | msg | 30d | events |
-| `loki_query_failed` | a Loki HTTP query failed (timeout / disconnect / non-2xx) — carries the request shape | endpoint, duration_s, error, window_from, window_to, query | 30d | events |
-| `page_serve_dir_missing` | a served page directory disappeared; emitted on degradation and auto-close | agent_id, key, name, serve_dir, port | 30d | events |
-| `warning_resolved` | mark a warning (or class of warnings, via attributes.match) resolved | target_event_id, match, resolved_by | 30d | events |
-| `error_resolved` | mark an error (or class of errors, via attributes.match) resolved | target_event_id, match, resolved_by | 30d | events |
+| event_name | meaning | tier | key payload fields | retention | destination |
+|------|------|------|-----------------|------|------|
+| `log` | bare log line | noise | msg | 30d | events |
+| `loki_query_failed` | a Loki HTTP query failed (timeout / disconnect / non-2xx) — carries the request shape | anomaly | endpoint, duration_s, error, window_from, window_to, query | 30d | events |
+| `page_serve_dir_missing` | a served page directory disappeared; emitted on degradation and auto-close | anomaly | agent_id, key, name, serve_dir, port | 30d | events |
+| `warning_resolved` | mark a warning (or class of warnings, via attributes.match) resolved | anomaly | target_event_id, match, resolved_by | 30d | events |
+| `error_resolved` | mark an error (or class of errors, via attributes.match) resolved | anomaly | target_event_id, match, resolved_by | 30d | events |
 
 ## 5. SSE roles (live channel, not persisted, 27)
 
