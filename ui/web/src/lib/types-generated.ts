@@ -2872,9 +2872,9 @@ export interface paths {
          *
          *     Data sources:
          *     - `live_count`: agents_meta table — all non-terminated agents (running/idling/restarting/hibernating)
-         *     - `tokens` / `cost_usd`: Prometheus (task #1197 — the OTLP-mapped
-         *       llm_usage counters via gateway/prom_metrics, windowed by `increase`)
-         *     - average turn duration + warning/error counts: Loki's unified event stream
+         *     - `tokens` / `cost_usd`: telemetry `llm_usage` events in Loki (cached
+         *       for 60 seconds per requested window)
+         *     - average turn duration / warning/error counts: Loki's unified event stream
          *     - `total_events`: Postgres archive partition estimates (a coarse growth gauge)
          *
          *     `?hours=` selects the aggregation window (`ts > now() - hours`), whitelisted
@@ -6256,10 +6256,11 @@ export interface components {
          *
          *     - `live_count`: current non-terminated count (from agents_meta, not
          *       events; not windowed)
-         *     - `tokens`: windowed LLM token usage
-         *     - `cost_usd`: windowed estimated LLM spend in USD, priced at current
-         *       rates per model via `shared.lm.pricing.cost_usd`; events whose model is
-         *       unpriced (or pre-dating model tracking) contribute 0
+         *     - `tokens`: windowed telemetry LLM token usage (cached for at most 60s)
+         *     - `cost_usd`: windowed LLM spend in USD, summed from the usage-time
+         *       `cost_usd` snapshots carried by telemetry Loki `llm_usage` events;
+         *       events that pre-date the snapshot field contribute 0 (cached for at
+         *       most 60s with `tokens`)
          *     - `avg_turn_seconds`: windowed avg LLM call wall time
          *       (event=turn_end + ok=true)
          *     - `warnings` / `errors`: level counts. Agent trial-and-error
