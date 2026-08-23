@@ -43,8 +43,8 @@ afterEach(() => {
 
 describe("migrateLegacyLocalStorageSettings", () => {
   it("carries a non-default boolean into the DB, then drops the key", async () => {
-    // "true" = explicitly opened the inspector (user ruling 2026-08-05: the
-    // floating panel defaults CLOSED, so an explicit open is a real
+    // "true" = explicitly opened the inspector (user ruling 2026-08-23: the
+    // side panel defaults CLOSED, so an explicit open is a real
     // preference) → written, then the legacy key drops.
     localStorage.setItem("ava:inspector-open", "true");
     await migrateLegacyLocalStorageSettings(write);
@@ -53,7 +53,7 @@ describe("migrateLegacyLocalStorageSettings", () => {
   });
 
   it("drops a default-valued key without writing", async () => {
-    // "false" = the CLOSED default (floating panel, ruling 2026-08-05) → no
+    // "false" = the CLOSED default (side panel, ruling 2026-08-23) → no
     // redundant write, the legacy key just drops.
     localStorage.setItem("ava:inspector-open", "false");
     await migrateLegacyLocalStorageSettings(write);
@@ -218,7 +218,7 @@ describe("migrateLegacyLocalStorageSettings", () => {
   });
 });
 
-describe("display.inspector_open default (user ruling 2026-08-05: the floating panel starts CLOSED on entry)", () => {
+describe("display.inspector_open default (user ruling 2026-08-23: the side panel starts CLOSED on entry)", () => {
   it("USER_SETTING_DEFAULTS has the panel closed", () => {
     expect(USER_SETTING_DEFAULTS["display.inspector_open"]).toBe(false);
   });

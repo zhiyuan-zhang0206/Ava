@@ -2,11 +2,11 @@
 
 // Inspector-panel open/closed flag. Two behaviors, one hook:
 //
-// - Desktop (≥ lg): the panel is a floating overlay (user ruling
-//   2026-08-05), so "I want the inspector open" is still a workspace
-//   preference — a DB-backed user setting (display.inspector_open) shared
-//   across browsers/machines. Default: CLOSED (a floating panel that opened
-//   on every entry would cover the timeline; the composer's toggle opens it).
+// - Desktop (≥ lg): the panel is a fixed right-side panel (user ruling
+//   2026-08-23, superseding the 2026-08-05 floating overlay), so "I want the
+//   inspector open" is still a workspace preference — a DB-backed user setting
+//   (display.inspector_open) shared across browsers/machines. Default: CLOSED;
+//   the composer's toggle opens it.
 //
 // - Mobile (< lg): the panel is a full-screen overlay that hides the
 //   timeline, so its open state is per-session view state (like the mobile

@@ -102,11 +102,10 @@ function HomeShell({ showError }: HomeShellProps) {
     isLoading: agentsLoading,
   } = useAgents(showError);
 
-  // The inspector is a floating overlay now (user ruling 2026-08-05): it
-  // starts CLOSED on entry (display.inspector_open default false) and opens
-  // via the composer's inspector toggle.
+  // User ruling 2026-08-23 supersedes the 2026-08-05 floating desktop
+  // overlay: desktop uses a fixed right-side panel and mobile keeps the
+  // full-screen overlay. Both start CLOSED and open via the composer's toggle.
   const { open: inspectorOpen } = useInspectorOpen();
-
 
   const handleSpawn = useCallback(
     async ({
@@ -135,9 +134,8 @@ function HomeShell({ showError }: HomeShellProps) {
   // Preload the open-pages list when an agent is selected (cheap DB read;
   // useAgentPages folds SSE into this cache). The expensive /inspect endpoint
   // is deliberately NOT preloaded here — selecting an agent must not fire a
-  // ~25-Loki-aggregation call the user may never look at. Instant panel open
-  // is covered by the InspectorToggle's prefetch-on-intent (pointerenter/
-  // focus) instead — see inspector-panel.tsx.
+  // ~25-Loki-aggregation call the user may never look at. InspectorPanel
+  // fetches on open instead — see inspector-panel.tsx.
   useQuery({
     queryKey: ["agent-pages", activeId] as const,
     queryFn: () => {
@@ -171,9 +169,9 @@ function HomeShell({ showError }: HomeShellProps) {
           forkPending={forkPending}
           showError={showError}
           handleFork={handleFork}
-          inspectorOpen={inspectorOpen}
         />
       </AgentEventStreamProvider>
+      {inspectorOpen && activeId != null && <InspectorPanel agentId={activeId} />}
     </>
   );
 }
@@ -184,7 +182,6 @@ interface HomeContentProps {
   forkPending: boolean;
   showError: (msg: string) => void;
   handleFork: () => void;
-  inspectorOpen: boolean;
 }
 
 function HomeContent({
@@ -193,7 +190,6 @@ function HomeContent({
   forkPending,
   showError,
   handleFork,
-  inspectorOpen,
 }: HomeContentProps) {
   const t = useTranslations("common");
   const composerFocusToken = useStore((s) => s.composerFocusToken);
@@ -400,12 +396,9 @@ function HomeContent({
               agentTerminated={activeAgent?.status === "terminated"}
               details={<ContentToggle />}
               inspect={
-                <>
-                  <InspectorToggle />
-                  {inspectorOpen && activeId != null && (
-                    <InspectorPanel agentId={activeId} />
-                  )}
-                </>
+                // The 2026-08-23 ruling keeps only the toggle in the composer;
+                // InspectorPanel is HomeShell's final flex sibling.
+                <InspectorToggle />
               }
             >
               <UploadButton
