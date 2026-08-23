@@ -41,6 +41,8 @@
     "sortBy": "Sort by",
     "loadingAgents": "Loading agents…",
     "statistics": "Statistics",
+    "statisticsUpdating": "Statistics are updating",
+    "statisticsRetry": "Retry",
     "searchAgents": "Search agents",
     "collapseSidebar": "Collapse sidebar",
     "closeSidebar": "Close sidebar",
