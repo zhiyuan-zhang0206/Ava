@@ -662,9 +662,9 @@ def test_in_process_loader_imports_shipped_metrics() -> None:
 
     plugin_specs = [s for s in specs if s.plugin != "core"]
     core_specs = [s for s in specs if s.plugin == "core"]
-    # the shipped plugin metrics (10 after the task #180 LogQL cutover)
+    # the shipped plugin metrics (9 after retiring the duplicate spawn panel)
     assert {s.plugin for s in plugin_specs} == {"ava_code", "ava_fleet", "ava_memory"}
-    assert len(plugin_specs) == 10
+    assert len(plugin_specs) == 9
     # core section follows, plugin section first (old snapshot order)
     assert [s.plugin for s in specs].index("core") == len(plugin_specs)
     assert len(core_specs) >= 16

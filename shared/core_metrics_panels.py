@@ -3,10 +3,9 @@
 ``deploy/lgtm/config/grafana/provisioning/dashboards/ava-ops-main.json``, migrated to core-metric registrations
 (Task #882) and from Postgres-event SQL to Loki LogQL (Task #1280).
 
-The hand-written core panels (ids < 1000) of the ops dashboard are registered
-here as core metrics, in their dashboard grid order. The cost tiles and
-drill-downs read each call's usage-time ``cost_usd`` snapshot from the Loki
-event stream; no dashboard query reprices historical token totals.
+The core dashboard panels (ids < 1000) are registered here as core metrics.
+The four statistics-coverage tiles are included with the original panels, and
+the hand-maintained JSON remains the rendered dashboard source of truth.
 
 Query dialect (Task #1280): every panel reads the event stream from Loki
 instead of the retired PG ``events`` table — the same read the alert rules
@@ -14,22 +13,20 @@ instead of the retired PG ``events`` table — the same read the alert rules
 (the unified emitter's OTLP resource), pipelines ``| json`` (event fields are
 structured metadata, NOT stream labels), and filters on the flattened labels
 (``attributes.in_total`` -> ``attributes_in_total``). Stat/table panels run as
-instant queries over ``[$__range]`` (the whole panel window); timeseries and
-barchart panels run as range queries bucketed by ``[$__interval]``. The one
-panel that does NOT read events — ``core_live_agents`` (the ``agents_meta``
-table, still live in PG) — stays SQL by design.
+instant queries over ``[$__range]`` (the whole panel window); range panels use
+fixed windows chosen for their metric semantics. The one panel that does NOT
+read events — ``core_live_agents`` (the ``agents_meta`` table, still live in
+PG) — stays SQL by design.
 
 Per-panel provenance:
 
-- **11 stat panels** (LLM calls / Warning / Error / Unresolved Warning /
-  Unresolved Error / Live agents / LLM cost (24h) / Tokens (24h), plus the
-  three cost projections): explicit 8x4 grid (three per row). The
+- **6 stat panels** (LLM calls / Warning / Error / Live agents /
+  LLM cost (24h) / Tokens (24h)): explicit 8x4 grid (three per row). The
   generator's stat color default (fixed blue) matches four of them; Warning
   (fixed orange) and Error (fixed red) set the color via ``field_defaults``,
-  and LLM cost carries the original ``decimals: 2``. The 24h tiles use
-  ``timeFrom: now-24h`` in the dashboard JSON so their names stay truthful.
-  Error keeps the original ``unit: "s"`` and the ``noValue: "0"`` option.
-- **10 chart panels** (SSE backlog / LLM throughput / Token usage —
+  and LLM cost carries the original ``decimals: 2``. Error keeps the
+  original ``unit: "s"`` and the ``noValue: "0"`` option.
+- **8 chart panels** (SSE backlog / LLM throughput / Token usage —
   Output + Reasoning / Cache hit / Input+Output+Gen-stage TPS / LLM calls /
   bucket / Event health / Token usage — Input): default 12x7 grid with the
   red-80 threshold step, except the three TPS panels which have no
@@ -38,30 +35,22 @@ Per-panel provenance:
   (fillOpacity 25 / axisLabel / stacking normal A on the two token-usage
   panels); SSE backlog and LLM calls / bucket match the barchart defaults
   and need no custom.
-- **Cost-analysis additions**: Daily LLM cost is a 24-hour barchart and the
-  model/agent drill-downs are instant-query Top 20 tables. Their Grafana JSON
-  is an explicit row because the dashboard generator does not own rows after
-  the original core grid.
 - **event_name/category**: taken from each query's semantics (llm_usage/telemetry,
   delivery_stalled/telemetry, ...). The level/status-based queries (Warning,
   Error, Live agents, Event health) filter on ``level``/``status`` rather
   than an event name — their event_name values ("warning" / "error" /
   "lifecycle" / "event") are descriptive registry metadata only.
-- **LogQL naming**: LogQL aggregates carry no series labels, so every
-  multi-series panel names its targets via ``target_names`` (rendered as
-  Grafana fieldConfig displayName overrides); the series labels from the SQL
-  aliases are preserved exactly (``"stalled <60s"`` etc.).
+- **LogQL naming**: every rendered Loki target supplies a ``legendFormat``;
+  static semantic names come from ``target_names`` and grouped queries use
+  their label template (for example, ``{{attributes_route}}``).
 - **SQL fixes** (the metric-template whitelist — see
   ``shared/plugin_metrics.validate_metric_sql`` — rejects ``<``/``>``/``/``
   inside quoted identifiers): the SSE backlog aliases ``"stalled <60s"`` /
   ``"stalled >600s"`` (subquery columns, outer references and output
   labels) are renamed to ``"stalled <60s"`` / ``"stalled >600s"`` —
   the values are unchanged, only the series labels lose the ``<``/``>``
-  glyphs (no per-series rename mechanism exists short of fieldConfig
-  overrides, which the spec/generator do not carry). The LLM throughput
-  alias ``"tokens/s"`` becomes ``"tokens/s"``, and the rendered series
-  label is preserved exactly via ``field_defaults`` displayName
-  (``"tokens/s"``), so that panel renders identically to the original.
+  glyphs. Loki legend names are supplied at the target level, independent of
+  the LogQL aggregate's label-set result.
 """
 
 from __future__ import annotations
@@ -160,7 +149,7 @@ core_metrics.register_core_metric(
         unit="short",
         panel="stat",
         query=_count(
-            'category=~"{category_re}|log" | level="warning" | attributes_resolved_by=""',
+            'category=~"telemetry|log" | level="warning" | attributes_resolved_by=""',
             "$__range",
         ),
         query_type="logql",
@@ -180,7 +169,7 @@ core_metrics.register_core_metric(
         unit="short",
         panel="stat",
         query=_count(
-            'category=~"{category_re}|log" | level=~"error|critical" | attributes_resolved_by=""',
+            'category=~"telemetry|log" | level=~"error|critical" | attributes_resolved_by=""',
             "$__range",
         ),
         query_type="logql",
@@ -322,6 +311,154 @@ core_metrics.register_core_metric(
 
 core_metrics.register_core_metric(
     MetricSpec(
+        name="core_llm_cost_daily",
+        title="Daily LLM cost (7d)",
+        description=(
+            "Daily usage-time LLM cost snapshots. The dashboard fixes this panel "
+            "to Asia/Shanghai calendar days and a 24-hour query interval."
+        ),
+        event_name="llm_usage",
+        category="telemetry",
+        unit="currencyUSD",
+        panel="barchart",
+        query=_llm_cost("$__interval"),
+        query_type="logql",
+        target_names=["cost usd"],
+        thresholds=[],
+    )
+)
+
+core_metrics.register_core_metric(
+    MetricSpec(
+        name="core_llm_cost_by_model",
+        title="LLM cost by model (Top 20)",
+        description=(
+            "Top 20 models by windowed usage-time cost snapshots. The model name "
+            "is the llm_usage payload's attributes_model label."
+        ),
+        event_name="llm_usage",
+        category="telemetry",
+        unit="currencyUSD",
+        panel="table",
+        query=(
+            f'topk(20, sum by (attributes_model) (sum_over_time({{service_name="unknown_service"}} '
+            f"| json | category={{category}} | event_name={{event_name}} | "
+            f'attributes_model!="" | unwrap {_LLM_ATTR["cost_usd"]} [$__range])))'
+        ),
+        query_type="logql",
+        target_names=["cost usd"],
+        thresholds=[],
+    )
+)
+
+core_metrics.register_core_metric(
+    MetricSpec(
+        name="core_llm_cost_by_agent",
+        title="LLM cost by agent (Top 20)",
+        description="Top 20 agents by windowed usage-time LLM cost snapshots.",
+        event_name="llm_usage",
+        category="telemetry",
+        unit="currencyUSD",
+        panel="table",
+        query=(
+            f'topk(20, sum by (agent_id) (sum_over_time({{service_name="unknown_service"}} '
+            f'| json | category={{category}} | event_name={{event_name}} | agent_id!="" | '
+            f"unwrap {_LLM_ATTR['cost_usd']} [$__range])))"
+        ),
+        query_type="logql",
+        target_names=["cost usd"],
+        thresholds=[],
+    )
+)
+
+core_metrics.register_core_metric(
+    MetricSpec(
+        name="core_llm_input_tokens_24h",
+        title="LLM input tokens (24h)",
+        event_name="llm_usage",
+        category="telemetry",
+        unit="short",
+        panel="stat",
+        query=(
+            f'sum(sum_over_time({{service_name="unknown_service"}} | json | '
+            f"category={{category}} | event_name={{event_name}} | "
+            f"unwrap {_LLM_ATTR['in_total']} [$__range]))"
+        ),
+        query_type="logql",
+        width=8,
+        height=4,
+    )
+)
+
+core_metrics.register_core_metric(
+    MetricSpec(
+        name="core_llm_output_tokens_24h",
+        title="LLM output tokens (24h)",
+        event_name="llm_usage",
+        category="telemetry",
+        unit="short",
+        panel="stat",
+        query=(
+            f'sum(sum_over_time({{service_name="unknown_service"}} | json | '
+            f"category={{category}} | event_name={{event_name}} | "
+            f"unwrap {_LLM_ATTR['out_total']} [$__range]))"
+        ),
+        query_type="logql",
+        width=8,
+        height=4,
+    )
+)
+
+core_metrics.register_core_metric(
+    MetricSpec(
+        name="core_cache_hit_rate_24h",
+        title="Cache hit rate (24h)",
+        event_name="llm_usage",
+        category="telemetry",
+        unit="percent",
+        panel="stat",
+        query=(
+            f'100 * sum(sum_over_time({{service_name="unknown_service"}} | json | '
+            f"category={{category}} | event_name={{event_name}} | "
+            f"unwrap {_LLM_ATTR['cache_read']} [$__range]))"
+            f' / sum(sum_over_time({{service_name="unknown_service"}} | json | '
+            f"category={{category}} | event_name={{event_name}} | "
+            f"unwrap {_LLM_ATTR['in_total']} [$__range]))"
+        ),
+        query_type="logql",
+        field_defaults={"decimals": 2},
+        width=8,
+        height=4,
+    )
+)
+
+core_metrics.register_core_metric(
+    MetricSpec(
+        name="core_avg_turn_duration_24h",
+        title="Avg turn duration (24h)",
+        event_name="turn_end",
+        category="telemetry",
+        unit="s",
+        panel="stat",
+        query=(
+            'sum(sum_over_time({service_name="unknown_service"} | json | '
+            'category={category} | event_name={event_name} | attributes_ok="true" | '
+            "unwrap attributes_duration_seconds [$__range]))"
+            ' / sum(count_over_time({service_name="unknown_service"} | json | '
+            'category={category} | event_name={event_name} | attributes_ok="true" [$__range]))'
+        ),
+        query_type="logql",
+        field_defaults={"decimals": 1},
+        width=8,
+        height=4,
+    )
+)
+
+
+# ── chart panels (12-wide, two per row) ──────────────────────────────
+
+core_metrics.register_core_metric(
+    MetricSpec(
         name="core_sse_backlog",
         title="SSE backlog — delivery_stalled (by stall seconds)",
         event_name="delivery_stalled",
@@ -331,18 +468,18 @@ core_metrics.register_core_metric(
         query=_count(
             f'category=~"{{category_re}}|log" | event_name={{event_name}} | '
             f"{_DELIVERY_ATTR['age_s']} < 60",
-            "$__interval",
+            "$__range",
         ),
         targets=[
             _count(
                 f'category=~"{{category_re}}|log" | event_name={{event_name}} | '
                 f"{_DELIVERY_ATTR['age_s']} >= 60 | {_DELIVERY_ATTR['age_s']} < 600",
-                "$__interval",
+                "$__range",
             ),
             _count(
                 f'category=~"{{category_re}}|log" | event_name={{event_name}} | '
                 f"{_DELIVERY_ATTR['age_s']} >= 600",
-                "$__interval",
+                "$__range",
             ),
         ],
         query_type="logql",
@@ -365,13 +502,13 @@ core_metrics.register_core_metric(
         query=(
             f'sum(rate({{service_name="unknown_service"}} | json | '
             f"category={{category}} | event_name={{event_name}} | "
-            f"unwrap {_LLM_ATTR['in_total']} [$__interval]))"
+            f"unwrap {_LLM_ATTR['in_total']} [1m]))"
             f' + sum(rate({{service_name="unknown_service"}} | json | '
             f"category={{category}} | event_name={{event_name}} | "
-            f"unwrap {_LLM_ATTR['out_total']} [$__interval]))"
+            f"unwrap {_LLM_ATTR['out_total']} [1m]))"
             f' + sum(rate({{service_name="unknown_service"}} | json | '
             f"category={{category}} | event_name={{event_name}} | "
-            f"unwrap {_LLM_ATTR['reasoning']} [$__interval]))"
+            f"unwrap {_LLM_ATTR['reasoning']} [1m]))"
         ),
         query_type="logql",
         target_names=["tokens/s"],
@@ -391,12 +528,12 @@ core_metrics.register_core_metric(
         query=(
             f'sum(sum_over_time({{service_name="unknown_service"}} | json | '
             f"category={{category}} | event_name={{event_name}} | "
-            f"unwrap {_LLM_ATTR['out_total']} [$__interval]))"
+            f"unwrap {_LLM_ATTR['out_total']} [5m]))"
         ),
         targets=[
             f'sum(sum_over_time({{service_name="unknown_service"}} | json | '
             f"category={{category}} | event_name={{event_name}} | "
-            f"unwrap {_LLM_ATTR['reasoning']} [$__interval]))"
+            f"unwrap {_LLM_ATTR['reasoning']} [5m]))"
         ],
         query_type="logql",
         target_names=["out", "reasoning"],
@@ -420,28 +557,28 @@ core_metrics.register_core_metric(
         query=(
             f'100 * sum(sum_over_time({{service_name="unknown_service"}} | json | '
             f"category={{category}} | event_name={{event_name}} | "
-            f"unwrap {_LLM_ATTR['cache_read']} [$__interval]))"
+            f"unwrap {_LLM_ATTR['cache_read']} [5m]))"
             f' / sum(sum_over_time({{service_name="unknown_service"}} | json | '
             f"category={{category}} | event_name={{event_name}} | "
-            f"unwrap {_LLM_ATTR['in_total']} [$__interval]))"
+            f"unwrap {_LLM_ATTR['in_total']} [5m]))"
         ),
         targets=[
             # max agent: per-agent ratio, then the max across agents per bucket
             (
                 f'100 * max(sum by (agent_id) (sum_over_time({{service_name="unknown_service"}} '
                 f'| json | category={{category}} | event_name={{event_name}} | agent_id!="" | '
-                f"unwrap {_LLM_ATTR['cache_read']} [$__interval]))"
+                f"unwrap {_LLM_ATTR['cache_read']} [5m]))"
                 f' / sum by (agent_id) (sum_over_time({{service_name="unknown_service"}} '
                 f'| json | category={{category}} | event_name={{event_name}} | agent_id!="" | '
-                f"unwrap {_LLM_ATTR['in_total']} [$__interval])))"
+                f"unwrap {_LLM_ATTR['in_total']} [5m])))"
             ),
             (
                 f'100 * min(sum by (agent_id) (sum_over_time({{service_name="unknown_service"}} '
                 f'| json | category={{category}} | event_name={{event_name}} | agent_id!="" | '
-                f"unwrap {_LLM_ATTR['cache_read']} [$__interval]))"
+                f"unwrap {_LLM_ATTR['cache_read']} [5m]))"
                 f' / sum by (agent_id) (sum_over_time({{service_name="unknown_service"}} '
                 f'| json | category={{category}} | event_name={{event_name}} | agent_id!="" | '
-                f"unwrap {_LLM_ATTR['in_total']} [$__interval])))"
+                f"unwrap {_LLM_ATTR['in_total']} [5m])))"
             ),
         ],
         query_type="logql",
@@ -472,18 +609,18 @@ def _tps(
     avg = (
         f'sum(sum_over_time({{service_name="unknown_service"}} | json | '
         f'category={{category}} | event_name={{event_name}} | {timing}!="" | '
-        f"unwrap {tok} [$__interval]))"
+        f"unwrap {tok} [5m]))"
         f' / sum(sum_over_time({{service_name="unknown_service"}} | json | '
         f'category={{category}} | event_name={{event_name}} | {timing}!="" | '
-        f"unwrap {timing} [$__interval])) * 1000"
+        f"unwrap {timing} [5m])) * 1000"
     )
     per_agent = (
         f'sum by (agent_id) (sum_over_time({{service_name="unknown_service"}} | json | '
         f'category={{category}} | event_name={{event_name}} | agent_id!="" | {timing}!="" | '
-        f"unwrap {tok} [$__interval]))"
+        f"unwrap {tok} [5m]))"
         f' / sum by (agent_id) (sum_over_time({{service_name="unknown_service"}} | json | '
         f'category={{category}} | event_name={{event_name}} | agent_id!="" | {timing}!="" | '
-        f"unwrap {timing} [$__interval])) * 1000"
+        f"unwrap {timing} [5m])) * 1000"
     )
     core_metrics.register_core_metric(
         MetricSpec(
@@ -559,72 +696,10 @@ core_metrics.register_core_metric(
         category="telemetry",
         unit="short",
         panel="barchart",
-        query=_count("category={category} | event_name={event_name}", "$__interval"),
+        query=_count("category={category} | event_name={event_name}", "30m"),
         query_type="logql",
         target_names=["calls"],
         thresholds=[ThresholdStep(color="red", value=80.0)],
-    )
-)
-
-core_metrics.register_core_metric(
-    MetricSpec(
-        name="core_llm_cost_daily",
-        title="Daily LLM cost (7d)",
-        description=(
-            "Daily usage-time LLM cost snapshots. The dashboard fixes this panel "
-            "to Asia/Shanghai calendar days and a 24-hour query interval."
-        ),
-        event_name="llm_usage",
-        category="telemetry",
-        unit="currencyUSD",
-        panel="barchart",
-        query=_llm_cost("$__interval"),
-        query_type="logql",
-        target_names=["cost usd"],
-        thresholds=[],
-    )
-)
-
-core_metrics.register_core_metric(
-    MetricSpec(
-        name="core_llm_cost_by_model",
-        title="LLM cost by model (Top 20)",
-        description=(
-            "Top 20 models by windowed usage-time cost snapshots. The model name "
-            "is the llm_usage payload's attributes_model label."
-        ),
-        event_name="llm_usage",
-        category="telemetry",
-        unit="currencyUSD",
-        panel="table",
-        query=(
-            f'topk(20, sum by (attributes_model) (sum_over_time({{service_name="unknown_service"}} '
-            f"| json | category={{category}} | event_name={{event_name}} | "
-            f'attributes_model!="" | unwrap {_LLM_ATTR["cost_usd"]} [$__range])))'
-        ),
-        query_type="logql",
-        target_names=["cost usd"],
-        thresholds=[],
-    )
-)
-
-core_metrics.register_core_metric(
-    MetricSpec(
-        name="core_llm_cost_by_agent",
-        title="LLM cost by agent (Top 20)",
-        description="Top 20 agents by windowed usage-time LLM cost snapshots.",
-        event_name="llm_usage",
-        category="telemetry",
-        unit="currencyUSD",
-        panel="table",
-        query=(
-            f'topk(20, sum by (agent_id) (sum_over_time({{service_name="unknown_service"}} '
-            f'| json | category={{category}} | event_name={{event_name}} | agent_id!="" | '
-            f"unwrap {_LLM_ATTR['cost_usd']} [$__range])))"
-        ),
-        query_type="logql",
-        target_names=["cost usd"],
-        thresholds=[],
     )
 )
 
@@ -636,10 +711,8 @@ core_metrics.register_core_metric(
         category="telemetry",
         unit="short",
         panel="timeseries",
-        query=_count(
-            'category=~"{category_re}|log" | level=~"warning|error|critical"', "$__interval"
-        ),
-        targets=[_count('category=~"{category_re}|log"', "$__interval")],
+        query=_count('category=~"{category_re}|log" | level=~"warning|error|critical"', "5m"),
+        targets=[_count('category=~"{category_re}|log"', "5m")],
         query_type="logql",
         target_names=["warn+error", "total"],
         custom={"axisLabel": "events"},
@@ -658,7 +731,7 @@ core_metrics.register_core_metric(
         query=(
             f'sum(sum_over_time({{service_name="unknown_service"}} | json | '
             f"category={{category}} | event_name={{event_name}} | "
-            f"unwrap {_LLM_ATTR['in_total']} [$__interval]))"
+            f"unwrap {_LLM_ATTR['in_total']} [5m]))"
         ),
         query_type="logql",
         target_names=["in"],
@@ -688,15 +761,15 @@ core_metrics.register_core_metric(
         query=(
             f'max(max_over_time({{service_name="unknown_service"}} | json | '
             f'category=~"{{category_re}}|log" | event_name={{event_name}} | '
-            f"unwrap {_GATEWAY_ATTR['p50_ms']} [$__interval]))"
+            f"unwrap {_GATEWAY_ATTR['p50_ms']} [1m]))"
         ),
         targets=[
             f'max(max_over_time({{service_name="unknown_service"}} | json | '
             f'category=~"{{category_re}}|log" | event_name={{event_name}} | '
-            f"unwrap {_GATEWAY_ATTR['p95_ms']} [$__interval]))",
+            f"unwrap {_GATEWAY_ATTR['p95_ms']} [1m]))",
             f'max(max_over_time({{service_name="unknown_service"}} | json | '
             f'category=~"{{category_re}}|log" | event_name={{event_name}} | '
-            f"unwrap {_GATEWAY_ATTR['max_ms']} [$__interval]))",
+            f"unwrap {_GATEWAY_ATTR['max_ms']} [1m]))",
         ],
         query_type="logql",
         target_names=["p50", "p95", "max"],
@@ -717,7 +790,7 @@ core_metrics.register_core_metric(
         query=(
             f'max by (attributes_route) (max_over_time({{service_name="unknown_service"}} | json | '
             f'category=~"{{category_re}}|log" | event_name={{event_name}} | '
-            f"unwrap {_GATEWAY_ATTR['p95_ms']} [$__interval]))"
+            f"unwrap {_GATEWAY_ATTR['p95_ms']} [1m]))"
         ),
         custom={"axisLabel": "ms"},
     )

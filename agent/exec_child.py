@@ -301,6 +301,9 @@ def _run(request_path: str, result_path: str) -> None:
     if request.agent_id is not None:
         _boot.establish(request.agent_id, owns_loop=True)
         _init_logger(request.agent_id)
+        from shared import telemetry_otlp
+
+        telemetry_otlp.warmup()
     # Two-phase overlay application, mirroring the agent process's own boot:
     # framework fields early (before any settings read), plugin fields after
     # plugins load (apply_config_overlay needs _PLUGIN_CONFIGS bound first).
@@ -321,6 +324,18 @@ def _run(request_path: str, result_path: str) -> None:
 
     try:
         _run_code(request.code, payload)
+        # Deliver queued SDK-call events before a clean exit. sync() lands the
+        # pipeline's held batch (queue + drain-thread batch), flush() then
+        # drains the OTLP backend queue and force-flushes the SDK batch
+        # processor — a short-lived child exits before the 5s batch window
+        # would fire on its own. A timed-out or cancelled child skips this
+        # (the parent is already killing it and the JSONL mirror holds the
+        # records), so teardown timing stays as before warmup().
+        if payload.kind in ("done", "lifecycle"):
+            from shared import telemetry, telemetry_otlp
+
+            telemetry.sync()
+            telemetry_otlp.flush()
     finally:
         _take_result_state_update(payload, state_injected=request.state is not None)
         payload.findings = [f.model_dump() for f in take_findings()]

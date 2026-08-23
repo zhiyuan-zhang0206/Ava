@@ -11,8 +11,8 @@ Query dialect (task #1280): each template selects
 ``{service_name="unknown_service"}`` (the unified emitter's OTLP resource),
 pipelines ``| json`` (event fields are structured metadata, NOT stream
 labels), and filters on the flattened labels. Stat panels run as instant
-queries over ``[$__range]`` (the whole panel window); timeseries panels run
-as range queries bucketed by ``[$__interval]``. Every count wraps in
+queries over ``[$__range]`` (the whole panel window); timeseries panels use
+a fixed ``[5m]`` window. Every count wraps in
 ``sum(...)``: the unknown_service family has >500 streams over a day, and an
 unaggregated count_over_time hits Loki's per-query series cap.
 
@@ -57,7 +57,7 @@ register_metric(
         category="telemetry",
         unit="short",
         panel="timeseries",
-        query=_count(f"{_CAT} | event_name={{event_name}}", "$__interval"),
+        query=_count(f"{_CAT} | event_name={{event_name}}", "5m"),
         query_type="logql",
         target_names=["fixes"],
         output=["grafana"],

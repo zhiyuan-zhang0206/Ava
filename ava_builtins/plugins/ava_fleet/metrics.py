@@ -1,12 +1,11 @@
 """ava_fleet Grafana + inspector metrics — registered at import time.
 
 ``scripts/gen_plugin_dashboard.py`` imports this module (inside a
-PluginContext) to collect the registrations. Three metrics:
+PluginContext) to collect the registrations. Two metrics:
 
 - ``ava_fleet_task_done_rate`` — dual-surface (grafana + inspector): a
   cluster-wide task-completion rate panel, and the same query the inspector
   surface renders per agent.
-- ``ava_fleet_spawn_rate`` — grafana-only spawn frequency.
 - ``ava_fleet_agent_task_done_rate`` — inspector-only: demonstrates the
   ``{{agent_id}}`` placeholder semantics reserved in the registry snapshot
   (the gateway renders it to ``agent_id="<n>"``); it is exported to
@@ -17,8 +16,8 @@ Loki (the PG ``events`` table is a frozen archive since the LGTM cutover) —
 ``{service_name="unknown_service"} | json`` then label filters on the
 flattened event fields; the same read the core panels and the alert rules
 use. Stat panels run as instant queries over ``[$__range]`` (the whole panel
-window); timeseries/barchart panels run as range queries bucketed by
-``[$__interval]``. Every count wraps in ``sum(...)``: the unknown_service
+window); Grafana timeseries use a fixed ``[5m]`` window. Every count wraps in
+``sum(...)``: the unknown_service
 family has >500 streams over a day, and an unaggregated count_over_time hits
 Loki's per-query series cap.
 
@@ -68,7 +67,7 @@ register_metric(
                     'category={category} | event_name={event_name} | '
                     + _TASK_ATTR['status']
                     + '="done"',
-                    '$__interval',
+                    '5m',
                 )
             }"
             f" / {
@@ -76,32 +75,13 @@ register_metric(
                     'category={category} | event_name={event_name} | '
                     + _TASK_ATTR['status']
                     + '!=""',
-                    '$__interval',
+                    '5m',
                 )
             }"
         ),
         query_type="logql",
         target_names=["done %"],
         output=["grafana", "inspector"],
-    )
-)
-
-register_metric(
-    MetricSpec(
-        name="ava_fleet_spawn_rate",
-        title="Agent spawn rate",
-        description=(
-            "Spawn events over time — the rate at which new agents are born "
-            "(event_name='spawn', category='audit')."
-        ),
-        event_name="spawn",
-        category="audit",
-        unit="ops",
-        panel="barchart",
-        query=_count("category={category} | event_name={event_name}", "$__interval"),
-        query_type="logql",
-        target_names=["spawns"],
-        output=["grafana"],
     )
 )
 

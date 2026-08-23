@@ -48,21 +48,21 @@ must never block, break, or slow the PG write.** Three layers:
    call again (``_export_otlp``) — even a programming error here cannot cost a
    batch its PG copy.
 
-Flag semantics: disposable exec children (identified by their
-``AVA_EXEC_REQUEST_FILE`` handshake) are always off. Other processes read
+Flag semantics: every process, including disposable exec children, reads
 ``AVA_TELEMETRY_OTLP_ENABLED`` / ``AVA_TELEMETRY_OTLP_ENDPOINT`` from the
 startup-frozen settings singleton (``restart_required`` on the config fields).
-This is **startup-applied**, matching every other config field in the system —
-there is no live-reload mechanism in ``shared/config``, and the isolation above
-makes the flag a rare emergency kill switch, not the primary defense. Flipping
-it + restarting is the documented apply path.
+Exec children call ``warmup()`` before agent code runs so constructing the OTel
+SDK cannot first happen during interpreter shutdown. This is **startup-applied**,
+matching every other config field in the system — there is no live-reload
+mechanism in ``shared/config``, and the isolation above makes the flag a rare
+emergency kill switch, not the primary defense. Flipping it + restarting is the
+documented apply path.
 """
 
 from __future__ import annotations
 
 import contextlib
 import json
-import os
 import queue
 import threading
 import time
@@ -70,7 +70,7 @@ from typing import Any
 
 from shared.telemetry import Event
 
-__all__ = ["endpoint_reachable", "export_batch", "flush", "shutdown"]
+__all__ = ["endpoint_reachable", "export_batch", "flush", "shutdown", "warmup"]
 
 # ── knobs ─────────────────────────────────────────────────────────────────────
 
@@ -238,17 +238,30 @@ class _OtlpBackend:
 
         Test seam + shutdown helper. The worker thread may concurrently take
         events; each event is processed exactly once by whichever thread
-        dequeues it, so a flush + worker race is harmless."""
-        deadline = time.monotonic() + timeout
+        dequeues it, so a flush + worker race is harmless. Draining is
+        non-blocking (``get_nowait``) — a flush must never add a multi-second
+        wait to a short-lived process.
+
+        After draining, the SDK batch processors are force-flushed (bounded
+        by their own timeout): a short-lived process (the exec child) exits
+        before the 5s batch window would fire on its own, so without this the
+        queued OTLP records — SDK calls — never reach the collector."""
+        del timeout  # signature kept for callers; the drain is best-effort
         while True:
             try:
-                event = self._queue.get(timeout=max(0.0, deadline - time.monotonic()))
+                event = self._queue.get_nowait()
             except queue.Empty:
-                return
+                break
             if event is None:
-                return
+                break
             with contextlib.suppress(Exception):
                 self._emit_log(event)
+        with contextlib.suppress(Exception):
+            if self._logs is not None:
+                self._logs.force_flush(timeout_millis=500)
+        with contextlib.suppress(Exception):
+            if self._metric_provider is not None:
+                self._metric_provider.force_flush(timeout_millis=500)
 
     def shutdown(self) -> None:
         """Stop the worker thread and flush the SDK providers (process exit)."""
@@ -265,11 +278,8 @@ class _OtlpBackend:
 
     @staticmethod
     def _enabled() -> bool:
-        """Disable OTLP in disposable exec children; otherwise read the flag
-        from startup-frozen settings. Any read failure degrades to off — the
-        OTLP side must never be the reason an emit path breaks."""
-        if "AVA_EXEC_REQUEST_FILE" in os.environ:
-            return False
+        """Read the startup-frozen OTLP flag. Any read failure degrades to
+        off — the OTLP side must never be the reason an emit path breaks."""
         with contextlib.suppress(Exception):
             from shared.config import settings
 
@@ -608,6 +618,17 @@ def export_batch(events: list[Event]) -> None:
     No-op when AVA_TELEMETRY_OTLP_ENABLED is off; otherwise best-effort and
     fully isolated — see the module docstring."""
     backend.export_batch(events)
+
+
+def warmup() -> None:
+    """Bring up the enabled backend before short-lived code can emit events.
+
+    The bounded endpoint preflight and SDK setup happen before agent code runs;
+    a failed warmup is reported once and never raises into the caller.
+    """
+    with contextlib.suppress(Exception):
+        if backend._enabled():
+            backend._ensure()
 
 
 def flush() -> None:
