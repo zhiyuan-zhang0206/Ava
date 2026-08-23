@@ -870,3 +870,122 @@ class TestGetLastMessage:
                 params={"caller": "agent:1"},
             )
         assert resp.status_code == 404
+
+
+_RESULT_READ_ENDPOINTS = [
+    ("GET", "/api/agents/{agent_id}/messages"),
+    ("GET", "/api/agents/{agent_id}/traces/trace-1/messages"),
+    ("GET", "/api/agents/{agent_id}/last-message"),
+    ("GET", "/api/agents/{agent_id}/pending"),
+    ("GET", "/api/agents/{agent_id}/activity"),
+    ("GET", "/api/agents/{agent_id}/timeline"),
+    ("GET", "/api/agents/{agent_id}/events"),
+    ("GET", "/api/agents/{agent_id}/events/stream"),
+    ("GET", "/api/events"),
+    ("POST", "/api/memory/search"),
+    ("GET", "/api/tasks"),
+]
+
+
+def _result_read(client: TestClient, method: str, path: str, *, caller: str | None = None):
+    """Call a guarded endpoint with the one valid POST body when needed."""
+    params = {"caller": caller} if caller is not None else None
+    if method == "POST":
+        return client.post(path, params=params, json={"query": "test", "k": 1})
+    return client.get(path, params=params)
+
+
+def _stub_result_read_backends(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make non-blocked artifact reads deterministic without external services."""
+    import gateway.routers.agent_events as agent_events_router
+    import gateway.routers.memory as memory_router
+    from gateway import loki_events
+    from services.memory_indexer import embedder
+
+    def _query(**_kwargs: object) -> tuple[list[dict[str, object]], bool]:
+        return [], False
+
+    async def _embed(_query: str) -> list[float]:
+        return [0.0]
+
+    async def _topk(_vector: object, _k: int, _deadline: float) -> list[str]:
+        return []
+
+    async def _stream(*_args: object, **_kwargs: object):
+        if False:
+            yield ""
+
+    monkeypatch.setattr(loki_events, "query_events", _query)
+    monkeypatch.setattr(embedder, "embed_query_async", _embed)
+    monkeypatch.setattr(memory_router, "_milvus_topk", _topk)
+    monkeypatch.setattr(agent_events_router, "event_stream", _stream)
+
+
+@pytest.mark.parametrize(("method", "path_template"), _RESULT_READ_ENDPOINTS)
+def test_eval_isolated_callers_cannot_read_result_surfaces(
+    db_conn: psycopg.Connection, method: str, path_template: str
+) -> None:
+    """Every artifact-read endpoint blocks the SDK-bypassing eval caller."""
+    from shared.db import create_agent
+
+    target_id = create_agent(db_conn)
+    caller_id = create_agent(db_conn)
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agents_meta (id, spawner, status) VALUES (%s, 'test', 'running')",
+            (target_id,),
+        )
+        cur.execute(
+            "INSERT INTO agents_meta (id, spawner, status, config_overlay) "
+            "VALUES (%s, 'test', 'running', %s::jsonb)",
+            (caller_id, json.dumps({"eval_isolation": True})),
+        )
+    db_conn.commit()
+
+    with TestClient(app) as client:
+        resp = _result_read(
+            client,
+            method,
+            path_template.format(agent_id=target_id),
+            caller=f"agent:{caller_id}",
+        )
+
+    assert resp.status_code == 403
+    assert "eval-isolated" in resp.json()["detail"]
+    if path_template.endswith("/last-message"):
+        assert resp.json()["detail"] == (
+            f"caller agent {caller_id} is eval-isolated: last-message reads are denied"
+        )
+
+
+@pytest.mark.parametrize(("method", "path_template"), _RESULT_READ_ENDPOINTS)
+def test_result_surfaces_allow_non_isolated_and_unmarked_callers(
+    db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+    method: str,
+    path_template: str,
+) -> None:
+    """The guard leaves ordinary reads intact and preserves last-message validation."""
+    from shared.db import create_agent
+
+    _stub_result_read_backends(monkeypatch)
+    target_id = create_agent(db_conn)
+    caller_id = create_agent(db_conn)
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agents_meta (id, spawner, status) VALUES (%s, 'test', 'running')",
+            (target_id,),
+        )
+        cur.execute(
+            "INSERT INTO agents_meta (id, spawner, status) VALUES (%s, 'test', 'running')",
+            (caller_id,),
+        )
+    db_conn.commit()
+    path = path_template.format(agent_id=target_id)
+
+    with TestClient(app) as client:
+        ordinary = _result_read(client, method, path, caller=f"agent:{caller_id}")
+        unmarked = _result_read(client, method, path)
+
+    assert ordinary.status_code == 200
+    assert unmarked.status_code == (422 if path_template.endswith("/last-message") else 200)

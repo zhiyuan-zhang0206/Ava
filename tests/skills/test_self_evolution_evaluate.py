@@ -128,14 +128,28 @@ def test_gather_excludes_invalid_replays_from_mean(monkeypatch: pytest.MonkeyPat
         "skipped": [],
     }
     records: dict[int, dict[str, Any]] = {
-        41: {"label": "ok", "turns": 1, "final_output": "done", "tools_called": {}},
-        42: {"label": "ok", "turns": 1, "final_output": "done", "tools_called": {}},
+        41: {
+            "label": "ok",
+            "turns": 1,
+            "final_output": "done",
+            "tools_called": {},
+            "leak_audit": [],
+            "invalidated": False,
+        },
+        42: {
+            "label": "ok",
+            "turns": 1,
+            "final_output": "done",
+            "tools_called": {},
+            "leak_audit": [],
+            "invalidated": False,
+        },
     }
 
     def _poll(_state: dict[str, Any]) -> dict[str, list[int]]:
         return {"done": [41, 42], "pending": []}
 
-    def _collect_one(agent_id: int) -> dict[str, Any]:
+    def _collect_one(agent_id: int, **_kwargs: object) -> dict[str, Any]:
         return records[agent_id]
 
     def _scores(rec: dict[str, Any]) -> dict[str, float]:
@@ -143,8 +157,12 @@ def test_gather_excludes_invalid_replays_from_mean(monkeypatch: pytest.MonkeyPat
             return {"completion": 1.0, "efficiency": 1.0, "overall": 1.0}
         return {"completion": 0.0, "efficiency": 0.0, "overall": 0.0}
 
+    def _leak_paths(_agent_id: int) -> Any:
+        return object()
+
     monkeypatch.setattr(evaluate, "poll", _poll)
     monkeypatch.setattr(evaluate, "collect_one", _collect_one)
+    monkeypatch.setattr(evaluate, "_leak_paths", _leak_paths)
     monkeypatch.setattr(
         evaluate,
         "scores",
@@ -157,3 +175,63 @@ def test_gather_excludes_invalid_replays_from_mean(monkeypatch: pytest.MonkeyPat
     assert report["mean"] == {"completion": 1.0, "efficiency": 1.0, "overall": 1.0}
     assert [entry["valid"] for entry in report["per_task"]] == [True, False]
     assert report["invalid"][0]["eval_agent_id"] == 42
+
+
+def test_gather_excludes_leaked_replays_from_mean(monkeypatch: pytest.MonkeyPatch) -> None:
+    evaluate = _evaluate_module()
+    state: dict[str, Any] = {
+        "skill": "ava-goal",
+        "stamp": "test",
+        "runs": [
+            {"eval_agent_id": 42, "source_agent_id": 1, "original_tools_called": {}},
+            {"eval_agent_id": 43, "source_agent_id": 2, "original_tools_called": {}},
+        ],
+        "skipped": [],
+    }
+    records: dict[int, dict[str, Any]] = {
+        42: {
+            "agent_id": 42,
+            "label": "ok",
+            "turns": 1,
+            "final_output": "done",
+            "tools_called": {},
+            "leak_audit": [],
+            "invalidated": False,
+        },
+        43: {
+            "agent_id": 43,
+            "label": "ok",
+            "turns": 1,
+            "final_output": "done",
+            "tools_called": {},
+            "leak_audit": [{"surface": "results", "evidence": "read", "tool": None}],
+            "invalidated": True,
+        },
+    }
+
+    def _poll(_state: dict[str, Any]) -> dict[str, list[int]]:
+        return {"done": [42, 43], "pending": []}
+
+    def _collect_one(agent_id: int, **_kwargs: object) -> dict[str, Any]:
+        return records[agent_id]
+
+    def _scores(rec: dict[str, Any]) -> dict[str, float]:
+        score = 1.0 if rec["agent_id"] == 42 else 0.0
+        return {"completion": score, "efficiency": score, "overall": score}
+
+    def _leak_paths(_agent_id: int) -> Any:
+        return object()
+
+    monkeypatch.setattr(evaluate, "poll", _poll)
+    monkeypatch.setattr(evaluate, "collect_one", _collect_one)
+    monkeypatch.setattr(evaluate, "_leak_paths", _leak_paths)
+    monkeypatch.setattr(evaluate, "scores", _scores)
+
+    report = evaluate.gather(state)
+
+    assert report["n"] == 1
+    assert report["mean"]["overall"] == 1.0
+    assert report["invalidated"] == 1
+    assert report["per_task"][1]["invalidated"] is True
+    assert report["per_task"][1]["leak_audit"] == records[43]["leak_audit"]
+    assert report["invalid"][0]["verification"]["reason"] == "leak"

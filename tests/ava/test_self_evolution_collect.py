@@ -123,7 +123,8 @@ def test_transcript_uses_full_checkpoint_loader(
         called["agent_id"] = agent_id
         return [HumanMessage(content="complete history")]
 
-    monkeypatch.setattr(collect_mod, "load_checkpoint_messages_full", _load)
+    record_mod = sys.modules[collect_mod._transcript.__module__]
+    monkeypatch.setattr(record_mod, "load_checkpoint_messages_full", _load)
 
     assert collect_mod._transcript(42) == [{"type": "human", "content": "complete history"}]
     assert called == {"agent_id": 42}
@@ -446,3 +447,34 @@ def test_build_record_well_formed_rows_report_zero_skipped(
     assert rec["plugins_activated_skipped"] == 0
     assert rec["plugins_activated"] == {"ava_code/hooks/before_exec": 1}
     assert capsys.readouterr().out == ""
+
+
+def test_build_record_adds_leak_audit_only_for_eval_collection(
+    collect_mod: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Weekly collection remains unchanged; eval collection records invalidating reads."""
+    paths = collect_mod.LeakPaths(
+        memory_pool=str(tmp_path / "memory"),
+        self_evolution=str(tmp_path / "self_evolution"),
+        workspaces_root=str(tmp_path / "workspaces"),
+        agent_workspace=str(tmp_path / "workspaces" / "1"),
+    )
+    weekly = _build_minimal_record(
+        collect_mod,
+        monkeypatch,
+        [("code", {"body": f"open('{paths.self_evolution}/reports/result.md')"})],
+    )
+    audited = collect_mod.build_record(
+        agent_id=1,
+        week="2026-W99",
+        events=[("code", {"body": f"open('{paths.self_evolution}/reports/result.md')"})],
+        log_events=[],
+        inbounds=[],
+        meta=("user", "completed", "done"),
+        leak_paths=paths,
+    )
+
+    assert "leak_audit" not in weekly
+    assert "invalidated" not in weekly
+    assert audited["invalidated"] is True
+    assert audited["leak_audit"][0]["surface"] == "results"

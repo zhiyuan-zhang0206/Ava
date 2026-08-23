@@ -21,15 +21,13 @@ scripts, not an importable package):
 
     .venv/bin/python skills/ava-self-evolution/reference/collect.py --days 7
 
-`collect.py` imports its sibling `label.py`; run it as a script so the
+`collect.py` imports its sibling `record.py`; run it as a script so the
 reference directory is on `sys.path`.
 """
 
 from __future__ import annotations
 
 import argparse
-import ast
-import contextlib
 import json
 import os
 import sys
@@ -45,11 +43,8 @@ import psycopg
 # PYTHONSAFEPATH=1 keeps the script's own directory off sys.path — restore
 # it for the sibling import (the reference dir is a script dir, not a package).
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # noqa: PTH100, PTH120
-from label import label  # sibling script, resolved via sys.path[0]
-from pydantic import ValidationError
+from record import LeakPaths, _plugins_activated, _transcript, build_record  # noqa: F401
 
-from shared.audit_events import SkillInvokedPayload
-from shared.checkpoint import CheckpointReadError, load_checkpoint_messages_full
 from shared.config import settings
 from shared.db import connect
 from shared.paths import ava_home
@@ -58,174 +53,6 @@ from shared.paths import ava_home
 # the user ("user") or a spawner / peer agent ("agent:<id>"). System and
 # watcher messages are deliberately excluded (nudges, heartbeats, wake-ups).
 TASK_SOURCES = ["user"]  # plus "agent:%" matched via LIKE in the query
-
-# ─────────────── correction / feedback detection ───────────────
-
-# Chinese correction keywords — user is redirecting or correcting the agent.
-CN_CORRECTION_KEYWORDS = [
-    "不对",
-    "错了",
-    "重新",
-    "不要",
-    "改成",
-    "应该是",
-    "不是这样",
-    "你搞错了",
-    "搞错了",
-    "纠正",
-    "修正一下",
-    "不是这个",
-    "别这样",
-    "不是让你",
-    "你没理解",
-    "理解错了",
-    "错误",
-    "有误",
-    "误导",
-]
-
-# English correction keywords — user is redirecting or correcting the agent.
-EN_CORRECTION_KEYWORDS = [
-    "wrong",
-    "incorrect",
-    "don't",
-    "do not",
-    "should be",
-    "instead",
-    "actually",
-    "no,",
-    "fix this",
-    "correct this",
-    "not right",
-    "mistake",
-    "you misunderstood",
-    "that's not",
-    "redo",
-    "re-do",
-    "try again",
-]
-
-# Agent-to-agent feedback keywords — one agent correcting or reminding another.
-PEER_FEEDBACK_KEYWORDS = [
-    "你那个",
-    "你没",
-    "不要用",
-    "别用",
-    "改成",
-    "修一下",
-    "还没修",
-    "没修好",
-    "不对",
-    "错了",
-    "应该用",
-    "不能这样",
-    "注意",
-    "别忘了",
-    "提醒",
-    "纠正",
-]
-
-
-def _detect_correction(content: str) -> bool:
-    """Return True if `content` reads as a user correction rather than a
-    neutral instruction or follow-up question.
-
-    Checks Chinese keywords first (most of our user traffic), then English.
-    The check is substring-based, case-insensitive for English.
-    """
-    if not content:
-        return False
-    if any(kw in content for kw in CN_CORRECTION_KEYWORDS):
-        return True
-    content_lower = content.lower()
-    return any(kw in content_lower for kw in EN_CORRECTION_KEYWORDS)
-
-
-def _detect_peer_feedback(content: str) -> bool:
-    """Return True if an agent-to-agent message reads as corrective feedback
-    rather than a neutral status update or coordination message.
-
-    Uses a focused keyword set tuned for our fleet's communication patterns.
-    Also falls back to the general correction detector for overlap.
-    """
-    if not content:
-        return False
-    if any(kw in content for kw in PEER_FEEDBACK_KEYWORDS):
-        return True
-    # Also check general correction patterns — agent feedback often uses
-    # the same language as user corrections.
-    return _detect_correction(content)
-
-
-# ─────────────── tool-call counting (AST over executed code) ───────────────
-
-
-def _dotted(node: ast.AST) -> str | None:
-    """Resolve an attribute chain like `ava.files.edit` to its dotted string,
-    or None if the call target is not a plain attribute-on-name chain."""
-    parts: list[str] = []
-    while isinstance(node, ast.Attribute):
-        parts.append(node.attr)
-        node = node.value
-    if isinstance(node, ast.Name):
-        parts.append(node.id)
-        return ".".join(reversed(parts))
-    return None
-
-
-def count_tool_calls(codes: list[str]) -> dict[str, int]:
-    """Count `ava.*` SDK calls across a run's executed code blocks. Code that
-    does not parse is skipped (the model occasionally emits a broken block)."""
-    counts: Counter[str] = Counter()
-    for code in codes:
-        try:
-            tree = ast.parse(code)
-        except SyntaxError:
-            continue
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Call):
-                name = _dotted(node.func)
-                if name and name.split(".", 1)[0] == "ava":
-                    counts[name] += 1
-    return dict(counts)
-
-
-# ─────────────── exec-outcome helpers (mirror shared.metrics) ───────────────
-
-
-def _is_exec_ok(event: str) -> bool:
-    return event == "exec"
-
-
-def _is_exec_fail(event: str) -> bool:
-    return event != "exec" and event.startswith(("exec_", "exec("))
-
-
-# ─────────────── message serialization ───────────────
-
-
-def _msg_text(content: Any) -> str:
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts = []
-        for block in content:
-            if isinstance(block, dict):
-                parts.append(block.get("text") or block.get("type") or "")
-            else:
-                parts.append(str(block))
-        return " ".join(p for p in parts if p)
-    return str(content)
-
-
-def _transcript(agent_id: int) -> list[dict[str, str]]:
-    """Full Task #1125 conversation, retaining summary and session-note messages.
-    Fixes the 2026-08-10 latest-only truncation; returns [] if unreadable."""
-    try:
-        msgs = load_checkpoint_messages_full(agent_id)
-    except CheckpointReadError:
-        return []
-    return [{"type": m.type, "content": _msg_text(m.content)} for m in msgs]
 
 
 # ─────── Loki-backed event fetches (paged via the gateway /api/events) ───────
@@ -439,206 +266,6 @@ def _meta_by_agent(cur: psycopg.Cursor, ids: list[int]) -> dict[int, tuple]:
     return {r[0]: (r[1], r[2], r[3]) for r in cur.fetchall()}
 
 
-# ─────────────── skill attribution ───────────────
-
-
-def _skills_touched(log_events: list[tuple]) -> list[str]:
-    """Skills actually invoked by this agent during the run.
-
-    `skill_invoked` event_log rows carry an `invocation_depth` field:
-    - `"loaded"` — the agent explicitly accessed the skill (high signal)
-    - `"prompt_injected"` — the skill was listed in the system prompt
-      but the agent never touched it (noise — almost every agent
-      "touches" gmail, ui, worktree this way)
-
-    Only `loaded` skills count. The regex soft-signal fallback was removed
-    with the event-system rework (2026-08): prompt_injected rows no longer
-    exist, so "no skill_invoked rows" no longer means "framework not landed"
-    — it means the agent did not load any skill. (Soft-signal scanning also
-    mis-attributed prompt_injected names from the transcript, the very noise
-    the rework removes.)
-    """
-    loaded: set[str] = set()
-    for event_type, payload in log_events:
-        if event_type != "skill_invoked":
-            continue
-        # Best-effort scoring: a malformed row is skipped, never crashes the
-        # weekly collect (same graceful-drift tolerance the old dict .get had).
-        with contextlib.suppress(ValidationError):
-            entry = SkillInvokedPayload.model_validate(payload)
-            if entry.invocation_depth == "loaded":
-                loaded.add(entry.skill)
-    return sorted(loaded)
-
-
-def _plugins_activated(events: list[tuple]) -> tuple[dict[str, int], int]:
-    """Plugin injection surfaces that fired during the run -> how many times.
-
-    The plugin-side counterpart of `_skills_touched`. Hooks and wraps used to
-    run silently, so a plugin that rewrote state or short-circuited an SDK call
-    in a bad run left no trace in this dataset and plugin-caused regressions
-    could not be mined. `plugin_activation` telemetry (issue #40) closes that:
-    one event per firing, carrying the same `(plugin, surface, identifier)`
-    triple `ava plugins inspect` shows as a registered contribution.
-
-    Keyed `"<plugin>/<surface>/<identifier>"` so a regression can be attributed
-    to the specific contribution, not merely to the plugin. A malformed row is
-    dropped rather than crashing the weekly collect — same graceful-drift
-    tolerance `_skills_touched` applies — but the drop is counted and returned
-    alongside the fired counts (issue #92) so `build_record` can surface it on
-    the run record instead of letting the dataset quietly thin out with no
-    signal that the event contract drifted.
-
-    Returns (fired counts, count of rows dropped for missing plugin/surface/
-    identifier).
-    """
-    fired: Counter[str] = Counter()
-    skipped = 0
-    for event_type, payload in events:
-        if event_type != "plugin_activation":
-            continue
-        p = payload or {}
-        plugin, surface, identifier = p.get("plugin"), p.get("surface"), p.get("identifier")
-        if not (plugin and surface and identifier):
-            skipped += 1
-            continue
-        fired[f"{plugin}/{surface}/{identifier}"] += 1
-    return dict(sorted(fired.items())), skipped
-
-
-# ─────────────── per-agent assembly ───────────────
-
-
-def _mode(values: list[str]) -> str:
-    return Counter(v for v in values if v).most_common(1)[0][0] if any(values) else ""
-
-
-def build_record(
-    agent_id: int,
-    week: str,
-    events: list[tuple],
-    log_events: list[tuple],
-    inbounds: list[dict[str, Any]],
-    meta: tuple,
-) -> dict[str, Any]:
-    spawner, status, last_message_text = meta
-
-    # ── split inbounds by source ──
-    user_msgs = [m["content"] for m in inbounds if m["source"] == "user"]
-    agent_msgs = [m for m in inbounds if m["source"].startswith("agent:")]
-
-    # ── classify user inbounds ──
-    # First user message is always the task prompt. Subsequent messages are
-    # split into corrections (redirection / criticism) and neutral follow-ups.
-    task_prompt = user_msgs[0] if user_msgs else ""
-    # Agent-spawned agents receive their task from the spawner, not the user.
-    # The first message from the spawner IS the task prompt.
-    if not task_prompt.strip() and spawner.startswith("agent:"):
-        spawner_msgs = [m for m in agent_msgs if m["source"] == spawner]
-        if spawner_msgs:
-            task_prompt = spawner_msgs[0]["content"]
-    # Cron / system agents receive their task via source='system'.
-    # The first system chat message is the task prompt.
-    if not task_prompt.strip():
-        system_msgs = [m["content"] for m in inbounds if m["source"] == "system"]
-        if system_msgs:
-            task_prompt = system_msgs[0]
-    corrections: list[str] = []
-    followup_prompts: list[str] = []
-    for msg in user_msgs[1:]:
-        if _detect_correction(msg):
-            corrections.append(msg)
-        else:
-            followup_prompts.append(msg)
-
-    # ── classify agent-to-agent inbounds ──
-    # Separate corrective peer feedback from neutral coordination messages.
-    # The first message from the spawner is the task assignment, not feedback —
-    # skip it.  Subsequent messages from the same spawner, and messages from
-    # other agents, are candidates.
-    spawner_id: int | None = None
-    if spawner.startswith("agent:"):
-        with contextlib.suppress(IndexError, ValueError):
-            spawner_id = int(spawner.split(":", 1)[1])
-    peer_feedback: list[dict[str, Any]] = []
-    for m in agent_msgs:
-        try:
-            from_agent = int(m["source"].split(":", 1)[1])
-        except (IndexError, ValueError):
-            from_agent = 0
-        # Skip all messages from the spawner — they are task coordination,
-        # not corrective feedback.  Only messages from other agents count.
-        if from_agent == spawner_id:
-            continue
-        if _detect_peer_feedback(m["content"]):
-            peer_feedback.append(
-                {
-                    "from_agent": from_agent,
-                    "content": m["content"],
-                }
-            )
-
-    turns = sum(1 for e, _ in events if e == "turn_end")
-    models = [str(p.get("model", "")) for e, p in events if e == "llm_usage"]
-    tokens_in = sum(int(p.get("in_total", 0)) for e, p in events if e == "llm_usage")
-    tokens_out = sum(int(p.get("out_total", 0)) for e, p in events if e == "llm_usage")
-    code_bodies = [str(p.get("body", "")) for e, p in events if e == "code"]
-    exec_ok = sum(1 for e, _ in events if _is_exec_ok(e))
-    exec_failed = sum(1 for e, _ in events if _is_exec_fail(e))
-    exec_outcomes = [e for e, _ in events if _is_exec_ok(e) or _is_exec_fail(e)]
-    last_exec_failed = bool(exec_outcomes) and _is_exec_fail(exec_outcomes[-1])
-    durations = [float(p.get("duration_seconds", 0)) for e, p in events if e == "turn_end"]
-    exec_duration_s = sum(
-        float((p or {}).get("duration_seconds", 0))
-        for e, p in events
-        if e == "node_exit" and (p or {}).get("node") == "exec"
-    )
-
-    compactions = sum(1 for et, _ in log_events if et == "compact")
-    breached = any(et == "report_breached" for et, _ in log_events)
-
-    transcript = _transcript(agent_id)
-
-    plugins_activated, plugins_activated_skipped = _plugins_activated(events)
-    if plugins_activated_skipped:
-        # Loud but tolerant (issue #92): the row is still dropped, but the
-        # drop is visible instead of silently thinning the plugin-attribution
-        # dimension out to empty.
-        print(
-            f"warning: agent {agent_id}: skipped {plugins_activated_skipped} "
-            "malformed plugin_activation row(s)"
-        )
-
-    rec: dict[str, Any] = {
-        "agent_id": agent_id,
-        "week": week,
-        "spawner": spawner,
-        "model": _mode(models),
-        "task_prompt": task_prompt,
-        "followup_prompts": followup_prompts,
-        "corrections": corrections,
-        "peer_feedback": peer_feedback,
-        "transcript": transcript,
-        "final_output": last_message_text or "",
-        "turns": turns,
-        "tokens_in": tokens_in,
-        "tokens_out": tokens_out,
-        "tools_called": count_tool_calls(code_bodies),
-        "skills_touched": _skills_touched(log_events),
-        "plugins_activated": plugins_activated,
-        "plugins_activated_skipped": plugins_activated_skipped,
-        "exec_ok": exec_ok,
-        "exec_failed": exec_failed,
-        "last_exec_failed": last_exec_failed,
-        "compactions": compactions,
-        "breached": breached,
-        "terminated": status == "terminated",
-        "duration_s": round(sum(durations), 1),
-    }
-    rec["label"] = label(rec)
-    return rec
-
-
 # ─────────────── driver ───────────────
 
 
@@ -689,7 +316,11 @@ def collect(
     return records
 
 
-def collect_one(agent_id: int, week: str | None = None) -> dict[str, Any]:
+def collect_one(
+    agent_id: int,
+    week: str | None = None,
+    leak_paths: LeakPaths | None = None,
+) -> dict[str, Any]:
     """Build a trace record for a single agent by id — its rows from the last
     7 days (Loki retention; eval agents live minutes, so this captures their
     full lifetime). Used to score a freshly-spawned evaluation agent right
@@ -724,7 +355,7 @@ def collect_one(agent_id: int, week: str | None = None) -> dict[str, Any]:
         meta = cur.fetchone()
     if meta is None:
         raise ValueError(f"no agents_meta row for agent {agent_id}")
-    return build_record(agent_id, week, events, log_events, inbounds, meta)
+    return build_record(agent_id, week, events, log_events, inbounds, meta, leak_paths=leak_paths)
 
 
 def dataset_path(week: str) -> Path:

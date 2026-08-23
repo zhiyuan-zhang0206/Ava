@@ -113,10 +113,10 @@ Layer map — responsibility, leak boundary, and current status:
 | Task selection | Only side-effect-free tasks get re-run | `is_replay_safe` gate (tool-call allowlist) | Implemented |
 | Data isolation | Eval run never touches production data | **Open** — `evaluate.launch` spawns ordinary cluster agents | Planned |
 | Side-effect containment | Agent's file/OS effects stay contained | Container mode (effects die with the container) | Implemented in harness; not used by `evaluate.launch` |
-| Memory isolation | Eval agent cannot read eval-relevant pool notes | Empty per-agent `ava.memory` pool; shared index and passive recall suppressed | Implemented at the SDK layer; raw filesystem and DB reads need next-phase OS sandboxing |
+| Memory isolation | Eval agent cannot read eval-relevant pool notes | Empty per-agent `ava.memory` pool; shared index and passive recall suppressed; the memory-search API is gateway-guarded | SDK + gateway boundary live; raw filesystem and DB reads need next-phase OS sandboxing |
 | Network restriction | Eval agent cannot web-search the answer or drive connected clients | `ava.web` / `ava.understand` removed unless explicitly allowlisted; `ava.mcps` / `ava.ui` always removed | Implemented at the SDK layer; raw outbound network needs next-phase container mode |
-| Result separation | Eval agent cannot read original-run artifacts | SDK hides task and last-message reads; gateway rejects isolated last-message callers | Implemented at the SDK + gateway layers; raw filesystem and DB reads need next-phase OS sandboxing |
-| Trace audit | Score is verified against what the agent actually did | Read of `tools_called`, file reads, messages per run | Partially — signals in rubric/label; manual deep-dive reads traces |
+| Result separation | Eval agent cannot read original-run artifacts | Gateway guards transcripts, checkpoints, inbounds, activity, timeline, events, memory search, and task registry; SDK hides task and last-message reads | Gateway boundary live. The caller marker remains client-reported under the peer-trust model; raw filesystem, raw outbound network, and database reads need the future OS-level boundary |
+| Trace audit | Score is verified against what the agent actually did | Per-run scan of executed code for memory, result, endpoint, and disabled-SDK vectors | Implemented at trace level: reads of a leak surface invalidate the run; disabled-SDK attempts remain reported but do not invalidate |
 
 Rule of thumb: **anything an eval agent can read that a fresh user could not
 read before attempting the task is a leak.** The per-run audit is a pass over

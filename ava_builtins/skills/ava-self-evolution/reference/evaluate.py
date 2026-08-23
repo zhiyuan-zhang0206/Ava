@@ -3,9 +3,11 @@
 This is the measurement half of the optimization loop (see the Evaluation Loop
 section of SKILL.md). Given a skill and a set of that skill's dataset tasks, it
 spawns a fresh agent per task (with `ava.agents.spawn`, so the agent picks up
-the current skill text), lets each run the task, then scores the resulting
-trace with `rubric.py`. Comparing the mean score before vs after a skill edit
-is the signal that tells you whether the edit helped.
+the current skill text), lets each run the task, verifies its replay, audits
+it for result leaks, then scores the resulting trace with `rubric.py`.
+Invalid runs remain in the report but are excluded from the mean. Comparing
+the mean score before vs after a skill edit is the signal that tells you
+whether the edit helped.
 
 Two-phase, because a task run takes minutes and a single execute_code block is
 capped well below that. So you cannot spawn and block for the result in one
@@ -40,12 +42,13 @@ from typing import Any
 # PYTHONSAFEPATH=1 keeps the script's own directory off sys.path — restore
 # it for the sibling import (the reference dir is a script dir, not a package).
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # noqa: PTH100, PTH120
+from audit import LeakPaths
 from collect import collect_one
 from rubric import scores
 
 import ava
 from shared.db import connect
-from shared.paths import ava_home
+from shared.paths import ava_home, workspace_dir
 
 # Tool-call prefixes that make a run unsafe to re-run: fleet/user-facing side
 # effects, process lifecycle, arbitrary OS (shell can rm / curl / git push),
@@ -170,29 +173,48 @@ def _mean(score_dicts: list[dict[str, float]]) -> dict[str, float]:
     return {k: round(sum(s[k] for s in score_dicts) / len(score_dicts), 3) for k in keys}
 
 
+def _leak_paths(agent_id: int) -> LeakPaths:
+    """Build host-side result-separation paths for one evaluation agent."""
+    agent_workspace = workspace_dir(agent_id).resolve()
+    return LeakPaths(
+        memory_pool=str(ava.memory.PATH.resolve()),
+        self_evolution=str((ava_home() / "self_evolution").resolve()),
+        workspaces_root=str(agent_workspace.parent),
+        agent_workspace=str(agent_workspace),
+    )
+
+
 def gather(state: dict[str, Any]) -> dict[str, Any]:
     """Collect + score every finished eval agent.
 
     Agents still running are listed under `pending`. Finished replays that do
-    not produce output, use side-effect tools, or diverge from the original
-    tool profile remain in `per_task` and `invalid`, but are excluded from the
-    mean and `n`.
+    not produce output, use side-effect tools, diverge from the original tool
+    profile, or touch a leak surface remain in `per_task` and `invalid`, but
+    are excluded from the mean and `n`.
     """
     progress = poll(state)
     per_task = []
     for run in state["runs"]:
         if run["eval_agent_id"] not in progress["done"]:
             continue
-        rec = collect_one(run["eval_agent_id"])
-        ok, reason = verify_replay({"tools_called": run.get("original_tools_called", {})}, rec)
+        eval_agent_id = run["eval_agent_id"]
+        rec = collect_one(eval_agent_id, leak_paths=_leak_paths(eval_agent_id))
+        replay_ok, replay_reason = verify_replay(
+            {"tools_called": run.get("original_tools_called", {})}, rec
+        )
+        leak_invalidated = rec["invalidated"]
+        valid = replay_ok and not leak_invalidated
+        reason = "leak" if leak_invalidated else replay_reason
         per_task.append(
             {
-                "eval_agent_id": run["eval_agent_id"],
+                "eval_agent_id": eval_agent_id,
                 "source_agent_id": run["source_agent_id"],
                 "label": rec["label"],
                 "scores": scores(rec),
-                "valid": ok,
-                "verification": {"ok": ok, "reason": reason},
+                "leak_audit": rec["leak_audit"],
+                "invalidated": leak_invalidated,
+                "valid": valid,
+                "verification": {"ok": valid, "reason": reason},
             }
         )
     invalid = [task for task in per_task if not task["valid"]]
@@ -204,6 +226,7 @@ def gather(state: dict[str, Any]) -> dict[str, Any]:
         "mean": _mean([task["scores"] for task in valid]),
         "per_task": per_task,
         "invalid": invalid,
+        "invalidated": sum(task["invalidated"] for task in per_task),
         "pending": progress["pending"],
         "skipped": state["skipped"],
     }

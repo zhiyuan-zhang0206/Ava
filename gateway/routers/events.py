@@ -34,9 +34,10 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 import httpx
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from gateway import loki_events, loki_query_budget
+from gateway.routers._eval_guard import deny_isolated_result_read
 from gateway.schemas import EventRow, EventsMeta, EventsResponse
 
 router = APIRouter()
@@ -98,7 +99,7 @@ def _validate(
     return level
 
 
-@router.get("/api/events")
+@router.get("/api/events", dependencies=[Depends(deny_isolated_result_read)])
 def get_events(
     category: Annotated[str | None, Query()] = None,
     event_name: Annotated[str | None, Query()] = None,

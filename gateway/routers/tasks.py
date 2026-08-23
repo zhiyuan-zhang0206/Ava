@@ -10,8 +10,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 
+from gateway.routers._eval_guard import deny_isolated_result_read
 from gateway.schemas import TaskListResponse, TaskRow, TaskUpdateRequest
 from shared.task_reparent import resolve_reparent
 
@@ -51,7 +52,7 @@ def _row_to_task(row: tuple[Any, ...], owner_label: str | None = None) -> TaskRo
     )
 
 
-@router.get("/api/tasks")
+@router.get("/api/tasks", dependencies=[Depends(deny_isolated_result_read)])
 def get_tasks(request: Request) -> TaskListResponse:
     """Return every task in the agent_tasks table, newest first.
 
