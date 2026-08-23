@@ -28,12 +28,11 @@ surface, and the local recovery record `ava trace ship` replays when the live
 fan-out missed data.
 
 - `shared/telemetry_otlp.py` — events → OTLP logs + metrics when enabled
-  (default **on**); disposable exec children (`AVA_EXEC_REQUEST_FILE`) always
-  skip this export.
+  (default **on**). Exec children warm and flush the same backend; their
+  handshake does not bypass export.
 - `shared/trace.py` — spans → OTLP/HTTP (protobuf wire, content-stripped) to
   the sidecar's `/v1/traces`; the sidecar's file exporter writes the mirror.
-  A missing sidecar at agent init disables recording for that process
-  (reported).
+  A missing sidecar reports once and starts one five-minute daemon retry loop.
 - `ava trace ship` (`cli/commands/trace.py`) — recovery replay that bypasses
   the local sidecar (replaying through it would loop the mirror watermark).
   Gateway/single-box units dial loopback Tempo; pure runners dial the gateway
@@ -67,13 +66,13 @@ fan-out missed data.
   recording). Incremental (per-file byte-offset watermark
   `traces/.ship-watermark.json`) or windowed (`--since` / `--until`);
   ingestion is idempotent by span id. Tempo is the only target.
-- **Failure isolation** — the contract this module exists to keep: the OTLP
-  side never blocks, breaks, or slows the PG write. The drain thread only
-  does bounded `put_nowait` into a 2048-entry queue (shed, counted) plus
-  in-memory metric atomics; all network I/O runs on SDK-owned threads with
-  their own retry/drop. Every entry point is suppress-guarded end to end; a backend
-  init failure disables the OTLP side for the process lifetime (reported
-  once). A dead collector cannot cost a batch its DB copy.
+- **Failure isolation** — OTLP never blocks or breaks the event drain after its
+  JSONL mirror write. The drain uses bounded `put_nowait` into a 2048-entry
+  queue (shed, counted) plus in-memory metric atomics; SDK threads own all
+  network I/O and retry/drop. Entry points suppress errors end to end. Failed
+  init retries every five minutes, emitting `otlp_backend_disabled` per failure
+  and `otlp_backend_recovered` on recovery. A dead collector cannot cost the
+  JSONL copy; status events land there when OTLP itself is unavailable.
 
 ## Read side
 
@@ -81,12 +80,13 @@ The LGTM consumers are documented separately:
 [[gateway/loki-events.ava.okf.md|Loki event history]] and
 [[gateway/prom-metrics.ava.okf.md|Prometheus telemetry aggregates]].
 
-**Flag semantics** — exec children always skip export based on their request
-handshake, not cluster config. Elsewhere `AVA_TELEMETRY_OTLP_ENABLED` /
+**Flag semantics** — `AVA_TELEMETRY_OTLP_ENABLED` /
 `AVA_TELEMETRY_OTLP_ENDPOINT` (default `http://127.0.0.1:4318` — the LOCAL
 sidecar on every machine, standard OTLP HTTP port) are startup-applied
 (`restart_required=all`); `shared/config` has no live-reload — flip +
-restart is the apply path. Converge renders a role-specific collector config.
+restart applies changes. Off leaves only the JSONL event sink: Loki/Prometheus
+and their read surfaces stop advancing, with no Postgres fallback. Converge
+renders a role-specific collector config.
 Gateway-capable units use `AVA_TELEMETRY_TEMPO_ENDPOINT` (default loopback host
 port 14318), `AVA_TELEMETRY_LOKI_URL` and
 `AVA_TELEMETRY_PROMETHEUS_URL` as gateway-local backend URLs. Pure runners do
@@ -99,8 +99,8 @@ single-box hosts collapse to the local receiver even when their secret is set.
 ## Key dependencies
 
 - `shared/telemetry.py` — caller: `_write_batch` runs the OTLP export after
-  the JSONL mirror append and before the events INSERT; `_drain_on_exit`
-  calls `telemetry_otlp.shutdown()` at exit.
+  the JSONL mirror append; `_drain_on_exit` calls
+  `telemetry_otlp.shutdown()` at exit.
 - OTel SDK (`opentelemetry-*`) — imported lazily inside `_build_providers` /
   `_emit_log`, so flag-off processes never pay for it.
 - `shared/config/observability.py` — the producer-local `telemetry_otlp_*`
@@ -124,8 +124,9 @@ single-box hosts collapse to the local receiver even when their secret is set.
 
 ## Notes
 
-- OTLP-side diagnostics go through loguru bound with `_no_emitter`, so they
-  reach the stderr/file sinks and never re-enter the event pipeline.
+- Routine OTLP diagnostics use loguru with `_no_emitter`, reaching stderr/file
+  without re-entering the pipeline. Registered disabled/recovered events also
+  record the otherwise invisible episode in the JSONL mirror.
 - Runner exporter component IDs stay `otlphttp/tempo`, `otlphttp/loki` and
   `otlphttp/prometheus` across the direct-backend → relay cutover. The
   file_storage extension keys the Tempo/Loki persistent queues by component

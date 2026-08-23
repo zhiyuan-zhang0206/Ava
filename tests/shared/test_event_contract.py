@@ -90,7 +90,7 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     from shared.telemetry import _TELEMETRY_KINDS
 
     assert telemetry_events() == frozenset(_TELEMETRY_KINDS)
-    assert len(_TELEMETRY_KINDS) == 101
+    assert len(_TELEMETRY_KINDS) == 105
 
 
 def test_category_for_kind() -> None:
@@ -144,6 +144,21 @@ def test_payload_keys_are_the_declared_attribute_contract() -> None:
     assert payload_keys("recall_filter") == ("body",)
     assert payload_keys("heartbeat_nudged") == ("idle_minutes",)
     assert payload_keys("delivery_stalled") == ("inbound_id", "age_s")
+    assert payload_keys("telemetry_read_stale") == (
+        "source",
+        "signal",
+        "threshold_s",
+        "age_s",
+        "action",
+        "reason",
+    )
+    assert payload_keys("telemetry_read_recovered") == (
+        "source",
+        "signal",
+        "stale_duration_s",
+    )
+    assert payload_keys("otlp_backend_disabled") == ("reason", "endpoint")
+    assert payload_keys("otlp_backend_recovered") == ("endpoint", "disabled_s")
     assert payload_keys("log") == ("msg",)  # loguru bare-log payload
     assert payload_keys("page_serve_dir_missing") == (
         "agent_id",

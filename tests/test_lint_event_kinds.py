@@ -52,6 +52,10 @@ _SQL_OR_DYNAMIC_KINDS = frozenset(
         "plugin_activation",
         "gateway_latency",  # gateway/_latency.py:emit_bucket telemetry.emit("telemetry", ...)
         "loki_query_budget",  # gateway/loki_query_budget.py:_emit_observation
+        "telemetry_read_stale",  # gateway/telemetry_staleness.py:_emit
+        "telemetry_read_recovered",  # gateway/telemetry_staleness.py:_emit
+        "otlp_backend_disabled",  # shared/telemetry_otlp.py:_emit_backend_event
+        "otlp_backend_recovered",  # shared/telemetry_otlp.py:_emit_backend_event
         # 历史括号名：W8 改名前的旧值，仍是 migrate_events.py 的映射目标且
         # DB 有存量行。新代码禁止产生，保留注册只为回填口径。
         "exec(cancelled)",

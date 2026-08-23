@@ -23,7 +23,7 @@ import pytest
 from fastapi.testclient import TestClient
 from psycopg import errors as pg_errors
 
-from gateway import loki_events, prom_metrics
+from gateway import loki_events, prom_metrics, telemetry_staleness
 from gateway.app import app
 from tests.gateway.loki_fake import FakeLoki
 
@@ -45,6 +45,11 @@ def _seed_agent(db_conn: psycopg.Connection, *, status: str = "running") -> int:
 # The metric names fleet_graph reads (must match the OTLP-mapped counters).
 _IN_METRIC = "ava_llm_usage_in_total"
 _OUT_METRIC = "ava_llm_usage_out_total"
+
+
+def _fresh_heartbeat_age(*, timeout_s: float | None = None) -> float:
+    del timeout_s
+    return 30.0
 
 
 @pytest.fixture(autouse=True)
@@ -71,6 +76,22 @@ def _mock_prom(monkeypatch: pytest.MonkeyPatch) -> None:
         return {}
 
     monkeypatch.setattr(prom_metrics, "sum_by", fake_sum_by)
+
+
+@pytest.fixture(autouse=True)
+def _fresh_telemetry_heartbeat(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Existing route tests describe fresh-source behavior."""
+    monkeypatch.setattr(
+        telemetry_staleness,
+        "prometheus_heartbeat_age",
+        _fresh_heartbeat_age,
+    )
+    monkeypatch.setattr(
+        telemetry_staleness,
+        "loki_heartbeat_age",
+        _fresh_heartbeat_age,
+    )
+    monkeypatch.setattr(telemetry_staleness, "_source_states", {})
 
 
 def _install_prom(

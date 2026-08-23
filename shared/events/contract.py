@@ -403,6 +403,39 @@ class GatewayLatency(TypedDict):
     count: int
 
 
+class TelemetryReadStale(TypedDict):
+    """`telemetry_read_stale` payload — gateway/telemetry_staleness.py."""
+
+    source: str
+    signal: str
+    threshold_s: int
+    age_s: float | None
+    action: str
+    reason: str
+
+
+class TelemetryReadRecovered(TypedDict):
+    """`telemetry_read_recovered` payload — gateway/telemetry_staleness.py."""
+
+    source: str
+    signal: str
+    stale_duration_s: float
+
+
+class OtlpBackendDisabled(TypedDict):
+    """`otlp_backend_disabled` payload — shared/telemetry_otlp.py."""
+
+    reason: str
+    endpoint: str | None
+
+
+class OtlpBackendRecovered(TypedDict):
+    """`otlp_backend_recovered` payload — shared/telemetry_otlp.py."""
+
+    endpoint: str | None
+    disabled_s: float | None
+
+
 class LokiQueryFailed(TypedDict):
     """`loki_query_failed` payload — gateway/loki_events.py transport failure.
 
@@ -845,6 +878,26 @@ EVENTS: dict[str, EventSpec] = {
         "gateway endpoint latency — 60s aggregate per route (p50/p95/max/count)",
         payload=GatewayLatency,
         tier="noise",
+    ),
+    "telemetry_read_stale": _telemetry(
+        "telemetry_read_stale",
+        "read-side telemetry staleness detected — heartbeat older than threshold",
+        payload=TelemetryReadStale,
+    ),
+    "telemetry_read_recovered": _telemetry(
+        "telemetry_read_recovered",
+        "read-side telemetry heartbeat recovered",
+        payload=TelemetryReadRecovered,
+    ),
+    "otlp_backend_disabled": _telemetry(
+        "otlp_backend_disabled",
+        "OTLP backend disabled for this process (init failure / collector unreachable); retry scheduled",
+        payload=OtlpBackendDisabled,
+    ),
+    "otlp_backend_recovered": _telemetry(
+        "otlp_backend_recovered",
+        "OTLP backend brought up after a disabled episode (periodic retry)",
+        payload=OtlpBackendRecovered,
     ),
     "loki_query_budget": _telemetry(
         "loki_query_budget",

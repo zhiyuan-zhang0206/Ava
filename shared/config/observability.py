@@ -95,9 +95,15 @@ class ObservabilitySettings(EnvSettings):
             "Dual-write the unified event stream to the OTLP/HTTP backend "
             "(OTel+Tempo+Loki+Prometheus stack, 2026-08-11 decision): events -> "
             "OTLP logs (Loki), telemetry numeric payloads -> OTLP metrics "
-            "(Prometheus). On = PG + OTLP; off = PG only. `ava trace ship "
-            "refuses while off (one kill switch for the whole "
-            "OTLP surface). Applies on the next process start."
+            "(Prometheus). On (default) enables that dual-write. Off leaves the "
+            "JSONL mirror only: OTLP export stops entirely, so Loki and Prometheus "
+            "stop receiving data and their read surfaces (fleet-graph token totals/"
+            "scores, stats-dashboard cost, inspect event history, Grafana) freeze "
+            "at the last data. The mirror prevents data loss, but visibility stops. "
+            "`ava trace ship` refuses while off (one kill switch for the whole OTLP "
+            "surface). There is no Postgres fallback: the PG events copy was retired "
+            "with the LGTM cutover (task #1197) and is a read-only archive. Applies "
+            "on the next process start."
         ),
         json_schema_extra={
             "restart_required": "all",

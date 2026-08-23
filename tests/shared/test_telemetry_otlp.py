@@ -392,11 +392,16 @@ def test_warmup_initializes_enabled_backend(otlp_backend) -> None:
     assert backend._thread is not None  # pyright: ignore[reportUnknownMemberType]
 
 
-def test_flag_off_disables_export(otlp_backend, monkeypatch) -> None:
+def test_flag_off_disables_export(otlp_backend: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     """AVA_TELEMETRY_OTLP_ENABLED=false -> export is a no-op: no backend
     bring-up, no records, no queue traffic."""
     backend, log_exporter, metric_reader = otlp_backend
     monkeypatch.setattr("shared.config.settings.observability.telemetry_otlp_enabled", False)  # pyright: ignore[reportUnknownMemberType]
+
+    def fail_emit(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("flag-off must not emit backend status events")
+
+    monkeypatch.setattr(telemetry, "emit", fail_emit)
     backend.export_batch([_event()])  # pyright: ignore[reportUnknownMemberType]
     assert backend._logs is None  # never brought up  # pyright: ignore[reportUnknownMemberType]
     assert backend._queue.empty()  # pyright: ignore[reportUnknownMemberType]
@@ -417,20 +422,132 @@ def test_flag_defaults_on_with_standard_endpoint(monkeypatch) -> None:
 # ── failure isolation ────────────────────────────────────────────────────────
 
 
-def test_backend_init_failure_isolated_and_disables(monkeypatch) -> None:
+def test_backend_init_failure_isolated_and_waits_before_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A backend that cannot come up (bad endpoint / missing dep) never raises
-    into the emitter and never retries per batch."""
+    into the emitter and does not retry again inside the five-minute window."""
     monkeypatch.setattr("shared.config.settings.observability.telemetry_otlp_enabled", True)  # pyright: ignore[reportUnknownMemberType]
 
+    def reachable(_endpoint: str) -> bool:
+        return True
+
+    monkeypatch.setattr(telemetry_otlp._OtlpBackend, "_endpoint_reachable", staticmethod(reachable))
+    attempts: list[str] = []
+
     def boom(endpoint: str) -> tuple[Any, Any]:
+        attempts.append(endpoint)
         raise RuntimeError("collector unreachable")
 
     monkeypatch.setattr(telemetry_otlp, "_build_providers", boom)  # pyright: ignore[reportUnknownMemberType]
     backend = telemetry_otlp._OtlpBackend()
     assert backend.export_batch([_event()]) is None  # does not raise
     assert backend._logs is None
-    assert backend.export_batch([_event()]) is None  # no retry
-    assert backend._init_attempted
+    assert backend.export_batch([_event()]) is None  # no per-batch retry
+    assert attempts == ["http://127.0.0.1:4318"]
+    assert backend._init_failed_at is not None
+
+
+def test_backend_retry_recovers_and_emits_real_status_events(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed init reports into the surviving mirror, then a later retry
+    initializes the backend and reports recovery."""
+    monkeypatch.setattr("shared.config.settings.observability.telemetry_otlp_enabled", True)
+
+    def reachable(_endpoint: str) -> bool:
+        return True
+
+    monkeypatch.setattr(telemetry_otlp._OtlpBackend, "_endpoint_reachable", staticmethod(reachable))
+    now = [100.0]
+    monkeypatch.setattr(telemetry_otlp.time, "monotonic", lambda: now[0])
+    emitted: list[tuple[str, dict[str, Any]]] = []
+
+    def capture_emit(
+        _category: str, event_name: str, *, attributes: dict[str, Any], **_kwargs: Any
+    ) -> None:
+        emitted.append((event_name, attributes))
+
+    monkeypatch.setattr(telemetry, "emit", capture_emit)
+
+    class _MetricProvider:
+        def get_meter(self, _name: str) -> object:
+            return object()
+
+    logs = object()
+    metrics = _MetricProvider()
+    attempts = 0
+
+    def build(endpoint: str) -> tuple[Any, Any]:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise RuntimeError("collector booting")
+        return logs, metrics
+
+    monkeypatch.setattr(telemetry_otlp, "_build_providers", build)
+    backend = telemetry_otlp._OtlpBackend()
+    try:
+        assert backend._ensure() is False
+        assert emitted == [
+            (
+                "otlp_backend_disabled",
+                {
+                    "reason": "init failed: RuntimeError('collector booting')",
+                    "endpoint": "http://127.0.0.1:4318",
+                },
+            )
+        ]
+
+        assert backend._ensure() is False
+        assert attempts == 1
+
+        now[0] += telemetry_otlp.COLLECTOR_RETRY_INTERVAL_S
+        assert backend._ensure() is True
+        assert backend._logs is logs
+        assert emitted[-1] == (
+            "otlp_backend_recovered",
+            {
+                "endpoint": "http://127.0.0.1:4318",
+                "disabled_s": telemetry_otlp.COLLECTOR_RETRY_INTERVAL_S,
+            },
+        )
+        assert backend._init_failed_at is None
+    finally:
+        backend.shutdown()
+
+
+def test_backend_unreachable_probe_emits_specific_disabled_reason(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("shared.config.settings.observability.telemetry_otlp_enabled", True)
+
+    def unreachable(_endpoint: str) -> bool:
+        return False
+
+    monkeypatch.setattr(
+        telemetry_otlp._OtlpBackend, "_endpoint_reachable", staticmethod(unreachable)
+    )
+    emitted: list[tuple[str, dict[str, Any]]] = []
+
+    def capture_emit(
+        _category: str, event_name: str, *, attributes: dict[str, Any], **_kwargs: Any
+    ) -> None:
+        emitted.append((event_name, attributes))
+
+    monkeypatch.setattr(telemetry, "emit", capture_emit)
+
+    backend = telemetry_otlp._OtlpBackend()
+    assert backend._ensure() is False
+    assert emitted == [
+        (
+            "otlp_backend_disabled",
+            {
+                "reason": "endpoint not answering",
+                "endpoint": "http://127.0.0.1:4318",
+            },
+        )
+    ]
 
 
 def test_queue_full_sheds_counted_not_blocking(monkeypatch) -> None:

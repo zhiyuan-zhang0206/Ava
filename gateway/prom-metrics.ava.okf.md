@@ -41,7 +41,10 @@ datapoint attributes.
 - `GET /api/fleet/graph` — node `total_tokens` (all-time in+out) + windowed
   `node_score` (in*0.1 + out*1.0); a Prometheus outage degrades the graph to
   a `stale` last-good response when available, otherwise to the PG node set
-  with empty edges and zeroed metric fields.
+  with empty edges and zeroed metric fields. After successful Prometheus and
+  Loki reads, [[telemetry-staleness.ava.okf.md|the telemetry staleness guard]]
+  checks the gateway's own latency heartbeat. A stale heartbeat keeps the live
+  data visible with `stale=true` but prevents either graph cache from advancing.
 - `AVA_TELEMETRY_PROMETHEUS_URL` (default `http://127.0.0.1:9090`,
   restart_required gateway) points at the Prometheus HTTP API port.
 
