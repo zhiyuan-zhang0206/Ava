@@ -392,6 +392,9 @@ func registerPermissions() {
     _ = AXIsProcessTrustedWithOptions(opts)
 }
 
+/// Serve desktop requests only through an owner-only Unix socket. `chmod` locks
+/// the socket file to mode 0700, and `getpeereid` admits only this process's
+/// uid; same-uid processes remain the documented residual threat surface.
 func serve() {
     registerPermissions()
     let path = socketPath()
@@ -416,6 +419,10 @@ func serve() {
         ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(fd, $0, len) }
     }
     if bindRC < 0 { perror("bind"); exit(1) }
+    // This helper holds TCC-granted desktop access, so the socket must be
+    // owner-only: a foreign local process must not drive screenshots or clicks.
+    // Same-uid processes are the documented residual threat surface.
+    if chmod(path, mode_t(0o700)) != 0 { perror("chmod"); exit(1) }
     if listen(fd, 16) < 0 { perror("listen"); exit(1) }
     FileHandle.standardError.write(Data("AvaPermissionsHelper: listening on \(path)\n".utf8))
 
@@ -425,6 +432,12 @@ func serve() {
             if errno == EINTR || errno == ECONNABORTED { continue }
             perror("accept")
             usleep(100_000)  // a persistent error (e.g. fd exhaustion) must not become a tight CPU spin
+            continue
+        }
+        var peerUID: uid_t = 0
+        var peerGID: gid_t = 0
+        if getpeereid(conn, &peerUID, &peerGID) != 0 || peerUID != getuid() {
+            close(conn)
             continue
         }
         while let line = readLine(conn) {
