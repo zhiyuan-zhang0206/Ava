@@ -43,7 +43,11 @@ are mounted. `hours` is the aggregation window, whitelisted to
 
 No standalone daemon: the gateway aggregates on demand. Loki work runs before
 the short Postgres metadata read, so waiting for the global Loki budget never
-holds a pooled DB connection.
+holds a pooled DB connection. Its four event aggregates each use one query for
+a <=3h window or merge the shared helper's contiguous, clock-aligned <=3h
+shards for a longer window. A local budget refusal retains the global typed 503
+response; a Loki transport/status failure is a retriable 503 with
+`Retry-After: 1` after `loki_events` records the failing query shape.
 
 `GET /api/agents/{id}/inspect` draws the same boundary per agent: its 75s
 single-flight TTL retains only history aggregates. Completed UTC days read the

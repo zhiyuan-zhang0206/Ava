@@ -14,9 +14,12 @@ empty fake; tests that need token values re-install a richer one over it).
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta
+from itertools import pairwise
 from types import SimpleNamespace
 from typing import Any, Literal
 
+import httpx
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
@@ -196,6 +199,84 @@ def test_dashboard_local_loki_budget_rejection_is_503(
     assert response.status_code == 503
     assert response.json()["detail"] == f"Loki query budget unavailable ({reason}); retry"
     assert response.headers["retry-after"] == "1"
+
+
+@pytest.mark.parametrize(
+    ("loki_method", "error"),
+    [
+        ("attribute_aggregate", httpx.ConnectError("Loki disconnected")),
+        ("count_events", httpx.ReadTimeout("Loki timed out")),
+    ],
+)
+def test_dashboard_loki_transport_error_is_retriable_503(
+    db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+    loki_method: Literal["attribute_aggregate", "count_events"],
+    error: httpx.HTTPError,
+) -> None:
+    """Loki transport failures become the dashboard's typed retry response."""
+
+    def unavailable(*args: Any, **kwargs: Any) -> float:
+        raise error
+
+    monkeypatch.setattr(loki_events, loki_method, unavailable)
+    db_conn.commit()
+    with TestClient(app) as client:
+        response = client.get("/api/stats/dashboard")
+    assert response.status_code == 503
+    assert response.headers["retry-after"] == "1"
+    assert type(error).__name__ in response.json()["detail"]
+
+
+def test_dashboard_shards_long_loki_windows_and_merges_aggregates(
+    db_conn: psycopg.Connection,
+    fake_loki: FakeLoki,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Long dashboard windows sum exact, contiguous three-hour Loki shards."""
+    aid = _insert_agent(db_conn, status="running")
+    fake_loki.add(
+        event="turn_end",
+        agent_id=aid,
+        payload={"duration_seconds": 10.0, "ok": True},
+        ts_offset_hours=5,
+    )
+    fake_loki.add(
+        event="turn_end",
+        agent_id=aid,
+        payload={"duration_seconds": 2.0, "ok": True},
+        ts_offset_hours=0.5,
+    )
+    fake_loki.add(event="log_warning", level="warning", ts_offset_hours=5)
+    fake_loki.add(event="log_error", level="error", ts_offset_hours=0.5)
+
+    aggregate_spans: list[tuple[datetime, datetime]] = []
+    count_spans: list[tuple[datetime, datetime]] = []
+    real_aggregate = fake_loki.attribute_aggregate
+    real_count = fake_loki.count_events
+
+    def spy_aggregate(**kwargs: Any) -> float | list[tuple[str, float]]:
+        aggregate_spans.append((kwargs["from_"], kwargs["to"]))
+        return real_aggregate(**kwargs)
+
+    def spy_count(**kwargs: Any) -> int:
+        count_spans.append((kwargs["from_"], kwargs["to"]))
+        return real_count(**kwargs)
+
+    monkeypatch.setattr(loki_events, "attribute_aggregate", spy_aggregate)
+    monkeypatch.setattr(loki_events, "count_events", spy_count)
+    db_conn.commit()
+    with TestClient(app) as client:
+        body = client.get("/api/stats/dashboard", params={"hours": 6}).json()
+
+    assert body["avg_turn_seconds"] == 6.0
+    assert body["warnings"] == 1
+    assert body["errors"] == 1
+    assert len(aggregate_spans) > 1
+    assert aggregate_spans[0][0] == aggregate_spans[-1][1] - timedelta(hours=6)
+    assert all(end - start <= timedelta(hours=3) for start, end in aggregate_spans)
+    assert all(end == next_start for (_, end), (next_start, _) in pairwise(aggregate_spans))
+    assert count_spans == aggregate_spans * 3
 
 
 def test_dashboard_empty_db_returns_zeros(db_conn: psycopg.Connection) -> None:
