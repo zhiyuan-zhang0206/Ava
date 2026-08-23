@@ -25,7 +25,7 @@ generated from it and never hand-synced. event_names that violate the naming rul
 |------|------|-------------|------|------|
 | audit (category=audit) | `events` | 20 | events table | 365d+ |
 | telemetry (category=telemetry) | `events` | 101 | events table | 90d |
-| log (category=log) | `events` | 4 | events table | 30d |
+| log (category=log) | `events` | 5 | events table | 30d |
 | file-only (destination=file) | file log | 1 | file only (not the events table) | — |
 | SSE live | Redis → frontend (not persisted) | 27 role | live projection | ephemeral |
 
@@ -206,6 +206,7 @@ consumers: see the comments at each emit point.
 |------|------|-----------------|------|------|
 | `log` | bare log line | msg | 30d | events |
 | `loki_query_failed` | a Loki HTTP query failed (timeout / disconnect / non-2xx) — carries the request shape | endpoint, duration_s, error, window_from, window_to, query | 30d | events |
+| `page_serve_dir_missing` | a served page directory disappeared; emitted on degradation and auto-close | agent_id, key, name, serve_dir, port | 30d | events |
 | `warning_resolved` | mark a warning (or class of warnings, via attributes.match) resolved | target_event_id, match, resolved_by | 30d | events |
 | `error_resolved` | mark an error (or class of errors, via attributes.match) resolved | target_event_id, match, resolved_by | 30d | events |
 

@@ -347,7 +347,8 @@ class PageOpened(_Base):
 
 class PageClosed(_Base):
     """Published when the agent calls `ava.ui.close(name)` or the
-    terminate cascade closes a page — the frontend Pages popover
+    terminate cascade closes a page, or when the page-server daemon closes a
+    row whose serve_dir remains unavailable — the frontend Pages popover
     removes the entry.
 
     Terminate path: SQL trigger `cascade_close_agent_pages` silently
