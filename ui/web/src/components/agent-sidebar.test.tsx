@@ -28,6 +28,8 @@ const state = {
   sidebarCollapsed: false,
   stats: undefined as StatsDashboard | undefined,
   statsError: null as unknown,
+  statsFetching: false,
+  statsRefetch: vi.fn(),
   statsWindowHours: 24 as StatsWindowHours,
   showTerminated: false,
   sidebarViewMode: "tree" as "tree" | "flat",
@@ -75,7 +77,12 @@ vi.mock("@/lib/sidebar", async () => {
       collapsed: state.sidebarCollapsed,
       setCollapsed: state.setSidebarCollapsed,
     }),
-    useStatsDashboard: () => ({ stats: state.stats, error: state.statsError }),
+    useStatsDashboard: () => ({
+      stats: state.stats,
+      error: state.statsError,
+      isFetching: state.statsFetching,
+      refetch: state.statsRefetch,
+    }),
     useStatsWindow: () => ({
       windowHours: state.statsWindowHours,
       setWindowHours: state.setStatsWindowHours,
@@ -314,6 +321,8 @@ beforeEach(() => {
   state.sidebarCollapsed = false;
   state.stats = undefined;
   state.statsError = null;
+  state.statsFetching = false;
+  state.statsRefetch = vi.fn();
   state.statsWindowHours = 24;
   state.showTerminated = false;
   state.sidebarViewMode = "tree";
@@ -583,6 +592,17 @@ describe("StatsCards tri-state (loading / data / error)", () => {
     expect(screen.getByText("Warnings / errors")).toBeTruthy();
   });
 
+  it("fetching without data shows an updating spinner and six skeleton values", () => {
+    state.agents = [makeAgent({ agent_id: 1 })];
+    state.statsFetching = true;
+    wrap(<AgentSidebar {...handlers} />);
+    openStats();
+
+    expect(screen.getByRole("status", { name: "Statistics are updating" })).toBeTruthy();
+    expect(document.querySelectorAll(".animate-pulse")).toHaveLength(6);
+    expect(screen.queryByText("—")).toBeNull();
+  });
+
   it("stats has data → 6 cards show real numbers", () => {
     state.agents = [makeAgent({ agent_id: 1 })];
     state.stats = {
@@ -605,7 +625,7 @@ describe("StatsCards tri-state (loading / data / error)", () => {
     expect(screen.getByText("2 / 1")).toBeTruthy(); // warn / err
   });
 
-  it("error non-null → '!' red placeholder", () => {
+  it("error without data shows retry and clicking it refetches", () => {
     state.agents = [makeAgent({ agent_id: 1 })];
     state.statsError = new Error("stats endpoint 500");
     wrap(<AgentSidebar {...handlers} />);
@@ -614,6 +634,31 @@ describe("StatsCards tri-state (loading / data / error)", () => {
     // The popover renders through a portal, so query the document, not the
     // wrapper container.
     expect(document.querySelectorAll(".text-destructive").length).toBeGreaterThan(0);
+    const retry = screen.getByRole("button", { name: "Retry" });
+    expect(retry.getAttribute("title")).toBe("stats endpoint 500");
+    fireEvent.click(retry);
+    expect(state.statsRefetch).toHaveBeenCalledOnce();
+  });
+
+  it("refetch failure keeps stale values and labels them with a warning", () => {
+    state.agents = [makeAgent({ agent_id: 1 })];
+    state.stats = {
+      live_count: 5,
+      window_hours: 24,
+      tokens: { input: 100, output: 50, cache_read: 0, cache_hit_pct: 80 },
+      cost_usd: 1,
+      avg_turn_seconds: 3,
+      warnings: 2,
+      errors: 1,
+      total_events: 100,
+    };
+    state.statsError = new Error("stats endpoint 500");
+    wrap(<AgentSidebar {...handlers} />);
+    openStats();
+
+    expect(screen.getByText("5")).toBeTruthy();
+    expect(screen.queryByText("!")).toBeNull();
+    expect(screen.getByTitle("stats endpoint 500")).toBeTruthy();
   });
 
   it("tokens compact: < 1000 raw, < 1M as k, >= 1M as M", () => {

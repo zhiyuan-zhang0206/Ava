@@ -93,7 +93,7 @@ export function CollapsedSidebar(props: DesktopProps) {
 function CollapsedStatsButton() {
   const t = useTranslations("sidebar");
   const { windowHours, setWindowHours } = useStatsWindow();
-  const { stats, error: statsError } = useStatsDashboard(windowHours);
+  const { stats, error: statsError, isFetching, refetch } = useStatsDashboard(windowHours);
   return (
     <Popover.Root>
       <Popover.Trigger asChild>
@@ -115,8 +115,10 @@ function CollapsedStatsButton() {
           <StatsCards
             stats={stats}
             error={statsError}
+            fetching={isFetching}
             windowHours={windowHours}
             onWindowChange={setWindowHours}
+            onRetry={() => { void refetch(); }}
           />
         </Popover.Content>
       </Popover.Portal>

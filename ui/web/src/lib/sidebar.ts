@@ -11,7 +11,7 @@
 // background to generate a short label when spawn carries a prompt;
 // user overrides go through `api.patchAgentLabel`.
 
-import { keepPreviousData, type QueryClient, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, type QueryClient, type UseQueryResult, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect } from "react";
 
 import { api } from "./api";
@@ -188,6 +188,7 @@ function subscribeStatsPoll(queryClient: QueryClient, windowHours: StatsWindowHo
         .fetchQuery({
           queryKey: ["stats", "dashboard", windowHours],
           queryFn: () => api.getStatsDashboard(windowHours),
+          retry: 1,
           staleTime: 0,
         })
         // React Query records the error for every observer to render; consume
@@ -212,11 +213,14 @@ function subscribeStatsPoll(queryClient: QueryClient, windowHours: StatsWindowHo
 export function useStatsDashboard(windowHours: StatsWindowHours): {
   stats: StatsDashboard | undefined;
   error: unknown;
+  isFetching: boolean;
+  refetch: UseQueryResult<StatsDashboard>["refetch"];
 } {
   const queryClient = useQueryClient();
-  const { data: stats, error } = useQuery({
+  const { data: stats, error, isFetching, refetch } = useQuery({
     queryKey: ["stats", "dashboard", windowHours],
-    queryFn: () => api.getStatsDashboard(windowHours),
+    queryFn: ({ signal }) => api.getStatsDashboard(windowHours, signal),
+    retry: 1,
     // A staggered second observer must consume the page's current snapshot,
     // not start a second request/cadence of its own.
     staleTime: STATS_POLL_MS,
@@ -228,7 +232,7 @@ export function useStatsDashboard(windowHours: StatsWindowHours): {
     () => subscribeStatsPoll(queryClient, windowHours),
     [queryClient, windowHours],
   );
-  return { stats, error };
+  return { stats, error, isFetching, refetch };
 }
 
 // Relative time formatting for sidebar rows (and, transitively, every other

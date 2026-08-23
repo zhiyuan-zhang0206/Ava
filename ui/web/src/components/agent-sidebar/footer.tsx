@@ -1,6 +1,15 @@
 "use client";
 
-import { Activity, BarChart3, NotebookText, Settings, Waypoints } from "lucide-react";
+import {
+  Activity,
+  AlertTriangle,
+  BarChart3,
+  Loader2,
+  NotebookText,
+  RotateCw,
+  Settings,
+  Waypoints,
+} from "lucide-react";
 import * as Popover from "@radix-ui/react-popover";
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
@@ -23,17 +32,23 @@ import { cn } from "@/lib/utils";
 export function StatsCards({
   stats,
   error,
+  fetching,
   windowHours,
   onWindowChange,
+  onRetry,
 }: {
   stats: StatsDashboard | undefined;
   error: unknown;
+  fetching: boolean;
   windowHours: StatsWindowHours;
   onWindowChange: (h: StatsWindowHours) => void;
+  onRetry: () => void;
 }) {
   const t = useTranslations("sidebar");
   const errMsg = error ? formatErrMsg(error) : null;
-  const placeholder = errMsg ? "!" : "—";
+  const failedWithoutData = errMsg !== null && stats === undefined;
+  const firstLoad = stats === undefined && error === null && fetching;
+  const placeholder = failedWithoutData ? "!" : "—";
   const win = STATS_WINDOW_LABELS[windowHours];
   const cards: { label: string; value: string; title?: string }[] = [
     {
@@ -80,15 +95,41 @@ export function StatsCards({
       title: errMsg ?? t("warningsTitle", { win }),
     },
   ];
-  const valueClass = errMsg
+  const valueClass = failedWithoutData
     ? "font-mono tabular-nums text-sm text-destructive"
     : "font-mono tabular-nums text-sm";
   return (
     <div className="text-xs">
       <div className={cn("items-center justify-between border-b border-border px-3 py-2", FLEX)}>
-        <span className="text-[10px] tracking-wide text-muted-foreground">
-          {t("statistics")}
-        </span>
+        <div className={cn("items-center gap-1.5", FLEX)}>
+          <span className="text-[10px] tracking-wide text-muted-foreground">
+            {t("statistics")}
+          </span>
+          {fetching ? (
+            <span
+              role="status"
+              aria-label={t("statisticsUpdating")}
+              title={t("statisticsUpdating")}
+            >
+              <Loader2 className="size-3 animate-spin text-muted-foreground" aria-hidden />
+            </span>
+          ) : null}
+          {failedWithoutData ? (
+            <button
+              type="button"
+              onClick={onRetry}
+              aria-label={t("statisticsRetry")}
+              title={errMsg}
+              className="rounded p-0.5 text-destructive hover:bg-sidebar-accent"
+            >
+              <RotateCw className="size-3" aria-hidden />
+            </button>
+          ) : errMsg !== null ? (
+            <span role="img" aria-label={errMsg} title={errMsg}>
+              <AlertTriangle className="size-3 text-destructive" aria-hidden />
+            </span>
+          ) : null}
+        </div>
         <select
           value={windowHours}
           onChange={(e) => onWindowChange(Number(e.target.value) as StatsWindowHours)}
@@ -111,7 +152,14 @@ export function StatsCards({
             <span className="text-[10px] tracking-wide text-muted-foreground">
               {card.label}
             </span>
-            <span className={valueClass}>{card.value}</span>
+            {firstLoad ? (
+              <span
+                className="h-4 w-10 animate-pulse rounded bg-muted-foreground/20"
+                aria-hidden
+              />
+            ) : (
+              <span className={valueClass}>{card.value}</span>
+            )}
           </div>
         ))}
       </div>
@@ -131,7 +179,7 @@ export function SidebarFooter() {
   const navT = useTranslations("nav");
   const router = useRouter();
   const { windowHours, setWindowHours } = useStatsWindow();
-  const { stats, error: statsError } = useStatsDashboard(windowHours);
+  const { stats, error: statsError, isFetching, refetch } = useStatsDashboard(windowHours);
 
   return (
     <div className={cn("items-center justify-between border-t border-border px-2 py-1.5", FLEX)}>
@@ -157,8 +205,10 @@ export function SidebarFooter() {
             <StatsCards
               stats={stats}
               error={statsError}
+              fetching={isFetching}
               windowHours={windowHours}
               onWindowChange={setWindowHours}
+              onRetry={() => { void refetch(); }}
             />
           </Popover.Content>
         </Popover.Portal>

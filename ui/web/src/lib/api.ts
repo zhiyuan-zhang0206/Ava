@@ -434,8 +434,14 @@ export const api = {
   // single request (live count / tokens / avg turn / warnings+errors).
   // `hours` selects the aggregation window — whitelisted backend-side
   // (1/6/24/72/168), anything else 422s.
-  getStatsDashboard: (hours: number): Promise<StatsDashboard> => {
-    return f(`/api/stats/dashboard?hours=${hours}`).then(ok<StatsDashboard>);
+  getStatsDashboard: (hours: number, signal?: AbortSignal): Promise<StatsDashboard> => {
+    return jsonWithTimeout<StatsDashboard>(
+      `/api/stats/dashboard?hours=${hours}`,
+      {},
+      40_000,
+      signal,
+      "stats dashboard",
+    );
   },
 
   // --- ops monitor (Insights Ops tab) ---
