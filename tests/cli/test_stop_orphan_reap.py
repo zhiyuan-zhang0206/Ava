@@ -6,15 +6,20 @@ session is invisible to all of them and keeps the cluster port against the
 next start — the new process dies on 'address already in use' while the old
 one keeps serving (the 2026-08-07 pgbouncer / gate / gateway /
 events-maintenance incident class). The sweep closes the gap: every port this
-unit expects to own is scanned, and an OUR listener (the repo/home ownership
-predicate) is killed verified. These tests pin the sweep's behavior: what it
-kills, what it never touches, and what it skips.
+unit expects to own is scanned, and only a listener positively attributable to
+the target cluster home is killed verified. These tests pin the sweep's
+behavior: what it kills, what it never touches, and what it skips.
 """
 
 from __future__ import annotations
 
+import contextlib
+import subprocess
+import sys
+import time
 from pathlib import Path
 
+import psutil
 import pytest
 
 from cli.commands import _orphan_reap as _or
@@ -57,6 +62,101 @@ def _ctx(tmp_path: Path) -> tuple[Path, Path]:
     repo.mkdir()
     home.mkdir()
     return repo, home
+
+
+def _detached_listener(tmp_path: Path, *, identity: Path) -> tuple[int, int]:
+    """Start a real TCP listener whose final argv token states its identity.
+
+    The launcher exits immediately so the listener is not pytest's child. That
+    matches the orphan daemon shape and lets the verified-kill liveness check
+    observe a gone process rather than an unreaped child zombie.
+    """
+    ready = tmp_path / f"listener-{identity.name}.port"
+    child = (
+        "import pathlib, socket, sys, time\n"
+        "sock = socket.socket()\n"
+        "sock.bind(('127.0.0.1', 0))\n"
+        "sock.listen()\n"
+        f"pathlib.Path({str(ready)!r}).write_text(str(sock.getsockname()[1]))\n"
+        "while True: time.sleep(60)\n"
+    )
+    launcher = (
+        "import subprocess, sys\n"
+        f"p = subprocess.Popen([sys.executable, '-c', {child!r}, {str(identity)!r}], "
+        "stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)\n"
+        "print(p.pid)\n"
+    )
+    done = subprocess.run(  # noqa: S603
+        [sys.executable, "-c", launcher],
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=30,
+    )
+    pid = int(done.stdout.strip())
+    deadline = time.monotonic() + 30
+    while not ready.exists():
+        assert time.monotonic() < deadline, "the listener fixture never became ready"
+        time.sleep(0.02)
+    return pid, int(ready.read_text())
+
+
+def _kill_fixture_process(pid: int) -> None:
+    with contextlib.suppress(psutil.Error):
+        proc = psutil.Process(pid)
+        proc.kill()
+        proc.wait(timeout=5)
+
+
+def test_destroy_reaper_leaves_foreign_listener_alive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Regression #1426: the checkout running a cross-home destroy is not an
+    ownership token. A foreign listener launched by that same Python checkout
+    survives, and the refusal identifies the port, process, and pid."""
+    repo = Path(__file__).resolve().parents[2]
+    home = tmp_path / "home"
+    home.mkdir()
+    pid, port = _detached_listener(
+        tmp_path,
+        identity=Path(f"{home}-foreign") / "source" / ".venv" / "bin" / "python",
+    )
+    monkeypatch.setattr(
+        "shared.port_preflight.unit_port_map",
+        lambda _home: {"gateway": port},  # pyright: ignore[reportUnknownArgumentType]
+    )
+
+    try:
+        assert _or._reap_orphan_listeners(repo, home, preserve=frozenset()) == []
+        assert psutil.pid_exists(pid), "destroy killed a listener it could not attribute"
+        out = capsys.readouterr().out
+        assert f"not claiming {port}: belongs to" in out
+        assert f"(pid {pid})" in out
+    finally:
+        _kill_fixture_process(pid)
+
+
+def test_destroy_reaper_reaps_listener_identified_by_cluster_home(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A listener whose argv positively names the target cluster home remains
+    reapable, so the ownership guard does not turn destroy into a blanket skip."""
+    repo = Path(__file__).resolve().parents[2]
+    home = tmp_path / "home"
+    home.mkdir()
+    pid, port = _detached_listener(tmp_path, identity=home / "source" / ".venv" / "bin" / "python")
+    monkeypatch.setattr(
+        "shared.port_preflight.unit_port_map",
+        lambda _home: {"gateway": port},  # pyright: ignore[reportUnknownArgumentType]
+    )
+
+    try:
+        assert _or._reap_orphan_listeners(repo, home, preserve=frozenset()) == [
+            ("gateway", port, pid)
+        ]
+        assert not psutil.pid_exists(pid)
+    finally:
+        _kill_fixture_process(pid)
 
 
 def test_reap_kills_our_listeners_and_leaves_foreign(
