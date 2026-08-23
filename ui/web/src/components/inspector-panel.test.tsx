@@ -761,13 +761,13 @@ describe("InspectorPanel desktop", () => {
     expect(toggle).toHaveBeenCalledOnce();
   });
 
-  it("Escape closes the panel on desktop", async () => {
+  it("Escape does not close the panel on desktop", async () => {
     getAgentInspect.mockResolvedValue(fixture());
     render(<InspectorPanel agentId={1} />);
 
     await waitFor(() => expect(screen.getByText("Persistent shells")).toBeTruthy());
     fireEvent.keyDown(window, { key: "Escape" });
-    expect(toggle).toHaveBeenCalledOnce();
+    expect(toggle).not.toHaveBeenCalled();
   });
 
   it("does not close when clicking outside the desktop side panel", async () => {

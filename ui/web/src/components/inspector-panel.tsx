@@ -67,7 +67,9 @@ const WINDOWS: { label: string; value: number | null }[] = [
  * Responsive (user ruling 2026-08-23, superseding the 2026-08-05 floating
  * overlay ruling on desktop): at ≥ lg it is a fixed right-side flex panel;
  * below lg it is a full-screen overlay with a backdrop, matching the mobile
- * sidebar drawer.
+ * sidebar drawer. The header X closes both forms and the backdrop closes the
+ * mobile overlay; Escape deliberately does not close either form (user ruling
+ * 2026-08-24).
  */
 // A subtle "live refresh is failing" marker for the inspector header. Shown only
 // when we already have a snapshot to display (stale-while-error) — a cold failure
@@ -86,19 +88,6 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
   const { isLarge } = useBreakpoint();
   const [hours, setHours] = useState<number | null>(24);
   const queryClient = useQueryClient();
-
-  // Responsive side panel / mobile overlay (user ruling 2026-08-23,
-  // superseding the 2026-08-05 floating-panel ruling on desktop): Escape
-  // closes both forms. The header X closes both; the mobile backdrop also
-  // closes the overlay.
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") toggle();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, toggle]);
 
   const { data, error, isLoading, refetch, isFetching } = useQuery({
     queryKey: ["agent-inspect", agentId, hours],
