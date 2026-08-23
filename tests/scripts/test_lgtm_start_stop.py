@@ -39,14 +39,6 @@ def _toolset(tmp_path: Path) -> tuple[dict[str, str], Path]:
         """,
     )
     _executable(
-        tools / "docker",
-        """\
-        #!/usr/bin/env bash
-        [[ "$1" == "info" ]] && exit 0
-        printf '%s\\n' "$*" >> "$FAKE_LOG"
-        """,
-    )
-    _executable(
         tools / "curl",
         """\
         #!/usr/bin/env bash
@@ -91,7 +83,6 @@ def test_start_and_stop_are_idempotent_without_real_services(tmp_path: Path) -> 
     first_lines = log.read_text(encoding="utf-8").splitlines()
     assert sum(line.startswith("bootstrap ") for line in first_lines) == 2
     assert sum(line.startswith("kickstart ") for line in first_lines) == 2
-    assert "compose up -d" in first_lines
 
     log.write_text("", encoding="utf-8")
     second = _run(START, env)
@@ -99,7 +90,6 @@ def test_start_and_stop_are_idempotent_without_real_services(tmp_path: Path) -> 
     second_lines = log.read_text(encoding="utf-8").splitlines()
     assert not any(line.startswith("bootstrap ") for line in second_lines)
     assert not any(line.startswith("kickstart ") for line in second_lines)
-    assert "compose up -d" in second_lines
 
     Path(env["FAKE_UP"]).mkdir(exist_ok=True)
     for child in Path(env["FAKE_UP"]).iterdir():
@@ -109,10 +99,10 @@ def test_start_and_stop_are_idempotent_without_real_services(tmp_path: Path) -> 
     assert _run(STOP, env).returncode == 0
     stopped = log.read_text(encoding="utf-8").splitlines()
     assert sum(line.startswith("bootout ") for line in stopped) == 4
-    assert stopped.count("compose down") == 2
+    assert stopped.count("compose down") == 0
 
 
-def test_start_fails_before_docker_when_a_native_binary_is_missing(tmp_path: Path) -> None:
+def test_start_fails_when_a_native_binary_is_missing(tmp_path: Path) -> None:
     env, _log = _toolset(tmp_path)
     (Path(env["AVA_HOME"]) / "lgtm/native/bin/loki").unlink()
 
