@@ -17,14 +17,14 @@ Seven sections, one row per section — `core` is the 2026-08-06 user-ruling
 row header. All sections are **expanded by default** (`collapsed: false`,
 2026-08-23 #382):
 
-1. **`core`** — the user's daily first screen: twelve windowed stat tiles
+1. **`core`** — the user's daily first screen: twelve dashboard-window stat tiles
    cover the entire Statistics popover (LLM calls / Warning / Error /
-   Unresolved Warning / Unresolved Error / Live agents / LLM cost (24h) /
-   Tokens (24h) / LLM input tokens (24h) / LLM output tokens (24h) / Cache
-   hit rate (24h) / Avg turn duration (24h)). It then shows Event health,
+   Unresolved Warning / Unresolved Error / Live agents / LLM cost /
+   Tokens / LLM input tokens / LLM output tokens / Cache hit rate / Avg turn
+   duration). It then shows Event health,
    Event rate, Token usage — Input, Token usage — Output + Reasoning, Cache
    hit, Turn success rate, and the three full-width **Events** panels:
-   business/anomaly logs, a 24-hour event-type table, and the parse-clean
+   business/anomaly logs, the event-type table, and the parse-clean
    raw stream for debugging.
 2. **`LLM`** — throughput tokens/s, the three TPS series, calls/bucket,
    cost USD, LLM errors, and per-agent Top 20.
@@ -38,20 +38,18 @@ row header. All sections are **expanded by default** (`collapsed: false`,
 6. **`Host & data plane`** — the former `ava-host-dataplane` panels: host
    CPU / memory / load / filesystem / disk / network throughput + Postgres
    connections / transactions / size + Redis memory / clients / throughput.
-7. **`Cost analysis`** — three cost projections, daily cost for the trailing
-   week, and Top-20 cost drill-downs by model and agent. Every panel reads
-   usage-time `attributes_cost_usd` snapshots from telemetry `llm_usage`
-   events (2026-08-23 #384).
+7. **`Cost analysis`** — two cost projections, interval-bucketed cost, and
+   Top-20 cost drill-downs by model and agent. Every panel reads usage-time
+   `attributes_cost_usd` snapshots from telemetry `llm_usage` events
+   (2026-08-23 #384).
 
-The dashboard timezone is `Asia/Shanghai` (2026-08-23 #384). The daily cost
-panel uses a `now-7d/d` relative override plus `interval: 24h`, so its
-`$__interval` range vectors are daily buckets aligned to that timezone
-rather than the browser's local clock.
+The dashboard timezone is `Asia/Shanghai` (2026-08-23 #384). All panels follow
+the dashboard time picker; there are no per-panel `timeFrom` overrides.
 
-The dashboard now has 76 panels: core ids remain below 1000 (the four new
+The dashboard now has 75 panels: core ids remain below 1000 (the four new
 stat tiles are 44–47), plugin ids are >= 1000, host/data-plane panels are
-2101–2112, the cost-analysis panels are 38–43, and the event panels are
-2201–2203 (business/anomaly logs, event-type table, raw stream). The
+2101–2112, the cost-analysis panels are 38, 39, 41–43, and the event panels
+are 2201–2203 (business/anomaly logs, event-type table, raw stream). The
 duplicate plugin spawn-rate panel (1006) was removed because the Fleet
 summaries cover the same information.
 
@@ -128,10 +126,8 @@ grouped series (`"{{attributes_route}}"`, `"{{agent_id}}"`). Do not add a
 Range panels use fixed windows selected by metric semantics: count trends use
 `[5m]`, rates use `[1m]`, calls-per-bucket uses `[30m]`, and Fleet/SSE/delivery
 window summaries use instant `[$__range]` queries. Stats and tables remain
-instant over `[$__range]`. The six stat tiles labelled `24h` (ids 7, 8, and
-38–41) additionally set `timeFrom: "24h"`, so their values remain daily
-totals even when the dashboard selector is shorter. This avoids presenting
-rare event counts as noisy per-second lines.
+instant over `[$__range]`. Every panel follows the dashboard time picker; no
+panel sets a `timeFrom` or fixed `interval` override.
 
 ## Writing a plugin metric
 

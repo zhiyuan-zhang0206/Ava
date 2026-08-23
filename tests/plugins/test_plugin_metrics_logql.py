@@ -137,8 +137,8 @@ def test_dashboard_json_matches_core_registrations() -> None:
         assert all(target["queryType"] == expected_query_type for target in targets)
 
 
-def test_dashboard_legends_and_24h_stats_are_explicit() -> None:
-    """Loki names and the six Statistics windows are dashboard contracts."""
+def test_dashboard_legends_and_time_ranges_are_explicit() -> None:
+    """Loki names and dashboard-wide time-range inheritance are contracts."""
     path = _REPO_ROOT / "deploy/lgtm/config/grafana/provisioning/dashboards/ava-ops-main.json"
     panels = json.loads(path.read_text())["panels"]
     for panel in panels:
@@ -152,32 +152,33 @@ def test_dashboard_legends_and_24h_stats_are_explicit() -> None:
             for override in panel.get("fieldConfig", {}).get("overrides", [])
         ), panel["id"]
 
-    panels_by_id = {panel["id"]: panel for panel in panels}
-    for panel_id in (7, 8, 44, 45, 46, 47):
-        assert panels_by_id[panel_id]["timeFrom"] == "now-24h"
+    assert all("timeFrom" not in panel for panel in panels)
+    assert all("interval" not in panel for panel in panels)
 
 
 def test_cost_dashboard_windows_and_telemetry_contract() -> None:
-    """Cost tiles from #384 use their named windows; no llm_usage panel reads logs."""
+    """Cost tiles follow the dashboard window; no llm_usage panel reads logs."""
     path = _REPO_ROOT / "deploy/lgtm/config/grafana/provisioning/dashboards/ava-ops-main.json"
     data = json.loads(path.read_text())
     by_title = {panel.get("title"): panel for panel in data["panels"]}
 
     assert data["timezone"] == "Asia/Shanghai"
     assert all(panel["collapsed"] is False for panel in data["panels"] if panel["type"] == "row")
-    assert by_title["LLM cost (24h)"]["timeFrom"] == "now-24h"
-    assert by_title["Tokens (24h)"]["timeFrom"] == "now-24h"
-    assert by_title["Today LLM cost estimate"]["timeFrom"] == "now/d"
-    assert by_title["This-month LLM cost estimate"]["timeFrom"] == "now/M"
-    assert by_title["Daily LLM cost (7d)"]["timeFrom"] == "now-7d/d"
-    assert by_title["Daily LLM cost (7d)"]["interval"] == "24h"
+    for title in (
+        "LLM cost",
+        "Tokens",
+        "LLM cost estimate — day pace",
+        "LLM cost estimate — 30-day pace",
+        "Daily LLM cost",
+    ):
+        assert "timeFrom" not in by_title[title]
+        assert "interval" not in by_title[title]
 
     core_by_title = {spec.title: spec for spec in _load_core()}
     for title in (
-        "Today LLM cost estimate",
-        "This-month LLM cost estimate",
-        "Next-month LLM cost estimate",
-        "Daily LLM cost (7d)",
+        "LLM cost estimate — day pace",
+        "LLM cost estimate — 30-day pace",
+        "Daily LLM cost",
         "LLM cost by model (Top 20)",
         "LLM cost by agent (Top 20)",
     ):
