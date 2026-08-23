@@ -159,8 +159,6 @@ def test_native_converge_retires_legacy_and_foreign_jobs(
     current = _lgtm_native.native_label("loki", home)
     legacy = "com.ava.loki"
     foreign = "com.ava.loki.other-home"
-    for label in (legacy, foreign):
-        (agents_dir / f"{label}.plist").write_bytes(plistlib.dumps({"Label": label}))
 
     def darwin_arm64() -> str:
         return "darwin_arm64"
@@ -179,6 +177,16 @@ def test_native_converge_retires_legacy_and_foreign_jobs(
 
     def fake_run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
         calls.append(command)
+        if command[1] == "list":
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                "-\t0\tcom.apple.unrelated\n"
+                f"123\t0\t{legacy}\n"
+                f"456\t0\t{foreign}\n"
+                f"789\t0\t{current}\n",
+                "",
+            )
         label = command[-1].rsplit("/", maxsplit=1)[-1]
         return subprocess.CompletedProcess(command, 0 if label in {legacy, foreign} else 1, "", "")
 
