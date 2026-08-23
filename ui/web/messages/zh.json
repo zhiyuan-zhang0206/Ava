@@ -246,6 +246,9 @@
     "intro": "让 Ava 来运维集群——运行或更新、切换频道、管理 MCP 服务器、安装技能或插件、调整本页未列出的任何配置。",
     "ask": "询问 Ava"
   },
+  "metrics": {
+    "grafanaUnavailable": "Grafana 未响应（反向代理可能未开启）— 已停留本页，请查看下方回退路径。"
+  },
   "config": {
     "loading": "加载配置中…",
     "couldntLoad": "无法加载配置——请检查 gateway 后刷新。",

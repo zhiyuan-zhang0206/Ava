@@ -240,11 +240,14 @@
     "updated": "Preset updated"
   },
   "guide": {
-    "describeTask": "Describe an operations task — e.g. “install the linear MCP server on the gateway machine”",
+    "describeTask": "Describe an operations task — e.g. install the linear MCP server",
     "started": "Ava Guide #{id} started — continue in the conversation",
     "failed": "Guide failed: {error}",
     "intro": "Ask Ava to operate the cluster — run or update it, switch tracks, manage MCP servers, install skills or plugins, tune anything not on this page.",
     "ask": "Ask Ava"
+  },
+  "metrics": {
+    "grafanaUnavailable": "Grafana is unavailable (the reverse proxy may be disabled) — staying on this page; see the fallback options below."
   },
   "config": {
     "loading": "Loading config…",

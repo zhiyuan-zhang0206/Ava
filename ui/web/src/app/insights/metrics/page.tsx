@@ -19,12 +19,13 @@
 // notice (and its fallback) alive in that case.
 
 import { ExternalLink, LineChart } from "lucide-react";
+import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { buttonVariants } from "@/components/ui/button";
-import { API_BASE } from "@/lib/api";
+import { api, API_BASE } from "@/lib/api";
 import { FLEX } from "@/lib/layout";
 import { cn } from "@/lib/utils";
 
@@ -33,9 +34,11 @@ import { cn } from "@/lib/utils";
 const REDIRECT_DELAY_MS = 1200;
 
 // Direct Grafana entry for the same dashboard linked from the Ops section.
-const GRAFANA_DIRECT = `${API_BASE}/grafana/d/ava-ops-main?from=now-24h&to=now&kiosk`;
+const GRAFANA_PATH = "/grafana/d/ava-ops-main?from=now-24h&to=now&kiosk";
+const GRAFANA_DIRECT = `${API_BASE}${GRAFANA_PATH}`;
 
 export default function MetricsRedirectPage() {
+  const t = useTranslations("metrics");
   const router = useRouter();
   // null = probe in flight; true = proxy reachable (redirect will fire);
   // false = proxy off / Grafana down (stay on the fallback notice).
@@ -47,7 +50,7 @@ export default function MetricsRedirectPage() {
     void (async () => {
       let up: boolean;
       try {
-        up = (await fetch(GRAFANA_DIRECT, { method: "HEAD" })).ok;
+        up = (await api.head(GRAFANA_PATH)).ok;
       } catch {
         up = false; // probe failed — stay on the fallback notice
       }
@@ -81,7 +84,7 @@ export default function MetricsRedirectPage() {
             links to the Grafana dashboard (LLM usage + latency, tokens,
             errors, restarts, delivery backlog, and plugin metrics).{" "}
             {proxyUp === false
-              ? "Grafana 未响应（反代可能未开启）— 已停留本页，见下方回退路径。"
+              ? t("grafanaUnavailable")
               : "Redirecting…"}
           </p>
         </div>

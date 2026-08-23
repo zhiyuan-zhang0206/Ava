@@ -51,7 +51,7 @@ describe("Metrics redirect page", () => {
     // Probe: HEAD on the direct Grafana URL.
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining("/grafana/d/ava-ops-main"),
-      { method: "HEAD" },
+      { method: "HEAD", credentials: "include" },
     );
   });
 
@@ -69,7 +69,7 @@ describe("Metrics redirect page", () => {
     fetchMock.mockResolvedValue({ ok: false });
     render(<MetricsRedirectPage />);
     await flushProbe();
-    expect(screen.getByText(/Grafana 未响应/)).toBeTruthy();
+    expect(screen.getByText(/Grafana is unavailable/)).toBeTruthy();
     act(() => {
       vi.advanceTimersByTime(1200);
     });
