@@ -1,9 +1,9 @@
 """Lock the plugin-metric LogQL cutover (task #180): every shipped plugin
 metric reads the live Loki event stream, not the frozen PG `events` table.
 
-The dashboard JSONs (`deploy/lgtm/config/grafana/provisioning/dashboards/
-ava-ops-*.json`) are hand-maintained since the generator did not survive the
-archive->public port — these tests lock the registered specs the JSONs mirror:
+The dashboard JSON (`deploy/lgtm/config/grafana/provisioning/dashboards/
+ava-ops-main.json`) is hand-maintained since the generator did not survive the
+archive->public port — these tests lock the registered specs the JSON mirrors:
 a spec regressing to SQL, rendering without the event-stream selector, or a
 JSON panel drifting from its spec fails here.
 """
@@ -75,28 +75,18 @@ def test_agent_placeholder_renders_per_agent() -> None:
 
 
 def test_dashboard_json_matches_registrations() -> None:
-    """Both dashboard JSONs mirror the registered grafana specs panel for
+    """The merged dashboard mirrors the registered grafana specs panel for
     panel: same Loki datasource, the rendered expr verbatim, instant queries
     for stat panels and range queries for the rest."""
     _load_all()
     specs = [s for s in registered_metrics() if "grafana" in s.output]
-    titles = {s.title for s in specs}
-    for filename in ("ava-ops-main.json", "ava-ops-plugins.json"):
-        path = _REPO_ROOT / "deploy/lgtm/config/grafana/provisioning/dashboards" / filename
-        data = json.loads(path.read_text())
-        by_title = {p.get("title"): p for p in data["panels"]}
-        for spec in specs:
-            panel = by_title[spec.title]
-            assert panel["datasource"] == {"type": "loki", "uid": "loki"}
-            targets = panel["targets"]
-            assert [t["expr"] for t in targets] == render_targets(spec)
-            qtype = "instant" if spec.panel == "stat" else "range"
-            assert all(t["queryType"] == qtype for t in targets)
-    # the plugin-only JSON carries nothing but the spec panels + row headers
-    plug_path = (
-        _REPO_ROOT / "deploy/lgtm/config/grafana/provisioning/dashboards/ava-ops-plugins.json"
-    )
-    plug_data = json.loads(plug_path.read_text())
-    for panel in plug_data["panels"]:
-        if panel.get("type") != "row":
-            assert panel.get("title") in titles, f"unexpected plugin panel {panel.get('title')!r}"
+    path = _REPO_ROOT / "deploy/lgtm/config/grafana/provisioning/dashboards/ava-ops-main.json"
+    data = json.loads(path.read_text())
+    by_title = {p.get("title"): p for p in data["panels"]}
+    for spec in specs:
+        panel = by_title[spec.title]
+        assert panel["datasource"] == {"type": "loki", "uid": "loki"}
+        targets = panel["targets"]
+        assert [t["expr"] for t in targets] == render_targets(spec)
+        qtype = "instant" if spec.panel == "stat" else "range"
+        assert all(t["queryType"] == qtype for t in targets)

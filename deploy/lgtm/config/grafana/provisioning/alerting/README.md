@@ -23,7 +23,7 @@ directory is mounted read-only into the container at
 point's webhook URL uses `host.docker.internal` because the container
 reaches the gateway on the host.
 
-## Rules (16)
+## Rules (19)
 
 Application layer — the Loki event stream plus the LLM latency histogram:
 
@@ -37,6 +37,9 @@ Application layer — the Loki event stream plus the LLM latency histogram:
 | `ava-ops-events-freshness` | event stream stalled | no events in Loki for 5m (absent_over_time) | 5m | error |
 | `ava-ops-trace-disk-watermark` | trace recording auto-degraded | recording_disabled_disk_watermark count in 24h > 0 (Loki) | 5m | error |
 | `ava-ops-llm-billing-quota` | LLM key out of credit / quota | llm_provider_error with billing=true in 15m > 0 (Loki) | 0m | critical |
+| `ava-ops-gateway-latency-route-warning` | Gateway latency: fast route p95 | p95 > 3s for 5m (Loki, LLM-bound + inherently-slow routes excluded) | 5m | warning |
+| `ava-ops-gateway-latency-route-error` | Gateway latency: fast route p95 | p95 > 10s for 5m (same route filter) | 5m | error |
+| `ava-ops-turn-duration-p95` | Turn duration p95 (collective slowdown) | histogram p95 > 75s for 10m (Prometheus, 24h baseline 37.6s × 2) | 10m | warning |
 
 Infrastructure layer (issue #46) — the per-machine OTel Collector sidecar's
 own scrapes, labelled `host` (deliberately not `machine`: the two names can
@@ -68,6 +71,17 @@ alerting until the process restarts — it resolves after a clean 5-minute
 window. The silence query's 5-minute absence window is already its
 debounce, hence no second `for` delay. Its 24-hour historical host set expires
 retired machines naturally; the fleet heartbeat owns permanent membership.
+
+The three slow-request rules (R17/R18, 2026-08-23, task #1399) close the
+user-visible-latency gap: fast-route p95 thresholds calibrated against 7d
+route data (fast routes stay ≤ 5.5s; the LLM-bound message routes and
+inherently-slow API routes are excluded — see the header comment in
+`rules.yml`), and the turn-duration rule catches fleet-wide slowdown (p95
+vs the 24h baseline ×2) rather than single long turns. All three carry
+`notify_im: "false"` — the PM slow-request convention is warning-first and
+no IM fan-out (alert-fatigue ruling 2026-08-22); the gateway honors the
+label once the IM gating PR (#3219) lands, until then they reach IM like
+the rest.
 
 Severity follows the alert-system vocabulary (Task #1224):
 critical/warning/error — all three push to IM, no gate. Thresholds are

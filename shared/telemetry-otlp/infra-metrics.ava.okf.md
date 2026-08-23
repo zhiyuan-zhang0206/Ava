@@ -102,7 +102,7 @@ gateway collector writes to loopback Prometheus.
   `otelcol_exporter_enqueue_failed_*_total` counters over 5 minutes, and a host
   seen in 24h whose `otelcol_process_uptime_total` disappeared for 5 minutes.
   The suffixes are Prometheus 3's OTLP translation, not the raw `:8888` names.
-  Rules and the `ava-host-dataplane` dashboard live in
+  Rules and the `ava-ops-main` dashboard (its "Host & data plane" section) live in
   `deploy/lgtm/config/grafana/provisioning/`.
 - Metric names were read off a live Prometheus 3.13.2, not inferred from the
   OTLP names: `system_cpu_utilization_ratio`,
