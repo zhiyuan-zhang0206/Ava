@@ -185,6 +185,18 @@ def test_deepseek_vision_exp_registry_facts() -> None:
     )
 
 
+def test_glm_5_3_registry_facts() -> None:
+    spec = MODELS["glm-5.3"]
+    assert spec.provider == "glm"
+    assert spec.spawnable
+    assert spec.context_window == 1_000_000
+    assert spec.knowledge_cutoff == "2025-12"
+    assert spec.effort_levels == ("low", "high", "max")
+    assert spec.media_types == frozenset()
+    assert resolve_setting("reasoning_effort", model="glm-5.3") == "max"
+    assert resolve_setting("llm_retry_max_attempts", model="glm-5.3") == 10
+
+
 def test_image_media_types_match_the_verified_model_matrix() -> None:
     """Image-capable ids are fixed by their provider bindings, not a broad
     prefix: the DeepSeek vision experiment is the only multimodal deepseek."""

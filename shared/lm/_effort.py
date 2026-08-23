@@ -47,7 +47,7 @@ _CLAUDE_EXTENDED_THINKING_DEFAULT_BUDGET = 8192
 _PROVIDER_EFFORT_LEVELS: dict[str, tuple[str, ...]] = {
     "gemini": ("minimal", "low", "medium", "high"),
     "kimi": ("low", "high", "max"),
-    "glm": ("high", "max"),
+    "glm": ("low", "high", "max"),
     "mimo": ("none", "high"),
     # Qwen's compatible-mode endpoint grades reasoning by a TOKEN budget
     # (`thinking_budget`), not by a level enum — the OpenAI-standard

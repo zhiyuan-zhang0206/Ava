@@ -69,20 +69,21 @@ def test_candidate_is_reported_once_then_recorded_in_state(
     env_file = tmp_path / ".env"
     _write_env_file(tracker, env_file)
     monkeypatch.setattr(tracker, "_environment_value", _missing_environment_value)
+    # This id must stay unregistered; bump to the next GLM id when glm-5.4 lands.
     monkeypatch.setattr(
         tracker,
         "fetch_provider_models",
-        _stub_fetcher(tracker, {"glm": ["glm-5.3"]}),
+        _stub_fetcher(tracker, {"glm": ["glm-5.4"]}),
     )
 
     args = ["--env-file", str(env_file), "--state-dir", str(tmp_path / "state")]
     assert tracker.main(args) == 2
-    assert "glm-5.3" in capsys.readouterr().out
+    assert "glm-5.4" in capsys.readouterr().out
 
     assert tracker.main(args) == 0
-    assert "glm-5.3" not in capsys.readouterr().out.split("## Actionable candidates", 1)[-1]
+    assert "glm-5.4" not in capsys.readouterr().out.split("## Actionable candidates", 1)[-1]
     state = json.loads((tmp_path / "state" / "state.json").read_text())
-    assert state["providers"]["glm"]["reported"] == ["glm-5.3"]
+    assert state["providers"]["glm"]["reported"] == ["glm-5.4"]
 
 
 def test_newer_same_series_is_actionable_while_older_upstream_member_is_suppressed() -> None:
