@@ -4,7 +4,10 @@ datasources:
     uid: tempo
     type: tempo
     access: proxy
-    url: http://tempo:3200
+    # Env-overridable: the WSL remote Tempo (100.78.137.46:3200) is the
+    # cluster's trace backend (d+WSL remote-on-demand); the in-compose
+    # container address remains the default until the native cutover lands.
+    url: ${GRAFANA_TEMPO_URL:-http://tempo:3200}
     isDefault: true
     jsonData:
       httpMethod: GET
