@@ -5,7 +5,6 @@ import {
   Bell,
   DollarSign,
   ExternalLink,
-  Gauge,
   HeartPulse,
   LayoutPanelTop,
   PanelTopClose,
@@ -259,7 +258,6 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
             <ConfigOverlaySection inspect={effectiveData} />
             <CostSection inspect={effectiveData} />
             <ActivitySection inspect={effectiveData} />
-            <TpsSection inspect={effectiveData} />
             <NoticeReplySection agentId={agentId} notice={effectiveData.notice ?? null} />
           </div>
         )}
@@ -543,22 +541,18 @@ function CostSection({ inspect }: { inspect: AgentInspect }) {
 }
 
 /**
- * Active rate — what share of the agent's alive time it spent actively working
- * (in the graph: llm + exec + hooks) versus idle-waiting for input. The
- * complement is "blocked on input" — the share of life gated on a human/peer.
- * A project-lead agent that decides every minute reads near 100%; one woken
- * once a week reads near 0%. The headline is the percentage; the two cells give
- * the absolute active and idle/blocked durations. Follows the header window.
+ * Activity — LLM-stage throughput plus absolute time spent in LLM reasoning,
+ * code execution, and idle/blocked states. The duration cells follow the
+ * header window.
  */
 function ActivitySection({ inspect }: { inspect: AgentInspect }) {
-  const { activity } = inspect;
+  const { activity, tps } = inspect;
   const hasLife = activity.alive_seconds > 0;
-  const pct = Math.round(activity.active_rate * 100);
   const idleSeconds = Math.max(0, activity.alive_seconds - activity.active_seconds);
   return (
-    <Section icon={<Timer className="size-3" />} title="Active rate">
+    <Section icon={<Timer className="size-3" />} title="Activity">
       <div className="grid grid-cols-2 gap-1">
-        <Metric label="Active rate" value={hasLife ? `${pct}%` : "—"} />
+        <Metric label="LLM stage" value={formatTps(tps.lm_stage_tps)} />
         <Metric
           label="LLM reasoning / output"
           value={
@@ -580,18 +574,6 @@ function ActivitySection({ inspect }: { inspect: AgentInspect }) {
           value={hasLife ? formatInterval(Math.round(idleSeconds)) : "—"}
         />
       </div>
-    </Section>
-  );
-}
-
-function TpsSection({ inspect }: { inspect: AgentInspect }) {
-  const { tps } = inspect;
-  return (
-    <Section icon={<Gauge className="size-3" />} title="TPS">
-      <Metric
-        label="LLM stage"
-        value={formatTps(tps.lm_stage_tps)}
-      />
     </Section>
   );
 }
