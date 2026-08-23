@@ -1,0 +1,57 @@
+# Native variant of deploy/lgtm/config/promtail.yml — only listener, host paths,
+# positions, and Loki client settings differ from the container configuration.
+server:
+  http_listen_port: 9080
+  http_listen_address: 127.0.0.1
+  grpc_listen_port: 0
+
+positions:
+  filename: "{{AVA_HOME}}/lgtm/native/data/positions/positions.yaml"
+
+clients:
+  - url: http://127.0.0.1:3100/loki/api/v1/push
+
+scrape_configs:
+  # Ava session stdout — $AVA_HOME/logs/*.out.log (host bind, read-only).
+  # One stream per session: the `service` label is the session name
+  # (ava-gateway, ava-rollout, ava-frontend, ava-agent-<id>, ava-schedule-<id>,
+  # agent shells ava-agent-<id>-shell-<n>-<task>, ...). The job label groups
+  # the whole scrape for LogQL ({job="ava-sessions"}).
+  #
+  # Deliberately NOT scraped: agent-<id>.log (loguru JSONL) and
+  # agent-<id>.stderr.log (loguru colored text). That content already reaches
+  # Loki structured through the OTLP event stream (otel-collector, label
+  # `service_name`), so a second raw copy would double the ingest volume for
+  # no query value. If a raw copy is ever wanted, add a glob + json stage.
+  - job_name: ava-sessions
+    static_configs:
+      - targets: [localhost]
+        labels:
+          job: ava-sessions
+          __path__: "{{AVA_HOME}}/logs/*.out.log"
+    pipeline_stages:
+      - regex:
+          source: filename
+          expression: '/(?P<service>[^/]+)\.out\.log$'
+      - labels:
+          service:
+      - decolorize:
+
+  # Orchestration sessions (updater / rollout) tee their stdout to
+  # <session>-<epoch>.log on POSIX instead of <name>.out.log (the backend's
+  # own .out.log is only written on Windows), so they get their own globs
+  # with a static service label. Same decolorize treatment.
+  - job_name: ava-orchestration
+    static_configs:
+      - targets: [localhost]
+        labels:
+          job: ava-orchestration
+          service: ava-updater
+          __path__: "{{AVA_HOME}}/logs/updater-*.log"
+      - targets: [localhost]
+        labels:
+          job: ava-orchestration
+          service: ava-rollout
+          __path__: "{{AVA_HOME}}/logs/rollout-*.log"
+    pipeline_stages:
+      - decolorize:

@@ -1,0 +1,125 @@
+"""Portable lifecycle tests for the native LGTM start and stop scripts."""
+
+from __future__ import annotations
+
+import os
+import subprocess
+import textwrap
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+START = ROOT / "deploy/lgtm/start.sh"
+STOP = ROOT / "deploy/lgtm/stop.sh"
+
+
+def _executable(path: Path, source: str) -> None:
+    path.write_text(textwrap.dedent(source), encoding="utf-8")
+    path.chmod(0o755)
+
+
+def _toolset(tmp_path: Path) -> tuple[dict[str, str], Path]:
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    log = tmp_path / "tool.log"
+    up = tmp_path / "up"
+    up.mkdir()
+    _executable(
+        tools / "launchctl",
+        """\
+        #!/usr/bin/env bash
+        printf '%s\\n' "$*" >> "$FAKE_LOG"
+        if [[ "$1" == "kickstart" ]]; then
+          case "$2" in
+            *loki) touch "$FAKE_UP/loki" ;;
+            *prometheus) touch "$FAKE_UP/prometheus" ;;
+            *promtail) touch "$FAKE_UP/promtail" ;;
+          esac
+        fi
+        [[ "$1" == "bootout" ]] && exit 1
+        exit 0
+        """,
+    )
+    _executable(
+        tools / "docker",
+        """\
+        #!/usr/bin/env bash
+        [[ "$1" == "info" ]] && exit 0
+        printf '%s\\n' "$*" >> "$FAKE_LOG"
+        """,
+    )
+    _executable(
+        tools / "curl",
+        """\
+        #!/usr/bin/env bash
+        url="${!#}"
+        case "$url" in
+          *:3100/*) name=loki ;;
+          *:9090/*) name=prometheus ;;
+          *:9080/*) name=promtail ;;
+          *) printf '200' ; exit 0 ;;
+        esac
+        [[ -e "$FAKE_UP/$name" ]] && printf '200' || printf '000'
+        """,
+    )
+    home = tmp_path / "home"
+    native = home / "lgtm/native/bin"
+    native.mkdir(parents=True)
+    for name in ("loki", "prometheus", "promtail"):
+        binary = native / name
+        binary.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+        binary.chmod(0o755)
+    env = {
+        **os.environ,
+        "HOME": str(home),
+        "AVA_HOME": str(home),
+        "FAKE_LOG": str(log),
+        "FAKE_UP": str(up),
+        "PATH": f"{tools}:{os.environ['PATH']}",
+    }
+    return env, log
+
+
+def _run(script: Path, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(  # noqa: S603 - fixed repository script in an isolated test toolset
+        ["bash", str(script)], env=env, capture_output=True, text=True, check=False
+    )
+
+
+def test_start_and_stop_are_idempotent_without_real_services(tmp_path: Path) -> None:
+    env, log = _toolset(tmp_path)
+
+    first = _run(START, env)
+    assert first.returncode == 0, first.stderr + first.stdout
+    first_lines = log.read_text(encoding="utf-8").splitlines()
+    assert sum(line.startswith("bootstrap ") for line in first_lines) == 3
+    assert sum(line.startswith("kickstart ") for line in first_lines) == 3
+    assert "compose up -d" in first_lines
+
+    log.write_text("", encoding="utf-8")
+    second = _run(START, env)
+    assert second.returncode == 0, second.stderr + second.stdout
+    second_lines = log.read_text(encoding="utf-8").splitlines()
+    assert not any(line.startswith("bootstrap ") for line in second_lines)
+    assert not any(line.startswith("kickstart ") for line in second_lines)
+    assert "compose up -d" in second_lines
+
+    Path(env["FAKE_UP"]).mkdir(exist_ok=True)
+    for child in Path(env["FAKE_UP"]).iterdir():
+        child.unlink()
+    log.write_text("", encoding="utf-8")
+    assert _run(STOP, env).returncode == 0
+    assert _run(STOP, env).returncode == 0
+    stopped = log.read_text(encoding="utf-8").splitlines()
+    assert sum(line.startswith("bootout ") for line in stopped) == 6
+    assert stopped.count("compose down") == 2
+
+
+def test_start_fails_before_docker_when_a_native_binary_is_missing(tmp_path: Path) -> None:
+    env, _log = _toolset(tmp_path)
+    (Path(env["AVA_HOME"]) / "lgtm/native/bin/loki").unlink()
+
+    result = _run(START, env)
+
+    assert result.returncode == 1
+    assert "ERROR:" in result.stdout
+    assert "run converge / `ava lgtm on`" in result.stdout

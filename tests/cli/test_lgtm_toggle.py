@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 import cli.commands as commands_ns
-from cli.commands import _lgtm
+from cli.commands import _lgtm, _lgtm_native
 
 
 class _Result:
@@ -31,6 +31,11 @@ def _wire(
     monkeypatch.setattr(_lgtm, "lgtm_compose_dir", lambda _repo: compose_dir)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     monkeypatch.setattr(commands_ns, "_repo_root", lambda: tmp_path / "repo")
     monkeypatch.setattr(_lgtm.shutil, "which", lambda _name: "/usr/local/bin/docker")  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+
+    def noop_native(_repo: Path, _home: Path) -> None:
+        return None
+
+    monkeypatch.setattr(_lgtm_native, "ensure_lgtm_native", noop_native)
 
     calls: list[tuple[list[str], Path]] = []
 
@@ -60,6 +65,34 @@ def test_on_is_idempotent_with_existing_marker(
     assert _lgtm.cmd_lgtm_on() == 0
     assert marker.exists()
     assert [c[0] for c in calls] == [["bash", "start.sh"]]
+
+
+def test_on_installs_native_backends_before_starting(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    marker, _calls = _wire(monkeypatch, tmp_path)
+    events: list[str] = []
+    native_home = tmp_path / "home"
+
+    def record_native(repo: Path, home: Path) -> None:
+        events.append(f"native:{repo}:{home}")
+
+    monkeypatch.setattr(
+        _lgtm_native,
+        "ensure_lgtm_native",
+        record_native,
+    )
+
+    def fake_run(_cmd: list[str], **_kw: object) -> _Result:
+        events.append("start")
+        return _Result()
+
+    monkeypatch.setattr(_lgtm.subprocess, "run", fake_run)
+    monkeypatch.setattr("shared.paths.ava_home", lambda: native_home)
+
+    assert _lgtm.cmd_lgtm_on() == 0
+    assert marker.exists()
+    assert events == [f"native:{tmp_path / 'repo'}:{native_home}", "start"]
 
 
 def test_off_removes_marker_then_stops(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

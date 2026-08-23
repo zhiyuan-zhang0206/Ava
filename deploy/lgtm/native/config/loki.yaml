@@ -1,0 +1,152 @@
+# Native variant of deploy/lgtm/config/loki.yaml — only paths, listener
+# addresses, and the single-binary ring address differ from the container
+# configuration. Every limit and query-defense setting stays identical.
+# Loki 3.x single-binary config — filesystem storage, no auth (local viewer).
+# Paths under /loki: the image ships /loki owned by the loki user (uid 10001),
+# and a fresh named volume preserves that ownership (mounting a root-owned
+# path like /var/loki breaks the non-root default user).
+auth_enabled: false
+
+server:
+  http_listen_port: 3100
+  http_listen_address: 127.0.0.1
+  grpc_listen_address: 127.0.0.1
+  # Querier-to-frontend result messages exceed the gRPC default 4MiB on
+  # 10-minute raw-line queries (~5k rows) and drop the client connection
+  # (RemoteProtocolError). Both directions need the cap raised: recv bounds
+  # what the server accepts from the querier stage, send bounds what it
+  # returns to the client — the default 4MiB send cap truncates the same
+  # large result sets the recv raise was for (issue #129).
+  grpc_server_max_recv_msg_size: 104857600
+  grpc_server_max_send_msg_size: 104857600
+
+# No phone-home: this config ships as the open-source reference deployment;
+# downstream users must not inherit vendor telemetry silently.
+analytics:
+  reporting_enabled: false
+
+# Single-box sizing: this instance shares one 10-core/16GB host with the
+# production cluster (Postgres, Redis, gateway, agents). max_concurrent: 4 is
+# the 3.x default, pinned explicitly so it cannot drift — it is what bounds a
+# query storm to ~4 cores of the box (2026-08-18 incident).
+querier:
+  max_concurrent: 4
+
+common:
+  path_prefix: "{{AVA_HOME}}/lgtm/native/data/loki"
+  storage:
+    filesystem:
+      chunks_directory: "{{AVA_HOME}}/lgtm/native/data/loki/chunks"
+      rules_directory: "{{AVA_HOME}}/lgtm/native/data/loki/rules"
+  replication_factor: 1
+  ring:
+    kvstore:
+      store: inmemory
+    # Native Loki advertises the LAN address by default (en0); ExpressVPN's
+    # global filter closes hairpin connections to it, causing ratestore and
+    # scheduler RPC failures. This single binary has no cross-host ring peers.
+    instance_addr: 127.0.0.1
+
+schema_config:
+  configs:
+    - from: 2024-01-01
+      store: tsdb
+      object_store: filesystem
+      schema: v13
+      index:
+        prefix: index_
+        period: 24h
+
+# Retention: the viewer ingests Ava session stdout (~20MB/day new + ~130MB
+# one-time backfill of the existing logs dir) plus the OTLP event stream.
+# Without a cap the filesystem store grows linearly forever. 7d matches the
+# write-side JSONL mirror retention.
+#
+# Task #1281 (PG events archive import): the archived events (8.7M rows,
+# 05-23 -> 08-12) land under the stream label stream="archive" and get a
+# 365d retention via retention_streams (compactor-driven, applied on top of
+# the 168h period). The import also needs reject_old_samples=false — Loki's
+# default rejects any sample older than reject_old_samples_max_age (336h),
+# and the archive is up to ~83 days old. FLIP BACK to true (and drop the
+# explicit false) once the import finishes: the emitter never writes old
+# samples, and the false disables a useful clock-drift guard.
+limits_config:
+  retention_period: 168h
+  retention_stream:
+    - selector: '{stream="archive"}'
+      priority: 1
+      period: 8760h
+  reject_old_samples: false
+  reject_old_samples_max_age: 336h
+  # The archive spans ~83 days (05-23 -> 08-12); Loki's default
+  # max_query_length (30d1h) would reject any whole-span parity/read query.
+  max_query_length: 2160h
+  # Kill a query that runs longer than this server-side. Deliberately just
+  # under the gateway's 60s httpx timeout (gateway/loki_events.py): a hung
+  # query then dies here with a clean error the gateway maps to a 503
+  # (plus a loki_query_failed event with the query shape) instead of
+  # holding a querier slot until the client abandons it — the failure mode
+  # behind the task #1289 dense-window /api/events 500s. Loki's default is
+  # 1m, which raced the client timeout and left cancelled-query noise in
+  # the logs with no record of what stalled.
+  query_timeout: 50s
+  # Output series cap per query. The default (500) forced the gateway's
+  # aggregations to defensively topk(500) their results (see the
+  # _bucketed_distribution_logql note in gateway/loki_events.py) — the
+  # events stream's aggregation shapes legitimately exceed 500 series.
+  max_query_series: 2000
+  # Line cap per query. The default (5000) truncates the raw-line range
+  # queries the 100MiB gRPC cap (server.grpc_server_max_recv_msg_size) was
+  # raised for; 20k lines is a few MB, well inside it. fleet_graph needs
+  # more: it asks for 50000 edge rows, and gateway/loki_events.query_events
+  # adds a one-row has_more lookahead, so the request arrives as 50001 --
+  # below this the query is rejected with HTTP 400 and the fleet graph
+  # degrades to stale-empty (Task #1344, 2026-08-22).
+  max_entries_limit_per_query: 50001
+  # Query splitting + fan-out bounds, sized for a single binary on a shared
+  # box (upstream defaults — 1h splits, parallelism 32/128 — are sized for a
+  # horizontally scaled querier fleet; here they turned one 30d instant
+  # aggregation into ~128 hourly subqueries, 2026-08-18 incident). BOTH split
+  # keys matter: the gateway's aggregations (count_events / count_grouped /
+  # attribute_aggregate in gateway/loki_events.py) are INSTANT queries
+  # governed only by the instant key; range queries (query_events,
+  # count_events_series, metric_range) follow the other.
+  split_queries_by_interval: 24h
+  split_instant_metric_queries_by_interval: 24h
+  max_query_parallelism: 4
+  tsdb_max_query_parallelism: 4
+
+compactor:
+  working_directory: "{{AVA_HOME}}/lgtm/native/data/loki/compactor"
+  retention_enabled: true
+  delete_request_store: filesystem
+
+# Result caches — without them every repeated aggregation re-reads and
+# re-unwraps the same chunks (the gateway's ops panels poll on fixed
+# intervals). Two caches because the two query shapes cache separately:
+# cache_results covers metric RANGE queries (count_events_series /
+# attribute_max_series / metric_range); the instant-metric pair covers the
+# gateway's aggregations, which run against /loki/api/v1/query with end=now —
+# with split alignment the interior 24h-aligned subranges repeat across polls
+# and only the trailing partial interval recomputes. The instant-metric keys
+# are marked experimental upstream (3.x); acceptable for this single-binary
+# deployment — verify hit rate via loki_results_cache_* metrics, not by
+# assumption. Embedded caches are RAM inside the loki process: sizes stay
+# explicit and small on a 16GB box.
+query_range:
+  align_queries_with_step: true
+  cache_results: true
+  results_cache:
+    cache:
+      embedded_cache:
+        enabled: true
+        max_size_mb: 100
+        ttl: 1h
+  cache_instant_metric_results: true
+  instant_metric_query_split_align: true
+  instant_metric_results_cache:
+    cache:
+      embedded_cache:
+        enabled: true
+        max_size_mb: 100
+        ttl: 1h

@@ -1,14 +1,10 @@
-"""LGTM observability-stack lifecycle — converge bring-up + `ava status` view.
+"""Hybrid LGTM lifecycle — native backends + compose bring-up + status view.
 
-The LGTM compose stack (deploy/lgtm: Tempo/Loki/Prometheus/Grafana/promtail)
-is the cluster's observability backend and a HOST SINGLETON: fixed host ports
-(3003/3100/3200/9090/14318) and one compose project per box. Converge runs on
-EVERY `ava start` of every cluster on the host — dev worktree clusters
-included — so the bring-up is gated on the `$AVA_HOME/lgtm-host` marker file
-(machine-identity-file pattern, operator-created once on the designated host;
-see deploy/lgtm/README.md). A home without the marker never touches the
-containers. The gateway watchdog's keepalive probe
-(services/healthchecks/lgtm.py) is gated on the same marker.
+The LGTM host runs Loki, Prometheus, and Promtail as launchd jobs, while Tempo
+and Grafana remain in the compose project. It is a HOST SINGLETON with fixed
+ports (3003/3100/3200/9090/14318), gated on the `$AVA_HOME/lgtm-host` marker
+so unmarked homes never touch the host-level backends. The gateway watchdog's
+keepalive probe uses the same gate.
 """
 
 from __future__ import annotations
@@ -67,9 +63,12 @@ def ensure_lgtm_stack_step(ctx: ConvergeCtx) -> None:
 def cmd_lgtm_on() -> int:
     """`ava lgtm on` — designate THIS host as the LGTM host and bring the
     stack up. Writes the `$AVA_HOME/lgtm-host` marker (so converge and the
-    gateway watchdog keep the stack alive from now on) and runs the idempotent
-    deploy/lgtm/start.sh. Safe to re-run; volumes persist across off/on."""
+    gateway watchdog keep the stack alive from now on), installs current native
+    backends, and runs the idempotent deploy/lgtm/start.sh. Safe to re-run;
+    rollback volumes persist across off/on."""
     import cli.commands as _ns
+    from cli.commands import _lgtm_native
+    from shared.paths import ava_home
 
     if shutil.which("docker") is None:
         print("✗ docker CLI not found — install docker (OrbStack on macOS) first", file=sys.stderr)
@@ -78,9 +77,11 @@ def cmd_lgtm_on() -> int:
     if not marker.exists():
         marker.touch()
         print(f"✓ marker written: {marker}")
+    repo = _ns._repo_root()
+    _lgtm_native.ensure_lgtm_native(repo, ava_home())
     result = subprocess.run(
         ["bash", "start.sh"],
-        cwd=lgtm_compose_dir(_ns._repo_root()),
+        cwd=lgtm_compose_dir(repo),
         check=False,
         timeout=600,
     )
@@ -139,12 +140,17 @@ def cmd_lgtm_status() -> int:
 
 
 def print_lgtm_status() -> None:
-    """The `ava status` LGTM section: compose containers + the four readiness
-    probes. Caller gates on `is_lgtm_host()` — this host runs the compose, so
-    loopback + the compose file's fixed host ports are the contract."""
+    """The `ava status` LGTM section: native jobs, compose, and readiness.
+
+    Caller gates on `is_lgtm_host()` — this host owns all fixed backend ports.
+    """
     import cli.commands as _ns
+    from cli.commands._lgtm_native import backend_pids
+    from shared.paths import ava_home
 
     compose_dir = lgtm_compose_dir(_ns._repo_root())
+    for name, pid in backend_pids(ava_home() / "lgtm/native").items():
+        print(f"  com.ava.{name:<9} {pid or 'not-running'}")
     if shutil.which("docker") is None:
         print("  ✗ docker CLI not found")
     else:

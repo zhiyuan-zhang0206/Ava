@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from cli.commands import _lgtm
+from cli.commands import _lgtm, _lgtm_native
 from cli.commands._converge_spec import ConvergeCtx
 
 
@@ -92,13 +92,44 @@ def test_failing_start_sh_propagates(monkeypatch: pytest.MonkeyPatch, tmp_path: 
 
 
 def test_backend_ports_are_unconditionally_loopback_only() -> None:
-    """Remote runners enter through the authenticated gateway collector;
-    unauthenticated Tempo/Loki/Prometheus APIs must never become off-box."""
+    """Native and container backend listeners stay pinned to loopback."""
     compose_path = Path(__file__).resolve().parents[2] / "deploy/lgtm/docker-compose.yml"
     text = compose_path.read_text(encoding="utf-8")
     assert "LGTM_BIND_HOST" not in text
     compose = yaml.safe_load(text)
     services = compose["services"]
     assert services["tempo"]["ports"] == ["127.0.0.1:3200:3200", "127.0.0.1:14318:4318"]
-    assert services["loki"]["ports"] == ["127.0.0.1:3100:3100"]
-    assert services["prometheus"]["ports"] == ["127.0.0.1:9090:9090"]
+    assert services["grafana"]["ports"] == ["3003:3000"]
+    native = compose_path.parent / "native"
+    loki = (native / "config/loki.yaml").read_text(encoding="utf-8")
+    promtail = (native / "config/promtail.yml").read_text(encoding="utf-8")
+    assert "http_listen_address: 127.0.0.1" in loki
+    assert "grpc_listen_address: 127.0.0.1" in loki
+    assert "instance_addr: 127.0.0.1" in loki
+    assert (
+        "--web.listen-address=127.0.0.1:9090"
+        in _lgtm_native._NATIVE_CONSTANTS["prometheus"].arguments
+    )
+    assert "http_listen_address: 127.0.0.1" in promtail
+
+
+def test_native_step_runs_only_for_the_marker_home(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    ctx = _ctx(tmp_path)
+    ctx.ava_home.mkdir(parents=True)
+    (ctx.ava_home / "lgtm-host").touch()
+    calls: list[tuple[Path, Path]] = []
+
+    def record_ensure(repo: Path, home: Path) -> None:
+        calls.append((repo, home))
+
+    monkeypatch.setattr(
+        _lgtm_native,
+        "ensure_lgtm_native",
+        record_ensure,
+    )
+
+    _lgtm_native.ensure_lgtm_native_step(ctx)
+
+    assert calls == [(ctx.repo, ctx.ava_home)]
