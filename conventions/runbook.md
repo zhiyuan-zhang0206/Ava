@@ -1077,10 +1077,11 @@ The whole OTLP surface (exporter + trace recording + ship) is gated by
 `AVA_TELEMETRY_OTLP_ENABLED` (default **on**); off = Postgres-only writes, one
 kill switch. Applies on the next process start.
 
-**LGTM backend lifecycle** — native launchd jobs `com.ava.loki` and
-`com.ava.prometheus` (GOMEMLIMIT 2GiB / 1GiB), plus the host-managed native
-Grafana launchd job, form the local observability backend. Tempo is configured
-per cluster; prod's host-scope override targets the remote WSL Tempo. No
+**LGTM backend lifecycle** — home-scoped native launchd jobs
+`com.ava.loki.<home-slug>` and `com.ava.prometheus.<home-slug>` (GOMEMLIMIT
+2GiB / 1GiB), plus the host-managed native Grafana launchd job, form the local
+observability backend. Tempo is configured per cluster; prod's host-scope
+override targets the remote WSL Tempo. No
 service lifecycle depends on a container backend. The backend is required while the gateway serves /ops
 and the inspect endpoints (consumers: the gateway Loki/Prometheus read paths,
 ops alerting via Grafana's embedded Alertmanager → the gateway webhook, the
@@ -1091,8 +1092,9 @@ operator-created `$AVA_HOME/lgtm-host` marker file (in practice prod
 from `deploy/lgtm/native/versions.yml`, renders native configs and plists, and
 runs the idempotent `deploy/lgtm/start.sh` on every `ava start` / `ava cluster
 update`. The gateway watchdog re-runs it when Loki/Prometheus/Grafana readiness
-probes hit connection failures; its probe-first path never restarts a live
-native backend. `ava status` shows native jobs and readiness probes.
+probes hit connection failures; its probe-first path skips only a reachable
+backend whose matching launchd job is still loaded. `ava status` shows native
+jobs and readiness probes.
 Unmarked homes (dev worktree clusters) never touch these backends.
 Deliberate stop: remove the marker or `ava start --disable-service lgtm`, then
 `deploy/lgtm/stop.sh` — see `deploy/lgtm/README.md`.
