@@ -77,6 +77,7 @@ import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import psycopg
@@ -135,6 +136,11 @@ _DEDUP_TTL_S = 7 * 86_400.0
 # stored outcome, then fail loud instead of re-executing.
 _DEDUP_WAIT_STEP_S = 0.1
 _DEDUP_WAIT_ATTEMPTS = 30  # ~3s cap
+# A cluster update may spend 30s in validate-before-kill fetch, then pause and
+# spawn through winproc. 180s leaves margin while staying far below
+# NO_PROGRESS_TIMEOUT_S (900s); the 2026-08-12 wedged-spawn shape is still
+# loud after this bound rather than being mistaken for legitimate progress.
+_DEDUP_EXPECTED_DURATION_S: dict[str, float] = {"cluster_update": 180.0}
 # Bounded retry for a connection that dies mid-transaction (Task #1059):
 # `check_connections` (#1027) only guards the checkout; a conn that breaks
 # between checkout and commit still crashed the pass. The idempotency key
@@ -502,9 +508,9 @@ async def _dispatch_idempotent_pass(
     instead of re-executing. The owner is decided atomically
     (`INSERT ... ON CONFLICT DO NOTHING`), so two racing dispatches with the
     same key cannot both execute. A same-key dispatch that arrives while the
-    owner is still executing (a caller bug — the gateway's attempts are
-    sequential) waits a bounded window for the owner's outcome, then fails
-    loud rather than re-executing.
+    owner is still executing waits for the owner's outcome, bounded by the
+    operation kind's expected duration where one is known, then fails loud
+    rather than re-executing.
 
     An unexpected crash inside the op deletes the row and re-raises: no outcome
     was stored, so a future same-key dispatch must re-execute, not replay or
@@ -542,13 +548,16 @@ async def _dispatch_idempotent_pass(
                 (status, json.dumps(result, default=str), key),
             )
         return status, result
-    # Another dispatch owns the key (and may still be executing): wait briefly
-    # for its stored outcome, then replay it. Bounded — a stuck owner fails
-    # loud instead of parking the gateway's retry.
-    for _ in range(_DEDUP_WAIT_ATTEMPTS):
+    # Another dispatch owns the key (and may still be executing): wait for its
+    # stored outcome, then replay it. Most kinds retain the historical ~3s
+    # waiter cap; known slow kinds use the owner's DB creation time as the
+    # absolute deadline, so retries do not misdiagnose ordinary work as stuck.
+    expected_duration_s = _DEDUP_EXPECTED_DURATION_S.get(kind)
+    fallback_waits_left = _DEDUP_WAIT_ATTEMPTS
+    while True:
         with pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
-                "SELECT op_status, response_body FROM api_idempotency "
+                "SELECT op_status, response_body, created_at FROM api_idempotency "
                 "WHERE key = %s AND method = 'ops'",
                 (key,),
             )
@@ -556,7 +565,24 @@ async def _dispatch_idempotent_pass(
         if row is not None and row[0] is not None:
             result: dict[str, object] = row[1] or {}
             return row[0], result
+        if row is not None and expected_duration_s is not None:
+            owner_created_at: datetime = row[2]
+            now = datetime.now(UTC)
+            deadline = owner_created_at + timedelta(seconds=expected_duration_s)
+            if now >= deadline:
+                elapsed_s = max((now - owner_created_at).total_seconds(), 0.0)
+                return "failed", {
+                    "error": (
+                        f"idempotency key {key!r} is owned by a dispatch that has been running "
+                        f"for {elapsed_s:.1f}s without completing (kind {kind!r}); the owner is "
+                        f"likely stuck; expected bound is {expected_duration_s:.1f}s"
+                    )
+                }
+        elif expected_duration_s is None or row is None:
+            fallback_waits_left -= 1
         await _sleep(_DEDUP_WAIT_STEP_S)
+        if fallback_waits_left == 0:
+            break
     return "failed", {
         "error": f"idempotency key {key!r} is owned by another dispatch that never "
         "completed (concurrent duplicate dispatch of one logical op?)"

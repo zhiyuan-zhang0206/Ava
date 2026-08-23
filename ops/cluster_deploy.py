@@ -455,14 +455,9 @@ def spawn_update(
                 f"$AVA_HOME/run/sessions/{updater_sess}.json if it is hung."
             )
 
-    # validate-before-kill: refuse a target whose migrations/ layout is broken
-    # (duplicate / non-contiguous version) BEFORE pausing or spawning the updater.
-    # Such breakage is otherwise only discovered at boot — after `ava restart`
-    # stops every service — taking the whole cluster down (the 2026-06-17 dup-0049
-    # outage). Fetch the target read-only and vet its migrations/ from git; a broken
-    # layout raises here (surfacing to the caller as a refused update) with the
-    # cluster still serving its current code, nothing paused. A restart_only bounce
-    # reuses the current code (no checkout / migration), so it has nothing to vet.
+    # Validate before kill: vet target migrations from git read-only before pause/spawn.
+    # Otherwise boot discovers a duplicate/non-contiguous layout after `ava restart`
+    # stops every service (the 2026-06-17 dup-0049 outage); restart-only reuses current code.
     if not restart_only:
         ref = target_sha if target_sha is not None else f"origin/{settings.general.track_branch}"
         # best-effort fetch so an origin/main vet sees the real latest tip (the
@@ -471,13 +466,20 @@ def spawn_update(
         # unreadable ref. Bounded so a stalled network cannot block this
         # synchronous call indefinitely (see _VALIDATE_FETCH_TIMEOUT_S above).
         try:
-            run_bounded(
+            fetch = run_bounded(
                 ["git", "fetch", "origin"],
                 cwd=_REPO_ROOT,
                 capture_output=True,
                 env=git_env(),
                 timeout=_VALIDATE_FETCH_TIMEOUT_S,
             )
+            if fetch.returncode != 0:
+                _log.warning(
+                    "validate-before-kill git fetch failed with rc=%s; stderr=%s; "
+                    "validation fails closed if its ref is unreadable",
+                    fetch.returncode,
+                    fetch.stderr,
+                )
         except subprocess.TimeoutExpired:
             _log.warning(
                 "validate-before-kill git fetch timed out after %.0fs; proceeding "
@@ -489,9 +491,7 @@ def spawn_update(
         shared.migrations.validate_migrations_at_ref(ref, repo_root=_REPO_ROOT)
 
     cluster_pause.pause_local_cluster()
-
     log_path = _new_update_log("updater")
-
     repo = _REPO_ROOT
     if restart_only:
         # The detached session runs the in-process self-update (R1-6 execution-shape
