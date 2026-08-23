@@ -22,6 +22,7 @@ from shared.live_events import (
     Cancelled,
     ChatDelta,
     ChatStart,
+    ClusterUpdateStarted,
     CodeDelta,
     CodeStart,
     CompactDone,
@@ -76,6 +77,11 @@ FROZEN_WIRE: list[tuple[type, str, dict[str, Any]]] = [
     (NoticeResolved, "notice_resolved", {"notice_id": 7}),
     (TaskCreated, "task_created", {"task_id": 3}),
     (TaskUpdated, "task_updated", {"task_id": 3}),
+    (
+        ClusterUpdateStarted,
+        "cluster_update_started",
+        {"kind": "rollout", "origin": "user"},
+    ),
 ]
 
 
@@ -124,10 +130,10 @@ def test_global_roles_is_low_frequency_subset_of_system_roles():
     }
     assert GLOBAL_ROLES.isdisjoint(high_frequency)
 
-    # The cross-agent fleet views are the only consumers of the broadcast: the
-    # sidebar list (spawned / updated / label), the pages popover (page open /
-    # close), the FYI notice feed (notice posted / resolved), and the task board
-    # (task created / updated).
+    # The cross-agent fleet views plus the cluster-update takeover are the only
+    # consumers of the broadcast: the sidebar list (spawned / updated / label),
+    # the pages popover (page open / close), the FYI notice feed (notice posted /
+    # resolved), and the task board (task created / updated).
     assert {
         "agent_spawned",
         "agent_updated",
@@ -138,6 +144,7 @@ def test_global_roles_is_low_frequency_subset_of_system_roles():
         "notice_resolved",
         "task_created",
         "task_updated",
+        "cluster_update_started",
     } == GLOBAL_ROLES
 
 

@@ -378,6 +378,11 @@ export interface TaskUpdatedEvent extends BaseEvent {
   readonly role: "task_updated";
   readonly task_id: number;
 }
+export interface ClusterUpdateStartedEvent extends BaseEvent {
+  readonly role: "cluster_update_started";
+  readonly kind: "rollout" | "restart";
+  readonly origin: string;
+}
 
 export type SystemEvent =
   | ChatStartEvent
@@ -406,7 +411,8 @@ export type SystemEvent =
   | NoticePostedEvent
   | NoticeResolvedEvent
   | TaskCreatedEvent
-  | TaskUpdatedEvent;
+  | TaskUpdatedEvent
+  | ClusterUpdateStartedEvent;
 
 
 

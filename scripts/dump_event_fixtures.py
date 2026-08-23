@@ -210,6 +210,12 @@ def _samples() -> dict[str, dict]:
             "agent_id": agent_id,
             "task_id": 3,
         },
+        "cluster_update_started": {
+            "role": "cluster_update_started",
+            "agent_id": 0,
+            "kind": "rollout",
+            "origin": "user",
+        },
     }
 
 

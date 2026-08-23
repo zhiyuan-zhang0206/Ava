@@ -1399,10 +1399,21 @@ class TestClusterRolloutEndpoint:
         monkeypatch: pytest.MonkeyPatch,
         set_machine_identity,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
     ) -> None:
+        from gateway.routers import cluster as cluster_router
         from ops import ops_cluster as ops_mod
 
         origins: list[str] = []
+        published: list[tuple[str, str]] = []
         set_machine_identity(role="gateway")
+
+        def _capture_publish(kind: str, origin: str) -> None:
+            published.append((kind, origin))
+
+        monkeypatch.setattr(
+            cluster_router,
+            "_publish_cluster_update_started",
+            _capture_publish,
+        )
         monkeypatch.setattr(
             ops_mod,
             "spawn_rollout",
@@ -1422,6 +1433,7 @@ class TestClusterRolloutEndpoint:
             r2 = client.post("/api/cluster/rollout", json={"origin": "agent:7"})
             assert r2.status_code == 202
             assert origins == ["user", "agent:7"]
+            assert published == [("rollout", "user"), ("rollout", "agent:7")]
 
     def test_returns_400_on_agent_runner(self, set_machine_identity) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
         set_machine_identity(role="agent-runner")
@@ -1435,9 +1447,20 @@ class TestClusterRolloutEndpoint:
         monkeypatch: pytest.MonkeyPatch,
         set_machine_identity,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
     ) -> None:
+        from gateway.routers import cluster as cluster_router
         from ops import ops_cluster as ops_mod
 
+        published: list[tuple[str, str]] = []
         set_machine_identity(role="gateway")
+
+        def _capture_publish(kind: str, origin: str) -> None:
+            published.append((kind, origin))
+
+        monkeypatch.setattr(
+            cluster_router,
+            "_publish_cluster_update_started",
+            _capture_publish,
+        )
 
         def _raise(_origin: str, **_kw: object) -> dict[str, str]:
             raise cluster_mod.ClusterUpdateInProgress(
@@ -1449,6 +1472,7 @@ class TestClusterRolloutEndpoint:
             r = client.post("/api/cluster/rollout")
         assert r.status_code == 409
         assert "ava-test-rollout" in r.json()["detail"]
+        assert published == []
 
     def test_returns_422_when_already_up_to_date(
         self,
@@ -1497,10 +1521,21 @@ class TestClusterRestartEndpoint:
         monkeypatch: pytest.MonkeyPatch,
         set_machine_identity,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
     ) -> None:
+        from gateway.routers import cluster as cluster_router
         from ops import ops_cluster as ops_mod
 
         origins: list[str] = []
+        published: list[tuple[str, str]] = []
         set_machine_identity(role="gateway")
+
+        def _capture_publish(kind: str, origin: str) -> None:
+            published.append((kind, origin))
+
+        monkeypatch.setattr(
+            cluster_router,
+            "_publish_cluster_update_started",
+            _capture_publish,
+        )
         monkeypatch.setattr(
             ops_mod,
             "spawn_restart",
@@ -1511,9 +1546,13 @@ class TestClusterRestartEndpoint:
         )
         with TestClient(app) as client:
             r = client.post("/api/cluster/restart")
-        assert r.status_code == 202
-        assert origins == ["user"]
-        assert r.json()["session"] == "ava-test-cluster-restart"
+            assert r.status_code == 202
+            assert origins == ["user"]
+            assert r.json()["session"] == "ava-test-cluster-restart"
+            r2 = client.post("/api/cluster/restart", json={"origin": "agent:7"})
+            assert r2.status_code == 202
+            assert origins == ["user", "agent:7"]
+            assert published == [("restart", "user"), ("restart", "agent:7")]
 
     def test_returns_400_on_agent_runner(self, set_machine_identity) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
         set_machine_identity(role="agent-runner")

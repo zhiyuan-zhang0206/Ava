@@ -16,6 +16,7 @@ import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useStore } from "@/lib/store";
+import { CLUSTER_STATUS_QUERY_KEY } from "@/lib/use-cluster-health";
 import type { ConnectionEvent } from "@/lib/useEventStream";
 
 import { AppConnectionBanner } from "./app-connection-banner";
@@ -35,11 +36,13 @@ vi.mock("@/lib/use-cluster-health", () => ({
 }));
 
 // Capture the connection handler so a test can drive SSE state transitions.
-const { connRef } = vi.hoisted(() => ({
+const { connRef, systemRef } = vi.hoisted(() => ({
   connRef: { current: null as ((ev: ConnectionEvent) => void) | null },
+  systemRef: { current: null as ((ev: unknown) => void) | null },
 }));
 vi.mock("@/lib/useEventStream", () => ({
-  useEventStream: (_onSystem: unknown, onConn: (ev: ConnectionEvent) => void) => {
+  useEventStream: (onSystem: (ev: unknown) => void, onConn: (ev: ConnectionEvent) => void) => {
+    systemRef.current = onSystem;
     connRef.current = onConn;
   },
 }));
@@ -52,16 +55,20 @@ function renderBanner() {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
-  return render(
-    <QueryClientProvider client={qc}>
-      <AppConnectionBanner />
-    </QueryClientProvider>,
-  );
+  return {
+    queryClient: qc,
+    ...render(
+      <QueryClientProvider client={qc}>
+        <AppConnectionBanner />
+      </QueryClientProvider>,
+    ),
+  };
 }
 
 beforeEach(() => {
   authState.status = "authenticated";
   connRef.current = null;
+  systemRef.current = null;
   useClusterHealth.mockClear();
   act(() => {
     useStore.setState({
@@ -125,5 +132,52 @@ describe("AppConnectionBanner", () => {
       connRef.current?.({ type: "parse-failed", raw: "x", error: new Error("x") });
     });
     expect(useStore.getState().connState).toBe("open");
+  });
+
+  it("marks the cluster as updating as soon as the global start event arrives", () => {
+    const { queryClient } = renderBanner();
+    expect(systemRef.current).not.toBeNull();
+
+    act(() => {
+      systemRef.current?.({
+        role: "cluster_update_started",
+        agent_id: 0,
+        kind: "rollout",
+        origin: "user",
+      });
+    });
+
+    expect(useStore.getState().clusterUpdating).toBe(true);
+    expect(queryClient.getQueryData(CLUSTER_STATUS_QUERY_KEY)).toMatchObject({
+      paused: false,
+      current_orchestration: "rollout",
+    });
+  });
+
+  it("replaces a cached pre-update snapshot when the start event arrives", () => {
+    const { queryClient } = renderBanner();
+    queryClient.setQueryData(CLUSTER_STATUS_QUERY_KEY, {
+      machine_name: "gateway-a",
+      serve_gateway: true,
+      serve_agent_runner: true,
+      paused: true,
+      current_orchestration: null,
+      shell_count: 0,
+    });
+
+    act(() => {
+      systemRef.current?.({
+        role: "cluster_update_started",
+        agent_id: 0,
+        kind: "restart",
+        origin: "agent:7",
+      });
+    });
+
+    expect(queryClient.getQueryData(CLUSTER_STATUS_QUERY_KEY)).toMatchObject({
+      machine_name: "gateway-a",
+      paused: true,
+      current_orchestration: "restart",
+    });
   });
 });

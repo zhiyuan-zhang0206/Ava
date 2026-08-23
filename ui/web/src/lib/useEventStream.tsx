@@ -5,7 +5,8 @@
 // - EventStreamProvider / useEventStream: the GLOBAL broadcast
 //   (`/api/system`). The server forwards only GLOBAL_ROLES — the
 //   cross-agent, low-frequency lifecycle (agent spawned/updated/label,
-//   page open/close, notice_posted/notice_resolved) for *every* agent. The
+//   page open/close, notice_posted/notice_resolved, cluster update start) for
+//   *every* agent. The
 //   sidebar agent list (useAgentsCacheSync, the single root cache writer), the
 //   inspector's open-pages list (useAgentPages, folding page_opened/page_closed
 //   into its ["agent-pages", agentId] cache), and the inbox feed

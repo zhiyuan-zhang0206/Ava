@@ -65,6 +65,7 @@ const REQUIRED_FIELDS: Record<SystemEvent["role"], readonly string[]> = {
   notice_resolved: ["agent_id", "role", "notice_id"],
   task_created: ["agent_id", "role", "task_id"],
   task_updated: ["agent_id", "role", "task_id"],
+  cluster_update_started: ["agent_id", "role", "kind", "origin"],
 };
 
 const ALL_ROLES: readonly SystemEvent["role"][] = Object.keys(
@@ -119,6 +120,7 @@ function assertSystemEventShape(obj: unknown): asserts obj is SystemEvent {
     case "notice_resolved":
     case "task_created":
     case "task_updated":
+    case "cluster_update_started":
       break;
     default:
       assertNever(r);

@@ -448,6 +448,20 @@ class TaskUpdated(_Base):
     task_id: int
 
 
+class ClusterUpdateStarted(_Base):
+    """Published after a whole-cluster rollout or restart orchestration is
+    successfully spawned. The frontend uses this event to show the full-screen
+    updating page before the gateway stops.
+
+    This cluster-level event has no owning agent, so ``agent_id`` is always 0.
+    It is a live-projection render hint and is never persisted.
+    """
+
+    role: Literal["cluster_update_started"] = "cluster_update_started"
+    kind: Literal["rollout", "restart"]
+    origin: str
+
+
 Event = Annotated[
     ChatStart
     | ChatDelta
@@ -475,7 +489,8 @@ Event = Annotated[
     | NoticePosted
     | NoticeResolved
     | TaskCreated
-    | TaskUpdated,
+    | TaskUpdated
+    | ClusterUpdateStarted,
     Field(discriminator="role"),
 ]
 
@@ -512,6 +527,7 @@ _ROLE_CLASSES: tuple[tuple[type[Event], bool], ...] = (
     (NoticeResolved, True),
     (TaskCreated, True),
     (TaskUpdated, True),
+    (ClusterUpdateStarted, True),
 )
 
 
@@ -536,8 +552,8 @@ SYSTEM_ROLES: frozenset[str] = frozenset(
 # Cross-agent, low-frequency subset forwarded on the global /api/system
 # broadcast — every connected client sees these for *all* agents. Only the
 # fleet-wide views consume them: the sidebar agent list (spawned / updated /
-# label), the pages popover (page open / close), and the FYI notice feed (notice
-# posted / resolved). The high-frequency
+# label), the pages popover (page open / close), the FYI notice feed (notice
+# posted / resolved), and cluster-update takeover. The high-frequency
 # per-turn roles (chat_delta / code_delta / reasoning_delta /
 # exec_output_chunk / timeline_snapshot / token_usage / ...) are deliberately
 # excluded — they go only to the per-agent /api/agents/{id}/system stream of
