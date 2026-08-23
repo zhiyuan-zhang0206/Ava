@@ -27,5 +27,5 @@ The full-screen supervision surface (`components/fleet/`, `app/fleet/page.tsx`) 
 
 ## Settings / Auth
 
-- Control page routing see [[frontend-data-flow.ava.okf.md|Data Flow]] hooks (`useUserSettings`, etc.); `/control/display` goes through the server-side `user_settings` table; the Insights Metrics section is retired (2026-08-04) — `/insights/metrics` now redirects to the Grafana Ops embed.
+- Control page routing see [[frontend-data-flow.ava.okf.md|Data Flow]] hooks (`useUserSettings`, etc.); `/control/display` goes through the server-side `user_settings` table; the Insights Metrics section is retired (2026-08-04) — `/insights/metrics` now redirects to the Grafana dashboard link.
 - **AuthGuard** (`components/auth/`) wraps all pages, showing a login page when unauthenticated; `auth-context` shared via React Context.

@@ -1,84 +1,29 @@
 "use client";
 
-// /insights#ops — the Ops Monitor panel as an embedded Grafana dashboard
-// (user pivot 2026-08-03: the self-made SVG panel from #672 is replaced by a
-// Grafana single-iframe embed (the ops dashboard is the only iframe).
-//
-// The iframe loads the "Ava Ops" dashboard (deploy/lgtm dashboards ava-ops-main.json)
-// through the gateway's /grafana reverse proxy — same origin family as
-// API_BASE, auth-gated by the cluster middleware like every other route, so
-// the browser's session cookie applies. The theme follows next-themes;
-// `kiosk` hides Grafana's sidemenu/topnav but keeps the dashboard's own
-// timepicker, so the time range and refresh interval are Grafana's native
-// controls (the frontend window selector + Refresh were removed 2026-08-05
-// per user ruling — the iframe URL carries no from/to, the dashboard's
-// defaults apply). autofitpanels stays off: on Grafana 13.1.1 it collapses
-// every panel to a 30px title bar at embed widths (see
-// deploy/lgtm/config/grafana/provisioning/dashboards/README.md).
-//
-// The frame is full-height, no inner scrollbar: EMBED_HEIGHT equals the
-// dashboard's fixed rendered height (panels are gridPos-sized, so the
-// height is a constant regardless of window width or time range). Measured
-// on Grafana 13.1.3 — grid rows × 30px + (rows-1) gaps × 8px + 116px chrome
-// (209 rows → 8050px for ava-ops-main after the 2026-08-23 merge; sections
-// LLM..Host & data plane collapse by default, so the dashboard renders
-// shorter until expanded — the frame keeps the full expanded height, which
-// leaves blank space below the core section while sections stay collapsed).
-// Keep in sync with the gridPos layout — recompute with the formula above
-// when panels change.
-//
-// The self-made chart components (components/ops/charts.tsx) and the
-// /api/ops/monitor polling were retired with this rewrite; the backend
-// endpoint and the event-stream instrumentation stay (Grafana queries the
-// same stream via its Postgres datasource).
-
-import { useTheme } from "next-themes";
+// /insights#ops — the full-height Grafana iframe was retired by user ruling
+// 2026-08-23. This section is now one link to the merged Ava Ops dashboard
+// through the gateway's /grafana proxy.
 
 import { API_BASE } from "@/lib/api";
-import { OVERFLOW_HIDDEN } from "@/lib/layout";
-import { cn } from "@/lib/utils";
 
-// Fixed uid of the embedded dashboard (deploy/lgtm dashboards ava-ops-main.json) —
-// the gateway reverse proxy maps /grafana/d/<uid> onto the Grafana instance.
-// Core metrics (row header "core") + plugin metrics (one row per plugin) are
-// rendered into this one dashboard by scripts/gen_plugin_dashboard.py (core
-// panels ids < 1000, plugin panels ids >= 1000).
-const DASHBOARD_UID = "ava-ops-main";
-
-// Full-height embed (see header comment): 209 grid rows → 8050px on
-// Grafana 13.1.3 (2026-08-23 merge: the four dashboards — overview, ops,
-// plugins, host & data plane — collapsed into ava-ops-main, six sections).
-// Bump when deploy/lgtm dashboards ava-ops-main.json panels change —
-// page.test.tsx derives the expected value from the dashboard's gridPos and
-// fails when the two drift apart.
-export const EMBED_HEIGHT = 8050;
+const OPS_DASHBOARD_URL = `${API_BASE}/grafana/d/ava-ops-main?from=now-6h&to=now`;
 
 export default function OpsPage() {
-  const { resolvedTheme } = useTheme();
-  const theme = resolvedTheme === "dark" ? "dark" : "light";
-  const src = `${API_BASE}/grafana/d/${DASHBOARD_UID}?theme=${theme}&kiosk`;
-
   return (
     <div className="space-y-4">
-      {/* Metrics (Grafana): the embedded Ava Ops dashboard — the section's
-          first sub-heading (nav anchor ops-metrics). */}
       <div id="ops-metrics" className="scroll-mt-4">
         <h3 className="mb-2 text-sm font-semibold text-muted-foreground">
           Metrics (Grafana)
         </h3>
-        {/* Full-height frame: panels render at natural size; the page scrolls
-            and the iframe has no inner scrollbar. */}
-        <div className={cn("rounded-md border border-border", OVERFLOW_HIDDEN)}>
-          <iframe
-            data-testid="ops-embed-frame"
-            title="Ava ops"
-            src={src}
-            style={{ height: EMBED_HEIGHT }}
-            className="w-full"
-          />
-        </div>
+        <a
+          href={OPS_DASHBOARD_URL}
+          target="_blank"
+          rel="noreferrer"
+          className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2"
+        >
+          Open the Ava ops dashboard
+        </a>
       </div>
-
     </div>
   );
 }
