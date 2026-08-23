@@ -244,7 +244,7 @@
     },
     "textMode": "auto"
    },
-   "title": "Unresolved Warning",
+   "title": "Warning (all)",
    "type": "stat",
    "targets": [
     {
@@ -253,10 +253,10 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=~\"telemetry|log\" | level=\"warning\" | attributes_resolved_by=\"\" [$__range]))",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=~\"telemetry|log\" | level=\"warning\" [$__range]))",
      "refId": "A",
      "queryType": "instant",
-     "legendFormat": "unresolved_warning"
+     "legendFormat": "warning_all"
     }
    ]
   },
@@ -305,7 +305,7 @@
     "textMode": "auto",
     "noValue": "0"
    },
-   "title": "Unresolved Error",
+   "title": "Error (all)",
    "type": "stat",
    "targets": [
     {
@@ -314,10 +314,10 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=~\"telemetry|log\" | level=~\"error|critical\" | attributes_resolved_by=\"\" [$__range]))",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=~\"telemetry|log\" | level=~\"error|critical\" [$__range]))",
      "refId": "A",
      "queryType": "instant",
-     "legendFormat": "unresolved_error"
+     "legendFormat": "error_all"
     }
    ]
   },
@@ -2223,8 +2223,8 @@
   },
   {
    "datasource": {
-    "type": "loki",
-    "uid": "loki"
+    "type": "prometheus",
+    "uid": "prometheus"
    },
    "fieldConfig": {
     "defaults": {
@@ -2274,42 +2274,31 @@
      "sort": "desc"
     }
    },
-   "title": "Turn duration (p50/p90/max)",
+   "title": "Turn duration (p50/p95)",
    "type": "timeseries",
-   "description": "Percentile trend of turn_end.duration_seconds per bucket. Loki's quantile_over_time is per-series (each event is its own series), so p50/p90 aggregate the per-stream quantiles with max() \u2014 an approximation of the SQL percentile_cont, tilted toward the slowest agent process; the exact global read is the ava_turn_end_duration_seconds histogram in Prometheus (same trade-off as alert rule R4). max is exact (max_over_time over the unwrapped field). event_name='turn_end', category='telemetry'.",
+   "description": "p50 and p95 of the Prometheus ava_turn_end_duration_seconds histogram. The p95 uses the same source and quantile as alert rule R18: histogram_quantile(0.95, sum by (le) (rate(ava_turn_end_duration_seconds_bucket[10m]))).",
    "targets": [
     {
      "datasource": {
-      "type": "loki",
-      "uid": "loki"
+      "type": "prometheus",
+      "uid": "prometheus"
      },
      "editorMode": "code",
-     "expr": "max(quantile_over_time(0.5, {service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"turn_end\" | unwrap attributes_duration_seconds [5m]))",
+     "expr": "histogram_quantile(0.95, sum by (le) (rate(ava_turn_end_duration_seconds_bucket[10m])))",
      "refId": "A",
      "queryType": "range",
-     "legendFormat": "p50_s"
+     "legendFormat": "p95_s"
     },
     {
      "datasource": {
-      "type": "loki",
-      "uid": "loki"
+      "type": "prometheus",
+      "uid": "prometheus"
      },
      "editorMode": "code",
-     "expr": "max(quantile_over_time(0.9, {service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"turn_end\" | unwrap attributes_duration_seconds [5m]))",
+     "expr": "histogram_quantile(0.5, sum by (le) (rate(ava_turn_end_duration_seconds_bucket[10m])))",
      "refId": "B",
      "queryType": "range",
-     "legendFormat": "p90_s"
-    },
-    {
-     "datasource": {
-      "type": "loki",
-      "uid": "loki"
-     },
-     "editorMode": "code",
-     "expr": "max(max_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"turn_end\" | unwrap attributes_duration_seconds [5m]))",
-     "refId": "C",
-     "queryType": "range",
-     "legendFormat": "max_s"
+     "legendFormat": "p50_s"
     }
    ]
   },

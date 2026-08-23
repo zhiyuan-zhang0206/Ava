@@ -153,6 +153,23 @@ class ObservabilitySettings(EnvSettings):
         },
     )
 
+    telemetry_tempo_query_url: str = Field(
+        default="http://127.0.0.1:3200",
+        alias="AVA_TELEMETRY_TEMPO_QUERY_URL",
+        description=(
+            "Tempo query/metrics base URL for the Grafana Tempo datasource and "
+            "Prometheus scrape of the trace backend. The OTLP intake endpoint is "
+            "AVA_TELEMETRY_TEMPO_ENDPOINT on a different port."
+        ),
+        json_schema_extra={
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
+
     telemetry_loki_url: str = Field(
         default="http://127.0.0.1:3100",
         alias="AVA_TELEMETRY_LOKI_URL",

@@ -26,6 +26,9 @@ Per-panel provenance:
   (fixed orange) and Error (fixed red) set the color via ``field_defaults``,
   and LLM cost carries the original ``decimals: 2``. Error keeps the
   original ``unit: "s"`` and the ``noValue: "0"`` option.
+- **Warning (all) / Error (all)**: resolution filtering is not shipped yet,
+  so these tiles deliberately show every warning/error event until task #1468
+  adds the ``resolved_by`` producer.
 - **8 chart panels** (SSE backlog / LLM throughput / Token usage —
   Output + Reasoning / Cache hit / Input+Output+Gen-stage TPS / LLM calls /
   bucket / Event health / Token usage — Input): default 12x7 grid with the
@@ -143,17 +146,17 @@ core_metrics.register_core_metric(
 core_metrics.register_core_metric(
     MetricSpec(
         name="core_unresolved_warning",
-        title="Unresolved Warning",
+        title="Warning (all)",
         event_name="warning_resolved",
         category="log",
         unit="short",
         panel="stat",
         query=_count(
-            'category=~"telemetry|log" | level="warning" | attributes_resolved_by=""',
+            'category=~"telemetry|log" | level="warning"',
             "$__range",
         ),
         query_type="logql",
-        target_names=["unresolved_warning"],
+        target_names=["warning_all"],
         field_defaults={"color": {"mode": "fixed", "fixedColor": "orange"}},
         width=8,
         height=4,
@@ -163,17 +166,17 @@ core_metrics.register_core_metric(
 core_metrics.register_core_metric(
     MetricSpec(
         name="core_unresolved_error",
-        title="Unresolved Error",
+        title="Error (all)",
         event_name="error_resolved",
         category="log",
         unit="short",
         panel="stat",
         query=_count(
-            'category=~"telemetry|log" | level=~"error|critical" | attributes_resolved_by=""',
+            'category=~"telemetry|log" | level=~"error|critical"',
             "$__range",
         ),
         query_type="logql",
-        target_names=["unresolved_error"],
+        target_names=["error_all"],
         options={"noValue": "0"},
         field_defaults={"color": {"mode": "fixed", "fixedColor": "red"}},
         width=8,

@@ -2,14 +2,15 @@
 
 Covers the generic observability pack migrated from the retired
 ``ava_observability`` plugin to core metrics: registration shape (19 metrics
-across grafana / inspector surfaces, plugin == "core", query_type == "logql"),
-the LogQL template safety validation, and every rendered query's structure —
-the stream selector, the ``| json`` pipeline, the event_name/category
-placeholders, and the per-panel filter semantics (exec spellings, syntax-fix
-kinds, halt classes, spawner sources, table top-k shapes, agent_id rendering).
-The queries themselves were verified against the live Loki stream during the
-migration (task #1280); unit tests lock the registry shape and the rendered
-templates instead of executing them (there is no Loki in the test env).
+across grafana / inspector surfaces, plugin == "core"), the LogQL template
+safety validation, and every rendered query's structure — the stream selector,
+the ``| json`` pipeline, the event_name/category placeholders, and the
+per-panel filter semantics (exec spellings, syntax-fix kinds, halt classes,
+spawner sources, table top-k shapes, agent_id rendering). Turn duration is the
+one PromQL exception: it shares the R18 histogram quantiles. The queries
+themselves were verified against the live Loki stream during the migration
+(task #1280); unit tests lock the registry shape and rendered templates instead
+of executing them (there is no Loki in the test environment).
 """
 
 from __future__ import annotations
@@ -26,7 +27,7 @@ EXPECTED = {
     "ava_obs_agent_llm_cost_usd": ("timeseries", ["inspector"], "llm_usage", "telemetry", 1),
     "ava_obs_llm_error_rate": ("timeseries", ["grafana", "inspector"], "llm_usage", "telemetry", 4),
     "ava_obs_turn_ok_rate": ("timeseries", ["grafana", "inspector"], "turn_end", "telemetry", 1),
-    "ava_obs_turn_duration_s": ("timeseries", ["grafana"], "turn_end", "telemetry", 3),
+    "ava_obs_turn_duration_s": ("timeseries", ["grafana"], "turn_end", "telemetry", 2),
     "ava_obs_exec_success_rate": ("timeseries", ["grafana"], "exec", "telemetry", 6),
     "ava_obs_syntax_fix_by_kind": ("timeseries", ["grafana"], "syntax_fix", "telemetry", 7),
     "ava_obs_spawn_by_spawner": ("barchart", ["grafana"], "spawn", "audit", 1),
@@ -102,19 +103,22 @@ def test_pack_registers_all_metrics() -> None:
         assert spec.event_name == event_name, name
         assert spec.category == category, name
         assert spec.plugin == "core", name
-        assert spec.query_type == "logql", name
+        expected_query_type = "promql" if name == "ava_obs_turn_duration_s" else "logql"
+        assert spec.query_type == expected_query_type, name
         assert len(spec.targets or []) + 1 == n_targets, name
         if spec.target_names is not None:
             assert len(spec.target_names) == n_targets, name
-        for expr in [render_query(spec), *render_targets(spec)[1:]]:
-            validate_logql(expr, name)
+        if spec.query_type == "logql":
+            for expr in [render_query(spec), *render_targets(spec)[1:]]:
+                validate_logql(expr, name)
 
 
-def test_rendered_queries_have_event_stream_and_json() -> None:
-    """Every rendered query selects the event stream and pipelines | json —
-    the invariant the alert rules and the inspector rely on."""
+def test_logql_queries_have_event_stream_and_json() -> None:
+    """Every LogQL query selects the event stream and pipelines | json."""
     _load_pack()
     for name, exprs in _all_rendered().items():
+        if name == "ava_obs_turn_duration_s":
+            continue
         for expr in exprs:
             assert 'service_name="unknown_service"' in expr, name
             assert "| json" in expr, name
@@ -188,16 +192,18 @@ def test_turn_ok_rate_math_shape() -> None:
     assert expr.count("sum(count_over_time(") == 2  # ok / total
 
 
-def test_turn_duration_percentiles_approximate() -> None:
-    """p50/p90 via per-stream quantile + max aggregation (documented
-    approximation — Loki quantiles are per-series), max exact via
-    max_over_time."""
+def test_turn_duration_uses_the_alert_histogram_quantiles() -> None:
+    """The dashboard follows R18's Prometheus p95 with a p50 companion."""
     _load_pack()
-    exprs = _all_rendered()["ava_obs_turn_duration_s"]
-    assert "quantile_over_time(0.5," in exprs[0]
-    assert "quantile_over_time(0.9," in exprs[1]
-    assert "max_over_time(" in exprs[2]
-    assert "unwrap attributes_duration_seconds" in exprs[2]
+    spec = {metric.name: metric for metric in core_metrics.registered_core_metrics()}[
+        "ava_obs_turn_duration_s"
+    ]
+    assert spec.query_type == "promql"
+    assert render_targets(spec) == [
+        "histogram_quantile(0.95, sum by (le) (rate(ava_turn_end_duration_seconds_bucket[10m])))",
+        "histogram_quantile(0.5, sum by (le) (rate(ava_turn_end_duration_seconds_bucket[10m])))",
+    ]
+    assert spec.target_names == ["p95_s", "p50_s"]
 
 
 def test_halt_breakdown_buckets() -> None:

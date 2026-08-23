@@ -1,7 +1,7 @@
 # deploy/lgtm/docker-compose.yml — container half of the observability backend.
-# Tempo and Grafana remain containers; converge installs the pinned native
-# Loki, Prometheus, and Promtail backends as launchd jobs before this compose
-# project is brought up. The marker-host watchdog re-runs start.sh after a
+# Compose copies of Tempo and Grafana are rollback assets; converge installs
+# native Grafana, Loki, and Prometheus as launchd jobs. Tempo remains remote
+# per cluster. The marker-host watchdog re-runs start.sh after a
 # connection-level readiness failure; it probes native jobs first and never
 # restarts an already-live backend.
 #
@@ -10,8 +10,8 @@
 # entry and fans out to these loopback backends.
 #
 # Operations:
-#   bash start.sh   # native launchd backends + Tempo/Grafana compose services
-#   bash stop.sh    # stop all backends; volumes persist
+#   bash start.sh   # native launchd backends
+#   bash stop.sh    # stop native backends; volumes persist
 #   rollback: stop, restore the prior compose + backend configs from git, then
 #             docker compose up -d (the rollback volumes remain on disk)
 #   docker compose down -v   # permanently wipe observability history
@@ -72,6 +72,7 @@ services:
       # (datasources.yml $GRAFANA_PG_PASSWORD). From .env (gitignored).
       GRAFANA_PG_PASSWORD: "${GRAFANA_PG_PASSWORD:-}"
       GRAFANA_PROVISIONING_PATH: "/etc/grafana/provisioning/dashboards"
+      AVA_TELEMETRY_TEMPO_QUERY_URL: "${AVA_TELEMETRY_TEMPO_QUERY_URL:-http://127.0.0.1:3200}"
     volumes:
       - ./config/grafana/provisioning:/etc/grafana/provisioning:ro
       - grafana-data:/var/lib/grafana

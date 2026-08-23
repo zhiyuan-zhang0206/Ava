@@ -62,6 +62,15 @@ def test_versions_file_has_the_pinned_release_assets() -> None:
                 }
             },
         },
+        "grafana": {
+            "version": "13.1.3",
+            "assets": {
+                "darwin-arm64": {
+                    "url": "https://dl.grafana.com/oss/release/grafana-13.1.3.darwin-arm64.tar.gz",
+                    "sha256": "cbd4fc856fa5817a7fbc141d1e11cb1d79ca21cea15294cd32d9c82a666d382a",
+                }
+            },
+        },
     }
 
 
@@ -157,7 +166,12 @@ def test_ensure_renders_configs_with_native_paths_and_loopback(
     loki_config = yaml.safe_load(loki)
     prometheus_config = yaml.safe_load(prometheus)
     assert "{{AVA_HOME}}" not in loki
-    assert {path.name for path in config_dir.iterdir()} == {"loki.yaml", "prometheus.yml"}
+    assert {path.name for path in config_dir.iterdir()} == {
+        "grafana.ini",
+        "loki.yaml",
+        "prometheus.yml",
+        "runtime.env",
+    }
     assert loki_config["common"]["path_prefix"] == f"{home}/lgtm/native/data/loki"
     assert loki_config["frontend"]["address"] == "127.0.0.1"
     assert (
@@ -180,10 +194,32 @@ def test_ensure_renders_configs_with_native_paths_and_loopback(
     }
     assert targets == {
         "prometheus": ["localhost:9090"],
-        "tempo": ["100.78.137.46:3200"],
+        "tempo": ["127.0.0.1:3200"],
         "loki": ["127.0.0.1:3100"],
         "grafana": ["127.0.0.1:3003"],
     }
+
+
+def test_render_configs_validates_loki_before_writing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    validated: list[dict[str, object]] = []
+    write_if_changed = _lgtm_native._write_if_changed
+
+    def record_validation(config: dict[str, object]) -> None:
+        validated.append(config)
+
+    def verify_validation_precedes_write(path: Path, content: str) -> None:
+        if path.name == "loki.yaml":
+            assert validated
+        write_if_changed(path, content)
+
+    monkeypatch.setattr(_lgtm_native, "validate_loki_deploy_config", record_validation)
+    monkeypatch.setattr(_lgtm_native, "_write_if_changed", verify_validation_precedes_write)
+
+    _lgtm_native._render_configs(_repo(), tmp_path / "native", tmp_path / "home")
+
+    assert validated
 
 
 def test_render_plist_uses_absolute_paths_and_memory_caps(tmp_path: Path) -> None:

@@ -201,37 +201,27 @@ core_metrics.register_core_metric(
 core_metrics.register_core_metric(
     MetricSpec(
         name="ava_obs_turn_duration_s",
-        title="Turn duration (p50/p90/max)",
+        title="Turn duration (p50/p95)",
         description=(
-            "Percentile trend of turn_end.duration_seconds per bucket. Loki's "
-            "quantile_over_time is per-series (each event is its own series), "
-            "so p50/p90 aggregate the per-stream quantiles with max() — an "
-            "approximation of the SQL percentile_cont, tilted toward the "
-            "slowest agent process; the exact global read is the "
-            "ava_turn_end_duration_seconds histogram in Prometheus (same "
-            "trade-off as alert rule R4). max is exact "
-            "(max_over_time over the unwrapped field). "
-            "event_name='turn_end', category='telemetry'."
+            "p50 and p95 of the Prometheus ava_turn_end_duration_seconds "
+            "histogram. The p95 uses the same source and quantile as alert rule "
+            "R18: histogram_quantile(0.95, sum by (le) "
+            "(rate(ava_turn_end_duration_seconds_bucket[10m])))."
         ),
         event_name="turn_end",
         category="telemetry",
         unit="s",
         panel="timeseries",
-        query_type="logql",
+        query_type="promql",
         query=(
-            f'max(quantile_over_time(0.5, {{service_name="unknown_service"}} | json | '
-            f"category={{category}} | event_name={{event_name}} | "
-            f"unwrap {_TURN_ATTR['duration_seconds']} [5m]))"
+            "histogram_quantile(0.95, sum by (le) "
+            "(rate(ava_turn_end_duration_seconds_bucket[10m])))"
         ),
         targets=[
-            f'max(quantile_over_time(0.9, {{service_name="unknown_service"}} | json | '
-            f"category={{category}} | event_name={{event_name}} | "
-            f"unwrap {_TURN_ATTR['duration_seconds']} [5m]))",
-            f'max(max_over_time({{service_name="unknown_service"}} | json | '
-            f"category={{category}} | event_name={{event_name}} | "
-            f"unwrap {_TURN_ATTR['duration_seconds']} [5m]))",
+            "histogram_quantile(0.5, sum by (le) "
+            "(rate(ava_turn_end_duration_seconds_bucket[10m])))",
         ],
-        target_names=["p50_s", "p90_s", "max_s"],
+        target_names=["p95_s", "p50_s"],
         output=["grafana"],
     )
 )

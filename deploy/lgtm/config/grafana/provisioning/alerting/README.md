@@ -4,15 +4,26 @@ Grafana Alerting rules for the Ava event system, provisioned as code. Since
 the LGTM cutover (Task #1224) they evaluate against the **LGTM read side**:
 R1-R3, R5-R7 and R13 query **Loki** (every event is one OTLP log line under
 `{service_name="unknown_service"}`, body = the full event JSON, so `| json`
-flattens each line to labels — the OTel-detected labels are structured
-metadata and cannot be matched by `{…}` selectors), and R4 queries
-**Prometheus** (the `ava_llm_usage_latency_ms` histogram, the OTLP metric
-mirror of the `llm_usage` event). The retired Postgres events read path
-(#1197) is gone — nothing queries the `ops` datasource from these rules.
+flattens each line to labels), while R4 and the gateway-metrics silence rule
+query **Prometheus** (the `ava_llm_usage_latency_milliseconds` histogram and
+the `ava_gateway_latency_count_total` heartbeat). The retired Postgres events
+read path (#1197) is gone — nothing queries the `ops` datasource from these
+rules.
 
 Datasources are provisioned beside this file (`datasources.yml`, uids
 `loki` / `prometheus`; the `ops` Postgres datasource stays for the ava-ops
 dashboards).
+
+### LogQL migration timeline
+
+- Until pre-cutover chunks expire, every rule keeps the legacy selector
+  `{service_name="unknown_service"}` plus `| json`, because old chunks lack
+  the promoted `event_name` / `agent_id` stream labels.
+- After `LEGACY_READ_EXPIRES_AT` (2026-08-30T11:10Z), tracked task #1467 moves
+  `event_name` / `agent_id` filters into the stream selector while retaining
+  `| json` for level, category, and attributes filters.
+- Never promote those filters before legacy chunks expire: doing so silently
+  drops seven days of history.
 
 ## Where these run (LGTM stack)
 
@@ -21,27 +32,29 @@ source checkout's `deploy/lgtm/config/grafana/provisioning/alerting`
 directory. The contact point posts to `127.0.0.1:8000`, reaching the gateway
 on the same host loopback.
 
-## Rules (19)
+## Rules (20)
 
-The rules are split between `ava-ops` (16 rules, evaluated every minute) and
-`ava-ops-slow` (R17/R18's three slow-request rules, evaluated every five
-minutes). Their existing `for` windows remain unchanged.
+The rules are split between `ava-ops` (15 rules, evaluated every minute:
+R1-R6, the gateway-metrics silence rule, R8-R12, and R14-R16) and
+`ava-ops-slow` (five rules, evaluated every five minutes: R7, R13, R17's two
+route tiers, and R18). Their existing `for` windows remain unchanged.
 
 Application layer — the Loki event stream plus the LLM latency histogram:
 
-| uid | Metric | Condition | `for` | Severity |
-|-----|--------|-----------|-------|----------|
-| `ava-ops-warning-error-spike` | WARNING+ERROR+CRITICAL spike | 5m count > 3× prior-15m rate AND ≥ 30 (Loki) | 5m | error |
-| `ava-ops-sse-drop-backlog` | sse_drop + event_log_drop backlog | SUM(payload.n) in 10m > 100 (Loki unwrap) | 5m | warning |
-| `ava-ops-agent-restart-spike` | agent_restarted spike | count in 15m > 30 (Loki) | 5m | warning |
-| `ava-ops-llm-latency-p95` | llm_usage latency p95 | histogram p95 in 10m > 60000 ms (Prometheus) | 10m | error |
-| `ava-ops-delivery-stalled-backlog` | delivery_stalled fresh backlog | fresh (age_s<600) count in 10m > 50 (Loki) | 5m | warning |
-| `ava-ops-events-freshness` | event stream stalled | no events in Loki for 5m (absent_over_time) | 5m | error |
-| `ava-ops-trace-disk-watermark` | trace recording auto-degraded | recording_disabled_disk_watermark count in 24h > 0 (Loki) | 5m | error |
-| `ava-ops-llm-billing-quota` | LLM key out of credit / quota | llm_provider_error with billing=true in 15m > 0 (Loki) | 0m | critical |
-| `ava-ops-gateway-latency-route-warning` | Gateway latency: fast route p95 | p95 > 3s for 5m (Loki, LLM-bound + inherently-slow routes excluded) | 5m | warning |
-| `ava-ops-gateway-latency-route-error` | Gateway latency: fast route p95 | p95 > 10s for 5m (same route filter) | 5m | error |
-| `ava-ops-turn-duration-p95` | Turn duration p95 (collective slowdown) | histogram p95 > 75s for 10m (Prometheus, 24h baseline 37.6s × 2) | 10m | warning |
+| uid | Group | Metric | Condition | `for` | Severity |
+|-----|-------|--------|-----------|-------|----------|
+| `ava-ops-warning-error-spike` | `ava-ops` | WARNING+ERROR+CRITICAL spike | 5m count > 3× prior-15m rate AND ≥ 30 (Loki) | 5m | error |
+| `ava-ops-sse-drop-backlog` | `ava-ops` | sse_drop + event_log_drop backlog | SUM(payload.n) in 10m > 100 (Loki unwrap) | 5m | warning |
+| `ava-ops-agent-restart-spike` | `ava-ops` | agent_restarted spike | count in 15m > 30 (Loki) | 5m | warning |
+| `ava-ops-llm-latency-p95` | `ava-ops` | llm_usage latency p95 | histogram p95 in 10m > 60000 ms (Prometheus) | 10m | error |
+| `ava-ops-delivery-stalled-backlog` | `ava-ops` | delivery_stalled fresh backlog | fresh (age_s<600) count in 10m > 50 (Loki) | 5m | warning |
+| `ava-ops-events-freshness` | `ava-ops` | event stream stalled | no events in Loki for 5m (absent_over_time) | 5m | error |
+| `ava-ops-gateway-metrics-silent` | `ava-ops` | gateway_latency heartbeat | no samples in Prometheus for 5m (absent_over_time) | 5m | error |
+| `ava-ops-trace-disk-watermark` | `ava-ops-slow` | trace recording auto-degraded | recording_disabled_disk_watermark count in 24h > 0 (Loki) | 5m | error |
+| `ava-ops-llm-billing-quota` | `ava-ops-slow` | LLM key out of credit / quota | llm_provider_error with billing=true in 15m > 0 (Loki) | 0m | critical |
+| `ava-ops-gateway-latency-route-warning` | `ava-ops-slow` | Gateway latency: fast route p95 | p95 > 3s for 5m (Loki, LLM-bound + inherently-slow routes excluded) | 5m | warning |
+| `ava-ops-gateway-latency-route-error` | `ava-ops-slow` | Gateway latency: fast route p95 | p95 > 10s for 5m (same route filter) | 5m | error |
+| `ava-ops-turn-duration-p95` | `ava-ops-slow` | Turn duration p95 (collective slowdown) | histogram p95 > 75s for 10m (Prometheus, 24h baseline 37.6s × 2) | 10m | warning |
 
 Infrastructure layer (issue #46) — the per-machine OTel Collector sidecar's
 own scrapes, labelled `host` (deliberately not `machine`: the two names can
@@ -76,10 +89,9 @@ retired machines naturally; the fleet heartbeat owns permanent membership.
 
 The three slow-request rules (R17/R18, 2026-08-23, task #1399) close the
 user-visible-latency gap: fast-route p95 thresholds calibrated against 7d
-route data (fast routes stay ≤ 5.5s; the LLM-bound message routes and
-inherently-slow API routes are excluded — see the header comment in
-`rules.yml`), and the turn-duration rule catches fleet-wide slowdown (p95
-vs the 24h baseline ×2) rather than single long turns. All three carry
+route data (the emitter's single route-classification source is
+`gateway/_latency.py`), and the turn-duration rule catches fleet-wide slowdown
+(p95 vs the 24h baseline ×2) rather than single long turns. All three carry
 `notify_im: "false"` — the PM slow-request convention is warning-first and
 no IM fan-out (alert-fatigue ruling 2026-08-22); the gateway honors the
 label once the IM gating PR (#3219) lands, until then they reach IM like
@@ -128,8 +140,10 @@ a new provider is covered by adding its string there, with no edit to
 
 There is no copy step: native Grafana reads this directory from the source
 checkout. Alert-rule provisioning does **not** hot-reload file changes
-(verified 2026-08-04), so restart native Grafana after editing `rules.yml`;
-datasource and contact-point provisioning do hot-reload.
+(verified 2026-08-04), so restart it after editing `rules.yml` with
+`launchctl kickstart -k gui/$(id -u)/com.ava.grafana.<home-slug>` (first run
+`launchctl bootstrap gui/$(id -u) <plist>` if the job is not loaded).
+Datasource and contact-point provisioning do hot-reload.
 
 ## How to add a rule
 

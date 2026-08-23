@@ -103,11 +103,35 @@ def test_emit_bucket_computes_stats(monkeypatch: pytest.MonkeyPatch) -> None:
     attrs = captured["attributes"]
     assert attrs == {
         "route": "/api/health",
+        "route_class": "fast",
         "p50_ms": 20.0,
         "p95_ms": 30.0,
         "max_ms": 30.0,
         "count": 3,
     }
+
+
+@pytest.mark.parametrize(
+    ("route", "expected_class"),
+    [
+        ("/api/agents/42/messages", "llm"),
+        ("/api/agents/42/shell/3", "llm"),
+        ("/api/agents/42/traces/abc", "llm"),
+        ("/api/memory/search", "slow"),
+        ("/api/agents/42/inspect", "slow"),
+        ("/api/stats/dashboard", "slow"),
+        ("/api/metrics/agents", "slow"),
+        ("/api/events", "slow"),
+        ("/api/fleet/graph", "slow"),
+        ("/api/agents/42/terminate", "slow"),
+        ("/api/agents/42/resurrect", "slow"),
+        ("/api/health", "fast"),
+        ("/api/agents", "fast"),
+        ("/api/metrics/summary", "fast"),
+    ],
+)
+def test_route_classification_matches_alert_eligibility(route: str, expected_class: str) -> None:
+    assert _latency.classify_route(route) == expected_class
 
 
 def test_emit_bucket_empty_is_noop(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -28,6 +28,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
+import re
 import time
 from collections.abc import Awaitable, Callable
 
@@ -46,6 +47,31 @@ FLUSH_INTERVAL_S = 60.0
 # ≈ 80 KiB per route — the accumulator stays trivially small even under an
 # attack-scale burst.
 MAX_SAMPLES_PER_ROUTE = 10_000
+
+# R17/R18 exclude these matched route patterns. Keep the alerting policy here,
+# beside the emitted route value, so a new slow route cannot drift from one
+# alert tier while remaining visible on the all-route dashboard.
+R17_R18_EXCLUSION_ROUTE_PATTERNS: dict[str, tuple[str, ...]] = {
+    "llm": (
+        r"/api/agents/.*/messages",
+        r"/api/agents/.*/shell/.*",
+        r"/api/agents/.*/traces/.*",
+    ),
+    "slow": (
+        r"/api/memory/search",
+        r"/api/agents/.*/inspect",
+        r"/api/stats/dashboard",
+        r"/api/metrics/agents",
+        r"/api/events",
+        r"/api/fleet/graph",
+        r"/api/agents/.*/terminate",
+        r"/api/agents/.*/resurrect",
+    ),
+}
+_ROUTE_CLASS_REGEXES = {
+    route_class: tuple(re.compile(f"^{pattern}$") for pattern in patterns)
+    for route_class, patterns in R17_R18_EXCLUSION_ROUTE_PATTERNS.items()
+}
 
 # Unmatched requests (404s, scanners) would otherwise open an unbounded key
 # space per raw path; beyond this many distinct keys everything unmatched
@@ -83,6 +109,14 @@ def record(route: str, duration_ms: float) -> None:
             _accumulator[route] = samples
     if len(samples) < MAX_SAMPLES_PER_ROUTE:
         samples.append(duration_ms)
+
+
+def classify_route(route: str) -> str:
+    """Classify one matched route for latency-alert eligibility."""
+    for route_class, patterns in _ROUTE_CLASS_REGEXES.items():
+        if any(pattern.fullmatch(route) for pattern in patterns):
+            return route_class
+    return "fast"
 
 
 def drain() -> dict[str, list[float]]:
@@ -128,6 +162,7 @@ def emit_bucket(route: str, samples: list[float]) -> None:
         "gateway_latency",
         attributes={
             "route": route,
+            "route_class": classify_route(route),
             "p50_ms": round(p50, 1),
             "p95_ms": round(p95, 1),
             "max_ms": round(max_ms, 1),
