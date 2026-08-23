@@ -25,6 +25,7 @@ import pytest
 
 from services.events_maintenance import rollup
 from services.events_maintenance.rollup import MetricsRow, RollupResult, TokensRow, compute_rollup
+from shared.loki_index_labels import LokiReadEra, LokiReadSlice
 
 # A fixed "now" so today = 2026-06-10 (UTC); rolled days are 06-07..06-09.
 # Noon so the test does not ride on a midnight edge. The retention floor at
@@ -337,3 +338,60 @@ def test_metrics_queries_shapes() -> None:
     assert q["turn_dur_min"].startswith("min by (agent_id) (min_over_time(")
     assert 'event_name=~"exec_.+|exec\\\\(.*"' in q["exec_failed"]
     assert 'event_name="exec"' in q["exec_ok"]
+
+
+def test_cutover_day_merges_legacy_and_indexed_rollups(monkeypatch: pytest.MonkeyPatch) -> None:
+    day = date(2026, 8, 10)
+    day_start = datetime.combine(day, datetime.min.time(), tzinfo=UTC)
+    cutover = day_start + timedelta(hours=12)
+    day_end = day_start + timedelta(days=1)
+    slices = (
+        LokiReadSlice(LokiReadEra.LEGACY, day_start, cutover),
+        LokiReadSlice(LokiReadEra.INDEXED, cutover, day_end),
+    )
+    calls: list[tuple[str, datetime]] = []
+
+    def _query(logql: str, at: datetime) -> list[tuple[dict[str, str], float]]:
+        calls.append((logql, at))
+        value = 1.0 if at == cutover else 2.0
+        labels = {"agent_id": "7"}
+        if "llm_usage" in logql:
+            labels["model"] = "m"
+        return [(labels, value)]
+
+    def _slices(_start: datetime, _end: datetime) -> tuple[LokiReadSlice, ...]:
+        return slices
+
+    monkeypatch.setattr(rollup, "split_index_label_window", _slices)
+    monkeypatch.setattr(rollup, "_query_instant", _query)
+
+    tokens, metrics = rollup._day_aggregates(day)
+
+    assert tokens == [
+        TokensRow(
+            agent_id=7,
+            model="m",
+            calls=3,
+            costed_calls=3,
+            unpriced_calls=0,
+            tokens_in=3,
+            tokens_out=3,
+            tokens_cached=3,
+            tokens_reasoning=3,
+            cost_usd=3.0,
+        )
+    ]
+    assert metrics == [
+        MetricsRow(
+            agent_id=7,
+            turn_total=3,
+            turn_ok=3,
+            turn_dur_sum=3.0,
+            turn_dur_min=1.0,
+            turn_dur_max=2.0,
+            exec_ok=3,
+            exec_failed=3,
+        )
+    ]
+    assert any('event_name=""' in logql for logql, _at in calls)
+    assert any('event_name="llm_usage"' in logql and _at == day_end for logql, _at in calls)

@@ -90,6 +90,7 @@ from cli.commands._health_alerts import (
     _notify_owner,  # noqa: F401  # pyright: ignore[reportUnusedImport]  # re-export (tests access via _cluster_health)
     _reset_failure_count,
 )
+from shared.loki_index_labels import LokiReadEra, event_stream_selector, split_index_label_window
 
 # Default thresholds. Overridable via CLI flags; the cron wrapper's
 # defaults are set at registration time.
@@ -167,20 +168,35 @@ def _crash_loop_detection(max_restarts: int, window_minutes: int) -> bool:
     from shared.config import settings
 
     cutoff = datetime.now(UTC) - timedelta(minutes=window_minutes)
+    start = cutoff - timedelta(minutes=window_minutes)
     try:
         url = settings.observability.telemetry_loki_url.rstrip("/") + "/loki/api/v1/query"
-        duration_s = max(1, window_minutes * 60)
-        logql = (
-            f'sum by (agent_id) (count_over_time({{service_name="unknown_service"}} '
-            f'| event_name="resurrect" | category="audit"[{duration_s}s]))'
-        )
-        resp = httpx.get(url, params={"query": logql, "time": cutoff.timestamp()}, timeout=30)
-        resp.raise_for_status()
-        result = resp.json().get("data", {}).get("result", [])
+        restarts: dict[str, int] = {}
+        slices = split_index_label_window(start, cutoff)
+        for slice_ in slices:
+            duration_s = max(1, int((slice_.end - slice_.start).total_seconds()))
+            selector = event_stream_selector(
+                era=slice_.era,
+                agent_id=None,
+                event_names=["resurrect"],
+                legacy_streams_only=len(slices) == 2 and slice_.era is LokiReadEra.LEGACY,
+            )
+            logql = (
+                f"sum by (agent_id) (count_over_time({selector} "
+                f'| event_name="resurrect" | category="audit"[{duration_s}s]))'
+            )
+            resp = httpx.get(
+                url, params={"query": logql, "time": slice_.end.timestamp()}, timeout=30
+            )
+            resp.raise_for_status()
+            for series in resp.json().get("data", {}).get("result", []):
+                value = series.get("value")
+                if value is None:
+                    continue
+                agent_id = str(series.get("metric", {}).get("agent_id", ""))
+                restarts[agent_id] = restarts.get(agent_id, 0) + int(value[1])
         # Any agent at or over the threshold is a crash loop.
-        return not any(
-            int(series["value"][1]) > max_restarts for series in result if series.get("value")
-        )
+        return not any(count > max_restarts for count in restarts.values())
     except Exception:
         # Loki unreachable — can't check crash loops. Return True (healthy) to
         # avoid a false positive on this secondary signal; the gateway liveness

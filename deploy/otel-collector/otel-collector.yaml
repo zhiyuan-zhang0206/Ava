@@ -144,6 +144,16 @@ processors:
       - context: datapoint
         statements:
           - set(attributes["host"], resource.attributes["host.name"])
+  # Loki can promote OTLP resource attributes, not log attributes. Copy the
+  # bounded event dimensions before the logs exporter; service rows keep no
+  # agent_id label instead of minting an empty stream dimension.
+  transform/promote_event_labels:
+    error_mode: ignore
+    log_statements:
+      - context: log
+        statements:
+          - set(resource.attributes["agent_id"], attributes["agent_id"]) where attributes["agent_id"] != nil
+          - set(resource.attributes["event_name"], attributes["event_name"]) where attributes["event_name"] != nil
 
 extensions:
   file_storage:
@@ -186,7 +196,7 @@ service:
       exporters: [otlphttp/tempo, file/traces]
     logs:
       receivers: [otlp$REMOTE_OTLP_PIPELINE_RECEIVER]
-      processors: [memory_limiter, batch]
+      processors: [memory_limiter, transform/promote_event_labels, batch]
       exporters: [otlphttp/loki]
     metrics:
       receivers: [otlp$REMOTE_OTLP_PIPELINE_RECEIVER]

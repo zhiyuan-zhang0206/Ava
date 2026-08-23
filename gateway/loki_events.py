@@ -34,10 +34,13 @@ from gateway import loki_query_budget
 from shared import telemetry
 from shared.config import settings
 from shared.log import logger
-
-# The emitter's OTLP resource is the default (service.name=unknown_service);
-# every ava.telemetry log lands in this stream family.
-_SELECTOR = '{service_name="unknown_service"}'
+from shared.loki_index_labels import (
+    LokiReadEra,
+    LokiReadSlice,
+    escape_logql_label,
+    event_stream_selector,
+    split_index_label_window,
+)
 
 # Minimum-level ordering (lowercase, matches the events-table convention).
 _LEVELS = ("debug", "info", "warning", "error", "critical")
@@ -156,9 +159,7 @@ def _escape_label(value: Any) -> str:
     Backslashes and double quotes are escaped; literal newlines (which
     cannot appear inside a LogQL quoted string) collapse to a space.
     """
-    return (
-        str(value).replace("\\", "\\\\").replace('"', '\\"').replace("\n", " ").replace("\r", " ")
-    )
+    return escape_logql_label(value)
 
 
 _event_id = telemetry.event_id
@@ -197,6 +198,8 @@ def _parse_line(line: str, ts_ns: int) -> dict[str, Any] | None:
 
 def _build_logql(
     *,
+    era: LokiReadEra = LokiReadEra.LEGACY,
+    legacy_streams_only: bool = False,
     agent_id: int | None = None,
     exclude_agent_ids: list[int] | None = None,
     service_only: bool = False,
@@ -228,7 +231,14 @@ def _build_logql(
     count path needs it so `count_over_time` and the row-parse path agree
     (both exclude unparseable lines).
     """
-    parts: list[str] = [_SELECTOR]
+    parts = [
+        event_stream_selector(
+            era=era,
+            agent_id=agent_id,
+            event_names=event_names,
+            legacy_streams_only=legacy_streams_only,
+        )
+    ]
     if grep:
         parts.append(f'|= "{_escape_label(grep)}"')
     parts.append("| json")
@@ -298,46 +308,50 @@ def query_events(
     is ``"backward"`` (newest first) or ``"forward"`` (oldest first — the
     aggregate path uses it for per-agent first-event timestamps).
     """
-    logql = _build_logql(
-        agent_id=agent_id,
-        exclude_agent_ids=exclude_agent_ids,
-        service_only=service_only,
-        event_names=event_names,
-        level_min=level_min,
-        level=level,
-        grep=grep,
-        categories=categories,
-        machine=machine,
-        trace_id=trace_id,
-        attribute_filters=attribute_filters,
-    )
     window = _window(from_, to)
     if window is None:
         return [], False
-    start, end = window
-    start_ns = int(start.timestamp() * 1e9)
-    end_ns = int(end.timestamp() * 1e9)
-
     url = settings.observability.telemetry_loki_url.rstrip("/") + "/loki/api/v1/query_range"
-    params = {
-        "query": logql,
-        "limit": limit + offset + 1,  # +1 lookahead for has_more
-        "direction": direction,
-        "start": start_ns,
-        "end": end_ns,
-    }
-    payload = _get_json(url, params, endpoint="query_range")
 
+    slices = _read_slices(window)
     raw: list[tuple[int, str]] = []
-    for stream in payload.get("data", {}).get("result", []):
-        for ts_ns, line in stream.get("values", []):
-            raw.append((int(ts_ns), line))
+    for slice_ in slices:
+        logql = _build_logql(
+            era=slice_.era,
+            legacy_streams_only=len(slices) == 2 and slice_.era is LokiReadEra.LEGACY,
+            agent_id=agent_id,
+            exclude_agent_ids=exclude_agent_ids,
+            service_only=service_only,
+            event_names=event_names,
+            level_min=level_min,
+            level=level,
+            grep=grep,
+            categories=categories,
+            machine=machine,
+            trace_id=trace_id,
+            attribute_filters=attribute_filters,
+        )
+        params = {
+            "query": logql,
+            "limit": limit + offset + 1,  # +1 lookahead for has_more
+            "direction": direction,
+            "start": int(slice_.start.timestamp() * 1e9),
+            "end": int(slice_.end.timestamp() * 1e9),
+        }
+        payload = _get_json(url, params, endpoint="query_range")
+        for stream in payload.get("data", {}).get("result", []):
+            for ts_ns, line in stream.get("values", []):
+                raw.append((int(ts_ns), line))
     # query_range groups by stream; each stream is already direction-sorted,
     # but cross-stream ordering needs one merge pass.
     raw.sort(key=lambda pair: pair[0], reverse=(direction == "backward"))
 
+    seen: set[tuple[int, str]] = set()
     rows: list[dict[str, Any]] = []
     for ts_ns, line in raw:
+        if (ts_ns, line) in seen:
+            continue
+        seen.add((ts_ns, line))
         parsed = _parse_line(line, ts_ns)
         if parsed is not None:
             rows.append(parsed)
@@ -356,6 +370,18 @@ def _window(from_: datetime | None, to: datetime | None) -> tuple[datetime, date
     if start >= end:
         return None
     return start, end
+
+
+def _read_slices(window: tuple[datetime, datetime]) -> tuple[LokiReadSlice, ...]:
+    """The one event-time partition every Loki read uses during rollout."""
+
+    return split_index_label_window(*window)
+
+
+def _slice_duration_s(slice_: LokiReadSlice) -> int:
+    """Range-vector duration for one half-open rollout slice."""
+
+    return max(1, int((slice_.end - slice_.start).total_seconds()))
 
 
 def count_events(
@@ -388,35 +414,39 @@ def count_events(
     window = _window(from_, to)
     if window is None:
         return 0
-    start, end = window
-    pipeline = _build_logql(
-        agent_id=agent_id,
-        exclude_agent_ids=exclude_agent_ids,
-        service_only=service_only,
-        event_names=event_names,
-        level_min=level_min,
-        level=level,
-        grep=grep,
-        categories=categories,
-        machine=machine,
-        trace_id=trace_id,
-        attribute_filters=attribute_filters,
-        drop_json_errors=True,
-    )
-    duration_s = max(1, int((end - start).total_seconds()))
-    logql = f"sum(count_over_time(({pipeline})[{duration_s}s]))"
     url = settings.observability.telemetry_loki_url.rstrip("/") + "/loki/api/v1/query"
-    params = {"query": logql, "time": end.timestamp()}
-    payload = _get_json(url, params, endpoint="query")
-    result = payload.get("data", {}).get("result", [])
-    if not result:
-        return 0
-    value = result[0].get("value") or result[0].get("values", [None])[-1]
-    return int(value[1]) if value else 0
+    slices = _read_slices(window)
+    total = 0
+    for slice_ in slices:
+        pipeline = _build_logql(
+            era=slice_.era,
+            legacy_streams_only=len(slices) == 2 and slice_.era is LokiReadEra.LEGACY,
+            agent_id=agent_id,
+            exclude_agent_ids=exclude_agent_ids,
+            service_only=service_only,
+            event_names=event_names,
+            level_min=level_min,
+            level=level,
+            grep=grep,
+            categories=categories,
+            machine=machine,
+            trace_id=trace_id,
+            attribute_filters=attribute_filters,
+            drop_json_errors=True,
+        )
+        logql = f"sum(count_over_time(({pipeline})[{_slice_duration_s(slice_)}s]))"
+        payload = _get_json(url, {"query": logql, "time": slice_.end.timestamp()}, endpoint="query")
+        result = payload.get("data", {}).get("result", [])
+        if result:
+            value = result[0].get("value") or result[0].get("values", [None])[-1]
+            total += int(value[1]) if value else 0
+    return total
 
 
 def _agg_pipeline(
     *,
+    era: LokiReadEra = LokiReadEra.LEGACY,
+    legacy_streams_only: bool = False,
     agent_id: int | None = None,
     exclude_agent_ids: list[int] | None = None,
     service_only: bool = False,
@@ -434,7 +464,14 @@ def _agg_pipeline(
     flatten the nested `attributes` object into per-line labels and split
     the aggregation into per-line series), then one json stage per nested
     attribute filter."""
-    parts: list[str] = [_SELECTOR]
+    parts = [
+        event_stream_selector(
+            era=era,
+            agent_id=agent_id,
+            event_names=event_names,
+            legacy_streams_only=legacy_streams_only,
+        )
+    ]
     if grep:
         parts.append(f'|= "{_escape_label(grep)}"')
     if agent_id is not None:
@@ -469,14 +506,62 @@ def _agg_pipeline(
     return " ".join(parts)
 
 
+def _agg_pipelines(
+    window: tuple[datetime, datetime],
+    *,
+    agent_id: int | None = None,
+    exclude_agent_ids: list[int] | None = None,
+    service_only: bool = False,
+    event_names: list[str] | None = None,
+    level_min: str | None = None,
+    level: str | None = None,
+    grep: str | None = None,
+    categories: list[str] | None = None,
+    machine: str | None = None,
+    trace_id: str | None = None,
+    attribute_filters: dict[str, str] | None = None,
+) -> list[tuple[LokiReadSlice, str]]:
+    """Build the same aggregation pipeline once for every rollout slice."""
+
+    slices = _read_slices(window)
+    return [
+        (
+            slice_,
+            _agg_pipeline(
+                era=slice_.era,
+                legacy_streams_only=len(slices) == 2 and slice_.era is LokiReadEra.LEGACY,
+                agent_id=agent_id,
+                exclude_agent_ids=exclude_agent_ids,
+                service_only=service_only,
+                event_names=event_names,
+                level_min=level_min,
+                level=level,
+                grep=grep,
+                categories=categories,
+                machine=machine,
+                trace_id=trace_id,
+                attribute_filters=attribute_filters,
+            ),
+        )
+        for slice_ in slices
+    ]
+
+
+def _range_eras(window: tuple[datetime, datetime]) -> list[tuple[LokiReadEra, bool]]:
+    """Read eras for a range query without shifting its caller-owned grid."""
+
+    slices = _read_slices(window)
+    return [
+        (slice_.era, len(slices) == 2 and slice_.era is LokiReadEra.LEGACY) for slice_ in slices
+    ]
+
+
 def _quantile_aggregate(
     *,
-    pipeline: str,
+    pipelines: list[tuple[LokiReadSlice, str]],
     field: str,
     quantile: float,
     group_by: str | None,
-    duration_s: int,
-    end: datetime,
 ) -> float | list[tuple[str, float]]:
     """Quantile over a payload attribute. Loki's `quantile_over_time` is
     per-series and every event is its own series (`trace_id`/`span_id`), so
@@ -498,21 +583,26 @@ def _quantile_aggregate(
         else ""
     )
     extract = f'{group_stage} | json {_escape_label(field)}="attributes.{_escape_label(field)}" | __error__=""'
-    if group_by:
-        logql = (
-            f"sum by ({_escape_label(group_by)}, {_escape_label(field)}) ("
-            f"count_over_time(({pipeline}{extract})[{duration_s}s]))"
-        )
-    else:
-        logql = (
-            f"sum by ({_escape_label(field)}) ("
-            f"count_over_time(({pipeline}{extract})[{duration_s}s]))"
-        )
-    try:
-        dist = _query_instant(logql, end)
-    except httpx.HTTPStatusError as exc:
-        if _is_series_limit(exc):
-            dist = _query_instant(
+    dist: list[dict[str, Any]] = []
+    for slice_, base_pipeline in pipelines:
+        pipeline = base_pipeline
+        duration_s = _slice_duration_s(slice_)
+        if group_by:
+            logql = (
+                f"sum by ({_escape_label(group_by)}, {_escape_label(field)}) ("
+                f"count_over_time(({pipeline}{extract})[{duration_s}s]))"
+            )
+        else:
+            logql = (
+                f"sum by ({_escape_label(field)}) ("
+                f"count_over_time(({pipeline}{extract})[{duration_s}s]))"
+            )
+        try:
+            dist.extend(_query_instant(logql, slice_.end))
+        except httpx.HTTPStatusError as exc:
+            if not _is_series_limit(exc):
+                raise
+            bucketed = _query_instant(
                 _bucketed_distribution_logql(
                     pipeline=pipeline,
                     extract=extract,
@@ -520,11 +610,10 @@ def _quantile_aggregate(
                     group_by=group_by,
                     duration_s=duration_s,
                 ),
-                end,
+                slice_.end,
             )
-            _relabel_buckets(dist, field)
-        else:
-            raise
+            _relabel_buckets(bucketed, field)
+            dist.extend(bucketed)
     if group_by:
         groups: dict[str, list[tuple[float, int]]] = {}
         for series in dist:
@@ -542,6 +631,94 @@ def _quantile_aggregate(
         if value is not None:
             vals.append((float(metric.get(field, 0)), int(value)))
     return _weighted_quantile(quantile, sorted(vals))
+
+
+def _count_attribute_slices(
+    *, pipelines: list[tuple[LokiReadSlice, str]], group_by: str | None
+) -> float | list[tuple[str, float]]:
+    """Count each cutover slice and add scalar or group totals."""
+
+    group_stage = (
+        f' | json {_escape_label(group_by)}="attributes.{_escape_label(group_by)}"'
+        if group_by
+        else ""
+    )
+    totals: dict[str, float] = {}
+    scalar = 0.0
+    for slice_, pipeline in pipelines:
+        if group_by:
+            logql = (
+                f"sum by ({_escape_label(group_by)}) (count_over_time(({pipeline}{group_stage})"
+                f"[{_slice_duration_s(slice_)}s]))"
+            )
+        else:
+            logql = f"sum(count_over_time(({pipeline})[{_slice_duration_s(slice_)}s]))"
+        for series in _query_instant(logql, slice_.end):
+            value = _result_value(series)
+            if value is None:
+                continue
+            if group_by:
+                key = str(series.get("metric", {}).get(group_by, ""))
+                totals[key] = totals.get(key, 0.0) + value
+            else:
+                scalar += value
+    return list(totals.items()) if group_by else scalar
+
+
+def _numeric_attribute_slices(
+    *,
+    pipelines: list[tuple[LokiReadSlice, str]],
+    field: str,
+    agg: str,
+    group_by: str | None,
+    range_op: str,
+    cross_op: str,
+) -> float | list[tuple[str, float]]:
+    """Merge sum/min/max payload aggregates across non-overlapping slices."""
+
+    group_stage = (
+        f' | json {_escape_label(group_by)}="attributes.{_escape_label(group_by)}"'
+        if group_by
+        else ""
+    )
+    totals: dict[str, float] = {}
+    scalar: float | None = None
+    for slice_, pipeline in pipelines:
+        unwrap_pipe = (
+            f'{pipeline}{group_stage} | json {_escape_label(field)}="attributes.{_escape_label(field)}" '
+            f'| __error__="" | unwrap {_escape_label(field)}'
+        )
+        if group_by:
+            logql = (
+                f"{cross_op} by ({_escape_label(group_by)}) ("
+                f"{range_op}(({unwrap_pipe})[{_slice_duration_s(slice_)}s]))"
+            )
+        else:
+            logql = f"{cross_op}({range_op}(({unwrap_pipe})[{_slice_duration_s(slice_)}s]))"
+        for series in _query_instant(logql, slice_.end):
+            value = _result_value(series)
+            if value is None:
+                continue
+            if group_by:
+                key = str(series.get("metric", {}).get(group_by, ""))
+                prior = totals.get(key)
+                if prior is None:
+                    totals[key] = value
+                elif agg == "sum":
+                    totals[key] = prior + value
+                elif agg == "min":
+                    totals[key] = min(prior, value)
+                else:
+                    totals[key] = max(prior, value)
+            elif scalar is None:
+                scalar = value
+            elif agg == "sum":
+                scalar += value
+            elif agg == "min":
+                scalar = min(scalar, value)
+            else:
+                scalar = max(scalar, value)
+    return list(totals.items()) if group_by else (scalar if scalar is not None else 0.0)
 
 
 @overload
@@ -642,9 +819,8 @@ def attribute_aggregate(
     window = _window(from_, to)
     if window is None:
         return [] if group_by else 0.0
-    start, end = window
-
-    pipeline = _agg_pipeline(
+    pipelines = _agg_pipelines(
+        window,
         agent_id=agent_id,
         service_only=service_only,
         event_names=event_names,
@@ -656,35 +832,19 @@ def attribute_aggregate(
         trace_id=trace_id,
         attribute_filters=attribute_filters,
     )
-    duration_s = max(1, int((end - start).total_seconds()))
 
     if agg == "quantile":
         if quantile is None:
             raise ValueError("attribute_aggregate(agg='quantile') needs quantile")
         return _quantile_aggregate(
-            pipeline=pipeline,
+            pipelines=pipelines,
             field=field,
             quantile=quantile,
             group_by=group_by,
-            duration_s=duration_s,
-            end=end,
         )
 
     if agg == "count":
-        group_stage = (
-            f' | json {_escape_label(group_by)}="attributes.{_escape_label(group_by)}"'
-            if group_by
-            else ""
-        )
-        if group_by:
-            logql = (
-                f"sum by ({_escape_label(group_by)}) (count_over_time(({pipeline}{group_stage})"
-                f"[{duration_s}s]))"
-            )
-        else:
-            logql = f"sum(count_over_time(({pipeline})[{duration_s}s]))"
-        result = _query_instant(logql, end)
-        return _grouped_or_scalar(result, group_by)
+        return _count_attribute_slices(pipelines=pipelines, group_by=group_by)
 
     ops = {
         "sum": ("sum_over_time", "sum"),
@@ -694,24 +854,14 @@ def attribute_aggregate(
     if agg not in ops:
         raise ValueError(f"attribute_aggregate: unknown agg {agg!r}")
     range_op, cross_op = ops[agg]
-    group_stage = (
-        f' | json {_escape_label(group_by)}="attributes.{_escape_label(group_by)}"'
-        if group_by
-        else ""
+    return _numeric_attribute_slices(
+        pipelines=pipelines,
+        field=field,
+        agg=agg,
+        group_by=group_by,
+        range_op=range_op,
+        cross_op=cross_op,
     )
-    unwrap_pipe = (
-        f'{pipeline}{group_stage} | json {_escape_label(field)}="attributes.{_escape_label(field)}" '
-        f'| __error__="" | unwrap {_escape_label(field)}'
-    )
-    if group_by:
-        logql = (
-            f"{cross_op} by ({_escape_label(group_by)}) ("
-            f"{range_op}(({unwrap_pipe})[{duration_s}s]))"
-        )
-    else:
-        logql = f"{cross_op}({range_op}(({unwrap_pipe})[{duration_s}s]))"
-    result = _query_instant(logql, end)
-    return _grouped_or_scalar(result, group_by)
 
 
 def count_by_event_name(
@@ -732,20 +882,21 @@ def count_by_event_name(
     window = _window(from_, to)
     if window is None:
         return {}
-    start, end = window
-    pipeline = _agg_pipeline(
+    pipelines = _agg_pipelines(
+        window,
         agent_id=agent_id,
         event_names=event_names,
         categories=categories,
         attribute_filters=attribute_filters,
     )
-    duration_s = max(1, int((end - start).total_seconds()))
-    logql = f"sum by (event_name) (count_over_time(({pipeline})[{duration_s}s]))"
     counts: dict[str, int] = {}
-    for series in _query_instant(logql, end):
-        value = _result_value(series)
-        if value is not None:
-            counts[str(series.get("metric", {}).get("event_name", ""))] = int(value)
+    for slice_, pipeline in pipelines:
+        logql = f"sum by (event_name) (count_over_time(({pipeline})[{_slice_duration_s(slice_)}s]))"
+        for series in _query_instant(logql, slice_.end):
+            value = _result_value(series)
+            if value is not None:
+                key = str(series.get("metric", {}).get("event_name", ""))
+                counts[key] = counts.get(key, 0) + int(value)
     return counts
 
 
@@ -768,40 +919,40 @@ def attribute_distribution(
     window = _window(from_, to)
     if window is None:
         return []
-    start, end = window
-    pipeline = _agg_pipeline(
+    pipelines = _agg_pipelines(
+        window,
         agent_id=agent_id,
         event_names=event_names,
         categories=categories,
         attribute_filters=attribute_filters,
     )
     extract = f' | json {_escape_label(field)}="attributes.{_escape_label(field)}" | __error__=""'
-    duration_s = max(1, int((end - start).total_seconds()))
-    logql = (
-        f"sum by ({_escape_label(field)}) (count_over_time(({pipeline}{extract})[{duration_s}s]))"
-    )
-    try:
-        result = _query_instant(logql, end)
-    except httpx.HTTPStatusError as exc:
-        if not _is_series_limit(exc):
-            raise
-        result = _query_instant(
-            _bucketed_distribution_logql(
-                pipeline=pipeline,
-                extract=extract,
-                field=field,
-                group_by=None,
-                duration_s=duration_s,
-            ),
-            end,
-        )
-        _relabel_buckets(result, field)
-    out: list[tuple[float, int]] = []
-    for series in result:
-        value = _result_value(series)
-        if value is not None:
-            out.append((float(series.get("metric", {}).get(field, 0)), int(value)))
-    return out
+    totals: dict[float, int] = {}
+    for slice_, pipeline in pipelines:
+        duration_s = _slice_duration_s(slice_)
+        logql = f"sum by ({_escape_label(field)}) (count_over_time(({pipeline}{extract})[{duration_s}s]))"
+        try:
+            result = _query_instant(logql, slice_.end)
+        except httpx.HTTPStatusError as exc:
+            if not _is_series_limit(exc):
+                raise
+            result = _query_instant(
+                _bucketed_distribution_logql(
+                    pipeline=pipeline,
+                    extract=extract,
+                    field=field,
+                    group_by=None,
+                    duration_s=duration_s,
+                ),
+                slice_.end,
+            )
+            _relabel_buckets(result, field)
+        for series in result:
+            value = _result_value(series)
+            if value is not None:
+                key = float(series.get("metric", {}).get(field, 0))
+                totals[key] = totals.get(key, 0) + int(value)
+    return sorted(totals.items())
 
 
 def _is_series_limit(exc: httpx.HTTPStatusError) -> bool:
@@ -925,22 +1076,53 @@ def _weighted_quantile(q: float, vals: list[tuple[float, int]]) -> float:
     return vals[-1][0]
 
 
-def _grouped_or_scalar(
-    result: list[dict[str, Any]], group_by: str | None
-) -> float | list[tuple[str, float]]:
-    """Unpack an instant-query result into a scalar or [(group, value)] list."""
-    if group_by:
-        out: list[tuple[str, float]] = []
-        for series in result:
-            metric = series.get("metric", {})
-            value = _result_value(series)
-            if value is not None:
-                out.append((str(metric.get(group_by, "")), value))
-        return out
-    if not result:
-        return 0.0
-    value = _result_value(result[0])
-    return value if value is not None else 0.0
+def _fetch_projected_slice(
+    *,
+    slice_: LokiReadSlice,
+    pipeline: str,
+    start_ns: int,
+    end_ns: int,
+    limit_per_slice: int,
+    out: list[tuple[int, int | None, str]],
+) -> None:
+    """Append one projected stream slice, bisecting a full Loki response."""
+
+    def fetch(s0_ns: int, e0_ns: int, depth: int = 0) -> None:
+        """Fetch [s0_ns, e0_ns) backward; a full page is bisected."""
+        params = {
+            "query": pipeline,
+            "limit": limit_per_slice,
+            "direction": "backward",
+            "start": s0_ns,
+            "end": e0_ns,
+        }
+        payload = _get_json(
+            settings.observability.telemetry_loki_url.rstrip("/") + "/loki/api/v1/query_range",
+            params,
+            endpoint="query_range",
+        )
+        rows: list[tuple[int, int | None, str]] = []
+        for stream in payload.get("data", {}).get("result", []):
+            agent_label = "agent_id" if slice_.era is LokiReadEra.INDEXED else "_projected_agent_id"
+            stream_labels = stream.get("stream", {})
+            aid_raw = stream_labels.get(agent_label, stream_labels.get("agent_id", ""))
+            aid = int(aid_raw) if aid_raw else None
+            for ts_ns, line in stream.get("values", []):
+                rows.append((int(ts_ns), aid, line))
+        rows.sort(key=lambda r: r[0], reverse=True)
+        if len(rows) >= limit_per_slice:
+            if depth >= 8 or e0_ns - s0_ns <= 1_000_000_000:
+                raise RuntimeError(
+                    f"query_projected_lines: slice [{s0_ns}, {e0_ns}) still "
+                    f"holds >= {limit_per_slice} rows at the bisection floor"
+                )
+            mid = (s0_ns + e0_ns) // 2
+            fetch(s0_ns, mid, depth + 1)
+            fetch(mid, e0_ns, depth + 1)
+            return
+        out.extend(rows)
+
+    fetch(start_ns, end_ns)
 
 
 def query_projected_lines(
@@ -975,10 +1157,14 @@ def query_projected_lines(
     labels ("" when absent). Duplicate boundary rows across slices are
     dropped; the result is sorted by ts_ns ascending.
     """
+    window = _window(from_, to)
+    if window is None:
+        return []
     # _agg_pipeline (not _build_logql): the plain `| json` stage would
     # flatten every line into its own series (trace_id/span_id per line) and
     # the row fetch would crawl — same reason attribute_aggregate avoids it.
-    pipeline = _agg_pipeline(
+    pipelines = _agg_pipelines(
+        window,
         agent_id=agent_id,
         exclude_agent_ids=exclude_agent_ids,
         service_only=service_only,
@@ -991,55 +1177,11 @@ def query_projected_lines(
         trace_id=trace_id,
         attribute_filters=attribute_filters,
     )
-    if fields:
-        json_stage = ", ".join(
-            f'{_escape_label(f)}="attributes.{_escape_label(f)}"' for f in fields
-        )
-        pipeline += f" | json {json_stage}"
-    pipeline += f' | line_format "{template}"'
-    window = _window(from_, to)
-    if window is None:
-        return []
     start, end = window
     start_ns = int(start.timestamp() * 1e9)
     end_ns = int(end.timestamp() * 1e9)
 
     out: list[tuple[int, int | None, str]] = []
-
-    def fetch(s0_ns: int, e0_ns: int, depth: int = 0) -> None:
-        """Fetch [s0_ns, e0_ns) backward; a slice that fills its limit is
-        bisected, and a slice still truncated at the bisection floor raises —
-        silently dropping rows would skew the caller's reduction."""
-        params = {
-            "query": pipeline,
-            "limit": limit_per_slice,
-            "direction": "backward",
-            "start": s0_ns,
-            "end": e0_ns,
-        }
-        payload = _get_json(
-            settings.observability.telemetry_loki_url.rstrip("/") + "/loki/api/v1/query_range",
-            params,
-            endpoint="query_range",
-        )
-        rows: list[tuple[int, int | None, str]] = []
-        for stream in payload.get("data", {}).get("result", []):
-            aid_raw = stream.get("stream", {}).get("agent_id", "")
-            aid = int(aid_raw) if aid_raw else None
-            for ts_ns, line in stream.get("values", []):
-                rows.append((int(ts_ns), aid, line))
-        rows.sort(key=lambda r: r[0], reverse=True)
-        if len(rows) >= limit_per_slice:
-            if depth >= 8 or e0_ns - s0_ns <= 1_000_000_000:
-                raise RuntimeError(
-                    f"query_projected_lines: slice [{s0_ns}, {e0_ns}) still "
-                    f"holds >= {limit_per_slice} rows at the bisection floor"
-                )
-            mid = (s0_ns + e0_ns) // 2
-            fetch(s0_ns, mid, depth + 1)
-            fetch(mid, e0_ns, depth + 1)
-            return
-        out.extend(rows)
 
     # Estimate slice count from an exact count (same filter set), split the
     # window evenly; a slice that returns the full limit is bisected.
@@ -1062,13 +1204,34 @@ def query_projected_lines(
     except Exception:
         n = 0
     n_slices = max(1, min(256, (n + limit_per_slice - 1) // limit_per_slice))
-    # Even row-based split (stable when density is uniform: one pass).
-    for i in range(n_slices):
-        s = start_ns + (end_ns - start_ns) * i // n_slices
-        e = start_ns + (end_ns - start_ns) * (i + 1) // n_slices
-        if i == n_slices - 1:
-            e = end_ns
-        fetch(s, e)
+    for slice_, base_pipeline in pipelines:
+        pipeline = base_pipeline
+        if slice_.era is LokiReadEra.LEGACY:
+            # Legacy streams expose agent_id only inside the JSON body. Extract
+            # it under a temporary label before line_format replaces that body.
+            pipeline += ' | json _projected_agent_id="agent_id"'
+        if fields:
+            json_stage = ", ".join(
+                f'{_escape_label(f)}="attributes.{_escape_label(f)}"' for f in fields
+            )
+            pipeline += f" | json {json_stage}"
+        pipeline += f' | line_format "{template}"'
+        slice_start_ns = int(slice_.start.timestamp() * 1e9)
+        slice_end_ns = int(slice_.end.timestamp() * 1e9)
+        # Even row-based split (stable when density is uniform: one pass).
+        for i in range(n_slices):
+            s = slice_start_ns + (slice_end_ns - slice_start_ns) * i // n_slices
+            e = slice_start_ns + (slice_end_ns - slice_start_ns) * (i + 1) // n_slices
+            if i == n_slices - 1:
+                e = slice_end_ns
+            _fetch_projected_slice(
+                slice_=slice_,
+                pipeline=pipeline,
+                start_ns=s,
+                end_ns=e,
+                limit_per_slice=limit_per_slice,
+                out=out,
+            )
     # Dedup (slice boundaries can repeat), window filter, ascending sort.
     seen: set[tuple[int, str]] = set()
     dedup: list[tuple[int, int | None, str]] = []
@@ -1107,8 +1270,8 @@ def count_grouped(
     window = _window(from_, to)
     if window is None:
         return {}
-    start, end = window
-    pipeline = _agg_pipeline(
+    pipelines = _agg_pipelines(
+        window,
         agent_id=agent_id,
         exclude_agent_ids=exclude_agent_ids,
         service_only=service_only,
@@ -1122,20 +1285,20 @@ def count_grouped(
         attribute_filters=attribute_filters,
     )
     key = _escape_label(group_by)
-    if from_attributes:
-        pipeline += f' | json {key}="attributes.{key}"'
-    duration_s = max(1, int((end - start).total_seconds()))
-    logql = f"sum by ({key}) (count_over_time(({pipeline})[{duration_s}s]))"
-    result = _query_instant(logql, end)
     out: dict[str, int] = {}
-    for series in result:
-        value = _result_value(series)
-        if value is None:
-            continue
-        k = str(series.get("metric", {}).get(group_by, ""))
-        if exclude_empty and k == "":
-            continue
-        out[k] = int(value)
+    for slice_, base_pipeline in pipelines:
+        pipeline = base_pipeline
+        if from_attributes:
+            pipeline += f' | json {key}="attributes.{key}"'
+        logql = f"sum by ({key}) (count_over_time(({pipeline})[{_slice_duration_s(slice_)}s]))"
+        for series in _query_instant(logql, slice_.end):
+            value = _result_value(series)
+            if value is None:
+                continue
+            k = str(series.get("metric", {}).get(group_by, ""))
+            if exclude_empty and k == "":
+                continue
+            out[k] = out.get(k, 0) + int(value)
     return out
 
 
@@ -1165,34 +1328,43 @@ def count_events_series(
     if window is None:
         return {}
     start, end = window
-    pipeline = _agg_pipeline(event_names=event_names, attribute_filters=attribute_filters)
     key = _escape_label(group_by) if group_by else None
-    if group_by is not None and from_attributes:
-        pipeline += f' | json {key}="attributes.{key}"'
     step = max(1, step_s)
-    if key:
-        logql = f"sum by ({key}) (count_over_time(({pipeline})[{step}s]))"
-    else:
-        logql = f"sum(count_over_time(({pipeline})[{step}s]))"
     url = settings.observability.telemetry_loki_url.rstrip("/") + "/loki/api/v1/query_range"
-    params = {
-        "query": logql,
-        "start": start.timestamp(),
-        "end": end.timestamp(),
-        "step": f"{step}s",
-    }
-    payload = _get_json(url, params, endpoint="query_range")
-    out: dict[str, list[tuple[int, int]]] = {"": []} if group_by is None else {}
-    for series in payload.get("data", {}).get("result", []):
-        k = str(series.get("metric", {}).get(group_by, "")) if group_by else ""
-        values: list[tuple[int, int]] = []
-        for ts, value in series.get("values", []):
-            try:
-                values.append((int(float(ts)), int(float(value))))
-            except (TypeError, ValueError):
-                continue
-        out.setdefault(k, []).extend(values)
-    return out
+    values_by_group: dict[str, dict[int, int]] = {"": {}} if group_by is None else {}
+    for era, legacy_streams_only in _range_eras(window):
+        pipeline = _agg_pipeline(
+            era=era,
+            legacy_streams_only=legacy_streams_only,
+            event_names=event_names,
+            attribute_filters=attribute_filters,
+        )
+        if group_by is not None and from_attributes:
+            pipeline += f' | json {key}="attributes.{key}"'
+        if key:
+            logql = f"sum by ({key}) (count_over_time(({pipeline})[{step}s]))"
+        else:
+            logql = f"sum(count_over_time(({pipeline})[{step}s]))"
+        payload = _get_json(
+            url,
+            {
+                "query": logql,
+                "start": start.timestamp(),
+                "end": end.timestamp(),
+                "step": f"{step}s",
+            },
+            endpoint="query_range",
+        )
+        for series in payload.get("data", {}).get("result", []):
+            group = str(series.get("metric", {}).get(group_by, "")) if group_by else ""
+            totals = values_by_group.setdefault(group, {})
+            for ts, value in series.get("values", []):
+                try:
+                    ts_s = int(float(ts))
+                    totals[ts_s] = totals.get(ts_s, 0) + int(float(value))
+                except (TypeError, ValueError):
+                    continue
+    return {group: sorted(values.items()) for group, values in values_by_group.items()}
 
 
 def attribute_max_series(
@@ -1217,25 +1389,33 @@ def attribute_max_series(
     if window is None:
         return []
     start, end = window
-    pipeline = _agg_pipeline(event_names=event_names, attribute_filters=attribute_filters)
     key = _escape_label(field)
     step = max(1, step_s)
-    logql = (
-        f'max(max_over_time(({pipeline} | json {key}="attributes.{key}" | unwrap {key})[{step}s]))'
-    )
     url = settings.observability.telemetry_loki_url.rstrip("/") + "/loki/api/v1/query_range"
-    params = {
-        "query": logql,
-        "start": start.timestamp(),
-        "end": end.timestamp(),
-        "step": f"{step}s",
-    }
-    payload = _get_json(url, params, endpoint="query_range")
-    out: list[tuple[int, float]] = []
-    for series in payload.get("data", {}).get("result", []):
-        for ts, value in series.get("values", []):
-            try:
-                out.append((int(float(ts)), float(value)))
-            except (TypeError, ValueError):
-                continue
-    return out
+    maxima: dict[int, float] = {}
+    for era, legacy_streams_only in _range_eras(window):
+        pipeline = _agg_pipeline(
+            era=era,
+            legacy_streams_only=legacy_streams_only,
+            event_names=event_names,
+            attribute_filters=attribute_filters,
+        )
+        logql = f'max(max_over_time(({pipeline} | json {key}="attributes.{key}" | unwrap {key})[{step}s]))'
+        payload = _get_json(
+            url,
+            {
+                "query": logql,
+                "start": start.timestamp(),
+                "end": end.timestamp(),
+                "step": f"{step}s",
+            },
+            endpoint="query_range",
+        )
+        for series in payload.get("data", {}).get("result", []):
+            for ts, value in series.get("values", []):
+                try:
+                    ts_s = int(float(ts))
+                    maxima[ts_s] = max(maxima.get(ts_s, float("-inf")), float(value))
+                except (TypeError, ValueError):
+                    continue
+    return sorted(maxima.items())

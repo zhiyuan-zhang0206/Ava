@@ -47,14 +47,16 @@ import psycopg
 from psycopg import sql
 
 from shared.log import logger
+from shared.loki_index_labels import (
+    LokiReadEra,
+    escape_logql_label,
+    event_stream_selector,
+    split_index_label_window,
+)
 
 # First fully-retained day: Loki prunes past retention_period (168h), so a
 # day is recomputable only when its 00:00 start is still inside retention.
 _LOKI_RETENTION = timedelta(hours=168)
-
-# The OTLP log stream selector. Single catch-all until the logs-side OTel
-# Resource lands (its coordinated change rewrites every selector site).
-_SELECTOR = '{service_name="unknown_service"}'
 
 _HTTP_TIMEOUT_S = 60.0
 
@@ -103,30 +105,58 @@ class RollupResult:
 
 # ── LogQL builders ───────────────────────────────────────────────────────────
 
-_LLM_PIPE = f'{_SELECTOR} | agent_id!="" | category=~"telemetry|log" | event_name="llm_usage"'
-_TURN_PIPE = f'{_SELECTOR} | agent_id!="" | category=~"telemetry|log" | event_name="turn_end"'
-_EXEC_OK_PIPE = f'{_SELECTOR} | agent_id!="" | event_name="exec"'
-# exec_failed = every exec outcome other than plain 'exec' (exec_failed /
-# exec(timeout) / exec_cancelled; the prefix regex also counts legacy
-# exec_thread_stuck rows for historical continuity) — mirrors the old SQL
-# LIKE pair.
-_EXEC_FAILED_PIPE = f'{_SELECTOR} | agent_id!="" | event_name=~"exec_.+|exec\\\\(.*"'
-
 _DAY_S = 86400
 
 
-def _tokens_queries() -> dict[str, str]:
+def _event_pipeline(
+    *,
+    era: LokiReadEra,
+    event_names: list[str],
+    telemetry_only: bool,
+    legacy_streams_only: bool = False,
+) -> str:
+    """One rollup event family, selective only after resource-label cutover."""
+
+    selector = event_stream_selector(
+        era=era,
+        agent_id=None,
+        event_names=event_names,
+        legacy_streams_only=legacy_streams_only,
+    )
+    parts = [selector, '| agent_id!=""']
+    if telemetry_only:
+        parts.append('| category=~"telemetry|log"')
+    if len(event_names) == 1:
+        parts.append(f'| event_name="{escape_logql_label(event_names[0])}"')
+    else:
+        joined = "|".join(escape_logql_label(event_name) for event_name in event_names)
+        parts.append(f'| event_name=~"{joined}"')
+    return " ".join(parts)
+
+
+def _tokens_queries(
+    *,
+    era: LokiReadEra = LokiReadEra.LEGACY,
+    duration_s: int = _DAY_S,
+    legacy_streams_only: bool = False,
+) -> dict[str, str]:
     """The per-(agent, model) instant queries for one day's tokens/cost row.
 
     Structured-metadata dims (agent_id / event_name / category) filter
     directly; `model` and each numeric field need their own single-extraction
     `| json` stage (multiple extractions in one stage are a parse error)."""
+    llm = _event_pipeline(
+        era=era,
+        event_names=["llm_usage"],
+        telemetry_only=True,
+        legacy_streams_only=legacy_streams_only,
+    )
     model = ' | json model="attributes.model"'
     out = {
-        "calls": f"sum by (agent_id, model) (count_over_time(({_LLM_PIPE}{model})[{_DAY_S}s]))",
+        "calls": f"sum by (agent_id, model) (count_over_time(({llm}{model})[{duration_s}s]))",
         "costed_calls": (
-            f"sum by (agent_id, model) (count_over_time(({_LLM_PIPE}{model}"
-            f' | json cost_usd="attributes.cost_usd" | cost_usd!="")[{_DAY_S}s]))'
+            f"sum by (agent_id, model) (count_over_time(({llm}{model}"
+            f' | json cost_usd="attributes.cost_usd" | cost_usd!="")[{duration_s}s]))'
         ),
     }
     for name, field in (
@@ -137,27 +167,50 @@ def _tokens_queries() -> dict[str, str]:
         ("cost_usd", "cost_usd"),
     ):
         out[name] = (
-            f"sum by (agent_id, model) (sum_over_time(({_LLM_PIPE}{model}"
+            f"sum by (agent_id, model) (sum_over_time(({llm}{model}"
             f' | json {field}="attributes.{field}" | __error__="" | unwrap {field})'
-            f"[{_DAY_S}s]))"
+            f"[{duration_s}s]))"
         )
     return out
 
 
-def _metrics_queries() -> dict[str, str]:
+def _metrics_queries(
+    *,
+    era: LokiReadEra = LokiReadEra.LEGACY,
+    duration_s: int = _DAY_S,
+    legacy_streams_only: bool = False,
+) -> dict[str, str]:
     """The per-agent instant queries for one day's turn/exec metrics row."""
+    turn = _event_pipeline(
+        era=era,
+        event_names=["turn_end"],
+        telemetry_only=True,
+        legacy_streams_only=legacy_streams_only,
+    )
+    exec_ok = _event_pipeline(
+        era=era,
+        event_names=["exec"],
+        telemetry_only=False,
+        legacy_streams_only=legacy_streams_only,
+    )
+    exec_failed = _event_pipeline(
+        era=era,
+        event_names=["exec_.+", "exec\\(.*"],
+        telemetry_only=False,
+        legacy_streams_only=legacy_streams_only,
+    )
     dur = ' | json duration_seconds="attributes.duration_seconds" | __error__="" | unwrap duration_seconds'
     return {
-        "turn_total": f"sum by (agent_id) (count_over_time(({_TURN_PIPE})[{_DAY_S}s]))",
+        "turn_total": f"sum by (agent_id) (count_over_time(({turn})[{duration_s}s]))",
         "turn_ok": (
-            f"sum by (agent_id) (count_over_time(({_TURN_PIPE}"
-            f' | json ok="attributes.ok" | ok="true")[{_DAY_S}s]))'
+            f"sum by (agent_id) (count_over_time(({turn}"
+            f' | json ok="attributes.ok" | ok="true")[{duration_s}s]))'
         ),
-        "turn_dur_sum": f"sum by (agent_id) (sum_over_time(({_TURN_PIPE}{dur})[{_DAY_S}s]))",
-        "turn_dur_min": f"min by (agent_id) (min_over_time(({_TURN_PIPE}{dur})[{_DAY_S}s]))",
-        "turn_dur_max": f"max by (agent_id) (max_over_time(({_TURN_PIPE}{dur})[{_DAY_S}s]))",
-        "exec_ok": f"sum by (agent_id) (count_over_time(({_EXEC_OK_PIPE})[{_DAY_S}s]))",
-        "exec_failed": f"sum by (agent_id) (count_over_time(({_EXEC_FAILED_PIPE})[{_DAY_S}s]))",
+        "turn_dur_sum": f"sum by (agent_id) (sum_over_time(({turn}{dur})[{duration_s}s]))",
+        "turn_dur_min": f"min by (agent_id) (min_over_time(({turn}{dur})[{duration_s}s]))",
+        "turn_dur_max": f"max by (agent_id) (max_over_time(({turn}{dur})[{duration_s}s]))",
+        "exec_ok": f"sum by (agent_id) (count_over_time(({exec_ok})[{duration_s}s]))",
+        "exec_failed": f"sum by (agent_id) (count_over_time(({exec_failed})[{duration_s}s]))",
     }
 
 
@@ -183,13 +236,37 @@ def _query_instant(logql: str, at: datetime) -> list[tuple[dict[str, str], float
 
 def _day_aggregates(day: date) -> tuple[list[TokensRow], list[MetricsRow]]:
     """Aggregate one whole UTC day from Loki (the test seam — patch me)."""
+    day_start = datetime.combine(day, time.min, tzinfo=UTC)
     day_end = datetime.combine(day + timedelta(days=1), time.min, tzinfo=UTC)
 
     tok: dict[tuple[int, str], dict[str, float]] = {}
-    for name, logql in _tokens_queries().items():
-        for labels, value in _query_instant(logql, day_end):
-            key = (int(labels["agent_id"]), labels.get("model", ""))
-            tok.setdefault(key, {})[name] = value
+    met: dict[int, dict[str, float]] = {}
+    slices = split_index_label_window(day_start, day_end)
+    for slice_ in slices:
+        duration_s = max(1, int((slice_.end - slice_.start).total_seconds()))
+        legacy_streams_only = len(slices) == 2 and slice_.era is LokiReadEra.LEGACY
+        for name, logql in _tokens_queries(
+            era=slice_.era,
+            duration_s=duration_s,
+            legacy_streams_only=legacy_streams_only,
+        ).items():
+            for labels, value in _query_instant(logql, slice_.end):
+                key = (int(labels["agent_id"]), labels.get("model", ""))
+                values = tok.setdefault(key, {})
+                values[name] = values.get(name, 0.0) + value
+        for name, logql in _metrics_queries(
+            era=slice_.era,
+            duration_s=duration_s,
+            legacy_streams_only=legacy_streams_only,
+        ).items():
+            for labels, value in _query_instant(logql, slice_.end):
+                values = met.setdefault(int(labels["agent_id"]), {})
+                if name == "turn_dur_min":
+                    values[name] = min(values.get(name, value), value)
+                elif name == "turn_dur_max":
+                    values[name] = max(values.get(name, value), value)
+                else:
+                    values[name] = values.get(name, 0.0) + value
     tokens_rows = [
         TokensRow(
             agent_id=agent_id,
@@ -206,10 +283,6 @@ def _day_aggregates(day: date) -> tuple[list[TokensRow], list[MetricsRow]]:
         for (agent_id, model), v in tok.items()
     ]
 
-    met: dict[int, dict[str, float]] = {}
-    for name, logql in _metrics_queries().items():
-        for labels, value in _query_instant(logql, day_end):
-            met.setdefault(int(labels["agent_id"]), {})[name] = value
     metrics_rows = [
         MetricsRow(
             agent_id=agent_id,
