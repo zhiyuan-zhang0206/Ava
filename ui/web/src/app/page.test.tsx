@@ -189,9 +189,9 @@ vi.mock("@/components/header-bar", () => ({
     children?: React.ReactNode;
     maxWidthCss?: string;
   }) => (
-    <div data-testid="header-bar" data-label={label} style={maxWidthCss ? { maxWidth: maxWidthCss } : undefined}>
+    <header data-testid="header-bar" data-label={label} style={maxWidthCss ? { maxWidth: maxWidthCss } : undefined}>
       {children}
-    </div>
+    </header>
   ),
 }));
 
@@ -211,14 +211,12 @@ vi.mock("@/components/composer", () => ({
     onSend,
     children,
     details,
-    inspect,
     maxWidthCss,
   }: {
     mode: string;
     onSend: (s: string, imageUrls: string[], clientMessageId: string) => Promise<boolean>;
     children?: React.ReactNode;
     details?: React.ReactNode;
-    inspect?: React.ReactNode;
     maxWidthCss?: string;
   }) => (
     <div
@@ -232,7 +230,6 @@ vi.mock("@/components/composer", () => ({
       <button data-testid="composer-send-plain" onClick={() => void onSend("plain text", [], "test-client-message-id")}>send plain</button>
       <button data-testid="composer-send-multi-image" onClick={() => void onSend("/compact /update", ["/api/agents/5/uploads/a.png"], "test-client-message-id")}>send multi image</button>
       {details}
-      {inspect}
       {children}
     </div>
   ),
@@ -434,7 +431,7 @@ describe("HomePage top-level render", () => {
   });
 
   // User ruling 2026-08-23: desktop is a fixed side panel and mobile is a
-  // full-screen overlay. Both start closed and open only via the composer's
+  // full-screen overlay. Both start closed and open only via the header's
   // inspector toggle — mount never touches either open-state source.
   it("mount does not auto-open the inspector", () => {
     hooksState.isLarge = false;
@@ -452,7 +449,7 @@ describe("HomePage top-level render", () => {
     expect(hooksState.setMobileInspectorOpen).not.toHaveBeenCalled();
   });
 
-  it("renders an open inspector as HomeContent's final sibling inside main", () => {
+  it("renders an open inspector as HomeContent's final sibling with its toggle in the header", () => {
     hooksState.activeId = 5;
     hooksState.agents = [makeAgent({ agent_id: 5 })];
     hooksState.settings = {
@@ -468,9 +465,9 @@ describe("HomePage top-level render", () => {
     expect(panel.parentElement).toBe(main);
     expect(main.lastElementChild).toBe(panel);
     expect(panel.previousElementSibling).toBe(homeContent);
-    expect(
-      screen.getByTestId("composer").contains(screen.getByTestId("inspector-toggle")),
-    ).toBe(true);
+    const toggle = screen.getByTestId("inspector-toggle");
+    expect(screen.getByRole("banner").contains(toggle)).toBe(true);
+    expect(screen.getByTestId("composer").contains(toggle)).toBe(false);
   });
 });
 

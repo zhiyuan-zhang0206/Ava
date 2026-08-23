@@ -291,9 +291,8 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
   );
 }
 
-/** Inspector toggle button — opens/closes the panel. It remains in the
- *  composer's top-right corner under the 2026-08-23 ruling, which supersedes
- *  the 2026-08-05 floating-panel layout on desktop. Closed means no
+/** Inspector toggle button — opens/closes the panel from the HeaderBar's
+ *  children slot at the top-right of the content column. Closed means no
  *  inspect traffic: the panel's enabled query performs the first fetch only
  *  after this button opens it. */
 export function InspectorToggle() {
@@ -598,16 +597,11 @@ function TpsSection({ inspect }: { inspect: AgentInspect }) {
 }
 
 /**
- * Liveness — one merged section (Task #1195, user ruling 2026-08-12): the
- * gateway-owned derived liveness state (Task #1174) plus the agent's birth
- * and idle-heartbeat state. 2×2 grid: row 1 = liveness state + birth; row 2 =
- * the heartbeat cells (next nudge / last pause). Heartbeat's icon carries the
- * "Liveness" title; the "every N" badge and the old "Last judged" cell are
- * dropped (the interval badge reads as "every 5 minutes").
- * 'online' = the machine is reachable AND (for running/idling) the process
- * lease is alive; 'offline' = the machine dropped or the process died (the
- * agent list shows a grey dot); 'unknown' = the gateway has not judged this
- * row yet.
+ * Liveness — one merged section (Task #1195, user ruling 2026-08-12) with
+ * three cells: agent birth, next heartbeat, and last pause. The gateway-owned
+ * derived liveness state only colors the HeartPulse icon when offline because
+ * the timeline header already displays agent status. The "every N" badge and
+ * old "Last judged" cell remain omitted.
  */
 function LivenessSection({ inspect }: { inspect: AgentInspect }) {
   const { liveness_state: state, heartbeat, spawned_at } = inspect;
@@ -617,7 +611,6 @@ function LivenessSection({ inspect }: { inspect: AgentInspect }) {
   return (
     <Section icon={<HeartPulse className={cn("size-3", offline && "text-destructive")} />} title="Liveness">
       <div className="grid grid-cols-2 gap-1">
-        <Metric label="State" value={state} />
         <Metric
           label="Birth"
           value={formatRelative(spawned_at)}

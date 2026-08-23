@@ -268,6 +268,7 @@ describe("InspectorPanel", () => {
     // title; the "every 5m" interval badge and the old "Last judged" cell are
     // dropped; the heartbeat cells stay
     expect(screen.getByText("Liveness")).toBeTruthy();
+    expect(screen.queryByText("State")).toBeNull();
     expect(screen.queryByText("every 5m")).toBeNull();
     expect(screen.getByText("never paused")).toBeTruthy();
   });
@@ -958,24 +959,24 @@ describe("InspectorPanel manual refresh", () => {
 
 
 describe("InspectorPanel liveness (merged section, Task #1195)", () => {
-  it("renders the merged section with the state cell and no last-judged cell", async () => {
+  it("omits the redundant online state cell and the old last-judged cell", async () => {
     getAgentInspect.mockResolvedValue(
       fixture({ liveness_state: "online", last_probe_at: "2026-08-12T05:00:00Z" }),
     );
     render(<InspectorPanel agentId={1} />);
     await waitFor(() => expect(screen.getByText("Liveness")).toBeTruthy());
-    expect(screen.getAllByText("online").length).toBeGreaterThan(0);
+    expect(screen.queryByText("online")).toBeNull();
     // "Last judged" deleted (user ruling 2026-08-12, Task #1195)
     expect(screen.queryByText("Last judged")).toBeNull();
   });
 
-  it("renders offline state without the old never-judged fallback", async () => {
+  it("uses offline state without rendering a redundant state cell", async () => {
     getAgentInspect.mockResolvedValue(
       fixture({ liveness_state: "offline", last_probe_at: null }),
     );
     render(<InspectorPanel agentId={1} />);
     await waitFor(() => expect(screen.getByText("Liveness")).toBeTruthy());
-    expect(screen.getAllByText("offline").length).toBeGreaterThan(0);
+    expect(screen.queryByText("offline")).toBeNull();
     expect(screen.queryByText("never")).toBeNull();
   });
 });

@@ -1445,14 +1445,13 @@ describe("Composer sessionStorage draft persistence", () => {
   });
 });
 
-describe("Composer top-right slots (details + inspect)", () => {
-  it("renders the details + inspect slots at the right edge of the meta row", () => {
+describe("Composer top-right details slot", () => {
+  it("renders the details slot at the right edge of the meta row", () => {
     renderComposer(
-      <Composer {...baseProps} mode="idle" details={<button type="button">DETAILS</button>} inspect={<button type="button">INSPECT</button>} />,
+      <Composer {...baseProps} mode="idle" details={<button type="button">DETAILS</button>} />,
     );
     expect(screen.getByRole("button", { name: "DETAILS" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "INSPECT" })).toBeTruthy();
-    // Both sit in the meta row, right-aligned (ml-auto cluster).
+    // The selector sits in the meta row, right-aligned (ml-auto cluster).
     const metaRow = screen.getByTestId("composer-meta").closest("div");
     const cluster = screen.getByRole("button", { name: "DETAILS" }).parentElement!;
     expect(cluster.className).toContain("ml-auto");
@@ -1461,6 +1460,7 @@ describe("Composer top-right slots (details + inspect)", () => {
 
   it("renders no right-edge cluster when neither slot is given", () => {
     renderComposer(<Composer {...baseProps} mode="idle" />);
-    expect(screen.queryByTestId("composer-meta")).toBeTruthy();
+    const metaRow = screen.getByTestId("composer-meta").closest("div");
+    expect(metaRow?.querySelector(".ml-auto")).toBeNull();
   });
 });
