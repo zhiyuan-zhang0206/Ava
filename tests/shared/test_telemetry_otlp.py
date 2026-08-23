@@ -77,7 +77,8 @@ def otlp_backend(monkeypatch):
 
     log_exporter = InMemoryLogRecordExporter()
     logger_provider = LoggerProvider()
-    logger_provider.add_log_record_processor(SimpleLogRecordProcessor(log_exporter))
+    resource_exporter: Any = telemetry_otlp._EventDimensionResourceExporter(log_exporter)
+    logger_provider.add_log_record_processor(SimpleLogRecordProcessor(resource_exporter))
     metric_reader = InMemoryMetricReader()
     metric_provider = MeterProvider(metric_readers=[metric_reader])
 
@@ -145,6 +146,48 @@ def test_log_mapping_full_record_shape(otlp_backend) -> None:
     assert body["event_name"] == "exec"
     assert body["attributes"] == {"body": "print(1)", "ok": False}
     assert body["ts"] == "2026-08-11T12:00:00+00:00"
+
+
+def test_flush_groups_each_event_name_under_its_matching_resource(otlp_backend) -> None:
+    """A mixed emitter flush serializes only resource-homogeneous event groups.
+
+    Loki indexes resource attributes, while the OTel SDK batches several log
+    records into one request. Every group in that request must therefore carry
+    the same ``event_name`` resource attribute as all of its records.
+    """
+    from opentelemetry.exporter.otlp.proto.common._log_encoder import encode_logs
+
+    backend, log_exporter, _ = otlp_backend
+    backend.export_batch(  # pyright: ignore[reportUnknownMemberType]
+        [_event(event_name=name) for name in ("llm_usage", "node_exit", "log")]
+    )
+    backend.flush()  # pyright: ignore[reportUnknownMemberType]
+
+    deadline = time.monotonic() + 1.0
+    while time.monotonic() < deadline:
+        records = log_exporter.get_finished_logs()  # pyright: ignore[reportUnknownMemberType]
+        if len(records) == 3:  # pyright: ignore[reportUnknownArgumentType]
+            break
+        time.sleep(0.01)
+    records = log_exporter.get_finished_logs()  # pyright: ignore[reportUnknownMemberType]
+    request = encode_logs(records)  # pyright: ignore[reportUnknownArgumentType]
+    assert len(request.resource_logs) == 3
+    for resource_logs in request.resource_logs:
+        resource_event_name = next(
+            attribute.value.string_value
+            for attribute in resource_logs.resource.attributes
+            if attribute.key == "event_name"
+        )
+        for scope_logs in resource_logs.scope_logs:
+            for record in scope_logs.log_records:
+                assert (
+                    next(
+                        attribute.value.string_value
+                        for attribute in record.attributes
+                        if attribute.key == "event_name"
+                    )
+                    == resource_event_name
+                )
 
 
 def test_metric_mapping_int_counter_float_histogram(otlp_backend) -> None:
@@ -316,6 +359,11 @@ def test_non_telemetry_events_produce_no_metrics(otlp_backend) -> None:
         ]
     )
     backend.flush()  # pyright: ignore[reportUnknownMemberType]
+    deadline = time.monotonic() + 1.0
+    while time.monotonic() < deadline:
+        if len(log_exporter.get_finished_logs()) == 2:  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+            break
+        time.sleep(0.01)
     assert len(log_exporter.get_finished_logs()) == 2  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
     assert _metrics(metric_reader) == {}
 

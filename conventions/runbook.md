@@ -984,7 +984,10 @@ The gateway collector fans out:
   (`$AVA_HOME/traces/spans.jsonl`, rotated `spans-<ISO>.jsonl`).
 - **logs** — every unified event (the `events` table write path) dual-writes to
   OTLP logs (Loki) via `shared/telemetry_otlp.py` → sidecar → Loki
-  (`AVA_TELEMETRY_LOKI_URL` base, `/otlp` appended).
+  (`AVA_TELEMETRY_LOKI_URL` base, `/otlp` appended). The emitter makes
+  `event_name` and, when present, `agent_id` resource dimensions per record
+  before the SDK serializes a batch: Loki indexes those resource dimensions, so
+  every indexed `event_name` label is the same value as the event JSON body.
 - **metrics** — telemetry events' numeric payloads map to OTLP metrics
   (Prometheus): int -> counter, float -> histogram, named `ava_<event>_<field>`;
   sidecar → Prometheus OTLP receiver (`AVA_TELEMETRY_PROMETHEUS_URL` base,
@@ -1006,6 +1009,43 @@ The gateway collector fans out:
   absolute value), and a recently-seen host whose collector stopped reporting
   for 5m. The local watchdog logs current full queues but does not restart a
   healthy receiver for remote backpressure.
+
+**Event-label canary.** After an OTLP-emitter rollout, query a post-rollout
+window and require every event stream label to equal its JSON event name. This
+checks the indexed read path, not merely content filtering:
+
+```bash
+.venv/bin/python - <<'PY'
+from datetime import UTC, datetime, timedelta
+import json
+from urllib.parse import urlencode
+from urllib.request import urlopen
+
+end = datetime.now(UTC)
+params = urlencode(
+    {
+        "query": '{service_name="unknown_service"}',
+        "start": str(int((end - timedelta(minutes=15)).timestamp() * 1_000_000_000)),
+        "end": str(int(end.timestamp() * 1_000_000_000)),
+        "limit": "2000",
+    }
+)
+with urlopen(f"http://127.0.0.1:3100/loki/api/v1/query_range?{params}") as response:  # noqa: S310 — loopback Loki canary
+    result = json.load(response)["data"]["result"]
+
+mismatches = [
+    (stream["stream"].get("event_name"), json.loads(line).get("event_name"))
+    for stream in result
+    for _, line in stream["values"]
+    if stream["stream"].get("event_name") != json.loads(line).get("event_name")
+]
+assert not mismatches, mismatches[:20]
+print(f"checked {sum(len(stream['values']) for stream in result)} event rows")
+PY
+```
+
+An absent `event_name` label or any mismatch fails the canary; run it only over
+newly emitted rows, since indexed-era data from before the rollout is immutable.
 
 **One time-series store.** Prometheus holds the host history; nothing else
 retains one. `ava status` and the status page carry a single LIVE psutil
