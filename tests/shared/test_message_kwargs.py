@@ -31,6 +31,32 @@ def test_msg_type_value_set() -> None:
     }
 
 
+def test_note_tag_value_set() -> None:
+    """The system-note tag set is a cross-stack wire contract."""
+    assert {tag.value for tag in NoteTag} == {
+        "sdk_hint",
+        "agent_reply",
+        "compact_reminder",
+        "history_dump",
+        "silent_idle_continue",
+        "memory",
+        "lifecycle_terminate",
+        "lifecycle_restart",
+        "lifecycle_resurrect",
+        "lifecycle_fork",
+        "heartbeat",
+        "security",
+        "context",
+        "agent_id",
+        "agent_memory",
+        "project_skills",
+        "preloaded_skills",
+        "new_skills",
+        "exec_timeout",
+        "timezone",
+    }
+
+
 def test_stored_discriminator_is_plain_str() -> None:
     """Constructors store `ava_msg_type` / `ava_note_tag` as plain `str`, never
     the StrEnum member — the serialization-safety invariant."""

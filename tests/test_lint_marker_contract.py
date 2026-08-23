@@ -70,7 +70,7 @@ def _frontend_dispatch_members() -> set[str]:
     return members
 
 
-def test_every_note_tag_has_a_frontend_branch() -> None:
+def test_note_tag_and_frontend_dispatch_sets_agree() -> None:
     backend = _note_tag_members()
     frontend = _frontend_dispatch_members()
     assert backend, "NoteTag enum is empty — did the enum move or get renamed?"
@@ -80,4 +80,9 @@ def test_every_note_tag_has_a_frontend_branch() -> None:
         "NoteTag member(s) with no frontend branch in markers.tsx — the UI will "
         f"render the red 'unrecognized system_marker' alarm for them (#1017 class): {missing}. "
         "Add a branch in markers.tsx (LIFECYCLE_TAGS / MEMORY_SOURCES / NOTE_SOURCES)."
+    )
+    stale = sorted(frontend - backend)
+    assert not stale, (
+        "Stale frontend dispatch member(s) not present in NoteTag — remove or rename them in "
+        f"markers.tsx: {stale}."
     )

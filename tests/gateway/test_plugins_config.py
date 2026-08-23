@@ -108,6 +108,17 @@ def test_load_auto_merges_new_plugins(tmp_path: Path):
     assert cfg.plugins["syntax_fix"].enabled is True
 
 
+def test_load_auto_merge_new_plugins_deterministic_order(tmp_path: Path):
+    """New in-memory entries preserve the sorted plugin-load invariant."""
+    for name in ("zeta", "alpha", "mid"):
+        _make_plugin_dir(name, tmp_path)
+    write_local({"plugins": {"alpha": {"enabled": False}}})
+
+    cfg = load({"zeta", "alpha", "mid"})
+
+    assert list(cfg.plugins) == ["alpha", "mid", "zeta"]
+
+
 def test_load_raises_on_dangling(tmp_path: Path):
     _make_plugin_dir("compact", tmp_path)
     write_local({"plugins": {"ghost": {"enabled": True}}})

@@ -8,6 +8,8 @@ monkeypatched; the gating is the logic under test.
 
 from __future__ import annotations
 
+import plistlib
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -131,3 +133,88 @@ def test_native_step_runs_only_for_the_marker_home(
     _lgtm_native.ensure_lgtm_native_step(ctx)
 
     assert calls == [(ctx.repo, ctx.ava_home)]
+
+
+def test_native_label_and_plist_are_scoped_to_the_cluster_home(tmp_path: Path) -> None:
+    from shared.cluster import home_slug
+
+    home = tmp_path / "home"
+    label = _lgtm_native.native_label("loki", home)
+
+    assert label == f"com.ava.loki.{home_slug(home)}"
+    rendered = plistlib.loads(
+        _lgtm_native._render_plist("loki", tmp_path / "native", home).encode()
+    )
+    assert rendered["Label"] == label
+
+
+def test_native_converge_retires_legacy_and_foreign_jobs(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / "lgtm-host").touch()
+    agents_dir = tmp_path / "LaunchAgents"
+    agents_dir.mkdir()
+    current = _lgtm_native.native_label("loki", home)
+    legacy = "com.ava.loki"
+    foreign = "com.ava.loki.other-home"
+    for label in (legacy, foreign):
+        (agents_dir / f"{label}.plist").write_bytes(plistlib.dumps({"Label": label}))
+
+    def darwin_arm64() -> str:
+        return "darwin_arm64"
+
+    def no_versions(_repo: Path) -> dict[str, dict[str, str]]:
+        return {}
+
+    def no_configs(_repo: Path, _native_dir: Path, _home: Path) -> None:
+        return None
+
+    monkeypatch.setattr(_lgtm_native, "platform_tag", darwin_arm64)
+    monkeypatch.setattr(_lgtm_native, "_load_versions", no_versions)
+    monkeypatch.setattr(_lgtm_native, "_render_configs", no_configs)
+    monkeypatch.setattr(_lgtm_native, "_agents_dir", lambda: agents_dir)
+    calls: list[list[str]] = []
+
+    def fake_run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(command)
+        label = command[-1].rsplit("/", maxsplit=1)[-1]
+        return subprocess.CompletedProcess(command, 0 if label in {legacy, foreign} else 1, "", "")
+
+    monkeypatch.setattr(_lgtm_native.subprocess, "run", fake_run)
+
+    _lgtm_native.ensure_lgtm_native(tmp_path / "repo", home)
+
+    assert not (agents_dir / f"{legacy}.plist").exists()
+    assert not (agents_dir / f"{foreign}.plist").exists()
+    assert (agents_dir / f"{current}.plist").exists()
+    assert {call[-1] for call in calls if call[1] == "bootout"} == {
+        f"gui/{_lgtm_native.os.getuid()}/{legacy}",
+        f"gui/{_lgtm_native.os.getuid()}/{foreign}",
+    }
+    assert all(current not in call[-1] for call in calls)
+
+
+def test_bootout_native_jobs_removes_this_homes_slugged_plists(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    home = tmp_path / "home"
+    agents_dir = tmp_path / "LaunchAgents"
+    agents_dir.mkdir()
+    for name in _lgtm_native._NATIVE_CONSTANTS:
+        label = _lgtm_native.native_label(name, home)
+        (agents_dir / f"{label}.plist").write_bytes(plistlib.dumps({"Label": label}))
+    monkeypatch.setattr(_lgtm_native, "_agents_dir", lambda: agents_dir)
+    calls: list[list[str]] = []
+
+    def fake_run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(command)
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(_lgtm_native.subprocess, "run", fake_run)
+
+    _lgtm_native.bootout_native_jobs(home)
+
+    assert not list(agents_dir.glob("*.plist"))
+    assert [call[1] for call in calls] == ["print", "bootout", "print", "bootout"]
