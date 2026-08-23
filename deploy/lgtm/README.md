@@ -102,12 +102,13 @@ because collector filelog receivers replace them.
 ## Session logs in Loki
 
 The collector's `filelog/sessions` and `filelog/orchestration` receivers ship
-session stdout and orchestration tee logs. The file name becomes resource
-`service.name`, which Loki exposes as the `service_name` stream label. Read
-offsets persist under `$AVA_HOME/otel-collector/log-offsets`, so a collector
-restart does not replay the log history. Structured agent logs still arrive
-through the collector's OTLP receiver and carry no `log.file.name`, so the
-filelog transform leaves them untouched.
+session stdout and orchestration tee logs, excluding the collector's own
+`ava-otel-collector.out.log` to prevent a self-ingestion echo. The file name
+becomes resource `service.name`, which Loki exposes as the `service_name` stream
+label. Read offsets persist under `$AVA_HOME/otel-collector/log-offsets`, so a
+collector restart does not replay the log history. Structured agent logs still
+arrive through the collector's OTLP receiver and carry no `log.file.name`, so
+the filelog transform leaves them untouched.
 
 ## Environment overrides
 

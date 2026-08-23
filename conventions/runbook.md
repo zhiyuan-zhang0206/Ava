@@ -1165,7 +1165,7 @@ Where to look when something went wrong on a host:
 | why did a daemon vanish | its log file: every daemon wraps `asyncio.run(main())` and logs the traceback before re-raising |
 | what did milvus say | its log file only — it is a C++ binary with no PG sink |
 | an agent | `$AVA_HOME/logs/agent-{N}.log` (kernel + its exec subprocess, both appending) |
-| raw session stdout (gateway / agents / shells / schedules) | Loki (the LGTM backend): the collector's filelog receivers tail every `$AVA_HOME/logs/*.out.log` plus the updater/rollout tees — resource `service.name` becomes Loki label `service_name` = session name, offsets persist in `file_storage/logoffsets`, 7-day retention; see `deploy/lgtm/README.md` |
+| raw session stdout (gateway / agents / shells / schedules) | Loki (the LGTM backend): the collector's filelog receivers tail `$AVA_HOME/logs/*.out.log` except their own `ava-otel-collector.out.log`, plus the updater/rollout tees — resource `service.name` becomes Loki label `service_name` = session name, offsets persist in `file_storage/logoffsets`, 7-day retention; see `deploy/lgtm/README.md` |
 
 Raw session output is queried in Loki, not tailed from a file — Grafana Explore
 (Loki datasource), `logcli`, or the HTTP API:
