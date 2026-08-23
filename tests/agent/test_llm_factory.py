@@ -874,15 +874,16 @@ class TestReasoningEffortDispatch:
         assert isinstance(m, ReasoningContentChatModel)
         assert m.reasoning_effort == "high"
 
-    def test_glm_low_clamps_to_high(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_glm_5_3_low_effort_is_passed_through(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """GLM-5.3 documents low as a native reasoning-effort rung."""
         monkeypatch.setattr(settings.lm, "llm_override", "")
         monkeypatch.setattr(settings.lm, "zhipu_api_key", SecretStr("sk-glm"))
         monkeypatch.setattr(settings.lm, "reasoning_effort", "low")
         from shared.lm._reasoning_compat import ReasoningContentChatModel
 
-        m = build_chat_model("glm-5.2")
+        m = build_chat_model("glm-5.3")
         assert isinstance(m, ReasoningContentChatModel)
-        assert m.reasoning_effort == "high"
+        assert m.reasoning_effort == "low"
 
     def test_glm_thinking_disabled_sends_body_thinking(
         self, monkeypatch: pytest.MonkeyPatch

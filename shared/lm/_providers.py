@@ -502,8 +502,8 @@ def _build_glm_model(
     # injection (deepseek-style: the caller asked for the cheap path).
     # Otherwise reasoning effort rides the OpenAI-standard
     # `reasoning_effort` payload field, a declared ChatOpenAI constructor
-    # field (GLM's enum is high/max, default max — `high` is the only
-    # cheaper tier).
+    # field (GLM's enum is low/high/max, default max — `low` and `high` are
+    # the cheaper tiers; checked 2026-08-23 for GLM-5.3).
     glm_kwargs: dict[str, Any] = {}
     if thinking is not None and thinking.get("type") == "disabled":
         glm_kwargs["extra_body"] = {"thinking": {"type": "disabled"}}

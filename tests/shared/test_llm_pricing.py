@@ -88,6 +88,16 @@ def test_deepseek_v4_effective_interval_boundary() -> None:
     assert rates_at("deepseek-v4-pro", cutover, _M) == Rates(0.66, 0.022, 1.98)
 
 
+def test_glm_5_pricing_effective_interval_boundary() -> None:
+    """GLM-5.2 preserves its prior rate before the GLM-5.3 launch cutover."""
+    before = datetime(2026, 8, 13, 9, 59, 59, 999999, tzinfo=UTC)
+    cutover = datetime(2026, 8, 13, 10, 0, tzinfo=UTC)
+
+    assert rates_at("glm-5.2", before, _M) == Rates(1.10, 0.55, 3.86)
+    assert rates_at("glm-5.2", cutover, _M) == Rates(1.40, 0.26, 4.40)
+    assert rates_at("glm-5.3", cutover, _M) == Rates(1.40, 0.26, 4.40)
+
+
 @pytest.mark.parametrize(
     ("at", "expected"),
     [
