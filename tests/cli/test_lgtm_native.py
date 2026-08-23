@@ -192,7 +192,7 @@ def test_render_plist_uses_absolute_paths_and_memory_caps(tmp_path: Path) -> Non
     for name, expected_limit in expected_limits.items():
         rendered = _lgtm_native._render_plist(name, native_dir, home)
         plist = plistlib.loads(rendered.encode())
-        assert plist["Label"] == f"com.ava.{name}"
+        assert plist["Label"] == _lgtm_native.native_label(name, home)
         assert plist["EnvironmentVariables"]["GOMEMLIMIT"] == expected_limit
         assert Path(plist["ProgramArguments"][0]).is_absolute()
         assert plist["StandardOutPath"] == str(home / f"lgtm/native/logs/{name}.log")

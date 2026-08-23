@@ -8,6 +8,7 @@ next lifecycle run.
 from __future__ import annotations
 
 import hashlib
+import os
 import platform
 import plistlib
 import re
@@ -26,6 +27,7 @@ from typing import Any, cast
 import yaml
 
 from cli.commands._converge_spec import ConvergeCtx
+from shared.log import logger
 
 SUPPORTED_TAGS = {"darwin_arm64"}
 
@@ -101,7 +103,19 @@ def _load_versions(repo: Path) -> dict[str, dict[str, str]]:
 
 def _plist_path(label: str) -> Path:
     """The launchd plist path for a native backend label."""
-    return Path.home() / "Library/LaunchAgents" / f"{label}.plist"
+    return _agents_dir() / f"{label}.plist"
+
+
+def _agents_dir() -> Path:
+    """The user LaunchAgents directory used by native LGTM services."""
+    return Path.home() / "Library" / "LaunchAgents"
+
+
+def native_label(name: str, ava_home: Path) -> str:
+    """Return the per-cluster launchd label for one native LGTM backend."""
+    from shared.cluster import home_slug
+
+    return f"com.ava.{name}.{home_slug(ava_home)}"
 
 
 def _render_plist(name: str, native_dir: Path, ava_home: Path) -> str:
@@ -114,7 +128,7 @@ def _render_plist(name: str, native_dir: Path, ava_home: Path) -> str:
         "data": str(resolved_native / "data"),
     }
     plist: dict[str, Any] = {
-        "Label": f"com.ava.{name}",
+        "Label": native_label(name, ava_home),
         "ProgramArguments": [
             str(resolved_native / "bin" / name),
             *[argument.format(**substitutions) for argument in service.arguments],
@@ -242,6 +256,44 @@ def _render_configs(repo: Path, native_dir: Path, ava_home: Path) -> None:
         )
 
 
+def _launchctl(*args: str) -> subprocess.CompletedProcess[str]:
+    """Run one local launchctl command without surfacing absent-job failures."""
+    return subprocess.run(["launchctl", *args], capture_output=True, text=True, check=False)
+
+
+def _job_loaded(label: str) -> bool:
+    """Whether launchd currently has a user job for this label."""
+    return _launchctl("print", f"gui/{os.getuid()}/{label}").returncode == 0
+
+
+def _retire_other_native_jobs(ava_home: Path) -> None:
+    """Remove legacy and foreign native jobs that race this host's fixed ports."""
+    for name in _NATIVE_CONSTANTS:
+        current = native_label(name, ava_home)
+        for plist in _agents_dir().glob(f"com.ava.{name}*.plist"):
+            try:
+                label = plistlib.loads(plist.read_bytes())["Label"]
+            except (KeyError, OSError, plistlib.InvalidFileException):
+                continue
+            if not isinstance(label, str):
+                continue
+            if label == current:
+                continue
+            if _job_loaded(label):
+                _launchctl("bootout", f"gui/{os.getuid()}/{label}")
+            plist.unlink(missing_ok=True)
+            logger.info("retired competing native LGTM job {} ({})", label, plist)
+
+
+def bootout_native_jobs(ava_home: Path) -> None:
+    """Boot out and delete this home's jobs; `ava lgtm off` should call it after marker removal."""
+    for name in _NATIVE_CONSTANTS:
+        label = native_label(name, ava_home)
+        if _job_loaded(label):
+            _launchctl("bootout", f"gui/{os.getuid()}/{label}")
+        _plist_path(label).unlink(missing_ok=True)
+
+
 def ensure_lgtm_native(repo: Path, ava_home: Path) -> None:
     """Install current backend binaries and always converge configs and plists."""
     tag = platform_tag()
@@ -263,7 +315,10 @@ def ensure_lgtm_native(repo: Path, ava_home: Path) -> None:
         print(f"  · lgtm native: installed {name} {asset['version']} ({tag})")
     _render_configs(repo, native_dir, ava_home)
     for name in _NATIVE_CONSTANTS:
-        _write_if_changed(_plist_path(f"com.ava.{name}"), _render_plist(name, native_dir, ava_home))
+        label = native_label(name, ava_home)
+        _write_if_changed(_plist_path(label), _render_plist(name, native_dir, ava_home))
+    if (ava_home / "lgtm-host").exists():
+        _retire_other_native_jobs(ava_home)
 
 
 def ensure_lgtm_native_step(ctx: ConvergeCtx) -> None:

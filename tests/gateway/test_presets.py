@@ -56,6 +56,29 @@ class TestPresetCrud:
             )
         assert r.status_code == 422
 
+    def test_create_rejects_cluster_consistent_framework_config(
+        self, db_conn: psycopg.Connection
+    ) -> None:
+        with TestClient(app) as client:
+            r = _create(client, config={"db_url": "postgresql://not-per-agent"})
+        assert r.status_code == 422
+        assert "not per_agent=True" in r.json()["detail"]
+
+    def test_create_accepts_per_agent_and_opaque_config_keys(
+        self, db_conn: psycopg.Connection
+    ) -> None:
+        with TestClient(app) as client:
+            per_agent = _create(client, config={"llm_model": "claude-sonnet-5"})
+            # Unknown keys may be plugin fields, so the gateway keeps them opaque.
+            opaque = _create(
+                client,
+                name="plugin-config",
+                label="Plugin config",
+                config={"llm_modell": "x"},
+            )
+        assert per_agent.status_code == 201
+        assert opaque.status_code == 201
+
     def test_create_blank_name_422(self, db_conn: psycopg.Connection) -> None:
         with TestClient(app) as client:
             r = client.post("/api/presets", json={"name": "", "label": "X"})
@@ -96,6 +119,18 @@ class TestPresetCrud:
         with TestClient(app) as client:
             pid = _create(client).json()["id"]
             assert client.patch(f"/api/presets/{pid}", json={}).status_code == 400
+
+    def test_update_rejects_cluster_consistent_config_and_accepts_opaque_key(
+        self, db_conn: psycopg.Connection
+    ) -> None:
+        with TestClient(app) as client:
+            pid = _create(client).json()["id"]
+            rejected = client.patch(
+                f"/api/presets/{pid}", json={"config": {"db_url": "postgresql://not-per-agent"}}
+            )
+            opaque = client.patch(f"/api/presets/{pid}", json={"config": {"llm_modell": "x"}})
+        assert rejected.status_code == 422
+        assert opaque.status_code == 200
 
     def test_update_missing_404(self, db_conn: psycopg.Connection) -> None:
         with TestClient(app) as client:

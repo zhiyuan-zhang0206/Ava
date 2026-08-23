@@ -3,9 +3,9 @@
 Three capabilities live under one plugin because they share the same domain (the
 shared memory pool at ava.memory.PATH):
 
-1. **ava.memory namespace** (PATH + search) — the agent-facing SDK surface.
+1. **ava.memory namespace** (PATH + search + write) — the agent-facing SDK surface.
    This plugin OWNS the `ava.memory` top-level namespace. Disabling it removes
-   `ava.memory` entirely — PATH, search(), IndexerUnavailable — not just
+   `ava.memory` entirely — PATH, search(), write(), IndexerUnavailable — not just
    passive recall.
 
 2. **Passive memory recall** (before_llm hook) — on a turn woken by fresh user
@@ -68,8 +68,12 @@ retries on the next turn.
 
 from __future__ import annotations
 
-__description__ = "Shared memory pool: ava.memory SDK surface (PATH + search) + passive recall hook (auto-surfaces relevant notes) + daily consolidation skill (commit, push, re-index)"
+__description__ = "Shared memory pool: ava.memory SDK surface (PATH + search + write) + passive recall hook (auto-surfaces relevant notes) + daily consolidation skill (commit, push, re-index)"
 
+import os
+import re
+import tempfile
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace as _SimpleNamespace
 
@@ -77,6 +81,8 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
 import ava as _ava
+import shared.machine
+import shared.paths
 from agent.graph._context import AvaContext
 from agent.graph._context_notes import (
     RANK_CLUSTER_MEMORY,
@@ -127,9 +133,15 @@ Two stores:
 - Per-agent memory (`<workspace>/memory/`): your own durable state.
   `MEMORY.md` there is the index — one line per memory, injected into your
   context at cold start and after each compact; each memory is one file
-  beside it, read on demand. Maintain it yourself — role, preferences,
+  beside it, read on demand. `write(slug, content, ..., store="personal")`
+  writes the entry and maintains its index. Maintain it — role, preferences,
   ongoing responsibilities, known pitfalls; keep shared-worthy facts in the
   pool instead.
+
+Use `write(slug, content, *, title=None, description=None, tags=None,
+store="personal")` to write either store. It resolves an absolute store-owned
+path, so it is immune to `ava.cwd` changes, and maintains the corresponding
+`MEMORY.md` pointer.
 """
 
 _PATH_DOC = """Memory pool root: a shared folder of markdown notes.
@@ -143,7 +155,11 @@ Start each note with YAML frontmatter, then the attribution header:
     type: Memory
     ava_agent: <your id>
     ---
-    <!-- agent-<your id> @ <your machine>, YYYY-MM-DD HH:MM -->"""
+    <!-- agent-<your id> @ <your machine>, YYYY-MM-DD HH:MM -->
+
+Use `write(slug, content, *, title=None, description=None, tags=None,
+store="shared")` as the canonical writer: it uses an absolute pool path and
+updates MEMORY.md, so a changed `ava.cwd` cannot put a note in the wrong place."""
 
 _memory_ns = _SimpleNamespace()
 _memory_ns.__doc__ = _MEMORY_DOC
@@ -161,10 +177,152 @@ def _search(query: str, k: int = 5) -> list[tuple[Path, str, list[str]]]:
 
 _memory_ns.search = _search
 
+_PERSONAL_SLUG_RE = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*\Z")
+
+
+def _entry_path(slug: str, store: str, agent_id: int) -> tuple[Path, bool]:
+    """Resolve a memory entry to its store-owned absolute path.
+
+    Shared entries may use topic directories, but neither store accepts a path
+    that can escape its root. Personal names are intentionally narrower because
+    that index is the agent's stable, flat namespace.
+    """
+    if not slug or slug.endswith(".md"):
+        raise ValueError("memory slug must be a non-empty filename without .md")
+    relative = Path(slug)
+    if (
+        relative.is_absolute()
+        or "\\" in slug
+        or any(part in {".", ".."} for part in relative.parts)
+    ):
+        raise ValueError("memory slug must be a relative path inside its store")
+    if store == "personal":
+        if not _PERSONAL_SLUG_RE.fullmatch(slug):
+            raise ValueError("personal memory slug must be one kebab-case name without slashes")
+        return shared.paths.workspace_dir(agent_id) / "memory" / f"{slug}.md", False
+    if store == "shared":
+        if relative == Path("MEMORY"):
+            raise ValueError("shared memory slug cannot replace MEMORY.md")
+        return shared.paths.memory_dir() / relative.with_suffix(".md"), True
+    raise ValueError("memory store must be 'personal' or 'shared'")
+
+
+def _validated_tags(tags: list[str] | None) -> list[str]:
+    """Return tags after enforcing the one-type-tag memory invariant."""
+    values = ["type/reference"] if tags is None else list(tags)
+    if sum(tag.startswith("type/") and len(tag) > len("type/") for tag in values) != 1:
+        raise ValueError("memory tags must contain exactly one type/<x> tag")
+    return values
+
+
+def _write_atomically(path: Path, content: str) -> None:
+    """Replace one memory entry without exposing a partially written note."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as file:
+            file.write(content)
+        os.replace(temporary, path)  # noqa: PTH105 — atomic publication required by the memory contract
+    except BaseException:
+        Path(temporary).unlink(missing_ok=True)
+        raise
+
+
+def _pointer_line(title: str, relative_path: str, description: str) -> str:
+    """Render the one-line index entry for a durable memory note."""
+    return f"- [{title}]({relative_path}) — {description or title}"
+
+
+def _upsert_index(
+    root: Path, relative_path: str, title: str, description: str, *, shared: bool
+) -> None:
+    """Replace or append one index pointer without disturbing other entries."""
+    index_path = root / "MEMORY.md"
+    text = index_path.read_text(encoding="utf-8") if index_path.exists() else ""
+    lines = text.splitlines()
+    pointer = _pointer_line(title, relative_path, description)
+    target = re.compile(rf"^- \[[^]]+\]\({re.escape(relative_path)}\) — .*$")
+    matches = [index for index, line in enumerate(lines) if target.fullmatch(line)]
+    if matches:
+        lines[matches[0]] = pointer
+        for index in reversed(matches[1:]):
+            del lines[index]
+    elif shared and "## Pointers" in lines:
+        section_start = lines.index("## Pointers")
+        section_end = next(
+            (
+                index
+                for index in range(section_start + 1, len(lines))
+                if lines[index].startswith("## ")
+            ),
+            len(lines),
+        )
+        pointer_lines = [
+            index
+            for index in range(section_start + 1, section_end)
+            if lines[index].startswith("- [")
+        ]
+        lines.insert(pointer_lines[-1] + 1 if pointer_lines else section_start + 1, pointer)
+    else:
+        lines.append(pointer)
+    index_path.parent.mkdir(parents=True, exist_ok=True)
+    index_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def write(
+    slug: str,
+    content: str,
+    *,
+    title: str | None = None,
+    description: str | None = None,
+    tags: list[str] | None = None,
+    store: str = "personal",
+) -> Path:
+    """Write a memory note to its owned store and upsert its MEMORY.md pointer.
+
+    Personal entries use a flat kebab-case name in the calling agent's
+    workspace; shared entries may use topic directories in the memory pool.
+    Both targets are absolute, so this API is unaffected by the agent's cwd.
+    """
+    from ava._boot import _agent_id
+
+    agent_id = _agent_id
+    if agent_id is None:
+        raise RuntimeError("ava.memory.write requires an established agent id")
+    entry, is_shared = _entry_path(slug, store, agent_id)
+    values = _validated_tags(tags)
+    note_title = title or slug
+    note_description = description or ""
+    if is_shared:
+        now = datetime.now(UTC)
+        machine = shared.machine.machine_name()
+        frontmatter = (
+            f"---\ntype: Memory\nava_agent: {agent_id}\ntitle: {note_title}\n"
+            f"description: {note_description}\ntags: [{', '.join(values)}]\n"
+            f"timestamp: '{now.isoformat()}'\nava_machine: {machine}\n---\n"
+            f"<!-- agent-{agent_id} @ {machine}, {now:%Y-%m-%d %H:%M} -->\n\n"
+        )
+    else:
+        frontmatter = (
+            f"---\nname: {slug}\ndescription: {note_description}\n"
+            f"tags: [{', '.join(values)}]\n---\n\n"
+        )
+    _write_atomically(entry, frontmatter + content)
+    root = (
+        shared.paths.memory_dir() if is_shared else shared.paths.workspace_dir(agent_id) / "memory"
+    )
+    _upsert_index(
+        root, entry.relative_to(root).as_posix(), note_title, note_description, shared=is_shared
+    )
+    return entry.resolve()
+
+
+_memory_ns.write = write
+
 # __all_for_ava__: the curated agent-facing surface. IndexerUnavailable is
 # intentionally excluded — it is reachable (ava.memory.IndexerUnavailable)
 # but does not appear in help(ava.memory).
-_memory_ns.__all_for_ava__ = ["PATH", "search"]
+_memory_ns.__all_for_ava__ = ["PATH", "search", "write"]
 
 _ava.register_namespace("memory", _memory_ns)
 

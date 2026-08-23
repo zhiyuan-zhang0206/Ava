@@ -229,7 +229,7 @@ def load(known_plugins: set[str]) -> PluginsConfig:
 
     # Auto-merge new plugins (in memory only)
     new_plugins = known_plugins - set(cfg.plugins)
-    for name in new_plugins:
+    for name in sorted(new_plugins):
         cfg.plugins[name] = PluginEntry(enabled=True)
 
     return cfg

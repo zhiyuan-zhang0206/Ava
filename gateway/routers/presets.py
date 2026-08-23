@@ -6,11 +6,11 @@ Selecting a preset at spawn time seeds the new agent's config from it; an
 explicit config passed alongside wins per-key (explicit beats template). The
 merge happens in the spawn handler (routers/agents.py), not here.
 
-`config` is stored and returned as an opaque JSONB object — it is deliberately
-NOT validated against the overlay schema at this write boundary (the gateway
-process does not load the plugin registry, so it cannot resolve plugin field
-names). An invalid overlay surfaces at agent boot when the spawned process
-applies it, the same fail-fast path a raw spawn config takes.
+`config` is stored and returned as an opaque JSONB object for plugin fields: the
+gateway process does not load the plugin registry, so it cannot resolve plugin
+field names. Framework Settings keys are validated at this write boundary,
+however: a known field must be `per_agent=True`; an unknown key remains opaque
+for a plugin to resolve when the spawned process applies the overlay.
 
 Hand-writing a preset's `config` JSON is not a UI task — the field names and
 skill combinations that make a good preset live in ava-guide.presets, not in
@@ -65,6 +65,28 @@ class PresetUpdate(BaseModel):
     config: dict[str, object] | None = None
 
 
+def _validate_config_keys(config: dict[str, object]) -> None:
+    """Reject known framework keys that cannot vary by agent.
+
+    Unknown names remain valid here because they may belong to a plugin, whose
+    schema only the agent process loads.
+    """
+    from shared.config import field_names, per_agent_field_names
+
+    framework_fields = field_names()
+    per_agent_fields = per_agent_field_names()
+    for key in config:
+        if key in framework_fields and key not in per_agent_fields:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"preset config key {key!r} is a framework Settings field but is not "
+                    "per_agent=True; cluster-consistent fields cannot be overridden per agent "
+                    "— see shared/plugin_config_registry.py"
+                ),
+            )
+
+
 def _view(r: tuple[Any, ...]) -> PresetView:
     return PresetView(
         id=r[0],
@@ -111,6 +133,7 @@ def _create_blocking(pool: ConnectionPool, body: PresetCreate) -> tuple[Any, ...
 @router.post("/api/presets", status_code=201)
 async def create_preset(request: Request, body: PresetCreate) -> PresetView:
     """Create a preset. 409 on a name clash."""
+    _validate_config_keys(body.config)
     row = await asyncio.to_thread(_create_blocking, request.app.state.db_pool, body)
     return _view(row)
 
@@ -162,6 +185,9 @@ async def update_preset(request: Request, preset_id: int, body: PresetUpdate) ->
     fields = body.model_dump(exclude_unset=True)
     if not fields:
         raise HTTPException(status_code=400, detail="no fields to update")
+    config = fields.get("config")
+    if config is not None:
+        _validate_config_keys(cast(dict[str, object], config))
     row = await asyncio.to_thread(_update_blocking, request.app.state.db_pool, preset_id, fields)
     return _view(row)
 

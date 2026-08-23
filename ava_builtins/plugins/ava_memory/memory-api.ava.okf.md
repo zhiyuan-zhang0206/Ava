@@ -1,7 +1,7 @@
 ---
 type: doc
 title: ava.memory — Long-term Memory Pool (Plugin Provided)
-description: '`ava.memory` is registered by the `ava_memory` plugin via `register_namespace`. Disabling the plugin → the entire `ava.memory` becomes unavailable. Provides `PATH` (shared memory pool root directory) and `search()` (semantic search).'
+description: '`ava.memory` is registered by the `ava_memory` plugin via `register_namespace`. Disabling the plugin → the entire `ava.memory` becomes unavailable. Provides `PATH` (shared memory pool root directory), `search()` (semantic search), and `write()` (cwd-independent indexed memory authoring).'
 tags:
 - plugin
 - memory
@@ -13,7 +13,7 @@ tags:
 
 ## Attribution
 
-**Provided by the `ava_memory` plugin**. Not a core module — disabling the plugin makes `ava.memory.PATH` and `ava.memory.search()` entirely unavailable.
+**Provided by the `ava_memory` plugin**. Not a core module — disabling the plugin makes `ava.memory.PATH`, `ava.memory.search()`, and `ava.memory.write()` entirely unavailable.
 
 ## What it is
 
@@ -27,6 +27,7 @@ Two types of memory, each serving different audiences:
 
 - `PATH: PosixPath` — shared memory pool root directory `~/.ava/memory`
 - `search(query, k=5) → list[tuple[Path, str, list[str]]]` — semantic search, returns `(absolute path, frontmatter description, tags)` tuples for the most relevant notes
+- `write(slug, content, *, title=None, description=None, tags=None, store="personal") → Path` — writes an absolute personal or shared entry with generated frontmatter and upserts its `MEMORY.md` pointer; the canonical writer, immune to `ava.cwd` drift
 - `IndexerUnavailable` — exception when the indexer service is unavailable
 
 ## Note Format

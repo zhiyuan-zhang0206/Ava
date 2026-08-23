@@ -1,14 +1,11 @@
 #!/usr/bin/env python3
-"""Lint: every ``NoteTag`` enum value in ``shared/message_kwargs.py`` must be
-referenced in the frontend system_marker dispatch at
-``ui/web/src/components/timeline/markers.tsx``.
+"""Lint the bidirectional ``NoteTag`` / frontend system_marker contract.
 
-When a new NoteTag is added to the Python enum without updating the
-TypeScript dispatch, the tag falls through to ``UnknownMarkerChip`` — a
-red alarm the user sees, but the developer who added the tag gets no
-signal. This lint closes that gap: it extracts the NoteTag str values
-from the Python enum and checks that each one appears as a string literal
-in markers.tsx. A missing tag fails the hook with a clear message.
+Every NoteTag enum value must have a branch in the frontend dispatch sets, or
+the tag falls through to ``UnknownMarkerChip``. Conversely, every string in
+``LIFECYCLE_TAGS``, ``MEMORY_SOURCES``, or ``NOTE_SOURCES`` must be a live
+NoteTag value; otherwise a removed or renamed backend tag leaves stale frontend
+behaviour. Both directions fail the hook with a clear message.
 
 Trigger: runs on either ``shared/message_kwargs.py`` or ``markers.tsx``
 changes (see ``.pre-commit-config.yaml``). No filenames passed; the script
@@ -69,6 +66,28 @@ def check_coverage(note_tags: list[str], ts_path: Path) -> list[str]:
     return missing
 
 
+def extract_dispatch_tags(path: Path) -> set[str]:
+    """Extract string members from the frontend's three NoteTag dispatch sets."""
+    text = path.read_text()
+    values: set[str] = set()
+    for name in ("LIFECYCLE_TAGS", "MEMORY_SOURCES", "NOTE_SOURCES"):
+        match = re.search(
+            rf"export const {name} = (?:new Set\()?\[(.*?)\]",
+            text,
+            re.DOTALL,
+        )
+        if match is None:
+            print(f"ERROR: could not find {name} in {TS_SRC}", file=sys.stderr)
+            sys.exit(1)
+        values.update(re.findall(r"[\"']([^\"']+)[\"']", match.group(1)))
+    return values
+
+
+def check_stale_dispatch_tags(note_tags: list[str], ts_path: Path) -> list[str]:
+    """Return dispatch-set values that have no current NoteTag member."""
+    return sorted(extract_dispatch_tags(ts_path) - set(note_tags))
+
+
 def main() -> None:
     if not PYTHON_SRC.exists():
         print(f"ERROR: {PYTHON_SRC} not found", file=sys.stderr)
@@ -104,7 +123,21 @@ def main() -> None:
         )
         sys.exit(1)
 
-    print(f"OK: all {len(note_tags)} NoteTag values covered in markers.tsx")
+    stale = check_stale_dispatch_tags(note_tags, TS_SRC)
+    if stale:
+        print(
+            f"ERROR: {len(stale)} stale system_marker dispatch value(s) not in NoteTag:",
+            file=sys.stderr,
+        )
+        for tag in stale:
+            print(f"  - {tag}", file=sys.stderr)
+        print(
+            "\nRemove or rename the stale member in LIFECYCLE_TAGS, MEMORY_SOURCES, or NOTE_SOURCES.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    print(f"OK: NoteTag and markers.tsx dispatch sets agree on {len(note_tags)} values")
 
 
 if __name__ == "__main__":

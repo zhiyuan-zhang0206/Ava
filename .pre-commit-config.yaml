@@ -289,13 +289,12 @@ repos:
         pass_filenames: false
 
 
-      # NoteTag <-> system_marker sync: every NoteTag enum value in
-      # agent/messages.py must be referenced in the frontend markers.tsx
-      # dispatch. When a tag is added to the Python enum without updating the
-      # TypeScript, it falls through to the red 'Unrecognized system_marker'
-      # alarm. This lint catches the drift at commit time.
+      # NoteTag <-> system_marker sync: the backend enum and frontend dispatch
+      # sets must be equal. A missing frontend branch falls through to the red
+      # 'Unrecognized system_marker' alarm; a stale branch hides a renamed or
+      # removed backend tag. This lint catches either drift at commit time.
       - id: lint-note-tags
-        name: lint NoteTag / system_marker sync (every NoteTag covered in markers.tsx)
+        name: lint NoteTag / system_marker bidirectional sync
         entry: .venv/bin/python scripts/lint_note_tags.py
         language: system
         files: ^(shared/message_kwargs\.py|ui/web/src/components/timeline/markers\.tsx)$
