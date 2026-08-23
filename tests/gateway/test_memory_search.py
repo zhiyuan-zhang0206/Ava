@@ -4,6 +4,7 @@ relative-path conversion; wire error propagation."""
 from __future__ import annotations
 
 import asyncio
+import time
 from pathlib import Path
 from typing import Any
 
@@ -803,6 +804,14 @@ async def _search(client: httpx.AsyncClient) -> httpx.Response:
     return await client.post("/api/memory/search", json={"query": "x", "k": 1})
 
 
+async def _assert_semaphore_locked(sem: asyncio.Semaphore, timeout_s: float = 5.0) -> None:
+    """Wait for concurrent requests to acquire every memory-search permit."""
+    deadline = time.monotonic() + timeout_s
+    while not sem.locked() and time.monotonic() < deadline:
+        await asyncio.sleep(0.01)
+    assert sem.locked(), "search holders never acquired every permit"
+
+
 class TestWedgedBackendReleasesPermits:
     """Every search finishes, and its permit comes back — whatever the backend does.
 
@@ -892,10 +901,9 @@ class TestWedgedBackendReleasesPermits:
 
         async with _asgi_client() as client:
             holders = [asyncio.create_task(_search(client)) for _ in range(_SEARCH_PERMITS)]
-            await asyncio.sleep(0.05)  # let both reach the wedged backend holding a permit
             # Without this the test could pass vacuously, cancelling requests
             # that had not yet taken a permit.
-            assert _gw_memory._MEMORY_SEARCH_SEMAPHORE.locked()
+            await _assert_semaphore_locked(_gw_memory._MEMORY_SEARCH_SEMAPHORE)
             for task in holders:
                 task.cancel()
             for task in holders:
