@@ -97,10 +97,8 @@ interface ClusterSlice {
   connState: ConnectionState;
   setConnState: (s: ConnectionState) => void;
 
-  /** True while the cluster is paused (an update / rollout / restart is in
-   * flight). Drives AuthGuard's decision to show the full-screen UpdatingPage
-   * instead of redirecting an unauthenticated session to /login (the auth
-   * failure is expected during a rollout, not a real logout). */
+  /** True while an update / rollout / restart is in flight. Drives
+   * AuthGuard's full-screen UpdatingPage takeover for every auth status. */
   clusterUpdating: boolean;
   setClusterUpdating: (b: boolean) => void;
 

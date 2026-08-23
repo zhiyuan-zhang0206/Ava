@@ -27,7 +27,7 @@ generated from it and never hand-synced. event_names that violate the naming rul
 | telemetry (category=telemetry) | `events` | 106 | events table | 90d |
 | log (category=log) | `events` | 6 | events table | 30d |
 | file-only (destination=file) | file log | 1 | file only (not the events table) | — |
-| SSE live | Redis → frontend (not persisted) | 27 role | live projection | ephemeral |
+| SSE live | Redis → frontend (not persisted) | 28 role | live projection | ephemeral |
 
 All persistent events land in the single `events` table (`category` distinguishes
 audit / telemetry / log). The four legacy mechanisms under the unified event model
@@ -216,7 +216,7 @@ consumers: see the comments at each emit point.
 | `warning_resolved` | mark a warning (or class of warnings, via attributes.match) resolved | anomaly | target_event_id, match, resolved_by | 30d | events |
 | `error_resolved` | mark an error (or class of errors, via attributes.match) resolved | anomaly | target_event_id, match, resolved_by | 30d | events |
 
-## 5. SSE roles (live channel, not persisted, 27)
+## 5. SSE roles (live channel, not persisted, 28)
 
 Typed Pydantic discriminators in `shared/live_events.py` (role is a Literal);
 `EVENT_ADAPTER` / `SYSTEM_ROLES` / `GLOBAL_ROLES` derive from the single
@@ -231,6 +231,7 @@ same origin as persistent events but uses an independent schema.
 | `cancelled` | — |
 | `chat_delta` | — |
 | `chat_start` | — |
+| `cluster_update_started` | ✓ |
 | `code_delta` | — |
 | `code_start` | — |
 | `compact_done` | — |

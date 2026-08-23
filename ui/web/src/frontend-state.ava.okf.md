@@ -26,7 +26,7 @@ Server data is not mirrored into Zustand — the sidebar reads `useAgents → us
 ## Zustand `store.ts` (Pure UI + Cluster Coordination)
 
 - **UI state**: `activeId`, composer focus token, mobile drawer, mobile inspector overlay (`mobileInspectorOpen`), toast, search. Spawn selections (`behavior.spawn_*`) and sidebar view mode/sort/stats (`display.sidebar_*`, hooks in `lib/sidebar.ts`) are **not here** — DB settings via `useUserSettings`.
-- **Cluster coordination**: `reconnectNonce` (sole SSE-reconnect lever), `clusterUpdating` (drives `AuthGuard`'s `UpdatingPage` full-screen takeover, no in-page banners), `clusterStranded` (drives `AppConnectionBanner`).
+- **Cluster coordination**: `reconnectNonce` (sole SSE-reconnect lever), `clusterUpdating` (event/poll-driven `UpdatingPage`; the event seeds cached orchestration against stale-poll reversal), `clusterStranded` (drives `AppConnectionBanner`).
 
 ## `timeline-store.ts` + Per-Thread Timeline Cache (R1/R2/R3)
 

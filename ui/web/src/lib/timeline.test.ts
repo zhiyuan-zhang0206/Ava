@@ -260,6 +260,17 @@ describe("applySystemEvent", () => {
     expect(after).toBe(before);
   });
 
+  it("cluster update start is a no-op in the per-agent timeline", () => {
+    const before: BackendTimelineItem[] = [item({ kind: "agent_chat", payload: "hi" })];
+    const after = applySystemEvent(before, {
+      role: "cluster_update_started",
+      agent_id: 0,
+      kind: "rollout",
+      origin: "user",
+    });
+    expect(after).toBe(before);
+  });
+
   it("full flow: code_start → delta × 2 → exec_start → exec_output (exec_start creates placeholder)", () => {
     let items: BackendTimelineItem[] = [];
     items = applySystemEvent(items, { role: "code_start", item_id: "5.1", agent_id: 1 });

@@ -74,6 +74,7 @@ logical item, so the merge is by identity, not a timestamp heuristic.
 | `task_created` / `task_updated` | task registry write | `task_id` |
 | `page_opened` | `ava.ui.show` registered a page | `page_id`, `name`, `port`, `title`, `url` |
 | `page_closed` | `ava.ui.close` | `name` |
+| `cluster_update_started` | whole-cluster rollout/restart orchestration spawned; global UI takeover hint | `kind`, `origin` (`agent_id` is `0`) |
 
 ## Notes
 

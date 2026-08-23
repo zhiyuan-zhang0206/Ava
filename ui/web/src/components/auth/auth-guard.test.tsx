@@ -81,6 +81,39 @@ describe("AuthGuard", () => {
     expect(replaceSpy).not.toHaveBeenCalled();
   });
 
+  it("shows UpdatingPage for an authenticated session while the cluster is updating", () => {
+    setStatus("authenticated");
+    storeClusterUpdating = true;
+    render(
+      <AuthGuard>
+        <span data-testid="child">app</span>
+      </AuthGuard>,
+    );
+    expect(screen.getByTestId("updating-page")).toBeTruthy();
+    expect(screen.queryByTestId("child")).toBeNull();
+    expect(replaceSpy).not.toHaveBeenCalled();
+  });
+
+  it("returns an authenticated session to the app when the update clears", () => {
+    setStatus("authenticated");
+    storeClusterUpdating = true;
+    const view = render(
+      <AuthGuard>
+        <span data-testid="child">app</span>
+      </AuthGuard>,
+    );
+    expect(screen.getByTestId("updating-page")).toBeTruthy();
+
+    storeClusterUpdating = false;
+    view.rerender(
+      <AuthGuard>
+        <span data-testid="child">app</span>
+      </AuthGuard>,
+    );
+    expect(screen.queryByTestId("updating-page")).toBeNull();
+    expect(screen.getByTestId("child")).toBeTruthy();
+  });
+
   it("redirects to /login when unauthenticated off the login page (not updating)", () => {
     pathname = "/";
     setStatus("unauthenticated");

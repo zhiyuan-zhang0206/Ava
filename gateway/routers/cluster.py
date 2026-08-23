@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Body, HTTPException, Request
 from loguru import logger
@@ -42,10 +42,25 @@ from ops.cluster import is_paused as cluster_is_paused
 from ops.rpc_schemas import ClusterSpawnSession
 from shared import machines
 from shared.cluster_drift import prod_source_head_sha
+from shared.config import settings
+from shared.live_events import ClusterUpdateStarted
 from shared.machine import is_agent_runner, is_gateway, machine_name
+from shared.redis_client import publish_best_effort_sync
 
 router = APIRouter()
 _log = logging.getLogger(__name__)
+
+
+# Only the whole-cluster endpoints below emit this hint: the single-host update
+# relay and watchdog self-heal paths do not interrupt this gateway, and the
+# cluster-status poll remains their fallback signal.
+def _publish_cluster_update_started(kind: Literal["rollout", "restart"], origin: str) -> None:
+    event = ClusterUpdateStarted(agent_id=0, kind=kind, origin=origin)
+    publish_best_effort_sync(
+        settings.data_plane.events_channel,
+        event.model_dump_json(),
+        context="cluster_update_started",
+    )
 
 
 def _local_snapshot_blocking() -> ClusterStatus:
@@ -258,9 +273,11 @@ async def post_cluster_rollout(
             detail="rollout must be triggered on the gateway",
         )
     try:
-        return await asyncio.to_thread(
+        result = await asyncio.to_thread(
             _ops.cluster_rollout_op, body.origin, mode=body.mode, force=body.force
         )
+        _publish_cluster_update_started("rollout", body.origin)
+        return result
     except ClusterUpdateInProgress as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except NothingToUpdate as exc:
@@ -299,7 +316,9 @@ async def post_cluster_restart(
             detail="restart must be triggered on the gateway",
         )
     try:
-        return await asyncio.to_thread(_ops.cluster_restart_op, body.origin, mode=body.mode)
+        result = await asyncio.to_thread(_ops.cluster_restart_op, body.origin, mode=body.mode)
+        _publish_cluster_update_started("restart", body.origin)
+        return result
     except ClusterUpdateInProgress as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except OrchestrationSpawnFailed as exc:

@@ -11,10 +11,9 @@
 // a rollout finishes (`paused` flips true -> false) we reconnect SSE and
 // refetch agents promptly instead of waiting on the watchdog.
 //
-// It also feeds `clusterUpdating` into the store so AuthGuard can tell an
-// expected update-induced auth failure apart from a real logged-out state and
-// show the full-screen UpdatingPage instead of redirecting to /login (see
-// components/auth/auth-guard.tsx).
+// It also feeds `clusterUpdating` into the store so AuthGuard shows the
+// full-screen UpdatingPage for the whole known update window, regardless of
+// auth state (see components/auth/auth-guard.tsx).
 //
 // ONE poll loop, on `/api/cluster/status`: it alone carries every signal this
 // hook needs (`paused` + `current_orchestration`), and it is the one status

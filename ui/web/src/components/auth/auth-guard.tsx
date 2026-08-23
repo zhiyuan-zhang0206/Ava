@@ -5,10 +5,10 @@
 // Wrap around pages that require authentication. The login page itself
 // should NOT be wrapped — it reads auth state directly.
 //
-// Special case: when the cluster is known to be updating (clusterUpdating in
-// the store is true) and auth fails, show the UpdatingPage instead of
-// redirecting to /login. This prevents users from seeing a confusing password
-// prompt during planned cluster restarts.
+// When the cluster is known to be updating, UpdatingPage takes over the full
+// viewport for every auth status. Clearing clusterUpdating reveals the app in
+// place for a valid session; an expired session follows the existing /login
+// redirect effect.
 
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, type ReactNode } from "react";
@@ -46,6 +46,13 @@ export function AuthGuard({ children }: { children: ReactNode }) {
   // On login page, always show children (login form handles its own redirect)
   if (isLoginPage) return <>{children}</>;
 
+  // State-driven takeover of the current URL. The cluster-health poll clears
+  // this flag when the orchestration finishes, so no route change or reload is
+  // needed to return to the app.
+  if (clusterUpdating) {
+    return <UpdatingPage />;
+  }
+
   // Authenticated — show the app. TelemetryPageView (page-view tracking)
   // lives here so only the authenticated surface is tracked, never the
   // login page or the pre-auth loading state.
@@ -56,14 +63,6 @@ export function AuthGuard({ children }: { children: ReactNode }) {
         <TelemetryPageView />
       </>
     );
-  }
-
-  // Unauthenticated but cluster is known to be updating — show the updating
-  // page instead of redirecting to /login. The UpdatingPage retries auth
-  // periodically; when the backend comes back, useAuth will flip to
-  // "authenticated" and the app will render.
-  if (clusterUpdating) {
-    return <UpdatingPage />;
   }
 
   // Unauthenticated + not updating + not login page — show nothing while
