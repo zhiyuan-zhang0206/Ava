@@ -39,10 +39,13 @@ def _alert(
     ends_at: str = "",
     summary: str = "test summary",
     fingerprint: str = "abc123",
+    notify_im: str | None = None,
 ) -> dict[str, Any]:
     labels = {"alertname": alertname, "team": "ava-ops"}
     if severity:
         labels["severity"] = severity
+    if notify_im is not None:
+        labels["notify_im"] = notify_im
     return {
         "status": status,
         "labels": labels,
@@ -234,6 +237,146 @@ def test_ingest_every_severity_notifies() -> None:
     assert "⚠️ 告警 [CRITICAL]" in notified[0]  # emoji-ok: asserting the user-designated IM format
     assert "⚠️ 告警 [WARNING]" in notified[1]  # emoji-ok: asserting the user-designated IM format
     assert "⚠️ 告警 [ERROR]" in notified[2]  # emoji-ok: asserting the user-designated IM format
+
+
+def test_ingest_notify_im_false_stores_and_publishes_without_im(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """notify_im="false" keeps the alert in the store and SSE stream while
+    suppressing only its IM fan-out."""
+    notified: list[str] = []
+    published: list[tuple[str, str]] = []
+
+    def _capture(text: str) -> bool:
+        notified.append(text)
+        return True
+
+    class _FakeRedis:
+        def __enter__(self) -> _FakeRedis:
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def publish(self, channel: str, frame: str) -> None:
+            published.append((channel, frame))
+
+    monkeypatch.setattr(alerts_router, "_notify_im", _capture)
+    monkeypatch.setattr(alerts_router, "sync_redis", _FakeRedis)
+
+    with TestClient(app) as client:
+        resp = _ingest(client, _webhook(notify_im="false"))
+    assert resp.json() == {"processed": 1, "inserted": 1, "updated": 0, "notified": 0}
+    assert notified == []
+
+    with db_conn.cursor() as cur:
+        cur.execute("SELECT status, notified_at FROM alerts")
+        row = cur.fetchone()
+        assert row is not None
+    assert row == ("unresolved", None)
+
+    assert len(published) == 1
+    channel, frame = published[0]
+    assert channel == "ava:alerts"
+    assert json.loads(frame)["status"] == "unresolved"
+
+
+def test_ingest_notify_im_false_firing_and_resolution_stay_silent(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A gated firing and its resolution both update the row without IM."""
+    notified: list[str] = []
+
+    def _capture(text: str) -> bool:
+        notified.append(text)
+        return True
+
+    monkeypatch.setattr(alerts_router, "_notify_im", _capture)
+
+    with TestClient(app) as client:
+        firing = _ingest(client, _webhook(notify_im="false"))
+        resolved = _ingest(
+            client,
+            _webhook(
+                status="resolved",
+                ends_at="2026-08-04T11:00:00Z",
+                notify_im="false",
+            ),
+        )
+    assert firing.json()["notified"] == 0
+    assert resolved.json()["notified"] == 0
+    assert notified == []
+
+    with db_conn.cursor() as cur:
+        cur.execute("SELECT status, ends_at, notified_at FROM alerts")
+        row = cur.fetchone()
+        assert row is not None
+    assert row == ("resolved", datetime(2026, 8, 4, 11, 0, tzinfo=UTC), None)
+
+
+def test_ingest_notify_im_non_gating_value_still_notifies(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only the exact string "false" gates IM; "true" keeps the default."""
+    notified: list[str] = []
+
+    def _capture(text: str) -> bool:
+        notified.append(text)
+        return True
+
+    monkeypatch.setattr(alerts_router, "_notify_im", _capture)
+
+    with TestClient(app) as client:
+        resp = _ingest(client, _webhook(notify_im="true"))
+    assert resp.json()["notified"] == 1
+    assert len(notified) == 1
+
+
+def test_ingest_notify_im_false_resends_and_refire_stay_silent(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Gated still-firing re-sends and a new firing episode never retry IM."""
+    notified: list[str] = []
+
+    def _capture(text: str) -> bool:
+        notified.append(text)
+        return True
+
+    monkeypatch.setattr(alerts_router, "_notify_im", _capture)
+
+    with TestClient(app) as client:
+        firing = _ingest(client, _webhook(notify_im="false"))
+        resend = _ingest(client, _webhook(notify_im="false"))
+        resolved = _ingest(
+            client,
+            _webhook(
+                status="resolved",
+                ends_at="2026-08-04T11:00:00Z",
+                notify_im="false",
+            ),
+        )
+        refire = _ingest(
+            client,
+            _webhook(
+                starts_at="2026-08-04T12:00:00Z",
+                notify_im="false",
+            ),
+        )
+
+    assert [response.json()["notified"] for response in (firing, resend, resolved, refire)] == [
+        0,
+        0,
+        0,
+        0,
+    ]
+    assert resend.json()["updated"] == 1
+    assert refire.json()["inserted"] == 1
+    assert notified == []
+
+    with db_conn.cursor() as cur:
+        cur.execute("SELECT status, notified_at FROM alerts ORDER BY starts_at")
+        rows = cur.fetchall()
+    assert rows == [("resolved", None), ("unresolved", None)]
 
 
 def test_ingest_uses_display_language_setting(db_conn: psycopg.Connection) -> None:
