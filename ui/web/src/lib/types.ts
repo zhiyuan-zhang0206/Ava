@@ -138,6 +138,7 @@ export type ContextSection = Schemas["ContextSection"];
 // --- Per-agent inspector panel (GET /api/agents/{id}/inspect) ---
 
 export type AgentInspect = Schemas["AgentInspect"];
+export type AgentInspectLive = Schemas["AgentInspectLive"];
 export type ShellInfo = Schemas["ShellInfo"];
 export type ShellCapture = Schemas["ShellCaptureResponse"];
 export type AgentCost = Schemas["AgentCost"];

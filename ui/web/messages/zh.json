@@ -43,6 +43,7 @@
     "loadingAgents": "加载 agent 中…",
     "statistics": "统计",
     "statisticsUpdating": "统计更新中",
+    "statisticsUpdatingFor": "正在更新 {win}…",
     "statisticsRetry": "重试",
     "searchAgents": "搜索 agents",
     "collapseSidebar": "收起侧边栏",

@@ -188,7 +188,7 @@ export function GraphView({
         params={forceParams}
         setParams={setForceParams}
         resetParams={resetForceParams}
-        statsText={`${graph.nodes.length} nodes · ${graph.edges.length} edges`}
+        statsText={`${nodes.length} nodes · ${edges.length} edges`}
         ariaLabel="Fleet relationship graph"
         overlayLeft={
           <select
@@ -223,7 +223,7 @@ export function GraphView({
           Truncated — edge limit reached
         </p>
       ) : null}
-      {graph.nodes.length === 0 ? (
+      {nodes.length === 0 ? (
         <p className={cn("absolute inset-0 items-center justify-center text-xs text-muted-foreground", FLEX)}>
           {loading ? "Loading..." : error ? "Graph unavailable." : "No agents to graph."}
         </p>

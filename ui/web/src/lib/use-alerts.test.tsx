@@ -1,10 +1,19 @@
 // foldAlert — the SSE frame → cache folding logic: upsert by id, count
 // deltas for the badge (unread) and the floating bar (unresolved).
 
-import { describe, expect, it } from "vitest";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { renderHook, waitFor } from "@testing-library/react";
+import type { ReactNode } from "react";
+import { describe, expect, it, vi } from "vitest";
 
-import { foldAlert } from "@/lib/use-alerts";
+import { foldAlert, useAlertsSection } from "@/lib/use-alerts";
 import type { Alert, AlertsResponse } from "@/lib/types";
+
+const mocks = vi.hoisted(() => ({ getAlerts: vi.fn() }));
+vi.mock("@/lib/api", () => ({
+  API_BASE: "",
+  api: { getAlerts: mocks.getAlerts },
+}));
 
 function row(overrides: Partial<Alert> = {}): Alert {
   return {
@@ -65,5 +74,27 @@ describe("foldAlert", () => {
     expect(next.alerts.map((a) => a.id)).toEqual([5]);
     expect(next.meta.unresolved_count).toBe(0);
     expect(next.meta.unread_count).toBe(0);
+  });
+});
+
+describe("useAlertsSection", () => {
+  it("pins the section query to the 24h window named by its empty state", async () => {
+    mocks.getAlerts.mockResolvedValue(resp([], 0, 0));
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    );
+
+    const { result } = renderHook(() => useAlertsSection(), { wrapper });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(mocks.getAlerts).toHaveBeenCalledWith({
+      window: "24h",
+      includeRead: true,
+      limit: 200,
+    });
+    queryClient.clear();
   });
 });

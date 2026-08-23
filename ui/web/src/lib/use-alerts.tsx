@@ -228,7 +228,7 @@ export function useAlerts() {
 export function useAlertsSection() {
   return useQuery({
     queryKey: ALERTS_SECTION_QUERY_KEY,
-    queryFn: () => api.getAlerts({ includeRead: true, limit: 200 }),
+    queryFn: () => api.getAlerts({ window: "24h", includeRead: true, limit: 200 }),
     staleTime: 30_000,
     refetchOnWindowFocus: false,
   });

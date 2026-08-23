@@ -488,6 +488,113 @@ def test_inspect_unknown_agent_404(db_conn: psycopg.Connection) -> None:
     assert resp.status_code == 404
 
 
+def test_inspect_live_returns_only_window_independent_fields(
+    db_conn: psycopg.Connection,
+    fake_loki: _FakeLoki,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The live route is the cheap inspector skeleton, not the aggregate payload."""
+    aid = _insert_agent(
+        db_conn,
+        status="idling",
+        config_overlay={"llm_model": "claude-opus-4-8"},
+    )
+    with db_conn.cursor() as cur:
+        cur.execute("UPDATE agents_meta SET machine = 'wsl' WHERE id = %s", (aid,))
+    fake_loki.add(
+        event="heartbeat_paused",
+        agent_id=aid,
+        payload={"duration_s": 1800},
+        ts_offset_hours=1,
+    )
+    db_conn.commit()
+
+    async def dispatch(
+        target_machine: str, kind: str, payload: dict[str, object], **kwargs: object
+    ) -> dict[str, object]:
+        assert (target_machine, kind, payload) == (
+            "wsl",
+            "shell_probe",
+            {"agent_id": aid},
+        )
+        return {
+            "shells": [{"id": 5, "name": "live-shell", "created_at": None, "uptime_seconds": 42}]
+        }
+
+    monkeypatch.setattr(agent_inspect._cluster_rpc, "dispatch_to_machine", dispatch)
+    with TestClient(app) as client:
+        response = client.get(f"/api/agents/{aid}/inspect/live")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert set(body) == {
+        "agent_id",
+        "machine",
+        "liveness_state",
+        "last_probe_at",
+        "spawned_at",
+        "started_at",
+        "shells",
+        "config_overlay",
+        "notice",
+        "heartbeat",
+    }
+    assert body["agent_id"] == aid
+    assert body["machine"] == "wsl"
+    assert body["config_overlay"] == {"llm_model": "claude-opus-4-8"}
+    assert body["shells"] == [
+        {"id": 5, "name": "live-shell", "created_at": None, "uptime_seconds": 42}
+    ]
+    assert body["heartbeat"]["last_pause"]["duration_s"] == 1800
+    assert {"cost", "stats", "tps", "activity"}.isdisjoint(body)
+
+
+def test_inspect_live_unknown_agent_404(db_conn: psycopg.Connection) -> None:
+    db_conn.commit()
+    with TestClient(app) as client:
+        response = client.get("/api/agents/999999/inspect/live")
+    assert response.status_code == 404
+
+
+def test_inspect_live_probe_failure_degrades_to_empty_shells(
+    db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    aid = _insert_agent(db_conn)
+    db_conn.commit()
+
+    async def unreachable(*args: object, **kwargs: object) -> dict[str, object]:
+        raise agent_inspect._cluster_rpc.ClusterOpUnreachable("connect failed")
+
+    monkeypatch.setattr(agent_inspect._cluster_rpc, "dispatch_to_machine", unreachable)
+    with TestClient(app) as client:
+        response = client.get(f"/api/agents/{aid}/inspect/live")
+    assert response.status_code == 200
+    assert response.json()["shells"] == []
+
+
+@pytest.mark.parametrize(
+    "error",
+    [httpx.RemoteProtocolError("Loki closed the response"), ValueError("invalid Loki JSON")],
+)
+def test_inspect_live_loki_failure_degrades_last_pause_to_none(
+    db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+    error: Exception,
+) -> None:
+    aid = _insert_agent(db_conn, status="idling")
+    db_conn.commit()
+
+    def unavailable(_agent_id: int) -> None:
+        raise error
+
+    monkeypatch.setattr(agent_inspect, "_heartbeat_last_pause", unavailable)
+    with TestClient(app) as client:
+        response = client.get(f"/api/agents/{aid}/inspect/live")
+    assert response.status_code == 200
+    assert response.json()["heartbeat"]["last_pause"] is None
+
+
 @pytest.mark.parametrize("reason", ["queue_full", "acquire_timeout"])
 def test_inspect_local_loki_budget_rejection_is_503(
     db_conn: psycopg.Connection,

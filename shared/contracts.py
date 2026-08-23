@@ -238,6 +238,9 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("GET", "/api/health"): RouteContract(note="liveness probe"),
     # ── gateway/routers/inspect.py ───────────────────────────────────
     ("GET", "/api/agents/{agent_id}/inspect"): RouteContract(),
+    ("GET", "/api/agents/{agent_id}/inspect/live"): RouteContract(
+        note="uncached live skeleton — cheap window-independent inspector fields",
+    ),
     ("GET", "/api/agents/{agent_id}/inspect/metrics"): RouteContract(),
     ("GET", "/api/agents/{agent_id}/neighbors"): RouteContract(),
     # ── gateway/routers/inventory.py ───────────────────────────────────

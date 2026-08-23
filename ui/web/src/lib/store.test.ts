@@ -17,6 +17,7 @@ function resetStore(): void {
     composerFocusToken: 0,
     mobileSidebarOpen: false,
     mobileInspectorOpen: false,
+    inspectorHours: 24,
     toast: null,
     searchQuery: "",
   });
@@ -43,6 +44,7 @@ describe("create() initial defaults (fresh module)", () => {
     expect(s.activeId).toBeNull();
     expect(s.mobileSidebarOpen).toBe(false);
     expect(s.mobileInspectorOpen).toBe(false);
+    expect(s.inspectorHours).toBe(24);
     expect(s.composerFocusToken).toBe(0);
     expect(s.toast).toBeNull();
     expect(s.searchQuery).toBe("");
@@ -125,6 +127,15 @@ describe("setMobileInspectorOpen", () => {
     expect(useStore.getState().mobileInspectorOpen).toBe(true);
     act(() => useStore.getState().setMobileInspectorOpen(false));
     expect(useStore.getState().mobileInspectorOpen).toBe(false);
+  });
+});
+
+describe("setInspectorHours", () => {
+  it("shares the session window used by panel queries and row prefetch", () => {
+    act(() => useStore.getState().setInspectorHours(1));
+    expect(useStore.getState().inspectorHours).toBe(1);
+    act(() => useStore.getState().setInspectorHours(null));
+    expect(useStore.getState().inspectorHours).toBeNull();
   });
 });
 

@@ -18,6 +18,7 @@ import type { NoticesFeed,
   UserSettingListResponse,
   UserSettingRow,
   AgentInspect,
+  AgentInspectLive,
   AgentMachineRow,
   AgentMessageEnqueued,
   AgentRow,
@@ -210,9 +211,8 @@ export const api = {
     return f(`/api/agents/${agentId}/context-breakdown`).then(ok<ContextBreakdownResponse>);
   },
 
-  // Per-agent inspector panel: live persistent shells + frozen config overlay
-  // + LLM cost + turn/exec stats. Single-agent counterpart to getStatsDashboard
-  // (fleet-wide). Polled while the panel is open. `hours` windows cost + stats
+  // Per-agent windowed inspector aggregates. Single-agent counterpart to
+  // getStatsDashboard (fleet-wide). `hours` windows cost + stats
   // (0 = 5m; 1/6/24/72/168 = hours); omitted = cumulative since spawn. `sinceCompact`
   // windows them to events since the agent's latest compact halt instead
   // (takes precedence over `hours` backend-side).
@@ -232,6 +232,22 @@ export const api = {
       INSPECT_REQUEST_TIMEOUT_MS,
       signal,
       "Inspector request",
+    );
+  },
+
+  // Cheap, window-independent inspector skeleton. Unlike getAgentInspect this
+  // omits the Loki aggregate fan-out and carries only current shells, liveness,
+  // configuration, notice, timestamps, and heartbeat state.
+  getAgentInspectLive: (
+    agentId: number,
+    signal?: AbortSignal,
+  ): Promise<AgentInspectLive> => {
+    return jsonWithTimeout<AgentInspectLive>(
+      `/api/agents/${agentId}/inspect/live`,
+      {},
+      INSPECT_REQUEST_TIMEOUT_MS,
+      signal,
+      "Inspector live request",
     );
   },
 

@@ -320,6 +320,21 @@ describe("stats / config / timeline / system status", () => {
     expect(calls[0].init?.signal?.aborted).toBe(true);
   });
 
+  it("getAgentInspectLive GETs the cheap endpoint and propagates cancellation", () => {
+    const controller = new AbortController();
+    vi.stubGlobal("fetch", vi.fn((url: string, init?: RequestInit) => {
+      calls.push({ url, init });
+      return new Promise<Response>(() => undefined);
+    }));
+
+    void api.getAgentInspectLive(7, controller.signal);
+
+    expect(calls[0].url).toMatch(/\/api\/agents\/7\/inspect\/live$/);
+    expect(calls[0].init?.signal?.aborted).toBe(false);
+    controller.abort();
+    expect(calls[0].init?.signal?.aborted).toBe(true);
+  });
+
   it("getAgentInspect aborts fetch and rejects when its response deadline expires", async () => {
     vi.useFakeTimers();
     vi.stubGlobal("fetch", vi.fn((url: string, init?: RequestInit) => {

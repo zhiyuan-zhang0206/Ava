@@ -50,7 +50,10 @@ export function StatsCards({
   const firstLoad = stats === undefined && error === null && fetching;
   const placeholder = failedWithoutData ? "!" : "—";
   const win = STATS_WINDOW_LABELS[windowHours];
-  const cards: { label: string; value: string; title?: string }[] = [
+  const windowMismatch = stats !== undefined && stats.window_hours !== windowHours;
+  const windowedPlaceholder = windowMismatch ? "…" : placeholder;
+  const windowedTitle = windowMismatch ? t("statisticsUpdatingFor", { win }) : null;
+  const cards: { label: string; value: string; title?: string; windowed?: boolean }[] = [
     {
       label: t("liveAgents"),
       value: stats ? String(stats.live_count) : placeholder,
@@ -58,10 +61,14 @@ export function StatsCards({
     },
     {
       label: t("tokens"),
-      value: stats
+      windowed: true,
+      value: windowMismatch
+        ? windowedPlaceholder
+        : stats
         ? formatTokensCompact(stats.tokens.input + stats.tokens.output)
         : placeholder,
       title:
+        windowedTitle ??
         errMsg ??
         (stats
           ? t("tokensTitleDetail", { inp: stats.tokens.input.toLocaleString(), out: stats.tokens.output.toLocaleString(), cache: stats.tokens.cache_hit_pct })
@@ -69,13 +76,24 @@ export function StatsCards({
     },
     {
       label: t("cacheHit"),
-      value: stats ? `${stats.tokens.cache_hit_pct.toFixed(2)}%` : placeholder,
-      title: errMsg ?? t("cacheHitTitle", { win }),
+      windowed: true,
+      value: windowMismatch
+        ? windowedPlaceholder
+        : stats
+          ? `${stats.tokens.cache_hit_pct.toFixed(2)}%`
+          : placeholder,
+      title: windowedTitle ?? errMsg ?? t("cacheHitTitle", { win }),
     },
     {
       label: t("cost"),
-      value: stats ? `$${stats.cost_usd.toFixed(2)}` : placeholder,
+      windowed: true,
+      value: windowMismatch
+        ? windowedPlaceholder
+        : stats
+          ? `$${stats.cost_usd.toFixed(2)}`
+          : placeholder,
       title:
+        windowedTitle ??
         errMsg ??
         (stats
           ? t("costTitleDetail", { win, amount: stats.cost_usd })
@@ -83,16 +101,24 @@ export function StatsCards({
     },
     {
       label: t("avgTurnTime"),
+      windowed: true,
       value:
-        stats?.avg_turn_seconds != null
+        windowMismatch
+          ? windowedPlaceholder
+          : stats?.avg_turn_seconds != null
           ? `${Math.round(stats.avg_turn_seconds)}s`
           : placeholder,
-      title: errMsg ?? t("avgTurnTitle", { win }),
+      title: windowedTitle ?? errMsg ?? t("avgTurnTitle", { win }),
     },
     {
       label: t("warningsErrors"),
-      value: stats ? `${stats.warnings} / ${stats.errors}` : placeholder,
-      title: errMsg ?? t("warningsTitle", { win }),
+      windowed: true,
+      value: windowMismatch
+        ? windowedPlaceholder
+        : stats
+          ? `${stats.warnings} / ${stats.errors}`
+          : placeholder,
+      title: windowedTitle ?? errMsg ?? t("warningsTitle", { win }),
     },
   ];
   const valueClass = failedWithoutData
@@ -147,6 +173,7 @@ export function StatsCards({
         {cards.map((card) => (
           <div
             key={card.label}
+            title={windowMismatch && card.windowed ? card.title : undefined}
             className={cn("gap-0.5 px-2 py-1.5 rounded bg-sidebar-accent/40", FLEX, FLEX_COL)}
           >
             <span className="text-[10px] tracking-wide text-muted-foreground">

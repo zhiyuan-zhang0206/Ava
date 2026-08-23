@@ -157,6 +157,31 @@ class HeartbeatInfo(BaseModel):
     last_pause: HeartbeatLastPause | None = None
 
 
+class AgentInspectLive(BaseModel):
+    """GET /api/agents/{id}/inspect/live response — the inspector's cheap,
+    window-independent skeleton.
+
+    Every field reflects current database or runner state except
+    `heartbeat.last_pause`, which is a single bounded recent-history lookup and
+    degrades to None when Loki is unavailable. The response intentionally omits
+    cost, stats, TPS, and activity so switching agents does not wait for the
+    expensive event-history aggregate fan-out.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    agent_id: int
+    machine: str
+    liveness_state: Literal["online", "offline", "unknown"]
+    last_probe_at: datetime | None = None
+    spawned_at: datetime
+    started_at: datetime | None = None
+    shells: list[ShellInfo]
+    config_overlay: dict[str, Any]
+    notice: OpenNotice | None = None
+    heartbeat: HeartbeatInfo
+
+
 class AgentInspect(BaseModel):
     """GET /api/agents/{id}/inspect response — the per-agent inspector panel.
 

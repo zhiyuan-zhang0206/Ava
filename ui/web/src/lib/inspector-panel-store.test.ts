@@ -12,7 +12,7 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { useInspectorOpen } from "./inspector-panel-store";
+import { useInspectorHours, useInspectorOpen } from "./inspector-panel-store";
 import { useStore } from "./store";
 
 const { isLargeMock, settings, setSettingMock } = vi.hoisted(() => {
@@ -49,11 +49,11 @@ beforeEach(() => {
     settings[k] = undefined;
   });
   setSettingMock.mockClear();
-  useStore.setState({ mobileInspectorOpen: false });
+  useStore.setState({ mobileInspectorOpen: false, inspectorHours: 24 });
 });
 
 afterEach(() => {
-  useStore.setState({ mobileInspectorOpen: false });
+  useStore.setState({ mobileInspectorOpen: false, inspectorHours: 24 });
 });
 
 describe("useInspectorOpen — desktop (≥ lg)", () => {
@@ -83,6 +83,16 @@ describe("useInspectorOpen — desktop (≥ lg)", () => {
     rerender();
     expect(result.current.open).toBe(false);
     expect(setSettingMock).toHaveBeenLastCalledWith("display.inspector_open", false);
+  });
+});
+
+describe("useInspectorHours", () => {
+  it("defaults to 24h and updates the shared client selection", () => {
+    const { result } = renderHook(() => useInspectorHours());
+    expect(result.current.inspectorHours).toBe(24);
+    act(() => result.current.setInspectorHours(-1));
+    expect(result.current.inspectorHours).toBe(-1);
+    expect(useStore.getState().inspectorHours).toBe(-1);
   });
 });
 

@@ -17,12 +17,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { InspectorPanel, InspectorToggle } from "./inspector-panel";
 import { formatAbsolute, formatRelative } from "@/lib/time";
-import type { AgentInspect } from "@/lib/types";
+import type { AgentInspect, AgentInspectLive } from "@/lib/types";
 
 // vi.hoisted so the mock fn is initialized before the hoisted vi.mock factory
 // runs (the factory fires during the InspectorPanel import, before module-body
 // consts would otherwise initialize).
-const { getAgentInspect, listPages, resolveNotice } = vi.hoisted(() => ({
+const { getAgentInspect, getAgentInspectLive, listPages, resolveNotice } = vi.hoisted(() => ({
   getAgentInspect:
     vi.fn<
       (
@@ -32,6 +32,8 @@ const { getAgentInspect, listPages, resolveNotice } = vi.hoisted(() => ({
         signal?: AbortSignal,
       ) => Promise<AgentInspect>
     >(),
+  getAgentInspectLive:
+    vi.fn<(agentId: number, signal?: AbortSignal) => Promise<AgentInspectLive>>(),
   // useAgentPages fetches the open-pages list; default to none so the Page
   // section renders its empty state and these render tests stay focused on the
   // /inspect sections. The dedicated use-agent-pages.test.ts covers the fetch +
@@ -41,24 +43,50 @@ const { getAgentInspect, listPages, resolveNotice } = vi.hoisted(() => ({
   resolveNotice: vi.fn(() => Promise.resolve({ status: "ok" })),
 }));
 vi.mock("@/lib/api", () => ({
-  api: { getAgentInspect, listPages, resolveNotice },
+  api: { getAgentInspect, getAgentInspectLive, listPages, resolveNotice },
 }));
 
 // useAgentPages subscribes to the global SSE stream; stub it to a no-op so the
 // panel renders without an <EventStreamProvider> (its page-fold behavior is
 // covered in use-agent-pages.test.ts).
+const streamHandlers = vi.hoisted(() => ({
+  system: undefined as ((event: unknown) => void) | undefined,
+  connection: undefined as ((event: { type: string }) => void) | undefined,
+}));
 vi.mock("@/lib/useEventStream", () => ({
   EventStreamProvider: ({ children }: { children: React.ReactNode }) => children,
-  useEventStream: () => undefined,
+  useEventStream: (
+    onSystemEvent: (event: unknown) => void,
+    onConnectionEvent: (event: { type: string }) => void,
+  ) => {
+    streamHandlers.system = onSystemEvent;
+    streamHandlers.connection = onConnectionEvent;
+  },
 }));
 
-const panelState = { open: true };
+const panelState = { open: true, hours: 24 as number | null };
 const toggle = vi.fn(() => {
   panelState.open = !panelState.open;
 });
-vi.mock("@/lib/inspector-panel-store", () => ({
-  useInspectorOpen: () => ({ open: panelState.open, toggle }),
-}));
+const setInspectorHours = vi.fn((hours: number | null) => {
+  panelState.hours = hours;
+});
+vi.mock("@/lib/inspector-panel-store", async () => {
+  const React = await import("react");
+  return {
+    useInspectorOpen: () => ({ open: panelState.open, toggle }),
+    useInspectorHours: () => {
+      const [hours, setHours] = React.useState(panelState.hours);
+      return {
+        inspectorHours: hours,
+        setInspectorHours: (next: number | null) => {
+          setInspectorHours(next);
+          setHours(next);
+        },
+      };
+    },
+  };
+});
 
 // Breakpoint: tests default to desktop (isLarge = true). R4 layer 4: the
 // panel's breakpoint awareness goes through useBreakpoint.
@@ -71,12 +99,22 @@ vi.mock("@/lib/breakpoint", () => ({
   }),
 }));
 
+beforeEach(() => {
+  getAgentInspect.mockResolvedValue(fixture());
+  getAgentInspectLive.mockResolvedValue(liveFixture());
+});
+
 afterEach(() => {
   cleanup();
   getAgentInspect.mockReset();
+  getAgentInspectLive.mockReset();
   resolveNotice.mockClear();
   toggle.mockReset();
   panelState.open = true;
+  panelState.hours = 24;
+  setInspectorHours.mockClear();
+  streamHandlers.system = undefined;
+  streamHandlers.connection = undefined;
   isLargeMock.mockReturnValue(true);
 });
 
@@ -140,9 +178,25 @@ function fixture(overrides: Partial<AgentInspect> = {}): AgentInspect {
   };
 }
 
+function liveFixture(overrides: Partial<AgentInspectLive> = {}): AgentInspectLive {
+  const full = fixture(overrides);
+  return {
+    agent_id: full.agent_id,
+    machine: full.machine,
+    liveness_state: full.liveness_state,
+    last_probe_at: full.last_probe_at,
+    spawned_at: full.spawned_at,
+    started_at: full.started_at,
+    shells: full.shells,
+    config_overlay: full.config_overlay,
+    notice: full.notice,
+    heartbeat: full.heartbeat,
+  };
+}
+
 describe("InspectorPanel", () => {
   it("owns manual retry instead of inheriting the global automatic retry policy", async () => {
-    getAgentInspect.mockRejectedValue(
+    getAgentInspectLive.mockRejectedValue(
       new Error("HTTP 503: inspector history query timed out; retry"),
     );
     renderWithGlobalRetries(<InspectorPanel agentId={1} />);
@@ -150,13 +204,13 @@ describe("InspectorPanel", () => {
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Retry inspector" })).toBeTruthy(),
     );
-    expect(getAgentInspect).toHaveBeenCalledTimes(1);
+    expect(getAgentInspectLive).toHaveBeenCalledTimes(1);
   });
 
   it("shows a failed cold load with an explicit retry action", async () => {
-    getAgentInspect
+    getAgentInspectLive
       .mockRejectedValueOnce(new Error("HTTP 503: inspector history query timed out; retry"))
-      .mockResolvedValueOnce(fixture());
+      .mockResolvedValueOnce(liveFixture());
     render(<InspectorPanel agentId={1} />);
 
     await waitFor(() =>
@@ -164,15 +218,15 @@ describe("InspectorPanel", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "Retry inspector" }));
     await waitFor(() => expect(screen.getByText("Persistent shells")).toBeTruthy());
-    expect(getAgentInspect).toHaveBeenCalledTimes(2);
+    expect(getAgentInspectLive).toHaveBeenCalledTimes(2);
   });
 
   it("never renders the previous agent while the new agent inspect is pending", async () => {
-    let resolveAgentB: ((value: AgentInspect) => void) | undefined;
-    getAgentInspect.mockImplementation((agentId) => {
+    let resolveAgentB: ((value: AgentInspectLive) => void) | undefined;
+    getAgentInspectLive.mockImplementation((agentId) => {
       if (agentId === 1) {
         return Promise.resolve(
-          fixture({
+          liveFixture({
             agent_id: 1,
             shells: [
               {
@@ -194,7 +248,7 @@ describe("InspectorPanel", () => {
           }),
         );
       }
-      return new Promise<AgentInspect>((resolve) => {
+      return new Promise<AgentInspectLive>((resolve) => {
         resolveAgentB = resolve;
       });
     });
@@ -213,7 +267,9 @@ describe("InspectorPanel", () => {
         <InspectorPanel agentId={2} />
       </QueryClientProvider>,
     );
-    await waitFor(() => expect(getAgentInspect).toHaveBeenCalledWith(2, 24, false, expect.any(AbortSignal)));
+    await waitFor(() =>
+      expect(getAgentInspectLive).toHaveBeenCalledWith(2, expect.any(AbortSignal)),
+    );
 
     // B has not answered yet. React Query may supply A through
     // keepPreviousData, but no A-owned shell/notice/reply surface may render
@@ -223,7 +279,7 @@ describe("InspectorPanel", () => {
     expect(screen.queryByText("Only Agent A may answer this")).toBeNull();
     expect(screen.queryByRole("textbox")).toBeNull();
 
-    resolveAgentB?.(fixture({ agent_id: 2, shells: [] }));
+    resolveAgentB?.(liveFixture({ agent_id: 2, shells: [] }));
     await waitFor(() => expect(screen.getByText("None open")).toBeTruthy());
   });
 
@@ -276,6 +332,54 @@ describe("InspectorPanel", () => {
     expect(screen.queryByText("State")).toBeNull();
     expect(screen.queryByText("every 5m")).toBeNull();
     expect(screen.getByText("never paused")).toBeTruthy();
+  });
+
+  it("renders section skeletons instead of a single loading line on a cold split load", () => {
+    getAgentInspectLive.mockReturnValue(new Promise<AgentInspectLive>(() => undefined));
+    getAgentInspect.mockReturnValue(new Promise<AgentInspect>(() => undefined));
+
+    render(<InspectorPanel agentId={1} />);
+
+    expect(screen.getByText("Page")).toBeTruthy();
+    expect(screen.getByLabelText("Persistent shells loading")).toBeTruthy();
+    expect(screen.getByLabelText("Liveness loading")).toBeTruthy();
+    expect(screen.getByLabelText("Configuration overlay loading")).toBeTruthy();
+    expect(screen.getByLabelText("Cost loading")).toBeTruthy();
+    expect(screen.getByLabelText("Activity loading")).toBeTruthy();
+    expect(screen.getByLabelText("Notice loading")).toBeTruthy();
+    expect(screen.queryByText("Loading…")).toBeNull();
+  });
+
+  it("keeps live sections visible while the slower windowed half is pending", async () => {
+    getAgentInspect.mockReturnValue(new Promise<AgentInspect>(() => undefined));
+
+    render(<InspectorPanel agentId={1} />);
+
+    await waitFor(() => expect(screen.getByText("Persistent shells")).toBeTruthy());
+    expect(screen.getByText("dev-server")).toBeTruthy();
+    expect(screen.getByLabelText("Cost loading")).toBeTruthy();
+    expect(screen.getByLabelText("Activity loading")).toBeTruthy();
+    expect(screen.queryByText("$0.4213")).toBeNull();
+  });
+
+  it("replaces the prior window with skeletons while a new window is pending", async () => {
+    getAgentInspect.mockImplementation((_agentId, hours) => {
+      if (hours === 24) return Promise.resolve(fixture({ window_hours: 24 }));
+      return new Promise<AgentInspect>(() => undefined);
+    });
+    render(<InspectorPanel agentId={1} />);
+    await waitFor(() => expect(screen.getByText("$0.4213")).toBeTruthy());
+
+    fireEvent.change(screen.getByLabelText("Cost + activity window"), {
+      target: { value: "1" },
+    });
+
+    await waitFor(() =>
+      expect(getAgentInspect).toHaveBeenCalledWith(1, 1, false, expect.any(AbortSignal)),
+    );
+    expect(screen.queryByText("$0.4213")).toBeNull();
+    expect(screen.getByLabelText("Cost loading")).toBeTruthy();
+    expect(screen.getByText("dev-server")).toBeTruthy();
   });
 
   it("formats token counts with B/T tiers (task #824): 2176.67M → 2.18B", async () => {
@@ -368,8 +472,8 @@ describe("InspectorPanel", () => {
   });
 
   it("formats shell uptime past 24h as Xd Yh (task #824)", async () => {
-    getAgentInspect.mockResolvedValue(
-      fixture({
+    getAgentInspectLive.mockResolvedValue(
+      liveFixture({
         shells: [{ id: 9, name: "long-shell", created_at: null, uptime_seconds: 24 * 86_400 + 3 * 3_600 }],
       }),
     );
@@ -392,8 +496,8 @@ describe("InspectorPanel", () => {
   });
 
   it("renders the notice section when agent has an open notice", async () => {
-    getAgentInspect.mockResolvedValue(
-      fixture({
+    getAgentInspectLive.mockResolvedValue(
+      liveFixture({
         notice: {
           id: 1,
           title: "Approve deploy?",
@@ -421,15 +525,37 @@ describe("InspectorPanel", () => {
   });
 
   it("shows 'no open notice' when notice is null", async () => {
-    getAgentInspect.mockResolvedValue(fixture({ notice: null }));
+    getAgentInspectLive.mockResolvedValue(liveFixture({ notice: null }));
     render(<InspectorPanel agentId={1} />);
 
     await waitFor(() => expect(screen.getByText("No open notice")).toBeTruthy());
   });
 
+  it("invalidates both inspect query halves when notice SSE arrives", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+    rtlRender(
+      <QueryClientProvider client={queryClient}>
+        <InspectorPanel agentId={1} />
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect(screen.getByText("Persistent shells")).toBeTruthy());
+
+    act(() => {
+      streamHandlers.system?.({ agent_id: 1, role: "notice_posted" });
+    });
+
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: ["agent-inspect-live", 1],
+    });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["agent-inspect", 1] });
+  });
+
   it("notice is an interactive reply surface sitting below Activity", async () => {
-    getAgentInspect.mockResolvedValue(
-      fixture({
+    getAgentInspectLive.mockResolvedValue(
+      liveFixture({
         notice: {
           id: 5,
           title: "Approve?",
@@ -467,9 +593,9 @@ describe("InspectorPanel", () => {
       blocking: false,
       created_at: "2026-06-14T12:00:00Z",
     });
-    getAgentInspect
-      .mockResolvedValueOnce(fixture({ notice: mk(5, "First?") }))
-      .mockResolvedValue(fixture({ notice: mk(6, "Second?") }));
+    getAgentInspectLive
+      .mockResolvedValueOnce(liveFixture({ notice: mk(5, "First?") }))
+      .mockResolvedValue(liveFixture({ notice: mk(6, "Second?") }));
     render(<InspectorPanel agentId={1} />);
 
     await waitFor(() => expect(screen.getByText("First?")).toBeTruthy());
@@ -489,8 +615,8 @@ describe("InspectorPanel", () => {
   });
 
   it("shows FYI label when notice is not require_response", async () => {
-    getAgentInspect.mockResolvedValue(
-      fixture({
+    getAgentInspectLive.mockResolvedValue(
+      liveFixture({
         notice: {
           id: 2,
           title: "Milestone reached",
@@ -511,7 +637,7 @@ describe("InspectorPanel", () => {
   });
 
   it("renders empty states for no shells / no overrides", async () => {
-    getAgentInspect.mockResolvedValue(fixture({ shells: [], config_overlay: {} }));
+    getAgentInspectLive.mockResolvedValue(liveFixture({ shells: [], config_overlay: {} }));
     render(<InspectorPanel agentId={1} />);
     await waitFor(() => expect(screen.getByText("None open")).toBeTruthy());
     expect(screen.getByText("Defaults — no overrides")).toBeTruthy();
@@ -521,8 +647,8 @@ describe("InspectorPanel", () => {
     // The runtime stores skill lists in the underscore Python projection
     // (ava_code_worktree); the overlay must present the canonical dash form
     // (ava-code-worktree) while non-skill values stay untouched.
-    getAgentInspect.mockResolvedValue(
-      fixture({
+    getAgentInspectLive.mockResolvedValue(
+      liveFixture({
         config_overlay: {
           skills_to_inject_into_system_prompt: ["ava_qa_inspection", "*"],
           llm_model: "claude-opus-4-8",
@@ -578,7 +704,7 @@ describe("InspectorPanel", () => {
   });
 
   it("shows an error message when the fetch fails", async () => {
-    getAgentInspect.mockRejectedValue(new Error("boom"));
+    getAgentInspectLive.mockRejectedValue(new Error("boom"));
     render(<InspectorPanel agentId={1} />);
     await waitFor(() => expect(screen.getByText("boom")).toBeTruthy());
   });
@@ -612,19 +738,19 @@ describe("InspectorPanel", () => {
     // A malformed/misrouted response must obey the same identity boundary as
     // keepPreviousData. Rendering it as plain text would still disclose one
     // agent's inspector under another selection.
-    getAgentInspect.mockResolvedValue(
-      fixture({ agent_id: Number.NaN }),
+    getAgentInspectLive.mockResolvedValue(
+      liveFixture({ agent_id: Number.NaN }),
     );
     render(<InspectorPanel agentId={1} />);
 
-    await waitFor(() => expect(getAgentInspect).toHaveBeenCalled());
+    await waitFor(() => expect(getAgentInspectLive).toHaveBeenCalled());
     expect(screen.queryByText("dev-server")).toBeNull();
     await waitFor(() => expect(screen.getByText("No data")).toBeTruthy());
   });
 
   it("renders shell rows as plain text when a shell id is invalid", async () => {
-    getAgentInspect.mockResolvedValue(
-      fixture({
+    getAgentInspectLive.mockResolvedValue(
+      liveFixture({
         shells: [
           { id: Number.NaN, name: "bad-shell", created_at: null, uptime_seconds: 10 },
         ],
@@ -642,8 +768,8 @@ describe("InspectorPanel heartbeat cells (merged into Liveness, Task #1195)", ()
   it("shows the projected next check-in when idle and un-paused", async () => {
     // ~4.5m ahead → "in 4m" (floor of a 4.5m delta), independent of timezone.
     const nextAt = new Date(Date.now() + 270_000).toISOString();
-    getAgentInspect.mockResolvedValue(
-      fixture({
+    getAgentInspectLive.mockResolvedValue(
+      liveFixture({
         heartbeat: { interval_s: 300, next_at: nextAt, paused_until: null, heartbeat_pending: false, last_pause: null },
       }),
     );
@@ -655,8 +781,8 @@ describe("InspectorPanel heartbeat cells (merged into Liveness, Task #1195)", ()
 
   it("shows the active pause window when paused", async () => {
     const pausedUntil = new Date(Date.now() + 720_000).toISOString(); // 12m
-    getAgentInspect.mockResolvedValue(
-      fixture({
+    getAgentInspectLive.mockResolvedValue(
+      liveFixture({
         heartbeat: { interval_s: 900, next_at: null, paused_until: pausedUntil, heartbeat_pending: false, last_pause: null },
       }),
     );
@@ -670,8 +796,8 @@ describe("InspectorPanel heartbeat cells (merged into Liveness, Task #1195)", ()
     // idle, un-paused, but a check-in inbound is already pending (the daemon
     // won't send another) — the panel surfaces "pending" rather than projecting a stale
     // past next_at, which is the reported "one hour ago" bug.
-    getAgentInspect.mockResolvedValue(
-      fixture({
+    getAgentInspectLive.mockResolvedValue(
+      liveFixture({
         heartbeat: { interval_s: 300, next_at: null, paused_until: null, heartbeat_pending: true, last_pause: null },
       }),
     );
@@ -683,8 +809,8 @@ describe("InspectorPanel heartbeat cells (merged into Liveness, Task #1195)", ()
 
   it("shows an em dash for a running agent plus the last pause from history", async () => {
     const at = new Date(Date.now() - 330_000).toISOString(); // ~5.5m ago → "5m ago"
-    getAgentInspect.mockResolvedValue(
-      fixture({
+    getAgentInspectLive.mockResolvedValue(
+      liveFixture({
         heartbeat: {
           interval_s: 300,
           next_at: null,
@@ -711,8 +837,8 @@ describe("InspectorPanel birth (cell in the merged Liveness section, Task #1195)
     const spawned = "2026-06-14T12:00:00Z";
     for (const started of ["2026-06-14T12:00:05Z", "2026-07-30T09:00:00Z"]) {
       cleanup();
-      getAgentInspect.mockResolvedValue(
-        fixture({ spawned_at: spawned, started_at: started }),
+      getAgentInspectLive.mockResolvedValue(
+        liveFixture({ spawned_at: spawned, started_at: started }),
       );
       render(<InspectorPanel agentId={1} />);
       await waitFor(() => expect(screen.getByText("Birth")).toBeTruthy());
@@ -784,6 +910,7 @@ describe("InspectorPanel desktop", () => {
     const { container } = render(<InspectorPanel agentId={1} />);
     expect(container.querySelector("aside")).toBeNull();
     expect(getAgentInspect).not.toHaveBeenCalled();
+    expect(getAgentInspectLive).not.toHaveBeenCalled();
   });
 });
 
@@ -844,6 +971,7 @@ describe("InspectorPanel mobile", () => {
     const { container } = render(<InspectorPanel agentId={1} />);
     expect(container.querySelector("aside")).toBeNull();
     expect(getAgentInspect).not.toHaveBeenCalled();
+    expect(getAgentInspectLive).not.toHaveBeenCalled();
   });
 
   it("multiple hidden inspector observers issue zero inspect requests", () => {
@@ -855,6 +983,7 @@ describe("InspectorPanel mobile", () => {
       </>,
     );
     expect(getAgentInspect).not.toHaveBeenCalled();
+    expect(getAgentInspectLive).not.toHaveBeenCalled();
   });
 
   it("multiple open inspector observers share one initial request", async () => {
@@ -868,13 +997,19 @@ describe("InspectorPanel mobile", () => {
 
     await waitFor(() => expect(screen.getAllByText("Persistent shells")).toHaveLength(2));
     expect(getAgentInspect).toHaveBeenCalledOnce();
+    expect(getAgentInspectLive).toHaveBeenCalledOnce();
   });
 
-  it("aborts the in-flight inspect request when the panel closes", async () => {
-    let requestSignal: AbortSignal | undefined;
+  it("aborts both in-flight inspect requests when the panel closes", async () => {
+    let windowedSignal: AbortSignal | undefined;
+    let liveSignal: AbortSignal | undefined;
     getAgentInspect.mockImplementation((_agentId, _hours, _sinceCompact, signal) => {
-      requestSignal = signal;
+      windowedSignal = signal;
       return new Promise<AgentInspect>(() => undefined);
+    });
+    getAgentInspectLive.mockImplementation((_agentId, signal) => {
+      liveSignal = signal;
+      return new Promise<AgentInspectLive>(() => undefined);
     });
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const view = rtlRender(
@@ -882,7 +1017,8 @@ describe("InspectorPanel mobile", () => {
         <InspectorPanel agentId={1} />
       </QueryClientProvider>,
     );
-    await waitFor(() => expect(requestSignal).toBeDefined());
+    await waitFor(() => expect(windowedSignal).toBeDefined());
+    expect(liveSignal).toBeDefined();
 
     panelState.open = false;
     view.rerender(
@@ -890,7 +1026,8 @@ describe("InspectorPanel mobile", () => {
         <InspectorPanel agentId={1} />
       </QueryClientProvider>,
     );
-    await waitFor(() => expect(requestSignal?.aborted).toBe(true));
+    await waitFor(() => expect(windowedSignal?.aborted).toBe(true));
+    expect(liveSignal?.aborted).toBe(true);
   });
 
   it("aborts the previous agent's inspect request before switching", async () => {
@@ -949,9 +1086,11 @@ describe("InspectorToggle", () => {
     render(<InspectorToggle />);
     const btn = screen.getByRole("button", { name: "Open inspector" });
     expect(getAgentInspect).not.toHaveBeenCalled();
+    expect(getAgentInspectLive).not.toHaveBeenCalled();
     fireEvent.pointerEnter(btn);
     fireEvent.focus(btn);
     expect(getAgentInspect).not.toHaveBeenCalled();
+    expect(getAgentInspectLive).not.toHaveBeenCalled();
   });
 });
 
@@ -961,18 +1100,20 @@ describe("InspectorPanel manual refresh", () => {
     render(<InspectorPanel agentId={1} />);
     await waitFor(() => expect(screen.getByText("Persistent shells")).toBeTruthy());
     const callsAfterOpen = getAgentInspect.mock.calls.length;
+    const liveCallsAfterOpen = getAgentInspectLive.mock.calls.length;
     fireEvent.click(screen.getByRole("button", { name: "Refresh inspector data" }));
     await waitFor(() =>
       expect(getAgentInspect.mock.calls.length).toBe(callsAfterOpen + 1),
     );
+    expect(getAgentInspectLive.mock.calls.length).toBe(liveCallsAfterOpen + 1);
   });
 });
 
 
 describe("InspectorPanel liveness (merged section, Task #1195)", () => {
   it("omits the redundant online state cell and the old last-judged cell", async () => {
-    getAgentInspect.mockResolvedValue(
-      fixture({ liveness_state: "online", last_probe_at: "2026-08-12T05:00:00Z" }),
+    getAgentInspectLive.mockResolvedValue(
+      liveFixture({ liveness_state: "online", last_probe_at: "2026-08-12T05:00:00Z" }),
     );
     const { container } = render(<InspectorPanel agentId={1} />);
     await waitFor(() => expect(screen.getByText("Liveness")).toBeTruthy());
@@ -983,8 +1124,8 @@ describe("InspectorPanel liveness (merged section, Task #1195)", () => {
   });
 
   it("uses offline state without rendering a redundant state cell", async () => {
-    getAgentInspect.mockResolvedValue(
-      fixture({ liveness_state: "offline", last_probe_at: null }),
+    getAgentInspectLive.mockResolvedValue(
+      liveFixture({ liveness_state: "offline", last_probe_at: null }),
     );
     const { container } = render(<InspectorPanel agentId={1} />);
     await waitFor(() => expect(screen.getByText("Liveness")).toBeTruthy());
