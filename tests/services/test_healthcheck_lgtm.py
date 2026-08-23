@@ -1,10 +1,9 @@
-"""`services.healthchecks.lgtm` unit tests — readiness probes + start.sh restart.
+"""`services.healthchecks.lgtm` unit tests — local readiness + start.sh restart.
 
-The stack's health is "do the four backend listeners answer" — any HTTP status
-proves a listener is up; only a connection-level failure means the container
-(or the docker daemon) is down, and the fix is re-running the idempotent
-start.sh. The check self-gates on the $AVA_HOME/lgtm-host marker so it is a
-no-op on every host that does not own the compose stack.
+The watchdog repairs only the local LGTM backends, so its three readiness
+probes intentionally exclude remote Tempo. Any HTTP status proves a local
+listener is up; only a connection-level failure re-runs the idempotent start
+script. The check self-gates on the $AVA_HOME/lgtm-host marker.
 """
 
 from __future__ import annotations
@@ -16,6 +15,15 @@ from pathlib import Path
 import pytest
 
 from services.healthchecks import lgtm as hc
+
+
+def test_readiness_probes_exclude_remote_tempo() -> None:
+    """Only locally managed backends can trigger a local lifecycle repair."""
+    assert hc.READINESS_PROBES == (
+        ("loki", "http://127.0.0.1:3100/ready"),
+        ("prometheus", "http://127.0.0.1:9090/-/ready"),
+        ("grafana", "http://127.0.0.1:3003/api/health"),
+    )
 
 
 def test_endpoint_answers_any_http_status(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -48,7 +56,7 @@ def test_down_probes_names_connection_failures(monkeypatch: pytest.MonkeyPatch) 
     assert hc.down_probes() == ["prometheus"]
 
 
-def test_restart_runs_start_sh_in_compose_dir(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_restart_runs_start_sh_in_deploy_dir(monkeypatch: pytest.MonkeyPatch) -> None:
     """`_restart_stack` re-runs the idempotent start.sh in deploy/lgtm."""
     calls: list[tuple[list[str], Path]] = []
 
@@ -70,7 +78,7 @@ def test_restart_runs_start_sh_in_compose_dir(monkeypatch: pytest.MonkeyPatch) -
 
 def test_main_noop_without_marker(monkeypatch: pytest.MonkeyPatch) -> None:
     """Every unmarked host (dev worktree clusters included) must never probe or
-    restart — the compose stack is another home's singleton."""
+    restart — the native backends belong to another home's singleton."""
     monkeypatch.setattr(hc, "init_gateway_process", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     monkeypatch.setattr(hc, "is_lgtm_host", lambda: False)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     probed: list[bool] = []

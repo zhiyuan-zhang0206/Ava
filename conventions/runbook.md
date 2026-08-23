@@ -1081,8 +1081,7 @@ kill switch. Applies on the next process start.
 `com.ava.prometheus` (GOMEMLIMIT 2GiB / 1GiB), plus the host-managed native
 Grafana launchd job, form the local observability backend. Tempo is configured
 per cluster; prod's host-scope override targets the remote WSL Tempo. No
-service lifecycle depends on compose: `deploy/lgtm/docker-compose.yml` is a
-manual rollback asset. The backend is required while the gateway serves /ops
+service lifecycle depends on a container backend. The backend is required while the gateway serves /ops
 and the inspect endpoints (consumers: the gateway Loki/Prometheus read paths,
 ops alerting via Grafana's embedded Alertmanager → the gateway webhook, the
 events-maintenance Loki rollup, `ava cluster health`). It is a **host
@@ -1091,9 +1090,9 @@ operator-created `$AVA_HOME/lgtm-host` marker file (in practice prod
 `~/.ava`; `touch ~/.ava/lgtm-host` once). On that host, converge installs pins
 from `deploy/lgtm/native/versions.yml`, renders native configs and plists, and
 runs the idempotent `deploy/lgtm/start.sh` on every `ava start` / `ava cluster
-update`. The gateway watchdog re-runs it when Loki/Prometheus/Tempo/Grafana
-readiness probes hit connection failures; its probe-first path never restarts
-a live native backend. `ava status` shows native jobs and readiness probes.
+update`. The gateway watchdog re-runs it when Loki/Prometheus/Grafana readiness
+probes hit connection failures; its probe-first path never restarts a live
+native backend. `ava status` shows native jobs and readiness probes.
 Unmarked homes (dev worktree clusters) never touch these backends.
 Deliberate stop: remove the marker or `ava start --disable-service lgtm`, then
 `deploy/lgtm/stop.sh` — see `deploy/lgtm/README.md`.

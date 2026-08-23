@@ -551,8 +551,8 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
     ),
     ConvergeStep("otel collector sidecar", ensure_otel_collector_step, requires_unit_config=True),
     ConvergeStep("lgtm native backends", ensure_lgtm_native_step),
-    # The LGTM observability backend (deploy/lgtm compose stack) — a host
-    # singleton, so the step is gated on the $AVA_HOME/lgtm-host marker file
+    # The native LGTM observability backend — a host singleton, so the step is
+    # gated on the $AVA_HOME/lgtm-host marker file
     # inside, not on roles: only the one home the operator marked brings it up;
     # every other cluster on the box (dev worktrees included) no-ops.
     ConvergeStep("lgtm observability stack", ensure_lgtm_stack_step),

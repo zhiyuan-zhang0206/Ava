@@ -1,22 +1,25 @@
-"""cli.commands._lgtm — converge bring-up gating tests.
+"""cli.commands._lgtm — native converge bring-up gating tests.
 
-The LGTM compose stack is a host singleton; converge runs on every `ava start`
-of every cluster on the box, so the bring-up must fire ONLY on the home
-carrying the $AVA_HOME/lgtm-host marker. No docker: subprocess is
-monkeypatched; the gating is the logic under test.
+The local LGTM backends are a host singleton; converge runs on every `ava
+start` of every cluster on the box, so the bring-up must fire ONLY on the home
+carrying the $AVA_HOME/lgtm-host marker.
 """
 
 from __future__ import annotations
 
 import plistlib
+import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
-import yaml
 
 from cli.commands import _lgtm, _lgtm_native
 from cli.commands._converge_spec import ConvergeCtx
+
+
+def _fail_on_docker_query(_name: str) -> None:
+    pytest.fail("native lifecycle must not query the Docker CLI")
 
 
 def _ctx(tmp_path: Path) -> ConvergeCtx:
@@ -25,9 +28,11 @@ def _ctx(tmp_path: Path) -> ConvergeCtx:
     return ConvergeCtx(repo=repo, ava_home=tmp_path / "home", roles=frozenset({"gateway"}))
 
 
-def test_no_marker_never_touches_docker(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_no_marker_never_touches_native_backends(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """A home without the lgtm-host marker (every dev worktree cluster) is a
-    no-op — it must not recreate the host's containers from its own checkout."""
+    no-op — it must not touch another home's native backends from its own checkout."""
     ctx = _ctx(tmp_path)
     ctx.ava_home.mkdir(parents=True)
     runs: list[list[str]] = []
@@ -38,11 +43,10 @@ def test_no_marker_never_touches_docker(monkeypatch: pytest.MonkeyPatch, tmp_pat
 
 
 def test_marker_runs_start_sh(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Marker + docker present -> the idempotent start.sh runs in deploy/lgtm."""
+    """A marked host runs the idempotent native start script in deploy/lgtm."""
     ctx = _ctx(tmp_path)
     ctx.ava_home.mkdir(parents=True)
     (ctx.ava_home / "lgtm-host").touch()
-    monkeypatch.setattr(_lgtm.shutil, "which", lambda _name: "/usr/local/bin/docker")  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
 
     calls: list[tuple[list[str], Path]] = []
 
@@ -59,21 +63,25 @@ def test_marker_runs_start_sh(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -
     assert calls == [(["bash", "start.sh"], ctx.repo / "deploy" / "lgtm")]
 
 
-def test_marker_without_docker_warns_and_skips(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """A marked host missing the docker CLI is an environment limit: warn +
-    skip (browser-step contract), never raise — converge must proceed."""
+def test_marker_starts_without_docker_cli(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """A marked host starts native jobs without consulting the Docker CLI."""
     ctx = _ctx(tmp_path)
     ctx.ava_home.mkdir(parents=True)
     (ctx.ava_home / "lgtm-host").touch()
-    monkeypatch.setattr(_lgtm.shutil, "which", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(shutil, "which", _fail_on_docker_query)
     runs: list[list[str]] = []
-    monkeypatch.setattr(_lgtm.subprocess, "run", lambda cmd, **_kw: runs.append(cmd))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType, reportUnknownMemberType]
+
+    class _Result:
+        returncode = 0
+
+    def record_run(cmd: list[str], **_kw: object) -> _Result:
+        runs.append(cmd)
+        return _Result()
+
+    monkeypatch.setattr(_lgtm.subprocess, "run", record_run)  # pyright: ignore[reportUnknownArgumentType]
 
     _lgtm.ensure_lgtm_stack_step(ctx)
-    assert runs == []
-    assert "docker CLI not found" in capsys.readouterr().err
+    assert runs == [["bash", "start.sh"]]
 
 
 def test_failing_start_sh_propagates(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -82,7 +90,6 @@ def test_failing_start_sh_propagates(monkeypatch: pytest.MonkeyPatch, tmp_path: 
     ctx = _ctx(tmp_path)
     ctx.ava_home.mkdir(parents=True)
     (ctx.ava_home / "lgtm-host").touch()
-    monkeypatch.setattr(_lgtm.shutil, "which", lambda _name: "/usr/local/bin/docker")  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
 
     class _Failed:
         returncode = 1
@@ -93,16 +100,9 @@ def test_failing_start_sh_propagates(monkeypatch: pytest.MonkeyPatch, tmp_path: 
         _lgtm.ensure_lgtm_stack_step(ctx)
 
 
-def test_backend_ports_are_unconditionally_loopback_only() -> None:
-    """Native and container backend listeners stay pinned to loopback."""
-    compose_path = Path(__file__).resolve().parents[2] / "deploy/lgtm/docker-compose.yml"
-    text = compose_path.read_text(encoding="utf-8")
-    assert "LGTM_BIND_HOST" not in text
-    compose = yaml.safe_load(text)
-    services = compose["services"]
-    assert services["tempo"]["ports"] == ["127.0.0.1:3200:3200", "127.0.0.1:14318:4318"]
-    assert services["grafana"]["ports"] == ["3003:3000"]
-    native = compose_path.parent / "native"
+def test_native_backend_ports_are_unconditionally_loopback_only() -> None:
+    """The native Loki and Prometheus listeners stay pinned to loopback."""
+    native = Path(__file__).resolve().parents[2] / "deploy/lgtm/native"
     loki = (native / "config/loki.yaml").read_text(encoding="utf-8")
     assert "http_listen_address: 127.0.0.1" in loki
     assert "grpc_listen_address: 127.0.0.1" in loki
