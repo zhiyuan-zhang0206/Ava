@@ -117,6 +117,13 @@ def test_payload_keys_are_the_declared_attribute_contract() -> None:
     assert payload_keys("heartbeat_nudged") == ("idle_minutes",)
     assert payload_keys("delivery_stalled") == ("inbound_id", "age_s")
     assert payload_keys("log") == ("msg",)  # loguru bare-log payload
+    assert payload_keys("page_serve_dir_missing") == (
+        "agent_id",
+        "key",
+        "name",
+        "serve_dir",
+        "port",
+    )
 
 
 def test_payload_keys_unknown_event_empty() -> None:
