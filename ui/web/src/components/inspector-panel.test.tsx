@@ -969,9 +969,10 @@ describe("InspectorPanel liveness (merged section, Task #1195)", () => {
     getAgentInspect.mockResolvedValue(
       fixture({ liveness_state: "online", last_probe_at: "2026-08-12T05:00:00Z" }),
     );
-    render(<InspectorPanel agentId={1} />);
+    const { container } = render(<InspectorPanel agentId={1} />);
     await waitFor(() => expect(screen.getByText("Liveness")).toBeTruthy());
     expect(screen.queryByText("online")).toBeNull();
+    expect(container.querySelector(".text-destructive")).toBeNull();
     // "Last judged" deleted (user ruling 2026-08-12, Task #1195)
     expect(screen.queryByText("Last judged")).toBeNull();
   });
@@ -980,9 +981,10 @@ describe("InspectorPanel liveness (merged section, Task #1195)", () => {
     getAgentInspect.mockResolvedValue(
       fixture({ liveness_state: "offline", last_probe_at: null }),
     );
-    render(<InspectorPanel agentId={1} />);
+    const { container } = render(<InspectorPanel agentId={1} />);
     await waitFor(() => expect(screen.getByText("Liveness")).toBeTruthy());
     expect(screen.queryByText("offline")).toBeNull();
+    expect(container.querySelector(".text-destructive")).not.toBeNull();
     expect(screen.queryByText("never")).toBeNull();
   });
 });
