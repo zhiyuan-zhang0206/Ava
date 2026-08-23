@@ -71,8 +71,13 @@ from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
 
 from shared.config import settings
 from shared.log import logger
+from shared.observability import cluster_label
 from shared.paths import traces_dir
-from shared.telemetry_otlp import COLLECTOR_RETRY_INTERVAL_S, endpoint_reachable
+from shared.telemetry_otlp import (
+    COLLECTOR_RETRY_INTERVAL_S,
+    _observability_export_allowed,
+    endpoint_reachable,
+)
 
 # Span attribute keys.
 #
@@ -511,6 +516,8 @@ def initialize_tracing() -> None:
         return
     if not settings.observability.trace_enabled:
         return
+    if not _observability_export_allowed():
+        return
 
     # Disk-watermark guard first: if the data disk is over its watermark,
     # skip recording entirely (auto-degrade) instead of letting the mirror
@@ -591,6 +598,7 @@ def initialize_tracing() -> None:
         instruments=instruments,
         disable_batch=False,
         telemetry_enabled=False,
+        resource_attributes={"cluster": cluster_label()},
     )
 
     logger.info(

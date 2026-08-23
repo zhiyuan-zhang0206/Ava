@@ -197,6 +197,31 @@ def test_gateway_config_scrapes_this_clusters_own_data_plane(
     ]
 
 
+def test_gateway_config_skips_postgres_receiver_without_password(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The contrib postgresql receiver rejects an empty password, while the
+    redis receiver supports the no-auth single-box posture."""
+    monkeypatch.setattr("shared.db.direct_db_url", lambda: "postgresql://ava@10.0.0.2:5433/ava")
+    monkeypatch.setattr("shared.config.settings.data_plane.redis_url", "redis://10.0.0.2:6380/0")
+    monkeypatch.setattr("shared.config.settings.gateway.gateway_url", "http://localhost:8000")
+    monkeypatch.setattr("shared.config.settings.data_plane.cluster_secret", "")
+    monkeypatch.setattr("shared.machine.reachable_host", lambda: "localhost")
+    repo = Path(__file__).resolve().parents[2]
+
+    cfg = yaml.safe_load(
+        oc.generate_config(repo, Path("/home/u/.ava"), frozenset({"gateway", "agent-runner"}))
+    )
+
+    assert "postgresql" not in cfg["receivers"]
+    assert cfg["receivers"]["redis"]["endpoint"] == "10.0.0.2:6380"
+    assert cfg["service"]["pipelines"]["metrics/infra"]["receivers"] == [
+        "host_metrics",
+        "prometheus/otelcol",
+        "redis",
+    ]
+
+
 def test_runner_config_has_host_metrics_but_no_data_plane_receivers(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -279,10 +304,60 @@ def test_logs_merge_event_and_filelog_transforms_before_batch(
     ]
     assert logs["processors"] == [
         "memory_limiter",
+        "filter/cluster_allow",
         "transform/promote_event_labels",
         "transform/filelog_service",
         "batch",
     ]
+
+
+def test_local_otlp_pipelines_drop_mismatched_cluster_resources(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cfg = _render_real_template(monkeypatch, frozenset({"gateway"}))
+
+    processor = cfg["processors"]["filter/cluster_allow"]
+    expected = [
+        'resource.attributes["cluster"] != nil and resource.attributes["cluster"] != ".ava"'
+    ]
+    assert processor == {
+        "error_mode": "ignore",
+        "traces": {"span": expected},
+        "metrics": {"metric": expected},
+        "logs": {"log_record": expected},
+    }
+    pipelines = cfg["service"]["pipelines"]
+    for name in ("logs", "metrics", "traces"):
+        assert pipelines[name]["processors"][:2] == ["memory_limiter", "filter/cluster_allow"]
+    assert "filter/cluster_allow" not in pipelines["metrics/infra"]["processors"]
+    assert "filter/cluster_allow" not in pipelines["traces/remote"]["processors"]
+
+
+def test_non_lgtm_gateway_converge_skips_collector_install(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    home = tmp_path / ".ava-preview"
+    home.mkdir()
+    ctx = oc.ConvergeCtx(
+        repo=Path(__file__).resolve().parents[2],
+        ava_home=home,
+        roles=frozenset({"gateway", "agent-runner"}),
+    )
+
+    def must_not_install(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("a non-LGTM gateway must not install a collector")
+
+    monkeypatch.setattr(oc, "ensure_otel_collector", must_not_install)
+
+    oc.ensure_otel_collector_step(ctx)
+
+    assert not (home / "otel-collector").exists()
+    err = capsys.readouterr().err
+    assert "gateway" in err
+    assert "lgtm-host" in err
+    assert "collector skipped" in err
 
 
 def test_session_filelog_excludes_collectors_own_output(

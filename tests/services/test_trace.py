@@ -10,6 +10,7 @@ from typing import Any
 
 import pytest
 
+from shared import telemetry_otlp
 from shared import trace as trace_mod
 from shared.trace import OtlpJsonHttpSpanExporter, initialize_tracing, turn_span
 
@@ -17,12 +18,17 @@ from shared.trace import OtlpJsonHttpSpanExporter, initialize_tracing, turn_span
 @pytest.fixture(autouse=True)
 def _reset_init_flag():
     """Reset trace-init and retry-loop state between tests."""
+    gate = getattr(telemetry_otlp, "_observability_export_allowed", None)
+    if gate is not None:
+        gate.cache_clear()
     trace_mod._state.clear()
     trace_mod._state.update(
         initialized=False,
         collector_offline_reported=False,
         retry_thread=None,
     )
+    if gate is not None:
+        gate.cache_clear()
     yield
     trace_mod._state["initialized"] = True
     retry_thread = trace_mod._state["retry_thread"]
@@ -74,6 +80,7 @@ def test_enabled_inits_traceloop_with_otlp_exporter(
         "shared.config.settings.observability.telemetry_otlp_endpoint",
         "http://127.0.0.1:4318",
     )
+    monkeypatch.setattr(trace_mod, "cluster_label", lambda: ".ava-test")
     _under_watermark(monkeypatch)
 
     calls: list[dict] = []  # pyright: ignore[reportMissingTypeArgument, reportUnknownVariableType]
@@ -90,6 +97,7 @@ def test_enabled_inits_traceloop_with_otlp_exporter(
     assert "api_key" not in kw
     assert kw["telemetry_enabled"] is False
     assert kw["disable_batch"] is False
+    assert kw["resource_attributes"] == {"cluster": ".ava-test"}
 
     from traceloop.sdk.instruments import Instruments
 
@@ -100,6 +108,55 @@ def test_enabled_inits_traceloop_with_otlp_exporter(
     assert Instruments.GOOGLE_GENERATIVEAI in instruments
 
     assert trace_mod._state["initialized"] is True
+
+
+def test_gateway_trace_recording_skips_without_lgtm_marker(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    home = tmp_path / ".ava-preview"
+    home.mkdir()
+    monkeypatch.setattr("shared.config.settings.observability.trace_enabled", True)
+    monkeypatch.setattr("shared.machine.machine_role", lambda: frozenset({"gateway"}))
+    monkeypatch.setattr("shared.paths.ava_home", lambda: home)
+    monkeypatch.delitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
+    telemetry_otlp._observability_export_allowed.cache_clear()
+    calls: list[dict[str, object]] = []
+
+    def record_init(**kw: object) -> None:
+        calls.append(kw)
+
+    monkeypatch.setattr("traceloop.sdk.Traceloop.init", record_init)
+
+    initialize_tracing()
+
+    assert calls == []
+    assert trace_mod._state["initialized"] is False
+
+
+def test_gateway_trace_recording_arms_with_lgtm_marker(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    home = tmp_path / ".ava"
+    home.mkdir()
+    (home / "lgtm-host").touch()
+    monkeypatch.setattr("shared.config.settings.observability.trace_enabled", True)
+    monkeypatch.setattr("shared.machine.machine_role", lambda: frozenset({"gateway"}))
+    monkeypatch.setattr("shared.paths.ava_home", lambda: home)
+    monkeypatch.setattr("shared.trace.traces_dir", lambda: tmp_path / "traces")
+    monkeypatch.delitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
+    telemetry_otlp._observability_export_allowed.cache_clear()
+    _under_watermark(monkeypatch)
+    calls: list[dict[str, object]] = []
+
+    def record_init(**kw: object) -> None:
+        calls.append(kw)
+
+    monkeypatch.setattr("traceloop.sdk.Traceloop.init", record_init)
+
+    initialize_tracing()
+
+    assert len(calls) == 1
+    assert calls[0]["resource_attributes"] == {"cluster": ".ava"}
 
 
 def test_sdk_initialize_raises_propagates_and_state_unchanged(

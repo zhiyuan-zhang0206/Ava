@@ -27,6 +27,8 @@ from gateway import loki_events, loki_query_budget
 from gateway.app import app
 from gateway.routers import _stats_dashboard, status
 from gateway.schemas import StatsWindowHours, window_delta
+from shared.cluster import home_label
+from shared.paths import ava_home
 from tests.gateway.loki_fake import FakeLoki
 
 
@@ -135,8 +137,11 @@ def test_dashboard_does_not_hold_db_connection_during_loki_queries(
 
     pool = FakePool()
 
+    clusters: list[str | None] = []
+
     def assert_db_released(*args: Any, **kwargs: Any) -> int:
         assert pool.active is False
+        clusters.append(kwargs.get("cluster"))
         return 0
 
     monkeypatch.setattr(loki_events, "attribute_aggregate", assert_db_released)
@@ -145,6 +150,8 @@ def test_dashboard_does_not_hold_db_connection_during_loki_queries(
     result = status.get_stats_dashboard(request, StatsWindowHours.H24)  # type: ignore[arg-type]
     assert result.live_count == 2
     assert result.total_events == 10
+    assert clusters
+    assert set(clusters) == {home_label(ava_home())}
 
 
 @pytest.mark.parametrize("reason", ["queue_full", "acquire_timeout"])
@@ -192,6 +199,28 @@ def test_dashboard_loki_transport_error_is_retriable_503(
     assert response.status_code == 503
     assert response.headers["retry-after"] == "1"
     assert type(error).__name__ in response.json()["detail"]
+
+
+def test_observability_read_unavailable_is_clean_503(
+    db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    message = (
+        "observability reads unavailable for this cluster; set "
+        "AVA_TELEMETRY_LOKI_URL and provide its stack, or accept that this "
+        "cluster has no observability"
+    )
+
+    def unavailable(*_args: Any, **_kwargs: Any) -> float:
+        raise loki_events.ObservabilityReadUnavailable(message)
+
+    monkeypatch.setattr(loki_events, "attribute_aggregate", unavailable)
+    db_conn.commit()
+    with TestClient(app) as client:
+        response = client.get("/api/stats/dashboard")
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": message}
 
 
 def test_dashboard_shards_long_loki_windows_and_merges_aggregates(

@@ -516,7 +516,7 @@ supervisor socket for agent shells / watchers).
 | `gateway-watchdog` ★ (gateway only) | `.venv/bin/python -m services.watchdog.daemon --role gateway` (asyncio imports + runs the gateway-capability healthchecks above — redis-acl first (re-affirms the cluster's redis ACL user (the identifier its redis_url carries), which a redis-server restart silently drops), then pgbouncer (restarts the per-cluster pooler when its listener stops answering OR its reachable-address listener is missing — a silently degraded double bind, task #1288; when the pooler is enabled it is every consumer's AVA_DB_URL, so it comes before any service that would be revived without a database), then gateway/labeler/heartbeat/events-maintenance/task-maintenance/report/milvus/memory-indexer/frontend — every 60s) | the OS-scheduled **watchdog probe** (`ava cluster watchdog-probe --role gateway`, launchd / crontab / schtasks, every 60s) respawns it when its pidfile shows it dead |
 | `agent-runner-watchdog` ★ (agent-runner only) | `.venv/bin/python -m services.watchdog.daemon --role agent-runner` (asyncio imports + runs the agent-runner-capability healthchecks above — ops/restarter (+browser, browser-mcp) — every 60s) | the OS-scheduled **watchdog probe** (`ava cluster watchdog-probe --role agent-runner`, launchd / crontab / schtasks, every 60s) respawns it when its pidfile shows it dead |
 | `browser` (agent-runner only, auto-detect display; opt-out `AVA_BROWSER_ENABLED=false`) | `.venv/bin/python -m services.browser.daemon` (headed real Chrome, dedicated profile `~/.ava/chrome-profile/`, CDP :9222) | `services.healthchecks.browser` (HTTP probe `/json/version` :9222) |
-| `otel-collector` | `<otel-collector-dir>/otelcol-contrib --config <otel-collector-dir>/config.yaml` (native Go binary installed by converge; one per machine — the local OTLP entry every agent exports to; gateway collectors fan out to loopback backends, pure runners relay with bearer auth; traces mirror locally; trace/log queues are file-backed while metrics use bounded memory) | `services.healthchecks.otel_collector` (valid empty OTLP POST must return 2xx on 4318) |
+| `otel-collector` | `<otel-collector-dir>/otelcol-contrib --config <otel-collector-dir>/config.yaml` (native Go binary installed by converge on the `lgtm-host` gateway and pure runners; unmarked gateway homes skip it; the gateway fans out only its cluster's labeled resources, pure runners relay with bearer auth; traces mirror locally; trace/log queues are file-backed while metrics use bounded memory) | `services.healthchecks.otel_collector` (valid empty OTLP POST must return 2xx on 4318) |
 | `browser-mcp` (agent-runner only, gated with `browser`) | `.venv/bin/python -m services.browser.mcp_daemon` (one shared `chrome-devtools-mcp` upstream attached to the headed Chrome, multiplexed over a Unix socket `~/.ava/chrome-mcp.<cdp_port>.sock` to every agent's chrome bridge — serial, with per-connection page affinity so one Chrome client is shared instead of one per browser-using agent) | `services.healthchecks.browser_mcp` (Unix-socket `list_tools` probe) |
 | `computer-mcp` (agent-runner only, platform-gated: signed permissions helper enabled + capable, AF_UNIX transport, non-Windows host — Windows is the phase-3 pilot) | `.venv/bin/python -m services.computer.mcp_daemon` (computer-use executor: every desktop action through the signed permissions helper — serialized machine-wide, screen-coordinated (lease + FIFO queue + `release_control`), Vision OCR on snapshots, audited as `computer_action` + `computer_session_start/end` events, served over `~/.ava/run/computer-mcp.sock`) | `services.healthchecks.computer_mcp` (Unix-socket lock-free `ping` probe) |
 | `mcp-daemon` (agent-runner only) | `.venv/bin/python -m ava._mcps_daemon` (ONE shared MCP daemon per machine, serving every agent over `~/.ava/run/mcp_daemon.sock` — sessions isolated per client connection, replacing the old one-daemon-per-agent children) | `services.healthchecks.mcp_daemon` (Unix-socket `ping` probe) |
@@ -967,12 +967,14 @@ chunk. The full role table (payload fields, publisher, when each fires) is in
 ## Observability / Tracing
 
 The observability stack (user decision 2026-08-11, architecture task #1266):
-**OTel + Tempo + Loki + Prometheus + Grafana**. Every machine runs one **OTel
-Collector sidecar** (`ava-otel-collector` session, supervised by the
-watchdog, binary + config installed by converge from
-`deploy/otel-collector/`); agents export OTLP/HTTP to their LOCAL sidecar
-(`AVA_TELEMETRY_OTLP_ENDPOINT`, default `http://127.0.0.1:4318`) and never
-dial a backend directly. Delivery after that local hop is role-specific: a
+**OTel + Tempo + Loki + Prometheus + Grafana**. The one gateway home carrying
+`$AVA_HOME/lgtm-host` and every pure runner run an **OTel Collector sidecar**
+(`ava-otel-collector`, supervised by the watchdog and installed by converge
+from `deploy/otel-collector/`). Producers export OTLP/HTTP to their local
+sidecar (`AVA_TELEMETRY_OTLP_ENDPOINT`, default `http://127.0.0.1:4318`). An
+unmarked gateway skips the collector and the default producer export, keeping
+the JSONL event mirror only; an explicitly configured OTLP endpoint opts the
+producer into that external collector. Delivery is role-specific: the marked
 gateway collector writes traces to the Tempo selected by the host-scope
 `AVA_TELEMETRY_TEMPO_ENDPOINT` setting (prod's override selects the remote WSL
 Tempo) and logs/metrics to gateway-loopback Loki/Prometheus; a pure runner
@@ -982,7 +984,10 @@ with `Authorization: Bearer $AVA_CLUSTER_SECRET`. The remote receiver binds
 only the exact non-loopback `AVA_MACHINE_HOST`, never `0.0.0.0`/`::`; the
 local receiver remains `127.0.0.1:4318` without auth. Combined single-box
 deployments keep only the local receiver, including when their secret is set.
-The gateway collector fans out:
+Every application log, metric and trace Resource carries `cluster` = this
+home's display label. The gateway collector drops any non-null cluster that
+does not match its own, while retaining null-cluster legacy/filelog/infra
+resources. It fans out:
 
 - **traces** → Tempo OTLP/HTTP (`AVA_TELEMETRY_TEMPO_ENDPOINT`, default
   `http://127.0.0.1:14318`; prod sets a host-scope override to the remote WSL
@@ -991,15 +996,15 @@ The gateway collector fans out:
 - **logs** — every unified event (the `events` table write path) dual-writes to
   OTLP logs (Loki) via `shared/telemetry_otlp.py` → sidecar → Loki
   (`AVA_TELEMETRY_LOKI_URL` base, `/otlp` appended). The emitter makes
-  `event_name` and, when present, `agent_id` resource dimensions per record
-  before the SDK serializes a batch: Loki indexes those resource dimensions, so
-  every indexed `event_name` label is the same value as the event JSON body.
+  `event_name`, `cluster` and, when present, `agent_id` resource dimensions per
+  record before the SDK serializes a batch: Loki indexes those resource
+  dimensions, so every indexed label is the same value as the event JSON body.
 - **metrics** — telemetry events' numeric payloads map to OTLP metrics
   (Prometheus): int -> counter, float -> histogram, named `ava_<event>_<field>`;
   sidecar → Prometheus OTLP receiver (`AVA_TELEMETRY_PROMETHEUS_URL` base,
   `/api/v1/otlp` appended).
 - **infrastructure metrics** — the sidecar SCRAPES as well as forwards
-  (issue #46): `host_metrics` on every machine (cpu / memory / load / disk /
+  (issue #46): `host_metrics` on every collector-bearing unit (cpu / memory / load / disk /
   filesystem / network) plus, on a gateway-capable unit only, `postgresql`
   and `redis` against **this cluster's own** data plane. Zero extra binaries —
   no node_exporter / postgres_exporter / redis_exporter — because the pinned
@@ -1008,7 +1013,9 @@ The gateway collector fans out:
   untouched) and land in Prometheus under `job="ava-infra"` with a `host`
   label = the OS hostname. A pure agent-runner's DB/Redis URLs point at the
   gateway's data plane, so its config omits those two receivers entirely
-  rather than duplicating the gateway's series.
+  rather than duplicating the gateway's series. A gateway whose Postgres URL
+  has an empty password omits the contrib Postgres receiver (which rejects an
+  empty password) but keeps its unauthenticated Redis receiver.
 - **collector delivery metrics** — every sidecar scrapes its loopback `:8888`
   endpoint every 30s into `metrics/infra`. Grafana rules alert on current
   queue pressure, new enqueue failures over 5m (counter delta, never lifetime
@@ -1064,9 +1071,10 @@ on every restart anyway.
 
 `AVA_TELEMETRY_OTLP_ENABLED` does **not** gate these. That flag is
 producer-scoped — the event dual-write, trace recording and ship, all things
-Ava processes do — and the sidecar has always run ungated by it. Infra metrics
-are the collector's own scrapes, so a machine can report host health while the
-event stream is reduced to its JSONL mirror. To silence them, stop the sidecar
+Ava processes do — and the sidecar lifecycle is independently marker/role
+gated. Infra metrics are the collector's own scrapes, so a marked gateway or
+runner can report host health while the event stream is reduced to its JSONL
+mirror. To silence them, stop the sidecar
 (`ava start --disable-service otel-collector`) or the stack (`ava lgtm off`);
 with no backend reachable the Prometheus exporter's bounded retry drops them
 the same way it already drops app metrics.
@@ -1083,7 +1091,10 @@ The whole OTLP surface (exporter + trace recording + ship) is gated by
 `AVA_TELEMETRY_OTLP_ENABLED` (default **on**); off leaves the JSONL mirror only
 and freezes Loki, Prometheus, and their read surfaces at the last exported
 data. There is no Postgres fallback: `events` is a read-only archive. This is
-one startup-applied kill switch, so a change requires a process restart.
+one startup-applied kill switch, so a change requires a process restart. The
+home/role producer gate additionally prevents an unmarked gateway from using
+the default loopback endpoint; explicitly setting `AVA_TELEMETRY_OTLP_ENDPOINT`
+bypasses that gate without creating a local collector.
 
 **LGTM backend lifecycle** — home-scoped native launchd jobs
 `com.ava.loki.<home-slug>` and `com.ava.prometheus.<home-slug>` (GOMEMLIMIT
@@ -1103,15 +1114,21 @@ update`. The gateway watchdog re-runs it when Loki/Prometheus/Grafana readiness
 probes hit connection failures; its probe-first path skips only a reachable
 backend whose matching launchd job is still loaded. `ava status` shows native
 jobs and readiness probes.
-Unmarked homes (dev worktree clusters) never touch these backends.
+Unmarked homes (dev worktree clusters) never touch these backends or install a
+gateway collector. Their gateway Loki readers reject the implicit loopback URL
+with HTTP 503; explicitly setting `AVA_TELEMETRY_LOKI_URL` opts reads into a
+caller-managed stack. Dashboard and fleet queries, as well as every Loki alert
+rule, also filter `cluster` so a shared backend cannot leak another home's
+telemetry into the result.
 Deliberate stop: remove the marker or `ava start --disable-service lgtm`, then
 `deploy/lgtm/stop.sh` — see `deploy/lgtm/README.md`.
 
-**Recording is one local hop from the producer** (sidecar architecture, task #1266). The
+**Recording is one collector hop from the producer** (sidecar architecture, task #1266). The
 previous inline-POST design raised `Exception while exporting Span.` whenever
 the POST failed; the agent-side mirror (record/ship split 2026-06-16) fixed
-that but left the mirror as the only durable copy. Now recording is an OTLP
-export to the local sidecar. Trace and log exporters use **file-backed sending
+that but left the mirror as the only durable copy. When the home/role gate
+allows export, recording is an OTLP export to the configured collector
+(normally the local sidecar). Trace and log exporters use **file-backed sending
 queues** (file_storage) with unlimited retry, so their accepted backlog
 survives sidecar restarts. Metrics intentionally use a bounded in-memory queue
 and a 15-minute retry window, then shed old points; cumulative instruments
@@ -1124,7 +1141,7 @@ would orphan their file_storage backlog during an upgrade.
 **Record** — `shared/trace.py:initialize_tracing`, gated by `AVA_TRACE_ENABLED`
 (default **on**). Instrumentation is OpenLLMetry (`traceloop-sdk`); the sole span
 exporter is `OtlpJsonHttpSpanExporter`, which POSTs each export batch as one
-standard OTLP/JSON `ExportTraceServiceRequest` to the local sidecar's
+standard OTLP/JSON `ExportTraceServiceRequest` to the configured collector's
 `/v1/traces` (JSON wire format; LLM content stripped before it leaves the
 process). The sidecar's file exporter mirrors each batch line-for-line to
 `$AVA_HOME/traces/spans.jsonl` — the durable, vendor-neutral, grep-able
@@ -1158,7 +1175,7 @@ only if you want scheduled gap-replay.
   ingestion is idempotent by span id, so re-shipping is safe.
 
 The OTLP toggle gates both recording and shipping in the collector
-architecture: recording itself is export to the local sidecar. Existing mirror
+architecture: recording itself is export to the configured collector. Existing mirror
 files remain on disk while disabled and can ship after re-enabling. (Bench
 containers record to their ephemeral-FS mirror, which dies with the container
 — a host that wants bench traces in Tempo ships its own mirror after the run.)

@@ -1,7 +1,7 @@
 ---
 type: doc
 title: "Infrastructure metrics — the sidecar's own scrapes"
-description: "The traditional SRE layer (issue #46): each OTel Collector scrapes host metrics and its own queue/drop/uptime metrics; a gateway-capable unit also scrapes its Postgres + Redis. The dedicated `metrics/infra` pipeline attaches `host` and lands in central Prometheus without extra exporter binaries."
+description: "The traditional SRE layer (issue #46): each running OTel Collector scrapes host metrics and its own queue/drop/uptime metrics; the marked gateway also scrapes its usable data-plane receivers. The dedicated `metrics/infra` pipeline attaches `host` and lands in central Prometheus without extra exporter binaries."
 tags:
 - shared
 - telemetry
@@ -20,10 +20,10 @@ Ava code participates and a box with no agents running still reports.
 
 ## What is scraped
 
-- `host_metrics`, on **every** machine, every 30 s — cpu (utilization ratio
+- `host_metrics`, on every **collector-bearing** machine, every 30 s — cpu (utilization ratio
   only; the per-core cumulative `system.cpu.time` is disabled), load, memory,
   disk, filesystem, network.
-- `prometheus/otelcol`, on **every** machine, every 30 s from the collector's
+- `prometheus/otelcol`, on every **collector-bearing** machine, every 30 s from the collector's
   loopback `127.0.0.1:8888` endpoint — exporter queue size/capacity, enqueue
   failure counters and process uptime. These are the delivery path's own
   observability: queue pressure and new drops must not hide behind a receiver
@@ -36,7 +36,9 @@ Ava code participates and a box with no agents running still reports.
   the GATEWAY's data plane, so rendering those receivers there would only
   duplicate the gateway's series — `_data_plane_receivers` in
   `cli/commands/_otel_collector.py` omits them, and the rendered config is
-  0600 because it carries the secret.
+  0600 because it carries the secret. The Postgres contrib receiver is also
+  omitted when the direct URL has an empty password because that receiver
+  rejects empty credentials; Redis remains enabled and unauthenticated.
 
 Not a node_exporter / postgres_exporter / redis_exporter trio: the pinned
 contrib collector already carries equivalent receivers, and one supervised
@@ -77,9 +79,11 @@ X" and lost its history on every process restart.
 ## Not gated by the OTLP kill switch
 
 `AVA_TELEMETRY_OTLP_ENABLED` is producer-scoped (the event dual-write, trace
-recording, ship) and has never gated the sidecar process itself. These scrapes
-are the collector's own, so a machine reports host health even with the event
-stream reduced to its JSONL mirror only. Silencing them means stopping the sidecar
+recording, ship) and does not gate a sidecar that its role/home allows. These
+scrapes are the collector's own, so a marked gateway or pure runner reports
+host health even with the event stream reduced to its JSONL mirror only. An
+unmarked gateway has no collector. Silencing an allowed collector means
+stopping the sidecar
 (`ava start --disable-service otel-collector`) or the backend (`ava lgtm off`);
 with no backend reachable the Prometheus exporter's bounded retry drops them,
 the same shed path app metrics already take. On a pure runner the exporter
