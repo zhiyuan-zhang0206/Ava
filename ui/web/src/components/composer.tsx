@@ -30,11 +30,8 @@ export type ComposerMode = "disabled" | "idle" | "busy";
 interface Props {
   mode: ComposerMode;
   children?: React.ReactNode;
-  /** Right-edge controls on the composer's top row (Details selector,
-   *  Inspector toggle). The 2026-08-23 ruling keeps both in the composer's
-   *  top-right corner; only the panel itself moves back beside the timeline. */
+  /** Right-edge Details selector on the composer's top row. */
   details?: React.ReactNode;
-  inspect?: React.ReactNode;
   /** Returns true on success — composer clears the input + attachments then;
    *  on false the user's text and images are preserved to avoid loss.
    *  `imageUrls` are the reference urls of attached images (empty for a
@@ -183,7 +180,7 @@ function newClientMessageId(): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
-export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, focusToken, contextTokens, maxContextTokens = 0, softCompactTokens = 0, hardCompactTokens = 0, agentId = null, agentTerminated = false, maxWidthCss, children, details, inspect }: Props) {
+export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, focusToken, contextTokens, maxContextTokens = 0, softCompactTokens = 0, hardCompactTokens = 0, agentId = null, agentTerminated = false, maxWidthCss, children, details }: Props) {
   const t = useTranslations("common");
   const prevAgentIdRef = useRef(agentId);
   const [value, setValue] = useState(() => {
@@ -662,13 +659,8 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
               " "
             ))}
         </span>
-        {/* Right-edge cluster (top-right corner of the composer): the Details
-            selector and Inspector toggle remain here under the 2026-08-23
-            ruling. The inspect slot contains only the toggle. */}
-        {(details ?? inspect) && (
-          // Keep this relative wrapper for the right-edge control cluster;
-          // InspectorPanel now renders as a flex sibling in page.tsx.
-          <span className={cn("relative ml-auto shrink-0 items-center gap-2", FLEX)}>{details}{inspect}</span>
+        {details && (
+          <span className={cn("relative ml-auto shrink-0 items-center gap-2", FLEX)}>{details}</span>
         )}
       </div>
       {images.length > 0 ? (
