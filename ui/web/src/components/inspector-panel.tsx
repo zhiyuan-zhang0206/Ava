@@ -3,11 +3,12 @@
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Bell,
+  ChevronLeft,
+  ChevronRight,
   DollarSign,
   ExternalLink,
   HeartPulse,
   LayoutPanelTop,
-  PanelTopClose,
   RefreshCw,
   SlidersHorizontal,
   Terminal,
@@ -308,11 +309,10 @@ export function InspectorToggle() {
           : "border-transparent text-muted-foreground/50 hover:border-border hover:text-muted-foreground",
       )}
     >
-      {/* Arrow points up toward the top bar regardless of state (user ruling
-          8/6, re-affirmed 8/8 #1065): PanelTopOpen's chevron points DOWN, so
-          PanelTopClose is the up-arrow. Selected state = brightness, not
-          direction. */}
-      <PanelTopClose className="size-3.5" />
+      {/* Closed points right to open the right-side panel; open points left to
+          close it back and keeps the "Close inspector" semantics. The
+          2026-08-24 user ruling supersedes the 8/6 and #1065 up-arrow ruling. */}
+      {open ? <ChevronLeft className="size-3.5" /> : <ChevronRight className="size-3.5" />}
       <span className="hidden sm:inline">Inspect</span>
     </button>
   );
