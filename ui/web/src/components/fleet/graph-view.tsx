@@ -205,6 +205,15 @@ export function GraphView({
           </select>
         }
       />
+      {graph.stale && graph.nodes.length > 0 ? (
+        <p
+          role="status"
+          className="pointer-events-none absolute right-3 top-3 inline-flex items-center gap-1 rounded border border-amber-500/30 bg-background/80 px-2 py-1 text-[10px] text-amber-600 backdrop-blur dark:text-amber-400"
+        >
+          <span aria-hidden className="size-1.5 rounded-full bg-amber-500" />
+          Stale — last known graph
+        </p>
+      ) : null}
       {graph.nodes.length === 0 ? (
         <p className={cn("absolute inset-0 items-center justify-center text-xs text-muted-foreground", FLEX)}>
           {loading ? "Loading..." : error ? "Graph unavailable." : "No agents to graph."}
