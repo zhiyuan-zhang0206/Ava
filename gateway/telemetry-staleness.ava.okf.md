@@ -16,8 +16,9 @@ tags:
 in Prometheus and Loki after a composite telemetry read succeeds. Missing or
 older-than-five-minute samples emit `telemetry_read_stale`; recovery emits
 `telemetry_read_recovered`. Long outages re-emit the stale event every five
-minutes. Check errors fail open because each caller retains its own backend
-exception degradation.
+minutes. Heartbeat queries run at most once per minute; callers within that
+window reuse the last verdict. Check errors fail open because each caller
+retains its own backend exception degradation.
 
 ## Heartbeat and threshold
 

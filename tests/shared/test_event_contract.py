@@ -49,6 +49,10 @@ def test_tier_for_applies_priority_rules_and_unknown_fallback() -> None:
     assert tier_for("status_change", "telemetry", "info") == "noise"
     assert tier_for("node_exit", "telemetry", "info") == "noise"
     assert tier_for("llm_usage", "telemetry", "info") == "observation"
+    assert tier_for("telemetry_read_stale", "telemetry", "info") == "anomaly"
+    assert tier_for("telemetry_read_recovered", "telemetry", "info") == "observation"
+    assert tier_for("otlp_backend_disabled", "telemetry", "info") == "anomaly"
+    assert tier_for("otlp_backend_recovered", "telemetry", "info") == "observation"
     assert tier_for("unregistered", "telemetry", "info") == "observation"
 
 

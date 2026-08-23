@@ -92,6 +92,7 @@ def _fresh_telemetry_heartbeat(monkeypatch: pytest.MonkeyPatch) -> None:
         _fresh_heartbeat_age,
     )
     monkeypatch.setattr(telemetry_staleness, "_source_states", {})
+    monkeypatch.setattr(telemetry_staleness, "CHECK_INTERVAL_S", 0, raising=False)
 
 
 def _install_prom(
