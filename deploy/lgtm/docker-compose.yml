@@ -71,14 +71,7 @@ services:
       # Read-only Postgres password for the grafana_ro datasource role
       # (datasources.yml $GRAFANA_PG_PASSWORD). From .env (gitignored).
       GRAFANA_PG_PASSWORD: "${GRAFANA_PG_PASSWORD:-}"
-      # Datasource targets from deploy/lgtm/.env; defaults reach native
-      # loopback backends through the container-to-host transport.
-      GRAFANA_LOKI_URL: "${GRAFANA_LOKI_URL:-http://host.docker.internal:3100}"
-      GRAFANA_PROM_URL: "${GRAFANA_PROM_URL:-http://host.docker.internal:9090}"
-      # Trace backend target for the provisioned Tempo datasource — the WSL
-      # remote Tempo (d+WSL remote-on-demand) overrides the in-compose
-      # default. Set in deploy/lgtm/.env (gitignored), never committed.
-      GRAFANA_TEMPO_URL: "${GRAFANA_TEMPO_URL:-http://tempo:3200}"
+      GRAFANA_PROVISIONING_PATH: "/etc/grafana/provisioning/dashboards"
     volumes:
       - ./config/grafana/provisioning:/etc/grafana/provisioning:ro
       - grafana-data:/var/lib/grafana

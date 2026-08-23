@@ -61,15 +61,6 @@ def test_versions_file_has_the_pinned_release_assets() -> None:
                 }
             },
         },
-        "promtail": {
-            "version": "3.6.0",
-            "assets": {
-                "darwin-arm64": {
-                    "url": "https://github.com/grafana/loki/releases/download/v3.6.0/promtail-darwin-arm64.zip",
-                    "sha256": "186a4cac97ebe2a3d8933a8d3d2b566353e62b6c9aeb502796bd16f0d475638e",
-                }
-            },
-        },
     }
 
 
@@ -161,11 +152,19 @@ def test_ensure_renders_configs_with_native_paths_and_loopback(
 
     config_dir = _native_dir(home) / "config"
     loki = (config_dir / "loki.yaml").read_text(encoding="utf-8")
-    promtail = (config_dir / "promtail.yml").read_text(encoding="utf-8")
+    prometheus = (config_dir / "prometheus.yml").read_text(encoding="utf-8")
     loki_config = yaml.safe_load(loki)
-    promtail_config = yaml.safe_load(promtail)
-    assert "{{AVA_HOME}}" not in loki + promtail
+    prometheus_config = yaml.safe_load(prometheus)
+    assert "{{AVA_HOME}}" not in loki
+    assert {path.name for path in config_dir.iterdir()} == {"loki.yaml", "prometheus.yml"}
     assert loki_config["common"]["path_prefix"] == f"{home}/lgtm/native/data/loki"
+    assert loki_config["frontend"]["address"] == "127.0.0.1"
+    assert (
+        loki_config["distributor"]
+        == yaml.safe_load((_repo() / "deploy/lgtm/config/loki.yaml").read_text(encoding="utf-8"))[
+            "distributor"
+        ]
+    )
     assert "http_listen_address: 127.0.0.1" in loki
     assert "grpc_listen_address: 127.0.0.1" in loki
     assert "instance_addr: 127.0.0.1" in loki
@@ -173,19 +172,23 @@ def test_ensure_renders_configs_with_native_paths_and_loopback(
     assert "query_timeout: 50s" in loki
     assert "max_entries_limit_per_query: 50001" in loki
     assert "split_queries_by_interval: 24h" in loki
-    assert "http_listen_address: 127.0.0.1" in promtail
-    assert "http://127.0.0.1:3100/loki/api/v1/push" in promtail
-    assert promtail_config["scrape_configs"][0]["static_configs"][0]["labels"]["__path__"] == (
-        f"{home}/logs/*.out.log"
-    )
-    assert (config_dir / "prometheus.yml").exists()
+    targets = {
+        job["job_name"]: job["static_configs"][0]["targets"]
+        for job in prometheus_config["scrape_configs"]
+    }
+    assert targets == {
+        "prometheus": ["localhost:9090"],
+        "tempo": ["100.78.137.46:3200"],
+        "loki": ["127.0.0.1:3100"],
+        "grafana": ["127.0.0.1:3003"],
+    }
 
 
 def test_render_plist_uses_absolute_paths_and_memory_caps(tmp_path: Path) -> None:
     native_dir = tmp_path / "home/lgtm/native"
     home = tmp_path / "home"
 
-    expected_limits = {"loki": "2GiB", "prometheus": "1GiB", "promtail": "256MiB"}
+    expected_limits = {"loki": "2GiB", "prometheus": "1GiB"}
     for name, expected_limit in expected_limits.items():
         rendered = _lgtm_native._render_plist(name, native_dir, home)
         plist = plistlib.loads(rendered.encode())

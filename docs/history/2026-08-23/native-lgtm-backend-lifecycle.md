@@ -13,3 +13,5 @@ stops remove the marker before teardown.
 The former Loki, Prometheus, and Promtail compose volumes remain as rollback
 assets. Restoring the prior compose and backend configs from git, then running
 `docker compose up -d`, restores the container path without deleting history.
+
+Update: superseded by [native LGTM production alignment](native-lgtm-prod-alignment.md), which records the completed cutover and Promtail retirement.

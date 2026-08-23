@@ -8,4 +8,7 @@ providers:
     disableDeletion: false
     updateIntervalSeconds: 30
     options:
-      path: /etc/grafana/provisioning/dashboards
+      # The provider resolves relative paths against the process CWD, not
+      # GF_PATHS_PROVISIONING; the native launcher sets the absolute path via
+      # this env var (runtime.env).
+      path: $__env{GRAFANA_PROVISIONING_PATH}
