@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, cast
 
 import httpx
@@ -228,14 +228,22 @@ def sum_by(
     metric: str,
     by: str,
     *,
-    window_hours: int | None = None,
+    window: timedelta | None = None,
     timeout_s: float | None = None,
 ) -> dict[str, float]:
     """Aggregate a counter metric grouped by one label."""
-    if window_hours is None:
+    if window is None:
         expr = f"sum by ({by}) ({metric})"
     else:
-        expr = f"sum by ({by}) (increase({metric}[{int(window_hours)}h]))"
+        seconds = int(window.total_seconds())
+        duration = (
+            f"{seconds // 3600}h"
+            if seconds % 3600 == 0
+            else f"{seconds // 60}m"
+            if seconds % 60 == 0
+            else f"{seconds}s"
+        )
+        expr = f"sum by ({by}) (increase({metric}[{duration}]))"
     out: dict[str, float] = {}
     for labels, value in query(expr, timeout_s=timeout_s):
         key = labels.get(by, "")

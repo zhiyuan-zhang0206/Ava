@@ -34,7 +34,7 @@ from psycopg import sql
 from psycopg_pool import ConnectionPool
 
 from gateway import loki_events
-from gateway.schemas import AgentCost, StatsWindowHours
+from gateway.schemas import AgentCost, StatsWindowHours, window_delta
 
 # The compact-halt event name (payload key `body` mentions "compact") —
 # mirrors `HALT_KEYS` in shared/events/contract.py.
@@ -70,7 +70,7 @@ def window_bounds(
     """Resolve (from_, window_start) for the Loki-side event aggregates
     (stats / activity / TPS — bounded readers). ``since_compact`` wins: the
     agent's latest compact-halt ts (None = never compacted -> retention
-    floor). Otherwise ``hours`` -> now - N h; neither -> None (the inspect
+    floor). Otherwise ``hours`` -> now - the selected window; neither -> None (the inspect
     path resolves whole life through its PG ledger/archive and a retained Loki
     tail; the cost path has its own matching ledger read). ``window_start`` is
     the same instant, None when the request is whole-life (the alive-time clip
@@ -81,7 +81,7 @@ def window_bounds(
             return _retention_floor(), None
         return compact_ts, compact_ts
     if hours is not None:
-        window_from = datetime.now(tz=UTC) - timedelta(hours=int(hours))
+        window_from = datetime.now(tz=UTC) - window_delta(hours)
         return window_from, window_from
     return None, None
 
@@ -279,7 +279,7 @@ def agent_cost(
     if since_compact:
         windowed_from = _compact_ts(agent_id)  # None = never compacted -> whole life
     elif hours is not None:
-        windowed_from = datetime.now(tz=UTC) - timedelta(hours=int(hours))
+        windowed_from = datetime.now(tz=UTC) - window_delta(hours)
 
     merged: dict[str, _ModelAgg] = {}
     if windowed_from is not None:

@@ -26,7 +26,7 @@ from fastapi.testclient import TestClient
 from gateway import loki_events, loki_query_budget
 from gateway.app import app
 from gateway.routers import _stats_dashboard, status
-from gateway.schemas import StatsWindowHours
+from gateway.schemas import StatsWindowHours, window_delta
 from tests.gateway.loki_fake import FakeLoki
 
 
@@ -579,19 +579,23 @@ def test_dashboard_hours_param_selects_window(
     assert wide["avg_turn_seconds"] == 6.0
 
 
+def test_five_minute_window_delta() -> None:
+    assert window_delta(StatsWindowHours.M5) == timedelta(minutes=5)
+
+
 def test_dashboard_all_whitelisted_hours_accepted(db_conn: psycopg.Connection) -> None:
-    """All 5 whitelist values (1/6/24/72/168) return 200, window_hours echoed as-is."""
+    """All 6 whitelist values (0/1/6/24/72/168) return 200, window_hours echoed as-is."""
     db_conn.commit()
     with TestClient(app) as client:
-        for hours in (1, 6, 24, 72, 168):
+        for hours in (0, 1, 6, 24, 72, 168):
             resp = client.get("/api/stats/dashboard", params={"hours": hours})
             assert resp.status_code == 200
             assert resp.json()["window_hours"] == hours
 
 
-@pytest.mark.parametrize("bad", ["0", "5", "-1", "25", "169", "abc", "24.5"])
+@pytest.mark.parametrize("bad", ["5", "-1", "25", "169", "abc", "24.5"])
 def test_dashboard_invalid_hours_422(db_conn: psycopg.Connection, bad: str) -> None:
-    """hours not in whitelist {1,6,24,72,168} → 422 (fail-fast), not silently fallback to 24."""
+    """hours outside {0,1,6,24,72,168} → 422 (fail-fast), not silently fallback to 24."""
     db_conn.commit()
     with TestClient(app) as client:
         resp = client.get("/api/stats/dashboard", params={"hours": bad})

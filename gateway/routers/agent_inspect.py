@@ -467,8 +467,9 @@ async def get_agent_inspect(
     heartbeat state. The
     single-agent counterpart to `/api/stats/dashboard` (fleet-wide).
 
-    `?hours=` windows `cost` + `stats` to the past N hours (whitelisted to
-    1/6/24/72/168, anything else 422s); omitted = cumulative since spawn.
+    `?hours=` windows `cost` + `stats` to the selected range (0 = last 5m;
+    1/6/24/72/168 = hours, anything else 422s); omitted = cumulative since
+    spawn.
     `?since_compact=true` windows them to events since the agent's latest
     compact halt instead — it takes precedence, `hours` is ignored and the
     echoed `window_hours` is None.

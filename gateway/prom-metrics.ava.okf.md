@@ -27,11 +27,12 @@ datapoint attributes.
 - **`query(expr, timeout_s=None)`** — one instant query against Prometheus's
   HTTP API (`/api/v1/query`), returning the `data.result` as (labels, value)
   pairs. Omitting the optional per-call timeout uses the shared client default.
-- **`sum_by(metric, by, window_hours=None, timeout_s=None)`** —
+- **`sum_by(metric, by, window=None, timeout_s=None)`** —
   `sum by (<by>) (<metric>)`:
   raw cumulative counters for the all-time view, wrapped in
-  `increase(<metric>[<N>h])` for the windowed view (the PromQL equivalent of
-  the old SQL `ts > now() - N hours`). Series missing the grouping label
+  `increase(<metric>[<N>])` for the windowed view (the PromQL equivalent of
+  the old SQL `ts > now() - window`), where `window` is a `timedelta` (`None`
+  = all-time). Series missing the grouping label
   aggregate under `""` (the old SQL NULL group).
 - Counters are cumulative since the exporting process started, so "all-time"
   means "since exporter start / retention" after the cutover.

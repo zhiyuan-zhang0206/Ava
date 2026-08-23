@@ -120,10 +120,12 @@ export function useSidebarSort(): {
 
 // Aggregation windows the stats endpoint accepts (`?hours=`), with the
 // compact labels the selector renders. Must mirror the backend whitelist
-// (`gateway/schemas.py:StatsWindowHours`) — any other value 422s.
-export const STATS_WINDOWS = [1, 6, 24, 72, 168] as const;
+// (`gateway/schemas/stats.py:StatsWindowHours`) — `0` means the last 5m;
+// any other value outside this whitelist 422s.
+export const STATS_WINDOWS = [0, 1, 6, 24, 72, 168] as const;
 export type StatsWindowHours = (typeof STATS_WINDOWS)[number];
 export const STATS_WINDOW_LABELS: Record<StatsWindowHours, string> = {
+  0: "5m",
   1: "1h",
   6: "6h",
   24: "24h",

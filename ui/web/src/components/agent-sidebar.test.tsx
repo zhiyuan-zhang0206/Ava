@@ -698,7 +698,7 @@ describe("StatsCards tri-state (loading / data / error)", () => {
 });
 
 describe("StatsCards window selector", () => {
-  it("renders all five window options with the persisted value selected", () => {
+  it("renders all six window options with the persisted value selected", () => {
     state.agents = [makeAgent({ agent_id: 1 })];
     state.statsWindowHours = 72;
     wrap(<AgentSidebar {...handlers} />);
@@ -706,10 +706,10 @@ describe("StatsCards window selector", () => {
     const select = screen.getByLabelText<HTMLSelectElement>("Statistics window");
     expect(select.value).toBe("72");
     const labels = Array.from(select.options).map((o) => o.text);
-    expect(labels).toEqual(["1h", "6h", "24h", "3d", "7d"]);
+    expect(labels).toEqual(["5m", "1h", "6h", "24h", "3d", "7d"]);
   });
 
-  it("changing the select calls setWindowHours with the numeric hours", () => {
+  it("changing the select calls setWindowHours with the numeric window value", () => {
     state.agents = [makeAgent({ agent_id: 1 })];
     wrap(<AgentSidebar {...handlers} />);
     openStats();

@@ -761,13 +761,13 @@ describe("InspectorPanel desktop", () => {
     expect(toggle).toHaveBeenCalledOnce();
   });
 
-  it("Escape closes the panel on desktop", async () => {
+  it("Escape does not close the panel on desktop", async () => {
     getAgentInspect.mockResolvedValue(fixture());
     render(<InspectorPanel agentId={1} />);
 
     await waitFor(() => expect(screen.getByText("Persistent shells")).toBeTruthy());
     fireEvent.keyDown(window, { key: "Escape" });
-    expect(toggle).toHaveBeenCalledOnce();
+    expect(toggle).not.toHaveBeenCalled();
   });
 
   it("does not close when clicking outside the desktop side panel", async () => {
@@ -925,17 +925,22 @@ describe("InspectorToggle", () => {
     expect(toggle).toHaveBeenCalledOnce();
   });
 
-  it("arrow points up toward the top bar (task #1065)", () => {
+  it("chevron points left when open and right when closed (2026-08-24 ruling)", () => {
     render(<InspectorToggle />);
-    const btn = screen.getByRole("button", { name: "Close inspector" });
-    const chevrons = [...btn.querySelectorAll("svg path")]
+    const openButton = screen.getByRole("button", { name: "Close inspector" });
+    const openChevrons = [...openButton.querySelectorAll("svg path")]
       .map((p) => p.getAttribute("d"))
       .filter((d) => d?.startsWith("m"));
-    // PanelTopClose renders the up-chevron "m9 16 3-3 3 3"; PanelTopOpen
-    // renders the down-chevron "m15 14-3 3-3-3" — the user-facing arrow must
-    // point up (user ruling 8/6, re-affirmed 2026-08-08 #1065).
-    expect(chevrons).toContain("m9 16 3-3 3 3");
-    expect(chevrons).not.toContain("m15 14-3 3-3-3");
+    expect(openChevrons).toContain("m15 18-6-6 6-6");
+
+    cleanup();
+    panelState.open = false;
+    render(<InspectorToggle />);
+    const closedButton = screen.getByRole("button", { name: "Open inspector" });
+    const closedChevrons = [...closedButton.querySelectorAll("svg path")]
+      .map((p) => p.getAttribute("d"))
+      .filter((d) => d?.startsWith("m"));
+    expect(closedChevrons).toContain("m9 18 6-6-6-6");
   });
 
   it("does not prefetch while closed, even on pointer intent", () => {

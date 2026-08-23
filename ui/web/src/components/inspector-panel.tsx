@@ -3,11 +3,12 @@
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Bell,
+  ChevronLeft,
+  ChevronRight,
   DollarSign,
   ExternalLink,
   HeartPulse,
   LayoutPanelTop,
-  PanelTopClose,
   RefreshCw,
   SlidersHorizontal,
   Terminal,
@@ -36,13 +37,14 @@ import { cn } from "@/lib/utils";
 import { BAR_HEIGHT_CLASS, FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/lib/layout";
 
 // Window options for the cost + activity sections. `null` = cumulative since
-// spawn (available as All); the hour values are a subset of the backend whitelist
-// (StatsWindowHours: 1/6/24/72/168). -1 is a local sentinel for the
-// since-last-compact window — it never reaches the backend as `hours`, it
-// selects the `since_compact` query param instead.
+// spawn (available as All); 0 = the last 5m and the positive values are a subset
+// of the backend whitelist (StatsWindowHours: 1/6/24/72/168 = hours). -1 is
+// a local sentinel for the since-last-compact window — it never reaches the
+// backend as `hours`, instead selecting the `since_compact` query param.
 const COMPACT_WINDOW = -1;
 const WINDOWS: { label: string; value: number | null }[] = [
   { label: "All", value: null },
+  { label: "5m", value: 0 },
   { label: "1h", value: 1 },
   { label: "24h", value: 24 },
   { label: "7d", value: 168 },
@@ -65,7 +67,9 @@ const WINDOWS: { label: string; value: number | null }[] = [
  * Responsive (user ruling 2026-08-23, superseding the 2026-08-05 floating
  * overlay ruling on desktop): at ≥ lg it is a fixed right-side flex panel;
  * below lg it is a full-screen overlay with a backdrop, matching the mobile
- * sidebar drawer.
+ * sidebar drawer. The header X closes both forms and the backdrop closes the
+ * mobile overlay; Escape deliberately does not close either form (user ruling
+ * 2026-08-24).
  */
 // A subtle "live refresh is failing" marker for the inspector header. Shown only
 // when we already have a snapshot to display (stale-while-error) — a cold failure
@@ -84,19 +88,6 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
   const { isLarge } = useBreakpoint();
   const [hours, setHours] = useState<number | null>(24);
   const queryClient = useQueryClient();
-
-  // Responsive side panel / mobile overlay (user ruling 2026-08-23,
-  // superseding the 2026-08-05 floating-panel ruling on desktop): Escape
-  // closes both forms. The header X closes both; the mobile backdrop also
-  // closes the overlay.
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") toggle();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, toggle]);
 
   const { data, error, isLoading, refetch, isFetching } = useQuery({
     queryKey: ["agent-inspect", agentId, hours],
@@ -308,11 +299,10 @@ export function InspectorToggle() {
           : "border-transparent text-muted-foreground/50 hover:border-border hover:text-muted-foreground",
       )}
     >
-      {/* Arrow points up toward the top bar regardless of state (user ruling
-          8/6, re-affirmed 8/8 #1065): PanelTopOpen's chevron points DOWN, so
-          PanelTopClose is the up-arrow. Selected state = brightness, not
-          direction. */}
-      <PanelTopClose className="size-3.5" />
+      {/* Closed points right to open the right-side panel; open points left to
+          close it back and keeps the "Close inspector" semantics. The
+          2026-08-24 user ruling supersedes the 8/6 and #1065 up-arrow ruling. */}
+      {open ? <ChevronLeft className="size-3.5" /> : <ChevronRight className="size-3.5" />}
       <span className="hidden sm:inline">Inspect</span>
     </button>
   );

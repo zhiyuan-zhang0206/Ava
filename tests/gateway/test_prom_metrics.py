@@ -12,7 +12,7 @@ from __future__ import annotations
 import threading
 from collections.abc import Generator
 from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
@@ -283,9 +283,15 @@ class TestSumBy:
 
     def test_windowed_query_text_uses_increase(self, monkeypatch: pytest.MonkeyPatch) -> None:
         client = _install(monkeypatch, _prom_payload([]))
-        prom_metrics.sum_by("ava_llm_usage_in_total", "model", window_hours=24)
+        prom_metrics.sum_by("ava_llm_usage_in_total", "model", window=timedelta(hours=24))
         _url, params = client.calls[0]
         assert params["query"] == "sum by (model) (increase(ava_llm_usage_in_total[24h]))"
+
+    def test_five_minute_window_uses_minutes(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        client = _install(monkeypatch, _prom_payload([]))
+        prom_metrics.sum_by("ava_llm_usage_in_total", "model", window=timedelta(minutes=5))
+        _url, params = client.calls[0]
+        assert params["query"] == "sum by (model) (increase(ava_llm_usage_in_total[5m]))"
 
     def test_missing_label_groups_under_empty_string(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # A series without the grouping label (e.g. pre-model-tracking events)
