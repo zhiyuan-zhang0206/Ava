@@ -177,12 +177,25 @@ def _agent_activity(
     )
 
 
+_HEARTBEAT_PAUSE_LOOKBACK = timedelta(hours=24)
+
+
 def _heartbeat_last_pause(agent_id: int) -> HeartbeatLastPause | None:
-    """Newest heartbeat pause from Loki; safe to retain with aggregates."""
+    """Newest recent heartbeat pause from Loki; safe to retain with aggregates.
+
+    "Last pause" is a recent-history hint; `_inspect_live` reads authoritative
+    active state from `agents_meta.heartbeat_paused_until`. The fixed 24-hour
+    lookback matches the default cluster `heartbeat_pause_max_seconds` cap
+    (86400), so any still-active default pause retains its start event. Raising
+    the cap via `AVA_HEARTBEAT_PAUSE_MAX_SECONDS` or using a longer per-agent
+    `config_overlay` is an accepted residual: the cell may show no recent pause
+    while the authoritative active state remains correct. Older pauses likewise
+    show as no recent pause, matching Loki's pre-existing 168-hour truncation.
+    """
     rows, _ = loki_events.query_events(
         agent_id=agent_id,
         event_names=["heartbeat_paused"],
-        from_=_agent_cost._retention_floor(),
+        from_=datetime.now(tz=UTC) - _HEARTBEAT_PAUSE_LOOKBACK,
         limit=1,
     )
     row = rows[0] if rows else None
