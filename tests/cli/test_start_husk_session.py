@@ -26,6 +26,7 @@ the code decided to run.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 import pytest
 
@@ -238,6 +239,46 @@ def _launch_probe_env(
     return seen
 
 
+def _stub_session_code_state(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    launched: str,
+    head: str,
+    lease_kind: Literal["free", "unreadable", "executing", "settle_hold"] = "free",
+    orchestration_kind: Literal["none", "in_flight", "unreadable"] = "none",
+) -> list[tuple[str, str | None, str | None]]:
+    """Make the session-code check inspect known local deployment state."""
+    from ops.controllers import _deploy_state
+    from shared import cluster_drift, session_code
+
+    sources: list[tuple[str, str | None, str | None]] = []
+    monkeypatch.setattr(cluster_drift, "running_from_prod_source", lambda: True)
+    monkeypatch.setattr(cluster_drift, "prod_source_head_sha", lambda: head)
+
+    def _launched_sha(
+        _session: str, *, service: str | None = None, health_url: str | None = None
+    ) -> str:
+        sources.append((_session, service, health_url))
+        return launched
+
+    def _lease_state(*, settle_hold_mode: Literal["narrow", "pass"]) -> _deploy_state.LeaseVerdict:
+        del settle_hold_mode
+        return _deploy_state.LeaseVerdict(lease_kind, "updater", None)
+
+    monkeypatch.setattr(session_code, "launched_sha", _launched_sha)
+    monkeypatch.setattr(
+        _deploy_state,
+        "read_lease_state",
+        _lease_state,
+    )
+    monkeypatch.setattr(
+        _deploy_state,
+        "read_orchestration",
+        lambda: _deploy_state.OrchestrationState(orchestration_kind, None),
+    )
+    return sources
+
+
 def test_husk_session_is_cleared_and_relaunched(
     monkeypatch: pytest.MonkeyPatch, capsys, tmp_path: Path
 ) -> None:
@@ -262,19 +303,75 @@ def test_husk_session_is_cleared_and_relaunched(
 def test_live_service_is_still_skipped(
     monkeypatch: pytest.MonkeyPatch, capsys, tmp_path: Path
 ) -> None:
-    """Idempotence is preserved: a session whose probe passes is left completely
-    alone — no kill, no relaunch, no bounced daemon on every `ava start`."""
+    """A healthy session already launched on the checkout's code is left alone."""
     seen = _launch_probe_env(
         monkeypatch,
         sessions_alive={"ava-gateway"},
         probe=ServiceProbe(True, "identity", ""),
     )
+    _stub_session_code_state(monkeypatch, launched="current", head="current")
     _roster(monkeypatch, "gateway")
 
     _cli._launch_sessions(frozenset({"gateway"}), set(), tmp_path)
 
     assert seen == {"killed": [], "launched": []}
     assert "✓ ava-gateway already running" in capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_live_service_on_stale_code_is_cleared_and_relaunched(
+    monkeypatch: pytest.MonkeyPatch, capsys, tmp_path: Path
+) -> None:
+    """A healthy session carrying a prior checkout is not an idempotent start."""
+    seen = _launch_probe_env(
+        monkeypatch,
+        sessions_alive={"ava-ops"},
+        probe=ServiceProbe(True, "identity", ""),
+    )
+    sources = _stub_session_code_state(monkeypatch, launched="oldsha", head="newsha")
+    _roster(monkeypatch, "ops")
+
+    _cli._launch_sessions(frozenset({"gateway"}), set(), tmp_path)
+
+    assert seen["killed"] == ["ava-ops"]
+    assert seen["launched"] == ["ava-ops"]
+    assert sources == [("ava-ops", "ops", "http://localhost:1/healthz")]
+    out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
+    assert "stale code" in out
+
+
+@pytest.mark.parametrize("guard", ("update", "local-orchestration", "dev-worktree"))
+def test_stale_code_session_is_left_alone_while_its_check_is_guarded(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, guard: str
+) -> None:
+    """Updates own code transitions, and dev/prod checkout pairs are incomparable."""
+    seen = _launch_probe_env(
+        monkeypatch,
+        sessions_alive={"ava-gateway"},
+        probe=ServiceProbe(True, "identity", ""),
+    )
+    if guard == "update":
+        _stub_session_code_state(
+            monkeypatch,
+            launched="oldsha",
+            head="newsha",
+            lease_kind="executing",
+        )
+    elif guard == "local-orchestration":
+        _stub_session_code_state(
+            monkeypatch,
+            launched="oldsha",
+            head="newsha",
+            orchestration_kind="in_flight",
+        )
+    else:
+        from shared import cluster_drift
+
+        monkeypatch.setattr(cluster_drift, "running_from_prod_source", lambda: False)
+    _roster(monkeypatch, "gateway")
+
+    _cli._launch_sessions(frozenset({"gateway"}), set(), tmp_path)
+
+    assert seen == {"killed": [], "launched": []}
 
 
 def test_probeless_service_keeps_the_session_only_guard(
