@@ -1484,6 +1484,7 @@ describe("processSseEventBatch — frame-level folding", () => {
       spawned_at: "2026-01-01T00:00:00Z",
       started_at: "2026-01-01T00:00:01Z",
       machine: "test",
+      supports_vision: true,
       last_active_at: "2026-01-01T00:00:01Z",
       last_inbound_at: "2026-01-01T00:00:01Z",
       notices_awaiting_response: [],

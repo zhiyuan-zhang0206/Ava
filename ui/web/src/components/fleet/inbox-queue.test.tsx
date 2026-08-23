@@ -135,6 +135,7 @@ function agent(over: {
     last_active_at: "2026-06-14T00:00:00Z", last_inbound_at: "2026-06-14T00:00:00Z",
     label: over.label ?? null,
     machine: "test",
+    supports_vision: true,
     notices_awaiting_response: over.notices_awaiting_response ?? [],
     unread_notice_count: 0,
     heartbeat_paused_until: null,

@@ -73,6 +73,7 @@ function ag(agent_id: number, overrides: Partial<AgentRowType> = {}): AgentRowTy
     last_active_at: "2026-05-07T00:00:00.000000Z", last_inbound_at: "2026-05-07T00:00:00.000000Z",
     label: null,
     machine: "test-machine",
+    supports_vision: true,
     liveness_state: "online",
     last_probe_at: null,
     notices_awaiting_response: [],

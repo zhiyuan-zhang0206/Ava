@@ -136,6 +136,7 @@ const baseAgent: AgentRow = {
   spawned_at: "2026-05-10T00:00:00Z",
   started_at: "2026-05-10T00:00:01Z",
   machine: "test",
+  supports_vision: true,
   notices_awaiting_response: [],
   unread_notice_count: 0,
   heartbeat_paused_until: null,

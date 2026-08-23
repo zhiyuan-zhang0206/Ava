@@ -6482,6 +6482,10 @@
             "type": "string",
             "title": "Machine"
           },
+          "supports_vision": {
+            "type": "boolean",
+            "title": "Supports Vision"
+          },
           "liveness_state": {
             "type": "string",
             "enum": [
@@ -6541,6 +6545,7 @@
           "last_inbound_at",
           "label",
           "machine",
+          "supports_vision",
           "liveness_state",
           "last_probe_at",
           "notices_awaiting_response",

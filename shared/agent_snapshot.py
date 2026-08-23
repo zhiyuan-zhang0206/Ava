@@ -16,6 +16,8 @@ import psycopg
 from pydantic import BaseModel, Field
 
 from shared.agents import AgentStatus
+from shared.config import settings
+from shared.lm.factory import model_supports_vision
 from shared.priority import Priority
 
 # Canonical columns + JOIN. last_active_at is the agent's REAL-activity clock
@@ -60,6 +62,7 @@ _COLS = (
     # no-interpolation preference); keep the '30' in sync with
     # shared.db.NOTICE_FYI_TTL_DAYS — the C1 tests lock the coupling.
     "AND n.created_at > now() - interval '30 days') AS unread_notice_count"
+    ", a.config_overlay"
 )
 _FROM = (
     "FROM agents_meta a "
@@ -128,6 +131,11 @@ class AgentSnapshot(BaseModel):
 
     `notices_awaiting_response` is the agent's open require_response notices,
     oldest first — empty when it is not waiting on the user.
+
+    `supports_vision` describes the effective model: the per-agent
+    `config_overlay.llm_model` when set, otherwise `settings.lm.llm_model`.
+    It uses `shared.lm.factory.model_supports_vision`, the same capability
+    lookup as the message API's image-content gate.
     """
 
     agent_id: int
@@ -142,6 +150,7 @@ class AgentSnapshot(BaseModel):
     last_inbound_at: datetime
     label: str | None
     machine: str
+    supports_vision: bool
     # Gateway-owned liveness projection (Task #1174): 'online' = the machine is
     # reachable AND (for running/idling) the process lease is alive; 'offline'
     # = machine unreachable (2 consecutive failed status_probe) or lease
@@ -159,6 +168,12 @@ class AgentSnapshot(BaseModel):
 def _row_to_snapshot(row: tuple[Any, ...]) -> AgentSnapshot:
     # Pydantic does the per-field type coercion / validation; the tuple
     # positions match the SELECT column order above.
+    config_overlay = row[17]
+    effective_model = (
+        config_overlay["llm_model"]
+        if config_overlay and "llm_model" in config_overlay
+        else settings.lm.llm_model
+    )
     return AgentSnapshot.model_validate(
         {
             "agent_id": row[0],
@@ -178,6 +193,7 @@ def _row_to_snapshot(row: tuple[Any, ...]) -> AgentSnapshot:
             "last_probe_at": row[14],
             "notices_awaiting_response": row[15],
             "unread_notice_count": row[16],
+            "supports_vision": model_supports_vision(effective_model),
         }
     )
 
