@@ -372,6 +372,7 @@ function HomeContent({
                 floating aggregation bar sits at the column's top center,
                 below the header, and jumps to /insights#alerts. */}
             <AlertsBadge />
+            <InspectorToggle />
           </HeaderBar>
           <AlertsFloatingBar />
           {/* Bottom stack: pending strip + composer in normal flow (user
@@ -395,11 +396,6 @@ function HomeContent({
               agentId={activeId}
               agentTerminated={activeAgent?.status === "terminated"}
               details={<ContentToggle />}
-              inspect={
-                // The 2026-08-23 ruling keeps only the toggle in the composer;
-                // InspectorPanel is HomeShell's final flex sibling.
-                <InspectorToggle />
-              }
             >
               <UploadButton
                 agentId={activeId}

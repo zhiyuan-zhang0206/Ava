@@ -3,7 +3,7 @@
 // Top header bar — shows the current agent label and houses the sidebar
 // hamburger (mobile). Navigation entries (Memory Graph / Fleet / Insights /
 // Control) moved to the sidebar footer (2026-08-05, user ruling); the right-
-// side children slot lets the parent inject controls like InspectorToggle.
+// side children slot homes the Alerts badge and Inspector toggle.
 
 import { Menu } from "lucide-react";
 import { useTranslations } from "next-intl";
