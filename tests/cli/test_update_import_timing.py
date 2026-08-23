@@ -4,12 +4,16 @@
 after the `git checkout` + `uv sync` above it. In-process means the stop executes
 whatever is already in `sys.modules`, so whether it kills this host's sessions with
 the just-pulled session-kill code or with the pre-pull code is decided entirely by
-import timing. Today nothing the updater imports before the checkout reaches
-`shared.session_backend`: every path to it (`cli/commands/_session_lifecycle.py`,
-`cli/commands/stop.py`) imports it *method-locally*, and it in turn reaches the
-Windows supervisor `shared.winproc` method-locally as well. So the whole kill chain
-is first loaded when the stop actually kills something — after the checkout, off
-the fresh files on disk. That is what this module pins.
+import timing. Nothing the updater imports before the checkout may reach
+`shared.session_backend` or `shared.session_record`: every path to the former
+(`cli/commands/_session_lifecycle.py`, `cli/commands/stop.py`) imports it
+*method-locally*, and it in turn reaches the platform supervisors method-locally.
+`shared.session_record` must be deferred too: `shared.proc` is in the updater's
+closure, and its former module-scope import left the old record module resident.
+The new `shared.posixproc` then imported `pid_starttime_ticks` from that stale
+module after checkout and crashed the stop. So the whole kill chain is first loaded
+when the stop actually kills something — after the checkout, off the fresh files on
+disk. That is what this module pins.
 
 The arrangement is load-bearing, and its failure mode is invisible. PR #932 fixed a
 `winproc.kill_session` that walked past a session boundary and killed the updater's
@@ -36,13 +40,17 @@ Shape of the assertion, and why it is not vacuous on the POSIX host CI runs on:
   Linux box is killed by `SessionBackend.kill_session`, whose graceful-then-force
   loop is Python code *in shared/session_backend.py*. A stale dispatcher is a stale
   killer on POSIX too.
-- The two leaves (`shared.winproc`, `shared.posixproc`) are asserted as defence in
-  depth, for a hoist that reaches a supervisor by a route that bypasses
-  session_backend — `services/healthchecks/frontend.py` also imports winproc
-  method-locally, and `cli/commands/stop.py`'s agent reap goes to `posixproc` via
-  `native_proc()`. Neither leaf alone would be a meaningful assertion on POSIX:
-  `shared.winproc` is never imported at all off Windows, so its absence there
-  proves nothing by itself.
+- The leaves (`shared.winproc`, `shared.posixproc`, `shared.session_record`) are
+  asserted as defence in depth. The first two catch a hoist that reaches a
+  supervisor by a route that bypasses session_backend —
+  `services/healthchecks/frontend.py` also imports winproc method-locally, and
+  `cli/commands/stop.py`'s agent reap goes to `posixproc` via `native_proc()`.
+  `shared.session_record` catches the separate stale-module path: `shared.proc`
+  is already in the updater's closure, and its former module-scope import poisoned
+  `posixproc`'s later import of the new `pid_starttime_ticks` API. Neither platform
+  supervisor leaf alone would be a meaningful assertion on POSIX: `shared.winproc`
+  is never imported at all off Windows, so its absence there proves nothing by
+  itself.
 - A **positive control** pins that the subject still exists: `cli.commands.stop`
   (which owns `_do_stop`) must BE resident. That is the invariant's exact shape —
   the stop's entry point is pre-checkout code, the killer underneath it is not yet
@@ -76,10 +84,16 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 # import that avoids a top-level cycle, and the widest thing it pulls in).
 _UPDATER_IMPORTS = ("cli.commands", "cli.commands._update_agent_runner")
 
-# The kill chain the post-checkout stop rides: the dispatcher — which owns the POSIX
-# kill loop and gates access to the Windows one — plus both platform supervisors.
-# None may be in the closure above.
-_MUST_BE_LAZY = ("shared.session_backend", "shared.winproc", "shared.posixproc")
+# The post-checkout stop's dispatcher and platform supervisors, plus
+# `session_record`: `shared.proc` is in the updater's closure, so a module-scope
+# import there would poison posixproc's later import of the new record API. None
+# may be in the closure above.
+_MUST_BE_LAZY = (
+    "shared.session_backend",
+    "shared.winproc",
+    "shared.posixproc",
+    "shared.session_record",
+)
 
 # Positive control — the stop's own entry point, which IS pre-checkout code.
 _MUST_BE_RESIDENT = ("cli.commands.stop",)
@@ -129,21 +143,24 @@ def test_every_named_module_resolves() -> None:
 
 
 def test_session_kill_chain_is_not_in_the_updaters_import_closure() -> None:
-    """No part of the session-kill chain may be loaded before the checkout.
+    """No dependency of the session-kill chain may load before the checkout.
 
     Fails if anything the updater imports at module scope starts reaching
     `shared.session_backend`, or if `from shared import winproc` / `posixproc` is
-    hoisted to module scope in a module that is already in the closure. Either way
-    the in-process `_do_stop` after the checkout kills with pre-pull code.
+    hoisted to module scope in a module that is already in the closure. It also
+    fails if `shared.proc` imports `shared.session_record` at module scope: the
+    freshly loaded posixproc would then see its old API after checkout. Either way
+    the in-process `_do_stop` after the checkout kills with pre-pull code or fails.
     """
     eager = _resident(_MUST_BE_LAZY)
     assert eager == set(), (
         f"{sorted(eager)} is loaded before `_run_agent_runner_self_update`'s git "
         f"checkout, so the in-process `_do_stop` after it would kill this host's "
         f"sessions with PRE-PULL code — the failure mode PR #932 fixed on Windows, "
-        f"where the stop killed the updater's own session. The kill chain must stay "
-        f"reachable only through method-local imports; see this module's docstring "
-        f"and the comments in shared/session_backend.py."
+        f"where the stop killed the updater's own session. The kill chain and its "
+        f"session-record dependency must stay reachable only through method-local "
+        f"imports; see this module's docstring and the comments in "
+        f"shared/session_backend.py and shared/proc.py."
     )
 
 
