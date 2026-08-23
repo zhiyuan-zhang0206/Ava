@@ -48,7 +48,7 @@ panel uses a `now-7d/d` relative override plus `interval: 24h`, so its
 `$__interval` range vectors are daily buckets aligned to that timezone
 rather than the browser's local clock.
 
-The dashboard now has 74 panels: core ids remain below 1000 (the four new
+The dashboard now has 76 panels: core ids remain below 1000 (the four new
 stat tiles are 44–47), plugin ids are >= 1000, host/data-plane panels are
 2101–2112, the cost-analysis panels are 38–43, and the event panels are
 2201–2203 (business/anomaly logs, event-type table, raw stream). The
@@ -158,7 +158,7 @@ empty ratio / error ratio).
 ## Layout
 
 Greedy 24-column grid, **no overlapping gridPos**: stats 8x4 (three per
-row), charts/tables 12x7 (two per row), primary/raw event logs 24x10, the
+row), charts/tables 12x7 (two per row), the business/anomaly event logs 24x7, the raw event stream 24x10, the
 event-type table 24x7, row headers h=1 w=24. Rows start exactly at the
 previous block's bottom (no gap row).
 

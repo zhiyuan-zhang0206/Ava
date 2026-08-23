@@ -661,7 +661,6 @@ class TestQueryEvents:
             == '{service_name="unknown_service", event_name=""} | json | agent_id="3"'
         )
         assert params["direction"] == "backward"
-
         assert params["limit"] == 101  # limit + offset + 1 lookahead
         # explicit straddling window: the indexed slice spans cutover -> end
         _, last_params = client.calls[-1]
