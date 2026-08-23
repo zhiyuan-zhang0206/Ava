@@ -725,6 +725,61 @@ describe("InspectorPanel birth (cell in the merged Liveness section, Task #1195)
 });
 
 
+describe("InspectorPanel desktop", () => {
+  beforeEach(() => {
+    isLargeMock.mockReturnValue(true);
+  });
+
+  it("renders as a fixed-width side panel without an overlay or backdrop", async () => {
+    getAgentInspect.mockResolvedValue(fixture());
+    render(<InspectorPanel agentId={1} />);
+
+    await waitFor(() => expect(screen.getByText("Persistent shells")).toBeTruthy());
+    const aside = screen.getByRole("complementary");
+    const classes = aside.className.split(" ");
+    expect(classes).toContain("flex");
+    expect(classes).toContain("w-80");
+    expect(classes).toContain("border-l");
+    expect(classes).not.toContain("fixed");
+    expect(classes).not.toContain("absolute");
+    expect(document.querySelector('div[aria-hidden="true"]')).toBeNull();
+  });
+
+  it("closes when clicking the X button", async () => {
+    getAgentInspect.mockResolvedValue(fixture());
+    render(<InspectorPanel agentId={1} />);
+
+    await waitFor(() => expect(screen.getByText("Persistent shells")).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Close inspector" }));
+    expect(toggle).toHaveBeenCalledOnce();
+  });
+
+  it("Escape closes the panel on desktop", async () => {
+    getAgentInspect.mockResolvedValue(fixture());
+    render(<InspectorPanel agentId={1} />);
+
+    await waitFor(() => expect(screen.getByText("Persistent shells")).toBeTruthy());
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(toggle).toHaveBeenCalledOnce();
+  });
+
+  it("does not close when clicking outside the desktop side panel", async () => {
+    getAgentInspect.mockResolvedValue(fixture());
+    render(<InspectorPanel agentId={1} />);
+
+    await waitFor(() => expect(screen.getByText("Persistent shells")).toBeTruthy());
+    fireEvent.mouseDown(document.body);
+    expect(toggle).not.toHaveBeenCalled();
+  });
+
+  it("renders nothing while closed", () => {
+    panelState.open = false;
+    const { container } = render(<InspectorPanel agentId={1} />);
+    expect(container.querySelector("aside")).toBeNull();
+    expect(getAgentInspect).not.toHaveBeenCalled();
+  });
+});
+
 describe("InspectorPanel mobile", () => {
   beforeEach(() => {
     isLargeMock.mockReturnValue(false);
@@ -734,9 +789,13 @@ describe("InspectorPanel mobile", () => {
     getAgentInspect.mockResolvedValue(fixture());
     render(<InspectorPanel agentId={1} />);
 
-    // Mobile layout: full-screen overlay with an X close button.
     await waitFor(() => expect(screen.getByLabelText("Close inspector")).toBeTruthy());
     await waitFor(() => expect(screen.getByText("Persistent shells")).toBeTruthy());
+    const aside = screen.getByRole("complementary");
+    expect(aside.parentElement?.className.split(" ")).toEqual(
+      expect.arrayContaining(["fixed", "inset-0", "z-50", "flex"]),
+    );
+    expect(document.querySelector('div[aria-hidden="true"]')).toBeTruthy();
   });
 
   it("closes when clicking the backdrop", async () => {
@@ -773,15 +832,7 @@ describe("InspectorPanel mobile", () => {
     expect(header.textContent).toBe("Inspector");
   });
 
-  it("Escape closes the floating panel (user ruling 2026-08-05)", async () => {
-    getAgentInspect.mockResolvedValue(fixture());
-    render(<InspectorPanel agentId={1} />);
-    await waitFor(() => expect(screen.getByText("Persistent shells")).toBeTruthy());
-    fireEvent.keyDown(window, { key: "Escape" });
-    expect(toggle).toHaveBeenCalled();
-  });
-
-  it("renders nothing while closed (floating panel leaves the layout)", () => {
+  it("renders nothing while closed (overlay removed)", () => {
     panelState.open = false;
     const { container } = render(<InspectorPanel agentId={1} />);
     expect(container.querySelector("aside")).toBeNull();

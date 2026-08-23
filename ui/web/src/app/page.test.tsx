@@ -210,11 +210,15 @@ vi.mock("@/components/composer", () => ({
     mode,
     onSend,
     children,
+    details,
+    inspect,
     maxWidthCss,
   }: {
     mode: string;
     onSend: (s: string, imageUrls: string[], clientMessageId: string) => Promise<boolean>;
     children?: React.ReactNode;
+    details?: React.ReactNode;
+    inspect?: React.ReactNode;
     maxWidthCss?: string;
   }) => (
     <div
@@ -227,6 +231,8 @@ vi.mock("@/components/composer", () => ({
       <button data-testid="composer-send-multi-args" onClick={() => void onSend("/search hello world /compact", [], "test-client-message-id")}>send multi args</button>
       <button data-testid="composer-send-plain" onClick={() => void onSend("plain text", [], "test-client-message-id")}>send plain</button>
       <button data-testid="composer-send-multi-image" onClick={() => void onSend("/compact /update", ["/api/agents/5/uploads/a.png"], "test-client-message-id")}>send multi image</button>
+      {details}
+      {inspect}
       {children}
     </div>
   ),
@@ -240,6 +246,11 @@ vi.mock("@/components/upload-button", () => ({
 
 vi.mock("@/components/content-toggle", () => ({
   ContentToggle: () => <div data-testid="content-toggle" />,
+}));
+
+vi.mock("@/components/inspector-panel", () => ({
+  InspectorPanel: () => <div data-testid="inspector-panel" />,
+  InspectorToggle: () => <button data-testid="inspector-toggle">toggle</button>,
 }));
 
 import HomePage from "./page";
@@ -422,10 +433,10 @@ describe("HomePage top-level render", () => {
     );
   });
 
-  // The inspector is a floating overlay now (user ruling 2026-08-05): it
-  // starts closed on entry on every device and opens only via the composer's
-  // inspector toggle — mount never touches the open state.
-  it("mount does not auto-open the inspector overlay", () => {
+  // User ruling 2026-08-23: desktop is a fixed side panel and mobile is a
+  // full-screen overlay. Both start closed and open only via the composer's
+  // inspector toggle — mount never touches either open-state source.
+  it("mount does not auto-open the inspector", () => {
     hooksState.isLarge = false;
     hooksState.settings = { "display.inspector_open": false };
     wrap(<HomePage />);
@@ -441,6 +452,26 @@ describe("HomePage top-level render", () => {
     expect(hooksState.setMobileInspectorOpen).not.toHaveBeenCalled();
   });
 
+  it("renders an open inspector as HomeContent's final sibling inside main", () => {
+    hooksState.activeId = 5;
+    hooksState.agents = [makeAgent({ agent_id: 5 })];
+    hooksState.settings = {
+      "display.timeline_width_ratio": 0.4,
+      "display.inspector_open": true,
+    };
+    wrap(<HomePage />);
+
+    const main = screen.getByRole("main");
+    const homeContent = screen.getByTestId("timeline-surface").closest("section");
+    const panel = screen.getByTestId("inspector-panel");
+    expect(homeContent?.parentElement).toBe(main);
+    expect(panel.parentElement).toBe(main);
+    expect(main.lastElementChild).toBe(panel);
+    expect(panel.previousElementSibling).toBe(homeContent);
+    expect(
+      screen.getByTestId("composer").contains(screen.getByTestId("inspector-toggle")),
+    ).toBe(true);
+  });
 });
 
 describe("composerMode derivation", () => {

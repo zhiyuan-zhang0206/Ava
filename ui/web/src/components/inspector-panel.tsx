@@ -16,10 +16,11 @@ import {
   X,
 } from "lucide-react";
 import Link from "next/link";
-import { useCallback, type ReactNode, useEffect, useRef, useState } from "react";
+import { useCallback, type ReactNode, useEffect, useState } from "react";
 
 import { OpenNoticeDetail } from "@/components/open-notice-detail";
 import { api } from "@/lib/api";
+import { useBreakpoint } from "@/lib/breakpoint";
 import { useAgentPages } from "@/lib/use-agent-pages";
 import { useInspectorOpen } from "@/lib/inspector-panel-store";
 import type {
@@ -33,7 +34,7 @@ import type {
 import { formatAbsolute, formatRelative, formatShort } from "@/lib/time";
 import { useEventStream } from "@/lib/useEventStream";
 import { cn } from "@/lib/utils";
-import { BAR_HEIGHT_CLASS, FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0, OVERFLOW_HIDDEN } from "@/lib/layout";
+import { BAR_HEIGHT_CLASS, FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/lib/layout";
 
 // Window options for the cost + activity sections. `null` = cumulative since
 // spawn (available as All); the hour values are a subset of the backend whitelist
@@ -62,9 +63,10 @@ const WINDOWS: { label: string; value: number | null }[] = [
  * the panel stays open. Notice SSE events invalidate immediately. The header
  * window selector re-scopes cost (default: the recent 24h window).
  *
- * Responsive: on desktop (≥ lg) it's a side panel; on mobile (< lg) it
- * becomes a full-screen overlay with a backdrop — same pattern as the
- * mobile sidebar drawer.
+ * Responsive (user ruling 2026-08-23, superseding the 2026-08-05 floating
+ * overlay ruling on desktop): at ≥ lg it is a fixed right-side flex panel;
+ * below lg it is a full-screen overlay with a backdrop, matching the mobile
+ * sidebar drawer.
  */
 // A subtle "live refresh is failing" marker for the inspector header. Shown only
 // when we already have a snapshot to display (stale-while-error) — a cold failure
@@ -80,36 +82,21 @@ function StaleDot() {
 
 export function InspectorPanel({ agentId }: { agentId: number }) {
   const { open, toggle } = useInspectorOpen();
+  const { isLarge } = useBreakpoint();
   const [hours, setHours] = useState<number | null>(24);
   const queryClient = useQueryClient();
 
-  // Context-bar style floating panel (user ruling 2026-08-05 21:50): the
-  // panel pops up from the composer's top-right corner (anchored to the
-  // Inspect toggle) instead of a full-height right-side drawer — no backdrop.
-  // Escape, the header X, and a click anywhere outside the panel all close it.
-  const panelRef = useRef<HTMLDivElement>(null);
+  // Responsive side panel / mobile overlay (user ruling 2026-08-23,
+  // superseding the 2026-08-05 floating-panel ruling on desktop): Escape
+  // closes both forms. The header X closes both; the mobile backdrop also
+  // closes the overlay.
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") toggle();
     };
-    const onDown = (e: MouseEvent) => {
-      // Never treat the Inspect toggle itself as "outside" — its own click
-      // already toggles. Without this exclusion a second click on the toggle
-      // fires mousedown(close) + click(open) and the panel never closes
-      // (user ruling 2026-08-06: second click must collapse).
-      const t = e.target as Element | null;
-      if (t?.closest("[data-inspector-toggle]")) return;
-      if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
-        toggle();
-      }
-    };
     window.addEventListener("keydown", onKey);
-    window.addEventListener("mousedown", onDown);
-    return () => {
-      window.removeEventListener("keydown", onKey);
-      window.removeEventListener("mousedown", onDown);
-    };
+    return () => window.removeEventListener("keydown", onKey);
   }, [open, toggle]);
 
   const { data, error, isLoading, refetch, isFetching } = useQuery({
@@ -203,93 +190,110 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
   const matchingLastData = lastData?.agent_id === agentId ? lastData : undefined;
   const effectiveData = matchingData ?? matchingLastData;
 
-  // Renders nothing while closed — the panel floats above the layout (fixed),
-  // so it leaves the flex column entirely instead of reserving width. All
-  // hooks run regardless (rules-of-hooks), but the query is disabled so a
-  // closed panel cannot produce inspect traffic.
+  // Renders nothing while closed, so desktop releases the flex-column width
+  // and mobile removes the overlay. All hooks run regardless (rules-of-hooks),
+  // but the query is disabled so a closed panel cannot produce inspect traffic.
   if (!open) return null;
 
-  // Context-bar style floating panel (user ruling 2026-08-05 21:50):
-  // anchored to the composer's top-right corner, pops upward — no backdrop,
-  // no full-height drawer. Escape / header X / outside click close it.
-  return (
-    <aside
-      ref={panelRef}
-      className={cn("absolute bottom-full right-0 z-50 mb-2 w-[22rem] max-w-[calc(100vw-2rem)] rounded-lg border border-border bg-background shadow-xl", FLEX, FLEX_COL, OVERFLOW_HIDDEN)}
-    >
-        <header className={cn("items-center gap-2 border-b border-border px-4", BAR_HEIGHT_CLASS, FLEX)}>
-          <button
-            type="button"
-            onClick={toggle}
-            aria-label="Close inspector"
-            className="shrink-0 rounded p-1 -ml-1 text-muted-foreground hover:bg-sidebar-accent hover:text-foreground"
-          >
-            <X className="size-5" />
-          </button>
-          <span className={cn("truncate font-mono text-xs tracking-wide text-muted-foreground", MIN_W_0, FLEX_1)}>
-            Inspector
-          </span>
-          {error && effectiveData ? <StaleDot /> : null}
-          <button
-            type="button"
-            onClick={() => void refetch()}
-            disabled={isFetching}
-            aria-label="Refresh inspector data"
-            className="shrink-0 rounded p-1 text-muted-foreground hover:bg-sidebar-accent hover:text-foreground disabled:opacity-50"
-          >
-            <RefreshCw className={cn("size-3.5", isFetching && "animate-spin")} />
-          </button>
-          <select
-            value={hours ?? "all"}
-            onChange={(e) => setHours(e.target.value === "all" ? null : Number(e.target.value))}
-            aria-label="Cost + activity window"
-            className="shrink-0 cursor-pointer rounded border border-border bg-transparent px-1 py-0.5 text-[10px] text-muted-foreground hover:text-foreground focus:ring-1 focus:ring-ring focus:outline-none"
-          >
-            {WINDOWS.map((w) => (
-              <option key={w.label} value={w.value ?? "all"}>
-                {w.label}
-              </option>
-            ))}
-          </select>
-        </header>
+  const body = (
+    <>
+      <header className={cn("items-center gap-2 border-b border-border px-4", BAR_HEIGHT_CLASS, FLEX)}>
+        <button
+          type="button"
+          onClick={toggle}
+          aria-label="Close inspector"
+          className="shrink-0 rounded p-1 -ml-1 text-muted-foreground hover:bg-sidebar-accent hover:text-foreground"
+        >
+          <X className="size-5" />
+        </button>
+        <span className={cn("truncate font-mono text-xs tracking-wide text-muted-foreground", MIN_W_0, FLEX_1)}>
+          Inspector
+        </span>
+        {error && effectiveData ? <StaleDot /> : null}
+        <button
+          type="button"
+          onClick={() => void refetch()}
+          disabled={isFetching}
+          aria-label="Refresh inspector data"
+          className="shrink-0 rounded p-1 text-muted-foreground hover:bg-sidebar-accent hover:text-foreground disabled:opacity-50"
+        >
+          <RefreshCw className={cn("size-3.5", isFetching && "animate-spin")} />
+        </button>
+        <select
+          value={hours ?? "all"}
+          onChange={(e) => setHours(e.target.value === "all" ? null : Number(e.target.value))}
+          aria-label="Cost + activity window"
+          className="shrink-0 cursor-pointer rounded border border-border bg-transparent px-1 py-0.5 text-[10px] text-muted-foreground hover:text-foreground focus:ring-1 focus:ring-ring focus:outline-none"
+        >
+          {WINDOWS.map((w) => (
+            <option key={w.label} value={w.value ?? "all"}>
+              {w.label}
+            </option>
+          ))}
+        </select>
+      </header>
 
-        <div className={cn("max-h-[65vh] overflow-y-auto px-4 py-3 text-xs", MIN_H_0)}>
-          {error && !effectiveData ? (
-            <div className="space-y-2 font-mono text-[11px] text-destructive" role="alert">
-              <p>{error instanceof Error ? error.message : "Failed to load"}</p>
-              <button
-                type="button"
-                onClick={() => void refetch()}
-                disabled={isFetching}
-                aria-label="Retry inspector"
-                className="rounded border border-destructive/40 px-2 py-1 hover:bg-destructive/10 disabled:opacity-50"
-              >
-                {isFetching ? "Retrying…" : "Retry"}
-              </button>
-            </div>
-          ) : !effectiveData ? (
-            <p className="font-mono text-[11px] text-muted-foreground">
-              {isLoading ? "Loading…" : "No data"}
-            </p>
-          ) : (
-            <div className="space-y-4">
-              <PageSection pages={pages} />
-              <ShellsSection inspect={effectiveData} />
-              <LivenessSection inspect={effectiveData} />
-              <ConfigOverlaySection inspect={effectiveData} />
-              <CostSection inspect={effectiveData} />
-              <ActivitySection inspect={effectiveData} />
-              <TpsSection inspect={effectiveData} />
-              <NoticeReplySection agentId={agentId} notice={effectiveData.notice ?? null} />
-            </div>
-          )}
-        </div>
-    </aside>
+      <div className={cn("overflow-y-auto px-4 py-3 text-xs", MIN_H_0, FLEX_1)}>
+        {error && !effectiveData ? (
+          <div className="space-y-2 font-mono text-[11px] text-destructive" role="alert">
+            <p>{error instanceof Error ? error.message : "Failed to load"}</p>
+            <button
+              type="button"
+              onClick={() => void refetch()}
+              disabled={isFetching}
+              aria-label="Retry inspector"
+              className="rounded border border-destructive/40 px-2 py-1 hover:bg-destructive/10 disabled:opacity-50"
+            >
+              {isFetching ? "Retrying…" : "Retry"}
+            </button>
+          </div>
+        ) : !effectiveData ? (
+          <p className="font-mono text-[11px] text-muted-foreground">
+            {isLoading ? "Loading…" : "No data"}
+          </p>
+        ) : (
+          <div className="space-y-4">
+            <PageSection pages={pages} />
+            <ShellsSection inspect={effectiveData} />
+            <LivenessSection inspect={effectiveData} />
+            <ConfigOverlaySection inspect={effectiveData} />
+            <CostSection inspect={effectiveData} />
+            <ActivitySection inspect={effectiveData} />
+            <TpsSection inspect={effectiveData} />
+            <NoticeReplySection agentId={agentId} notice={effectiveData.notice ?? null} />
+          </div>
+        )}
+      </div>
+    </>
+  );
+
+  // Desktop: fixed right-side flex sibling. The 2026-08-23 ruling supersedes
+  // the 2026-08-05 floating overlay for this breakpoint.
+  if (isLarge) {
+    return (
+      <aside className={cn("w-80 shrink-0 border-l border-border bg-background", FLEX, FLEX_COL, MIN_H_0)}>
+        {body}
+      </aside>
+    );
+  }
+
+  // Mobile: full-screen overlay with backdrop (Task #793 semantics restored
+  // by the 2026-08-23 ruling).
+  return (
+    <div className={cn("fixed inset-0 z-50", FLEX)}>
+      <div
+        className="absolute inset-0 bg-black/40"
+        onClick={toggle}
+        aria-hidden="true"
+      />
+      <aside className={cn("relative w-full bg-background", FLEX, FLEX_COL)}>{body}</aside>
+    </div>
   );
 }
 
-/** Header toggle button — opens/closes the inspector. Rendered in the
- *  composer's top-right corner (user ruling 2026-08-05). Closed means no
+/** Inspector toggle button — opens/closes the panel. It remains in the
+ *  composer's top-right corner under the 2026-08-23 ruling, which supersedes
+ *  the 2026-08-05 floating-panel layout on desktop. Closed means no
  *  inspect traffic: the panel's enabled query performs the first fetch only
  *  after this button opens it. */
 export function InspectorToggle() {

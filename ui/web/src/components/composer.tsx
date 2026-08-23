@@ -31,8 +31,8 @@ interface Props {
   mode: ComposerMode;
   children?: React.ReactNode;
   /** Right-edge controls on the composer's top row (Details selector,
-   *  Inspector toggle) — user ruling 2026-08-05: they move from the header
-   *  bar to the composer's top-right corner. */
+   *  Inspector toggle). The 2026-08-23 ruling keeps both in the composer's
+   *  top-right corner; only the panel itself moves back beside the timeline. */
   details?: React.ReactNode;
   inspect?: React.ReactNode;
   /** Returns true on success — composer clears the input + attachments then;
@@ -663,11 +663,11 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
             ))}
         </span>
         {/* Right-edge cluster (top-right corner of the composer): the Details
-            selector + Inspector toggle moved here from the header bar
-            (user ruling 2026-08-05). */}
+            selector and Inspector toggle remain here under the 2026-08-23
+            ruling. The inspect slot contains only the toggle. */}
         {(details ?? inspect) && (
-          // relative: the InspectorPanel floating layer (rendered inside the
-          // inspect slot) anchors itself to this corner — bottom-full right-0.
+          // Keep this relative wrapper for the right-edge control cluster;
+          // InspectorPanel now renders as a flex sibling in page.tsx.
           <span className={cn("relative ml-auto shrink-0 items-center gap-2", FLEX)}>{details}{inspect}</span>
         )}
       </div>
