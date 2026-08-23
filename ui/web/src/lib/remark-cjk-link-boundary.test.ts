@@ -62,6 +62,16 @@ describe("remarkCjkLinkBoundary", () => {
       expected: [link("https://ip.sb"), text("，再见")],
     },
     {
+      name: "splits at a Unicode ellipsis",
+      markdown: "https://ip.sb……",
+      expected: [link("https://ip.sb"), text("……")],
+    },
+    {
+      name: "splits at an em dash",
+      markdown: "https://ip.sb——说明",
+      expected: [link("https://ip.sb"), text("——说明")],
+    },
+    {
       name: "merges the remainder with following text",
       markdown: "https://ip.sb： 显示",
       expected: [link("https://ip.sb"), text("： 显示")],

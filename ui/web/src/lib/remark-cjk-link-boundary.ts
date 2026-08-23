@@ -2,7 +2,7 @@ import type { Link, Nodes, Parents, Root, Text } from "mdast";
 import type { VFile } from "vfile";
 
 const CJK_LINK_BOUNDARY =
-  /\p{Script=Han}|\p{Script=Hiragana}|\p{Script=Katakana}|\p{Script=Hangul}|[\u2018-\u201F\u2E80-\u303F\u3040-\u30FF\u3300-\u33FF\u3400-\u4DBF\u4E00-\u9FFF\uAC00-\uD7AF\uF900-\uFAFF\uFE10-\uFE1F\uFE30-\uFE4F\uFF00-\uFFEF]/u;
+  /\p{Script=Han}|\p{Script=Hiragana}|\p{Script=Katakana}|\p{Script=Hangul}|[\u2010-\u201F\u2026\u2E80-\u303F\u3040-\u30FF\u3300-\u33FF\u3400-\u4DBF\u4E00-\u9FFF\uAC00-\uD7AF\uF900-\uFAFF\uFE10-\uFE1F\uFE30-\uFE4F\uFF00-\uFFEF]/u;
 
 function isParent(node: Nodes): node is Parents {
   return "children" in node;
@@ -79,6 +79,12 @@ function splitLinksIn(parent: Parents, source: string): void {
   }
 }
 
+/**
+ * Truncate GFM literal autolinks at CJK, fullwidth, dash, or ellipsis text.
+ * Raw non-ASCII characters require URL percent-encoding and are almost always
+ * trailing prose in agent output. Explicit links and CommonMark full autolinks
+ * are intentionally left untouched.
+ */
 export default function remarkCjkLinkBoundary() {
   return (tree: Root, file: VFile): void => {
     splitLinksIn(tree, file.toString());

@@ -48,6 +48,16 @@ describe("ChatMarkdown", () => {
     expect(link.nextSibling?.textContent).toBe("。");
   });
 
+  it("keeps a Unicode ellipsis outside a literal autolink", () => {
+    render(<ChatMarkdown content="https://ip.sb……" />);
+
+    const links = screen.getAllByRole("link");
+    expect(links).toHaveLength(1);
+    const link = screen.getByRole("link", { name: "https://ip.sb" });
+    expect(link.getAttribute("href")).toBe("https://ip.sb");
+    expect(link.nextSibling?.textContent).toBe("……");
+  });
+
   it("same-page anchor (#foo) does not add target=_blank", () => {
     render(<ChatMarkdown content="[a](#foo)" />);
     const a = screen.getByRole("link", { name: "a" });
