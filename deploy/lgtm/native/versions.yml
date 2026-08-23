@@ -1,7 +1,7 @@
-# Native LGTM backend pins for all three launchd backends — consumed by
-# cli/commands/_lgtm_native.py.
-# (converge). SHA256 values are the upstream release assets' checksums,
-# verified before extraction. Only darwin-arm64 is supported for now.
+# Native LGTM backend pins for all three launchd backends, consumed by
+# cli/commands/_lgtm_native.py at converge. SHA256 values are the upstream
+# release assets' checksums, verified before extraction. Only darwin-arm64 is
+# supported for now.
 loki:
   version: 3.7.6
   assets:

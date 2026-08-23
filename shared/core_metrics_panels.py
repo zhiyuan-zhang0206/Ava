@@ -20,15 +20,17 @@ PG) — stays SQL by design.
 
 Per-panel provenance:
 
-- **6 stat panels** (LLM calls / Warning / Error / Live agents /
-  LLM cost / Tokens): explicit 8x4 grid (three per row). The
-  generator's stat color default (fixed blue) matches four of them; Warning
-  (fixed orange) and Error (fixed red) set the color via ``field_defaults``,
-  and LLM cost carries the original ``decimals: 2``. Error keeps the
-  original ``unit: "s"`` and the ``noValue: "0"`` option.
-- **Warning (all) / Error (all)**: resolution filtering is not shipped yet,
-  so these tiles deliberately show every warning/error event until task #1468
-  adds the ``resolved_by`` producer.
+- **12 stat panels** (LLM calls / Warning / Error / Warning (all) /
+  Error (all) / Live agents / LLM cost / Tokens / LLM input tokens /
+  LLM output tokens / Cache hit rate / Avg turn duration): explicit 8x4 grid
+  (three per row). The generator's stat color default (fixed blue) remains
+  unless a panel overrides it; Warning (fixed orange) and Error (fixed red)
+  set the color via ``field_defaults``, and LLM cost carries the original
+  ``decimals: 2``. Error keeps the original ``unit: "s"`` and the
+  ``noValue: "0"`` option.
+- **Warning (all) / Error (all)**: resolution filtering is not shipped, so
+  these all-event tiles deliberately show every warning/error event until task
+  #1468 adds the ``resolved_by`` producer.
 - **8 chart panels** (SSE backlog / LLM throughput / Token usage —
   Output + Reasoning / Cache hit / Input+Output+Gen-stage TPS / LLM calls /
   bucket / Event health / Token usage — Input): default 12x7 grid with the
