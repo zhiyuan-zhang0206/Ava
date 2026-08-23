@@ -91,13 +91,14 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     gateway-to-Loki admission state/counters) + prom_query_budget (the local
     gateway-to-Prometheus admission state/counters) + telemetry_read_stale /
     telemetry_read_recovered / otlp_backend_disabled / otlp_backend_recovered
-    (runner-observability staleness and OTLP recovery state).
+    (runner-observability staleness and OTLP recovery state) + exec_envelope
+    (2026-08-24 runner batch R-4 — exec envelope transfer size/time cost).
     Bump deliberately when adding a telemetry event, never to silence a
     drift."""
     from shared.telemetry import _TELEMETRY_KINDS
 
     assert telemetry_events() == frozenset(_TELEMETRY_KINDS)
-    assert len(_TELEMETRY_KINDS) == 106
+    assert len(_TELEMETRY_KINDS) == 107
 
 
 def test_category_for_kind() -> None:
