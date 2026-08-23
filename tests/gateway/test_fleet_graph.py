@@ -775,7 +775,11 @@ def test_prometheus_down_degrades_to_stale_pg_node_graph(
     a = _seed_agent(db_conn)
 
     def boom(
-        metric: str, by: str, *, window_hours: int | None = None, timeout_s: float | None = None
+        metric: str,
+        by: str,
+        *,
+        window: timedelta | None = None,
+        timeout_s: float | None = None,
     ) -> dict[str, float]:
         raise httpx.ConnectError("prometheus down")
 

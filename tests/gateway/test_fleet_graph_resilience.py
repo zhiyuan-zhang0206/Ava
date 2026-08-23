@@ -1,6 +1,6 @@
 """Regression tests for fleet-graph upstream failures and Redis fallbacks."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import httpx
 import psycopg
@@ -111,7 +111,7 @@ def _empty_prom(
     _metric: str,
     _by: str,
     *,
-    window_hours: int | None = None,
+    window: timedelta | None = None,
     timeout_s: float | None = None,
 ) -> dict[str, float]:
     return {}
@@ -337,7 +337,7 @@ def test_prom_failure_serves_last_good_graph_without_writing_short_cache(
         _metric: str,
         _by: str,
         *,
-        window_hours: int | None = None,
+        window: timedelta | None = None,
         timeout_s: float | None = None,
     ) -> dict[str, float]:
         prom_timeouts.append(timeout_s)
@@ -370,7 +370,7 @@ def test_prom_failure_without_last_good_keeps_pg_nodes_out_of_short_cache(
         _metric: str,
         _by: str,
         *,
-        window_hours: int | None = None,
+        window: timedelta | None = None,
         timeout_s: float | None = None,
     ) -> dict[str, float]:
         raise httpx.ConnectError("prometheus unreachable")
