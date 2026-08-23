@@ -19,8 +19,9 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
+from gateway.routers._eval_guard import deny_isolated_result_read
 from gateway.schemas import (
     MemoryGraphEdge,
     MemoryGraphNode,
@@ -169,7 +170,11 @@ async def _milvus_topk(query_vector: Any, k: int, deadline: float) -> list[str]:
             await client.close()
 
 
-@router.post("/api/memory/search", response_model=MemorySearchResponse)
+@router.post(
+    "/api/memory/search",
+    response_model=MemorySearchResponse,
+    dependencies=[Depends(deny_isolated_result_read)],
+)
 async def post_memory_search(body: MemorySearchRequest) -> MemorySearchResponse:
     """Semantic search the memory pool; return **relative** paths of the
     top-k most-relevant markdown files.

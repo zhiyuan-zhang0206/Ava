@@ -12,9 +12,10 @@ import asyncio
 import logging
 from typing import Any, cast
 
-from fastapi import APIRouter, Header, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 
 from gateway.routers._delivery import deliver_chat_inbound, reconcile_chat_delivery
+from gateway.routers._eval_guard import caller_eval_isolation, deny_isolated_result_read
 from gateway.schemas import (
     AgentMessageEnqueued,
     AgentMessagesResponse,
@@ -44,29 +45,9 @@ from shared.uploads import image_mime_for, parse_upload_url, resolve_upload_path
 router = APIRouter()
 _log = logging.getLogger(__name__)
 
-
-def _caller_agent_id(caller: str) -> int | None:
-    """Return the agent id in an `agent:<id>` caller marker, if present."""
-    if not caller.startswith("agent:"):
-        return None
-    try:
-        return int(caller.removeprefix("agent:"))
-    except ValueError:
-        return None
-
-
-def caller_eval_isolation(pool: Any, caller_agent_id: int) -> bool:
-    """Whether a caller's stored eval configuration denies result reads."""
-    with pool.connection() as conn, conn.cursor() as cur:
-        cur.execute(
-            "SELECT "
-            "((config_overlay ->> 'eval_isolation')::boolean IS TRUE "
-            "OR (birth_config ->> 'eval_isolation')::boolean IS TRUE) "
-            "FROM agents_meta WHERE id = %s",
-            (caller_agent_id,),
-        )
-        row = cur.fetchone()
-    return bool(row and row[0])
+# Compatibility re-export for callers and tests that used this lookup before
+# result-read enforcement was centralized.
+__all__ = ["caller_eval_isolation"]
 
 
 def _resolve_agent_model(request: Request, agent_id: int) -> str:
@@ -252,7 +233,7 @@ async def reconcile_agent_message(
     return AgentMessageEnqueued(status=delivery.status, inbound_id=delivery.inbound_id)
 
 
-@router.get("/api/agents/{agent_id}/messages")
+@router.get("/api/agents/{agent_id}/messages", dependencies=[Depends(deny_isolated_result_read)])
 def get_agent_messages(
     agent_id: int,
     request: Request,
@@ -308,7 +289,10 @@ def get_agent_messages(
     )
 
 
-@router.get("/api/agents/{agent_id}/traces/{trace_id}/messages")
+@router.get(
+    "/api/agents/{agent_id}/traces/{trace_id}/messages",
+    dependencies=[Depends(deny_isolated_result_read)],
+)
 def get_trace_checkpoint_messages(
     agent_id: int,
     trace_id: str,
@@ -354,7 +338,10 @@ def get_trace_checkpoint_messages(
     )
 
 
-@router.get("/api/agents/{agent_id}/last-message")
+@router.get(
+    "/api/agents/{agent_id}/last-message",
+    dependencies=[Depends(deny_isolated_result_read)],
+)
 def get_last_message(
     agent_id: int,
     request: Request,
@@ -373,14 +360,9 @@ def get_last_message(
     to scanning the checkpoint when the column is NULL (backward compat
     with agents that have not yet written to it).
     """
-    caller_agent_id = _caller_agent_id(caller)
-    if caller_agent_id is not None and caller_eval_isolation(
-        request.app.state.db_pool, caller_agent_id
-    ):
-        raise HTTPException(
-            status_code=403,
-            detail=f"caller agent {caller_agent_id} is eval-isolated: last-message reads are denied",
-        )
+    # Keep the documented, required marker contract. The shared dependency
+    # reads the raw query parameter so every guarded route uses one policy.
+    del caller
     # --- agent existence check + last_message_text read ---
     # Read last_message_text first as an optimization — it survives compact.
     # When the column is missing (migration not applied), fall through to the
@@ -445,7 +427,7 @@ def _extract_message_text(msg: "AIMessage") -> str | None:  # noqa: F821, UP037 
     return None
 
 
-@router.get("/api/agents/{agent_id}/pending")
+@router.get("/api/agents/{agent_id}/pending", dependencies=[Depends(deny_isolated_result_read)])
 def get_pending_messages(agent_id: int, request: Request) -> list[PendingInbound]:
     """Chat inbounds still queued for the agent (status='pending'), oldest
     first. These have not been claimed yet, so they are absent from the
@@ -465,7 +447,7 @@ def get_pending_messages(agent_id: int, request: Request) -> list[PendingInbound
     ]
 
 
-@router.get("/api/agents/{agent_id}/activity")
+@router.get("/api/agents/{agent_id}/activity", dependencies=[Depends(deny_isolated_result_read)])
 def get_activity_trail(agent_id: int, request: Request) -> list[agent_snapshot.ActivityEntry]:
     """The agent's activity trail, oldest first (historical rows; the SDK write
     verb `ava.self.log` was removed 2026-08-02, so new rows no longer appear).

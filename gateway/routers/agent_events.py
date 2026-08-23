@@ -18,10 +18,11 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import StreamingResponse
 
 from gateway import loki_events
+from gateway.routers._eval_guard import deny_isolated_result_read
 from gateway.schemas import AgentEventRow
 from gateway.sse import event_stream
 from shared.config import settings
@@ -29,7 +30,10 @@ from shared.config import settings
 router = APIRouter()
 
 
-@router.get("/api/agents/{agent_id}/events/stream")
+@router.get(
+    "/api/agents/{agent_id}/events/stream",
+    dependencies=[Depends(deny_isolated_result_read)],
+)
 async def get_events_stream(agent_id: int, request: Request) -> StreamingResponse:
     """SSE endpoint — subscribe to Redis `ava:events`, filter by `agent_id`,
     forward.
@@ -59,7 +63,7 @@ async def get_events_stream(agent_id: int, request: Request) -> StreamingRespons
     )
 
 
-@router.get("/api/agents/{agent_id}/events")
+@router.get("/api/agents/{agent_id}/events", dependencies=[Depends(deny_isolated_result_read)])
 def get_agent_events(
     agent_id: int,
     from_: Annotated[datetime | None, Query(alias="from")] = None,
