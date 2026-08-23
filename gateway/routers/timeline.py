@@ -15,9 +15,10 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 
+from gateway.routers._eval_guard import deny_isolated_result_read
 from shared.checkpoint import CheckpointReadError, load_checkpoint_messages
 from shared.db import agent_exists, list_inbound_messages
 from shared.timeline import (
@@ -75,7 +76,7 @@ def _item_sort_key(item_id: str) -> tuple[int, int]:
     return (int(msg_idx), int(block_idx))
 
 
-@router.get("/api/agents/{agent_id}/timeline")
+@router.get("/api/agents/{agent_id}/timeline", dependencies=[Depends(deny_isolated_result_read)])
 def get_timeline(
     agent_id: int,
     request: Request,
