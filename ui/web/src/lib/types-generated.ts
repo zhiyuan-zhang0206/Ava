@@ -833,8 +833,8 @@ export interface paths {
          *     Returns newest-first (`ts DESC`; `id` is a stable surrogate derived
          *     from the log line, so `limit`/`offset` paging stays deterministic).
          *     `limit` defaults to 100, capped at 1000 (over-limit 422s); `offset`
-         *     pages further back (Loki has no native offset — the page is sliced in
-         *     memory, so deep offsets cost a larger fetch).
+         *     pages further back and is capped at 10,000. Loki has no native offset,
+         *     so the cap bounds the in-memory parse of `limit + offset + 1` rows.
          *
          *     No agent-existence precondition (same as `…/activity` and `…/pending`):
          *     an unknown agent or an empty window just returns `[]`.
@@ -914,6 +914,11 @@ export interface paths {
          *     panel. `heartbeat` is the agent's idle check-in state: the
          *     projected next check-in when idle (or the active pause / running suppression)
          *     plus its most recent pause from history.
+         *
+         *     The retained live lifecycle leg is the exceptional potentially broad
+         *     query until the legacy slice expires on 2026-08-30 19:00 UTC. It has an
+         *     8-second Loki timeout and a per-agent five-minute single-flight cache, so
+         *     changing `hours` or `since_compact` does not repeat that same scan.
          */
         get: operations["get_agent_inspect_api_agents__agent_id__inspect_get"];
         put?: never;
@@ -2697,8 +2702,9 @@ export interface paths {
          *         would scan the whole retention history (6M+ rows across every
          *         month partition), so the API never runs one. `meta.window_from`
          *         always echoes the effective lower bound.
-         *       - `limit` (default 100, cap 1000) / `offset`: offset paging; stable
-         *         ordering across same-`ts` rows.
+         *       - `limit` (default 100, cap 1000) / `offset` (cap 10,000): offset
+         *         paging with stable ordering across same-`ts` rows. The cap bounds the
+         *         in-memory Loki JSON parse (`limit + offset + 1` rows).
          *       - `with_total=1`: also compute the exact filtered row count
          *         (`meta.total`) via the Loki count path — one extra full-window
          *         aggregation, so it is opt-in; without it `meta.total` is null.
@@ -2849,6 +2855,12 @@ export interface paths {
          *     code alone — see `services/healthchecks/gateway.py`. Each was additive to the
          *     `{"status": "ok"}` contract.
          *
+         *     Liveness must fail faster than the resource it protects: this uses the
+         *     control-plane pool and a 1-2 second database budget rather than waiting up
+         *     to 30 seconds for the data-plane pool. A 503 therefore means the process is
+         *     alive but Postgres is degraded; the watchdog's consecutive-failure policy
+         *     decides whether that merits a respawn.
+         *
          *     `name` is a constant naming the service this route belongs to — the point being
          *     that an impostor answering here reports its own name, or none. No probe reads it
          *     yet; `shared.daemon_health._probe_home` gains the `name` arm only once every
@@ -2876,8 +2888,7 @@ export interface paths {
          *
          *     Data sources:
          *     - `live_count`: agents_meta table — all non-terminated agents (running/idling/restarting/hibernating)
-         *     - `tokens` / `cost_usd`: telemetry `llm_usage` events in Loki (cached
-         *       for 60 seconds per requested window)
+         *     - `tokens` / `cost_usd`: telemetry `llm_usage` events in Loki
          *     - average turn duration / warning/error counts: Loki's unified event stream
          *     - `total_events`: Postgres archive partition estimates (a coarse growth gauge)
          *
@@ -4528,6 +4539,11 @@ export interface components {
              * @default false
              */
             stale: boolean;
+            /**
+             * Truncated
+             * @default false
+             */
+            truncated: boolean;
         };
         /** GuideDraftRequest */
         GuideDraftRequest: {
@@ -10146,9 +10162,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: string;
-                    };
+                    "application/json": unknown;
                 };
             };
         };

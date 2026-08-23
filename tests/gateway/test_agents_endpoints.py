@@ -198,6 +198,15 @@ class TestSpawn:
         new_id = resp.json()["id"]
         assert _inbound_rows(db_conn, new_id) == [("查 X", "chat", "user")]
 
+    def test_spawn_with_long_prompt_inserts_chat_inbound(self, db_conn: psycopg.Connection) -> None:
+        """Long reports are delivered through the shared user-content schema."""
+        prompt = "a" * 100_000
+        with TestClient(app) as client:
+            resp = client.post("/api/agents", json={"prompt": prompt, "prompt_source": "user"})
+        assert resp.status_code == 201
+        new_id = resp.json()["id"]
+        assert _inbound_rows(db_conn, new_id) == [(prompt, "chat", "user")]
+
     def test_spawn_with_explicit_spawner(self, db_conn: psycopg.Connection) -> None:
         """spawner can be passed explicitly — e.g., when claude-code starts an ava agent, pass 'claude-code'."""
         with TestClient(app) as client:

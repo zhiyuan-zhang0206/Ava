@@ -688,7 +688,7 @@ def test_query_canceled_degrades_to_empty_graph(
         resp = client.get("/api/fleet/graph")
 
     assert resp.status_code == 200
-    assert resp.json() == {"nodes": [], "edges": [], "stale": True}
+    assert resp.json() == {"nodes": [], "edges": [], "stale": True, "truncated": False}
 
 
 # ── audit gateway.md P2-10: failed != empty (R4 layer 2) ───────────────

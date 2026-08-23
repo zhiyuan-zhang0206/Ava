@@ -75,7 +75,7 @@ def test_dual_category_status_change() -> None:
 
 def test_category_projection_matches_telemetry_whitelist() -> None:
     """The derived `_TELEMETRY_KINDS` (telemetry.py) must equal the registry's
-    telemetry projection — 101 names (2026-08-21 PR3 removed the thread
+    telemetry projection — 106 names (2026-08-21 PR3 removed the thread
     backend's exec_thread_stuck / exec_thread_unreapable — 81 baseline +
     frontend_interaction 2026-08-09 + gateway_latency Task #1091 + the
     three CAS-race kinds from Task #688: claim_cas_lost,
@@ -88,13 +88,16 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     label_generate_retired + exec_subprocess_killed (issue #184, the
     SIGKILL-after-grace outcome of the exec subprocess) + task_reminder_digest
     and task_escalation (Task #915 P2) + loki_query_budget (the local
-    gateway-to-Loki admission state/counters).
+    gateway-to-Loki admission state/counters) + prom_query_budget (the local
+    gateway-to-Prometheus admission state/counters) + telemetry_read_stale /
+    telemetry_read_recovered / otlp_backend_disabled / otlp_backend_recovered
+    (runner-observability staleness and OTLP recovery state).
     Bump deliberately when adding a telemetry event, never to silence a
     drift."""
     from shared.telemetry import _TELEMETRY_KINDS
 
     assert telemetry_events() == frozenset(_TELEMETRY_KINDS)
-    assert len(_TELEMETRY_KINDS) == 105
+    assert len(_TELEMETRY_KINDS) == 106
 
 
 def test_category_for_kind() -> None:

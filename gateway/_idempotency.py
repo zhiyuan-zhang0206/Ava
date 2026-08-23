@@ -45,8 +45,15 @@ from shared import contracts
 from shared.contracts import Idempotency
 
 _MAX_WAIT_SECONDS = 15.0
-_POLL_INTERVAL = 0.1
+_POLL_INITIAL_S = 0.1
+_POLL_FACTOR = 1.75
+_POLL_MAX_S = 1.0
 _RETENTION_DAYS = 7
+
+
+def _monotonic() -> float:
+    """Follower-wait clock seam that leaves asyncio's own scheduler untouched."""
+    return time.monotonic()
 
 
 # ── DB helpers (synchronous; callers wrap with asyncio.to_thread) ──────
@@ -179,6 +186,11 @@ async def idempotency_middleware(
     engages (the client's same-key retry lands after the pause and executes;
     the pause window also never sees a placeholder claimed and released by
     this middleware).
+
+    A follower starts by checking every 100ms, then backs off exponentially
+    to at most once per second while the 15-second total wait remains fixed.
+    This preserves prompt replay for short owner work without turning a retry
+    storm into roughly 150 database SELECTs per follower.
     """
     contract = contracts.contract_for(request.method, request.url.path)
     if (
@@ -203,14 +215,16 @@ async def idempotency_middleware(
         # Another request owns the key (or already completed). Poll for the
         # owner's outcome and replay it; if the owner failed and released
         # the row, re-claim and execute ourselves.
-        deadline = time.monotonic() + _MAX_WAIT_SECONDS
-        while time.monotonic() < deadline:
+        deadline = _monotonic() + _MAX_WAIT_SECONDS
+        poll_delay = _POLL_INITIAL_S
+        while _monotonic() < deadline:
             done = await asyncio.to_thread(_fetch, pool, key, request.method, request.url.path)
             if done is not None:
                 return _replay(done)
             if await asyncio.to_thread(_claim, pool, key, request.method, request.url.path):
                 break  # owner released (failed): we execute instead
-            await asyncio.sleep(_POLL_INTERVAL)
+            await asyncio.sleep(poll_delay)
+            poll_delay = min(poll_delay * _POLL_FACTOR, _POLL_MAX_S)
         else:
             # Owner still executing past the wait bound — do NOT double-execute.
             # 503 with a short Retry-After: the client's retry loop picks it up.

@@ -47,8 +47,8 @@ class CompactEnqueued(BaseModel):
 class UserMessageIn(BaseModel):
     """POST /api/agents/{id}/messages request body — user message to agent.
 
-    Constraints at the schema layer: blank / overlong returns 422 from
-    pydantic; the endpoint does not 400 anymore.
+    Constraints at the schema layer: blank / content over one million
+    characters returns 422 from pydantic; the endpoint does not 400 anymore.
     """
 
     content: _UserContent

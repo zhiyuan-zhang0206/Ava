@@ -1,50 +1,35 @@
-"""Cached Loki aggregates used only by the sidebar stats-dashboard route."""
+"""Whole-response cache for the sidebar stats-dashboard route."""
 
 from __future__ import annotations
 
 import threading
 import time
-from datetime import datetime
 
-from gateway import loki_events
-from gateway.schemas import StatsWindowHours
+from gateway.schemas import StatsDashboard, StatsWindowHours
 
-# The sidebar polls every 30s. Keep the four full-window llm_usage reads to
-# one result per requested window every two polls; turn/error/warning
-# aggregates deliberately remain fresh in status.py.
+# The sidebar polls every 30 seconds. Caching the complete response for 60
+# seconds avoids re-running its roughly 36-query Loki fan-out on every poll.
 _CACHE_TTL_S = 60.0
-_cache: dict[tuple[int], tuple[float, dict[str, float]]] = {}
+_cache: dict[int, tuple[float, StatsDashboard]] = {}
 _cache_lock = threading.Lock()
 
 
 def cache_clear() -> None:
-    """Test seam: drop the windowed llm_usage aggregate cache."""
+    """Test seam: drop all windowed dashboard responses."""
     with _cache_lock:
         _cache.clear()
 
 
-def llm_usage_sums(
-    hours: StatsWindowHours, window_start: datetime, now: datetime
-) -> dict[str, float]:
-    """Return cached telemetry-only llm_usage sums for one sidebar window."""
-    cache_key = (int(hours),)
-    now_mono = time.monotonic()
+def cache_get(hours: StatsWindowHours) -> StatsDashboard | None:
+    """Return a fresh cached response for the requested window, if present."""
     with _cache_lock:
-        hit = _cache.get(cache_key)
-        if hit is not None and hit[0] + _CACHE_TTL_S > now_mono:
-            return hit[1]
+        hit = _cache.get(int(hours))
+        if hit is None or hit[0] + _CACHE_TTL_S <= time.monotonic():
+            return None
+        return hit[1]
 
-    sums = {
-        field: loki_events.attribute_aggregate(
-            field=field,
-            agg="sum",
-            event_names=["llm_usage"],
-            categories=["telemetry"],
-            from_=window_start,
-            to=now,
-        )
-        for field in ("in_total", "out_total", "cache_read", "cost_usd")
-    }
+
+def cache_put(hours: StatsWindowHours, response: StatsDashboard) -> None:
+    """Store the immutable response after its complete backend read succeeds."""
     with _cache_lock:
-        _cache[cache_key] = (time.monotonic(), sums)
-    return sums
+        _cache[int(hours)] = (time.monotonic(), response)

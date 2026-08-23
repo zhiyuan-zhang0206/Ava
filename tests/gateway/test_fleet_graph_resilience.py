@@ -1,12 +1,14 @@
 """Regression tests for fleet-graph upstream failures and Redis fallbacks."""
 
+from datetime import UTC, datetime
+
 import httpx
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
 from psycopg import errors as pg_errors
 
-from gateway import loki_events, prom_metrics, telemetry_staleness
+from gateway import events_archive, loki_events, prom_metrics, telemetry_staleness
 from gateway.app import app
 from gateway.schemas import FleetGraphNode, FleetGraphResponse
 from shared import telemetry
@@ -64,6 +66,31 @@ def _fresh_telemetry_heartbeat(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     monkeypatch.setattr(telemetry_staleness, "_source_states", {})
     monkeypatch.setattr(telemetry_staleness, "CHECK_INTERVAL_S", 0, raising=False)
+
+
+def test_fleet_archive_boundary_reuses_the_process_cache() -> None:
+    """Fleet's local helper cannot re-run the frozen archive max(ts) scan."""
+
+    class Cursor:
+        def __init__(self) -> None:
+            self.executions = 0
+
+        def execute(self, query: str) -> None:
+            assert query == "SELECT max(ts) FROM events"
+            self.executions += 1
+
+        def fetchone(self) -> tuple[datetime]:
+            return (datetime(2026, 8, 13, tzinfo=UTC),)
+
+    import gateway.routers.fleet_graph as fg
+
+    events_archive.reset_for_tests()
+    first = Cursor()
+    second = Cursor()
+    assert fg._archive_boundary(first) == datetime(2026, 8, 13, tzinfo=UTC)
+    assert fg._archive_boundary(second) == datetime(2026, 8, 13, tzinfo=UTC)
+    assert first.executions == 1
+    assert second.executions == 0
 
 
 def _seed_agent(db_conn: psycopg.Connection) -> int:
@@ -186,7 +213,7 @@ def test_loki_failure_serves_last_good_graph_without_writing_short_cache(
     _seed_agent(db_conn)
     redis = _FakeRedis()
     query_args: dict[str, object] = {}
-    last_good = _last_good_graph()
+    last_good = _last_good_graph().model_copy(update={"truncated": True})
 
     import gateway.routers.fleet_graph as fg
 
@@ -205,10 +232,63 @@ def test_loki_failure_serves_last_good_graph_without_writing_short_cache(
 
     expected = last_good.model_dump(mode="json")
     expected["stale"] = True
+    expected["truncated"] = False
     assert resp.status_code == 200
     assert resp.json() == expected
     assert query_args["timeout_s"] == 8.0
     assert redis.writes == []
+
+
+def test_loki_edge_cap_marks_a_fresh_graph_truncated(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The edge fetch's lookahead is visible, not confused with staleness."""
+    _seed_agent(db_conn)
+    redis = _FakeRedis()
+
+    import gateway.routers.fleet_graph as fg
+
+    def truncated_query_events(**_kwargs: object) -> tuple[list[dict[str, object]], bool]:
+        return [], True
+
+    monkeypatch.setattr(fg, "sync_redis", _RedisFactory(redis))
+    monkeypatch.setattr(prom_metrics, "sum_by", _empty_prom)
+    monkeypatch.setattr(loki_events, "query_events", truncated_query_events)
+    with TestClient(app) as client:
+        response = client.get("/api/fleet/graph")
+
+    assert response.status_code == 200
+    assert response.json()["stale"] is False
+    assert response.json()["truncated"] is True
+
+
+def test_pg_phase_exceeding_route_budget_serves_stale_before_telemetry(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A slow DB phase does not start more upstream reads after its deadline."""
+    _seed_agent(db_conn)
+    redis = _FakeRedis()
+    prom_calls = 0
+
+    import gateway.routers.fleet_graph as fg
+
+    monotonic = iter((0.0, fg._ROUTE_TIMEOUT_S + 0.1))
+    monkeypatch.setattr(fg, "sync_redis", _RedisFactory(redis))
+    monkeypatch.setattr(fg, "_monotonic", lambda: next(monotonic))
+
+    def prom(*_args: object, **_kwargs: object) -> dict[str, float]:
+        nonlocal prom_calls
+        prom_calls += 1
+        return {}
+
+    monkeypatch.setattr(prom_metrics, "sum_by", prom)
+    with TestClient(app) as client:
+        response = client.get("/api/fleet/graph")
+
+    assert response.status_code == 200
+    assert response.json()["stale"] is True
+    assert response.json()["truncated"] is False
+    assert prom_calls == 0
 
 
 def test_loki_failure_without_last_good_keeps_fetched_nodes_out_of_short_cache(
@@ -271,7 +351,7 @@ def test_prom_failure_serves_last_good_graph_without_writing_short_cache(
     expected["stale"] = True
     assert resp.status_code == 200
     assert resp.json() == expected
-    assert prom_timeouts == [8.0]
+    assert prom_timeouts == [8.0] * 4
     assert redis.writes == []
 
 

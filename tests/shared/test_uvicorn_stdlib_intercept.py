@@ -84,7 +84,7 @@ def test_gateway_uvicorn_run_passes_log_config_none() -> None:
     """The gateway's `uvicorn.run` call must stay `log_config=None` — the
     whole point of #970. Guarded statically so a future edit cannot silently
     reintroduce uvicorn's dictConfig clobber."""
-    src = (_REPO_ROOT / "gateway" / "app.py").read_text()
+    src = (_REPO_ROOT / "gateway" / "_server.py").read_text()
     tree = ast.parse(src)
     found: list[ast.keyword] = []
     for node in ast.walk(tree):
@@ -97,6 +97,6 @@ def test_gateway_uvicorn_run_passes_log_config_none() -> None:
         ):
             found = [k for k in node.keywords if k.arg == "log_config"]
             break
-    assert found, "uvicorn.run call not found in gateway/app.py"
+    assert found, "uvicorn.run call not found in gateway/_server.py"
     assert len(found) == 1
     assert isinstance(found[0].value, ast.Constant) and found[0].value.value is None

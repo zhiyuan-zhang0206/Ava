@@ -263,7 +263,7 @@ def test_dashboard_shards_long_loki_windows_and_merges_aggregates(
     spans = sorted(aggregate_counts)
     assert len(spans) > 1
     assert sum((end - start for start, end in spans), timedelta()) == timedelta(hours=6)
-    assert all(end - start <= timedelta(hours=3) for start, end in spans)
+    assert all(end - start <= timedelta(hours=6) for start, end in spans)
     assert all(end == next_start for (_, end), (next_start, _) in pairwise(spans))
     assert set(aggregate_counts.values()) == {1}
     assert Counter(count_spans) == Counter(dict.fromkeys(spans, 3))

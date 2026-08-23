@@ -36,7 +36,7 @@ from typing import Any
 from psycopg import Cursor
 from psycopg_pool import ConnectionPool
 
-from gateway import loki_events
+from gateway import events_archive, loki_events
 from shared.log import logger
 
 # Audit event names that form ties (same family as fleet_graph._EDGE_EVENT_NAMES).
@@ -58,9 +58,7 @@ def _archive_boundary(cur: Cursor) -> datetime | None:
     Rows older than the boundary come from the archive, rows at/after it from
     Loki (task #1280 interim; task #1281 imports the archive into Loki, after
     which the archive read collapses to Loki-only)."""
-    cur.execute("SELECT max(ts) FROM events")
-    row = cur.fetchone()
-    return row[0] if row is not None else None
+    return events_archive.load_frozen_boundary(cur)
 
 
 def _fetch_archive_edges(

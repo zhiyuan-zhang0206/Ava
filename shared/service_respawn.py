@@ -26,6 +26,7 @@ healthcheck's ``main()``, holding the one policy that decides between "no-op",
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -47,6 +48,22 @@ _log = logging.getLogger("shared.service_respawn")
 # remaining checks by at most this much, once per 60s round.
 _VERIFY_DEADLINE_S = 20.0
 _VERIFY_INTERVAL_S = 0.5
+
+_consecutive_probe_failures: dict[str, int] = {}
+"""Per-watchdog-process failed probe counts, keyed by service label."""
+_consecutive_probe_failures_lock = threading.Lock()
+
+
+def _reset_consecutive_probe_failures(label: str) -> None:
+    with _consecutive_probe_failures_lock:
+        _consecutive_probe_failures.pop(label, None)
+
+
+def _record_consecutive_probe_failure(label: str) -> int:
+    with _consecutive_probe_failures_lock:
+        failures = _consecutive_probe_failures.get(label, 0) + 1
+        _consecutive_probe_failures[label] = failures
+        return failures
 
 
 def respawn_service(
@@ -179,6 +196,7 @@ def run_keepalive(
     probe: Callable[[], DaemonProbe],
     respawn: Callable[[], DaemonProbe],
     on_unrevivable: Callable[[], None] | None = None,
+    consecutive_failures_before_respawn: int = 1,
 ) -> None:
     """The whole body of a daemon healthcheck's ``main()`` — probe, then act once.
 
@@ -200,8 +218,9 @@ def run_keepalive(
       every round and the distinct exit code reaches the watchdog's own log line
       ("healthcheck <x> reported failure (exit 3)"), because a healthcheck that
       quietly declines to heal is the shape of the 98-minute outage.
-    - **down** — info line, respawn, then report what the *probe* says of the
-      respawn (``respawn_and_verify``), exiting non-zero if it never came up.
+    - **down** — info line, respawn after the configured consecutive-failure
+      threshold, then report what the *probe* says of the respawn
+      (``respawn_and_verify``), exiting non-zero if it never came up.
 
     ``on_unrevivable`` is the caller's fallback for "this round will have no live
     daemon", run when the respawn failed to verify AND on the terminal path (where
@@ -218,9 +237,17 @@ def run_keepalive(
     Raises ``SystemExit`` rather than returning a code: these mains are entry
     points, run standalone by an OS scheduler and in-thread by the watchdog
     (which catches ``SystemExit`` explicitly for exactly this reason).
+
+    Consecutive-failure state lives in this watchdog process, which is correct
+    for its long-lived daemon loop. A standalone one-shot invocation starts
+    without history and therefore cannot apply a threshold across rounds.
     """
+    if consecutive_failures_before_respawn < 1:
+        raise ValueError("consecutive_failures_before_respawn must be at least 1")
+
     result = probe()
     if result.alive:
+        _reset_consecutive_probe_failures(label)
         log.debug("[%s healthcheck] daemon alive (%s), no-op", label, result.detail)
         return
 
@@ -233,6 +260,7 @@ def run_keepalive(
         raise SystemExit(code)
 
     if result.terminal:
+        _reset_consecutive_probe_failures(label)
         # No respawn at all — see ProbeVerdict. The stand-in fallback still runs:
         # this is the case where "no live daemon" lasts until a human intervenes.
         _unrevivable(
@@ -242,6 +270,16 @@ def run_keepalive(
             result.detail,
         )
 
+    failures = _record_consecutive_probe_failure(label)
+    if failures < consecutive_failures_before_respawn:
+        log.warning(
+            "[%s healthcheck] probe failed (%s/%s) — not respawning yet",
+            label,
+            failures,
+            consecutive_failures_before_respawn,
+        )
+        return
+    _reset_consecutive_probe_failures(label)
     log.info("[%s healthcheck] daemon dead (%s), restarting...", label, result.detail)
     after = respawn()
     if after.alive:

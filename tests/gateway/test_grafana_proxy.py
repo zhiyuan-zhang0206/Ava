@@ -148,6 +148,18 @@ def test_proxy_forwards_post_body(grafana_server: int, monkeypatch: pytest.Monke
     assert echo["ct"].startswith("application/json")
 
 
+def test_proxy_rejects_body_over_cap(grafana_server: int, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Forwarded request buffering has a hard cap, unlike streamed responses."""
+    from gateway.routers import grafana
+
+    _enable(monkeypatch, grafana_server)
+    monkeypatch.setattr(grafana, "_MAX_PROXY_REQUEST_BODY_BYTES", 8)
+    with TestClient(app) as client:
+        response = client.post("/grafana/api/ds/query", content=b"123456789")
+    assert response.status_code == 413
+    assert "exceeds 16 MiB" in response.json()["detail"]
+
+
 def test_proxy_forwards_head(grafana_server: int, monkeypatch: pytest.MonkeyPatch) -> None:
     _enable(monkeypatch, grafana_server)
     with TestClient(app) as client:

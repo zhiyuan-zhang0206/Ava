@@ -9,9 +9,13 @@ values, missing-value rows skipped, empty result []).
 
 from __future__ import annotations
 
+import threading
+from collections.abc import Generator
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from typing import Any
 
+import httpx
 import pytest
 
 from gateway import prom_metrics
@@ -31,7 +35,11 @@ class _FakeResponse:
 
     def raise_for_status(self) -> None:
         if self.status_code >= 400:
-            raise RuntimeError(f"prometheus {self.status_code}")
+            request = httpx.Request("GET", "http://prometheus.invalid")
+            response = httpx.Response(self.status_code, request=request)
+            raise httpx.HTTPStatusError(
+                "prometheus response error", request=request, response=response
+            )
 
 
 class _FakeClient:
@@ -78,6 +86,13 @@ def _prom_payload(series: list[tuple[dict[str, str], str]]) -> dict[str, Any]:
     }
 
 
+@pytest.fixture(autouse=True)
+def _fresh_query_budget() -> Generator[None, None, None]:
+    prom_metrics.reset_for_tests()
+    yield
+    prom_metrics.reset_for_tests()
+
+
 # ─── query(): URL + parse semantics ──────────────────────────────────────────
 
 
@@ -113,8 +128,129 @@ class TestQuery:
     def test_non_2xx_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         client = _FakeClient({"status": "error"}, status=422)
         monkeypatch.setattr(prom_metrics, "_client", _accessor(client))
-        with pytest.raises(RuntimeError):
+        with pytest.raises(httpx.HTTPStatusError):
             prom_metrics.query("up")
+
+    def test_transport_failure_emits_query_shape(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        class _FailedClient:
+            def get(self, url: str, params: dict[str, Any]) -> _FakeResponse:
+                raise httpx.ReadTimeout("prometheus timed out")
+
+        failures: list[dict[str, object]] = []
+
+        def _record(**kwargs: object) -> None:
+            failures.append(kwargs)
+
+        monkeypatch.setattr(prom_metrics, "_client", _accessor(_FailedClient()))
+        monkeypatch.setattr(prom_metrics, "_log_prom_failure", _record)
+
+        with pytest.raises(httpx.ReadTimeout):
+            prom_metrics.query("sum(up)")
+
+        assert len(failures) == 1
+        failure = failures[0]
+        assert failure["endpoint"] == "query"
+        assert isinstance(failure["duration_s"], float)
+        assert failure["error"] == "ReadTimeout"
+        assert failure["query"] == "sum(up)"
+
+    def test_transport_failure_emits_first_and_each_fiftieth_after_success_reset(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A sustained Prometheus outage stays visible without flooding events."""
+
+        class _FailedClient:
+            def get(self, url: str, params: dict[str, Any]) -> _FakeResponse:
+                raise httpx.ReadTimeout("prometheus timed out")
+
+        emitted: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+        def _emit(*args: object, **kwargs: object) -> None:
+            emitted.append((args, kwargs))
+
+        monkeypatch.setattr(prom_metrics.telemetry, "emit", _emit)
+        monkeypatch.setattr(prom_metrics, "_client", _accessor(_FailedClient()))
+
+        for _ in range(50):
+            with pytest.raises(httpx.ReadTimeout):
+                prom_metrics.query("sum(up)")
+
+        monkeypatch.setattr(prom_metrics, "_client", _accessor(_FakeClient(_prom_payload([]))))
+        assert prom_metrics.query("sum(up)") == []
+
+        monkeypatch.setattr(prom_metrics, "_client", _accessor(_FailedClient()))
+        for _ in range(50):
+            with pytest.raises(httpx.ReadTimeout):
+                prom_metrics.query("sum(up)")
+
+        assert len(emitted) == 4
+        for args, kwargs in emitted:
+            assert args == ("log", "prom_query_failed")
+            assert kwargs["level"] == "error"
+            attributes = kwargs["attributes"]
+            assert isinstance(attributes, dict)
+            assert attributes["endpoint"] == "query"
+            assert attributes["error"] == "ReadTimeout"
+            assert attributes["query"] == "sum(up)"
+
+
+class TestQueryBudget:
+    def test_query_holds_a_prometheus_budget_slot(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        entered = threading.Event()
+        release = threading.Event()
+
+        class _BlockingClient:
+            def get(self, url: str, params: dict[str, Any]) -> _FakeResponse:
+                entered.set()
+                assert release.wait(timeout=1)
+                return _FakeResponse(_prom_payload([]))
+
+        monkeypatch.setattr(prom_metrics, "_client", _accessor(_BlockingClient()))
+        prom_metrics.reset_for_tests(capacity=1)
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(prom_metrics.query, "up")
+            assert entered.wait(timeout=1)
+            assert prom_metrics.prom_query_budget.metrics().active == 1
+            release.set()
+            assert future.result(timeout=1) == []
+
+    def test_queue_full_raises_prometheus_budget_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        client = _install(monkeypatch, _prom_payload([]))
+        prom_metrics.reset_for_tests(capacity=1, max_waiters=0)
+
+        with (
+            prom_metrics.prom_query_budget.slot(),
+            pytest.raises(prom_metrics.PromQueryBudgetError) as excinfo,
+        ):
+            prom_metrics.query("up")
+
+        assert excinfo.value.reason == "queue_full"
+        assert client.calls == []
+
+    def test_acquire_timeout_raises_prometheus_budget_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _install(monkeypatch, _prom_payload([]))
+        prom_metrics.reset_for_tests(capacity=1, max_waiters=1, wait_timeout_s=0.01)
+        entered = threading.Event()
+        release = threading.Event()
+
+        def _hold_slot() -> None:
+            with prom_metrics.prom_query_budget.slot():
+                entered.set()
+                assert release.wait(timeout=1)
+
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            holder = executor.submit(_hold_slot)
+            assert entered.wait(timeout=1)
+            with pytest.raises(prom_metrics.PromQueryBudgetError) as excinfo:
+                prom_metrics.query("up")
+            release.set()
+            holder.result(timeout=1)
+
+        assert excinfo.value.reason == "acquire_timeout"
 
 
 # ─── sum_by(): PromQL shape + grouping ───────────────────────────────────────

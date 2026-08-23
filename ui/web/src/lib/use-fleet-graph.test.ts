@@ -59,6 +59,7 @@ const API_GRAPH: WireFleetGraph = {
     },
   ],
   stale: false,
+  truncated: false,
 };
 
 function withClient(client: QueryClient) {
@@ -88,7 +89,7 @@ describe("useFleetGraph", () => {
       wrapper: withClient(freshClient()),
     });
 
-    expect(result.current.graph).toEqual({ nodes: [], edges: [], stale: false });
+    expect(result.current.graph).toEqual({ nodes: [], edges: [], stale: false, truncated: false });
     expect(result.current.loading).toBe(true);
     expect(result.current.error).toBe(false);
   });
@@ -167,6 +168,7 @@ describe("useFleetGraph", () => {
       ],
       edges: [],
       stale: false,
+      truncated: false,
     } as unknown as WireFleetGraph;
     getFleetGraph.mockResolvedValue(raw);
 
@@ -190,11 +192,11 @@ describe("useFleetGraph", () => {
 
     await waitFor(() => expect(result.current.error).toBe(true));
     expect(result.current.loading).toBe(false);
-    expect(result.current.graph).toEqual({ nodes: [], edges: [], stale: false });
+    expect(result.current.graph).toEqual({ nodes: [], edges: [], stale: false, truncated: false });
   });
 
   it("preserves the generated stale flag and renders a degraded 200 as unavailable", async () => {
-    getFleetGraph.mockResolvedValue({ nodes: [], edges: [], stale: true });
+    getFleetGraph.mockResolvedValue({ nodes: [], edges: [], stale: true, truncated: false });
 
     const { result } = renderHook(() => useFleetGraph(), {
       wrapper: withClient(freshClient()),
