@@ -435,10 +435,11 @@ def _do_stop(
     # daemon that outlived its stop) is invisible to every leg above and holds
     # the cluster port against the next start — the new process then dies on
     # 'address already in use' while the old one keeps serving. Every port this
-    # unit expects to own is scanned; an OUR listener (repo/home ownership
-    # predicate) is by definition an orphan of this stop and gets a verified
-    # kill. Foreign listeners are never touched. Runs last so it also catches
-    # residuals of the data-plane and extras legs; preserved ports are skipped.
+    # unit expects to own is scanned; only a listener positively attributable
+    # to this cluster's home is an orphan of this stop and gets a verified kill.
+    # Foreign listeners are identified and left alone. Runs last so it also
+    # catches residuals of the data-plane and extras legs; preserved ports are
+    # skipped.
     _reap_orphan_step(
         _repo,
         keep_browser=keep_browser,

@@ -6,13 +6,14 @@ escaped its session — a gateway whose session died but whose uvicorn kept
 the port, a pidfile daemon that outlived its stop, a gate process outside its
 job — is invisible to every one of those legs and holds the cluster port
 against the next start. This module is the port-level closure: every port the
-unit expects to own is scanned, OUR listeners (the same repo/home ownership
-predicate the start preflight applies) are killed verified, and foreign
-listeners are never touched (the start's preflight reports them instead).
+unit expects to own is scanned, listeners positively attributable to this
+cluster's home are killed verified, and every other listener is identified and
+left alone.
 """
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from cli.commands._repo import build_services
@@ -20,7 +21,7 @@ from shared.paths import ava_home
 
 
 def _reap_orphan_listeners(
-    repo: Path, home: Path, *, preserve: frozenset[str]
+    _repo: Path, home: Path, *, preserve: frozenset[str]
 ) -> list[tuple[str, int, int]]:
     """Sweep this unit's expected ports for OUR orphans and kill them verified.
 
@@ -34,12 +35,11 @@ def _reap_orphan_listeners(
     taken effect when it never did (the 2026-08-07 pgbouncer / gate / gateway /
     events-maintenance incident class). This sweep is the port-level closure:
     for every port this unit expects to own, a listener whose pid mentions this
-    unit's repo or home (the same ownership predicate the start preflight
-    applies — shared.port_preflight.process_mentions) is by definition an
-    orphan of a service this stop just killed, so it gets the verified
-    terminate (SIGTERM + bounded wait + SIGKILL). A FOREIGN listener is never
-    touched — it is another unit's or the operator's process, and the start's
-    port preflight reports it instead.
+    cluster's resolved home is by definition an orphan of a service this stop
+    just killed, so it gets the verified terminate (SIGTERM + bounded wait +
+    SIGKILL). The checkout executing a cross-home destroy is deliberately not
+    an ownership marker: unrelated processes can run from that checkout. A
+    FOREIGN or unreadable listener is identified and left alone.
 
     `preserve` names the services whose ports are legitimately still held:
     the browser (keep_browser — the login Chrome is preserved by design), the
@@ -51,15 +51,21 @@ def _reap_orphan_listeners(
     """
     from cli.commands._pgbouncer import _terminate_verified
     from shared.port_preflight import listeners_on, process_mentions, unit_port_map
+    from shared.proc import process_cmdline
 
-    markers = (str(repo.resolve()), str(home.resolve()))
+    # process_mentions is substring-based; include the separator so a sibling
+    # such as `<home>-old/...` cannot authorize a kill for `<home>`.
+    markers = (f"{home.resolve()}{os.sep}",)
     reaped: list[tuple[str, int, int]] = []
     for svc, port in sorted(unit_port_map(home).items()):
         if svc in preserve:
             continue
         for pid in listeners_on(port):
             if not process_mentions(pid, markers):
-                continue  # foreign — never touch (the preflight reports it)
+                cmdline = process_cmdline(pid)
+                process = Path(cmdline[0]).name if cmdline else "unknown process"
+                print(f"  · not claiming {port}: belongs to {process} (pid {pid})")
+                continue
             if _terminate_verified(pid, label=f"orphan {svc} on port {port}"):
                 reaped.append((svc, port, pid))
     return reaped
