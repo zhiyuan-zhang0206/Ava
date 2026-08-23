@@ -12,6 +12,7 @@
     "allow-shell-open-external",
     "allow-shell-save-settings",
     "allow-shell-retry-entry",
-    "allow-shell-notify"
+    "allow-shell-notify",
+    "allow-shell-take-pending-click"
   ]
 }

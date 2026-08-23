@@ -17,4 +17,5 @@ pub const COMMANDS: &[&str] = &[
     "shell_retry_entry",
     "shell_open_settings",
     "shell_notify",
+    "shell_take_pending_click",
 ];

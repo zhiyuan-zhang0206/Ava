@@ -15,10 +15,15 @@
 // The notified subset is deliberately small: an agent finishing a turn, and an
 // agent blocking on a user decision. Everything else the console shows on
 // screen; a shell that notified more would be noise.
+//
+// Native code captures notification taps because the notification plugin's JS
+// event can be lost on a cold launch. Once this credential-gated SSE opens, the
+// bridge consumes that per-tap marker and navigates the same window to Inbox.
 (function () {
   if (window.top !== window) return;
   if (window.__AVA_SHELL_NOTIFY__) return;
   var started = false;
+  var sseOpen = false;
 
   function tryStart() {
     var cfg = window.__AVA_SHELL__;
@@ -43,6 +48,26 @@
         .invoke("shell_notify", { title: title, body: body })
         .catch(function (error) {
           console.error("[ava-shell] notification failed", error);
+        });
+    }
+
+    function consumeDeeplink() {
+      if (!started || !sseOpen || !cfg.entryUrl) return;
+      var target;
+      try {
+        target = new URL("fleet#inbox", cfg.entryUrl);
+      } catch (error) {
+        console.error("[ava-shell] could not resolve Inbox deep link", error);
+        return;
+      }
+      window.__TAURI_INTERNALS__
+        .invoke("shell_take_pending_click")
+        .then(function (pending) {
+          if (!pending) return;
+          window.location.href = target.href;
+        })
+        .catch(function (error) {
+          console.error("[ava-shell] notification click check failed", error);
         });
     }
 
@@ -92,6 +117,10 @@
 
     function connect() {
       var source = new EventSource(cfg.gatewayUrl + "/api/system", { withCredentials: true });
+      source.onopen = function () {
+        sseOpen = true;
+        consumeDeeplink();
+      };
       source.onmessage = function (message) {
         var parsed;
         try {
@@ -105,6 +134,7 @@
         else onEvent(parsed);
       };
       source.onerror = function () {
+        sseOpen = false;
         // EventSource retries a dropped connection itself; only a CLOSED socket
         // is a dead end that needs a fresh one.
         if (source.readyState !== EventSource.CLOSED) return;
@@ -114,6 +144,10 @@
     }
 
     connect();
+    window.addEventListener("focus", consumeDeeplink);
+    document.addEventListener("visibilitychange", function () {
+      if (!document.hidden) consumeDeeplink();
+    });
   }
 
   tryStart();
