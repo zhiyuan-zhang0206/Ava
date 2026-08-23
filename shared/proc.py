@@ -37,7 +37,6 @@ import psutil
 from shared.paths import run_dir
 from shared.platform import CREATE_NO_WINDOW, SIGKILL
 from shared.platform_backend import get_backend
-from shared.session_record import SessionRecord
 
 # psutil exceptions that mean "the process is already gone / not ours to touch" —
 # expected during a teardown, not an error: between enumerating a tree and
@@ -96,6 +95,11 @@ def hosting_supervised_session() -> str | None:
     A record whose process is gone, or whose pid the OS recycled onto a
     different process (start-time mismatch), does not count.
     """
+    # Deliberately method-local: the in-process updater's post-checkout stop must
+    # load SessionRecord from the new tree; a module-scope import leaves its old
+    # version in sys.modules before checkout. See shared/session_backend.py.
+    from shared.session_record import SessionRecord
+
     try:
         me = psutil.Process()
         lineage = {me.pid} | {p.pid for p in me.parents()}
