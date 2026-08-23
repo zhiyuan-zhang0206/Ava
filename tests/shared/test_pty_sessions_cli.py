@@ -512,6 +512,68 @@ def test_new_is_idempotent_for_live_session(sessions: Path) -> None:
     _output_until(home, name, "still-one-shell")
 
 
+def test_new_reaps_a_recordless_host_before_replacement(sessions: Path) -> None:
+    """A vanished record cannot leave a SIGTERM-immune host owning the name.
+
+    The record is deliberately removed while the host and shell are still live,
+    modelling the failed registry layer from the schedule incident. A same-name
+    ``new`` must force-reap that precisely identified orphan and create one fresh
+    session instead of failing on the old host's live socket.
+    """
+    home = sessions
+    name = "ava-test-recordless-1"
+    _new(home, name)
+    first = _record(home, name)
+    identity = host_identity(record_path(name))
+    assert first is not None and identity is not None
+    old_shell = psutil.Process(first.pid)
+    old_host = psutil.Process(identity[0])
+    record_path(name).unlink()
+    assert not _has(home, name), "the missing record must make the session unlisted"
+
+    envfile = write_env_file({})
+    try:
+        result = _run_cli(home, name, "new", str(home), str(envfile))
+        assert result.returncode == 0, result.stderr
+        second = _record(home, name)
+        assert second is not None and second.pid != first.pid
+        assert not envfile.exists(), "the replacement must consume its env handoff"
+        assert _wait(lambda: not old_host.is_running()), "recordless host survived replacement"
+        assert _wait(lambda: not old_shell.is_running()), "recordless shell survived replacement"
+    finally:
+        # The pre-fix behavior rejects the replacement and leaves the deliberately
+        # recordless host outside the fixture's normal record-based teardown.
+        for proc in (old_shell, old_host):
+            with contextlib.suppress(psutil.Error):
+                if proc.is_running():
+                    proc.kill()
+        envfile.unlink(missing_ok=True)
+
+
+def test_kill_reaps_a_recordless_host_without_its_socket(sessions: Path) -> None:
+    """`kill` remains authoritative after both routing artifacts disappear."""
+    home = sessions
+    name = "ava-test-recordless-kill-1"
+    _new(home, name)
+    first = _record(home, name)
+    identity = host_identity(record_path(name))
+    assert first is not None and identity is not None
+    old_shell = psutil.Process(first.pid)
+    old_host = psutil.Process(identity[0])
+    record_path(name).unlink()
+    socket_path(name).unlink()
+
+    try:
+        _kill(home, name)
+        assert _wait(lambda: not old_host.is_running()), "recordless host survived kill"
+        assert _wait(lambda: not old_shell.is_running()), "recordless shell survived kill"
+    finally:
+        for proc in (old_shell, old_host):
+            with contextlib.suppress(psutil.Error):
+                if proc.is_running():
+                    proc.kill()
+
+
 def test_new_honors_cwd(sessions: Path) -> None:
     home = sessions
     name = "ava-test-cwd-1"
