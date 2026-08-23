@@ -49,7 +49,7 @@ _EDGE_EVENT_NAMES = ("send_message", "spawn", "fork", "resurrect")
 # Loki fetch cap for the edge stream. Audit events are low-volume (a few
 # thousand since the cutover); the cap is a guardrail, not an expectation.
 _LOKI_EDGE_LIMIT = 50_000
-_LOKI_EDGE_TIMEOUT_S = 8.0
+_TELEMETRY_READ_TIMEOUT_S = 8.0
 
 # The OTLP-mapped llm_usage counters (shared/telemetry_otlp._record_metrics:
 # int payload field -> Counter named ava_<event>_<field>, Prometheus appends
@@ -123,7 +123,7 @@ def _fetch_loki_edges(*, boundary: datetime | None, now: datetime) -> list[dict[
         to=now,
         limit=_LOKI_EDGE_LIMIT,
         direction="forward",
-        timeout_s=_LOKI_EDGE_TIMEOUT_S,
+        timeout_s=_TELEMETRY_READ_TIMEOUT_S,
     )
     if has_more:
         logger.warning(
@@ -406,13 +406,31 @@ def get_fleet_graph(
     # via gateway/prom_metrics; the `hours` window becomes a PromQL range
     # selector (increase over [Nh]) instead of a SQL fragment.
     try:
-        in_all = prom_metrics.sum_by(_IN_METRIC, "agent_id")
-        out_all = prom_metrics.sum_by(_OUT_METRIC, "agent_id")
+        in_all = prom_metrics.sum_by(
+            _IN_METRIC,
+            "agent_id",
+            timeout_s=_TELEMETRY_READ_TIMEOUT_S,
+        )
+        out_all = prom_metrics.sum_by(
+            _OUT_METRIC,
+            "agent_id",
+            timeout_s=_TELEMETRY_READ_TIMEOUT_S,
+        )
         if hours is None:
             in_win, out_win = in_all, out_all
         else:
-            in_win = prom_metrics.sum_by(_IN_METRIC, "agent_id", window_hours=hours)
-            out_win = prom_metrics.sum_by(_OUT_METRIC, "agent_id", window_hours=hours)
+            in_win = prom_metrics.sum_by(
+                _IN_METRIC,
+                "agent_id",
+                window_hours=hours,
+                timeout_s=_TELEMETRY_READ_TIMEOUT_S,
+            )
+            out_win = prom_metrics.sum_by(
+                _OUT_METRIC,
+                "agent_id",
+                window_hours=hours,
+                timeout_s=_TELEMETRY_READ_TIMEOUT_S,
+            )
     except (httpx.HTTPError, ValueError) as exc:
         logger.warning("fleet_graph Prometheus query failed — serving stale graph: {}", exc)
         return _stale_graph(key, _build_nodes(node_rows))

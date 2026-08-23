@@ -57,12 +57,36 @@ def _seed_agent(db_conn: psycopg.Connection) -> int:
     return agent_id
 
 
-def _empty_prom(_metric: str, _by: str, *, window_hours: int | None = None) -> dict[str, float]:
+def _empty_prom(
+    _metric: str,
+    _by: str,
+    *,
+    window_hours: int | None = None,
+    timeout_s: float | None = None,
+) -> dict[str, float]:
     return {}
 
 
 def _empty_loki(**_kwargs: object) -> tuple[list[dict[str, object]], bool]:
     return [], False
+
+
+def _last_good_graph() -> FleetGraphResponse:
+    return FleetGraphResponse(
+        nodes=[
+            FleetGraphNode(
+                agent_id=999,
+                label="last good",
+                status=AgentStatus.RUNNING,
+                liveness_state="online",
+                spawner="test",
+                machine=None,
+                node_score=12.5,
+                total_tokens=42,
+            )
+        ],
+        edges=[],
+    )
 
 
 def test_success_writes_short_cache_and_last_good_graph(
@@ -97,21 +121,7 @@ def test_loki_failure_serves_last_good_graph_without_writing_short_cache(
     _seed_agent(db_conn)
     redis = _FakeRedis()
     query_args: dict[str, object] = {}
-    last_good = FleetGraphResponse(
-        nodes=[
-            FleetGraphNode(
-                agent_id=999,
-                label="last good",
-                status=AgentStatus.RUNNING,
-                liveness_state="online",
-                spawner="test",
-                machine=None,
-                node_score=12.5,
-                total_tokens=42,
-            )
-        ],
-        edges=[],
-    )
+    last_good = _last_good_graph()
 
     import gateway.routers.fleet_graph as fg
 
@@ -163,26 +173,81 @@ def test_loki_failure_without_last_good_keeps_fetched_nodes_out_of_short_cache(
     assert redis.writes == []
 
 
+def test_prom_failure_serves_last_good_graph_without_writing_short_cache(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Prometheus failure prefers the complete fallback over a node-only graph."""
+    _seed_agent(db_conn)
+    redis = _FakeRedis()
+    last_good = _last_good_graph()
+    prom_timeouts: list[float | None] = []
+
+    import gateway.routers.fleet_graph as fg
+
+    key = fg._cache_key(include_terminated=False, hours=None, decay_lambda=0.5)
+    redis.values[f"fleet_graph:last_good:{key}"] = last_good.model_dump_json()
+    monkeypatch.setattr(fg, "sync_redis", _RedisFactory(redis))
+
+    def boom(
+        _metric: str,
+        _by: str,
+        *,
+        window_hours: int | None = None,
+        timeout_s: float | None = None,
+    ) -> dict[str, float]:
+        prom_timeouts.append(timeout_s)
+        raise httpx.ConnectError("prometheus unreachable")
+
+    monkeypatch.setattr(prom_metrics, "sum_by", boom)
+    with TestClient(app) as client:
+        resp = client.get("/api/fleet/graph")
+
+    expected = last_good.model_dump(mode="json")
+    expected["stale"] = True
+    assert resp.status_code == 200
+    assert resp.json() == expected
+    assert prom_timeouts == [8.0]
+    assert redis.writes == []
+
+
+def test_prom_failure_without_last_good_keeps_pg_nodes_out_of_short_cache(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Without last-good data, a Prometheus failure still preserves PG nodes."""
+    agent_id = _seed_agent(db_conn)
+    redis = _FakeRedis()
+
+    import gateway.routers.fleet_graph as fg
+
+    monkeypatch.setattr(fg, "sync_redis", _RedisFactory(redis))
+
+    def boom(
+        _metric: str,
+        _by: str,
+        *,
+        window_hours: int | None = None,
+        timeout_s: float | None = None,
+    ) -> dict[str, float]:
+        raise httpx.ConnectError("prometheus unreachable")
+
+    monkeypatch.setattr(prom_metrics, "sum_by", boom)
+    with TestClient(app) as client:
+        resp = client.get("/api/fleet/graph")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert {node["agent_id"] for node in body["nodes"]} == {agent_id}
+    assert body["edges"] == []
+    assert body["stale"] is True
+    assert redis.writes == []
+
+
 def test_pg_cancellation_serves_last_good_graph(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """PG cancellation uses the complete fallback when no fresh nodes exist."""
     redis = _FakeRedis()
-    last_good = FleetGraphResponse(
-        nodes=[
-            FleetGraphNode(
-                agent_id=999,
-                label="last good",
-                status=AgentStatus.RUNNING,
-                liveness_state="online",
-                spawner="test",
-                machine=None,
-                node_score=12.5,
-                total_tokens=42,
-            )
-        ],
-        edges=[],
-    )
+    last_good = _last_good_graph()
 
     import gateway.routers.fleet_graph as fg
 
