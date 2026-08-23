@@ -54,6 +54,13 @@ class _FakeClient:
 
     def get(self, url: str, params: dict[str, Any]) -> _FakeResponse:
         self.calls.append((url, params))
+        if not self.payloads:
+            # attribute_aggregate slices a window into multiple instant
+            # queries (era-sliced read path, task #1407 B2); a test that
+            # canned a single payload legitimately sees later slices with no
+            # data. Loki itself returns an empty result for an empty window,
+            # so return that instead of raising.
+            return _FakeResponse({"data": {"result": []}})
         item = self.payloads.pop(0)
         return item if isinstance(item, _FakeResponse) else _FakeResponse(item)
 
@@ -611,7 +618,9 @@ class TestQueryEvents:
 
         loki_events.query_events(timeout_s=8.0)
 
-        assert timeouts == [8.0]
+        # era-sliced read path: a default 24h window spans the legacy and
+        # indexed slices (task #1407 B2), each carrying the timeout
+        assert timeouts == [8.0, 8.0]
 
     def test_request_params_and_default_window(self, monkeypatch: pytest.MonkeyPatch) -> None:
         client = _install(monkeypatch, _loki_payload([]))
@@ -622,12 +631,19 @@ class TestQueryEvents:
         assert has_more is False
         url, params = client.calls[0]
         assert url.endswith("/loki/api/v1/query_range")
-        assert params["query"] == '{service_name="unknown_service"} | json | agent_id="3"'
+        # era-sliced read path: the legacy slice carries the empty event_name
+        # matcher so the two slices stay disjoint (task #1407 B2)
+        assert (
+            params["query"]
+            == '{service_name="unknown_service", event_name=""} | json | agent_id="3"'
+        )
         assert params["direction"] == "backward"
         assert params["limit"] == 101  # limit + offset + 1 lookahead
-        # default from_ = now - 24h, to = now (ns)
-        start = datetime.fromtimestamp(params["start"] / 1e9, UTC)
-        end = datetime.fromtimestamp(params["end"] / 1e9, UTC)
+        # default from_ = now - 24h, to = now (ns); the last slice is the
+        # indexed tail near `now`
+        _, last_params = client.calls[-1]
+        start = datetime.fromtimestamp(last_params["start"] / 1e9, UTC)
+        end = datetime.fromtimestamp(last_params["end"] / 1e9, UTC)
         assert before - timedelta(hours=25) <= start <= after
         assert before - timedelta(seconds=5) <= end <= after + timedelta(seconds=5)
         assert start <= end
@@ -823,8 +839,15 @@ class TestCountEvents:
     def test_default_window_is_24h(self, monkeypatch: pytest.MonkeyPatch) -> None:
         client = _install(monkeypatch, {"data": {"result": []}})
         assert loki_events.count_events() == 0
-        _url, params = client.calls[0]
-        assert params["query"].endswith(")[86400s]))")
+        # era-sliced read path: the default 24h window splits into legacy +
+        # indexed slices; their durations must sum to 86400s
+        assert len(client.calls) == 2
+        total = 0
+        for _url, params in client.calls:
+            duration = int(params["query"].rsplit("[", 1)[1].split("s")[0])
+            total += duration
+        # slice boundaries round, so allow a 1s drift on the whole window
+        assert abs(total - 86400) <= 1
 
     def test_empty_window_returns_zero_without_query(self, monkeypatch: pytest.MonkeyPatch) -> None:
         client = _install(monkeypatch, {"data": {"result": []}})
