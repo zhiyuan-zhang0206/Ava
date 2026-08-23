@@ -56,11 +56,10 @@ export function useFleetGraph(opts?: { hours?: number; decayLambda?: number }): 
     queryFn: () => api.getFleetGraph({ hours, decayLambda }),
     retry: false,
     // Slow reconciliation poll beneath the SSE invalidation (same pattern as
-    // use-tasks.ts). 30s matches the backend's whole-response Redis cache
-    // (_CACHE_TTL_SECONDS in gateway/routers/fleet_graph.py) — polling faster
-    // can only refetch identical cached bytes. A constant interval, so a
-    // failed poll keeps retrying (the graph self-heals) instead of freezing
-    // after the first error.
+    // use-tasks.ts). The backend keeps a whole response for 60s
+    // (_CACHE_TTL_SECONDS in gateway/routers/fleet_graph.py), so alternating
+    // 30s polls hit Redis and expensive source reads run at most once a minute.
+    // A constant interval keeps retrying failed polls instead of freezing.
     refetchInterval: 30_000,
   });
 

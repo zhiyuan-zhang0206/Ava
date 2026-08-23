@@ -48,10 +48,10 @@ class _FakeClient:
         return _FakeResponse(self.payloads.pop(0), status=self.status)
 
 
-def _accessor(client: _FakeClient) -> object:
+def _accessor(client: object) -> Any:
     """`prom_metrics._client` replacement: hands back the fake."""
 
-    def _get() -> _FakeClient:
+    def _get() -> Any:
         return client
 
     return _get
@@ -121,6 +121,20 @@ class TestQuery:
 
 
 class TestSumBy:
+    def test_per_call_timeout_reaches_http_request(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        timeouts: list[float] = []
+
+        class _TimedClient:
+            def get(self, url: str, params: dict[str, Any], *, timeout: float) -> _FakeResponse:
+                timeouts.append(timeout)
+                return _FakeResponse(_prom_payload([]))
+
+        monkeypatch.setattr(prom_metrics, "_client", _accessor(_TimedClient()))
+
+        prom_metrics.sum_by("ava_llm_usage_in_total", "agent_id", timeout_s=8.0)
+
+        assert timeouts == [8.0]
+
     def test_all_time_query_text(self, monkeypatch: pytest.MonkeyPatch) -> None:
         client = _install(
             monkeypatch,

@@ -24,22 +24,20 @@ import httpx
 from fastapi import APIRouter, Query, Request
 from psycopg import errors as pg_errors
 
-from gateway import loki_events, prom_metrics
+from gateway import loki_events, loki_query_budget, prom_metrics
 from gateway.schemas import FleetGraphEdge, FleetGraphNode, FleetGraphResponse, StatsWindowHours
 from shared.log import logger
 from shared.redis_client import sync_redis
 
 router = APIRouter()
 
-# The fleet view polls this endpoint every 5s, while the underlying data moves
-# slowly (all-time token totals, recency-decayed edge weights). A 30s Redis
-# TTL is invisible to that polling cadence but cuts DB query frequency 6x and
-# — the actual incident driver — serves the graph from cache during
-# deploy/lifecycle storms, when Postgres is busy with migration write-amplify
-# and fleet_graph's all-time llm_usage aggregation can exceed the 1min
-# statement timeout. Cache is fail-open: a Redis outage degrades to a direct
-# query, never to a 500.
-_CACHE_TTL_SECONDS = 30
+# The fleet view polls every 30s while the underlying data moves slowly
+# (all-time token totals, recency-decayed edge weights). A 60s Redis TTL makes
+# alternating polls cache hits, cutting expensive composite reads in half while
+# SSE invalidation still carries lifecycle changes promptly. Cache is fail-open:
+# a Redis outage degrades to a direct query, never to a 500.
+_CACHE_TTL_SECONDS = 60
+_LAST_GOOD_CACHE_TTL_SECONDS = 7 * 24 * 60 * 60
 
 # Audit event names that form edges. Lineage (spawn/fork/resurrect) is
 # permanent and all-time; messages (send_message) decay with recency.
@@ -48,6 +46,7 @@ _EDGE_EVENT_NAMES = ("send_message", "spawn", "fork", "resurrect")
 # Loki fetch cap for the edge stream. Audit events are low-volume (a few
 # thousand since the cutover); the cap is a guardrail, not an expectation.
 _LOKI_EDGE_LIMIT = 50_000
+_TELEMETRY_READ_TIMEOUT_S = 8.0
 
 # The OTLP-mapped llm_usage counters (shared/telemetry_otlp._record_metrics:
 # int payload field -> Counter named ava_<event>_<field>, Prometheus appends
@@ -65,17 +64,45 @@ def _cache_key(
     )
 
 
-def _read_cached_graph(key: str) -> FleetGraphResponse | None:
-    """Serve a cached response if one exists; fail-open (None) on Redis
-    outage — the next request retries the cache write."""
+def _last_good_cache_key(key: str) -> str:
+    """Stable full-response fallback corresponding to one poll-cache key."""
+    return f"fleet_graph:last_good:{key}"
+
+
+def _read_graph(key: str, *, cache_name: str) -> FleetGraphResponse | None:
+    """Read one graph cache entry; fail-open on an unavailable Redis."""
     try:
         with sync_redis(decode_responses=True) as redis:
             cached = redis.get(key)
         if cached is not None:
             return FleetGraphResponse.model_validate_json(cached)
     except Exception as exc:
-        logger.debug("fleet_graph cache read failed — falling back to direct query: %s", exc)
+        logger.debug(
+            "fleet_graph {} read failed — falling back to direct query: {}", cache_name, exc
+        )
     return None
+
+
+def _read_cached_graph(key: str) -> FleetGraphResponse | None:
+    """Serve the short-lived poll cache when it exists."""
+    return _read_graph(key, cache_name="cache")
+
+
+def _read_last_good_graph(key: str) -> FleetGraphResponse | None:
+    """Return the last successful full graph for this parameter combination."""
+    return _read_graph(_last_good_cache_key(key), cache_name="last-good cache")
+
+
+def _stale_graph(key: str, nodes: list[FleetGraphNode]) -> FleetGraphResponse:
+    """Prefer a complete last-good graph; otherwise preserve known nodes.
+
+    A degraded response intentionally bypasses the 60-second cache so the
+    next poll retries the upstream read instead of extending a failure.
+    """
+    last_good = _read_last_good_graph(key)
+    if last_good is not None:
+        return last_good.model_copy(update={"stale": True})
+    return FleetGraphResponse(nodes=nodes, edges=[], stale=True)
 
 
 def _fetch_loki_edges(*, boundary: datetime | None, now: datetime) -> list[dict[str, Any]]:
@@ -83,8 +110,8 @@ def _fetch_loki_edges(*, boundary: datetime | None, now: datetime) -> list[dict[
 
     Lineage events are all-time (fetch from the boundary); message events
     additionally respect the `hours` window, applied per row by the caller —
-    the lineage tail must not be clipped by the message window. A Loki outage
-    raises `httpx.HTTPError`; the route degrades to a stale empty graph."""
+    the lineage tail must not be clipped by the message window. The per-request
+    timeout bounds the expensive tail read before the route degrades."""
     loki_from = boundary if boundary is not None else now - timedelta(days=30)
     rows, has_more = loki_events.query_events(
         event_names=list(_EDGE_EVENT_NAMES),
@@ -93,10 +120,11 @@ def _fetch_loki_edges(*, boundary: datetime | None, now: datetime) -> list[dict[
         to=now,
         limit=_LOKI_EDGE_LIMIT,
         direction="forward",
+        timeout_s=_TELEMETRY_READ_TIMEOUT_S,
     )
     if has_more:
         logger.warning(
-            "fleet_graph Loki edge stream exceeded the %d-row fetch cap — edges truncated",
+            "fleet_graph Loki edge stream exceeded the {}-row fetch cap — edges truncated",
             _LOKI_EDGE_LIMIT,
         )
     return rows
@@ -227,6 +255,34 @@ def _fetch_archive_edges(
     return list(cur.fetchall())
 
 
+def _build_nodes(
+    node_rows: list[tuple[Any, ...]],
+    *,
+    in_all: dict[str, float] | None = None,
+    out_all: dict[str, float] | None = None,
+    in_win: dict[str, float] | None = None,
+    out_win: dict[str, float] | None = None,
+) -> list[FleetGraphNode]:
+    """Build graph nodes, retaining PG identity when metrics are unavailable."""
+    in_all = in_all or {}
+    out_all = out_all or {}
+    in_win = in_win or {}
+    out_win = out_win or {}
+    return [
+        FleetGraphNode(
+            agent_id=r[0],
+            label=r[1],
+            status=r[2],
+            liveness_state=r[3],
+            spawner=r[4],
+            machine=r[5],
+            total_tokens=round(in_all.get(str(r[0]), 0.0) + out_all.get(str(r[0]), 0.0)),
+            node_score=round(in_win.get(str(r[0]), 0.0) * 0.1 + out_win.get(str(r[0]), 0.0), 2),
+        )
+        for r in node_rows
+    ]
+
+
 @router.get("/api/fleet/graph")
 def get_fleet_graph(
     request: Request,
@@ -336,22 +392,60 @@ def get_fleet_graph(
             )
 
     except pg_errors.QueryCanceled:
-        # Postgres is under heavy load (deploy migration / lifecycle storm) and
-        # canceled the statement at its 1min timeout. Degrade to an empty graph
-        # instead of a 500 — but the degradation must be VISIBLE (R4 layer 2:
-        # failed != empty): `stale=True` tells the frontend to render "data
-        # temporarily unavailable" rather than an empty fleet. The empty
-        # response is deliberately NOT cached — the next request retries the
-        # query.
-        logger.warning("fleet_graph query canceled (statement timeout) — returning empty graph")
-        return FleetGraphResponse(nodes=[], edges=[], stale=True)
+        # A canceled PG query cannot provide a fresh node set, but a complete
+        # prior graph is still strictly more useful than an empty fleet.
+        logger.warning("fleet_graph query canceled (statement timeout) — serving stale graph")
+        return _stale_graph(key, [])
+
+    # --- Token aggregates from Prometheus (the llm_usage counters) ---
+    # total_tokens is the all-time counter sum (tooltip); node_score is the
+    # windowed weighted score (node size). Both read the OTLP-mapped counters
+    # via gateway/prom_metrics; the `hours` window becomes a PromQL range
+    # selector (increase over [Nh]) instead of a SQL fragment.
+    try:
+        in_all = prom_metrics.sum_by(
+            _IN_METRIC,
+            "agent_id",
+            timeout_s=_TELEMETRY_READ_TIMEOUT_S,
+        )
+        out_all = prom_metrics.sum_by(
+            _OUT_METRIC,
+            "agent_id",
+            timeout_s=_TELEMETRY_READ_TIMEOUT_S,
+        )
+        if hours is None:
+            in_win, out_win = in_all, out_all
+        else:
+            in_win = prom_metrics.sum_by(
+                _IN_METRIC,
+                "agent_id",
+                window_hours=hours,
+                timeout_s=_TELEMETRY_READ_TIMEOUT_S,
+            )
+            out_win = prom_metrics.sum_by(
+                _OUT_METRIC,
+                "agent_id",
+                window_hours=hours,
+                timeout_s=_TELEMETRY_READ_TIMEOUT_S,
+            )
+    except (httpx.HTTPError, ValueError) as exc:
+        logger.warning("fleet_graph Prometheus query failed — serving stale graph: {}", exc)
+        return _stale_graph(key, _build_nodes(node_rows))
+
+    nodes = _build_nodes(
+        node_rows,
+        in_all=in_all,
+        out_all=out_all,
+        in_win=in_win,
+        out_win=out_win,
+    )
 
     # --- Loki side: the live tail of the audit stream ---
     try:
         loki_rows = _fetch_loki_edges(boundary=boundary, now=now)
-    except httpx.HTTPError as exc:
-        logger.warning("fleet_graph Loki query failed — returning empty graph: %s", exc)
-        return FleetGraphResponse(nodes=[], edges=[], stale=True)
+    except (httpx.HTTPError, loki_query_budget.LokiQueryBudgetError) as exc:
+        logger.warning("fleet_graph Loki query failed — serving stale graph: {}", exc)
+        return _stale_graph(key, nodes)
 
     live_ids: set[int] | None = None
     if not include_terminated:
@@ -365,46 +459,13 @@ def get_fleet_graph(
         decay_lambda=decay_lambda,
     )
 
-    # --- Token aggregates from Prometheus (the llm_usage counters) ---
-    # total_tokens is the all-time counter sum (tooltip); node_score is the
-    # windowed weighted score (node size). Both read the OTLP-mapped counters
-    # via gateway/prom_metrics; the `hours` window becomes a PromQL range
-    # selector (increase over [Nh]) instead of a SQL fragment.
-    try:
-        in_all = prom_metrics.sum_by(_IN_METRIC, "agent_id")
-        out_all = prom_metrics.sum_by(_OUT_METRIC, "agent_id")
-        if hours is None:
-            in_win, out_win = in_all, out_all
-        else:
-            in_win = prom_metrics.sum_by(_IN_METRIC, "agent_id", window_hours=hours)
-            out_win = prom_metrics.sum_by(_OUT_METRIC, "agent_id", window_hours=hours)
-    except (httpx.HTTPError, ValueError) as exc:
-        # Prometheus unreachable / malformed — the same visible degradation as
-        # a canceled query: an EMPTY graph marked stale, never a silent zero
-        # (R4 layer 2: failed != empty). Deliberately NOT cached — the next
-        # request retries.
-        logger.warning("fleet_graph Prometheus query failed — returning empty graph: %s", exc)
-        return FleetGraphResponse(nodes=[], edges=[], stale=True)
-
-    nodes = [
-        FleetGraphNode(
-            agent_id=r[0],
-            label=r[1],
-            status=r[2],
-            liveness_state=r[3],
-            spawner=r[4],
-            machine=r[5],
-            total_tokens=round(in_all.get(str(r[0]), 0.0) + out_all.get(str(r[0]), 0.0)),
-            node_score=round(in_win.get(str(r[0]), 0.0) * 0.1 + out_win.get(str(r[0]), 0.0), 2),
-        )
-        for r in node_rows
-    ]
-
     response = FleetGraphResponse(nodes=nodes, edges=edges)
     try:
         with sync_redis(decode_responses=True) as redis:
-            redis.set(key, response.model_dump_json(), ex=_CACHE_TTL_SECONDS)
+            serialized = response.model_dump_json()
+            redis.set(_last_good_cache_key(key), serialized, ex=_LAST_GOOD_CACHE_TTL_SECONDS)
+            redis.set(key, serialized, ex=_CACHE_TTL_SECONDS)
     except Exception as exc:
         # Fail-open: a cache write failure must not fail the response.
-        logger.debug("fleet_graph cache write failed: %s", exc)
+        logger.debug("fleet_graph cache write failed: {}", exc)
     return response

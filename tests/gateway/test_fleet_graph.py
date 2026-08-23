@@ -65,7 +65,9 @@ def _mock_prom(monkeypatch: pytest.MonkeyPatch) -> None:
     Tests that need token values re-install a richer fake over this one (it
     runs first, the per-test install wins)."""
 
-    def fake_sum_by(metric: str, by: str, *, window_hours: int | None = None) -> dict[str, float]:
+    def fake_sum_by(
+        metric: str, by: str, *, window_hours: int | None = None, timeout_s: float | None = None
+    ) -> dict[str, float]:
         return {}
 
     monkeypatch.setattr(prom_metrics, "sum_by", fake_sum_by)
@@ -81,7 +83,9 @@ def _install_prom(
     {agent_id: value} for window_hours=None calls, `windowed` for windowed
     calls. A metric absent from both maps reads as {} (no llm_usage series)."""
 
-    def fake_sum_by(metric: str, by: str, *, window_hours: int | None = None) -> dict[str, float]:
+    def fake_sum_by(
+        metric: str, by: str, *, window_hours: int | None = None, timeout_s: float | None = None
+    ) -> dict[str, float]:
         src = windowed if window_hours is not None else all_time
         return (src or {}).get(metric, {})
 
@@ -573,13 +577,13 @@ def test_null_agent_id_audit_row_does_not_500_and_makes_no_edge(
     assert resp.json()["edges"] == []
 
 
-# ── Redis cache: 30s TTL, keyed by params, fail-open ──────────────────────
+# ── Redis cache: 60s TTL, keyed by params, fail-open ──────────────────────
 
 
 def test_cache_serves_stale_graph_within_ttl(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A second request within the 30s TTL hits the Redis cache and does not
+    """A second request within the 60s TTL hits the Redis cache and does not
     re-query Prometheus: change the mocked counters after the first request
     and assert the response still carries the first request's data."""
     a = _seed_agent(db_conn)
@@ -717,14 +721,14 @@ def test_query_canceled_degrades_with_stale_flag(
 # ── Prometheus outage: same visible degradation (R4 layer 2) ───────────────
 
 
-def test_loki_down_degrades_to_stale_empty_graph(
+def test_loki_down_degrades_to_stale_node_graph(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A Loki outage (httpx transport error on the edge stream) returns an
-    EMPTY graph marked stale — the same visible degradation as a canceled
-    query, never a silent zero (edges would otherwise vanish without a trace
-    the moment Loki is unreachable)."""
-    _seed_agent(db_conn)
+    edge-less graph with the fetched nodes marked stale — never a silent zero
+    (edges would otherwise vanish without a trace the moment Loki is
+    unreachable)."""
+    a = _seed_agent(db_conn)
 
     def boom(*args: object, **kwargs: object) -> object:
         raise httpx.ConnectError("loki unreachable")
@@ -734,24 +738,29 @@ def test_loki_down_degrades_to_stale_empty_graph(
         resp = client.get("/api/fleet/graph")
     assert resp.status_code == 200
     body = resp.json()
-    assert body["nodes"] == [] and body["edges"] == []
+    assert {node["agent_id"] for node in body["nodes"]} == {a}
+    assert body["edges"] == []
     assert body["stale"] is True
 
 
-def test_prometheus_down_degrades_to_stale_empty_graph(
+def test_prometheus_down_degrades_to_stale_pg_node_graph(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A Prometheus outage (httpx transport error on the aggregate query)
-    returns an EMPTY graph marked stale — the same visible degradation as a
-    canceled query, never a silent zero (the graph would otherwise render
-    every node with 0 tokens and read as "no data")."""
-    _seed_agent(db_conn)
+    returns the PG node set marked stale — never an empty fleet (the graph
+    would otherwise render no node identities at all)."""
+    a = _seed_agent(db_conn)
 
-    def boom(metric: str, by: str, *, window_hours: int | None = None) -> dict[str, float]:
+    def boom(
+        metric: str, by: str, *, window_hours: int | None = None, timeout_s: float | None = None
+    ) -> dict[str, float]:
         raise httpx.ConnectError("prometheus down")
 
     monkeypatch.setattr(prom_metrics, "sum_by", boom)
     with TestClient(app) as client:
         resp = client.get("/api/fleet/graph")
     assert resp.status_code == 200
-    assert resp.json() == {"nodes": [], "edges": [], "stale": True}
+    body = resp.json()
+    assert {node["agent_id"] for node in body["nodes"]} == {a}
+    assert body["edges"] == []
+    assert body["stale"] is True

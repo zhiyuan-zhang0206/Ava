@@ -24,9 +24,11 @@ datapoint attributes.
 
 ## Core responsibilities
 
-- **`query(expr)`** — one instant query against Prometheus's HTTP API
-  (`/api/v1/query`), returning the `data.result` as (labels, value) pairs.
-- **`sum_by(metric, by, window_hours=None)`** — `sum by (<by>) (<metric>)`:
+- **`query(expr, timeout_s=None)`** — one instant query against Prometheus's
+  HTTP API (`/api/v1/query`), returning the `data.result` as (labels, value)
+  pairs. Omitting the optional per-call timeout uses the shared client default.
+- **`sum_by(metric, by, window_hours=None, timeout_s=None)`** —
+  `sum by (<by>) (<metric>)`:
   raw cumulative counters for the all-time view, wrapped in
   `increase(<metric>[<N>h])` for the windowed view (the PromQL equivalent of
   the old SQL `ts > now() - N hours`). Series missing the grouping label
@@ -38,7 +40,8 @@ datapoint attributes.
 
 - `GET /api/fleet/graph` — node `total_tokens` (all-time in+out) + windowed
   `node_score` (in*0.1 + out*1.0); a Prometheus outage degrades the graph to
-  a `stale` empty response (same visible degradation as a canceled query).
+  a `stale` last-good response when available, otherwise to the PG node set
+  with empty edges and zeroed metric fields.
 - `GET /api/stats/dashboard` — windowed per-model in/out/cache_read sums,
   priced per model via `shared.lm.pricing.cost_usd`.
 - `AVA_TELEMETRY_PROMETHEUS_URL` (default `http://127.0.0.1:9090`,
@@ -54,3 +57,5 @@ datapoint attributes.
   `increase()` aggregations undercount ~45% on live data — fixed with the
   cutover, old series age out with Prometheus retention).
 - Parent node: [[gateway.ava.okf.md|Gateway]].
+- The fleet graph passes an eight-second per-call timeout for its Prometheus
+  aggregates; other Prometheus consumers retain the shared client default.

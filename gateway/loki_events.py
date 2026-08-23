@@ -91,7 +91,13 @@ def _log_loki_failure(
         logger.error("loki_query_failed emit failed", attributes=attributes)
 
 
-def _get_json(url: str, params: dict[str, Any], *, endpoint: str) -> dict[str, Any]:
+def _get_json(
+    url: str,
+    params: dict[str, Any],
+    *,
+    endpoint: str,
+    timeout_s: float | None = None,
+) -> dict[str, Any]:
     """One Loki HTTP GET with per-call timing and failure reporting.
 
     Every Loki call in this module funnels through here. Transport failures
@@ -104,7 +110,10 @@ def _get_json(url: str, params: dict[str, Any], *, endpoint: str) -> dict[str, A
     started = time.perf_counter()
     try:
         with loki_query_budget.query_budget.slot():
-            resp = _client().get(url, params=params)
+            if timeout_s is None:
+                resp = _client().get(url, params=params)
+            else:
+                resp = _client().get(url, params=params, timeout=timeout_s)
             resp.raise_for_status()
             payload = resp.json()
     except loki_query_budget.LokiQueryBudgetError:
@@ -298,6 +307,7 @@ def query_events(
     limit: int = 100,
     offset: int = 0,
     direction: str = "backward",
+    timeout_s: float | None = None,
 ) -> tuple[list[dict[str, Any]], bool]:
     """Slice of the event stream from Loki, newest-first by default.
 
@@ -306,7 +316,8 @@ def query_events(
     exact. ``from_``/``to`` bound the window; ``from_`` defaults to
     now - 24h (same lower-bound contract as the old PG API). ``direction``
     is ``"backward"`` (newest first) or ``"forward"`` (oldest first — the
-    aggregate path uses it for per-agent first-event timestamps).
+    aggregate path uses it for per-agent first-event timestamps). ``timeout_s``
+    overrides the shared client's default for this request only.
     """
     window = _window(from_, to)
     if window is None:
@@ -338,7 +349,7 @@ def query_events(
             "start": int(slice_.start.timestamp() * 1e9),
             "end": int(slice_.end.timestamp() * 1e9),
         }
-        payload = _get_json(url, params, endpoint="query_range")
+        payload = _get_json(url, params, endpoint="query_range", timeout_s=timeout_s)
         for stream in payload.get("data", {}).get("result", []):
             for ts_ns, line in stream.get("values", []):
                 raw.append((int(ts_ns), line))
