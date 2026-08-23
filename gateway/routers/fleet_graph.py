@@ -31,15 +31,12 @@ from shared.redis_client import sync_redis
 
 router = APIRouter()
 
-# The fleet view polls this endpoint every 5s, while the underlying data moves
-# slowly (all-time token totals, recency-decayed edge weights). A 30s Redis
-# TTL is invisible to that polling cadence but cuts DB query frequency 6x and
-# — the actual incident driver — serves the graph from cache during
-# deploy/lifecycle storms, when Postgres is busy with migration write-amplify
-# and fleet_graph's all-time llm_usage aggregation can exceed the 1min
-# statement timeout. Cache is fail-open: a Redis outage degrades to a direct
-# query, never to a 500.
-_CACHE_TTL_SECONDS = 30
+# The fleet view polls every 30s while the underlying data moves slowly
+# (all-time token totals, recency-decayed edge weights). A 60s Redis TTL makes
+# alternating polls cache hits, cutting expensive composite reads in half while
+# SSE invalidation still carries lifecycle changes promptly. Cache is fail-open:
+# a Redis outage degrades to a direct query, never to a 500.
+_CACHE_TTL_SECONDS = 60
 _LAST_GOOD_CACHE_TTL_SECONDS = 7 * 24 * 60 * 60
 
 # Audit event names that form edges. Lineage (spawn/fork/resurrect) is
@@ -99,7 +96,7 @@ def _read_last_good_graph(key: str) -> FleetGraphResponse | None:
 def _stale_graph(key: str, nodes: list[FleetGraphNode]) -> FleetGraphResponse:
     """Prefer a complete last-good graph; otherwise preserve known nodes.
 
-    A degraded response intentionally bypasses the 30-second cache so the
+    A degraded response intentionally bypasses the 60-second cache so the
     next poll retries the upstream read instead of extending a failure.
     """
     last_good = _read_last_good_graph(key)

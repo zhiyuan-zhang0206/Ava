@@ -109,7 +109,7 @@ def test_success_writes_short_cache_and_last_good_graph(
     assert {write[0] for write in redis.writes} == {key, f"fleet_graph:last_good:{key}"}
     assert redis.values[key] == redis.values[f"fleet_graph:last_good:{key}"]
     assert {write[0]: write[2] for write in redis.writes} == {
-        key: fg._CACHE_TTL_SECONDS,
+        key: 60,
         f"fleet_graph:last_good:{key}": fg._LAST_GOOD_CACHE_TTL_SECONDS,
     }
 

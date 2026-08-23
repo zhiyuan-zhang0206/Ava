@@ -119,6 +119,9 @@ export const ForceGraph = memo(function ForceGraph({
   // used for the sim collide radii so the rendered node matches its collision
   // circle. floor 1 avoids div-by-zero when every score is 0.
   const maxScore = useMemo(() => Math.max(...nodes.map((n) => n.score), 1), [nodes]);
+  // Edge opacity spans this graph's actual weight range, so the weakest and
+  // strongest relationships remain visually distinct as the graph changes.
+  const maxEdgeWeight = useMemo(() => Math.max(...edges.map((e) => e.weight), 1), [edges]);
   const nodeById = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes]);
 
   // Simulation nodes: collide radius = the rendered radius for circles, the
@@ -373,12 +376,13 @@ export const ForceGraph = memo(function ForceGraph({
                 connectedNodeIds != null &&
                 (e.from === selectedId || e.to === selectedId);
               const isDimmed = connectedNodeIds != null && !isIncident;
+              const normalizedWeight = Math.min(Math.max(e.weight / maxEdgeWeight, 0), 1);
               const opacity = isIncident
                 ? 0.92
                 : isDimmed
                   ? 0.08
                   : isMessage
-                    ? Math.min(0.85, 0.24 + 0.16 * e.weight)
+                    ? 0.24 + 0.61 * normalizedWeight
                     : 0.72;
               // Stroke width scales with weight (log-compressed so high-weight
               // edges don't overwhelm). Base width depends on edge type, then

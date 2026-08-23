@@ -577,13 +577,13 @@ def test_null_agent_id_audit_row_does_not_500_and_makes_no_edge(
     assert resp.json()["edges"] == []
 
 
-# ── Redis cache: 30s TTL, keyed by params, fail-open ──────────────────────
+# ── Redis cache: 60s TTL, keyed by params, fail-open ──────────────────────
 
 
 def test_cache_serves_stale_graph_within_ttl(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A second request within the 30s TTL hits the Redis cache and does not
+    """A second request within the 60s TTL hits the Redis cache and does not
     re-query Prometheus: change the mocked counters after the first request
     and assert the response still carries the first request's data."""
     a = _seed_agent(db_conn)

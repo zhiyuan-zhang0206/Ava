@@ -17,3 +17,12 @@ the source reads instead of extending a failure.
 The fleet graph's Prometheus aggregates now use the same eight-second
 per-call HTTP deadline as its Loki edge query. Other Prometheus consumers
 continue using the shared client's default timeout.
+
+## Follow-up: polling and edge scale
+
+The whole-response cache now has a 60-second lifetime while the frontend
+continues reconciling every 30 seconds. This keeps UI polling responsive and
+makes alternating polls Redis hits, limiting expensive source reads to once per
+minute; SSE invalidation still carries lifecycle changes promptly. Message-edge
+opacity now scales across each graph's own weight range rather than raw weight
+values.
