@@ -37,7 +37,8 @@ Three signals:
   directly; pure runners use the authenticated gateway collector ingress.
 
 Failure isolation — the contract this module exists to keep: **the OTLP side
-must never block, break, or slow the PG write.** Three layers:
+must never block, break, or slow the event drain after its JSONL mirror write.**
+Three layers:
 
 1. The emitter drain thread only does bounded ``put_nowait`` into this
    module's queue (shed, counted, reported) plus in-memory metric recordings —
@@ -48,7 +49,7 @@ must never block, break, or slow the PG write.** Three layers:
    Ava thread.
 3. Every entry point is suppress-guarded end to end, and the emitter wraps the
    call again (``_export_otlp``) — even a programming error here cannot cost a
-   batch its PG copy.
+   batch its JSONL copy.
 
 Flag semantics: every process, including disposable exec children, reads
 ``AVA_TELEMETRY_OTLP_ENABLED`` / ``AVA_TELEMETRY_OTLP_ENDPOINT`` from the
@@ -57,8 +58,14 @@ Exec children call ``warmup()`` before agent code runs so constructing the OTel
 SDK cannot first happen during interpreter shutdown. This is **startup-applied**,
 matching every other config field in the system — there is no live-reload
 mechanism in ``shared/config``, and the isolation above makes the flag a rare
-emergency kill switch, not the primary defense. Flipping it + restarting is the
-documented apply path.
+emergency kill switch, not the primary defense. Off means JSONL mirror only:
+Loki and Prometheus stop advancing. Flipping it + restarting is the documented
+apply path.
+
+Backend initialization is retried every five minutes after a failed collector
+probe or SDK setup. Each disabled/recovered attempt is emitted as a real event,
+not only through the ``_NO_EMITTER`` diagnostic path, so the surviving JSONL
+mirror records the outage even while OTLP itself cannot carry the event.
 """
 
 from __future__ import annotations
@@ -73,7 +80,14 @@ from typing import Any
 
 from shared.telemetry import Event
 
-__all__ = ["endpoint_reachable", "export_batch", "flush", "shutdown", "warmup"]
+__all__ = [
+    "COLLECTOR_RETRY_INTERVAL_S",
+    "endpoint_reachable",
+    "export_batch",
+    "flush",
+    "shutdown",
+    "warmup",
+]
 
 # ── knobs ─────────────────────────────────────────────────────────────────────
 
@@ -88,6 +102,11 @@ _QUEUE_MAXSIZE = 2048
 # near-live without a per-batch network round-trip; the reader thread owns the
 # timing, the emitter never waits on it.
 _METRICS_INTERVAL_S = 15
+
+# A failed collector probe costs up to 1.5 seconds. Retry on the drain thread
+# every five minutes, not on every batch, so a missing sidecar cannot turn event
+# volume into connection-probe volume.
+COLLECTOR_RETRY_INTERVAL_S = 300
 
 # Log-record severity mapping — OTel SeverityNumber values (plain ints; the
 # enum is constructed at the record site, see _emit_log).
@@ -145,9 +164,8 @@ def endpoint_reachable(endpoint: str) -> bool:
     collector (a fresh install without the LGTM stack), where building the
     SDK exporters would make their own threads log 'Exception while
     exporting' every interval forever. The probe posts an OTLP/JSON body
-    so a healthy collector answers 200. A transient blip disables OTLP for
-    the process lifetime — the same tradeoff the init-failure path
-    already makes.
+    so a healthy collector answers 200. A failed probe is retried every five
+    minutes; disabled and recovered episodes are also reported as real events.
 
     Shared by the events exporter (here) and the trace exporter
     (``shared.trace.initialize_tracing``) — both arm their SDK exporters
@@ -225,6 +243,18 @@ class _EventDimensionResourceExporter:
         self._exporter.shutdown()
 
 
+def _emit_backend_event(event_name: str, **attributes: Any) -> None:
+    """Emit init status into the unified stream; never affect backend setup.
+
+    When the collector is unavailable, the event reaches the JSONL mirror even
+    though its OTLP copy cannot leave the process.
+    """
+    with contextlib.suppress(Exception):
+        from shared import telemetry
+
+        telemetry.emit("telemetry", event_name, attributes=attributes)
+
+
 class _OtlpBackend:
     """One OTLP export backend per process: bounded queue + worker thread that
     feeds the OTel SDK log processor, plus direct in-memory metric recording.
@@ -248,7 +278,8 @@ class _OtlpBackend:
         self._metric_provider: Any = None
         self._meter: Any = None
         self._instruments: dict[tuple[str, str], Any] = {}
-        self._init_attempted = False
+        self._init_failed_at: float | None = None
+        self._init_lock = threading.Lock()
         self._thread: threading.Thread | None = None
 
     # ── public surface (called by shared.telemetry) ─────────────────────────
@@ -269,7 +300,7 @@ class _OtlpBackend:
                 if n == 1 or n % 50 == 0:
                     self._report(
                         f"OTLP log queue full — shed {n} event(s) cumulative "
-                        "(OTLP side only; the PG copy is unaffected)"
+                        "(OTLP side only; the JSONL mirror is unaffected)"
                     )
         for event in events:
             with contextlib.suppress(Exception):
@@ -334,35 +365,84 @@ class _OtlpBackend:
         return endpoint_reachable(endpoint)
 
     def _ensure(self) -> bool:
-        """Bring up the backend once. Failure disables the OTLP side for the
-        process lifetime (reported) — a misconfigured endpoint must not retry
-        per batch."""
+        """Bring up the backend, retrying a failed init at five-minute cadence.
+
+        The interval gate prevents per-batch probes. Initialization remains
+        best-effort and never raises into the event drain.
+        """
         if self._logs is not None:
             return True
-        if self._init_attempted:
+        now = time.monotonic()
+        if (
+            self._init_failed_at is not None
+            and now - self._init_failed_at < COLLECTOR_RETRY_INTERVAL_S
+        ):
             return False
-        self._init_attempted = True
-        try:
-            if self._providers is not None:
-                self._logs, self._metric_provider = self._providers
-            else:
-                from shared.config import settings
+        with self._init_lock:
+            if self._logs is not None:
+                return True
+            now = time.monotonic()
+            if (
+                self._init_failed_at is not None
+                and now - self._init_failed_at < COLLECTOR_RETRY_INTERVAL_S
+            ):
+                return False
 
-                endpoint = settings.observability.telemetry_otlp_endpoint
-                if not self._endpoint_reachable(endpoint):
-                    self._report(
-                        f"OTLP endpoint {endpoint} not answering — OTLP export "
-                        "disabled for this process (no collector on this box?)"
-                    )
-                    return False
-                self._logs, self._metric_provider = _build_providers(endpoint)
-            self._meter = self._metric_provider.get_meter("ava.telemetry")
-            self._thread = threading.Thread(target=self._run, daemon=True, name="otlp-exporter")
-            self._thread.start()
+            endpoint: str | None = None
+            try:
+                if self._providers is not None:
+                    logs, metric_provider = self._providers
+                else:
+                    from shared.config import settings
+
+                    endpoint = settings.observability.telemetry_otlp_endpoint
+                    if not self._endpoint_reachable(endpoint):
+                        self._init_failed_at = time.monotonic()
+                        self._report(
+                            f"OTLP endpoint {endpoint} not answering — OTLP export disabled; "
+                            f"retrying in {COLLECTOR_RETRY_INTERVAL_S}s"
+                        )
+                        _emit_backend_event(
+                            "otlp_backend_disabled",
+                            reason="endpoint not answering",
+                            endpoint=endpoint,
+                        )
+                        return False
+                    logs, metric_provider = _build_providers(endpoint)
+                meter = metric_provider.get_meter("ava.telemetry")
+                worker = threading.Thread(target=self._run, daemon=True, name="otlp-exporter")
+                disabled_at = self._init_failed_at
+                self._logs = logs
+                self._metric_provider = metric_provider
+                self._meter = meter
+                self._thread = worker
+                worker.start()
+            except Exception as exc:
+                self._logs = None
+                self._metric_provider = None
+                self._meter = None
+                self._thread = None
+                self._init_failed_at = time.monotonic()
+                reason = f"init failed: {exc!r}"
+                self._report(
+                    "OTLP backend init failed — OTLP side disabled; "
+                    f"retrying in {COLLECTOR_RETRY_INTERVAL_S}s: {exc!r}"
+                )
+                _emit_backend_event(
+                    "otlp_backend_disabled",
+                    reason=reason,
+                    endpoint=endpoint,
+                )
+                return False
+
+            self._init_failed_at = None
+            if disabled_at is not None:
+                _emit_backend_event(
+                    "otlp_backend_recovered",
+                    endpoint=endpoint,
+                    disabled_s=max(0.0, now - disabled_at),
+                )
             return True
-        except Exception as exc:  # report once, disable for the process lifetime
-            self._report(f"OTLP backend init failed — OTLP side disabled for this process: {exc!r}")
-            return False
 
     def _run(self) -> None:
         """Worker loop: map + emit queued events to the OTel log processor."""
@@ -667,7 +747,8 @@ def warmup() -> None:
     """Bring up the enabled backend before short-lived code can emit events.
 
     The bounded endpoint preflight and SDK setup happen before agent code runs;
-    a failed warmup is reported once and never raises into the caller.
+    a failed warmup is reported and retried after five minutes without ever
+    raising into the caller.
     """
     with contextlib.suppress(Exception):
         if backend._enabled():

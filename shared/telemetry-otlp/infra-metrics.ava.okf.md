@@ -79,7 +79,7 @@ X" and lost its history on every process restart.
 `AVA_TELEMETRY_OTLP_ENABLED` is producer-scoped (the event dual-write, trace
 recording, ship) and has never gated the sidecar process itself. These scrapes
 are the collector's own, so a machine reports host health even with the event
-stream on Postgres only. Silencing them means stopping the sidecar
+stream reduced to its JSONL mirror only. Silencing them means stopping the sidecar
 (`ava start --disable-service otel-collector`) or the backend (`ava lgtm off`);
 with no backend reachable the Prometheus exporter's bounded retry drops them,
 the same shed path app metrics already take. On a pure runner the exporter

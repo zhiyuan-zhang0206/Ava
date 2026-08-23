@@ -45,6 +45,7 @@ _EXPECTED_UIDS = {
     "ava-ops-llm-latency-p95",
     "ava-ops-delivery-stalled-backlog",
     "ava-ops-events-freshness",
+    "ava-ops-gateway-metrics-silent",
     "ava-ops-trace-disk-watermark",
     "ava-ops-llm-billing-quota",
     # slow-request layer (task #1399) — user-visible latency, warning-first
@@ -84,7 +85,7 @@ def _load_rules() -> list[dict[str, Any]]:
     assert [group["name"] for group in groups] == ["ava-ops", "ava-ops-slow"]
     assert [group["folder"] for group in groups] == ["Ava", "Ava"]
     assert [group["interval"] for group in groups] == ["1m", "5m"]
-    assert [len(group["rules"]) for group in groups] == [16, 3]
+    assert [len(group["rules"]) for group in groups] == [17, 3]
     return [rule for group in groups for rule in group["rules"]]
 
 
@@ -203,6 +204,18 @@ def test_freshness_rule_is_absent_over_time() -> None:
     assert any("absent_over_time" in e for e in exprs)
     assert any("[5m]" in e for e in exprs)
     assert _threshold_params(rules["ava-ops-events-freshness"]) == [[0]]
+
+
+def test_gateway_metrics_silence_rule_uses_heartbeat_counter() -> None:
+    """The gateway-exporter blind spot is watched through Prometheus itself,
+    independently of events reaching Loki."""
+    rules = {r["uid"]: r for r in _load_rules()}
+    rule = rules["ava-ops-gateway-metrics-silent"]
+    assert _exprs(rule, "prometheus") == ["absent_over_time(ava_gateway_latency_count_total[5m])"]
+    assert _threshold_params(rule) == [[0]]
+    assert rule["for"] == "5m"
+    assert rule["noDataState"] == "OK"
+    assert rule["execErrState"] == "OK"
 
 
 def test_latency_rule_uses_prometheus_histogram() -> None:

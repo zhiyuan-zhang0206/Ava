@@ -48,6 +48,7 @@ Browser (frontend:3000) ──HTTP──▶ Gateway (:8000) ──▶ Postgres /
 - [[routers.ava.okf.md]] — per-domain router modules in `gateway/routers/` (incl. `okf_graph.py` and `default_model.py`)
 - [[sse.ava.okf.md]] — Redis → SSE event stream
 - [[gateway/routers/ops-monitor.ava.okf.md]] — `GET /api/ops/monitor` ops panel series
+- [[telemetry-staleness.ava.okf.md]] — Loki/Prometheus heartbeat guard for stale telemetry reads
 - [[scheduler.ava.okf.md]] — ScheduleManager + ScheduleRunner
 - [[db.ava.okf.md]] — Postgres connection pool
 

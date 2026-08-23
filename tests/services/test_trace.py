@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import threading
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -15,10 +16,24 @@ from shared.trace import OtlpJsonHttpSpanExporter, initialize_tracing, turn_span
 
 @pytest.fixture(autouse=True)
 def _reset_init_flag():
-    """Reset the module-level _initialized flag between tests."""
-    trace_mod._state["initialized"] = False
+    """Reset trace-init and retry-loop state between tests."""
+    trace_mod._state.clear()
+    trace_mod._state.update(
+        initialized=False,
+        collector_offline_reported=False,
+        retry_thread=None,
+    )
     yield
-    trace_mod._state["initialized"] = False
+    trace_mod._state["initialized"] = True
+    retry_thread = trace_mod._state["retry_thread"]
+    if isinstance(retry_thread, threading.Thread):
+        retry_thread.join(timeout=0.25)
+    trace_mod._state.clear()
+    trace_mod._state.update(
+        initialized=False,
+        collector_offline_reported=False,
+        retry_thread=None,
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -118,6 +133,54 @@ def test_idempotent_second_call_is_noop(monkeypatch: pytest.MonkeyPatch, tmp_pat
     initialize_tracing()
 
     assert len(calls) == 1  # pyright: ignore[reportUnknownArgumentType]
+
+
+def test_collector_unreachable_retries_once_until_init_succeeds(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """One daemon loop retries a collector-unreachable preflight, logs the
+    episode once, and exits after tracing initializes."""
+    monkeypatch.setattr("shared.config.settings.observability.trace_enabled", True)
+    monkeypatch.setattr("shared.trace.traces_dir", lambda: tmp_path)
+    monkeypatch.setattr("shared.trace.COLLECTOR_RETRY_INTERVAL_S", 0.1)
+    _under_watermark(monkeypatch)
+
+    reachable = iter((False, False, True))
+    attempts: list[bool] = []
+
+    def endpoint_reachable(_endpoint: str) -> bool:
+        result = next(reachable)
+        attempts.append(result)
+        return result
+
+    monkeypatch.setattr("shared.trace.endpoint_reachable", endpoint_reachable)
+    warnings: list[str] = []
+
+    def capture_warning(message: str, *_args: object, **_kwargs: object) -> None:
+        warnings.append(message)
+
+    monkeypatch.setattr(trace_mod.logger, "warning", capture_warning)
+    initialized = threading.Event()
+
+    def init_traceloop(**_kwargs: object) -> None:
+        initialized.set()
+
+    monkeypatch.setattr("traceloop.sdk.Traceloop.init", init_traceloop)
+
+    initialize_tracing()
+    retry_thread = trace_mod._state["retry_thread"]
+    assert isinstance(retry_thread, threading.Thread)
+
+    initialize_tracing()
+    assert trace_mod._state["retry_thread"] is retry_thread
+    assert initialized.wait(timeout=1.0)
+    retry_thread.join(timeout=0.5)
+
+    assert attempts == [False, False, True]
+    assert warnings == ["trace recording disabled — local OTel collector not answering"]
+    assert trace_mod._state["initialized"] is True
+    assert trace_mod._state["collector_offline_reported"] is False
+    assert not retry_thread.is_alive()
 
 
 # --- OtlpJsonHttpSpanExporter ---------------------------------------------------

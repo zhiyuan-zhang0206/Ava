@@ -6,10 +6,16 @@ import pytest
 from fastapi.testclient import TestClient
 from psycopg import errors as pg_errors
 
-from gateway import loki_events, prom_metrics
+from gateway import loki_events, prom_metrics, telemetry_staleness
 from gateway.app import app
 from gateway.schemas import FleetGraphNode, FleetGraphResponse
+from shared import telemetry
 from shared.agents import AgentStatus
+
+
+def _fresh_heartbeat_age(*, timeout_s: float | None = None) -> float:
+    del timeout_s
+    return 30.0
 
 
 class _FakeRedis:
@@ -41,6 +47,22 @@ class _RedisFactory:
 
     def __call__(self, **_kwargs: object) -> _FakeRedis:
         return self._redis
+
+
+@pytest.fixture(autouse=True)
+def _fresh_telemetry_heartbeat(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Existing resilience cases isolate their named upstream failure."""
+    monkeypatch.setattr(
+        telemetry_staleness,
+        "prometheus_heartbeat_age",
+        _fresh_heartbeat_age,
+    )
+    monkeypatch.setattr(
+        telemetry_staleness,
+        "loki_heartbeat_age",
+        _fresh_heartbeat_age,
+    )
+    monkeypatch.setattr(telemetry_staleness, "_source_states", {})
 
 
 def _seed_agent(db_conn: psycopg.Connection) -> int:
@@ -112,6 +134,47 @@ def test_success_writes_short_cache_and_last_good_graph(
         key: 60,
         f"fleet_graph:last_good:{key}": fg._LAST_GOOD_CACHE_TTL_SECONDS,
     }
+
+
+def test_stale_heartbeat_marks_response_and_skips_all_cache_writes(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Successful source queries with an old heartbeat stay visible but are
+    marked stale and cannot replace either graph cache."""
+    _seed_agent(db_conn)
+    redis = _FakeRedis()
+
+    import gateway.routers.fleet_graph as fg
+
+    monkeypatch.setattr(fg, "sync_redis", _RedisFactory(redis))
+    monkeypatch.setattr(loki_events, "query_events", _empty_loki)
+    monkeypatch.setattr(prom_metrics, "sum_by", _empty_prom)
+
+    def missing_heartbeat(*, timeout_s: float | None = None) -> None:
+        del timeout_s
+
+    monkeypatch.setattr(telemetry_staleness, "prometheus_heartbeat_age", missing_heartbeat)
+    emitted: list[tuple[str, dict[str, object]]] = []
+
+    def capture_emit(
+        _category: str,
+        event_name: str,
+        *,
+        attributes: dict[str, object],
+        **_kwargs: object,
+    ) -> None:
+        emitted.append((event_name, attributes))
+
+    monkeypatch.setattr(telemetry, "emit", capture_emit)
+
+    with TestClient(app) as client:
+        resp = client.get("/api/fleet/graph")
+
+    assert resp.status_code == 200
+    assert resp.json()["stale"] is True
+    assert redis.writes == []
+    assert emitted[0][0] == "telemetry_read_stale"
+    assert emitted[0][1]["source"] == "prometheus"
 
 
 def test_loki_failure_serves_last_good_graph_without_writing_short_cache(

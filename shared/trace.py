@@ -42,7 +42,9 @@ that turn nests under it and the trace exports the moment the turn ends. The
 root carries the vendor-neutral `session.id` (Tempo/Grafana group one agent's
 turns into a session by it) plus `ava.turn` (the per-process turn counter).
 
-Idempotent: the _initialized guard prevents a second init.
+Idempotent: the _initialized guard prevents a second init. A collector miss at
+startup logs once, then one daemon loop retries every five minutes until trace
+recording comes up; disk-watermark auto-degrade remains a deliberate no-retry.
 
 History: Laminar -> Langfuse 2026-06-06; Langfuse -> Tempo (LGTM) 2026-08-11;
 agent-side mirror -> local collector sidecar (task #1266) 2026-08-14.
@@ -55,9 +57,11 @@ import json
 import os
 import re
 import shutil
+import threading
 import time
-from collections.abc import Generator, Sequence
+from collections.abc import Callable, Generator, Sequence
 from datetime import UTC, date, datetime, timedelta
+from functools import wraps
 from pathlib import Path
 from typing import Any
 
@@ -68,7 +72,7 @@ from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
 from shared.config import settings
 from shared.log import logger
 from shared.paths import traces_dir
-from shared.telemetry_otlp import endpoint_reachable
+from shared.telemetry_otlp import COLLECTOR_RETRY_INTERVAL_S, endpoint_reachable
 
 # Span attribute keys.
 #
@@ -181,11 +185,15 @@ def _strip_content_attributes(otlp: dict[str, Any]) -> None:
                         ev.pop("attributes", None)
 
 
-# Module-level mutable state for idempotent init guard.
+# Module-level mutable state for the idempotent init guard and collector retry.
 # Dict mutation avoids ruff PLW0603 (global statement) while keeping
-# the same observable semantics: write `_state["initialized"] = True` instead
-# of `global _initialized; _initialized = True`.
-_state: dict[str, bool] = {"initialized": False}
+# the same observable semantics without global assignment statements.
+_state: dict[str, Any] = {
+    "initialized": False,
+    "collector_offline_reported": False,
+    "retry_thread": None,
+}
+_init_lock = threading.Lock()
 
 # Mirror filenames (sidecar file exporter layout since task #1266):
 #   spans.jsonl                          — the ACTIVE file the collector appends to
@@ -437,6 +445,40 @@ class OtlpJsonHttpSpanExporter(SpanExporter):
         return None
 
 
+def _retry_initialize_tracing() -> None:
+    """Retry the collector preflight on one daemon thread until init succeeds."""
+    while not _state["initialized"]:
+        time.sleep(COLLECTOR_RETRY_INTERVAL_S)
+        if _state["initialized"]:
+            return
+        initialize_tracing()
+
+
+def _start_collector_retry() -> None:
+    retry_thread = _state["retry_thread"]
+    if isinstance(retry_thread, threading.Thread) and retry_thread.is_alive():
+        return
+    retry_thread = threading.Thread(
+        target=_retry_initialize_tracing,
+        daemon=True,
+        name="trace-collector-retry",
+    )
+    _state["retry_thread"] = retry_thread
+    retry_thread.start()
+
+
+def _serialized_initialize(function: Callable[[], None]) -> Callable[[], None]:
+    """Apply the module init lock while preserving the public docstring."""
+
+    @wraps(function)
+    def serialized() -> None:
+        with _init_lock:
+            function()
+
+    return serialized
+
+
+@_serialized_initialize
 def initialize_tracing() -> None:
     """Initialize OTel span recording to the local collector. Idempotent.
 
@@ -452,9 +494,8 @@ def initialize_tracing() -> None:
     JSONL mirror and either fans out locally or relays to the gateway. Its
     queues decouple ordinary backend outages, while prolonged pressure can
     still return backpressure before the mirror. If the sidecar itself is not
-    answering at init, recording stays off for this process (reported) — the
-    same init-time tradeoff the events exporter makes; the watchdog revives
-    the sidecar within a minute and the next process start re-checks.
+    answering at init, recording stays off temporarily: the episode is logged
+    once and one daemon loop re-checks every five minutes until init succeeds.
 
     Guards (each independently configurable):
     - disk watermark (`trace_disk_watermark`): data disk over the fraction ->
@@ -499,16 +540,19 @@ def initialize_tracing() -> None:
     # Local-collector preflight: recording IS an OTLP export now, so a missing
     # sidecar means no recording (and no mirror — the mirror is written by the
     # collector). Skip with a warning event instead of arming an exporter that
-    # fails every batch; the watchdog brings the sidecar back and the next
-    # process start re-checks.
+    # fails every batch. One daemon retry loop re-checks at the exporter retry
+    # cadence, while repeated callers in the same episode stay quiet.
     endpoint = settings.observability.telemetry_otlp_endpoint
     if not endpoint_reachable(endpoint):
-        logger.warning(
-            "trace recording disabled — local OTel collector not answering",
-            event="trace",
-            action="recording_disabled_collector_unreachable",
-            endpoint=endpoint,
-        )
+        if not _state["collector_offline_reported"]:
+            logger.warning(
+                "trace recording disabled — local OTel collector not answering",
+                event="trace",
+                action="recording_disabled_collector_unreachable",
+                endpoint=endpoint,
+            )
+            _state["collector_offline_reported"] = True
+        _start_collector_retry()
         return
 
     # Content stripping, layer 1 (the source): the openllmetry instrumentors
@@ -555,6 +599,7 @@ def initialize_tracing() -> None:
         endpoint=endpoint,
         mirror_dir=str(traces_dir()),
     )
+    _state["collector_offline_reported"] = False
     _state["initialized"] = True
 
 

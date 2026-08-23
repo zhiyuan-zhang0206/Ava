@@ -12,6 +12,10 @@ Data sources (task #1197 LGTM cutover):
   frozen PG `events` archive (pre-cutover structural history) stitched with
   Loki (the live tail). Task #1281 imports the archive into Loki, after
   which the PG side collapses and this read becomes Loki-only.
+
+Successful Prometheus/Loki reads also pass through the gateway-latency
+heartbeat guard. Old or missing heartbeat samples keep the fetched data but
+mark it stale and prevent it from replacing either Redis cache.
 """
 
 from __future__ import annotations
@@ -24,7 +28,7 @@ import httpx
 from fastapi import APIRouter, Query, Request
 from psycopg import errors as pg_errors
 
-from gateway import loki_events, loki_query_budget, prom_metrics
+from gateway import loki_events, loki_query_budget, prom_metrics, telemetry_staleness
 from gateway.schemas import FleetGraphEdge, FleetGraphNode, FleetGraphResponse, StatsWindowHours
 from shared.log import logger
 from shared.redis_client import sync_redis
@@ -103,6 +107,30 @@ def _stale_graph(key: str, nodes: list[FleetGraphNode]) -> FleetGraphResponse:
     if last_good is not None:
         return last_good.model_copy(update={"stale": True})
     return FleetGraphResponse(nodes=nodes, edges=[], stale=True)
+
+
+def _finalize_graph_response(
+    *, key: str, nodes: list[FleetGraphNode], edges: list[FleetGraphEdge]
+) -> FleetGraphResponse:
+    """Mark heartbeat staleness and cache only a fresh full response."""
+    try:
+        stale = telemetry_staleness.check_and_report(timeout_s=3.0)
+    except Exception as exc:
+        logger.debug("fleet_graph telemetry staleness guard failed open: {}", exc)
+        stale = False
+
+    response = FleetGraphResponse(nodes=nodes, edges=edges, stale=stale)
+    if stale:
+        return response
+    try:
+        with sync_redis(decode_responses=True) as redis:
+            serialized = response.model_dump_json()
+            redis.set(_last_good_cache_key(key), serialized, ex=_LAST_GOOD_CACHE_TTL_SECONDS)
+            redis.set(key, serialized, ex=_CACHE_TTL_SECONDS)
+    except Exception as exc:
+        # Fail-open: a cache write failure must not fail the response.
+        logger.debug("fleet_graph cache write failed: {}", exc)
+    return response
 
 
 def _fetch_loki_edges(*, boundary: datetime | None, now: datetime) -> list[dict[str, Any]]:
@@ -459,13 +487,4 @@ def get_fleet_graph(
         decay_lambda=decay_lambda,
     )
 
-    response = FleetGraphResponse(nodes=nodes, edges=edges)
-    try:
-        with sync_redis(decode_responses=True) as redis:
-            serialized = response.model_dump_json()
-            redis.set(_last_good_cache_key(key), serialized, ex=_LAST_GOOD_CACHE_TTL_SECONDS)
-            redis.set(key, serialized, ex=_CACHE_TTL_SECONDS)
-    except Exception as exc:
-        # Fail-open: a cache write failure must not fail the response.
-        logger.debug("fleet_graph cache write failed: {}", exc)
-    return response
+    return _finalize_graph_response(key=key, nodes=nodes, edges=edges)

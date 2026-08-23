@@ -1060,7 +1060,7 @@ on every restart anyway.
 producer-scoped — the event dual-write, trace recording and ship, all things
 Ava processes do — and the sidecar has always run ungated by it. Infra metrics
 are the collector's own scrapes, so a machine can report host health while the
-event stream is Postgres-only. To silence them, stop the sidecar
+event stream is reduced to its JSONL mirror. To silence them, stop the sidecar
 (`ava start --disable-service otel-collector`) or the stack (`ava lgtm off`);
 with no backend reachable the Prometheus exporter's bounded retry drops them
 the same way it already drops app metrics.
@@ -1074,8 +1074,10 @@ runs, and it filters by process NAME, which cannot separate an Ava agent from
 any other `python3.12` on the box.
 
 The whole OTLP surface (exporter + trace recording + ship) is gated by
-`AVA_TELEMETRY_OTLP_ENABLED` (default **on**); off = Postgres-only writes, one
-kill switch. Applies on the next process start.
+`AVA_TELEMETRY_OTLP_ENABLED` (default **on**); off leaves the JSONL mirror only
+and freezes Loki, Prometheus, and their read surfaces at the last exported
+data. There is no Postgres fallback: `events` is a read-only archive. This is
+one startup-applied kill switch, so a change requires a process restart.
 
 **LGTM backend lifecycle** — home-scoped native launchd jobs
 `com.ava.loki.<home-slug>` and `com.ava.prometheus.<home-slug>` (GOMEMLIMIT
@@ -1123,8 +1125,10 @@ process). The sidecar's file exporter mirrors each batch line-for-line to
 source of truth (any OTLP backend ingests the same lines; rotation bounds the
 directory by size/day/backups, and the agent-start prune enforces
 `AVA_TRACE_RETENTION_DAYS` / `AVA_TRACE_MAX_DIR_MB` as the final guard). A
-sidecar not answering at agent init disables recording for that process
-(reported) — the same init-time tradeoff the events exporter makes.
+sidecar not answering at agent init reports once and starts one daemon retry
+loop. Both the trace precheck and event exporter retry every five minutes; the
+event exporter records disabled/recovered attempts as real events in the JSONL
+mirror that survives the outage.
 
 **Ship** — `ava trace ship` (`cli/commands/trace.py`). Recovery replay reads
 the mirror and bypasses the LOCAL sidecar, because replaying through it would
