@@ -738,6 +738,35 @@ describe("Composer context breakdown panel", () => {
 });
 
 describe("Composer file upload (drag + paste)", () => {
+  it("does not show the file-upload hint when no file delivery is in flight", () => {
+    render(<Composer {...baseProps} mode="idle" filesUploading={false} />);
+    expect(screen.queryByTestId("composer-upload-hint")).toBeNull();
+  });
+
+  it("shows the file-upload hint without blocking Enter-to-send", async () => {
+    const onSend = vi.fn(() => Promise.resolve(true));
+    render(
+      <Composer
+        {...baseProps}
+        mode="idle"
+        filesUploading
+        onSend={onSend}
+      />,
+    );
+
+    expect(screen.getByTestId("composer-upload-hint").textContent).toBe(
+      "Uploading file(s) — Enter sends the text now; files are delivered when the upload finishes.",
+    );
+
+    const textarea = screen.getByTestId("composer-input");
+    fireEvent.change(textarea, { target: { value: "send this now" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+
+    await waitFor(() =>
+      expect(onSend).toHaveBeenCalledWith("send this now", [], expect.any(String)),
+    );
+  });
+
   it("dropping files calls onUploadFiles", () => {
     const onUploadFiles = vi.fn();
     render(<Composer {...baseProps} mode="idle" onUploadFiles={onUploadFiles} />);

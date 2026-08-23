@@ -21,6 +21,7 @@
     "composerInput": "Message your agent",
     "composerPlaceholder": "send a message",
     "composerPlaceholderResurrect": "send a message to resurrect this agent",
+    "filesUploadingHint": "Uploading file(s) — Enter sends the text now; files are delivered when the upload finishes.",
     "deliveryUnconfirmedStatus": "Delivery unconfirmed. Reconcile this message before sending another.",
     "deliveryUnconfirmedToast": "Delivery unconfirmed. Retry the same message to reconcile it, or explicitly send another.",
     "retrySameMessage": "Retry same message",
