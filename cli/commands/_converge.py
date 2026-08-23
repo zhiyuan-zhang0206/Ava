@@ -33,6 +33,7 @@ from cli.commands._converge_os_jobs import (
 from cli.commands._converge_spec import ALL_ROLES, ConvergeCtx, ConvergeStep
 from cli.commands._health_preflight import ensure_health_preflight as _ensure_health_preflight
 from cli.commands._lgtm import ensure_lgtm_stack_step
+from cli.commands._lgtm_native import ensure_lgtm_native_step
 from cli.commands._otel_collector import ensure_otel_collector_step
 from cli.commands._pgbouncer import _ensure_pgbouncer_step
 from cli.commands._port_preflight import ensure_port_preflight as _ensure_port_preflight
@@ -549,6 +550,7 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
         requires_unit_config=True,
     ),
     ConvergeStep("otel collector sidecar", ensure_otel_collector_step, requires_unit_config=True),
+    ConvergeStep("lgtm native backends", ensure_lgtm_native_step),
     # The LGTM observability backend (deploy/lgtm compose stack) — a host
     # singleton, so the step is gated on the $AVA_HOME/lgtm-host marker file
     # inside, not on roles: only the one home the operator marked brings it up;

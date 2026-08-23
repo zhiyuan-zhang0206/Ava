@@ -1,236 +1,131 @@
 # LGTM observability backend
 
-A **Tempo + Loki + Prometheus + Grafana** stack, co-located with the gateway
-host, serving as the cluster's observability backend. Decided 2026-08-11
-(task #1170): no Langfuse machine; the most general OTel stack, self-hosted.
-
-The gateway depends on it: this stack is **required serving infrastructure
-while the gateway serves /ops and the inspect endpoints**. Live consumers:
-
-- **gateway read paths** — `gateway/loki_events.py` (event history from Loki)
-  and `gateway/prom_metrics.py` (telemetry aggregates from Prometheus) back
-  the /ops and inspect endpoints.
-- **ops alerting** — the Grafana container's embedded Alertmanager evaluates
-  the provisioned alert rules and fires the gateway webhook
-  (`gateway/routers/alerts.py`); with the stack down, no ops alert fires.
-- **events-maintenance** — the rollup aggregates from Loki.
-- **`ava cluster health`** — audits crash loops from the Loki event stream
-  (`cli/commands/_cluster_health.py`; it fails OPEN — reports healthy — when
-  Loki is unreachable, so a down stack silently blinds that audit).
+The LGTM host is the cluster's observability backend for logs, metrics, traces,
+and the Grafana UI. It is required while the gateway serves `/ops` and the
+inspect endpoints: gateway read paths query Loki and Prometheus, Grafana
+evaluates alert rules, the events-maintenance rollup reads Loki, and `ava
+cluster health` audits Loki event history.
 
 ## Lifecycle ownership
 
-The stack is a **host singleton** (fixed host ports, one compose project per
-box), owned by the Ava lifecycle on exactly one home: the host carrying the
-**`$AVA_HOME/lgtm-host` marker file** (machine-identity-file pattern, created
-once by the operator — in practice the prod default home `~/.ava`):
+This is a host singleton with fixed ports, owned by the one home carrying
+`$AVA_HOME/lgtm-host`. A home without the marker never installs, starts, or
+stops these backends.
 
 ```bash
-ava lgtm on   # designate this host/home as the LGTM owner + bring the stack up
+ava lgtm on
 ```
 
-(`ava lgtm on` writes the marker and runs `start.sh`; `ava lgtm off` removes
-it and takes the stack down — volumes persist, so on/off is a clean A/B for
-measuring observability's own overhead. `ava lgtm status` shows marker +
-containers + readiness probes.)
+`ava lgtm on` writes the marker, installs missing pinned native binaries, and
+runs the idempotent launcher. With the marker present, every converge runs the
+same launcher and the gateway watchdog re-runs it after a connection-level
+readiness failure. The launcher probes native processes first, so a live Loki,
+Prometheus, or Promtail process is never restarted by the watchdog. `ava
+lgtm status` and `ava status` show native job PIDs, the compose services, and
+the readiness probes.
 
-With the marker present:
-
-- **converge** (every `ava start` / `ava cluster update`, and standalone
-  `ava converge`) runs the idempotent `start.sh`;
-- the **gateway watchdog** probes the four readiness endpoints every 60s
-  (`services/healthchecks/lgtm.py`) and re-runs `start.sh` on a
-  connection-level failure — this is the restore mechanism after a
-  reboot/OrbStack crash (the compose `restart: unless-stopped` policy only
-  fires once the docker daemon itself is back up);
-- **`ava status`** shows an LGTM section (compose containers + probes).
-
-A home without the marker never touches the containers — a dev worktree
-cluster's converge/watchdog no-op here, so they cannot recreate prod's
-running containers from a dev checkout's configs.
-
-## Why this stack
-
-| Criterion | Choice |
-|---|---|
-| 通用性 | Tempo 是 Grafana Labs 的 OTLP 原生 trace 后端，与 Loki/Prometheus 共用 Grafana 一个 UI |
-| 成熟度 | LGTM 是当前自托管可观测性事实标准组合 |
-| 本地部署 | docker compose 单机跑 5 容器；OrbStack 已装 |
-| UI | Grafana 13（统一 trace/log/metric 探索，Tempo 数据源原生支持 trace 瀑布图） |
-
-Tempo 官方不发布 macOS 二进制（仅 linux/windows），所以当前启动器走
-docker compose。容器不是配置边界：Grafana 的固定运行时行为在
-`config/grafana/runtime.env`，由当前 compose 启动器和后续 native 启动器
-共同消费；CI 也用官方原生 Grafana 二进制验证该文件。Loki/Prometheus/
-Grafana 均有原生二进制，启动器原生化时不得把这些行为重新写成一份。
-被否决的候选：Jaeger v2（原生 macOS、CNCF 毕业，但只有 trace 没有
-log/metrics，且 UI 单独一套）；SigNoz（ClickHouse 过重）；Zipkin（老、UI 弱）。
+The marker gate also protects dev worktrees: their converge and watchdog paths
+are no-ops unless that worktree home is explicitly marked.
 
 ## What it runs
 
-| Container | Image (pinned) | Ports (host) | Role |
-|---|---|---|---|
-| tempo | grafana/tempo:3.0.2 | 3200 query, 14318 OTLP/HTTP | trace backend (local block storage) |
-| loki | grafana/loki:3.7.6 | 3100 | log backend (filesystem, 7d retention; native OTLP ingest at /otlp/v1/logs) |
-| promtail | grafana/promtail:3.6.0 | — | tails `$AVA_HOME/logs/*.out.log` + updater/rollout tees into Loki |
-| prometheus | prom/prometheus:v3.13.2 | 9090 | metrics (self-scrape + OTLP receiver) |
-| grafana | grafana/grafana:13.1.3 | 3003 | unified UI (anonymous viewer) |
+| Backend | Delivery | Version / limit | Port | Role |
+|---|---|---|---|---|
+| Loki | native launchd | 3.7.6 / `GOMEMLIMIT=2GiB` | 3100 | log backend, filesystem storage, 7-day retention |
+| Prometheus | native launchd | 3.13.2 / `GOMEMLIMIT=1GiB` | 9090 | metrics and OTLP receiver |
+| Promtail | native launchd | 3.6.0 / `GOMEMLIMIT=256MiB` | 9080 | session-log shipping into Loki |
+| Tempo | compose container | `grafana/tempo:3.0.2`, 1 core / 768MiB | 3200, 14318 | trace backend |
+| Grafana | compose container | `grafana/grafana:13.1.3`, 2 cores / 2GiB | 3003 | anonymous read-only UI |
 
-No otel-collector container since task #1266: the OTLP entry is the **native
-per-machine sidecar** (`ava-otel-collector` session, supervised by the
-watchdog) on host 4318 (OTLP/HTTP). On the gateway it fans out to these
-loopback backends. A pure runner instead relays all three signals to the
-gateway collector's bearer-authenticated receiver bound only to the exact
-`AVA_MACHINE_HOST:4318`; backend ports are never exposed. Every collector
-mirrors locally produced traces to `$AVA_HOME/traces/spans.jsonl`. Trace/log
-exporters use persistent file-backed queues with unlimited retry; metrics use
-a bounded in-memory queue and retry window, then shed old points (cumulative
-metrics repair on the next successful sample).
+The pinned release assets and SHA256 values live in
+[`native/versions.yml`](native/versions.yml). Converge verifies an archive
+before extraction, writes it under `$AVA_HOME/lgtm/native/bin/`, and records a
+per-backend version marker. Unsupported platforms warn and skip: only the
+designated macOS arm64 host has native assets today.
 
-Data lives in docker named volumes (`tempo-data`, `loki-data`, `prom-data`,
-`grafana-data`) — `docker compose down` keeps them, `down -v` wipes them.
-`restart: unless-stopped`: a crashed/OOM-killed backend recovers by itself and
-containers come back with the docker daemon after a reboot; a clean `stop.sh`
-(compose down) removes them, so it sticks against the restart policy — but
-see the watchdog note below.
+Native templates in `native/config/` are rendered on every converge into
+`$AVA_HOME/lgtm/native/config/`. Loki's limits and query defenses are copied
+from the rollback configuration and must remain aligned. Native backend
+listeners bind loopback only; Grafana reaches Loki and Prometheus through
+`host.docker.internal`, with environment overrides available for exceptional
+deployments.
 
-Resource + retention posture (single 16GB box shared with the prod cluster):
-every container carries explicit `cpus`/`mem_limit` caps (~6.5 cores / ~6GB
-ceiling in total), Loki's query fan-out is bounded (24h splits, parallelism 4,
-embedded result caches), Prometheus retention is explicit (90d time / 8GB
-size — whichever hits first), and Tempo states its 168h block retention
-instead of inheriting the upstream default. The unauthenticated backend ports
-(Loki 3100, Prometheus 9090, Tempo 3200/14318) are unconditionally bound to
-127.0.0.1. Remote writers cross only the authenticated collector receiver on
-the gateway's exact private address; no `0.0.0.0`/`::` listener and no backend
-bind override exist. Grafana (3003) keeps the wider bind: it is the one
-anonymous-but-read-only surface. Grafana has a 2-core / 2GB ceiling; its SQLite
-metadata store retries lock-conflicted queries up to five times with Grafana's
-bounded backoff. (`wal=true` is not used: Grafana 13.1.3's modernc SQLite DSN
-adapter does not correctly apply that pragma.) Grafana Live is disabled because
-no shipped dashboard uses it.
+## Why this stack
 
-## Start / stop
+One Grafana UI over Loki, Prometheus, and Tempo gives operators native LogQL,
+metrics, and trace exploration while keeping the rest of the product's OTel
+pipeline unchanged. Loki, Prometheus, and Promtail use verified native release
+assets on the LGTM host; Tempo and Grafana remain pinned compose services. The
+native collector sidecar is still the one local OTLP entry on port 4318 and
+fans out only to loopback backend listeners.
 
-```bash
-bash deploy/lgtm/start.sh   # idempotent; auto-starts OrbStack if needed (macOS)
-bash deploy/lgtm/stop.sh    # stops; data persists
-```
+## Resource and retention posture
 
-On the marked LGTM host the lifecycle owns the stack: converge re-runs
-`start.sh` on every `ava start`, and the gateway watchdog revives a stack
-whose probes hit connection failures within ~a minute. A deliberate stop
-there is `ava lgtm off` (removes the marker, then runs `stop.sh`);
-`ava start --disable-service lgtm` remains the durable skip that keeps the
-designation. While the stack is down the gateway's /ops + inspect reads,
-ops alerting, and the events-maintenance rollup degrade; the native sidecar
-persists accepted trace/log batches for later delivery. Metrics retry in
-bounded memory for 15 minutes and may shed old points; cumulative series
-repair on a later successful sample.
+Loki and Prometheus use explicit Go memory limits rather than container memory
+caps. Loki retains normal streams for seven days, preserves the configured
+archive-stream exception, and keeps bounded query splitting, fan-out, and
+embedded result caches. Prometheus retains data for 90 days or 8GB, whichever
+limit is reached first. Tempo declares its 168-hour block retention. The two
+container services retain explicit CPU and memory capsules, and native logs
+are written to `$AVA_HOME/lgtm/native/logs/`.
 
-## Session logs in Loki (2026-08-12)
+All unauthenticated backend APIs remain loopback-only: Loki 3100, Prometheus
+9090, Tempo 3200 and 14318. Grafana 3003 is the intended wider,
+anonymous-but-read-only surface.
 
-Session stdout (`$AVA_HOME/logs/*.out.log` — gateway, rollout, frontend,
-`ava-agent-<id>`, `ava-schedule-<id>`, agent shells) is tailed into Loki by
-promtail, plus the updater/rollout POSIX tee files (`updater-*.log`,
-`rollout-*.log`). The write-side `ava logs` CLI was removed the same day —
-Loki is the one query path for raw session output.
-
-Labels:
-
-| Label | Values |
-|---|---|
-| `job` | `ava-sessions` (all `*.out.log`) / `ava-orchestration` (updater+rollout tees) |
-| `service` | the session name (`ava-gateway`, `ava-agent-1818`, `ava-agent-7-shell-0-uv-sync`, …) |
-
-Not ingested (by design): `agent-<id>.log` / `agent-<id>.stderr.log` (loguru)
-— that content already reaches Loki structured through the OTLP event stream
-under `service_name`, so a second raw copy would only double the volume.
-Note the two label namespaces: raw session logs use `service`, OTLP events
-use `service_name`.
-
-Retention: 7 days (`loki.yaml` → `limits_config.retention_period` +
-`compactor.retention_enabled`), matching the write-side JSONL mirror. The
-initial bring-up backfills the existing logs dir (~130MB across ~2000 files)
-once; steady state adds roughly ~20MB/day.
-
-Config changes apply with `docker compose restart loki promtail` (configs are
-bind-mounted read-only; neither service reloads on its own). The prod copy of
-these files lives at `~/.ava/source/deploy/lgtm/` — it picks the change
-up on the next `ava cluster update`, and then needs the same restart. The
-logs-dir bind defaults to `~/.ava/logs` (the operator's `$HOME` — no
-machine-specific path is baked in); override with `AVA_LOGS_DIR=/path/to/logs
-bash start.sh`.
-
-Query paths:
+## Start, stop, and rollback
 
 ```bash
-# Grafana (anonymous viewer) — Explore > Loki datasource:
-{job="ava-sessions"} |= "error"
-{service="ava-gateway"}
-{service=~"ava-agent-.+"} |~ "(?i)traceback"
-
-# logcli (if installed on the host):
-logcli --addr http://127.0.0.1:3100 query '{service="ava-gateway"}' --since=1h --limit=100
-logcli --addr http://127.0.0.1:3100 query '{service="ava-agent-1818"}' --tail
-
-# Loki HTTP API (any host):
-curl -G -s http://127.0.0.1:3100/loki/api/v1/query \
-  --data-urlencode 'query={service="ava-gateway"}' \
-  --data-urlencode 'limit=50' \
-  --data-urlencode 'time='$(date +%s)000000000
+ava lgtm on                 # install current native pins, then start all backends
+bash deploy/lgtm/start.sh   # idempotent lifecycle launcher
+bash deploy/lgtm/stop.sh    # stop native jobs and Tempo/Grafana; keep volumes
+ava lgtm off                # remove marker first, then stop deliberately
 ```
 
-## Access
+`start.sh` rejects a missing native binary before it touches Docker. It starts
+the Docker daemon when necessary, runs `docker compose up -d` for Tempo and
+Grafana, and bootstraps a native job only when its HTTP listener does not
+answer. A newly bootstrapped job must answer within 30 seconds or the launcher
+fails loudly.
 
-- Grafana: http://localhost:3003 (anonymous viewer, no login; Viewer may use
-  Explore and temporary panel edits but still cannot save dashboards; set
-  `GRAFANA_ROOT_URL` in `.env` when the UI is reached through a different
-  host, e.g. a VPN overlay address)
-  - Tempo datasource (default) — Explore > Traces: search/waterfall once the
-    exporter ships traces
-  - Loki datasource — Explore > Logs
-  - Prometheus datasource — Explore > Metrics
-- OTLP ingest: every producer uses its NATIVE local sidecar at
-  `http://127.0.0.1:4318`. The gateway additionally serves an authenticated
-  receiver at its exact `AVA_MACHINE_HOST:4318` for pure-runner collectors.
-  `ava trace ship` bypasses its local sidecar to avoid re-mirroring: gateway
-  units send to loopback Tempo; pure runners send to that authenticated remote
-  receiver with the cluster bearer.
+For a controlled configuration restart, converge the changed templates and
+then use `ava lgtm off` followed by `ava lgtm on`. This is deliberate: the
+watchdog does not restart a working backend just to apply a configuration
+change.
 
-## Write-side contract (and what "required" means)
+Rollback keeps all five historical compose volumes. Stop the hybrid stack,
+restore the earlier `docker-compose.yml` and backend configs from git, then
+run `docker compose up -d`; the retained Loki, Prometheus, and Promtail
+volumes make the container path available without reinitializing data.
 
-- **Producers are untouched**: nothing here writes to `~/.ava/traces` (the
-  mirror — the sidecar does), the events table, or any main-flow service. The
-  only touch on `$AVA_HOME` is promtail's read-only bind of `$AVA_HOME/logs`
-  (session stdout → Loki).
-- **The READ side is load-bearing**: the gateway's /ops + inspect endpoints,
-  ops alerting (Grafana's Alertmanager → gateway webhook), the
-  events-maintenance rollup, and `ava cluster health` all consume this stack
-  (see the consumer list at the top). It is not a stop-anytime viewer — on
-  the marked host the lifecycle keeps it up.
-- The old Jaeger v2 experiment (an earlier viewer-only role, replaced by this
-  stack) is archived at `~/.ava/traces-viewer/` — stopped, harmless, removable.
+## Session logs in Loki
 
-## Environment (optional `.env`)
+Promtail continues to ship session stdout and orchestration tee logs with the
+existing `job` and `service` labels. Its native positions file is
+`$AVA_HOME/lgtm/native/data/positions/positions.yaml`, so a process restart
+does not replay the entire log history. Structured agent logs still arrive
+through the collector's OTLP path rather than being scraped a second time.
 
-Copy `.env.example` to `.env` (gitignored) to customize:
+## Environment overrides
+
+Copy `.env.example` to `.env` only when an override is needed.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `GRAFANA_ROOT_URL` | `http://localhost:3003` | Public URL of the Grafana UI, used for redirects |
-
-Backend bind addresses are deliberately not configurable: Tempo, Loki and
-Prometheus stay on loopback in every topology.
+| `GRAFANA_ROOT_URL` | `http://localhost:3003` | Grafana redirect URL |
+| `GRAFANA_LOKI_URL` | `http://host.docker.internal:3100` | Loki datasource target |
+| `GRAFANA_PROM_URL` | `http://host.docker.internal:9090` | Prometheus datasource target |
+| `GRAFANA_TEMPO_URL` | `http://tempo:3200` | Tempo datasource target |
 
 ## Verify
 
 ```bash
-curl -s http://127.0.0.1:3003/api/health          # Grafana: {"database":"ok"}
-curl -s 'http://127.0.0.1:3003/api/datasources'   # 3 datasources provisioned
-curl -s http://127.0.0.1:9090/api/v1/targets      # 4 scrape targets up
-curl -s http://127.0.0.1:3200/ready               # Tempo ready
-curl -s http://127.0.0.1:3100/ready               # Loki ready
+curl -s http://127.0.0.1:3003/api/health
+curl -s http://127.0.0.1:9090/api/v1/targets
+curl -s http://127.0.0.1:3200/ready
+curl -s http://127.0.0.1:3100/ready
 curl -s http://127.0.0.1:3100/loki/api/v1/label/service/values
-  # session logs are flowing when ava-gateway / ava-agent-* appear
 ```
+
+The Grafana datasource list remains available at
+`http://127.0.0.1:3003/api/datasources`.

@@ -1,0 +1,37 @@
+# Native template shared with deploy/lgtm/config/prometheus.yml. Keep both
+# copies identical after this header so the container rollback config is exact.
+# Prometheus — scrapes only the viewer's own components (zero impact on the
+# main flow). Ava's own series arrive by OTLP push
+# (--web.enable-otlp-receiver in the compose command); retention is set there
+# too (90d time / 8GB size).
+#
+# There is no node_exporter here and there will not be one: host metrics
+# (issue #46) arrive on the same OTLP push, scraped by each machine's own OTel
+# Collector sidecar (`host_metrics` receiver, plus `postgresql` + `redis` on a
+# gateway unit). One already-pinned binary per machine instead of three more,
+# and the same path for a remote runner that this Prometheus cannot scrape.
+# Those series land under `job="ava-infra"` with a `host` label.
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+# Companion setting for the OTLP receiver: pushed samples can arrive out of
+# order (collector retries after a backend outage replay queued batches), and
+# without a window Prometheus drops them silently.
+storage:
+  tsdb:
+    out_of_order_time_window: 30m
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+  - job_name: tempo
+    static_configs:
+      - targets: ["tempo:3200"]
+  - job_name: loki
+    static_configs:
+      - targets: ["loki:3100"]
+  - job_name: grafana
+    static_configs:
+      - targets: ["grafana:3000"]

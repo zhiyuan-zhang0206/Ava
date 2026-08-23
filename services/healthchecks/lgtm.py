@@ -1,19 +1,18 @@
-"""LGTM stack healthcheck — called every 60s by the gateway watchdog.
+"""Hybrid LGTM healthcheck — called every 60s by the gateway watchdog.
 
 Runs only on the designated LGTM host: the `$AVA_HOME/lgtm-host` marker file
 (operator-created once, machine-identity-file pattern — see
 deploy/lgtm/README.md) gates this check the same way it gates the converge
 bring-up. Without the marker the check is a no-op, so a dev worktree
-cluster's watchdog never touches the host-singleton containers (fixed host
+cluster's watchdog never touches the host-singleton backends (fixed host
 ports, one compose project per host).
 
 Probes the four readiness endpoints on the compose file's fixed host ports:
 Loki /ready, Prometheus /-/ready, Tempo /ready, Grafana /api/health. Any
 HTTP answer counts as alive (a 503 is a warming-up backend, not a dead one);
-only a connection-level failure means the container — or the docker daemon —
-is down, and then the fix is re-running the idempotent deploy/lgtm/start.sh
-(starts OrbStack on macOS if needed, then `docker compose up -d`). Same
-connection-level contract as the otel_collector sidecar check.
+only a connection-level failure means a backend — or the docker daemon — is
+down, and then the fix is re-running the idempotent deploy/lgtm/start.sh.
+Same connection-level contract as the otel_collector sidecar check.
 
 The stack is the cluster's observability backend: while it is down the
 gateway's /ops + inspect reads (Loki/Prometheus), the Grafana-evaluated ops
@@ -33,9 +32,8 @@ from shared.config import settings
 from shared.log import init_gateway_process
 from shared.paths import ava_home
 
-# The four backends' readiness endpoints, on the fixed host ports the compose
-# file publishes (the marker pins this check to the host running that compose,
-# so loopback + fixed ports IS the contract, not a configurable endpoint).
+# The four backends' readiness endpoints, on the fixed host ports. The marker
+# pins this check to the owner host, so loopback + fixed ports is the contract.
 READINESS_PROBES: tuple[tuple[str, str], ...] = (
     ("loki", "http://127.0.0.1:3100/ready"),
     ("prometheus", "http://127.0.0.1:9090/-/ready"),
@@ -80,7 +78,7 @@ def down_probes() -> list[str]:
 
 
 def _restart_stack() -> bool:
-    """Re-run the idempotent start.sh (docker daemon bring-up + compose up -d)."""
+    """Re-run start.sh; its probe-first path never restarts a live backend."""
     repo = settings.services.project_root or Path(__file__).resolve().parent.parent.parent
     result = subprocess.run(
         ["bash", "start.sh"],

@@ -1034,21 +1034,24 @@ The whole OTLP surface (exporter + trace recording + ship) is gated by
 `AVA_TELEMETRY_OTLP_ENABLED` (default **on**); off = Postgres-only writes, one
 kill switch. Applies on the next process start.
 
-**LGTM backend lifecycle** — the Tempo/Loki/Prometheus/Grafana compose stack
-(`deploy/lgtm/`) is the cluster's observability backend, required while the
-gateway serves /ops and the inspect endpoints (consumers: the gateway
-Loki/Prometheus read paths, ops alerting via Grafana's embedded Alertmanager
-→ the gateway webhook, the events-maintenance Loki rollup, `ava cluster
-health`). It is a **host singleton** owned by the lifecycle on exactly one
-home — the one carrying the operator-created `$AVA_HOME/lgtm-host` marker
-file (in practice prod `~/.ava`; `touch ~/.ava/lgtm-host` once). On that
-host, converge runs the idempotent `deploy/lgtm/start.sh` on every `ava
-start` / `ava cluster update`, the gateway watchdog re-runs it when the
-readiness probes (Loki/Prometheus/Tempo/Grafana) hit connection failures
-(`services/healthchecks/lgtm.py`), and `ava status` shows the containers +
-probes. Unmarked homes (dev worktree clusters) never touch the containers.
-Deliberate stop: remove the marker or `ava start --disable-service lgtm`,
-then `deploy/lgtm/stop.sh` — see `deploy/lgtm/README.md`.
+**LGTM backend lifecycle** — native launchd jobs `com.ava.loki`,
+`com.ava.prometheus`, and `com.ava.promtail` (GOMEMLIMIT 2GiB / 1GiB /
+256MiB) plus the Tempo/Grafana compose services in `deploy/lgtm/` form the
+cluster's observability backend, required while the gateway serves /ops and
+the inspect endpoints (consumers: the gateway Loki/Prometheus read paths, ops
+alerting via Grafana's embedded Alertmanager → the gateway webhook, the
+events-maintenance Loki rollup, `ava cluster health`). It is a **host
+singleton** owned by the lifecycle on exactly one home — the one carrying the
+operator-created `$AVA_HOME/lgtm-host` marker file (in practice prod
+`~/.ava`; `touch ~/.ava/lgtm-host` once). On that host, converge installs pins
+from `deploy/lgtm/native/versions.yml`, renders native configs and plists, and
+runs the idempotent `deploy/lgtm/start.sh` on every `ava start` / `ava cluster
+update`. The gateway watchdog re-runs it when Loki/Prometheus/Tempo/Grafana
+readiness probes hit connection failures; its probe-first path never restarts
+a live native backend. `ava status` shows native jobs, compose services, and
+probes. Unmarked homes (dev worktree clusters) never touch these backends.
+Deliberate stop: remove the marker or `ava start --disable-service lgtm`, then
+`deploy/lgtm/stop.sh` — see `deploy/lgtm/README.md`.
 
 **Recording is one local hop from the producer** (sidecar architecture, task #1266). The
 previous inline-POST design raised `Exception while exporting Span.` whenever

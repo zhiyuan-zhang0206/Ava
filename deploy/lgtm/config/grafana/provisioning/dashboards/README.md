@@ -151,10 +151,12 @@ queries × 24h × 5m; 6h/10m keeps the embed live while bounding Loki).
 ## Syncing to the live Grafana
 
 There is no sync: the LGTM Grafana container (host port 3003,
-`deploy/lgtm` compose) mounts this directory read-only and its file
-provider reloads a changed file within ~30s — editing here and checking
-out on the LGTM host IS the deployment. The `uid` must stay `ava-ops-main`;
-the datasource uids must match `datasources.yml`.
+`deploy/lgtm` compose) mounts this directory read-only and its file provider
+reloads a changed file within ~30s — editing here and checking out on the
+LGTM host is the deployment. The `uid` must stay `ava-ops-main`; datasource
+uids must match `datasources.yml`. Loki and Prometheus now run natively on the
+host, so their Grafana datasource URLs use `host.docker.internal`; Tempo stays
+an in-compose container.
 
 ## Import / update
 
