@@ -6,7 +6,7 @@
 // settings-migration.test.ts.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, renderHook } from "@testing-library/react";
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { createElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -131,6 +131,7 @@ describe("useStatsDashboard shared polling", () => {
     const first = renderHook(() => useStatsDashboard(24), { wrapper });
     await act(async () => { await vi.advanceTimersByTimeAsync(0); });
     expect(getStatsDashboard).toHaveBeenCalledTimes(1);
+    expect(getStatsDashboard).toHaveBeenNthCalledWith(1, 24, expect.any(AbortSignal));
 
     await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
     const second = renderHook(() => useStatsDashboard(24), { wrapper });
@@ -139,6 +140,7 @@ describe("useStatsDashboard shared polling", () => {
 
     await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
     expect(getStatsDashboard).toHaveBeenCalledTimes(2);
+    expect(getStatsDashboard).toHaveBeenNthCalledWith(2, 24);
     await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
     expect(getStatsDashboard).toHaveBeenCalledTimes(2);
     await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
@@ -148,5 +150,22 @@ describe("useStatsDashboard shared polling", () => {
     second.unmount();
     await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
     expect(getStatsDashboard).toHaveBeenCalledTimes(3);
+  });
+
+  it("retries one failed request and exposes the error", async () => {
+    const failure = new Error("stats endpoint 500");
+    getStatsDashboard.mockRejectedValue(failure);
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retryDelay: 0 } },
+    });
+    const wrapper = ({ children }: { children: ReactNode }) =>
+      createElement(QueryClientProvider, { client: queryClient }, children);
+
+    const hook = renderHook(() => useStatsDashboard(24), { wrapper });
+    await waitFor(() => expect(hook.result.current.error).toBe(failure));
+
+    expect(getStatsDashboard).toHaveBeenCalledTimes(2);
+    expect(hook.result.current.isFetching).toBe(false);
+    hook.unmount();
   });
 });
