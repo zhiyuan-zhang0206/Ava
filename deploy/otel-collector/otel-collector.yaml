@@ -104,6 +104,27 @@ $REMOTE_OTLP_RECEIVER
           scrape_interval: 30s
           static_configs:
             - targets: [127.0.0.1:8888]
+
+  # ── Session-log tailing (2026-08-23 cutover; replaces promtail) ──────────
+  # Each machine's collector tails the local session stdout the way promtail
+  # did (job/service labels become resource service.name -> Loki's
+  # service_name stream label). start_at: end = no backfill; offsets persist
+  # in file_storage/logoffsets so a restart does not re-read.
+  filelog/sessions:
+    include:
+      - $AVA_HOME/logs/*.out.log
+    start_at: end
+    include_file_name: true
+    include_file_path: false
+    storage: file_storage/logoffsets
+  filelog/orchestration:
+    include:
+      - $AVA_HOME/logs/updater-*.log
+      - $AVA_HOME/logs/rollout-*.log
+    start_at: end
+    include_file_name: true
+    include_file_path: false
+    storage: file_storage/logoffsets
 $DATA_PLANE_RECEIVERS
 processors:
   # memory_limiter runs FIRST in every pipeline: under memory pressure it
@@ -114,6 +135,21 @@ processors:
     check_interval: 1s
     limit_mib: 512
     spike_limit_mib: 128
+  # Session-log labeling (filelog receivers; replaces promtail's per-file
+  # service label): service.name <- the file's session name (strip .out.log /
+  # the -<epoch> suffix), guarded so event logs (no log.file.name) pass
+  # through untouched.
+  transform/filelog_service:
+    log_statements:
+      - context: log
+        conditions:
+          - attributes["log.file.name"] != nil
+        statements:
+          - set(attributes["tmp_svc"], attributes["log.file.name"])
+          - replace_pattern(attributes["tmp_svc"], "\\.out\\.log$$", "")
+          - replace_pattern(attributes["tmp_svc"], "^(updater|rollout)-[0-9]+$$", "$$1")
+          - set(resource.attributes["service.name"], attributes["tmp_svc"])
+          - delete_key(attributes, "tmp_svc")
   batch:
     send_batch_size: 512
     send_batch_max_size: 1024
@@ -156,6 +192,9 @@ processors:
           - set(resource.attributes["event_name"], attributes["event_name"]) where attributes["event_name"] != nil
 
 extensions:
+  file_storage/logoffsets:
+    directory: $AVA_HOME/otel-collector/log-offsets
+    create_directory: true
   file_storage:
     directory: $AVA_HOME/otel-collector/queue
     create_directory: true
@@ -188,15 +227,15 @@ $OTLP_EXPORTERS
       max_backups: 16
 
 service:
-  extensions: [file_storage$CLUSTER_AUTH_SERVICE_EXTENSION]
+  extensions: [file_storage, file_storage/logoffsets$CLUSTER_AUTH_SERVICE_EXTENSION]
   pipelines:
     traces:
       receivers: [otlp]
       processors: [memory_limiter, batch]
       exporters: [otlphttp/tempo, file/traces]
     logs:
-      receivers: [otlp$REMOTE_OTLP_PIPELINE_RECEIVER]
-      processors: [memory_limiter, transform/promote_event_labels, batch]
+      receivers: [otlp$REMOTE_OTLP_PIPELINE_RECEIVER, filelog/sessions, filelog/orchestration]
+      processors: [memory_limiter, transform/promote_event_labels, transform/filelog_service, batch]
       exporters: [otlphttp/loki]
     metrics:
       receivers: [otlp$REMOTE_OTLP_PIPELINE_RECEIVER]

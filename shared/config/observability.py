@@ -132,12 +132,11 @@ class ObservabilitySettings(EnvSettings):
         default="http://127.0.0.1:14318",
         alias="AVA_TELEMETRY_TEMPO_ENDPOINT",
         description=(
-            "Gateway-local Tempo OTLP/HTTP base URL (host port 14318). The "
-            "gateway collector's traces pipelines and gateway/single-box "
-            "`ava trace ship` use it. A pure runner ignores this loopback URL: "
-            "its collector and trace replay instead use the gateway's "
-            "authenticated private-address OTLP receiver. Backends therefore "
-            "stay loopback-only."
+            "Tempo OTLP/HTTP base URL. The single-box default is the host "
+            "loopback. A cluster's Tempo may be remote through a host-scope "
+            "AVA_TELEMETRY_TEMPO_ENDPOINT override, as configured on the "
+            "production cluster. A pure runner ignores this URL and relays "
+            "through the gateway."
         ),
         json_schema_extra={
             "restart_required": "all",

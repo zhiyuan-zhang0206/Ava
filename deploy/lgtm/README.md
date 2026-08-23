@@ -19,8 +19,8 @@ ava lgtm on
 `ava lgtm on` writes the marker, installs missing pinned native binaries, and
 runs the idempotent launcher. With the marker present, every converge runs the
 same launcher and the gateway watchdog re-runs it after a connection-level
-readiness failure. The launcher probes native processes first, so a live Loki,
-Prometheus, or Promtail process is never restarted by the watchdog. `ava
+readiness failure. The launcher probes native processes first, so a live Loki
+or Prometheus process is never restarted by the watchdog. `ava
 lgtm status` and `ava status` show native job PIDs, the compose services, and
 the readiness probes.
 
@@ -33,9 +33,8 @@ are no-ops unless that worktree home is explicitly marked.
 |---|---|---|---|---|
 | Loki | native launchd | 3.7.6 / `GOMEMLIMIT=2GiB` | 3100 | log backend, filesystem storage, 7-day retention |
 | Prometheus | native launchd | 3.13.2 / `GOMEMLIMIT=1GiB` | 9090 | metrics and OTLP receiver |
-| Promtail | native launchd | 3.6.0 / `GOMEMLIMIT=256MiB` | 9080 | session-log shipping into Loki |
-| Tempo | compose container | `grafana/tempo:3.0.2`, 1 core / 768MiB | 3200, 14318 | trace backend |
-| Grafana | compose container | `grafana/grafana:13.1.3`, 2 cores / 2GiB | 3003 | anonymous read-only UI |
+| Tempo | remote per cluster config | WSL backend; compose copy is the rollback asset | configured by `AVA_TELEMETRY_TEMPO_ENDPOINT` | trace backend |
+| Grafana | native launchd (host-managed; see the runbook) | host-managed | 3003 | anonymous read-only UI |
 
 The pinned release assets and SHA256 values live in
 [`native/versions.yml`](native/versions.yml). Converge verifies an archive
@@ -46,18 +45,19 @@ designated macOS arm64 host has native assets today.
 Native templates in `native/config/` are rendered on every converge into
 `$AVA_HOME/lgtm/native/config/`. Loki's limits and query defenses are copied
 from the rollback configuration and must remain aligned. Native backend
-listeners bind loopback only; Grafana reaches Loki and Prometheus through
-`host.docker.internal`, with environment overrides available for exceptional
-deployments.
+listeners bind loopback only, and native Grafana dials Loki, Prometheus, and
+Postgres on the host loopback.
 
 ## Why this stack
 
 One Grafana UI over Loki, Prometheus, and Tempo gives operators native LogQL,
 metrics, and trace exploration while keeping the rest of the product's OTel
-pipeline unchanged. Loki, Prometheus, and Promtail use verified native release
-assets on the LGTM host; Tempo and Grafana remain pinned compose services. The
-native collector sidecar is still the one local OTLP entry on port 4318 and
-fans out only to loopback backend listeners.
+pipeline unchanged. Loki and Prometheus use verified native release assets on
+the LGTM host, Grafana is host-managed native launchd, and Tempo is selected by
+per-cluster configuration. Grafana and Tempo use the pinned compose services
+only during a manual rollback. The native collector sidecar is still the one
+local OTLP entry on port 4318; its filelog receivers also own session-log
+shipping.
 
 ## Resource and retention posture
 
@@ -76,35 +76,38 @@ anonymous-but-read-only surface.
 ## Start, stop, and rollback
 
 ```bash
-ava lgtm on                 # install current native pins, then start all backends
-bash deploy/lgtm/start.sh   # idempotent lifecycle launcher
-bash deploy/lgtm/stop.sh    # stop native jobs and Tempo/Grafana; keep volumes
+ava lgtm on                 # install current native pins, then start native backends
+bash deploy/lgtm/start.sh   # idempotent native-only lifecycle launcher
+bash deploy/lgtm/stop.sh    # stop the native Loki and Prometheus jobs
 ava lgtm off                # remove marker first, then stop deliberately
 ```
 
-`start.sh` rejects a missing native binary before it touches Docker. It starts
-the Docker daemon when necessary, runs `docker compose up -d` for Tempo and
-Grafana, and bootstraps a native job only when its HTTP listener does not
-answer. A newly bootstrapped job must answer within 30 seconds or the launcher
-fails loudly.
+`start.sh` and `stop.sh` are native-only. The launcher rejects a missing native
+binary, bootstraps Loki or Prometheus only when its HTTP listener does not
+answer, and reports the state of host-managed Grafana without starting it. A
+newly bootstrapped job must answer within 30 seconds or the launcher fails
+loudly. Neither script touches the Docker daemon or compose.
 
 For a controlled configuration restart, converge the changed templates and
 then use `ava lgtm off` followed by `ava lgtm on`. This is deliberate: the
 watchdog does not restart a working backend just to apply a configuration
 change.
 
-Rollback keeps all five historical compose volumes. Stop the hybrid stack,
-restore the earlier `docker-compose.yml` and backend configs from git, then
-run `docker compose up -d`; the retained Loki, Prometheus, and Promtail
-volumes make the container path available without reinitializing data.
+The container path is a manual rollback: restore the earlier
+`docker-compose.yml` and backend configs from git, then run
+`docker compose up -d`. Retained compose data volumes remain rollback assets;
+Promtail's native binary and positions path are no longer part of the stack
+because collector filelog receivers replace them.
 
 ## Session logs in Loki
 
-Promtail continues to ship session stdout and orchestration tee logs with the
-existing `job` and `service` labels. Its native positions file is
-`$AVA_HOME/lgtm/native/data/positions/positions.yaml`, so a process restart
-does not replay the entire log history. Structured agent logs still arrive
-through the collector's OTLP path rather than being scraped a second time.
+The collector's `filelog/sessions` and `filelog/orchestration` receivers ship
+session stdout and orchestration tee logs. The file name becomes resource
+`service.name`, which Loki exposes as the `service_name` stream label. Read
+offsets persist under `$AVA_HOME/otel-collector/log-offsets`, so a collector
+restart does not replay the log history. Structured agent logs still arrive
+through the collector's OTLP receiver and carry no `log.file.name`, so the
+filelog transform leaves them untouched.
 
 ## Environment overrides
 
@@ -113,9 +116,7 @@ Copy `.env.example` to `.env` only when an override is needed.
 | Variable | Default | Purpose |
 |---|---|---|
 | `GRAFANA_ROOT_URL` | `http://localhost:3003` | Grafana redirect URL |
-| `GRAFANA_LOKI_URL` | `http://host.docker.internal:3100` | Loki datasource target |
-| `GRAFANA_PROM_URL` | `http://host.docker.internal:9090` | Prometheus datasource target |
-| `GRAFANA_TEMPO_URL` | `http://tempo:3200` | Tempo datasource target |
+| `GRAFANA_PROVISIONING_PATH` | source checkout's dashboard provisioning directory | Native Grafana file-provider path, set by `config/grafana/runtime.env` |
 
 ## Verify
 

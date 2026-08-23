@@ -1,9 +1,8 @@
-"""Native LGTM backend installation and launchd configuration.
+"""Native Loki and Prometheus installation and launchd configuration.
 
-The designated LGTM host runs Loki, Prometheus, and Promtail as pinned native
-binaries. Converge downloads only a missing or stale release asset, while
-always rendering the live configs and launchd plists so checkout changes apply
-on the next lifecycle run. Grafana and Tempo remain in the compose stack.
+Converge downloads only a missing or stale release asset, while always
+rendering the live configs and launchd plists so checkout changes apply on the
+next lifecycle run.
 """
 
 from __future__ import annotations
@@ -61,11 +60,6 @@ _NATIVE_CONSTANTS: dict[str, _NativeService] = {
         ),
         gomemlimit="1GiB",
         archive_member="prometheus-3.13.2.darwin-arm64/prometheus",
-    ),
-    "promtail": _NativeService(
-        arguments=("-config.file={config}/promtail.yml",),
-        gomemlimit="256MiB",
-        archive_member="promtail-darwin-arm64",
     ),
 }
 
@@ -241,7 +235,7 @@ def _write_if_changed(path: Path, content: str) -> None:
 def _render_configs(repo: Path, native_dir: Path, ava_home: Path) -> None:
     """Render native templates with the sole supported placeholder."""
     source_dir = repo / "deploy/lgtm/native/config"
-    for name in ("loki.yaml", "promtail.yml", "prometheus.yml"):
+    for name in ("loki.yaml", "prometheus.yml"):
         template = (source_dir / name).read_text(encoding="utf-8")
         _write_if_changed(
             native_dir / "config" / name, template.replace("{{AVA_HOME}}", str(ava_home))

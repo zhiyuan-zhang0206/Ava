@@ -16,14 +16,16 @@ dashboards).
 
 ## Where these run (LGTM stack)
 
-Since the single-Grafana merge (Task #1264) the LGTM Grafana container
-(host port 3003, `deploy/lgtm` compose) evaluates these rules. This
-directory is mounted read-only into the container at
-`/etc/grafana/provisioning/alerting` — it is the ONLY copy; the contact
-point's webhook URL uses `host.docker.internal` because the container
-reaches the gateway on the host.
+Native Grafana on the LGTM host (port 3003) evaluates these rules from the
+source checkout's `deploy/lgtm/config/grafana/provisioning/alerting`
+directory. The contact point posts to `127.0.0.1:8000`, reaching the gateway
+on the same host loopback.
 
 ## Rules (19)
+
+The rules are split between `ava-ops` (16 rules, evaluated every minute) and
+`ava-ops-slow` (R17/R18's three slow-request rules, evaluated every five
+minutes). Their existing `for` windows remain unchanged.
 
 Application layer — the Loki event stream plus the LLM latency histogram:
 
@@ -124,24 +126,23 @@ a new provider is covered by adding its string there, with no edit to
 
 ## Sync to the live Grafana
 
-There is no sync step: the container mounts this directory directly, so a
-git checkout on the LGTM host is the deployment. Caveat: alert-RULE
-provisioning does **not** hot-reload file changes (verified 2026-08-04) —
-restart the grafana container (`docker compose restart grafana` under
-`deploy/lgtm`) after editing `rules.yml`; datasource and contact-point
-provisioning do hot-reload.
+There is no copy step: native Grafana reads this directory from the source
+checkout. Alert-rule provisioning does **not** hot-reload file changes
+(verified 2026-08-04), so restart native Grafana after editing `rules.yml`;
+datasource and contact-point provisioning do hot-reload.
 
 ## How to add a rule
 
-1. Add a rule to `rules.yml` (uid must be unique; keep `folder: Ava`, group
-   `ava-ops`, `interval: 1m`). Loki queries: stream selector
+1. Add a rule to `rules.yml` (uid must be unique; keep `folder: Ava`). Put fast
+   rules in `ava-ops` (`interval: 1m`) and expensive slow-request rules in
+   `ava-ops-slow` (`interval: 5m`). Loki queries: stream selector
    `{service_name="unknown_service"}` + `| json` before any field filter,
    and wrap every count in `sum(...)` — the unknown_service family has >500
    streams over a day and an unaggregated count hits Loki's per-query
    series cap.
-2. Land the change; on the LGTM host restart the grafana container
+2. Land the change; on the LGTM host restart native Grafana
    (rule provisioning does not hot-reload).
-3. Verify via the container Grafana's admin API:
+3. Verify via native Grafana's admin API:
    `GET /api/v1/provisioning/alert-rules`. Synthetic events are no longer SQL
    inserts — push a test event through the emitter (any Ava process emits
    on activity; e.g. trigger a real event or use the Loki push API), then

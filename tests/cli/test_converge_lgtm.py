@@ -102,7 +102,6 @@ def test_backend_ports_are_unconditionally_loopback_only() -> None:
     assert services["grafana"]["ports"] == ["3003:3000"]
     native = compose_path.parent / "native"
     loki = (native / "config/loki.yaml").read_text(encoding="utf-8")
-    promtail = (native / "config/promtail.yml").read_text(encoding="utf-8")
     assert "http_listen_address: 127.0.0.1" in loki
     assert "grpc_listen_address: 127.0.0.1" in loki
     assert "instance_addr: 127.0.0.1" in loki
@@ -110,7 +109,6 @@ def test_backend_ports_are_unconditionally_loopback_only() -> None:
         "--web.listen-address=127.0.0.1:9090"
         in _lgtm_native._NATIVE_CONSTANTS["prometheus"].arguments
     )
-    assert "http_listen_address: 127.0.0.1" in promtail
 
 
 def test_native_step_runs_only_for_the_marker_home(

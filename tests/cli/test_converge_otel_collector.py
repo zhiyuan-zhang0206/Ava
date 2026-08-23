@@ -234,9 +234,11 @@ def test_infra_metrics_ride_their_own_pipeline(monkeypatch: pytest.MonkeyPatch) 
     assert "resource_detection/host" in pipelines["metrics/infra"]["processors"]
 
 
-def test_logs_promote_event_labels_before_batch(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The shared logs pipeline promotes only bounded event dimensions to
-    resources, where Loki's OTLP mapping can index them."""
+def test_logs_merge_event_and_filelog_transforms_before_batch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The logs pipeline promotes bounded event dimensions and labels tailed
+    session files before the final batch processor."""
     cfg = _render_real_template(monkeypatch, frozenset({"gateway", "agent-runner"}))
 
     processor = cfg["processors"]["transform/promote_event_labels"]
@@ -250,8 +252,37 @@ def test_logs_promote_event_labels_before_batch(monkeypatch: pytest.MonkeyPatch)
             ],
         }
     ]
-    processors = cfg["service"]["pipelines"]["logs"]["processors"]
-    assert processors == ["memory_limiter", "transform/promote_event_labels", "batch"]
+    filelog_processor = cfg["processors"]["transform/filelog_service"]
+    assert filelog_processor["log_statements"] == [
+        {
+            "context": "log",
+            "conditions": ['attributes["log.file.name"] != nil'],
+            "statements": [
+                'set(attributes["tmp_svc"], attributes["log.file.name"])',
+                'replace_pattern(attributes["tmp_svc"], "\\\\.out\\\\.log$", "")',
+                'replace_pattern(attributes["tmp_svc"], "^(updater|rollout)-[0-9]+$", "$1")',
+                'set(resource.attributes["service.name"], attributes["tmp_svc"])',
+                'delete_key(attributes, "tmp_svc")',
+            ],
+        }
+    ]
+    assert cfg["extensions"]["file_storage/logoffsets"] == {
+        "directory": "/home/u/.ava/otel-collector/log-offsets",
+        "create_directory": True,
+    }
+    logs = cfg["service"]["pipelines"]["logs"]
+    assert logs["receivers"] == [
+        "otlp",
+        "otlp/remote",
+        "filelog/sessions",
+        "filelog/orchestration",
+    ]
+    assert logs["processors"] == [
+        "memory_limiter",
+        "transform/promote_event_labels",
+        "transform/filelog_service",
+        "batch",
+    ]
 
 
 def test_runner_forwards_to_authenticated_gateway_ingress_without_renaming_queues(

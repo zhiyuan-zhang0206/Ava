@@ -967,8 +967,10 @@ watchdog, binary + config installed by converge from
 `deploy/otel-collector/`); agents export OTLP/HTTP to their LOCAL sidecar
 (`AVA_TELEMETRY_OTLP_ENDPOINT`, default `http://127.0.0.1:4318`) and never
 dial a backend directly. Delivery after that local hop is role-specific: a
-gateway collector writes to gateway-loopback Tempo/Loki/Prometheus; a pure
-runner collector keeps the same three exporter component IDs and relays each
+gateway collector writes traces to the Tempo selected by the host-scope
+`AVA_TELEMETRY_TEMPO_ENDPOINT` setting (prod's override selects the remote WSL
+Tempo) and logs/metrics to gateway-loopback Loki/Prometheus; a pure runner
+collector keeps the same three exporter component IDs and relays each
 signal to the gateway collector at the host from `AVA_GATEWAY_URL`, port 4318,
 with `Authorization: Bearer $AVA_CLUSTER_SECRET`. The remote receiver binds
 only the exact non-loopback `AVA_MACHINE_HOST`, never `0.0.0.0`/`::`; the
@@ -977,7 +979,8 @@ deployments keep only the local receiver, including when their secret is set.
 The gateway collector fans out:
 
 - **traces** → Tempo OTLP/HTTP (`AVA_TELEMETRY_TEMPO_ENDPOINT`, default
-  `http://127.0.0.1:14318` on the LGTM host) + local JSONL mirror
+  `http://127.0.0.1:14318`; prod sets a host-scope override to the remote WSL
+  Tempo) + local JSONL mirror
   (`$AVA_HOME/traces/spans.jsonl`, rotated `spans-<ISO>.jsonl`).
 - **logs** — every unified event (the `events` table write path) dual-writes to
   OTLP logs (Loki) via `shared/telemetry_otlp.py` → sidecar → Loki
@@ -1034,12 +1037,14 @@ The whole OTLP surface (exporter + trace recording + ship) is gated by
 `AVA_TELEMETRY_OTLP_ENABLED` (default **on**); off = Postgres-only writes, one
 kill switch. Applies on the next process start.
 
-**LGTM backend lifecycle** — native launchd jobs `com.ava.loki`,
-`com.ava.prometheus`, and `com.ava.promtail` (GOMEMLIMIT 2GiB / 1GiB /
-256MiB) plus the Tempo/Grafana compose services in `deploy/lgtm/` form the
-cluster's observability backend, required while the gateway serves /ops and
-the inspect endpoints (consumers: the gateway Loki/Prometheus read paths, ops
-alerting via Grafana's embedded Alertmanager → the gateway webhook, the
+**LGTM backend lifecycle** — native launchd jobs `com.ava.loki` and
+`com.ava.prometheus` (GOMEMLIMIT 2GiB / 1GiB), plus the host-managed native
+Grafana launchd job, form the local observability backend. Tempo is configured
+per cluster; prod's host-scope override targets the remote WSL Tempo. No
+service lifecycle depends on compose: `deploy/lgtm/docker-compose.yml` is a
+manual rollback asset. The backend is required while the gateway serves /ops
+and the inspect endpoints (consumers: the gateway Loki/Prometheus read paths,
+ops alerting via Grafana's embedded Alertmanager → the gateway webhook, the
 events-maintenance Loki rollup, `ava cluster health`). It is a **host
 singleton** owned by the lifecycle on exactly one home — the one carrying the
 operator-created `$AVA_HOME/lgtm-host` marker file (in practice prod
@@ -1048,8 +1053,8 @@ from `deploy/lgtm/native/versions.yml`, renders native configs and plists, and
 runs the idempotent `deploy/lgtm/start.sh` on every `ava start` / `ava cluster
 update`. The gateway watchdog re-runs it when Loki/Prometheus/Tempo/Grafana
 readiness probes hit connection failures; its probe-first path never restarts
-a live native backend. `ava status` shows native jobs, compose services, and
-probes. Unmarked homes (dev worktree clusters) never touch these backends.
+a live native backend. `ava status` shows native jobs and readiness probes.
+Unmarked homes (dev worktree clusters) never touch these backends.
 Deliberate stop: remove the marker or `ava start --disable-service lgtm`, then
 `deploy/lgtm/stop.sh` — see `deploy/lgtm/README.md`.
 
@@ -1160,7 +1165,7 @@ Where to look when something went wrong on a host:
 | why did a daemon vanish | its log file: every daemon wraps `asyncio.run(main())` and logs the traceback before re-raising |
 | what did milvus say | its log file only — it is a C++ binary with no PG sink |
 | an agent | `$AVA_HOME/logs/agent-{N}.log` (kernel + its exec subprocess, both appending) |
-| raw session stdout (gateway / agents / shells / schedules) | Loki (the LGTM backend): promtail tails every `$AVA_HOME/logs/*.out.log` plus the updater/rollout tees — label `service` = session name, 7-day retention; see `deploy/lgtm/README.md` |
+| raw session stdout (gateway / agents / shells / schedules) | Loki (the LGTM backend): the collector's filelog receivers tail every `$AVA_HOME/logs/*.out.log` plus the updater/rollout tees — resource `service.name` becomes Loki label `service_name` = session name, offsets persist in `file_storage/logoffsets`, 7-day retention; see `deploy/lgtm/README.md` |
 
 Raw session output is queried in Loki, not tailed from a file — Grafana Explore
 (Loki datasource), `logcli`, or the HTTP API:
