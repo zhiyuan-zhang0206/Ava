@@ -11,3 +11,9 @@ edges. A canceled PG query has no fresh node set, so it uses last-good data when
 present and otherwise retains the existing empty stale response. Degraded
 responses never refresh the short poll cache, ensuring the next poll retries
 the source reads instead of extending a failure.
+
+## Follow-up: Prometheus deadline
+
+The fleet graph's Prometheus aggregates now use the same eight-second
+per-call HTTP deadline as its Loki edge query. Other Prometheus consumers
+continue using the shared client's default timeout.

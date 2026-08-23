@@ -51,7 +51,11 @@ def _client() -> httpx.Client:
     return _shared_client
 
 
-def query(expr: str) -> list[tuple[dict[str, str], float]]:
+def query(
+    expr: str,
+    *,
+    timeout_s: float | None = None,
+) -> list[tuple[dict[str, str], float]]:
     """Run one instant query; return the `data.result` as (labels, value)
     pairs in API order.
 
@@ -60,7 +64,11 @@ def query(expr: str) -> list[tuple[dict[str, str], float]]:
     """
     url = settings.observability.telemetry_prometheus_url.rstrip("/") + "/api/v1/query"
     params = {"query": expr}
-    resp = _client().get(url, params=params)
+    request = _client().get
+    if timeout_s is None:
+        resp = request(url, params=params)
+    else:
+        resp = request(url, params=params, timeout=timeout_s)
     resp.raise_for_status()
     payload = resp.json()
 
@@ -79,7 +87,13 @@ def query(expr: str) -> list[tuple[dict[str, str], float]]:
     return rows
 
 
-def sum_by(metric: str, by: str, *, window_hours: int | None = None) -> dict[str, float]:
+def sum_by(
+    metric: str,
+    by: str,
+    *,
+    window_hours: int | None = None,
+    timeout_s: float | None = None,
+) -> dict[str, float]:
     """Aggregate a counter metric grouped by one label: `sum by (<by>) (<metric>)`.
 
     `window_hours=None` reads the raw cumulative counter (all-time since the
@@ -93,7 +107,7 @@ def sum_by(metric: str, by: str, *, window_hours: int | None = None) -> dict[str
     else:
         expr = f"sum by ({by}) (increase({metric}[{int(window_hours)}h]))"
     out: dict[str, float] = {}
-    for labels, value in query(expr):
+    for labels, value in query(expr, timeout_s=timeout_s):
         key = labels.get(by, "")
         out[key] = out.get(key, 0.0) + value
     return out

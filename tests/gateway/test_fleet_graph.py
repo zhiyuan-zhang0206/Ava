@@ -65,7 +65,9 @@ def _mock_prom(monkeypatch: pytest.MonkeyPatch) -> None:
     Tests that need token values re-install a richer fake over this one (it
     runs first, the per-test install wins)."""
 
-    def fake_sum_by(metric: str, by: str, *, window_hours: int | None = None) -> dict[str, float]:
+    def fake_sum_by(
+        metric: str, by: str, *, window_hours: int | None = None, timeout_s: float | None = None
+    ) -> dict[str, float]:
         return {}
 
     monkeypatch.setattr(prom_metrics, "sum_by", fake_sum_by)
@@ -81,7 +83,9 @@ def _install_prom(
     {agent_id: value} for window_hours=None calls, `windowed` for windowed
     calls. A metric absent from both maps reads as {} (no llm_usage series)."""
 
-    def fake_sum_by(metric: str, by: str, *, window_hours: int | None = None) -> dict[str, float]:
+    def fake_sum_by(
+        metric: str, by: str, *, window_hours: int | None = None, timeout_s: float | None = None
+    ) -> dict[str, float]:
         src = windowed if window_hours is not None else all_time
         return (src or {}).get(metric, {})
 
@@ -747,7 +751,9 @@ def test_prometheus_down_degrades_to_stale_pg_node_graph(
     would otherwise render no node identities at all)."""
     a = _seed_agent(db_conn)
 
-    def boom(metric: str, by: str, *, window_hours: int | None = None) -> dict[str, float]:
+    def boom(
+        metric: str, by: str, *, window_hours: int | None = None, timeout_s: float | None = None
+    ) -> dict[str, float]:
         raise httpx.ConnectError("prometheus down")
 
     monkeypatch.setattr(prom_metrics, "sum_by", boom)
