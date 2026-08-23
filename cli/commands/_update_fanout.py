@@ -28,7 +28,7 @@ import sys
 from typing import TypedDict
 
 _PHASE_A_TIMEOUT_S = 10.0
-_PHASE_B_TIMEOUT_S = 10.0
+_PHASE_B_TIMEOUT_S = 120.0
 _PREFLIGHT_FETCH_TIMEOUT_S = 30.0
 
 

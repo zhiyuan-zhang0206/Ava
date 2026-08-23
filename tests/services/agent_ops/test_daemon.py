@@ -895,6 +895,83 @@ async def test_idempotent_dispatch_replays_without_reexecuting(
 
 
 @pytest.mark.asyncio
+async def test_idempotent_dispatch_same_key_waits_for_slow_running_owner(
+    monkeypatch: pytest.MonkeyPatch, ops_pool: object
+) -> None:
+    """A cluster update retry waits for its still-running owner and replays it."""
+    monkeypatch.setattr(daemon, "_db_pool", ops_pool)
+    monkeypatch.setattr(daemon, "_DEDUP_WAIT_STEP_S", 0.01)
+    monkeypatch.setattr(daemon, "_DEDUP_WAIT_ATTEMPTS", 2)
+    calls: dict[str, int] = {}
+    started = asyncio.Event()
+
+    async def _slow_dispatch(
+        kind: str, payload: dict[str, object]
+    ) -> tuple[str, dict[str, object]]:
+        calls["n"] = calls.get("n", 0) + 1
+        started.set()
+        await asyncio.sleep(0.3)
+        return "completed", {"session": "ava-updater", "log": "/x"}
+
+    monkeypatch.setattr(daemon, "_dispatch", _slow_dispatch)
+    owner = asyncio.create_task(
+        daemon._dispatch_idempotent("cluster_update", {}, "slow-cluster-update", ops_pool)  # type: ignore[arg-type]
+    )
+    await started.wait()
+    duplicate = await daemon._dispatch_idempotent(
+        "cluster_update",
+        {},
+        "slow-cluster-update",
+        ops_pool,  # type: ignore[arg-type]
+    )
+    first = await owner
+
+    assert duplicate == first == ("completed", {"session": "ava-updater", "log": "/x"})
+    assert calls == {"n": 1}
+
+
+@pytest.mark.asyncio
+async def test_idempotent_dispatch_waiter_fails_after_expected_duration(
+    monkeypatch: pytest.MonkeyPatch, ops_pool: object
+) -> None:
+    """An overdue cluster-update owner fails loudly instead of claiming completion."""
+    monkeypatch.setattr(daemon, "_db_pool", ops_pool)
+    monkeypatch.setattr(daemon, "_DEDUP_WAIT_STEP_S", 0.01)
+    monkeypatch.setitem(daemon._DEDUP_EXPECTED_DURATION_S, "cluster_update", 0.02)
+    calls: dict[str, int] = {}
+    started = asyncio.Event()
+
+    async def _slow_dispatch(
+        kind: str, payload: dict[str, object]
+    ) -> tuple[str, dict[str, object]]:
+        calls["n"] = calls.get("n", 0) + 1
+        started.set()
+        await asyncio.sleep(0.3)
+        return "completed", {"session": "ava-updater", "log": "/x"}
+
+    monkeypatch.setattr(daemon, "_dispatch", _slow_dispatch)
+    owner = asyncio.create_task(
+        daemon._dispatch_idempotent("cluster_update", {}, "stuck-cluster-update", ops_pool)  # type: ignore[arg-type]
+    )
+    await started.wait()
+    status, result = await daemon._dispatch_idempotent(
+        "cluster_update",
+        {},
+        "stuck-cluster-update",
+        ops_pool,  # type: ignore[arg-type]
+    )
+    await owner
+
+    assert status == "failed"
+    error = str(result["error"])
+    assert "cluster_update" in error
+    assert "running for" in error
+    assert "stuck" in error
+    assert "never completed" not in error
+    assert calls == {"n": 1}
+
+
+@pytest.mark.asyncio
 async def test_idempotent_dispatch_distinct_keys_execute_twice(
     monkeypatch: pytest.MonkeyPatch, ops_pool: object
 ) -> None:
