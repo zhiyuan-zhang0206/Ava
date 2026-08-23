@@ -616,17 +616,27 @@ class TestQueryEvents:
 
         monkeypatch.setattr(loki_events, "_client", _accessor(_TimedClient()))
 
-        loki_events.query_events(timeout_s=8.0)
+        def _slices(_window: tuple[datetime, datetime]) -> tuple[LokiReadSlice, ...]:
+            return _straddled_slices()
 
-        # era-sliced read path: a default 24h window spans the legacy and
+        monkeypatch.setattr(loki_events, "_read_slices", _slices)
+
+        loki_events.query_events(from_=_ROLL_OUT_START, to=_ROLL_OUT_END, timeout_s=8.0)
+
+        # era-sliced read path: the straddling window spans the legacy and
         # indexed slices (task #1407 B2), each carrying the timeout
         assert timeouts == [8.0, 8.0]
 
-    def test_request_params_and_default_window(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_request_params_and_straddling_window(self, monkeypatch: pytest.MonkeyPatch) -> None:
         client = _install(monkeypatch, _loki_payload([]))
-        before = datetime.now(UTC)
-        rows, has_more = loki_events.query_events(agent_id=3, limit=100, offset=0)
-        after = datetime.now(UTC)
+
+        def _slices(_window: tuple[datetime, datetime]) -> tuple[LokiReadSlice, ...]:
+            return _straddled_slices()
+
+        monkeypatch.setattr(loki_events, "_read_slices", _slices)
+        rows, has_more = loki_events.query_events(
+            agent_id=3, limit=100, offset=0, from_=_ROLL_OUT_START, to=_ROLL_OUT_END
+        )
         assert rows == []
         assert has_more is False
         url, params = client.calls[0]
@@ -639,14 +649,10 @@ class TestQueryEvents:
         )
         assert params["direction"] == "backward"
         assert params["limit"] == 101  # limit + offset + 1 lookahead
-        # default from_ = now - 24h, to = now (ns); the last slice is the
-        # indexed tail near `now`
+        # explicit straddling window: the indexed slice spans cutover -> end
         _, last_params = client.calls[-1]
-        start = datetime.fromtimestamp(last_params["start"] / 1e9, UTC)
-        end = datetime.fromtimestamp(last_params["end"] / 1e9, UTC)
-        assert before - timedelta(hours=25) <= start <= after
-        assert before - timedelta(seconds=5) <= end <= after + timedelta(seconds=5)
-        assert start <= end
+        assert last_params["start"] == int(_ROLL_OUT_CUTOVER.timestamp() * 1e9)
+        assert last_params["end"] == int(_ROLL_OUT_END.timestamp() * 1e9)
 
     def test_explicit_window(self, monkeypatch: pytest.MonkeyPatch) -> None:
         client = _install(monkeypatch, _loki_payload([]))
@@ -836,18 +842,24 @@ class TestCountEvents:
         assert '| event_name=~"spawn"' in q
         assert params["time"] == datetime(2026, 8, 2, tzinfo=UTC).timestamp()
 
-    def test_default_window_is_24h(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_straddling_window_sums_both_slice_durations(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         client = _install(monkeypatch, {"data": {"result": []}})
-        assert loki_events.count_events() == 0
-        # era-sliced read path: the default 24h window splits into legacy +
-        # indexed slices; their durations must sum to 86400s
+
+        def _slices(_window: tuple[datetime, datetime]) -> tuple[LokiReadSlice, ...]:
+            return _straddled_slices()
+
+        monkeypatch.setattr(loki_events, "_read_slices", _slices)
+        assert loki_events.count_events(from_=_ROLL_OUT_START, to=_ROLL_OUT_END) == 0
+        # era-sliced read path: a straddling window splits into legacy +
+        # indexed slices; their durations must sum to the window length (2h)
         assert len(client.calls) == 2
         total = 0
         for _url, params in client.calls:
             duration = int(params["query"].rsplit("[", 1)[1].split("s")[0])
             total += duration
-        # slice boundaries round, so allow a 1s drift on the whole window
-        assert abs(total - 86400) <= 1
+        assert total == 7200
 
     def test_empty_window_returns_zero_without_query(self, monkeypatch: pytest.MonkeyPatch) -> None:
         client = _install(monkeypatch, {"data": {"result": []}})
