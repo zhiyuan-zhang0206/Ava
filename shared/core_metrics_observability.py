@@ -576,7 +576,7 @@ core_metrics.register_core_metric(
         unit="ops",
         panel="timeseries",
         query_type="logql",
-        query='sum(rate({service_name="unknown_service"} | json [1m]))',
+        query='sum(rate({service_name="unknown_service"} | json | __error__="" [1m]))',
         target_names=["events_per_s"],
         output=["grafana"],
     )
