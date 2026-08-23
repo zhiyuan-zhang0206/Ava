@@ -31,7 +31,7 @@ network, because they are operator tools and the SDK surface is for agents.
 ## `GET /api/stats/dashboard?hours=`
 
 Backs the stat cards at the top of the frontend sidebar in **one** round trip,
-polled on one page-wide 5s cadence regardless of how many sidebar consumers
+polled on one page-wide 30s cadence regardless of how many sidebar consumers
 are mounted. `hours` is the aggregation window, whitelisted to
 1 / 6 / 24 / 72 / 168 (default 24).
 
@@ -42,15 +42,15 @@ are mounted. `hours` is the aggregation window, whitelisted to
 
 No standalone daemon: the gateway aggregates on demand. Loki work runs before
 the short Postgres metadata read, so waiting for the global Loki budget never
-holds a pooled DB connection. Every event aggregate uses one query for a <=3h
-window or merges the shared helper's contiguous, clock-aligned <=3h shards for
-a longer window. The four telemetry `llm_usage` token/cost sums cache for 30s
-per requested window to absorb the sidebar's 5s poll; turn/warning/error
-aggregates remain fresh. The `llm_usage.cost_usd` sum is the usage-time quote
-snapshot, not historical tokens repriced against today's registry. A local
-budget refusal retains the global typed 503 response; a Loki transport/status
-failure is a retriable 503 with `Retry-After: 1` after `loki_events` records
-the failing query shape.
+holds a pooled DB connection. The four telemetry `llm_usage` token/cost sums
+are full-window instant aggregates and cache for 60s per requested window to
+absorb every other sidebar poll. Turn/warning/error aggregates remain fresh
+and use one query for a <=3h window or merge the shared helper's contiguous,
+clock-aligned <=3h shards for a longer window. The `llm_usage.cost_usd` sum is
+the usage-time quote snapshot, not historical tokens repriced against today's
+registry. A local budget refusal retains the global typed 503 response; a Loki
+transport/status failure is a retriable 503 with `Retry-After: 1` after
+`loki_events` records the failing query shape.
 
 `GET /api/agents/{id}/inspect` draws the same boundary per agent: its 75s
 single-flight TTL retains only history aggregates. Completed UTC days read the

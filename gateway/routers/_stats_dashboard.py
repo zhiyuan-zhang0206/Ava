@@ -7,13 +7,12 @@ import time
 from datetime import datetime
 
 from gateway import loki_events
-from gateway.routers import _inspect_pg
 from gateway.schemas import StatsWindowHours
 
-# The sidebar polls every 5s. Keep the expensive, four-field llm_usage read
-# bounded to one result per requested window every 30s; turn/error/warning
+# The sidebar polls every 30s. Keep the four full-window llm_usage reads to
+# one result per requested window every two polls; turn/error/warning
 # aggregates deliberately remain fresh in status.py.
-_CACHE_TTL_S = 30.0
+_CACHE_TTL_S = 60.0
 _cache: dict[tuple[int], tuple[float, dict[str, float]]] = {}
 _cache_lock = threading.Lock()
 
@@ -36,19 +35,13 @@ def llm_usage_sums(
             return hit[1]
 
     sums = {
-        field: sum(
-            _inspect_pg.query_loki_shards(
-                window_start,
-                now,
-                lambda shard_start, shard_end, field=field: loki_events.attribute_aggregate(
-                    field=field,
-                    agg="sum",
-                    event_names=["llm_usage"],
-                    categories=["telemetry"],
-                    from_=shard_start,
-                    to=shard_end,
-                ),
-            )
+        field: loki_events.attribute_aggregate(
+            field=field,
+            agg="sum",
+            event_names=["llm_usage"],
+            categories=["telemetry"],
+            from_=window_start,
+            to=now,
         )
         for field in ("in_total", "out_total", "cache_read", "cost_usd")
     }

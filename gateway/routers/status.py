@@ -86,7 +86,7 @@ def get_stats_dashboard(
     Data sources:
     - `live_count`: agents_meta table — all non-terminated agents (running/idling/restarting/hibernating)
     - `tokens` / `cost_usd`: telemetry `llm_usage` events in Loki (cached
-      for 30 seconds per requested window)
+      for 60 seconds per requested window)
     - average turn duration / warning/error counts: Loki's unified event stream
     - `total_events`: Postgres archive partition estimates (a coarse growth gauge)
 
@@ -112,8 +112,8 @@ def get_stats_dashboard(
         window_cost_usd = llm_usage_sums["cost_usd"]
         cache_hit_pct = round(cache_read / in_total * 100, 2) if in_total else 0.0
 
-        # Keep each Loki range vector at most three hours wide. The shared helper
-        # returns one span for short windows and partitions longer ones exactly.
+        # Keep turn and alert range vectors at most three hours wide. The shared
+        # helper returns one span for short windows and partitions longer ones.
         turn_end_sum = sum(
             _inspect_pg.query_loki_shards(
                 window_start,

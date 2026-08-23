@@ -109,6 +109,7 @@ def test_cost_dashboard_windows_and_telemetry_contract() -> None:
     by_title = {panel.get("title"): panel for panel in data["panels"]}
 
     assert data["timezone"] == "Asia/Shanghai"
+    assert all(panel["collapsed"] is False for panel in data["panels"] if panel["type"] == "row")
     assert by_title["LLM cost (24h)"]["timeFrom"] == "now-24h"
     assert by_title["Tokens (24h)"]["timeFrom"] == "now-24h"
     assert by_title["Today LLM cost estimate"]["timeFrom"] == "now/d"
