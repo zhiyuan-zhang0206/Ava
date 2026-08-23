@@ -1,10 +1,9 @@
 # Grafana dashboards — Ava Ops (as code)
 
-This directory IS the live provisioning source: the LGTM Grafana container
-mounts `deploy/lgtm/config/grafana/provisioning/` read-only at
-`/etc/grafana/provisioning`, and its file provider hot-reloads changed
-dashboards within ~30s — a git checkout is the whole deployment step, no
-copy pipeline.
+This directory IS the live provisioning source. Native Grafana receives its
+absolute file-provider path through `GRAFANA_PROVISIONING_PATH` in
+`config/grafana/runtime.env` and hot-reloads changed dashboards within ~30s —
+a git checkout is the whole deployment step, with no copy pipeline.
 
 ## One dashboard (2026-08-23 merge, task #1399)
 
@@ -140,24 +139,21 @@ queries × 24h × 5m; 6h/10m keeps the dashboard live while bounding Loki).
 
 ## Syncing to the live Grafana
 
-There is no sync: the LGTM Grafana container (host port 3003,
-`deploy/lgtm` compose) mounts this directory read-only and its file provider
-reloads a changed file within ~30s — editing here and checking out on the
-LGTM host is the deployment. The `uid` must stay `ava-ops-main`; datasource
-uids must match `datasources.yml`. Loki and Prometheus now run natively on the
-host, so their Grafana datasource URLs use `host.docker.internal`; Tempo stays
-an in-compose container.
+There is no sync: native Grafana (host port 3003) reads this directory through
+the absolute `GRAFANA_PROVISIONING_PATH` set in `runtime.env`, and its file
+provider reloads a changed file within ~30s. Editing here and checking out on
+the LGTM host is the deployment. The `uid` must stay `ava-ops-main`, and
+datasource uids must match `datasources.yml`. Loki and Prometheus datasource
+URLs use host loopback; Tempo is the remote WSL trace backend.
 
 ## Import / update
 
 Provisioning is wired by `dashboards.yml` in this directory (file
-provider, `disableDeletion: false`, path
-`/etc/grafana/provisioning/dashboards` inside the container). Update flow:
-edit the dashboard JSON here (keeping the uid `ava-ops-main`) → land the
-change → the LGTM host's checkout advances and the provisioner reloads
-within ~30s (a `docker restart lgtm-grafana-1` forces the reload — Grafana
-does not hot-apply provisioned dashboard files without a reload of the
-provisioning cycle, and panel edits are only picked up on restart).
+provider, `disableDeletion: false`, path expanded from
+`$__env{GRAFANA_PROVISIONING_PATH}`). Update flow: edit the dashboard JSON
+here (keeping the uid `ava-ops-main`) → land the change → the LGTM host's
+checkout advances and the provisioner reloads within ~30s. Restart native
+Grafana to force a new provisioning cycle when needed.
 
 ## Access requirements
 
@@ -172,7 +168,8 @@ provisioning cycle, and panel edits are only picked up on restart).
 
 **Live**: Grafana Alerting rules, as code in
 [`../alerting/rules.yml`](../alerting/rules.yml) — nineteen rules (2026-08-23)
-evaluated every minute over Loki and Prometheus: the event-health,
+split between the one-minute `ava-ops` group and five-minute `ava-ops-slow`
+group over Loki and Prometheus: the event-health,
 backlog, restart-spike, LLM-latency, delivery, freshness, trace-watermark,
 billing, host/data-plane, and collector-delivery rules, plus the three
 slow-request rules R17/R18 (gateway fast-route p95 two-tier + turn-duration

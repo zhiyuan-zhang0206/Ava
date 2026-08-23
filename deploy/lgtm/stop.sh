@@ -12,7 +12,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-for name in loki prometheus promtail; do
+for name in loki prometheus; do
     launchctl bootout "gui/$(id -u)/com.ava.$name" || true
 done
 docker compose down

@@ -1,9 +1,9 @@
 """Validation for deploy/lgtm/config/grafana/provisioning/alerting/rules.yml — the Grafana alert rules.
 
-The rules moved from the retired Postgres events read path to the LGTM read
-side (Task #1224): R1-R3, R5-R7 query Loki (the events stream as OTLP logs
-under {service_name="unknown_service"}; `| json` flattens each line to
-labels), R4 queries Prometheus (the ava_llm_usage_latency_ms histogram).
+The two rule groups moved from the retired Postgres events read path to the
+LGTM read side (Task #1224): R1-R3, R5-R7 query Loki (the events stream as
+OTLP logs under {service_name="unknown_service"}; `| json` flattens each line
+to labels), R4 queries Prometheus (the ava_llm_usage_latency_ms histogram).
 Keeps the rules in sync with the emitter's LogQL/OTLP contract.
 
 R8-R12 (issue #46) are the infrastructure layer and query a DIFFERENT
@@ -80,11 +80,12 @@ def _load_rules() -> list[dict[str, Any]]:
     doc = yaml.safe_load(_RULES.read_text(encoding="utf-8"))
     assert doc is not None
     groups = doc["groups"]
-    assert len(groups) == 1
-    group = groups[0]
-    assert group["name"] == "ava-ops"
-    assert group["folder"] == "Ava"
-    return group["rules"]
+    assert len(groups) == 2
+    assert [group["name"] for group in groups] == ["ava-ops", "ava-ops-slow"]
+    assert [group["folder"] for group in groups] == ["Ava", "Ava"]
+    assert [group["interval"] for group in groups] == ["1m", "5m"]
+    assert [len(group["rules"]) for group in groups] == [16, 3]
+    return [rule for group in groups for rule in group["rules"]]
 
 
 def _exprs(rule: dict[str, Any], datasource_uid: str) -> list[str]:

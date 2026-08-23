@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 #
 # deploy/lgtm/start.sh — bring up the hybrid observability backend on the
-# designated LGTM host. Loki, Prometheus, and Promtail are native launchd
-# jobs; Tempo and Grafana remain compose services.
+# designated LGTM host. Loki and Prometheus are native launchd jobs.
 #
 # The gateway watchdog re-runs this script after a connection-level readiness
 # failure. Native backends are probed before launchd is touched, so that path
@@ -15,13 +14,13 @@ cd "$SCRIPT_DIR"
 log() { printf '[%s] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }
 
 NATIVE_DIR="${AVA_HOME:-$HOME/.ava}/lgtm/native"
-for name in loki prometheus promtail; do
+for name in loki prometheus; do
     if [[ ! -x "$NATIVE_DIR/bin/$name" ]]; then
         log "ERROR: native $name binary is missing; run converge / \`ava lgtm on\` first"
         exit 1
     fi
 done
-mkdir -p "$NATIVE_DIR/data/loki" "$NATIVE_DIR/data/prom" "$NATIVE_DIR/data/positions" "$NATIVE_DIR/logs"
+mkdir -p "$NATIVE_DIR/data/loki" "$NATIVE_DIR/data/prom" "$NATIVE_DIR/logs"
 
 # Ensure the docker daemon is up. macOS can launch OrbStack itself; elsewhere
 # the daemon is managed by the OS (systemd etc.) and we can only report.
@@ -71,7 +70,6 @@ _start_native() {
 
 _start_native loki http://127.0.0.1:3100/ready
 _start_native prometheus http://127.0.0.1:9090/-/ready
-_start_native promtail http://127.0.0.1:9080/
 
 log "waiting for Grafana"
 for _ in $(seq 1 30); do
@@ -84,7 +82,6 @@ log "stack is up:"
 GRAFANA_URL="${GRAFANA_ROOT_URL:-http://localhost:3003}"
 log "  Loki         http://127.0.0.1:3100   (native launchd)"
 log "  Prometheus   http://127.0.0.1:9090   (native launchd)"
-log "  Promtail     http://127.0.0.1:9080   (native launchd)"
 log "  Grafana      $GRAFANA_URL   (compose container)"
 log "  Tempo        http://127.0.0.1:3200   (compose container; intake :14318)"
 log "  sidecar OTLP http://localhost:4318    (native ava-otel-collector)"

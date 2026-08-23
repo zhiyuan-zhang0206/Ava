@@ -1,5 +1,6 @@
-# Native template shared with deploy/lgtm/config/prometheus.yml. Keep both
-# copies identical after this header so the container rollback config is exact.
+# Native variant of deploy/lgtm/config/prometheus.yml. This copy pins loopback
+# and remote targets while the container copy keeps compose DNS names; keep all
+# other scrape settings aligned.
 # Prometheus — scrapes only the viewer's own components (zero impact on the
 # main flow). Ava's own series arrive by OTLP push
 # (--web.enable-otlp-receiver in the compose command); retention is set there
@@ -28,10 +29,10 @@ scrape_configs:
       - targets: ["localhost:9090"]
   - job_name: tempo
     static_configs:
-      - targets: ["tempo:3200"]
+      - targets: ["100.78.137.46:3200"]
   - job_name: loki
     static_configs:
-      - targets: ["loki:3100"]
+      - targets: ["127.0.0.1:3100"]
   - job_name: grafana
     static_configs:
-      - targets: ["grafana:3000"]
+      - targets: ["127.0.0.1:3003"]

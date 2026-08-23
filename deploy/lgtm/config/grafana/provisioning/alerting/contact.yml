@@ -1,7 +1,7 @@
 # Ava alerts — webhook contact point (as code, Task #1224).
 #
-# The webhook URL uses host.docker.internal — the Grafana container
-# reaches the gateway on the host, not on the container loopback.
+# The webhook URL uses 127.0.0.1 — native Grafana (2026-08-23 cutover)
+# reaches the gateway on the host loopback.
 #
 # Routes every fired alert to the gateway's alert ingest endpoint
 # (POST /api/alerts), which stores the instance in `alerts` (Alertmanager
@@ -40,7 +40,7 @@ contactPoints:
         type: webhook
         disableResolveMessage: false
         settings:
-          url: http://host.docker.internal:8000/api/alerts
+          url: http://127.0.0.1:8000/api/alerts
           httpMethod: POST
           authorization_scheme: Bearer
           authorization_credentials: $__env{OPS_ALERTS_WEBHOOK_TOKEN}

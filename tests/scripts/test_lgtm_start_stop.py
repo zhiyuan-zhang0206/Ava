@@ -32,7 +32,6 @@ def _toolset(tmp_path: Path) -> tuple[dict[str, str], Path]:
           case "$2" in
             *loki) touch "$FAKE_UP/loki" ;;
             *prometheus) touch "$FAKE_UP/prometheus" ;;
-            *promtail) touch "$FAKE_UP/promtail" ;;
           esac
         fi
         [[ "$1" == "bootout" ]] && exit 1
@@ -55,7 +54,6 @@ def _toolset(tmp_path: Path) -> tuple[dict[str, str], Path]:
         case "$url" in
           *:3100/*) name=loki ;;
           *:9090/*) name=prometheus ;;
-          *:9080/*) name=promtail ;;
           *) printf '200' ; exit 0 ;;
         esac
         [[ -e "$FAKE_UP/$name" ]] && printf '200' || printf '000'
@@ -64,7 +62,7 @@ def _toolset(tmp_path: Path) -> tuple[dict[str, str], Path]:
     home = tmp_path / "home"
     native = home / "lgtm/native/bin"
     native.mkdir(parents=True)
-    for name in ("loki", "prometheus", "promtail"):
+    for name in ("loki", "prometheus"):
         binary = native / name
         binary.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
         binary.chmod(0o755)
@@ -91,8 +89,8 @@ def test_start_and_stop_are_idempotent_without_real_services(tmp_path: Path) -> 
     first = _run(START, env)
     assert first.returncode == 0, first.stderr + first.stdout
     first_lines = log.read_text(encoding="utf-8").splitlines()
-    assert sum(line.startswith("bootstrap ") for line in first_lines) == 3
-    assert sum(line.startswith("kickstart ") for line in first_lines) == 3
+    assert sum(line.startswith("bootstrap ") for line in first_lines) == 2
+    assert sum(line.startswith("kickstart ") for line in first_lines) == 2
     assert "compose up -d" in first_lines
 
     log.write_text("", encoding="utf-8")
@@ -110,7 +108,7 @@ def test_start_and_stop_are_idempotent_without_real_services(tmp_path: Path) -> 
     assert _run(STOP, env).returncode == 0
     assert _run(STOP, env).returncode == 0
     stopped = log.read_text(encoding="utf-8").splitlines()
-    assert sum(line.startswith("bootout ") for line in stopped) == 6
+    assert sum(line.startswith("bootout ") for line in stopped) == 4
     assert stopped.count("compose down") == 2
 
 

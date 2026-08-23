@@ -1337,6 +1337,16 @@ groups:
                   query:
                     params: [C]
 
+  # Slow-request tier (R17/R18) — its own group at 5m evaluation: the
+  # gateway-latency route query (unwrap over the live event stream) is the
+  # single most expensive rule query (fleet-graph degradation wave,
+  # 2026-08-23, #3224). `for` windows (5m/10m) are unchanged, so alert
+  # semantics hold at 1/5 the evaluation cost.
+  - orgId: 1
+    name: ava-ops-slow
+    folder: Ava
+    interval: 5m
+    rules:
       # ── R17: Gateway latency by route — fast routes only (LLM-bound and
       #        slow-by-design routes excluded). p95 bucket > 3s for 5m =
       #        warning; > 10s for 5m = error. Calibrated 2026-08-23 on 7d
