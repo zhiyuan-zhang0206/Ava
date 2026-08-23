@@ -35,16 +35,30 @@ class StatsValues(NamedTuple):
     turn_duration_seconds: float
 
 
-class _LokiStats(NamedTuple):
-    """The three consolidated live queries merged across bounded shards."""
+class InspectValues(NamedTuple):
+    """All inspector values derived from one ledger/archive/live snapshot."""
+
+    stats: AgentStats
+    turn_duration_seconds: float
+    output_tokens: int
+    active_seconds: float
+    exec_seconds: float
+    lifecycle_events: list[tuple[datetime, str]]
+
+
+class _LiveInspectValues(NamedTuple):
+    """One projected event stream reduced for every inspect history section."""
 
     turn_total: int
     turn_ok: int
     exec_ok: int
     exec_failed: int
-    turn_duration_seconds: float
-    turn_min_seconds: float | None
-    turn_max_seconds: float | None
+    turn_durations: list[float]
+    distribution: list[tuple[float, int]]
+    output_tokens: float
+    active_seconds: float
+    exec_seconds: float
+    lifecycle_events: list[tuple[datetime, str]]
 
 
 def _utc_midnight(value: datetime) -> datetime:
@@ -69,7 +83,7 @@ def full_day_plan(from_: datetime | None, to: datetime | None) -> DayPlan:
 
 
 def _merge_spans(spans: list[tuple[datetime, datetime]]) -> list[tuple[datetime, datetime]]:
-    """Coalesce overlapping raw spans before their shard fan-out."""
+    """Coalesce overlapping raw spans before querying their shared envelope."""
     merged: list[tuple[datetime, datetime]] = []
     for start, end in sorted(spans):
         if merged and start <= merged[-1][1]:
@@ -129,79 +143,187 @@ def merge_exact_distribution(
     return sorted(merged.items())
 
 
-def _loki_stats(agent_id: int, spans: list[tuple[datetime, datetime]]) -> _LokiStats:
-    """Run the inspect stats' three Loki query shapes over <=3h shards."""
-    count_rows: list[dict[str, int]] = []
-    ok_rows: list[dict[str, int]] = []
-    distributions: list[list[tuple[float, int]]] = []
+def _in_spans(value: datetime, spans: list[tuple[datetime, datetime]]) -> bool:
+    """Whether a Loki timestamp belongs to one of the existing live windows."""
+    return any(start <= value <= end for start, end in spans)
 
-    def count_query(start: datetime, end: datetime) -> dict[str, int]:
-        return loki_events.count_by_event_name(
-            agent_id=agent_id,
-            event_names=["^turn_end$", "^exec$", "^exec_.*", "^exec\\(.*"],
-            categories=["telemetry", "log"],
-            attribute_filters=None,
-            from_=start,
-            to=end,
-        )
 
-    def ok_query(start: datetime, end: datetime) -> dict[str, int]:
-        return loki_events.count_by_event_name(
-            agent_id=agent_id,
-            event_names=["^turn_end$"],
-            categories=["telemetry", "log"],
-            attribute_filters={"ok": "true"},
-            from_=start,
-            to=end,
-        )
+def _attribute_text(attributes: dict[str, Any], key: str) -> str:
+    """Match JSON/JSONB text filters, including JSON booleans and missing keys."""
+    value = attributes.get(key)
+    if value is None:
+        return ""
+    if value is True:
+        return "true"
+    if value is False:
+        return "false"
+    return str(value)
 
-    def duration_query(start: datetime, end: datetime) -> list[tuple[float, int]]:
-        return loki_events.attribute_distribution(
-            field="duration_seconds",
-            agent_id=agent_id,
-            event_names=["^turn_end$"],
-            categories=["telemetry", "log"],
-            attribute_filters=None,
-            from_=start,
-            to=end,
-        )
 
-    for start, end in spans:
-        count_rows.extend(_inspect_pg.query_loki_shards(start, end, count_query))
-        ok_rows.extend(_inspect_pg.query_loki_shards(start, end, ok_query))
-        distributions.extend(_inspect_pg.query_loki_shards(start, end, duration_query))
+def _attribute_number(attributes: dict[str, Any], key: str) -> float | None:
+    """Return a numeric payload value when Loki's former unwrap would retain it."""
+    try:
+        return float(attributes[key])
+    except (KeyError, TypeError, ValueError):
+        return None
 
-    counts: dict[str, int] = {}
-    for row in count_rows:
-        for event_name, count in row.items():
-            counts[event_name] = counts.get(event_name, 0) + count
-    turn_ok = sum(row.get("turn_end", 0) for row in ok_rows)
-    flat_distribution = [entry for distribution in distributions for entry in distribution]
-    return _LokiStats(
-        turn_total=counts.get("turn_end", 0),
-        turn_ok=turn_ok,
-        exec_ok=counts.get("exec", 0),
-        exec_failed=sum(
-            count for event_name, count in counts.items() if event_name not in {"turn_end", "exec"}
-        ),
-        turn_duration_seconds=sum(value * count for value, count in flat_distribution),
-        turn_min_seconds=min((value for value, _ in flat_distribution), default=None),
-        turn_max_seconds=max((value for value, _ in flat_distribution), default=None),
+
+def _projected_live_values(
+    agent_id: int,
+    *,
+    stats_spans: list[tuple[datetime, datetime]],
+    token_spans: list[tuple[datetime, datetime]],
+    distribution_window: tuple[datetime, datetime] | None,
+    activity_window: tuple[datetime, datetime] | None,
+    lifecycle_window: tuple[datetime, datetime] | None,
+) -> _LiveInspectValues:
+    """Reduce one raw Loki line pass over every live interval inspect needs.
+
+    The pass uses one envelope rather than one aggregation shape per interval.
+    A row is still admitted to each ledger/archive seam only through that
+    section's original span, preserving the existing double-count prevention.
+    """
+    spans = [*stats_spans, *token_spans]
+    for window in (distribution_window, activity_window, lifecycle_window):
+        if window is not None:
+            spans.append(window)
+    if not spans:
+        return _LiveInspectValues(0, 0, 0, 0, [], [], 0.0, 0.0, 0.0, [])
+
+    rows = loki_events.query_projected_lines(
+        fields=[],
+        template="{{ __line__ }}",
+        agent_id=agent_id,
+        event_names=[
+            "^turn_end$",
+            "^exec$",
+            "^exec_.*",
+            "^exec\\(.*",
+            "^llm_usage$",
+            "^node_exit$",
+            "^agent_spawned$",
+            "^agent_resurrected$",
+            "^agent_terminated$",
+        ],
+        from_=min(start for start, _ in spans),
+        to=max(end for _, end in spans),
+    )
+
+    turn_total = turn_ok = exec_ok = exec_failed = 0
+    turn_durations: list[float] = []
+    distribution: list[tuple[float, int]] = []
+    output_tokens = active_seconds = exec_seconds = 0.0
+    lifecycle_events: list[tuple[datetime, str]] = []
+    seen: set[tuple[int, str]] = set()
+
+    for ts_ns, _row_agent_id, line in rows:
+        key = (ts_ns, line)
+        if key in seen:
+            continue
+        seen.add(key)
+        row = loki_events._parse_line(line, ts_ns)
+        if row is None:
+            continue
+        timestamp = datetime.fromtimestamp(ts_ns / 1e9, UTC)
+        event_name = row["event_name"]
+        category = row["category"]
+        attributes = row["attributes"]
+        telemetry_or_log = category in {"telemetry", "log"}
+        duration = _attribute_number(attributes, "duration_seconds")
+
+        if telemetry_or_log and _in_spans(timestamp, stats_spans):
+            if event_name == "turn_end":
+                turn_total += 1
+                if _attribute_text(attributes, "ok") == "true":
+                    turn_ok += 1
+                if duration is not None:
+                    turn_durations.append(duration)
+            elif event_name == "exec":
+                exec_ok += 1
+            elif event_name.startswith(("exec_", "exec(")):
+                exec_failed += 1
+
+        if (
+            telemetry_or_log
+            and event_name == "turn_end"
+            and duration is not None
+            and distribution_window is not None
+            and _in_spans(timestamp, [distribution_window])
+        ):
+            distribution.append((duration, 1))
+
+        if telemetry_or_log and event_name == "llm_usage" and _in_spans(timestamp, token_spans):
+            output_tokens += _attribute_number(attributes, "out_total") or 0.0
+
+        if (
+            event_name == "node_exit"
+            and duration is not None
+            and activity_window is not None
+            and _in_spans(timestamp, [activity_window])
+        ):
+            node = _attribute_text(attributes, "node")
+            if node != "claim":
+                active_seconds += duration
+            if node == "exec":
+                exec_seconds += duration
+
+        if (
+            event_name in {"agent_spawned", "agent_resurrected", "agent_terminated"}
+            and lifecycle_window is not None
+            and _in_spans(timestamp, [lifecycle_window])
+        ):
+            lifecycle_events.append((row["ts"], event_name))
+
+    return _LiveInspectValues(
+        turn_total,
+        turn_ok,
+        exec_ok,
+        exec_failed,
+        turn_durations,
+        distribution,
+        output_tokens,
+        active_seconds,
+        exec_seconds,
+        lifecycle_events,
     )
 
 
 def _turn_distribution(
-    pool: ConnectionPool[Any], agent_id: int, from_: datetime | None, to: datetime | None
+    archive: list[tuple[float, int]], live: list[tuple[float, int]]
 ) -> list[tuple[float, int]]:
-    """Stitch the exact frozen archive distribution to retained live buckets.
+    """Merge the frozen archive and live values without reducing precision."""
+    return merge_exact_distribution([archive, live])
 
-    The 2026-08-13 → 2026-08-16 cutover seam has no source rows: the archive
-    ended and Loki later pruned before mirroring resumed. It remains absent
-    from this historical percentile rather than being fabricated or bridged.
-    """
+
+def inspect_values(
+    pool: ConnectionPool[Any], agent_id: int, from_: datetime | None, to: datetime | None
+) -> InspectValues:
+    """Build stats, TPS, and activity inputs from one archive/ledger/live view."""
+    plan = full_day_plan(from_, to)
     with pool.connection() as conn, conn.cursor() as cur:
         freeze = _inspect_pg.freeze_point(cur)
-        archive = _inspect_pg.archive_distribution(
+        if plan.has_full_days:
+            max_day = _inspect_pg.newest_ledger_day(
+                conn, agent_id=agent_id, day_from=plan.day_from, day_to=plan.day_to
+            )
+            floor_at = _agent_cost._retention_floor()
+            gap_live = (
+                max_day is not None and datetime.combine(max_day, time.min, tzinfo=UTC) >= floor_at
+            )
+            ledger_day_to = (
+                plan.day_to if max_day is None or not gap_live else max_day - timedelta(days=1)
+            )
+            ledger = _inspect_pg.ledger_stats(
+                conn, agent_id=agent_id, day_from=plan.day_from, day_to=ledger_day_to
+            )
+            ledger_tokens, token_watermark = _inspect_pg.ledger_tokens(
+                conn, agent_id=agent_id, day_from=plan.day_from, day_to=plan.day_to
+            )
+        else:
+            ledger = (0, 0, 0.0, None, None, 0, 0, None)
+            ledger_tokens = 0
+            token_watermark = None
+        archive_distribution = _inspect_pg.archive_distribution(
             conn,
             field="duration_seconds",
             agent_id=agent_id,
@@ -211,68 +333,53 @@ def _turn_distribution(
             from_=from_,
             to=to,
         )
-    live_window = _inspect_pg.retained_live_window(from_=from_, to=to, freeze=freeze)
-    live: list[list[tuple[float, int]]] = []
-    if live_window is not None:
-        start, end = live_window
-        live = _inspect_pg.query_loki_shards(
-            start,
-            end,
-            lambda shard_start, shard_end: loki_events.attribute_distribution(
-                field="duration_seconds",
-                agent_id=agent_id,
-                event_names=["^turn_end$"],
-                categories=["telemetry", "log"],
-                attribute_filters=None,
-                from_=shard_start,
-                to=shard_end,
-            ),
+        archive_active_seconds = _inspect_pg.archive_aggregate(
+            conn,
+            field="duration_seconds",
+            agg="sum",
+            event_names=["^node_exit$"],
+            categories=None,
+            agent_id=agent_id,
+            from_=from_,
+            to=to,
+            attribute_filters={"node": "!=claim"},
         )
-    # Reuse Loki's private implementation deliberately: its interpolation is
-    # the existing percentile_cont contract for inspector duration metrics.
-    # Bucketing is only needed when archive and live data meet at the seam;
-    # a window with one source preserves its exact duration values.
-    return (
-        merge_distribution([archive, *live])
-        if archive and any(live)
-        else merge_exact_distribution([archive, *live])
-    )
+        archive_exec_seconds = _inspect_pg.archive_aggregate(
+            conn,
+            field="duration_seconds",
+            agg="sum",
+            event_names=["^node_exit$"],
+            categories=None,
+            agent_id=agent_id,
+            from_=from_,
+            to=to,
+            attribute_filters={"node": "exec"},
+        )
+        archive_lifecycle = _inspect_pg.archive_lifecycle(
+            conn, agent_id=agent_id, from_=None, to=None
+        )
 
-
-def stats_values(
-    pool: ConnectionPool[Any], agent_id: int, from_: datetime | None, to: datetime | None
-) -> StatsValues:
-    """Turn/exec stats from ledger plus bounded live edges and percentiles.
-
-    The newest retained ledger day is read wholly from Loki because late writes
-    can make that rolled row stale; older days remain ledger-served.
-    """
-    plan = full_day_plan(from_, to)
-    if plan.has_full_days:
-        with pool.connection() as conn:
-            max_day = _inspect_pg.newest_ledger_day(
-                conn, agent_id=agent_id, day_from=plan.day_from, day_to=plan.day_to
-            )
-            floor = _agent_cost._retention_floor()
-            gap_live = (
-                max_day is not None and datetime.combine(max_day, time.min, tzinfo=UTC) >= floor
-            )
-            ledger_day_to = (
-                plan.day_to if max_day is None or not gap_live else max_day - timedelta(days=1)
-            )
-            ledger = _inspect_pg.ledger_stats(
-                conn, agent_id=agent_id, day_from=plan.day_from, day_to=ledger_day_to
-            )
-    else:
-        ledger = (0, 0, 0.0, None, None, 0, 0, None)
     turn_total, turn_ok, turn_sum, turn_min, turn_max, exec_ok, exec_failed, watermark = ledger
-    live = _loki_stats(agent_id, live_edge_spans(plan, watermark, from_, to))
-    distribution = _turn_distribution(pool, agent_id, from_, to)
+    stats_spans = live_edge_spans(plan, watermark, from_, to)
+    token_spans = live_edge_spans(plan, token_watermark, from_, to)
+    distribution_window = _inspect_pg.retained_live_window(from_=from_, to=to, freeze=freeze)
+    activity_window = _inspect_pg.retained_live_window(from_=from_, to=to, freeze=freeze)
+    lifecycle_window = _inspect_pg.retained_live_window(from_=None, to=None, freeze=freeze)
+    live = _projected_live_values(
+        agent_id,
+        stats_spans=stats_spans,
+        token_spans=token_spans,
+        distribution_window=distribution_window,
+        activity_window=activity_window,
+        lifecycle_window=lifecycle_window,
+    )
+    distribution = _turn_distribution(archive_distribution, live.distribution)
     minimum = min(
-        (value for value in (turn_min, live.turn_min_seconds) if value is not None), default=0.0
+        (value for value in (turn_min, *live.turn_durations) if value is not None), default=0.0
     )
     maximum = max(
-        (value for value in (turn_max, live.turn_max_seconds) if value is not None), default=0.0
+        (value for value in (turn_max, *live.turn_durations) if value is not None),
+        default=0.0,
     )
     stats = AgentStats(
         turn_total=turn_total + live.turn_total,
@@ -284,7 +391,22 @@ def stats_values(
         exec_ok=exec_ok + live.exec_ok,
         exec_failed=exec_failed + live.exec_failed,
     )
-    return StatsValues(stats=stats, turn_duration_seconds=turn_sum + live.turn_duration_seconds)
+    return InspectValues(
+        stats=stats,
+        turn_duration_seconds=turn_sum + sum(live.turn_durations),
+        output_tokens=ledger_tokens + int(live.output_tokens),
+        active_seconds=archive_active_seconds + live.active_seconds,
+        exec_seconds=archive_exec_seconds + live.exec_seconds,
+        lifecycle_events=sorted([*archive_lifecycle, *live.lifecycle_events]),
+    )
+
+
+def stats_values(
+    pool: ConnectionPool[Any], agent_id: int, from_: datetime | None, to: datetime | None
+) -> StatsValues:
+    """Compatibility wrapper for callers that need only the stats section."""
+    values = inspect_values(pool, agent_id, from_, to)
+    return StatsValues(stats=values.stats, turn_duration_seconds=values.turn_duration_seconds)
 
 
 def agent_stats(
