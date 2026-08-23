@@ -152,6 +152,15 @@ class ExecFailed(TypedDict):
     body: str
 
 
+class ExecEnvelope(TypedDict):
+    """`exec_envelope` payload — request/result transfer cost."""
+
+    envelope: Literal["request", "result"]
+    op: Literal["read", "write"]
+    size_bytes: int
+    serialize_ms: float
+
+
 class ExecSubprocessKilled(TypedDict):
     """`exec_subprocess_killed` payload — a child survived the signal grace
     and the parent SIGKILLed its process group."""
@@ -661,6 +670,11 @@ EVENTS: dict[str, EventSpec] = {
     "exec": _telemetry("exec", "execute_code succeeded", payload=ExecPayload),
     "exec_failed": _telemetry(
         "exec_failed", "execute_code failed", payload=ExecFailed, tier="anomaly"
+    ),
+    "exec_envelope": _telemetry(
+        "exec_envelope",
+        "exec envelope transfer cost (size + serialize time) — request snapshot / result delta",
+        payload=ExecEnvelope,
     ),
     "exec_cancelled": _telemetry("exec_cancelled", "execute_code cancelled", tier="anomaly"),
     "exec(timeout)": _telemetry(

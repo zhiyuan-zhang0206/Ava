@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import stat
 import time
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +36,25 @@ from agent.graph._exec_protocol import (
     write_request,
     write_result,
 )
+
+
+def _exec_envelope_events() -> list[dict[str, Any]]:
+    """Read the durable telemetry mirror's exec-envelope rows."""
+    from shared.paths import logs_dir
+
+    path = logs_dir() / f"events-{datetime.now(UTC):%Y%m%d}.jsonl"
+    if not path.exists():
+        return []
+    events: list[dict[str, Any]] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        if row.get("event_name") == "exec_envelope":
+            events.append(row)
+    return events
+
 
 # ── typed blob: exact round-trip (the reason this codec was chosen) ──────
 
@@ -100,6 +120,39 @@ def test_request_envelope_round_trip(tmp_path: Path) -> None:
     assert payload.agent_id == 7
     assert payload.timeout_s == 300.0
     assert payload.state == state  # exact, typed (messages back as instances)
+
+
+def test_request_envelope_transfers_emit_size_and_serialize_time(tmp_path: Path) -> None:
+    """Request writes and reads record the final envelope size and their own
+    serialization cost in the durable event stream."""
+    from shared import telemetry
+    from shared.log import _add_postgres_sink, logger
+
+    events_before = len(_exec_envelope_events())
+    sink_id = _add_postgres_sink(process="test-exec-envelope")
+    try:
+        path = make_request_path(tmp_path, agent_id=7)
+        write_request(path, code="print('hi')", agent_id=7, timeout_s=1.0, state=_make_state_dump())
+        read_request(path)
+
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            telemetry.flush()
+            if len(_exec_envelope_events()) >= events_before + 2:
+                break
+            time.sleep(0.05)
+    finally:
+        logger.remove(sink_id)
+
+    events = _exec_envelope_events()[events_before:]
+    assert len(events) >= 2
+    request_events = [event for event in events if event["attributes"]["envelope"] == "request"]
+    by_op = {event["attributes"]["op"]: event["attributes"] for event in request_events}
+    assert set(by_op) >= {"write", "read"}
+    for attrs in by_op.values():
+        assert attrs["size_bytes"] == path.stat().st_size
+        assert isinstance(attrs["serialize_ms"], float)
+        assert attrs["serialize_ms"] >= 0.0
 
 
 def test_request_envelope_without_state(tmp_path: Path) -> None:
@@ -225,7 +278,7 @@ def test_size_ceiling_enforced(tmp_path: Path) -> None:
     path = make_request_path(tmp_path, agent_id=7)
     write_request(path, code="x = 1", agent_id=7, timeout_s=1.0, state=None)
     path.write_bytes(b"x" * (MAX_ENVELOPE_BYTES + 1))
-    with pytest.raises(ValueError, match="ceiling"):
+    with pytest.raises(ValueError, match=r"ceiling.*compact the conversation"):
         read_request(path)
 
 

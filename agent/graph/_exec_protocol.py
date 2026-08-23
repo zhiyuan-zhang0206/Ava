@@ -43,6 +43,7 @@ from typing import Any, Literal, cast
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
 from agent.state import checkpoint_msgpack_allowlist
+from shared.log import logger
 
 # Envelope schema versions — bumped only on a breaking shape change.
 REQUEST_VERSION = 1
@@ -155,6 +156,7 @@ def write_request(
 ) -> None:
     """Write the request envelope (0600). `state` is a model dump; it is
     serialized as a typed blob so langchain messages / plugin models survive."""
+    started_at = time.perf_counter()
     envelope: dict[str, Any] = {
         "v": REQUEST_VERSION,
         "code": code,
@@ -166,10 +168,12 @@ def write_request(
         envelope["state_tag"] = tag
         envelope["state_b64"] = base64.b64encode(blob).decode("ascii")
     _write_json(path, envelope)
+    _log_envelope_transfer("request", "write", path, started_at)
 
 
 def read_request(path: Path) -> RequestPayload:
     """Read and decode a request envelope; fail-fast on version drift."""
+    started_at = time.perf_counter()
     envelope = _read_json(path)
     if envelope.get("v") != REQUEST_VERSION:
         raise ValueError(
@@ -183,18 +187,21 @@ def read_request(path: Path) -> RequestPayload:
             raise ValueError(
                 f"exec request state blob decoded to {type(state).__name__}, expected dict"
             )
-    return RequestPayload(
+    payload = RequestPayload(
         code=str(envelope["code"]),
         agent_id=envelope.get("agent_id"),
         timeout_s=float(envelope["timeout_s"]),
         state=cast("dict[str, Any] | None", state),
     )
+    _log_envelope_transfer("request", "read", path, started_at)
+    return payload
 
 
 def write_result(path: Path, payload: ResultPayload) -> None:
     """Write the result envelope (0600)."""
     if payload.kind not in RESULT_KINDS:
         raise ValueError(f"unknown result kind {payload.kind!r}")
+    started_at = time.perf_counter()
     envelope: dict[str, Any] = {
         "v": RESULT_VERSION,
         "kind": payload.kind,
@@ -211,11 +218,13 @@ def write_result(path: Path, payload: ResultPayload) -> None:
         envelope["update_tag"] = tag
         envelope["update_b64"] = base64.b64encode(blob).decode("ascii")
     _write_json(path, envelope)
+    _log_envelope_transfer("result", "write", path, started_at)
 
 
 def read_result(path: Path) -> ResultPayload:
     """Read and decode a result envelope; fail-fast on version drift or an
     unknown kind."""
+    started_at = time.perf_counter()
     envelope = _read_json(path)
     if envelope.get("v") != RESULT_VERSION:
         raise ValueError(f"exec result envelope version {envelope.get('v')!r} != {RESULT_VERSION}")
@@ -232,7 +241,7 @@ def read_result(path: Path) -> ResultPayload:
         raise ValueError(
             f"exec result update blob decoded to {type(state_update).__name__}, expected dict"
         )
-    return ResultPayload(
+    payload = ResultPayload(
         kind=kind,
         lifecycle_type=envelope.get("lifecycle_type"),
         exc_type=envelope.get("exc_type"),
@@ -242,6 +251,27 @@ def read_result(path: Path) -> ResultPayload:
         state_update_error=envelope.get("state_update_error"),
         findings=envelope.get("findings"),
         attachments=cast("list[dict[str, Any]] | None", envelope.get("attachments")),
+    )
+    _log_envelope_transfer("result", "read", path, started_at)
+    return payload
+
+
+def _log_envelope_transfer(
+    envelope: Literal["request", "result"],
+    op: Literal["read", "write"],
+    path: Path,
+    started_at: float,
+) -> None:
+    """Record an envelope transfer's final size and serialization cost."""
+    size_bytes = path.stat().st_size
+    serialize_ms = (time.perf_counter() - started_at) * 1000
+    logger.info(
+        "[exec envelope] {op} {envelope} size_bytes={size_bytes} serialize_ms={serialize_ms:.1f}",
+        event="exec_envelope",
+        envelope=envelope,
+        op=op,
+        size_bytes=size_bytes,
+        serialize_ms=serialize_ms,
     )
 
 
@@ -265,10 +295,12 @@ def _write_json(path: Path, envelope: dict[str, Any]) -> None:
 
 def _read_json(path: Path) -> dict[str, Any]:
     """Read + parse an envelope JSON, enforcing the size ceiling."""
-    if path.stat().st_size > MAX_ENVELOPE_BYTES:
+    size_bytes = path.stat().st_size
+    if size_bytes > MAX_ENVELOPE_BYTES:
         raise ValueError(
-            f"exec envelope {path} is {path.stat().st_size} bytes, over the "
-            f"{MAX_ENVELOPE_BYTES} ceiling"
+            f"exec envelope {path} is {size_bytes} bytes, over the {MAX_ENVELOPE_BYTES} "
+            "ceiling — this state snapshot or result delta is over the exec envelope limit; "
+            "compact the conversation"
         )
     data = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):

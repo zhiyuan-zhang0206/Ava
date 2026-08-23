@@ -292,11 +292,13 @@ def _run(request_path: str, result_path: str) -> None:
     from ava._attach import take_attachments
     from ava.security import take_findings
 
+    _line_buffered_output()
+    _install_signal_handlers()
+    if "AVA_AGENT_ID" in os.environ:
+        _init_logger(int(os.environ["AVA_AGENT_ID"]))
     request = read_request(Path(request_path))
     payload = ResultPayload(kind="done")
 
-    _line_buffered_output()
-    _install_signal_handlers()
     overlay, birth = _pop_overlay_env()
     if request.agent_id is not None:
         _boot.establish(request.agent_id, owns_loop=True)
