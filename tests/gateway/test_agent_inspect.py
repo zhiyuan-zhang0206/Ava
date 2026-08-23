@@ -23,6 +23,7 @@ import json
 import re
 import threading
 import time
+from collections import Counter
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
@@ -108,6 +109,10 @@ class _FakeLoki:
 
     def __init__(self) -> None:
         self.rows: list[dict[str, Any]] = []
+        self.wire_calls: Counter[str] = Counter()
+
+    def _record_wire_call(self, method: str) -> None:
+        self.wire_calls[method] += 1
 
     def add(
         self,
@@ -181,6 +186,7 @@ class _FakeLoki:
         return out
 
     def query_events(self, **kwargs: Any) -> tuple[list[dict[str, Any]], bool]:
+        self._record_wire_call("query_events")
         rows = sorted(self._match(**kwargs), key=lambda r: r["ts"], reverse=True)
         limit = kwargs.get("limit", 100)
         offset = kwargs.get("offset", 0)
@@ -188,9 +194,11 @@ class _FakeLoki:
         return page, len(rows) > offset + limit
 
     def count_events(self, **kwargs: Any) -> int:
+        self._record_wire_call("count_events")
         return len(self._match(**kwargs))
 
     def count_by_event_name(self, **kwargs: Any) -> dict[str, int]:
+        self._record_wire_call("count_by_event_name")
         counts: dict[str, int] = {}
         for row in self._match(**kwargs):
             event_name = str(row["event_name"])
@@ -198,6 +206,7 @@ class _FakeLoki:
         return counts
 
     def attribute_distribution(self, **kwargs: Any) -> list[tuple[float, int]]:
+        self._record_wire_call("attribute_distribution")
         field = kwargs["field"]
         counts: dict[float, int] = {}
         for row in self._match(**kwargs):
@@ -209,6 +218,7 @@ class _FakeLoki:
         return sorted(counts.items())
 
     def attribute_aggregate(self, **kwargs: Any) -> Any:
+        self._record_wire_call("attribute_aggregate")
         rows = self._match(**kwargs)
         field = kwargs["field"]
         agg = kwargs["agg"]
@@ -244,6 +254,34 @@ class _FakeLoki:
             return [(g, _agg(vs)) for g, vs in groups.items()]
         return _agg([v for v in (_value(r) for r in rows) if v is not None])
 
+    def query_projected_lines(self, **kwargs: Any) -> list[tuple[int, int | None, str]]:
+        """Return the raw event body format the inspector reduces client-side."""
+        self._record_wire_call("query_projected_lines")
+        assert kwargs["fields"] == []
+        assert kwargs["template"] == "{{ __line__ }}"
+        rows: list[tuple[int, int | None, str]] = []
+        for row in self._match(**kwargs):
+            body = {
+                "ts": row["ts"].isoformat(),
+                "agent_id": row["agent_id"],
+                "machine": row["machine"],
+                "process": row["process"],
+                "category": row["category"],
+                "event_name": row["event_name"],
+                "level": row["level"],
+                "source": row["source"],
+                "target_agent_id": row["target_agent_id"],
+                "attributes": row["attributes"],
+            }
+            rows.append(
+                (
+                    int(row["ts"].timestamp() * 1e9),
+                    row["agent_id"],
+                    json.dumps(body, separators=(",", ":")),
+                )
+            )
+        return sorted(rows)
+
 
 @pytest.fixture(autouse=True)
 def fake_loki(monkeypatch: pytest.MonkeyPatch) -> _FakeLoki:
@@ -256,6 +294,7 @@ def fake_loki(monkeypatch: pytest.MonkeyPatch) -> _FakeLoki:
     monkeypatch.setattr(loki_events, "count_by_event_name", fake.count_by_event_name)
     monkeypatch.setattr(loki_events, "attribute_distribution", fake.attribute_distribution)
     monkeypatch.setattr(loki_events, "attribute_aggregate", fake.attribute_aggregate)
+    monkeypatch.setattr(loki_events, "query_projected_lines", fake.query_projected_lines)
     _agent_cost.cache_clear()
     agent_inspect.cache_clear()
     return fake
@@ -328,6 +367,24 @@ def _metrics_ledger_row(
                 exec_ok,
                 exec_failed,
             ),
+        )
+
+
+def _archive_event(
+    db: psycopg.Connection,
+    *,
+    agent_id: int,
+    event: str,
+    attributes: dict[str, Any],
+    ts: datetime,
+) -> None:
+    """Insert one frozen event row; the later marker establishes its cutoff."""
+    with db.cursor() as cur:
+        cur.execute(
+            "INSERT INTO events "
+            "(ts, agent_id, machine, process, category, event_name, level, source, attributes) "
+            "VALUES (%s, %s, 'test', 'test', 'telemetry', %s, 'info', 'test', %s::jsonb)",
+            (ts, agent_id, event, json.dumps(attributes)),
         )
 
 
@@ -1024,6 +1081,98 @@ def test_inspect_windowed_duration_stats_keep_exact_float_values(
     assert stats["turn_max_seconds"] == 96.04
 
 
+def test_inspect_archive_and_live_durations_keep_exact_percentiles(
+    db_conn: psycopg.Connection, fake_loki: _FakeLoki
+) -> None:
+    """The archive/live seam preserves fractions instead of second buckets."""
+    aid = _insert_agent(db_conn)
+    now = datetime.now(UTC)
+    _archive_event(
+        db_conn,
+        agent_id=aid,
+        event="turn_end",
+        attributes={"duration_seconds": 1.25, "ok": True},
+        ts=now - timedelta(hours=2),
+    )
+    # The archive cutoff is exclusive, so this marker leaves the turn archived
+    # and starts the live window before the FakeLoki row below.
+    _archive_event(
+        db_conn,
+        agent_id=aid,
+        event="freeze_marker",
+        attributes={},
+        ts=now - timedelta(hours=1),
+    )
+    fake_loki.add(
+        event="turn_end",
+        agent_id=aid,
+        payload={"duration_seconds": 1.75, "ok": True},
+        ts=now - timedelta(minutes=30),
+    )
+    db_conn.commit()
+
+    with TestClient(app) as client:
+        stats = client.get(f"/api/agents/{aid}/inspect").json()["stats"]
+
+    assert stats["turn_p50_seconds"] == 1.5
+    assert stats["turn_p90_seconds"] == 1.7
+
+
+def _assert_inspect_live_query_budget(fake_loki: _FakeLoki) -> None:
+    """The cold panel keeps cost/heartbeat and collapses every other live read."""
+    assert sum(fake_loki.wire_calls.values()) <= 12
+    assert fake_loki.wire_calls["attribute_aggregate"] == 7
+    assert fake_loki.wire_calls["query_events"] == 1
+    assert fake_loki.wire_calls["query_projected_lines"] == 1
+    assert fake_loki.wire_calls["count_by_event_name"] == 0
+    assert fake_loki.wire_calls["attribute_distribution"] == 0
+
+
+def test_inspect_cold_panel_with_ledger_uses_one_shared_live_pass(
+    db_conn: psycopg.Connection, fake_loki: _FakeLoki
+) -> None:
+    """A ledger-backed whole-life panel needs cost, heartbeat, and one live pass."""
+    aid = _insert_agent(db_conn)
+    _ledger_row(db_conn, agent_id=aid, days_ago=2, tout=100)
+    _metrics_ledger_row(
+        db_conn,
+        agent_id=aid,
+        days_ago=2,
+        turn_total=1,
+        turn_ok=1,
+        turn_duration_seconds=2.0,
+    )
+    fake_loki.add(event="agent_spawned", agent_id=aid, ts_offset_hours=2)
+    fake_loki.add(event="turn_end", agent_id=aid, payload={"duration_seconds": 2.5, "ok": True})
+    fake_loki.add(event="llm_usage", agent_id=aid, payload={"out_total": 25})
+    _node_exit(fake_loki, agent_id=aid, node="exec", duration_seconds=1.5)
+    db_conn.commit()
+
+    fake_loki.wire_calls.clear()
+    with TestClient(app) as client:
+        assert client.get(f"/api/agents/{aid}/inspect").status_code == 200
+
+    _assert_inspect_live_query_budget(fake_loki)
+
+
+def test_inspect_cold_all_live_panel_uses_one_shared_live_pass(
+    db_conn: psycopg.Connection, fake_loki: _FakeLoki
+) -> None:
+    """No ledger rows still produce one consolidated raw line fetch."""
+    aid = _insert_agent(db_conn)
+    fake_loki.add(event="agent_spawned", agent_id=aid, ts_offset_hours=2)
+    fake_loki.add(event="turn_end", agent_id=aid, payload={"duration_seconds": 2.5, "ok": True})
+    fake_loki.add(event="llm_usage", agent_id=aid, payload={"out_total": 25})
+    _node_exit(fake_loki, agent_id=aid, node="exec", duration_seconds=1.5)
+    db_conn.commit()
+
+    fake_loki.wire_calls.clear()
+    with TestClient(app) as client:
+        assert client.get(f"/api/agents/{aid}/inspect").status_code == 200
+
+    _assert_inspect_live_query_budget(fake_loki)
+
+
 def test_inspect_whole_life_stats_read_completed_days_from_the_ledger(
     db_conn: psycopg.Connection, fake_loki: _FakeLoki
 ) -> None:
@@ -1139,6 +1288,31 @@ def test_inspect_exec_ok_fail_split(db_conn: psycopg.Connection, fake_loki: _Fak
     stats = body["stats"]
     assert stats["exec_ok"] == 2
     assert stats["exec_failed"] == 2
+
+
+def test_inspect_projected_rows_deduplicate_repeated_boundary_lines(
+    db_conn: psycopg.Connection,
+    fake_loki: _FakeLoki,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A projected slice boundary cannot double-count its repeated raw line."""
+    aid = _insert_agent(db_conn)
+    fake_loki.add(event="turn_end", agent_id=aid, payload={"duration_seconds": 2.0, "ok": True})
+    original = fake_loki.query_projected_lines
+
+    def duplicate_boundary_line(**kwargs: Any) -> list[tuple[int, int | None, str]]:
+        rows = original(**kwargs)
+        return [*rows, *rows]
+
+    monkeypatch.setattr(loki_events, "query_projected_lines", duplicate_boundary_line)
+    db_conn.commit()
+    with TestClient(app) as client:
+        stats = client.get(f"/api/agents/{aid}/inspect").json()["stats"]
+
+    assert stats["turn_total"] == 1
+    assert stats["turn_ok"] == 1
+    assert stats["turn_min_seconds"] == 2.0
+    assert stats["turn_max_seconds"] == 2.0
 
 
 def test_inspect_empty_agent_zeros(db_conn: psycopg.Connection) -> None:
@@ -1820,6 +1994,26 @@ def test_inspect_activity_excludes_claim_node(
         act = client.get(f"/api/agents/{aid}/inspect").json()["activity"]
     # only the llm node counts — the 3000s claim is excluded
     assert act["active_seconds"] == pytest.approx(12.0)  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_inspect_activity_counts_missing_node_in_any_category(
+    db_conn: psycopg.Connection, fake_loki: _FakeLoki
+) -> None:
+    """Missing ``node`` still means non-claim, even outside telemetry/log."""
+    aid = _insert_agent(db_conn)
+    fake_loki.add(
+        event="node_exit",
+        agent_id=aid,
+        category="audit",
+        payload={"duration_seconds": 3.0},
+    )
+    db_conn.commit()
+
+    with TestClient(app) as client:
+        activity = client.get(f"/api/agents/{aid}/inspect").json()["activity"]
+
+    assert activity["active_seconds"] == 3.0
+    assert activity["exec_seconds"] == 0.0
 
 
 def test_inspect_activity_rate_capped_at_one(
