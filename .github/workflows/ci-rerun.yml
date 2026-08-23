@@ -56,17 +56,9 @@ jobs:
             exit 0
           fi
 
-          mapfile -t failed_job_ids < <(
-            gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/jobs?per_page=100" \
-              --jq '.jobs[] | select((.conclusion // "" | ascii_downcase) as $c | ["failure", "timed_out", "action_required", "startup_failure"] | index($c)) | .id'
-          )
-          if [ "${#failed_job_ids[@]}" -eq 0 ]; then
-            echo "No failed jobs in CI run ${RUN_ID}"
-            exit 0
-          fi
-          for job_id in "${failed_job_ids[@]}"; do
-            gh api --method POST "repos/${GITHUB_REPOSITORY}/actions/jobs/${job_id}/rerun"
-          done
+          # The first job-level rerun starts a new attempt, making later calls fail with 403.
+          # Rerun all failed jobs and their dependents atomically at the run level instead.
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/rerun-failed-jobs"
           echo "reran=true" >> "$GITHUB_OUTPUT"
 
       - name: Remind maintainers after a PR rerun
