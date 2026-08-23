@@ -13,6 +13,7 @@ tests/agent/test_ava_fleet_plugin.py.)
 from __future__ import annotations
 
 import http.server
+import socket
 import socketserver
 import threading
 from pathlib import Path
@@ -55,7 +56,7 @@ class _StubPageServer:
     """A real HTTP server answering /health — the stand-in for what the
     page_server daemon spawns for an open row."""
 
-    def __init__(self, host: str, port: int) -> None:
+    def __init__(self, host: str, port: int = 0) -> None:
         class Handler(http.server.BaseHTTPRequestHandler):
             def do_GET(self) -> None:
                 if self.path == "/health":
@@ -74,6 +75,7 @@ class _StubPageServer:
             allow_reuse_address = True
 
         self._server = _ReuseServer((host, port), Handler)
+        self.port = self._server.server_address[1]
         self._server.daemon_threads = True
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
 
@@ -84,6 +86,22 @@ class _StubPageServer:
     def __exit__(self, *exc: object) -> None:
         self._server.shutdown()
         self._server.server_close()
+
+
+class _SilentServer:
+    """Reserve a loopback port while deliberately withholding an HTTP response."""
+
+    def __init__(self, host: str, port: int = 0) -> None:
+        self._socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self._socket.bind((host, port))
+        self._socket.listen()
+        self.port = self._socket.getsockname()[1]
+
+    def __enter__(self) -> _SilentServer:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self._socket.close()
 
 
 class TestShow:
@@ -159,15 +177,14 @@ class TestServe:
 
     def test_serve_registers_serve_dir(self, db_conn: psycopg.Connection, tmp_path: Path) -> None:
         ava._boot._agent_id = spawn_agent()
-        port = 10000 + ava._boot.agent_id()
         (tmp_path / "index.html").write_text("<h1>served</h1>", encoding="utf-8")
-        with _StubPageServer("127.0.0.1", port):
-            page = ava.ui.serve(str(tmp_path), "srv", title="Served")
+        with _StubPageServer("127.0.0.1") as stub:
+            page = ava.ui.serve(str(tmp_path), "srv", port=stub.port, title="Served")
         assert page.name == "srv"
-        assert page.port == port
+        assert page.port == stub.port
         db_conn.rollback()
         assert _open_pages(db_conn, ava._boot.agent_id()) == [
-            ("srv", port, "Served", str(tmp_path))
+            ("srv", stub.port, "Served", str(tmp_path))
         ]
 
     def test_serve_waits_for_server_to_come_up(
@@ -175,11 +192,10 @@ class TestServe:
     ) -> None:
         """serve() polls until the daemon's server answers (stub starts late)."""
         ava._boot._agent_id = spawn_agent()
-        port = 10000 + ava._boot.agent_id()
         (tmp_path / "index.html").write_text("<h1>x</h1>", encoding="utf-8")
-        with _StubPageServer("127.0.0.1", port):
-            page = ava.ui.serve(str(tmp_path), "late", port=port)
-        assert page.port == port
+        with _StubPageServer("127.0.0.1") as stub:
+            page = ava.ui.serve(str(tmp_path), "late", port=stub.port)
+        assert page.port == stub.port
 
     def test_serve_times_out_without_daemon(
         self, db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -189,22 +205,25 @@ class TestServe:
         import ava.ui as ui_mod
 
         ava._boot._agent_id = spawn_agent()
-        port = 10000 + ava._boot.agent_id()
         (tmp_path / "index.html").write_text("<h1>x</h1>", encoding="utf-8")
         monkeypatch.setattr(ui_mod, "_SERVE_READY_TIMEOUT_S", 0.5)
-        with pytest.raises(ui_mod.PageError, match="did not come up"):
-            ava.ui.serve(str(tmp_path), "nod", port=port)
+        with (
+            _SilentServer("127.0.0.1") as silent,
+            pytest.raises(ui_mod.PageError, match="did not come up"),
+        ):
+            ava.ui.serve(str(tmp_path), "nod", port=silent.port)
         db_conn.rollback()
         # The declaration is durable even when the server is not up yet.
-        assert _open_pages(db_conn, ava._boot.agent_id()) == [("nod", port, None, str(tmp_path))]
+        assert _open_pages(db_conn, ava._boot.agent_id()) == [
+            ("nod", silent.port, None, str(tmp_path))
+        ]
 
     def test_serve_same_name_replaces(self, db_conn: psycopg.Connection, tmp_path: Path) -> None:
         ava._boot._agent_id = spawn_agent()
-        port = 10000 + ava._boot.agent_id()
         (tmp_path / "index.html").write_text("<h1>x</h1>", encoding="utf-8")
-        with _StubPageServer("127.0.0.1", port):
-            ava.ui.serve(str(tmp_path), "once", port=port)
-            ava.ui.serve(str(tmp_path), "twice", port=port)
+        with _StubPageServer("127.0.0.1") as stub:
+            ava.ui.serve(str(tmp_path), "once", port=stub.port)
+            ava.ui.serve(str(tmp_path), "twice", port=stub.port)
         db_conn.rollback()
         assert [r[0] for r in _open_pages(db_conn, ava._boot.agent_id())] == ["twice"]
 
@@ -230,9 +249,8 @@ class TestServeMarkdown:
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         ava._boot._agent_id = spawn_agent()
-        port = 10000 + ava._boot.agent_id()
-        with _StubPageServer("127.0.0.1", port):
-            ava.ui.serve_markdown("# Hello", "md", port=port)
+        with _StubPageServer("127.0.0.1") as stub:
+            ava.ui.serve_markdown("# Hello", "md", port=stub.port)
         db_conn.rollback()
         rows = _open_pages(db_conn, ava._boot.agent_id())
         assert len(rows) == 1

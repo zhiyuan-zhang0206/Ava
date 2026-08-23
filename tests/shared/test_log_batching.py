@@ -172,7 +172,9 @@ def test_stop_flushes_what_is_buffered(tuned: Any) -> None:
 # --- bounded queue ---
 
 
-def test_queue_is_bounded_and_counts_what_it_sheds(tuned: Any, monkeypatch: Any) -> None:
+def test_queue_is_bounded_and_counts_what_it_sheds(
+    tuned: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A producer outrunning the drain thread sheds records, not memory.
 
     The drain thread is stalled so the queue genuinely fills; before this bound
@@ -185,13 +187,25 @@ def test_queue_is_bounded_and_counts_what_it_sheds(tuned: Any, monkeypatch: Any)
         time.sleep(5.0)
         blocked(batch)
 
+    reports: list[dict] = []  # pyright: ignore[reportMissingTypeArgument, reportUnknownVariableType]
+    monkeypatch.setattr(
+        slog.logger,
+        "warning",
+        lambda _msg, **kw: reports.append(kw) if kw.get("event") == "event_log_drop" else None,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType, reportUnknownMemberType]
+    )
     # Not stopped in a finally: stop() joins, and this writer sleeps 5s by
     # design. The drain thread is already a daemon, so it cannot hold the
     # interpreter open.
     sink = _make_sink(_stalled, batch=10, interval=0.05, maxsize=20)
     for i in range(500):
         sink.enqueue(_event(i))
-    assert sink.dropped > 0, "queue accepted 500 records with maxsize=20"
+    deadline = time.monotonic() + 10.0
+    while time.monotonic() < deadline and not reports:
+        time.sleep(0.01)
+
+    assert reports, "expected an event_log_drop report after shedding records"
+    assert all(r["event"] == "event_log_drop" for r in reports)  # pyright: ignore[reportUnknownArgumentType, reportUnknownVariableType]
+    assert reports[0]["n"] > 0
     assert sink._queue.qsize() <= 20, "queue grew past its bound"
 
 
