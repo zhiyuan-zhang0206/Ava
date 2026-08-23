@@ -113,6 +113,10 @@ $REMOTE_OTLP_RECEIVER
   filelog/sessions:
     include:
       - $AVA_HOME/logs/*.out.log
+    # The collector is itself a session named ava-otel-collector. Tailing its
+    # stdout would feed exported log diagnostics back into this receiver.
+    exclude:
+      - $AVA_HOME/logs/ava-otel-collector.out.log
     start_at: end
     include_file_name: true
     include_file_path: false

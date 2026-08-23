@@ -285,6 +285,20 @@ def test_logs_merge_event_and_filelog_transforms_before_batch(
     ]
 
 
+def test_session_filelog_excludes_collectors_own_output(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The collector tails every service session except its own output, which
+    would otherwise be re-ingested recursively through the logs exporter."""
+    cfg = _render_real_template(monkeypatch, frozenset({"gateway", "agent-runner"}))
+
+    receiver = cfg["receivers"]["filelog/sessions"]
+    assert receiver["include"] == ["/home/u/.ava/logs/*.out.log"]
+    assert receiver["exclude"] == [
+        "/home/u/.ava/logs/ava-otel-collector.out.log",
+    ]
+
+
 def test_runner_forwards_to_authenticated_gateway_ingress_without_renaming_queues(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
