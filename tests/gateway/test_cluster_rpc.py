@@ -225,6 +225,25 @@ async def test_default_timeout_comes_from_settings(
 
 
 @pytest.mark.asyncio
+async def test_client_ignores_system_proxy(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Cluster-private RPC dials never inherit the host's proxy settings."""
+    monkeypatch.setattr(cluster_rpc, "lookup_machine_url", lambda _n: "http://host:8106")  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    real_client = httpx.AsyncClient
+    seen: dict[str, object] = {}
+
+    def _client_factory(**kwargs):  # type: ignore[no-untyped-def]
+        seen["trust_env"] = kwargs["trust_env"]
+        kwargs["transport"] = httpx.MockTransport(
+            lambda _r: httpx.Response(200, json={"status": "completed", "result": {}})
+        )
+        return real_client(**kwargs)  # pyright: ignore[reportUnknownArgumentType]
+
+    monkeypatch.setattr(cluster_rpc.httpx, "AsyncClient", _client_factory)  # pyright: ignore[reportUnknownArgumentType]
+    await cluster_rpc.dispatch_to_machine("wsl", "status_probe", {}, retries=0)
+    assert seen["trust_env"] is False
+
+
+@pytest.mark.asyncio
 async def test_connect_timeout_capped_by_timeout_s(monkeypatch: pytest.MonkeyPatch) -> None:
     """A short probe timeout_s bounds the connect phase too. The connect floor
     used to be a flat 10s, so a blackholed host (powered-off private-network peer)
