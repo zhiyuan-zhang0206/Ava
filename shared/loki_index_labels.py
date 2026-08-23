@@ -19,7 +19,7 @@ EVENT_STREAM_SERVICE_NAME = "unknown_service"
 
 # Operator-set deployment boundary. Keep this value in the future until the
 # collector transform and Loki mapping are live cluster-wide.
-INDEX_LABEL_CUTOVER_AT = datetime(2026, 9, 1, tzinfo=UTC)
+INDEX_LABEL_CUTOVER_AT = datetime(2026, 8, 23, 11, 0, tzinfo=UTC)
 EVENT_STREAM_RETENTION = timedelta(hours=168)
 LEGACY_READ_MARGIN = timedelta(minutes=10)
 LEGACY_READ_EXPIRES_AT = INDEX_LABEL_CUTOVER_AT + EVENT_STREAM_RETENTION + LEGACY_READ_MARGIN
