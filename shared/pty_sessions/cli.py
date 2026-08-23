@@ -75,6 +75,7 @@ from shared.pty_sessions._paths import (
     socket_path,
     transcript_path,
 )
+from shared.pty_sessions.orphan_reaper import _reap_orphaned_hosts
 from shared.session_record import SessionRecord, pid_starttime_ticks
 
 # ---------------------------------------------------------------------------
@@ -449,6 +450,15 @@ def _op_new(name: str, rest: list[str]) -> int:
         return 2
     cwd, envfile = rest[0], rest[1]
     cmd_b64 = rest[2] if len(rest) == 3 else ""
+    try:
+        reaped = _reap_orphaned_hosts(name)
+    except RuntimeError as exc:
+        with contextlib.suppress(OSError):
+            Path(envfile).unlink()
+        sys.stderr.write(f"cannot reap orphan pty host for {name}: {exc}\n")
+        return 1
+    if reaped:
+        logger.warning("pty new {name}: reaped {count} orphan host(s)", name=name, count=reaped)
     if has_session(name):
         # Already exists = idempotent no-op. The envfile is still consumed
         # (its handoff job is done whether or not a session was created) so
@@ -559,6 +569,11 @@ def _kill_by_record(name: str) -> int:
         sys.stderr.write(f"session {name} survived the record-based kill\n")
         return 1
     _sweep_dead(name)
+    try:
+        _reap_orphaned_hosts(name, force_unresponsive=True)
+    except RuntimeError as exc:
+        sys.stderr.write(f"session {name} left an orphaned host after record-based kill: {exc}\n")
+        return 1
     return 0
 
 
@@ -572,10 +587,23 @@ def _op_kill(name: str, rest: list[str]) -> int:
         resp = session_request(name, {"op": "kill", "graceful": graceful})
     except OSError:
         if not has_session(name):
+            try:
+                _reap_orphaned_hosts(name, force_unresponsive=True)
+            except RuntimeError as exc:
+                sys.stderr.write(f"cannot reap orphan pty host for {name}: {exc}\n")
+                return 1
             _sweep_dead(name)
             return 0  # idempotent: killing an absent session is a noop
         return _kill_by_record(name)
-    return _finish_op(resp)
+    result = _finish_op(resp)
+    if result != 0:
+        return result
+    try:
+        _reap_orphaned_hosts(name, force_unresponsive=True)
+    except RuntimeError as exc:
+        sys.stderr.write(f"session {name} left an orphaned host after kill: {exc}\n")
+        return 1
+    return 0
 
 
 def _op_list(rest: list[str]) -> int:

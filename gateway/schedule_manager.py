@@ -44,7 +44,7 @@ from psycopg_pool import ConnectionPool
 
 from shared.cluster import session_name
 from shared.config import settings
-from shared.paths import prod_service_checkout_error
+from shared.paths import ava_home, prod_service_checkout_error
 from shared.session_backend import get_shell_backend
 from shared.session_env import forward_env_dict
 
@@ -198,7 +198,17 @@ class ScheduleManager:
 
     def _live_ids(self) -> set[int]:
         live: set[int] = set()
-        for name in get_shell_backend().list_sessions(prefix=_SCHEDULE_PREFIX):
+        backend = get_shell_backend()
+        names = backend.list_sessions(prefix=_SCHEDULE_PREFIX)
+        home = ava_home()
+        _log.debug(
+            "schedule session scan backend=%s settings_home=%s record_dir=%s names=%s",
+            type(backend).__name__,
+            home,
+            home / "run" / "pty",
+            names,
+        )
+        for name in names:
             tail = name.removeprefix(_SCHEDULE_PREFIX)
             if tail.isdigit():
                 live.add(int(tail))
