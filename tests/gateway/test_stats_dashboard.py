@@ -25,7 +25,7 @@ from fastapi.testclient import TestClient
 
 from gateway import loki_events, loki_query_budget
 from gateway.app import app
-from gateway.routers import status
+from gateway.routers import _stats_dashboard, status
 from gateway.schemas import StatsWindowHours
 from tests.gateway.loki_fake import FakeLoki
 
@@ -39,6 +39,12 @@ def fake_loki(monkeypatch: pytest.MonkeyPatch) -> FakeLoki:
     monkeypatch.setattr(loki_events, "count_events", fake.count_events)
     monkeypatch.setattr(loki_events, "attribute_aggregate", fake.attribute_aggregate)
     return fake
+
+
+@pytest.fixture(autouse=True)
+def clear_llm_usage_sums_cache() -> None:
+    """Keep every FakeLoki test isolated from the route's 30-second cache."""
+    _stats_dashboard.cache_clear()
 
 
 def _insert_agent_row(db: psycopg.Connection, label: str = "t") -> int:
@@ -341,7 +347,7 @@ def test_dashboard_cache_hit_pct_two_decimals(
 def test_dashboard_cost_uses_usage_time_snapshots(
     db_conn: psycopg.Connection, fake_loki: FakeLoki
 ) -> None:
-    """Cost sums the event payload snapshots, regardless of model registry state."""
+    """Cost sums telemetry snapshots, regardless of model registry state."""
     fake_loki.add(
         event="llm_usage",
         payload={
@@ -376,7 +382,45 @@ def test_dashboard_cost_uses_usage_time_snapshots(
     db_conn.commit()
     with TestClient(app) as client:
         body = client.get("/api/stats/dashboard").json()
-    assert body["cost_usd"] == pytest.approx(38.0)  # pyright: ignore[reportUnknownMemberType]
+    # The matching log event is excluded: llm_usage is telemetry-only in both
+    # the status card and Grafana panels.
+    assert body["cost_usd"] == pytest.approx(37.25)  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_dashboard_caches_llm_usage_sums_per_window(
+    db_conn: psycopg.Connection, fake_loki: FakeLoki, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The 5s sidebar poll reuses only its matching window's four Loki sums."""
+    fake_loki.add(
+        event="llm_usage",
+        payload={"in_total": 10, "out_total": 5, "cache_read": 0, "cost_usd": 1.0},
+    )
+    aggregate_calls = 0
+    real_aggregate = fake_loki.attribute_aggregate
+
+    def spy_aggregate(**kwargs: Any) -> float | list[tuple[str, float]]:
+        nonlocal aggregate_calls
+        if kwargs.get("event_names") == ["llm_usage"]:
+            aggregate_calls += 1
+        return real_aggregate(**kwargs)
+
+    monkeypatch.setattr(loki_events, "attribute_aggregate", spy_aggregate)
+    db_conn.commit()
+    with TestClient(app) as client:
+        assert client.get("/api/stats/dashboard").json()["cost_usd"] == 1.0
+        initial_calls = aggregate_calls
+        fake_loki.add(
+            event="llm_usage",
+            payload={"in_total": 20, "out_total": 10, "cache_read": 0, "cost_usd": 2.0},
+        )
+        assert client.get("/api/stats/dashboard").json()["cost_usd"] == 1.0
+        assert aggregate_calls == initial_calls
+        assert client.get("/api/stats/dashboard", params={"hours": 6}).json()["cost_usd"] == 3.0
+        window_calls = aggregate_calls
+        assert window_calls > initial_calls
+        _stats_dashboard.cache_clear()
+        assert client.get("/api/stats/dashboard").json()["cost_usd"] == 3.0
+    assert aggregate_calls > window_calls
 
 
 def test_dashboard_aggregates_turn_end_filters_ok(
