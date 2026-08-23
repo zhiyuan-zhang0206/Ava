@@ -85,7 +85,7 @@ class ThresholdStep(BaseModel):
 
 
 class MetricSpec(BaseModel):
-    """One plugin metric over the unified ``events`` table.
+    """One plugin metric over the live event stream or a permitted SQL source.
 
     Fields:
         name: globally unique id (``^[a-z][a-z0-9_]*$``). Convention:
@@ -98,11 +98,10 @@ class MetricSpec(BaseModel):
         category: the event category (audit | telemetry | log).
         unit: Grafana unit id (``short``, ``percent``, ``ops``, ``s``, ...).
         panel: Grafana panel type — ``timeseries`` / ``stat`` / ``barchart`` / ``table``.
-        query: Grafana SQL template over ``events``. Placeholders:
-            ``{event_name}`` and ``{category}`` (rendered as single-quoted
-            literals by the generator), ``{{agent_id}}`` (inspector-only,
-            rendered by the future gateway to ``agent_id = <n>``).
-        targets: extra SQL templates rendered as refId B/C/... targets on
+        query: Grafana query template. LogQL templates select the live event
+            stream and use ``{event_name}`` / ``{category}`` placeholders;
+            ``{{agent_id}}`` is inspector-only and rendered as a label filter.
+        targets: extra query templates rendered as refId B/C/... targets on
             the same panel (multi-series panels — e.g. the core TPS panels'
             max/min-agent series). Validated like ``query``.
         options / custom / field_defaults: optional panel-look overrides
@@ -136,10 +135,10 @@ class MetricSpec(BaseModel):
     # Additional query targets (refIds B/C/...) for multi-series panels —
     # each target is validated and rendered exactly like `query`.
     targets: list[str] | None = None
-    # Display names for the rendered targets (refIds A, B, ...), one per
-    # series. LogQL aggregates carry no labels, so the generator renders
-    # these as fieldConfig displayName overrides; SQL targets are named by
-    # their column aliases and must not combine with target_names.
+    # Legend names for the rendered targets (refIds A, B, ...), one per
+    # series. LogQL aggregates carry no labels, so Grafana targets render
+    # these as legendFormat values; SQL targets are named by their column
+    # aliases and must not combine with target_names.
     target_names: list[str] | None = None
     # Optional panel look overrides, merged into the generated panel JSON:
     # `options` merges into panel "options" (legend/colorMode/noValue/...),

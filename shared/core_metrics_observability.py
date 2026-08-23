@@ -12,7 +12,7 @@ Migrated plugin -> core (user ruling 2026-08-06: core metrics + plugin
 metrics two-tier architecture): the 15 MetricSpec definitions below are
 verbatim from the retired plugin's metrics.py, registered with
 ``core_metrics.register_core_metric`` instead of ``register_metric`` — the
-same SQL safety validation, no PluginContext, ``plugin`` auto-filled to
+same query safety validation, no PluginContext, ``plugin`` auto-filled to
 "core". Registration happens at import time (``core_metrics.collect_core_metrics``
 imports this module through the ``_CORE_DEFINITION_MODULES`` tuple); templates
 use the {event_name}/{category} placeholders and, on inspector-only metrics, the
@@ -25,8 +25,8 @@ use). Event attributes unwrap via ``attributes_<key>``; the numeric payload
 fields (in_total/out_total/cost_usd/...) come straight from the event JSON —
 cost_usd has ridden in every llm_usage payload since #2626, so the cost
 panels unwrap it instead of mirroring MODEL_PRICING into SQL (405 ruling,
-2026-08-14). Multi-series panels name their targets via ``target_names``
-(Grafana displayName overrides) because LogQL aggregates carry no labels.
+2026-08-14). Multi-series panels name their targets with per-target
+``legendFormat`` values because LogQL aggregates carry no labels.
 
 Data provenance (verified against the live prod stream, 2026-08-04):
 - llm_usage ~41.3k rows/7d, category=telemetry; attributes carry model /
@@ -114,7 +114,7 @@ core_metrics.register_core_metric(
         query=(
             f'sum(sum_over_time({{service_name="unknown_service"}} | json | '
             f"category={{category}} | event_name={{event_name}} | "
-            f"unwrap {_LLM_ATTR['cost_usd']} [$__interval]))"
+            f"unwrap {_LLM_ATTR['cost_usd']} [30m]))"
         ),
         target_names=["cost usd"],
         output=["grafana"],
@@ -163,11 +163,11 @@ core_metrics.register_core_metric(
         unit="short",
         panel="timeseries",
         query_type="logql",
-        query=_count('category={category} | event_name="llm_provider_error"', "$__interval"),
+        query=_count('category={category} | event_name="llm_provider_error"', "5m"),
         targets=[
-            _count('category={category} | event_name="stream_stalled_retry"', "$__interval"),
-            _count('category={category} | event_name="llm_turn_aborted"', "$__interval"),
-            _count('category={category} | event_name="stream_overloaded_retry"', "$__interval"),
+            _count('category={category} | event_name="stream_stalled_retry"', "5m"),
+            _count('category={category} | event_name="llm_turn_aborted"', "5m"),
+            _count('category={category} | event_name="stream_overloaded_retry"', "5m"),
         ],
         target_names=["provider_error", "stalled_retry", "turn_aborted", "overloaded_retry"],
         output=["grafana", "inspector"],
@@ -190,8 +190,8 @@ core_metrics.register_core_metric(
         panel="timeseries",
         query_type="logql",
         query=(
-            f"100 * {_count(f'category={{category}} | event_name={{event_name}} | {_TURN_ATTR["ok"]}="true"', '$__interval')}"
-            f" / {_count('category={category} | event_name={event_name}', '$__interval')}"
+            f"100 * {_count(f'category={{category}} | event_name={{event_name}} | {_TURN_ATTR["ok"]}="true"', '5m')}"
+            f" / {_count('category={category} | event_name={event_name}', '5m')}"
         ),
         target_names=["ok_pct"],
         output=["grafana", "inspector"],
@@ -221,15 +221,15 @@ core_metrics.register_core_metric(
         query=(
             f'max(quantile_over_time(0.5, {{service_name="unknown_service"}} | json | '
             f"category={{category}} | event_name={{event_name}} | "
-            f"unwrap {_TURN_ATTR['duration_seconds']} [$__interval]))"
+            f"unwrap {_TURN_ATTR['duration_seconds']} [5m]))"
         ),
         targets=[
             f'max(quantile_over_time(0.9, {{service_name="unknown_service"}} | json | '
             f"category={{category}} | event_name={{event_name}} | "
-            f"unwrap {_TURN_ATTR['duration_seconds']} [$__interval]))",
+            f"unwrap {_TURN_ATTR['duration_seconds']} [5m]))",
             f'max(max_over_time({{service_name="unknown_service"}} | json | '
             f"category={{category}} | event_name={{event_name}} | "
-            f"unwrap {_TURN_ATTR['duration_seconds']} [$__interval]))",
+            f"unwrap {_TURN_ATTR['duration_seconds']} [5m]))",
         ],
         target_names=["p50_s", "p90_s", "max_s"],
         output=["grafana"],
@@ -255,21 +255,21 @@ core_metrics.register_core_metric(
         unit="short",
         panel="timeseries",
         query_type="logql",
-        query=_count("category={category} | event_name={event_name}", "$__interval"),
+        query=_count("category={category} | event_name={event_name}", "5m"),
         targets=[
             _count(
                 'category={category} | event_name=~"exec_failed|exec[(]failed[)]"',
-                "$__interval",
+                "5m",
             ),
             _count(
                 'category={category} | event_name=~"exec_timeout|exec[(]timeout[)]"',
-                "$__interval",
+                "5m",
             ),
             _count(
                 'category={category} | event_name=~"exec_cancelled|exec[(]cancelled[)]"',
-                "$__interval",
+                "5m",
             ),
-            _count('category={category} | event_name="exec_node_timeout"', "$__interval"),
+            _count('category={category} | event_name="exec_node_timeout"', "5m"),
             # other: every exec* event outside the known spellings (the
             # regex is anchored, so "exec.*" is a prefix match).
             _count(
@@ -277,7 +277,7 @@ core_metrics.register_core_metric(
                 'event_name!~"exec|exec_failed|exec[(]failed[)]|exec_timeout|'
                 "exec[(]timeout[)]|exec_cancelled|exec[(]cancelled[)]|"
                 'exec_node_timeout"',
-                "$__interval",
+                "5m",
             ),
         ],
         target_names=[
@@ -312,35 +312,35 @@ core_metrics.register_core_metric(
         query_type="logql",
         query=_count(
             f'category={{category}} | event_name={{event_name}} | {_FIX_ATTR["fixes"]}=~".*ruff_format.*"',
-            "$__interval",
+            "5m",
         ),
         targets=[
             _count(
                 f'category={{category}} | event_name={{event_name}} | {_FIX_ATTR["fixes"]}=~".*ruff.*" | {_FIX_ATTR["fixes"]}!~".*ruff_format.*"',
-                "$__interval",
+                "5m",
             ),
             _count(
                 f'category={{category}} | event_name={{event_name}} | {_FIX_ATTR["fixes"]}=~".*invalid_escape.*"',
-                "$__interval",
+                "5m",
             ),
             _count(
                 f'category={{category}} | event_name={{event_name}} | {_FIX_ATTR["fixes"]}=~".*missing_imports.*"',
-                "$__interval",
+                "5m",
             ),
             _count(
                 f'category={{category}} | event_name={{event_name}} | {_FIX_ATTR["fixes"]}=~".*chinese_punct.*"',
-                "$__interval",
+                "5m",
             ),
             _count(
                 f'category={{category}} | event_name={{event_name}} | {_FIX_ATTR["fixes"]}=~".*bracket_matching.*"',
-                "$__interval",
+                "5m",
             ),
             # other: missing/none/unknown kinds — !~ matches lines where the
             # label is absent (empty), which is the SQL `IS NULL` branch.
             _count(
                 f"category={{category}} | event_name={{event_name}} | "
                 f'{_FIX_ATTR["fixes"]}!~".*(ruff|invalid_escape|missing_imports|chinese_punct|bracket_matching).*"',
-                "$__interval",
+                "5m",
             ),
         ],
         target_names=[
@@ -361,34 +361,21 @@ core_metrics.register_core_metric(
 core_metrics.register_core_metric(
     MetricSpec(
         name="ava_obs_spawn_by_spawner",
-        title="Agent spawns (by source)",
+        title="Agent spawns (window, by source)",
         description=(
-            "Spawn events per bucket, bucketed by spawner: the events.source "
-            "field carries the spawner ('agent:N' sub-agent / 'user' user / "
-            "'cron' scheduled; the rest fall into other, including the "
-            "historical 'agent:None' dirty value). event_name='spawn', "
-            "category='audit'."
+            "Windowed spawn totals grouped by source. The source label carries "
+            "the spawner and is rendered directly in the chart legend. "
+            "event_name='spawn', category='audit'."
         ),
         event_name="spawn",
         category="audit",
         unit="short",
         panel="barchart",
         query_type="logql",
-        query=_count(
-            'category={category} | event_name={event_name} | source=~"agent:.*"', "$__interval"
+        query=(
+            'sum by (source) (count_over_time({service_name="unknown_service"} | json | '
+            "category={category} | event_name={event_name} [$__range]))"
         ),
-        targets=[
-            _count('category={category} | event_name={event_name} | source="user"', "$__interval"),
-            _count(
-                'category={category} | event_name={event_name} | source=~"cron.*"', "$__interval"
-            ),
-            # other: not agent:/user/cron (missing source matches too)
-            _count(
-                'category={category} | event_name={event_name} | source!~"agent:.*" | source!="user" | source!~"cron.*"',
-                "$__interval",
-            ),
-        ],
-        target_names=["agent", "user_spawns", "cron", "other"],
         output=["grafana"],
     )
 )
@@ -396,25 +383,20 @@ core_metrics.register_core_metric(
 core_metrics.register_core_metric(
     MetricSpec(
         name="ava_obs_lifecycle_counts",
-        title="Agent lifecycle counts",
+        title="Agent lifecycle (window)",
         description=(
-            "Lifecycle audit events per bucket: spawn / terminate / restart / "
-            "resurrect / fork (event_name='spawn' is spec metadata; the "
-            "query covers all 5 audit events). category='audit'."
+            "Windowed lifecycle totals grouped by event name: spawn / terminate / "
+            "restart / resurrect / fork. category='audit'."
         ),
         event_name="spawn",
         category="audit",
         unit="short",
         panel="barchart",
         query_type="logql",
-        query=_count("category={category} | event_name={event_name}", "$__interval"),
-        targets=[
-            _count('category={category} | event_name="terminate"', "$__interval"),
-            _count('category={category} | event_name="restart"', "$__interval"),
-            _count('category={category} | event_name="resurrect"', "$__interval"),
-            _count('category={category} | event_name="fork"', "$__interval"),
-        ],
-        target_names=["spawn", "terminate", "restart", "resurrect", "fork"],
+        query=(
+            'sum by (event_name) (count_over_time({service_name="unknown_service"} | json | '
+            'category={category} | event_name=~"spawn|terminate|restart|resurrect|fork" [$__range]))'
+        ),
         output=["grafana"],
     )
 )
@@ -506,16 +488,16 @@ core_metrics.register_core_metric(
         query_type="logql",
         query=_count(
             f'category={{category}} | event_name={{event_name}} | {_HALT_ATTR["body"]}="no tool_call (idle)"',
-            "$__interval",
+            "5m",
         ),
         targets=[
             _count(
                 f'category={{category}} | event_name={{event_name}} | {_HALT_ATTR["body"]}=~".*compact.*"',
-                "$__interval",
+                "5m",
             ),
             _count(
                 f'category={{category}} | event_name={{event_name}} | {_HALT_ATTR["body"]}=~"lifecycle .*"',
-                "$__interval",
+                "5m",
             ),
             # other: not idle/compact/lifecycle (missing body matches too —
             # the SQL `body IS NULL` branch).
@@ -524,7 +506,7 @@ core_metrics.register_core_metric(
                 f'{_HALT_ATTR["body"]}!="no tool_call (idle)" | '
                 f'{_HALT_ATTR["body"]}!~".*compact.*" | '
                 f'{_HALT_ATTR["body"]}!~"lifecycle .*"',
-                "$__interval",
+                "5m",
             ),
         ],
         target_names=["idle", "compact", "lifecycle", "other"],
@@ -537,18 +519,18 @@ core_metrics.register_core_metric(
 core_metrics.register_core_metric(
     MetricSpec(
         name="ava_obs_delivery_stalled_count",
-        title="Delivery backlog",
+        title="Delivery stalled (window)",
         description=(
-            "delivery_stalled events per bucket — message-delivery backlog "
-            "level (the delivery watchdog's alert signal for over-age pending "
-            "inbound). event_name='delivery_stalled', category='telemetry'."
+            "Windowed delivery_stalled total — the delivery watchdog's alert "
+            "signal for over-age pending inbound. event_name='delivery_stalled', "
+            "category='telemetry'."
         ),
         event_name="delivery_stalled",
         category="telemetry",
         unit="short",
-        panel="timeseries",
+        panel="stat",
         query_type="logql",
-        query=_count("category={category} | event_name={event_name}", "$__interval"),
+        query=_count("category={category} | event_name={event_name}", "$__range"),
         target_names=["stalled"],
         output=["grafana"],
     )
@@ -594,7 +576,7 @@ core_metrics.register_core_metric(
         unit="ops",
         panel="timeseries",
         query_type="logql",
-        query='sum(rate({service_name="unknown_service"} | json [$__interval]))',
+        query='sum(rate({service_name="unknown_service"} | json [1m]))',
         target_names=["events_per_s"],
         output=["grafana"],
     )
@@ -621,7 +603,7 @@ core_metrics.register_core_metric(
         query_type="logql",
         query=_count(
             'category={category} | event_name={event_name} | source="user"',
-            "$__interval",
+            "5m",
         ),
         target_names=["interactions"],
         output=["grafana"],
