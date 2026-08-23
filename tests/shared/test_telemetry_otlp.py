@@ -12,12 +12,10 @@ from __future__ import annotations
 
 import http.server
 import json
-import os
 import socket
 import threading
 import time
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any
 
 import psycopg
@@ -335,11 +333,15 @@ def test_enabled_follows_setting_outside_exec_child(
     assert telemetry_otlp._OtlpBackend._enabled() is configured
 
 
-def test_enabled_is_false_in_exec_child(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setattr("shared.config.settings.observability.telemetry_otlp_enabled", True)
-    monkeypatch.setitem(os.environ, "AVA_EXEC_REQUEST_FILE", str(tmp_path / "request.json"))
+def test_warmup_initializes_enabled_backend(otlp_backend) -> None:
+    """Warmup constructs the providers before an exec can emit sdk_call events."""
+    backend, _log_exporter, _metric_reader = otlp_backend
 
-    assert telemetry_otlp._OtlpBackend._enabled() is False
+    telemetry_otlp.warmup()
+
+    assert backend._logs is not None  # pyright: ignore[reportUnknownMemberType]
+    assert backend._metric_provider is not None  # pyright: ignore[reportUnknownMemberType]
+    assert backend._thread is not None  # pyright: ignore[reportUnknownMemberType]
 
 
 def test_flag_off_disables_export(otlp_backend, monkeypatch) -> None:
@@ -534,3 +536,74 @@ def test_endpoint_reachable_non_http_scheme_skips_probe():
         )
         is True
     )
+
+
+# ── exec-child export path (task #1423) ──────────────────────────────────────
+
+
+def test_handshake_env_no_longer_gates_export(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The AVA_EXEC_REQUEST_FILE handshake was the old child-export gate; it
+    must no longer disable OTLP — the export flag is the only authority."""
+    monkeypatch.setenv("AVA_EXEC_REQUEST_FILE", "request.json")
+    monkeypatch.setattr("shared.config.settings.observability.telemetry_otlp_enabled", True)
+    assert telemetry_otlp._OtlpBackend._enabled() is True  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_flush_force_flushes_sdk_batch_records(monkeypatch: pytest.MonkeyPatch) -> None:
+    """flush() must force-flush the SDK batch processor: a short-lived exec
+    child exits before the 5s batch window fires on its own, so without the
+    force_flush the app-level queue drain is not enough to reach the wire."""
+    from opentelemetry.sdk._logs import LoggerProvider
+    from opentelemetry.sdk._logs.export import (
+        BatchLogRecordProcessor,
+        InMemoryLogRecordExporter,
+    )
+    from opentelemetry.sdk.metrics import MeterProvider
+    from opentelemetry.sdk.metrics.export import InMemoryMetricReader
+
+    log_exporter = InMemoryLogRecordExporter()
+    logger_provider = LoggerProvider()
+    logger_provider.add_log_record_processor(BatchLogRecordProcessor(log_exporter))
+    metric_provider = MeterProvider(metric_readers=[InMemoryMetricReader()])
+    monkeypatch.setattr("shared.config.settings.observability.telemetry_otlp_enabled", True)
+    backend = telemetry_otlp._OtlpBackend(  # pyright: ignore[reportUnknownMemberType]
+        providers=(logger_provider, metric_provider)
+    )
+    monkeypatch.setattr(telemetry_otlp, "backend", backend)  # pyright: ignore[reportUnknownMemberType]
+    try:
+        backend.export_batch([_event(attributes={"fn": "files.read"})])
+        # Without force_flush the in-memory batch exporter would stay empty
+        # until its 5s schedule; the flush must surface the record now.
+        telemetry_otlp.flush()
+        assert len(log_exporter.get_finished_logs()) == 1
+    finally:
+        backend.shutdown()
+
+
+def test_warmup_builds_backend_when_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    """warmup() constructs the OTel providers so a short-lived child never
+    first builds them during interpreter shutdown."""
+    from opentelemetry.sdk._logs import LoggerProvider
+    from opentelemetry.sdk._logs.export import (
+        InMemoryLogRecordExporter,
+        SimpleLogRecordProcessor,
+    )
+    from opentelemetry.sdk.metrics import MeterProvider
+    from opentelemetry.sdk.metrics.export import InMemoryMetricReader
+
+    log_exporter = InMemoryLogRecordExporter()
+    logger_provider = LoggerProvider()
+    logger_provider.add_log_record_processor(SimpleLogRecordProcessor(log_exporter))
+    backend = telemetry_otlp._OtlpBackend(  # pyright: ignore[reportUnknownMemberType]
+        providers=(
+            logger_provider,
+            MeterProvider(metric_readers=[InMemoryMetricReader()]),
+        )
+    )
+    monkeypatch.setattr(telemetry_otlp, "backend", backend)  # pyright: ignore[reportUnknownMemberType]
+    monkeypatch.setattr("shared.config.settings.observability.telemetry_otlp_enabled", True)
+    try:
+        telemetry_otlp.warmup()
+        assert backend._logs is not None  # pyright: ignore[reportUnknownMemberType]
+    finally:
+        backend.shutdown()

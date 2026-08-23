@@ -80,21 +80,30 @@ def test_register_core_metric_agent_placeholder_rule() -> None:
         )
 
 
-def test_collect_core_metrics_tolerates_missing_modules() -> None:
-    # core_metrics_panels does not exist in this worktree yet — a missing
-    # definition module is skipped (no raise) while the present modules
-    # (core_metrics_observability, the migrated ava_observability pack)
-    # still register and render as core metrics. The module cache is reset
-    # first: the autouse fixture cleared the registry, and a cached module
-    # would not re-register (collect's import-once semantics are a fresh-
-    # process behavior, as in the generator).
+def test_collect_core_metrics_includes_statistics_coverage() -> None:
+    """The core registry includes every statistic surfaced to operators."""
     import sys
 
+    sys.modules.pop("shared.core_metrics_panels", None)
     sys.modules.pop("shared.core_metrics_observability", None)
     specs = core_metrics.collect_core_metrics()
     assert specs
     assert all(s.plugin == "core" for s in specs)
-    assert {s.name for s in specs} >= {"ava_obs_llm_cost_usd", "ava_obs_events_rate"}
+    by_name = {spec.name: spec for spec in specs}
+    assert set(by_name) >= {
+        "ava_obs_llm_cost_usd",
+        "ava_obs_events_rate",
+        "core_llm_input_tokens_24h",
+        "core_llm_output_tokens_24h",
+        "core_cache_hit_rate_24h",
+        "core_avg_turn_duration_24h",
+    }
+    assert by_name["core_cache_hit_rate_24h"].field_defaults == {"decimals": 2}
+    avg_turn = by_name["core_avg_turn_duration_24h"].query
+    assert avg_turn.count('attributes_ok="true"') == 2
+    assert "sum(count_over_time(" in avg_turn
+    for name in ("core_unresolved_warning", "core_unresolved_error"):
+        assert 'category=~"telemetry|log"' in by_name[name].query
 
 
 # ── LogQL dialect (task #1280) ────────────────────────────────────────────────
@@ -154,6 +163,20 @@ def test_register_core_metric_validates_logql() -> None:
         )
     )
     assert spec.query_type == "logql"
+
+
+def test_unresolved_events_allow_the_fixed_category_union() -> None:
+    """Resolution records span telemetry and log, regardless of spec metadata."""
+    spec = core_metrics.register_core_metric(
+        _logql_spec(
+            name="core_unresolved_events",
+            query=(
+                'sum(count_over_time({service_name="unknown_service"} | json | '
+                'category=~"telemetry|log" | level="warning" [$__range]))'
+            ),
+        )
+    )
+    assert spec.name == "core_unresolved_events"
 
 
 def test_render_logql_quotes_and_agent_placeholder() -> None:

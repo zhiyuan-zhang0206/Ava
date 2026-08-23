@@ -34,9 +34,7 @@ from agent.graph._exec_stream import ExecOutputChunkPublisher
 from agent.graph._exec_subprocess import _run_in_subprocess
 from shared.config import settings
 from shared.lifecycle import AgentRestart, AgentTermination, _SystemHalt
-from shared.paths import logs_dir
 from shared.proc import kill_process_tree
-from tests._test_env_file import rewrite_line
 
 _AGENT_ID = 424242
 
@@ -145,29 +143,6 @@ async def test_subprocess_done(tmp_path: Path) -> None:
     assert "hello from child" in result.output
     # envelopes cleaned up
     assert not list((tmp_path / "exec" / str(_AGENT_ID)).iterdir())
-
-
-async def test_exec_child_disables_otlp_after_cluster_env_authority(tmp_path: Path) -> None:
-    env_path = Path(os.environ["AVA_HOME"]) / ".env"
-    original_env = env_path.read_text()
-    log_path = logs_dir() / f"agent-{_AGENT_ID}.log"
-    log_offset = log_path.stat().st_size if log_path.exists() else 0
-    rewrite_line(env_path, "AVA_TELEMETRY_OTLP_ENABLED", "true")
-    try:
-        result = await _run(
-            tmp_path,
-            (
-                "from shared.telemetry_otlp import backend\n"
-                'print("OTLP_ENABLED_IN_CHILD:", backend._enabled())\n'
-            ),
-        )
-    finally:
-        env_path.write_text(original_env)
-
-    assert isinstance(result, _ExecDone)
-    assert result.output == "OTLP_ENABLED_IN_CHILD: False\n"
-    child_log = log_path.read_bytes()[log_offset:] if log_path.exists() else b""
-    assert b"OTLP backend init failed" not in child_log
 
 
 async def test_subprocess_bootstrap_ignores_agent_package_in_process_cwd(

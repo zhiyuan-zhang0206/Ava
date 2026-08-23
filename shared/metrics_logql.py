@@ -12,7 +12,10 @@ here instead — a lightweight contract rather than a grammar whitelist:
   stream labels, so label filters before the json stage match nothing;
 - event_name/category filters must go through the {event_name}/{category}
   placeholders (registry metadata is the single source of truth) unless the
-  query filters on neither (whole-stream queries are legitimate).
+  query filters on neither (whole-stream queries are legitimate). The
+  unresolved-event totals are the one explicit exception: they intentionally
+  span the fixed ``telemetry|log`` category union because resolution records
+  have changed category over time.
 
 ``validate_logql`` re-validates a RENDERED query (placeholders substituted)
 — the inspector's defense against a tampered registry file.
@@ -40,7 +43,8 @@ def _validate_logql_template(template: str, name: str) -> None:
     filters must go through the {event_name}/{category} placeholders (registry
     metadata is the single source of truth) unless the query has no
     event_name/category filter at all — whole-stream queries (e.g. the event
-    rate panel) legitimately filter on neither."""
+    rate panel) legitimately filter on neither. The fixed cross-category
+    selector used by unresolved-event totals is the sole exception."""
     if _LOKI_EVENT_SELECTOR not in template:
         raise _plugin_metrics.InvalidMetricQuery(
             f"metric {name!r} LogQL query must select the event stream {{{_LOKI_EVENT_SELECTOR}}}"
@@ -55,7 +59,10 @@ def _validate_logql_template(template: str, name: str) -> None:
         "{event_name}" in template or "{category}" in template or "{category_re}" in template
     )
     has_event_filter = "event_name=" in template or "category=" in template
-    if not has_placeholder and has_event_filter:
+    has_unresolved_category_union = (
+        'category=~"telemetry|log"' in template and "event_name=" not in template
+    )
+    if not has_placeholder and has_event_filter and not has_unresolved_category_union:
         raise _plugin_metrics.InvalidMetricQuery(
             f"metric {name!r} LogQL query filters event_name/category without "
             "the {event_name}/{category} placeholders (registry metadata is "

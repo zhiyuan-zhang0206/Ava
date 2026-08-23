@@ -29,13 +29,13 @@ EXPECTED = {
     "ava_obs_turn_duration_s": ("timeseries", ["grafana"], "turn_end", "telemetry", 3),
     "ava_obs_exec_success_rate": ("timeseries", ["grafana"], "exec", "telemetry", 6),
     "ava_obs_syntax_fix_by_kind": ("timeseries", ["grafana"], "syntax_fix", "telemetry", 7),
-    "ava_obs_spawn_by_spawner": ("barchart", ["grafana"], "spawn", "audit", 4),
-    "ava_obs_lifecycle_counts": ("barchart", ["grafana"], "spawn", "audit", 5),
+    "ava_obs_spawn_by_spawner": ("barchart", ["grafana"], "spawn", "audit", 1),
+    "ava_obs_lifecycle_counts": ("barchart", ["grafana"], "spawn", "audit", 1),
     "ava_obs_sdk_call_top": ("table", ["grafana"], "sdk_call", "telemetry", 1),
     "ava_obs_agent_llm_usage_table": ("table", ["grafana"], "llm_usage", "telemetry", 4),
     "ava_obs_halt_breakdown": ("timeseries", ["grafana"], "halt", "telemetry", 4),
     "ava_obs_delivery_stalled_count": (
-        "timeseries",
+        "stat",
         ["grafana"],
         "delivery_stalled",
         "telemetry",
@@ -169,7 +169,7 @@ def test_exec_breakdown_covers_legacy_spellings() -> None:
     land in other — the thread backend stopped emitting them, PR3)."""
     _load_pack()
     exprs = _all_rendered()["ava_obs_exec_success_rate"]
-    assert 'event_name="exec" [$__interval]' in exprs[0]
+    assert 'event_name="exec" [5m]' in exprs[0]
     assert 'event_name=~"exec_failed|exec[(]failed[)]"' in exprs[1]
     assert 'event_name=~"exec_timeout|exec[(]timeout[)]"' in exprs[2]
     assert 'event_name=~"exec_cancelled|exec[(]cancelled[)]"' in exprs[3]
@@ -231,17 +231,18 @@ def test_syntax_fix_kind_buckets() -> None:
     )
 
 
-def test_lifecycle_and_spawner_buckets() -> None:
+def test_lifecycle_and_spawner_window_aggregates() -> None:
     _load_pack()
     spawner = _all_rendered()["ava_obs_spawn_by_spawner"]
-    assert 'source=~"agent:.*"' in spawner[0]
-    assert 'source="user"' in spawner[1]
-    assert 'source=~"cron.*"' in spawner[2]
-    assert 'source!~"agent:.*" | source!="user" | source!~"cron.*"' in spawner[3]
+    assert spawner == [
+        'sum by (source) (count_over_time({service_name="unknown_service"} | json | '
+        'category="audit" | event_name="spawn" [$__range]))'
+    ]
     life = _all_rendered()["ava_obs_lifecycle_counts"]
-    assert 'event_name="spawn" [$__interval]' in life[0]
-    for idx, name in enumerate(("terminate", "restart", "resurrect", "fork"), 1):
-        assert f'event_name="{name}"' in life[idx], name
+    assert life == [
+        'sum by (event_name) (count_over_time({service_name="unknown_service"} | json | '
+        'category="audit" | event_name=~"spawn|terminate|restart|resurrect|fork" [$__range]))'
+    ]
 
 
 def test_sdk_call_top_table_shape() -> None:
@@ -254,7 +255,7 @@ def test_sdk_call_top_table_shape() -> None:
 def test_events_rate_uses_rate() -> None:
     _load_pack()
     expr = _all_rendered()["ava_obs_events_rate"][0]
-    assert expr == 'sum(rate({service_name="unknown_service"} | json [$__interval]))'
+    assert expr == 'sum(rate({service_name="unknown_service"} | json [1m]))'
 
 
 def test_frontend_table_shapes() -> None:

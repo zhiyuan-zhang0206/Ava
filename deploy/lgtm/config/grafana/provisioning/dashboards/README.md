@@ -14,23 +14,25 @@ dashboard"). `uid` is fixed at `ava-ops-main` — the dashboard link and user
 bookmarks depend on it; never change it.
 
 Seven sections, one row per section — `core` is the 2026-08-06 user-ruling
-row header; all seven sections are **expanded by default** (`collapsed: false`):
+row header. All sections are **expanded by default** (`collapsed: false`,
+2026-08-23 #382):
 
-1. **`core`** — the user's daily first screen: the eight windowed stat
-   tiles (LLM calls / Warning / Error / Unresolved Warning / Unresolved
-   Error / Live agents / LLM cost (24h) / Tokens (24h)), then Event
-   health, Event rate, Token usage — Output + Reasoning, Turn success
-   rate, and the full-width **Ava events (Loki)** logs panel (the live
-   event stream `{service_name="unknown_service"}` — its former overview
-   query `{scope_name="ava.telemetry"}` targeted a label scheme that no
-   longer exists and was fixed during the merge).
-2. **`LLM`** — throughput tokens/s, token input, the three TPS series,
-   cache hit, calls/bucket, cost USD, LLM errors, per-agent Top 20.
+1. **`core`** — the user's daily first screen: twelve windowed stat tiles
+   cover the entire Statistics popover (LLM calls / Warning / Error /
+   Unresolved Warning / Unresolved Error / Live agents / LLM cost (24h) /
+   Tokens (24h) / LLM input tokens (24h) / LLM output tokens (24h) / Cache
+   hit rate (24h) / Avg turn duration (24h)). It then shows Event health,
+   Event rate, Token usage — Input, Token usage — Output + Reasoning, Cache
+   hit, Turn success rate, and the full-width **Ava events (Loki)** logs
+   panel. Token input and cache hit moved here because they are first-class
+   operational statistics.
+2. **`LLM`** — throughput tokens/s, the three TPS series, calls/bucket,
+   cost USD, LLM errors, and per-agent Top 20.
 3. **`Gateway & execution`** — gateway latency p50/p95/max + by route,
    turn duration, exec outcomes, syntax-fix triggers, halt classes, SDK
    Top 20, frontend interactions ×3, settings changes.
-4. **`Fleet`** — agent spawns (by source), lifecycle counts, delivery
-   backlog, SSE backlog.
+4. **`Fleet`** — windowed agent spawns by source, windowed lifecycle totals,
+   delivery-stalled total, and SSE backlog.
 5. **`Plugin quality`** — the ava_code / ava_fleet / ava_memory panels
    (was the plugins dashboard + the plugin rows; deduplicated).
 6. **`Host & data plane`** — the former `ava-host-dataplane` panels: host
@@ -39,14 +41,17 @@ row header; all seven sections are **expanded by default** (`collapsed: false`):
 7. **`Cost analysis`** — three cost projections, daily cost for the trailing
    week, and Top-20 cost drill-downs by model and agent. Every panel reads
    usage-time `attributes_cost_usd` snapshots from telemetry `llm_usage`
-   events; the 24h LLM cost/token cards pin their own `now-24h` window so
-   their titles remain accurate while the dashboard default stays at 6h.
+   events (2026-08-23 #384).
 
-Panel content is preserved verbatim, dedup only — nothing was dropped
-except the `Recent traces (Tempo)` panel (the Tempo trace UI phase was cut
-by decision; it returns in a later phase). Panel ids keep the old ranges:
-core < 1000, plugin panels >= 1000; the merged host & data-plane panels
-live at 2101–2112 and the logs panel at 2201.
+The dashboard timezone is `Asia/Shanghai` (2026-08-23 #384). The daily cost
+panel uses a `now-7d/d` relative override plus `interval: 24h`, so its
+`$__interval` range vectors are daily buckets aligned to that timezone
+rather than the browser's local clock.
+
+The dashboard now has 74 panels: core ids remain below 1000 (the four new
+stat tiles are 44–47), plugin ids are >= 1000, host/data-plane panels are
+2101–2112, the cost-analysis panels are 38–43, and the logs panel is 2201. The duplicate plugin spawn-rate panel
+(1006) was removed because the Fleet summaries cover the same information.
 
 ## Files
 
@@ -74,8 +79,8 @@ sidecar scrapes, `job="ava-infra"` + a `host` label = the OS hostname).
 
 ## Core metrics (registered, not hand-written)
 
-Core metric definitions live in `shared/core_metrics_panels.py` (the
-original 16 ops-dashboard panels, migrated 2026-08-06) and
+Core metric definitions live in `shared/core_metrics_panels.py` (the core
+dashboard panels, including the Statistics-coverage tiles) and
 `shared/core_metrics_observability.py` (the former `ava_observability`
 plugin pack, promoted to core the same day — the repo's own observability
 is not a plugin, per user ruling). Both register through
@@ -87,11 +92,6 @@ All titles are **English** (2026-08-05 user ruling: the previous Chinese
 titles could not be changed from the Grafana settings page because the
 dashboard is provisioning-managed — titles are edited here, as code).
 
-The dashboard timezone is `Asia/Shanghai`. The daily cost panel uses a
-`now-7d/d` relative override plus `interval: 24h`, so its `$__interval` range
-vectors are daily buckets aligned to that timezone rather than the browser's
-local clock.
-
 ### MetricSpec — the registration contract
 
 `shared/plugin_metrics.py` defines `MetricSpec`, shared by core and plugin
@@ -101,7 +101,7 @@ registrations: `name` / `title` / `description` / `event_name` / `category` /
 `query_type="logql"`, for every shipped metric; the one SQL holdout is the
 core `Live agents` stat over `agents_meta`), plus the Task #882 fields:
 
-- `targets` — extra SQL templates rendered as refId B/C/... targets on the
+- `targets` — extra query templates rendered as refId B/C/... targets on the
   same panel (multi-series panels — e.g. the core TPS panels' max/min-agent
   series); validated like `query`.
 - `options` / `custom` / `field_defaults` — optional panel-look overrides
@@ -112,6 +112,25 @@ core `Live agents` stat over `agents_meta`), plus the Task #882 fields:
 - `thresholds` — absolute-threshold steps; an explicit empty list (`[]`)
   suppresses the default green base entirely.
 
+### Loki legend naming
+
+Every Loki target must set `legendFormat`. Aggregates otherwise render their
+label-set value (often `{}`), and Grafana `fieldConfig` `byName` display-name
+overrides cannot match a Loki target's refId. Use a concise static semantic
+name for aggregate series (`"p50"`, `"warn+error"`) and a label template for
+grouped series (`"{{attributes_route}}"`, `"{{agent_id}}"`). Do not add a
+`byName` display-name override for a Loki target.
+
+### Time granularity
+
+Range panels use fixed windows selected by metric semantics: count trends use
+`[5m]`, rates use `[1m]`, calls-per-bucket uses `[30m]`, and Fleet/SSE/delivery
+window summaries use instant `[$__range]` queries. Stats and tables remain
+instant over `[$__range]`. The six stat tiles labelled `24h` (ids 7, 8, and
+38–41) additionally set `timeFrom: "24h"`, so their values remain daily
+totals even when the dashboard selector is shorter. This avoids presenting
+rare event counts as noisy per-second lines.
+
 ## Writing a plugin metric
 
 1. Add `metrics.py` to your plugin dir (e.g. `ava_builtins/plugins/<name>/metrics.py`).
@@ -120,9 +139,9 @@ core `Live agents` stat over `agents_meta`), plus the Task #882 fields:
 3. The `query` template is **LogQL** (`query_type="logql"`) — the live event
    stream in Loki. Every template must select `{service_name="unknown_service"}`
    and pipeline `| json` before any event-field filter; the template
-   contract is validated by `shared/metrics_logql.py`. Stat panels run as
-   instant queries over `[$__range]`; timeseries/barchart panels as range
-   queries bucketed by `[$__interval]`; every count wraps in `sum(...)`.
+   contract is validated by `shared/metrics_logql.py`. Use the fixed window
+   that matches the panel's information density; stats and tables remain
+   instant over `[$__range]`; every count wraps in `sum(...)`.
 4. `output` selects the surfaces: `["grafana"]`, `["inspector"]`, or both.
 5. **Then update `ava-ops-main.json` by hand**: add the rendered panel
    under the `Plugin quality` row (keep ids >= 1000).
@@ -130,9 +149,9 @@ core `Live agents` stat over `agents_meta`), plus the Task #882 fields:
    grafana spec against the JSON.
 
 Shipped examples: `ava_builtins/plugins/ava_code/metrics.py` (syntax_fix
-trend/stat), `ava_builtins/plugins/ava_fleet/metrics.py` (task done rate,
-spawn frequency), `ava_builtins/plugins/ava_memory/metrics.py` (recall-filter
-runs / empty ratio / error ratio).
+trend/stat), `ava_builtins/plugins/ava_fleet/metrics.py` (task completion
+rate), `ava_builtins/plugins/ava_memory/metrics.py` (recall-filter runs /
+empty ratio / error ratio).
 
 ## Layout
 
