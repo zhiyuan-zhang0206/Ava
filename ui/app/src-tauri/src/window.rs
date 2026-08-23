@@ -199,6 +199,7 @@ pub const REMOTE_PERMISSIONS: &[&str] = &[
     "allow-shell-open-external",
     "allow-shell-open-settings",
     "allow-shell-notify",
+    "allow-shell-take-pending-click",
 ];
 
 fn capability_identifier(origin: &str) -> String {

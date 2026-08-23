@@ -5,7 +5,6 @@
 //! shell grants for the configured gate origin — see `window::grant_remote_ipc`.
 
 use serde::{Deserialize, Serialize};
-#[cfg(target_os = "android")]
 use tauri::Manager;
 use tauri::{AppHandle, Runtime, State};
 
@@ -265,6 +264,26 @@ pub async fn shell_notify(
         log::debug!("notification suppressed off Android: {title}");
     }
     Ok(())
+}
+
+/// Consume an Android notification tap once the authenticated console is ready.
+#[tauri::command]
+pub async fn shell_take_pending_click(app: AppHandle) -> bool {
+    if !app.state::<ShellState>().settings().notifications {
+        return false;
+    }
+    #[cfg(target_os = "android")]
+    {
+        crate::android::take_pending_click(&app)
+            .await
+            .unwrap_or(false)
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = app;
+        log::debug!("notification-click capture suppressed off Android");
+        false
+    }
 }
 
 #[cfg(test)]
