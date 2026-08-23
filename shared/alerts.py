@@ -20,8 +20,8 @@ this module stays below both the gateway layer and the CLI layer; callers own
 their transport (router: pydantic + the app's DB pool; probes: their own
 payload dict + ``shared.db.connect``).
 
-Dedup key (fingerprint, starts_at): Alertmanager re-sends the same instance
-every group_interval while it is firing and once more on resolution — the
+Dedup key (fingerprint, starts_at): Alertmanager may re-send the same instance
+while it is firing and sends it once more on resolution — the
 upsert updates the row instead of duplicating it; a resolved row that fires
 again (new starts_at) starts a fresh instance. ``fingerprint`` is the
 Alertmanager-standard fnv-1a hash over sorted labels; the ingest computes it

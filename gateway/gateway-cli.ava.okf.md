@@ -17,7 +17,7 @@ The three are loosely coupled via HTTP + SSE: frontend directly calls Gateway AP
 
 ## Core Responsibilities
 
-- **Gateway**: HTTP API + SSE event push + Schedule management
+- **Gateway**: HTTP API + SSE event push + Schedule management + Grafana alert-state reconciliation
 - **CLI**: cluster lifecycle (start/stop/status/update/enroll) + operational diagnosis
 - **Frontend**: Web UI, real-time agent conversation + fleet monitoring + configuration management
 
@@ -33,6 +33,7 @@ The three are loosely coupled via HTTP + SSE: frontend directly calls Gateway AP
 ## Entry Points
 
 - `gateway/app.py` — FastAPI app definition + lifespan + middleware
+- `gateway/alert_reconciliation.py` — periodic repair of lost Grafana resolution webhooks
 - `cli/main.py:main()` — CLI argparse entry
 - `ui/web/src/app/layout.tsx` — Next.js root layout
 - `ui/web/src/app/page.tsx` — home page (Fleet view)
