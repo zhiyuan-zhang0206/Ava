@@ -3,9 +3,9 @@
 // /insights/metrics — retired (user ruling 2026-08-04): the hand-made Metrics
 // page is replaced by the Grafana dashboards. The route is kept so
 // old bookmarks and deep links land on a short transition notice and then
-// auto-redirect to the Ops section, which embeds the "Ava Ops" Grafana
-// dashboard through the gateway's /grafana reverse proxy (same embed as
-// /insights#ops — see ops/page.tsx).
+// auto-redirect to the Ops section, which links to the "Ava Ops" Grafana
+// dashboard through the gateway's /grafana reverse proxy (the same dashboard
+// linked from /insights#ops — see ops/page.tsx).
 //
 // The backend /api/metrics + /api/metrics/agents endpoints are intentionally
 // left in place: scripts/metrics.py (the CLI mirror of shared/metrics.py) and
@@ -14,7 +14,7 @@
 //
 // The auto-redirect is CONDITIONAL on the /grafana proxy actually answering
 // (HEAD probe): when the proxy is off or Grafana is down, redirecting would
-// land the user on a broken /insights#ops embed and destroy this page — the
+// land the user on a broken Grafana link and destroy this page — the
 // only place carrying the fallback (CLI / /api/metrics). The probe keeps the
 // notice (and its fallback) alive in that case.
 
@@ -32,8 +32,7 @@ import { cn } from "@/lib/utils";
 // old link sees *why* they landed on Grafana, not a silent jump.
 const REDIRECT_DELAY_MS = 1200;
 
-// Direct Grafana entry (same dashboard + default window the Ops section
-// embeds; the Ops section adds the theme + refresh controls).
+// Direct Grafana entry for the same dashboard linked from the Ops section.
 const GRAFANA_DIRECT = `${API_BASE}/grafana/d/ava-ops-main?from=now-24h&to=now&kiosk`;
 
 export default function MetricsRedirectPage() {
@@ -79,9 +78,8 @@ export default function MetricsRedirectPage() {
             <Link href="/insights#ops" className="underline underline-offset-2 hover:text-foreground">
               Ops section
             </Link>{" "}
-            embeds the Grafana dashboard (LLM usage + latency, tokens,
-            errors, restarts, delivery backlog) and the plugin metrics
-            dashboards.{" "}
+            links to the Grafana dashboard (LLM usage + latency, tokens,
+            errors, restarts, delivery backlog, and plugin metrics).{" "}
             {proxyUp === false
               ? "Grafana 未响应（反代可能未开启）— 已停留本页，见下方回退路径。"
               : "Redirecting…"}

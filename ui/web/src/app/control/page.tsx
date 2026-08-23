@@ -54,7 +54,7 @@ const INSIGHTS_ANCHORS = new Set(controlAnchorIds(INSIGHTS_SECTIONS));
 
 // Retired Metrics anchors (2026-08-04): the Metrics page moved to Grafana, so
 // old /control#metrics / #metrics-* deep links land on the Ops section, which
-// embeds the dashboard that replaced them.
+// links to the dashboard that replaced them.
 const RETIRED_ANCHOR_TARGET = "ops";
 
 export default function ControlPage() {

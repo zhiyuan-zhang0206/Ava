@@ -2,11 +2,11 @@
 
 // Deep-link anchor scrolling for the two vertical anchor-nav pages (Control
 // and Insights). A mount-time hash scroll is not enough on its own: section
-// bodies fetch asynchronously (live status data, the embedded Grafana frame,
-// section lists), so content ABOVE the target grows after the first
+// bodies fetch asynchronously (live status data and section lists), so content
+// ABOVE the target grows after the first
 // scrollIntoView and pushes the anchored section below where it landed — on
 // /insights#alerts the section ended up at the bottom of the viewport (or
-// below the fold entirely, when the frame above it loaded last). This hook
+// below the fold entirely, when an async section above it settled last). This hook
 // re-applies the scroll while the scroll container's content height is still
 // settling, then detaches — the user's own scrolling is never fought.
 

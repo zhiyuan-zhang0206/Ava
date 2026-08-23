@@ -11,7 +11,7 @@ copy pipeline.
 `ava-ops-main.json` is the **single shipped dashboard** — the four
 dashboards (Ava Ops, Plugin Metrics, Overview, Host & Data Plane) were
 merged into one, sectioned like Ava Ops (user ruling: "merge into one big
-dashboard"). `uid` is fixed at `ava-ops-main` — the embed URL and user
+dashboard"). `uid` is fixed at `ava-ops-main` — the dashboard link and user
 bookmarks depend on it; never change it.
 
 Six sections, one row per section — `core` is the 2026-08-06 user-ruling
@@ -116,37 +116,27 @@ core `Live agents` stat over `agents_meta`), plus the Task #882 fields:
    queries bucketed by `[$__interval]`; every count wraps in `sum(...)`.
 4. `output` selects the surfaces: `["grafana"]`, `["inspector"]`, or both.
 5. **Then update `ava-ops-main.json` by hand**: add the rendered panel
-   under the `Plugin quality` row (keep ids >= 1000) and bump
-   `EMBED_HEIGHT` in `ui/web/src/app/insights/ops/page.tsx` — its
-   `page.test.tsx` derives the expected height from the JSON's gridPos and
-   fails loudly when they drift. `tests/plugins/test_plugin_metrics_logql.py`
-   also locks every registered grafana spec against the JSON.
+   under the `Plugin quality` row (keep ids >= 1000).
+   `tests/plugins/test_plugin_metrics_logql.py` also locks every registered
+   grafana spec against the JSON.
 
 Shipped examples: `ava_builtins/plugins/ava_code/metrics.py` (syntax_fix
 trend/stat), `ava_builtins/plugins/ava_fleet/metrics.py` (task done rate,
 spawn frequency), `ava_builtins/plugins/ava_memory/metrics.py` (recall-filter
 runs / empty ratio / error ratio).
 
-## Layout & embed height
+## Layout
 
 Greedy 24-column grid, **no overlapping gridPos**: stats 8x4 (three per
 row), charts/tables 12x7 (two per row), the logs panel 24x10, row headers
 h=1 w=24. Rows start exactly at the previous block's bottom (no gap row).
 
-The embed is a full-height iframe with **no inner scrollbar**:
-`EMBED_HEIGHT = grid rows × 30px + (rows-1) × 8px + 116px chrome` (209
-rows → 8050px after the merge, Grafana 13.1.3). `page.test.tsx` derives the
-expected value from the JSON and fails on drift — bump
-`ui/web/src/app/insights/ops/page.tsx` whenever panels change. Note the
-frame keeps the full **expanded** height while sections 2–6 start
-collapsed, so the embed shows blank space below `core` until a section is
-expanded — a consequence of the collapse-by-default design, not a layout
-bug. **Do not add `autofitpanels`**: on Grafana 13.1.x it collapses every
-panel to a 30px title bar at embed widths.
+**Do not add `autofitpanels`**: on Grafana 13.1.x it collapses every panel
+to a 30px title bar at narrow window widths.
 
 `refresh` is `10m` and the default window `now-6h` (2026-08-23, task
 #1399: the 24h window was the main Loki query-weight driver — 87 Loki
-queries × 24h × 5m; 6h/10m keeps the embed live while bounding Loki).
+queries × 24h × 5m; 6h/10m keeps the dashboard live while bounding Loki).
 
 ## Syncing to the live Grafana
 
@@ -169,19 +159,14 @@ within ~30s (a `docker restart lgtm-grafana-1` forces the reload — Grafana
 does not hot-apply provisioned dashboard files without a reload of the
 provisioning cycle, and panel edits are only picked up on restart).
 
-## Embed requirements (deployment-side, to verify)
+## Access requirements
 
 - **Gateway reverse proxy** `/grafana/*` → the Grafana instance, behind the
-  normal cluster auth, so the iframe request is authorized like every other
+  normal cluster auth, so the dashboard request is authorized like every other
   API route. The frontend only ever dials `{API_BASE}/grafana/...`.
-- **`allow_embedding = true`** in Grafana config (default `false` sends
-  `X-Frame-Options: deny`, which blocks the iframe).
 - **Postgres datasource** reachable from Grafana with read access to
   `agents_meta` (and the `postgres` plugin enabled).
-- The embed renders at `/insights#ops` in light and dark theme, `&kiosk`
-  hides Grafana chrome (sidemenu/topnav) while the dashboard timepicker
-  stays usable, panels render at natural size, and the iframe is
-  full-height.
+- The Insights page links to `/grafana/d/ava-ops-main` from `/insights#ops`.
 
 ## Alerting
 

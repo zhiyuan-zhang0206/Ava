@@ -1,7 +1,7 @@
 "use client";
 
 // /insights — the cluster's read-only observability surface: live Status and
-// the embedded Grafana Ops dashboard, split out of Control so the two usage
+// the Grafana Ops dashboard link, split out of Control so the two usage
 // sessions don't share a page. Insights is meant to sit open and poll (Status
 // every 10s, its update-check every 30s); Control is almost entirely static
 // write/manage forms. The standalone Metrics section was retired 2026-08-04 —
@@ -38,7 +38,7 @@ export default function InsightsPage() {
   // /control#status deep links): resolve the target once, from the URL hash
   // at mount (later hash changes come from nav clicks, which scroll
   // themselves). Retired Metrics anchors (#metrics, #metrics-*) land on the
-  // Ops section — the Grafana embed that replaced the Metrics page. The
+  // Ops section — the Grafana dashboard link that replaced the Metrics page. The
   // scroll itself is re-applied by useSettledAnchorScroll until the async
   // section bodies stop growing, so the deep link lands on the section at its
   // final position.
@@ -85,7 +85,7 @@ export default function InsightsPage() {
             <ControlSection
               id="ops"
               label="Ops"
-              description="Embedded Grafana dashboard — SSE/event-log backlog, LLM latency + TPS, process restarts."
+              description="Grafana dashboard link — SSE/event-log backlog, LLM latency + TPS, process restarts."
             >
               <OpsPage />
             </ControlSection>
