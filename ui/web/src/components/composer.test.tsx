@@ -768,6 +768,41 @@ describe("Composer file upload (drag + paste)", () => {
     expect(onUploadFiles).toHaveBeenCalledWith([img]);
   });
 
+  it("pasted images use file delivery and Enter sends text while that upload is in flight", async () => {
+    let finishUpload: (() => void) | undefined;
+    const onUploadFiles = vi.fn(
+      () => new Promise<void>((resolve) => { finishUpload = resolve; }),
+    );
+    const onSend = vi.fn(() => Promise.resolve(true));
+    render(
+      <Composer
+        {...baseProps}
+        mode="idle"
+        onSend={onSend}
+        onUploadFiles={onUploadFiles}
+      />,
+    );
+    const textarea = screen.getByTestId("composer-input");
+    const image = new File(["img"], "paste.png", { type: "image/png" });
+
+    fireEvent.paste(textarea, {
+      clipboardData: { files: [image], types: ["Files"] },
+    });
+    expect(onUploadFiles).toHaveBeenCalledWith([image]);
+    expect(screen.queryByTestId("composer-attachments")).toBeNull();
+
+    fireEvent.change(textarea, { target: { value: "describe the uploaded file" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    await waitFor(() =>
+      expect(onSend).toHaveBeenCalledWith(
+        "describe the uploaded file",
+        [],
+        expect.any(String),
+      ),
+    );
+    finishUpload?.();
+  });
+
   it("pasting plain text (no files) does not call onUploadFiles", () => {
     const onUploadFiles = vi.fn();
     render(<Composer {...baseProps} mode="idle" onUploadFiles={onUploadFiles} />);

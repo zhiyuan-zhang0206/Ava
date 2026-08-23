@@ -41,6 +41,7 @@ def test_agent_row_wire_shape() -> None:
         last_inbound_at=t,
         label="agent-1",
         machine="test-machine",
+        supports_vision=True,
         liveness_state="online",
         last_probe_at=None,
         notices_awaiting_response=[],
@@ -51,6 +52,7 @@ def test_agent_row_wire_shape() -> None:
     assert d["agent_id"] == 1
     assert d["label"] == "agent-1"
     assert d["spawner"] == "user"
+    assert d["supports_vision"] is True
     assert d["notices_awaiting_response"] == []
     assert d["unread_notice_count"] == 0
 

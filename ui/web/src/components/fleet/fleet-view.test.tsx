@@ -134,6 +134,7 @@ function makeAgent(over: Partial<AgentRow> & { agent_id: number }): AgentRow {
     last_active_at: "2026-06-06T00:00:00Z", last_inbound_at: "2026-06-06T00:00:00Z",
     label: null,
     machine: "test",
+    supports_vision: true,
     notices_awaiting_response: [], unread_notice_count: 0,
     heartbeat_paused_until: null,
     liveness_state: "online",

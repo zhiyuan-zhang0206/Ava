@@ -47,6 +47,7 @@ from ops.agents import (
 )
 from ops.ops_lifecycle import _force_mark_terminated
 from shared import boot_timing
+from shared.agent_snapshot import select_one
 from shared.agents import (
     AgentNotFound,
     AgentStatus,
@@ -315,6 +316,21 @@ class TestSpawnAgent:
 
         # launch received the overlay
         assert captured.get("cfg") == {"llm_model": "gpt-5.6-sol"}
+
+    def test_snapshot_reports_effective_model_vision_support(
+        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(settings.lm, "llm_model", "claude-sonnet-5")
+        default_model_agent = _spawn_agent()
+        text_only_agent = _spawn_agent(config={"llm_model": "deepseek-v4-pro"})
+
+        default_snapshot = select_one(db_conn, default_model_agent)
+        text_only_snapshot = select_one(db_conn, text_only_agent)
+
+        assert default_snapshot is not None
+        assert default_snapshot.supports_vision is True
+        assert text_only_snapshot is not None
+        assert text_only_snapshot.supports_vision is False
 
 
 class TestResurrectAgent:

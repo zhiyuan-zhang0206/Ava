@@ -45,6 +45,7 @@ def _agent_row(agent_id: int, status: str, label: str | None) -> dict[str, objec
         "last_inbound_at": "2026-06-01T00:00:00Z",
         "label": label,
         "machine": "test-host",
+        "supports_vision": True,
         "notices_awaiting_response": [],
         "unread_notice_count": 0,
         "heartbeat_paused_until": None,

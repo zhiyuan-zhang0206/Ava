@@ -9,6 +9,7 @@
 // useState/useEffect/useCallback transformation logic testable.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { useState } from "react";
 import {
   act,
   cleanup,
@@ -205,35 +206,54 @@ vi.mock("@/components/timeline", () => ({
   ),
 }));
 
-vi.mock("@/components/composer", () => ({
-  Composer: ({
+vi.mock("@/components/composer", () => {
+  function ComposerMock({
     mode,
     onSend,
+    onUploadFiles,
+    onAttachImage,
     children,
     details,
     maxWidthCss,
   }: {
     mode: string;
     onSend: (s: string, imageUrls: string[], clientMessageId: string) => Promise<boolean>;
+    onUploadFiles?: (files: File[]) => void;
+    onAttachImage?: (file: File) => Promise<string>;
     children?: React.ReactNode;
     details?: React.ReactNode;
     maxWidthCss?: string;
-  }) => (
-    <div
-      data-testid="composer"
-      data-mode={mode}
-      data-max-width={maxWidthCss ?? "undefined"}
-    >
-      <button data-testid="composer-send" onClick={() => void onSend("hi", [], "test-client-message-id")}>send</button>
-      <button data-testid="composer-send-multi" onClick={() => void onSend("/compact /update", [], "test-client-message-id")}>send multi</button>
-      <button data-testid="composer-send-multi-args" onClick={() => void onSend("/search hello world /compact", [], "test-client-message-id")}>send multi args</button>
-      <button data-testid="composer-send-plain" onClick={() => void onSend("plain text", [], "test-client-message-id")}>send plain</button>
-      <button data-testid="composer-send-multi-image" onClick={() => void onSend("/compact /update", ["/api/agents/5/uploads/a.png"], "test-client-message-id")}>send multi image</button>
-      {details}
-      {children}
-    </div>
-  ),
-}));
+  }) {
+    const [thumbnail, setThumbnail] = useState<string | null>(null);
+    const pasteImage = (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+      const image = Array.from(event.clipboardData.files).find((file) =>
+        file.type.startsWith("image/"),
+      );
+      if (!image) return;
+      event.preventDefault();
+      if (onAttachImage) void onAttachImage(image).then(setThumbnail);
+      else onUploadFiles?.([image]);
+    };
+    return (
+      <div
+        data-testid="composer"
+        data-mode={mode}
+        data-max-width={maxWidthCss ?? "undefined"}
+      >
+        <textarea data-testid="composer-paste-target" onPaste={pasteImage} />
+        {thumbnail ? <div data-testid="composer-image-thumbnail" data-url={thumbnail} /> : null}
+        <button data-testid="composer-send" onClick={() => void onSend("hi", [], "test-client-message-id")}>send</button>
+        <button data-testid="composer-send-multi" onClick={() => void onSend("/compact /update", [], "test-client-message-id")}>send multi</button>
+        <button data-testid="composer-send-multi-args" onClick={() => void onSend("/search hello world /compact", [], "test-client-message-id")}>send multi args</button>
+        <button data-testid="composer-send-plain" onClick={() => void onSend("plain text", [], "test-client-message-id")}>send plain</button>
+        <button data-testid="composer-send-multi-image" onClick={() => void onSend("/compact /update", ["/api/agents/5/uploads/a.png"], "test-client-message-id")}>send multi image</button>
+        {details}
+        {children}
+      </div>
+    );
+  }
+  return { Composer: ComposerMock };
+});
 
 vi.mock("@/components/upload-button", () => ({
   UploadButton: ({ agentId }: { agentId: number | null }) => (
@@ -267,6 +287,7 @@ function makeAgent(overrides: Partial<AgentRow>): AgentRow {
     last_active_at: "2026-05-15T00:00:00Z", last_inbound_at: "2026-05-15T00:00:00Z",
     label: null,
     machine: "test",
+    supports_vision: true,
     notices_awaiting_response: [],
     unread_notice_count: 0,
     heartbeat_paused_until: null,
@@ -588,6 +609,58 @@ describe("UploadButton receives activeId", () => {
     hooksState.activeId = 7;
     wrap(<HomePage />);
     expect(screen.getByTestId("upload-button").getAttribute("data-agent-id")).toBe("7");
+  });
+});
+
+describe("pasted image routing", () => {
+  const uploadResult = {
+    files: [
+      {
+        filename: "paste.png",
+        path: "/tmp/paste.png",
+        url: "/api/agents/5/uploads/paste.png",
+        size: 3,
+        content_type: "image/png",
+      },
+    ],
+  };
+
+  it("uses file delivery without a native thumbnail for a text-only agent", async () => {
+    hooksState.activeId = 5;
+    hooksState.agents = [makeAgent({ agent_id: 5, supports_vision: false })];
+    vi.mocked(api.uploadFiles).mockResolvedValueOnce(uploadResult);
+    const image = new File(["png"], "paste.png", { type: "image/png" });
+
+    wrap(<HomePage />);
+    fireEvent.paste(screen.getByTestId("composer-paste-target"), {
+      clipboardData: { files: [image], types: ["Files"] },
+    });
+
+    await waitFor(() => expect(vi.mocked(api.uploadFiles)).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(api.uploadFiles)).toHaveBeenCalledWith(
+      5,
+      [image],
+      expect.any(Function),
+    );
+    expect(vi.mocked(api.uploadFiles)).not.toHaveBeenCalledWith(5, [image], undefined, false);
+    expect(screen.queryByTestId("composer-image-thumbnail")).toBeNull();
+  });
+
+  it("keeps the native image attachment path for a vision-capable agent", async () => {
+    hooksState.activeId = 5;
+    hooksState.agents = [makeAgent({ agent_id: 5, supports_vision: true })];
+    vi.mocked(api.uploadFiles).mockResolvedValueOnce(uploadResult);
+    const image = new File(["png"], "paste.png", { type: "image/png" });
+
+    wrap(<HomePage />);
+    fireEvent.paste(screen.getByTestId("composer-paste-target"), {
+      clipboardData: { files: [image], types: ["Files"] },
+    });
+
+    await waitFor(() =>
+      expect(vi.mocked(api.uploadFiles)).toHaveBeenCalledWith(5, [image], undefined, false),
+    );
+    expect(await screen.findByTestId("composer-image-thumbnail")).toBeTruthy();
   });
 });
 

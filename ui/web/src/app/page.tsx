@@ -387,7 +387,7 @@ function HomeContent({
               onSend={handleSend}
               onStop={handleStop}
               onUploadFiles={uploadHandler}
-              onAttachImage={activeId != null ? attachImage : undefined}
+              onAttachImage={activeAgent?.supports_vision === true ? attachImage : undefined}
               focusToken={composerFocusToken}
               contextTokens={contextTokens}
               maxContextTokens={maxContextTokens}

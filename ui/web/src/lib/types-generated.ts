@@ -3711,6 +3711,8 @@ export interface components {
             label: string | null;
             /** Machine */
             machine: string;
+            /** Supports Vision */
+            supports_vision: boolean;
             /**
              * Liveness State
              * @enum {string}

@@ -25,6 +25,7 @@ export function upsertAgent(prev: AgentRow[] | undefined, next: AgentRow): Agent
         cur.last_probe_at === nxt.last_probe_at &&
         cur.label === nxt.label &&
         cur.pid === nxt.pid &&
+        cur.supports_vision === nxt.supports_vision &&
         cur.unread_notice_count === nxt.unread_notice_count &&
         cur.notices_awaiting_response.length === nxt.notices_awaiting_response.length),
   );

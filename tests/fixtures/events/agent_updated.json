@@ -14,10 +14,11 @@
     "last_inbound_at": "2026-01-01T00:00:07Z",
     "label": "demo",
     "machine": "test-host",
+    "supports_vision": true,
+    "liveness_state": "online",
+    "last_probe_at": null,
     "notices_awaiting_response": [],
     "unread_notice_count": 0,
-    "heartbeat_paused_until": null,
-    "liveness_state": "online",
-    "last_probe_at": null
+    "heartbeat_paused_until": null
   }
 }

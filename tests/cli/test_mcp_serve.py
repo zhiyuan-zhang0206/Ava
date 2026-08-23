@@ -57,6 +57,7 @@ def _agent_row(agent_id: int = 7, status: str = "running") -> dict[str, Any]:
         "last_active_at": "2026-07-01T00:05:00Z",
         "label": "researcher",
         "machine": "mac-mini",
+        "supports_vision": True,
         "notices_awaiting_response": [],
         "unread_notice_count": 0,
         "heartbeat_paused_until": None,

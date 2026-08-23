@@ -46,6 +46,7 @@ _AGENT = {
     "last_active_at": "2026-08-07T00:00:00Z",
     "label": "layout-test",
     "machine": "test-host",
+    "supports_vision": True,
     "notices_awaiting_response": [
         {
             "id": 1,
