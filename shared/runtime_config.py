@@ -41,7 +41,7 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, cast, get_origin
 
 from dotenv import dotenv_values, set_key, unset_key
 
@@ -72,6 +72,13 @@ def _field_alias_map() -> dict[str, str]:
     from shared.config import field_alias_map
 
     return field_alias_map()
+
+
+def _field_is_list(name: str) -> bool:
+    """Whether ``name`` is declared as a list-backed Settings field."""
+    from shared.config import FIELD_INFOS
+
+    return get_origin(FIELD_INFOS[name].annotation) is list
 
 
 def read_env_aliases() -> dict[str, str]:
@@ -138,7 +145,8 @@ def write_fields(updates: dict[str, Any], removals: set[str]) -> None:
         path.touch(exist_ok=True)
         sp = str(path)
         for name, value in updates.items():
-            set_key(sp, amap[name], env_value_text(value))
+            quote_mode = "never" if _field_is_list(name) else "always"
+            set_key(sp, amap[name], env_value_text(value), quote_mode=quote_mode)
         for name in removals:
             unset_key(sp, amap[name])
         # Inside the lock: `.env` is the only on-disk copy of a cluster's secrets

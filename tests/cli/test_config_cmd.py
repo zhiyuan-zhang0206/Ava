@@ -8,11 +8,13 @@ is an explicit null), the read-only / unknown-key guards, and the restart hint.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import pytest
 
 from cli.commands import config as cfg
+from shared import runtime_config
 from shared.api_contracts.config import (
     ConfigFieldView,
     ConfigFieldWriteResult,
@@ -98,6 +100,43 @@ def test_set_coerces_int(captured_put: dict[str, Any]) -> None:
     rc = cfg.cmd_config_set(["AVA_OPS_CONCURRENCY=4"], machine=None)
     assert rc == 0
     assert captured_put["body"] == {"ops_concurrency": 4}  # int, not "4"
+
+
+def test_set_list_field_writes_bare_env_and_round_trips(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A list-backed CLI value lands as a bare comma list that the consuming
+    Settings model parses back into the declared list type."""
+    from shared.config.services import ServiceSettings
+
+    view = _view()
+    view.fields.append(
+        _field(
+            "im_disabled_adapters",
+            "AVA_IM_DISABLED_ADAPTERS",
+            "string",
+            [],
+            True,
+            "cluster-pinned",
+            "agent",
+        )
+    )
+    monkeypatch.setattr(cfg, "_get_config", lambda _machine: view)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(runtime_config, "_ava_home", lambda: tmp_path)
+
+    def _persist(body: dict[str, Any], _machine: str | None) -> ConfigWriteResult:
+        runtime_config.write_fields(body, set())
+        return ConfigWriteResult(applied=True, results={}, restart_required=["agent"])
+
+    monkeypatch.setattr(cfg, "_put_config", _persist)
+
+    rc = cfg.cmd_config_set(["AVA_IM_DISABLED_ADAPTERS=weixin,feishu"], machine=None)
+
+    assert rc == 0
+    assert (tmp_path / ".env").read_text() == "AVA_IM_DISABLED_ADAPTERS=weixin,feishu\n"
+    written = runtime_config.read_env_aliases()["AVA_IM_DISABLED_ADAPTERS"]
+    parsed = ServiceSettings.model_validate({"AVA_IM_DISABLED_ADAPTERS": written})
+    assert parsed.im_disabled_adapters == ["weixin", "feishu"]
 
 
 def test_set_sends_only_the_delta(monkeypatch: pytest.MonkeyPatch) -> None:
