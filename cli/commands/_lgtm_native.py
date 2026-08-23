@@ -1,4 +1,4 @@
-"""Native Loki and Prometheus installation and launchd configuration.
+"""Native LGTM installation and launchd configuration.
 
 Converge downloads only a missing or stale release asset, while always
 rendering the live configs and launchd plists so checkout changes apply on the
@@ -43,8 +43,10 @@ _LAUNCHCTL_TIMEOUT_S = 5.0
 @dataclass(frozen=True)
 class _NativeService:
     arguments: tuple[str, ...]
-    gomemlimit: str
-    archive_member: str
+    gomemlimit: str | None
+    archive_member: str | None
+    binary_path: str
+    uses_run_script: bool = False
 
 
 _NATIVE_CONSTANTS: dict[str, _NativeService] = {
@@ -52,6 +54,7 @@ _NATIVE_CONSTANTS: dict[str, _NativeService] = {
         arguments=("-config.file={config}/loki.yaml",),
         gomemlimit="2GiB",
         archive_member="loki-darwin-arm64",
+        binary_path="bin/loki",
     ),
     "prometheus": _NativeService(
         arguments=(
@@ -64,6 +67,18 @@ _NATIVE_CONSTANTS: dict[str, _NativeService] = {
         ),
         gomemlimit="1GiB",
         archive_member="prometheus-3.13.2.darwin-arm64/prometheus",
+        binary_path="bin/prometheus",
+    ),
+    "grafana": _NativeService(
+        arguments=(
+            "server",
+            "--config={config}/grafana.ini",
+            "--homepath={homepath}",
+        ),
+        gomemlimit=None,
+        archive_member=None,
+        binary_path="grafana-home/bin/grafana",
+        uses_run_script=True,
     ),
 }
 
@@ -120,6 +135,11 @@ def native_label(name: str, ava_home: Path) -> str:
     return f"com.ava.{name}.{home_slug(ava_home)}"
 
 
+def _binary_path(name: str, native_dir: Path) -> Path:
+    """Return the installed executable path for one native backend."""
+    return native_dir / _NATIVE_CONSTANTS[name].binary_path
+
+
 def _render_plist(name: str, native_dir: Path, ava_home: Path) -> str:
     """Render one owner-scoped launchd plist with absolute program paths."""
     service = _NATIVE_CONSTANTS[name]
@@ -128,14 +148,23 @@ def _render_plist(name: str, native_dir: Path, ava_home: Path) -> str:
     substitutions = {
         "config": str(resolved_native / "config"),
         "data": str(resolved_native / "data"),
+        "homepath": str(resolved_native / "grafana-home"),
     }
+    program_arguments = (
+        [str(resolved_native / "grafana" / "run.sh")]
+        if service.uses_run_script
+        else [
+            str(_binary_path(name, resolved_native)),
+            *[argument.format(**substitutions) for argument in service.arguments],
+        ]
+    )
+    environment = {"AVA_HOME": str(resolved_home)}
+    if service.gomemlimit is not None:
+        environment["GOMEMLIMIT"] = service.gomemlimit
     plist: dict[str, Any] = {
         "Label": native_label(name, ava_home),
-        "ProgramArguments": [
-            str(resolved_native / "bin" / name),
-            *[argument.format(**substitutions) for argument in service.arguments],
-        ],
-        "EnvironmentVariables": {"AVA_HOME": str(resolved_home), "GOMEMLIMIT": service.gomemlimit},
+        "ProgramArguments": program_arguments,
+        "EnvironmentVariables": environment,
         "RunAtLoad": True,
         "KeepAlive": {"SuccessfulExit": False},
         "ThrottleInterval": 10,
@@ -203,6 +232,8 @@ def _download_with_retry(url: str, archive: Path) -> None:
 def _extract_member(name: str, archive: Path, destination: Path) -> None:
     """Copy the expected release member into its final binary path."""
     member = _NATIVE_CONSTANTS[name].archive_member
+    if member is None:
+        raise RuntimeError(f"native LGTM {name} must install a release tree")
     with tempfile.TemporaryDirectory() as temporary_dir:
         extracted = Path(temporary_dir) / name
         if archive.suffix == ".zip":
@@ -224,6 +255,22 @@ def _extract_member(name: str, archive: Path, destination: Path) -> None:
     destination.chmod(0o755)
 
 
+def _extract_tree(name: str, archive: Path, destination: Path) -> None:
+    """Install a release archive tree after stripping its top-level directory."""
+    with tempfile.TemporaryDirectory() as temporary_dir:
+        extracted = Path(temporary_dir) / "extracted"
+        extracted.mkdir()
+        with tarfile.open(archive) as bundle:
+            bundle.extractall(extracted, filter="data")
+        roots = [path for path in extracted.iterdir() if path.is_dir()]
+        if len(roots) != 1:
+            raise RuntimeError(f"native LGTM {name} archive must have one top-level directory")
+        if destination.exists():
+            shutil.rmtree(destination)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(roots[0]), destination)
+
+
 def _download_and_verify(name: str, version: str, asset: dict[str, str], native_dir: Path) -> None:
     """Download, hash-verify, and install one pinned native backend binary."""
     with tempfile.TemporaryDirectory() as temporary_dir:
@@ -236,7 +283,11 @@ def _download_and_verify(name: str, version: str, asset: dict[str, str], native_
                 f"native LGTM {name} {version} SHA256 mismatch: got {actual}, "
                 f"expected {asset['sha256']} — refusing to install"
             )
-        _extract_member(name, archive, native_dir / "bin" / name)
+        service = _NATIVE_CONSTANTS[name]
+        if service.archive_member is None:
+            _extract_tree(name, archive, native_dir / "grafana-home")
+        else:
+            _extract_member(name, archive, _binary_path(name, native_dir))
     (native_dir / f"version-{name}").write_text(version + "\n", encoding="utf-8")
 
 
@@ -249,17 +300,44 @@ def _write_if_changed(path: Path, content: str) -> None:
 
 
 def _render_configs(repo: Path, native_dir: Path, ava_home: Path) -> None:
-    """Render native templates with the sole supported placeholder."""
+    """Render native templates from this checkout and host configuration."""
+    from shared.config import settings
+
     source_dir = repo / "deploy/lgtm/native/config"
-    for name in ("loki.yaml", "prometheus.yml"):
+    provisioning_dir = repo / "deploy/lgtm/config/grafana/provisioning"
+    tempo_query_url = settings.observability.telemetry_tempo_query_url.rstrip("/")
+    substitutions = {
+        "AVA_HOME": str(ava_home),
+        "AVA_PROVISIONING_PATH": str(provisioning_dir),
+        "GRAFANA_PROVISIONING_PATH": str(provisioning_dir / "dashboards"),
+        "AVA_TEMPO_QUERY_URL": tempo_query_url,
+        "REPO": str(repo),
+    }
+    for name in ("loki.yaml", "prometheus.yml", "grafana.ini", "runtime.env"):
         template = (source_dir / name).read_text(encoding="utf-8")
-        content = template.replace("{{AVA_HOME}}", str(ava_home))
+        template_substitutions = substitutions
+        if name == "prometheus.yml":
+            template_substitutions = {
+                **substitutions,
+                "AVA_TEMPO_QUERY_URL": tempo_query_url.removeprefix("http://").removeprefix(
+                    "https://"
+                ),
+            }
+        content = template
+        for key, value in template_substitutions.items():
+            content = content.replace(f"{{{{{key}}}}}", value)
         if name == "loki.yaml":
             rendered = yaml.safe_load(content)
             if not isinstance(rendered, dict):
                 raise TypeError("native Loki config must render to a mapping")
             validate_loki_deploy_config(cast(dict[str, object], rendered))
         _write_if_changed(native_dir / "config" / name, content)
+    run_script = (source_dir / "run.sh").read_text(encoding="utf-8")
+    for key, value in substitutions.items():
+        run_script = run_script.replace(f"{{{{{key}}}}}", value)
+    rendered_run_script = native_dir / "grafana" / "run.sh"
+    _write_if_changed(rendered_run_script, run_script)
+    rendered_run_script.chmod(0o755)
 
 
 def _launchctl(*args: str) -> subprocess.CompletedProcess[str]:
@@ -377,7 +455,7 @@ def backend_pids(native_dir: Path) -> dict[str, str | None]:
     """Return the running PID for each exact native binary path, if any."""
     pids: dict[str, str | None] = {}
     for name in _NATIVE_CONSTANTS:
-        binary = (native_dir / "bin" / name).resolve()
+        binary = _binary_path(name, native_dir).resolve()
         result = subprocess.run(
             ["pgrep", "-f", rf"^{re.escape(str(binary))}( |$)"],
             capture_output=True,

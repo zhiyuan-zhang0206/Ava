@@ -28,7 +28,8 @@ functions, no comments, no multi-statement, no Grafana macros, no
 ``{event_name}`` / ``{category}`` / ``{{agent_id}}`` placeholders (the live
 event stream is read through LogQL, task #1280). LogQL templates
 (``query_type="logql"``) follow the lighter contract in
-``shared/metrics_logql.py``.
+``shared/metrics_logql.py``. PromQL templates (``query_type="promql"``)
+are static Prometheus expressions.
 """
 
 from __future__ import annotations
@@ -130,15 +131,15 @@ class MetricSpec(BaseModel):
     panel: PanelType = "timeseries"
     query: str = Field(min_length=1)
     # Query dialect: "sql" (postgres datasource over the legacy `events`
-    # table) or "logql" (loki datasource over the event stream, #1280).
-    query_type: Literal["sql", "logql"] = "sql"
+    # table), "logql" (loki event stream), or "promql" (Prometheus).
+    query_type: Literal["sql", "logql", "promql"] = "sql"
     # Additional query targets (refIds B/C/...) for multi-series panels —
     # each target is validated and rendered exactly like `query`.
     targets: list[str] | None = None
     # Legend names for the rendered targets (refIds A, B, ...), one per
-    # series. LogQL aggregates carry no labels, so Grafana targets render
-    # these as legendFormat values; SQL targets are named by their column
-    # aliases and must not combine with target_names.
+    # series. LogQL and PromQL aggregates carry no labels, so Grafana targets
+    # render these as legendFormat values; SQL targets are named by their
+    # column aliases and must not combine with target_names.
     target_names: list[str] | None = None
     # Optional panel look overrides, merged into the generated panel JSON:
     # `options` merges into panel "options" (legend/colorMode/noValue/...),
@@ -173,10 +174,10 @@ class MetricSpec(BaseModel):
     def _target_names_consistent(self) -> MetricSpec:
         if self.target_names is None:
             return self
-        if self.query_type != "logql":
+        if self.query_type == "sql":
             raise ValueError(
-                "target_names requires query_type='logql' (SQL targets are "
-                "named by their column aliases)"
+                "target_names requires query_type='logql' or 'promql' (SQL "
+                "targets are named by their column aliases)"
             )
         expected = 1 + len(self.targets or [])
         if len(self.target_names) != expected:
@@ -742,19 +743,31 @@ def register_metric(spec: MetricSpec) -> MetricSpec:
 
 def validate_spec_sql(spec: MetricSpec) -> None:
     """Validate every query template on a spec (``query`` + ``targets``) —
-    the static-SQL whitelist or the LogQL contract, by dialect. Shared by
+    the static-SQL whitelist, LogQL contract, or PromQL sanity check, by dialect. Shared by
     ``register_metric`` and ``register_core_metric`` (Task #882) — core
     metrics go through the same safety checks as plugin metrics. SQL
     templates carry no placeholders anymore (task #180 PR C), so the old
     ``{{agent_id}}`` ↔ grafana rule is subsumed by the placeholder
     rejection; the LogQL dialect keeps its ``{{agent_id}}`` inspector idiom
-    (render-only, per-agent)."""
+    (render-only, per-agent). PromQL has neither event-stream requirements
+    nor template substitutions."""
     if spec.query_type == "logql":
         # Lazy: metrics_logql imports this module (the exception class), so a
         # module-level from-import here would cycle.
         from shared.metrics_logql import validate_spec_logql
 
         validate_spec_logql(spec)
+        return
+    if spec.query_type == "promql":
+        for template in [spec.query, *(spec.targets or [])]:
+            if any(
+                placeholder in template
+                for placeholder in ("{event_name}", "{category}", "{{agent_id}}")
+            ):
+                raise InvalidMetricQuery(
+                    "PromQL metric queries cannot use event-stream template placeholders: "
+                    f"{template!r}"
+                )
         return
     for template in [spec.query, *(spec.targets or [])]:
         validate_metric_sql(template)
@@ -785,7 +798,9 @@ def _sql_literal(value: str) -> str:
 def _render_template(template: str, spec: MetricSpec, agent_id: int | None) -> str:
     """Substitute ``{event_name}`` / ``{category}`` and, when ``agent_id``
     is given, ``{{agent_id}}``. The literal quoting follows the dialect:
-    SQL wants single quotes, LogQL wants double quotes."""
+    SQL wants single quotes, LogQL wants double quotes; PromQL is static."""
+    if spec.query_type == "promql":
+        return template
     literal = _sql_literal if spec.query_type == "sql" else _logql_literal
     rendered = template.replace("{event_name}", literal(spec.event_name)).replace(
         "{category}", literal(spec.category)

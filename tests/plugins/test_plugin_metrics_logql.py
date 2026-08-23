@@ -129,12 +129,36 @@ def test_dashboard_json_matches_core_registrations() -> None:
             assert all("queryType" not in target for target in targets)
             continue
 
-        assert panel["datasource"] == {"type": "loki", "uid": "loki"}
+        datasource = (
+            {"type": "prometheus", "uid": "prometheus"}
+            if spec.query_type == "promql"
+            else {"type": "loki", "uid": "loki"}
+        )
+        assert panel["datasource"] == datasource
         assert [target["expr"] for target in targets] == expected
         expected_query_type = (
-            "instant" if spec.panel in {"stat", "table"} or "$__range" in expected[0] else "range"
+            "instant"
+            if spec.query_type == "logql"
+            and (spec.panel in {"stat", "table"} or "$__range" in expected[0])
+            else "range"
         )
         assert all(target["queryType"] == expected_query_type for target in targets)
+        if spec.query_type == "promql":
+            assert spec.target_names is not None
+            assert [target["legendFormat"] for target in targets] == spec.target_names
+
+
+def test_dashboard_has_88_loki_targets() -> None:
+    """Removing the three Loki turn-duration targets leaves the measured total."""
+    path = _REPO_ROOT / "deploy/lgtm/config/grafana/provisioning/dashboards/ava-ops-main.json"
+    panels = json.loads(path.read_text())["panels"]
+    loki_targets = [
+        target
+        for panel in panels
+        for target in panel.get("targets", [])
+        if target.get("datasource", panel.get("datasource", {})).get("uid") == "loki"
+    ]
+    assert len(loki_targets) == 88
 
 
 def test_dashboard_legends_and_time_ranges_are_explicit() -> None:

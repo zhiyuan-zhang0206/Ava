@@ -1,3 +1,6 @@
+# ROLLBACK-ONLY (2026-08-23): collector filelog receivers replaced this
+# pipeline; the compose project no longer runs a promtail service. Kept only
+# for the manual container rollback path.
 server:
   http_listen_port: 9080
   grpc_listen_port: 0
