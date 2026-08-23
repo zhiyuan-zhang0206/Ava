@@ -3,12 +3,10 @@
 ``deploy/lgtm/config/grafana/provisioning/dashboards/ava-ops-main.json``, migrated to core-metric registrations
 (Task #882) and from Postgres-event SQL to Loki LogQL (Task #1280).
 
-The 16 hand-written core panels (ids < 1000) of the ops dashboard are
-registered here as core metrics, in their original gridPos order: the 6 stat
-panels first (two rows of three 8-wide), then the 8 charts in two 12-wide
-columns. Rendered output stays panel-for-panel equivalent to the
-pre-migration dashboard — only the panel ids (now 1..16), the leading
-``core`` row header (id 900) and the version field change.
+The hand-written core panels (ids < 1000) of the ops dashboard are registered
+here as core metrics, in their dashboard grid order. The cost tiles and
+drill-downs read each call's usage-time ``cost_usd`` snapshot from the Loki
+event stream; no dashboard query reprices historical token totals.
 
 Query dialect (Task #1280): every panel reads the event stream from Loki
 instead of the retired PG ``events`` table — the same read the alert rules
@@ -23,13 +21,15 @@ table, still live in PG) — stays SQL by design.
 
 Per-panel provenance:
 
-- **6 stat panels** (LLM calls / Warning / Error / Live agents /
-  LLM cost (24h) / Tokens (24h)): explicit 8x4 grid (three per row). The
+- **11 stat panels** (LLM calls / Warning / Error / Unresolved Warning /
+  Unresolved Error / Live agents / LLM cost (24h) / Tokens (24h), plus the
+  three cost projections): explicit 8x4 grid (three per row). The
   generator's stat color default (fixed blue) matches four of them; Warning
   (fixed orange) and Error (fixed red) set the color via ``field_defaults``,
-  and LLM cost carries the original ``decimals: 2``. Error keeps the
-  original ``unit: "s"`` and the ``noValue: "0"`` option.
-- **8 chart panels** (SSE backlog / LLM throughput / Token usage —
+  and LLM cost carries the original ``decimals: 2``. The 24h tiles use
+  ``timeFrom: now-24h`` in the dashboard JSON so their names stay truthful.
+  Error keeps the original ``unit: "s"`` and the ``noValue: "0"`` option.
+- **10 chart panels** (SSE backlog / LLM throughput / Token usage —
   Output + Reasoning / Cache hit / Input+Output+Gen-stage TPS / LLM calls /
   bucket / Event health / Token usage — Input): default 12x7 grid with the
   red-80 threshold step, except the three TPS panels which have no
@@ -38,6 +38,10 @@ Per-panel provenance:
   (fillOpacity 25 / axisLabel / stacking normal A on the two token-usage
   panels); SSE backlog and LLM calls / bucket match the barchart defaults
   and need no custom.
+- **Cost-analysis additions**: Daily LLM cost is a 24-hour barchart and the
+  model/agent drill-downs are instant-query Top 20 tables. Their Grafana JSON
+  is an explicit row because the dashboard generator does not own rows after
+  the original core grid.
 - **event_name/category**: taken from each query's semantics (llm_usage/telemetry,
   delivery_stalled/telemetry, ...). The level/status-based queries (Warning,
   Error, Live agents, Event health) filter on ``level``/``status`` rather
@@ -76,6 +80,15 @@ _DELIVERY_ATTR = {k: f"attributes_{k}" for k in DELIVERY_STALLED_KEYS}
 _GATEWAY_ATTR = {k: f"attributes_{k}" for k in GATEWAY_LATENCY_KEYS}
 
 
+def _llm_cost(window: str) -> str:
+    """Usage-time LLM cost snapshots over one Grafana/Loki range vector."""
+    return (
+        f'sum(sum_over_time({{service_name="unknown_service"}} | json | '
+        f"category={{category}} | event_name={{event_name}} | "
+        f"unwrap {_LLM_ATTR['cost_usd']} [{window}]))"
+    )
+
+
 def _count(pipeline: str, window: str) -> str:
     """One count_over_time series — every count wraps in sum(...): the
     unknown_service family has >500 streams over a day, and an unaggregated
@@ -95,7 +108,7 @@ core_metrics.register_core_metric(
         category="telemetry",
         unit="short",
         panel="stat",
-        query=_count('category=~"{category_re}|log" | event_name={event_name}', "$__range"),
+        query=_count("category={category} | event_name={event_name}", "$__range"),
         query_type="logql",
         target_names=["calls"],
         width=8,
@@ -207,11 +220,7 @@ core_metrics.register_core_metric(
         panel="stat",
         # cost_usd rides in every llm_usage payload (task #2626) — unwrap it
         # instead of mirroring MODEL_PRICING into SQL (405 ruling, 2026-08-14).
-        query=(
-            f'sum(sum_over_time({{service_name="unknown_service"}} | json | '
-            f'category=~"{{category_re}}|log" | event_name={{event_name}} | '
-            f"unwrap {_LLM_ATTR['cost_usd']} [$__range]))"
-        ),
+        query=_llm_cost("$__range"),
         query_type="logql",
         target_names=["llm cost"],
         field_defaults={"decimals": 2},
@@ -230,14 +239,79 @@ core_metrics.register_core_metric(
         panel="stat",
         query=(
             f'sum(sum_over_time({{service_name="unknown_service"}} | json | '
-            f'category=~"{{category_re}}|log" | event_name={{event_name}} | '
+            f"category={{category}} | event_name={{event_name}} | "
             f"unwrap {_LLM_ATTR['in_total']} [$__range]))"
             f' + sum(sum_over_time({{service_name="unknown_service"}} | json | '
-            f'category=~"{{category_re}}|log" | event_name={{event_name}} | '
+            f"category={{category}} | event_name={{event_name}} | "
             f"unwrap {_LLM_ATTR['out_total']} [$__range]))"
         ),
         query_type="logql",
         target_names=["tokens"],
+        width=8,
+        height=4,
+    )
+)
+
+core_metrics.register_core_metric(
+    MetricSpec(
+        name="core_llm_cost_today_estimate",
+        title="Today LLM cost estimate",
+        description=(
+            "Projected full-day LLM spend from usage-time cost snapshots. Formula: "
+            "today's spend since Asia/Shanghai midnight × 86,400 / elapsed "
+            "seconds in the panel range."
+        ),
+        event_name="llm_usage",
+        category="telemetry",
+        unit="currencyUSD",
+        panel="stat",
+        query=f"({_llm_cost('$__range')}) * 86400 / $__range_s",
+        query_type="logql",
+        target_names=["today estimate"],
+        field_defaults={"decimals": 2},
+        width=8,
+        height=4,
+    )
+)
+
+core_metrics.register_core_metric(
+    MetricSpec(
+        name="core_llm_cost_month_estimate",
+        title="This-month LLM cost estimate",
+        description=(
+            "30-day-normalized projection from usage-time cost snapshots. Formula: "
+            "this month's spend so far × 2,592,000 / elapsed seconds in the "
+            "panel range. It is a 30-day pace, not a calendar-month total."
+        ),
+        event_name="llm_usage",
+        category="telemetry",
+        unit="currencyUSD",
+        panel="stat",
+        query=f"({_llm_cost('$__range')}) * 2592000 / $__range_s",
+        query_type="logql",
+        target_names=["month estimate"],
+        field_defaults={"decimals": 2},
+        width=8,
+        height=4,
+    )
+)
+
+core_metrics.register_core_metric(
+    MetricSpec(
+        name="core_llm_cost_next_month_estimate",
+        title="Next-month LLM cost estimate",
+        description=(
+            "30-day projection from usage-time cost snapshots. Formula: "
+            "(spend over the trailing 168 hours / 7) × 30."
+        ),
+        event_name="llm_usage",
+        category="telemetry",
+        unit="currencyUSD",
+        panel="stat",
+        query=f"({_llm_cost('168h')}) / 7 * 30",
+        query_type="logql",
+        target_names=["next-month estimate"],
+        field_defaults={"decimals": 2},
         width=8,
         height=4,
     )
@@ -290,13 +364,13 @@ core_metrics.register_core_metric(
         # Σ(in+out+reasoning) ÷ interval_sec.
         query=(
             f'sum(rate({{service_name="unknown_service"}} | json | '
-            f'category=~"{{category_re}}|log" | event_name={{event_name}} | '
+            f"category={{category}} | event_name={{event_name}} | "
             f"unwrap {_LLM_ATTR['in_total']} [$__interval]))"
             f' + sum(rate({{service_name="unknown_service"}} | json | '
-            f'category=~"{{category_re}}|log" | event_name={{event_name}} | '
+            f"category={{category}} | event_name={{event_name}} | "
             f"unwrap {_LLM_ATTR['out_total']} [$__interval]))"
             f' + sum(rate({{service_name="unknown_service"}} | json | '
-            f'category=~"{{category_re}}|log" | event_name={{event_name}} | '
+            f"category={{category}} | event_name={{event_name}} | "
             f"unwrap {_LLM_ATTR['reasoning']} [$__interval]))"
         ),
         query_type="logql",
@@ -316,12 +390,12 @@ core_metrics.register_core_metric(
         panel="timeseries",
         query=(
             f'sum(sum_over_time({{service_name="unknown_service"}} | json | '
-            f'category=~"{{category_re}}|log" | event_name={{event_name}} | '
+            f"category={{category}} | event_name={{event_name}} | "
             f"unwrap {_LLM_ATTR['out_total']} [$__interval]))"
         ),
         targets=[
             f'sum(sum_over_time({{service_name="unknown_service"}} | json | '
-            f'category=~"{{category_re}}|log" | event_name={{event_name}} | '
+            f"category={{category}} | event_name={{event_name}} | "
             f"unwrap {_LLM_ATTR['reasoning']} [$__interval]))"
         ],
         query_type="logql",
@@ -485,10 +559,72 @@ core_metrics.register_core_metric(
         category="telemetry",
         unit="short",
         panel="barchart",
-        query=_count('category=~"{category_re}|log" | event_name={event_name}', "$__interval"),
+        query=_count("category={category} | event_name={event_name}", "$__interval"),
         query_type="logql",
         target_names=["calls"],
         thresholds=[ThresholdStep(color="red", value=80.0)],
+    )
+)
+
+core_metrics.register_core_metric(
+    MetricSpec(
+        name="core_llm_cost_daily",
+        title="Daily LLM cost (7d)",
+        description=(
+            "Daily usage-time LLM cost snapshots. The dashboard fixes this panel "
+            "to Asia/Shanghai calendar days and a 24-hour query interval."
+        ),
+        event_name="llm_usage",
+        category="telemetry",
+        unit="currencyUSD",
+        panel="barchart",
+        query=_llm_cost("$__interval"),
+        query_type="logql",
+        target_names=["cost usd"],
+        thresholds=[],
+    )
+)
+
+core_metrics.register_core_metric(
+    MetricSpec(
+        name="core_llm_cost_by_model",
+        title="LLM cost by model (Top 20)",
+        description=(
+            "Top 20 models by windowed usage-time cost snapshots. The model name "
+            "is the llm_usage payload's attributes_model label."
+        ),
+        event_name="llm_usage",
+        category="telemetry",
+        unit="currencyUSD",
+        panel="table",
+        query=(
+            f'topk(20, sum by (attributes_model) (sum_over_time({{service_name="unknown_service"}} '
+            f"| json | category={{category}} | event_name={{event_name}} | "
+            f'attributes_model!="" | unwrap {_LLM_ATTR["cost_usd"]} [$__range])))'
+        ),
+        query_type="logql",
+        target_names=["cost usd"],
+        thresholds=[],
+    )
+)
+
+core_metrics.register_core_metric(
+    MetricSpec(
+        name="core_llm_cost_by_agent",
+        title="LLM cost by agent (Top 20)",
+        description="Top 20 agents by windowed usage-time LLM cost snapshots.",
+        event_name="llm_usage",
+        category="telemetry",
+        unit="currencyUSD",
+        panel="table",
+        query=(
+            f'topk(20, sum by (agent_id) (sum_over_time({{service_name="unknown_service"}} '
+            f'| json | category={{category}} | event_name={{event_name}} | agent_id!="" | '
+            f"unwrap {_LLM_ATTR['cost_usd']} [$__range])))"
+        ),
+        query_type="logql",
+        target_names=["cost usd"],
+        thresholds=[],
     )
 )
 
@@ -521,7 +657,7 @@ core_metrics.register_core_metric(
         panel="timeseries",
         query=(
             f'sum(sum_over_time({{service_name="unknown_service"}} | json | '
-            f'category=~"{{category_re}}|log" | event_name={{event_name}} | '
+            f"category={{category}} | event_name={{event_name}} | "
             f"unwrap {_LLM_ATTR['in_total']} [$__interval]))"
         ),
         query_type="logql",

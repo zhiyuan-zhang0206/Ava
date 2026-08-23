@@ -4,16 +4,15 @@ Locks the query contract of the sidebar stats card — pyright/tsc cannot catch
 drift between hard-coded `payload->>'X'` keys in SQL and emit site field names,
 these tests are the only defense.
 
-Runs on ava_test DB (real SQL); directly INSERT `events` rows to simulate
-endpoint aggregation after emit. The `agents` table's live_count is similarly
-populated via INSERT of real rows. The token + cost block reads Prometheus
-(task #1197) and is faked via prom_metrics (an autouse fixture installs an
-empty fake; tests that need token values re-install a richer one over it).
+Runs on ava_test DB (real SQL) for the Postgres metadata read. The Loki-backed
+event aggregates use `FakeLoki`; the `agents` table's live_count is similarly
+populated via INSERT of real rows.
 """
 
 from __future__ import annotations
 
 import json
+from collections import Counter
 from datetime import datetime, timedelta
 from itertools import pairwise
 from types import SimpleNamespace
@@ -24,17 +23,11 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
-from gateway import loki_events, loki_query_budget, prom_metrics
+from gateway import loki_events, loki_query_budget
 from gateway.app import app
 from gateway.routers import status
 from gateway.schemas import StatsWindowHours
 from tests.gateway.loki_fake import FakeLoki
-
-# The OTLP-mapped llm_usage counters the dashboard reads (must match
-# shared/telemetry_otlp._record_metrics + gateway/routers/status.py).
-_IN_METRIC = "ava_llm_usage_in_total"
-_OUT_METRIC = "ava_llm_usage_out_total"
-_CACHED_METRIC = "ava_llm_usage_cache_read_total"
 
 
 @pytest.fixture(autouse=True)
@@ -46,39 +39,6 @@ def fake_loki(monkeypatch: pytest.MonkeyPatch) -> FakeLoki:
     monkeypatch.setattr(loki_events, "count_events", fake.count_events)
     monkeypatch.setattr(loki_events, "attribute_aggregate", fake.attribute_aggregate)
     return fake
-
-
-@pytest.fixture(autouse=True)
-def _mock_prom(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Prometheus is not part of the test DB — every dashboard test fakes
-    prom_metrics.sum_by; the default fake has no series (all zeros)."""
-
-    def fake_sum_by(metric: str, by: str, *, window_hours: int | None = None) -> dict[str, float]:
-        return {}
-
-    monkeypatch.setattr(prom_metrics, "sum_by", fake_sum_by)
-
-
-def _install_prom(
-    monkeypatch: pytest.MonkeyPatch, *, windowed: dict[str, dict[str, float]]
-) -> None:
-    """Richer fake: metric -> {model: value}, returned for every window."""
-
-    def fake_sum_by(metric: str, by: str, *, window_hours: int | None = None) -> dict[str, float]:
-        return windowed.get(metric, {})
-
-    monkeypatch.setattr(prom_metrics, "sum_by", fake_sum_by)
-
-
-def _install_prom_per_window(
-    monkeypatch: pytest.MonkeyPatch, per_window: dict[int, dict[str, dict[str, float]]]
-) -> None:
-    """Fake keyed by window_hours — for the `?hours=` window-switch test."""
-
-    def fake_sum_by(metric: str, by: str, *, window_hours: int | None = None) -> dict[str, float]:
-        return per_window.get(window_hours or 0, {}).get(metric, {})
-
-    monkeypatch.setattr(prom_metrics, "sum_by", fake_sum_by)
 
 
 def _insert_agent_row(db: psycopg.Connection, label: str = "t") -> int:
@@ -249,6 +209,16 @@ def test_dashboard_shards_long_loki_windows_and_merges_aggregates(
     )
     fake_loki.add(event="log_warning", level="warning", ts_offset_hours=5)
     fake_loki.add(event="log_error", level="error", ts_offset_hours=0.5)
+    fake_loki.add(
+        event="llm_usage",
+        payload={"in_total": 100, "out_total": 20, "cache_read": 50, "cost_usd": 1.5},
+        ts_offset_hours=5,
+    )
+    fake_loki.add(
+        event="llm_usage",
+        payload={"in_total": 10, "out_total": 2, "cache_read": 5, "cost_usd": 0.5},
+        ts_offset_hours=0.5,
+    )
 
     aggregate_spans: list[tuple[datetime, datetime]] = []
     count_spans: list[tuple[datetime, datetime]] = []
@@ -272,11 +242,16 @@ def test_dashboard_shards_long_loki_windows_and_merges_aggregates(
     assert body["avg_turn_seconds"] == 6.0
     assert body["warnings"] == 1
     assert body["errors"] == 1
-    assert len(aggregate_spans) > 1
-    assert aggregate_spans[0][0] == aggregate_spans[-1][1] - timedelta(hours=6)
-    assert all(end - start <= timedelta(hours=3) for start, end in aggregate_spans)
-    assert all(end == next_start for (_, end), (next_start, _) in pairwise(aggregate_spans))
-    assert count_spans == aggregate_spans * 3
+    assert body["tokens"] == {"input": 110, "output": 22, "cache_read": 55, "cache_hit_pct": 50}
+    assert body["cost_usd"] == 2.0
+    aggregate_counts = Counter(aggregate_spans)
+    spans = sorted(aggregate_counts)
+    assert len(spans) > 1
+    assert sum((end - start for start, end in spans), timedelta()) == timedelta(hours=6)
+    assert all(end - start <= timedelta(hours=3) for start, end in spans)
+    assert all(end == next_start for (_, end), (next_start, _) in pairwise(spans))
+    assert set(aggregate_counts.values()) == {5}
+    assert Counter(count_spans) == Counter(dict.fromkeys(spans, 3))
 
 
 def test_dashboard_empty_db_returns_zeros(db_conn: psycopg.Connection) -> None:
@@ -331,19 +306,12 @@ def test_dashboard_live_count_excludes_terminated(db_conn: psycopg.Connection) -
 
 
 def test_dashboard_aggregates_llm_usage_payload(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection, fake_loki: FakeLoki
 ) -> None:
-    """Windowed per-model sums from the Prometheus counters -> token totals.
-    Locks the metric-name contract: ava_llm_usage_{in,out,cache_read}_total
-    feed the three token fields. If the OTLP mapper drifts the names, these
-    mocks stop matching the route's constants and the test fails."""
-    _install_prom(
-        monkeypatch,
-        windowed={
-            _IN_METRIC: {"deepseek-v4-pro": 1500.0},
-            _OUT_METRIC: {"deepseek-v4-pro": 300.0},
-            _CACHED_METRIC: {"deepseek-v4-pro": 1200.0},
-        },
+    """Windowed LLM token fields sum the corresponding Loki payload values."""
+    fake_loki.add(
+        event="llm_usage",
+        payload={"in_total": 1500, "out_total": 300, "cache_read": 1200, "cost_usd": 1.2},
     )
     db_conn.commit()
     with TestClient(app) as client:
@@ -356,17 +324,13 @@ def test_dashboard_aggregates_llm_usage_payload(
 
 
 def test_dashboard_cache_hit_pct_two_decimals(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection, fake_loki: FakeLoki
 ) -> None:
     """cache_hit_pct = cache_read / input * 100 with two decimal places (no longer integer truncation).
     1000 / 3000 = 33.333... → 33.33."""
-    _install_prom(
-        monkeypatch,
-        windowed={
-            _IN_METRIC: {"deepseek-v4-pro": 3000.0},
-            _OUT_METRIC: {"deepseek-v4-pro": 100.0},
-            _CACHED_METRIC: {"deepseek-v4-pro": 1000.0},
-        },
+    fake_loki.add(
+        event="llm_usage",
+        payload={"in_total": 3000, "out_total": 100, "cache_read": 1000, "cost_usd": 1.2},
     )
     db_conn.commit()
     with TestClient(app) as client:
@@ -374,44 +338,45 @@ def test_dashboard_cache_hit_pct_two_decimals(
     assert body["tokens"]["cache_hit_pct"] == 33.33
 
 
-def test_dashboard_cost_aggregates_per_model(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+def test_dashboard_cost_uses_usage_time_snapshots(
+    db_conn: psycopg.Connection, fake_loki: FakeLoki
 ) -> None:
-    """Windowed cost grouped by the model label; each group is priced via
-    cost_usd (3-tier) and the per-group costs sum. A missing model label
-    (pre-model-tracking events) groups under "" and an unpriced model both
-    contribute 0 (unknown cost is treated as 0, not free)."""
-    # claude-opus-4-8 (5, 5, 25) USD/M: in=1M out=1M cache=0 →
-    # (1M*5 + 0 + 1M*25)/1e6 = 30.0
-    # mimo-v2.5-pro (0.435, 0.0036, 0.87): in=1M out=1M cache=1M (full hit) →
-    # (0 + 1M*0.0036 + 1M*0.87)/1e6 = 0.8736
-    _install_prom(
-        monkeypatch,
-        windowed={
-            _IN_METRIC: {
-                "claude-opus-4-8": 1_000_000.0,
-                "mimo-v2.5-pro": 1_000_000.0,
-                "no-such-model": 999.0,
-                "": 999.0,
-            },
-            _OUT_METRIC: {
-                "claude-opus-4-8": 1_000_000.0,
-                "mimo-v2.5-pro": 1_000_000.0,
-                "no-such-model": 999.0,
-                "": 999.0,
-            },
-            _CACHED_METRIC: {
-                "claude-opus-4-8": 0.0,
-                "mimo-v2.5-pro": 1_000_000.0,
-                "no-such-model": 0.0,
-                "": 0.0,
-            },
+    """Cost sums the event payload snapshots, regardless of model registry state."""
+    fake_loki.add(
+        event="llm_usage",
+        payload={
+            "model": "claude-opus-4-8",
+            "in_total": 1_000_000,
+            "out_total": 1_000_000,
+            "cache_read": 0,
+            "cost_usd": 30.0,
+        },
+    )
+    fake_loki.add(
+        event="llm_usage",
+        payload={
+            "model": "retired-model",
+            "in_total": 999,
+            "out_total": 999,
+            "cache_read": 0,
+            "cost_usd": 7.25,
+        },
+    )
+    fake_loki.add(
+        event="llm_usage",
+        category="log",
+        payload={
+            "model": "retired-log-model",
+            "in_total": 1,
+            "out_total": 1,
+            "cache_read": 0,
+            "cost_usd": 0.75,
         },
     )
     db_conn.commit()
     with TestClient(app) as client:
         body = client.get("/api/stats/dashboard").json()
-    assert body["cost_usd"] == pytest.approx(30.0 + 0.8736)  # pyright: ignore[reportUnknownMemberType]
+    assert body["cost_usd"] == pytest.approx(38.0)  # pyright: ignore[reportUnknownMemberType]
 
 
 def test_dashboard_aggregates_turn_end_filters_ok(
@@ -432,12 +397,22 @@ def test_dashboard_aggregates_turn_end_filters_ok(
 
 
 def test_dashboard_default_24h_window_filters_old_rows(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection, fake_loki: FakeLoki
 ) -> None:
-    """The Prometheus side applies the window (increase over [24h]): the
-    mocked windowed counters only carry the recent increment, so tokens read
-    10/5 — the old row contributes to total_events only."""
+    """Loki aggregates include only recent usage; the old DB row is metadata only."""
     aid = _insert_agent(db_conn, status="running")
+    fake_loki.add(
+        event="llm_usage",
+        agent_id=aid,
+        payload={"in_total": 999, "out_total": 999, "cache_read": 0, "cost_usd": 99.9},
+        ts_offset_hours=25,
+    )
+    fake_loki.add(
+        event="llm_usage",
+        agent_id=aid,
+        payload={"in_total": 10, "out_total": 5, "cache_read": 0, "cost_usd": 0.2},
+        ts_offset_hours=1,
+    )
     _insert_event(
         db_conn,
         event="llm_usage",
@@ -451,14 +426,6 @@ def test_dashboard_default_24h_window_filters_old_rows(
         agent_id=aid,
         payload={"in_total": 10, "out_total": 5, "cache_read": 0},
         ts_offset_hours=1,
-    )
-    _install_prom(
-        monkeypatch,
-        windowed={
-            _IN_METRIC: {"deepseek-v4-pro": 10.0},
-            _OUT_METRIC: {"deepseek-v4-pro": 5.0},
-            _CACHED_METRIC: {},
-        },
     )
     db_conn.commit()
     # total_events reads pg_class.reltuples (planner estimate), not a windowed
@@ -512,11 +479,9 @@ def test_dashboard_audit_warning_not_counted(
 
 
 def test_dashboard_hours_param_selects_window(
-    db_conn: psycopg.Connection, fake_loki: FakeLoki, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection, fake_loki: FakeLoki
 ) -> None:
-    """?hours= switches window: the Prometheus mock returns different
-    windowed sums per hours, while warnings / avg_turn read the same window
-    from Loki — the two sources share the same hours parameter."""
+    """?hours= applies the same Loki window to every event aggregate."""
     aid = _insert_agent(db_conn, status="running")
     fake_loki.add(event="some_warning", level="warning", agent_id=aid, ts_offset_hours=3)
     fake_loki.add(
@@ -531,22 +496,17 @@ def test_dashboard_hours_param_selects_window(
         payload={"duration_seconds": 2.0, "ok": True},
         ts_offset_hours=0.5,
     )
-    # 3h-old increment is outside hours=1, inside hours=6 — the Prometheus side
-    # applies the window; the route just forwards `hours` into the PromQL.
-    _install_prom_per_window(
-        monkeypatch,
-        {
-            1: {
-                _IN_METRIC: {"deepseek-v4-pro": 10.0},
-                _OUT_METRIC: {"deepseek-v4-pro": 5.0},
-                _CACHED_METRIC: {},
-            },
-            6: {
-                _IN_METRIC: {"deepseek-v4-pro": 110.0},
-                _OUT_METRIC: {"deepseek-v4-pro": 55.0},
-                _CACHED_METRIC: {},
-            },
-        },
+    fake_loki.add(
+        event="llm_usage",
+        agent_id=aid,
+        payload={"in_total": 100, "out_total": 50, "cache_read": 0, "cost_usd": 1.0},
+        ts_offset_hours=3,
+    )
+    fake_loki.add(
+        event="llm_usage",
+        agent_id=aid,
+        payload={"in_total": 10, "out_total": 5, "cache_read": 0, "cost_usd": 0.1},
+        ts_offset_hours=0.5,
     )
     db_conn.commit()
     with TestClient(app) as client:

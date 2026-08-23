@@ -13,8 +13,8 @@ merged into one, sectioned like Ava Ops (user ruling: "merge into one big
 dashboard"). `uid` is fixed at `ava-ops-main` — the dashboard link and user
 bookmarks depend on it; never change it.
 
-Six sections, one row per section — `core` is the 2026-08-06 user-ruling
-row header; sections 2–6 are **collapsed by default** (`collapsed: true`):
+Seven sections, one row per section — `core` is the 2026-08-06 user-ruling
+row header; sections 2–7 are **collapsed by default** (`collapsed: true`):
 
 1. **`core`** — the user's daily first screen: the eight windowed stat
    tiles (LLM calls / Warning / Error / Unresolved Warning / Unresolved
@@ -36,6 +36,11 @@ row header; sections 2–6 are **collapsed by default** (`collapsed: true`):
 6. **`Host & data plane`** — the former `ava-host-dataplane` panels: host
    CPU / memory / load / filesystem / disk / network throughput + Postgres
    connections / transactions / size + Redis memory / clients / throughput.
+7. **`Cost analysis`** — three cost projections, daily cost for the trailing
+   week, and Top-20 cost drill-downs by model and agent. Every panel reads
+   usage-time `attributes_cost_usd` snapshots from telemetry `llm_usage`
+   events; the 24h LLM cost/token cards pin their own `now-24h` window so
+   their titles remain accurate while the dashboard default stays at 6h.
 
 Panel content is preserved verbatim, dedup only — nothing was dropped
 except the `Recent traces (Tempo)` panel (the Tempo trace UI phase was cut
@@ -81,6 +86,11 @@ fills `plugin = "core"`.
 All titles are **English** (2026-08-05 user ruling: the previous Chinese
 titles could not be changed from the Grafana settings page because the
 dashboard is provisioning-managed — titles are edited here, as code).
+
+The dashboard timezone is `Asia/Shanghai`. The daily cost panel uses a
+`now-7d/d` relative override plus `interval: 24h`, so its `$__interval` range
+vectors are daily buckets aligned to that timezone rather than the browser's
+local clock.
 
 ### MetricSpec — the registration contract
 
