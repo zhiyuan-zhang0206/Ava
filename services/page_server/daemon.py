@@ -1,11 +1,12 @@
 """Page server supervisor daemon — doorplate ③ (R3).
 
 The single supervisor of page servers: every open `agent_pages` row whose
-serve_dir is set (ava.ui.serve()/serve_markdown() pages — `show()` pages
-are the agent's own servers and are never touched) gets exactly one page
-server process on this host, spawned from the row's serve_dir on the row's
-port; rows that close (or agents that terminate — the SQL trigger closes
-their pages) get their server killed.
+serve_dir is an existing directory (ava.ui.serve()/serve_markdown() pages —
+`show()` pages are the agent's own servers and are never touched) gets exactly
+one page server process on this host, spawned from the row's serve_dir on the
+row's port. A vanished serve_dir retries on a bounded degradation ladder before
+the daemon closes the unusable row; rows that close (or agents that terminate —
+the SQL trigger closes their pages) get their server killed.
 
 The daemon is deliberately decoupled from the agent heartbeat and the
 session tree: page servers are detached subprocesses (`start_new_session` —
@@ -46,6 +47,12 @@ from psycopg_pool import ConnectionPool
 
 import shared.db
 from services._pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
+from services.page_server.degradation import (
+    _DegradedServeDir,
+    _discard_gone_degraded,
+    _PageRow,
+    _reconcile_serve_dir,
+)
 from shared.config import settings
 from shared.daemon_health import Liveness, health_port, start_health_server, stop_health_server
 from shared.daemon_shutdown import install_graceful_shutdown
@@ -78,16 +85,6 @@ class _ServerHandle:
     token: str
     proc: subprocess.Popen[bytes]
     log_path: Path
-
-
-@dataclass
-class _PageRow:
-    id: int
-    agent_id: int
-    name: str
-    port: int
-    host: str
-    serve_dir: str
 
 
 def _write_pidfile() -> None:
@@ -277,15 +274,18 @@ def _reconcile_once(
     pool: ConnectionPool,
     managed: dict[tuple[int, str], _ServerHandle],
     backoff: dict[tuple[int, str], float],
+    degraded: dict[tuple[int, str], _DegradedServeDir],
     host: str,
     log_dir: Path,
 ) -> None:
     """One supervision pass: spawn what is missing, kill what is gone,
     respawn what died. The agent_pages table is the truth source; `managed`
     is only the cache of what this process already spawned; `backoff`
-    remembers rows whose last spawn failed, so they are not hot-looped."""
+    remembers ordinary launch failures, while `degraded` remembers missing
+    directories on their independent exponential retry ladder."""
     rows = _open_rows(pool, host)
     wanted = {(r.agent_id, r.name): r for r in rows}
+    _discard_gone_degraded(degraded, wanted)
 
     # 0. Reclaim (audit round 2, P1): page servers are detached processes
     # (start_new_session) that survive a daemon restart, while `managed` is
@@ -341,6 +341,7 @@ def _reconcile_once(
             _kill_server(handle)
             del managed[key]
             backoff.pop(key, None)
+            degraded.pop(key, None)
         elif handle.proc.poll() is not None:
             _log.warning(
                 "[page-server] respawning %s (process died, code=%s)", key, handle.proc.returncode
@@ -348,11 +349,16 @@ def _reconcile_once(
             _kill_server(handle)
             del managed[key]
             backoff.pop(key, None)
+            degraded.pop(key, None)
 
-    # 2. Spawn what is missing, honoring the failed-spawn backoff.
+    # 2. Spawn what is missing. A vanished directory never gets as far as
+    # Popen: it has its own degrade/recovery ladder, distinct from failures
+    # such as a busy port that retain the fixed failed-spawn cooldown.
     now = time.monotonic()
     for key, row in wanted.items():
         if key in managed:
+            continue
+        if _reconcile_serve_dir(pool, row, key, degraded, backoff, now):
             continue
         if now < backoff.get(key, 0.0):
             continue
@@ -379,6 +385,7 @@ async def _reconcile_loop(pool: ConnectionPool, liveness: Liveness) -> None:
     log_dir = settings.services.page_server_log_dir
     managed: dict[tuple[int, str], _ServerHandle] = {}
     backoff: dict[tuple[int, str], float] = {}
+    degraded: dict[tuple[int, str], _DegradedServeDir] = {}
     _log.info(
         "[page-server] daemon started, pid=%s, machine=%s, host=%s",
         os.getpid(),
@@ -389,7 +396,9 @@ async def _reconcile_loop(pool: ConnectionPool, liveness: Liveness) -> None:
         liveness.beat()
         try:
             await asyncio.sleep(_POLL_INTERVAL_S)
-            await asyncio.to_thread(_reconcile_once, pool, managed, backoff, host, log_dir)
+            await asyncio.to_thread(
+                _reconcile_once, pool, managed, backoff, degraded, host, log_dir
+            )
         except asyncio.CancelledError:
             raise
         except psycopg.ProgrammingError:
