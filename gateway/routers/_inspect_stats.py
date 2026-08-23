@@ -8,6 +8,8 @@ double counted.
 
 from __future__ import annotations
 
+import threading
+import time as time_mod
 from datetime import UTC, date, datetime, time, timedelta
 from math import floor
 from typing import Any, NamedTuple
@@ -16,6 +18,7 @@ from psycopg_pool import ConnectionPool
 
 from gateway import loki_events
 from gateway.routers import _agent_cost, _inspect_pg
+from gateway.routers._inspect_cache import InspectQueryCache
 from gateway.schemas import AgentStats
 
 
@@ -58,7 +61,81 @@ class _LiveInspectValues(NamedTuple):
     output_tokens: float
     active_seconds: float
     exec_seconds: float
-    lifecycle_events: list[tuple[datetime, str]]
+
+
+_LIFECYCLE_EVENTS = ("agent_spawned", "agent_resurrected", "agent_terminated")
+_LIFECYCLE_EVENT_PATTERNS = [f"^{event}$" for event in _LIFECYCLE_EVENTS]
+_LIFECYCLE_CACHE_TTL_S = 300.0
+_lifecycle_cache = InspectQueryCache[int, list[tuple[datetime, str]]](
+    max_entries=256,
+    max_inflight=128,
+)
+_lifecycle_cache_freeze: datetime | None | object = object()
+_lifecycle_cache_lock = threading.Lock()
+
+
+def reset_for_tests() -> None:
+    """Clear the per-agent lifecycle cache between isolated test databases."""
+    global _lifecycle_cache_freeze  # noqa: PLW0603 — intentional test seam
+    with _lifecycle_cache_lock:
+        _lifecycle_cache.clear()
+        _lifecycle_cache_freeze = object()
+
+
+def _load_live_lifecycle(
+    agent_id: int, window: tuple[datetime, datetime]
+) -> list[tuple[datetime, str]]:
+    """Read one agent's retained lifecycle leg with the interactive 8s bound."""
+    rows = loki_events.query_projected_lines(
+        fields=[],
+        template="{{ __line__ }}",
+        agent_id=agent_id,
+        event_names=_LIFECYCLE_EVENT_PATTERNS,
+        from_=window[0],
+        to=window[1],
+        timeout_s=8.0,
+    )
+    events: list[tuple[datetime, str]] = []
+    seen: set[tuple[int, str]] = set()
+    for ts_ns, _row_agent_id, line in rows:
+        key = (ts_ns, line)
+        if key in seen:
+            continue
+        seen.add(key)
+        row = loki_events._parse_line(line, ts_ns)
+        if row is not None and row["event_name"] in _LIFECYCLE_EVENTS:
+            events.append((row["ts"], row["event_name"]))
+    return events
+
+
+def cached_live_lifecycle(
+    agent_id: int,
+    *,
+    window: tuple[datetime, datetime] | None,
+    freeze: datetime | None,
+) -> list[tuple[datetime, str]]:
+    """Return the once-per-agent live lifecycle leg for about five minutes.
+
+    The retained legacy window is independent of the requested inspector
+    window, so one 8-second-bounded cold load serves every `hours` and
+    `since_compact` view for this agent. Lifecycle events are rare; a fresh
+    spawn/resurrect/terminate can lag the panel by up to five minutes, versus
+    its existing 75-second aggregate cache. When the archive freeze changes
+    (only test reset in practice), cached live windows are discarded.
+    """
+    if window is None:
+        return []
+    global _lifecycle_cache_freeze  # noqa: PLW0603 — cache epoch marker
+    with _lifecycle_cache_lock:
+        if _lifecycle_cache_freeze != freeze:
+            _lifecycle_cache.clear()
+            _lifecycle_cache_freeze = freeze
+    return _lifecycle_cache.get_or_load(
+        agent_id,
+        lambda: _load_live_lifecycle(agent_id, window),
+        ttl_s=_LIFECYCLE_CACHE_TTL_S,
+        now=time_mod.monotonic,
+    )
 
 
 def _utc_midnight(value: datetime) -> datetime:
@@ -175,7 +252,6 @@ def _projected_live_values(
     token_spans: list[tuple[datetime, datetime]],
     distribution_window: tuple[datetime, datetime] | None,
     activity_window: tuple[datetime, datetime] | None,
-    lifecycle_window: tuple[datetime, datetime] | None,
 ) -> _LiveInspectValues:
     """Reduce one raw Loki line pass over every live interval inspect needs.
 
@@ -184,11 +260,11 @@ def _projected_live_values(
     section's original span, preserving the existing double-count prevention.
     """
     spans = [*stats_spans, *token_spans]
-    for window in (distribution_window, activity_window, lifecycle_window):
+    for window in (distribution_window, activity_window):
         if window is not None:
             spans.append(window)
     if not spans:
-        return _LiveInspectValues(0, 0, 0, 0, [], [], 0.0, 0.0, 0.0, [])
+        return _LiveInspectValues(0, 0, 0, 0, [], [], 0.0, 0.0, 0.0)
 
     rows = loki_events.query_projected_lines(
         fields=[],
@@ -201,19 +277,16 @@ def _projected_live_values(
             "^exec\\(.*",
             "^llm_usage$",
             "^node_exit$",
-            "^agent_spawned$",
-            "^agent_resurrected$",
-            "^agent_terminated$",
         ],
         from_=min(start for start, _ in spans),
         to=max(end for _, end in spans),
+        timeout_s=8.0,
     )
 
     turn_total = turn_ok = exec_ok = exec_failed = 0
     turn_durations: list[float] = []
     distribution: list[tuple[float, int]] = []
     output_tokens = active_seconds = exec_seconds = 0.0
-    lifecycle_events: list[tuple[datetime, str]] = []
     seen: set[tuple[int, str]] = set()
 
     for ts_ns, _row_agent_id, line in rows:
@@ -267,13 +340,6 @@ def _projected_live_values(
             if node == "exec":
                 exec_seconds += duration
 
-        if (
-            event_name in {"agent_spawned", "agent_resurrected", "agent_terminated"}
-            and lifecycle_window is not None
-            and _in_spans(timestamp, [lifecycle_window])
-        ):
-            lifecycle_events.append((row["ts"], event_name))
-
     return _LiveInspectValues(
         turn_total,
         turn_ok,
@@ -284,7 +350,6 @@ def _projected_live_values(
         output_tokens,
         active_seconds,
         exec_seconds,
-        lifecycle_events,
     )
 
 
@@ -298,7 +363,13 @@ def _turn_distribution(
 def inspect_values(
     pool: ConnectionPool[Any], agent_id: int, from_: datetime | None, to: datetime | None
 ) -> InspectValues:
-    """Build stats, TPS, and activity inputs from one archive/ledger/live view."""
+    """Build stats, TPS, and activity inputs from one archive/ledger/live view.
+
+    The retained live lifecycle stream is separately cached per agent for
+    five minutes: until the 2026-08-30 legacy slice expires it is the one
+    potentially broad read, while requested stats spans stay window-bounded.
+    Every interactive Loki read is capped at eight seconds.
+    """
     plan = full_day_plan(from_, to)
     with pool.connection() as conn, conn.cursor() as cur:
         freeze = _inspect_pg.freeze_point(cur)
@@ -371,7 +442,11 @@ def inspect_values(
         token_spans=token_spans,
         distribution_window=distribution_window,
         activity_window=activity_window,
-        lifecycle_window=lifecycle_window,
+    )
+    live_lifecycle = cached_live_lifecycle(
+        agent_id,
+        window=lifecycle_window,
+        freeze=freeze,
     )
     distribution = _turn_distribution(archive_distribution, live.distribution)
     minimum = min(
@@ -397,7 +472,7 @@ def inspect_values(
         output_tokens=ledger_tokens + int(live.output_tokens),
         active_seconds=archive_active_seconds + live.active_seconds,
         exec_seconds=archive_exec_seconds + live.exec_seconds,
-        lifecycle_events=sorted([*archive_lifecycle, *live.lifecycle_events]),
+        lifecycle_events=sorted([*archive_lifecycle, *live_lifecycle]),
     )
 
 

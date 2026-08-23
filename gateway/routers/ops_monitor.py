@@ -19,12 +19,22 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
+import httpx
 from fastapi import APIRouter, Query, Request
 
+from gateway import loki_query_budget, prom_metrics
 from gateway.ops_series_lgtm import fetch_ops_series
+from gateway.routers._backend_failure import raise_backend_unavailable
 from gateway.schemas.ops import OpsMonitorReport
 
 router = APIRouter()
+
+
+def _lookup_agent_labels(request: Request, agent_ids: list[int]) -> dict[int, str | None]:
+    """Read the small agents-label projection after the LGTM fan-out completes."""
+    with request.app.state.db_pool.connection() as conn, conn.cursor() as cur:
+        cur.execute("SELECT id, label FROM agents WHERE id = ANY(%s)", (agent_ids,))
+        return dict(cur.fetchall())
 
 
 @router.get("/api/ops/monitor")
@@ -36,6 +46,13 @@ def get_ops_monitor(
     derived from the window (1h→60s, 6h→300s, 24h→1800s, 7d→3600s); every
     bucket in the window is present (zero-filled when empty), aligned to
     `meta.bucket_starts`."""
-    with request.app.state.db_pool.connection() as conn, conn.cursor() as cur:
-        data = fetch_ops_series(cur, window)
+    try:
+        data = fetch_ops_series(
+            window,
+            label_lookup=lambda agent_ids: _lookup_agent_labels(request, agent_ids),
+        )
+    except (loki_query_budget.LokiQueryBudgetError, prom_metrics.PromQueryBudgetError):
+        raise
+    except httpx.HTTPError as exc:
+        raise_backend_unavailable(exc, backend="observability")
     return OpsMonitorReport(**data)

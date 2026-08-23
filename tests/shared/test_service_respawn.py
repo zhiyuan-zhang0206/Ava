@@ -281,6 +281,62 @@ def test_run_keepalive_respawns_a_plain_dead_daemon() -> None:
     assert respawns == [1]
 
 
+def test_run_keepalive_waits_for_consecutive_failures_before_respawning(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The gateway's transient DB degradation must survive one watchdog round."""
+    respawns: list[int] = []
+
+    def _run() -> None:
+        _sr_mod.run_keepalive(
+            "gateway-threshold-test",
+            _log,
+            probe=lambda: DaemonProbe.down("healthz degraded"),
+            respawn=lambda: (respawns.append(1), DaemonProbe.up("pid 42"))[1],
+            consecutive_failures_before_respawn=2,
+        )
+
+    with caplog.at_level(logging.WARNING):
+        _run()
+    assert respawns == []
+    assert "probe failed (1/2) — not respawning yet" in caplog.text
+    _run()
+    assert respawns == [1]
+
+
+def test_run_keepalive_success_resets_consecutive_failure_count() -> None:
+    """A recovered probe cannot combine with an earlier transient failure."""
+    label = "gateway-threshold-reset-test"
+    respawns: list[int] = []
+
+    def _respawn() -> DaemonProbe:
+        respawns.append(1)
+        return DaemonProbe.up("pid 42")
+
+    _sr_mod.run_keepalive(
+        label,
+        _log,
+        probe=lambda: DaemonProbe.down("degraded"),
+        respawn=_respawn,
+        consecutive_failures_before_respawn=2,
+    )
+    _sr_mod.run_keepalive(
+        label,
+        _log,
+        probe=lambda: DaemonProbe.up("pid 42"),
+        respawn=_respawn,
+        consecutive_failures_before_respawn=2,
+    )
+    _sr_mod.run_keepalive(
+        label,
+        _log,
+        probe=lambda: DaemonProbe.down("degraded"),
+        respawn=_respawn,
+        consecutive_failures_before_respawn=2,
+    )
+    assert respawns == []
+
+
 def test_run_keepalive_does_not_respawn_a_terminal_verdict(caplog) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
     """Loud and stop, not silent give-up: ERROR + the distinct exit code, no
     respawn. A healthcheck that quietly declines to heal is the 98-minute outage's

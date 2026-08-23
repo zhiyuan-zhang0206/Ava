@@ -21,10 +21,12 @@ import threading
 from collections.abc import Iterator
 from pathlib import Path
 
+import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
 from gateway.app import app
+from gateway.routers import pages as pages_router
 from shared import config
 from shared.db import create_agent
 
@@ -197,6 +199,27 @@ def test_proxy_502_when_page_server_unreachable(db_conn) -> None:  # pyright: ig
         assert resp.status_code == 201
         resp = client.get(f"/api/pages/{aid}-p/")
     assert resp.status_code == 502
+
+
+def test_proxy_revalidates_nonloopback_registry_target_before_dialing(
+    db_conn: psycopg.Connection,
+) -> None:
+    """Rows inserted outside registration cannot turn the proxy into SSRF."""
+    pages_router.reset_page_host_cache_for_tests()
+    aid = create_agent(db_conn)
+    with db_conn.cursor() as cur:
+        cur.execute("UPDATE agents_meta SET machine = 'runner-a' WHERE id = %s", (aid,))
+        cur.execute(
+            "INSERT INTO agent_pages (agent_id, name, host, port) VALUES (%s, 'unsafe', %s, 8000)",
+            (aid, "foreign.internal"),
+        )
+    db_conn.commit()
+
+    with TestClient(app) as client:
+        response = client.get(f"/api/pages/{aid}-unsafe/")
+
+    assert response.status_code == 403
+    assert "refusing to proxy" in response.json()["detail"]
 
 
 def test_proxy_streams_sse_chunked_content(db_conn) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]

@@ -48,6 +48,10 @@ router = APIRouter()
 # stream keeps flowing.
 _PROXY_TIMEOUT = httpx.Timeout(connect=5.0, read=120.0, write=5.0, pool=5.0)
 
+# Grafana datasource queries are JSON requests. Buffering lets httpx replay
+# their exact body upstream, but never accept an unbounded client upload.
+_MAX_PROXY_REQUEST_BODY_BYTES = 16 * 1024 * 1024
+
 
 def build_proxy_client() -> httpx.AsyncClient:
     """The shared upstream client — one connection pool for every proxied
@@ -110,6 +114,18 @@ async def _close_upstream(resp: httpx.Response) -> None:
     await resp.aclose()
 
 
+async def _read_proxy_request_body(request: Request) -> bytes:
+    """Read a forwardable request body up to the Grafana proxy's 16 MiB cap."""
+    chunks: list[bytes] = []
+    size = 0
+    async for chunk in request.stream():
+        size += len(chunk)
+        if size > _MAX_PROXY_REQUEST_BODY_BYTES:
+            raise HTTPException(status_code=413, detail="grafana request body exceeds 16 MiB")
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
 @router.get("/grafana")
 async def grafana_root() -> RedirectResponse:
     """Trailing-slash canonicalization: `/grafana` redirects to `/grafana/`
@@ -125,8 +141,9 @@ async def _proxy(rest: str, request: Request) -> Response:
     the upstream is unreachable; 504 on a stalled transfer. Auth-gated by the
     cluster middleware like every other API route.
 
-    Streaming (not buffering): SSE and arbitrarily large payloads pass through
-    chunk-by-chunk — the gateway never holds a whole body in memory.
+    Upstream responses stream chunk-by-chunk. Forwarded request bodies are
+    buffered only up to 16 MiB, then rejected with 413, so a caller cannot
+    force an unbounded gateway allocation.
     """
     _validate_proxy_rest(rest)
     if not settings.gateway.grafana_proxy_enabled:
@@ -159,7 +176,7 @@ async def _proxy(rest: str, request: Request) -> Response:
             request.method,
             target,
             headers=fwd_headers,
-            content=await request.body(),
+            content=await _read_proxy_request_body(request),
         )
         resp = await client.send(req, stream=True)
     except httpx.TimeoutException:

@@ -93,11 +93,13 @@ function richGraph(): FleetGraph {
       edge(1, id, "message", { weight: 5, last_seen_at: seen }),
     ),
   ];
-  return { nodes, edges, stale: false };
+  return { nodes, edges, stale: false, truncated: false };
 }
 
-function ok(graph: Omit<FleetGraph, "stale"> & { stale?: boolean }): FleetGraphResult {
-  return { graph: { stale: false, ...graph }, loading: false, error: false };
+function ok(
+  graph: Omit<FleetGraph, "stale" | "truncated"> & { stale?: boolean; truncated?: boolean },
+): FleetGraphResult {
+  return { graph: { stale: false, truncated: false, ...graph }, loading: false, error: false };
 }
 
 beforeEach(() => {
@@ -305,6 +307,14 @@ describe("GraphView", () => {
     expect(screen.queryByRole("status")).toBeNull();
   });
 
+  it("marks a fresh graph whose Loki edge response was truncated", () => {
+    useFleetGraph.mockReturnValue(ok({ nodes: [node(1)], edges: [], truncated: true }));
+
+    renderGraph(<GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />);
+
+    expect(screen.getByText("Truncated — edge limit reached")).toBeTruthy();
+  });
+
   it("merges multiple lineage kinds per pair into one edge (no duplicate React keys)", async () => {
     // The backend returns separate edges per event kind (spawn / fork /
     // resurrect) for the same pair; GraphView collapses them to the shared
@@ -339,7 +349,7 @@ describe("GraphView", () => {
   });
 
   it("empty graph (not loading, no error) shows the empty placeholder", () => {
-    useFleetGraph.mockReturnValue({ graph: { nodes: [], edges: [], stale: false }, loading: false, error: false });
+    useFleetGraph.mockReturnValue({ graph: { nodes: [], edges: [], stale: false, truncated: false }, loading: false, error: false });
 
     renderGraph(<GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />);
 
@@ -348,7 +358,7 @@ describe("GraphView", () => {
   });
 
   it("empty graph while loading shows the loading placeholder", () => {
-    useFleetGraph.mockReturnValue({ graph: { nodes: [], edges: [], stale: false }, loading: true, error: false });
+    useFleetGraph.mockReturnValue({ graph: { nodes: [], edges: [], stale: false, truncated: false }, loading: true, error: false });
 
     renderGraph(<GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />);
 
@@ -356,7 +366,7 @@ describe("GraphView", () => {
   });
 
   it("error (endpoint absent / gateway down) shows the unavailable placeholder", () => {
-    useFleetGraph.mockReturnValue({ graph: { nodes: [], edges: [], stale: false }, loading: false, error: true });
+    useFleetGraph.mockReturnValue({ graph: { nodes: [], edges: [], stale: false, truncated: false }, loading: false, error: true });
 
     renderGraph(<GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />);
 

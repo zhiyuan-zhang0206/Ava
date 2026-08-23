@@ -44,6 +44,7 @@ not multiply — the concurrency cap against the single-box LGTM stack.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -361,7 +362,11 @@ def _restart_submit(*, from_: datetime, to: datetime, bucket_s: int) -> dict[str
 
 
 def _restart_series(
-    futs: dict[str, Future[Any]], cur: Any, *, bucket_starts: list[datetime], bucket_s: int
+    futs: dict[str, Future[Any]],
+    *,
+    bucket_starts: list[datetime],
+    bucket_s: int,
+    label_lookup: Callable[[list[int]], dict[int, str | None]] | None,
 ) -> dict[str, Any]:
     agent_restarts = _counts(
         _bucket_values(
@@ -400,10 +405,8 @@ def _restart_series(
         key=lambda r: (-r[1], r[0]),
     )[:20]
     labels: dict[int, str | None] = {}
-    if top and cur is not None:
-        ids = [aid for aid, _ in top]
-        cur.execute("SELECT id, label FROM agents WHERE id = ANY(%s)", (ids,))
-        labels = dict(cur.fetchall())
+    if top and label_lookup is not None:
+        labels = label_lookup([aid for aid, _ in top])
     agents = [{"agent_id": aid, "label": labels.get(aid), "restarts": c} for aid, c in top]
 
     return {
@@ -420,13 +423,18 @@ def _restart_series(
 # ── entry point ────────────────────────────────────────────────────────────
 
 
-def fetch_ops_series(cur: Any, window: str) -> dict[str, Any]:
+def fetch_ops_series(
+    window: str,
+    *,
+    label_lookup: Callable[[list[int]], dict[int, str | None]] | None = None,
+) -> dict[str, Any]:
     """Run every registered ops series for `window` and return the full report
     dict — meta + the three groups — ready for `OpsMonitorReport(**data)`.
 
-    Reads Loki + Prometheus (the LGTM stack); `cur` is used only for the
-    agents-registry label lookup in the restarts breakdown (core cluster
-    state, not the retired events storage) and may be None to skip it.
+    Reads Loki + Prometheus (the LGTM stack). `label_lookup`, when supplied,
+    runs only after every network future has completed, for the agents-registry
+    labels in the restart breakdown. This keeps a pooled Postgres connection
+    out of bounded-but-slow network waits.
 
     Every leaf query is submitted to the shared executor before any group is
     assembled, so the whole fan-out runs concurrently — same parallelism as
@@ -452,6 +460,9 @@ def fetch_ops_series(cur: Any, window: str) -> dict[str, Any]:
         "sse": _sse_series(sse_futs, bucket_starts=bucket_starts, bucket_s=bucket_s),
         "llm": _llm_series(llm_futs, bucket_starts=bucket_starts, bucket_s=bucket_s),
         "restarts": _restart_series(
-            restart_futs, cur, bucket_starts=bucket_starts, bucket_s=bucket_s
+            restart_futs,
+            bucket_starts=bucket_starts,
+            bucket_s=bucket_s,
+            label_lookup=label_lookup,
         ),
     }

@@ -115,6 +115,7 @@ class TestEventsApi:
             r = client.get("/api/events")
         assert r.status_code == 503
         assert "retry" in r.json()["detail"]
+        assert r.headers["retry-after"] == "1"
 
     def test_loki_disconnect_returns_503(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Server-side disconnects map to the same 503."""
@@ -281,6 +282,12 @@ class TestEventsApi:
         kw = fake_events.calls[0]  # the query call (no count by default)
         assert kw["limit"] == 5
         assert kw["offset"] == 10
+
+    def test_offset_over_hard_cap_422(self, fake_events: _FakeEvents) -> None:
+        with TestClient(app) as client:
+            response = client.get("/api/events", params={"offset": 10_001})
+        assert response.status_code == 422
+        assert fake_events.calls == []
 
     def test_filters_compose_and(self, fake_events: _FakeEvents) -> None:
         with TestClient(app) as client:

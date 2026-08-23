@@ -84,7 +84,17 @@ def _restart() -> DaemonProbe:
 
 def main() -> None:
     init_gateway_process(name="gateway-healthcheck")
-    run_keepalive("gateway", _log, probe=_probe, respawn=_restart)
+    # Two failed rounds deliberately self-heal a sustained DB outage by respawning
+    # about every two minutes, accepting stats-cache loss. PgBouncer pool poisoning
+    # has a precedent; a respawn is the clean reconnect path. Change this only with
+    # a fresh decision, not as an accidental retry-policy simplification.
+    run_keepalive(
+        "gateway",
+        _log,
+        probe=_probe,
+        respawn=_restart,
+        consecutive_failures_before_respawn=2,
+    )
 
 
 if __name__ == "__main__":

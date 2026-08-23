@@ -20,6 +20,8 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import re as _re
+import threading
+import time
 from collections.abc import AsyncGenerator
 from urllib.parse import urlparse
 
@@ -52,6 +54,9 @@ router = APIRouter()
 # cannot park the request forever. The read timeout is between-chunks, so a
 # live SSE stream or a slow large download keeps flowing.
 _PROXY_TIMEOUT = httpx.Timeout(connect=5.0, read=120.0, write=5.0, pool=5.0)
+_PAGE_HOST_CACHE_TTL_S = 60.0
+_page_host_cache: dict[str, tuple[float, frozenset[str]]] = {}
+_page_host_cache_lock = threading.Lock()
 
 # Response headers forwarded from the page server; everything else
 # (hop-by-hop, server internals) is dropped. Content-Length is forwarded too
@@ -229,6 +234,7 @@ async def _proxy_page_get_impl(agent_id: int, name: str, rest: str, request: Req
     if target_row is None:
         raise HTTPException(status_code=404, detail=f"page {name!r} not open (agent {agent_id})")
     host, port = target_row
+    await asyncio.to_thread(_validate_proxy_page_target, request.app.state.db_pool, agent_id, host)
     target = f"http://{host}:{port}/{rest}"
     query = request.url.query
     if query:
@@ -319,6 +325,83 @@ def _is_loopback_host(host: str) -> bool:
         return False
 
 
+def reset_page_host_cache_for_tests() -> None:
+    """Clear memoized machine dial hosts between isolated page-proxy tests."""
+    with _page_host_cache_lock:
+        _page_host_cache.clear()
+
+
+def _agent_machine(pool: ConnectionPool, agent_id: int) -> str | None:
+    """Return a page agent's registered home machine, if it is usable."""
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute("SELECT machine FROM agents_meta WHERE id = %s", (agent_id,))
+        row = cur.fetchone()
+    machine = row[0] if row is not None else None
+    return str(machine) if machine and machine != "unknown" else None
+
+
+def _machine_dial_hosts(pool: ConnectionPool, machine: str) -> frozenset[str]:
+    """Return the short-lived cached host allowlist advertised by one machine."""
+    now = time.monotonic()
+    with _page_host_cache_lock:
+        cached = _page_host_cache.get(machine)
+        if cached is not None and cached[0] > now:
+            return cached[1]
+    hosts = {machine}
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT url FROM machine_units "
+            "WHERE machine_name = %s AND stopped_at IS NULL AND url IS NOT NULL",
+            (machine,),
+        )
+        for (url,) in cur.fetchall():
+            hostname = urlparse(str(url)).hostname
+            if hostname:
+                hosts.add(hostname)
+    allowed = frozenset(hosts)
+    with _page_host_cache_lock:
+        _page_host_cache[machine] = (now + _PAGE_HOST_CACHE_TTL_S, allowed)
+    return allowed
+
+
+def _validate_nonloopback_page_host(
+    pool: ConnectionPool,
+    agent_id: int,
+    host: str,
+    *,
+    status_code: int,
+) -> None:
+    """Fail closed unless `host` is this agent machine's advertised address."""
+    machine = _agent_machine(pool, agent_id)
+    if machine is None:
+        raise HTTPException(
+            status_code=status_code,
+            detail=(
+                f"page host {host!r} is not loopback and agent {agent_id}'s home "
+                "machine is unknown — refusing to proxy to it"
+            ),
+        )
+    if host not in _machine_dial_hosts(pool, machine):
+        raise HTTPException(
+            status_code=status_code,
+            detail=(
+                f"page host {host!r} is neither loopback nor {machine!r}'s "
+                "registered address — refusing to proxy to it"
+            ),
+        )
+
+
+def _validate_proxy_page_target(pool: ConnectionPool, agent_id: int, host: str) -> None:
+    """Revalidate non-loopback registry rows immediately before proxy dialing.
+
+    Registration validates new rows, but ops writes may predate or bypass that
+    path. This short-lived allowlist is read from the same machine registry and
+    fails closed before the gateway makes an untrusted network connection.
+    """
+    if not _is_loopback_host(host):
+        _validate_nonloopback_page_host(pool, agent_id, host, status_code=403)
+
+
 def _validate_page_dial_target(pool: ConnectionPool, agent_id: int, host: str, port: int) -> None:
     """SSRF guard for the page reverse proxy (audit round-2 P1-4).
 
@@ -347,37 +430,7 @@ def _validate_page_dial_target(pool: ConnectionPool, agent_id: int, host: str, p
         )
     if _is_loopback_host(host):
         return
-    with pool.connection() as conn, conn.cursor() as cur:
-        cur.execute("SELECT machine FROM agents_meta WHERE id = %s", (agent_id,))
-        row = cur.fetchone()
-    if row is None or not row[0] or row[0] == "unknown":
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f"page host {host!r} is not loopback and agent {agent_id}'s home "
-                "machine is unknown — refusing to proxy to it"
-            ),
-        )
-    machine = row[0]
-    allowed = {machine}
-    with pool.connection() as conn, conn.cursor() as cur:
-        cur.execute(
-            "SELECT url FROM machine_units "
-            "WHERE machine_name = %s AND stopped_at IS NULL AND url IS NOT NULL",
-            (machine,),
-        )
-        for (url,) in cur.fetchall():
-            hostname = urlparse(str(url)).hostname
-            if hostname:
-                allowed.add(hostname)
-    if host not in allowed:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f"page host {host!r} is neither loopback nor {machine!r}'s "
-                "registered address — refusing to proxy to it"
-            ),
-        )
+    _validate_nonloopback_page_host(pool, agent_id, host, status_code=400)
 
 
 def _register_page_blocking(

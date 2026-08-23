@@ -62,3 +62,4 @@ class FleetGraphResponse(BaseModel):
     nodes: list[FleetGraphNode]
     edges: list[FleetGraphEdge]
     stale: bool = False
+    truncated: bool = False

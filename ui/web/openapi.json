@@ -1120,7 +1120,7 @@
     "/api/agents/{agent_id}/events": {
       "get": {
         "summary": "Get Agent Events",
-        "description": "Historical slice of this agent's `events` rows — the REST\ncounterpart to the live `…/events/stream` SSE tail (which only carries\nevents from the moment you subscribe). Backs ops / SDK / eval consumers\nthat need to query the past.\n\nFilters compose (AND):\n  - `from=<ISO-8601>` / `to=<ISO-8601>`: inclusive time window\n    (`ts >= from AND ts <= to`); `from` omitted defaults to the last\n    24h (same lower-bound contract as /api/events). Bad timestamps 422\n    (FastAPI datetime parse).\n  - `event=<name>`: exact event type, e.g. `llm_usage` / `turn_end` /\n    `exec` / `exec_failed`.\n  - `level=<INFO|WARNING|ERROR|…>`: exact level (case-insensitive, any\n    case accepted; the stored/returned values are LOWERCASE since the W9\n    events-table switch — `agent_events`' uppercase `INFO`/`WARNING`/\n    `ERROR` no longer appears on the wire). This is an *exact* match,\n    unlike `/api/cluster/admin/events` where `level`\n    is a minimum threshold — a per-agent history query reads more\n    predictably as \"give me exactly this level\".\n\nReturns newest-first (`ts DESC`; `id` is a stable surrogate derived\nfrom the log line, so `limit`/`offset` paging stays deterministic).\n`limit` defaults to 100, capped at 1000 (over-limit 422s); `offset`\npages further back (Loki has no native offset — the page is sliced in\nmemory, so deep offsets cost a larger fetch).\n\nNo agent-existence precondition (same as `…/activity` and `…/pending`):\nan unknown agent or an empty window just returns `[]`.",
+        "description": "Historical slice of this agent's `events` rows — the REST\ncounterpart to the live `…/events/stream` SSE tail (which only carries\nevents from the moment you subscribe). Backs ops / SDK / eval consumers\nthat need to query the past.\n\nFilters compose (AND):\n  - `from=<ISO-8601>` / `to=<ISO-8601>`: inclusive time window\n    (`ts >= from AND ts <= to`); `from` omitted defaults to the last\n    24h (same lower-bound contract as /api/events). Bad timestamps 422\n    (FastAPI datetime parse).\n  - `event=<name>`: exact event type, e.g. `llm_usage` / `turn_end` /\n    `exec` / `exec_failed`.\n  - `level=<INFO|WARNING|ERROR|…>`: exact level (case-insensitive, any\n    case accepted; the stored/returned values are LOWERCASE since the W9\n    events-table switch — `agent_events`' uppercase `INFO`/`WARNING`/\n    `ERROR` no longer appears on the wire). This is an *exact* match,\n    unlike `/api/cluster/admin/events` where `level`\n    is a minimum threshold — a per-agent history query reads more\n    predictably as \"give me exactly this level\".\n\nReturns newest-first (`ts DESC`; `id` is a stable surrogate derived\nfrom the log line, so `limit`/`offset` paging stays deterministic).\n`limit` defaults to 100, capped at 1000 (over-limit 422s); `offset`\npages further back and is capped at 10,000. Loki has no native offset,\nso the cap bounds the in-memory parse of `limit + offset + 1` rows.\n\nNo agent-existence precondition (same as `…/activity` and `…/pending`):\nan unknown agent or an empty window just returns `[]`.",
         "operationId": "get_agent_events_api_agents__agent_id__events_get",
         "parameters": [
           {
@@ -1216,6 +1216,7 @@
             "required": false,
             "schema": {
               "type": "integer",
+              "maximum": 10000,
               "minimum": 0,
               "default": 0,
               "title": "Offset"
@@ -1298,7 +1299,7 @@
     "/api/agents/{agent_id}/inspect": {
       "get": {
         "summary": "Get Agent Inspect",
-        "description": "Per-agent inspector panel data in one shot — the agent's live persistent\nshells, its frozen config overlay, its LLM cost, turn/exec stats, idle\nheartbeat state. The\nsingle-agent counterpart to `/api/stats/dashboard` (fleet-wide).\n\n`?hours=` windows `cost` + `stats` to the past N hours (whitelisted to\n1/6/24/72/168, anything else 422s); omitted = cumulative since spawn.\n`?since_compact=true` windows them to events since the agent's latest\ncompact halt instead — it takes precedence, `hours` is ignored and the\nechoed `window_hours` is None.\n`shells` + `config_overlay` + `heartbeat` are always\ncurrent, independent of the window. 404 if the agent is unknown (no\nagents_meta row). `config_overlay` is the spawn-time override map — `{}` when\nthe agent runs on cluster defaults (the column is NULL).\n\nLatency discipline: the event-history sections run on parallel workers\n(one Loki fan-out per section, overlapped), and only those aggregates ride\na 75s TTL cache keyed by (agent_id, hours, since_compact), with concurrent\nmisses sharing one single-flight Future — the panel refetches in bursts\n(open, notice SSE events, 60s interval), and a burst must not re-run the\n~20-query fan-out per request. The agents_meta projection (machine,\nconfig, heartbeat inputs, liveness and timestamps), `notice`, and `shells`\nare fetched fresh on every call and never ride the cache. `shells` is probed\non the agent's own machine via the `shell_probe` cluster op (the gateway\nnever runs sessions itself; every machine — its own included — is dialed at its\nregistered ops URL), so a split deployment reflects each agent's runner and\nan unreachable machine degrades to an empty list rather than failing the\npanel. `heartbeat` is the agent's idle check-in state: the\nprojected next check-in when idle (or the active pause / running suppression)\nplus its most recent pause from history.",
+        "description": "Per-agent inspector panel data in one shot — the agent's live persistent\nshells, its frozen config overlay, its LLM cost, turn/exec stats, idle\nheartbeat state. The\nsingle-agent counterpart to `/api/stats/dashboard` (fleet-wide).\n\n`?hours=` windows `cost` + `stats` to the past N hours (whitelisted to\n1/6/24/72/168, anything else 422s); omitted = cumulative since spawn.\n`?since_compact=true` windows them to events since the agent's latest\ncompact halt instead — it takes precedence, `hours` is ignored and the\nechoed `window_hours` is None.\n`shells` + `config_overlay` + `heartbeat` are always\ncurrent, independent of the window. 404 if the agent is unknown (no\nagents_meta row). `config_overlay` is the spawn-time override map — `{}` when\nthe agent runs on cluster defaults (the column is NULL).\n\nLatency discipline: the event-history sections run on parallel workers\n(one Loki fan-out per section, overlapped), and only those aggregates ride\na 75s TTL cache keyed by (agent_id, hours, since_compact), with concurrent\nmisses sharing one single-flight Future — the panel refetches in bursts\n(open, notice SSE events, 60s interval), and a burst must not re-run the\n~20-query fan-out per request. The agents_meta projection (machine,\nconfig, heartbeat inputs, liveness and timestamps), `notice`, and `shells`\nare fetched fresh on every call and never ride the cache. `shells` is probed\non the agent's own machine via the `shell_probe` cluster op (the gateway\nnever runs sessions itself; every machine — its own included — is dialed at its\nregistered ops URL), so a split deployment reflects each agent's runner and\nan unreachable machine degrades to an empty list rather than failing the\npanel. `heartbeat` is the agent's idle check-in state: the\nprojected next check-in when idle (or the active pause / running suppression)\nplus its most recent pause from history.\n\nThe retained live lifecycle leg is the exceptional potentially broad\nquery until the legacy slice expires on 2026-08-30 19:00 UTC. It has an\n8-second Loki timeout and a per-agent five-minute single-flight cache, so\nchanging `hours` or `since_compact` does not repeat that same scan.",
         "operationId": "get_agent_inspect_api_agents__agent_id__inspect_get",
         "parameters": [
           {
@@ -4541,7 +4542,7 @@
     "/api/events": {
       "get": {
         "summary": "Get Events",
-        "description": "Slice of the unified event stream — every event (audit / telemetry /\nlog) through one query surface, the programmatic read side of the\nunified emitter. Newest-first (`ts DESC`, `id DESC` tiebreak).\n\nFilters compose (AND):\n  - `category=<audit|telemetry|log>`: retention/alerting class (unknown\n    value 422s).\n  - `event_name=<name>`: exact event name, e.g. `llm_usage` /\n    `turn_end` / `spawn` / `send_message` (the legacy `kind=` spelling\n    is accepted as an alias; passing both with different values 422s).\n    The `kind=` alias is retired on 2026-09-30 — pre-alignment clients\n    must move to `event_name` before then, after which the alias and its\n    conflict check are removed.\n  - `agent_id=<n>`: events belonging to that agent; service-level events\n    (NULL) are excluded when set.\n  - `trace_id=<hex>`: one turn's whole call chain — every event that\n    shares the id.\n  - `machine=<name>`: the host dimension.\n  - `level=<debug|info|warning|error|critical>`: exact match,\n    case-insensitive (unknown value 422s).\n  - `tier=<business|anomaly|observation|noise>[,...]`: comma-separated\n    display tiers, ORed within the list and ANDed with every other filter.\n    The Loki predicate is derived before pagination so `meta.total` and\n    page boundaries stay exact.\n  - `from=<ISO-8601>` / `to=<ISO-8601>`: inclusive time window\n    (`ts >= from AND ts <= to`); either side may be omitted. Values\n    MUST carry a timezone offset (`Z` or `+hh:mm`) — a naive timestamp\n    is interpreted in the server's local timezone, so it 422s instead\n    of silently shifting the window.\n  - `hours=<n>`: alternative window — the last N hours\n    (`from = now - hours`). Mutually exclusive with `from`.\n  - Default window: when neither `from` nor `hours` is given, the last\n    24 hours are assumed (`from = now - 24h`) — an unbounded query\n    would scan the whole retention history (6M+ rows across every\n    month partition), so the API never runs one. `meta.window_from`\n    always echoes the effective lower bound.\n  - `limit` (default 100, cap 1000) / `offset`: offset paging; stable\n    ordering across same-`ts` rows.\n  - `with_total=1`: also compute the exact filtered row count\n    (`meta.total`) via the Loki count path — one extra full-window\n    aggregation, so it is opt-in; without it `meta.total` is null.\n\nResponse: `meta` (opt-in exact filtered `total`, effective\n`window_from`/`window_to`, `limit`/`offset`, `has_more` from the list\nfetch's +1 lookahead) + `items` (the unified `EventRow` shape).\n`window_from` is always set — the default 24h lower bound when the\nrequest named none. An empty window returns `items: []`.",
+        "description": "Slice of the unified event stream — every event (audit / telemetry /\nlog) through one query surface, the programmatic read side of the\nunified emitter. Newest-first (`ts DESC`, `id DESC` tiebreak).\n\nFilters compose (AND):\n  - `category=<audit|telemetry|log>`: retention/alerting class (unknown\n    value 422s).\n  - `event_name=<name>`: exact event name, e.g. `llm_usage` /\n    `turn_end` / `spawn` / `send_message` (the legacy `kind=` spelling\n    is accepted as an alias; passing both with different values 422s).\n    The `kind=` alias is retired on 2026-09-30 — pre-alignment clients\n    must move to `event_name` before then, after which the alias and its\n    conflict check are removed.\n  - `agent_id=<n>`: events belonging to that agent; service-level events\n    (NULL) are excluded when set.\n  - `trace_id=<hex>`: one turn's whole call chain — every event that\n    shares the id.\n  - `machine=<name>`: the host dimension.\n  - `level=<debug|info|warning|error|critical>`: exact match,\n    case-insensitive (unknown value 422s).\n  - `tier=<business|anomaly|observation|noise>[,...]`: comma-separated\n    display tiers, ORed within the list and ANDed with every other filter.\n    The Loki predicate is derived before pagination so `meta.total` and\n    page boundaries stay exact.\n  - `from=<ISO-8601>` / `to=<ISO-8601>`: inclusive time window\n    (`ts >= from AND ts <= to`); either side may be omitted. Values\n    MUST carry a timezone offset (`Z` or `+hh:mm`) — a naive timestamp\n    is interpreted in the server's local timezone, so it 422s instead\n    of silently shifting the window.\n  - `hours=<n>`: alternative window — the last N hours\n    (`from = now - hours`). Mutually exclusive with `from`.\n  - Default window: when neither `from` nor `hours` is given, the last\n    24 hours are assumed (`from = now - 24h`) — an unbounded query\n    would scan the whole retention history (6M+ rows across every\n    month partition), so the API never runs one. `meta.window_from`\n    always echoes the effective lower bound.\n  - `limit` (default 100, cap 1000) / `offset` (cap 10,000): offset\n    paging with stable ordering across same-`ts` rows. The cap bounds the\n    in-memory Loki JSON parse (`limit + offset + 1` rows).\n  - `with_total=1`: also compute the exact filtered row count\n    (`meta.total`) via the Loki count path — one extra full-window\n    aggregation, so it is opt-in; without it `meta.total` is null.\n\nResponse: `meta` (opt-in exact filtered `total`, effective\n`window_from`/`window_to`, `limit`/`offset`, `has_more` from the list\nfetch's +1 lookahead) + `items` (the unified `EventRow` shape).\n`window_from` is always set — the default 24h lower bound when the\nrequest named none. An empty window returns `items: []`.",
         "operationId": "get_events_api_events_get",
         "parameters": [
           {
@@ -4742,6 +4743,7 @@
             "required": false,
             "schema": {
               "type": "integer",
+              "maximum": 10000,
               "minimum": 0,
               "default": 0,
               "title": "Offset"
@@ -5034,20 +5036,14 @@
     "/api/health": {
       "get": {
         "summary": "Get Health",
-        "description": "Liveness probe over the private network (the gateway is unauthenticated). DB ping\nincluded — a gateway that can serve HTTP but cannot reach Postgres is not\n\"healthy\" enough for the watchdog to leave alone.\n\nThe identity fields answer the three questions a 200 alone cannot: `name` is\nwhich *service* answered, `home` this gateway's `$AVA_HOME` (its cluster\nidentity), `machine` its host. A 200 on this port only proves *something*\nlistens there, so the watchdog verifies the identity too rather than the status\ncode alone — see `services/healthchecks/gateway.py`. Each was additive to the\n`{\"status\": \"ok\"}` contract.\n\n`name` is a constant naming the service this route belongs to — the point being\nthat an impostor answering here reports its own name, or none. No probe reads it\nyet; `shared.daemon_health._probe_home` gains the `name` arm only once every\ndeployed gateway emits the field, and that ordering is load-bearing (#1038).",
+        "description": "Liveness probe over the private network (the gateway is unauthenticated). DB ping\nincluded — a gateway that can serve HTTP but cannot reach Postgres is not\n\"healthy\" enough for the watchdog to leave alone.\n\nThe identity fields answer the three questions a 200 alone cannot: `name` is\nwhich *service* answered, `home` this gateway's `$AVA_HOME` (its cluster\nidentity), `machine` its host. A 200 on this port only proves *something*\nlistens there, so the watchdog verifies the identity too rather than the status\ncode alone — see `services/healthchecks/gateway.py`. Each was additive to the\n`{\"status\": \"ok\"}` contract.\n\nLiveness must fail faster than the resource it protects: this uses the\ncontrol-plane pool and a 1-2 second database budget rather than waiting up\nto 30 seconds for the data-plane pool. A 503 therefore means the process is\nalive but Postgres is degraded; the watchdog's consecutive-failure policy\ndecides whether that merits a respawn.\n\n`name` is a constant naming the service this route belongs to — the point being\nthat an impostor answering here reports its own name, or none. No probe reads it\nyet; `shared.daemon_health._probe_home` gains the `name` arm only once every\ndeployed gateway emits the field, and that ordering is load-bearing (#1038).",
         "operationId": "get_health_api_health_get",
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "type": "object",
-                  "title": "Response Get Health Api Health Get"
-                }
+                "schema": {}
               }
             }
           }
@@ -5057,7 +5053,7 @@
     "/api/stats/dashboard": {
       "get": {
         "summary": "Get Stats Dashboard",
-        "description": "Pull all data for the sidebar-top stats card in one shot.\n\nData sources:\n- `live_count`: agents_meta table — all non-terminated agents (running/idling/restarting/hibernating)\n- `tokens` / `cost_usd`: telemetry `llm_usage` events in Loki (cached\n  for 60 seconds per requested window)\n- average turn duration / warning/error counts: Loki's unified event stream\n- `total_events`: Postgres archive partition estimates (a coarse growth gauge)\n\n`?hours=` selects the aggregation window (`ts > now() - hours`), whitelisted\nby `StatsWindowHours` (1/6/24/72/168; anything else 422s). Zero-data\nscenario: tokens all 0, cost_usd 0.0, avg_turn_seconds None (frontend\nshows \"—\").",
+        "description": "Pull all data for the sidebar-top stats card in one shot.\n\nData sources:\n- `live_count`: agents_meta table — all non-terminated agents (running/idling/restarting/hibernating)\n- `tokens` / `cost_usd`: telemetry `llm_usage` events in Loki\n- average turn duration / warning/error counts: Loki's unified event stream\n- `total_events`: Postgres archive partition estimates (a coarse growth gauge)\n\n`?hours=` selects the aggregation window (`ts > now() - hours`), whitelisted\nby `StatsWindowHours` (1/6/24/72/168; anything else 422s). Zero-data\nscenario: tokens all 0, cost_usd 0.0, avg_turn_seconds None (frontend\nshows \"—\").",
         "operationId": "get_stats_dashboard_api_stats_dashboard_get",
         "parameters": [
           {
@@ -6178,7 +6174,7 @@
             "anyOf": [
               {
                 "type": "string",
-                "maxLength": 64000,
+                "maxLength": 1000000,
                 "minLength": 1
               },
               {
@@ -8067,6 +8063,11 @@
           "stale": {
             "type": "boolean",
             "title": "Stale",
+            "default": false
+          },
+          "truncated": {
+            "type": "boolean",
+            "title": "Truncated",
             "default": false
           }
         },
@@ -10549,7 +10550,7 @@
             "anyOf": [
               {
                 "type": "string",
-                "maxLength": 64000,
+                "maxLength": 1000000,
                 "minLength": 1
               },
               {
@@ -10853,7 +10854,7 @@
             "anyOf": [
               {
                 "type": "string",
-                "maxLength": 64000,
+                "maxLength": 1000000,
                 "minLength": 1
               },
               {
@@ -11516,7 +11517,7 @@
             "anyOf": [
               {
                 "type": "string",
-                "maxLength": 64000,
+                "maxLength": 1000000,
                 "minLength": 1
               },
               {
@@ -12105,7 +12106,7 @@
           },
           "text": {
             "type": "string",
-            "maxLength": 64000,
+            "maxLength": 1000000,
             "title": "Text"
           }
         },

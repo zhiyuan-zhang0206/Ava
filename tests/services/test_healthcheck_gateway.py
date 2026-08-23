@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import urllib.error
 import urllib.request
+from collections.abc import Generator
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +30,7 @@ import pytest
 
 import shared.daemon_health as dh
 from services.healthchecks import gateway as hc
+from shared import service_respawn
 from shared.daemon_health import EXIT_PORT_TAKEN, DaemonProbe, ProbeVerdict
 from shared.paths import ava_home
 
@@ -54,6 +56,14 @@ def _respond(monkeypatch: pytest.MonkeyPatch, status: int, body: bytes) -> None:
 
 def _own_health_body() -> bytes:
     return json.dumps({"status": "ok", "home": str(ava_home()), "machine": "m"}).encode()
+
+
+@pytest.fixture(autouse=True)
+def _reset_gateway_probe_failures() -> Generator[None, None, None]:
+    """Keep the watchdog's process-local two-probe threshold test-isolated."""
+    service_respawn._reset_consecutive_probe_failures("gateway")
+    yield
+    service_respawn._reset_consecutive_probe_failures("gateway")
 
 
 def test_probe_alive_when_home_matches(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -96,8 +106,10 @@ def test_another_clusters_gateway_is_not_respawned_against(monkeypatch: pytest.M
     assert excinfo.value.code == EXIT_PORT_TAKEN
 
 
-def test_an_unreachable_gateway_is_still_respawned(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Regression guard: nothing on the port is the respawnable case, unchanged."""
+def test_an_unreachable_gateway_respawns_after_two_failed_probes(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """One failed probe is a blip; the second still triggers gateway recovery."""
 
     def fake_urlopen(_url: str, **_kw: Any) -> _FakeResponse:
         raise urllib.error.URLError("connection refused")
@@ -106,6 +118,10 @@ def test_an_unreachable_gateway_is_still_respawned(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(hc, "init_gateway_process", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     respawns: list[int] = []
     monkeypatch.setattr(hc, "_restart", lambda: (respawns.append(1), DaemonProbe.up("home /x"))[1])
+    hc.main()
+    assert respawns == []
+    assert "probe failed (1/2) — not respawning yet" in caplog.text
+
     hc.main()
     assert respawns == [1]
 

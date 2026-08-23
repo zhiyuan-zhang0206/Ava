@@ -18,10 +18,12 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated
 
+import httpx
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import StreamingResponse
 
-from gateway import loki_events
+from gateway import loki_events, loki_query_budget
+from gateway.routers._backend_failure import raise_backend_unavailable
 from gateway.routers._eval_guard import deny_isolated_result_read
 from gateway.schemas import AgentEventRow
 from gateway.sse import event_stream
@@ -71,7 +73,7 @@ def get_agent_events(
     event: Annotated[str | None, Query()] = None,
     level: Annotated[str | None, Query()] = None,
     limit: Annotated[int, Query(ge=1, le=1000)] = 100,
-    offset: Annotated[int, Query(ge=0)] = 0,
+    offset: Annotated[int, Query(ge=0, le=10_000)] = 0,
 ) -> list[AgentEventRow]:
     """Historical slice of this agent's `events` rows — the REST
     counterpart to the live `…/events/stream` SSE tail (which only carries
@@ -96,22 +98,27 @@ def get_agent_events(
     Returns newest-first (`ts DESC`; `id` is a stable surrogate derived
     from the log line, so `limit`/`offset` paging stays deterministic).
     `limit` defaults to 100, capped at 1000 (over-limit 422s); `offset`
-    pages further back (Loki has no native offset — the page is sliced in
-    memory, so deep offsets cost a larger fetch).
+    pages further back and is capped at 10,000. Loki has no native offset,
+    so the cap bounds the in-memory parse of `limit + offset + 1` rows.
 
     No agent-existence precondition (same as `…/activity` and `…/pending`):
     an unknown agent or an empty window just returns `[]`.
     """
-    rows, _ = loki_events.query_events(
-        agent_id=agent_id,
-        categories=["telemetry", "log"],
-        event_names=[event] if event is not None else None,
-        level=level,
-        from_=from_,
-        to=to,
-        limit=limit,
-        offset=offset,
-    )
+    try:
+        rows, _ = loki_events.query_events(
+            agent_id=agent_id,
+            categories=["telemetry", "log"],
+            event_names=[event] if event is not None else None,
+            level=level,
+            from_=from_,
+            to=to,
+            limit=limit,
+            offset=offset,
+        )
+    except loki_query_budget.LokiQueryBudgetError:
+        raise
+    except httpx.HTTPError as exc:
+        raise_backend_unavailable(exc)
     return [
         AgentEventRow(
             id=row["id"],

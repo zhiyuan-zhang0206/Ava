@@ -61,12 +61,26 @@ def test_post_message_empty_content_422(db_conn: psycopg.Connection) -> None:
     assert _pending_rows(db_conn, tid) == []
 
 
-def test_post_message_oversized_422(db_conn: psycopg.Connection) -> None:
-    """Over 64K chars rejected by schema."""
+def test_post_message_large_content_is_accepted(db_conn: psycopg.Connection) -> None:
+    """A handoff-sized message remains a normal durable chat inbound."""
     tid = _seed_agent(db_conn)
-    huge = "a" * 70_000
+    content = "a" * 100_000
     with TestClient(app) as client:
-        resp = client.post(f"/api/agents/{tid}/messages", json={"content": huge, "source": "user"})
+        resp = client.post(
+            f"/api/agents/{tid}/messages", json={"content": content, "source": "user"}
+        )
+    assert resp.status_code == 201
+    assert _pending_rows(db_conn, tid) == [("chat", "pending", content)]
+
+
+def test_post_message_content_over_one_million_chars_is_422(db_conn: psycopg.Connection) -> None:
+    """The one-megabyte schema guardrail rejects abusive request bodies."""
+    tid = _seed_agent(db_conn)
+    content = "a" * 1_000_001
+    with TestClient(app) as client:
+        resp = client.post(
+            f"/api/agents/{tid}/messages", json={"content": content, "source": "user"}
+        )
     assert resp.status_code == 422
     assert _pending_rows(db_conn, tid) == []
 

@@ -15,6 +15,7 @@ from psycopg_pool import ConnectionPool
 from gateway import loki_events, loki_query_budget, neighbors
 from gateway.routers import _agent_cost, _inspect_stats, _plugin_metrics
 from gateway.routers._agent_cost import window_bounds
+from gateway.routers._backend_failure import raise_backend_unavailable
 from gateway.routers._inspect_cache import InspectCacheFullError, InspectQueryCache
 from gateway.routers._inspect_live import db_rows_blocking, notice_blocking
 from gateway.schemas import (
@@ -197,6 +198,7 @@ def _heartbeat_last_pause(agent_id: int) -> HeartbeatLastPause | None:
         event_names=["heartbeat_paused"],
         from_=datetime.now(tz=UTC) - _HEARTBEAT_PAUSE_LOOKBACK,
         limit=1,
+        timeout_s=8.0,
     )
     row = rows[0] if rows else None
     return (
@@ -450,6 +452,7 @@ async def _inspect_rows_cached_async(
 def cache_clear() -> None:
     """Test seam: drop the inspect response cache."""
     _inspect_query_cache.clear()
+    _inspect_stats.reset_for_tests()
 
 
 @router.get("/api/agents/{agent_id}/inspect")
@@ -489,6 +492,11 @@ async def get_agent_inspect(
     panel. `heartbeat` is the agent's idle check-in state: the
     projected next check-in when idle (or the active pause / running suppression)
     plus its most recent pause from history.
+
+    The retained live lifecycle leg is the exceptional potentially broad
+    query until the legacy slice expires on 2026-08-30 19:00 UTC. It has an
+    8-second Loki timeout and a per-agent five-minute single-flight cache, so
+    changing `hours` or `since_compact` does not repeat that same scan.
     """
     pool = request.app.state.db_pool
     # Release the agents_meta borrow before entering the potentially queued
@@ -516,13 +524,7 @@ async def get_agent_inspect(
         # Preserve the process-wide admission handler's machine-readable reason.
         raise
     except httpx.HTTPError as exc:
-        # Loki timed out, rejected, or dropped a response. The query layer has
-        # already emitted its query shape; the panel contract is retriable 503.
-        raise HTTPException(
-            status_code=503,
-            detail="inspector history backend unavailable; retry",
-            headers={"Retry-After": "1"},
-        ) from exc
+        raise_backend_unavailable(exc)
     # The notice is read fresh on every call (it never rides the cache): the
     # panel's reply surface must clear the moment a notice resolves, and the
     # SELECT is cheap. The shell probe is equally cheap and always live.

@@ -14,6 +14,8 @@ from typing import Any
 
 from psycopg import Connection, sql
 
+from gateway import events_archive
+
 _LOKI_RETENTION = timedelta(hours=168)
 _LOKI_SHARD = timedelta(hours=3)
 _LOKI_SHARD_WORKERS = 4
@@ -21,9 +23,7 @@ _LOKI_SHARD_WORKERS = 4
 
 def freeze_point(cur: Any) -> datetime | None:
     """Return the exclusive upper bound of the frozen event archive."""
-    cur.execute("SELECT max(ts) FROM events")
-    row = cur.fetchone()
-    return row[0] if row is not None else None
+    return events_archive.load_frozen_boundary(cur)
 
 
 def _archive_where(
@@ -278,13 +278,20 @@ def retained_live_window(
     return (start, end) if start < end else None
 
 
-def split_loki_window(from_: datetime, to: datetime) -> list[tuple[datetime, datetime]]:
-    """Split a retained live read into contiguous, clock-aligned <=3h spans."""
+def split_loki_window(
+    from_: datetime,
+    to: datetime,
+    *,
+    shard_width: timedelta = _LOKI_SHARD,
+) -> list[tuple[datetime, datetime]]:
+    """Split a retained live read into contiguous, clock-aligned bounded spans."""
     if from_ >= to:
         return []
+    if shard_width <= timedelta():
+        raise ValueError("shard_width must be positive")
     spans: list[tuple[datetime, datetime]] = []
     start = from_
-    shard_s = int(_LOKI_SHARD.total_seconds())
+    shard_s = int(shard_width.total_seconds())
     while start < to:
         next_boundary_s = ((int(start.timestamp()) // shard_s) + 1) * shard_s
         end = min(datetime.fromtimestamp(next_boundary_s, tz=UTC), to)
@@ -294,10 +301,14 @@ def split_loki_window(from_: datetime, to: datetime) -> list[tuple[datetime, dat
 
 
 def query_loki_shards[T](
-    from_: datetime, to: datetime, query: Callable[[datetime, datetime], T]
+    from_: datetime,
+    to: datetime,
+    query: Callable[[datetime, datetime], T],
+    *,
+    shard_width: timedelta = _LOKI_SHARD,
 ) -> list[T]:
     """Run bounded Loki spans concurrently; each query acquires Loki's global slot."""
-    spans = split_loki_window(from_, to)
+    spans = split_loki_window(from_, to, shard_width=shard_width)
     if len(spans) == 1:
         start, end = spans[0]
         return [query(start, end)]

@@ -14,9 +14,11 @@ from __future__ import annotations
 
 from typing import Any
 
+import httpx
 from fastapi import APIRouter, HTTPException, Query
 
-from gateway import loki_events
+from gateway import loki_events, loki_query_budget
+from gateway.routers._backend_failure import raise_backend_unavailable
 
 router = APIRouter()
 
@@ -43,12 +45,17 @@ def get_computer_trace(
     envelope rows (may be null while a session is open); `actions` carries
     the computer_action rows with the replay-relevant payload keys.
     """
-    rows, _has_more = loki_events.query_events(
-        attribute_filters={"task_id": str(task_id)},
-        event_names=list(_TRACE_EVENT_NAMES),
-        limit=_TRACE_LIMIT,
-        direction="forward",
-    )
+    try:
+        rows, _has_more = loki_events.query_events(
+            attribute_filters={"task_id": str(task_id)},
+            event_names=list(_TRACE_EVENT_NAMES),
+            limit=_TRACE_LIMIT,
+            direction="forward",
+        )
+    except loki_query_budget.LokiQueryBudgetError:
+        raise
+    except httpx.HTTPError as exc:
+        raise_backend_unavailable(exc)
     if not rows:
         raise HTTPException(status_code=404, detail=f"no computer-use trace for task {task_id}")
     actions: list[dict[str, Any]] = []

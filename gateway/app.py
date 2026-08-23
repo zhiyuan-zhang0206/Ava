@@ -56,19 +56,26 @@ cluster's private network)
 import asyncio
 import hmac
 import logging
-import os
 import time
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager, suppress
 
-import uvicorn
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 import shared.db
-from gateway import _idempotency, _latency, _pause_policy, alert_reconciliation, loki_query_budget
+from gateway import (
+    _idempotency,
+    _latency,
+    _pause_policy,
+    alert_reconciliation,
+    events_archive,
+    loki_query_budget,
+    prom_metrics,
+)
 from gateway import mcp_endpoint as _mcp_endpoint
+from gateway._server import main as _run_gateway
 from gateway.routers import (
     _machine_pause as machine_pause_router,
 )
@@ -196,15 +203,29 @@ from shared.cluster_auth import (
 )
 from shared.config import settings, warn_deprecated_env_aliases
 from shared.context import AvaContext
-from shared.machine import is_gateway, machine_name
+from shared.machine import machine_name
 from shared.os_cron import register_os_cron
 
 _log = logging.getLogger(__name__)
 
 
+def _preload_archive_boundary(app: FastAPI) -> None:
+    """Load the frozen events-archive boundary once; failure leaves the cache unset.
+
+    The first archive reader retries the one-time scan rather than preventing
+    the gateway from starting (the events table is frozen, so the value is a
+    process-lifetime constant — see gateway/events_archive.py).
+    """
+    try:
+        with app.state.db_pool.connection() as conn, conn.cursor() as cur:
+            events_archive.load_frozen_boundary(cur)
+    except Exception:
+        _log.debug("frozen events archive boundary preload failed", exc_info=True)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
-    """App-level resources: DB pool.
+    """App-level resources: data-plane and control-plane DB pools.
 
     Redis is not shared at app level — SSE endpoints need independent pubsub
     connections (one per client); attaching pubsub to a shared client causes
@@ -236,6 +257,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # sleep or a network change comes back on a dead TCP flow and, unbounded, parks
     # the request handler on the OS TCP-retransmit timeout.
     app.state.db_pool = shared.db.pool(max_size=8)
+    # The control plane must never queue behind the saturated data-plane pool.
+    # Audit P0-2 follows the 2026-08-23 watchdog misjudgment chain: health and
+    # recovery reads need their own short, small reservation.
+    app.state.control_db_pool = shared.db.pool(min_size=1, max_size=2, timeout=2.0)
+
+    await asyncio.to_thread(_preload_archive_boundary, app)
 
     # Shared upstream client for the Grafana reverse proxy — one connection
     # pool across proxied requests instead of an AsyncClient per request.
@@ -322,6 +349,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
             await app.state.latency_flusher
         await app.state.schedule_manager.stop()
         app.state.db_pool.close()
+        app.state.control_db_pool.close()
 
 
 app = FastAPI(
@@ -353,6 +381,9 @@ _pause_cache: list[tuple[float, bool] | None] = [None]
 expires. A one-element list so the async reader can update it without a
 `global` statement (ruff PLW0603); the middleware is the only writer."""
 
+_pause_inflight: list[asyncio.Future[bool] | None] = [None]
+"""One shared expired-cache posture read; followers await this Future."""
+
 
 async def _cluster_is_paused(request: Request) -> bool:
     """Whether this host's posture is `paused`, read off the event loop.
@@ -361,8 +392,9 @@ async def _cluster_is_paused(request: Request) -> bool:
     middleware on every request (audit P1-1: the old path opened a fresh
     non-pooled connection and ran a synchronous SELECT directly on the event
     loop — a slow DB froze the whole gateway exactly when pause matters
-    most). This version borrows the app's shared pool, runs the read in the
-    threadpool, and caches the result for `_PAUSE_READ_TTL_S`.
+    most). This version borrows the reserved control-plane pool, runs the
+    read in the threadpool, caches it for `_PAUSE_READ_TTL_S`, and shares one
+    in-flight read when the cache expires.
 
     A read failure reads as NOT paused — the same conservative direction the
     old flag-file stat had (an unreadable flag was an absent flag), and the
@@ -372,10 +404,13 @@ async def _cluster_is_paused(request: Request) -> bool:
     cached = _pause_cache[0]
     if cached is not None and now < cached[0]:
         return cached[1]
+    inflight = _pause_inflight[0]
+    if inflight is not None:
+        return await asyncio.shield(inflight)
 
     def _read_posture() -> bool:
         try:
-            with request.app.state.db_pool.connection() as conn, conn.cursor() as cur:
+            with request.app.state.control_db_pool.connection() as conn, conn.cursor() as cur:
                 cur.execute(
                     "SELECT posture FROM host_deploy_state WHERE machine = %s",
                     (machine_name(),),
@@ -389,9 +424,22 @@ async def _cluster_is_paused(request: Request) -> bool:
             )
             return False
 
-    paused = await asyncio.to_thread(_read_posture)
-    _pause_cache[0] = (now + _PAUSE_READ_TTL_S, paused)
-    return paused
+    async def _read_and_cache() -> bool:
+        paused = await asyncio.to_thread(_read_posture)
+        _pause_cache[0] = (now + _PAUSE_READ_TTL_S, paused)
+        return paused
+
+    # A canceled request stops awaiting this one worker read but does not
+    # cancel it for concurrent middleware followers.
+    task = asyncio.create_task(_read_and_cache())
+    _pause_inflight[0] = task
+
+    def _clear_inflight(done: asyncio.Future[bool]) -> None:
+        if _pause_inflight[0] is done:
+            _pause_inflight[0] = None
+
+    task.add_done_callback(_clear_inflight)
+    return await asyncio.shield(task)
 
 
 # AtLeastOnceWithKey dedup (doorplate ①): generic keyed routes store/replay a
@@ -598,6 +646,19 @@ async def _loki_query_budget_error_handler(
     )
 
 
+@app.exception_handler(prom_metrics.PromQueryBudgetError)
+async def _prom_query_budget_error_handler(
+    request: Request,  # noqa: ARG001 — FastAPI exception-handler signature
+    exc: prom_metrics.PromQueryBudgetError,
+) -> JSONResponse:
+    """Map local Prometheus admission saturation to one retriable contract."""
+    return JSONResponse(
+        status_code=503,
+        content={"detail": f"Prometheus query budget unavailable ({exc.reason}); retry"},
+        headers={"Retry-After": "1"},
+    )
+
+
 @app.exception_handler(Exception)
 async def _unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     """Last-resort handler for route-level unhandled exceptions.
@@ -674,93 +735,5 @@ app.mount("/mcp", _mcp_endpoint.mcp_gateway(app))
 
 
 def main() -> None:
-    import atexit
-
-    from shared.log import init_gateway_process
-    from shared.migrations import assert_schema_current
-    from shared.platform import raise_fd_limit
-
-    assert_schema_current(settings.data_plane.db_url)
-
-    # pidfile — `services/healthchecks/gateway.py` uses it to probe.
-    # SIGKILL does not trigger atexit; the healthcheck uses kill -0 to
-    # judge liveness, so a stale pidfile is not fatal (kill -0 fail ->
-    # restart).
-    pidfile = settings.services.gateway_pidfile
-    pidfile.parent.mkdir(parents=True, exist_ok=True)
-    pidfile.write_text(str(os.getpid()))
-
-    def _cleanup_pidfile() -> None:
-        with suppress(OSError):
-            pidfile.unlink(missing_ok=True)
-
-    atexit.register(_cleanup_pidfile)
-
-    # Raise the fd limit: it covers the gateway's own SSE long connections +
-    # Redis pubsub + HTTP keepalive, which on a long run would otherwise blow
-    # the launchd 256 default (errno 24 -> requests connection-reset, surfaced
-    # in the frontend as "Failed to fetch"), and the session children it spawns
-    # inherit the raised ceiling.
-    raise_fd_limit(65536)
-
-    init_gateway_process()
-
-    import faulthandler
-    import signal
-
-    # Thread dump on SIGUSR1: the watchdog's gateway healthcheck sends this
-    # before respawning a frozen gateway, so a stall lands a stack trace in
-    # the pane log instead of a silent black box (2026-08-03: 13 freezes in
-    # 8h, none left a trace between the last log line and the kill). uvicorn
-    # does not touch SIGUSR1, so the registration survives into the loop.
-    faulthandler.register(signal.SIGUSR1)
-
-    # Bind address depends on role.
-    #
-    # - **gateway**: "" = all interfaces, BOTH address families (asyncio binds
-    #   a wildcard socket per family for an empty host). Dual-stack matters
-    #   because browsers resolving the host's DNS name try the AAAA first — a
-    #   v4-only bind refuses that first dial on every request. NOT "::": asyncio
-    #   sets IPV6_V6ONLY on an explicit "::" bind, which refuses plain-IPv4
-    #   clients (healthchecks, SDK) outright — verified on macOS.
-    #   A no-secret gateway binds 127.0.0.1 instead: its API is unauthenticated,
-    #   and the no-secret posture is single-box (the data plane is loopback-only
-    #   too — `_bind_addrs`), so an all-interfaces bind would expose the
-    #   unauthenticated API to the LAN.
-    # - **agent-runner**: 127.0.0.1. The gateway does not reach an
-    #   agent-runner's gateway directly — gateway→agent-runner RPC goes
-    #   to the separate ava-ops server (services/agent_ops), which dispatches
-    #   each op in-process via gateway.ops_*. The only callers of an
-    #   agent-runner's gateway :8000 are local SDK + local agent processes,
-    #   so bind 127.0.0.1.
-    #
-    # reload defaults to False — prod-safe. reload=True forks workers via
-    # multiprocessing.spawn, and the worker's `PPID=1` is fully detached
-    # from the session: when the session closes the worker does
-    # not die, leaving a zombie holding :8000; the next graceful kill on
-    # ava cluster update cannot catch it, and the new gateway boot gets
-    # [Errno 48] Address already in use. For dev hot-reload, set
-    # AVA_GATEWAY_RELOAD=1 (usually in a dev clone's .env or shell). Reload
-    # mode binds through uvicorn's own bind_socket, which maps "" to a
-    # v4-only wildcard — dev-only, and browsers fall back from the refused
-    # IPv6 dial instantly.
-    host = "" if is_gateway() and settings.data_plane.cluster_secret else "127.0.0.1"
-    reload = settings.gateway.gateway_reload
-    # log_config=None: uvicorn's default LOGGING_CONFIG dictConfig would
-    # clobber the root-handler install (`_StdlibInterceptHandler`) that
-    # init_gateway_process set up above, sending uvicorn's own records
-    # (ASGI tracebacks, startup/shutdown) to a bare stderr handler instead
-    # of through loguru → gateway.log + the events pipeline. With None,
-    # uvicorn leaves the logging system alone; uvicorn.error propagates to
-    # the root intercept handler, and uvicorn.access is gated to WARNING in
-    # `_install_stdlib_intercept` (per-request INFO is noise). #970: an
-    # unhandled ASGI exception used to land only in the session log and die
-    # with the session — now it reaches gateway.log and the events table.
-    uvicorn.run(
-        "gateway.app:app",
-        host=host,
-        port=settings.gateway.gateway_port,
-        reload=reload,
-        reload_dirs=["gateway", "shared", "ava", "agent"] if reload else None,
-        log_config=None,
-    )
+    """Run the gateway process through the stable `gateway.app` entry point."""
+    _run_gateway()

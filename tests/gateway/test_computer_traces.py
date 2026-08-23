@@ -8,9 +8,11 @@ from __future__ import annotations
 
 from typing import Any
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
+from gateway import loki_events
 from gateway.app import app
 from tests.gateway.loki_fake import FakeLoki
 
@@ -45,6 +47,17 @@ def _trace(task_id: int) -> dict[str, Any]:
 
 
 class TestComputerTrace:
+    def test_loki_failure_is_retriable_503(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        def unavailable(**_kwargs: Any) -> tuple[list[dict[str, Any]], bool]:
+            raise httpx.ConnectError("loki unavailable")
+
+        monkeypatch.setattr(loki_events, "query_events", unavailable)
+        with TestClient(app) as client:
+            response = client.get("/api/computer/traces?task_id=1")
+        assert response.status_code == 503
+        assert response.headers["retry-after"] == "1"
+        assert "ConnectError" in response.json()["detail"]
+
     def test_empty_task_404(self, loki_fake: FakeLoki) -> None:
         resp = TestClient(app).get("/api/computer/traces?task_id=999")
         assert resp.status_code == 404

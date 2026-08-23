@@ -9,7 +9,33 @@ import psycopg
 import pytest
 from psycopg.types.json import Jsonb
 
+from gateway import events_archive
 from gateway.routers import _inspect_pg, _inspect_stats
+
+
+class _BoundaryCursor:
+    def __init__(self, boundary: datetime | None) -> None:
+        self.boundary = boundary
+        self.executions = 0
+
+    def execute(self, query: str) -> None:
+        assert query == "SELECT max(ts) FROM events"
+        self.executions += 1
+
+    def fetchone(self) -> tuple[datetime | None] | None:
+        return (self.boundary,)
+
+
+def test_frozen_archive_boundary_is_loaded_once_per_process() -> None:
+    boundary = datetime(2026, 8, 13, tzinfo=UTC)
+    first_cursor = _BoundaryCursor(boundary)
+    second_cursor = _BoundaryCursor(None)
+
+    assert events_archive.frozen_boundary() is None
+    assert events_archive.load_frozen_boundary(first_cursor) == boundary
+    assert events_archive.load_frozen_boundary(second_cursor) == boundary
+    assert first_cursor.executions == 1
+    assert second_cursor.executions == 0
 
 
 def _insert_agent(db: psycopg.Connection) -> int:
