@@ -19,10 +19,11 @@
 // The frame is full-height, no inner scrollbar: EMBED_HEIGHT equals the
 // dashboard's fixed rendered height (panels are gridPos-sized, so the
 // height is a constant regardless of window width or time range). Measured
-// on Grafana 13.1.1 — 124 grid rows × 30px + 123 gaps × 8px + 116px chrome =
-// 4820px for ava-ops-main (2026-08-06: core + plugin metrics are rendered
-// into this one dashboard by scripts/gen_plugin_dashboard.py — core section
-// first, then one row per plugin — so no separate plugins embed exists).
+// on Grafana 13.1.3 — grid rows × 30px + (rows-1) gaps × 8px + 116px chrome
+// (209 rows → 8050px for ava-ops-main after the 2026-08-23 merge; sections
+// LLM..Host & data plane collapse by default, so the dashboard renders
+// shorter until expanded — the frame keeps the full expanded height, which
+// leaves blank space below the core section while sections stay collapsed).
 // Keep in sync with the gridPos layout — recompute with the formula above
 // when panels change.
 //
@@ -44,12 +45,13 @@ import { cn } from "@/lib/utils";
 // panels ids < 1000, plugin panels ids >= 1000).
 const DASHBOARD_UID = "ava-ops-main";
 
-// Full-height embed (see header comment): 138 grid rows → 5352px on
-// Grafana 13.1.1 (4 frontend-telemetry panels added 2026-08-09). Bump when
-// deploy/lgtm dashboards ava-ops-main.json panels change — page.test.tsx derives the
-// expected value from the dashboard's gridPos and fails when the two drift
-// apart.
-export const EMBED_HEIGHT = 5770;
+// Full-height embed (see header comment): 209 grid rows → 8050px on
+// Grafana 13.1.3 (2026-08-23 merge: the four dashboards — overview, ops,
+// plugins, host & data plane — collapsed into ava-ops-main, six sections).
+// Bump when deploy/lgtm dashboards ava-ops-main.json panels change —
+// page.test.tsx derives the expected value from the dashboard's gridPos and
+// fails when the two drift apart.
+export const EMBED_HEIGHT = 8050;
 
 export default function OpsPage() {
   const { resolvedTheme } = useTheme();

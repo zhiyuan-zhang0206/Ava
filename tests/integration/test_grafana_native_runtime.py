@@ -63,23 +63,6 @@ def _dashboard(filename: str) -> dict[str, Any]:
     return json.loads((DASHBOARD_DIR / filename).read_text(encoding="utf-8"))
 
 
-def _tempo_trace_target(dashboard: dict[str, Any]) -> dict[str, Any]:
-    matches = [
-        (panel, target)
-        for panel in dashboard["panels"]
-        for target in panel.get("targets", [])
-        if target.get("queryType") == "traceql"
-        and target.get("datasource", {}).get("uid") == "tempo"
-    ]
-    assert len(matches) == 1
-    panel, target = matches[0]
-    assert panel["title"] == "Recent traces (Tempo)"
-    assert panel["datasource"] == {"type": "tempo", "uid": "tempo"}
-    assert target["datasource"] == panel["datasource"]
-    assert target["query"] == '{resource.service.name="ava"}'
-    return target
-
-
 def _free_port() -> int:
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
@@ -158,21 +141,13 @@ def test_shipped_grafana_runtime_contract() -> None:
 
 
 def test_default_dashboard_refresh_is_load_bounded() -> None:
-    expected = {
-        "ava-host-dataplane.json",
-        "ava-ops-main.json",
-        "ava-ops-plugins.json",
-        "ava-overview.json",
-    }
-    actual = {
-        path.name: json.loads(path.read_text(encoding="utf-8"))["refresh"]
-        for path in DASHBOARD_DIR.glob("ava-*.json")
-    }
-    assert actual == dict.fromkeys(expected, "5m")
-
-
-def test_shipped_trace_dashboard_contract() -> None:
-    _tempo_trace_target(_dashboard("ava-overview.json"))
+    """The merged Ava Ops dashboard (2026-08-23: the four dashboards collapsed
+    into one) keeps the user-approved defaults: 10m refresh, now-6h window —
+    the 6h/10m ruling keeps Loki query weight bounded (task #1399)."""
+    for path in DASHBOARD_DIR.glob("ava-*.json"):
+        dashboard = json.loads(path.read_text(encoding="utf-8"))
+        assert dashboard["refresh"] == "10m"
+        assert dashboard["time"] == {"from": "now-6h", "to": "now"}
 
 
 def test_anonymous_viewer_can_open_tempo_trace_in_explore(tmp_path: Path) -> None:
@@ -229,14 +204,10 @@ def test_anonymous_viewer_can_open_tempo_trace_in_explore(tmp_path: Path) -> Non
         admin_settings = json.loads(admin_body)
         assert admin_settings["database"]["query_retries"] == "5"
 
-        # Import both user-facing shipped dashboards into this disposable
-        # instance.  Overview carries the Tempo panel; ops-main is the URL that
-        # prompted this incident.
-        overview = _dashboard("ava-overview.json")
-        for dashboard, route in (
-            (_dashboard("ava-ops-main.json"), "/d/ava-ops-main/ava-ops"),
-            (overview, "/d/ava-overview/ava-overview"),
-        ):
+        # Import the one user-facing shipped dashboard into this disposable
+        # instance (2026-08-23 merge: ops-main is the only shipped dashboard —
+        # the URL that prompted this incident).
+        for dashboard, route in ((_dashboard("ava-ops-main.json"), "/d/ava-ops-main/ava-ops"),):
             import_status, _, import_body = _request(
                 f"{base_url}/api/dashboards/db",
                 data=json.dumps({"dashboard": dashboard, "overwrite": True}).encode(),
@@ -247,7 +218,16 @@ def test_anonymous_viewer_can_open_tempo_trace_in_explore(tmp_path: Path) -> Non
             assert dashboard_status == 200
             assert dashboard_location == ""
 
-        trace_target = _tempo_trace_target(overview)
+        # No shipped dashboard links to Tempo since the 2026-08-23 merge
+        # (the Recent traces panel left with ava-overview; Tempo returns in a
+        # later phase) — the Viewer-can-Explore contract is kept by building
+        # the trace target a Tempo panel would carry.
+        trace_target: dict[str, Any] = {
+            "datasource": {"type": "tempo", "uid": "tempo"},
+            "query": '{resource.service.name="ava"}',
+            "queryType": "traceql",
+            "refId": "A",
+        }
         explore_url = _explore_url(base_url, trace_target)
         status, location, body = _request(explore_url)
 

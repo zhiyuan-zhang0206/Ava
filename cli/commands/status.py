@@ -114,7 +114,7 @@ def cmd_status() -> int:
     # psutil and never from the observability stack — this is precisely the
     # answer that must survive an LGTM backend that is down or was never
     # deployed. The HISTORY lives in Prometheus (issue #46, the Grafana
-    # `ava-host-dataplane` dashboard); nothing here retains a series.
+    # `ava-ops-main` dashboard, "Host & data plane" section); nothing here retains a series.
     print("\nhost (live cpu/memory/disk):")
     _print_host_resources()
 
