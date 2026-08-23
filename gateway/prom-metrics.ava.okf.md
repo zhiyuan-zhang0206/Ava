@@ -1,7 +1,7 @@
 ---
 type: doc
 title: "Prometheus telemetry-aggregate read path"
-description: "`gateway/prom_metrics.py` — the LGTM telemetry-aggregate read side (task #1197): instant queries over the OTLP-mapped llm_usage counters, serving the fleet graph node totals/scores and the dashboard token + cost block."
+description: "`gateway/prom_metrics.py` — the LGTM telemetry-aggregate read side (task #1197): instant queries over the OTLP-mapped llm_usage counters, serving fleet-graph node totals and scores."
 tags:
 - gateway
 - prometheus
@@ -42,8 +42,6 @@ datapoint attributes.
   `node_score` (in*0.1 + out*1.0); a Prometheus outage degrades the graph to
   a `stale` last-good response when available, otherwise to the PG node set
   with empty edges and zeroed metric fields.
-- `GET /api/stats/dashboard` — windowed per-model in/out/cache_read sums,
-  priced per model via `shared.lm.pricing.cost_usd`.
 - `AVA_TELEMETRY_PROMETHEUS_URL` (default `http://127.0.0.1:9090`,
   restart_required gateway) points at the Prometheus HTTP API port.
 

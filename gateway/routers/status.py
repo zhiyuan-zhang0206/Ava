@@ -22,7 +22,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from psycopg import Cursor
 from pydantic import ValidationError
 
-from gateway import loki_events, loki_query_budget, prom_metrics
+from gateway import loki_events, loki_query_budget
 from gateway.routers import _inspect_pg, _roster_rows
 from gateway.schemas import (
     ClusterPanel,
@@ -41,20 +41,12 @@ from shared.cluster_drift import prod_source_head_sha
 from shared.cluster_lock import DeployLease, settle_hosts
 from shared.config import settings
 from shared.last_update import LastUpdate
-from shared.lm.pricing import cost_usd
 from shared.machine import is_agent_runner, is_gateway, machine_name
 from shared.paths import ava_home
 from shared.resource_sample import ResourceSample
 
 router = APIRouter()
 _log = logging.getLogger(__name__)
-
-# The OTLP-mapped llm_usage counters (shared/telemetry_otlp._record_metrics:
-# int payload field -> Counter named ava_<event>_<field>, Prometheus appends
-# `_total`) — the dashboard's token + cost block reads these from Prometheus.
-_IN_METRIC = "ava_llm_usage_in_total"
-_OUT_METRIC = "ava_llm_usage_out_total"
-_CACHED_METRIC = "ava_llm_usage_cache_read_total"
 
 
 @router.get("/api/health")
@@ -93,9 +85,8 @@ def get_stats_dashboard(
 
     Data sources:
     - `live_count`: agents_meta table — all non-terminated agents (running/idling/restarting/hibernating)
-    - `tokens` / `cost_usd`: Prometheus (task #1197 — the OTLP-mapped
-      llm_usage counters via gateway/prom_metrics, windowed by `increase`)
-    - average turn duration + warning/error counts: Loki's unified event stream
+    - `tokens` / `cost_usd` / average turn duration / warning/error counts:
+      Loki's unified event stream
     - `total_events`: Postgres archive partition estimates (a coarse growth gauge)
 
     `?hours=` selects the aggregation window (`ts > now() - hours`), whitelisted
@@ -103,29 +94,6 @@ def get_stats_dashboard(
     scenario: tokens all 0, cost_usd 0.0, avg_turn_seconds None (frontend
     shows "—").
     """
-    # Windowed per-model token sums from Prometheus — the OTLP-mapped llm_usage
-    # counters (task #1197: the PG events read is replaced). Each model group
-    # is priced via cost_usd (the single pricing source); cost is linear in
-    # tokens, so summing per-group costs equals pricing the grand total. A
-    # missing model label (events pre-dating model tracking) groups under ""
-    # and contributes tokens at 0 cost; an unpriced model prices to None ->
-    # 0 — unknown is excluded, not billed as free. An empty result set leaves
-    # all totals at 0.
-    in_by_model = prom_metrics.sum_by(_IN_METRIC, "model", window_hours=hours)
-    out_by_model = prom_metrics.sum_by(_OUT_METRIC, "model", window_hours=hours)
-    cached_by_model = prom_metrics.sum_by(_CACHED_METRIC, "model", window_hours=hours)
-    in_total = out_total = cache_read = 0
-    window_cost_usd = 0.0
-    for model in set(in_by_model) | set(out_by_model) | set(cached_by_model):
-        g_in = in_by_model.get(model, 0.0)
-        g_out = out_by_model.get(model, 0.0)
-        g_cached = cached_by_model.get(model, 0.0)
-        in_total += round(g_in)
-        out_total += round(g_out)
-        cache_read += round(g_cached)
-        window_cost_usd += cost_usd(model, round(g_in), round(g_out), round(g_cached)) or 0.0
-    cache_hit_pct = round(cache_read / in_total * 100, 2) if in_total else 0.0
-
     # The turn / W/E stats read Loki (task #1197 LGTM read side): the PG
     # `events` table is a frozen pre-cutover archive, so a live window queried
     # there flatlines to zero. Do not hold a pooled DB connection while these
@@ -133,6 +101,32 @@ def get_stats_dashboard(
     now = datetime.now(UTC)
     window_start = now - timedelta(hours=hours)
     try:
+        # Cost and token fields come from the same llm_usage event snapshot.
+        # In particular, cost_usd was quoted when the call ran; do not apply
+        # today's registry prices to historical token counts at read time.
+        llm_usage_sums = {
+            field: sum(
+                _inspect_pg.query_loki_shards(
+                    window_start,
+                    now,
+                    lambda shard_start, shard_end, field=field: loki_events.attribute_aggregate(
+                        field=field,
+                        agg="sum",
+                        event_names=["llm_usage"],
+                        categories=["telemetry", "log"],
+                        from_=shard_start,
+                        to=shard_end,
+                    ),
+                )
+            )
+            for field in ("in_total", "out_total", "cache_read", "cost_usd")
+        }
+        in_total = round(llm_usage_sums["in_total"])
+        out_total = round(llm_usage_sums["out_total"])
+        cache_read = round(llm_usage_sums["cache_read"])
+        window_cost_usd = llm_usage_sums["cost_usd"]
+        cache_hit_pct = round(cache_read / in_total * 100, 2) if in_total else 0.0
+
         # Keep each Loki range vector at most three hours wide. The shared helper
         # returns one span for short windows and partitions longer ones exactly.
         turn_end_sum = sum(

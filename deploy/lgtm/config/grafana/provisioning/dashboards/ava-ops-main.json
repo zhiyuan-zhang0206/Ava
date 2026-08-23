@@ -86,7 +86,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=~\"telemetry|log\" | event_name=\"llm_usage\" [$__range]))",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" [$__range]))",
      "refId": "A",
      "queryType": "instant"
     }
@@ -511,6 +511,7 @@
     "textMode": "auto"
    },
    "title": "LLM cost (24h)",
+   "timeFrom": "now-24h",
    "type": "stat",
    "targets": [
     {
@@ -519,7 +520,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(sum_over_time({service_name=\"unknown_service\"} | json | category=~\"telemetry|log\" | event_name=\"llm_usage\" | unwrap attributes_cost_usd [$__range]))",
+     "expr": "sum(sum_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" | unwrap attributes_cost_usd [$__range]))",
      "refId": "A",
      "queryType": "instant"
     }
@@ -584,6 +585,7 @@
     "textMode": "auto"
    },
    "title": "Tokens (24h)",
+   "timeFrom": "now-24h",
    "type": "stat",
    "targets": [
     {
@@ -592,7 +594,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(sum_over_time({service_name=\"unknown_service\"} | json | category=~\"telemetry|log\" | event_name=\"llm_usage\" | unwrap attributes_in_total [$__range])) + sum(sum_over_time({service_name=\"unknown_service\"} | json | category=~\"telemetry|log\" | event_name=\"llm_usage\" | unwrap attributes_out_total [$__range]))",
+     "expr": "sum(sum_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" | unwrap attributes_in_total [$__range])) + sum(sum_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" | unwrap attributes_out_total [$__range]))",
      "refId": "A",
      "queryType": "instant"
     }
@@ -887,7 +889,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(sum_over_time({service_name=\"unknown_service\"} | json | category=~\"telemetry|log\" | event_name=\"llm_usage\" | unwrap attributes_out_total [$__interval]))",
+     "expr": "sum(sum_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" | unwrap attributes_out_total [$__interval]))",
      "refId": "A",
      "queryType": "range"
     },
@@ -897,7 +899,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(sum_over_time({service_name=\"unknown_service\"} | json | category=~\"telemetry|log\" | event_name=\"llm_usage\" | unwrap attributes_reasoning [$__interval]))",
+     "expr": "sum(sum_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" | unwrap attributes_reasoning [$__interval]))",
      "refId": "B",
      "queryType": "range"
     }
@@ -1105,7 +1107,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(rate({service_name=\"unknown_service\"} | json | category=~\"telemetry|log\" | event_name=\"llm_usage\" | unwrap attributes_in_total [$__interval])) + sum(rate({service_name=\"unknown_service\"} | json | category=~\"telemetry|log\" | event_name=\"llm_usage\" | unwrap attributes_out_total [$__interval])) + sum(rate({service_name=\"unknown_service\"} | json | category=~\"telemetry|log\" | event_name=\"llm_usage\" | unwrap attributes_reasoning [$__interval]))",
+     "expr": "sum(rate({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" | unwrap attributes_in_total [$__interval])) + sum(rate({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" | unwrap attributes_out_total [$__interval])) + sum(rate({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" | unwrap attributes_reasoning [$__interval]))",
      "refId": "A",
      "queryType": "range"
     }
@@ -1196,7 +1198,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(sum_over_time({service_name=\"unknown_service\"} | json | category=~\"telemetry|log\" | event_name=\"llm_usage\" | unwrap attributes_in_total [$__interval]))",
+     "expr": "sum(sum_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" | unwrap attributes_in_total [$__interval]))",
      "refId": "A",
      "queryType": "range"
     }
@@ -1774,7 +1776,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=~\"telemetry|log\" | event_name=\"llm_usage\" [$__interval]))",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" [$__interval]))",
      "refId": "A",
      "queryType": "range"
     }
@@ -5172,6 +5174,444 @@
      "sort": "desc"
     }
    }
+  },
+  {
+   "collapsed": true,
+   "gridPos": {
+    "h": 1,
+    "w": 24,
+    "x": 0,
+    "y": 209
+   },
+   "id": 2007,
+   "panels": [],
+   "title": "Cost analysis",
+   "type": "row"
+  },
+  {
+   "datasource": {
+    "type": "loki",
+    "uid": "loki"
+   },
+   "description": "Projected full-day LLM spend from usage-time cost snapshots. Formula: today's spend since Asia/Shanghai midnight × 86,400 / elapsed seconds in the panel range.",
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "fixedColor": "blue",
+      "mode": "fixed"
+     },
+     "decimals": 2,
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       }
+      ]
+     },
+     "unit": "currencyUSD"
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "A"
+      },
+      "properties": [
+       {
+        "id": "displayName",
+        "value": "today estimate"
+       }
+      ]
+     }
+    ]
+   },
+   "gridPos": {
+    "h": 4,
+    "w": 8,
+    "x": 0,
+    "y": 210
+   },
+   "id": 38,
+   "options": {
+    "colorMode": "value",
+    "graphMode": "area",
+    "justifyMode": "auto",
+    "orientation": "auto",
+    "reduceOptions": {
+     "calcs": [
+      "last"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "textMode": "auto"
+   },
+   "timeFrom": "now/d",
+   "title": "Today LLM cost estimate",
+   "type": "stat",
+   "targets": [
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "(sum(sum_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" | unwrap attributes_cost_usd [$__range]))) * 86400 / $__range_s",
+     "refId": "A",
+     "queryType": "instant"
+    }
+   ]
+  },
+  {
+   "datasource": {
+    "type": "loki",
+    "uid": "loki"
+   },
+   "description": "30-day-normalized projection from usage-time cost snapshots. Formula: this month's spend so far × 2,592,000 / elapsed seconds in the panel range. It is a 30-day pace, not a calendar-month total.",
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "fixedColor": "blue",
+      "mode": "fixed"
+     },
+     "decimals": 2,
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       }
+      ]
+     },
+     "unit": "currencyUSD"
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "A"
+      },
+      "properties": [
+       {
+        "id": "displayName",
+        "value": "month estimate"
+       }
+      ]
+     }
+    ]
+   },
+   "gridPos": {
+    "h": 4,
+    "w": 8,
+    "x": 8,
+    "y": 210
+   },
+   "id": 39,
+   "options": {
+    "colorMode": "value",
+    "graphMode": "area",
+    "justifyMode": "auto",
+    "orientation": "auto",
+    "reduceOptions": {
+     "calcs": [
+      "last"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "textMode": "auto"
+   },
+   "timeFrom": "now/M",
+   "title": "This-month LLM cost estimate",
+   "type": "stat",
+   "targets": [
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "(sum(sum_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" | unwrap attributes_cost_usd [$__range]))) * 2592000 / $__range_s",
+     "refId": "A",
+     "queryType": "instant"
+    }
+   ]
+  },
+  {
+   "datasource": {
+    "type": "loki",
+    "uid": "loki"
+   },
+   "description": "30-day projection from usage-time cost snapshots. Formula: (spend over the trailing 168 hours / 7) × 30.",
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "fixedColor": "blue",
+      "mode": "fixed"
+     },
+     "decimals": 2,
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       }
+      ]
+     },
+     "unit": "currencyUSD"
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "A"
+      },
+      "properties": [
+       {
+        "id": "displayName",
+        "value": "next-month estimate"
+       }
+      ]
+     }
+    ]
+   },
+   "gridPos": {
+    "h": 4,
+    "w": 8,
+    "x": 16,
+    "y": 210
+   },
+   "id": 40,
+   "options": {
+    "colorMode": "value",
+    "graphMode": "area",
+    "justifyMode": "auto",
+    "orientation": "auto",
+    "reduceOptions": {
+     "calcs": [
+      "last"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "textMode": "auto"
+   },
+   "title": "Next-month LLM cost estimate",
+   "type": "stat",
+   "targets": [
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "(sum(sum_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" | unwrap attributes_cost_usd [168h]))) / 7 * 30",
+     "refId": "A",
+     "queryType": "instant"
+    }
+   ]
+  },
+  {
+   "datasource": {
+    "type": "loki",
+    "uid": "loki"
+   },
+   "description": "Daily usage-time LLM cost snapshots. The dashboard fixes this panel to Asia/Shanghai calendar days and a 24-hour query interval.",
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "palette-classic"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": []
+     },
+     "unit": "currencyUSD"
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "A"
+      },
+      "properties": [
+       {
+        "id": "displayName",
+        "value": "cost usd"
+       }
+      ]
+     }
+    ]
+   },
+   "gridPos": {
+    "h": 7,
+    "w": 24,
+    "x": 0,
+    "y": 214
+   },
+   "id": 41,
+   "interval": "24h",
+   "options": {
+    "legend": {
+     "calcs": [
+      "sum",
+      "max"
+     ],
+     "displayMode": "table",
+     "placement": "bottom",
+     "showLegend": true
+    },
+    "orientation": "auto",
+    "tooltip": {
+     "mode": "single",
+     "sort": "none"
+    },
+    "xField": "Time",
+    "xTickLabelRotation": 0
+   },
+   "timeFrom": "now-7d/d",
+   "title": "Daily LLM cost (7d)",
+   "type": "barchart",
+   "targets": [
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "sum(sum_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" | unwrap attributes_cost_usd [$__interval]))",
+     "refId": "A",
+     "queryType": "range"
+    }
+   ]
+  },
+  {
+   "datasource": {
+    "type": "loki",
+    "uid": "loki"
+   },
+   "description": "Top 20 models by windowed usage-time cost snapshots. The model name is the llm_usage payload's attributes_model label.",
+   "fieldConfig": {
+    "defaults": {
+     "thresholds": {
+      "mode": "absolute",
+      "steps": []
+     },
+     "unit": "currencyUSD"
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "A"
+      },
+      "properties": [
+       {
+        "id": "displayName",
+        "value": "cost usd"
+       }
+      ]
+     }
+    ]
+   },
+   "gridPos": {
+    "h": 7,
+    "w": 12,
+    "x": 0,
+    "y": 221
+   },
+   "id": 42,
+   "options": {
+    "cellHeight": "sm",
+    "footer": {
+     "countRows": false,
+     "enablePagination": true,
+     "show": false
+    },
+    "showHeader": true,
+    "showTypeIcons": false,
+    "sortBy": []
+   },
+   "title": "LLM cost by model (Top 20)",
+   "type": "table",
+   "targets": [
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "topk(20, sum by (attributes_model) (sum_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" | attributes_model!=\"\" | unwrap attributes_cost_usd [$__range])))",
+     "refId": "A",
+     "queryType": "instant"
+    }
+   ]
+  },
+  {
+   "datasource": {
+    "type": "loki",
+    "uid": "loki"
+   },
+   "description": "Top 20 agents by windowed usage-time LLM cost snapshots.",
+   "fieldConfig": {
+    "defaults": {
+     "thresholds": {
+      "mode": "absolute",
+      "steps": []
+     },
+     "unit": "currencyUSD"
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "A"
+      },
+      "properties": [
+       {
+        "id": "displayName",
+        "value": "cost usd"
+       }
+      ]
+     }
+    ]
+   },
+   "gridPos": {
+    "h": 7,
+    "w": 12,
+    "x": 12,
+    "y": 221
+   },
+   "id": 43,
+   "options": {
+    "cellHeight": "sm",
+    "footer": {
+     "countRows": false,
+     "enablePagination": true,
+     "show": false
+    },
+    "showHeader": true,
+    "showTypeIcons": false,
+    "sortBy": []
+   },
+   "title": "LLM cost by agent (Top 20)",
+   "type": "table",
+   "targets": [
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "topk(20, sum by (agent_id) (sum_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" | agent_id!=\"\" | unwrap attributes_cost_usd [$__range])))",
+     "refId": "A",
+     "queryType": "instant"
+    }
+   ]
   }
  ],
  "refresh": "10m",
@@ -5189,7 +5629,7 @@
   "to": "now"
  },
  "timepicker": {},
- "timezone": "browser",
+ "timezone": "Asia/Shanghai",
  "title": "Ava Ops",
  "uid": "ava-ops-main",
  "version": 1
