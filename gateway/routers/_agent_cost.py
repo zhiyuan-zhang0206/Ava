@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import threading
 import time as time_mod
-from datetime import UTC, date, datetime, time, timedelta
+from datetime import UTC, date, datetime
 from typing import Any, TypedDict
 
 from psycopg import sql
@@ -35,14 +35,11 @@ from psycopg_pool import ConnectionPool
 
 from gateway import loki_events
 from gateway.schemas import AgentCost, StatsWindowHours, window_delta
+from shared.loki_index_labels import ledger_gap_plan, retention_floor
 
 # The compact-halt event name (payload key `body` mentions "compact") —
 # mirrors `HALT_KEYS` in shared/events/contract.py.
 HALT_EVENT = "halt"
-
-# Loki holds 168h (deploy/lgtm/config/loki.yaml retention_period); the
-# lookup window for compact markers and the pure-Loki path bound.
-_LOKI_RETENTION = timedelta(hours=168)
 
 _CACHE_TTL_S = 30.0
 
@@ -56,12 +53,6 @@ class _AggCommon(TypedDict, total=False):
     agent_id: int
     from_: datetime | None
     to: datetime | None
-
-
-def _retention_floor() -> datetime:
-    """Lower bound for Loki lookups: now - retention. Data older than this
-    does not exist in Loki regardless of the requested window."""
-    return datetime.now(tz=UTC) - _LOKI_RETENTION
 
 
 def window_bounds(
@@ -78,7 +69,7 @@ def window_bounds(
     if since_compact:
         compact_ts = _compact_ts(agent_id)
         if compact_ts is None:
-            return _retention_floor(), None
+            return retention_floor(), None
         return compact_ts, compact_ts
     if hours is not None:
         window_from = datetime.now(tz=UTC) - window_delta(hours)
@@ -96,7 +87,7 @@ def _compact_ts(agent_id: int) -> datetime | None:
         agent_id=agent_id,
         event_names=[HALT_EVENT],
         grep="compact",
-        from_=_retention_floor(),
+        from_=retention_floor(),
         limit=1,
     )
     return rows[0]["ts"] if rows else None
@@ -130,7 +121,7 @@ class _ModelAgg:
 _LEDGER_SQL = sql.SQL("""SELECT model,
   sum(llm_calls), sum(costed_calls), sum(unpriced_calls),
   sum(tokens_in), sum(tokens_out), sum(tokens_cached), sum(tokens_reasoning),
-  sum(cost_usd), max(day)
+  sum(cost_usd)
 FROM agent_model_tokens_daily
 WHERE agent_id = %s{}
 GROUP BY model""")
@@ -148,13 +139,13 @@ def _max_token_day(pool: ConnectionPool[Any], agent_id: int) -> date | None:
 
 def _ledger_aggs(
     pool: ConnectionPool[Any], agent_id: int, *, day_lt: date | None = None
-) -> tuple[dict[str, _ModelAgg], datetime | None]:
-    """Per-model sums over every rolled ledger day, plus the newest rolled
-    day's exclusive end (UTC midnight after it) — the instant the Loki tail
-    picks up from. ``day_lt`` excludes a retained gap day so the reduced
-    ledger watermark leaves that entire day to live events."""
+) -> dict[str, _ModelAgg]:
+    """Per-model sums over rolled ledger days.
+
+    ``day_lt`` excludes the retained gap day; `ledger_gap_plan` determines
+    the matching live-tail start independently of older ledger rows.
+    """
     out: dict[str, _ModelAgg] = {}
-    max_day: Any = None
     with pool.connection() as conn, conn.cursor() as cur:
         condition = sql.SQL(" AND day < %s") if day_lt is not None else sql.SQL("")
         params = (agent_id, day_lt) if day_lt is not None else (agent_id,)
@@ -169,12 +160,7 @@ def _ledger_aggs(
             agg.tcached = int(row[6])
             agg.treason = int(row[7])
             agg.cost = float(row[8])
-            if max_day is None or row[9] > max_day:
-                max_day = row[9]
-    if max_day is None:
-        return out, None
-    tail_from = datetime.combine(max_day + timedelta(days=1), time.min, tzinfo=UTC)
-    return out, tail_from
+    return out
 
 
 def _loki_aggs_into(
@@ -286,14 +272,10 @@ def agent_cost(
         _loki_aggs_into(merged, agent_id, windowed_from, None)
     else:
         max_day = _max_token_day(pool, agent_id)
-        floor = _retention_floor()
-        gap_live = max_day is not None and datetime.combine(max_day, time.min, tzinfo=UTC) >= floor
-        merged, tail_from = _ledger_aggs(pool, agent_id, day_lt=max_day if gap_live else None)
-        if tail_from is None or tail_from < floor:
-            # No rolled day yet (fresh agent / daemon lag beyond retention):
-            # the tail is everything Loki still holds.
-            tail_from = floor
-        _loki_aggs_into(merged, agent_id, tail_from, None)
+        floor = retention_floor()
+        gap = ledger_gap_plan(max_day, floor)
+        merged = _ledger_aggs(pool, agent_id, day_lt=gap.day_lt)
+        _loki_aggs_into(merged, agent_id, gap.tail_from, None)
 
     cost = _to_agent_cost(merged)
     with _cache_lock:

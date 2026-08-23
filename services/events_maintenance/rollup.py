@@ -52,15 +52,12 @@ from psycopg import sql
 
 from shared.log import logger
 from shared.loki_index_labels import (
+    EVENT_STREAM_RETENTION,
     LokiReadEra,
     escape_logql_label,
     event_stream_selector,
     split_index_label_window,
 )
-
-# First fully-retained day: Loki prunes past retention_period (168h), so a
-# day is recomputable only when its 00:00 start is still inside retention.
-_LOKI_RETENTION = timedelta(hours=168)
 
 _HTTP_TIMEOUT_S = 60.0
 
@@ -117,7 +114,7 @@ def _event_pipeline(
     era: LokiReadEra,
     event_names: list[str],
     telemetry_only: bool,
-    legacy_streams_only: bool = False,
+    indexed_labeled: bool = False,
 ) -> str:
     """One rollup event family, selective only after resource-label cutover."""
 
@@ -125,7 +122,7 @@ def _event_pipeline(
         era=era,
         agent_id=None,
         event_names=event_names,
-        legacy_streams_only=legacy_streams_only,
+        indexed_labeled=indexed_labeled,
     )
     parts = [selector, '| agent_id!=""']
     if telemetry_only:
@@ -142,7 +139,7 @@ def _tokens_queries(
     *,
     era: LokiReadEra = LokiReadEra.LEGACY,
     duration_s: int = _DAY_S,
-    legacy_streams_only: bool = False,
+    indexed_labeled: bool = False,
 ) -> dict[str, str]:
     """The per-(agent, model) instant queries for one day's tokens/cost row.
 
@@ -153,7 +150,7 @@ def _tokens_queries(
         era=era,
         event_names=["llm_usage"],
         telemetry_only=True,
-        legacy_streams_only=legacy_streams_only,
+        indexed_labeled=indexed_labeled,
     )
     model = ' | json model="attributes.model"'
     out = {
@@ -182,26 +179,26 @@ def _metrics_queries(
     *,
     era: LokiReadEra = LokiReadEra.LEGACY,
     duration_s: int = _DAY_S,
-    legacy_streams_only: bool = False,
+    indexed_labeled: bool = False,
 ) -> dict[str, str]:
     """The per-agent instant queries for one day's turn/exec metrics row."""
     turn = _event_pipeline(
         era=era,
         event_names=["turn_end"],
         telemetry_only=True,
-        legacy_streams_only=legacy_streams_only,
+        indexed_labeled=indexed_labeled,
     )
     exec_ok = _event_pipeline(
         era=era,
         event_names=["exec"],
         telemetry_only=False,
-        legacy_streams_only=legacy_streams_only,
+        indexed_labeled=indexed_labeled,
     )
     exec_failed = _event_pipeline(
         era=era,
         event_names=["exec_.+", "exec\\(.*"],
         telemetry_only=False,
-        legacy_streams_only=legacy_streams_only,
+        indexed_labeled=indexed_labeled,
     )
     dur = ' | json duration_seconds="attributes.duration_seconds" | __error__="" | unwrap duration_seconds'
     return {
@@ -249,11 +246,11 @@ def _day_aggregates(day: date) -> tuple[list[TokensRow], list[MetricsRow]] | Non
     for slice_ in slices:
         slice_row_count = 0
         duration_s = max(1, int((slice_.end - slice_.start).total_seconds()))
-        legacy_streams_only = len(slices) == 2 and slice_.era is LokiReadEra.LEGACY
+        indexed_labeled = len(slices) == 2 and slice_.era is LokiReadEra.INDEXED
         for name, logql in _tokens_queries(
             era=slice_.era,
             duration_s=duration_s,
-            legacy_streams_only=legacy_streams_only,
+            indexed_labeled=indexed_labeled,
         ).items():
             result_rows = _query_instant(logql, slice_.end)
             slice_row_count += len(result_rows)
@@ -264,7 +261,7 @@ def _day_aggregates(day: date) -> tuple[list[TokensRow], list[MetricsRow]] | Non
         for name, logql in _metrics_queries(
             era=slice_.era,
             duration_s=duration_s,
-            legacy_streams_only=legacy_streams_only,
+            indexed_labeled=indexed_labeled,
         ).items():
             result_rows = _query_instant(logql, slice_.end)
             slice_row_count += len(result_rows)
@@ -373,7 +370,7 @@ def compute_rollup(
     now = now_utc.astimezone(UTC)
     today = now.date()
     yesterday = today - timedelta(days=1)
-    floor_day = (now - _LOKI_RETENTION).date() + timedelta(days=1)
+    floor_day = (now - EVENT_STREAM_RETENTION).date() + timedelta(days=1)
 
     with conn.cursor() as cur:
         max_metrics = _max_rolled_day(cur, "agent_metrics_daily")

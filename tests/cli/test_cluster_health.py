@@ -15,7 +15,7 @@ exactly one IM notification and one alerts row per transition.
 from __future__ import annotations
 
 import subprocess
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -783,8 +783,45 @@ def test_crash_loop_merges_disjoint_cutover_eras(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(httpx, "get", _fake_get)
 
     assert _cluster_health._crash_loop_detection(max_restarts=2, window_minutes=60) is False
-    assert 'event_name=""' in queries[0]
+    assert 'event_name=""' not in queries[0]
+    assert 'event_name!=""' in queries[1]
     assert 'event_name="resurrect"' in queries[1]
+
+
+def test_crash_loop_queries_the_current_window(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The instant query evaluates at now, covering exactly (now-window, now]."""
+    import httpx
+
+    from shared.loki_index_labels import LokiReadEra, LokiReadSlice
+
+    fixed_now = datetime(2026, 8, 24, 12, 0, tzinfo=UTC)
+    captured_windows: list[tuple[datetime, datetime]] = []
+    captured_params: list[dict[str, Any]] = []
+
+    class _FixedDatetime(datetime):
+        @classmethod
+        def now(cls, tz: object | None = None) -> datetime:
+            assert tz is UTC
+            return fixed_now
+
+    def _slices(start: datetime, end: datetime) -> tuple[LokiReadSlice, ...]:
+        captured_windows.append((start, end))
+        return (LokiReadSlice(LokiReadEra.LEGACY, start, end),)
+
+    def _fake_get(url: str, **kw: Any) -> httpx.Response:
+        captured_params.append(kw["params"])
+        response = httpx.Response(200, json={"data": {"result": []}})
+        response.request = httpx.Request("GET", url)  # type: ignore[attr-defined]
+        return response
+
+    monkeypatch.setattr(_cluster_health, "datetime", _FixedDatetime)
+    monkeypatch.setattr(_cluster_health, "split_index_label_window", _slices)
+    monkeypatch.setattr(httpx, "get", _fake_get)
+
+    assert _cluster_health._crash_loop_detection(max_restarts=2, window_minutes=60) is True
+    assert captured_windows == [(fixed_now - timedelta(minutes=60), fixed_now)]
+    assert captured_params[0]["time"] == fixed_now.timestamp()
+    assert "[3600s]" in captured_params[0]["query"]
 
 
 # ─── edge alerts → alerts ingest (W16) ──────────────────────────────────────

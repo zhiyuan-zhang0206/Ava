@@ -318,8 +318,9 @@ CREATE UNIQUE INDEX idx_inbound_messages_client_message_id
 -- so these are never themselves subject to retention. A gateway maintenance daemon
 -- (services.events_maintenance) upserts them daily; the upsert is a full-day
 -- overwrite recompute keyed on the PK, so it is idempotent — a re-run never
--- double-counts. The read-time split is day-boundary (UTC midnight): a since-birth
--- query reads rollup for `day < today` and the raw rows for today.
+-- double-counts. The read-time split is day-boundary (UTC midnight): the ledger
+-- serves rolled days, while the newest retained day (which can be stale) and today
+-- come from the retained Loki tail so late closed-day writes count exactly once.
 --
 -- agent_metrics_daily: per agent x UTC-day turn / exec counters plus the mergeable
 -- turn-duration stats. turn_dur_sum feeds both the lifetime mean and lm_stage_tps.

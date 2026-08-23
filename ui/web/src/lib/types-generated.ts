@@ -2891,7 +2891,8 @@ export interface paths {
          *     - `live_count`: agents_meta table — all non-terminated agents (running/idling/restarting/hibernating)
          *     - `tokens` / `cost_usd`: telemetry `llm_usage` events in Loki
          *     - average turn duration / warning/error counts: Loki's unified event stream
-         *     - `total_events`: Postgres archive partition estimates (a coarse growth gauge)
+         *     - `total_events`: archived event row count (frozen at the LGTM cutover;
+         *       not a live gauge)
          *
          *     `?hours=` selects the aggregation window (0 = last 5m; 1/6/24/72/168 =
          *     hours), whitelisted by `StatsWindowHours` (anything else 422s). Zero-data
@@ -6294,8 +6295,8 @@ export interface components {
          *     - `warnings` / `errors`: level counts. Agent trial-and-error
          *       (exec_failed) logs at INFO and is deliberately NOT counted — these
          *       numbers are operator-facing alerts, not agent activity.
-         *     - `total_events`: events row count, for ops to monitor growth rate
-         *       (lifetime estimate, not windowed)
+         *     - `total_events`: archived event row count (frozen — the PG events copy
+         *       stopped growing at the LGTM cutover; not a live gauge)
          *
          *     `avg_turn_seconds` None = zero turns in the window (new DB / no
          *     activity); frontend renders "—".

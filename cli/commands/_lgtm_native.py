@@ -28,6 +28,7 @@ import yaml
 
 from cli.commands._converge_spec import ConvergeCtx
 from shared.log import logger
+from shared.loki_index_labels import validate_loki_deploy_config
 
 SUPPORTED_TAGS = {"darwin_arm64"}
 
@@ -252,9 +253,13 @@ def _render_configs(repo: Path, native_dir: Path, ava_home: Path) -> None:
     source_dir = repo / "deploy/lgtm/native/config"
     for name in ("loki.yaml", "prometheus.yml"):
         template = (source_dir / name).read_text(encoding="utf-8")
-        _write_if_changed(
-            native_dir / "config" / name, template.replace("{{AVA_HOME}}", str(ava_home))
-        )
+        content = template.replace("{{AVA_HOME}}", str(ava_home))
+        if name == "loki.yaml":
+            rendered = yaml.safe_load(content)
+            if not isinstance(rendered, dict):
+                raise TypeError("native Loki config must render to a mapping")
+            validate_loki_deploy_config(cast(dict[str, object], rendered))
+        _write_if_changed(native_dir / "config" / name, content)
 
 
 def _launchctl(*args: str) -> subprocess.CompletedProcess[str]:
