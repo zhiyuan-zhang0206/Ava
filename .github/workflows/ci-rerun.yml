@@ -45,10 +45,11 @@ jobs:
             echo "CI run attempt $RUN_ATTEMPT has already been rerun"
             exit 0
           fi
-          # A later CI run for this commit supersedes this completed failure.
+          # On pushes, this workflow shares HEAD_SHA with CI and would otherwise be newest.
+          # Filter to CI only; PR rerun heads are on default branch, not the PR.
           newest_run_id="$(
             gh api "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${HEAD_SHA}&per_page=100" \
-              --jq '[.workflow_runs[].id] | max'
+              --jq '[.workflow_runs[] | select(.name == "CI") | .id] | max'
           )"
           if [ "$RUN_ID" != "$newest_run_id" ]; then
             echo "CI run ${RUN_ID} is not the newest run (${newest_run_id}) for ${HEAD_SHA}"

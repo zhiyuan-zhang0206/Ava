@@ -297,7 +297,7 @@ jobs:
           uv run python -c "
           import sys, xml.etree.ElementTree as ET, os
           pct = round(float(ET.parse('coverage.xml').getroot().attrib['line-rate']) * 100, 1)
-          threshold = float(os.environ.get('BACKEND_COVERAGE_THRESHOLD', 75))
+          threshold = float(os.environ.get('BACKEND_COVERAGE_THRESHOLD', 85))
           print(f'Backend line coverage: {pct}% (threshold: {threshold}%)')
           sys.exit(1) if pct < threshold else None
           "
@@ -357,7 +357,7 @@ jobs:
 
           summary = json.loads(Path("coverage/coverage-summary.json").read_text())
           coverage = float(summary["total"]["lines"]["pct"])
-          threshold = float(os.environ["FRONTEND_COVERAGE_THRESHOLD"])
+          threshold = float(os.environ.get("FRONTEND_COVERAGE_THRESHOLD", "81"))
           print(f"Frontend line coverage: {coverage}% (threshold: {threshold}%)")
           if coverage < threshold:
               raise SystemExit(

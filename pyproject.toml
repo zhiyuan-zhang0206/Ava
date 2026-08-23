@@ -386,7 +386,7 @@ omit = [
 
 [tool.coverage.report]
 # fail_under is intentionally NOT set here: the hard gate lives in ci.yml's
-# coverage-gate steps (BACKEND_COVERAGE_THRESHOLD=80 / FRONTEND_COVERAGE_THRESHOLD=77),
+# coverage-gate steps (BACKEND_COVERAGE_THRESHOLD=85 / FRONTEND_COVERAGE_THRESHOLD=81),
 # whose env fallbacks equal the env values. Local runs use this file's
 # measurement set ([tool.coverage.run].source) without a blocking floor
 # (audit round-2 tests-ci P2 — the old comment described a pre-gate era).
