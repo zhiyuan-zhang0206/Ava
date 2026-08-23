@@ -237,8 +237,8 @@ def test_a_rule_on_the_symlink_path_also_counts_as_covered(
 ) -> None:
     """A rule naming the stable symlink is accepted, not flagged.
 
-    Both forms occur in the wild: `$(brew --prefix redis)/bin/redis-server` is the
-    stable `/opt/homebrew/opt/redis/…` symlink onto the versioned Cellar path, and
+    Both forms occur in the wild: `$(brew --prefix pgbouncer)/bin/pgbouncer` is the
+    stable `/opt/homebrew/opt/pgbouncer/…` symlink onto a versioned Cellar path, and
     that symlink form is exactly what this repo's own older runbook told operators
     to `--add`. Flagging a host whose rule was added that way would print a scary
     block on every `ava start` of a host that is fine — and a step operators learn

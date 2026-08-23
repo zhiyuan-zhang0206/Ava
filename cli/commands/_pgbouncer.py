@@ -164,7 +164,7 @@ def _render_ini(
     """The pgbouncer.ini for this cluster's pooler. One [databases] entry mapping the
     cluster db to the local Postgres over its trust unix socket; [pgbouncer] sets
     transaction pooling, client auth against the userlist, and loopback +
-    reachable binds (never all interfaces), matching the pg/redis posture.
+    reachable binds (never all interfaces), matching Postgres's posture.
 
     Client auth mirrors the cluster secret: `scram-sha-256` when a secret is set
     (the pooled front door needs it, like pg/redis), `trust` when the cluster has

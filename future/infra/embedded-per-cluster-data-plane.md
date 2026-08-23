@@ -96,8 +96,9 @@ machinery. Isolation comes from *each cluster having its own instance* (which
 kills cross-talk); auth is the one remaining lock ("don't connect to the wrong
 port"), identical on a single box and across machines.
 
-Bind posture is unchanged — loopback + this host's reachable address, never all
-interfaces — only the port becomes per-cluster instead of the fixed 5432/6379.
+Postgres bind posture is unchanged — loopback + this host's reachable address,
+never all interfaces — while Redis is loopback-only; only the ports become
+per-cluster instead of the fixed 5432/6379.
 
 ## Prod migrated (grandfathering removed)
 

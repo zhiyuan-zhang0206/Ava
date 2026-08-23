@@ -28,9 +28,13 @@ cluster's own `.env` URLs (`shared.cluster.identity_from_url`) — or pass the
 fixed `DATA_PLANE_IDENTITY` at install-time birth — and thread it in via
 `ensure_cluster_instance(identity=...)`; nothing here derives it from a name.
 
-Bind posture — loopback + this host's reachable address, never all interfaces —
-only the port is per-cluster. A single-box cluster is reachable only at loopback,
-so the bind collapses to loopback alone.
+Bind posture — Postgres and its PgBouncer pooler bind loopback + this host's
+reachable address, never all interfaces. Redis is the exception: it always binds
+loopback-only. Non-loopback Redis inbound is served by the host-level relay bridge
+(`com.ava.redis-bridge`, `/usr/bin/python3 relay.py`), which forwards this host's
+private-network address and Redis port to `127.0.0.1`; see
+`docs/history/2026-08-24/redis-loopback-only.md` and task #1469. A single-box
+cluster is reachable only at loopback, so the Postgres binds collapse to loopback.
 
 POSIX only (macOS brew / Linux pg_ctl + redis-server). Windows has no native
 pg_ctl/redis-server on PATH — a Windows per-cluster data plane is a follow-up;
@@ -64,9 +68,9 @@ _LOOPBACK_ALIASES = frozenset({"127.0.0.1", "::1", "localhost", "ip6-localhost"}
 _PG_MAX_CONNECTIONS = 500
 
 # Bounded wait for this host's non-loopback bind address (AVA_MACHINE_HOST) to
-# appear on a local interface before binding pg/redis to it. On reboot brew /
-# launchd can start `ava` before the private network has assigned the address,
-# so binding it fails and the whole autostart dies.
+# appear on a local interface before the Postgres data plane binds to it. On
+# reboot brew / launchd can start `ava` before the private network has assigned
+# the address, so binding it fails and the whole autostart dies.
 _BIND_WAIT_TIMEOUT_S = 60.0
 _BIND_WAIT_INTERVAL_S = 2.0
 
@@ -103,13 +107,13 @@ def _bind_addrs(cluster_secret: str) -> list[str]:
     when reachable resolves to localhost — the single-box default).
 
     A no-secret cluster binds LOOPBACK ONLY, whatever the reachable address says:
-    with the data plane unauthenticated (no scram / no requirepass), a
-    non-loopback bind would expose pg/redis to the LAN. Auth and reachability
-    move together — an operator who wants a LAN-reachable data plane sets the
-    cluster secret.
+    with the Postgres data plane unauthenticated (no scram), a non-loopback bind
+    would expose Postgres and its pooler to the LAN. Auth and reachability move
+    together — an operator who wants a LAN-reachable Postgres data plane sets
+    the cluster secret.
 
     `cluster_secret` is the CALLER-PASSED cluster secret (the same value the hba
-    is written from and the pooler/redis are configured with), never read from
+    is written from and the pooler is configured with), never read from
     `settings` — a process that inherited a sibling cluster's
     AVA_CLUSTER_SECRET (a prod-sourced shell running an install) must not widen
     a no-secret cluster's bind posture to the LAN. The caller resolves the
@@ -125,10 +129,10 @@ def _bind_addrs(cluster_secret: str) -> list[str]:
 
 
 def _addr_assigned(addr: str) -> bool:
-    """True if `addr` is currently assigned to a local interface (bindable). A pg /
-    redis listener can only bind an address the kernel has on an interface; before
-    the private-network interface comes up, binding its address fails with
-    EADDRNOTAVAIL. Probing with a throwaway bind is the portable check."""
+    """True if `addr` is currently assigned to a local interface (bindable). A
+    Postgres or PgBouncer listener can only bind an address the kernel has on an
+    interface; before the private-network interface comes up, binding its address
+    fails with EADDRNOTAVAIL. Probing with a throwaway bind is the portable check."""
     family = socket.AF_INET6 if ":" in addr else socket.AF_INET
     try:
         with socket.socket(family, socket.SOCK_STREAM) as s:
@@ -294,7 +298,7 @@ def _start_pg(pg_port: int, cluster_secret: str) -> int:
             return 1
         print("    pg_hba.conf reloaded into the running server")
         return 0
-    # Same gate as the redis/pgbouncer paths (task #1303, PR #47 P2): a no-secret
+    # Same gate as the pgbouncer path (task #1303, PR #47 P2): a no-secret
     # cluster binds loopback alone (`_bind_addrs`), so a stray ambient
     # AVA_MACHINE_HOST must not hold a warm start hostage for a bind that never
     # happens. Wait only when this cluster actually binds the reachable address.
@@ -387,7 +391,7 @@ def _write_redis_conf(data: Path, cluster_secret: str) -> Path:
     win (and a stale conf from an older start cannot pin them).
 
     A no-secret cluster writes NO requirepass line — redis then serves without
-    auth, on the loopback-only bind (`_bind_addrs`) that the same secret gates."""
+    auth on the unconditional loopback-only bind."""
     conf = data / "redis.conf"
     fd = os.open(conf, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as handle:
@@ -406,20 +410,6 @@ def _start_redis(redis_port: int, cluster_secret: str, identity: str) -> int:
         # the in-memory ACL) — including no-secret clusters, whose identity
         # user is created with `nopass` (see _ensure_redis_acl).
         return _ensure_redis_acl(redis_port, cluster_secret, identity)
-    # Same boot race as Postgres: binding the reachable address before it is on an
-    # interface fails (redis exits outright — loud, but it takes the whole start down
-    # pointlessly). Wait bounded for it first (task #1288) — but only when this
-    # cluster actually binds it: a no-secret cluster binds loopback alone
-    # (`_bind_addrs`), so a stray AVA_MACHINE_HOST must not hold a warm start hostage.
-    if _bind_addrs(cluster_secret) != ["127.0.0.1"] and not _wait_for_reachable_bind():
-        print(
-            f"  ✗ reachable bind address {reachable_host()!r} is not assigned to any "
-            f"local interface after {int(_BIND_WAIT_TIMEOUT_S)}s — redis cannot bind "
-            f"it. On reboot this means the private network has not come "
-            f"up yet; retry `ava start` once it is.",
-            file=sys.stderr,
-        )
-        return 1
     data = _redis_data_dir()
     data.mkdir(parents=True, exist_ok=True)
     args = [
@@ -430,7 +420,7 @@ def _start_redis(redis_port: int, cluster_secret: str, identity: str) -> int:
         "--port",
         str(redis_port),
         "--bind",
-        *_bind_addrs(cluster_secret),
+        "127.0.0.1",
         "--protected-mode",
         "no",
         "--dir",

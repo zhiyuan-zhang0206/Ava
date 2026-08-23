@@ -220,7 +220,7 @@ class GeneralSettings(EnvSettings):
     machine_host: str = Field(
         default="",
         alias="AVA_MACHINE_HOST",
-        description="This host's reachable address — the IP/hostname other nodes and the browser dial it at, and the address pg/redis bind in addition to loopback. Empty (default): fall back to the `$AVA_HOME/machine_host` file, then `localhost`. Left empty on purpose — a `localhost` default here would shadow the file and register an enrolled agent-runner at a self-dialing address. A split deployment sets each node's real private-network address.",
+        description="This host's reachable address — the IP/hostname other nodes and the browser dial it at, and the address Postgres and its pooler bind in addition to loopback (Redis remains loopback-only). Empty (default): fall back to the `$AVA_HOME/machine_host` file, then `localhost`. Left empty on purpose — a `localhost` default here would shadow the file and register an enrolled agent-runner at a self-dialing address. A split deployment sets each node's real private-network address.",
         json_schema_extra={
             "restart_required": "all",
             "writable": False,

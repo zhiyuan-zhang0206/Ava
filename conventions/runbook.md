@@ -269,11 +269,15 @@ whose redis_url carries no username (`redis://:<secret>@host/0`, born before the
 names-as-data ACL model) dials as that `default` user — no ACL identity exists to
 drop, so the healthcheck warns and skips rather than raising every round, and `ava
 start` converge backfills the username into the URL (from the db_url identity) so the
-cluster adopts the scoped ACL user. **pg/redis always bind
-loopback + this host's reachable address (`AVA_MACHINE_HOST`, default `localhost`),
-de-duplicated** (never all interfaces): a single box resolves to loopback alone, while a
-split node sets its real private-network IP, which is appended, plus the `scram-sha-256`
-`AVA_TRUSTED_CIDRS` pg_hba ranges. Each per-cluster pg is started with
+cluster adopts the scoped ACL user. **Postgres and PgBouncer bind loopback + this
+host's reachable address (`AVA_MACHINE_HOST`, default `localhost`), de-duplicated**
+(never all interfaces): a single box resolves to loopback alone, while a split node
+sets its real private-network IP, which is appended, plus the `scram-sha-256`
+`AVA_TRUSTED_CIDRS` pg_hba ranges. Redis is the exception: it always binds
+loopback-only, and the host-level `com.ava.redis-bridge` relay (`/usr/bin/python3
+relay.py`) serves non-loopback Redis inbound by forwarding the host's
+private-network address and Redis port to `127.0.0.1`. Each per-cluster pg is
+started with
 `max_connections = 500` (each agent process holds ~4 steady conns), passed on the
 `pg_ctl start` line; pg_hba is written into `$AVA_HOME/pg/pg_hba.conf` and —
 when the server is already running — reloaded (SIGHUP) so the rewritten hba takes
@@ -281,13 +285,15 @@ effect immediately instead of at the next restart (install-time birth starts pg
 before the cluster's `.env` exists, so the first `ava start` rewrites it with the
 real posture; Task #1113). `ava start`
 is a *consumer*: it skips the bring-up when this cluster's pg/redis are already up
-(`pg_isready` + a redis PING), and on a fresh start first waits (bounded, ~60s) for the
-reachable bind address to appear on an interface — so a reboot that starts `ava` before
-the private-network interface exists retries rather than dying on an un-bindable address.
-pg/redis are never touched when already up, so a (re)start never disrupts a running
-data plane — with ONE deliberate exception: a running pgbouncer that answers on
-loopback but is missing its reachable-address listener (a silently degraded double
-bind, task #1288) is RESTARTED rather than reloaded, because a SIGHUP reload never
+(`pg_isready` + a redis PING), and on a fresh start Postgres (and PgBouncer) first
+waits (bounded, ~60s) for the reachable bind address to appear on an interface — so
+a reboot that starts `ava` before the private-network interface exists retries rather
+than dying on an un-bindable address. Redis never waits because loopback is always
+available. pg/redis are never touched when already up, so a (re)start never
+disrupts a running data plane — with ONE deliberate exception: a running
+pgbouncer that answers on loopback but is missing its reachable-address listener
+(a silently degraded double bind, task #1288) is RESTARTED rather than reloaded,
+because a SIGHUP reload never
 retries a `listen_addr` that failed to bind at startup. `ava stop` tears this cluster's
 own instance down (data persists on disk); `ava cluster update` keeps it up (`--keep-infra`) for
 the migrate step.

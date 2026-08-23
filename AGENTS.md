@@ -54,10 +54,11 @@ Windows unit carries `agent-runner` only
 **Auth follows the secret.** With a secret set, each cluster connects to
 Postgres as its own role and to redis as its own ACL user (the identifiers its
 URLs carry, as data — never derived from a name), authenticating with
-`AVA_CLUSTER_SECRET`; the gateway API + /ops require it as a bearer, and
-pg/redis bind loopback + this host's reachable address only. An EMPTY secret
-(single-box default — off is fully off) serves everything unauthenticated,
-loopback-only.
+`AVA_CLUSTER_SECRET`; the gateway API + /ops require it as a bearer, Postgres and
+its pooler bind loopback + this host's reachable address only, and Redis is always
+loopback-only with off-box inbound carried by the host-level relay bridge. An
+EMPTY secret (single-box default — off is fully off) serves everything
+unauthenticated, loopback-only.
 
 | Path | Role |
 |---|---|

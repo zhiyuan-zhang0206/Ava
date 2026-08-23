@@ -45,20 +45,20 @@ def serving_binaries(roles: frozenset[str]) -> tuple[Path, ...]:
     The interpreter is audited for **either** capability, not just `gateway`. A
     gateway serves the HTTP port every runner dials (issue #949's symptom), and an
     agent-runner serves the ops port the *gateway* dials back — same interpreter,
-    same ALF exposure, mirror-image outage. Postgres and redis are gateway-only:
-    a runner holds no local data plane, so those binaries are absent there.
+    same ALF exposure, mirror-image outage. Postgres is gateway-only: a runner
+    holds no local data plane, so that binary is absent there. Redis is not audited
+    because its server always binds loopback-only and serves no off-box port.
 
     Filtered to paths that exist, so a resolver falling through to a
-    wrong-but-harmless default (`brew_prefix` does this when brew is absent)
-    contributes a phantom "missing rule" instead of a real one.
+    wrong-but-harmless default contributes a phantom "missing rule" instead of a
+    real one.
     """
     from shared.paths import otel_collector_binary
-    from shared.pg_tools import brew_prefix, pg_tool
+    from shared.pg_tools import pg_tool
 
     candidates = [Path(sys.executable)]
     if "gateway" in roles:
         candidates.append(pg_tool("postgres"))
-        candidates.append(brew_prefix("redis") / "bin" / "redis-server")
         # A gateway with a cluster secret serves the collector's authenticated
         # remote OTLP receiver on AVA_MACHINE_HOST. Auditing it unconditionally
         # for gateway capability is harmless on a loopback-only single box (the
