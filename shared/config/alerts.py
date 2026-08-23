@@ -19,6 +19,23 @@ from shared.config._base import EnvSettings
 
 
 class AlertsSettings(EnvSettings):
+    grafana_admin_password: SecretStr | None = Field(
+        default=None,
+        alias="GRAFANA_ADMIN_PASSWORD",
+        description=(
+            "Admin password for the co-located Grafana API. When set, the gateway "
+            "periodically reconciles stored Grafana alert instances against "
+            "Grafana's active Alertmanager view."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": False,
+            "sensitive": True,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
+
     webhook_token: SecretStr | None = Field(
         default=None,
         validation_alias=AliasChoices(
