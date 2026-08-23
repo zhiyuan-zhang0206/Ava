@@ -156,6 +156,40 @@ def test_ledger_reads_are_day_scoped_and_return_exclusive_watermarks(
     ) == (42, datetime.combine(today - timedelta(days=1), datetime.min.time(), tzinfo=UTC))
 
 
+def test_newest_ledger_day_is_scoped_to_the_requested_range(
+    db_conn: psycopg.Connection,
+) -> None:
+    agent_id = _insert_agent(db_conn)
+    today = datetime.now(tz=UTC).date()
+    older = today - timedelta(days=2)
+    newer = today - timedelta(days=1)
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agent_metrics_daily (agent_id, day, turn_total) "
+            "VALUES (%s, %s, 1), (%s, %s, 1)",
+            (agent_id, older, agent_id, newer),
+        )
+    db_conn.commit()
+
+    assert (
+        _inspect_pg.newest_ledger_day(db_conn, agent_id=agent_id, day_from=older, day_to=newer)
+        == newer
+    )
+    assert (
+        _inspect_pg.newest_ledger_day(db_conn, agent_id=agent_id, day_from=older, day_to=older)
+        == older
+    )
+    assert (
+        _inspect_pg.newest_ledger_day(
+            db_conn,
+            agent_id=agent_id,
+            day_from=today - timedelta(days=5),
+            day_to=today - timedelta(days=4),
+        )
+        is None
+    )
+
+
 def test_archive_lifecycle_is_chronological_for_one_replay_pass(
     db_conn: psycopg.Connection,
 ) -> None:

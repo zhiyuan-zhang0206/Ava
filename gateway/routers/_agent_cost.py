@@ -13,10 +13,10 @@ Reads take one of two bounded paths:
   ``since_compact`` whose halt marker can only be found inside Loki
   retention anyway) aggregates **pure Loki** over the window — with 24h
   query splitting + result caches this is a handful of subqueries;
-- whole life = **ledger** (every rolled day, unbounded — the ledger has no
-  retention) + **Loki tail** from the watermark (the midnight after the
-  newest rolled day) to now, so a maintenance-daemon lag widens the tail
-  instead of opening a hole.
+- whole life = **ledger** (every rolled day except the newest retained day,
+  which can be stale after a late write) + **Loki tail** from the reduced
+  ledger watermark. Older days remain ledger-served; the newest retained day
+  lives entirely in the tail, so it is neither lost nor double counted.
 
 A small TTL cache absorbs the inspector's poll cadence: the 5s poll costs
 one recompute per ``_CACHE_TTL_S`` per (agent, window) instead of five
@@ -27,9 +27,10 @@ from __future__ import annotations
 
 import threading
 import time as time_mod
-from datetime import UTC, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from typing import Any, TypedDict
 
+from psycopg import sql
 from psycopg_pool import ConnectionPool
 
 from gateway import loki_events
@@ -126,28 +127,38 @@ class _ModelAgg:
         self.cost = 0.0
 
 
-_LEDGER_SQL = """SELECT model,
+_LEDGER_SQL = sql.SQL("""SELECT model,
   sum(llm_calls), sum(costed_calls), sum(unpriced_calls),
   sum(tokens_in), sum(tokens_out), sum(tokens_cached), sum(tokens_reasoning),
   sum(cost_usd), max(day)
 FROM agent_model_tokens_daily
-WHERE agent_id = %s
-GROUP BY model"""
+WHERE agent_id = %s{}
+GROUP BY model""")
+
+
+def _max_token_day(pool: ConnectionPool[Any], agent_id: int) -> date | None:
+    """Return the newest durable token-ledger day for one agent."""
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT max(day) FROM agent_model_tokens_daily WHERE agent_id = %s", (agent_id,)
+        )
+        row = cur.fetchone()
+    return row[0] if row is not None else None
 
 
 def _ledger_aggs(
-    pool: ConnectionPool[Any], agent_id: int
+    pool: ConnectionPool[Any], agent_id: int, *, day_lt: date | None = None
 ) -> tuple[dict[str, _ModelAgg], datetime | None]:
     """Per-model sums over every rolled ledger day, plus the newest rolled
     day's exclusive end (UTC midnight after it) — the instant the Loki tail
-    picks up from. Self-healing at the seam: a maintenance-daemon lag leaves
-    the watermark earlier and the tail simply covers more (bounded by Loki
-    retention either way), so nothing between ledger and tail is ever
-    invisible or double-counted."""
+    picks up from. ``day_lt`` excludes a retained gap day so the reduced
+    ledger watermark leaves that entire day to live events."""
     out: dict[str, _ModelAgg] = {}
     max_day: Any = None
     with pool.connection() as conn, conn.cursor() as cur:
-        cur.execute(_LEDGER_SQL, (agent_id,))
+        condition = sql.SQL(" AND day < %s") if day_lt is not None else sql.SQL("")
+        params = (agent_id, day_lt) if day_lt is not None else (agent_id,)
+        cur.execute(_LEDGER_SQL.format(condition), params)
         for row in cur.fetchall():
             agg = out.setdefault(row[0], _ModelAgg())
             agg.calls = int(row[1])
@@ -265,8 +276,10 @@ def agent_cost(
     if windowed_from is not None:
         _loki_aggs_into(merged, agent_id, windowed_from, None)
     else:
-        merged, tail_from = _ledger_aggs(pool, agent_id)
+        max_day = _max_token_day(pool, agent_id)
         floor = _retention_floor()
+        gap_live = max_day is not None and datetime.combine(max_day, time.min, tzinfo=UTC) >= floor
+        merged, tail_from = _ledger_aggs(pool, agent_id, day_lt=max_day if gap_live else None)
         if tail_from is None or tail_from < floor:
             # No rolled day yet (fresh agent / daemon lag beyond retention):
             # the tail is everything Loki still holds.

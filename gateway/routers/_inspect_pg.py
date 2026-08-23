@@ -179,6 +179,19 @@ def _watermark(max_day: date | None) -> datetime | None:
     return datetime.combine(max_day + timedelta(days=1), time.min, tzinfo=UTC)
 
 
+def newest_ledger_day(
+    conn: Connection[Any], *, agent_id: int, day_from: date | None, day_to: date | None
+) -> date | None:
+    """Return the newest metrics-ledger day in the requested UTC-day range."""
+    where, params = _ledger_day_where(agent_id=agent_id, day_from=day_from, day_to=day_to)
+    with conn.cursor() as cur:
+        cur.execute(
+            sql.SQL("SELECT max(day) FROM agent_metrics_daily WHERE {}").format(where), params
+        )
+        row = cur.fetchone()
+    return row[0] if row is not None else None
+
+
 def ledger_stats(
     conn: Connection[Any], *, agent_id: int, day_from: date | None, day_to: date | None
 ) -> tuple[int, int, float, float | None, float | None, int, int, datetime | None]:
