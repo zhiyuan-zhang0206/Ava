@@ -9,6 +9,7 @@
 // To quarantine a test file, move it into a `flaky/` directory next to where
 // it lived and leave a comment in the file saying why — both configs key off
 // the directory pattern, no list to update.
+// No files are currently quarantined.
 
 import path from "node:path";
 
@@ -32,6 +33,8 @@ export default defineConfig({
     fileParallelism: false,
     // The quarantine directory pattern — the main config excludes the same.
     include: ["src/**/flaky/**/*.test.{ts,tsx}"],
+    // An empty quarantine is healthy after files are de-quarantined.
+    passWithNoTests: true,
     // No coverage from flaky tests — coverage gate is satisfied by the
     // parallel stable run.
     coverage: { enabled: false },
