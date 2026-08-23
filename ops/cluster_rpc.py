@@ -171,8 +171,13 @@ async def _dispatch_once(
         # the header entirely to avoid an illegal "Bearer " value.
         secret = settings.data_plane.cluster_secret
         headers = bearer_header(secret) if secret else {}
+        # Cluster-internal dials must never honor the host's system/env proxy:
+        # private peers are not proxy-routable. This matches shared/http_dial.py's
+        # PinnedIPv4Transport, which is sync-only; async httpx already handles
+        # IPv4-literal hosts natively.
         async with httpx.AsyncClient(
-            timeout=httpx.Timeout(timeout_s, connect=min(10.0, timeout_s))
+            timeout=httpx.Timeout(timeout_s, connect=min(10.0, timeout_s)),
+            trust_env=False,
         ) as client:
             resp = await client.post(
                 url,
