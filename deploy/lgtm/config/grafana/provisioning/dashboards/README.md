@@ -23,9 +23,9 @@ row header. All sections are **expanded by default** (`collapsed: false`,
    Tokens (24h) / LLM input tokens (24h) / LLM output tokens (24h) / Cache
    hit rate (24h) / Avg turn duration (24h)). It then shows Event health,
    Event rate, Token usage — Input, Token usage — Output + Reasoning, Cache
-   hit, Turn success rate, and the full-width **Ava events (Loki)** logs
-   panel. Token input and cache hit moved here because they are first-class
-   operational statistics.
+   hit, Turn success rate, and the three full-width **Events** panels:
+   business/anomaly logs, a 24-hour event-type table, and the parse-clean
+   raw stream for debugging.
 2. **`LLM`** — throughput tokens/s, the three TPS series, calls/bucket,
    cost USD, LLM errors, and per-agent Top 20.
 3. **`Gateway & execution`** — gateway latency p50/p95/max + by route,
@@ -48,10 +48,12 @@ panel uses a `now-7d/d` relative override plus `interval: 24h`, so its
 `$__interval` range vectors are daily buckets aligned to that timezone
 rather than the browser's local clock.
 
-The dashboard now has 74 panels: core ids remain below 1000 (the four new
+The dashboard now has 76 panels: core ids remain below 1000 (the four new
 stat tiles are 44–47), plugin ids are >= 1000, host/data-plane panels are
-2101–2112, the cost-analysis panels are 38–43, and the logs panel is 2201. The duplicate plugin spawn-rate panel
-(1006) was removed because the Fleet summaries cover the same information.
+2101–2112, the cost-analysis panels are 38–43, and the event panels are
+2201–2203 (business/anomaly logs, event-type table, raw stream). The
+duplicate plugin spawn-rate panel (1006) was removed because the Fleet
+summaries cover the same information.
 
 ## Files
 
@@ -156,8 +158,9 @@ empty ratio / error ratio).
 ## Layout
 
 Greedy 24-column grid, **no overlapping gridPos**: stats 8x4 (three per
-row), charts/tables 12x7 (two per row), the logs panel 24x10, row headers
-h=1 w=24. Rows start exactly at the previous block's bottom (no gap row).
+row), charts/tables 12x7 (two per row), the business/anomaly event logs 24x7, the raw event stream 24x10, the
+event-type table 24x7, row headers h=1 w=24. Rows start exactly at the
+previous block's bottom (no gap row).
 
 **Do not add `autofitpanels`**: on Grafana 13.1.x it collapses every panel
 to a 30px title bar at narrow window widths.

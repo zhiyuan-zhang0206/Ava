@@ -541,6 +541,19 @@ class TestBuildLogql:
         assert '| level="warning"' in q
         assert "=~" not in q
 
+    def test_noise_tier_matches_only_ordinary_noise_rows(self) -> None:
+        q = loki_events._build_logql(tiers=["noise"])
+        assert 'level!~"warning|error|critical" and category!="audit"' in q
+        assert 'event_name=~"' in q
+        assert "node_exit" in q
+
+    def test_observation_tier_excludes_noise_and_anomaly_event_names(self) -> None:
+        q = loki_events._build_logql(tiers=["observation"])
+        assert 'level!~"warning|error|critical" and category!="audit"' in q
+        assert 'event_name!~"' in q
+        assert "node_exit" in q
+        assert "exec_failed" in q
+
     def test_machine_and_trace_id(self) -> None:
         q = loki_events._build_logql(machine="machine-1", trace_id="ABCD")
         assert '| machine="machine-1"' in q
@@ -653,6 +666,13 @@ class TestQueryEvents:
         _, last_params = client.calls[-1]
         assert last_params["start"] == int(_ROLL_OUT_CUTOVER.timestamp() * 1e9)
         assert last_params["end"] == int(_ROLL_OUT_END.timestamp() * 1e9)
+
+    def test_tier_filter_drops_json_parse_errors(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        client = _install(monkeypatch, _loki_payload([]))
+
+        loki_events.query_events(tiers=["noise"])
+
+        assert '| __error__=""' in client.calls[0][1]["query"]
 
     def test_explicit_window(self, monkeypatch: pytest.MonkeyPatch) -> None:
         client = _install(monkeypatch, _loki_payload([]))

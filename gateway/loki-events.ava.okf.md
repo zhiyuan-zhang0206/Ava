@@ -24,10 +24,13 @@ whose top-level fields ride as structured metadata.
 - **`query_events()`** — the row list: LogQL `{service_name="unknown_service"}`
   selector → line filters → `| json` → structured-metadata filters →
   `query_range` (backward, newest-first). Every matching line parses back to
-  the `AgentEventRow` shape; row `id` is a stable blake2b surrogate over
+  the `EventRow` shape; row `id` is a stable blake2b surrogate over
   (ts, line) — Loki has no numeric id. Offset pages in memory (`limit + offset
   + 1` fetched, `has_more` from the +1 lookahead); the default window is the
   last 24h.
+  `/api/events?tier=` adds one derived LogQL predicate that ORs requested
+  tiers before paging (and drops JSON parse errors first), so its list and
+  exact-count paths keep the same tier membership.
 - **`count_events()`** — the exact filtered line count (the `/api/events`
   opt-in `meta.total`, `with_total=1`): `sum(count_over_time(...))` as an *instant* query at the
   window end (range vector `[to - from]`), with `| __error__=""` so count and
