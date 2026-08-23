@@ -23,7 +23,7 @@ from psycopg import Cursor
 from pydantic import ValidationError
 
 from gateway import loki_events, loki_query_budget
-from gateway.routers import _inspect_pg, _roster_rows
+from gateway.routers import _inspect_pg, _roster_rows, _stats_dashboard
 from gateway.schemas import (
     ClusterPanel,
     MachineStatus,
@@ -85,8 +85,9 @@ def get_stats_dashboard(
 
     Data sources:
     - `live_count`: agents_meta table — all non-terminated agents (running/idling/restarting/hibernating)
-    - `tokens` / `cost_usd` / average turn duration / warning/error counts:
-      Loki's unified event stream
+    - `tokens` / `cost_usd`: telemetry `llm_usage` events in Loki (cached
+      for 30 seconds per requested window)
+    - average turn duration / warning/error counts: Loki's unified event stream
     - `total_events`: Postgres archive partition estimates (a coarse growth gauge)
 
     `?hours=` selects the aggregation window (`ts > now() - hours`), whitelisted
@@ -101,26 +102,10 @@ def get_stats_dashboard(
     now = datetime.now(UTC)
     window_start = now - timedelta(hours=hours)
     try:
-        # Cost and token fields come from the same llm_usage event snapshot.
-        # In particular, cost_usd was quoted when the call ran; do not apply
-        # today's registry prices to historical token counts at read time.
-        llm_usage_sums = {
-            field: sum(
-                _inspect_pg.query_loki_shards(
-                    window_start,
-                    now,
-                    lambda shard_start, shard_end, field=field: loki_events.attribute_aggregate(
-                        field=field,
-                        agg="sum",
-                        event_names=["llm_usage"],
-                        categories=["telemetry", "log"],
-                        from_=shard_start,
-                        to=shard_end,
-                    ),
-                )
-            )
-            for field in ("in_total", "out_total", "cache_read", "cost_usd")
-        }
+        # Cost and token fields come from the same telemetry llm_usage event
+        # snapshot. In particular, cost_usd was quoted when the call ran; do
+        # not apply today's registry prices to historical token counts at read time.
+        llm_usage_sums = _stats_dashboard.llm_usage_sums(hours, window_start, now)
         in_total = round(llm_usage_sums["in_total"])
         out_total = round(llm_usage_sums["out_total"])
         cache_read = round(llm_usage_sums["cache_read"])

@@ -52,10 +52,11 @@ class StatsDashboard(BaseModel):
 
     - `live_count`: current non-terminated count (from agents_meta, not
       events; not windowed)
-    - `tokens`: windowed LLM token usage
+    - `tokens`: windowed telemetry LLM token usage (cached for at most 30s)
     - `cost_usd`: windowed LLM spend in USD, summed from the usage-time
-      `cost_usd` snapshots carried by Loki `llm_usage` events; events that
-      pre-date the snapshot field contribute 0
+      `cost_usd` snapshots carried by telemetry Loki `llm_usage` events;
+      events that pre-date the snapshot field contribute 0 (cached for at
+      most 30s with `tokens`)
     - `avg_turn_seconds`: windowed avg LLM call wall time
       (event=turn_end + ok=true)
     - `warnings` / `errors`: level counts. Agent trial-and-error

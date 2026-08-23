@@ -14,3 +14,8 @@ Grafana's familiar `LLM cost (24h)` and `Tokens (24h)` cards keep their names
 and use panel-local `now-24h` windows, while the dashboard default remains 6h
 to bound general Loki query load. Daily, projection, model, and agent cost
 panels read the same Loki snapshot field.
+
+Update (delegator review pass 1): `llm_usage` is telemetry-only, so the status
+card applies the same category filter as every Grafana LLM panel. Its four
+windowed token/cost sums now have a 30-second per-window TTL cache, matching
+the sidebar's 5-second polling cadence without caching turn or alert gauges.
