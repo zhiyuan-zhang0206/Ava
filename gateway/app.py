@@ -71,6 +71,7 @@ from gateway import (
     _pause_policy,
     alert_reconciliation,
     events_archive,
+    loki_events,
     loki_query_budget,
     prom_metrics,
 )
@@ -644,6 +645,15 @@ async def _loki_query_budget_error_handler(
         content={"detail": f"Loki query budget unavailable ({exc.reason}); retry"},
         headers={"Retry-After": "1"},
     )
+
+
+@app.exception_handler(loki_events.ObservabilityReadUnavailable)
+async def _observability_read_unavailable_handler(
+    request: Request,  # noqa: ARG001 — FastAPI exception-handler signature
+    exc: loki_events.ObservabilityReadUnavailable,
+) -> JSONResponse:
+    """Expose a non-LGTM gateway's deliberate read isolation as a clean 503."""
+    return JSONResponse(status_code=503, content={"detail": str(exc)})
 
 
 @app.exception_handler(prom_metrics.PromQueryBudgetError)

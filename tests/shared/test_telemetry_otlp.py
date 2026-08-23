@@ -12,10 +12,12 @@ from __future__ import annotations
 
 import http.server
 import json
+import os
 import socket
 import threading
 import time
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 import psycopg
@@ -31,6 +33,17 @@ _AGENT = 8902
 def _outside_exec_child(monkeypatch: pytest.MonkeyPatch) -> None:
     """This module exercises the long-lived-process OTLP backend by default."""
     monkeypatch.delenv("AVA_EXEC_REQUEST_FILE", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _fresh_observability_export_gate() -> Any:
+    """The production gate is process-cached; tests model fresh processes."""
+    gate = getattr(telemetry_otlp, "_observability_export_allowed", None)
+    if gate is not None:
+        gate.cache_clear()
+    yield
+    if gate is not None:
+        gate.cache_clear()
 
 
 def _event(
@@ -49,6 +62,7 @@ def _event(
         span_id=span_id,
         agent_id=agent_id,
         machine="test-mac",
+        cluster=".ava-test",
         process="test-proc",
         category=category,  # type: ignore[arg-type]
         event_name=event_name,
@@ -139,11 +153,13 @@ def test_log_mapping_full_record_shape(otlp_backend) -> None:
     assert attrs["category"] == "log"
     assert attrs["level"] == "warning"
     assert attrs["machine"] == "test-mac"
+    assert attrs["cluster"] == ".ava-test"
     assert attrs["process"] == "test-proc"
     assert attrs["source"] == "test"
     assert attrs["agent_id"] == _AGENT
     body = json.loads(r.log_record.body)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
     assert body["event_name"] == "exec"
+    assert body["cluster"] == ".ava-test"
     assert body["attributes"] == {"body": "print(1)", "ok": False}
     assert body["ts"] == "2026-08-11T12:00:00+00:00"
 
@@ -178,6 +194,12 @@ def test_flush_groups_each_event_name_under_its_matching_resource(otlp_backend) 
             for attribute in resource_logs.resource.attributes
             if attribute.key == "event_name"
         )
+        resource_cluster = next(
+            attribute.value.string_value
+            for attribute in resource_logs.resource.attributes
+            if attribute.key == "cluster"
+        )
+        assert resource_cluster == ".ava-test"
         for scope_logs in resource_logs.scope_logs:
             for record in scope_logs.log_records:
                 assert (
@@ -245,6 +267,14 @@ def test_metric_mapping_int_counter_float_histogram(otlp_backend) -> None:
     assert turn["ok"] is True
 
     assert "ava_llm_usage_ok" not in metrics  # bools are attributes, not metrics
+
+
+def test_metrics_resource_carries_cluster(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(telemetry_otlp, "cluster_label", lambda: ".ava-preview")
+
+    resource = telemetry_otlp._metrics_resource()
+
+    assert resource.attributes["cluster"] == ".ava-preview"
 
 
 def test_metric_disposition_cost_counter_price_excluded(otlp_backend) -> None:
@@ -379,6 +409,75 @@ def test_enabled_follows_setting_outside_exec_child(
     monkeypatch.setattr("shared.config.settings.observability.telemetry_otlp_enabled", configured)
 
     assert telemetry_otlp._OtlpBackend._enabled() is configured
+
+
+@pytest.mark.parametrize(
+    ("marker", "endpoint_override", "expected"),
+    [
+        (False, False, False),
+        (True, False, True),
+        (False, True, True),
+    ],
+)
+def test_gateway_export_gate_requires_lgtm_marker_or_explicit_endpoint(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    marker: bool,
+    endpoint_override: bool,
+    expected: bool,
+) -> None:
+    home = tmp_path / ".ava-preview"
+    home.mkdir()
+    if marker:
+        (home / "lgtm-host").touch()
+    monkeypatch.setattr("shared.machine.machine_role", lambda: frozenset({"gateway"}))
+    monkeypatch.setattr("shared.paths.ava_home", lambda: home)
+    monkeypatch.setattr("shared.config.settings.observability.telemetry_otlp_enabled", True)
+    if endpoint_override:
+        monkeypatch.setitem(
+            os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", "http://collector.invalid:4318"
+        )
+    else:
+        monkeypatch.delitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
+    telemetry_otlp._observability_export_allowed.cache_clear()
+
+    assert telemetry_otlp._OtlpBackend._enabled() is expected
+
+    # The isolation verdict is frozen once per process, even if the marker
+    # changes later; a restart is the apply boundary.
+    if not marker and not endpoint_override:
+        (home / "lgtm-host").touch()
+        assert telemetry_otlp._OtlpBackend._enabled() is False
+
+
+def test_pure_runner_export_relay_is_not_gated(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr("shared.machine.machine_role", lambda: frozenset({"agent-runner"}))
+    monkeypatch.setattr("shared.paths.ava_home", lambda: tmp_path)
+    monkeypatch.delitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
+    monkeypatch.setattr("shared.config.settings.observability.telemetry_otlp_enabled", True)
+    telemetry_otlp._observability_export_allowed.cache_clear()
+
+    assert telemetry_otlp._OtlpBackend._enabled() is True
+
+
+@pytest.mark.parametrize("exception_name", ["MachineRoleMissing", "MachineRoleInvalid"])
+def test_unconfigured_machine_role_does_not_disable_export(
+    monkeypatch: pytest.MonkeyPatch, exception_name: str
+) -> None:
+    from shared import machine
+
+    exception_type = getattr(machine, exception_name)
+
+    def missing_role() -> frozenset[str]:
+        raise exception_type("role unavailable")
+
+    monkeypatch.setattr(machine, "machine_role", missing_role)
+    monkeypatch.setattr("shared.config.settings.observability.telemetry_otlp_enabled", True)
+    telemetry_otlp._observability_export_allowed.cache_clear()
+
+    assert telemetry_otlp._OtlpBackend._enabled() is True
 
 
 def test_warmup_initializes_enabled_backend(otlp_backend) -> None:

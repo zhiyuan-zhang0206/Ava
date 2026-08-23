@@ -139,6 +139,20 @@ processors:
     check_interval: 1s
     limit_mib: 512
     spike_limit_mib: 128
+  # The LGTM host accepts legacy records without a cluster dimension, but a
+  # co-located home that reaches its local receiver must never pollute this
+  # cluster's backends. Keep memory_limiter first; reject mismatches second.
+  filter/cluster_allow:
+    error_mode: ignore
+    traces:
+      span:
+        - 'resource.attributes["cluster"] != nil and resource.attributes["cluster"] != "$CLUSTER_LABEL"'
+    metrics:
+      metric:
+        - 'resource.attributes["cluster"] != nil and resource.attributes["cluster"] != "$CLUSTER_LABEL"'
+    logs:
+      log_record:
+        - 'resource.attributes["cluster"] != nil and resource.attributes["cluster"] != "$CLUSTER_LABEL"'
   # Session-log labeling (filelog receivers; replaces promtail's per-file
   # service label): service.name <- the file's session name (strip .out.log /
   # the -<epoch> suffix), guarded so event logs (no log.file.name) pass
@@ -235,15 +249,15 @@ service:
   pipelines:
     traces:
       receivers: [otlp]
-      processors: [memory_limiter, batch]
+      processors: [memory_limiter, filter/cluster_allow, batch]
       exporters: [otlphttp/tempo, file/traces]
     logs:
       receivers: [otlp$REMOTE_OTLP_PIPELINE_RECEIVER, filelog/sessions, filelog/orchestration]
-      processors: [memory_limiter, transform/promote_event_labels, transform/filelog_service, batch]
+      processors: [memory_limiter, filter/cluster_allow, transform/promote_event_labels, transform/filelog_service, batch]
       exporters: [otlphttp/loki]
     metrics:
       receivers: [otlp$REMOTE_OTLP_PIPELINE_RECEIVER]
-      processors: [memory_limiter, batch]
+      processors: [memory_limiter, filter/cluster_allow, batch]
       exporters: [otlphttp/prometheus]
     # Infra metrics ride their own pipeline so the host-identity processors
     # touch only them: app metrics already carry `machine`/`agent_id`

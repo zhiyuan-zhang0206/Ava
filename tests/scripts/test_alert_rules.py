@@ -163,6 +163,17 @@ def test_loki_rules_pipeline_json_before_filters() -> None:
             assert "unknown_service" in expr, f"{rule['uid']}: wrong stream selector"
 
 
+def test_loki_rules_filter_to_prod_cluster_after_json() -> None:
+    """The one LGTM host serves prod; co-located cluster events must never
+    affect its alerts, including the whole-stream freshness probe."""
+    for rule in _load_rules():
+        for expr in _exprs(rule, "loki"):
+            normalized = " ".join(expr.split())
+            assert '| json | cluster=".ava"' in normalized, (
+                f"{rule['uid']}: missing prod cluster filter after json:\n{expr}"
+            )
+
+
 @pytest.mark.parametrize(
     ("uid", "event_filter"),
     [

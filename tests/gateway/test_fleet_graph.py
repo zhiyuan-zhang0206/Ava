@@ -16,7 +16,7 @@ live, so it is exercised against a real DB here. Covers:
 """
 
 import math
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 import httpx
 import psycopg
@@ -26,6 +26,9 @@ from psycopg import errors as pg_errors
 
 from gateway import loki_events, prom_metrics, telemetry_staleness
 from gateway.app import app
+from gateway.routers import fleet_graph
+from shared.cluster import home_label
+from shared.paths import ava_home
 from tests.gateway.loki_fake import FakeLoki
 
 
@@ -171,6 +174,23 @@ def _event_loki(
         ts_offset_hours=ts_offset_hours,
         category="audit",
     )
+
+
+def test_loki_edge_tail_is_scoped_to_this_cluster(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[dict[str, object]] = []
+
+    def query_events(**kwargs: object) -> tuple[list[dict[str, object]], bool]:
+        calls.append(kwargs)
+        return [], False
+
+    monkeypatch.setattr(loki_events, "query_events", query_events)
+
+    fleet_graph._fetch_loki_edges(
+        boundary=None,
+        now=datetime(2026, 8, 24, tzinfo=UTC),
+    )
+
+    assert calls[0]["cluster"] == home_label(ava_home())
 
 
 def _nodes_by_id(client: TestClient, query: str = "") -> dict[int, dict]:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
