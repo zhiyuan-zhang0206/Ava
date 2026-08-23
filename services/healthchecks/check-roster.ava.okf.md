@@ -19,7 +19,7 @@ tags:
 | `computer_mcp.py` | Computer-use service | Unix socket protocol `ping` (lock-free; does not take the action lock) | `respawn_service` | the computer-MCP daemon's accept/read loop answers |
 | `mcp_daemon.py` | Shared MCP daemon | Unix socket protocol `ping` | `respawn_and_verify` (probe-confirmed) | the shared MCP daemon's loop answers |
 | `delivery_watchdog.py` | Delivery watchdog | HTTP `/healthz` (identity-verified) with Liveness beat | `respawn_and_verify` | our daemon's work loop is still ticking (a wedged loop 503s via Liveness) |
-| `im_bridge.py` | IM Bridge | HTTP `/healthz` (identity-verified) with Liveness beat | `respawn_and_verify` | our daemon's work loop is still ticking |
+| `im_bridge.py` | IM Bridge | HTTP `/healthz` (identity-verified); before respawn, a second bounded read accepts this unit's matching `name` + `home` even on a stale 503 or pidfile mismatch | `respawn_and_verify` | our daemon still owns and answers the health port; Liveness staleness is warning-only because an IM long poll can legitimately block the work loop |
 | `heartbeat.py` | Heartbeat | HTTP `/healthz` (identity-verified) with Liveness beat | `respawn_and_verify` | our daemon's work loop is still ticking |
 | `labeler.py` | Labeler | HTTP `/healthz` (identity-verified) with Liveness beat | `respawn_and_verify` | our daemon's work loop is still ticking |
 | `memory_indexer.py` | Memory-indexer | HTTP `/healthz` (identity-verified) with Liveness beat | `respawn_and_verify` | our daemon's work loop is still ticking |
