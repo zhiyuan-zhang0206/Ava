@@ -207,6 +207,30 @@ describe("GraphView", () => {
     }
   });
 
+  it("scales message-edge opacity across the graph's weight range", async () => {
+    useFleetGraph.mockReturnValue(
+      ok({
+        nodes: [node(1), node(2), node(3)],
+        edges: [
+          edge(1, 2, "message", { weight: 1 }),
+          edge(1, 3, "message", { weight: 2 }),
+        ],
+      }),
+    );
+    const { container } = renderGraph(
+      <GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />,
+    );
+    await waitFor(() => screen.getByText("#1"), { timeout: 4000 });
+
+    const opacities = Array.from(
+      container.querySelectorAll('svg[aria-label="Fleet relationship graph"] line'),
+      (line) => Number(line.getAttribute("stroke-opacity")),
+    ).sort((a, b) => a - b);
+    expect(opacities).toHaveLength(2);
+    expect(opacities[0]).toBeCloseTo(0.545);
+    expect(opacities[1]).toBeCloseTo(0.85);
+  });
+
   it("drops terminated nodes and their edges before rendering (task #1104)", async () => {
     // User ruling 2026-08-09: terminated agents never appear in the agents
     // graph — the component filters by liveness FIRST (mirroring the sidebar

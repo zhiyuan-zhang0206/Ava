@@ -33,7 +33,7 @@ The full stream `/api/system/all` is **always connected** (not bound to activeId
 |---|---|
 | `useAgents` | agent list + lifecycle actions — pure reader of the `["agents"]` cache; the fold owner writes it (no poll, no optimistic) |
 | `useFleetAgents` | `/fleet` read-only agents (pure-read shares `AGENTS_QUERY_KEY` cache) |
-| `useFleetGraph` | Fleet relationship graph (GraphView data source) |
+| `useFleetGraph` | Fleet relationship graph (GraphView data source); SSE invalidation + 30s reconciliation poll, served from the backend's 60s whole-response cache |
 | `useTasks` | Task Graph/Kanban data source; SSE task_created/task_updated invalidate (2s debounce) + 30s fallback poll (constant interval, does not stop on failure); **stale-while-error** — poll failure continues to serve last data, `error` separately exposed for `StaleBadge` hint |
 | `useTimeline` | timeline items (merged three sources: React Query snapshot + SSE fold + reload merge; switching back to a cached thread triggers fetch-on-enter background reconcile, see [[frontend-state.ava.okf.md|State management]]) |
 | `useTokenUsage` | context window occupancy (React Query historical value + SSE token_usage) |
