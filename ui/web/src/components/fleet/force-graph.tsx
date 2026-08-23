@@ -73,11 +73,25 @@ export function radiusOf(score: number, maxScore: number, minR: number, maxR: nu
 const ZOOM_MIN = 0.15;
 const ZOOM_MAX = 4;
 
-// Label truncation: the text block must fit inside the node with padding. 6px
-// mono glyphs are ~3.6px wide; the budget is the node's diameter minus padding.
-function fitLabel(label: string, r: number): string {
+// Label wrapping: each 6px mono glyph is ~3.6px wide. Horizontal and vertical
+// padding keep every rendered line inside the node; the id occupies line one.
+export const LABEL_LINE_HEIGHT = 7;
+
+export function wrapLabel(label: string, r: number): string[] {
   const maxChars = Math.floor((2 * r - 8) / 3.6);
-  return label.length > maxChars ? label.slice(0, Math.max(maxChars - 1, 0)) + "…" : label;
+  const maxLabelLines = Math.max(Math.floor((2 * r - 4) / LABEL_LINE_HEIGHT) - 1, 0);
+  if (maxChars <= 0 || maxLabelLines === 0 || label.length === 0) return [];
+
+  const lines: string[] = [];
+  for (let offset = 0; offset < label.length; offset += maxChars) {
+    lines.push(label.slice(offset, offset + maxChars));
+  }
+  if (lines.length <= maxLabelLines) return lines;
+
+  const visibleLines = lines.slice(0, maxLabelLines);
+  const last = visibleLines.length - 1;
+  visibleLines[last] = `${visibleLines[last].slice(0, Math.max(maxChars - 1, 0))}…`;
+  return visibleLines;
 }
 
 export const ForceGraph = memo(function ForceGraph({
@@ -424,7 +438,9 @@ export const ForceGraph = memo(function ForceGraph({
               const isHovered = hovered?.id === n.id;
               const isRinged = selectedId === n.id;
               const fill = statusText[n.status] ?? "text-slate-400";
-              const label = n.label ? fitLabel(n.label, r) : null;
+              const labelLines = n.label ? wrapLabel(n.label, r) : [];
+              const totalTextLines = 1 + labelLines.length;
+              const firstTextLineY = -((totalTextLines - 1) * LABEL_LINE_HEIGHT) / 2;
               const badgeR = Math.max(5, r * 0.4);
               return (
                 <g
@@ -511,7 +527,6 @@ export const ForceGraph = memo(function ForceGraph({
                     />
                   )}
                   <text
-                    y={label ? -3.5 : 0}
                     textAnchor="middle"
                     dominantBaseline="central"
                     className="fill-white text-[6px] font-mono font-semibold"
@@ -520,14 +535,14 @@ export const ForceGraph = memo(function ForceGraph({
                     paintOrder="stroke"
                     style={{ pointerEvents: "none" }}
                   >
-                    <tspan x={0} dominantBaseline="central">
+                    <tspan x={0} y={firstTextLineY} dominantBaseline="central">
                       #{n.id}
                     </tspan>
-                    {label ? (
-                      <tspan x={0} dy={7} dominantBaseline="central">
-                        {label}
+                    {labelLines.map((line, index) => (
+                      <tspan key={index} x={0} dy={LABEL_LINE_HEIGHT} dominantBaseline="central">
+                        {line}
                       </tspan>
-                    ) : null}
+                    ))}
                   </text>
                   {/* Needs-you badge — pending require_response notices on this
                       node's owner, colored by top priority (tasks only). */}
