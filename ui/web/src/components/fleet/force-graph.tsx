@@ -511,8 +511,8 @@ export const ForceGraph = memo(function ForceGraph({
                     textAnchor="middle"
                     dominantBaseline="central"
                     className="fill-white text-[6px] font-mono font-semibold"
-                    stroke="rgba(0,0,0,0.45)"
-                    strokeWidth={1.5}
+                    stroke="rgba(0,0,0,0.35)"
+                    strokeWidth={0.75}
                     paintOrder="stroke"
                     style={{ pointerEvents: "none" }}
                   >

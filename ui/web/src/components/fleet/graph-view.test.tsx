@@ -265,6 +265,22 @@ describe("GraphView", () => {
     expect(container.querySelector("title")?.textContent).toContain("Offline");
   });
 
+  it("flags a non-empty graph served as stale", () => {
+    useFleetGraph.mockReturnValue(ok({ nodes: [node(1)], edges: [], stale: true }));
+
+    renderGraph(<GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />);
+
+    expect(screen.getByRole("status").textContent).toBe("Stale — last known graph");
+  });
+
+  it("does not flag a fresh graph as stale", () => {
+    useFleetGraph.mockReturnValue(ok({ nodes: [node(1)], edges: [], stale: false }));
+
+    renderGraph(<GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />);
+
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
   it("merges multiple lineage kinds per pair into one edge (no duplicate React keys)", async () => {
     // The backend returns separate edges per event kind (spawn / fork /
     // resurrect) for the same pair; GraphView collapses them to the shared
