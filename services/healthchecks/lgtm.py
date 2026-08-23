@@ -5,14 +5,15 @@ Runs only on the designated LGTM host: the `$AVA_HOME/lgtm-host` marker file
 deploy/lgtm/README.md) gates this check the same way it gates the converge
 bring-up. Without the marker the check is a no-op, so a dev worktree
 cluster's watchdog never touches the host-singleton backends (fixed host
-ports, one compose project per host).
+ports, one native lifecycle per host).
 
-Probes the four readiness endpoints on the compose file's fixed host ports:
-Loki /ready, Prometheus /-/ready, Tempo /ready, Grafana /api/health. Any
-HTTP answer counts as alive (a 503 is a warming-up backend, not a dead one);
-only a connection-level failure means a backend — or the docker daemon — is
-down, and then the fix is re-running the idempotent deploy/lgtm/start.sh.
-Same connection-level contract as the otel_collector sidecar check.
+Probes the three LOCAL readiness endpoints: Loki /ready, Prometheus /-/ready,
+and Grafana /api/health. Tempo is a remote WSL service, so it is deliberately
+outside this repair loop: its failure must not restart local backends. Any HTTP
+answer counts as alive (a 503 is a warming-up backend, not a dead one); only a
+connection-level failure means a local backend is down, and then the fix is
+re-running the idempotent deploy/lgtm/start.sh. Same connection-level contract
+as the otel_collector sidecar check.
 
 The stack is the cluster's observability backend: while it is down the
 gateway's /ops + inspect reads (Loki/Prometheus), the Grafana-evaluated ops
@@ -32,19 +33,19 @@ from shared.config import settings
 from shared.log import init_gateway_process
 from shared.paths import ava_home
 
-# The four backends' readiness endpoints, on the fixed host ports. The marker
-# pins this check to the owner host, so loopback + fixed ports is the contract.
+# The locally managed backends' readiness endpoints, on their fixed host ports.
+# The marker pins this check to the owner host, so loopback + fixed ports is the
+# contract. Remote Tempo intentionally has no readiness probe here.
 READINESS_PROBES: tuple[tuple[str, str], ...] = (
     ("loki", "http://127.0.0.1:3100/ready"),
     ("prometheus", "http://127.0.0.1:9090/-/ready"),
-    ("tempo", "http://127.0.0.1:3200/ready"),
     ("grafana", "http://127.0.0.1:3003/api/health"),
 )
 
 
 def lgtm_host_marker() -> Path:
     """The machine-identity marker that designates THIS host as the one running
-    the LGTM compose stack (`$AVA_HOME/lgtm-host`, operator-created once)."""
+    the local LGTM backends (`$AVA_HOME/lgtm-host`, operator-created once)."""
     return ava_home() / "lgtm-host"
 
 
@@ -52,12 +53,12 @@ def is_lgtm_host() -> bool:
     return lgtm_host_marker().exists()
 
 
-def lgtm_compose_dir(repo: Path) -> Path:
+def lgtm_deploy_dir(repo: Path) -> Path:
     return repo / "deploy" / "lgtm"
 
 
 def _endpoint_answers(url: str) -> bool:
-    """Any HTTP answer = the container's listener is up; connection failure = down."""
+    """Any HTTP answer = the backend listener is up; connection failure = down."""
     try:
         with urllib.request.urlopen(url, timeout=2.0):  # noqa: S310 — loopback probe, deliberate
             return True
@@ -68,7 +69,7 @@ def _endpoint_answers(url: str) -> bool:
 
 
 def probe_statuses() -> list[tuple[str, bool]]:
-    """(backend name, listener answered) for each of the four readiness probes."""
+    """(backend name, listener answered) for each local readiness probe."""
     return [(name, _endpoint_answers(url)) for name, url in READINESS_PROBES]
 
 
@@ -82,7 +83,7 @@ def _restart_stack() -> bool:
     repo = settings.services.project_root or Path(__file__).resolve().parent.parent.parent
     result = subprocess.run(
         ["bash", "start.sh"],
-        cwd=lgtm_compose_dir(repo),
+        cwd=lgtm_deploy_dir(repo),
         capture_output=True,
         text=True,
         check=False,

@@ -93,11 +93,9 @@ then use `ava lgtm off` followed by `ava lgtm on`. This is deliberate: the
 watchdog does not restart a working backend just to apply a configuration
 change.
 
-The container path is a manual rollback: restore the earlier
-`docker-compose.yml` and backend configs from git, then run
-`docker compose up -d`. Retained compose data volumes remain rollback assets;
-Promtail's native binary and positions path are no longer part of the stack
-because collector filelog receivers replace them.
+Tempo is remote and selected by `AVA_TELEMETRY_TEMPO_ENDPOINT`; the local
+lifecycle neither probes it nor manages it. The collector's filelog receivers
+ship session and orchestration logs directly to Loki.
 
 ## Session logs in Loki
 

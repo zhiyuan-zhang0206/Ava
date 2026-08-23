@@ -1,12 +1,13 @@
-"""`ava lgtm on|off|status` — the observability-stack toggle.
+"""`ava lgtm on|off|status` — the native observability-stack toggle.
 
-No docker: subprocess/shutil are monkeypatched; under test is the marker
-lifecycle (on writes it, off removes it BEFORE stopping — else the gateway
-watchdog would resurrect the containers) and the script wiring.
+Under test is the marker lifecycle (on writes it, off removes it BEFORE
+stopping — else the gateway watchdog would resurrect local backends), script
+wiring, and the native status view.
 """
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
 import pytest
@@ -19,18 +20,29 @@ class _Result:
     returncode = 0
 
 
+def _fail_on_docker_query(_name: str) -> None:
+    pytest.fail("native lifecycle must not query the Docker CLI")
+
+
+def _fake_backend_pids(_native_dir: Path) -> dict[str, str | None]:
+    return {"loki": "101", "prometheus": None}
+
+
+def _fail_run(*_args: object, **_kwargs: object) -> None:
+    pytest.fail("native status must not run a container command")
+
+
 def _wire(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> tuple[Path, list[tuple[list[str], Path]]]:
-    """Point marker + compose dir at tmp, record subprocess invocations."""
+    """Point marker + deploy dir at tmp, record subprocess invocations."""
     marker = tmp_path / "home" / "lgtm-host"
     marker.parent.mkdir(parents=True, exist_ok=True)
-    compose_dir = tmp_path / "repo" / "deploy" / "lgtm"
-    compose_dir.mkdir(parents=True, exist_ok=True)
+    deploy_dir = tmp_path / "repo" / "deploy" / "lgtm"
+    deploy_dir.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(_lgtm, "lgtm_host_marker", lambda: marker)
-    monkeypatch.setattr(_lgtm, "lgtm_compose_dir", lambda _repo: compose_dir)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(_lgtm, "lgtm_deploy_dir", lambda _repo: deploy_dir)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     monkeypatch.setattr(commands_ns, "_repo_root", lambda: tmp_path / "repo")
-    monkeypatch.setattr(_lgtm.shutil, "which", lambda _name: "/usr/local/bin/docker")  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
 
     def noop_native(_repo: Path, _home: Path) -> None:
         return None
@@ -97,9 +109,10 @@ def test_on_installs_native_backends_before_starting(
 
 def test_off_removes_marker_then_stops(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """The marker must be gone by the time stop.sh runs — with it still in
-    place the gateway watchdog brings the containers back within a minute."""
+    place the gateway watchdog brings local backends back within a minute."""
     marker, calls = _wire(monkeypatch, tmp_path)
     marker.touch()
+    monkeypatch.setattr(shutil, "which", _fail_on_docker_query)
 
     marker_present_at_stop: list[bool] = []
 
@@ -123,13 +136,15 @@ def test_off_without_marker_still_stops(monkeypatch: pytest.MonkeyPatch, tmp_pat
     assert [c[0] for c in calls] == [["bash", "stop.sh"]]
 
 
-def test_on_without_docker_fails_fast(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_on_without_docker_starts_native_backends(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     marker, calls = _wire(monkeypatch, tmp_path)
-    monkeypatch.setattr(_lgtm.shutil, "which", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(shutil, "which", _fail_on_docker_query)
 
-    assert _lgtm.cmd_lgtm_on() == 1
-    assert not marker.exists()
-    assert calls == []
+    assert _lgtm.cmd_lgtm_on() == 0
+    assert marker.exists()
+    assert [command for command, _cwd in calls] == [["bash", "start.sh"]]
 
 
 def test_status_without_marker_says_so(
@@ -140,3 +155,27 @@ def test_status_without_marker_says_so(
 
     assert _lgtm.cmd_lgtm_status() == 0
     assert "not the LGTM host" in capsys.readouterr().out
+
+
+def test_status_reports_native_jobs_without_docker(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The native PID helper is the status source; no container query remains."""
+    _wire(monkeypatch, tmp_path)
+    monkeypatch.setattr(_lgtm, "is_lgtm_host", lambda: True)
+    monkeypatch.setattr(_lgtm_native, "backend_pids", _fake_backend_pids)
+    monkeypatch.setattr(
+        _lgtm,
+        "probe_statuses",
+        lambda: [("loki", True), ("prometheus", True), ("grafana", False)],
+    )
+    monkeypatch.setattr(shutil, "which", _fail_on_docker_query)
+    monkeypatch.setattr(_lgtm.subprocess, "run", _fail_run)
+
+    assert _lgtm.cmd_lgtm_status() == 0
+    output = capsys.readouterr().out
+    assert "com.ava.loki      101" in output
+    assert "com.ava.prometheus not-running" in output
+    assert "✓ loki readiness" in output
+    assert "✗ grafana readiness" in output
+    assert "docker" not in output.lower()
