@@ -19,9 +19,10 @@ the platform backend rather than the host, so they run anywhere.
 
 from __future__ import annotations
 
+import logging
 import subprocess as _sp
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
 
 import pytest
@@ -68,6 +69,30 @@ class _FakeSessionBackend:
         return sorted(n for n in self.alive if n.startswith(prefix))
 
 
+def _successful_fetch(
+    _argv: Sequence[str],
+    *,
+    timeout: float,
+    capture_output: bool = False,
+    **popen_kwargs: object,
+) -> _sp.CompletedProcess[str]:
+    """Return the fetch result irrelevant to session-spawn shape tests."""
+    return _sp.CompletedProcess(["git", "fetch", "origin"], 0, "", "")
+
+
+def _failed_fetch(
+    _argv: Sequence[str],
+    *,
+    timeout: float,
+    capture_output: bool = False,
+    **popen_kwargs: object,
+) -> _sp.CompletedProcess[str]:
+    """Return a failed fetch so the warning path remains observable."""
+    return _sp.CompletedProcess(
+        ["git", "fetch", "origin"], 128, "", "fatal: unable to access origin"
+    )
+
+
 @pytest.fixture(autouse=True)
 def _pin_session_names(monkeypatch: pytest.MonkeyPatch) -> None:
     """Deterministic session names + empty env forwarding, matching
@@ -94,6 +119,7 @@ def native_host(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[_Fa
         )
 
     monkeypatch.setattr(cluster_deploy.subprocess, "run", _run)
+    monkeypatch.setattr(cluster_deploy, "run_bounded", _successful_fetch)
     monkeypatch.setattr("shared.migrations.validate_migrations_at_ref", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType]
     yield backend
 
@@ -119,6 +145,7 @@ def posix_native_host(
         )
 
     monkeypatch.setattr(cluster_deploy.subprocess, "run", _run)
+    monkeypatch.setattr(cluster_deploy, "run_bounded", _successful_fetch)
     yield backend
 
 
@@ -250,6 +277,22 @@ def test_the_posix_updater_command_carries_no_marker(
     cluster_mod.spawn_update(restart_only=True)
 
     assert uo._RUN_MARKER not in posix_native_host.spawned[0][1]
+
+
+@pytest.mark.real_cluster_spawn
+def test_spawn_update_logs_nonzero_validate_fetch(
+    native_host: _FakeSessionBackend,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A failed best-effort fetch remains visible before validation fails closed."""
+    monkeypatch.setattr(cluster_deploy, "run_bounded", _failed_fetch)
+
+    with caplog.at_level(logging.WARNING, logger="ops.cluster_deploy"):
+        cluster_mod.spawn_update()
+
+    assert "rc=128" in caplog.text
+    assert "fatal: unable to access origin" in caplog.text
 
 
 @pytest.mark.real_cluster_spawn
