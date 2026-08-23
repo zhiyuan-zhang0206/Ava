@@ -198,9 +198,9 @@ consumers: see the comments at each emit point.
 | `silent_idle` | silent idle verdict | noise | — | — | 90d | events |
 | `last_msg` | last-message check | noise | — | — | 90d | events |
 | `gateway_latency` | gateway endpoint latency — 60s aggregate per route (p50/p95/max/count) | noise | route, p50_ms, p95_ms, max_ms, count | — | 90d | events |
-| `telemetry_read_stale` | read-side telemetry staleness detected — heartbeat older than threshold | observation | source, signal, threshold_s, age_s, action, reason | — | 90d | events |
+| `telemetry_read_stale` | read-side telemetry staleness detected — heartbeat older than threshold | anomaly | source, signal, threshold_s, age_s, action, reason | — | 90d | events |
 | `telemetry_read_recovered` | read-side telemetry heartbeat recovered | observation | source, signal, stale_duration_s | — | 90d | events |
-| `otlp_backend_disabled` | OTLP backend disabled for this process (init failure / collector unreachable); retry scheduled | observation | reason, endpoint | — | 90d | events |
+| `otlp_backend_disabled` | OTLP backend disabled for this process (init failure / collector unreachable); retry scheduled | anomaly | reason, endpoint | — | 90d | events |
 | `otlp_backend_recovered` | OTLP backend brought up after a disabled episode (periodic retry) | observation | endpoint, disabled_s | — | 90d | events |
 | `loki_query_budget` | local Loki query-admission transition and capacity metrics | noise | outcome, active, queued, high_water, wait_ms, acquired, queue_full, wait_timeout | — | 90d | events |
 

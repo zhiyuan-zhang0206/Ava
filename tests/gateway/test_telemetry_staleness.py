@@ -14,6 +14,8 @@ from shared import telemetry
 @pytest.fixture(autouse=True)
 def _isolated_source_state(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(telemetry_staleness, "_source_states", {})
+    monkeypatch.setattr(telemetry_staleness, "_check_state", telemetry_staleness._CheckState())
+    monkeypatch.setattr(telemetry_staleness, "CHECK_INTERVAL_S", 0, raising=False)
 
 
 def test_prometheus_heartbeat_age_reads_newest_sample(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -127,6 +129,35 @@ def test_check_reports_stale_rate_limits_and_recovers(monkeypatch: pytest.Monkey
             "stale_duration_s": 360.0,
         },
     )
+
+
+def test_check_throttles_heartbeat_queries(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = {"prometheus": 0, "loki": 0}
+    monotonic_times = iter((100.0, 100.1, 160.1))
+
+    def heartbeat_age(source: str) -> float:
+        calls[source] += 1
+        return 30.0
+
+    def prometheus_age(*, timeout_s: float | None = None) -> float:
+        del timeout_s
+        return heartbeat_age("prometheus")
+
+    def loki_age(*, timeout_s: float | None = None) -> float:
+        del timeout_s
+        return heartbeat_age("loki")
+
+    monkeypatch.setattr(telemetry_staleness, "CHECK_INTERVAL_S", 60)
+    monkeypatch.setattr(telemetry_staleness.time, "monotonic", lambda: next(monotonic_times))
+    monkeypatch.setattr(telemetry_staleness, "prometheus_heartbeat_age", prometheus_age)
+    monkeypatch.setattr(telemetry_staleness, "loki_heartbeat_age", loki_age)
+
+    assert telemetry_staleness.check_and_report() is False
+    assert telemetry_staleness.check_and_report() is False
+    assert calls == {"prometheus": 1, "loki": 1}
+
+    assert telemetry_staleness.check_and_report() is False
+    assert calls == {"prometheus": 2, "loki": 2}
 
 
 def test_check_fail_open_when_heartbeat_queries_raise(monkeypatch: pytest.MonkeyPatch) -> None:

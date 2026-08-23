@@ -883,6 +883,7 @@ EVENTS: dict[str, EventSpec] = {
         "telemetry_read_stale",
         "read-side telemetry staleness detected — heartbeat older than threshold",
         payload=TelemetryReadStale,
+        tier="anomaly",
     ),
     "telemetry_read_recovered": _telemetry(
         "telemetry_read_recovered",
@@ -893,6 +894,7 @@ EVENTS: dict[str, EventSpec] = {
         "otlp_backend_disabled",
         "OTLP backend disabled for this process (init failure / collector unreachable); retry scheduled",
         payload=OtlpBackendDisabled,
+        tier="anomaly",
     ),
     "otlp_backend_recovered": _telemetry(
         "otlp_backend_recovered",

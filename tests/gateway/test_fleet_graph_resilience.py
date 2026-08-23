@@ -63,6 +63,7 @@ def _fresh_telemetry_heartbeat(monkeypatch: pytest.MonkeyPatch) -> None:
         _fresh_heartbeat_age,
     )
     monkeypatch.setattr(telemetry_staleness, "_source_states", {})
+    monkeypatch.setattr(telemetry_staleness, "CHECK_INTERVAL_S", 0, raising=False)
 
 
 def _seed_agent(db_conn: psycopg.Connection) -> int:
@@ -163,7 +164,8 @@ def test_stale_heartbeat_marks_response_and_skips_all_cache_writes(
         attributes: dict[str, object],
         **_kwargs: object,
     ) -> None:
-        emitted.append((event_name, attributes))
+        if event_name == "telemetry_read_stale":
+            emitted.append((event_name, attributes))
 
     monkeypatch.setattr(telemetry, "emit", capture_emit)
 

@@ -11,6 +11,10 @@ times the 15-second metric export interval: a 45-second deadline for a 60-second
 heartbeat would alert during healthy operation. Missing or old samples mark
 read responses stale and emit transition events; check failures themselves fail
 open because each read path owns backend-outage degradation separately.
+
+The five-minute threshold is coarse enough that checking once per minute cannot
+miss it. The check cadence keeps this guard off the fleet graph's cold-path hot
+loop while still detecting staleness before the next threshold-sized window.
 """
 
 from __future__ import annotations
@@ -28,6 +32,7 @@ from shared.log import logger
 HEARTBEAT_EVENT = "gateway_latency"
 HEARTBEAT_METRIC = "ava_gateway_latency_count_total"
 STALENESS_THRESHOLD_S = 300
+CHECK_INTERVAL_S = 60
 
 
 @dataclass
@@ -36,7 +41,14 @@ class _SourceState:
     last_reported: float
 
 
+@dataclass
+class _CheckState:
+    last_check_monotonic: float | None = None
+    last_stale: bool = False
+
+
 _source_states: dict[str, _SourceState] = {}
+_check_state = _CheckState()
 _state_lock = threading.Lock()
 
 
@@ -126,23 +138,32 @@ def check_and_report(*, now: datetime | None = None, timeout_s: float = 3.0) -> 
 
     Each source is checked independently. A heartbeat-query exception is not a
     staleness verdict: it is logged at debug, left out of this poll's result,
-    and does not mutate transition state.
+    and does not mutate transition state. The combined fail-open verdict is
+    cached on a monotonic cadence alongside successful checks.
     """
-    try:
-        now_s = (now or datetime.now(UTC)).timestamp()
-    except Exception as exc:
-        logger.debug("telemetry heartbeat check could not read the clock: {}", exc)
-        return False
-    stale = False
-    checks = (
-        ("prometheus", prometheus_heartbeat_age),
-        ("loki", loki_heartbeat_age),
-    )
-    for source, heartbeat_age in checks:
+    with _state_lock:
+        checked_at = time.monotonic()
+        if (
+            _check_state.last_check_monotonic is not None
+            and checked_at - _check_state.last_check_monotonic < CHECK_INTERVAL_S
+        ):
+            return _check_state.last_stale
         try:
-            age_s = heartbeat_age(timeout_s=timeout_s)
-            with _state_lock:
-                stale = _report_source(source=source, age_s=age_s, now_s=now_s) or stale
+            now_s = (now or datetime.now(UTC)).timestamp()
         except Exception as exc:
-            logger.debug("telemetry heartbeat check failed for {}: {}", source, exc)
-    return stale
+            logger.debug("telemetry heartbeat check could not read the clock: {}", exc)
+            return False
+        stale = False
+        checks = (
+            ("prometheus", prometheus_heartbeat_age),
+            ("loki", loki_heartbeat_age),
+        )
+        for source, heartbeat_age in checks:
+            try:
+                age_s = heartbeat_age(timeout_s=timeout_s)
+                stale = _report_source(source=source, age_s=age_s, now_s=now_s) or stale
+            except Exception as exc:
+                logger.debug("telemetry heartbeat check failed for {}: {}", source, exc)
+        _check_state.last_check_monotonic = checked_at
+        _check_state.last_stale = stale
+        return stale
