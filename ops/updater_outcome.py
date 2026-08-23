@@ -59,6 +59,7 @@ from pydantic import BaseModel
 
 import shared.paths
 from shared.exit_codes import RESTART_DECLINED_EXIT_CODE
+from shared.platform import IS_WINDOWS
 
 # How much of the log's tail to classify. The markers are the last few lines of a
 # finished run; reading the whole file would mean loading an arbitrarily large log
@@ -130,26 +131,29 @@ class UpdaterOutcome(BaseModel):
 def updater_log_candidates(session: str) -> list[Path]:
     """Every file `session`'s output could be landing in, newest-relevant first.
 
-    **Two candidates, because the updater's output does not land in the same place
-    on both platforms.** The POSIX updater pipes itself through
+    **The platforms have different authoritative logs.** The POSIX updater pipes itself through
     ``tee -a $AVA_HOME/logs/updater-<epoch>.log``; the Windows supervisor owns the
     redirect instead and appends to ``$AVA_HOME/logs/ava-updater.out.log``
     (`SessionBackend.session_log_path`), so the `updater-*.log` glob **is never
     written on Windows** — verified on the fleet box: `spawn_update` logs that
     path, and no file by that name exists in the log directory.
 
-    That is what made the stall timeout structurally inert on the one platform
-    whose legs are slow enough to need it, and it is the same trap for anything
-    else that reads the updater's output. Both readers go through this list.
+    A POSIX tee file holds exactly one run, so it is authoritative whenever it
+    exists. On 2026-08-24, appending the shared backend log let its microscopically
+    newer mtime select a previous run's ``rc=0`` while the tee file still held this
+    run's partial output; Phase B then falsely declared the live updater stalled.
+    The backend log remains the fallback without a tee file and the Windows source,
+    whose per-run marker is narrowed by `_anchor_to_this_run`.
     """
     from shared.session_backend import get_backend
 
-    candidates = sorted((shared.paths.ava_home() / "logs").glob("updater-*.log"))[-1:]
+    per_run_logs = sorted((shared.paths.ava_home() / "logs").glob("updater-*.log"))[-1:]
+    candidates = list(per_run_logs)
     try:
         backend_log = get_backend().session_log_path(session)
     except Exception:  # fail-fast-ok: backend unavailable — the tee'd log is all we have
         backend_log = None
-    if backend_log is not None:
+    if backend_log is not None and (IS_WINDOWS or not per_run_logs):
         candidates.append(backend_log)
     return candidates
 

@@ -62,6 +62,7 @@ import psutil
 
 from shared.log import logger
 from shared.paths import logs_dir, run_dir
+from shared.platform import IS_WINDOWS
 from shared.session_record import SessionRecord
 from shared.winjob import in_attached_exec_job
 
@@ -391,6 +392,21 @@ def _spared_pids(name: str, proc: psutil.Process) -> frozenset[int]:
       was already reaped, so the fix does not depend on on-disk state.
     """
     return frozenset(_live_session_pids(name) | _self_ancestry_below(proc.pid))
+
+
+def tree_kill_would_spare(session_name: str, proc: psutil.Process, ancestor_pids: set[int]) -> bool:
+    """Whether killing `session_name`'s tree leaves this lineage untouched.
+
+    POSIX launch reparenting already isolates sessions, so a recorded session in
+    a lineage is always reached by its stop tree. Windows needs the opposite
+    answer: `_spared_pids` preserves nested live sessions and the kill caller's
+    ancestry, the 2026-07-29 boundary that keeps an updater alive while it stops
+    its `ava-ops` parent. The 2026-08-24 restart guard asks this same predicate
+    rather than trying to duplicate the kill path's boundary.
+    """
+    if not IS_WINDOWS:
+        return False
+    return bool(_spared_pids(session_name, proc) & ancestor_pids)
 
 
 def _descendants(proc: psutil.Process, *, spare: frozenset[int]) -> list[psutil.Process]:
