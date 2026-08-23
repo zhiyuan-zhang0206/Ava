@@ -168,7 +168,7 @@ def ingest_alerts(body: AlertWebhookPayload, request: Request) -> AlertIngestRes
                 pending.append((key, _notify_text(alert, lang)))
         conn.commit()
 
-    _publish_rows(rows)
+    publish_alert_rows(rows)
 
     if pending:
         with request.app.state.db_pool.connection() as conn:
@@ -183,7 +183,7 @@ def ingest_alerts(body: AlertWebhookPayload, request: Request) -> AlertIngestRes
     )
 
 
-def _publish_rows(rows: list[dict[str, Any]]) -> None:
+def publish_alert_rows(rows: list[dict[str, Any]]) -> None:
     """Publish each upserted row to the SSE channel (best-effort).
 
     A Redis outage must not fail the ingest — the SSE stream is a live tail

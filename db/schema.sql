@@ -409,7 +409,7 @@ CREATE TABLE agent_model_tokens_daily (
 -- severity: critical / warning / error (all three push to IM).
 -- status: unresolved / resolved only — no ack, no escalation.
 -- Dedup key (fingerprint, starts_at): Alertmanager re-sends the same instance
--- every group_interval while firing, and once more on resolution. fingerprint
+-- while firing according to notification policy, and once more on resolution. fingerprint
 -- is the Alertmanager-standard fnv-1a hash over sorted labels; the ingest
 -- computes it when a direct writer omits it. read_at carries the top-bar
 -- unread badge; notified_at stamps a landed IM send.

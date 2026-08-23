@@ -67,7 +67,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 import shared.db
-from gateway import _idempotency, _latency, _pause_policy, loki_query_budget
+from gateway import _idempotency, _latency, _pause_policy, alert_reconciliation, loki_query_budget
 from gateway import mcp_endpoint as _mcp_endpoint
 from gateway.routers import (
     _machine_pause as machine_pause_router,
@@ -242,6 +242,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # Cheap when the proxy is disabled: no connection exists until the first
     # proxied request.
     app.state.grafana_client = grafana_router.build_proxy_client()
+    app.state.alert_reconciler = alert_reconciliation.start_grafana_alert_reconciler(
+        app.state.db_pool,
+        app.state.grafana_client,
+        alerts_router.publish_alert_rows,
+    )
 
     # Register the OS-level health-probe cron (launchd plist on macOS, crontab
     # on Linux). This is the primary registration path — every gateway start
@@ -310,6 +315,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
             yield
     finally:
         app.state.mcp_manager = None
+        await alert_reconciliation.stop_grafana_alert_reconciler(app.state.alert_reconciler)
         await app.state.grafana_client.aclose()
         app.state.latency_flusher.cancel()
         with suppress(asyncio.CancelledError):

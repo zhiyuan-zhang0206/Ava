@@ -21,6 +21,7 @@ Ava cluster HTTP API gateway—FastAPI service running on **port 8000** (loopbac
 - **Agent lifecycle management**: unified handling of spawn, send_message, terminate, resurrect, restart via `/api/agents/*`
 - **Eval result boundary**: artifact-read endpoints reject eval-isolated callers from their stored per-agent configuration, so bypassing the SDK cannot expose another run's transcript, activity, events, memory search, or task results
 - **SSE event push**: Redis pub/sub → SSE bridge, pushing agent events to the browser in real time
+- **Alert truth reconciliation**: startup + five-minute reads of Grafana's active Alertmanager instances repair stored alert resolutions whose one-shot webhook was lost
 - **Schedule keep-alive**: built-in ScheduleManager, keeping schedule resident processes alive in their own sessions (not a timer trigger — timing logic is inside the script, the manager only ensures stay-up)
 - **Cluster ops API**: cluster, config, inventory, metrics, system and other management endpoints
 - **Per-agent command views**: `GET /api/commands?agent_id=` resolves the agent's runner then asks its `agent_skill_view` op for the command catalog that runner discovers from its own converged load dir plus the agent's persisted cwd; an unavailable, unknown, or version-skewed runner falls back to the gateway-local catalog
@@ -53,6 +54,7 @@ Browser (frontend:3000) ──HTTP──▶ Gateway (:8000) ──▶ Postgres /
 ## Entry Points
 
 - `gateway/app.py` — FastAPI application definition, lifespan, middleware, route mounting
+- `gateway/alert_reconciliation.py` — fail-closed Grafana active-instance reconciliation for the alert store
 - `gateway/__main__.py` — `.venv/bin/python -m gateway` → uvicorn
 - `scripts/start_gateway.py` — canonical launch script (per `gateway/app.py` docstring)
 
