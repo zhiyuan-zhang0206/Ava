@@ -356,7 +356,7 @@ class _EventPipeline:
         self._batch_size = batch_size
         self._flush_interval_s = flush_interval_s
         self._queue: queue.Queue[Event | None | _SyncMarker] = queue.Queue(maxsize=queue_maxsize)
-        self.dropped = 0  # records shed because the queue was full, process lifetime
+        self.dropped = 0  # records shed because the queue was full since the last flush
         # enqueue() runs on producer threads while _flush() (drain thread)
         # reads and zeroes the counter — `+=` is not atomic under the GIL, so
         # the read-modify-write pair is serialized.
