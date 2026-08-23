@@ -316,4 +316,13 @@ describe("FleetView (mobile)", () => {
     // Should restore to the Inbox tab.
     expect(screen.getByRole("tab", { name: /Inbox/, selected: true })).toBeTruthy();
   });
+
+  it("deep link #inbox selects the Inbox tab on mobile", () => {
+    window.location.hash = "#inbox";
+    agentsMock.mockReturnValue([makeAgent({ agent_id: 1, label: "lead" })]);
+    wrap(<FleetView />);
+    expect(screen.getByRole("tab", { name: /Inbox/, selected: true })).toBeTruthy();
+    expect(screen.getByRole("list", { name: /inbox queue/i })).toBeTruthy();
+    window.location.hash = "";
+  });
 });

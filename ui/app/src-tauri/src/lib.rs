@@ -47,7 +47,8 @@ pub fn run() {
     let builder = builder
         .plugin(tauri_plugin_notification::init())
         .plugin(android::background_plugin())
-        .plugin(android::secret_plugin());
+        .plugin(android::secret_plugin())
+        .plugin(android::click_plugin());
 
     builder
         .invoke_handler(tauri::generate_handler![
@@ -57,6 +58,7 @@ pub fn run() {
             commands::shell_retry_entry,
             commands::shell_open_settings,
             commands::shell_notify,
+            commands::shell_take_pending_click,
         ])
         .setup(|app| {
             let handle = app.handle();

@@ -40,7 +40,8 @@ import { BAR_HEIGHT_CLASS, FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/li
 // surface am I looking at right now"), not a durable preference — so it stays
 // in localStorage rather than syncing to the DB across frontends. Written
 // post-mount only (SSR renders the default; reading localStorage during render
-// would mismatch hydration).
+// would mismatch hydration). The Inbox deep link is the exception: it writes
+// the tab because it is the user's current surface choice.
 const LS_MOBILE_TAB = "ava.fleet.mobileTab";
 // The desktop left-panel view (Graph vs Task Graph) and the collapsed-queue
 // choice ARE durable preferences — DB-backed (display.fleet_left_view /
@@ -73,6 +74,14 @@ export function FleetView() {
       // ignore malformed / unavailable storage — fall back to defaults
     }
     hydrated.current = true;
+  }, []);
+  useEffect(() => {
+    const hash = window.location.hash;
+    const tab = new URLSearchParams(window.location.search).get("tab");
+    if (hash === "#inbox" || tab === "inbox") {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- The route identifies the mobile surface selected by the user.
+      setMobileTab("inbox");
+    }
   }, []);
   useEffect(() => {
     if (hydrated.current) localStorage.setItem(LS_MOBILE_TAB, mobileTab);

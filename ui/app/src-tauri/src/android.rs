@@ -21,6 +21,8 @@ const BACKGROUND_PLUGIN_CLASS: &str = "AvaBackgroundPlugin";
 const BACKGROUND_PLUGIN_NAME: &str = "avabackground";
 const SECRET_PLUGIN_CLASS: &str = "AvaSecretPlugin";
 const SECRET_PLUGIN_NAME: &str = "avasecret";
+const CLICK_PLUGIN_CLASS: &str = "AvaClickPlugin";
+const CLICK_PLUGIN_NAME: &str = "avaclick";
 
 /// `run_mobile_plugin` must never be called on the Android main thread: the
 /// JNI round-trip is serviced by the main looper, so a main-thread call
@@ -37,6 +39,11 @@ struct BackgroundPlugin<R: Runtime>(PluginHandle<R>);
 /// an empty secret when saving: storing a credential must fail closed.
 #[derive(Clone)]
 struct SecretPlugin<R: Runtime>(PluginHandle<R>);
+
+/// Managed handle to the notification-click mailbox. A missing overlay means
+/// the shell continues without notification deep-link capture.
+#[derive(Clone)]
+struct ClickPlugin<R: Runtime>(PluginHandle<R>);
 
 #[derive(serde::Deserialize)]
 struct StoredSecret {
@@ -74,6 +81,44 @@ pub fn secret_plugin<R: Runtime>() -> TauriPlugin<R> {
             Ok(())
         })
         .build()
+}
+
+/// Register the Kotlin notification-click plugin.
+pub fn click_plugin<R: Runtime>() -> TauriPlugin<R> {
+    PluginBuilder::new(CLICK_PLUGIN_NAME)
+        .setup(|app, api| {
+            match api.register_android_plugin(PLUGIN_PACKAGE, CLICK_PLUGIN_CLASS) {
+                Ok(handle) => {
+                    app.manage(ClickPlugin(handle));
+                }
+                // A missing class means the Android overlay was not applied.
+                // The shell still starts; it simply cannot capture click taps.
+                Err(err) => log::error!("notification-click plugin unavailable: {err}"),
+            }
+            Ok(())
+        })
+        .build()
+}
+
+/// Consume the pending notification click, if the Android overlay is present.
+pub async fn take_pending_click<R: Runtime>(app: &AppHandle<R>) -> Option<bool> {
+    let Some(plugin) = app
+        .try_state::<ClickPlugin<R>>()
+        .map(|plugin| plugin.0.clone())
+    else {
+        return None;
+    };
+    // See the Android main-thread rule above: never use run_mobile_plugin here.
+    match plugin
+        .run_mobile_plugin_async::<serde_json::Value>("takePendingClick", serde_json::json!({}))
+        .await
+    {
+        Ok(result) => result.get("pending").and_then(serde_json::Value::as_bool),
+        Err(err) => {
+            log::error!("could not consume notification click: {err}");
+            None
+        }
+    }
 }
 
 /// Start or stop the foreground service without blocking the Android looper.
