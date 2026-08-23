@@ -1012,7 +1012,7 @@
    }
   },
   {
-   "collapsed": true,
+   "collapsed": false,
    "gridPos": {
     "h": 1,
     "w": 24,
@@ -2157,7 +2157,7 @@
    ]
   },
   {
-   "collapsed": true,
+   "collapsed": false,
    "gridPos": {
     "h": 1,
     "w": 24,
@@ -3446,7 +3446,7 @@
    ]
   },
   {
-   "collapsed": true,
+   "collapsed": false,
    "gridPos": {
     "h": 1,
     "w": 24,
@@ -4004,7 +4004,7 @@
    ]
   },
   {
-   "collapsed": true,
+   "collapsed": false,
    "gridPos": {
     "h": 1,
     "w": 24,
@@ -4571,7 +4571,7 @@
    ]
   },
   {
-   "collapsed": true,
+   "collapsed": false,
    "gridPos": {
     "h": 1,
     "w": 24,
