@@ -1134,7 +1134,7 @@ What the operator watches, and where it reads:
 | LLM / gateway / turn latency p95-p99 | Grafana `ava-ops-main`, Prometheus `ava_*` histograms | R4 (LLM p95) |
 | Error and warning volume | Loki event stream | R1, R6 |
 | Delivery and event-pipeline health | Loki | R2, R5 |
-| Host CPU / memory / load | Grafana `ava-host-dataplane`, `job="ava-infra"` | R8, R9 |
+| Host CPU / memory / load | Grafana `ava-ops-main` ("Host & data plane" section), `job="ava-infra"` | R8, R9 |
 | Per-volume disk | same, `system_filesystem_utilization_ratio` | R10 (and R7, its trace-recording consequence) |
 | Data-plane saturation | same, `postgresql_*` / `redis_*` | R11, R12 |
 

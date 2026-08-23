@@ -65,7 +65,7 @@ describe("Ops tab (Grafana embed)", () => {
   it("renders at full embed height (no inner scrollbar)", () => {
     mockResolvedTheme.mockReturnValue("dark");
     wrap(<OpsPage />);
-    expect(frame().style.height).toBe("5770px");
+    expect(frame().style.height).toBe("8050px");
   });
 
   // The embed height is a fixed constant tied to the dashboard's gridPos

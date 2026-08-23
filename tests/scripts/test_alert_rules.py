@@ -47,6 +47,10 @@ _EXPECTED_UIDS = {
     "ava-ops-events-freshness",
     "ava-ops-trace-disk-watermark",
     "ava-ops-llm-billing-quota",
+    # slow-request layer (task #1399) — user-visible latency, warning-first
+    "ava-ops-gateway-latency-route-warning",
+    "ava-ops-gateway-latency-route-error",
+    "ava-ops-turn-duration-p95",
     # infrastructure layer (issue #46) — the sidecar's own scrapes
     "ava-ops-host-cpu-saturated",
     "ava-ops-host-memory-pressure",
@@ -390,3 +394,56 @@ def test_every_rule_is_silent_on_no_data_and_datasource_error() -> None:
     for rule in _load_rules():
         assert rule["noDataState"] == "OK", rule["uid"]
         assert rule["execErrState"] == "OK", rule["uid"]
+
+
+def test_gateway_latency_rules_scope_to_fast_routes() -> None:
+    """R17's two tiers (3s warning / 10s error) alert on UI-facing quick
+    reads only: the LLM-bound message route and the slow-by-design API routes
+    are excluded from the route selector — their latency is intrinsic, not a
+    degradation. Both tiers share the selector, differ only in threshold."""
+    rules = {r["uid"]: r for r in _load_rules()}
+    for uid in ("ava-ops-gateway-latency-route-warning", "ava-ops-gateway-latency-route-error"):
+        rule = rules[uid]
+        expr = _exprs(rule, "loki")[0]
+        assert 'event_name="gateway_latency"' in expr
+        assert "attributes_route !~" in expr
+        assert "/api/agents/.*/messages" in expr
+        assert "unwrap attributes_p95_ms" in expr
+        assert "max by (attributes_route)" in expr
+        assert rule["for"] == "5m"
+        assert rule["labels"]["notify_im"] == "false"
+    assert _threshold_params(rules["ava-ops-gateway-latency-route-warning"]) == [[3000]]
+    assert _threshold_params(rules["ava-ops-gateway-latency-route-error"]) == [[10000]]
+
+
+def test_gateway_latency_rules_keep_the_route_label() -> None:
+    """The reduce node must fan out by labels (not collapse to a single
+    series), or the alert instance loses attributes_route and the summary
+    names no route."""
+    for rule in _load_rules():
+        if rule["uid"] not in (
+            "ava-ops-gateway-latency-route-warning",
+            "ava-ops-gateway-latency-route-error",
+        ):
+            continue
+        reduce_nodes = [d for d in rule["data"] if d["model"].get("type") == "reduce"]
+        assert reduce_nodes, rule["uid"]
+        assert reduce_nodes[0]["model"].get("mode") == "byLabels"
+        assert "attributes_route" in reduce_nodes[0]["model"].get("includeLabels", [])
+
+
+def test_turn_duration_rule_uses_prometheus_histogram() -> None:
+    """R18 reads the OTLP-mirrored turn-end histogram (ava_turn_end_duration_seconds)
+    — the Loki cross-stream quantile hit the per-query series cap, so the
+    turn p95 lives on Prometheus. Threshold 75s = 2x the 24h baseline p95
+    (37.6s on 2026-08-23), sustained 10m, warning-first without IM."""
+    rules = {r["uid"]: r for r in _load_rules()}
+    rule = rules["ava-ops-turn-duration-p95"]
+    exprs = _exprs(rule, "prometheus")
+    assert len(exprs) == 1
+    assert "ava_turn_end_duration_seconds_bucket" in exprs[0]
+    assert "histogram_quantile(0.95" in exprs[0]
+    assert _threshold_params(rule) == [[75]]
+    assert rule["for"] == "10m"
+    assert rule["labels"]["notify_im"] == "false"
+    assert rule["labels"]["severity"] == "warning"

@@ -43,11 +43,13 @@ import { useSectionVisible } from "@/app/control/_visibility";
 import { FLEX } from "@/lib/layout";
 import { cn } from "@/lib/utils";
 
-// The host/data-plane dashboard the sidecar's host_metrics + postgresql +
-// redis receivers feed (deploy/lgtm/config/grafana/provisioning/dashboards/
-// ava-host-dataplane.json), reached through the gateway's /grafana proxy. The
-// readout below is the live value; the trend lives there.
-const HOST_DASHBOARD_URL = `${API_BASE}/grafana/d/ava-host-dataplane?from=now-6h&to=now`;
+// The host/data-plane trends (2026-08-23 dashboard merge: the four
+// dashboards collapsed into one — the host & data plane panels live in the
+// "Host & data plane" section of the Ava Ops dashboard,
+// deploy/lgtm/config/grafana/provisioning/dashboards/ava-ops-main.json),
+// reached through the gateway's /grafana proxy. The readout below is the
+// live value; the trend lives there.
+const HOST_DASHBOARD_URL = `${API_BASE}/grafana/d/ava-ops-main?from=now-6h&to=now`;
 
 export default function StatusPage() {
   const visible = useSectionVisible();
@@ -659,7 +661,7 @@ function ResourcesSection({ data }: { data: ClusterPanel }) {
           rel="noreferrer"
           className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2"
         >
-          History
+          Trends (Grafana)
         </a>
       }
     >
