@@ -223,9 +223,9 @@ def _covered(binary: Path, rules: dict[str, bool]) -> bool:
 
     Both forms are accepted because both are legitimately how a rule gets written,
     and the paths Ava resolves are layers of symlink over a versioned target:
-    `$(brew --prefix redis)/bin/redis-server` is the stable
-    `/opt/homebrew/opt/redis/…` symlink onto `/opt/homebrew/Cellar/redis/8.8.0/…`,
-    and `.venv/bin/python` is a symlink onto the uv interpreter. An operator (or
+    `$(brew --prefix pgbouncer)/bin/pgbouncer` is the stable
+    `/opt/homebrew/opt/pgbouncer/…` symlink onto a versioned Cellar path, and
+    `.venv/bin/python` is a symlink onto the uv interpreter. An operator (or
     this repo's own older runbook text) adds whichever form they had in hand.
 
     Accepting either is the asymmetry worth choosing deliberately. A false *alarm*
@@ -294,7 +294,7 @@ class ManifestEntry:
 
     ``paths`` are glob patterns (``~`` expanded at resolve time) that point at
     the executables ALF must allow; every one is written as a glob because every
-    Ava-managed path is version-stamped (`Cellar/redis/8.8.0/`,
+    Ava-managed path is version-stamped (`Cellar/pgbouncer/1.25.1/`,
     `runtime/pg/17.4.0/`, `uv/python/cpython-3.12.12-.../`). ``machine`` filters
     the entry to one machine (``shared.machine.machine_name``, e.g. "my-mac");
     None applies to every macOS host. The filter exists for user applications an
@@ -335,15 +335,10 @@ FIREWALL_MANIFEST: tuple[ManifestEntry, ...] = (
         "homebrew postgres",
         ("/opt/homebrew/Cellar/postgresql@17/*/bin/postgres",),
     ),
-    ManifestEntry(
-        "redis",
-        (
-            "/opt/homebrew/Cellar/redis/*/bin/redis-server",
-            # The stable opt symlink, alongside the resolved Cellar path: both
-            # forms appear in practice, and either one satisfies the audit.
-            "/opt/homebrew/opt/redis/bin/redis-server",
-        ),
-    ),
+    # Redis always binds loopback-only (task #1469), so it serves no off-box port
+    # and needs no ALF rule. The private-network :6380 listener is the
+    # `com.ava.redis-bridge` relay running as `/usr/bin/python3 relay.py`; that
+    # Apple-signed built-in interpreter is auto-allowed and needs no manifest entry.
     ManifestEntry(
         "pgbouncer",
         (

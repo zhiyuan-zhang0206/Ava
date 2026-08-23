@@ -3,20 +3,22 @@
 Give each capability its own machine when you want the gateway and the
 compute isolated (e.g. a small always-on gateway + beefier runners).
 
-The data-plane posture is uniform — the default is multi-machine, a single box is
-just the case where the reachable address is loopback (no single-vs-multi branch).
-The agent-facing machine surface (`spawn(machine=)`, `list_machines`, the roster)
-is always present — a single box simply sees one machine.
+The data-plane posture has no single-vs-multi branch: Postgres and PgBouncer use
+the configured reachable address when authenticated, while Redis always binds
+loopback and off-box Redis inbound goes through the host-level relay bridge. The
+agent-facing machine surface (`spawn(machine=)`, `list_machines`, the roster) is
+always present — a single box simply sees one machine.
 
 **Auth and reachability move together.** `AVA_CLUSTER_SECRET` is what makes the
 data plane reachable off-box at all:
 
-- **No secret** (the single-box default) → pg/redis bind **loopback only**,
-  whatever `AVA_MACHINE_HOST` says. An unauthenticated data plane is never
-  exposed to the LAN.
-- **Secret set** → pg/redis bind loopback **plus** this host's reachable address
-  (`AVA_MACHINE_HOST`), de-duplicated — never all interfaces, so only hosts that
-  can route to that address see them at all, and they still need the password.
+- **No secret** (the single-box default) → Postgres and PgBouncer bind
+  **loopback only**, whatever `AVA_MACHINE_HOST` says. Redis is also loopback-only.
+  An unauthenticated data plane is never exposed to the LAN.
+- **Secret set** → Postgres and PgBouncer bind loopback **plus** this host's
+  reachable address (`AVA_MACHINE_HOST`), de-duplicated — never all interfaces.
+  Redis remains loopback-only; `com.ava.redis-bridge` (`/usr/bin/python3 relay.py`)
+  forwards the host's private-network Redis port to `127.0.0.1` for off-box clients.
 
 A split deployment therefore always has a secret: `install.sh --role gateway`
 mints one for you, and every `ava enroll` requires it.
@@ -33,9 +35,10 @@ cd ~/.ava/source
 # The gateway must advertise an address the runners reach it at (the operator
 # declares it — Ava assumes the machines can reach each other, not HOW).
 # AVA_MACHINE_HOST defaults to localhost; setting it to this node's real address
-# adds that address to the native pg/redis/PgBouncer binds (alongside loopback)
-# and lets /api/bootstrap project reachable URL hosts to runners. Keep the born
-# AVA_DB_URL and AVA_REDIS_URL unchanged: they remain the gateway's loopback
+# adds that address to the native Postgres/PgBouncer binds (alongside loopback)
+# and lets /api/bootstrap project reachable URL hosts to runners. Redis remains
+# loopback-only and the host-level relay bridge accepts its off-box traffic.
+# Keep the born AVA_DB_URL and AVA_REDIS_URL unchanged: they remain the gateway's loopback
 # self-dial URLs. AVA_TRUSTED_CIDRS is the
 # private-network range the runners connect from (the overlay's address block);
 # pg_hba requires scram-sha-256 from it:
@@ -46,10 +49,11 @@ ava start --machine-name machine-1 --serve-gateway \
 ```
 
 With a cluster secret and `AVA_MACHINE_HOST` set to this node's address,
-`ava start` binds the native Postgres + Redis + PgBouncer to loopback + that
-address, de-duplicated — never a wildcard. Reachability is limited to loopback
-and networks that can route to the chosen address; remote clients still need the
-credential. pg_hba trusts the local unix socket but requires `scram-sha-256` from the
+`ava start` binds native Postgres + PgBouncer to loopback + that address,
+de-duplicated — never a wildcard — and Redis to loopback alone. The relay bridge
+listens on the chosen private-network address at the Redis port and forwards to
+`127.0.0.1`; remote clients still need the credential. pg_hba trusts the local
+unix socket but requires `scram-sha-256` from the
 `AVA_TRUSTED_CIDRS` ranges. The gateway's main Postgres identity and its Redis
 ACL user authenticate with `AVA_CLUSTER_SECRET`; the single-tenant Redis
 `requirepass` is that same secret. A runner does **not** receive the main
@@ -72,10 +76,9 @@ Config re-application on `ava start` differs between the two engines:
   `AVA_MACHINE_HOST` converges the hba immediately. A new *bind* still needs the
   server to restart (`ava stop` then `ava start` brings the pg_ctl-managed
   instance back up under the new config).
-- **Redis** — the conf is rewritten only when Ava actually brings a redis up. A
-  redis already running is left alone (only its ACL user is re-affirmed), so to
-  change redis's bind you must stop it and let the next `ava start` launch a
-  fresh one.
+- **Redis** — the conf is rewritten only when Ava actually brings a Redis up. A
+  server already running is left alone (only its ACL user is re-affirmed). Its
+  bind is fixed at loopback; the host-level relay bridge owns off-box ingress.
 
 > **Ava owns this Postgres.** Every cluster runs its own Postgres instance that
 > Ava `initdb`s under `$AVA_HOME`, so it provisions the per-cluster role +
@@ -88,7 +91,8 @@ Config re-application on `ava start` differs between the two engines:
 > Firewall on (System Settings → Network → Firewall), incoming connections to a binary
 > macOS does not recognise are dropped, so a remote agent-runner (or even this host
 > dialing its *own* private-network IP) times out, while `127.0.0.1` still works —
-> loopback is never filtered. Three binaries serve off-box ports and none is
+> loopback is never filtered. The following binaries serve off-box ports and
+> neither is
 > Developer-ID signed (the uv interpreter is `adhoc, linker-signed`, so the
 > "automatically allow downloaded signed software" default does not cover it):
 >
@@ -96,12 +100,15 @@ Config re-application on `ava start` differs between the two engines:
 > |---|---|---|
 > | the venv's python (`readlink -f .venv/bin/python`) | the gateway's HTTP port; an agent-runner's ops port | both capabilities |
 > | `postgres` (the vendored `~/.ava/runtime/pg/<ver>/bin`, else the brew keg) | the cluster's pg port | gateway |
-> | `redis-server` (`$(brew --prefix redis)/bin`, a symlink onto `Cellar/redis/<ver>`) | the cluster's redis port | gateway |
+>
+> Redis is absent because `redis-server` binds loopback-only. Its private-network
+> listener is the relay bridge running as Apple-signed `/usr/bin/python3`, which
+> ALF auto-allows without a manifest entry.
 >
 > **Do not hand-transcribe these paths — ask for them.** `ava converge` (run
 > automatically by `ava start`) audits this host, repairs what it can through a
 > passwordless `sudo -n`, and prints the exact `--add` / `--unblockapp` pair for
-> anything left, which matters because all three paths are version-stamped:
+> anything left, which matters because both paths are version-stamped:
 >
 > ```bash
 > ava converge          # audits + repairs where it has a grant, else prints the commands

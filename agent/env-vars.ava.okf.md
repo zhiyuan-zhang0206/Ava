@@ -29,7 +29,7 @@ Cluster identity is **path-only** (`shared/cluster/`, #629/#633): there is no `A
 ### Network & Host
 | Variable | Set at | Purpose |
 |------|--------|------|
-| `AVA_MACHINE_HOST` | converge | Reachable IP/hostname of this machine; pg/redis bind to this address |
+| `AVA_MACHINE_HOST` | converge | Reachable IP/hostname of this machine; Postgres and its pooler bind to this address (Redis remains loopback-only) |
 | `AVA_MACHINE_NAME` | converge | Machine name (e.g., my-mac) |
 | `AVA_GATEWAY_URL` | at startup | Gateway HTTP address |
 

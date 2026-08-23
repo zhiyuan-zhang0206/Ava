@@ -134,8 +134,10 @@ TLS is "add a cert + switch the scheme", not a re-architecture.
 1. **Should loopback be exempt from auth?** Leaning no — keep auth uniform; an
    exemption would reintroduce a "same box" special case.
 2. **Should the gateway stop binding `0.0.0.0`?** It should bind `127.0.0.1` AND
-   `AVA_MACHINE_HOST`, matching the pg/redis posture. The ops server deliberately
-   still binds `0.0.0.0` (the gateway dials it across the private network and it
-   authenticates), so this is specifically about the gateway's own listener.
+   `AVA_MACHINE_HOST`, matching the Postgres/PgBouncer posture; Redis remains
+   loopback-only with off-box ingress carried by the relay bridge. The ops server
+   deliberately still binds `0.0.0.0` (the gateway dials it across the private
+   network and it authenticates), so this is specifically about the gateway's
+   own listener.
 3. **`X-Cluster-Secret`** is kept as an alternative to `Authorization: Bearer` for
    simple consumers — worth revisiting whether it still earns its place.

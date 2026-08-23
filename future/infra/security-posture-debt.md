@@ -13,7 +13,8 @@
 One `AVA_CLUSTER_SECRET` (43-char high-entropy) = all trust: gateway API bearer +
 ops RPC + pg scram + redis requirepass. No per-agent identity inside the cluster;
 every agent process env carries the secret + all 11 provider keys. Data plane:
-pg/redis bind loopback + the machine's reachable private-network address only;
+Postgres and PgBouncer bind loopback + the machine's reachable private-network
+address only; Redis remains loopback-only and off-box inbound uses the relay bridge;
 `pg_hba` allows the whole private network (100.64.0.0/10) with scram;
 unix-socket local trust (OS user is the trust root).
 

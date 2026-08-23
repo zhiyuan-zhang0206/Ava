@@ -28,10 +28,11 @@ fire on the next boot (this box auto-logs-in). Enabling it in the current
 session is a one-line manual step printed below, not something converge does.
 
 Only ONE boot-ordering hazard is handled inside `ava start` itself: a routable
-bind address not up yet when this cluster's pg/redis start
+bind address not up yet when this cluster's Postgres or PgBouncer starts
 (`cli/commands/_cluster_instance.py` waits for the reachable address before
-binding). That covers a LOCAL address only. An enrolled agent-runner's start
-also depends on a REMOTE gateway — its Settings build fetches
+binding Postgres; PgBouncer uses the same wait). Redis is loopback-only and does
+not share this hazard. That covers a LOCAL address only. An enrolled agent-runner's
+start also depends on a REMOTE gateway — its Settings build fetches
 `GET /api/bootstrap` (`shared.bootstrap`) — and on a VPN-joined runner that
 interface comes up after the boot job fires. This module used to assert the
 hazard class was already handled and emit a fire-once job; the retry above is
