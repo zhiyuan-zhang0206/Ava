@@ -64,7 +64,8 @@ def get_stats_dashboard(
     - `live_count`: agents_meta table — all non-terminated agents (running/idling/restarting/hibernating)
     - `tokens` / `cost_usd`: telemetry `llm_usage` events in Loki
     - average turn duration / warning/error counts: Loki's unified event stream
-    - `total_events`: Postgres archive partition estimates (a coarse growth gauge)
+    - `total_events`: archived event row count (frozen at the LGTM cutover;
+      not a live gauge)
 
     `?hours=` selects the aggregation window (0 = last 5m; 1/6/24/72/168 =
     hours), whitelisted by `StatsWindowHours` (anything else 422s). Zero-data
@@ -181,9 +182,8 @@ def get_stats_dashboard(
         cur.execute("SELECT COUNT(*) FROM agents_meta WHERE status != 'terminated'")
         live_count = int(cur.fetchone()[0])
 
-        # total_events is a coarse growth gauge, not an exact figure — sum the
-        # planner's per-partition row estimates instead of a full-table COUNT(*) on
-        # every 5s poll, which scaled O(rows) on the ever-growing append-only table.
+        # total_events is the frozen archive's approximate row count, not a live
+        # growth gauge — sum planner estimates instead of a full-table COUNT(*).
         # events is partitioned, and a partitioned parent's own reltuples is
         # not maintained by autovacuum, so the count must come from the leaf
         # partitions. pg_partition_tree returns the whole tree (isleaf filters to the

@@ -482,5 +482,8 @@ def test_cutover_day_merges_legacy_and_indexed_rollups(monkeypatch: pytest.Monke
             exec_failed=3,
         )
     ]
-    assert any('event_name=""' in logql for logql, _at in calls)
-    assert any('event_name="llm_usage"' in logql and _at == day_end for logql, _at in calls)
+    assert all('event_name=""' not in logql for logql, _at in calls)
+    assert any(
+        'event_name!=""' in logql and 'event_name="llm_usage"' in logql and _at == day_end
+        for logql, _at in calls
+    )

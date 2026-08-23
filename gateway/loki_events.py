@@ -255,7 +255,7 @@ def _tier_predicate(tiers: list[EventTier]) -> str:
 def _build_logql(
     *,
     era: LokiReadEra = LokiReadEra.LEGACY,
-    legacy_streams_only: bool = False,
+    indexed_labeled: bool = False,
     agent_id: int | None = None,
     exclude_agent_ids: list[int] | None = None,
     service_only: bool = False,
@@ -293,7 +293,7 @@ def _build_logql(
             era=era,
             agent_id=agent_id,
             event_names=event_names,
-            legacy_streams_only=legacy_streams_only,
+            indexed_labeled=indexed_labeled,
         )
     ]
     if grep:
@@ -380,7 +380,7 @@ def query_events(
     for slice_ in slices:
         logql = _build_logql(
             era=slice_.era,
-            legacy_streams_only=len(slices) == 2 and slice_.era is LokiReadEra.LEGACY,
+            indexed_labeled=len(slices) == 2 and slice_.era is LokiReadEra.INDEXED,
             agent_id=agent_id,
             exclude_agent_ids=exclude_agent_ids,
             service_only=service_only,
@@ -410,6 +410,8 @@ def query_events(
     # but cross-stream ordering needs one merge pass.
     raw.sort(key=lambda pair: pair[0], reverse=(direction == "backward"))
 
+    # The exact-cutover row can arrive from both queries; (ts, line) is the
+    # cross-cutover dedupe backstop after the time partition.
     seen: set[tuple[int, str]] = set()
     rows: list[dict[str, Any]] = []
     for ts_ns, line in raw:
@@ -486,7 +488,7 @@ def count_events(
     for slice_ in slices:
         pipeline = _build_logql(
             era=slice_.era,
-            legacy_streams_only=len(slices) == 2 and slice_.era is LokiReadEra.LEGACY,
+            indexed_labeled=len(slices) == 2 and slice_.era is LokiReadEra.INDEXED,
             agent_id=agent_id,
             exclude_agent_ids=exclude_agent_ids,
             service_only=service_only,
@@ -518,7 +520,8 @@ def count_events(
 def _agg_pipeline(
     *,
     era: LokiReadEra = LokiReadEra.LEGACY,
-    legacy_streams_only: bool = False,
+    legacy_unlabeled: bool = False,
+    indexed_labeled: bool = False,
     agent_id: int | None = None,
     exclude_agent_ids: list[int] | None = None,
     service_only: bool = False,
@@ -541,7 +544,8 @@ def _agg_pipeline(
             era=era,
             agent_id=agent_id,
             event_names=event_names,
-            legacy_streams_only=legacy_streams_only,
+            legacy_unlabeled=legacy_unlabeled,
+            indexed_labeled=indexed_labeled,
         )
     ]
     if grep:
@@ -601,7 +605,7 @@ def _agg_pipelines(
             slice_,
             _agg_pipeline(
                 era=slice_.era,
-                legacy_streams_only=len(slices) == 2 and slice_.era is LokiReadEra.LEGACY,
+                indexed_labeled=len(slices) == 2 and slice_.era is LokiReadEra.INDEXED,
                 agent_id=agent_id,
                 exclude_agent_ids=exclude_agent_ids,
                 service_only=service_only,
@@ -619,12 +623,17 @@ def _agg_pipelines(
     ]
 
 
-def _range_eras(window: tuple[datetime, datetime]) -> list[tuple[LokiReadEra, bool]]:
-    """Read eras for a range query without shifting its caller-owned grid."""
+def _range_eras(window: tuple[datetime, datetime]) -> list[tuple[LokiReadEra, bool, bool]]:
+    """Read label-disjoint eras without shifting a caller-owned range grid."""
 
     slices = _read_slices(window)
     return [
-        (slice_.era, len(slices) == 2 and slice_.era is LokiReadEra.LEGACY) for slice_ in slices
+        (
+            slice_.era,
+            len(slices) == 2 and slice_.era is LokiReadEra.LEGACY,
+            len(slices) == 2 and slice_.era is LokiReadEra.INDEXED,
+        )
+        for slice_ in slices
     ]
 
 
@@ -1328,7 +1337,8 @@ def query_projected_lines(
                 timeout_s=timeout_s,
                 out=out,
             )
-    # Dedup (slice boundaries can repeat), window filter, ascending sort.
+    # Dedup cross-cutover and row-slice boundaries by (ts, line), then filter
+    # the requested window and sort ascending.
     seen: set[tuple[int, str]] = set()
     dedup: list[tuple[int, int | None, str]] = []
     for ts_ns, aid, line in out:
@@ -1428,10 +1438,11 @@ def count_events_series(
     step = max(1, step_s)
     url = settings.observability.telemetry_loki_url.rstrip("/") + "/loki/api/v1/query_range"
     values_by_group: dict[str, dict[int, int]] = {"": {}} if group_by is None else {}
-    for era, legacy_streams_only in _range_eras(window):
+    for era, legacy_unlabeled, indexed_labeled in _range_eras(window):
         pipeline = _agg_pipeline(
             era=era,
-            legacy_streams_only=legacy_streams_only,
+            legacy_unlabeled=legacy_unlabeled,
+            indexed_labeled=indexed_labeled,
             event_names=event_names,
             attribute_filters=attribute_filters,
         )
@@ -1489,10 +1500,11 @@ def attribute_max_series(
     step = max(1, step_s)
     url = settings.observability.telemetry_loki_url.rstrip("/") + "/loki/api/v1/query_range"
     maxima: dict[int, float] = {}
-    for era, legacy_streams_only in _range_eras(window):
+    for era, legacy_unlabeled, indexed_labeled in _range_eras(window):
         pipeline = _agg_pipeline(
             era=era,
-            legacy_streams_only=legacy_streams_only,
+            legacy_unlabeled=legacy_unlabeled,
+            indexed_labeled=indexed_labeled,
             event_names=event_names,
             attribute_filters=attribute_filters,
         )

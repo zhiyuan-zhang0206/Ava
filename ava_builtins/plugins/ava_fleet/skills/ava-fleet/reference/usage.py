@@ -45,15 +45,11 @@ import json
 import sys
 import time
 from datetime import UTC, datetime, timedelta
-from datetime import time as time_mod
 from typing import Any
 
 from gateway import loki_events
 from shared.db import connect
-
-# Loki holds 168h (deploy/lgtm/config/loki.yaml retention_period) — the same
-# retention the gateway cost path binds to (gateway/routers/_agent_cost.py).
-_LOKI_RETENTION = timedelta(hours=168)
+from shared.loki_index_labels import ledger_gap_plan, retention_floor
 
 # The token/cost payload fields summed per (agent, model) — the llm_usage
 # payload keys (shared/events/contract.py LLM_USAGE_KEYS).
@@ -67,12 +63,6 @@ _CATEGORIES = ["telemetry", "log"]
 # many agents fans out ~7 instant queries per agent; keep the burst bounded
 # (Loki query-load discipline, 2026-08-18 storm).
 _AGENT_QUERY_PAUSE_S = 0.15
-
-
-def _retention_floor() -> datetime:
-    """Lower bound for Loki lookups: now - retention. Data older than this
-    does not exist in Loki regardless of the requested window."""
-    return datetime.now(tz=UTC) - _LOKI_RETENTION
 
 
 def _window_bounds(
@@ -149,48 +139,55 @@ def _loki_rows(agent_ids: list[int], from_: datetime, to: datetime | None) -> li
     return out
 
 
-_LEDGER_SQL = """SELECT agent_id, model,
+_LEDGER_SQL = """SELECT model,
   sum(llm_calls), sum(costed_calls), sum(unpriced_calls),
   sum(tokens_in), sum(tokens_out), sum(tokens_cached), sum(tokens_reasoning),
-  sum(cost_usd), max(day)
+  sum(cost_usd)
+FROM agent_model_tokens_daily
+WHERE agent_id = %s{}
+GROUP BY model"""
+
+_NEWEST_LEDGER_DAYS_SQL = """SELECT agent_id, max(day)
 FROM agent_model_tokens_daily
 WHERE agent_id = ANY(%s)
-GROUP BY agent_id, model"""
+GROUP BY agent_id"""
 
 
-def _ledger_rows(agent_ids: list[int]) -> tuple[list[_LokiRow], dict[int, datetime]]:
-    """Per (agent, model) sums over every rolled ledger day, plus each
-    agent's ledger watermark (the midnight after its newest rolled day — the
-    instant its Loki tail picks up from). Ledger `unpriced_calls` maps
-    straight to the row's unpriced slot (it is already the count of calls
-    without a cost snapshot)."""
+def _ledger_rows(
+    agent_ids: list[int], floor: datetime
+) -> tuple[list[_LokiRow], dict[int, datetime]]:
+    """Ledger rows and per-agent live-tail starts, mirroring gateway cost.
+
+    A retained newest day is excluded from each agent's sum and wholly reread
+    from Loki; non-retained ledger history stays durable. Ledger
+    ``unpriced_calls`` maps directly to the row's unpriced slot.
+    """
     rows: list[_LokiRow] = []
-    watermarks: dict[int, datetime] = {}
+    tails: dict[int, datetime] = {}
     with connect() as conn, conn.cursor() as cur:
-        cur.execute(_LEDGER_SQL, (agent_ids,))
-        for row in cur.fetchall():
-            aid = int(row[0])
-            rows.append(
-                (
-                    aid,
-                    row[1],
-                    int(row[5]),
-                    int(row[6]),
-                    int(row[7]),
-                    int(row[8]),
-                    int(row[2]),
-                    float(row[9]),
-                    int(row[4]),
+        cur.execute(_NEWEST_LEDGER_DAYS_SQL, (agent_ids,))
+        newest_days = {int(agent_id): day for agent_id, day in cur.fetchall()}
+        for aid in agent_ids:
+            gap = ledger_gap_plan(newest_days.get(aid), floor)
+            tails[aid] = gap.tail_from
+            condition = " AND day < %s" if gap.day_lt is not None else ""
+            params = (aid, gap.day_lt) if gap.day_lt is not None else (aid,)
+            cur.execute(_LEDGER_SQL.format(condition), params)
+            for row in cur.fetchall():
+                rows.append(
+                    (
+                        aid,
+                        row[0],
+                        int(row[4]),
+                        int(row[5]),
+                        int(row[6]),
+                        int(row[7]),
+                        int(row[1]),
+                        float(row[8]),
+                        int(row[3]),
+                    )
                 )
-            )
-            day = row[10]
-            cur_wm = watermarks.get(aid)
-            if day is not None and (cur_wm is None or day > cur_wm):
-                watermarks[aid] = day
-    return rows, {
-        aid: datetime.combine(day + timedelta(days=1), time_mod.min, tzinfo=UTC)
-        for aid, day in watermarks.items()
-    }
+    return rows, tails
 
 
 def _active_agents(from_: datetime, to: datetime | None) -> list[int]:
@@ -210,22 +207,22 @@ def _active_agents(from_: datetime, to: datetime | None) -> list[int]:
 def _rows(agent_ids: list[int], since: datetime | None, hours: float | None) -> list[_LokiRow]:
     """The merged row set for one request, mirroring `_agent_cost.agent_cost`:
     windowed = pure Loki over the window; whole life = ledger + the per-agent
-    Loki tail from the ledger watermark (ledger-less agents tail from the
+    Loki tail from the shared gap-day plan (ledger-less agents tail from the
     retention floor — data older than retention is indistinguishable from
-    never having cost, same as the gateway path)."""
+    never having cost, exactly like the gateway cost path)."""
     from_, to = _window_bounds(since, hours)
     if from_ is not None:
         if not agent_ids:
             agent_ids = _active_agents(from_, to)
         return _loki_rows(agent_ids, from_, to)
 
-    floor = _retention_floor()
+    floor = retention_floor()
     now = datetime.now(tz=UTC)
     if not agent_ids:
         agent_ids = _active_agents(floor, now)
-    rows, watermarks = _ledger_rows(agent_ids)
+    rows, tails = _ledger_rows(agent_ids, floor)
     for aid in agent_ids:
-        tail_from = watermarks.get(aid, floor)
+        tail_from = tails[aid]
         rows.extend(_loki_rows([aid], tail_from, now))
     return rows
 

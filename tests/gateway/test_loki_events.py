@@ -24,7 +24,14 @@ import pytest
 import yaml
 
 from gateway import loki_events, loki_query_budget
-from shared.loki_index_labels import LokiReadEra, LokiReadSlice
+from shared.loki_index_labels import (
+    EVENT_STREAM_RETENTION,
+    LOKI_QUERY_CONCURRENCY,
+    LokiReadEra,
+    LokiReadSlice,
+    event_stream_selector,
+    validate_loki_deploy_config,
+)
 
 # ─── fake httpx transport ────────────────────────────────────────────────────
 
@@ -109,6 +116,16 @@ def _fresh_query_budget() -> Any:
     loki_query_budget.reset_for_tests()
 
 
+@pytest.fixture(autouse=True)
+def _stable_default_read_era(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep non-rollout tests independent of the wall-clock cutover date."""
+
+    def _single_legacy(window: tuple[datetime, datetime]) -> tuple[LokiReadSlice, ...]:
+        return (LokiReadSlice(LokiReadEra.LEGACY, *window),)
+
+    monkeypatch.setattr(loki_events, "_read_slices", _single_legacy)
+
+
 def _loki_payload(lines: list[tuple[str, str]]) -> dict[str, Any]:
     """One stream with (ts_ns_str, line) values, the shape Loki returns."""
     return {"data": {"result": [{"stream": {}, "values": [[ts, line] for ts, line in lines]}]}}
@@ -162,9 +179,27 @@ def _wait_for_budget_waiters(expected: int) -> None:
 
 class TestGlobalQueryBudget:
     def test_matches_loki_real_max_concurrent(self) -> None:
-        config = (Path(__file__).parents[2] / "deploy/lgtm/config/loki.yaml").read_text()
-        assert "max_concurrent: 4" in config
-        assert loki_query_budget.LOKI_QUERY_CONCURRENCY == 4
+        repo = Path(__file__).parents[2]
+        configs = [
+            yaml.safe_load((repo / path).read_text())
+            for path in ("deploy/lgtm/config/loki.yaml", "deploy/lgtm/native/config/loki.yaml")
+        ]
+        retention = f"{int(EVENT_STREAM_RETENTION.total_seconds() // 3600)}h"
+        for config in configs:
+            assert config["querier"]["max_concurrent"] == LOKI_QUERY_CONCURRENCY
+            assert config["limits_config"]["retention_period"] == retention
+            validate_loki_deploy_config(config)
+        assert loki_query_budget.LOKI_QUERY_CONCURRENCY == LOKI_QUERY_CONCURRENCY
+
+    def test_rejects_loki_deploy_config_drift(self) -> None:
+        with pytest.raises(ValueError, match="retention_period"):
+            validate_loki_deploy_config(
+                {"limits_config": {"retention_period": "96h"}, "querier": {"max_concurrent": 8}}
+            )
+        with pytest.raises(ValueError, match="max_concurrent"):
+            validate_loki_deploy_config(
+                {"limits_config": {"retention_period": "168h"}, "querier": {"max_concurrent": 8}}
+            )
 
     def test_loki_preserves_default_resource_labels_and_indexes_event_dimensions(self) -> None:
         config_path = Path(__file__).parents[2] / "deploy/lgtm/config/loki.yaml"
@@ -495,9 +530,50 @@ class TestGlobalQueryBudget:
 # ─── _build_logql ────────────────────────────────────────────────────────────
 
 
+class TestLiveArchiveExclusion:
+    def test_shared_selector_excludes_archive_rows(self) -> None:
+        """The 2026-08 archive proves the shared selector's real invariant."""
+        url = loki_events.settings.observability.telemetry_loki_url.rstrip("/")
+        try:
+            ready = httpx.get(f"{url}/ready", timeout=3)
+            ready.raise_for_status()
+        except httpx.HTTPError as exc:
+            pytest.skip(f"Loki unavailable for archive exclusion invariant: {exc}")
+
+        start = datetime(2026, 8, 1, tzinfo=UTC)
+        end = datetime(2026, 8, 10, tzinfo=UTC)
+
+        def count(selector: str) -> int:
+            response = httpx.get(
+                f"{url}/loki/api/v1/query",
+                params={
+                    "query": f"sum(count_over_time({selector}[{int((end - start).total_seconds())}s]))",
+                    "time": end.timestamp(),
+                },
+                timeout=10,
+            )
+            response.raise_for_status()
+            result = response.json().get("data", {}).get("result", [])
+            return int(float(result[0]["value"][1])) if result else 0
+
+        archive_rows = count('{service_name="unknown_service", stream="archive"}')
+        if archive_rows == 0:
+            pytest.skip("no archive rows in this Loki")
+
+        selector = event_stream_selector(
+            era=LokiReadEra.LEGACY,
+            agent_id=None,
+            event_names=None,
+        )
+        assert count(selector) == 0
+
+
 class TestBuildLogql:
     def test_default_is_selector_plus_json(self) -> None:
-        assert loki_events._build_logql() == '{service_name="unknown_service"} | json'
+        assert (
+            loki_events._build_logql()
+            == '{service_name="unknown_service", stream!="archive"} | json'
+        )
 
     def test_agent_id_filter(self) -> None:
         q = loki_events._build_logql(agent_id=42)
@@ -511,7 +587,7 @@ class TestBuildLogql:
             event_names=["spawn", "terminate"],
         )
         assert q.startswith(
-            '{service_name="unknown_service", agent_id="42", event_name=~"spawn|terminate"}'
+            '{service_name="unknown_service", stream!="archive", agent_id="42", event_name=~"spawn|terminate"}'
         )
         assert '| agent_id="42"' in q
         assert '| event_name=~"spawn|terminate"' in q
@@ -522,7 +598,7 @@ class TestBuildLogql:
 
     def test_grep_is_a_line_filter_before_json(self) -> None:
         q = loki_events._build_logql(grep="boom")
-        assert q.startswith('{service_name="unknown_service"} |= "boom" | json')
+        assert q.startswith('{service_name="unknown_service", stream!="archive"} |= "boom" | json')
 
     def test_categories_become_or_regex(self) -> None:
         q = loki_events._build_logql(categories=["telemetry", "log"])
@@ -654,11 +730,9 @@ class TestQueryEvents:
         assert has_more is False
         url, params = client.calls[0]
         assert url.endswith("/loki/api/v1/query_range")
-        # era-sliced read path: the legacy slice carries the empty event_name
-        # matcher so the two slices stay disjoint (task #1407 B2)
         assert (
             params["query"]
-            == '{service_name="unknown_service", event_name=""} | json | agent_id="3"'
+            == '{service_name="unknown_service", stream!="archive"} | json | agent_id="3"'
         )
         assert params["direction"] == "backward"
         assert params["limit"] == 101  # limit + offset + 1 lookahead
@@ -687,6 +761,7 @@ class TestQueryEvents:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         before = _event_line(ts="2026-08-10T00:30:00Z", event_name="before")
+        labeled_before = _event_line(ts="2026-08-10T00:45:00Z", event_name="labeled_before")
         boundary = _event_line(ts="2026-08-10T01:00:00Z", event_name="boundary")
         after = _event_line(ts="2026-08-10T01:30:00Z", event_name="after")
         client = _install(
@@ -695,6 +770,7 @@ class TestQueryEvents:
                 _loki_payload(
                     [
                         ("1786309200000000000", before),
+                        ("1786310100000000000", labeled_before),
                         ("1786311000000000000", boundary),
                     ]
                 ),
@@ -718,17 +794,23 @@ class TestQueryEvents:
             from_=_ROLL_OUT_START,
             to=_ROLL_OUT_END,
             direction="forward",
-            limit=3,
+            limit=4,
         )
 
-        assert [row["event_name"] for row in rows] == ["before", "boundary", "after"]
+        assert [row["event_name"] for row in rows] == [
+            "before",
+            "labeled_before",
+            "boundary",
+            "after",
+        ]
         assert has_more is False
         assert len(client.calls) == 2
         assert client.calls[0][1]["query"].startswith(
-            '{service_name="unknown_service", event_name=""}'
+            '{service_name="unknown_service", stream!="archive"}'
         )
+        assert 'event_name=""' not in client.calls[0][1]["query"]
         assert client.calls[1][1]["query"].startswith(
-            '{service_name="unknown_service", agent_id="7", event_name="spawn"}'
+            '{service_name="unknown_service", stream!="archive", event_name!="", agent_id="7", event_name="spawn"}'
         )
 
     def test_newest_first_merge_across_streams(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -917,8 +999,8 @@ class TestCountEvents:
             )
             == 5
         )
-        assert 'event_name=""' in client.calls[0][1]["query"]
-        assert 'agent_id="7", event_name="spawn"' in client.calls[1][1]["query"]
+        assert 'event_name=""' not in client.calls[0][1]["query"]
+        assert 'event_name!="", agent_id="7", event_name="spawn"' in client.calls[1][1]["query"]
 
     def test_query_events_empty_window_returns_no_rows(
         self, monkeypatch: pytest.MonkeyPatch
@@ -1379,7 +1461,7 @@ class TestCountEventsSeries:
         assert [call[1]["start"] for call in client.calls] == [_ROLL_OUT_START.timestamp()] * 2
         assert [call[1]["end"] for call in client.calls] == [_ROLL_OUT_END.timestamp()] * 2
         assert 'event_name=""' in client.calls[0][1]["query"]
-        assert 'event_name="sse_drop"' in client.calls[1][1]["query"]
+        assert 'event_name!="", event_name="sse_drop"' in client.calls[1][1]["query"]
 
     def test_empty_window_short_circuits(self, monkeypatch: pytest.MonkeyPatch) -> None:
         client = _install(monkeypatch, {"data": {"result": []}})

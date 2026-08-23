@@ -961,6 +961,45 @@ def test_inspect_whole_life_gap_day_cost_not_lost_and_not_double_counted(
     assert cost["unpriced_calls"] == 0
 
 
+def test_inspect_whole_life_gap_day_tokens_reread_the_closed_day(
+    db_conn: psycopg.Connection, fake_loki: _FakeLoki
+) -> None:
+    """A late 23:50 usage row joins the newest day's live token reread once."""
+    aid = _insert_agent(db_conn)
+    now = datetime.now(UTC)
+    today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    _ledger_row(db_conn, agent_id=aid, days_ago=1, tout=100)
+    # The ledger row is stale; the live reread has the original 100-token row
+    # and the late 50-token write at 23:50 of the newest closed day.
+    fake_loki.add(
+        event="llm_usage",
+        agent_id=aid,
+        payload={"out_total": 100, "model": "claude-opus-4-8"},
+        ts=today - timedelta(hours=12),
+    )
+    fake_loki.add(
+        event="llm_usage",
+        agent_id=aid,
+        payload={"out_total": 50, "model": "claude-opus-4-8"},
+        ts=today - timedelta(minutes=10),
+    )
+    fake_loki.add(
+        event="turn_end",
+        agent_id=aid,
+        payload={"duration_seconds": 1.0, "ok": True},
+        ts=today - timedelta(minutes=20),
+    )
+    db_conn.commit()
+
+    with TestClient(app) as client:
+        response = client.get(f"/api/agents/{aid}/inspect")
+
+    assert response.status_code == 200
+    # lm_stage_tps is output_tokens / turn duration, so the one-second turn
+    # exposes the private token aggregate as exactly X + Y.
+    assert response.json()["tps"]["lm_stage_tps"] == 150.0
+
+
 def test_inspect_snapshot_cost_immune_to_registry_changes(
     db_conn: psycopg.Connection, fake_loki: _FakeLoki
 ) -> None:

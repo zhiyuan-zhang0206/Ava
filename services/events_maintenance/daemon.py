@@ -56,7 +56,7 @@ import logging
 import os
 import sys
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import psycopg
 from psycopg_pool import ConnectionPool
@@ -78,6 +78,7 @@ from shared.daemon_health import Liveness, health_port, start_health_server, sto
 from shared.daemon_shutdown import install_graceful_shutdown
 from shared.events.contract import EVENTS, RETENTION_BY_CATEGORY, retention_days
 from shared.log import init_gateway_process
+from shared.loki_index_labels import EVENT_STREAM_RETENTION
 from shared.paths import legacy_pid_path
 
 _log = logging.getLogger("services.events_maintenance.daemon")
@@ -86,10 +87,10 @@ _PIDFILE = settings.services.events_maintenance_pidfile
 _LIVENESS_TIMEOUT_S = 60.0
 _LIVENESS_BEAT_STEP_S = 30.0
 
-# Days of already-rolled history re-aggregated each run to absorb a late write
-# into a closed day. Small: the observability sink writes on-line, so a write
-# landing more than a couple of days after its event is not expected.
-_LOOKBACK_DAYS = 3
+# Recompute all Loki-retained closed days: a late write anywhere in retained
+# history must reach the durable ledger. The extra daily work is bounded by
+# retention itself.
+_LOOKBACK_DAYS = int(EVENT_STREAM_RETENTION / timedelta(days=1))
 
 # Cadence of the Rule A fast loop. #1197 removed the ops-rollup fast loop this
 # pass rode on, silently killing Rule A (trim_overgrown_threads became dead

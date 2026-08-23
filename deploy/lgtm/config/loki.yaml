@@ -84,18 +84,15 @@ distributor:
 # Task #1281 (PG events archive import): the archived events (8.7M rows,
 # 05-23 -> 08-12) land under the stream label stream="archive" and get a
 # 365d retention via retention_streams (compactor-driven, applied on top of
-# the 168h period). The import also needs reject_old_samples=false — Loki's
-# default rejects any sample older than reject_old_samples_max_age (336h),
-# and the archive is up to ~83 days old. FLIP BACK to true (and drop the
-# explicit false) once the import finishes: the emitter never writes old
-# samples, and the false disables a useful clock-drift guard.
+# the 168h period). The completed import needed old samples temporarily; the
+# default `reject_old_samples: true` is now restored as the clock-drift guard.
+# Keep reject_old_samples_max_age as that guard's age bound.
 limits_config:
   retention_period: 168h
   retention_stream:
     - selector: '{stream="archive"}'
       priority: 1
       period: 8760h
-  reject_old_samples: false
   reject_old_samples_max_age: 336h
   # The archive spans ~83 days (05-23 -> 08-12); Loki's default
   # max_query_length (30d1h) would reject any whole-span parity/read query.
