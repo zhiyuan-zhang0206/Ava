@@ -246,15 +246,19 @@ def _stub_session_code_state(
     head: str,
     lease_kind: Literal["free", "unreadable", "executing", "settle_hold"] = "free",
     orchestration_kind: Literal["none", "in_flight", "unreadable"] = "none",
-) -> None:
+) -> list[tuple[str, str | None, str | None]]:
     """Make the session-code check inspect known local deployment state."""
     from ops.controllers import _deploy_state
     from shared import cluster_drift, session_code
 
+    sources: list[tuple[str, str | None, str | None]] = []
     monkeypatch.setattr(cluster_drift, "running_from_prod_source", lambda: True)
     monkeypatch.setattr(cluster_drift, "prod_source_head_sha", lambda: head)
 
-    def _launched_sha(_session: str) -> str:
+    def _launched_sha(
+        _session: str, *, service: str | None = None, health_url: str | None = None
+    ) -> str:
+        sources.append((_session, service, health_url))
         return launched
 
     def _lease_state(*, settle_hold_mode: Literal["narrow", "pass"]) -> _deploy_state.LeaseVerdict:
@@ -272,6 +276,7 @@ def _stub_session_code_state(
         "read_orchestration",
         lambda: _deploy_state.OrchestrationState(orchestration_kind, None),
     )
+    return sources
 
 
 def test_husk_session_is_cleared_and_relaunched(
@@ -319,16 +324,17 @@ def test_live_service_on_stale_code_is_cleared_and_relaunched(
     """A healthy session carrying a prior checkout is not an idempotent start."""
     seen = _launch_probe_env(
         monkeypatch,
-        sessions_alive={"ava-gateway"},
+        sessions_alive={"ava-ops"},
         probe=ServiceProbe(True, "identity", ""),
     )
-    _stub_session_code_state(monkeypatch, launched="oldsha", head="newsha")
-    _roster(monkeypatch, "gateway")
+    sources = _stub_session_code_state(monkeypatch, launched="oldsha", head="newsha")
+    _roster(monkeypatch, "ops")
 
     _cli._launch_sessions(frozenset({"gateway"}), set(), tmp_path)
 
-    assert seen["killed"] == ["ava-gateway"]
-    assert seen["launched"] == ["ava-gateway"]
+    assert seen["killed"] == ["ava-ops"]
+    assert seen["launched"] == ["ava-ops"]
+    assert sources == [("ava-ops", "ops", "http://localhost:1/healthz")]
     out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
     assert "stale code" in out
 

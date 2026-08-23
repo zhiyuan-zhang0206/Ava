@@ -224,14 +224,15 @@ def _relaunch_once(sess: str, cmd: str, cwd: Path, extra: dict[str, str] | None)
     return _ns._new_session(sess, cmd, cwd, extra_env=extra)
 
 
-def _stale_session_code_reason(session: str) -> str | None:
+def _stale_session_code_reason(session: str, spec: ServiceSpec) -> str | None:
     """Why a healthy prod service must be relaunched for code drift, or ``None``.
 
-    A session version is actionable only when both sides are known: the session's
-    launch sidecar and the installed prod source's HEAD. Dev worktrees compare
-    different trees by design, and an executing update or local orchestration
-    owns the normal checkout-ahead transient, so all of those cases preserve the
-    ordinary idempotent start behavior.
+    A session version is actionable only when both sides are known: the live
+    daemon's frozen SHA (or, when it has no health endpoint, its launch sidecar)
+    and the installed prod source's HEAD. Dev worktrees compare different trees
+    by design, and an executing update or local orchestration owns the normal
+    checkout-ahead transient, so all of those cases preserve ordinary idempotent
+    start behavior.
     """
     from ops.controllers._deploy_state import read_lease_state, read_orchestration
     from shared.cluster_drift import prod_source_head_sha, running_from_prod_source
@@ -240,7 +241,12 @@ def _stale_session_code_reason(session: str) -> str | None:
     if not running_from_prod_source():
         return None
     head = prod_source_head_sha()
-    launched = launched_sha(session)
+    health_url = spec.curl_url if spec.curl_url and spec.curl_url.endswith("/healthz") else None
+    launched = launched_sha(
+        session,
+        service=spec.session.replace("-", "_"),
+        health_url=health_url,
+    )
     if head is None or launched is None or launched == head:
         return None
 
@@ -292,7 +298,7 @@ def _launch_sessions(roles: MachineRoles, skip: set[str], repo: Path) -> LaunchO
         if _ns._has_session(sess):
             husk = _ns._husk_session_reason(spec)
             if husk is None:
-                stale_code = _stale_session_code_reason(sess)
+                stale_code = _stale_session_code_reason(sess, spec)
                 if stale_code is None:
                     print(f"  ✓ {sess} already running")
                     continue
