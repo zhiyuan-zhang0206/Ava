@@ -252,6 +252,53 @@ def test_a_log_with_neither_marker_is_unknown_not_a_clean_exit(home: Path) -> No
     assert "no exit verdict" in uo.describe_updater_outcome(outcome)
 
 
+def test_a_posix_per_run_log_excludes_the_shared_logs_previous_exit(
+    home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The POSIX tee file is this run's whole story.
+
+    On 2026-08-24 its partial output shared a directory with the supervisor's
+    appended log, whose newer mtime made the reader classify the previous run's
+    ``rc=0`` as this still-running updater's exit. A per-run file with no ending
+    must stay ``unknown`` even when that shared log also exists.
+    """
+    per_run = home / "logs" / "updater-1787518170.log"
+    backend_log = home / "logs" / "ava-updater.out.log"
+    monkeypatch.setattr(uo, "IS_WINDOWS", False)
+    monkeypatch.setattr("shared.session_backend.get_backend", lambda: _Backend(backend_log))
+    _paused(home)
+    _write_log(per_run, "[updater] force-checkout to abc1234\n", age_s=1.0)
+    _write_log(backend_log, "[session-exit] rc=0\n[updater] force-checkout to abc1234\n")
+
+    outcome = uo.last_updater_outcome()
+
+    assert outcome is not None
+    assert (outcome.kind, outcome.rc, outcome.log) == ("unknown", None, per_run.name)
+
+
+def test_posix_per_run_log_is_the_only_updater_log_candidate(
+    home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The appended backend log is not a POSIX fallback once a tee log exists."""
+    per_run = _write_log(home / "logs" / "updater-1787518170.log", "partial\n")
+    backend_log = _write_log(home / "logs" / "ava-updater.out.log", "older run\n")
+    monkeypatch.setattr(uo, "IS_WINDOWS", False)
+    monkeypatch.setattr("shared.session_backend.get_backend", lambda: _Backend(backend_log))
+
+    assert uo.updater_log_candidates("ava-updater") == [per_run]
+
+
+def test_windows_backend_log_remains_a_candidate_without_a_per_run_log(
+    home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Windows has no POSIX tee file, so its supervisor log remains readable."""
+    backend_log = _write_log(home / "logs" / "ava-updater.out.log", "partial\n")
+    monkeypatch.setattr(uo, "IS_WINDOWS", True)
+    monkeypatch.setattr("shared.session_backend.get_backend", lambda: _Backend(backend_log))
+
+    assert uo.updater_log_candidates("ava-updater") == [backend_log]
+
+
 # ─── the staleness anchor: a previous update's log is not this update's outcome ──
 
 

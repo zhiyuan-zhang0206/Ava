@@ -39,6 +39,7 @@ import subprocess
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import cast
 
 import psutil
 import pytest
@@ -191,6 +192,17 @@ def test_killing_a_daemon_spares_the_agent_processes_it_launched(fleet: _Fleet) 
     winproc.kill_session("ava-ops", graceful=False)
 
     assert not fleet.proc(_PID_BASE + 4).killed
+
+
+def test_tree_kill_would_spare_only_the_nested_session_subtree(
+    fleet: _Fleet, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The restart under the updater survives an ops-tree kill; a plain child does not."""
+    monkeypatch.setattr(winproc, "IS_WINDOWS", True)
+    ops = cast(psutil.Process, fleet.proc(_PID_BASE))
+
+    assert winproc.tree_kill_would_spare("ava-ops", ops, {_PID_BASE + 2, _PID_BASE + 3})
+    assert not winproc.tree_kill_would_spare("ava-ops", ops, {_PID_BASE + 1})
 
 
 def test_the_targeted_session_and_its_plain_children_still_die(fleet: _Fleet) -> None:

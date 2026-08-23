@@ -285,6 +285,59 @@ def test_restart_refused_inside_supervised_session(
     assert _HOSTING_SESSION in capsys.readouterr().err
 
 
+def test_restart_proceeds_when_windows_stop_would_spare_its_lineage(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    write_session_record: Callable[..., Path],
+) -> None:
+    """The updater remains alive when stopping its Windows ops-daemon parent.
+
+    Windows keeps the updater beneath ``ava-ops`` rather than reparenting it, but
+    the kill path has spared that updater subtree since the 2026-07-29 incident.
+    The 2026-08-24 guard must consult that fact instead of declining a restart
+    whose stop leg cannot kill it.
+    """
+    from shared.proc import hosting_supervised_session
+
+    def _spares(_name: str, _proc: psutil.Process, _ancestor_pids: set[int]) -> bool:
+        return True
+
+    def _success(*_args: object, **_kwargs: object) -> int:
+        return 0
+
+    write_session_record("ava-updater", pid=os.getppid())
+    write_session_record("ava-ops", pid=os.getppid())
+    monkeypatch.setattr("shared.winproc.tree_kill_would_spare", _spares)
+    monkeypatch.setattr(_cli, "_preflight_probes", _success)
+    monkeypatch.setattr(_cli, "_do_stop", _success)
+    monkeypatch.setattr(_cli, "_cmd_start_body", _success)
+
+    assert hosting_supervised_session() is None
+    assert _cli.cmd_restart() == 0
+    assert "refusing restart" not in capsys.readouterr().err
+
+
+def test_restart_refuses_when_the_service_tree_would_not_spare_its_lineage(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    write_session_record: Callable[..., Path],
+) -> None:
+    """The 2026-08-12 whole-tree shape remains unsafe and must still refuse."""
+    from shared.exit_codes import RESTART_DECLINED_EXIT_CODE
+
+    def _does_not_spare(_name: str, _proc: psutil.Process, _ancestor_pids: set[int]) -> bool:
+        return False
+
+    write_session_record(_HOSTING_SESSION, pid=os.getppid())
+    monkeypatch.setattr("shared.winproc.tree_kill_would_spare", _does_not_spare)
+    monkeypatch.setattr("cli.commands.stop._release_self_heal_pause", lambda: None)
+    monkeypatch.setattr(_cli, "_preflight_probes", _fail_if_called("the preflight"))
+    monkeypatch.setattr(_cli, "_do_stop", _fail_if_called("_do_stop"))
+
+    assert _cli.cmd_restart() == RESTART_DECLINED_EXIT_CODE
+    assert _HOSTING_SESSION in capsys.readouterr().err
+
+
 def test_pty_session_records_do_not_refuse() -> None:
     """A pty session record for this very process (run/pty, the per-session
     host namespace) must NOT read as a supervised session: the guard's scan is

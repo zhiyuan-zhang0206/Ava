@@ -89,15 +89,19 @@ def hosting_supervised_session() -> str | None:
     (2026-08-12: an agent ran `ava cluster update --local` in its pty-hosted
     background shell; stopping ava-pty-supervisor force-killed the supervisor's
     whole tree — rollout included — stranding the cluster paused with every
-    service down). The detached orchestration sessions are exempt: they are
-    exactly the hosts the detached form sanctions.
+    service down). Windows preserves nested live-session subtrees during a kill,
+    so its 2026-08-24 updater restart is safe inside `ava-ops`; the guard asks the
+    kill path's predicate rather than approximating that boundary. The detached
+    orchestration sessions are exempt: they are exactly the hosts the detached
+    form sanctions.
 
     A record whose process is gone, or whose pid the OS recycled onto a
     different process (start-time mismatch), does not count.
     """
     # Deliberately method-local: the in-process updater's post-checkout stop must
-    # load SessionRecord from the new tree; a module-scope import leaves its old
-    # version in sys.modules before checkout. See shared/session_backend.py.
+    # load these from the new tree; a module-scope import leaves their old version
+    # in sys.modules before checkout. See shared/session_backend.py.
+    from shared import winproc
     from shared.session_record import SessionRecord
 
     try:
@@ -115,9 +119,12 @@ def hosting_supervised_session() -> str | None:
         try:
             proc = psutil.Process(record.pid)
             if record.starttime is not None:
-                if record.identifies(record.pid) is True:
-                    return name
-            elif abs(proc.create_time() - record.create_time) <= _SESSION_CREATE_TIME_TOLERANCE_S:
+                is_record_process = record.identifies(record.pid) is True
+            else:
+                is_record_process = (
+                    abs(proc.create_time() - record.create_time) <= _SESSION_CREATE_TIME_TOLERANCE_S
+                )
+            if is_record_process and not winproc.tree_kill_would_spare(name, proc, lineage):
                 return name
         except psutil.Error:
             continue
