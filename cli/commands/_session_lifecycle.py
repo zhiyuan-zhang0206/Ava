@@ -94,6 +94,17 @@ def _new_session(
     if extra_env:
         env.update(extra_env)
     ok = get_backend().new_session(session, cmd, cwd, env=env)
+    if ok:
+        # `running_sha` was recorded immediately before this launch pass. Unlike
+        # that host-wide update baseline, the session-code sidecar is bound to
+        # this one process identity and can therefore answer whether THIS live
+        # daemon needs replacing after a checkout advances.
+        from shared.running_sha import get as running_sha
+        from shared.session_code import record_launch
+
+        sha = running_sha()
+        if sha is not None:
+            record_launch(session, sha)
     if not ok:
         print(
             f"  \u2717 could not start session {session}",
@@ -213,6 +224,40 @@ def _relaunch_once(sess: str, cmd: str, cwd: Path, extra: dict[str, str] | None)
     return _ns._new_session(sess, cmd, cwd, extra_env=extra)
 
 
+def _stale_session_code_reason(session: str) -> str | None:
+    """Why a healthy prod service must be relaunched for code drift, or ``None``.
+
+    A session version is actionable only when both sides are known: the session's
+    launch sidecar and the installed prod source's HEAD. Dev worktrees compare
+    different trees by design, and an executing update or local orchestration
+    owns the normal checkout-ahead transient, so all of those cases preserve the
+    ordinary idempotent start behavior.
+    """
+    from ops.controllers._deploy_state import read_lease_state, read_orchestration
+    from shared.cluster_drift import prod_source_head_sha, running_from_prod_source
+    from shared.session_code import launched_sha
+
+    if not running_from_prod_source():
+        return None
+    head = prod_source_head_sha()
+    launched = launched_sha(session)
+    if head is None or launched is None or launched == head:
+        return None
+
+    # Match the code controller's narrow settle-hold rule: an executing rollout
+    # owns the transition, while a hold waiting for this host is specifically
+    # waiting for the convergence this relaunch provides.
+    lease = read_lease_state(settle_hold_mode="narrow")
+    if lease.kind in {"unreadable", "executing"} or (
+        lease.kind == "settle_hold" and not lease.waits_for_this_host
+    ):
+        return None
+    orchestration = read_orchestration()
+    if orchestration.kind != "none":
+        return None
+    return f"session launched on {launched[:7]}; prod source is {head[:7]}"
+
+
 def _launch_sessions(roles: MachineRoles, skip: set[str], repo: Path) -> LaunchOutcome:
     """Launch the sessions this host's capability set needs (+ --disable-service).
 
@@ -247,12 +292,18 @@ def _launch_sessions(roles: MachineRoles, skip: set[str], repo: Path) -> LaunchO
         if _ns._has_session(sess):
             husk = _ns._husk_session_reason(spec)
             if husk is None:
-                print(f"  ✓ {sess} already running")
-                continue
-            # The session outlived its service. Clear it before relaunching:
-            # `new-session -d -s <name>` refuses a duplicate name, so skipping the
-            # kill would turn the husk into a launch failure instead of a launch.
-            print(f"  ⚠ {sess} session is alive but the service is not ({husk}) — relaunching")
+                stale_code = _stale_session_code_reason(sess)
+                if stale_code is None:
+                    print(f"  ✓ {sess} already running")
+                    continue
+                print(
+                    f"  ⚠ {sess} session is alive but runs stale code ({stale_code}) — relaunching"
+                )
+            else:
+                # The session outlived its service. Clear it before relaunching:
+                # `new-session -d -s <name>` refuses a duplicate name, so skipping the
+                # kill would turn the husk into a launch failure instead of a launch.
+                print(f"  ⚠ {sess} session is alive but the service is not ({husk}) — relaunching")
             if not _ns._kill_session(sess, expected=True):
                 # NOT a launch failure: the session is still there, and the husk
                 # verdict came from a single probe that a merely-slow service can
