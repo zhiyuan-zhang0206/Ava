@@ -326,7 +326,9 @@ class _OtlpBackend:
     def _emit_log(self, event: Event) -> None:
         """Map one Event to an OTLP LogRecord and emit it.
 
-        Body = the full event as JSON (mirror shape). Attributes = the indexed
+        Body = the full event as JSON (the id-free mirror shape; the mirror row
+        itself also carries the surrogate `id`, which the body deliberately does
+        not). Attributes = the indexed
         dimensions; trace_id/span_id ride the LogRecord fields so Loki rows
         correlate with Tempo spans. Runs on the worker thread (or flush()).
         """
