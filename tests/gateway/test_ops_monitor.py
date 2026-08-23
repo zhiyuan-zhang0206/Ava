@@ -16,13 +16,17 @@ zero-filled per bucket.
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 
+import httpx
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+from gateway import prom_metrics
 from gateway.app import app
 from gateway.ops_series_lgtm import _GRID_ORIGIN, _bucket_starts
+from gateway.routers import ops_monitor
 from tests.gateway.loki_fake import FakeLoki
 from tests.gateway.prom_fake import FakePrometheus
 
@@ -265,3 +269,82 @@ def test_ops_monitor_grid_alignment(
     # the bucket start for index i is the grid-aligned boundary, not `now`
     start = datetime.fromisoformat(meta["bucket_starts"][i])
     assert start.minute % 30 == 0 and start.second == 0
+
+
+def test_ops_monitor_borrows_db_only_after_lgtm_fanout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The label projection cannot occupy a DB slot while network futures run."""
+    events: list[str] = []
+
+    class Cursor:
+        def __enter__(self) -> Cursor:
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def execute(self, _query: str, _params: tuple[list[int]]) -> None:
+            events.append("label_query")
+
+        def fetchall(self) -> list[tuple[int, str]]:
+            return [(7, "worker")]
+
+    class Connection:
+        def __enter__(self) -> Connection:
+            events.append("db_borrow")
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def cursor(self) -> Cursor:
+            return Cursor()
+
+    class Pool:
+        def connection(self) -> Connection:
+            return Connection()
+
+    def fetch(
+        _window: str,
+        *,
+        label_lookup: object,
+    ) -> dict[str, object]:
+        events.append("fanout_done")
+        assert callable(label_lookup)
+        assert label_lookup([7]) == {7: "worker"}
+        return {"ok": True}
+
+    def report(**data: object) -> dict[str, object]:
+        return data
+
+    monkeypatch.setattr(ops_monitor, "fetch_ops_series", fetch)
+    monkeypatch.setattr(ops_monitor, "OpsMonitorReport", report)
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(db_pool=Pool())))
+
+    assert ops_monitor.get_ops_monitor(request) == {"ok": True}  # type: ignore[arg-type]
+    assert events == ["fanout_done", "db_borrow", "label_query"]
+
+
+def test_ops_monitor_backend_failure_is_retriable_503(monkeypatch: pytest.MonkeyPatch) -> None:
+    def unavailable(*_args: object, **_kwargs: object) -> dict[str, object]:
+        raise httpx.ReadTimeout("observability unavailable")
+
+    monkeypatch.setattr(ops_monitor, "fetch_ops_series", unavailable)
+    with TestClient(app) as client:
+        response = client.get("/api/ops/monitor")
+    assert response.status_code == 503
+    assert response.headers["retry-after"] == "1"
+    assert "ReadTimeout" in response.json()["detail"]
+
+
+def test_ops_monitor_prom_budget_failure_uses_global_503(monkeypatch: pytest.MonkeyPatch) -> None:
+    def saturated(*_args: object, **_kwargs: object) -> dict[str, object]:
+        raise prom_metrics.PromQueryBudgetError("queue_full")
+
+    monkeypatch.setattr(ops_monitor, "fetch_ops_series", saturated)
+    with TestClient(app) as client:
+        response = client.get("/api/ops/monitor")
+    assert response.status_code == 503
+    assert response.headers["retry-after"] == "1"
+    assert response.json()["detail"] == "Prometheus query budget unavailable (queue_full); retry"

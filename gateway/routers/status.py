@@ -18,12 +18,14 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 
 import httpx
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Query, Request
 from psycopg import Cursor
 from pydantic import ValidationError
 
 from gateway import loki_events, loki_query_budget
 from gateway.routers import _inspect_pg, _roster_rows, _stats_dashboard
+from gateway.routers._backend_failure import raise_backend_unavailable
+from gateway.routers._health import get_health
 from gateway.schemas import (
     ClusterPanel,
     MachineStatus,
@@ -42,38 +44,12 @@ from shared.cluster_lock import DeployLease, settle_hosts
 from shared.config import settings
 from shared.last_update import LastUpdate
 from shared.machine import is_agent_runner, is_gateway, machine_name
-from shared.paths import ava_home
 from shared.resource_sample import ResourceSample
 
 router = APIRouter()
 _log = logging.getLogger(__name__)
 
-
-@router.get("/api/health")
-def get_health(request: Request) -> dict[str, str]:
-    """Liveness probe over the private network (the gateway is unauthenticated). DB ping
-    included — a gateway that can serve HTTP but cannot reach Postgres is not
-    "healthy" enough for the watchdog to leave alone.
-
-    The identity fields answer the three questions a 200 alone cannot: `name` is
-    which *service* answered, `home` this gateway's `$AVA_HOME` (its cluster
-    identity), `machine` its host. A 200 on this port only proves *something*
-    listens there, so the watchdog verifies the identity too rather than the status
-    code alone — see `services/healthchecks/gateway.py`. Each was additive to the
-    `{"status": "ok"}` contract.
-
-    `name` is a constant naming the service this route belongs to — the point being
-    that an impostor answering here reports its own name, or none. No probe reads it
-    yet; `shared.daemon_health._probe_home` gains the `name` arm only once every
-    deployed gateway emits the field, and that ordering is load-bearing (#1038)."""
-    with request.app.state.db_pool.connection() as conn, conn.cursor() as cur:
-        cur.execute("SELECT 1")
-    return {
-        "status": "ok",
-        "name": "gateway",
-        "home": str(ava_home()),
-        "machine": machine_name(),
-    }
+router.add_api_route("/api/health", get_health, methods=["GET"], response_model=None)
 
 
 @router.get("/api/stats/dashboard")
@@ -85,8 +61,7 @@ def get_stats_dashboard(
 
     Data sources:
     - `live_count`: agents_meta table — all non-terminated agents (running/idling/restarting/hibernating)
-    - `tokens` / `cost_usd`: telemetry `llm_usage` events in Loki (cached
-      for 60 seconds per requested window)
+    - `tokens` / `cost_usd`: telemetry `llm_usage` events in Loki
     - average turn duration / warning/error counts: Loki's unified event stream
     - `total_events`: Postgres archive partition estimates (a coarse growth gauge)
 
@@ -95,6 +70,10 @@ def get_stats_dashboard(
     scenario: tokens all 0, cost_usd 0.0, avg_turn_seconds None (frontend
     shows "—").
     """
+    cached = _stats_dashboard.cache_get(hours)
+    if cached is not None:
+        return cached
+
     # The turn / W/E stats read Loki (task #1197 LGTM read side): the PG
     # `events` table is a frozen pre-cutover archive, so a live window queried
     # there flatlines to zero. Do not hold a pooled DB connection while these
@@ -105,15 +84,27 @@ def get_stats_dashboard(
         # Cost and token fields come from the same telemetry llm_usage event
         # snapshot. In particular, cost_usd was quoted when the call ran; do
         # not apply today's registry prices to historical token counts at read time.
-        llm_usage_sums = _stats_dashboard.llm_usage_sums(hours, window_start, now)
+        llm_usage_sums = {
+            field: loki_events.attribute_aggregate(
+                field=field,
+                agg="sum",
+                event_names=["llm_usage"],
+                categories=["telemetry"],
+                from_=window_start,
+                to=now,
+                timeout_s=8.0,
+            )
+            for field in ("in_total", "out_total", "cache_read", "cost_usd")
+        }
         in_total = round(llm_usage_sums["in_total"])
         out_total = round(llm_usage_sums["out_total"])
         cache_read = round(llm_usage_sums["cache_read"])
         window_cost_usd = llm_usage_sums["cost_usd"]
         cache_hit_pct = round(cache_read / in_total * 100, 2) if in_total else 0.0
 
-        # Keep turn and alert range vectors at most three hours wide. The shared
-        # helper returns one span for short windows and partitions longer ones.
+        # Dashboard reads accept six-hour shards (24h = four shards), halving
+        # the number of bounded calls versus the inspector's three-hour default.
+        # Each interactive query still has its own 8-second timeout.
         turn_end_sum = sum(
             _inspect_pg.query_loki_shards(
                 window_start,
@@ -125,7 +116,9 @@ def get_stats_dashboard(
                     attribute_filters={"ok": "true"},
                     from_=shard_start,
                     to=shard_end,
+                    timeout_s=8.0,
                 ),
+                shard_width=timedelta(hours=6),
             )
         )
         turn_end_count = sum(
@@ -137,7 +130,9 @@ def get_stats_dashboard(
                     attribute_filters={"ok": "true"},
                     from_=shard_start,
                     to=shard_end,
+                    timeout_s=8.0,
                 ),
+                shard_width=timedelta(hours=6),
             )
         )
         avg_turn_seconds: float | None = turn_end_sum / turn_end_count if turn_end_count else None
@@ -155,7 +150,9 @@ def get_stats_dashboard(
                         categories=["telemetry", "log"],
                         from_=shard_start,
                         to=shard_end,
+                        timeout_s=8.0,
                     ),
+                    shard_width=timedelta(hours=6),
                 )
             ),
             "error": sum(
@@ -167,7 +164,9 @@ def get_stats_dashboard(
                         categories=["telemetry", "log"],
                         from_=shard_start,
                         to=shard_end,
+                        timeout_s=8.0,
                     ),
+                    shard_width=timedelta(hours=6),
                 )
             ),
         }
@@ -175,13 +174,7 @@ def get_stats_dashboard(
         # Preserve the process-wide admission handler's machine-readable reason.
         raise
     except httpx.HTTPError as exc:
-        # loki_events already emitted the failing query shape; the dashboard only
-        # translates the transport failure into its retriable API contract.
-        raise HTTPException(
-            status_code=503,
-            detail=(f"stats backend unavailable ({type(exc).__name__}); retry in a moment"),
-            headers={"Retry-After": "1"},
-        ) from exc
+        raise_backend_unavailable(exc)
 
     with request.app.state.db_pool.connection() as conn, conn.cursor() as cur:
         cur.execute("SELECT COUNT(*) FROM agents_meta WHERE status != 'terminated'")
@@ -197,6 +190,8 @@ def get_stats_dashboard(
         # for the table itself — so this is correct whether or not events is
         # partitioned. GREATEST clamps the -1 "never analyzed" sentinel (Postgres
         # 14+); the value is approximate, refreshed by autovacuum/ANALYZE.
+        # It intentionally rides the whole-response cache: a 60-second-old
+        # growth gauge is useful, and cache misses keep this DB work cheap.
         cur.execute(
             "SELECT COALESCE(SUM(GREATEST(c.reltuples, 0)), 0)::bigint "
             "FROM pg_partition_tree('events'::regclass) t "
@@ -204,7 +199,7 @@ def get_stats_dashboard(
         )
         total_events = int(cur.fetchone()[0])
 
-    return StatsDashboard(
+    response = StatsDashboard(
         live_count=live_count,
         window_hours=hours,
         tokens=StatsTokens(
@@ -219,6 +214,8 @@ def get_stats_dashboard(
         errors=warn_err.get("error", 0),
         total_events=total_events,
     )
+    _stats_dashboard.cache_put(hours, response)
+    return response
 
 
 def _get_services_status() -> ServicesStatus:

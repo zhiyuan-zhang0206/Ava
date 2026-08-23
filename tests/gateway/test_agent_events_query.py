@@ -12,6 +12,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -133,6 +134,23 @@ class TestAgentEventsQuery:
         kw = fake_query["calls"][0]
         assert kw["limit"] == 5
         assert kw["offset"] == 10
+
+    def test_offset_over_hard_cap_422(self, fake_query: dict[str, list[dict[str, Any]]]) -> None:  # type: ignore[no-untyped-def]
+        with TestClient(app) as client:
+            response = client.get("/api/agents/7/events", params={"offset": 10_001})
+        assert response.status_code == 422
+        assert fake_query["calls"] == []
+
+    def test_loki_failure_is_retriable_503(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        def unavailable(**_kwargs: Any) -> tuple[list[dict[str, Any]], bool]:
+            raise httpx.ReadTimeout("loki timed out")
+
+        monkeypatch.setattr(loki_events, "query_events", unavailable)
+        with TestClient(app) as client:
+            response = client.get("/api/agents/7/events")
+        assert response.status_code == 503
+        assert response.headers["retry-after"] == "1"
+        assert "ReadTimeout" in response.json()["detail"]
 
     def test_unknown_agent_returns_empty(self, fake_query: dict[str, list[dict[str, Any]]]) -> None:  # type: ignore[no-untyped-def]
         with TestClient(app) as client:

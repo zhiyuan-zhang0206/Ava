@@ -37,6 +37,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from gateway import loki_events, loki_query_budget
+from gateway.routers._backend_failure import raise_backend_unavailable
 from gateway.routers._eval_guard import deny_isolated_result_read
 from gateway.schemas import EventRow, EventsMeta, EventsResponse
 from shared.events.contract import EventTier, tier_for
@@ -134,7 +135,7 @@ def get_events(
     to: Annotated[datetime | None, Query()] = None,
     hours: Annotated[float | None, Query(gt=0, le=_MAX_HOURS)] = None,
     limit: Annotated[int, Query(ge=1, le=1000)] = 100,
-    offset: Annotated[int, Query(ge=0)] = 0,
+    offset: Annotated[int, Query(ge=0, le=10_000)] = 0,
     with_total: Annotated[bool, Query()] = False,  # noqa: FBT002 — FastAPI query param
 ) -> EventsResponse:
     """Slice of the unified event stream — every event (audit / telemetry /
@@ -173,8 +174,9 @@ def get_events(
         would scan the whole retention history (6M+ rows across every
         month partition), so the API never runs one. `meta.window_from`
         always echoes the effective lower bound.
-      - `limit` (default 100, cap 1000) / `offset`: offset paging; stable
-        ordering across same-`ts` rows.
+      - `limit` (default 100, cap 1000) / `offset` (cap 10,000): offset
+        paging with stable ordering across same-`ts` rows. The cap bounds the
+        in-memory Loki JSON parse (`limit + offset + 1` rows).
       - `with_total=1`: also compute the exact filtered row count
         (`meta.total`) via the Loki count path — one extra full-window
         aggregation, so it is opt-in; without it `meta.total` is null.
@@ -239,15 +241,9 @@ def get_events(
         # transition metrics; the global handler preserves that reason.
         raise
     except httpx.HTTPError as exc:
-        # The events backend (Loki) timed out or dropped the connection — a
-        # retriable backend failure, not a client error (task #1289: the
-        # 60s httpx timeout on dense-window queries surfaced as a bare 500).
-        # The failing query shape is recorded as a `loki_query_failed` event
-        # by loki_events before the exception reaches here.
-        raise HTTPException(
-            status_code=503,
-            detail=(f"events backend unavailable ({type(exc).__name__}); retry in a moment"),
-        ) from exc
+        # The failing query shape is recorded by loki_events before the
+        # exception reaches this wire-level retriable response.
+        raise_backend_unavailable(exc)
 
     items = [
         EventRow(

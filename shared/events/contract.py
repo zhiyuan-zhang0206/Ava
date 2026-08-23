@@ -452,6 +452,15 @@ class LokiQueryFailed(TypedDict):
     query: str
 
 
+class PromQueryFailed(TypedDict):
+    """`prom_query_failed` payload — gateway/prom_metrics.py transport failure."""
+
+    endpoint: str
+    duration_s: float
+    error: str
+    query: str
+
+
 class PageServeDirMissing(TypedDict):
     """`page_serve_dir_missing` payload — page-server daemon degradation alert.
 
@@ -473,6 +482,19 @@ class LokiQueryBudget(TypedDict):
     Float state/wait fields become OTLP histograms; integer outcome fields are
     0/1 deltas and become counters. `outcome` is the bounded reason dimension.
     """
+
+    outcome: Literal["queued", "acquired", "released", "queue_full", "wait_timeout", "cancelled"]
+    active: float
+    queued: float
+    high_water: float
+    wait_ms: float
+    acquired: int
+    queue_full: int
+    wait_timeout: int
+
+
+class PromQueryBudget(TypedDict):
+    """One local Prometheus-admission transition and post-transition state."""
 
     outcome: Literal["queued", "acquired", "released", "queue_full", "wait_timeout", "cancelled"]
     active: float
@@ -907,6 +929,12 @@ EVENTS: dict[str, EventSpec] = {
         payload=LokiQueryBudget,
         tier="noise",
     ),
+    "prom_query_budget": _telemetry(
+        "prom_query_budget",
+        "local Prometheus query-admission transition and capacity metrics",
+        payload=PromQueryBudget,
+        tier="noise",
+    ),
     # ── log (category=log) — registry.md §4, the bare-log fallback ──
     "log": EventSpec(
         name="log", category="log", tier="noise", payload=LogPayload, doc="bare log line"
@@ -917,6 +945,13 @@ EVENTS: dict[str, EventSpec] = {
         tier="anomaly",
         payload=LokiQueryFailed,
         doc="a Loki HTTP query failed (timeout / disconnect / non-2xx) — carries the request shape",
+    ),
+    "prom_query_failed": EventSpec(
+        name="prom_query_failed",
+        category="log",
+        payload=PromQueryFailed,
+        tier="anomaly",
+        doc="a Prometheus HTTP query failed (timeout / disconnect / non-2xx) — carries the request shape",
     ),
     "page_serve_dir_missing": EventSpec(
         name="page_serve_dir_missing",

@@ -611,6 +611,41 @@ def _run_middleware_once(
     asyncio.run(_run())
 
 
+def test_follower_polling_uses_capped_exponential_backoff(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A busy same-key follower backs off instead of issuing 10 polls/second."""
+    claims = iter((False, False, False, True))
+    sleeps: list[float] = []
+
+    def claim(*_args: object) -> bool:
+        return next(claims)
+
+    def fetch(*_args: object) -> None:
+        return None
+
+    monkeypatch.setattr(_idempotency.contracts, "contract_for", _fake_contract_for)
+    monkeypatch.setattr(app.state, "db_pool", object(), raising=False)
+    monkeypatch.setattr(_idempotency, "_claim", claim)
+    monkeypatch.setattr(_idempotency, "_fetch", fetch)
+    monkeypatch.setattr(_idempotency, "_monotonic", lambda: 0.0)
+
+    async def sleep(delay: float) -> None:
+        sleeps.append(delay)
+
+    async def drain(*_args: object) -> tuple[bytes, str]:
+        return b"{}", "application/json"
+
+    async def call_next(_request: Request) -> Response:
+        return Response(content=b"{}", media_type="application/json")
+
+    monkeypatch.setattr(_idempotency.asyncio, "sleep", sleep)
+    monkeypatch.setattr(_idempotency, "_drain_and_store", drain)
+    _run_middleware_once("key-backoff", "/api/test-keyed", call_next)
+
+    assert sleeps == [0.1, 0.1 * 1.75]
+
+
 def test_owner_drain_failure_releases_key(
     client: TestClient,
     db_conn: psycopg.Connection,

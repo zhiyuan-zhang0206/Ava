@@ -51,13 +51,14 @@ _ANOMALY_LEVELS = ("warning", "error", "critical")
 # Loki's default per-query series cap; event queries over long windows can
 # exceed it when the count path is used. The list path fetches raw streams
 # so it is unaffected.
-_HTTP_TIMEOUT_S = 60.0
+_HTTP_TIMEOUT_S = 45.0
 
 # A query slower than this logs a structured "loki query slow" line — the
 # threshold keeps the log volume near zero (fast queries are Loki's own
 # metrics' business) while making the slow tail visible in the gateway log
 # (which the LGTM sidecar ships into the event stream). Task #1289: the
 # 2026-08-20 /api/events 500s were 60s Loki hangs this line would have caught.
+# Stay below Loki's 50-second server query timeout so this client gives up first.
 _SLOW_QUERY_LOG_S = 5.0
 
 
@@ -463,6 +464,7 @@ def count_events(
     attribute_filters: dict[str, str] | None = None,
     from_: datetime | None = None,
     to: datetime | None = None,
+    timeout_s: float | None = None,
 ) -> int:
     """Exact count of event lines matching the same filters as
     `query_events` — the opt-in (`with_total=1`) `meta.total` of `/api/events`.
@@ -500,7 +502,12 @@ def count_events(
             drop_json_errors=True,
         )
         logql = f"sum(count_over_time(({pipeline})[{_slice_duration_s(slice_)}s]))"
-        payload = _get_json(url, {"query": logql, "time": slice_.end.timestamp()}, endpoint="query")
+        payload = _get_json(
+            url,
+            {"query": logql, "time": slice_.end.timestamp()},
+            endpoint="query",
+            timeout_s=timeout_s,
+        )
         result = payload.get("data", {}).get("result", [])
         if result:
             value = result[0].get("value") or result[0].get("values", [None])[-1]
@@ -627,6 +634,7 @@ def _quantile_aggregate(
     field: str,
     quantile: float,
     group_by: str | None,
+    timeout_s: float | None,
 ) -> float | list[tuple[str, float]]:
     """Quantile over a payload attribute. Loki's `quantile_over_time` is
     per-series and every event is its own series (`trace_id`/`span_id`), so
@@ -663,7 +671,7 @@ def _quantile_aggregate(
                 f"count_over_time(({pipeline}{extract})[{duration_s}s]))"
             )
         try:
-            dist.extend(_query_instant(logql, slice_.end))
+            dist.extend(_query_instant(logql, slice_.end, timeout_s=timeout_s))
         except httpx.HTTPStatusError as exc:
             if not _is_series_limit(exc):
                 raise
@@ -676,6 +684,7 @@ def _quantile_aggregate(
                     duration_s=duration_s,
                 ),
                 slice_.end,
+                timeout_s=timeout_s,
             )
             _relabel_buckets(bucketed, field)
             dist.extend(bucketed)
@@ -699,7 +708,10 @@ def _quantile_aggregate(
 
 
 def _count_attribute_slices(
-    *, pipelines: list[tuple[LokiReadSlice, str]], group_by: str | None
+    *,
+    pipelines: list[tuple[LokiReadSlice, str]],
+    group_by: str | None,
+    timeout_s: float | None,
 ) -> float | list[tuple[str, float]]:
     """Count each cutover slice and add scalar or group totals."""
 
@@ -718,7 +730,7 @@ def _count_attribute_slices(
             )
         else:
             logql = f"sum(count_over_time(({pipeline})[{_slice_duration_s(slice_)}s]))"
-        for series in _query_instant(logql, slice_.end):
+        for series in _query_instant(logql, slice_.end, timeout_s=timeout_s):
             value = _result_value(series)
             if value is None:
                 continue
@@ -738,6 +750,7 @@ def _numeric_attribute_slices(
     group_by: str | None,
     range_op: str,
     cross_op: str,
+    timeout_s: float | None,
 ) -> float | list[tuple[str, float]]:
     """Merge sum/min/max payload aggregates across non-overlapping slices."""
 
@@ -760,7 +773,7 @@ def _numeric_attribute_slices(
             )
         else:
             logql = f"{cross_op}({range_op}(({unwrap_pipe})[{_slice_duration_s(slice_)}s]))"
-        for series in _query_instant(logql, slice_.end):
+        for series in _query_instant(logql, slice_.end, timeout_s=timeout_s):
             value = _result_value(series)
             if value is None:
                 continue
@@ -805,6 +818,7 @@ def attribute_aggregate(
     attribute_filters: dict[str, str] | None = None,
     from_: datetime | None = None,
     to: datetime | None = None,
+    timeout_s: float | None = None,
 ) -> list[tuple[str, float]]: ...
 
 
@@ -827,6 +841,7 @@ def attribute_aggregate(
     attribute_filters: dict[str, str] | None = None,
     from_: datetime | None = None,
     to: datetime | None = None,
+    timeout_s: float | None = None,
 ) -> float: ...
 
 
@@ -848,6 +863,7 @@ def attribute_aggregate(
     attribute_filters: dict[str, str] | None = None,
     from_: datetime | None = None,
     to: datetime | None = None,
+    timeout_s: float | None = None,
 ) -> float | list[tuple[str, float]]:
     """Numeric aggregate over one **payload attribute** (nested in the event
     JSON's `attributes` object) — the Loki replacement for the SQL-side
@@ -906,10 +922,15 @@ def attribute_aggregate(
             field=field,
             quantile=quantile,
             group_by=group_by,
+            timeout_s=timeout_s,
         )
 
     if agg == "count":
-        return _count_attribute_slices(pipelines=pipelines, group_by=group_by)
+        return _count_attribute_slices(
+            pipelines=pipelines,
+            group_by=group_by,
+            timeout_s=timeout_s,
+        )
 
     ops = {
         "sum": ("sum_over_time", "sum"),
@@ -926,6 +947,7 @@ def attribute_aggregate(
         group_by=group_by,
         range_op=range_op,
         cross_op=cross_op,
+        timeout_s=timeout_s,
     )
 
 
@@ -1064,11 +1086,13 @@ def _relabel_buckets(dist: list[dict[str, Any]], field: str) -> None:
         metric[field] = str(float(raw) + 0.5) if raw != "" else "0"
 
 
-def _query_instant(logql: str, at: datetime) -> list[dict[str, Any]]:
+def _query_instant(
+    logql: str, at: datetime, *, timeout_s: float | None = None
+) -> list[dict[str, Any]]:
     """One Loki instant query; returns the result vectors (metric + value)."""
     url = settings.observability.telemetry_loki_url.rstrip("/") + "/loki/api/v1/query"
     params = {"query": logql, "time": at.timestamp()}
-    payload = _get_json(url, params, endpoint="query")
+    payload = _get_json(url, params, endpoint="query", timeout_s=timeout_s)
     return payload.get("data", {}).get("result", [])
 
 
@@ -1148,6 +1172,7 @@ def _fetch_projected_slice(
     start_ns: int,
     end_ns: int,
     limit_per_slice: int,
+    timeout_s: float | None,
     out: list[tuple[int, int | None, str]],
 ) -> None:
     """Append one projected stream slice, bisecting a full Loki response."""
@@ -1165,6 +1190,7 @@ def _fetch_projected_slice(
             settings.observability.telemetry_loki_url.rstrip("/") + "/loki/api/v1/query_range",
             params,
             endpoint="query_range",
+            timeout_s=timeout_s,
         )
         rows: list[tuple[int, int | None, str]] = []
         for stream in payload.get("data", {}).get("result", []):
@@ -1208,6 +1234,7 @@ def query_projected_lines(
     from_: datetime | None = None,
     to: datetime | None = None,
     limit_per_slice: int = 5000,
+    timeout_s: float | None = None,
 ) -> list[tuple[int, int | None, str]]:
     """Projected row fetch — (ts_ns, agent_id, line) ascending, for client-side
     reduction of payload fields too wide to ship whole (metrics A3).
@@ -1220,7 +1247,9 @@ def query_projected_lines(
     the bisection floor (1s / depth 8) raises instead of silently dropping
     rows. agent_id comes from the stream
     labels ("" when absent). Duplicate boundary rows across slices are
-    dropped; the result is sorted by ts_ns ascending.
+    dropped; the result is sorted by ts_ns ascending. `timeout_s` bounds both
+    the count estimate and each projected-range request, so an interactive
+    reduction cannot occupy a Loki-budget slot for the default client timeout.
     """
     window = _window(from_, to)
     if window is None:
@@ -1265,6 +1294,7 @@ def query_projected_lines(
             attribute_filters=attribute_filters,
             from_=datetime.fromtimestamp(start_ns / 1e9, UTC),
             to=datetime.fromtimestamp(end_ns / 1e9, UTC),
+            timeout_s=timeout_s,
         )
     except Exception:
         n = 0
@@ -1295,6 +1325,7 @@ def query_projected_lines(
                 start_ns=s,
                 end_ns=e,
                 limit_per_slice=limit_per_slice,
+                timeout_s=timeout_s,
                 out=out,
             )
     # Dedup (slice boundaries can repeat), window filter, ascending sort.

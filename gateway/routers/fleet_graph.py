@@ -21,14 +21,22 @@ mark it stale and prevent it from replacing either Redis cache.
 from __future__ import annotations
 
 import math
+import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
-from typing import Annotated, Any, LiteralString
+from typing import Annotated, Any, LiteralString, NamedTuple
 
 import httpx
 from fastapi import APIRouter, Query, Request
 from psycopg import errors as pg_errors
 
-from gateway import loki_events, loki_query_budget, prom_metrics, telemetry_staleness
+from gateway import (
+    events_archive,
+    loki_events,
+    loki_query_budget,
+    prom_metrics,
+    telemetry_staleness,
+)
 from gateway.schemas import FleetGraphEdge, FleetGraphNode, FleetGraphResponse, StatsWindowHours
 from shared.log import logger
 from shared.redis_client import sync_redis
@@ -51,12 +59,18 @@ _EDGE_EVENT_NAMES = ("send_message", "spawn", "fork", "resurrect")
 # thousand since the cutover); the cap is a guardrail, not an expectation.
 _LOKI_EDGE_LIMIT = 50_000
 _TELEMETRY_READ_TIMEOUT_S = 8.0
+_ROUTE_TIMEOUT_S = 10.0
 
 # The OTLP-mapped llm_usage counters (shared/telemetry_otlp._record_metrics:
 # int payload field -> Counter named ava_<event>_<field>, Prometheus appends
 # `_total`). The token totals are the sum of the two counters.
 _IN_METRIC = "ava_llm_usage_in_total"
 _OUT_METRIC = "ava_llm_usage_out_total"
+
+
+def _monotonic() -> float:
+    """Route-budget clock seam, kept local so tests do not alter anyio timing."""
+    return time.monotonic()
 
 
 def _cache_key(
@@ -71,6 +85,39 @@ def _cache_key(
 def _last_good_cache_key(key: str) -> str:
     """Stable full-response fallback corresponding to one poll-cache key."""
     return f"fleet_graph:last_good:{key}"
+
+
+class _EdgeFilterPlan(NamedTuple):
+    """Caller-derived fixed SQL fragments and their safely-bound time values."""
+
+    win_start: datetime | None
+    edge_win: LiteralString
+    win_params: tuple[datetime, ...]
+    edge_live: LiteralString
+
+
+def _edge_filter_plan(
+    *, include_terminated: bool, hours: StatsWindowHours | None, now: datetime
+) -> _EdgeFilterPlan:
+    """Construct graph-edge filter fragments from validated route parameters."""
+    edge_live: LiteralString = (
+        ""
+        if include_terminated
+        else (
+            " AND agent_id IN (SELECT id FROM agents_meta WHERE status != 'terminated')"
+            " AND target_agent_id IN (SELECT id FROM agents_meta WHERE status != 'terminated')"
+        )
+    )
+    if hours is None:
+        return _EdgeFilterPlan(None, "", (), edge_live)
+
+    win_start = now - timedelta(hours=hours)
+    return _EdgeFilterPlan(
+        win_start,
+        " AND (event_name <> 'send_message' OR ts >= %s)",
+        (win_start,),
+        edge_live,
+    )
 
 
 def _read_graph(key: str, *, cache_name: str) -> FleetGraphResponse | None:
@@ -105,12 +152,16 @@ def _stale_graph(key: str, nodes: list[FleetGraphNode]) -> FleetGraphResponse:
     """
     last_good = _read_last_good_graph(key)
     if last_good is not None:
-        return last_good.model_copy(update={"stale": True})
-    return FleetGraphResponse(nodes=nodes, edges=[], stale=True)
+        return last_good.model_copy(update={"stale": True, "truncated": False})
+    return FleetGraphResponse(nodes=nodes, edges=[], stale=True, truncated=False)
 
 
 def _finalize_graph_response(
-    *, key: str, nodes: list[FleetGraphNode], edges: list[FleetGraphEdge]
+    *,
+    key: str,
+    nodes: list[FleetGraphNode],
+    edges: list[FleetGraphEdge],
+    truncated: bool = False,
 ) -> FleetGraphResponse:
     """Mark heartbeat staleness and cache only a fresh full response."""
     try:
@@ -119,9 +170,11 @@ def _finalize_graph_response(
         logger.debug("fleet_graph telemetry staleness guard failed open: {}", exc)
         stale = False
 
-    response = FleetGraphResponse(nodes=nodes, edges=edges, stale=stale)
+    response = FleetGraphResponse(nodes=nodes, edges=edges, stale=stale, truncated=truncated)
     if stale:
         return response
+    # A truncated-but-fresh graph is still the best current view, so cache it
+    # under the fresh-only rule; the next poll will re-read its capped edge tail.
     try:
         with sync_redis(decode_responses=True) as redis:
             serialized = response.model_dump_json()
@@ -133,7 +186,9 @@ def _finalize_graph_response(
     return response
 
 
-def _fetch_loki_edges(*, boundary: datetime | None, now: datetime) -> list[dict[str, Any]]:
+def _fetch_loki_edges(
+    *, boundary: datetime | None, now: datetime
+) -> tuple[list[dict[str, Any]], bool]:
     """Live-tail audit rows from Loki since the archive freeze boundary.
 
     Lineage events are all-time (fetch from the boundary); message events
@@ -155,7 +210,7 @@ def _fetch_loki_edges(*, boundary: datetime | None, now: datetime) -> list[dict[
             "fleet_graph Loki edge stream exceeded the {}-row fetch cap — edges truncated",
             _LOKI_EDGE_LIMIT,
         )
-    return rows
+    return rows, has_more
 
 
 def _merge_edge_rows(
@@ -228,9 +283,7 @@ def _archive_boundary(cur: Any) -> datetime | None:
     Rows older than the boundary come from the archive, rows at/after it from
     Loki (task #1280 interim; task #1281 imports the archive into Loki, after
     which the archive read collapses to Loki-only)."""
-    cur.execute("SELECT max(ts) FROM events")
-    row = cur.fetchone()
-    return row[0] if row is not None else None
+    return events_archive.load_frozen_boundary(cur)
 
 
 def _fetch_archive_edges(
@@ -281,6 +334,101 @@ def _fetch_archive_edges(
         edge_params,
     )
     return list(cur.fetchall())
+
+
+class _PgGraphData(NamedTuple):
+    """The DB-bound graph phase, kept separate from upstream telemetry work."""
+
+    node_rows: list[tuple[Any, ...]]
+    boundary: datetime | None
+    archive_rows: list[tuple[Any, ...]]
+
+
+def _fetch_pg_graph(
+    pool: Any,
+    *,
+    not_terminated: LiteralString,
+    edge_live: LiteralString,
+    edge_win: LiteralString,
+    win_params: tuple[datetime, ...],
+    decay_lambda: float,
+    now: datetime,
+) -> _PgGraphData:
+    """Fetch nodes and frozen archive edges under the route's PG budget."""
+    with pool.connection() as conn, conn.cursor() as cur:
+        # The graph's archive read can scan a large frozen table. Bound the PG
+        # phase below the route deadline so a sync route worker can degrade
+        # rather than wait for the pool's normal 60-second limit.
+        cur.execute("SET LOCAL statement_timeout = '8000'")
+        cur.execute(
+            # S608: the terminated filter is the only spliced fragment and it
+            # is a fixed internal literal (not caller input).
+            "SELECT "
+            "    a.id, "
+            "    t.label, "
+            "    a.status, "
+            "    a.liveness_state, "
+            "    a.spawner, "
+            "    a.machine "
+            "FROM agents_meta a "
+            "JOIN agents t ON t.id = a.id " + not_terminated + " ORDER BY a.id"
+        )
+        node_rows = cur.fetchall()
+        boundary = _archive_boundary(cur)
+        archive_rows = _fetch_archive_edges(
+            cur,
+            decay_lambda=decay_lambda,
+            now=now,
+            boundary=boundary,
+            edge_live=edge_live,
+            edge_win=edge_win,
+            win_params=win_params,
+        )
+    return _PgGraphData(node_rows, boundary, archive_rows)
+
+
+def _fetch_prom_tokens(
+    hours: StatsWindowHours | None,
+) -> tuple[dict[str, float], dict[str, float], dict[str, float], dict[str, float]]:
+    """Fetch independent all-time and selected-window token counters in parallel."""
+    # All four counter reads are independent, including the all-time and
+    # selected-window pairs, so issue them together instead of adding four
+    # 8-second waits to the route's sync worker occupancy.
+    with ThreadPoolExecutor(max_workers=4, thread_name_prefix="fleet-prom") as executor:
+        futures = {
+            "in_all": executor.submit(
+                prom_metrics.sum_by,
+                _IN_METRIC,
+                "agent_id",
+                timeout_s=_TELEMETRY_READ_TIMEOUT_S,
+            ),
+            "out_all": executor.submit(
+                prom_metrics.sum_by,
+                _OUT_METRIC,
+                "agent_id",
+                timeout_s=_TELEMETRY_READ_TIMEOUT_S,
+            ),
+            "in_window": executor.submit(
+                prom_metrics.sum_by,
+                _IN_METRIC,
+                "agent_id",
+                window_hours=hours,
+                timeout_s=_TELEMETRY_READ_TIMEOUT_S,
+            ),
+            "out_window": executor.submit(
+                prom_metrics.sum_by,
+                _OUT_METRIC,
+                "agent_id",
+                window_hours=hours,
+                timeout_s=_TELEMETRY_READ_TIMEOUT_S,
+            ),
+        }
+        return (
+            futures["in_all"].result(),
+            futures["out_all"].result(),
+            futures["in_window"].result(),
+            futures["out_window"].result(),
+        )
 
 
 def _build_nodes(
@@ -358,72 +506,44 @@ def get_fleet_graph(
     # None => all-time (no filter, no param). The node token window is applied in
     # PromQL (increase over [Nh]) instead — see the Prometheus block below.
     now = datetime.now(UTC)
-    win_start = now - timedelta(hours=hours) if hours is not None else None
-    edge_win: LiteralString
-    if hours is None:
-        edge_win, win_params = "", ()
-    else:
-        edge_win = " AND (event_name <> 'send_message' OR ts >= %s)"
-        win_params = (now - timedelta(hours=hours),)
-
     not_terminated: LiteralString = "" if include_terminated else "WHERE a.status != 'terminated'"
     # Same live-frontier rule for edges: an edge touching a terminated agent can
     # never be drawn (its endpoint is not in the node set), so filtering it here
     # shrinks the payload (24h window: ~2436 -> ~150 edges) with no visual change.
-    edge_live: LiteralString = (
-        ""
-        if include_terminated
-        else (
-            " AND agent_id IN (SELECT id FROM agents_meta WHERE status != 'terminated')"
-            " AND target_agent_id IN (SELECT id FROM agents_meta WHERE status != 'terminated')"
-        )
-    )
+    edge_filters = _edge_filter_plan(include_terminated=include_terminated, hours=hours, now=now)
 
     key = _cache_key(include_terminated=include_terminated, hours=hours, decay_lambda=decay_lambda)
     cached = _read_cached_graph(key)
     if cached is not None:
         return cached
 
+    deadline = _monotonic() + _ROUTE_TIMEOUT_S
     try:
-        with request.app.state.db_pool.connection() as conn, conn.cursor() as cur:
-            # --- Nodes: identity + liveness from PG (the token aggregates come
-            # from Prometheus below) ---
-            cur.execute(
-                # S608: the terminated filter is the only spliced fragment and
-                # it is a fixed internal literal (not caller input).
-                "SELECT "
-                "    a.id, "
-                "    t.label, "
-                "    a.status, "
-                "    a.liveness_state, "
-                "    a.spawner, "
-                "    a.machine "
-                "FROM agents_meta a "
-                "JOIN agents t ON t.id = a.id " + not_terminated + " ORDER BY a.id"
-            )
-            node_rows = cur.fetchall()
-
-            # --- Edges: frozen PG archive + Loki stitch ---
-            # Lineage (spawn/fork/resurrect) is permanent (weight = COUNT(*) * 2.0);
-            # messages decay per event and drop below 0.01. The PG `events` table
-            # is the frozen pre-cutover archive (task #1197): rows older than its
-            # max(ts) boundary come from here, rows at/after it from Loki.
-            boundary = _archive_boundary(cur)
-            archive_rows = _fetch_archive_edges(
-                cur,
-                decay_lambda=decay_lambda,
-                now=now,
-                boundary=boundary,
-                edge_live=edge_live,
-                edge_win=edge_win,
-                win_params=win_params,
-            )
-
+        pg_data = _fetch_pg_graph(
+            request.app.state.db_pool,
+            not_terminated=not_terminated,
+            edge_live=edge_filters.edge_live,
+            edge_win=edge_filters.edge_win,
+            win_params=edge_filters.win_params,
+            decay_lambda=decay_lambda,
+            now=now,
+        )
     except pg_errors.QueryCanceled:
         # A canceled PG query cannot provide a fresh node set, but a complete
         # prior graph is still strictly more useful than an empty fleet.
         logger.warning("fleet_graph query canceled (statement timeout) — serving stale graph")
         return _stale_graph(key, [])
+
+    node_rows = pg_data.node_rows
+    boundary = pg_data.boundary
+    archive_rows = pg_data.archive_rows
+
+    # A phase that crosses the TTFB deadline has missed its budget. Do not
+    # reject a merely late successful final assembly: only a completed phase
+    # triggers degradation, and degraded results never replace last-good data.
+    if _monotonic() > deadline:
+        logger.warning("fleet_graph PG phase exceeded route budget — serving stale graph")
+        return _stale_graph(key, _build_nodes(node_rows))
 
     # --- Token aggregates from Prometheus (the llm_usage counters) ---
     # total_tokens is the all-time counter sum (tooltip); node_score is the
@@ -431,31 +551,10 @@ def get_fleet_graph(
     # via gateway/prom_metrics; the `hours` window becomes a PromQL range
     # selector (increase over [Nh]) instead of a SQL fragment.
     try:
-        in_all = prom_metrics.sum_by(
-            _IN_METRIC,
-            "agent_id",
-            timeout_s=_TELEMETRY_READ_TIMEOUT_S,
-        )
-        out_all = prom_metrics.sum_by(
-            _OUT_METRIC,
-            "agent_id",
-            timeout_s=_TELEMETRY_READ_TIMEOUT_S,
-        )
-        if hours is None:
-            in_win, out_win = in_all, out_all
-        else:
-            in_win = prom_metrics.sum_by(
-                _IN_METRIC,
-                "agent_id",
-                window_hours=hours,
-                timeout_s=_TELEMETRY_READ_TIMEOUT_S,
-            )
-            out_win = prom_metrics.sum_by(
-                _OUT_METRIC,
-                "agent_id",
-                window_hours=hours,
-                timeout_s=_TELEMETRY_READ_TIMEOUT_S,
-            )
+        in_all, out_all, in_win, out_win = _fetch_prom_tokens(hours)
+    except prom_metrics.PromQueryBudgetError as exc:
+        logger.warning("fleet_graph Prometheus query budget refused — serving stale graph: {}", exc)
+        return _stale_graph(key, _build_nodes(node_rows))
     except (httpx.HTTPError, ValueError) as exc:
         logger.warning("fleet_graph Prometheus query failed — serving stale graph: {}", exc)
         return _stale_graph(key, _build_nodes(node_rows))
@@ -468,11 +567,19 @@ def get_fleet_graph(
         out_win=out_win,
     )
 
+    if _monotonic() > deadline:
+        logger.warning("fleet_graph Prometheus phase exceeded route budget — serving stale graph")
+        return _stale_graph(key, nodes)
+
     # --- Loki side: the live tail of the audit stream ---
     try:
-        loki_rows = _fetch_loki_edges(boundary=boundary, now=now)
+        loki_rows, truncated = _fetch_loki_edges(boundary=boundary, now=now)
     except (httpx.HTTPError, loki_query_budget.LokiQueryBudgetError) as exc:
         logger.warning("fleet_graph Loki query failed — serving stale graph: {}", exc)
+        return _stale_graph(key, nodes)
+
+    if _monotonic() > deadline:
+        logger.warning("fleet_graph Loki phase exceeded route budget — serving stale graph")
         return _stale_graph(key, nodes)
 
     live_ids: set[int] | None = None
@@ -482,9 +589,14 @@ def get_fleet_graph(
         archive_rows,
         loki_rows,
         live_ids=live_ids,
-        win_start=win_start,
+        win_start=edge_filters.win_start,
         now=now,
         decay_lambda=decay_lambda,
     )
 
-    return _finalize_graph_response(key=key, nodes=nodes, edges=edges)
+    return _finalize_graph_response(
+        key=key,
+        nodes=nodes,
+        edges=edges,
+        truncated=truncated,
+    )

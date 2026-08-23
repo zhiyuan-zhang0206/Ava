@@ -37,7 +37,7 @@ from fastapi.testclient import TestClient
 from gateway import loki_events, loki_query_budget
 from gateway.app import app
 from gateway.loki_events import _weighted_quantile
-from gateway.routers import _agent_cost, agent_inspect
+from gateway.routers import _agent_cost, _inspect_stats, agent_inspect
 from gateway.routers._inspect_cache import InspectCacheFullError, InspectQueryCache
 from shared.config import settings
 
@@ -300,6 +300,84 @@ def fake_loki(monkeypatch: pytest.MonkeyPatch) -> _FakeLoki:
     return fake
 
 
+def _lifecycle_line(ts: datetime, event_name: str = "agent_spawned") -> tuple[int, int, str]:
+    body = {
+        "ts": ts.isoformat(),
+        "agent_id": 7,
+        "machine": "test",
+        "process": "test",
+        "category": "audit",
+        "event_name": event_name,
+        "level": "info",
+        "source": "test",
+        "target_agent_id": None,
+        "attributes": {},
+    }
+    return (int(ts.timestamp() * 1e9), 7, json.dumps(body, separators=(",", ":")))
+
+
+def test_lifecycle_cache_is_per_agent_not_inspect_window_and_expires(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The retained lifecycle load is shared by h=1/h=24 response caches."""
+    now = datetime(2026, 8, 23, tzinfo=UTC)
+    window = (now - timedelta(days=7), now)
+    calls: list[dict[str, Any]] = []
+    clock = iter((0.0, 0.0, 299.0, 301.0, 301.0))
+
+    def projected(**kwargs: Any) -> list[tuple[int, int, str]]:
+        calls.append(kwargs)
+        return [_lifecycle_line(now)]
+
+    monkeypatch.setattr(loki_events, "query_projected_lines", projected)
+    monkeypatch.setattr(_inspect_stats.time_mod, "monotonic", lambda: next(clock))
+
+    first = _inspect_stats.cached_live_lifecycle(7, window=window, freeze=now)
+    # h=1 and h=24 calculate this same retained lifecycle window; the cache
+    # key deliberately remains only the agent id.
+    second = _inspect_stats.cached_live_lifecycle(7, window=window, freeze=now)
+    third = _inspect_stats.cached_live_lifecycle(7, window=window, freeze=now)
+
+    assert first == second == third == [(now, "agent_spawned")]
+    assert len(calls) == 2
+    assert calls[0]["timeout_s"] == 8.0
+
+
+def test_lifecycle_cache_cold_miss_is_single_flight(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Concurrent views of one agent wait for the same lifecycle scan."""
+    now = datetime(2026, 8, 23, tzinfo=UTC)
+    window = (now - timedelta(days=7), now)
+    entered = threading.Event()
+    release = threading.Event()
+    calls = 0
+
+    def projected(**_kwargs: Any) -> list[tuple[int, int, str]]:
+        nonlocal calls
+        calls += 1
+        entered.set()
+        assert release.wait(timeout=2)
+        return [_lifecycle_line(now)]
+
+    monkeypatch.setattr(loki_events, "query_projected_lines", projected)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first = executor.submit(
+            _inspect_stats.cached_live_lifecycle,
+            7,
+            window=window,
+            freeze=now,
+        )
+        assert entered.wait(timeout=2)
+        second = executor.submit(
+            _inspect_stats.cached_live_lifecycle,
+            7,
+            window=window,
+            freeze=now,
+        )
+        release.set()
+        assert first.result(timeout=2) == second.result(timeout=2)
+    assert calls == 1
+
+
 def _ledger_row(
     db: psycopg.Connection,
     *,
@@ -446,7 +524,7 @@ def test_inspect_loki_transport_failure_is_retriable_503(
     with TestClient(app) as client:
         response = client.get(f"/api/agents/{aid}/inspect")
     assert response.status_code == 503
-    assert response.json()["detail"] == "inspector history backend unavailable; retry"
+    assert "loki backend unavailable (RemoteProtocolError)" in response.json()["detail"]
     assert response.headers["retry-after"] == "1"
 
 
@@ -1123,7 +1201,9 @@ def _assert_inspect_live_query_budget(fake_loki: _FakeLoki) -> None:
     assert sum(fake_loki.wire_calls.values()) <= 12
     assert fake_loki.wire_calls["attribute_aggregate"] == 7
     assert fake_loki.wire_calls["query_events"] == 1
-    assert fake_loki.wire_calls["query_projected_lines"] == 1
+    # Requested stats and the retained per-agent lifecycle leg are separate:
+    # the latter is cached for five minutes across inspector windows.
+    assert fake_loki.wire_calls["query_projected_lines"] == 2
     assert fake_loki.wire_calls["count_by_event_name"] == 0
     assert fake_loki.wire_calls["attribute_distribution"] == 0
 

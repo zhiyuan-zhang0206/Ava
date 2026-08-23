@@ -72,6 +72,7 @@ class BudgetObservation:
 
 
 BudgetObserver = Callable[[BudgetObservation], None]
+BudgetErrorFactory = Callable[[BudgetRejectReason], httpx.PoolTimeout]
 
 
 def _emit_observation(observation: BudgetObservation) -> None:
@@ -102,11 +103,13 @@ class FairQueryBudget:
         max_waiters: int,
         wait_timeout_s: float,
         observer: BudgetObserver | None = None,
+        error_factory: BudgetErrorFactory = LokiQueryBudgetError,
     ) -> None:
         self._capacity = capacity
         self._max_waiters = max_waiters
         self._wait_timeout_s = wait_timeout_s
         self._observer = observer
+        self._error_factory = error_factory
         self._condition = threading.Condition()
         self._active = 0
         self._queue: deque[object] = deque()
@@ -143,12 +146,12 @@ class FairQueryBudget:
         try:
             self._observer(observation)
         except Exception:
-            _log.exception("Loki query budget observer failed")
+            _log.exception("query budget observer failed")
 
     def _acquire(self) -> None:
         queued_at = time.monotonic()
         ticket = object()
-        rejection: LokiQueryBudgetError | None = None
+        rejection: httpx.PoolTimeout | None = None
         with self._condition:
             if self._active < self._capacity and not self._queue:
                 self._active += 1
@@ -158,7 +161,7 @@ class FairQueryBudget:
             elif len(self._queue) >= self._max_waiters:
                 self._queue_full += 1
                 observation = self._observation("queue_full", queue_full=1)
-                rejection = LokiQueryBudgetError("queue_full")
+                rejection = self._error_factory("queue_full")
                 acquired_immediately = False
             else:
                 self._queue.append(ticket)
@@ -175,7 +178,7 @@ class FairQueryBudget:
     def _wait_for_slot(self, ticket: object, queued_at: float) -> None:
         """Wait for an already-enqueued ticket, removing it on every exit path."""
         deadline = queued_at + self._wait_timeout_s
-        timeout_error: LokiQueryBudgetError | None = None
+        timeout_error: httpx.PoolTimeout | None = None
         observation: BudgetObservation | None = None
         try:
             with self._condition:
@@ -190,7 +193,7 @@ class FairQueryBudget:
                             wait_ms=(time.monotonic() - queued_at) * 1000.0,
                             wait_timeout=1,
                         )
-                        timeout_error = LokiQueryBudgetError("acquire_timeout")
+                        timeout_error = self._error_factory("acquire_timeout")
                         break
                     self._condition.wait(timeout=remaining)
                 if timeout_error is None:
@@ -260,6 +263,7 @@ def reset_for_tests(
     max_waiters: int = LOKI_QUERY_MAX_WAITERS,
     wait_timeout_s: float = LOKI_QUERY_WAIT_TIMEOUT_S,
     observer: BudgetObserver | None = None,
+    error_factory: BudgetErrorFactory = LokiQueryBudgetError,
 ) -> None:
     """Replace the process budget between isolated unit tests."""
     global query_budget  # noqa: PLW0603 — intentional process singleton test seam
@@ -268,4 +272,5 @@ def reset_for_tests(
         max_waiters=max_waiters,
         wait_timeout_s=wait_timeout_s,
         observer=observer,
+        error_factory=error_factory,
     )

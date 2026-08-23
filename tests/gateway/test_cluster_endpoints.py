@@ -8,16 +8,20 @@ processes, no real sessions.
 
 from __future__ import annotations
 
+import asyncio
+import threading
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from functools import partial
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Literal, cast
 
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+import gateway.app as gateway_app
 from gateway import loki_events
 from gateway.app import app
 from ops import cluster as cluster_mod
@@ -74,6 +78,64 @@ def _pin_session_names(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 class TestPauseMiddleware:
+    def test_expired_pause_cache_uses_one_control_pool_read(self) -> None:
+        """Concurrent middleware requests share the expired-cache DB read."""
+        entered = threading.Event()
+        release = threading.Event()
+        reads = 0
+
+        class Cursor:
+            def __enter__(self) -> Cursor:
+                return self
+
+            def __exit__(self, *_args: object) -> None:
+                return None
+
+            def execute(self, _query: str, _params: tuple[str]) -> None:
+                nonlocal reads
+                reads += 1
+                entered.set()
+                assert release.wait(timeout=2)
+
+            def fetchone(self) -> tuple[str]:
+                return ("running",)
+
+        class Connection:
+            def __enter__(self) -> Connection:
+                return self
+
+            def __exit__(self, *_args: object) -> None:
+                return None
+
+            def cursor(self) -> Cursor:
+                return Cursor()
+
+        class ControlPool:
+            def connection(self) -> Connection:
+                return Connection()
+
+        request = SimpleNamespace(
+            app=SimpleNamespace(state=SimpleNamespace(control_db_pool=ControlPool()))
+        )
+
+        async def run() -> None:
+            gateway_app._pause_cache[0] = None
+            gateway_app._pause_inflight[0] = None
+            first = asyncio.create_task(gateway_app._cluster_is_paused(cast(Any, request)))
+            assert await asyncio.to_thread(entered.wait, 2)
+            second = asyncio.create_task(gateway_app._cluster_is_paused(cast(Any, request)))
+            await asyncio.sleep(0)
+            release.set()
+            assert await first is False
+            assert await second is False
+
+        try:
+            asyncio.run(run())
+        finally:
+            gateway_app._pause_cache[0] = None
+            gateway_app._pause_inflight[0] = None
+        assert reads == 1
+
     def test_sdk_path_returns_503_when_paused(self, fake_flag: Path) -> None:
         fake_flag.write_text("")
         with TestClient(app) as client:

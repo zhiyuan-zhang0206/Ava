@@ -1213,6 +1213,34 @@ class _RepeatingClient:
 
 
 class TestQueryProjectedLines:
+    def test_timeout_is_threaded_to_count_and_projected_slices(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        timeouts: list[float | None] = []
+
+        def get_json(
+            _url: str,
+            _params: dict[str, Any],
+            *,
+            endpoint: str,
+            timeout_s: float | None = None,
+        ) -> dict[str, Any]:
+            timeouts.append(timeout_s)
+            assert endpoint in {"query", "query_range"}
+            return {"data": {"result": []}}
+
+        monkeypatch.setattr(loki_events, "_get_json", get_json)
+        loki_events.query_projected_lines(
+            fields=[],
+            template="{{ __line__ }}",
+            event_names=["agent_spawned"],
+            from_=datetime(2026, 8, 1, tzinfo=UTC),
+            to=datetime(2026, 8, 2, tzinfo=UTC),
+            timeout_s=8.0,
+        )
+        assert timeouts
+        assert set(timeouts) == {8.0}
+
     def test_returns_projected_rows_ascending(self, monkeypatch: pytest.MonkeyPatch) -> None:
         count_payload: dict[str, Any] = {"data": {"result": [{"metric": {}, "value": [1, "2"]}]}}
         page: dict[str, Any] = {

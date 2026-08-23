@@ -359,7 +359,7 @@ async def get_cluster_roster(request: Request) -> list[MachineStatus]:
     of N). Same fan-out the `/api/status` cluster panel uses. Bypasses 503 mode
     so the roster stays visible during pause.
     """
-    rows = await asyncio.to_thread(_machines_rows_blocking, request.app.state.db_pool)
+    rows = await asyncio.to_thread(_machines_rows_blocking, request.app.state.control_db_pool)
     if not rows:
         return []
 
@@ -517,7 +517,7 @@ async def get_cluster_machines(request: Request) -> list[AgentMachineRow]:
     gateway_url are intentionally omitted — agents reason over the free-text
     description, not ops topology.
     """
-    rows = await asyncio.to_thread(_machines_rows_blocking, request.app.state.db_pool)
+    rows = await asyncio.to_thread(_machines_rows_blocking, request.app.state.control_db_pool)
     if not rows:
         return []
     statuses = await gather_cluster_status(rows, machine_name())
@@ -582,7 +582,7 @@ def delete_cluster_machine(name: str, request: Request) -> MachineDeleteResponse
             detail=f"refusing to delete this host's own machines row ({name!r}); "
             "stop the gateway first if you really want to retire it.",
         )
-    with request.app.state.db_pool.connection() as conn, conn.cursor() as cur:
+    with request.app.state.control_db_pool.connection() as conn, conn.cursor() as cur:
         cur.execute("DELETE FROM machines WHERE name = %s", (name,))
         deleted = cur.rowcount > 0
     return MachineDeleteResponse(deleted=deleted)

@@ -168,9 +168,12 @@ def test_user_message_in_strips_and_rejects_empty() -> None:
         UserMessageIn(content="   ")
 
 
-def test_user_message_in_rejects_oversized() -> None:
+def test_user_message_in_accepts_long_content_and_rejects_abuse_cap() -> None:
+    """TEXT-backed messages allow legitimate long input up to one million chars."""
     import pytest
     from pydantic import ValidationError
 
+    assert UserMessageIn(content="a" * 70_000).content == "a" * 70_000
+
     with pytest.raises(ValidationError):
-        UserMessageIn(content="a" * 70_000)
+        UserMessageIn(content="a" * 1_000_001)

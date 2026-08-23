@@ -15,7 +15,11 @@ against, one PR later.
 
 from __future__ import annotations
 
+from typing import Never
+
+import pytest
 from fastapi.testclient import TestClient
+from psycopg_pool import PoolTimeout
 
 from gateway.app import app
 from shared.machine import machine_name
@@ -46,6 +50,32 @@ def test_health_payload_carries_the_full_identity_set() -> None:
     payload = _health()
     assert payload == {
         "status": "ok",
+        "name": "gateway",
+        "home": str(ava_home()),
+        "machine": machine_name(),
+    }
+
+
+def test_health_control_pool_timeout_returns_degraded_with_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A saturated control pool is a bounded DB degradation, not a hung probe."""
+
+    class _TimedOutPool:
+        def connection(self) -> Never:
+            raise PoolTimeout("control pool saturated")
+
+        def close(self) -> None:
+            pass
+
+    with TestClient(app) as client:
+        monkeypatch.setattr(app.state, "control_db_pool", _TimedOutPool())
+        resp = client.get("/api/health")
+
+    assert resp.status_code == 503
+    assert resp.headers["Retry-After"] == "1"
+    assert resp.json() == {
+        "status": "degraded",
         "name": "gateway",
         "home": str(ava_home()),
         "machine": machine_name(),
