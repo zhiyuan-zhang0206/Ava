@@ -16,15 +16,22 @@ import {
   X,
 } from "lucide-react";
 import Link from "next/link";
-import { useCallback, type ReactNode, useEffect, useState } from "react";
+import { useCallback, type ReactNode, useEffect } from "react";
 
 import { OpenNoticeDetail } from "@/components/open-notice-detail";
 import { api } from "@/lib/api";
 import { useBreakpoint } from "@/lib/breakpoint";
 import { useAgentPages } from "@/lib/use-agent-pages";
-import { useInspectorOpen } from "@/lib/inspector-panel-store";
+import { useInspectorHours, useInspectorOpen } from "@/lib/inspector-panel-store";
+import {
+  COMPACT_INSPECT_WINDOW,
+  fetchWindowedInspect,
+  inspectLiveQueryKey,
+  inspectWindowedQueryKey,
+} from "@/lib/inspector-prefetch";
 import type {
   AgentInspect,
+  AgentInspectLive,
   HeartbeatInfo,
   OpenNotice,
   PageRow,
@@ -41,14 +48,13 @@ import { BAR_HEIGHT_CLASS, FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/li
 // of the backend whitelist (StatsWindowHours: 1/6/24/72/168 = hours). -1 is
 // a local sentinel for the since-last-compact window — it never reaches the
 // backend as `hours`, instead selecting the `since_compact` query param.
-const COMPACT_WINDOW = -1;
 const WINDOWS: { label: string; value: number | null }[] = [
   { label: "All", value: null },
   { label: "5m", value: 0 },
   { label: "1h", value: 1 },
   { label: "24h", value: 24 },
   { label: "7d", value: 168 },
-  { label: "Since compact", value: COMPACT_WINDOW },
+  { label: "Since compact", value: COMPACT_INSPECT_WINDOW },
 ];
 
 /**
@@ -56,13 +62,12 @@ const WINDOWS: { label: string; value: number | null }[] = [
  * counterpart to the sidebar's fleet-wide stats card. Sections include
  * persistent shells, the frozen config overlay, and LLM cost.
  *
- * Fetch discipline (2026-08-18 incident: this endpoint's 5s poll pinned the
- * prod box — GET /api/agents/{id}/inspect runs ~25 whole-life Loki
- * aggregations plus a cross-machine shell probe per call): data loads when
- * the panel OPENS (refetchOnMount:"always"), refreshes on the header's
- * manual refresh button, and drifts on a slow 60s background interval while
- * the panel stays open. Notice SSE events invalidate immediately. The header
- * window selector re-scopes cost (default: the recent 24h window).
+ * Fetch discipline: the uncached live query supplies shells/liveness/config/
+ * notice independently of the slower windowed aggregate query. Both load on
+ * open, refresh manually or every 60s, and cancel on close. While the panel is
+ * open, sidebar-row intent can prefetch these same keys; closed stays at zero
+ * inspect traffic. Notice SSE invalidates both halves. Window transitions use
+ * per-section skeletons instead of displaying a previous window's totals.
  *
  * Responsive (user ruling 2026-08-23, superseding the 2026-08-05 floating
  * overlay ruling on desktop): at ≥ lg it is a fixed right-side flex panel;
@@ -83,46 +88,59 @@ function StaleDot() {
   );
 }
 
+function matchesInspectWindow(
+  data: AgentInspect | undefined,
+  agentId: number,
+  hours: number | null,
+): data is AgentInspect {
+  if (data?.agent_id !== agentId) return false;
+  if (hours === COMPACT_INSPECT_WINDOW) return data.since_compact;
+  return !data.since_compact && (data.window_hours ?? null) === hours;
+}
+
 export function InspectorPanel({ agentId }: { agentId: number }) {
   const { open, toggle } = useInspectorOpen();
+  const { inspectorHours: hours, setInspectorHours: setHours } = useInspectorHours();
   const { isLarge } = useBreakpoint();
-  const [hours, setHours] = useState<number | null>(24);
   const queryClient = useQueryClient();
 
-  const { data, error, isLoading, refetch, isFetching } = useQuery({
-    queryKey: ["agent-inspect", agentId, hours],
-    queryFn: ({ signal }) =>
-      api.getAgentInspect(
-        agentId,
-        hours === COMPACT_WINDOW ? null : hours,
-        hours === COMPACT_WINDOW,
-        signal,
-      ),
-    // Slow background drift only — the endpoint is expensive (~25 Loki
-    // aggregations + a shell-probe RPC per call), so the interval is a floor
-    // for "numbers don't rot while the panel sits open", not the freshness
-    // mechanism. Freshness comes from refetchOnMount on open, the header's
-    // manual refresh, and SSE-driven invalidation (notices below).
+  const liveQuery = useQuery({
+    queryKey: inspectLiveQueryKey(agentId),
+    queryFn: ({ signal }) => api.getAgentInspectLive(agentId, signal),
     enabled: open,
-    // The request already has explicit server/client deadlines and the cold
-    // error surface owns a manual Retry action. Inheriting the global three
-    // automatic retries would multiply one 15s overload into a minute-long
-    // spinner and would enqueue more expensive history reads while Loki is ill.
     retry: false,
     refetchInterval: open ? 60_000 : false,
-    // Fetch once on open, not just cold. The global 5min staleTime otherwise
-    // treats cached inspect data from a previous open as fresh, so opening
-    // the panel would show stale numbers;
-    // "always" pulls immediately (cached data stays on screen meanwhile via
-    // placeholderData).
     refetchOnMount: "always",
-    // Changing the window (`hours` is in the key) mints a fresh cache entry
-    // with no data yet; without this the whole panel — including the
-    // window-independent shells/config/notice sections — would blank to
-    // "loading…" on every window switch until the new fetch lands. Keep the
-    // previous window's data rendered while the new one loads.
+  });
+  const windowedQuery = useQuery({
+    queryKey: inspectWindowedQueryKey(agentId, hours),
+    queryFn: ({ signal }) => fetchWindowedInspect(agentId, hours, signal),
+    enabled: open,
+    retry: false,
+    refetchInterval: open ? 60_000 : false,
+    refetchOnMount: "always",
     placeholderData: keepPreviousData,
   });
+
+  // Both query keys include the agent id, but keep explicit response identity
+  // guards: a malformed/misrouted response must never render under another
+  // agent. The aggregate response also has to echo the selected window; during
+  // keepPreviousData transitions a prior window becomes section skeletons,
+  // never mislabeled numbers.
+  const liveData =
+    liveQuery.data?.agent_id === agentId ? liveQuery.data : undefined;
+  const windowedData = matchesInspectWindow(windowedQuery.data, agentId, hours)
+    ? windowedQuery.data
+    : undefined;
+  const isFetching = liveQuery.isFetching || windowedQuery.isFetching;
+  const hasStaleError =
+    (liveQuery.error !== null && liveData !== undefined) ||
+    (windowedQuery.error !== null && windowedData !== undefined);
+
+  const refresh = useCallback(() => {
+    void liveQuery.refetch();
+    void windowedQuery.refetch();
+  }, [liveQuery, windowedQuery]);
 
   // Disabling an observer does not itself guarantee transport cancellation.
   // Consume React Query's AbortSignal above and explicitly cancel when the
@@ -130,6 +148,7 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
   // running in the gateway.
   useEffect(() => {
     if (!open) {
+      void queryClient.cancelQueries({ queryKey: inspectLiveQueryKey(agentId) });
       void queryClient.cancelQueries({ queryKey: ["agent-inspect", agentId] });
     }
   }, [agentId, open, queryClient]);
@@ -138,47 +157,32 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
   // poll — see useAgentPages.
   const pages = useAgentPages(agentId);
 
-  // Keep the inspect query fresh on notice events — notice_posted/notice_resolved
-  // SSE arrive long before the slow 60s interval, so the notice section updates
-  // in real time (same pattern as useInboxFeed).
+  const invalidateInspect = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: inspectLiveQueryKey(agentId) });
+    void queryClient.invalidateQueries({ queryKey: ["agent-inspect", agentId] });
+  }, [agentId, queryClient]);
+
+  // Notice events affect the live notice immediately and may coincide with
+  // aggregate activity, so reconcile both halves of the inspector cache.
   const onSystemEvent = useCallback(
     (ev: SystemEvent) => {
       if (ev.agent_id !== agentId) return;
       if (ev.role === "notice_posted" || ev.role === "notice_resolved") {
-        void queryClient.invalidateQueries({ queryKey: ["agent-inspect", agentId] });
+        invalidateInspect();
       }
     },
-    [agentId, queryClient],
+    [agentId, invalidateInspect],
   );
   const onConnectionEvent = useCallback(
     (_ev: { type: string }) => {
       // On reconnect, reconcile the notice state (may have changed while disconnected).
       if (_ev.type === "open") {
-        void queryClient.invalidateQueries({ queryKey: ["agent-inspect", agentId] });
+        invalidateInspect();
       }
     },
-    [agentId, queryClient],
+    [invalidateInspect],
   );
   useEventStream(onSystemEvent, onConnectionEvent);
-
-  // Keep the last successfully loaded data so the panel never blanks when the
-  // query key resets for a same-agent window change. React Query's
-  // keepPreviousData is intentionally broader than that: it can also hand the
-  // observer agent A's result while agent B is pending, so both the query value
-  // and our local fallback are identity-checked before either can render.
-  const [lastData, setLastData] = useState<AgentInspect>();
-  // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: cache last successful data to avoid blanking
-  useEffect(() => { if (data?.agent_id === agentId) setLastData(data); }, [agentId, data]);
-  // Cross-agent guard (Task #1051): on agent switch, drop the previous
-  // agent's snapshot immediately — while the new query is in flight, `data`
-  // is undefined for a COLD key and effectiveData would otherwise fall back
-  // to agent A's snapshot and render it (shells/cost/notice — and the
-  // NoticeReplySection reply/read writes) under agent B's name.
-  // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: stale snapshot must not survive an agent switch
-  useEffect(() => { setLastData(undefined); }, [agentId]);
-  const matchingData = data?.agent_id === agentId ? data : undefined;
-  const matchingLastData = lastData?.agent_id === agentId ? lastData : undefined;
-  const effectiveData = matchingData ?? matchingLastData;
 
   // Renders nothing while closed, so desktop releases the flex-column width
   // and mobile removes the overlay. All hooks run regardless (rules-of-hooks),
@@ -199,10 +203,10 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
         <span className={cn("truncate font-mono text-xs tracking-wide text-muted-foreground", MIN_W_0, FLEX_1)}>
           Inspector
         </span>
-        {error && effectiveData ? <StaleDot /> : null}
+        {hasStaleError ? <StaleDot /> : null}
         <button
           type="button"
-          onClick={() => void refetch()}
+          onClick={refresh}
           disabled={isFetching}
           aria-label="Refresh inspector data"
           className="shrink-0 rounded p-1 text-muted-foreground hover:bg-sidebar-accent hover:text-foreground disabled:opacity-50"
@@ -224,12 +228,16 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
       </header>
 
       <div className={cn("overflow-y-auto px-4 py-3 text-xs", MIN_H_0, FLEX_1)}>
-        {error && !effectiveData ? (
+        {liveQuery.error && !liveData ? (
           <div className="space-y-2 font-mono text-[11px] text-destructive" role="alert">
-            <p>{error instanceof Error ? error.message : "Failed to load"}</p>
+            <p>
+              {liveQuery.error instanceof Error
+                ? liveQuery.error.message
+                : "Failed to load"}
+            </p>
             <button
               type="button"
-              onClick={() => void refetch()}
+              onClick={refresh}
               disabled={isFetching}
               aria-label="Retry inspector"
               className="rounded border border-destructive/40 px-2 py-1 hover:bg-destructive/10 disabled:opacity-50"
@@ -237,19 +245,35 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
               {isFetching ? "Retrying…" : "Retry"}
             </button>
           </div>
-        ) : !effectiveData ? (
-          <p className="font-mono text-[11px] text-muted-foreground">
-            {isLoading ? "Loading…" : "No data"}
-          </p>
         ) : (
           <div className="space-y-4">
             <PageSection pages={pages} />
-            <ShellsSection inspect={effectiveData} />
-            <LivenessSection inspect={effectiveData} />
-            <ConfigOverlaySection inspect={effectiveData} />
-            <CostSection inspect={effectiveData} />
-            <ActivitySection inspect={effectiveData} />
-            <NoticeReplySection agentId={agentId} notice={effectiveData.notice ?? null} />
+            {liveData ? (
+              <>
+                <ShellsSection inspect={liveData} />
+                <LivenessSection inspect={liveData} />
+                <ConfigOverlaySection inspect={liveData} />
+              </>
+            ) : liveQuery.isPending ? (
+              <LiveSectionsSkeleton />
+            ) : (
+              <p className="font-mono text-[11px] text-muted-foreground">No data</p>
+            )}
+            {windowedData ? (
+              <>
+                <CostSection inspect={windowedData} />
+                <ActivitySection inspect={windowedData} />
+              </>
+            ) : windowedQuery.error ? (
+              <WindowedSectionsError onRetry={() => void windowedQuery.refetch()} />
+            ) : (
+              <WindowedSectionsSkeleton />
+            )}
+            {liveData ? (
+              <NoticeReplySection agentId={agentId} notice={liveData.notice ?? null} />
+            ) : liveQuery.isPending ? (
+              <SectionSkeleton title="Notice" />
+            ) : null}
           </div>
         )}
       </div>
@@ -339,6 +363,56 @@ function Section({
   );
 }
 
+function SectionSkeleton({ title, rows = 2 }: { title: string; rows?: number }) {
+  return (
+    <section aria-label={`${title} loading`} className="space-y-1.5">
+      <div className="h-3 w-24 animate-pulse rounded bg-muted-foreground/20" />
+      <div className="grid grid-cols-2 gap-1">
+        {Array.from({ length: rows }, (_, index) => (
+          <div
+            key={index}
+            className="h-10 animate-pulse rounded bg-muted-foreground/10"
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function LiveSectionsSkeleton() {
+  return (
+    <>
+      <SectionSkeleton title="Persistent shells" rows={1} />
+      <SectionSkeleton title="Liveness" rows={3} />
+      <SectionSkeleton title="Configuration overlay" rows={1} />
+    </>
+  );
+}
+
+function WindowedSectionsSkeleton() {
+  return (
+    <>
+      <SectionSkeleton title="Cost" rows={4} />
+      <SectionSkeleton title="Activity" rows={4} />
+    </>
+  );
+}
+
+function WindowedSectionsError({ onRetry }: { onRetry: () => void }) {
+  return (
+    <div className="space-y-2 font-mono text-[11px] text-destructive" role="alert">
+      <p>Windowed inspector data unavailable</p>
+      <button
+        type="button"
+        onClick={onRetry}
+        className="rounded border border-destructive/40 px-2 py-1 hover:bg-destructive/10"
+      >
+        Retry windowed data
+      </button>
+    </div>
+  );
+}
+
 function PageSection({ pages }: { pages: PageRow[] }) {
   return (
     <Section
@@ -399,9 +473,10 @@ function NoticeReplySection({
           key={notice.id}
           agentId={agentId}
           notice={notice}
-          onResolved={() =>
-            void queryClient.invalidateQueries({ queryKey: ["agent-inspect", agentId] })
-          }
+          onResolved={() => {
+            void queryClient.invalidateQueries({ queryKey: inspectLiveQueryKey(agentId) });
+            void queryClient.invalidateQueries({ queryKey: ["agent-inspect", agentId] });
+          }}
         />
       ) : (
         <p className="font-mono text-[11px] text-muted-foreground/70">No open notice</p>
@@ -410,7 +485,7 @@ function NoticeReplySection({
   );
 }
 
-function ShellsSection({ inspect }: { inspect: AgentInspect }) {
+function ShellsSection({ inspect }: { inspect: AgentInspectLive }) {
   const { shells } = inspect;
   return (
     <Section
@@ -484,7 +559,7 @@ function displaySkillName(name: string): string {
   return name === "*" ? name : name.replace(/_/g, "-");
 }
 
-function ConfigOverlaySection({ inspect }: { inspect: AgentInspect }) {
+function ConfigOverlaySection({ inspect }: { inspect: AgentInspectLive }) {
   const entries = Object.entries(inspect.config_overlay);
   return (
     <Section icon={<SlidersHorizontal className="size-3" />} title="Configuration overlay">
@@ -575,7 +650,7 @@ function ActivitySection({ inspect }: { inspect: AgentInspect }) {
  * the timeline header already displays agent status. The "every N" badge and
  * old "Last judged" cell remain omitted.
  */
-function LivenessSection({ inspect }: { inspect: AgentInspect }) {
+function LivenessSection({ inspect }: { inspect: AgentInspectLive }) {
   const { liveness_state: state, heartbeat, spawned_at } = inspect;
   const offline = state === "offline";
   const next = nextHeartbeatCell(heartbeat);

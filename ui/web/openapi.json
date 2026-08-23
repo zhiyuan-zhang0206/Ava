@@ -1296,6 +1296,46 @@
         }
       }
     },
+    "/api/agents/{agent_id}/inspect/live": {
+      "get": {
+        "summary": "Get Agent Inspect Live",
+        "description": "Cheap current-state half of the inspector panel.\n\nReads the agent projection and open notice from Postgres, probes shells on\nthe owning runner, and performs only one bounded best-effort Loki lookup for\nthe heartbeat's recent-pause hint. Unknown agents return 404. Shell probe\nfailures degrade to an empty list and Loki failures degrade\n`heartbeat.last_pause` to None, keeping this endpoint useful as the panel's\nfast skeleton source. No part of this response is cached.",
+        "operationId": "get_agent_inspect_live_api_agents__agent_id__inspect_live_get",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Agent Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentInspectLive"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/agents/{agent_id}/inspect": {
       "get": {
         "summary": "Get Agent Inspect",
@@ -6108,6 +6148,93 @@
         ],
         "title": "AgentInspect",
         "description": "GET /api/agents/{id}/inspect response — the per-agent inspector panel.\n\nA single-agent view, in contrast to `/api/stats/dashboard` (the whole fleet\naggregated): the agent's live persistent shells, its frozen per-agent config\noverlay, its current open notice (since #152 at most one), its cumulative\nLLM cost, turn/exec stats, active-rate (working vs blocked-on-a-human),\nidle-heartbeat state, and delivery-obligation state.\n`config_overlay` is the spawn-time field-override map (empty when the agent\nruns on cluster defaults). `shells` is probed on the agent's own machine via\nthe `shell_probe` cluster op — the gateway never runs sessions itself, so a\nsplit deployment sees each agent's shells wherever that agent runs.\n\n`window_hours` echoes the `?hours=` request parameter: None = cumulative\nsince spawn (the default), else `cost` + `stats` + `tps` + `activity`\naggregate only over the past N hours. `since_compact` echoes\n`?since_compact=`: True = those cover only events since the agent's latest\ncompact halt (`hours` is ignored and `window_hours` is None). `shells`,\n`config_overlay`, `notice`, and `heartbeat` are always current, independent\nof the window."
+      },
+      "AgentInspectLive": {
+        "properties": {
+          "agent_id": {
+            "type": "integer",
+            "title": "Agent Id"
+          },
+          "machine": {
+            "type": "string",
+            "title": "Machine"
+          },
+          "liveness_state": {
+            "type": "string",
+            "enum": [
+              "online",
+              "offline",
+              "unknown"
+            ],
+            "title": "Liveness State"
+          },
+          "last_probe_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Probe At"
+          },
+          "spawned_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Spawned At"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "shells": {
+            "items": {
+              "$ref": "#/components/schemas/ShellInfo"
+            },
+            "type": "array",
+            "title": "Shells"
+          },
+          "config_overlay": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Config Overlay"
+          },
+          "notice": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OpenNotice"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "heartbeat": {
+            "$ref": "#/components/schemas/HeartbeatInfo"
+          }
+        },
+        "type": "object",
+        "required": [
+          "agent_id",
+          "machine",
+          "liveness_state",
+          "spawned_at",
+          "shells",
+          "config_overlay",
+          "heartbeat"
+        ],
+        "title": "AgentInspectLive",
+        "description": "GET /api/agents/{id}/inspect/live response — the inspector's cheap,\nwindow-independent skeleton.\n\nEvery field reflects current database or runner state except\n`heartbeat.last_pause`, which is a single bounded recent-history lookup and\ndegrades to None when Loki is unavailable. The response intentionally omits\ncost, stats, TPS, and activity so switching agents does not wait for the\nexpensive event-history aggregate fan-out."
       },
       "AgentMachineRow": {
         "properties": {

@@ -259,10 +259,25 @@ describe("GraphView", () => {
 
     expect(screen.queryByText("#2")).toBeNull(); // terminated never renders
     expect(screen.getByText("#3")).toBeTruthy(); // hibernating is live
+    expect(screen.getByText("2 nodes · 1 edges")).toBeTruthy();
     const svg = container.querySelector(
       'svg[aria-label="Fleet relationship graph"]',
     )!;
     expect(svg.querySelectorAll("line").length).toBe(1); // only live-live edge
+  });
+
+  it("shows rendered-set counts and the empty state when every node is terminated", () => {
+    useFleetGraph.mockReturnValue(
+      ok({
+        nodes: [node(1, { status: "terminated" }), node(2, { status: "terminated" })],
+        edges: [edge(1, 2, "spawn")],
+      }),
+    );
+
+    renderGraph(<GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />);
+
+    expect(screen.getByText("0 nodes · 0 edges")).toBeTruthy();
+    expect(screen.getByText("No agents to graph.")).toBeTruthy();
   });
 
   it("renders an offline projected transition node in muted gray", async () => {

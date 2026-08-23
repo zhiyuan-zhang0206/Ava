@@ -68,6 +68,11 @@ single-flight load and may populate the TTL after its original caller has
 received the bounded failure. Async followers await that shared claim without
 occupying the gateway's worker pool.
 
+`GET /api/agents/{id}/inspect/live` is the uncached, window-independent half:
+fresh DB projection + notice, runner shell probe, and one bounded recent-pause
+lookup. Shell failure becomes `[]`; Loki failure drops only the optional pause
+hint. Cost, stats, TPS, and activity remain exclusive to `/inspect`.
+
 ## Key Dependencies
 
 - [[routers.ava.okf.md]] — the router index these two belong to

@@ -21,6 +21,18 @@ import { useBreakpoint } from "./breakpoint";
 import { useStore } from "./store";
 import { useUserSettings } from "./use-user-settings";
 
+export interface InspectorWindowState {
+  inspectorHours: number | null;
+  setInspectorHours: (hours: number | null) => void;
+}
+
+/** Session-scoped aggregate window shared by the panel and row prefetch. */
+export function useInspectorHours(): InspectorWindowState {
+  const inspectorHours = useStore((s) => s.inspectorHours);
+  const setInspectorHours = useStore((s) => s.setInspectorHours);
+  return { inspectorHours, setInspectorHours };
+}
+
 export function useInspectorOpen(): { open: boolean; toggle: () => void } {
   const { isLarge } = useBreakpoint();
   const { settings, setSetting } = useUserSettings();

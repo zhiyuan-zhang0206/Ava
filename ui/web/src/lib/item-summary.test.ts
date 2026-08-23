@@ -58,6 +58,26 @@ describe("summarizeCode", () => {
     expect(s.calls).toEqual([]);
     expect(s.lines).toBe(3);
   });
+
+  it("trusts an authoritative empty sdk_calls array without regex fallback", () => {
+    const code = "# ava.files.read('comment-only')\nvalue = \"ava.shell.run('string-only')\"";
+
+    expect(summarizeCode(code, [])).toEqual({
+      calls: [],
+      totalCalls: 0,
+      lines: 2,
+    });
+  });
+
+  it.each([undefined, null])(
+    "uses the regex fallback when sdk_calls is absent (%s)",
+    (sdkCalls) => {
+      expect(summarizeCode("ava.files.read('a')", sdkCalls)).toMatchObject({
+        calls: [{ method: "files.read", count: 1 }],
+        totalCalls: 1,
+      });
+    },
+  );
 });
 
 describe("summarizeOutput", () => {
