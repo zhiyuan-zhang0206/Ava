@@ -1660,6 +1660,23 @@ def test_inspect_heartbeat_last_pause_newest_wins(
     assert _seconds_from_now(hb["last_pause"]["at"]) == pytest.approx(-3600, abs=60)  # pyright: ignore[reportUnknownMemberType]
 
 
+def test_inspect_heartbeat_last_pause_beyond_lookback_is_none(
+    db_conn: psycopg.Connection, fake_loki: _FakeLoki
+) -> None:
+    """A pause older than the recent-history lookback is omitted."""
+    aid = _insert_agent(db_conn, status="idling", status_changed_s_ago=60)
+    fake_loki.add(
+        event="heartbeat_paused",
+        agent_id=aid,
+        payload={"duration_s": 3600},
+        ts_offset_hours=30,
+    )
+    db_conn.commit()
+    with TestClient(app) as client:
+        hb = client.get(f"/api/agents/{aid}/inspect").json()["heartbeat"]
+    assert hb["last_pause"] is None
+
+
 # ── Notice section ──────────────────────────────────────────────────────────
 
 
