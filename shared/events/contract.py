@@ -404,6 +404,21 @@ class LokiQueryFailed(TypedDict):
     query: str
 
 
+class PageServeDirMissing(TypedDict):
+    """`page_serve_dir_missing` payload — page-server daemon degradation alert.
+
+    The directory behind a served page disappeared or ceased to be a directory.
+    The daemon reports the first observation and its eventual auto-close, so the
+    page's key and source path remain attributable after the row is gone.
+    """
+
+    agent_id: int
+    key: str
+    name: str
+    serve_dir: str
+    port: int
+
+
 class LokiQueryBudget(TypedDict):
     """One local Loki-admission transition and its post-transition state.
 
@@ -755,6 +770,12 @@ EVENTS: dict[str, EventSpec] = {
         category="log",
         payload=LokiQueryFailed,
         doc="a Loki HTTP query failed (timeout / disconnect / non-2xx) — carries the request shape",
+    ),
+    "page_serve_dir_missing": EventSpec(
+        name="page_serve_dir_missing",
+        category="log",
+        payload=PageServeDirMissing,
+        doc="a served page directory disappeared; emitted on degradation and auto-close",
     ),
     # unresolved-ops markers: a warning/error (or a class of them) declared fixed —
     # ops panels filter these out of the "unresolved" views (user ruling 2026-08-09)
