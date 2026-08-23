@@ -70,9 +70,11 @@ from __future__ import annotations
 
 __description__ = "Shared memory pool: ava.memory SDK surface (PATH + search + write) + passive recall hook (auto-surfaces relevant notes) + daily consolidation skill (commit, push, re-index)"
 
+import fcntl
 import os
 import re
 import tempfile
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace as _SimpleNamespace
@@ -233,40 +235,58 @@ def _pointer_line(title: str, relative_path: str, description: str) -> str:
     return f"- [{title}]({relative_path}) — {description or title}"
 
 
+def _locked_update(index_path: Path, update: Callable[[str], str]) -> None:
+    """Apply one index update while holding its advisory per-file lock."""
+    index_path.parent.mkdir(parents=True, exist_ok=True)
+    with index_path.open("a+", encoding="utf-8") as index_file:
+        fcntl.flock(index_file.fileno(), fcntl.LOCK_EX)
+        try:
+            index_file.seek(0)
+            text = update(index_file.read())
+            index_file.seek(0)
+            index_file.truncate()
+            index_file.write(text)
+            index_file.flush()
+        finally:
+            fcntl.flock(index_file.fileno(), fcntl.LOCK_UN)
+
+
 def _upsert_index(
     root: Path, relative_path: str, title: str, description: str, *, shared: bool
 ) -> None:
     """Replace or append one index pointer without disturbing other entries."""
     index_path = root / "MEMORY.md"
-    text = index_path.read_text(encoding="utf-8") if index_path.exists() else ""
-    lines = text.splitlines()
     pointer = _pointer_line(title, relative_path, description)
     target = re.compile(rf"^- \[[^]]+\]\({re.escape(relative_path)}\) — .*$")
-    matches = [index for index, line in enumerate(lines) if target.fullmatch(line)]
-    if matches:
-        lines[matches[0]] = pointer
-        for index in reversed(matches[1:]):
-            del lines[index]
-    elif shared and "## Pointers" in lines:
-        section_start = lines.index("## Pointers")
-        section_end = next(
-            (
+
+    def update(text: str) -> str:
+        lines = text.splitlines()
+        matches = [index for index, line in enumerate(lines) if target.fullmatch(line)]
+        if matches:
+            lines[matches[0]] = pointer
+            for index in reversed(matches[1:]):
+                del lines[index]
+        elif shared and "## Pointers" in lines:
+            section_start = lines.index("## Pointers")
+            section_end = next(
+                (
+                    index
+                    for index in range(section_start + 1, len(lines))
+                    if lines[index].startswith("## ")
+                ),
+                len(lines),
+            )
+            pointer_lines = [
                 index
-                for index in range(section_start + 1, len(lines))
-                if lines[index].startswith("## ")
-            ),
-            len(lines),
-        )
-        pointer_lines = [
-            index
-            for index in range(section_start + 1, section_end)
-            if lines[index].startswith("- [")
-        ]
-        lines.insert(pointer_lines[-1] + 1 if pointer_lines else section_start + 1, pointer)
-    else:
-        lines.append(pointer)
-    index_path.parent.mkdir(parents=True, exist_ok=True)
-    index_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+                for index in range(section_start + 1, section_end)
+                if lines[index].startswith("- [")
+            ]
+            lines.insert(pointer_lines[-1] + 1 if pointer_lines else section_start + 1, pointer)
+        else:
+            lines.append(pointer)
+        return "\n".join(lines) + "\n"
+
+    _locked_update(index_path, update)
 
 
 def write(
@@ -283,6 +303,11 @@ def write(
     Personal entries use a flat kebab-case name in the calling agent's
     workspace; shared entries may use topic directories in the memory pool.
     Both targets are absolute, so this API is unaffected by the agent's cwd.
+
+    Each index update holds an advisory lock on that store's individual
+    `MEMORY.md` file. This serializes writers in this and other processes that
+    use `flock` on the same filesystem; distinct index files and writers that
+    do not take the same advisory lock remain independent.
     """
     from ava._boot import _agent_id
 

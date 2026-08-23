@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from importlib import import_module
 from pathlib import Path
 from typing import Any
@@ -93,6 +94,30 @@ def test_personal_write_creates_entry_and_upserts_index(memory_plugin: Any, tmp_
     assert index.read_text(encoding="utf-8") == (
         "- [Working style](working-style.md) — Revised working preference\n"
     )
+
+
+def test_concurrent_personal_writes_preserve_all_index_pointers(
+    memory_plugin: Any, tmp_path: Path
+) -> None:
+    writers = 10
+
+    def write_entry(index: int) -> None:
+        ava.memory.write(
+            f"concurrent-note-{index}",
+            f"Concurrent note {index}.\n",
+            title=f"Concurrent note {index}",
+            description=f"Concurrent description {index}",
+        )
+
+    with ThreadPoolExecutor(max_workers=writers) as executor:
+        list(executor.map(write_entry, range(writers)))
+
+    index = tmp_path / "workspace" / "memory" / "MEMORY.md"
+    assert set(index.read_text(encoding="utf-8").splitlines()) == {
+        f"- [Concurrent note {number}](concurrent-note-{number}.md) — "
+        f"Concurrent description {number}"
+        for number in range(writers)
+    }
 
 
 def test_shared_write_uses_pool_frontmatter_and_pointers_section(

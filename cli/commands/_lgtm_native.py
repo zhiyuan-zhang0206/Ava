@@ -36,6 +36,7 @@ _DOWNLOAD_ATTEMPT_TIMEOUT_S = 600.0
 _DOWNLOAD_ATTEMPTS = 3
 _DOWNLOAD_RETRY_BACKOFF_S = 5.0
 _DOWNLOAD_PROGRESS_INTERVAL_S = 15.0
+_LAUNCHCTL_TIMEOUT_S = 5.0
 
 
 @dataclass(frozen=True)
@@ -258,7 +259,13 @@ def _render_configs(repo: Path, native_dir: Path, ava_home: Path) -> None:
 
 def _launchctl(*args: str) -> subprocess.CompletedProcess[str]:
     """Run one local launchctl command without surfacing absent-job failures."""
-    return subprocess.run(["launchctl", *args], capture_output=True, text=True, check=False)
+    return subprocess.run(
+        ["launchctl", *args],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=_LAUNCHCTL_TIMEOUT_S,
+    )
 
 
 def _job_loaded(label: str) -> bool:
@@ -266,10 +273,30 @@ def _job_loaded(label: str) -> bool:
     return _launchctl("print", f"gui/{os.getuid()}/{label}").returncode == 0
 
 
+def _loaded_user_job_labels() -> set[str]:
+    """Return labels reported by launchd's bounded user-job listing."""
+    result = _launchctl("list")
+    if result.returncode != 0:
+        return set()
+    labels: set[str] = set()
+    for line in result.stdout.splitlines():
+        fields = line.split(maxsplit=2)
+        if len(fields) == 3:
+            labels.add(fields[2])
+    return labels
+
+
 def _retire_other_native_jobs(ava_home: Path) -> None:
     """Remove legacy and foreign native jobs that race this host's fixed ports."""
+    loaded_labels = _loaded_user_job_labels()
     for name in _NATIVE_CONSTANTS:
         current = native_label(name, ava_home)
+        competing_loaded = {
+            label
+            for label in loaded_labels
+            if re.fullmatch(rf"com\.ava\.{re.escape(name)}(?:\..+)?", label) and label != current
+        }
+        plists: dict[str, Path] = {}
         for plist in _agents_dir().glob(f"com.ava.{name}*.plist"):
             try:
                 label = plistlib.loads(plist.read_bytes())["Label"]
@@ -279,10 +306,23 @@ def _retire_other_native_jobs(ava_home: Path) -> None:
                 continue
             if label == current:
                 continue
-            if _job_loaded(label):
-                _launchctl("bootout", f"gui/{os.getuid()}/{label}")
-            plist.unlink(missing_ok=True)
-            logger.info("retired competing native LGTM job {} ({})", label, plist)
+            plists[label] = plist
+        for label in set(plists) | competing_loaded:
+            plist = plists.get(label, _plist_path(label))
+            was_loaded = label in competing_loaded or _job_loaded(label)
+            booted_out = (
+                _launchctl("bootout", f"gui/{os.getuid()}/{label}").returncode == 0
+                if was_loaded
+                else False
+            )
+            try:
+                plist.unlink()
+            except FileNotFoundError:
+                removed_plist = False
+            else:
+                removed_plist = True
+            if booted_out or removed_plist:
+                logger.info("retired competing native LGTM job {} ({})", label, plist)
 
 
 def bootout_native_jobs(ava_home: Path) -> None:
