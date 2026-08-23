@@ -548,6 +548,8 @@ def _terminate_graceful_blocking(
     pid = row[0] if row else None
     if pid is not None and probe_agent_process(pid, agent_id) not in RESIDENT_IDENTITIES:
         zombie_closed_page_names = _force_mark_terminated(agent_id, db_pool, source=body.source)
+        with db_pool.connection() as conn:
+            publish_agent_updated_sync(conn, agent_id)
         return "already_terminated", None, zombie_closed_page_names
     with db_pool.connection() as conn:
         iid = insert_inbound_message(conn, agent_id, "", source=body.source, kind="terminate")

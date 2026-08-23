@@ -332,6 +332,10 @@ class TestTerminate:
 
         session_kills: list[tuple[str, bool]] = []
         pid_kills: list[int] = []
+        published_agent_ids: list[int] = []
+
+        def _capture_agent_updated(_conn: psycopg.Connection, published_agent_id: int) -> None:
+            published_agent_ids.append(published_agent_id)
 
         class _RecordingSupervisor:
             @staticmethod
@@ -341,6 +345,10 @@ class TestTerminate:
 
         monkeypatch.setattr("ops.ops_lifecycle.native_proc", lambda: _RecordingSupervisor)
         monkeypatch.setattr("ops.ops_lifecycle.force_kill", pid_kills.append)
+        monkeypatch.setattr(
+            "ops.ops_lifecycle.publish_agent_updated_sync",
+            _capture_agent_updated,
+        )
 
         def _foreign_process(_pid: int, _agent_id: int) -> AgentProcessIdentity:
             return AgentProcessIdentity.FOREIGN
@@ -368,6 +376,7 @@ class TestTerminate:
         assert _inbound_rows(db_conn, agent_id) == [("", "terminate", "user")]
         assert session_kills == []
         assert pid_kills == []
+        assert published_agent_ids == [agent_id]
 
     def test_terminate_gone_pid_force_marks_without_killing(
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
