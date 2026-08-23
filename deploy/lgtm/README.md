@@ -33,8 +33,8 @@ are no-ops unless that worktree home is explicitly marked.
 |---|---|---|---|---|
 | Loki | native launchd | 3.7.6 / `GOMEMLIMIT=2GiB` | 3100 | log backend, filesystem storage, 7-day retention |
 | Prometheus | native launchd | 3.13.2 / `GOMEMLIMIT=1GiB` | 9090 | metrics and OTLP receiver |
-| Tempo | compose container | `grafana/tempo:3.0.2`, 1 core / 768MiB | 3200, 14318 | trace backend |
-| Grafana | compose container | `grafana/grafana:13.1.3`, 2 cores / 2GiB | 3003 | anonymous read-only UI |
+| Tempo | remote per cluster config | WSL backend; compose copy is the rollback asset | configured by `AVA_TELEMETRY_TEMPO_ENDPOINT` | trace backend |
+| Grafana | native launchd (host-managed; see the runbook) | host-managed | 3003 | anonymous read-only UI |
 
 The pinned release assets and SHA256 values live in
 [`native/versions.yml`](native/versions.yml). Converge verifies an archive
@@ -53,8 +53,11 @@ Postgres on the host loopback.
 One Grafana UI over Loki, Prometheus, and Tempo gives operators native LogQL,
 metrics, and trace exploration while keeping the rest of the product's OTel
 pipeline unchanged. Loki and Prometheus use verified native release assets on
-the LGTM host. The native collector sidecar is still the one local OTLP entry
-on port 4318; its filelog receivers also own session-log shipping.
+the LGTM host, Grafana is host-managed native launchd, and Tempo is selected by
+per-cluster configuration. Grafana and Tempo use the pinned compose services
+only during a manual rollback. The native collector sidecar is still the one
+local OTLP entry on port 4318; its filelog receivers also own session-log
+shipping.
 
 ## Resource and retention posture
 
@@ -73,27 +76,28 @@ anonymous-but-read-only surface.
 ## Start, stop, and rollback
 
 ```bash
-ava lgtm on                 # install current native pins, then start all backends
-bash deploy/lgtm/start.sh   # idempotent lifecycle launcher
-bash deploy/lgtm/stop.sh    # stop native jobs and Tempo/Grafana; keep volumes
+ava lgtm on                 # install current native pins, then start native backends
+bash deploy/lgtm/start.sh   # idempotent native-only lifecycle launcher
+bash deploy/lgtm/stop.sh    # stop the native Loki and Prometheus jobs
 ava lgtm off                # remove marker first, then stop deliberately
 ```
 
-`start.sh` rejects a missing native binary before it touches Docker. It starts
-the Docker daemon when necessary, runs `docker compose up -d` for Tempo and
-Grafana, and bootstraps a native job only when its HTTP listener does not
-answer. A newly bootstrapped job must answer within 30 seconds or the launcher
-fails loudly.
+`start.sh` and `stop.sh` are native-only. The launcher rejects a missing native
+binary, bootstraps Loki or Prometheus only when its HTTP listener does not
+answer, and reports the state of host-managed Grafana without starting it. A
+newly bootstrapped job must answer within 30 seconds or the launcher fails
+loudly. Neither script touches the Docker daemon or compose.
 
 For a controlled configuration restart, converge the changed templates and
 then use `ava lgtm off` followed by `ava lgtm on`. This is deliberate: the
 watchdog does not restart a working backend just to apply a configuration
 change.
 
-Rollback keeps the retained compose data volumes. Stop the hybrid stack,
-restore the earlier `docker-compose.yml` and backend configs from git, then
-run `docker compose up -d`; Promtail's native binary and positions path are no
-longer part of the stack because collector filelog receivers replace them.
+The container path is a manual rollback: restore the earlier
+`docker-compose.yml` and backend configs from git, then run
+`docker compose up -d`. Retained compose data volumes remain rollback assets;
+Promtail's native binary and positions path are no longer part of the stack
+because collector filelog receivers replace them.
 
 ## Session logs in Loki
 
