@@ -23,6 +23,7 @@ import json
 import re
 import threading
 import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
@@ -681,6 +682,44 @@ def test_inspect_cost_unpriced_and_cache_hit(
     assert cost["llm_calls"] == 1
     # 800 / 1000 = 80%
     assert cost["cache_hit_pct"] == 80.0
+
+
+def test_inspect_cost_aggregates_share_one_snapshot_instant(
+    db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Each cost fan-out pins its seven Loki aggregates to one instant."""
+    aid = _insert_agent(db_conn)
+    recorded_to: list[datetime | None] = []
+    aggregate: Callable[..., Any] = loki_events.attribute_aggregate
+
+    def record_snapshot_instant(**kwargs: Any) -> Any:
+        recorded_to.append(kwargs["to"])
+        return aggregate(**kwargs)
+
+    monkeypatch.setattr(loki_events, "attribute_aggregate", record_snapshot_instant)
+    with TestClient(app):
+        pool = app.state.db_pool
+        for hours in (None, _agent_cost.StatsWindowHours.H24):
+            _agent_cost.cache_clear()
+            _agent_cost.agent_cost(pool, aid, hours, since_compact=False)
+            assert len(recorded_to) == 7
+            assert recorded_to[0] is not None
+            assert all(to == recorded_to[0] for to in recorded_to)
+            recorded_to.clear()
+
+
+def test_inspect_cost_report_clamps_invalid_aggregates() -> None:
+    """Out-of-domain aggregates cannot invalidate the complete inspector report."""
+    agg = _agent_cost._ModelAgg()
+    agg.tin = 100
+    agg.tcached = 101
+    agg.unpriced_calls = -1
+
+    cost = _agent_cost._to_agent_cost({"test": agg})
+
+    assert cost.unpriced_calls == 0
+    assert cost.cache_hit_pct == 100.0
 
 
 def test_inspect_cost_scoped_to_agent(db_conn: psycopg.Connection, fake_loki: _FakeLoki) -> None:
