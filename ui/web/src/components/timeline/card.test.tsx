@@ -2,19 +2,19 @@
  * card.tsx — unit tests for MessageCard, CardHeader, messageCardConfig,
  * and the rich summary components.
  *
- * Quarantined (this `flaky/` directory runs serially via
- * vitest.flaky.config.ts): the live-clock renders here (useNow's 100ms
- * setInterval) historically leaked past the file's end — no cleanup ran under
- * `globals: false` — and a tick landing after happy-dom teardown surfaced as
- * an Unhandled "ReferenceError: window is not defined" from react-dom's
- * scheduler under CI's parallel forks. vitest.setup.ts now registers
+ * Historical quarantine root cause: live-clock renders here (useNow's 100ms
+ * setInterval) leaked past the file's end because `globals: false` prevented
+ * automatic cleanup. A tick after happy-dom teardown surfaced as an unhandled
+ * "ReferenceError: window is not defined" from react-dom's scheduler under
+ * CI's parallel forks. The fix landed in vitest.setup.ts as
  * afterEach(cleanup), which unmounts and clears those intervals per test.
+ * De-quarantined 2026-08-24.
  */
 import { describe, expect, it } from "vitest";
 import { render } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
-import { CardHeader, MessageCard, messageCardConfig, type CardConfig } from "../card";
+import { CardHeader, MessageCard, messageCardConfig, type CardConfig } from "./card";
 import type { BackendTimelineItem } from "@/lib/types";
 
 // ---------------------------------------------------------------------------
