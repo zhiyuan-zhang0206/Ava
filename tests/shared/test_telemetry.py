@@ -19,6 +19,7 @@ import json
 import socket
 from datetime import UTC, datetime
 from typing import Any
+from uuid import uuid4
 
 import pytest
 from opentelemetry import trace as otel_trace
@@ -183,6 +184,66 @@ def test_jsonl_mirror_holds_every_event() -> None:
     assert path.exists(), f"mirror file missing: {path}"
     lines = path.read_text(encoding="utf-8").splitlines()
     assert any('"event_name":"fork"' in line and '"category":"audit"' in line for line in lines)
+
+
+def test_jsonl_mirror_ids_are_stable_and_match_the_id_free_body() -> None:
+    """Mirror rows share Loki's id derivation, so mirror consumers can deduplicate."""
+    marker = uuid4().hex
+    ts = datetime(2026, 8, 23, 12, 0, tzinfo=UTC)
+    for sequence in range(3):
+        telemetry.emit(
+            "telemetry",
+            "exec",
+            agent_id=_AGENT,
+            attributes={"mirror_id_test": marker, "sequence": sequence},
+            ts=ts,
+        )
+
+    rows = [
+        row
+        for row in _mirror_rows("exec", _AGENT)
+        if row["attributes"].get("mirror_id_test") == marker
+    ]
+    assert len(rows) == 3
+    assert all(isinstance(row["id"], int) for row in rows)
+    assert len({row["id"] for row in rows}) == len(rows)
+
+    first_body: str | None = None
+    first_ts_ns: int | None = None
+    for row in rows:
+        body = {key: value for key, value in row.items() if key != "id"}
+        body_str = json.dumps(body, default=str, separators=(",", ":"), ensure_ascii=False)
+        ts_ns = int(datetime.fromisoformat(row["ts"]).timestamp() * 1_000_000_000)
+        assert row["id"] == telemetry.event_id(body_str, ts_ns)
+        if first_body is None:
+            first_body = body_str
+            first_ts_ns = ts_ns
+
+    assert first_body is not None and first_ts_ns is not None
+    assert telemetry.event_id(first_body, first_ts_ns) == telemetry.event_id(
+        first_body, first_ts_ns
+    )
+
+
+def test_jsonl_mirror_true_duplicate_rows_have_equal_ids() -> None:
+    marker = uuid4().hex
+    ts = datetime(2026, 8, 23, 12, 0, tzinfo=UTC)
+    for _ in range(2):
+        telemetry.emit(
+            "telemetry",
+            "exec",
+            agent_id=_AGENT,
+            attributes={"mirror_id_duplicate_test": marker},
+            ts=ts,
+        )
+
+    rows = [
+        row
+        for row in _mirror_rows("exec", _AGENT)
+        if row["attributes"].get("mirror_id_duplicate_test") == marker
+    ]
+    assert len(rows) == 2
+    assert rows[0]["id"] == rows[1]["id"]
 
 
 # ── resilience ────────────────────────────────────────────────────────────────

@@ -12,8 +12,9 @@ Notes:
   `| json` stage is required before any event-field filter.
 - Loki has no numeric row id and no offset paging: `query_events` pages in
   memory (`limit + offset + 1` rows fetched, offset slice taken) and derives
-  a stable surrogate id per line (blake2b over ts+line). `has_more` comes
-  from the +1 lookahead row.
+  a stable surrogate id per line (blake2b over ts+line). The JSONL mirror
+  persists that same id alongside its row. `has_more` comes from the +1
+  lookahead row.
 - The `grep` filter maps to a line-content match (`|=`), which sees the full
   JSON body including the nested `attributes.msg` payload.
 - `categories` is an OR regex (`category=~"telemetry|log"`); the events-table
@@ -25,7 +26,6 @@ from __future__ import annotations
 import json
 import time
 from datetime import UTC, datetime, timedelta
-from hashlib import blake2b
 from typing import Any, overload
 
 import httpx
@@ -161,10 +161,7 @@ def _escape_label(value: Any) -> str:
     )
 
 
-def _event_id(line: str, ts_ns: int) -> int:
-    """Stable surrogate row id — Loki has no numeric id; the pair
-    (timestamp, line) is unique per event."""
-    return int.from_bytes(blake2b(f"{ts_ns}:{line}".encode(), digest_size=8).digest(), "big")
+_event_id = telemetry.event_id
 
 
 def _parse_line(line: str, ts_ns: int) -> dict[str, Any] | None:

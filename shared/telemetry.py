@@ -63,6 +63,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from hashlib import blake2b
 from typing import Any, Literal
 
 from shared.events.contract import EVENTS
@@ -74,6 +75,7 @@ __all__ = [
     "Event",
     "category_for_kind",
     "emit",
+    "event_id",
     "flush",
     "init_telemetry",
     "stop",
@@ -95,6 +97,11 @@ _QUEUE_MAXSIZE = 10_000
 
 # JSONL mirror retention (day-stamped files, like the trace mirror).
 _JSONL_RETENTION_DAYS = 7
+
+
+def event_id(line: str, ts_ns: int) -> int:
+    """Return the stable surrogate id shared by mirror and Loki event rows."""
+    return int.from_bytes(blake2b(f"{ts_ns}:{line}".encode(), digest_size=8).digest(), "big")
 
 
 @dataclass(frozen=True)
@@ -210,6 +217,9 @@ def _prune_jsonl_mirror() -> None:
 def _append_jsonl(events: list[Event]) -> None:
     """Append the batch to today's mirror file, one JSON line per event.
 
+    Each row carries the stable surrogate ``id`` derived from its id-free body
+    and timestamp, matching the id Loki's read path returns for the same event.
+
     Best-effort — the mirror is a fallback, not a critical path; a write
     failure must never break the batch. But it must not be SILENT either:
     the mirror is the durable fallback for the DB copy, so a sustained
@@ -223,29 +233,34 @@ def _append_jsonl(events: list[Event]) -> None:
         with contextlib.suppress(Exception):
             _prune_jsonl_mirror()
     try:
-        lines = [
-            json.dumps(
-                {
-                    "ts": e.ts.isoformat(),
-                    "trace_id": e.trace_id,
-                    "span_id": e.span_id,
-                    "agent_id": e.agent_id,
-                    "machine": e.machine,
-                    "process": e.process,
-                    "category": e.category,
-                    "event_name": e.event_name,
-                    "level": e.level,
-                    "source": e.source,
-                    "target_agent_id": e.target_agent_id,
-                    "attributes": e.attributes,
-                },
-                default=str,
-                separators=(",", ":"),
-                ensure_ascii=False,
+        lines: list[str] = []
+        for e in events:
+            body = {
+                "ts": e.ts.isoformat(),
+                "trace_id": e.trace_id,
+                "span_id": e.span_id,
+                "agent_id": e.agent_id,
+                "machine": e.machine,
+                "process": e.process,
+                "category": e.category,
+                "event_name": e.event_name,
+                "level": e.level,
+                "source": e.source,
+                "target_agent_id": e.target_agent_id,
+                "attributes": e.attributes,
+            }
+            body_str = json.dumps(body, default=str, separators=(",", ":"), ensure_ascii=False)
+            ts_ns = int(e.ts.timestamp() * 1_000_000_000)
+            eid = event_id(body_str, ts_ns)
+            lines.append(
+                json.dumps(
+                    {**body, "id": eid},
+                    default=str,
+                    separators=(",", ":"),
+                    ensure_ascii=False,
+                )
+                + "\n"
             )
-            + "\n"
-            for e in events
-        ]
         path = logs_dir() / f"events-{day}.jsonl"
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as f:
