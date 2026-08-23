@@ -24,6 +24,7 @@ Notes:
 from __future__ import annotations
 
 import json
+import re
 import time
 from datetime import UTC, datetime, timedelta
 from typing import Any, overload
@@ -33,6 +34,7 @@ import httpx
 from gateway import loki_query_budget
 from shared import telemetry
 from shared.config import settings
+from shared.events.contract import TIER_BY_EVENT, EventTier
 from shared.log import logger
 from shared.loki_index_labels import (
     LokiReadEra,
@@ -44,6 +46,7 @@ from shared.loki_index_labels import (
 
 # Minimum-level ordering (lowercase, matches the events-table convention).
 _LEVELS = ("debug", "info", "warning", "error", "critical")
+_ANOMALY_LEVELS = ("warning", "error", "critical")
 
 # Loki's default per-query series cap; event queries over long windows can
 # exceed it when the count path is used. The list path fetches raw streams
@@ -205,6 +208,49 @@ def _parse_line(line: str, ts_ns: int) -> dict[str, Any] | None:
     }
 
 
+def _tier_event_names(tier: EventTier) -> tuple[str, ...]:
+    """Declared names for one default tier, in stable LogQL-regex order."""
+    return tuple(sorted(name for name, declared in TIER_BY_EVENT.items() if declared == tier))
+
+
+def _event_name_regex(event_names: tuple[str, ...]) -> str:
+    """Escaped alternation matching exactly the supplied event names."""
+    return "|".join(_escape_label(re.escape(name)) for name in event_names)
+
+
+def _tier_predicate(tiers: list[EventTier]) -> str:
+    """One LogQL label-filter expression for a union of event tiers.
+
+    Tier is derived from row fields rather than stored in Loki. The predicate
+    mirrors ``shared.events.contract.tier_for`` exactly, including severity
+    and audit precedence, so filtering happens before pagination and count
+    aggregation rather than after a page has been fetched.
+    """
+    anomaly_levels = "|".join(_ANOMALY_LEVELS)
+    non_anomaly = f'level!~"{anomaly_levels}"'
+    anomaly_names = _event_name_regex(_tier_event_names("anomaly"))
+    non_observation_names = _event_name_regex(
+        tuple(sorted(name for name, tier in TIER_BY_EVENT.items() if tier != "observation"))
+    )
+    clauses: list[str] = []
+    for tier in tiers:
+        if tier == "business":
+            clauses.append(f'({non_anomaly} and category="audit")')
+        elif tier == "anomaly":
+            clauses.append(
+                f'(level=~"{anomaly_levels}" or '
+                f'({non_anomaly} and category!="audit" and event_name=~"{anomaly_names}"))'
+            )
+        elif tier == "noise":
+            noise_names = _event_name_regex(_tier_event_names("noise"))
+            clauses.append(f'({non_anomaly} and category!="audit" and event_name=~"{noise_names}")')
+        else:
+            clauses.append(
+                f'({non_anomaly} and category!="audit" and event_name!~"{non_observation_names}")'
+            )
+    return "(" + " or ".join(clauses) + ")"
+
+
 def _build_logql(
     *,
     era: LokiReadEra = LokiReadEra.LEGACY,
@@ -217,6 +263,7 @@ def _build_logql(
     level: str | None = None,
     grep: str | None = None,
     categories: list[str] | None = None,
+    tiers: list[EventTier] | None = None,
     machine: str | None = None,
     trace_id: str | None = None,
     attribute_filters: dict[str, str] | None = None,
@@ -286,6 +333,8 @@ def _build_logql(
         parts.append(f'| machine="{_escape_label(machine)}"')
     if trace_id is not None:
         parts.append(f'| trace_id="{_escape_label(trace_id.lower())}"')
+    if tiers:
+        parts.append(f"| {_tier_predicate(tiers)}")
     return " ".join(parts)
 
 
@@ -299,6 +348,7 @@ def query_events(
     level: str | None = None,
     grep: str | None = None,
     categories: list[str] | None = None,
+    tiers: list[EventTier] | None = None,
     machine: str | None = None,
     trace_id: str | None = None,
     attribute_filters: dict[str, str] | None = None,
@@ -338,9 +388,11 @@ def query_events(
             level=level,
             grep=grep,
             categories=categories,
+            tiers=tiers,
             machine=machine,
             trace_id=trace_id,
             attribute_filters=attribute_filters,
+            drop_json_errors=tiers is not None,
         )
         params = {
             "query": logql,
@@ -405,6 +457,7 @@ def count_events(
     level: str | None = None,
     grep: str | None = None,
     categories: list[str] | None = None,
+    tiers: list[EventTier] | None = None,
     machine: str | None = None,
     trace_id: str | None = None,
     attribute_filters: dict[str, str] | None = None,
@@ -440,6 +493,7 @@ def count_events(
             level=level,
             grep=grep,
             categories=categories,
+            tiers=tiers,
             machine=machine,
             trace_id=trace_id,
             attribute_filters=attribute_filters,

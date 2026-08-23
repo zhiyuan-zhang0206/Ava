@@ -32,6 +32,7 @@ _EVENT_KEYS = {
     "process",
     "category",
     "event_name",
+    "tier",
     "level",
     "source",
     "target_agent_id",
@@ -134,6 +135,25 @@ class TestEventsApi:
         items = r.json()["items"]
         assert set(items[0]) == _EVENT_KEYS
 
+    def test_response_rows_include_computed_tiers(self, fake_events: _FakeEvents) -> None:
+        fake_events.rows.extend(
+            [
+                _row(category="audit", event_name="spawn"),
+                _row(event_name="llm_usage"),
+                _row(event_name="node_exit"),
+                _row(event_name="llm_usage", level="warning"),
+            ]
+        )
+        with TestClient(app) as client:
+            r = client.get("/api/events")
+
+        assert [item["tier"] for item in r.json()["items"]] == [
+            "business",
+            "observation",
+            "noise",
+            "anomaly",
+        ]
+
     def test_filter_category_maps_to_categories(self, fake_events: _FakeEvents) -> None:
         with TestClient(app) as client:
             client.get("/api/events", params={"category": "audit"})
@@ -150,6 +170,11 @@ class TestEventsApi:
         with TestClient(app) as client:
             client.get("/api/events", params={"event_name": "spawn"})
         assert fake_events.calls[0]["event_names"] == ["spawn"]
+
+    def test_filter_tier_maps_a_comma_separated_list(self, fake_events: _FakeEvents) -> None:
+        with TestClient(app) as client:
+            client.get("/api/events", params={"tier": "business,anomaly"})
+        assert fake_events.calls[0]["tiers"] == ["business", "anomaly"]
 
     def test_filter_kind_legacy_alias(self, fake_events: _FakeEvents) -> None:
         with TestClient(app) as client:
@@ -292,6 +317,12 @@ class TestEventsApi:
         with TestClient(app) as client:
             r = client.get("/api/events", params={"level": "fatal"})
         assert r.status_code == 422
+
+    def test_invalid_tier_422(self, fake_events: _FakeEvents) -> None:
+        with TestClient(app) as client:
+            r = client.get("/api/events", params={"tier": "business,urgent"})
+        assert r.status_code == 422
+        assert fake_events.calls == []
 
     def test_invalid_from_timestamp_422(self, fake_events: _FakeEvents) -> None:
         with TestClient(app) as client:

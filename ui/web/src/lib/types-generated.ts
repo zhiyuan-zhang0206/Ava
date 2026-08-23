@@ -2681,6 +2681,10 @@ export interface paths {
          *       - `machine=<name>`: the host dimension.
          *       - `level=<debug|info|warning|error|critical>`: exact match,
          *         case-insensitive (unknown value 422s).
+         *       - `tier=<business|anomaly|observation|noise>[,...]`: comma-separated
+         *         display tiers, ORed within the list and ANDed with every other filter.
+         *         The Loki predicate is derived before pagination so `meta.total` and
+         *         page boundaries stay exact.
          *       - `from=<ISO-8601>` / `to=<ISO-8601>`: inclusive time window
          *         (`ts >= from AND ts <= to`); either side may be omitted. Values
          *         MUST carry a timezone offset (`Z` or `+hh:mm`) — a naive timestamp
@@ -4404,6 +4408,11 @@ export interface components {
             category: string;
             /** Event Name */
             event_name: string;
+            /**
+             * Tier
+             * @enum {string}
+             */
+            tier: "business" | "anomaly" | "observation" | "noise";
             /** Level */
             level: string;
             /** Source */
@@ -9932,6 +9941,7 @@ export interface operations {
                 trace_id?: string | null;
                 machine?: string | null;
                 level?: string | null;
+                tier?: string | null;
                 from?: string | null;
                 to?: string | null;
                 hours?: number | null;

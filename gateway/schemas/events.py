@@ -12,6 +12,8 @@ from pydantic import (
     ConfigDict,
 )
 
+from shared.events.contract import EventTier
+
 
 class AgentEventRow(BaseModel):
     """One row from the `events` PG table — admin event log entry (category=telemetry/log).
@@ -67,6 +69,7 @@ class EventRow(BaseModel):
     process: str
     category: str
     event_name: str
+    tier: EventTier
     level: str
     source: str
     target_agent_id: int | None

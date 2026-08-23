@@ -95,8 +95,8 @@ more often than payload. Payload keys other than those listed have no Pydantic m
 (display-surface use; see the payload tiering rules in `shared/audit_events.py`).
 Emit sites and consumers: see the comments at each emit point.
 
-| event_name | meaning | key payload fields | retention | destination |
-|------|------|-----------------|------|------|
+| event_name | meaning | tier | key payload fields | retention | destination |
+|------|------|------|-----------------|------|------|
 """
 
 _TELEMETRY_INTRO = """
@@ -109,15 +109,15 @@ Telemetry-side event name resolution (`shared/log.py`): **explicit `event=` →
 write SQL directly — both are annotated in the registry doc field. Emit sites and
 consumers: see the comments at each emit point.
 
-| event_name | meaning | key payload fields | family | retention | destination |
-|------|------|-----------------|----|------|------|
+| event_name | meaning | tier | key payload fields | family | retention | destination |
+|------|------|------|-----------------|----|------|------|
 """
 
 _LOG_INTRO = """
 ## 4. Log (bare logs, category=log)
 
-| event_name | meaning | key payload fields | retention | destination |
-|------|------|-----------------|------|------|
+| event_name | meaning | tier | key payload fields | retention | destination |
+|------|------|------|-----------------|------|------|
 """
 
 _SSE_INTRO = """
@@ -277,7 +277,7 @@ def _row(name: str) -> str:
     keys = ", ".join(payload_keys(name)) if payload_keys(name) else "—"
     ret = f"{retention_days(name)}d"
     dest = "file" if spec.destination == "file" else "events"
-    return f"| `{name}` | {spec.doc} | {keys} | {ret} | {dest} |"
+    return f"| `{name}` | {spec.doc} | {spec.tier} | {keys} | {ret} | {dest} |"
 
 
 def _row_telemetry(name: str) -> str:
@@ -286,7 +286,7 @@ def _row_telemetry(name: str) -> str:
     ret = f"{retention_days(name)}d"
     dest = "file" if spec.destination == "file" else "events"
     fam = spec.family or "—"
-    return f"| `{name}` | {spec.doc} | {keys} | {fam} | {ret} | {dest} |"
+    return f"| `{name}` | {spec.doc} | {spec.tier} | {keys} | {fam} | {ret} | {dest} |"
 
 
 def render() -> str:

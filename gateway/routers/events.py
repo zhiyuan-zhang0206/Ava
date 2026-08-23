@@ -7,7 +7,7 @@ from `gateway/loki_events.py`; wire shape and filter semantics are unchanged
 from the PG version.
 
 Filters compose (AND): `category` / `event_name` (`kind` kept as a
-legacy alias) / `agent_id` / `trace_id` / `machine` / `level`, plus a
+legacy alias) / `tier` / `agent_id` / `trace_id` / `machine` / `level`, plus a
 time window given either as `from`/`to`
 (ISO-8601, inclusive) or as `hours` (the last N hours — shorthand for
 `from = now - hours`; the two forms are mutually exclusive). `level` is an
@@ -39,6 +39,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from gateway import loki_events, loki_query_budget
 from gateway.routers._eval_guard import deny_isolated_result_read
 from gateway.schemas import EventRow, EventsMeta, EventsResponse
+from shared.events.contract import EventTier, tier_for
 
 router = APIRouter()
 
@@ -46,6 +47,7 @@ router = APIRouter()
 # rejected with 422 rather than silently matching nothing (fail fast).
 _CATEGORIES = frozenset({"audit", "telemetry", "log"})
 _LEVELS = frozenset({"debug", "info", "warning", "error", "critical"})
+_TIERS = ("business", "anomaly", "observation", "noise")
 
 # Longest retention (audit = 365d); anything longer is a no-op window anyway.
 _MAX_HOURS = 24 * 365
@@ -99,6 +101,23 @@ def _validate(
     return level
 
 
+def _parse_tiers(tier: str | None) -> list[EventTier] | None:
+    """Normalize a comma-separated tier filter or fail fast with 422."""
+    if tier is None:
+        return None
+    tiers: list[EventTier] = []
+    for raw in tier.split(","):
+        value = raw.strip().lower()
+        if value not in _TIERS:
+            raise HTTPException(
+                status_code=422,
+                detail=f"tier must be a comma-separated list of {_TIERS}, got {tier!r}",
+            )
+        if value not in tiers:
+            tiers.append(value)
+    return tiers
+
+
 @router.get("/api/events", dependencies=[Depends(deny_isolated_result_read)])
 def get_events(
     category: Annotated[str | None, Query()] = None,
@@ -110,6 +129,7 @@ def get_events(
     trace_id: Annotated[str | None, Query()] = None,
     machine: Annotated[str | None, Query()] = None,
     level: Annotated[str | None, Query()] = None,
+    tier: Annotated[str | None, Query()] = None,
     from_: Annotated[datetime | None, Query(alias="from")] = None,
     to: Annotated[datetime | None, Query()] = None,
     hours: Annotated[float | None, Query(gt=0, le=_MAX_HOURS)] = None,
@@ -137,6 +157,10 @@ def get_events(
       - `machine=<name>`: the host dimension.
       - `level=<debug|info|warning|error|critical>`: exact match,
         case-insensitive (unknown value 422s).
+      - `tier=<business|anomaly|observation|noise>[,...]`: comma-separated
+        display tiers, ORed within the list and ANDed with every other filter.
+        The Loki predicate is derived before pagination so `meta.total` and
+        page boundaries stay exact.
       - `from=<ISO-8601>` / `to=<ISO-8601>`: inclusive time window
         (`ts >= from AND ts <= to`); either side may be omitted. Values
         MUST carry a timezone offset (`Z` or `+hh:mm`) — a naive timestamp
@@ -162,6 +186,7 @@ def get_events(
     request named none. An empty window returns `items: []`.
     """
     level = _validate(category=category, level=level, from_=from_, to=to, hours=hours)
+    tiers = _parse_tiers(tier)
 
     now = datetime.now(UTC)
     window_from = from_
@@ -189,6 +214,7 @@ def get_events(
                 agent_id=agent_id,
                 categories=[category] if category is not None else None,
                 event_names=[name] if name is not None else None,
+                tiers=tiers,
                 trace_id=trace_id.lower() if trace_id is not None else None,
                 machine=machine,
                 level=level,
@@ -199,6 +225,7 @@ def get_events(
             agent_id=agent_id,
             categories=[category] if category is not None else None,
             event_names=[name] if name is not None else None,
+            tiers=tiers,
             trace_id=trace_id.lower() if trace_id is not None else None,
             machine=machine,
             level=level,
@@ -233,6 +260,7 @@ def get_events(
             process=row["process"],
             category=row["category"],
             event_name=row["event_name"],
+            tier=tier_for(row["event_name"], row["category"], row["level"]),
             level=row["level"],
             source=row["source"],
             target_agent_id=row["target_agent_id"],
