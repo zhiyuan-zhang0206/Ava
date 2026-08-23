@@ -1566,9 +1566,9 @@ def test_inspect_since_compact_never_compacted_is_cumulative(
     assert body["cost"]["cost_usd"] == pytest.approx(30.0)  # pyright: ignore[reportUnknownMemberType]
 
 
-@pytest.mark.parametrize("bad", ["0", "5", "-1", "169", "abc", "24.5"])
+@pytest.mark.parametrize("bad", ["5", "-1", "169", "abc", "24.5"])
 def test_inspect_invalid_hours_422(db_conn: psycopg.Connection, bad: str) -> None:
-    """hours not in the whitelist {1,6,24,72,168} → 422 (fail-fast, reusing StatsWindowHours)."""
+    """hours outside {0,1,6,24,72,168} → 422 (fail-fast, reusing StatsWindowHours)."""
     aid = _insert_agent(db_conn)
     db_conn.commit()
     with TestClient(app) as client:

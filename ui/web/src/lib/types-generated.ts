@@ -889,8 +889,9 @@ export interface paths {
          *     heartbeat state. The
          *     single-agent counterpart to `/api/stats/dashboard` (fleet-wide).
          *
-         *     `?hours=` windows `cost` + `stats` to the past N hours (whitelisted to
-         *     1/6/24/72/168, anything else 422s); omitted = cumulative since spawn.
+         *     `?hours=` windows `cost` + `stats` to the selected range (0 = last 5m;
+         *     1/6/24/72/168 = hours, anything else 422s); omitted = cumulative since
+         *     spawn.
          *     `?since_compact=true` windows them to events since the agent's latest
          *     compact halt instead — it takes precedence, `hours` is ignored and the
          *     echoed `window_hours` is None.
@@ -2892,8 +2893,8 @@ export interface paths {
          *     - average turn duration / warning/error counts: Loki's unified event stream
          *     - `total_events`: Postgres archive partition estimates (a coarse growth gauge)
          *
-         *     `?hours=` selects the aggregation window (`ts > now() - hours`), whitelisted
-         *     by `StatsWindowHours` (1/6/24/72/168; anything else 422s). Zero-data
+         *     `?hours=` selects the aggregation window (0 = last 5m; 1/6/24/72/168 =
+         *     hours), whitelisted by `StatsWindowHours` (anything else 422s). Zero-data
          *     scenario: tokens all 0, cost_usd 0.0, avg_turn_seconds None (frontend
          *     shows "—").
          */
@@ -3038,15 +3039,15 @@ export interface paths {
          *     saves ~90% of the payload; pass `?include_terminated=true` for the full
          *     archive.
          *
-         *     `?hours=` (whitelisted 1/6/24/72/168; omitted = all-time) windows both the
-         *     node score and the edge events. `?decay_lambda=` (>= 0, default 0.5) is the
-         *     per-day decay constant for the message edge weight.
+         *     `?hours=` (0 = last 5m; 1/6/24/72/168 = hours; omitted = all-time) windows
+         *     both the node score and the edge events. `?decay_lambda=` (>= 0, default
+         *     0.5) is the per-day decay constant for the message edge weight.
          *
          *     Node score (windowed, drives node size):
          *         node_score = SUM(in_total) * 0.1 + SUM(out_total) * 1.0
          *     over the agent's `llm_usage` counters in the window — read from
          *     Prometheus (`ava_llm_usage_in_total` / `ava_llm_usage_out_total`,
-         *     windowed via `increase(...[Nh])`). `total_tokens` is the all-time sum of
+         *     windowed via `increase(...)`). `total_tokens` is the all-time sum of
          *     the same two counters (cumulative since the exporting process started).
          *
          *     Edge weight:
@@ -6278,8 +6279,8 @@ export interface components {
          * @description GET /api/stats/dashboard response — sidebar-top stats card data pulled in one shot.
          *
          *     All windowed fields (`tokens` / `cost_usd` / `avg_turn_seconds` /
-         *     `warnings` / `errors`) aggregate over the past `window_hours` hours —
-         *     the request's `?hours=` parameter echoed back.
+         *     `warnings` / `errors`) aggregate over the selected `window_hours` value —
+         *     `0` means five minutes; all other values are hours.
          *
          *     - `live_count`: current non-terminated count (from agents_meta, not
          *       events; not windowed)
@@ -6334,14 +6335,14 @@ export interface components {
         };
         /**
          * StatsWindowHours
-         * @description Whitelisted `?hours=` windows for /api/stats/dashboard — 1h / 6h /
-         *     24h / 3d / 7d. An enum (not `int` + range check) so FastAPI 422s any
-         *     other value instead of silently aggregating an arbitrary window.
+         * @description Whitelisted `?hours=` windows for stats, inspect, and fleet — 0 = last
+         *     5 minutes / 1h / 6h / 24h / 3d / 7d. An enum (not `int` + range check)
+         *     so FastAPI 422s any other value instead of silently aggregating an arbitrary window.
          *     (A `Literal[1, 6, ...]` won't do: query params arrive as strings and
          *     int-literal validation doesn't coerce them, 422ing even valid values.)
          * @enum {integer}
          */
-        StatsWindowHours: 1 | 6 | 24 | 72 | 168;
+        StatsWindowHours: 0 | 1 | 6 | 24 | 72 | 168;
         /**
          * SystemStatus
          * @description GET /api/status response — System Status panel data all in one go.

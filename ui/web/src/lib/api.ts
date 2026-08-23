@@ -213,7 +213,7 @@ export const api = {
   // Per-agent inspector panel: live persistent shells + frozen config overlay
   // + LLM cost + turn/exec stats. Single-agent counterpart to getStatsDashboard
   // (fleet-wide). Polled while the panel is open. `hours` windows cost + stats
-  // (whitelisted 1/6/24/72/168); omitted = cumulative since spawn. `sinceCompact`
+  // (0 = 5m; 1/6/24/72/168 = hours); omitted = cumulative since spawn. `sinceCompact`
   // windows them to events since the agent's latest compact halt instead
   // (takes precedence over `hours` backend-side).
   getAgentInspect: (
@@ -408,7 +408,7 @@ export const api = {
   // The weighted agent-relationship graph for the fleet Graph View
   // (spawn/fork lineage + aggregated message edges + dynamic weights).
   // `hours` windows both node score and edge events (whitelisted backend-side,
-  // 1/6/24/72/168; omitted = all-time). `decayLambda` is the per-day edge-weight
+  // 0 = 5m; 1/6/24/72/168 = hours; omitted = all-time). `decayLambda` is the per-day edge-weight
   // decay constant (default 0.5 backend-side).
   getFleetGraph: (opts?: { hours?: number; decayLambda?: number }): Promise<WireFleetGraph> => {
     const params = new URLSearchParams();
@@ -435,7 +435,7 @@ export const api = {
   // One endpoint loads all the stat cards at the top of the sidebar in a
   // single request (live count / tokens / avg turn / warnings+errors).
   // `hours` selects the aggregation window — whitelisted backend-side
-  // (1/6/24/72/168), anything else 422s.
+  // (0 = 5m; 1/6/24/72/168 = hours), anything else 422s.
   getStatsDashboard: (hours: number, signal?: AbortSignal): Promise<StatsDashboard> => {
     return jsonWithTimeout<StatsDashboard>(
       `/api/stats/dashboard?hours=${hours}`,

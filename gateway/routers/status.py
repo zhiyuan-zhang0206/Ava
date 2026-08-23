@@ -35,6 +35,7 @@ from gateway.schemas import (
     StatsTokens,
     StatsWindowHours,
     SystemStatus,
+    window_delta,
 )
 from ops import cluster_rpc as _cluster_rpc
 from ops.cluster import ClusterStatus, _check_pidfile, current_orchestration
@@ -65,8 +66,8 @@ def get_stats_dashboard(
     - average turn duration / warning/error counts: Loki's unified event stream
     - `total_events`: Postgres archive partition estimates (a coarse growth gauge)
 
-    `?hours=` selects the aggregation window (`ts > now() - hours`), whitelisted
-    by `StatsWindowHours` (1/6/24/72/168; anything else 422s). Zero-data
+    `?hours=` selects the aggregation window (0 = last 5m; 1/6/24/72/168 =
+    hours), whitelisted by `StatsWindowHours` (anything else 422s). Zero-data
     scenario: tokens all 0, cost_usd 0.0, avg_turn_seconds None (frontend
     shows "—").
     """
@@ -79,7 +80,7 @@ def get_stats_dashboard(
     # there flatlines to zero. Do not hold a pooled DB connection while these
     # bounded-but-slow network queries wait for the global Loki budget.
     now = datetime.now(UTC)
-    window_start = now - timedelta(hours=hours)
+    window_start = now - window_delta(hours)
     try:
         # Cost and token fields come from the same telemetry llm_usage event
         # snapshot. In particular, cost_usd was quoted when the call ran; do
