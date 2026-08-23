@@ -184,6 +184,8 @@ const PUT_JSON = (body: unknown): RequestInit => ({
 });
 
 export const api = {
+  head: (path: string): Promise<Response> => f(path, { method: "HEAD" }),
+
   // Returns one tail window of the timeline (newest `limit` items). Pass
   // `before` = the oldest item_id currently held to page further back for
   // scroll-up history; `has_more` reports whether older items remain.
