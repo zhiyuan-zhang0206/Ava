@@ -23,6 +23,8 @@ def _toolset(tmp_path: Path) -> tuple[dict[str, str], Path]:
     log = tmp_path / "tool.log"
     up = tmp_path / "up"
     up.mkdir()
+    loaded = tmp_path / "loaded"
+    loaded.mkdir()
     _executable(
         tools / "launchctl",
         """\
@@ -30,9 +32,16 @@ def _toolset(tmp_path: Path) -> tuple[dict[str, str], Path]:
         printf '%s\\n' "$*" >> "$FAKE_LOG"
         if [[ "$1" == "kickstart" ]]; then
           case "$2" in
-            *loki) touch "$FAKE_UP/loki" ;;
-            *prometheus) touch "$FAKE_UP/prometheus" ;;
+            *loki*) touch "$FAKE_UP/loki" ; touch "$FAKE_LOADED/loki" ;;
+            *prometheus*) touch "$FAKE_UP/prometheus" ; touch "$FAKE_LOADED/prometheus" ;;
           esac
+        fi
+        if [[ "$1" == "print" ]]; then
+          case "$2" in
+            *loki*) [[ -e "$FAKE_LOADED/loki" ]] && exit 0 || exit 1 ;;
+            *prometheus*) [[ -e "$FAKE_LOADED/prometheus" ]] && exit 0 || exit 1 ;;
+          esac
+          exit 1
         fi
         [[ "$1" == "bootout" ]] && exit 1
         exit 0
@@ -58,12 +67,17 @@ def _toolset(tmp_path: Path) -> tuple[dict[str, str], Path]:
         binary = native / name
         binary.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
         binary.chmod(0o755)
+    agents_dir = home / "Library" / "LaunchAgents"
+    agents_dir.mkdir(parents=True)
+    for name in ("loki", "prometheus"):
+        (agents_dir / f"com.ava.{name}.home-slug.plist").touch()
     env = {
         **os.environ,
         "HOME": str(home),
         "AVA_HOME": str(home),
         "FAKE_LOG": str(log),
         "FAKE_UP": str(up),
+        "FAKE_LOADED": str(loaded),
         "PATH": f"{tools}:{os.environ['PATH']}",
     }
     return env, log
@@ -91,6 +105,8 @@ def test_start_and_stop_are_idempotent_without_real_services(tmp_path: Path) -> 
     assert not any(line.startswith("bootstrap ") for line in second_lines)
     assert not any(line.startswith("kickstart ") for line in second_lines)
 
+    # stop.sh bootouts the (still unslugged) legacy names; clear the up markers
+    # so the stop assertions see exactly its four bootout attempts.
     Path(env["FAKE_UP"]).mkdir(exist_ok=True)
     for child in Path(env["FAKE_UP"]).iterdir():
         child.unlink()

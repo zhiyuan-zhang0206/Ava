@@ -19,10 +19,10 @@ ava lgtm on
 `ava lgtm on` writes the marker, installs missing pinned native binaries, and
 runs the idempotent launcher. With the marker present, every converge runs the
 same launcher and the gateway watchdog re-runs it after a connection-level
-readiness failure. The launcher probes native processes first, so a live Loki
-or Prometheus process is never restarted by the watchdog. `ava
-lgtm status` and `ava status` show native job PIDs, the compose services, and
-the readiness probes.
+readiness failure. The launcher resolves the single home-scoped launchd plist
+for each backend and skips only when that job is loaded and its endpoint is
+reachable. `ava lgtm status` and `ava status` show native job PIDs, the compose
+services, and the readiness probes.
 
 The marker gate also protects dev worktrees: their converge and watchdog paths
 are no-ops unless that worktree home is explicitly marked.
@@ -83,10 +83,11 @@ ava lgtm off                # remove marker first, then stop deliberately
 ```
 
 `start.sh` and `stop.sh` are native-only. The launcher rejects a missing native
-binary, bootstraps Loki or Prometheus only when its HTTP listener does not
-answer, and reports the state of host-managed Grafana without starting it. A
-newly bootstrapped job must answer within 30 seconds or the launcher fails
-loudly. Neither script touches the Docker daemon or compose.
+binary or a missing/ambiguous home-scoped launchd plist, bootstraps Loki or
+Prometheus unless both its launchd job is loaded and its HTTP listener answers,
+and reports the state of host-managed Grafana without starting it. A newly
+bootstrapped job must answer within 30 seconds or the launcher fails loudly.
+Neither script touches the Docker daemon or compose.
 
 For a controlled configuration restart, converge the changed templates and
 then use `ava lgtm off` followed by `ava lgtm on`. This is deliberate: the

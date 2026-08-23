@@ -7,6 +7,7 @@ carrying the $AVA_HOME/lgtm-host marker.
 
 from __future__ import annotations
 
+import os
 import plistlib
 import shutil
 import subprocess
@@ -26,6 +27,55 @@ def _ctx(tmp_path: Path) -> ConvergeCtx:
     repo = tmp_path / "repo"
     (repo / "deploy" / "lgtm").mkdir(parents=True)
     return ConvergeCtx(repo=repo, ava_home=tmp_path / "home", roles=frozenset({"gateway"}))
+
+
+def _write_executable(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+    path.chmod(0o755)
+
+
+def _native_start_fixture(tmp_path: Path) -> tuple[Path, Path, Path, dict[str, str]]:
+    user_home = tmp_path / "user"
+    agents_dir = user_home / "Library" / "LaunchAgents"
+    agents_dir.mkdir(parents=True)
+    ava_home = tmp_path / "ava-home"
+    for name in ("loki", "prometheus"):
+        _write_executable(ava_home / "lgtm" / "native" / "bin" / name, "#!/bin/sh\nexit 0\n")
+
+    fake_bin = tmp_path / "fake-bin"
+    _write_executable(fake_bin / "curl", "#!/bin/sh\nprintf '200'\n")
+    launchctl_log = tmp_path / "launchctl.log"
+    _write_executable(
+        fake_bin / "launchctl",
+        "#!/usr/bin/env bash\n"
+        'printf \'%s\\n\' "$*" >> "$LAUNCHCTL_LOG"\n'
+        '[[ "$1" == "print" ]] && exit 1\n'
+        "exit 0\n",
+    )
+    env = os.environ.copy()
+    env.update(
+        {
+            "AVA_HOME": str(ava_home),
+            "HOME": str(user_home),
+            "LAUNCHCTL_LOG": str(launchctl_log),
+            "PATH": f"{fake_bin}{os.pathsep}{env['PATH']}",
+        }
+    )
+    return ava_home, agents_dir, launchctl_log, env
+
+
+def _run_native_start(env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    deploy_dir = Path(__file__).resolve().parents[2] / "deploy" / "lgtm"
+    return subprocess.run(  # noqa: S603 — fixed argv executes this repo's start script
+        ["bash", str(deploy_dir / "start.sh")],
+        cwd=deploy_dir,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
 
 
 def test_no_marker_never_touches_native_backends(
@@ -146,6 +196,52 @@ def test_native_label_and_plist_are_scoped_to_the_cluster_home(tmp_path: Path) -
         _lgtm_native._render_plist("loki", tmp_path / "native", home).encode()
     )
     assert rendered["Label"] == label
+
+
+@pytest.mark.parametrize("loki_slugs", [(), ("one", "two")])
+def test_lgtm_start_requires_exactly_one_slugged_plist(
+    tmp_path: Path, loki_slugs: tuple[str, ...]
+) -> None:
+    _ava_home, agents_dir, _launchctl_log, env = _native_start_fixture(tmp_path)
+    for slug in loki_slugs:
+        (agents_dir / f"com.ava.loki.{slug}.plist").touch()
+    (agents_dir / "com.ava.prometheus.owner.plist").touch()
+
+    result = _run_native_start(env)
+
+    assert result.returncode != 0
+    assert f"found {len(loki_slugs)}" in result.stderr
+
+
+def test_lgtm_start_bootstraps_the_labels_rendered_by_converge(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A reachable process left behind by bootout cannot hide an unloaded slugged job."""
+    ava_home, agents_dir, launchctl_log, env = _native_start_fixture(tmp_path)
+
+    def no_versions(_repo: Path) -> dict[str, dict[str, str]]:
+        return {}
+
+    def no_configs(_repo: Path, _native_dir: Path, _home: Path) -> None:
+        return None
+
+    monkeypatch.setattr(_lgtm_native, "platform_tag", lambda: "darwin_arm64")
+    monkeypatch.setattr(_lgtm_native, "_load_versions", no_versions)
+    monkeypatch.setattr(_lgtm_native, "_render_configs", no_configs)
+    monkeypatch.setattr(_lgtm_native, "_agents_dir", lambda: agents_dir)
+    _lgtm_native.ensure_lgtm_native(Path(__file__).resolve().parents[2], ava_home)
+
+    result = _run_native_start(env)
+
+    assert result.returncode == 0, result.stderr
+    launchctl_calls = launchctl_log.read_text(encoding="utf-8").splitlines()
+    domain = f"gui/{os.getuid()}"
+    for name in ("loki", "prometheus"):
+        label = _lgtm_native.native_label(name, ava_home)
+        plist = agents_dir / f"{label}.plist"
+        assert f"print {domain}/{label}" in launchctl_calls
+        assert f"bootstrap {domain} {plist}" in launchctl_calls
+        assert f"kickstart {domain}/{label}" in launchctl_calls
 
 
 def test_native_converge_retires_legacy_and_foreign_jobs(
