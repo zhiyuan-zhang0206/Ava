@@ -6,10 +6,11 @@
 # as a rollback path only and is not started here.
 #
 # The gateway watchdog re-runs this script after a connection-level readiness
-# failure. Native backends are probed before launchd is touched, so that path
-# never restarts a backend that is already live.
+# failure. A backend is skipped only when its canonical launchd job is loaded
+# and its endpoint is reachable.
 #
 set -euo pipefail
+shopt -s nullglob
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
@@ -30,19 +31,35 @@ _reachable() {
     [[ -n "$code" && "$code" != "000" ]]
 }
 
+_native_plist() {
+    local name="$1"
+    local plists=("$HOME/Library/LaunchAgents/com.ava.$name."*.plist)
+    if (( ${#plists[@]} != 1 )); then
+        log "ERROR: expected exactly one slugged launchd plist for $name; found ${#plists[@]}" >&2
+        for plist in "${plists[@]}"; do
+            log "  $plist" >&2
+        done
+        return 1
+    fi
+    printf '%s\n' "${plists[0]}"
+}
+
 _start_native() {
     local name="$1"
     local url="$2"
     local domain="gui/$(id -u)"
-    local plist="$HOME/Library/LaunchAgents/com.ava.$name.plist"
-    if _reachable "$url"; then
+    local plist
+    plist="$(_native_plist "$name")"
+    local label="${plist##*/}"
+    label="${label%.plist}"
+    if _reachable "$url" && launchctl print "$domain/$label" >/dev/null 2>&1; then
         log "$name already running — skipped"
         return
     fi
     if ! launchctl bootstrap "$domain" "$plist"; then
         log "$name launchctl bootstrap returned non-zero (already loaded is safe)"
     fi
-    launchctl kickstart "$domain/com.ava.$name"
+    launchctl kickstart "$domain/$label"
     for _ in $(seq 1 15); do
         _reachable "$url" && return
         sleep 2
