@@ -45,6 +45,7 @@ from shared.cluster_lock import DeployLease, settle_hosts
 from shared.config import settings
 from shared.last_update import LastUpdate
 from shared.machine import is_agent_runner, is_gateway, machine_name
+from shared.observability import cluster_label
 from shared.resource_sample import ResourceSample
 
 router = APIRouter()
@@ -74,6 +75,7 @@ def get_stats_dashboard(
     cached = _stats_dashboard.cache_get(hours)
     if cached is not None:
         return cached
+    cluster = cluster_label()
 
     # The turn / W/E stats read Loki (task #1197 LGTM read side): the PG
     # `events` table is a frozen pre-cutover archive, so a live window queried
@@ -91,6 +93,7 @@ def get_stats_dashboard(
                 agg="sum",
                 event_names=["llm_usage"],
                 categories=["telemetry"],
+                cluster=cluster,
                 from_=window_start,
                 to=now,
                 timeout_s=8.0,
@@ -115,6 +118,7 @@ def get_stats_dashboard(
                     agg="sum",
                     event_names=["turn_end"],
                     attribute_filters={"ok": "true"},
+                    cluster=cluster,
                     from_=shard_start,
                     to=shard_end,
                     timeout_s=8.0,
@@ -129,6 +133,7 @@ def get_stats_dashboard(
                 lambda shard_start, shard_end: loki_events.count_events(
                     event_names=["turn_end"],
                     attribute_filters={"ok": "true"},
+                    cluster=cluster,
                     from_=shard_start,
                     to=shard_end,
                     timeout_s=8.0,
@@ -149,6 +154,7 @@ def get_stats_dashboard(
                     lambda shard_start, shard_end: loki_events.count_events(
                         level="warning",
                         categories=["telemetry", "log"],
+                        cluster=cluster,
                         from_=shard_start,
                         to=shard_end,
                         timeout_s=8.0,
@@ -163,6 +169,7 @@ def get_stats_dashboard(
                     lambda shard_start, shard_end: loki_events.count_events(
                         level_min="error",
                         categories=["telemetry", "log"],
+                        cluster=cluster,
                         from_=shard_start,
                         to=shard_end,
                         timeout_s=8.0,

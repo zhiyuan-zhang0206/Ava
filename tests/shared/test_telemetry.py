@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import socket
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
@@ -25,7 +26,7 @@ import pytest
 from opentelemetry import trace as otel_trace
 from opentelemetry.trace import NonRecordingSpan, SpanContext
 
-from shared import telemetry
+from shared import observability, telemetry
 
 _AGENT = 8901
 
@@ -85,6 +86,7 @@ def test_emit_writes_unified_event_shape() -> None:
     assert obj["level"] == "info"
     assert obj["agent_id"] == _AGENT
     assert obj["machine"]  # required dimension — always filled
+    assert obj["cluster"]  # home-derived dimension — always filled
     assert obj["process"] == "test-proc"
     assert obj["source"] == "system"
     assert obj["target_agent_id"] is None
@@ -162,6 +164,25 @@ def test_machine_falls_back_to_hostname_when_unset(monkeypatch: pytest.MonkeyPat
 
     monkeypatch.setattr(sm, "machine_name", _raise)
     assert telemetry._resolve_machine() == socket.gethostname()
+
+
+def test_cluster_label_falls_back_without_raising(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    home = tmp_path / ".ava-preview"
+
+    def fail_label(_home: Any) -> str:
+        raise RuntimeError("label unavailable")
+
+    def fallback_slug(_home: Any) -> str:
+        return "ava-preview-fallback"
+
+    monkeypatch.setattr("shared.cluster.home_label", fail_label)
+    monkeypatch.setattr("shared.cluster.home_slug", fallback_slug)
+    assert observability.cluster_label(home) == "ava-preview-fallback"
+
+    monkeypatch.setattr("shared.cluster.home_slug", fail_label)
+    assert observability.cluster_label(home) == ".unknown"
 
 
 def test_category_for_kind_mapping() -> None:

@@ -122,11 +122,10 @@ def _host_port(host: str, port: int) -> str:
     return f"{rendered}:{port}"
 
 
-# The data-plane receiver block, rendered into $DATA_PLANE_RECEIVERS. Scrape
+# Data-plane receiver fragments rendered into $DATA_PLANE_RECEIVERS. Scrape
 # interval is 60s (not host_metrics' 30s): connection counts and redis memory
-# are slow-moving pressure gauges, and each scrape opens a real backend
-# session on a pooler-fronted Postgres.
-_DATA_PLANE_BLOCK = """
+# are slow-moving pressure gauges.
+_POSTGRES_RECEIVER_BLOCK = """
   # This cluster's OWN Postgres — dialed DIRECT, never through PgBouncer: the
   # receiver reads pg_stat_* views, which a transaction-pooled session cannot
   # be trusted to serve consistently. The role is the cluster's NOSUPERUSER
@@ -141,7 +140,9 @@ _DATA_PLANE_BLOCK = """
     collection_interval: 60s
     tls:
       insecure: true
+"""
 
+_REDIS_RECEIVER_BLOCK = """
   # This cluster's OWN Redis. Password is the cluster secret (requirepass ==
   # the secret); an empty secret is the no-auth single-box default and the
   # receiver simply skips AUTH.
@@ -186,15 +187,29 @@ def _data_plane_receivers(roles: MachineRoles | None) -> tuple[str, str]:
         return "", ""
     pg = urlsplit(db_url)
     redis_url = settings.data_plane.redis_url
-    block = _DATA_PLANE_BLOCK.format(
-        pg_endpoint=_endpoint(db_url, "postgres"),
-        pg_user=_yaml_quote(unquote(pg.username or "")),
-        pg_password=_yaml_quote(unquote(pg.password or "")),
-        pg_database=_yaml_quote(pg.path.lstrip("/")),
-        redis_endpoint=_endpoint(redis_url, "redis"),
-        redis_password=_yaml_quote(unquote(urlsplit(redis_url).password or "")),
+    blocks: list[str] = []
+    receivers: list[str] = []
+    if pg.password:
+        blocks.append(
+            _POSTGRES_RECEIVER_BLOCK.format(
+                pg_endpoint=_endpoint(db_url, "postgres"),
+                pg_user=_yaml_quote(unquote(pg.username or "")),
+                pg_password=_yaml_quote(unquote(pg.password)),
+                pg_database=_yaml_quote(pg.path.lstrip("/")),
+            )
+        )
+        receivers.append("postgresql")
+    # The contrib postgresql receiver rejects an empty password, so no-auth
+    # single-box homes omit only that receiver. Redis supports an empty
+    # password and remains observable in the same posture.
+    blocks.append(
+        _REDIS_RECEIVER_BLOCK.format(
+            redis_endpoint=_endpoint(redis_url, "redis"),
+            redis_password=_yaml_quote(unquote(urlsplit(redis_url).password or "")),
+        )
     )
-    return block, ", postgresql, redis"
+    receivers.append("redis")
+    return "".join(blocks), "".join(f", {receiver}" for receiver in receivers)
 
 
 def gateway_otel_ingress_endpoint() -> str:
@@ -423,12 +438,14 @@ def _otlp_exporters(roles: MachineRoles | None) -> str:
 
 def generate_config(repo: Path, ava_home: Path, roles: MachineRoles | None) -> str:
     """Render the sidecar config from the repo template + this unit's settings."""
+    from shared.cluster import home_label
     from shared.config import settings
 
     obs = settings.observability
     data_plane_block, data_plane_pipeline = _data_plane_receivers(roles)
     substitutions = {
         "AVA_HOME": str(ava_home),
+        "CLUSTER_LABEL": home_label(ava_home),
         # Kept as named generation inputs for small downstream/custom templates;
         # the shipped template consumes the role-specific OTLP_EXPORTERS block.
         "TEMPO_ENDPOINT": obs.telemetry_tempo_endpoint.rstrip("/"),
@@ -590,5 +607,13 @@ def ensure_otel_collector(repo: Path, ava_home: Path, roles: MachineRoles | None
 
 
 def ensure_otel_collector_step(ctx: ConvergeCtx) -> None:
-    """Converge step: install the pinned sidecar binary + config (every machine)."""
+    """Install a pure-runner relay or the designated LGTM host's collector."""
+    marker = ctx.ava_home / "lgtm-host"
+    if ctx.roles is not None and "gateway" in ctx.roles and not marker.exists():
+        print(
+            "  ! otel-collector: collector skipped — this gateway home is not "
+            f"the LGTM host ({marker} is absent); telemetry export is unavailable",
+            file=sys.stderr,
+        )
+        return
     ensure_otel_collector(ctx.repo, ctx.ava_home, ctx.roles)

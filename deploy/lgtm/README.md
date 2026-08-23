@@ -56,8 +56,10 @@ pipeline unchanged. Loki and Prometheus use verified native release assets on
 the LGTM host, Grafana is host-managed native launchd, and Tempo is selected by
 per-cluster configuration. Grafana and Tempo use the pinned compose services
 only during a manual rollback. The native collector sidecar is still the one
-local OTLP entry on port 4318; its filelog receivers also own session-log
-shipping.
+local OTLP entry on port 4318 for this marked home; its filelog receivers also
+own session-log shipping. Application Resources carry the home-derived
+`cluster`, and the collector rejects non-null values belonging to another home
+before they reach Loki, Prometheus, or Tempo.
 
 ## Resource and retention posture
 

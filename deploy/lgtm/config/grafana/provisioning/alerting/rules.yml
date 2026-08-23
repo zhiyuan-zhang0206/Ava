@@ -40,6 +40,10 @@
 # operator's SRE loop".
 #
 # LogQL notes:
+# - Prod events carry cluster=".ava"; co-located cluster events must not
+#   participate in prod alert evaluation.
+# - Read side is strict: legacy records without a cluster dimension are excluded for up to the 7-day Loki retention, so aggregate counts may read low during rollout.
+#   This is deliberate: allowing absent-cluster rows would keep the co-located preview leak visible in prod reads for the full retention window.
 # - The OTel-detected labels (event_name, level, category, ...) are
 #   structured metadata, NOT stream labels: {…} selectors cannot match them
 #   (verified against the live cluster) — every rule pipelines `| json`
@@ -131,7 +135,7 @@ groups:
                 uid: loki
               editorMode: code
               expr: >-
-                sum(count_over_time({service_name="unknown_service"} | json |
+                sum(count_over_time({service_name="unknown_service"} | json | cluster=".ava" |
                 category=~"telemetry|log" | level=~"warning|error|critical" [5m]))
               instant: true
               queryType: instant
@@ -148,7 +152,7 @@ groups:
                 uid: loki
               editorMode: code
               expr: >-
-                sum(count_over_time({service_name="unknown_service"} | json |
+                sum(count_over_time({service_name="unknown_service"} | json | cluster=".ava" |
                 category=~"telemetry|log" | level=~"warning|error|critical" [15m] offset 5m))
               instant: true
               queryType: instant
@@ -237,7 +241,7 @@ groups:
                 uid: loki
               editorMode: code
               expr: >-
-                sum(sum_over_time({service_name="unknown_service"} | json |
+                sum(sum_over_time({service_name="unknown_service"} | json | cluster=".ava" |
                 category="telemetry" | event_name=~"sse_drop|event_log_drop" |
                 unwrap attributes_n [10m]))
               instant: true
@@ -304,7 +308,7 @@ groups:
                 uid: loki
               editorMode: code
               expr: >-
-                sum(count_over_time({service_name="unknown_service"} | json |
+                sum(count_over_time({service_name="unknown_service"} | json | cluster=".ava" |
                 category="telemetry" | event_name="agent_restarted" [15m]))
               instant: true
               queryType: instant
@@ -445,7 +449,7 @@ groups:
                 uid: loki
               editorMode: code
               expr: >-
-                sum(count_over_time({service_name="unknown_service"} | json |
+                sum(count_over_time({service_name="unknown_service"} | json | cluster=".ava" |
                 category="telemetry" | event_name="delivery_stalled" |
                 attributes_age_s < 600 [10m]))
               instant: true
@@ -526,7 +530,7 @@ groups:
                 uid: loki
               editorMode: code
               expr: >-
-                absent_over_time({service_name="unknown_service"}[5m])
+                absent_over_time({service_name="unknown_service"} | json | cluster=".ava" [5m])
               instant: true
               queryType: instant
             relativeTimeRange:
@@ -682,7 +686,7 @@ groups:
                 uid: loki
               editorMode: code
               expr: >-
-                sum(count_over_time({service_name="unknown_service"} | json |
+                sum(count_over_time({service_name="unknown_service"} | json | cluster=".ava" |
                 category="telemetry" | event_name="trace" |
                 attributes_action="recording_disabled_disk_watermark" [24h]))
               instant: true
@@ -1155,7 +1159,7 @@ groups:
               editorMode: code
               expr: >-
                 sum by (attributes_vendor, attributes_model)
-                (count_over_time({service_name="unknown_service"} | json |
+                (count_over_time({service_name="unknown_service"} | json | cluster=".ava" |
                 category="telemetry" | event_name="llm_provider_error" |
                 attributes_billing="true" [15m]))
               instant: true
@@ -1461,7 +1465,7 @@ groups:
               editorMode: code
               expr: >-
                 max by (attributes_route) (max_over_time({service_name="unknown_service"}
-                | json | category=~"telemetry|log" | event_name="gateway_latency"
+                | json | cluster=".ava" | category=~"telemetry|log" | event_name="gateway_latency"
                 | attributes_route !~ "/api/agents/.*/messages|/api/memory/search|/api/agents/.*/inspect|/api/stats/dashboard|/api/metrics/agents|/api/events|/api/agents/.*/shell/.*|/api/fleet/graph|/api/agents/.*/terminate|/api/agents/.*/resurrect|/api/agents/.*/traces/.*"
                 | unwrap attributes_p95_ms [5m]))
               instant: true
@@ -1531,7 +1535,7 @@ groups:
               editorMode: code
               expr: >-
                 max by (attributes_route) (max_over_time({service_name="unknown_service"}
-                | json | category=~"telemetry|log" | event_name="gateway_latency"
+                | json | cluster=".ava" | category=~"telemetry|log" | event_name="gateway_latency"
                 | attributes_route !~ "/api/agents/.*/messages|/api/memory/search|/api/agents/.*/inspect|/api/stats/dashboard|/api/metrics/agents|/api/events|/api/agents/.*/shell/.*|/api/fleet/graph|/api/agents/.*/terminate|/api/agents/.*/resurrect|/api/agents/.*/traces/.*"
                 | unwrap attributes_p95_ms [5m]))
               instant: true

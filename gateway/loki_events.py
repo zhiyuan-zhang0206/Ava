@@ -43,6 +43,7 @@ from shared.loki_index_labels import (
     event_stream_selector,
     split_index_label_window,
 )
+from shared.observability import endpoint_override_is_explicit, gateway_observability_home
 
 # Minimum-level ordering (lowercase, matches the events-table convention).
 _LEVELS = ("debug", "info", "warning", "error", "critical")
@@ -60,6 +61,25 @@ _HTTP_TIMEOUT_S = 45.0
 # 2026-08-20 /api/events 500s were 60s Loki hangs this line would have caught.
 # Stay below Loki's 50-second server query timeout so this client gives up first.
 _SLOW_QUERY_LOG_S = 5.0
+
+
+class ObservabilityReadUnavailable(RuntimeError):  # noqa: N818
+    """This gateway home has no local observability stack or explicit Loki."""
+
+
+def _read_gate() -> None:
+    """Refuse the default loopback Loki URL outside the designated LGTM home."""
+    home = gateway_observability_home()
+    if home is None:
+        return
+    if not (home / "lgtm-host").exists() and not endpoint_override_is_explicit(
+        "AVA_TELEMETRY_LOKI_URL"
+    ):
+        raise ObservabilityReadUnavailable(
+            "observability reads unavailable for this cluster; set "
+            "AVA_TELEMETRY_LOKI_URL and provide its stack, or accept that this "
+            "cluster has no observability"
+        )
 
 
 def _log_loki_failure(
@@ -111,6 +131,7 @@ def _get_json(
     Slow-but-successful queries log one structured line (see
     `_SLOW_QUERY_LOG_S`).
     """
+    _read_gate()
     started = time.perf_counter()
     try:
         with loki_query_budget.query_budget.slot():
@@ -265,6 +286,7 @@ def _build_logql(
     grep: str | None = None,
     categories: list[str] | None = None,
     tiers: list[EventTier] | None = None,
+    cluster: str | None = None,
     machine: str | None = None,
     trace_id: str | None = None,
     attribute_filters: dict[str, str] | None = None,
@@ -299,6 +321,8 @@ def _build_logql(
     if grep:
         parts.append(f'|= "{_escape_label(grep)}"')
     parts.append("| json")
+    if cluster is not None:
+        parts.append(f'| cluster="{_escape_label(cluster)}"')
     if drop_json_errors:
         parts.append('| __error__=""')
     if attribute_filters:
@@ -350,6 +374,7 @@ def query_events(
     grep: str | None = None,
     categories: list[str] | None = None,
     tiers: list[EventTier] | None = None,
+    cluster: str | None = None,
     machine: str | None = None,
     trace_id: str | None = None,
     attribute_filters: dict[str, str] | None = None,
@@ -370,6 +395,7 @@ def query_events(
     aggregate path uses it for per-agent first-event timestamps). ``timeout_s``
     overrides the shared client's default for this request only.
     """
+    _read_gate()
     window = _window(from_, to)
     if window is None:
         return [], False
@@ -390,6 +416,7 @@ def query_events(
             grep=grep,
             categories=categories,
             tiers=tiers,
+            cluster=cluster,
             machine=machine,
             trace_id=trace_id,
             attribute_filters=attribute_filters,
@@ -459,6 +486,7 @@ def count_events(
     grep: str | None = None,
     categories: list[str] | None = None,
     tiers: list[EventTier] | None = None,
+    cluster: str | None = None,
     machine: str | None = None,
     trace_id: str | None = None,
     attribute_filters: dict[str, str] | None = None,
@@ -477,6 +505,7 @@ def count_events(
     (unparseable lines are excluded from both). Verified against real Loki
     for every filter combination (task #1197 PR 2).
     """
+    _read_gate()
     window = _window(from_, to)
     if window is None:
         return 0
@@ -496,6 +525,7 @@ def count_events(
             grep=grep,
             categories=categories,
             tiers=tiers,
+            cluster=cluster,
             machine=machine,
             trace_id=trace_id,
             attribute_filters=attribute_filters,
@@ -527,6 +557,7 @@ def _agg_pipeline(
     level: str | None = None,
     grep: str | None = None,
     categories: list[str] | None = None,
+    cluster: str | None = None,
     machine: str | None = None,
     trace_id: str | None = None,
     attribute_filters: dict[str, str] | None = None,
@@ -546,6 +577,8 @@ def _agg_pipeline(
     ]
     if grep:
         parts.append(f'|= "{_escape_label(grep)}"')
+    if cluster is not None:
+        parts.append(f'| cluster="{_escape_label(cluster)}"')
     if agent_id is not None:
         parts.append(f'| agent_id="{agent_id}"')
     elif exclude_agent_ids:
@@ -589,6 +622,7 @@ def _agg_pipelines(
     level: str | None = None,
     grep: str | None = None,
     categories: list[str] | None = None,
+    cluster: str | None = None,
     machine: str | None = None,
     trace_id: str | None = None,
     attribute_filters: dict[str, str] | None = None,
@@ -610,6 +644,7 @@ def _agg_pipelines(
                 level=level,
                 grep=grep,
                 categories=categories,
+                cluster=cluster,
                 machine=machine,
                 trace_id=trace_id,
                 attribute_filters=attribute_filters,
@@ -813,6 +848,7 @@ def attribute_aggregate(
     level: str | None = None,
     grep: str | None = None,
     categories: list[str] | None = None,
+    cluster: str | None = None,
     machine: str | None = None,
     trace_id: str | None = None,
     attribute_filters: dict[str, str] | None = None,
@@ -836,6 +872,7 @@ def attribute_aggregate(
     level: str | None = None,
     grep: str | None = None,
     categories: list[str] | None = None,
+    cluster: str | None = None,
     machine: str | None = None,
     trace_id: str | None = None,
     attribute_filters: dict[str, str] | None = None,
@@ -858,6 +895,7 @@ def attribute_aggregate(
     level: str | None = None,
     grep: str | None = None,
     categories: list[str] | None = None,
+    cluster: str | None = None,
     machine: str | None = None,
     trace_id: str | None = None,
     attribute_filters: dict[str, str] | None = None,
@@ -897,6 +935,7 @@ def attribute_aggregate(
       extraction per stage — multiple extractions are a parse error);
     - `unwrap` only parses inside range aggregations.
     """
+    _read_gate()
     window = _window(from_, to)
     if window is None:
         return [] if group_by else 0.0
@@ -909,6 +948,7 @@ def attribute_aggregate(
         level=level,
         grep=grep,
         categories=categories,
+        cluster=cluster,
         machine=machine,
         trace_id=trace_id,
         attribute_filters=attribute_filters,
@@ -1401,6 +1441,7 @@ def count_grouped(
 def count_events_series(
     *,
     event_names: list[str],
+    cluster: str | None = None,
     attribute_filters: dict[str, str] | None = None,
     group_by: str | None = None,
     from_attributes: bool = False,
@@ -1420,6 +1461,7 @@ def count_events_series(
     `from_attributes=True`, a nested payload key (extracted via one
     `| json` stage). With `group_by=None` the single series is keyed `""`.
     """
+    _read_gate()
     window = _window(from_, to)
     if window is None:
         return {}
@@ -1433,6 +1475,7 @@ def count_events_series(
             era=era,
             legacy_streams_only=legacy_streams_only,
             event_names=event_names,
+            cluster=cluster,
             attribute_filters=attribute_filters,
         )
         if group_by is not None and from_attributes:

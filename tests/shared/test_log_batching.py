@@ -34,6 +34,7 @@ def _event(i: int, category: str = "log") -> telemetry.Event:
         span_id=None,
         agent_id=None,
         machine="test",
+        cluster=".ava-test",
         process="test",
         category=category,  # type: ignore[arg-type]
         event_name=f"kind-{i}",

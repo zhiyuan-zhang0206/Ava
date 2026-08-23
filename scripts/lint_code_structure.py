@@ -100,6 +100,7 @@ _SCAN_DIRS = (
 # disappear fails too (stale entry). See the module docstring.
 _MACHINE_ROLE_ALLOWED: dict[str, str] = {
     "shared/machine.py": "defines machine_role() and its capability wrappers is_gateway()/is_agent_runner() — the implementation itself",
+    "shared/observability.py": "does this process serve the gateway capability whose LGTM marker governs telemetry (what do I serve)",
     "cli/commands/start.py": "which daemons do I bring up (what do I serve)",
     "cli/commands/_repo.py": "resolve this host's capability set, None when unset, for stop/status/converge (what do I serve)",
     "cli/commands/_gateway_ready.py": "audit this host's role for the readiness report (what do I serve)",

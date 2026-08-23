@@ -1,7 +1,7 @@
 ---
 type: doc
 title: "Loki event-history read path"
-description: "`gateway/loki_events.py` — the LGTM read side of the unified event stream (task #1197): query_events / count_events / attribute_aggregate over Loki, serving the events routes and the per-agent inspector."
+description: "`gateway/loki_events.py` — the cluster-scoped LGTM read side of the unified event stream: query_events / count_events / attribute_aggregate over Loki, with unmarked gateways refusing the implicit loopback backend."
 tags:
 - gateway
 - loki
@@ -17,12 +17,14 @@ tags:
 all event history reads serve from Loki). The write side
 (`shared/telemetry_otlp.py`, [[shared/telemetry-otlp/telemetry-otlp.ava.okf.md|OTLP exporter]])
 ships every event as an OTLP log whose line body is the full event JSON and
-whose top-level fields ride as structured metadata.
+whose top-level fields, including the home-derived `cluster`, ride as
+structured metadata.
 
 ## Core responsibilities
 
 - **`query_events()`** — the row list: LogQL `{service_name="unknown_service"}`
-  selector → line filters → `| json` → structured-metadata filters →
+  selector → line filters → `| json` → `cluster=<this home>` plus other
+  structured-metadata filters →
   `query_range` (backward, newest-first). Every matching line parses back to
   the `EventRow` shape; row `id` is a stable blake2b surrogate over
   (ts, line) — Loki has no numeric id. Offset pages in memory (`limit + offset
@@ -44,6 +46,11 @@ whose top-level fields ride as structured metadata.
   interpolation (`percentile_cont` semantics — the old SQL used
   `percentile_cont`), `count` for line counts; optional `group_by` on another
   payload attribute (per-model token sums).
+- **Read gate** — a gateway home without `lgtm-host` refuses the implicit
+  loopback Loki URL before any HTTP call. The gateway maps the typed refusal to
+  HTTP 503. An explicit `AVA_TELEMETRY_LOKI_URL` is the operator escape hatch;
+  pure runners and role-less maintenance processes retain their existing
+  behavior.
 
 ## Loki quirks (verified 2026-08-12)
 
@@ -72,7 +79,8 @@ whose top-level fields ride as structured metadata.
 ## Notes
 
 - `AVA_TELEMETRY_LOKI_URL` (default `http://127.0.0.1:3100`,
-  restart_required gateway) points at the single-binary Loki HTTP port.
+  restart_required gateway) points at the single-binary Loki HTTP port. The
+  default is valid only for the marked LGTM gateway home.
 - Every query runs through one long-lived module-level `httpx.Client`
   (the lazy `_client()` accessor — the seam tests swap): connection reuse
   across the gateway's fan-out reads instead of a TCP connection per query.

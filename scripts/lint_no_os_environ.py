@@ -96,6 +96,7 @@ _ALLOWED_FILES = frozenset(
         "ava/_boot.py",  # _try_establish_from_env() reads os.environ["AVA_AGENT_ID"] as a lazy fallback; the env key is the only channel for child processes (shell sessions, watchers) to discover their parent agent
         "ava/_attach.py",  # attach() reads the one-shot AVA_EXEC_REQUEST_FILE child-protocol marker at call time; it is not Settings config and only an exec child receives it
         "shared/telemetry_otlp.py",  # _enabled() reads the same one-shot AVA_EXEC_REQUEST_FILE child-protocol marker at call time; boot authority makes Settings unsuitable and the marker is not runtime config
+        "shared/observability.py",  # endpoint_override_is_explicit must distinguish operator-set observability URLs from Settings' identical loopback defaults; Settings preserves the value but not whether it was explicit
         "ava/_mcp_remote.py",
         "shared/turn_identity.py",  # effective_agent_id() reads the ambient AVA_AGENT_ID as the outermost identity fallback (the same per-process identity channel as ava/_boot.py / ava/_mcp_remote.py); the turn contextvar layers above it and Settings models neither  # _current_agent_id() reads the ambient AVA_AGENT_ID to stamp MCP daemon envelopes; the key is the process identity channel, not Settings-managed, and importing ava.self here is circular (moved from ava/mcps.py, 2026-08-13 #1229)
         "services/computer/mcp_wrapper.py",  # _agent_id() reads the ambient AVA_AGENT_ID to stamp computer-mcp requests; same identity channel, not Settings-managed

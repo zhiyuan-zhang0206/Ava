@@ -36,9 +36,9 @@ former loguru Postgres sink had.
 carries its turn's trace id with no per-callsite plumbing. Events emitted
 outside any span (gateway/daemon paths) get NULL.
 
-`machine` is a required dimension, bound at process start (see
-`init_telemetry`); processes that never init fall back to the hostname so a
-row is never written without it.
+`machine` and `cluster` are required dimensions, bound at process start (see
+`init_telemetry`); processes that never init fall back to the hostname and
+home-derived cluster label so a row is never written without either.
 
 Emit is best-effort and never raises: a broken sink must not crash the caller
 (JSONL mirror + loguru file sinks hold every line as the durable backfill).
@@ -68,6 +68,7 @@ from typing import Any, Literal
 
 from shared.events.contract import EVENTS
 from shared.events.contract import category_for_kind as registry_category
+from shared.observability import cluster_label
 from shared.paths import logs_dir
 
 __all__ = [
@@ -114,6 +115,7 @@ class Event:
     span_id: str | None
     agent_id: int | None
     machine: str
+    cluster: str
     process: str
     category: Category
     event_name: str
@@ -195,6 +197,7 @@ _state: dict[str, Any] = {
     "process": "unknown",
     "agent_id": None,
     "machine": None,
+    "cluster": None,
     "jsonl_day": None,
 }
 
@@ -241,6 +244,7 @@ def _append_jsonl(events: list[Event]) -> None:
                 "span_id": e.span_id,
                 "agent_id": e.agent_id,
                 "machine": e.machine,
+                "cluster": e.cluster,
                 "process": e.process,
                 "category": e.category,
                 "event_name": e.event_name,
@@ -507,6 +511,8 @@ def init_telemetry(*, process: str = "unknown", agent_id: int | None = None) -> 
     _state["agent_id"] = agent_id
     if _state["machine"] is None:
         _state["machine"] = _resolve_machine()
+    if _state["cluster"] is None:
+        _state["cluster"] = cluster_label()
     if _state["pipeline"] is None:
         _state["pipeline"] = _open_pipeline()
 
@@ -590,6 +596,7 @@ def emit(
                 span_id=span_id,
                 agent_id=agent_id if agent_id is not None else _ambient_agent_id(),
                 machine=_state["machine"] or _resolve_machine(),
+                cluster=_state["cluster"] or cluster_label(),
                 process=_state["process"],
                 category=category,
                 event_name=event_name,

@@ -52,6 +52,11 @@ registry. A local budget refusal retains the global typed 503 response; a Loki
 transport/status failure is a retriable 503 with `Retry-After: 1` after
 `loki_events` records the failing query shape.
 
+Every dashboard Loki read is explicitly scoped to the current home-derived
+cluster label. The fleet graph's Loki event tail applies the same dimension,
+and an unmarked gateway without an explicit Loki URL receives the shared clean
+503 instead of reading another home's loopback stack.
+
 `GET /api/agents/{id}/inspect` draws the same boundary per agent: its 75s
 single-flight TTL retains only history aggregates. Completed UTC days read the
 durable Postgres ledger; duration percentiles and lifecycle/node details stitch
