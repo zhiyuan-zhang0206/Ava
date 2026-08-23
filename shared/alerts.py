@@ -29,7 +29,7 @@ when a direct writer omits it, using the exact Alertmanager algorithm so a
 computed hash and a Grafana-sent hash agree for the same label set. The IM
 fan-out goes through the local im_bridge daemon's health-port ``/send`` RPC,
 gated by the transition logic in ``upsert_alert`` — every severity pushes
-(user ruling: all three of critical/warning/error notify IM).
+unless the rule explicitly labels the alert ``notify_im="false"``.
 """
 
 from __future__ import annotations
@@ -65,6 +65,9 @@ _SEVERITIES = frozenset({"critical", "warning", "error"})
 # Alertmanager's status vocabulary maps onto the store's: the store has only
 # unresolved / resolved (no ack, no escalation — user ruling).
 _STATUS_MAP = {"firing": "unresolved", "resolved": "resolved"}
+
+_IM_GATE_LABEL = "notify_im"
+_IM_GATE_VALUE = "false"
 
 # FNV-1a 64-bit constants (the hash Alertmanager fingerprints labels with).
 _FNV_OFFSET = 0xCBF29CE484222325
@@ -136,6 +139,17 @@ def normalize_status(status: str) -> str:
     return _STATUS_MAP.get(status, "unresolved")
 
 
+def im_fanout_allowed(labels: dict[str, str]) -> bool:
+    """Return whether this alert may fan out to IM.
+
+    Only the exact string ``labels["notify_im"] == "false"`` disables IM.
+    This conservative gate keeps noisy slow-request rules visible in the UI
+    and Insights while keeping the user's IM quiet (Task #1404).
+    """
+
+    return labels.get(_IM_GATE_LABEL) != _IM_GATE_VALUE
+
+
 def upsert_alert(
     conn: psycopg.Connection, alert: dict[str, Any], source: str = "grafana"
 ) -> tuple[AlertKey, bool, bool, dict[str, Any]]:
@@ -147,8 +161,9 @@ def upsert_alert(
     never overwritten by a conflict re-send — a repeated webhook or probe
     edge for the same instance must not rewrite history.
 
-    ``should_notify`` — the notification gate (every severity pushes, but a
-    repeated re-send of a still-firing instance must not re-spam):
+    ``should_notify`` — the notification gate (every severity pushes unless
+    ``notify_im`` is exactly ``"false"``; transition rules still prevent a
+    repeated re-send of a still-firing instance from re-spamming):
     - firing, and the firing has not been IM-notified yet (fresh insert, a
       failed earlier attempt, or a resolved row re-firing): True — a single
       im_bridge outage must not silence the alert forever, the next re-send
@@ -242,6 +257,7 @@ def upsert_alert(
         should_notify = True
     elif old_status == "unresolved" and status == "resolved" and was_notified:
         should_notify = True
+    should_notify = im_fanout_allowed(labels) and should_notify
     return (fp, starts_at), did_insert, should_notify, row
 
 
