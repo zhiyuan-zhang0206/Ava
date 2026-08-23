@@ -39,6 +39,8 @@ closed; their removal is a separate migration-cleanup task).
 The rollup only covers whole days up to yesterday (UTC); today is served live by
 the readers. The upsert is a full-day overwrite recompute keyed on the PK, so
 re-running is idempotent — a restart or a fast interval never double-counts.
+An indexed slice with zero aggregate rows is warned and skipped rather than
+treated as an empty day, leaving that day's existing ledger rows intact.
 Partition creation is likewise idempotent (an already-covered month is a no-op).
 
 Usage:
