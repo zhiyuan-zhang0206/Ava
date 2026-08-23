@@ -255,7 +255,7 @@ def test_sdk_call_top_table_shape() -> None:
 def test_events_rate_uses_rate() -> None:
     _load_pack()
     expr = _all_rendered()["ava_obs_events_rate"][0]
-    assert expr == 'sum(rate({service_name="unknown_service"} | json [1m]))'
+    assert expr == 'sum(rate({service_name="unknown_service"} | json | __error__="" [1m]))'
 
 
 def test_frontend_table_shapes() -> None:
