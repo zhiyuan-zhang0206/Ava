@@ -1,9 +1,10 @@
 """Permissions helper: client wire-protocol contract + capability/lifecycle helpers.
 
 The Swift helper, code-signing, launchd, and TCC are macOS-host concerns and are
-not exercised here (CI is headless Linux). What IS portable -- and what these
-tests pin -- is the JSON-line contract the client speaks, verified against a
-pure-Python fake server, plus the platform gate and the per-cluster naming.
+not exercised here (CI is headless Linux). The native server additionally
+enforces owner-only socket mode and same-uid peers. What IS portable -- and what
+these tests pin -- is the JSON-line contract the client speaks, verified against
+a pure-Python fake server, plus the platform gate and the per-cluster naming.
 """
 
 from __future__ import annotations
