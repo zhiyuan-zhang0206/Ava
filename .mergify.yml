@@ -1,7 +1,7 @@
 # Mergify merge queue — this repo's PR merge automation.
 #
 # Flow: CI green → post `@mergifyio queue` as a PR comment → Mergify batches
-# queued PRs (batch_size 5) into one speculative draft PR, re-runs CI on the
+# queued PRs (batch_size 8) into one speculative draft PR, re-runs CI on the
 # combined tree, and lands every PR in the batch on green (rebase merges,
 # linear history). A red batch is bisected automatically to evict the culprit.
 # The speculative draft PRs ride branches under mergify/merge-queue/ — ci.yml's
@@ -34,7 +34,11 @@ queue_rules:
     merge_bot_account: zhiyuan-zhang0206
     # Batch queued PRs into one speculative verification (draft PR); a red
     # batch bisects automatically.
-    batch_size: 5
+    batch_size: 8
+    # Pin Mergify's default (30s): a batch that has not reached batch_size
+    # processes after at most 30s instead of waiting indefinitely for the
+    # batch to fill; keeps low-traffic merges snappy.
+    batch_max_wait_time: 30s
     # Without checks_timeout Mergify waits only the auto-derived 18m; on a
     # busy queue every batch re-runs CI and PRs get dequeued mid-run.
     # 3600s = comfortable headroom over the full suite.
