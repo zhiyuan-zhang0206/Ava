@@ -1,4 +1,10 @@
-"""Window planning and consolidated bounded-Loki turn stats for inspect."""
+"""Window planning and consolidated bounded-Loki turn stats for inspect.
+
+When the newest metrics-ledger day remains inside Loki retention, inspect
+excludes that potentially stale day from the ledger and rereads it entirely
+from live events. Late writes into a closed day are therefore neither lost nor
+double counted.
+"""
 
 from __future__ import annotations
 
@@ -236,12 +242,26 @@ def _turn_distribution(
 def stats_values(
     pool: ConnectionPool[Any], agent_id: int, from_: datetime | None, to: datetime | None
 ) -> StatsValues:
-    """Turn/exec stats from day ledger + bounded edges, with stitched percentiles."""
+    """Turn/exec stats from ledger plus bounded live edges and percentiles.
+
+    The newest retained ledger day is read wholly from Loki because late writes
+    can make that rolled row stale; older days remain ledger-served.
+    """
     plan = full_day_plan(from_, to)
     if plan.has_full_days:
         with pool.connection() as conn:
-            ledger = _inspect_pg.ledger_stats(
+            max_day = _inspect_pg.newest_ledger_day(
                 conn, agent_id=agent_id, day_from=plan.day_from, day_to=plan.day_to
+            )
+            floor = _agent_cost._retention_floor()
+            gap_live = (
+                max_day is not None and datetime.combine(max_day, time.min, tzinfo=UTC) >= floor
+            )
+            ledger_day_to = (
+                plan.day_to if max_day is None or not gap_live else max_day - timedelta(days=1)
+            )
+            ledger = _inspect_pg.ledger_stats(
+                conn, agent_id=agent_id, day_from=plan.day_from, day_to=ledger_day_to
             )
     else:
         ledger = (0, 0, 0.0, None, None, 0, 0, None)

@@ -115,12 +115,15 @@ class _FakeLoki:
         agent_id: int,
         payload: dict[str, Any] | None = None,
         ts_offset_hours: float = 0,
+        ts: datetime | None = None,
         category: str = "telemetry",
     ) -> None:
         self.rows.append(
             {
                 "id": len(self.rows) + 1,
-                "ts": datetime.now(UTC) - timedelta(hours=ts_offset_hours),
+                "ts": ts
+                if ts is not None
+                else datetime.now(UTC) - timedelta(hours=ts_offset_hours),
                 "agent_id": agent_id,
                 "machine": "test",
                 "process": "test",
@@ -706,15 +709,13 @@ def test_inspect_whole_life_ledger_plus_tail_no_double_count(
 ) -> None:
     """Task #1273 regression class: whole-life cost must not collapse to the
     Loki window (405: ~$14.5 history shown as $0.74). The daily ledger
-    serves history — including days beyond Loki's reach — and the Loki tail
-    starts at the midnight AFTER the newest rolled day, so a row already
-    rolled is never counted twice and a maintenance-daemon lag widens the
-    tail instead of opening a hole: the 2-days-ago Loki row (after the
-    3-days-ago watermark) counts exactly once."""
+    serves history — including days beyond Loki's reach — while the stale
+    gap-day row is excluded and its events are reread from the live tail."""
     aid = _insert_agent(db_conn)
     _ledger_row(db_conn, agent_id=aid, days_ago=40, tin=1_000_000, tout=1_000_000, cost=30.0)
     _ledger_row(db_conn, agent_id=aid, days_ago=3, tin=500_000, tout=500_000, cost=15.0)
-    # In Loki AND after the watermark (2d < 3d) — the tail's responsibility.
+    _ledger_row(db_conn, agent_id=aid, days_ago=2, tin=500_000, tout=500_000, cost=15.0)
+    # The gap day's live event replaces its stale rolled row exactly once.
     fake_loki.add(
         event="llm_usage",
         agent_id=aid,
@@ -737,6 +738,55 @@ def test_inspect_whole_life_ledger_plus_tail_no_double_count(
     assert cost["unpriced_calls"] == 0
 
 
+def test_inspect_whole_life_gap_day_cost_not_lost_and_not_double_counted(
+    db_conn: psycopg.Connection, fake_loki: _FakeLoki
+) -> None:
+    """The gap-day tail replaces a stale cost row, including its final hour."""
+    aid = _insert_agent(db_conn)
+    now = datetime.now(UTC)
+    today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    _ledger_row(
+        db_conn,
+        agent_id=aid,
+        days_ago=1,
+        calls=5,
+        tin=1_000_000,
+        tout=1_000_000,
+        cost=10.0,
+    )
+    fake_loki.add(
+        event="llm_usage",
+        agent_id=aid,
+        payload={
+            "in_total": 200_000,
+            "out_total": 40_000,
+            "cache_read": 0,
+            "model": "claude-opus-4-8",
+            "cost_usd": 2.0,
+        },
+        ts=today - timedelta(minutes=30),
+    )
+    fake_loki.add(
+        event="llm_usage",
+        agent_id=aid,
+        payload={
+            "in_total": 300_000,
+            "out_total": 50_000,
+            "cache_read": 0,
+            "model": "claude-opus-4-8",
+            "cost_usd": 3.0,
+        },
+        ts=now - timedelta(seconds=30),
+    )
+    db_conn.commit()
+    with TestClient(app) as client:
+        cost = client.get(f"/api/agents/{aid}/inspect").json()["cost"]
+    assert cost["cost_usd"] == pytest.approx(5.0)  # pyright: ignore[reportUnknownMemberType]
+    assert cost["llm_calls"] == 2
+    assert cost["tokens_in"] == 500_000
+    assert cost["unpriced_calls"] == 0
+
+
 def test_inspect_snapshot_cost_immune_to_registry_changes(
     db_conn: psycopg.Connection, fake_loki: _FakeLoki
 ) -> None:
@@ -744,7 +794,7 @@ def test_inspect_snapshot_cost_immune_to_registry_changes(
     stored cost_usd is summed as-is and NEVER re-priced against the current
     registry. Both rows carry snapshots whose values differ from what the
     registry would compute today; the response must equal the snapshots, not
-    the registry math."""
+    the registry math. The newest retained row is instead reread live."""
     aid = _insert_agent(db_conn)
     _ledger_row(
         db_conn,
@@ -754,6 +804,15 @@ def test_inspect_snapshot_cost_immune_to_registry_changes(
         tin=1_000_000,
         tout=1_000_000,
         cost=50.0,
+    )
+    _ledger_row(
+        db_conn,
+        agent_id=aid,
+        days_ago=2,
+        model="deepseek-v4-pro",
+        tin=1_000_000,
+        tout=1_000_000,
+        cost=1.0,
     )
     fake_loki.add(
         event="llm_usage",
@@ -774,6 +833,7 @@ def test_inspect_snapshot_cost_immune_to_registry_changes(
     # tokens still aggregate normally alongside the snapshotted cost
     assert cost["tokens_in"] == 2_000_000
     assert cost["unpriced_calls"] == 0
+    assert cost["llm_calls"] == 2
 
 
 def test_inspect_snapshotless_rows_are_unpriced(
@@ -928,8 +988,10 @@ def test_inspect_windowed_duration_stats_keep_exact_float_values(
 def test_inspect_whole_life_stats_read_completed_days_from_the_ledger(
     db_conn: psycopg.Connection, fake_loki: _FakeLoki
 ) -> None:
-    """No-hours inspect keeps pre-tail turn/exec counts in Postgres, not Loki."""
+    """The live-covered gap day is reread wholly and its stale row excluded."""
     aid = _insert_agent(db_conn)
+    now = datetime.now(UTC)
+    today = now.replace(hour=0, minute=0, second=0, microsecond=0)
     _metrics_ledger_row(
         db_conn,
         agent_id=aid,
@@ -940,25 +1002,85 @@ def test_inspect_whole_life_stats_read_completed_days_from_the_ledger(
         exec_ok=4,
         exec_failed=2,
     )
-    # The newest ledger day ends at yesterday 00:00, so this completed-day
-    # live event must be read from its watermark through now (not just today).
+    _metrics_ledger_row(
+        db_conn,
+        agent_id=aid,
+        days_ago=1,
+        turn_total=5,
+        turn_ok=5,
+        turn_duration_seconds=3.0,
+        exec_ok=3,
+    )
+    # Gap-day events include the old midnight-boundary hole; the stale row
+    # remains out of the ledger sum while the live tail reads all three rows.
     fake_loki.add(
         event="turn_end",
         agent_id=aid,
         payload={"duration_seconds": 4.0, "ok": True},
-        ts_offset_hours=27,
+        ts=today - timedelta(hours=12) + timedelta(microseconds=1),
     )
-    fake_loki.add(event="turn_end", agent_id=aid, payload={"duration_seconds": 5.0, "ok": True})
-    fake_loki.add(event="exec", agent_id=aid)
+    fake_loki.add(
+        event="turn_end",
+        agent_id=aid,
+        payload={"duration_seconds": 4.0, "ok": True},
+        ts=today - timedelta(hours=1),
+    )
+    fake_loki.add(
+        event="turn_end",
+        agent_id=aid,
+        payload={"duration_seconds": 5.0, "ok": True},
+        ts=now - timedelta(seconds=30),
+    )
+    fake_loki.add(event="exec", agent_id=aid, ts=now - timedelta(seconds=30))
     db_conn.commit()
     with TestClient(app) as client:
         response = client.get(f"/api/agents/{aid}/inspect")
     assert response.status_code == 200
     stats = response.json()["stats"]
-    assert stats["turn_total"] == 9
-    assert stats["turn_ok"] == 8
+    assert stats["turn_total"] == 10
+    assert stats["turn_ok"] == 9
     assert stats["exec_ok"] == 5
     assert stats["exec_failed"] == 2
+
+
+def test_inspect_whole_life_gap_day_events_read_live_and_not_double_counted(
+    db_conn: psycopg.Connection, fake_loki: _FakeLoki
+) -> None:
+    """The final gap-day hour is live-read while its stale row stays excluded."""
+    aid = _insert_agent(db_conn)
+    now = datetime.now(UTC)
+    today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    _metrics_ledger_row(
+        db_conn,
+        agent_id=aid,
+        days_ago=1,
+        turn_total=5,
+        turn_ok=4,
+        turn_duration_seconds=3.0,
+        exec_ok=2,
+        exec_failed=1,
+    )
+    fake_loki.add(
+        event="turn_end",
+        agent_id=aid,
+        payload={"duration_seconds": 4.0, "ok": True},
+        ts=today - timedelta(minutes=30),
+    )
+    fake_loki.add(
+        event="turn_end",
+        agent_id=aid,
+        payload={"duration_seconds": 5.0, "ok": True},
+        ts=now - timedelta(seconds=30),
+    )
+    db_conn.commit()
+    with TestClient(app) as client:
+        stats = client.get(f"/api/agents/{aid}/inspect").json()["stats"]
+    assert stats["turn_total"] == 2
+    assert stats["turn_ok"] == 2
+    assert stats["turn_p50_seconds"] == 4.5
+    assert stats["turn_p90_seconds"] == 4.9
+    assert stats["turn_min_seconds"] == 4.0
+    assert stats["turn_max_seconds"] == 5.0
 
 
 def test_inspect_exec_ok_fail_split(db_conn: psycopg.Connection, fake_loki: _FakeLoki) -> None:
@@ -997,10 +1119,11 @@ def test_inspect_empty_agent_zeros(db_conn: psycopg.Connection) -> None:
 def test_inspect_hours_windows_cost_and_stats(
     db_conn: psycopg.Connection, fake_loki: _FakeLoki
 ) -> None:
-    """`?hours=24` narrows cost + stats to the last 24h: 25h old llm_usage/turn_end fall outside the window,
-    1h old fall inside. Without hours both counted (cumulative). window_hours echoed back as-is."""
+    """A 24h window is Loki-only; whole life excludes its live-covered D-1 row."""
     aid = _insert_agent(db_conn)
-    # 25h ago — outside the 24h window
+    now = datetime.now(UTC)
+    today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    # Two days ago at noon — deterministically outside the 24h window.
     fake_loki.add(
         event="llm_usage",
         agent_id=aid,
@@ -1011,13 +1134,21 @@ def test_inspect_hours_windows_cost_and_stats(
             "model": "claude-opus-4-8",
             "cost_usd": 30.0,
         },
-        ts_offset_hours=25,
+        ts=today - timedelta(hours=36),
     )
     fake_loki.add(
         event="turn_end",
         agent_id=aid,
         payload={"duration_seconds": 2.0, "ok": True},
-        ts_offset_hours=25,
+        ts=today - timedelta(hours=36),
+    )
+    _metrics_ledger_row(
+        db_conn,
+        agent_id=aid,
+        days_ago=2,
+        turn_total=1,
+        turn_ok=1,
+        turn_duration_seconds=2.0,
     )
     _metrics_ledger_row(
         db_conn,
@@ -1027,7 +1158,7 @@ def test_inspect_hours_windows_cost_and_stats(
         turn_ok=1,
         turn_duration_seconds=2.0,
     )
-    # 1h ago — inside the window
+    # Now — always inside the 24h window and after the gap-day tail start.
     fake_loki.add(
         event="llm_usage",
         agent_id=aid,
@@ -1038,13 +1169,13 @@ def test_inspect_hours_windows_cost_and_stats(
             "model": "claude-opus-4-8",
             "cost_usd": 2.0,
         },
-        ts_offset_hours=1,
+        ts=now - timedelta(seconds=30),
     )
     fake_loki.add(
         event="turn_end",
         agent_id=aid,
         payload={"duration_seconds": 4.0, "ok": True},
-        ts_offset_hours=1,
+        ts=now - timedelta(seconds=30),
     )
     db_conn.commit()
     with TestClient(app) as client:
@@ -1055,7 +1186,7 @@ def test_inspect_hours_windows_cost_and_stats(
     assert windowed["cost"]["llm_calls"] == 1
     assert windowed["cost"]["cost_usd"] == pytest.approx(2.0)  # pyright: ignore[reportUnknownMemberType]
     assert windowed["stats"]["turn_total"] == 1
-    # cumulative (whole life, empty ledger -> full-retention tail): 30 + 2; turns 2
+    # Cumulative: D-2 ledger + live now; the D-1 gap row is not summed.
     assert cumulative["window_hours"] is None
     assert cumulative["cost"]["llm_calls"] == 2
     assert cumulative["cost"]["cost_usd"] == pytest.approx(32.0)  # pyright: ignore[reportUnknownMemberType]

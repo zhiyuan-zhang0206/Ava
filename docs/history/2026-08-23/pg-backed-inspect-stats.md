@@ -15,3 +15,10 @@ three hours and run concurrently through the existing Loki query budget. The
 stats path consolidates counts and duration distribution per shard, so one
 distribution feeds duration sum/min/max while the stitched archive/live
 distribution supplies the window's percentiles.
+
+## Gap-day live re-read
+
+When the newest ledger day's UTC start is still within Loki retention, inspect
+excludes that potentially stale row and rereads the entire day from the live
+tail. A late write into a closed day is therefore neither lost nor double
+counted, while older settled days remain ledger-served.
