@@ -416,7 +416,6 @@
     "y": 9
    },
    "id": 7,
-   "timeFrom": "now-24h",
    "options": {
     "colorMode": "value",
     "graphMode": "area",
@@ -431,7 +430,7 @@
     },
     "textMode": "auto"
    },
-   "title": "LLM cost (24h)",
+   "title": "LLM cost",
    "type": "stat",
    "targets": [
     {
@@ -477,7 +476,6 @@
     "y": 9
    },
    "id": 8,
-   "timeFrom": "now-24h",
    "options": {
     "colorMode": "value",
     "graphMode": "area",
@@ -492,7 +490,7 @@
     },
     "textMode": "auto"
    },
-   "title": "Tokens (24h)",
+   "title": "Tokens",
    "type": "stat",
    "targets": [
     {
@@ -538,7 +536,6 @@
     "y": 9
    },
    "id": 44,
-   "timeFrom": "now-24h",
    "options": {
     "colorMode": "value",
     "graphMode": "area",
@@ -553,7 +550,7 @@
     },
     "textMode": "auto"
    },
-   "title": "LLM input tokens (24h)",
+   "title": "LLM input tokens",
    "type": "stat",
    "targets": [
     {
@@ -599,7 +596,6 @@
     "y": 13
    },
    "id": 45,
-   "timeFrom": "now-24h",
    "options": {
     "colorMode": "value",
     "graphMode": "area",
@@ -614,7 +610,7 @@
     },
     "textMode": "auto"
    },
-   "title": "LLM output tokens (24h)",
+   "title": "LLM output tokens",
    "type": "stat",
    "targets": [
     {
@@ -661,7 +657,6 @@
     "y": 13
    },
    "id": 46,
-   "timeFrom": "now-24h",
    "options": {
     "colorMode": "value",
     "graphMode": "area",
@@ -676,7 +671,7 @@
     },
     "textMode": "auto"
    },
-   "title": "Cache hit rate (24h)",
+   "title": "Cache hit rate",
    "type": "stat",
    "targets": [
     {
@@ -723,7 +718,6 @@
     "y": 13
    },
    "id": 47,
-   "timeFrom": "now-24h",
    "options": {
     "colorMode": "value",
     "graphMode": "area",
@@ -738,7 +732,7 @@
     },
     "textMode": "auto"
    },
-   "title": "Avg turn duration (24h)",
+   "title": "Avg turn duration",
    "type": "stat",
    "targets": [
     {
@@ -1272,7 +1266,7 @@
   {
    "id": 2202,
    "type": "table",
-   "title": "Events \u2014 types (24h)",
+   "title": "Events \u2014 types",
    "datasource": {
     "type": "loki",
     "uid": "loki"
@@ -1289,7 +1283,7 @@
       "type": "loki",
       "uid": "loki"
      },
-     "expr": "sum by (event_name, level, category) (count_over_time({service_name=\"unknown_service\"} | json | __error__=\"\" [24h]))",
+     "expr": "sum by (event_name, level, category) (count_over_time({service_name=\"unknown_service\"} | json | __error__=\"\" [$__range]))",
      "refId": "A",
      "queryType": "instant",
      "legendFormat": "events"
@@ -1306,7 +1300,7 @@
     "showTypeIcons": false,
     "sortBy": []
    },
-   "description": "Event counts by name, level, and category over the last 24 hours. Tier is derived by the events API and is not a Loki label, so this query groups only fields Loki stores.",
+   "description": "Event counts by name, level, and category over the selected dashboard window. Tier is derived by the events API and is not a Loki label, so this query groups only fields Loki stores.",
    "fieldConfig": {
     "defaults": {
      "color": {
@@ -4435,7 +4429,7 @@
     "type": "loki",
     "uid": "loki"
    },
-   "description": "Projected full-day LLM spend from usage-time cost snapshots. Formula: today's spend since Asia/Shanghai midnight \u00d7 86,400 / elapsed seconds in the panel range.",
+   "description": "Projected full-day LLM spend from usage-time cost snapshots over the dashboard time window. Formula: window spend \u00d7 86,400 / elapsed seconds in the panel range.",
    "fieldConfig": {
     "defaults": {
      "color": {
@@ -4476,8 +4470,7 @@
     },
     "textMode": "auto"
    },
-   "timeFrom": "now/d",
-   "title": "Today LLM cost estimate",
+   "title": "LLM cost estimate \u2014 day pace",
    "type": "stat",
    "targets": [
     {
@@ -4498,7 +4491,7 @@
     "type": "loki",
     "uid": "loki"
    },
-   "description": "30-day-normalized projection from usage-time cost snapshots. Formula: this month's spend so far \u00d7 2,592,000 / elapsed seconds in the panel range. It is a 30-day pace, not a calendar-month total.",
+   "description": "Projected 30-day LLM spend from usage-time cost snapshots over the dashboard time window. Formula: window spend \u00d7 2,592,000 / elapsed seconds in the panel range.",
    "fieldConfig": {
     "defaults": {
      "color": {
@@ -4520,7 +4513,7 @@
    },
    "gridPos": {
     "h": 4,
-    "w": 8,
+    "w": 16,
     "x": 8,
     "y": 228
    },
@@ -4539,8 +4532,7 @@
     },
     "textMode": "auto"
    },
-   "timeFrom": "now/M",
-   "title": "This-month LLM cost estimate",
+   "title": "LLM cost estimate \u2014 30-day pace",
    "type": "stat",
    "targets": [
     {
@@ -4561,69 +4553,7 @@
     "type": "loki",
     "uid": "loki"
    },
-   "description": "30-day projection from usage-time cost snapshots. Formula: (spend over the trailing 168 hours / 7) \u00d7 30.",
-   "fieldConfig": {
-    "defaults": {
-     "color": {
-      "fixedColor": "blue",
-      "mode": "fixed"
-     },
-     "decimals": 2,
-     "thresholds": {
-      "mode": "absolute",
-      "steps": [
-       {
-        "color": "green",
-        "value": null
-       }
-      ]
-     },
-     "unit": "currencyUSD"
-    }
-   },
-   "gridPos": {
-    "h": 4,
-    "w": 8,
-    "x": 16,
-    "y": 228
-   },
-   "id": 40,
-   "options": {
-    "colorMode": "value",
-    "graphMode": "area",
-    "justifyMode": "auto",
-    "orientation": "auto",
-    "reduceOptions": {
-     "calcs": [
-      "last"
-     ],
-     "fields": "",
-     "values": false
-    },
-    "textMode": "auto"
-   },
-   "title": "Next-month LLM cost estimate",
-   "type": "stat",
-   "targets": [
-    {
-     "datasource": {
-      "type": "loki",
-      "uid": "loki"
-     },
-     "editorMode": "code",
-     "expr": "(sum(sum_over_time({service_name=\"unknown_service\"} | json | category=\"telemetry\" | event_name=\"llm_usage\" | unwrap attributes_cost_usd [168h]))) / 7 * 30",
-     "refId": "A",
-     "queryType": "instant",
-     "legendFormat": "next month est."
-    }
-   ]
-  },
-  {
-   "datasource": {
-    "type": "loki",
-    "uid": "loki"
-   },
-   "description": "Daily usage-time LLM cost snapshots. The dashboard fixes this panel to Asia/Shanghai calendar days and a 24-hour query interval.",
+   "description": "Usage-time LLM cost snapshots grouped into $__interval buckets over the dashboard time window.",
    "fieldConfig": {
     "defaults": {
      "color": {
@@ -4643,7 +4573,6 @@
     "y": 232
    },
    "id": 41,
-   "interval": "24h",
    "options": {
     "legend": {
      "calcs": [
@@ -4662,8 +4591,7 @@
     "xField": "Time",
     "xTickLabelRotation": 0
    },
-   "timeFrom": "now-7d/d",
-   "title": "Daily LLM cost (7d)",
+   "title": "Daily LLM cost",
    "type": "barchart",
    "targets": [
     {

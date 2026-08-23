@@ -21,7 +21,7 @@ PG) — stays SQL by design.
 Per-panel provenance:
 
 - **6 stat panels** (LLM calls / Warning / Error / Live agents /
-  LLM cost (24h) / Tokens (24h)): explicit 8x4 grid (three per row). The
+  LLM cost / Tokens): explicit 8x4 grid (three per row). The
   generator's stat color default (fixed blue) matches four of them; Warning
   (fixed orange) and Error (fixed red) set the color via ``field_defaults``,
   and LLM cost carries the original ``decimals: 2``. Error keeps the
@@ -202,7 +202,7 @@ core_metrics.register_core_metric(
 core_metrics.register_core_metric(
     MetricSpec(
         name="core_llm_cost_24h",
-        title="LLM cost (24h)",
+        title="LLM cost",
         event_name="llm_usage",
         category="telemetry",
         unit="currencyUSD",
@@ -221,7 +221,7 @@ core_metrics.register_core_metric(
 core_metrics.register_core_metric(
     MetricSpec(
         name="core_tokens_24h",
-        title="Tokens (24h)",
+        title="Tokens",
         event_name="llm_usage",
         category="telemetry",
         unit="short",
@@ -244,10 +244,10 @@ core_metrics.register_core_metric(
 core_metrics.register_core_metric(
     MetricSpec(
         name="core_llm_cost_today_estimate",
-        title="Today LLM cost estimate",
+        title="LLM cost estimate — day pace",
         description=(
-            "Projected full-day LLM spend from usage-time cost snapshots. Formula: "
-            "today's spend since Asia/Shanghai midnight × 86,400 / elapsed "
+            "Projected full-day LLM spend from usage-time cost snapshots over the "
+            "dashboard time window. Formula: window spend × 86,400 / elapsed "
             "seconds in the panel range."
         ),
         event_name="llm_usage",
@@ -266,11 +266,11 @@ core_metrics.register_core_metric(
 core_metrics.register_core_metric(
     MetricSpec(
         name="core_llm_cost_month_estimate",
-        title="This-month LLM cost estimate",
+        title="LLM cost estimate — 30-day pace",
         description=(
-            "30-day-normalized projection from usage-time cost snapshots. Formula: "
-            "this month's spend so far × 2,592,000 / elapsed seconds in the "
-            "panel range. It is a 30-day pace, not a calendar-month total."
+            "Projected 30-day LLM spend from usage-time cost snapshots over the "
+            "dashboard time window. Formula: window spend × 2,592,000 / elapsed "
+            "seconds in the panel range."
         ),
         event_name="llm_usage",
         category="telemetry",
@@ -285,37 +285,16 @@ core_metrics.register_core_metric(
     )
 )
 
-core_metrics.register_core_metric(
-    MetricSpec(
-        name="core_llm_cost_next_month_estimate",
-        title="Next-month LLM cost estimate",
-        description=(
-            "30-day projection from usage-time cost snapshots. Formula: "
-            "(spend over the trailing 168 hours / 7) × 30."
-        ),
-        event_name="llm_usage",
-        category="telemetry",
-        unit="currencyUSD",
-        panel="stat",
-        query=f"({_llm_cost('168h')}) / 7 * 30",
-        query_type="logql",
-        target_names=["next-month estimate"],
-        field_defaults={"decimals": 2},
-        width=8,
-        height=4,
-    )
-)
-
 
 # ── chart panels (12-wide, two per row) ──────────────────────────────
 
 core_metrics.register_core_metric(
     MetricSpec(
         name="core_llm_cost_daily",
-        title="Daily LLM cost (7d)",
+        title="Daily LLM cost",
         description=(
-            "Daily usage-time LLM cost snapshots. The dashboard fixes this panel "
-            "to Asia/Shanghai calendar days and a 24-hour query interval."
+            "Usage-time LLM cost snapshots grouped into $__interval buckets over "
+            "the dashboard time window."
         ),
         event_name="llm_usage",
         category="telemetry",
@@ -374,7 +353,7 @@ core_metrics.register_core_metric(
 core_metrics.register_core_metric(
     MetricSpec(
         name="core_llm_input_tokens_24h",
-        title="LLM input tokens (24h)",
+        title="LLM input tokens",
         event_name="llm_usage",
         category="telemetry",
         unit="short",
@@ -393,7 +372,7 @@ core_metrics.register_core_metric(
 core_metrics.register_core_metric(
     MetricSpec(
         name="core_llm_output_tokens_24h",
-        title="LLM output tokens (24h)",
+        title="LLM output tokens",
         event_name="llm_usage",
         category="telemetry",
         unit="short",
@@ -412,7 +391,7 @@ core_metrics.register_core_metric(
 core_metrics.register_core_metric(
     MetricSpec(
         name="core_cache_hit_rate_24h",
-        title="Cache hit rate (24h)",
+        title="Cache hit rate",
         event_name="llm_usage",
         category="telemetry",
         unit="percent",
@@ -435,7 +414,7 @@ core_metrics.register_core_metric(
 core_metrics.register_core_metric(
     MetricSpec(
         name="core_avg_turn_duration_24h",
-        title="Avg turn duration (24h)",
+        title="Avg turn duration",
         event_name="turn_end",
         category="telemetry",
         unit="s",
