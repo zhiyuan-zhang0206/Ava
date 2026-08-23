@@ -18,6 +18,10 @@ overwrites, never double-counts. Each run re-rolls the last
 ``lookback_days`` already-rolled days so a late OTLP write into a closed
 day is picked up.
 
+An indexed slice that returns zero aggregate rows is unsafe rather than
+authoritatively empty: the pass warns and skips that day, preserving its
+existing ledger rows while continuing with the remaining days.
+
 Loki bounds what is recoverable: retention is 7d
 (deploy/lgtm/config/loki.yaml `retention_period: 168h`), so the
 recompute window clamps to the first FULLY-retained day — a maintenance
@@ -93,9 +97,9 @@ class MetricsRow:
 
 @dataclass(frozen=True)
 class RollupResult:
-    """What one `compute_rollup` run covered. `start_day`/`end_day` are the
-    inclusive UTC-day range recomputed (None when the run was a no-op — no
-    whole retained day to roll yet); `*_rows` are the upsert row counts."""
+    """What one `compute_rollup` run attempted. `start_day`/`end_day` are the
+    inclusive UTC-day range (None when the run was a no-op — no whole retained
+    day to roll yet); `*_rows` are the successful upsert row counts."""
 
     start_day: date | None
     end_day: date | None
@@ -234,8 +238,8 @@ def _query_instant(logql: str, at: datetime) -> list[tuple[dict[str, str], float
     return out
 
 
-def _day_aggregates(day: date) -> tuple[list[TokensRow], list[MetricsRow]]:
-    """Aggregate one whole UTC day from Loki (the test seam — patch me)."""
+def _day_aggregates(day: date) -> tuple[list[TokensRow], list[MetricsRow]] | None:
+    """Aggregate one UTC day, or return None for a zero-row indexed slice."""
     day_start = datetime.combine(day, time.min, tzinfo=UTC)
     day_end = datetime.combine(day + timedelta(days=1), time.min, tzinfo=UTC)
 
@@ -243,6 +247,7 @@ def _day_aggregates(day: date) -> tuple[list[TokensRow], list[MetricsRow]]:
     met: dict[int, dict[str, float]] = {}
     slices = split_index_label_window(day_start, day_end)
     for slice_ in slices:
+        slice_row_count = 0
         duration_s = max(1, int((slice_.end - slice_.start).total_seconds()))
         legacy_streams_only = len(slices) == 2 and slice_.era is LokiReadEra.LEGACY
         for name, logql in _tokens_queries(
@@ -250,7 +255,9 @@ def _day_aggregates(day: date) -> tuple[list[TokensRow], list[MetricsRow]]:
             duration_s=duration_s,
             legacy_streams_only=legacy_streams_only,
         ).items():
-            for labels, value in _query_instant(logql, slice_.end):
+            result_rows = _query_instant(logql, slice_.end)
+            slice_row_count += len(result_rows)
+            for labels, value in result_rows:
                 key = (int(labels["agent_id"]), labels.get("model", ""))
                 values = tok.setdefault(key, {})
                 values[name] = values.get(name, 0.0) + value
@@ -259,7 +266,9 @@ def _day_aggregates(day: date) -> tuple[list[TokensRow], list[MetricsRow]]:
             duration_s=duration_s,
             legacy_streams_only=legacy_streams_only,
         ).items():
-            for labels, value in _query_instant(logql, slice_.end):
+            result_rows = _query_instant(logql, slice_.end)
+            slice_row_count += len(result_rows)
+            for labels, value in result_rows:
                 values = met.setdefault(int(labels["agent_id"]), {})
                 if name == "turn_dur_min":
                     values[name] = min(values.get(name, value), value)
@@ -267,6 +276,8 @@ def _day_aggregates(day: date) -> tuple[list[TokensRow], list[MetricsRow]]:
                     values[name] = max(values.get(name, value), value)
                 else:
                     values[name] = values.get(name, 0.0) + value
+        if slice_.era is LokiReadEra.INDEXED and slice_row_count == 0:
+            return None
     tokens_rows = [
         TokensRow(
             agent_id=agent_id,
@@ -388,8 +399,15 @@ def compute_rollup(
     per_day: list[tuple[date, list[TokensRow], list[MetricsRow]]] = []
     day = start_day
     while day <= yesterday:
-        tokens_rows, metrics_rows = _day_aggregates(day)
-        per_day.append((day, tokens_rows, metrics_rows))
+        aggregates = _day_aggregates(day)
+        if aggregates is None:
+            logger.warning(
+                f"[events-maintenance] indexed slice returned zero rows for {day}; "
+                "refusing to rewrite that day and leaving existing rollup rows intact"
+            )
+        else:
+            tokens_rows, metrics_rows = aggregates
+            per_day.append((day, tokens_rows, metrics_rows))
         day += timedelta(days=1)
 
     tokens_count = metrics_count = 0
