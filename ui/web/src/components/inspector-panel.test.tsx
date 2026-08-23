@@ -11,6 +11,7 @@ import {
   render as rtlRender,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -255,10 +256,14 @@ describe("InspectorPanel", () => {
     expect(screen.getByText("142")).toBeTruthy(); // LLM calls
     expect(screen.getByText("91.70%")).toBeTruthy(); // cache hit
 
-    // active rate: 1800/3600 = 50%, shown in 2×2 grid with LM / exec / idle
-    const activeRateEls = screen.getAllByText("Active rate");
-    expect(activeRateEls.length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText("50%")).toBeTruthy();
+    // activity: LLM-stage TPS leads the grid, followed by LM / exec / idle
+    const activitySection = screen.getByText("Activity").closest("section");
+    expect(activitySection).not.toBeNull();
+    expect(within(activitySection!).getByText("LLM stage")).toBeTruthy();
+    expect(within(activitySection!).getByText("42.5")).toBeTruthy();
+    expect(screen.queryByText("Active rate")).toBeNull();
+    expect(screen.queryByText("50%")).toBeNull();
+    expect(screen.queryByText("TPS")).toBeNull();
     expect(screen.getByText("20m")).toBeTruthy(); // 1200s LM
     expect(screen.getByText("8m")).toBeTruthy(); // 450s exec
     expect(screen.getByText("Idle")).toBeTruthy();
@@ -355,7 +360,7 @@ describe("InspectorPanel", () => {
     );
     render(<InspectorPanel agentId={1} />);
 
-    await waitFor(() => expect(screen.getAllByText("Active rate").length).toBeGreaterThanOrEqual(1));
+    await waitFor(() => expect(screen.getByText("Activity")).toBeTruthy());
     // Idle cell shows the day tier; the sub-day cells keep hour/minute form.
     expect(screen.getByText("24d 3h")).toBeTruthy();
     // "1h" appears twice: the window-selector option AND the llm_seconds cell.
@@ -374,15 +379,16 @@ describe("InspectorPanel", () => {
     expect(screen.getByText("24d 3h")).toBeTruthy();
   });
 
-  it("active rate shows an em dash and no blocked-% when alive is 0", async () => {
+  it("activity durations show em dashes when alive is 0 while LLM stage remains visible", async () => {
     getAgentInspect.mockResolvedValue(
       fixture({ activity: { active_seconds: 0, alive_seconds: 0, active_rate: 0, llm_seconds: 0, exec_seconds: 0 } }),
     );
     render(<InspectorPanel agentId={1} />);
-    await waitFor(() => expect(screen.getAllByText("Active rate").length).toBeGreaterThanOrEqual(1));
-    // no-life branch: all four cells show em dash
-    const dashes = screen.getAllByText("—");
-    expect(dashes.length).toBeGreaterThanOrEqual(4);
+    await waitFor(() => expect(screen.getByText("Activity")).toBeTruthy());
+    const activitySection = screen.getByText("Activity").closest("section");
+    expect(activitySection).not.toBeNull();
+    expect(within(activitySection!).getAllByText("—")).toHaveLength(3);
+    expect(within(activitySection!).getByText("42.5")).toBeTruthy();
   });
 
   it("renders the notice section when agent has an open notice", async () => {
@@ -421,7 +427,7 @@ describe("InspectorPanel", () => {
     await waitFor(() => expect(screen.getByText("No open notice")).toBeTruthy());
   });
 
-  it("notice is an interactive reply surface sitting below TPS", async () => {
+  it("notice is an interactive reply surface sitting below Activity", async () => {
     getAgentInspect.mockResolvedValue(
       fixture({
         notice: {
@@ -441,11 +447,11 @@ describe("InspectorPanel", () => {
     // Interactive mirror (not the old read-only card): a reply box + Dismiss.
     expect(screen.getByRole("textbox")).toBeTruthy();
     expect(screen.getByText("Dismiss")).toBeTruthy();
-    // Rendered after the TPS section (bottom of the panel).
-    const tps = screen.getByText("TPS");
+    // Rendered after the Activity section (bottom of the panel).
+    const activity = screen.getByText("Activity");
     const notice = screen.getByText("Notice");
     expect(
-      tps.compareDocumentPosition(notice) & Node.DOCUMENT_POSITION_FOLLOWING,
+      activity.compareDocumentPosition(notice) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
   });
 
