@@ -46,6 +46,9 @@ interface Props {
   // silently and resolves to its reference url, which the composer attaches to
   // the next message as native model content. Undefined when no agent is active.
   onAttachImage?: (file: File) => Promise<string>;
+  // File delivery runs independently of message submission. This state only
+  // makes that parallel delivery visible; it must never gate Enter or Send.
+  filesUploading?: boolean;
   // Monotonically increasing token — every value change steals focus
   // back to the textarea. Callers (page.tsx) increment this at moments
   // that demand "be able to type immediately" (spawn, switch thread, etc.).
@@ -180,7 +183,7 @@ function newClientMessageId(): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
-export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, focusToken, contextTokens, maxContextTokens = 0, softCompactTokens = 0, hardCompactTokens = 0, agentId = null, agentTerminated = false, maxWidthCss, children, details }: Props) {
+export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, filesUploading = false, focusToken, contextTokens, maxContextTokens = 0, softCompactTokens = 0, hardCompactTokens = 0, agentId = null, agentTerminated = false, maxWidthCss, children, details }: Props) {
   const t = useTranslations("common");
   const prevAgentIdRef = useRef(agentId);
   const [value, setValue] = useState(() => {
@@ -663,6 +666,15 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
           <span className={cn("relative ml-auto shrink-0 items-center gap-2", FLEX)}>{details}</span>
         )}
       </div>
+      {filesUploading ? (
+        <div
+          role="status"
+          data-testid="composer-upload-hint"
+          className="px-0.5 text-xs leading-4 text-muted-foreground"
+        >
+          {t("filesUploadingHint")}
+        </div>
+      ) : null}
       {images.length > 0 ? (
         <div className={cn("flex-wrap gap-2 px-0.5 pb-1", FLEX)} data-testid="composer-attachments">
           {images.map((img) => (
