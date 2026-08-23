@@ -182,7 +182,12 @@ def _loki_aggs_into(
 ) -> None:
     """Accumulate per-model llm_usage aggregates from Loki over [from_, to)
     into ``merged``. Rows carrying a cost snapshot sum it directly; rows
-    without one are unpriced (0 cost) — no read-time re-pricing."""
+    without one are unpriced (0 cost) — no read-time re-pricing. A pinned
+    ``to`` makes the per-model sums and counts a consistent snapshot: every
+    query is evaluated at the same instant, with no cross-query skew at the
+    live tail."""
+    if to is None:
+        to = datetime.now(tz=UTC)
     common: _AggCommon = {
         "event_names": ["llm_usage"],
         "categories": ["telemetry", "log"],
@@ -231,10 +236,14 @@ def _to_agent_cost(merged: dict[str, _ModelAgg]) -> AgentCost:
         calls += agg.calls
         unpriced += agg.unpriced_calls
         total_cost += agg.cost
-    cache_hit_pct = round(tcached / tin * 100, 2) if tin else 0.0
+    # These are AgentCost's declared domains. The pinned snapshot makes them
+    # hold by construction; this last defense keeps cache_read without in_total
+    # or an out-of-domain ledger row from turning the inspector report into a 503.
+    unpriced_calls = max(0, unpriced)
+    cache_hit_pct = min(100.0, round(tcached / tin * 100, 2)) if tin else 0.0
     return AgentCost(
         cost_usd=round(total_cost, 4),
-        unpriced_calls=unpriced,
+        unpriced_calls=unpriced_calls,
         llm_calls=calls,
         tokens_in=tin,
         tokens_out=tout,
