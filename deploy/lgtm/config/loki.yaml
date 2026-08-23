@@ -48,6 +48,34 @@ schema_config:
         prefix: index_
         period: 24h
 
+# `default_resource_attributes_as_index_labels` replaces Loki's default list,
+# so retain the 3.7.6 defaults and add only the bounded Ava event dimensions.
+# `agent_id` is dozens of values and `event_name` around twenty; payloads,
+# trace IDs, and spans remain structured metadata rather than streams.
+distributor:
+  otlp_config:
+    default_resource_attributes_as_index_labels:
+      - service.name
+      - service.namespace
+      - service.instance.id
+      - deployment.environment
+      - deployment.environment.name
+      - cloud.region
+      - cloud.availability_zone
+      - k8s.cluster.name
+      - k8s.namespace.name
+      - k8s.pod.name
+      - k8s.container.name
+      - container.name
+      - k8s.replicaset.name
+      - k8s.deployment.name
+      - k8s.statefulset.name
+      - k8s.daemonset.name
+      - k8s.cronjob.name
+      - k8s.job.name
+      - agent_id
+      - event_name
+
 # Retention: the viewer ingests Ava session stdout (~20MB/day new + ~130MB
 # one-time backfill of the existing logs dir) plus the OTLP event stream.
 # Without a cap the filesystem store grows linearly forever. 7d matches the

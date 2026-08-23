@@ -751,6 +751,42 @@ def test_crash_loop_counts_audit_resurrect_only(monkeypatch: pytest.MonkeyPatch)
     assert _crash_loop_detection(max_restarts=2, window_minutes=60) is True
 
 
+def test_crash_loop_merges_disjoint_cutover_eras(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A straddling health window adds per-agent counts without reading a
+    promoted boundary row through both selectors."""
+    import httpx
+
+    from shared.loki_index_labels import LokiReadEra, LokiReadSlice
+
+    start = datetime(2026, 8, 10, tzinfo=UTC)
+    cutover = start.replace(hour=1)
+    end = start.replace(hour=2)
+    slices = (
+        LokiReadSlice(LokiReadEra.LEGACY, start, cutover),
+        LokiReadSlice(LokiReadEra.INDEXED, cutover, end),
+    )
+    queries: list[str] = []
+
+    def _fake_get(url: str, **kw: Any) -> httpx.Response:
+        queries.append(kw["params"]["query"])
+        value = "2" if len(queries) == 1 else "1"
+        resp = httpx.Response(
+            200, json={"data": {"result": [{"metric": {"agent_id": "1"}, "value": [0, value]}]}}
+        )
+        resp.request = httpx.Request("GET", url)  # type: ignore[attr-defined]
+        return resp
+
+    def _slices(_start: datetime, _end: datetime) -> tuple[LokiReadSlice, ...]:
+        return slices
+
+    monkeypatch.setattr(_cluster_health, "split_index_label_window", _slices)
+    monkeypatch.setattr(httpx, "get", _fake_get)
+
+    assert _cluster_health._crash_loop_detection(max_restarts=2, window_minutes=60) is False
+    assert 'event_name=""' in queries[0]
+    assert 'event_name="resurrect"' in queries[1]
+
+
 # ─── edge alerts → alerts ingest (W16) ──────────────────────────────────────
 
 

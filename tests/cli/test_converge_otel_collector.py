@@ -234,6 +234,26 @@ def test_infra_metrics_ride_their_own_pipeline(monkeypatch: pytest.MonkeyPatch) 
     assert "resource_detection/host" in pipelines["metrics/infra"]["processors"]
 
 
+def test_logs_promote_event_labels_before_batch(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The shared logs pipeline promotes only bounded event dimensions to
+    resources, where Loki's OTLP mapping can index them."""
+    cfg = _render_real_template(monkeypatch, frozenset({"gateway", "agent-runner"}))
+
+    processor = cfg["processors"]["transform/promote_event_labels"]
+    assert processor["error_mode"] == "ignore"
+    assert processor["log_statements"] == [
+        {
+            "context": "log",
+            "statements": [
+                'set(resource.attributes["agent_id"], attributes["agent_id"]) where attributes["agent_id"] != nil',
+                'set(resource.attributes["event_name"], attributes["event_name"]) where attributes["event_name"] != nil',
+            ],
+        }
+    ]
+    processors = cfg["service"]["pipelines"]["logs"]["processors"]
+    assert processors == ["memory_limiter", "transform/promote_event_labels", "batch"]
+
+
 def test_runner_forwards_to_authenticated_gateway_ingress_without_renaming_queues(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
