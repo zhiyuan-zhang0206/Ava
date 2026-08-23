@@ -16,6 +16,7 @@ clock; the retention floor derives from it the same way.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import LiteralString, cast
@@ -25,7 +26,7 @@ import pytest
 
 from services.events_maintenance import rollup
 from services.events_maintenance.rollup import MetricsRow, RollupResult, TokensRow, compute_rollup
-from shared.loki_index_labels import LokiReadEra, LokiReadSlice
+from shared.loki_index_labels import INDEX_LABEL_CUTOVER_AT, LokiReadEra, LokiReadSlice
 
 # A fixed "now" so today = 2026-06-10 (UTC); rolled days are 06-07..06-09.
 # Noon so the test does not ride on a midnight edge. The retention floor at
@@ -126,6 +127,26 @@ def _roll(
     return compute_rollup(db, now_utc=now, lookback_days=lookback)
 
 
+def _cutover_query(
+    agent_id: int, *, indexed_value: float | None
+) -> Callable[[str, datetime], list[tuple[dict[str, str], float]]]:
+    """Return one row per legacy/indexed query, or no indexed rows."""
+
+    def query(logql: str, at: datetime) -> list[tuple[dict[str, str], float]]:
+        if at > INDEX_LABEL_CUTOVER_AT:
+            if indexed_value is None:
+                return []
+            value = indexed_value
+        else:
+            value = 1.0
+        labels = {"agent_id": str(agent_id)}
+        if "llm_usage" in logql:
+            labels["model"] = "m1"
+        return [(labels, value)]
+
+    return query
+
+
 # ── happy path ────────────────────────────────────────────────────────────────
 
 
@@ -186,6 +207,72 @@ def test_late_write_lookback_re_rolls_closed_day(
     _roll(db, _FakeLokiDays({day: ([_tokens_row(aid, calls=2, tokens_in=20)], [])}), monkeypatch)
     assert _fetch_tokens(db)[(aid, "2026-06-09", "m1")][0] == 2
     assert _fetch_tokens(db)[(aid, "2026-06-09", "m1")][1] == 20
+
+
+def test_zero_row_indexed_slice_refuses_day_rewrite(
+    db: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    aid = _agent(db)
+    day = INDEX_LABEL_CUTOVER_AT.date()
+    next_day = day + timedelta(days=1)
+    with db.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agent_model_tokens_daily (agent_id, day, model, llm_calls, "
+            "tokens_in, tokens_out, tokens_cached, tokens_reasoning, cost_usd, "
+            "costed_calls, unpriced_calls) VALUES (%s, %s, 'm1', 7, 70, 35, 7, 3, 1.25, 7, 0)",
+            (aid, day),
+        )
+    warnings: list[str] = []
+    populated_query = _cutover_query(aid, indexed_value=2.0)
+    cutover_day_end = datetime.combine(next_day, datetime.min.time(), tzinfo=UTC)
+
+    def zero_first_indexed_slice(logql: str, at: datetime) -> list[tuple[dict[str, str], float]]:
+        return [] if at == cutover_day_end else populated_query(logql, at)
+
+    def capture_warning(message: object) -> None:
+        warnings.append(str(message))
+
+    monkeypatch.setattr(rollup, "_query_instant", zero_first_indexed_slice)
+    monkeypatch.setattr(rollup.logger, "warning", capture_warning)
+
+    result = compute_rollup(
+        db,
+        now_utc=INDEX_LABEL_CUTOVER_AT + timedelta(days=2, hours=1),
+        lookback_days=0,
+    )
+
+    assert result == RollupResult(day, next_day, 1, 1)
+    assert _fetch_tokens(db)[(aid, str(day), "m1")] == (7, 70, 35, 7, 3, 1.25, 7, 0)
+    assert _fetch_tokens(db)[(aid, str(next_day), "m1")] == (2, 2, 2, 2, 2, 2.0, 2, 0)
+    assert (aid, str(day)) not in _fetch_metrics(db)
+    assert _fetch_metrics(db)[(aid, str(next_day))] == (2, 2, 2.0, 2.0, 2.0, 2, 2)
+    assert len(warnings) == 1
+    assert str(day) in warnings[0]
+    assert "indexed slice returned zero rows" in warnings[0]
+
+
+def test_nonzero_indexed_slice_rewrites_day(
+    db: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    aid = _agent(db)
+    day = INDEX_LABEL_CUTOVER_AT.date()
+    with db.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agent_model_tokens_daily (agent_id, day, model, llm_calls) "
+            "VALUES (%s, %s, 'm1', 7)",
+            (aid, day),
+        )
+    monkeypatch.setattr(rollup, "_query_instant", _cutover_query(aid, indexed_value=2.0))
+
+    result = compute_rollup(
+        db,
+        now_utc=INDEX_LABEL_CUTOVER_AT + timedelta(days=1, hours=1),
+        lookback_days=0,
+    )
+
+    assert result == RollupResult(day, day, 1, 1)
+    assert _fetch_tokens(db)[(aid, str(day), "m1")] == (3, 3, 3, 3, 3, 3.0, 3, 0)
+    assert _fetch_metrics(db)[(aid, str(day))] == (3, 3, 3.0, 1.0, 2.0, 3, 3)
 
 
 def test_retention_clamp_never_rewrites_archive_days(
@@ -365,7 +452,9 @@ def test_cutover_day_merges_legacy_and_indexed_rollups(monkeypatch: pytest.Monke
     monkeypatch.setattr(rollup, "split_index_label_window", _slices)
     monkeypatch.setattr(rollup, "_query_instant", _query)
 
-    tokens, metrics = rollup._day_aggregates(day)
+    aggregates = rollup._day_aggregates(day)
+    assert aggregates is not None
+    tokens, metrics = aggregates
 
     assert tokens == [
         TokensRow(
