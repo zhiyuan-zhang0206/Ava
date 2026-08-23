@@ -594,6 +594,7 @@ function LivenessSection({ inspect }: { inspect: AgentInspect }) {
     <Section icon={<HeartPulse className={cn("size-3", offline && "text-destructive")} />} title="Liveness">
       <div className="grid grid-cols-2 gap-1">
         <Metric
+          className="col-span-2"
           label="Birth"
           value={formatRelative(spawned_at)}
           sub={formatAbsolute(spawned_at)}
@@ -633,16 +634,18 @@ function nextHeartbeatCell(hb: HeartbeatInfo): { value: string } {
 }
 
 function Metric({
+  className,
   label,
   value,
   sub,
 }: {
+  className?: string;
   label: string;
   value: string;
   sub?: string;
 }) {
   return (
-    <div className={cn("gap-0.5 rounded bg-sidebar-accent/40 px-2 py-1", FLEX, FLEX_COL)}>
+    <div className={cn("gap-0.5 rounded bg-sidebar-accent/40 px-2 py-1", FLEX, FLEX_COL, className)}>
       <span className="text-[10px] tracking-wide text-muted-foreground">{label}</span>
       <span className="font-mono text-xs tabular-nums text-foreground">{value}</span>
       {sub != null && (
