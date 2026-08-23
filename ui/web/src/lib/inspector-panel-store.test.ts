@@ -1,7 +1,7 @@
 // useInspectorOpen — the inspector open/closed flag is breakpoint-aware:
 //
 // - Desktop (≥ lg): a workspace preference (DB-backed display.inspector_open),
-//   default OPEN (the panel is a side panel beside the timeline — #723).
+//   default CLOSED (the panel is a side panel beside the timeline — #1415).
 // - Mobile (< lg): per-session view state (zustand, like the mobile sidebar
 //   drawer), default CLOSED — the panel is a full-screen overlay that hides
 //   the timeline, so first load must land on the timeline (task #793).
@@ -57,7 +57,7 @@ afterEach(() => {
 });
 
 describe("useInspectorOpen — desktop (≥ lg)", () => {
-  it("defaults to CLOSED when the setting is unset (floating panel, #835)", () => {
+  it("defaults to CLOSED when the setting is unset (side panel, #1415)", () => {
     const { result } = renderHook(() => useInspectorOpen());
     expect(result.current.open).toBe(false);
   });

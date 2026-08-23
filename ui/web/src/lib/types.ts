@@ -680,10 +680,10 @@ export const USER_SETTING_DEFAULTS: Record<string, unknown> = {
   // Display settings both control this flag — acting as expand-all /
   // collapse-all across every run. Default true: steps start expanded.
   "display.expand_runs_mode": "all",
-  // Inspector panel open/closed — a workspace preference shared by the header
-  // toggle and the timeline layout. Default CLOSED (user ruling 2026-08-05:
-  // the floating panel must not open on every entry and cover the timeline —
-  // the composer's toggle opens it).
+  // Inspector side-panel open/closed — a workspace preference shared by the
+  // composer's toggle and the timeline layout. Default CLOSED (user ruling
+  // 2026-08-23, superseding the 2026-08-05 floating desktop panel); the
+  // composer's toggle opens it.
   "display.inspector_open": false,
   // Sidebar layout. Width is FIXED (task #750: drag resize removed); the
   // stored display.sidebar_width is a legacy value and is ignored — kept in
