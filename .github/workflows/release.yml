@@ -3,7 +3,8 @@
 # release_cut.py creates annotated tags whose messages carry the day's PR summary
 # (categorized by conventional-commit type). This workflow turns each tag push
 # into a GitHub Release with that same annotation as the body — no separate
-# release-notes authoring step needed.
+# release-notes authoring step needed. Before publishing, it verifies the
+# tagged commit's required CI checks completed successfully (or legitimately skipped).
 #
 # Triggers on dated three-segment tags only (v<major>.<minor>.<patch>-<YYYYMMDD>),
 # not legacy two-segment milestone tags (v0.1-kernel etc.).
@@ -16,6 +17,7 @@ on:
       - 'v[0-9]+.[0-9]+.[0-9]+-[0-9]*'  # dated three-segment tags only
 
 permissions:
+  checks: read
   contents: write  # create releases
 
 jobs:
@@ -27,6 +29,48 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0  # full history needed for tag annotation
+
+      - name: Verify CI on tagged commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          SHA="$(git rev-parse "${TAG}^{commit}")"
+          export SHA
+          gh api --paginate --slurp \
+            "repos/${GITHUB_REPOSITORY}/commits/${SHA}/check-runs?per_page=100&filter=latest" \
+            > /tmp/check-runs.json
+          python3 - <<'EOF'
+          import json
+          import os
+          import sys
+          from pathlib import Path
+
+          pages = json.loads(Path("/tmp/check-runs.json").read_text())
+          check_runs = [run for page in pages for run in page["check_runs"]]
+          if not check_runs:
+              raise SystemExit("tagged commit never ran CI — do not release")
+
+          required = (
+              "backend (pytest + pyright)",
+              "frontend (eslint + tsc + vitest)",
+              "e2e (Playwright happy path)",
+          )
+          by_name = {run["name"]: run for run in check_runs}
+          problems = []
+          for name in required:
+              run = by_name.get(name)
+              if run is None:
+                  problems.append(f"{name}: missing")
+              elif run["status"] != "completed":
+                  problems.append(f"{name}: status={run['status']}")
+              elif run["conclusion"] not in {"success", "skipped"}:
+                  problems.append(f"{name}: conclusion={run['conclusion']}")
+          if problems:
+              print("release is refused:", *problems, sep="\n- ", file=sys.stderr)
+              raise SystemExit(1)
+          print(f"Required CI checks passed for tagged commit {os.environ['SHA']}")
+          EOF
 
       - name: Create GitHub Release from tag annotation
         env:

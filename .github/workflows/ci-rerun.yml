@@ -1,0 +1,84 @@
+name: CI failed-job rerun
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+
+permissions:
+  actions: write
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  rerun-failed-jobs:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RUN_ID: ${{ github.event.workflow_run.id }}
+      RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+      RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+      RUN_EVENT: ${{ github.event.workflow_run.event }}
+      HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+      PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+    steps:
+      - name: Rerun failed CI jobs once
+        id: rerun
+        shell: bash
+        run: |
+          set -euo pipefail
+          conclusion="${RUN_CONCLUSION,,}"
+          case "$conclusion" in
+            failure|timed_out|action_required|startup_failure) ;;
+            *) echo "CI conclusion $conclusion does not need a rerun"; exit 0 ;;
+          esac
+          case "$RUN_EVENT" in
+            push|pull_request) ;;
+            *) echo "CI event $RUN_EVENT is not eligible for automatic reruns"; exit 0 ;;
+          esac
+          # GitHub's workflow-run REST schema increments run_attempt on reruns:
+          # https://docs.github.com/rest/actions/workflow-runs#get-a-workflow-run
+          # Acting only on attempt 1 prevents a failed rerun from looping.
+          if [ "$RUN_ATTEMPT" -gt 1 ]; then
+            echo "CI run attempt $RUN_ATTEMPT has already been rerun"
+            exit 0
+          fi
+          # A later CI run for this commit supersedes this completed failure.
+          newest_run_id="$(
+            gh api "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${HEAD_SHA}&per_page=100" \
+              --jq '[.workflow_runs[].id] | max'
+          )"
+          if [ "$RUN_ID" != "$newest_run_id" ]; then
+            echo "CI run ${RUN_ID} is not the newest run (${newest_run_id}) for ${HEAD_SHA}"
+            exit 0
+          fi
+
+          mapfile -t failed_job_ids < <(
+            gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/jobs?per_page=100" \
+              --jq '.jobs[] | select((.conclusion // "" | ascii_downcase) as $c | ["failure", "timed_out", "action_required", "startup_failure"] | index($c)) | .id'
+          )
+          if [ "${#failed_job_ids[@]}" -eq 0 ]; then
+            echo "No failed jobs in CI run ${RUN_ID}"
+            exit 0
+          fi
+          for job_id in "${failed_job_ids[@]}"; do
+            gh api --method POST "repos/${GITHUB_REPOSITORY}/actions/jobs/${job_id}/rerun"
+          done
+          echo "reran=true" >> "$GITHUB_OUTPUT"
+
+      - name: Remind maintainers after a PR rerun
+        if: ${{ steps.rerun.outputs.reran == 'true' && env.RUN_EVENT == 'pull_request' && env.PR_NUMBER != '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          marker="<!-- ci-rerun-reminder:${HEAD_SHA} -->"
+          if gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments?per_page=100" \
+            --jq '.[].body' | grep -Fq "$marker"; then
+            echo "PR ${PR_NUMBER} already has the rerun reminder for ${HEAD_SHA}"
+            exit 0
+          fi
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" \
+            -f body="$marker
+          Failed CI jobs were re-run once. If this run is still red, this PR was removed from the merge queue (if it was queued); a maintainer must run @mergifyio queue once CI is green."
