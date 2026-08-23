@@ -38,7 +38,8 @@ datapoint attributes.
 
 - `GET /api/fleet/graph` — node `total_tokens` (all-time in+out) + windowed
   `node_score` (in*0.1 + out*1.0); a Prometheus outage degrades the graph to
-  a `stale` empty response (same visible degradation as a canceled query).
+  a `stale` last-good response when available, otherwise to the PG node set
+  with empty edges and zeroed metric fields.
 - `GET /api/stats/dashboard` — windowed per-model in/out/cache_read sums,
   priced per model via `shared.lm.pricing.cost_usd`.
 - `AVA_TELEMETRY_PROMETHEUS_URL` (default `http://127.0.0.1:9090`,

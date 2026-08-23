@@ -597,6 +597,22 @@ class TestParseLine:
 
 
 class TestQueryEvents:
+    def test_per_call_timeout_overrides_shared_client_default(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        timeouts: list[float] = []
+
+        class _TimedClient:
+            def get(self, url: str, params: dict[str, Any], *, timeout: float) -> _FakeResponse:
+                timeouts.append(timeout)
+                return _FakeResponse(_loki_payload([]))
+
+        monkeypatch.setattr(loki_events, "_client", _accessor(_TimedClient()))
+
+        loki_events.query_events(timeout_s=8.0)
+
+        assert timeouts == [8.0]
+
     def test_request_params_and_default_window(self, monkeypatch: pytest.MonkeyPatch) -> None:
         client = _install(monkeypatch, _loki_payload([]))
         before = datetime.now(UTC)
