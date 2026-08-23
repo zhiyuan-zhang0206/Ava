@@ -1,22 +1,21 @@
-"""Hybrid LGTM lifecycle — native backends + compose bring-up + status view.
+"""Native LGTM lifecycle — local backends, remote Tempo, and status view.
 
-The LGTM host runs Loki, Prometheus, and Promtail as launchd jobs, while Tempo
-and Grafana remain in the compose project. It is a HOST SINGLETON with fixed
-ports (3003/3100/3200/9090/14318), gated on the `$AVA_HOME/lgtm-host` marker
-so unmarked homes never touch the host-level backends. The gateway watchdog's
-keepalive probe uses the same gate.
+The LGTM host runs Loki and Prometheus as Ava-managed launchd jobs and Grafana
+as a host-managed native job. Tempo is remote and configured by the telemetry
+endpoint. The local backends are a HOST SINGLETON with fixed ports
+(3003/3100/9090), gated on the `$AVA_HOME/lgtm-host` marker so unmarked homes
+never touch them. The gateway watchdog's keepalive probe uses the same gate.
 """
 
 from __future__ import annotations
 
-import shutil
 import subprocess
 import sys
 
 from cli.commands._converge_spec import ConvergeCtx
 from services.healthchecks.lgtm import (
     is_lgtm_host,
-    lgtm_compose_dir,
+    lgtm_deploy_dir,
     lgtm_host_marker,
     probe_statuses,
 )
@@ -34,25 +33,17 @@ __all__ = [
 def ensure_lgtm_stack_step(ctx: ConvergeCtx) -> None:
     """Converge step: bring up the LGTM stack on the designated LGTM host.
 
-    Marker absent = no-op (this home does not own the host's containers).
-    Marker present: run the idempotent deploy/lgtm/start.sh (docker daemon
-    bring-up + `docker compose up -d`). A marked host without the docker CLI
-    warns and skips (environment limit, same contract as the browser step); a
-    failing start.sh propagates — the marker is the operator's statement that
-    this host owns the gateway's observability backend, and a silent skip
-    would hide its loss.
+    Marker absent = no-op (this home does not own the host's local backends).
+    Marker present: run the idempotent native deploy/lgtm/start.sh. A failing
+    start.sh propagates — the marker is the operator's statement that this host
+    owns the gateway's observability backend, and a silent skip would hide its
+    loss.
     """
     if not (ctx.ava_home / "lgtm-host").exists():
         return
-    if shutil.which("docker") is None:
-        print(
-            "  ! lgtm: docker CLI not found — observability stack not started",
-            file=sys.stderr,
-        )
-        return
     result = subprocess.run(
         ["bash", "start.sh"],
-        cwd=lgtm_compose_dir(ctx.repo),
+        cwd=lgtm_deploy_dir(ctx.repo),
         check=False,
         timeout=600,
     )
@@ -64,15 +55,11 @@ def cmd_lgtm_on() -> int:
     """`ava lgtm on` — designate THIS host as the LGTM host and bring the
     stack up. Writes the `$AVA_HOME/lgtm-host` marker (so converge and the
     gateway watchdog keep the stack alive from now on), installs current native
-    backends, and runs the idempotent deploy/lgtm/start.sh. Safe to re-run;
-    rollback volumes persist across off/on."""
+    backends, and runs the idempotent deploy/lgtm/start.sh. Safe to re-run."""
     import cli.commands as _ns
     from cli.commands import _lgtm_native
     from shared.paths import ava_home
 
-    if shutil.which("docker") is None:
-        print("✗ docker CLI not found — install docker (OrbStack on macOS) first", file=sys.stderr)
-        return 1
     marker = lgtm_host_marker()
     if not marker.exists():
         marker.touch()
@@ -81,7 +68,7 @@ def cmd_lgtm_on() -> int:
     _lgtm_native.ensure_lgtm_native(repo, ava_home())
     result = subprocess.run(
         ["bash", "start.sh"],
-        cwd=lgtm_compose_dir(repo),
+        cwd=lgtm_deploy_dir(repo),
         check=False,
         timeout=600,
     )
@@ -94,8 +81,8 @@ def cmd_lgtm_on() -> int:
 def cmd_lgtm_off() -> int:
     """`ava lgtm off` — take the observability stack down on this host and
     stop being the LGTM host. Removes the marker FIRST (else the gateway
-    watchdog resurrects the containers within ~a minute), then compose-downs
-    the stack. Volumes persist — `ava lgtm on` restores full history.
+    watchdog resurrects local backends within ~a minute), then stops the
+    native jobs.
 
     The point of the toggle is measuring observability's own overhead, so it
     prints the caveat that matters for a clean A/B: producers probe the OTLP
@@ -108,12 +95,9 @@ def cmd_lgtm_off() -> int:
     if marker.exists():
         marker.unlink()
         print(f"✓ marker removed: {marker} (converge/watchdog will no longer touch the stack)")
-    if shutil.which("docker") is None:
-        print("docker CLI not found — nothing to stop")
-        return 0
     result = subprocess.run(
         ["bash", "stop.sh"],
-        cwd=lgtm_compose_dir(_ns._repo_root()),
+        cwd=lgtm_deploy_dir(_ns._repo_root()),
         check=False,
         timeout=300,
     )
@@ -129,7 +113,7 @@ def cmd_lgtm_off() -> int:
 
 
 def cmd_lgtm_status() -> int:
-    """`ava lgtm status` — marker + containers + the four readiness probes."""
+    """`ava lgtm status` — marker + native jobs + local readiness probes."""
     if not is_lgtm_host():
         print(
             "this host is not the LGTM host (no $AVA_HOME/lgtm-host marker) — `ava lgtm on` to designate it"
@@ -140,35 +124,14 @@ def cmd_lgtm_status() -> int:
 
 
 def print_lgtm_status() -> None:
-    """The `ava status` LGTM section: native jobs, compose, and readiness.
+    """The `ava status` LGTM section: native jobs and local readiness.
 
     Caller gates on `is_lgtm_host()` — this host owns all fixed backend ports.
     """
-    import cli.commands as _ns
     from cli.commands._lgtm_native import backend_pids
     from shared.paths import ava_home
 
-    compose_dir = lgtm_compose_dir(_ns._repo_root())
     for name, pid in backend_pids(ava_home() / "lgtm/native").items():
         print(f"  com.ava.{name:<9} {pid or 'not-running'}")
-    if shutil.which("docker") is None:
-        print("  ✗ docker CLI not found")
-    else:
-        ps = subprocess.run(
-            ["docker", "compose", "ps", "--format", "{{.Service}}\t{{.Status}}"],
-            cwd=compose_dir,
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=30,
-        )
-        if ps.returncode != 0:
-            print(f"  ✗ docker compose ps failed: {ps.stderr.strip() or 'docker daemon down?'}")
-        elif not ps.stdout.strip():
-            print("  ✗ no containers running (converge on this host runs deploy/lgtm/start.sh)")
-        else:
-            for line in ps.stdout.strip().splitlines():
-                service, _, container_status = line.partition("\t")
-                print(f"  {service:<12} {container_status}")
     for name, up in probe_statuses():
         print(f"  {'✓' if up else '✗'} {name} readiness")
