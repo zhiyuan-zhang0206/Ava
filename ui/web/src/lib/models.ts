@@ -17,6 +17,7 @@ const PROVIDER_LABELS: Record<string, string> = {
   claude: "Claude",
   gemini: "Gemini",
   gpt: "GPT",
+  grok: "Grok",
   mimo: "MiMo",
   kimi: "Kimi",
   glm: "GLM",

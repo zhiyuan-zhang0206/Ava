@@ -522,7 +522,10 @@ MODELS: dict[str, ModelSpec] = {
         spawnable=True,
         context_window=1_000_000,
         knowledge_cutoff="2025-12",
-        effort_levels=("high", "max"),
+        # GLM-5.3 docs document the shared GLM-5-series parameter values
+        # low/high/max (checked 2026-08-23); keep this entry aligned with the
+        # provider clamp and its gateway invariant test.
+        effort_levels=("low", "high", "max"),
         tuning=ModelTuning(
             # Pinned 2026-08-01 (task #568): Z.ai documents GLM-5.2's default
             # effort as `max` (decisions/2026-07-25-per-model-tuning-
@@ -533,6 +536,24 @@ MODELS: dict[str, ModelSpec] = {
             # one day (~50% of all requests) and a full hour at 100% failure.
             # Z.ai's own guidance for their 1305 code ("platform service overload") is to
             # lengthen the retry interval and avoid fixed-interval hammering.
+            llm_retry_max_attempts=10,
+        ),
+    ),
+    "glm-5.3": ModelSpec(
+        provider="glm",
+        spawnable=True,
+        context_window=1_000_000,
+        # Zhipu publishes no knowledge cutoff. GLM-5.3 shares GLM-5.2's base model
+        # (release notes: all gains from post-training; checked 2026-08-23), so the
+        # conservative glm-5.2 value carries over — erring early is the safe direction.
+        knowledge_cutoff="2025-12",
+        # docs.z.ai/guides/llm/glm-5.3: reasoning_effort low/high/max, default max.
+        effort_levels=("low", "high", "max"),
+        tuning=ModelTuning(
+            # Z.ai documents GLM-5.3's default effort as max.
+            reasoning_effort="max",
+            # Same GLM-family overload history rationale as glm-5.2's entry
+            # (llm_retry_max_attempts=10).
             llm_retry_max_attempts=10,
         ),
     ),

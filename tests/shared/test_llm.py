@@ -79,6 +79,9 @@ class TestModelContextWindow:
     def test_glm_5_2_is_1m(self) -> None:
         assert MODEL_CONTEXT_WINDOW["glm-5.2"] == 1_000_000
 
+    def test_glm_5_3_is_1m(self) -> None:
+        assert MODEL_CONTEXT_WINDOW["glm-5.3"] == 1_000_000
+
 
 class TestModelIdentity:
     """Per-model identity note injected into the system prompt — a model
