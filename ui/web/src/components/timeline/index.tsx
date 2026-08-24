@@ -74,6 +74,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useContentToggle, useContentToggleReset } from "@/lib/content-toggle-store";
+import { isReattachedTimelineContext } from "@/lib/timeline";
 import {
   POINTER_STICKY_THRESHOLDS,
   TOUCH_STICKY_THRESHOLDS,
@@ -194,10 +195,9 @@ export function TimelineView({
   // landing scrolls by the anchor's actual displacement since the last
   // commit — the reading position never moves, no matter how far the user
   // scrolled during the fetch or how many windows land back-to-back.
-  // `frontId` is the landing signal: the first item whose id is not the
-  // permanent system prompt "0.0". The prompt is re-attached at the head of
-  // every window (#1214), so the ARRAY front never changes when older items
-  // land — only the front REAL item does.
+  // `frontId` is the landing signal: the first item that is not standing
+  // context re-attached at the head of every window. The ARRAY front does not
+  // change when older items land — only the front real item does.
   const pendingAnchorRef = useRef<{ id: string; frontId: string | null; docTop: number } | null>(null);
   // Scroll-to-bottom button visibility. Driven by the *measured* current
   // distance to the bottom (sticky.ts:isAtBottom), NOT by the sticky
@@ -299,33 +299,35 @@ export function TimelineView({
         // the prepend commit can re-pin to a fresh screen top.
         //
         // #817 (user report): the anchor must be a REAL content node, NOT the
-        // first [data-item-id] in the DOM. The system prompt "0.0" fronts
-        // every window (#1214) and its item id (0,0) sorts before every real
-        // message, so a prepend inserts the older window AFTER it — the 0.0
-        // node (standalone or as a collapsed turn's header) is never pushed
-        // down by a landing. Anchoring to it yields delta ≈ 0, the
+        // first [data-item-id] in the DOM. Standing context fronts every
+        // window, so a prepend inserts the older window AFTER it — those nodes
+        // (standalone or in a collapsed turn) are never pushed down by a
+        // landing. Anchoring to one yields delta ≈ 0, the
         // compensation no-ops, and the viewport is left showing the new
         // window's top — the "jump to the top" the user reported (#659's
         // test mocked 0.0 as moved, which the real layout never does).
         // The anchor is the TOPMOST node the prepend can displace that the user
-        // can actually see — the first VISIBLE real item. A system-prompt 0.0
+        // can actually see — the first VISIBLE real item. A standing-context
         // node / an off-screen first item would pin the compensation to a
         // position the user isn't reading, and the viewport would be yanked by
         // the anchor's displacement instead of holding the reading position
         // (#1272: the expanded 0.0 prompt card is tens of thousands of px tall,
         // so with the card visible the first real item sits far below the
         // viewport, and the old anchor made every landing jump ~60k px).
-        // When NO real item is visible — the user is reading INSIDE the prompt
-        // card — anchor to the 0.0 node itself: the prepend inserts after it,
-        // so it is never displaced and the correct compensation is zero.
+        // When NO real item is visible — the user is reading INSIDE standing
+        // context — anchor to that context node itself: the prepend inserts
+        // after it, so it is never displaced and compensation is zero.
         let anchorNode: HTMLElement | null = null;
-        let promptNode: HTMLElement | null = null;
+        let contextNode: HTMLElement | null = null;
+        const contextIds = new Set(
+          itemsRef.current.filter(isReattachedTimelineContext).map((it) => it.item_id),
+        );
         const vpRect = viewport.getBoundingClientRect();
         for (const n of viewport.querySelectorAll<HTMLElement>("[data-item-id]")) {
           const id = n.dataset.itemId;
           if (!id || id.startsWith("_")) continue;
-          if (id === "0.0") {
-            promptNode ??= n;
+          if (contextIds.has(id)) {
+            contextNode ??= n;
             continue;
           }
           const r = n.getBoundingClientRect();
@@ -334,21 +336,20 @@ export function TimelineView({
             break;
           }
         }
-        anchorNode ??= promptNode;
+        anchorNode ??= contextNode;
         const anchorId = anchorNode?.dataset.itemId;
         pendingAnchorRef.current =
           anchorNode && anchorId
             ? {
                 id: anchorId,
-                // Landing signal: the first REAL item id (the system prompt
-                // "0.0" is permanently attached at the front of every window
-                // since #1214, so the array front itself can never change
-                // across a prepend; ephemeral _marker items are skipped too —
-                // they sort last in real data but the signal must not depend
-                // on their position).
+                // Landing signal: the first real item id. Re-attached context
+                // keeps the array front fixed across a prepend; ephemeral
+                // _marker items are skipped too — they sort last in real data
+                // but the signal must not depend on their position.
                 frontId:
                   itemsRef.current.find(
-                    (it) => it.item_id !== "0.0" && !it.item_id.startsWith("_"),
+                    (it) =>
+                      !isReattachedTimelineContext(it) && !it.item_id.startsWith("_"),
                   )?.item_id ?? null,
                 // Document-space top (rect.top + scrollTop — invariant under
                 // user scrolls). Refreshed on every commit while pending, so
@@ -527,13 +528,12 @@ export function TimelineView({
     const findNode = () =>
       viewport.querySelector<HTMLElement>(`[data-item-id="${escapedId}"]`) ??
       viewport.querySelector<HTMLElement>(`[data-turn-member-ids~="${escapedId}"]`);
-    // Prepend landed? The array front is the permanent 0.0 system prompt
-    // (kept attached since #1214), so items[0] can never change across a
-    // prepend — compare the first REAL item id captured at trigger instead.
+    // Prepend landed? Standing context remains at the array front across a
+    // prepend, so compare the first real item id captured at trigger instead.
     // Streaming commits / snapshot folds only touch the tail, so the front
     // real id is unchanged until an older window actually lands.
     const frontRealId = items.find(
-      (it) => it.item_id !== "0.0" && !it.item_id.startsWith("_"),
+      (it) => !isReattachedTimelineContext(it) && !it.item_id.startsWith("_"),
     )?.item_id ?? null;
     if (frontRealId === anchor.frontId) {
       // Prepend not landed yet — keep waiting. Refresh the anchor's document

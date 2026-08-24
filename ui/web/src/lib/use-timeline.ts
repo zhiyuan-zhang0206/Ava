@@ -45,7 +45,7 @@ import { api } from "./api";
 import { errMsg } from "./errors";
 import { noteTurnStart } from "./interaction-timing";
 import { useTimelineStore } from "./timeline-store";
-import { parseItemId } from "./timeline";
+import { isReattachedTimelineContext, parseItemId } from "./timeline";
 
 /** Base number of items fetched per scroll-up. Subsequent scroll-ups
  * fetch BASE * 2^olderFetchCount items (capped at 1000), so the window
@@ -382,14 +382,13 @@ export function useTimeline(
     if (agentId == null) return;
     const st = useTimelineStore.getState();
     if (!st.hasMoreOlder || st.loadingOlder) return;
-    // The cursor is the oldest item with a stable backend id (ephemeral
-    // `_marker.*` items the backend doesn't know are skipped). The
-    // system-prompt item 0.0 is excluded: GET /timeline re-attaches it at the
-    // window head (#570), so it is the oldest parseable item, but the backend
-    // `before` paging treats it as index 0 → an empty window + has_more=false
-    // that permanently kills scroll-up history loading (regression #579-P1).
+    // The cursor is the oldest real timeline item with a stable backend id.
+    // Ephemeral `_marker.*` items are unparseable, and GET /timeline re-attaches
+    // standing context (the prompt and compact summary) ahead of every window;
+    // using either context item as `before` can return no historical tail and
+    // permanently set hasMoreOlder=false.
     const oldest = st.items.find(
-      (it) => it.item_id !== "0.0" && parseItemId(it.item_id) !== null,
+      (it) => !isReattachedTimelineContext(it) && parseItemId(it.item_id) !== null,
     );
     if (!oldest) return;
     // Exponential growth: first fetch N, second 2N, third 4N, … capped at 1000.
