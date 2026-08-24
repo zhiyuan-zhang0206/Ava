@@ -28,6 +28,7 @@ tags:
 - **Local query admission** (`shared/loki_query_budget.py`): bounded FIFO slots shared as a state machine, not as capacity. The gateway observes its four-slot budget; events maintenance owns a separate capacity-one budget.
 - **Installation & paths** (`shared/install_registry.py`, `shared/paths.py`, `shared/plugins_config.py`, `shared/private_storage.py`): the machine-local package registry that gates the skill scanner, per-machine plugin enable state, `$AVA_HOME` path resolution, and owner-only storage with atomic local bytes writes for secrets and uploads — see the child nodes below.
 - **Process supervision** (`shared/posixproc.py`, `shared/winproc.py`, `shared/session_backend.py`, `shared/daemon_shutdown.py`, `shared/daemon_health.py`): services, orchestration sessions and agent processes are **native** sessions; agent shells run on per-session **PTY hosts** ([[shared/pty_sessions/pty_sessions.ava.okf.md]]); Windows uses winproc. Daemon health accepts either one `Liveness` heartbeat or a worst-case `LivenessGroup` whose per-loop progress snapshots make concurrent-loop failures attributable. Launch shape, the kill contract and the SIGTERM unwind: [[shared/session-backend/session-backend.ava.okf.md|session backend]].
+- **Health envelope** (`shared/health_schema.py`, `shared/daemon_health.py`): daemon `/healthz` and gateway `/api/health` return identity, liveness, readiness, components, and reasons; a degraded component is HTTP 503 for watchdog recovery.
 
 ## Key dependencies
 

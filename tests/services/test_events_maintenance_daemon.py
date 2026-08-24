@@ -10,8 +10,8 @@ The runtime guards the maintenance daemon needs and that are easy to regress:
     ALWAYS runs the Rule B reaper + blob vacuum, and Rule A rides its own fast
     loop again (both were collateral of the #1197 cutover).
 
-All driven directly (no DB): `_run_maintenance` / `_maintenance_with_liveness`
-are monkeypatched, so these are pure asyncio-loop tests.
+All driven directly (no DB): `_run_maintenance` / `_maintenance_with_liveness` are
+monkeypatched, so these are pure asyncio-loop tests.
 """
 
 from __future__ import annotations
@@ -136,30 +136,25 @@ def test_failed_rollup_still_waits_before_retry(monkeypatch: pytest.MonkeyPatch)
 def test_wedged_dispatch_parks_without_entering_retry_sleep(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A timed-out worker may still hold a connection, so its loop parks permanently."""
+    """A timed-out worker parks by ending its loop without entering either sleep path."""
 
     async def wedge(_pool: object, progress: LoopProgress) -> None:
         progress.fail("dispatch exceeded hard deadline")
         raise daemon.WedgedPassError("dispatch exceeded hard deadline")
 
-    parked: list[float] = []
-
-    async def fake_park(total_s: float) -> None:
-        parked.append(total_s)
-        raise asyncio.CancelledError
+    async def forbidden_park(_total_s: float) -> None:
+        pytest.fail("wedged loop entered an explicit park sleep")
 
     async def forbidden_retry_sleep(_progress: LoopProgress, _total_s: float) -> None:
         pytest.fail("wedged loop entered the normal retry sleep")
 
     monkeypatch.setattr(daemon, "_maintenance_with_liveness", wedge)
-    monkeypatch.setattr(daemon.asyncio, "sleep", fake_park)
+    monkeypatch.setattr(daemon.asyncio, "sleep", forbidden_park)
     monkeypatch.setattr(daemon, "_sleep_with_liveness", forbidden_retry_sleep)
 
     progress = LoopProgress("dispatch", timeout_s=1.0)
-    with pytest.raises(asyncio.CancelledError):
-        asyncio.run(daemon._dispatch_loop(_FAKE_POOL, progress))
+    asyncio.run(daemon._dispatch_loop(_FAKE_POOL, progress))
 
-    assert parked == [3600]
     assert not progress.is_alive()
 
 
@@ -307,6 +302,73 @@ def test_checkpoint_trim_loop_runs_rule_a(monkeypatch: pytest.MonkeyPatch) -> No
     assert hourly > daemon._CHECKPOINT_TRIM_INTERVAL_S
 
 
+def test_loop_components_report_fresh_loops_as_ok(monkeypatch: pytest.MonkeyPatch) -> None:
+    now = 100.0
+    monkeypatch.setattr(daemon.time, "monotonic", lambda: now)
+    liveness = LivenessGroup()
+    liveness.register("dispatch", timeout_s=15.0)
+    liveness.register("trim", timeout_s=10.0)
+    liveness.register("resolution", timeout_s=20.0)
+
+    assert daemon._loop_components(liveness) == [
+        {"name": "dispatch", "status": "ok", "progress": "idle"},
+        {"name": "trim", "status": "ok", "progress": "idle"},
+        {"name": "resolution", "status": "ok", "progress": "idle"},
+    ]
+
+
+def test_loop_components_report_wedged_loop_reason(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(daemon.time, "monotonic", lambda: 100.0)
+    liveness = LivenessGroup()
+    dispatch = liveness.register("dispatch", timeout_s=15.0)
+    dispatch.fail("dispatch pass exceeded hard deadline")
+
+    assert daemon._loop_components(liveness) == [
+        {
+            "name": "dispatch",
+            "status": "degraded",
+            "last_error": "dispatch pass exceeded hard deadline",
+            "progress": "wedged",
+            "detail": "wedged: dispatch pass exceeded hard deadline",
+        }
+    ]
+
+
+def test_loop_components_report_stale_loop(monkeypatch: pytest.MonkeyPatch) -> None:
+    now = 100.0
+    monkeypatch.setattr(daemon.time, "monotonic", lambda: now)
+    liveness = LivenessGroup()
+    liveness.register("trim", timeout_s=5.0)
+    now = 106.0
+
+    assert daemon._loop_components(liveness) == [
+        {
+            "name": "trim",
+            "status": "degraded",
+            "progress": "idle",
+            "detail": "no progress for 6s",
+        }
+    ]
+
+
+def test_loop_components_convert_success_iso_to_epoch(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(daemon.time, "monotonic", lambda: 100.0)
+    monkeypatch.setattr(daemon.time, "time", lambda: 1_787_659_212.5)
+    liveness = LivenessGroup()
+    dispatch = liveness.register("dispatch", timeout_s=15.0)
+    monkeypatch.setattr(dispatch, "_last_success_at", "2026-08-25T12:00:00+00:00")
+
+    assert daemon._loop_components(liveness) == [
+        {
+            "name": "dispatch",
+            "status": "ok",
+            "last_success": 1_787_659_200.0,
+            "age_s": 12.5,
+            "progress": "idle",
+        }
+    ]
+
+
 def test_deadline_settings_defaults_and_env_aliases() -> None:
     defaults = DaemonSettings()
     assert defaults.events_maintenance_pass_deadline_s == 1500.0
@@ -338,10 +400,12 @@ def test_run_gives_each_loop_its_own_progress_tracker(monkeypatch: pytest.Monkey
     pool = _RunPool()
     health = object()
     health_liveness: list[object] = []
+    health_components: list[Any] = []
     received: dict[str, LoopProgress] = {}
 
-    async def fake_start(_name: str, *, liveness: object) -> object:
+    async def fake_start(_name: str, *, liveness: object, components: Any) -> object:
         health_liveness.append(liveness)
+        health_components.append(components)
         return health
 
     async def fake_stop(server: object) -> None:
@@ -375,6 +439,13 @@ def test_run_gives_each_loop_its_own_progress_tracker(monkeypatch: pytest.Monkey
     assert pool.closed
     assert len(health_liveness) == 1
     assert isinstance(health_liveness[0], LivenessGroup)
+    assert len(health_components) == 1
+    assert callable(health_components[0])
+    assert [record["name"] for record in health_components[0]()] == [
+        "dispatch",
+        "trim",
+        "resolution",
+    ]
     assert len({id(progress) for progress in received.values()}) == 3
     assert received["dispatch"].timeout_s == 1500.0
     assert received["trim"].timeout_s == 300.0

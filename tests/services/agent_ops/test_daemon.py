@@ -35,6 +35,48 @@ def _stub_pool() -> object:
     return object()
 
 
+def test_ops_components_expose_wedged_lock_and_active_op_saturation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The health response names a wedged control plane without treating capacity as failure."""
+    now = 10_000.0
+    monkeypatch.setattr(daemon.time, "monotonic", lambda: now)
+    monkeypatch.setattr(daemon, "_cluster_update_held_since", now - daemon._WEDGE_AFTER_S - 1)
+    monkeypatch.setattr(
+        daemon,
+        "_active_ops",
+        {"cluster_fetch": ("cluster_fetch", now - daemon._WEDGE_AFTER_S - 2)},
+    )
+    monkeypatch.setattr(daemon.settings.services, "ops_concurrency", 4)
+
+    assert daemon.ops_components() == [
+        {"name": "loop", "status": "ok", "progress": "serving /ops"},
+        {
+            "name": "update-lock",
+            "status": "degraded",
+            "progress": f"held {daemon._WEDGE_AFTER_S + 1:.0f}s",
+            "detail": f"held for {daemon._WEDGE_AFTER_S + 1:.0f}s",
+        },
+        {
+            "name": "ops",
+            "status": "degraded",
+            "progress": "1 active",
+            "detail": f"cluster_fetch running for {daemon._WEDGE_AFTER_S + 2:.0f}s",
+        },
+    ]
+    assert len(daemon._active_ops) / daemon.settings.services.ops_concurrency == 0.25
+
+
+def test_ops_components_report_free_and_no_active_workers(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(daemon, "_cluster_update_held_since", None)
+    monkeypatch.setattr(daemon, "_active_ops", {})
+
+    components = daemon.ops_components()
+
+    assert components[1] == {"name": "update-lock", "status": "ok", "progress": "free"}
+    assert components[2] == {"name": "ops", "status": "ok", "progress": "0 active"}
+
+
 # ─── _dispatch routing ─────────────────────────────────────────────────────────
 
 

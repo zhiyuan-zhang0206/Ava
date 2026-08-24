@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
+import json
+
 import psycopg
 from fastapi import Request
 from fastapi.responses import JSONResponse
 from psycopg_pool import PoolTimeout
 
+from shared.health_schema import DEGRADED, OK, component, render
 from shared.machine import machine_name
 from shared.paths import ava_home
 
 
-def get_health(request: Request) -> dict[str, str] | JSONResponse:
+def get_health(request: Request) -> dict[str, object] | JSONResponse:
     """Liveness probe over the private network (the gateway is unauthenticated). DB ping
     included — a gateway that can serve HTTP but cannot reach Postgres is not
     "healthy" enough for the watchdog to leave alone.
@@ -33,19 +36,29 @@ def get_health(request: Request) -> dict[str, str] | JSONResponse:
     that an impostor answering here reports its own name, or none. No probe reads it
     yet; `shared.daemon_health._probe_home` gains the `name` arm only once every
     deployed gateway emits the field, and that ordering is load-bearing (#1038)."""
-    identity = {
+    identity: dict[str, object] = {
         "status": "ok",
         "name": "gateway",
         "home": str(ava_home()),
         "machine": machine_name(),
+        "liveness": OK,
     }
+    components = [component("http", OK, progress="serving")]
     try:
         with request.app.state.control_db_pool.connection() as conn, conn.cursor() as cur:
             # PgBouncer drops `options` startup parameters, so the per-request
             # liveness budget must be set inside this borrowed transaction.
             cur.execute("SET LOCAL statement_timeout = '2000'")
             cur.execute("SELECT 1")
-    except (PoolTimeout, psycopg.Error):
-        identity["status"] = "degraded"
-        return JSONResponse(status_code=503, content=identity, headers={"Retry-After": "1"})
-    return identity
+    except (PoolTimeout, psycopg.Error) as exc:
+        identity["status"] = DEGRADED
+        components.append(component("db", DEGRADED, detail=f"{type(exc).__name__}: {exc}"))
+        status, body = render(identity, components)
+        return JSONResponse(
+            status_code=status,
+            content=json.loads(body),
+            headers={"Retry-After": "1"},
+        )
+    components.append(component("db", OK))
+    _status, body = render(identity, components)
+    return json.loads(body)

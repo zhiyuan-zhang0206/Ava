@@ -111,6 +111,7 @@ from shared.agents import AvaAgentError
 from shared.config import settings
 from shared.daemon_health import health_port, start_health_server, stop_health_server
 from shared.daemon_shutdown import install_graceful_shutdown
+from shared.health_schema import DEGRADED, OK, component
 from shared.log import init_gateway_process
 from shared.machine import machine_name
 from shared.paths import legacy_pid_path
@@ -119,6 +120,7 @@ from shared.transport_encryption import verify_transport_encryption
 _log = logging.getLogger("services.agent_ops.daemon")
 
 _PIDFILE = settings.services.ops_pidfile
+_WEDGE_AFTER_S = 1800
 
 # ── Idempotency-key dedup (Task #961) ────────────────────────────────────────
 # A request with `idempotency_key` is deduplicated against the shared
@@ -200,6 +202,9 @@ _cluster_update_lock = asyncio.Lock()
 # it has been refusing behind. Event-loop thread only, so it needs no lock.
 _cluster_update_held_since: float | None = None
 
+# Health handler and `_run_arm` share the loop; restart drops state and idempotency makes retry safe.
+_active_ops: dict[str, tuple[str, float]] = {}
+
 # The read-modify-write arms, serialized against each other. Same lost serialization
 # as `cluster_update`, different failure: `config_write` and `inventory_write` both
 # READ their on-disk state, modify it and write it back, so an interleave lands the
@@ -252,6 +257,34 @@ def _op_thread_pool() -> ThreadPoolExecutor:
     return _op_executor
 
 
+def ops_components() -> list[dict[str, object]]:
+    """Report control-plane progress; only work past the safe bound degrades it."""
+    now = time.monotonic()
+    if _cluster_update_held_since is None:
+        update_lock = component("update-lock", OK, progress="free")
+    else:
+        held_s = now - _cluster_update_held_since
+        update_lock = component(
+            "update-lock",
+            DEGRADED if held_s > _WEDGE_AFTER_S else OK,
+            progress=f"held {held_s:.0f}s",
+            detail=f"held for {held_s:.0f}s" if held_s > _WEDGE_AFTER_S else None,
+        )
+
+    if not _active_ops:
+        active = component("ops", OK, progress="0 active")
+    else:
+        detail, started_at = min(_active_ops.values(), key=lambda entry: entry[1])
+        age_s = now - started_at
+        active = component(
+            "ops",
+            DEGRADED if age_s > _WEDGE_AFTER_S else OK,
+            progress=f"{len(_active_ops)} active",
+            detail=f"{detail} running for {age_s:.0f}s" if age_s > _WEDGE_AFTER_S else None,
+        )
+    return [component("loop", OK, progress="serving /ops"), update_lock, active]
+
+
 async def _run_arm(kind: str, payload: dict[str, Any]) -> tuple[str, dict[str, object]]:
     """`_dispatch_sync` on this daemon's own pool (see `_op_executor`).
 
@@ -260,9 +293,15 @@ async def _run_arm(kind: str, payload: dict[str, Any]) -> tuple[str, dict[str, o
     as its default in the worker. Pass what an arm needs through its `payload`.
     """
     loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(
-        _op_thread_pool(), functools.partial(_dispatch_sync, kind, payload)
-    )
+    active = (kind, time.monotonic())
+    _active_ops[kind] = active
+    try:
+        return await loop.run_in_executor(
+            _op_thread_pool(), functools.partial(_dispatch_sync, kind, payload)
+        )
+    finally:
+        if _active_ops.get(kind) == active:
+            _active_ops.pop(kind)
 
 
 def _set_update_held_since(value: float | None) -> None:
@@ -690,6 +729,10 @@ async def _main() -> None:
             "ops",
             host=bind_host,
             extra_routes={("POST", "/ops"): _ops_route},
+            components=ops_components,
+            extra=lambda: {
+                "saturation": len(_active_ops) / max(1, settings.services.ops_concurrency)
+            },
             auth_token=auth_token,
         )
         _log.info(
