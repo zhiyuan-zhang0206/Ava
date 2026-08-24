@@ -22,6 +22,19 @@ class _Backend:
         return self._supervised
 
 
+class _Clock:
+    """Deterministic monotonic clock for bounded-stop unit tests."""
+
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def monotonic(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.now += seconds
+
+
 def _wire_listener(
     monkeypatch: pytest.MonkeyPatch,
     *,
@@ -81,17 +94,110 @@ def test_probe_keeps_the_listener_named_by_the_live_session_record(
     assert result.stale_pids == ()
 
 
-def test_takeover_kills_only_the_verified_stale_binary(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A collector that lost its record is reclaimed before the replacement binds."""
-    _wire_listener(monkeypatch, holder_matches_binary=True, supervised_pid=None)
-    killed: list[int] = []
-    monkeypatch.setattr(supervised_listener, "force_kill", killed.append)
+def test_stale_listener_that_ignores_sigterm_is_force_killed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A stale listener gets only its bounded grace window before SIGKILL."""
+    clock = _Clock()
+    alive = {"value": True}
+    signals: list[str] = []
+    monkeypatch.setattr(supervised_listener, "time", clock)
 
-    supervised_listener.reclaim_stale_supervised_listener(
-        "otel-collector", ports=(4318, 8888), binary=Path("/home/u/.ava/otelcol-contrib")
+    def _is_alive(_pid: int) -> bool:
+        return alive["value"]
+
+    def _request_stop(_pid: int) -> None:
+        signals.append("term")
+
+    monkeypatch.setattr(supervised_listener, "process_alive", _is_alive)
+    monkeypatch.setattr(supervised_listener, "request_stop", _request_stop)
+
+    def _force_kill(_pid: int) -> None:
+        signals.append("kill")
+        alive["value"] = False
+
+    monkeypatch.setattr(supervised_listener, "force_kill", _force_kill)
+
+    assert supervised_listener.terminate_stale_listener(1109, grace_s=0.2) == "forced"
+    assert signals == ["term", "kill"]
+
+
+def test_stale_listener_that_stops_on_sigterm_is_graceful(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A cooperative listener exits during the grace window without SIGKILL."""
+    alive = {"value": True}
+    signals: list[str] = []
+
+    def _is_alive(_pid: int) -> bool:
+        return alive["value"]
+
+    def _request_stop(_pid: int) -> None:
+        signals.append("term")
+        alive["value"] = False
+
+    monkeypatch.setattr(supervised_listener, "request_stop", _request_stop)
+
+    def _force_kill(_pid: int) -> None:
+        signals.append("kill")
+
+    monkeypatch.setattr(supervised_listener, "process_alive", _is_alive)
+    monkeypatch.setattr(supervised_listener, "force_kill", _force_kill)
+
+    assert supervised_listener.terminate_stale_listener(1109, grace_s=0.2) == "graceful"
+    assert signals == ["term"]
+
+
+def test_stale_listener_that_is_already_gone_is_a_noop(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A PID that vanished before signalling is not reported as a clean stop."""
+    signals: list[str] = []
+
+    def _is_dead(_pid: int) -> bool:
+        return False
+
+    def _request_stop(_pid: int) -> None:
+        signals.append("term")
+
+    def _force_kill(_pid: int) -> None:
+        signals.append("kill")
+
+    monkeypatch.setattr(supervised_listener, "process_alive", _is_dead)
+    monkeypatch.setattr(supervised_listener, "request_stop", _request_stop)
+    monkeypatch.setattr(supervised_listener, "force_kill", _force_kill)
+
+    assert supervised_listener.terminate_stale_listener(1109) == "noop"
+    assert signals == []
+
+
+def test_takeover_reports_a_stale_listener_that_survives_sigkill(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A failed SIGKILL stays visible to the caller instead of becoming a false recovery."""
+    _wire_listener(monkeypatch, holder_matches_binary=True, supervised_pid=None)
+    clock = _Clock()
+    signals: list[str] = []
+
+    def _is_alive(_pid: int) -> bool:
+        return True
+
+    def _request_stop(_pid: int) -> None:
+        signals.append("term")
+
+    def _force_kill(_pid: int) -> None:
+        signals.append("kill")
+
+    monkeypatch.setattr(supervised_listener, "time", clock)
+    monkeypatch.setattr(supervised_listener, "process_alive", _is_alive)
+    monkeypatch.setattr(supervised_listener, "request_stop", _request_stop)
+    monkeypatch.setattr(supervised_listener, "force_kill", _force_kill)
+
+    result = supervised_listener.reclaim_stale_supervised_listener(
+        "otel-collector", ports=(4318, 8888), binary=Path("/home/u/.ava/otelcol-contrib"), grace_s=0
     )
 
-    assert killed == [1109]
+    assert result.stale_pids == (1109,)
+    assert signals == ["term", "kill"]
+    assert "survived forced stop" in caplog.text
 
 
 def test_takeover_refuses_a_different_process_on_the_collector_ports(
