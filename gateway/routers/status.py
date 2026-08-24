@@ -73,15 +73,18 @@ def get_stats_dashboard(
 
     Data sources:
     - `live_count`: agents_meta table — all non-terminated agents (running/idling/restarting/hibernating)
-    - `tokens` / `cost_usd`: telemetry `llm_usage` events in Loki
-    - average turn duration / warning/error counts: Loki's unified event stream
+    - `tokens` / `cost_usd`: full UTC days from the fleet ledger plus a Loki tail
+    - average turn duration: Loki's unified event stream in 12-hour shards
+    - warning/error counts: one grouped Loki query per 12-hour shard
     - `total_events`: archived event row count (frozen at the LGTM cutover;
       not a live gauge)
 
     `?hours=` selects the aggregation window (0 = last 5m; 1/6/24/72/168 =
     hours), whitelisted by `StatsWindowHours` (anything else 422s). Zero-data
     scenario: tokens all 0, cost_usd 0.0, avg_turn_seconds None (frontend
-    shows "—").
+    shows "—"). Until the unlabeled legacy slice expires on 2026-08-30,
+    the ledger removes the fixed-cost full-window token scans; afterward the
+    indexed Loki tail keeps the same self-healing late-write behavior.
     """
     cached = _stats_dashboard.cache_get(hours)
     if cached is not None:
@@ -95,31 +98,39 @@ def get_stats_dashboard(
     now = datetime.now(UTC)
     window_start = now - window_delta(hours)
     try:
-        # Cost and token fields come from the same telemetry llm_usage event
-        # snapshot. In particular, cost_usd was quoted when the call ran; do
-        # not apply today's registry prices to historical token counts at read time.
-        llm_usage_sums = {
-            field: loki_events.attribute_aggregate(
-                field=field,
-                agg="sum",
-                event_names=["llm_usage"],
-                categories=["telemetry"],
-                cluster=cluster,
-                from_=window_start,
-                to=now,
-                timeout_s=8.0,
+        # Settled UTC days avoid full-window Loki scans. The global newest
+        # ledger day is reread live while retained, so a late write into that
+        # closed day is neither missed nor double counted. Both small DB reads
+        # finish before any query waits for the shared Loki budget.
+        ledger, tail_spans = _stats_dashboard.ledger_token_plan(
+            request.app.state.db_pool, window_start=window_start, now=now
+        )
+
+        # Cost snapshots are usage-time values; do not apply today's model
+        # registry prices to historical token counts at read time.
+        tail_sums = {
+            field: sum(
+                loki_events.attribute_aggregate(
+                    field=field,
+                    agg="sum",
+                    event_names=["llm_usage"],
+                    categories=["telemetry"],
+                    cluster=cluster,
+                    from_=tail_start,
+                    to=tail_end,
+                    timeout_s=8.0,
+                )
+                for tail_start, tail_end in tail_spans
             )
             for field in ("in_total", "out_total", "cache_read", "cost_usd")
         }
-        in_total = round(llm_usage_sums["in_total"])
-        out_total = round(llm_usage_sums["out_total"])
-        cache_read = round(llm_usage_sums["cache_read"])
-        window_cost_usd = llm_usage_sums["cost_usd"]
+        in_total = ledger.tokens_in + round(tail_sums["in_total"])
+        out_total = ledger.tokens_out + round(tail_sums["out_total"])
+        cache_read = ledger.tokens_cached + round(tail_sums["cache_read"])
+        window_cost_usd = ledger.cost_usd + tail_sums["cost_usd"]
         cache_hit_pct = round(cache_read / in_total * 100, 2) if in_total else 0.0
 
-        # Dashboard reads accept six-hour shards (24h = four shards), halving
-        # the number of bounded calls versus the inspector's three-hour default.
-        # Each interactive query still has its own 8-second timeout.
+        # Twelve-hour shards halve fan-out; every interactive query has an 8-second timeout.
         turn_end_sum = sum(
             _inspect_pg.query_loki_shards(
                 window_start,
@@ -134,7 +145,7 @@ def get_stats_dashboard(
                     to=shard_end,
                     timeout_s=8.0,
                 ),
-                shard_width=timedelta(hours=6),
+                shard_width=timedelta(hours=12),
             )
         )
         turn_end_count = sum(
@@ -149,7 +160,7 @@ def get_stats_dashboard(
                     to=shard_end,
                     timeout_s=8.0,
                 ),
-                shard_width=timedelta(hours=6),
+                shard_width=timedelta(hours=12),
             )
         )
         avg_turn_seconds: float | None = turn_end_sum / turn_end_count if turn_end_count else None
@@ -157,36 +168,24 @@ def get_stats_dashboard(
         # events.level is lowercase (W9 switch; agent_events stored loguru's
         # uppercase 'WARNING'/'ERROR'). critical folds into 'error' so the
         # operator gauge sees daemon/schema-drift failures.
-        warn_err: dict[str, int] = {
-            "warning": sum(
-                _inspect_pg.query_loki_shards(
-                    window_start,
-                    now,
-                    lambda shard_start, shard_end: loki_events.count_events(
-                        level="warning",
-                        categories=["telemetry", "log"],
-                        cluster=cluster,
-                        from_=shard_start,
-                        to=shard_end,
-                        timeout_s=8.0,
-                    ),
-                    shard_width=timedelta(hours=6),
-                )
+        grouped_levels = _inspect_pg.query_loki_shards(
+            window_start,
+            now,
+            lambda shard_start, shard_end: loki_events.count_grouped(
+                group_by="level",
+                level_min="warning",
+                categories=["telemetry", "log"],
+                cluster=cluster,
+                from_=shard_start,
+                to=shard_end,
+                timeout_s=8.0,
             ),
+            shard_width=timedelta(hours=12),
+        )
+        warn_err = {
+            "warning": sum(grouped.get("warning", 0) for grouped in grouped_levels),
             "error": sum(
-                _inspect_pg.query_loki_shards(
-                    window_start,
-                    now,
-                    lambda shard_start, shard_end: loki_events.count_events(
-                        level_min="error",
-                        categories=["telemetry", "log"],
-                        cluster=cluster,
-                        from_=shard_start,
-                        to=shard_end,
-                        timeout_s=8.0,
-                    ),
-                    shard_width=timedelta(hours=6),
-                )
+                grouped.get("error", 0) + grouped.get("critical", 0) for grouped in grouped_levels
             ),
         }
     except loki_query_budget.LokiQueryBudgetError:
