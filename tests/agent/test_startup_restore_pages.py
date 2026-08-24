@@ -1,8 +1,7 @@
 """`reconcile_open_pages` — probe every open page's server and restore it.
 
-Runs at agent boot and on each heartbeat (Task #973: a cluster rollout
-rebuilds the session tree the page servers live in, killing every page server
-while the agents stay alive — boot recovery never runs). Per open row:
+Runs at agent boot and on each heartbeat, as the catch-all for page-server
+death after daemon supervision inside persistent page sessions. Per open row:
 server alive -> keep; dead + serve_dir -> re-serve; dead + no serve_dir ->
 close the row so the dead link stops showing as open (PageClosed event).
 

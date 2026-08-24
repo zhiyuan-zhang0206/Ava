@@ -121,11 +121,17 @@ def test_agent_shell_sessions_parses_and_filters(monkeypatch: pytest.MonkeyPatch
         "ava-main-agent-7-shell-2-watcher",
         "ava-main-agent-7-shell-0",
         "ava-main-agent-7-shell-1-dev-server",
+        "ava-main-agent-7-shell-3-page-dashboard",
         "ava-main-agent-12-shell-3",  # other agent
         "ava-main-restarter",  # not an agent
     )
     shells = agent_shell_sessions(7)
-    assert [(s.id, s.name) for s in shells] == [(0, None), (1, "dev-server"), (2, "watcher")]
+    assert [(s.id, s.name) for s in shells] == [
+        (0, None),
+        (1, "dev-server"),
+        (2, "watcher"),
+        (3, "page-dashboard"),
+    ]
 
 
 def test_agent_shell_sessions_none_for_agent_without_shells(monkeypatch: pytest.MonkeyPatch):

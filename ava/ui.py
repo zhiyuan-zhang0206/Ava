@@ -1,7 +1,7 @@
 """Show the user a rich web page your HTTP server serves.
 
-A page is declared with the platform, and the platform supervises its
-server process — the SDK never starts or tracks server processes itself.
+A page is declared with the platform, whose page-server daemon runs the
+server inside a persistent shell session owned by this agent.
 You can have at most one open page at a time — opening a new one
 auto-closes the old one.
 
@@ -38,7 +38,7 @@ _PAGE_BASE_PORT = 10000
 # How long serve() waits for the page_server daemon to bring the server up
 # before failing (the daemon reconciles on a ~2s poll; the window covers a
 # cold daemon restart too).
-_SERVE_READY_TIMEOUT_S = 10.0
+_SERVE_READY_TIMEOUT_S = 15.0
 
 # Temp dirs created by serve_markdown(), keyed by page name so close() can
 # clean them up. Lost on restart (in-process cache) — the daemon keeps serving
@@ -195,10 +195,11 @@ def show(name: str, port: int | None = None, title: str | None = None) -> Page:
 def serve(dir: str, name: str, port: int | None = None, title: str | None = None) -> Page:
     """Start an HTTP server for `dir` and show it to the user, in one call.
 
-    Declares the page (the content already lives in `dir`) and waits for
-    the platform's page supervisor to spawn the server. The server binds
-    the machine's own address (loopback on a single machine) — the page is
-    only ever reached through the platform's authenticated link.
+    Declares the page (the content already lives in `dir`) and waits for the
+    platform's page-server daemon to run the server inside a persistent shell
+    session owned by this agent. The server binds the machine's own address
+    (loopback on a single machine) — the page is only ever reached through the
+    platform's authenticated link.
 
     Calling again auto-closes any existing page; `close(name)` closes the
     page and the platform stops the server.

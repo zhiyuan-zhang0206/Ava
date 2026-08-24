@@ -45,6 +45,28 @@ def _advance(
     )
 
 
+def test_observations_exempt_daemon_owned_page_sessions(monkeypatch: pytest.MonkeyPatch) -> None:
+    page = "ava-agent-7-shell-3-page-dashboard"
+    worker = "ava-agent-7-shell-4-worker"
+    requests: list[str] = []
+    monkeypatch.setattr(
+        reminder_daemon.shared.pty_sessions.cli,
+        "live_sessions",
+        lambda: {page: object(), worker: object()},
+    )
+
+    def _request(name: str, _request: dict[str, str]) -> dict[str, object]:
+        requests.append(name)
+        return {"ok": True, "data": {"idle": False, "idle_since": 0.0}}
+
+    monkeypatch.setattr(reminder_daemon.shared.pty_sessions.cli, "session_request", _request)
+    observations, live_names = reminder_daemon._observations()
+
+    assert [observation.name for observation in observations] == [worker]
+    assert live_names == {worker}
+    assert requests == [worker]
+
+
 def test_fires_at_each_backoff_threshold_and_not_just_before() -> None:
     observation = _observation()
     state: dict[str, SessionState] = {}

@@ -42,7 +42,7 @@ _PIDFILE = settings.services.idle_shell_reminder_pidfile
 _TICK_S = 60.0
 _LIVENESS_TIMEOUT_S = 90.0
 _LIVENESS_BEAT_STEP_S = 30.0
-_SESSION_RE = re.compile(r"ava-agent-(\d+)-shell-(\d+)(?:-[a-z][a-z0-9-]*)?")
+_SESSION_RE = re.compile(r"ava-agent-(\d+)-shell-(\d+)(?:-([a-z][a-z0-9-]*))?")
 
 
 def _state_path() -> Path:
@@ -55,6 +55,12 @@ def _parse_session_name(name: str) -> tuple[int, int] | None:
     if match is None:
         return None
     return int(match.group(1)), int(match.group(2))
+
+
+def _is_page_session(name: str) -> bool:
+    """Whether a shell name carries the daemon-owned ``page-`` suffix."""
+    match = _SESSION_RE.fullmatch(name)
+    return match is not None and (match.group(3) or "").startswith("page-")
 
 
 def _retained_reply_ids(owner: int, inbound_ids: frozenset[int]) -> set[int]:
@@ -115,6 +121,8 @@ def _observations() -> tuple[tuple[IdleObservation, ...], set[str]]:
         parsed = _parse_session_name(name)
         if parsed is None:
             _log.debug("skipping unrecognized pty session name: %s", name)
+            continue
+        if _is_page_session(name):
             continue
         owner, sdk_id = parsed
         live_names.add(name)

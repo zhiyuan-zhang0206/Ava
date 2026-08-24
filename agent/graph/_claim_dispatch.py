@@ -252,11 +252,11 @@ async def _handle_heartbeat(
 ) -> None:
     """HEARTBEAT: check-in delivered as a system note, plus page liveness.
 
-    A cluster rollout rebuilds the session tree the page servers live in,
-    killing every page server while the agents stay alive — boot recovery
-    never runs (Task #973). Probing on each heartbeat (default 5 min) makes
-    a live agent self-heal its pages: dead serve_dir pages are re-served,
-    dead no-dir pages are closed. Best-effort; reconcile never raises.
+    The page-server daemon supervises serve() pages inside persistent agent
+    shell sessions, which are outside rollout service teardown. Probing on
+    each heartbeat (default 5 min) remains the catch-all for server death:
+    dead serve_dir pages are re-served and dead no-dir pages are closed.
+    Best-effort; reconcile never raises.
     """
     st.new_msgs.append(
         system_note_message(
