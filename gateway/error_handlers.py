@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from gateway import loki_events, loki_query_budget, prom_metrics
+from gateway._cors import cors_allowed_origins
 from gateway.error_envelope import error_response
 from shared.agents import AvaAgentError
 
@@ -30,9 +31,16 @@ async def _ava_agent_error_handler(request: Request, exc: AvaAgentError) -> JSON
 
 
 def _cors_headers(request: Request) -> dict[str, str]:
-    """Return CORS headers absent from ServerErrorMiddleware's bare response."""
+    """Return CORS headers for an allowlisted request origin, else no headers.
+
+    ServerErrorMiddleware — which answers unhandled exceptions — sits OUTSIDE
+    every user middleware (Starlette/FastAPI build order), so its response
+    never passes through CORSMiddleware and the catch-all handler below must
+    add the headers itself. Mirrors CORSMiddleware's simple-response behavior
+    for this gateway's exact-origin configuration (#187).
+    """
     origin = request.headers.get("origin")
-    if origin is None:
+    if origin is None or origin not in cors_allowed_origins():
         return {}
     return {
         "Access-Control-Allow-Origin": origin,

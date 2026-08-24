@@ -883,8 +883,12 @@ NAT64-synthesize IPv4 literals and the request never enters the tunnel):
 
 The frontend resolves the gateway as `${location.hostname}:8000` (frontend
 `:3000` and gateway `:8000` are co-located on the gateway host, different
-ports). Gateway CORS allows all origins — anything that reaches it is already on
-the private network. On a host where another service holds the gateway port, set
+ports). Gateway CORS accepts exact origins only. An empty
+`AVA_GATEWAY_CORS_ALLOWED_ORIGINS` derives localhost, `127.0.0.1`, and the
+configured gateway host at the frontend entry port; set the variable to a
+comma-separated list to replace that derived allowlist. Cookie-authenticated
+state changes also reject a present, non-allowlisted `Origin`. On a host where
+another service holds the gateway port, set
 `AVA_GATEWAY_PORT` plus the matching
 `AVA_GATEWAY_HEALTH_URL=http://localhost:<port>/api/health`
 (two-var contract; `ava status` probes the health URL). A pure agent-runner

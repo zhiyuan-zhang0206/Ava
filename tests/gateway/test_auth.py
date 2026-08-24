@@ -14,9 +14,11 @@ secret-less by default; the gateway then binds loopback only).
 from __future__ import annotations
 
 import pytest
+from fastapi import Request
 from fastapi.testclient import TestClient
 
-from gateway.app import app
+from gateway._cors import cors_allowed_origins
+from gateway.app import _cors_headers, app
 from shared import config
 from shared.cluster_auth import (
     bearer_header,
@@ -24,6 +26,7 @@ from shared.cluster_auth import (
     sign_session,
     verify_session,
 )
+from shared.config.gateway import GatewaySettings
 
 _SECRET = "test-cluster-secret"  # noqa: S105 — test fixture
 
@@ -40,6 +43,15 @@ def _session_cookie(token: str) -> dict[str, str]:
     return {"Cookie": f"{cookie_name()}={token}"}
 
 
+def _request_with_origin(origin: str) -> Request:
+    return Request(
+        {
+            "type": "http",
+            "headers": [(b"origin", origin.encode())],
+        }
+    )
+
+
 @pytest.fixture(autouse=True)
 def _patch_secret(monkeypatch: pytest.MonkeyPatch) -> None:
     """Enable auth with a known secret for every test in this module.
@@ -50,6 +62,71 @@ def _patch_secret(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     monkeypatch.setattr(config.settings.gateway, "auth_middleware_enabled", True)
     monkeypatch.setattr(config.settings.data_plane, "cluster_secret", _SECRET)
+
+
+# ── Gateway security settings ─────────────────────────────────────────
+
+
+def test_cors_allowed_origins_parses_comma_separated_value() -> None:
+    parsed = GatewaySettings.model_validate(
+        {"cors_allowed_origins": ("https://one.example, http://two.example:3000")}
+    )
+
+    assert parsed.cors_allowed_origins == [
+        "https://one.example",
+        "http://two.example:3000",
+    ]
+
+
+def test_session_cookie_secure_defaults_to_none() -> None:
+    assert GatewaySettings().session_cookie_secure is None
+
+
+def test_session_cookie_secure_parses_explicit_bool() -> None:
+    parsed = GatewaySettings.model_validate({"session_cookie_secure": "true"})
+
+    assert parsed.session_cookie_secure is True
+
+
+def test_cors_allowed_origins_derive_frontend_hosts_and_gateway_host(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(config.settings.gateway, "cors_allowed_origins", [])
+    monkeypatch.setattr(
+        config.settings.services,
+        "frontend_healthcheck_url",
+        "http://localhost:3000",
+    )
+    monkeypatch.setattr(
+        config.settings.gateway,
+        "gateway_url",
+        "https://gateway.example:8100",
+    )
+
+    assert cors_allowed_origins() == [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "https://gateway.example:3000",
+    ]
+
+
+def test_cors_allowed_origins_use_explicit_list_verbatim(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    explicit = ["https://one.example", "http://two.example:3000"]
+    monkeypatch.setattr(config.settings.gateway, "cors_allowed_origins", explicit)
+    monkeypatch.setattr(
+        config.settings.services,
+        "frontend_healthcheck_url",
+        "http://localhost:4100",
+    )
+    monkeypatch.setattr(
+        config.settings.gateway,
+        "gateway_url",
+        "https://gateway.example:8100",
+    )
+
+    assert cors_allowed_origins() == explicit
 
 
 # ── Bypass paths are exempt ──────────────────────────────────────────
@@ -103,6 +180,42 @@ def test_login_sets_session_cookie() -> None:
     assert "HttpOnly" in set_cookie
     # Persistence: without Max-Age Chromium drops the cookie on restart (desktop #706).
     assert "Max-Age=" in set_cookie
+
+
+def test_login_cookie_not_secure_for_http_gateway(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(config.settings.gateway, "session_cookie_secure", None)
+    monkeypatch.setattr(config.settings.gateway, "gateway_url", "http://gateway.example:8000")
+
+    with TestClient(app) as client:
+        resp = client.post("/api/auth/login", json={"password": _SECRET})
+
+    assert "; Secure" not in resp.headers["Set-Cookie"]
+
+
+def test_login_cookie_secure_when_policy_explicitly_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(config.settings.gateway, "session_cookie_secure", True)
+    monkeypatch.setattr(config.settings.gateway, "gateway_url", "http://gateway.example:8000")
+
+    with TestClient(app) as client:
+        resp = client.post("/api/auth/login", json={"password": _SECRET})
+
+    assert "; Secure" in resp.headers["Set-Cookie"]
+
+
+def test_login_cookie_secure_for_https_gateway(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(config.settings.gateway, "session_cookie_secure", None)
+    monkeypatch.setattr(config.settings.gateway, "gateway_url", "https://gateway.example:8000")
+
+    with TestClient(app) as client:
+        resp = client.post("/api/auth/login", json={"password": _SECRET})
+
+    assert "; Secure" in resp.headers["Set-Cookie"]
 
 
 def test_login_with_username_succeeds() -> None:
@@ -206,31 +319,71 @@ def test_cors_preflight_on_protected_route_not_401() -> None:
     Access-Control-* headers, and the real cross-origin POST surfaces in the
     browser as "Failed to fetch". Regression guard for the resurrect /
     terminate / restart lifecycle buttons."""
+    allowed_origin = cors_allowed_origins()[0]
     with TestClient(app) as client:
         resp = client.options(
             "/api/agents/405/resurrect",
             headers={
-                "Origin": "http://localhost:3000",
+                "Origin": allowed_origin,
                 "Access-Control-Request-Method": "POST",
                 "Access-Control-Request-Headers": "content-type",
             },
         )
     assert resp.status_code != 401
-    assert resp.headers["access-control-allow-origin"] == "http://localhost:3000"
+    assert resp.headers["access-control-allow-origin"] == allowed_origin
+
+
+def test_cors_preflight_disallowed_origin_has_no_allow_origin_header() -> None:
+    with TestClient(app) as client:
+        resp = client.options(
+            "/api/agents/405/resurrect",
+            headers={
+                "Origin": "https://disallowed.example",
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "content-type",
+            },
+        )
+
+    assert "access-control-allow-origin" not in resp.headers
 
 
 def test_unauthorized_response_carries_cors_headers() -> None:
     """A 401 short-circuited by the auth middleware still carries the CORS
     headers — CORSMiddleware is the OUTERMOST middleware, so a browser caller
     sees the real 401 instead of "Failed to fetch" (#187)."""
+    allowed_origin = cors_allowed_origins()[0]
     with TestClient(app) as client:
         resp = client.get(
             "/api/agents",
-            headers={"Origin": "http://localhost:3000"},
+            headers={"Origin": allowed_origin},
         )
     assert resp.status_code == 401
-    assert resp.headers["access-control-allow-origin"] == "http://localhost:3000"
+    assert resp.headers["access-control-allow-origin"] == allowed_origin
     assert resp.headers["access-control-allow-credentials"] == "true"
+
+
+def test_cors_headers_reflect_allowed_origin(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        config.settings.gateway,
+        "cors_allowed_origins",
+        ["https://allowed.example"],
+    )
+
+    assert _cors_headers(_request_with_origin("https://allowed.example")) == {
+        "Access-Control-Allow-Origin": "https://allowed.example",
+        "Vary": "Origin",
+        "Access-Control-Allow-Credentials": "true",
+    }
+
+
+def test_cors_headers_omit_disallowed_origin(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        config.settings.gateway,
+        "cors_allowed_origins",
+        ["https://allowed.example"],
+    )
+
+    assert _cors_headers(_request_with_origin("https://disallowed.example")) == {}
 
 
 # ── Bearer token works ────────────────────────────────────────────────
@@ -271,6 +424,73 @@ def test_api_agents_rejects_invalid_cookie() -> None:
     with TestClient(app) as client:
         resp = client.get("/api/agents", headers=_session_cookie("bad-token"))
     assert resp.status_code == 401
+
+
+def test_cookie_authenticated_post_rejects_disallowed_origin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        config.settings.gateway,
+        "cors_allowed_origins",
+        ["https://allowed.example"],
+    )
+    token = sign_session(_SECRET)
+
+    with TestClient(app) as client:
+        resp = client.post(
+            "/api/frontend-telemetry",
+            content=b"{}",
+            headers={
+                **_session_cookie(token),
+                "Origin": "https://disallowed.example",
+            },
+        )
+
+    assert resp.status_code == 403
+    assert resp.json() == {"detail": "origin not allowed"}
+    assert resp.headers["vary"] == "Origin"
+
+
+def test_bearer_authenticated_post_allows_disallowed_origin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        config.settings.gateway,
+        "cors_allowed_origins",
+        ["https://allowed.example"],
+    )
+
+    with TestClient(app) as client:
+        resp = client.post(
+            "/api/frontend-telemetry",
+            content=b"{}",
+            headers={
+                **_auth(),
+                "Origin": "https://disallowed.example",
+            },
+        )
+
+    assert resp.status_code == 422
+
+
+def test_cookie_authenticated_post_allows_missing_origin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        config.settings.gateway,
+        "cors_allowed_origins",
+        ["https://allowed.example"],
+    )
+    token = sign_session(_SECRET)
+
+    with TestClient(app) as client:
+        resp = client.post(
+            "/api/frontend-telemetry",
+            content=b"{}",
+            headers=_session_cookie(token),
+        )
+
+    assert resp.status_code == 422
 
 
 # ── Wrong secret gets 401 ─────────────────────────────────────────────

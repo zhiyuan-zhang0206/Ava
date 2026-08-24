@@ -63,6 +63,7 @@ from contextlib import asynccontextmanager, suppress
 from fastapi import FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 import shared.db
@@ -77,6 +78,7 @@ from gateway import (
     prom_metrics,
 )
 from gateway import mcp_endpoint as _mcp_endpoint
+from gateway._cors import cors_allowed_origins
 from gateway._server import main as _run_gateway
 from gateway.error_envelope import error_response, request_trace_middleware
 from gateway.error_handlers import (
@@ -87,6 +89,9 @@ from gateway.error_handlers import (
     _prom_query_budget_error_handler,
     _request_validation_error_handler,
     _unhandled_exception_handler,
+)
+from gateway.error_handlers import (
+    _cors_headers as _cors_headers,
 )
 from gateway.routers import (
     _machine_pause as machine_pause_router,
@@ -517,6 +522,7 @@ _AUTH_BYPASS_PATHS: frozenset[str] = frozenset(
         "/api/alerts",
     }
 )
+_STATE_CHANGING_METHODS: frozenset[str] = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
 
 @app.middleware("http")
@@ -555,6 +561,20 @@ async def _cluster_auth_middleware(
     # 1. Check session cookie
     cookie_token = request.cookies.get(cookie_name())
     if verify_session(cookie_token, secret):
+        origin = request.headers.get("Origin")
+        # SameSite=Lax blocks cross-site cookie sending. Checking the exact
+        # origin on mutations also closes the same-site-subdomain vector while
+        # preserving non-browser clients, which commonly omit Origin.
+        if (
+            request.method in _STATE_CHANGING_METHODS
+            and origin is not None
+            and origin not in cors_allowed_origins()
+        ):
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "origin not allowed"},
+                headers={"Vary": "Origin"},
+            )
         return await call_next(request)
 
     # 2. Check Bearer token
@@ -588,22 +608,17 @@ async def _cluster_auth_middleware(
 app.middleware("http")(_latency.latency_middleware)
 
 
-# CORSMiddleware is registered AFTER latency — the OUTERMOST middleware —
-# so every response carries the Access-Control-* headers, including the ones
-# short-circuited by inner middleware: the auth middleware's 401, the pause
-# middleware's 503, and the exception handler's 500 (a bare ServerErrorMiddleware
-# response — the only layer OUTSIDE user middleware — carries no CORS headers,
-# which is why unhandled route exceptions need the Exception handler below;
-# #187). The gateway is reachable on the cluster's private network; CORS
-# allows all origins (the frontend on :3000 calls the gateway on :8000 — a
-# different port, hence cross-origin — from any private-network address).
-# ``allow_origin_regex`` is used instead of ``allow_origins=["*"]`` because
-# credentials (session cookies) require a concrete origin — ``*`` is forbidden
-# by the spec with credentials. A CORS preflight (OPTIONS) is answered here,
-# before auth or pause ever see it.
+# CORSMiddleware is registered AFTER latency — the OUTERMOST middleware — so
+# allowlisted responses carry Access-Control-* headers even when inner
+# middleware short-circuits with 401 or 503. Unhandled route exceptions need
+# the Exception handler below because ServerErrorMiddleware sits outside user
+# middleware (#187). Browser origins are exact matches: an explicit setting is
+# authoritative; otherwise the allowlist derives the local frontend origins and
+# the gateway host at the frontend entry port. A CORS preflight (OPTIONS) is
+# answered here before auth or pause ever see it.
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex=".*",
+    allow_origins=cors_allowed_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

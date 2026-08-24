@@ -3,10 +3,10 @@
 > **Status: Phases 1 + 2 landed and deployed. Phase 3 (TLS) is the only remaining
 > slice.**
 >
-> Phase 1 (the gateway auth middleware) merged: every `/api/*` route except a
-> four-path bypass list requires a session cookie or a Bearer cluster secret
-> when the cluster has one; an empty bearer is the supported loopback-only
-> single-box posture. Phase 2 shipped as **cookie-based session auth**, not
+> Phase 1 (the gateway auth middleware) merged: every protected route requires
+> a session cookie or a Bearer cluster secret when the cluster has one; an empty
+> secret is the supported loopback-only single-box posture. Phase 2 shipped as
+> **cookie-based session auth**, not
 > the Next.js proxy this doc originally recommended (see "Decision" below).
 >
 > Current edge posture (bearer-gated when configured, loopback + `AVA_MACHINE_HOST`
@@ -47,15 +47,12 @@ automatically.
 
 Two things changed versus the original Phase-1 draft:
 
-- **Fail-open was removed** *(historical — reversed 2026-08-03, see the header
-  banner)*. The draft let an empty `settings.cluster_secret` skip
-  the check for dev/test convenience. That is exactly the kind of "config value
-  silently disables the security boundary" hole the fail-fast rule rejects, so the
-  gateway refused to start without a secret; the only sanctioned bypass was the
-  explicit `auth_middleware_enabled=false`.
-- **The bypass list is four fixed paths**, not one: `/api/health` (probed by each
-  host on the private network) plus `/api/auth/{login,check,logout}` (a browser
-  cannot present a cookie it has not obtained yet).
+- **The empty-secret posture is explicit.** With a secret, authentication fails
+  closed; without one, a single-box gateway serves unauthenticated and binds
+  loopback only. `auth_middleware_enabled=false` remains a separate e2e/test knob.
+- **The bypass list is fixed**, not route-prefix based: `/api/health`,
+  `/api/auth/{login,check,logout}`, and `/api/alerts` (which applies its own token
+  or loopback policy).
 
 It could not merge alone — the middleware would have locked the frontend out
 immediately, since browser `fetch()` and `EventSource` carried no auth. That
@@ -78,10 +75,12 @@ forcing function is what produced Phase 2.
 
 `POST /api/auth/login` verifies the password (the cluster secret) and sets an
 HttpOnly `ava_session` cookie (`gateway/routers/auth.py`); the browser then carries
-it automatically on both `fetch()` and `EventSource`. CORS runs
-`allow_origin_regex=".*"` with `allow_credentials=True`, since the frontend (`:3000`)
-and gateway (`:8000`) are co-located but cross-origin. SDK / agent / script callers
-keep using Bearer.
+it automatically on both `fetch()` and `EventSource`. CORS allows exact configured
+origins (or derives the local and gateway-host frontend origins), since the frontend
+(`:3000`) and gateway (`:8000`) are co-located but cross-origin. Cookie-authenticated
+mutations reject a present origin outside that allowlist. SDK / agent / script callers
+keep using Bearer. The cookie `Secure` flag is explicitly configurable and otherwise
+follows the configured gateway URL scheme, ready for Phase 3 to switch it on with TLS.
 
 Rationale: this is how every website works — login → cookie → auto-carry. It needs
 no custom headers for SSE, no proxy layer, and it is the shape that can go public
