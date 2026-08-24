@@ -327,6 +327,8 @@ def _launch_sessions(roles: MachineRoles, skip: set[str], repo: Path) -> LaunchO
             print(f"  + {sess} (build ~30-60s)")
         else:
             print(f"  + {sess}")
+        if spec.before_launch is not None:
+            spec.before_launch()
         # Determine process profile from the service's spec (ops.spec.profile_marker):
         # gateway daemons get AVA_PROCESS_PROFILE=gateway, agent-runner daemons get
         # =runner; a spec with no_profile_marker (labeler) or with both capabilities
