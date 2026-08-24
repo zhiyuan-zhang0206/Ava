@@ -26,7 +26,7 @@ from shared.machine import machine_name
 from shared.paths import ava_home
 
 
-def _health() -> dict[str, str]:
+def _health() -> dict[str, object]:
     with TestClient(app) as client:
         resp = client.get("/api/health")
     assert resp.status_code == 200
@@ -53,6 +53,13 @@ def test_health_payload_carries_the_full_identity_set() -> None:
         "name": "gateway",
         "home": str(ava_home()),
         "machine": machine_name(),
+        "liveness": "ok",
+        "readiness": "ok",
+        "components": [
+            {"name": "http", "status": "ok", "progress": "serving"},
+            {"name": "db", "status": "ok"},
+        ],
+        "degraded_reasons": [],
     }
 
 
@@ -79,4 +86,15 @@ def test_health_control_pool_timeout_returns_degraded_with_identity(
         "name": "gateway",
         "home": str(ava_home()),
         "machine": machine_name(),
+        "liveness": "ok",
+        "readiness": "degraded",
+        "components": [
+            {"name": "http", "status": "ok", "progress": "serving"},
+            {
+                "name": "db",
+                "status": "degraded",
+                "detail": "PoolTimeout: control pool saturated",
+            },
+        ],
+        "degraded_reasons": ["db: PoolTimeout: control pool saturated"],
     }

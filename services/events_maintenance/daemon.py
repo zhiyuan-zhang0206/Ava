@@ -28,6 +28,8 @@ loops:
 Each loop reports independent progress, success, and errors in `/healthz`.
 Only completed bounded work or sleeps beat; exceeding a hard deadline fails
 healthz until the watchdog replaces the process and its orphaned worker thread.
+The same trackers are projected as unified envelope components, so the legacy
+per-loop snapshots and the component degradation reasons describe one state.
 
 The events-archive slices only run when `AVA_EVENTS_MAINTENANCE_ENABLED` is
 set. Since the LGTM cutover (task #1197) the PG `events` copy is a read-only
@@ -55,14 +57,21 @@ Usage:
 Kept alive by the gateway watchdog's 60s healthcheck
 (`services.healthchecks.events_maintenance`), so the schema-drift exit in
 `_dispatch_loop` is revived on the next round instead of staying dead.
+
+Health reports progress independently for the rollup, checkpoint-trim, and
+resolution loops. The endpoint takes the worst state: only a completed bounded
+unit refreshes a loop's success timestamp, and a worker running beyond its hard
+deadline makes `/healthz` return 503 for watchdog recovery.
 """
 
 import asyncio
 import logging
 import os
 import sys
+import time
 from collections.abc import Callable
 from datetime import UTC, datetime
+from typing import cast
 
 import psycopg
 from psycopg_pool import ConnectionPool
@@ -91,6 +100,7 @@ from shared.daemon_health import (
 )
 from shared.daemon_shutdown import install_graceful_shutdown
 from shared.events.contract import EVENTS, RETENTION_BY_CATEGORY, retention_days
+from shared.health_schema import DEGRADED, OK, component
 from shared.log import init_gateway_process
 from shared.paths import legacy_pid_path
 
@@ -275,6 +285,43 @@ def _is_running() -> bool:
     )
 
 
+def _loop_components(liveness: LivenessGroup) -> list[dict[str, object]]:
+    """Project each registered loop tracker into the shared health envelope."""
+    now = time.time()
+    records: list[dict[str, object]] = []
+    for progress in liveness._loops.values():
+        snapshot = progress.snapshot()
+        stale_for = cast(float, snapshot["stale_for"])
+        wedged = cast(bool, snapshot["wedged"])
+        last_success_at = cast(str | None, snapshot["last_success_at"])
+        last_success = (
+            datetime.fromisoformat(last_success_at).timestamp()
+            if last_success_at is not None
+            else None
+        )
+        error = cast(dict[str, str] | None, snapshot["last_error"])
+        last_error = error["message"] if error is not None else None
+        stale = stale_for > progress.timeout_s
+        if wedged:
+            detail = f"wedged: {last_error or 'pass exceeded its deadline'}"
+        elif stale:
+            detail = f"no progress for {stale_for:.0f}s"
+        else:
+            detail = None
+        records.append(
+            component(
+                progress.name,
+                DEGRADED if wedged or stale else OK,
+                last_success=last_success,
+                last_error=last_error,
+                progress="wedged" if wedged else "idle",
+                detail=detail,
+                now=now,
+            )
+        )
+    return records
+
+
 async def _sleep_with_liveness(progress: LoopProgress, total_s: float) -> None:
     """Sleep `total_s`, beating progress every `_LIVENESS_BEAT_STEP_S` so the long
     inter-poll wait keeps /healthz fresh instead of reading as a wedged loop."""
@@ -335,8 +382,7 @@ async def _dispatch_loop(pool: ConnectionPool, progress: LoopProgress) -> None:
                 "[events-maintenance] rollup pass wedged — parking for watchdog respawn",
                 exc_info=True,
             )
-            while True:
-                await asyncio.sleep(3600)
+            break
         except psycopg.ProgrammingError:
             _log.critical(
                 "[events-maintenance] schema / syntax error — code<->DB drift; "
@@ -378,8 +424,7 @@ async def _checkpoint_trim_loop(pool: ConnectionPool, progress: LoopProgress) ->
                 "[events-maintenance] checkpoint trim pass wedged — parking for watchdog respawn",
                 exc_info=True,
             )
-            while True:
-                await asyncio.sleep(3600)
+            break
         except psycopg.ProgrammingError:
             _log.critical(
                 "[events-maintenance] checkpoint trim schema / syntax error — "
@@ -423,8 +468,7 @@ async def _resolution_loop(pool: ConnectionPool, progress: LoopProgress) -> None
                 "[events-maintenance] resolution pass wedged — parking for watchdog respawn",
                 exc_info=True,
             )
-            while True:
-                await asyncio.sleep(3600)
+            break
         except psycopg.ProgrammingError:
             _log.critical(
                 "[events-maintenance] resolution schema / syntax error — "
@@ -439,7 +483,7 @@ async def _resolution_loop(pool: ConnectionPool, progress: LoopProgress) -> None
 
 
 async def run() -> None:
-    """Start the daemon: healthz server -> write pidfile -> connect DB -> enter main loop."""
+    """Start healthz, register per-loop progress, then enter all maintenance loops."""
     if _is_running():
         _log.info(
             "[events-maintenance] daemon already running (pidfile=%s), exiting",
@@ -459,7 +503,11 @@ async def run() -> None:
     resolution_progress = liveness.register(
         "resolution", settings.daemon.events_maintenance_resolution_deadline_s
     )
-    health = await start_health_server("events_maintenance", liveness=liveness)
+    health = await start_health_server(
+        "events_maintenance",
+        liveness=liveness,
+        components=lambda: _loop_components(liveness),
+    )
     _log.info("[events-maintenance] healthz listening on :%s", health_port("events_maintenance"))
 
     pool = shared.db.pool()

@@ -26,6 +26,7 @@ from typing import cast
 import pytest
 
 from shared import daemon_health
+from shared.health_schema import DEGRADED, OK, component
 from shared.paths import ava_home
 
 
@@ -63,6 +64,10 @@ async def test_healthz_returns_200_with_json_body() -> None:
         assert payload["name"] == "restarter"
         assert isinstance(payload["pid"], int)
         assert isinstance(payload["started_at"], float)
+        assert payload["status"] == "ok"
+        assert payload["readiness"] == "ok"
+        assert payload["components"] == [{"name": "loop", "status": "ok"}]
+        assert payload["degraded_reasons"] == []
     finally:
         await daemon_health.stop_health_server(server)
 
@@ -188,6 +193,9 @@ async def test_healthz_503_when_liveness_stale() -> None:
         payload = json.loads(body)
         assert payload["name"] == "restarter"
         assert "stale_for" in payload
+        assert payload["liveness"] == "stale"
+        assert payload["components"][0]["status"] == "stale"
+        assert payload["degraded_reasons"] == ["loop: stale"]
     finally:
         await daemon_health.stop_health_server(server)
 
@@ -202,6 +210,51 @@ async def test_healthz_200_when_liveness_fresh() -> None:
         status, body = await _http_get(port, "/healthz")
         assert status == 200
         assert "stale_for" in json.loads(body)
+    finally:
+        await daemon_health.stop_health_server(server)
+
+
+@pytest.mark.asyncio
+async def test_healthz_component_failure_surfaces_the_component_reason() -> None:
+    port = _find_free_port()
+    server = await daemon_health.start_health_server(
+        "restarter",
+        port=port,
+        components=[component("worker", DEGRADED, detail="job stuck")],
+    )
+    try:
+        status, body = await _http_get(port, "/healthz")
+        assert status == 503
+        payload = json.loads(body)
+        assert payload["status"] == "degraded"
+        assert payload["readiness"] == "degraded"
+        assert payload["degraded_reasons"] == ["worker: job stuck"]
+    finally:
+        await daemon_health.stop_health_server(server)
+
+
+@pytest.mark.asyncio
+async def test_healthz_evaluates_component_provider_for_each_request() -> None:
+    calls = 0
+
+    def components() -> list[dict[str, object]]:
+        nonlocal calls
+        calls += 1
+        return [component("worker", OK, progress=f"run {calls}")]
+
+    port = _find_free_port()
+    server = await daemon_health.start_health_server(
+        "restarter",
+        port=port,
+        components=components,
+        extra=lambda: {"saturation": calls},
+    )
+    try:
+        _first_status, first = await _http_get(port, "/healthz")
+        _second_status, second = await _http_get(port, "/healthz")
+        assert json.loads(first)["components"][0]["progress"] == "run 1"
+        assert json.loads(second)["components"][0]["progress"] == "run 2"
+        assert json.loads(second)["saturation"] == 2
     finally:
         await daemon_health.stop_health_server(server)
 
@@ -595,6 +648,25 @@ async def test_probe_dead_when_liveness_is_stale(tmp_path: Path) -> None:
     try:
         probe = await _probe("restarter", port, pidfile)
         assert probe.verdict is daemon_health.ProbeVerdict.DOWN
+    finally:
+        await daemon_health.stop_health_server(server)
+
+
+@pytest.mark.asyncio
+async def test_probe_includes_degraded_component_reasons(tmp_path: Path) -> None:
+    """A watchdog failure names the stuck component rather than an opaque 503."""
+    port = _find_free_port()
+    pidfile = tmp_path / "restarter.pid"
+    pidfile.write_text(str(os.getpid()))
+    server = await daemon_health.start_health_server(
+        "restarter",
+        port=port,
+        components=[component("ops", DEGRADED, detail="update-lock held 7200s")],
+    )
+    try:
+        probe = await _probe("restarter", port, pidfile)
+        assert probe.verdict is daemon_health.ProbeVerdict.DOWN
+        assert probe.detail == "healthz returned HTTP 503; degraded: ops: update-lock held 7200s"
     finally:
         await daemon_health.stop_health_server(server)
 

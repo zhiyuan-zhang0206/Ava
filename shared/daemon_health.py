@@ -19,11 +19,14 @@ Design:
   ``asyncio.Server``; the caller's finally block calls
   ``stop_health_server`` for cleanup
 - bind ``127.0.0.1``-only; daemon healthchecks / RPC are strictly local
-- ``/healthz`` is always present: returns 200 + JSON
-  ``{"name": ..., "pid": ..., "home": ..., "started_at": ...}`` — the
-  first three are the identity ``probe_daemon`` verifies. ``Liveness`` tracks
-  one loop; ``LivenessGroup`` tracks concurrent loops independently. Both flip
-  stale work to 503 so a live sibling cannot hide a wedged loop
+- ``/healthz`` is always present: it wraps the identity fields
+  ``{"name": ..., "pid": ..., "home": ..., "started_at": ...}`` in the
+  shared health envelope, including readiness, liveness, per-component progress,
+  and reasons for degradation. The first three identity fields remain what
+  ``probe_daemon`` verifies. ``Liveness`` tracks one loop; ``LivenessGroup``
+  tracks concurrent loops independently and exposes their snapshots. Stale
+  liveness or a degraded component flips the response to 503 so a live sibling
+  cannot hide wedged work from the watchdog.
 - ``extra_routes``: ``{("POST", "/search"): handler}`` lets a daemon
   expose its own RPCs (e.g. memory_indexer ``/search``, bypassing
   milvus-lite single-process flock restrictions)
@@ -319,10 +322,15 @@ class LivenessGroup:
 
 
 def _healthz_payload(
-    name: str, pid: int, home: str, started_at: float, liveness: Liveness | LivenessGroup | None
+    name: str,
+    pid: int,
+    home: str,
+    started_at: float,
+    liveness: Liveness | LivenessGroup | None,
+    components: list[dict[str, object]] | None = None,
+    extra: dict[str, object] | None = None,
 ) -> tuple[int, bytes]:
-    """Build the (status, json body) for GET /healthz. 503 when a liveness is
-    present and its main loop has gone stale; 200 otherwise.
+    """Build the shared GET /healthz envelope, preserving daemon identity.
 
     ``name``/``pid``/``home`` are the identity triple ``probe_daemon`` checks —
     a probe that only trusted the status code cannot tell this daemon apart from
@@ -341,14 +349,23 @@ def _healthz_payload(
         "started_at": started_at,
         "sha": process_sha.get(),
     }
-    status = 200
+    from shared import health_schema
+
+    stale_for = None
     if liveness is not None:
-        payload["stale_for"] = round(liveness.stale_for(), 1)
+        stale_for = round(liveness.stale_for(), 1)
+        payload["stale_for"] = stale_for
         if isinstance(liveness, LivenessGroup):
             payload["loops"] = liveness.snapshot()
-        if not liveness.is_alive():
-            status = 503
-    return status, json.dumps(payload).encode("utf-8")
+    if components is None:
+        loop: dict[str, object] = {
+            "name": "loop",
+            "status": health_schema.OK if liveness is None or liveness.is_alive() else "stale",
+        }
+        if stale_for is not None:
+            loop["stale_for"] = stale_for
+        components = [loop]
+    return health_schema.render(payload, components, liveness=liveness, extra=extra)
 
 
 async def start_health_server(
@@ -358,6 +375,8 @@ async def start_health_server(
     host: str = "127.0.0.1",
     extra_routes: Mapping[tuple[str, str], RouteHandler] | None = None,
     liveness: Liveness | LivenessGroup | None = None,
+    components: list[dict[str, object]] | Callable[[], list[dict[str, object]]] | None = None,
+    extra: dict[str, object] | Callable[[], dict[str, object]] | None = None,
     auth_token: str | None = None,
 ) -> asyncio.Server:
     """Start daemon HTTP server; return server instance (caller is responsible for close).
@@ -380,6 +399,11 @@ async def start_health_server(
             it is not alive, ``/healthz`` returns 503 instead of 200 so the
             watchdog respawns a wedged daemon. Groups also expose per-loop
             progress snapshots in the response.
+        components: optional per-component health state. A callable is evaluated
+            for each request, so a daemon can report fresh worker progress without
+            sharing mutable response state with this server.
+        extra: optional non-component health fields. As with ``components``, a
+            callable is evaluated on each request.
         auth_token: when set, every ``extra_routes`` request must carry
             ``Authorization: Bearer <auth_token>`` or it gets 401. ``/healthz``
             stays unauthenticated (the watchdog probes it locally and it leaks
@@ -430,8 +454,10 @@ async def start_health_server(
                         )
 
                     if method == "GET" and path == "/healthz":
+                        current_components = components() if callable(components) else components
+                        current_extra = extra() if callable(extra) else extra
                         status, healthz_body = _healthz_payload(
-                            name, pid, home, started_at, liveness
+                            name, pid, home, started_at, liveness, current_components, current_extra
                         )
                         response = _build_response(status, healthz_body, "application/json")
                     elif (method, path) in routes:
@@ -598,6 +624,17 @@ def _health_payload(url: str, timeout_s: float) -> dict[str, object] | DaemonPro
             if not (200 <= resp.status < 300):
                 return DaemonProbe.down(f"healthz returned HTTP {resp.status}")
             body = resp.read(_MAX_BODY_BYTES)
+    except urllib.error.HTTPError as exc:
+        detail = f"healthz returned HTTP {exc.code}"
+        try:
+            parsed = json.loads(exc.read(_MAX_BODY_BYTES))
+        except json.JSONDecodeError:
+            return DaemonProbe.down(detail)
+        if isinstance(parsed, dict) and isinstance(parsed.get("degraded_reasons"), list):
+            reasons = "; ".join(str(reason) for reason in parsed["degraded_reasons"])
+            if reasons:
+                detail += f"; degraded: {reasons}"
+        return DaemonProbe.down(detail)
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
         return DaemonProbe.down(f"healthz unreachable: {type(exc).__name__}: {exc}")
     try:
