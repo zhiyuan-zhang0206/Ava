@@ -46,6 +46,7 @@ The full linter inventory — what each one enforces and where it runs: [[script
 - `cloud-bench-bootstrap.sh`, `metrics.py`
 - `rotate_cluster_secret.py` — emergency control-plane `AVA_CLUSTER_SECRET` bearer rotation on the gateway machine (default `--dry-run`); it does not change the data plane
 - `rotate_data_plane_secrets.py` — routine gateway-local data-plane rotation (`--scope admin`, `runner`, or `both`) with a 0600 recovery state
+- `restore_drill.py` — decrypts a managed database backup, restores it into throwaway Postgres, and verifies schema, checkpoint counts, and a readable conversation without touching the live databaserypted daily artifacts)
 
 ## Key Dependencies
 

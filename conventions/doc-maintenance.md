@@ -180,7 +180,7 @@ Process, rule, and observed-behaviour changes → the doc that owns them:
 | Change | Doc |
 |---|---|
 | Operational procedures | `.agents/skills/` (one skill per procedure) |
-| Backup schedule / retention / restore | `.agents/skills/recover-a-cluster/references/db-restore.md` — the `pg-backup` service's own behaviour moved with the restore procedure rather than staying in the runtime model |
+| Backup schedule / retention / restore | `.agents/skills/operating-ava-cluster/references/db-restore.md` — the `pg-backup` service's own behaviour moved with the restore procedure rather than staying in the runtime model |
 | Runtime model (clusters, data plane, logging, CI) | `runbook.md` |
 | Dev environment setup | `dev-setup.md` |
 | PR process | `.agents/skills/write-a-pr-description/SKILL.md` |

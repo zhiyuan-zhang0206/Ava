@@ -87,4 +87,4 @@ the box, so it lives in the default home regardless of which unit reads it.
   `run/<service>.pid`, was handled with a permanent dual read
   (`legacy_pid_path()`), which is why this one is a one-shot rename instead.
 - Operational procedures that act on these paths (backup/restore, log reading,
-  recovery) are in `.agents/skills/recover-a-cluster/SKILL.md`.
+  recovery) are in `.agents/skills/operating-ava-cluster/`.
