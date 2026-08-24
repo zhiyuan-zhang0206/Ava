@@ -72,9 +72,28 @@ _start_native() {
     exit 1
 }
 
+_retire_legacy_grafana() {
+    local domain="gui/$(id -u)"
+    local legacy_label="com.ava.grafana-native"
+    local legacy_plist="$HOME/Library/LaunchAgents/$legacy_label.plist"
+    if ! launchctl print "$domain/$legacy_label" >/dev/null 2>&1; then
+        return
+    fi
+    log "retiring legacy Grafana job after native Grafana became reachable"
+    if ! launchctl bootout "$domain/$legacy_label"; then
+        log "WARNING: legacy Grafana job bootout returned non-zero"
+    fi
+    if rm -f "$legacy_plist"; then
+        log "removed legacy Grafana plist $legacy_plist"
+    else
+        log "WARNING: could not remove legacy Grafana plist $legacy_plist"
+    fi
+}
+
 _start_native loki http://127.0.0.1:3100/ready
 _start_native prometheus http://127.0.0.1:9090/-/ready
 _start_native grafana http://127.0.0.1:3003/
+_retire_legacy_grafana
 
 grafana_password="$NATIVE_DIR/grafana/admin_password"
 if [[ -f "$grafana_password" ]]; then

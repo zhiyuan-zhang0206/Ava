@@ -122,7 +122,7 @@ Copy `.env.example` to `.env` only when an override is needed.
 | `GRAFANA_ROOT_URL` | `http://localhost:3003` | Grafana redirect URL |
 | `GRAFANA_PROVISIONING_PATH` | checkout provisioning directory | Rendered by converge for native Grafana; do not set it in `.env` |
 | `AVA_TELEMETRY_TEMPO_ENDPOINT` | `http://127.0.0.1:14318` | Tempo OTLP intake URL for trace export |
-| `AVA_TELEMETRY_TEMPO_QUERY_URL` | `http://127.0.0.1:3200` | Tempo query/metrics URL rendered into native Grafana and Prometheus |
+| `AVA_TELEMETRY_TEMPO_QUERY_URL` | `http://127.0.0.1:3200` | Tempo query/metrics URL rendered into native Grafana and Prometheus; when Tempo is remote, this host-scoped setting must name its remote query endpoint (writable through the config API), and converge warns when it conflicts with the intake topology |
 
 `.env` holds live secrets and is gitignored; never commit it. Converge renders
 the native Grafana provisioning path and runtime configuration; `.env` supplies

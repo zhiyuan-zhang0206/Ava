@@ -39,16 +39,22 @@ def _toolset(tmp_path: Path) -> tuple[dict[str, str], Path]:
         fi
         if [[ "$1" == "print" ]]; then
           case "$2" in
+            *grafana-native*) [[ -e "$FAKE_LOADED/grafana-native" ]] && exit 0 || exit 1 ;;
             *loki*) [[ -e "$FAKE_LOADED/loki" ]] && exit 0 || exit 1 ;;
             *prometheus*) [[ -e "$FAKE_LOADED/prometheus" ]] && exit 0 || exit 1 ;;
             *grafana*) [[ -e "$FAKE_LOADED/grafana" ]] && exit 0 || exit 1 ;;
           esac
           exit 1
         fi
+        if [[ "$1" == "bootout" && "$2" == *grafana-native* ]]; then
+          rm -f "$FAKE_LOADED/grafana-native"
+          exit 0
+        fi
         [[ "$1" == "bootout" ]] && exit 1
         exit 0
         """,
     )
+    _executable(tools / "sleep", "#!/usr/bin/env bash\n")
     _executable(
         tools / "curl",
         """\
@@ -70,6 +76,10 @@ def _toolset(tmp_path: Path) -> tuple[dict[str, str], Path]:
           *:3003/*) name=grafana ;;
           *) printf '200' ; exit 0 ;;
         esac
+        if [[ "$name" == "grafana" && -n "${FAKE_GRAFANA_UNREACHABLE:-}" ]]; then
+          printf '000'
+          exit 0
+        fi
         [[ -e "$FAKE_UP/$name" ]] && printf '200' || printf '000'
         """,
     )
@@ -81,7 +91,6 @@ def _toolset(tmp_path: Path) -> tuple[dict[str, str], Path]:
         binary.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
         binary.chmod(0o755)
     (home / "lgtm/native/grafana").mkdir(parents=True)
-    (home / "lgtm/native/grafana/admin_password").write_text("test-password\n", encoding="utf-8")
     _executable(
         home / "lgtm/native/grafana/run.sh",
         "#!/usr/bin/env bash\n",
@@ -150,8 +159,43 @@ def test_start_fails_when_a_native_binary_is_missing(tmp_path: Path) -> None:
 def test_start_counts_provisioned_rules_as_json_documents(tmp_path: Path) -> None:
     env, _log = _toolset(tmp_path)
     env["FAKE_RULE_COUNT"] = "17"
+    password_file = Path(env["AVA_HOME"]) / "lgtm/native/grafana/admin_password"
+    password_file.write_text("test-password\n", encoding="utf-8")
 
     result = _run(START, env)
 
     assert result.returncode == 0, result.stderr + result.stdout
     assert "Grafana provisioned 17 alert rules; expected at least 18" in result.stdout
+
+
+def test_start_retires_legacy_grafana_only_after_the_replacement_is_reachable(
+    tmp_path: Path,
+) -> None:
+    env, log = _toolset(tmp_path)
+    home = Path(env["AVA_HOME"])
+    legacy_plist = home / "Library/LaunchAgents/com.ava.grafana-native.plist"
+    legacy_plist.touch()
+    (Path(env["FAKE_LOADED"]) / "grafana-native").touch()
+
+    result = _run(START, env)
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert f"bootout gui/{os.getuid()}/com.ava.grafana-native" in log.read_text(encoding="utf-8")
+    assert not legacy_plist.exists()
+
+
+def test_start_preserves_legacy_grafana_when_replacement_never_becomes_reachable(
+    tmp_path: Path,
+) -> None:
+    env, log = _toolset(tmp_path)
+    env["FAKE_GRAFANA_UNREACHABLE"] = "1"
+    home = Path(env["AVA_HOME"])
+    legacy_plist = home / "Library/LaunchAgents/com.ava.grafana-native.plist"
+    legacy_plist.touch()
+    (Path(env["FAKE_LOADED"]) / "grafana-native").touch()
+
+    result = _run(START, env)
+
+    assert result.returncode == 1
+    assert "com.ava.grafana-native" not in log.read_text(encoding="utf-8")
+    assert legacy_plist.exists()

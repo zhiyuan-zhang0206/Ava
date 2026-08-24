@@ -8,6 +8,7 @@ next lifecycle run.
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import os
 import platform
 import plistlib
@@ -23,6 +24,7 @@ import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
+from urllib.parse import urlparse
 
 import yaml
 
@@ -291,12 +293,35 @@ def _download_and_verify(name: str, version: str, asset: dict[str, str], native_
     (native_dir / f"version-{name}").write_text(version + "\n", encoding="utf-8")
 
 
-def _write_if_changed(path: Path, content: str) -> None:
+def _write_if_changed(path: Path, content: str, *, mode: int | None = None) -> None:
     """Publish text only when it differs, avoiding needless launchd churn."""
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists() and path.read_text(encoding="utf-8") == content:
+        if mode is not None:
+            path.chmod(mode)
         return
-    path.write_text(content, encoding="utf-8")
+    if mode is None:
+        path.write_text(content, encoding="utf-8")
+        return
+    if path.exists():
+        path.chmod(mode)
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
+    with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+        os.fchmod(output.fileno(), mode)
+        output.write(content)
+
+
+def _has_loopback_host(url: str) -> bool:
+    """Whether a configured URL resolves to a loopback hostname or address."""
+    hostname = urlparse(url).hostname
+    if hostname is None:
+        return False
+    if hostname.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(hostname).is_loopback
+    except ValueError:
+        return False
 
 
 def _render_configs(repo: Path, native_dir: Path, ava_home: Path) -> None:
@@ -306,6 +331,14 @@ def _render_configs(repo: Path, native_dir: Path, ava_home: Path) -> None:
     source_dir = repo / "deploy/lgtm/native/config"
     provisioning_dir = repo / "deploy/lgtm/config/grafana/provisioning"
     tempo_query_url = settings.observability.telemetry_tempo_query_url.rstrip("/")
+    tempo_intake_endpoint = settings.observability.telemetry_tempo_endpoint.rstrip("/")
+    if _has_loopback_host(tempo_query_url) != _has_loopback_host(tempo_intake_endpoint):
+        print(
+            "lgtm native: AVA_TELEMETRY_TEMPO_QUERY_URL resolves to "
+            f"{tempo_query_url} but the Tempo intake endpoint is {tempo_intake_endpoint} "
+            "— set AVA_TELEMETRY_TEMPO_QUERY_URL to the remote cluster's query URL",
+            file=sys.stderr,
+        )
     substitutions = {
         "AVA_HOME": str(ava_home),
         "AVA_PROVISIONING_PATH": str(provisioning_dir),
@@ -338,6 +371,17 @@ def _render_configs(repo: Path, native_dir: Path, ava_home: Path) -> None:
     rendered_run_script = native_dir / "grafana" / "run.sh"
     _write_if_changed(rendered_run_script, run_script)
     rendered_run_script.chmod(0o755)
+
+
+def _render_grafana_admin_password(native_dir: Path) -> None:
+    """Render the host-scoped Grafana credential when the setting is configured."""
+    from shared.config import settings
+
+    credential = settings.alerts.grafana_admin_password
+    if credential is None:
+        return
+    credential_file = native_dir / "grafana/admin_password"
+    _write_if_changed(credential_file, credential.get_secret_value() + "\n", mode=0o600)
 
 
 def _launchctl(*args: str) -> subprocess.CompletedProcess[str]:
@@ -390,7 +434,10 @@ def _retire_other_native_jobs(ava_home: Path) -> None:
             if label == current:
                 continue
             plists[label] = plist
-        for label in set(plists) | competing_loaded:
+        competitors = set(plists) | competing_loaded
+        if not competitors or not _job_loaded(current):
+            continue
+        for label in competitors:
             plist = plists.get(label, _plist_path(label))
             was_loaded = label in competing_loaded or _job_loaded(label)
             booted_out = (
@@ -437,6 +484,7 @@ def ensure_lgtm_native(repo: Path, ava_home: Path) -> None:
         _download_and_verify(name, asset["version"], asset, native_dir)
         print(f"  · lgtm native: installed {name} {asset['version']} ({tag})")
     _render_configs(repo, native_dir, ava_home)
+    _render_grafana_admin_password(native_dir)
     for name in _NATIVE_CONSTANTS:
         label = native_label(name, ava_home)
         _write_if_changed(_plist_path(label), _render_plist(name, native_dir, ava_home))
