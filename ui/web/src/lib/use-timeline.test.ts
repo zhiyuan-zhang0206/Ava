@@ -249,35 +249,89 @@ describe("useTimeline mount + initial fetch", () => {
     expect(showError).not.toHaveBeenCalled();
   });
 
-  it("loadOlder skips the re-attached 0.0 system-prompt item as the before cursor (#579-P1)", async () => {
-    // GET /timeline re-attaches 0.0 at the window head (#570). Using it as
-    // the paging cursor made the backend return an empty window +
-    // has_more=false, permanently killing scroll-up history loading.
+  it("loadOlder skips all re-attached context and keeps paging from the oldest real item", async () => {
+    // GET /timeline re-attaches the prompt and compact summary at every
+    // window head. Neither is a valid cursor for the historical tail.
     const showError = vi.fn();
     vi.mocked(api.getTimeline).mockResolvedValueOnce(
       tlResp(
         [
           snapshotItem({ item_id: "0.0", kind: "system_prompt", payload: "PROMPT" }),
-          snapshotItem({ item_id: "5.0", kind: "inbound_chat", payload: "recent" }),
-          snapshotItem({ item_id: "6.0", payload: "newest" }),
+          snapshotItem({
+            item_id: "6.0",
+            kind: "inbound_compact_summary",
+            payload: "SUMMARY",
+          }),
+          snapshotItem({ item_id: "960.1", kind: "inbound_chat", payload: "recent" }),
         ],
         true,
       ),
     );
     vi.mocked(api.getTimeline).mockResolvedValueOnce(
-      tlResp([snapshotItem({ item_id: "3.0", kind: "inbound_chat", payload: "older" })], false),
+      tlResp(
+        [
+          snapshotItem({ item_id: "0.0", kind: "system_prompt", payload: "PROMPT" }),
+          snapshotItem({
+            item_id: "6.0",
+            kind: "inbound_compact_summary",
+            payload: "SUMMARY",
+          }),
+          snapshotItem({ item_id: "915.1", kind: "agent_chat", payload: "older" }),
+        ],
+        true,
+      ),
+    );
+    vi.mocked(api.getTimeline).mockResolvedValueOnce(
+      tlResp(
+        [
+          snapshotItem({ item_id: "0.0", kind: "system_prompt", payload: "PROMPT" }),
+          snapshotItem({
+            item_id: "6.0",
+            kind: "inbound_compact_summary",
+            payload: "SUMMARY",
+          }),
+          snapshotItem({ item_id: "800.1", kind: "agent_chat", payload: "oldest" }),
+        ],
+        false,
+      ),
     );
 
     const { result } = renderHook(() => useTimeline(42, showError), { wrapper });
     await waitFor(() => expect(result.current.items).toHaveLength(3));
     expect(result.current.hasMoreOlder).toBe(true);
+    vi.mocked(api.getTimeline).mockClear();
 
     act(() => result.current.loadOlder());
 
     await waitFor(() => expect(result.current.items).toHaveLength(4));
-    // Cursor must be the oldest NON-0.0 stable id.
-    expect(api.getTimeline).toHaveBeenLastCalledWith(42, { before: "5.0", limit: 50 });
-    expect(result.current.items.map((i) => i.item_id)).toEqual(["0.0", "3.0", "5.0", "6.0"]);
+    expect(api.getTimeline).toHaveBeenNthCalledWith(1, 42, {
+      before: "960.1",
+      limit: 50,
+    });
+    expect(result.current.items.map((i) => i.item_id)).toEqual([
+      "0.0",
+      "6.0",
+      "915.1",
+      "960.1",
+    ]);
+    expect(result.current.hasMoreOlder).toBe(true);
+
+    act(() => result.current.loadOlder());
+
+    await waitFor(() => expect(result.current.items).toHaveLength(5));
+    expect(api.getTimeline).toHaveBeenNthCalledWith(2, 42, {
+      before: "915.1",
+      limit: 100,
+    });
+    expect(result.current.items.map((i) => i.item_id)).toEqual([
+      "0.0",
+      "6.0",
+      "800.1",
+      "915.1",
+      "960.1",
+    ]);
+    expect(result.current.hasMoreOlder).toBe(false);
+    expect(showError).not.toHaveBeenCalled();
   });
 
   it("loadOlder is a no-op when hasMoreOlder is false", async () => {
