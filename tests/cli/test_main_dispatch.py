@@ -41,6 +41,7 @@ _HANDLERS: tuple[tuple[list[str], str], ...] = (
     (["agents", "kill", "1"], "_h_agents_kill"),
     (["agents", "resurrect", "1"], "_h_agents_resurrect"),
     (["mcp", "serve"], "_h_mcp_serve"),
+    (["logs", "retention"], "_h_logs_retention"),
 )
 
 
@@ -100,12 +101,51 @@ def test_migrations_subcommand_removed() -> None:
         _main._build_parser().parse_args(["migrations", "apply"])
 
 
-def test_logs_subcommand_removed() -> None:
-    """`ava logs` is gone — raw session output is queried in Loki (local LGTM
-    viewer), not tailed by a self-built CLI. argparse exits 2 on the unknown
-    subcommand."""
+def test_logs_retention_parser_accepts_the_public_flags() -> None:
+    """The local-log cleanup contract is reachable at `ava logs retention`."""
+    args = _main._build_parser().parse_args(
+        ["logs", "retention", "--older-than", "21", "--dry-run"]
+    )
+
+    assert args.older_than == 21
+    assert args.dry_run is True
+
+
+def test_logs_retention_default_comes_from_observability_settings() -> None:
+    from shared.config.observability import ObservabilitySettings
+
+    field = ObservabilitySettings.model_fields["log_retention_days"]
+    configured = ObservabilitySettings(AVA_LOG_RETENTION_DAYS=23)
+
+    assert field.alias == "AVA_LOG_RETENTION_DAYS"
+    assert configured.log_retention_days == 23
+
+
+def test_logs_retention_parser_rejects_non_positive_days() -> None:
     with pytest.raises(SystemExit):
-        _main._build_parser().parse_args(["logs"])
+        _main._build_parser().parse_args(["logs", "retention", "--older-than", "0"])
+
+
+def test_logs_retention_settings_reject_non_positive_environment_default() -> None:
+    from pydantic import ValidationError
+
+    from shared.config.observability import ObservabilitySettings
+
+    with pytest.raises(ValidationError):
+        ObservabilitySettings(AVA_LOG_RETENTION_DAYS=0)
+
+
+def test_logs_retention_help_explains_defaults_and_dry_run(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with pytest.raises(SystemExit) as exited:
+        _main._build_parser().parse_args(["logs", "retention", "--help"])
+
+    assert exited.value.code == 0
+    help_text = capsys.readouterr().out
+    assert "14 days" in help_text
+    assert "AVA_LOG_RETENTION_DAYS" in help_text
+    assert "without deleting" in help_text
 
 
 def test_start_subcommand_forwards_argparse_flags(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -160,7 +200,7 @@ def test_maintenance_verbs_opt_out_of_the_gateway_fetch(
     # same way `start`'s installed-home gate is neutralized below: this test
     # asserts env pinning, not gate behaviour.
     monkeypatch.setattr(_preflight, "require_anchored_home", lambda _verb: None)  # pyright: ignore[reportUnknownArgumentType]
-    for verb in ("stop", "status", "cluster", "agents", "config"):
+    for verb in ("stop", "status", "cluster", "agents", "config", "logs"):
         env = {"PATH": "/usr/bin"}
         monkeypatch.setattr(_os, "environ", env)
         monkeypatch.setattr(_main, "_build_parser", lambda v=verb: _noop_parser(v))
@@ -239,6 +279,7 @@ def _anchored(monkeypatch: pytest.MonkeyPatch, home: str = "/Users/x/.ava-worktr
         ["cluster", "restart"],
         ["cluster", "rollback"],
         ["cluster", "recover"],
+        ["logs", "retention"],
     ],
 )
 def test_unanchored_checkout_is_refused_before_dispatch(

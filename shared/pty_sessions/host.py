@@ -47,7 +47,6 @@ import psutil
 
 from shared.log import logger
 from shared.pty_sessions._paths import DEFAULT_COLS, DEFAULT_ROWS, err, ok, write_record
-from shared.pty_sessions.retention import prune_stale_transcripts
 from shared.session_record import SessionRecord, pid_starttime_ticks
 
 # A pid is "the same process we launched" only if its start-time matches to
@@ -713,7 +712,6 @@ def main(argv: list[str] | None = None) -> int:
     if not Path(cwd).is_dir():
         sys.stderr.write(f"cwd is not a directory: {cwd}\n")
         return 1
-    prune_stale_transcripts(transcript.parent)
     try:
         env = _load_env_file(envfile)
     except OSError as exc:

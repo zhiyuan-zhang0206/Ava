@@ -52,6 +52,23 @@ class ObservabilitySettings(EnvSettings):
         },
     )
 
+    log_retention_days: int = Field(
+        default=14,
+        ge=1,
+        alias="AVA_LOG_RETENTION_DAYS",
+        description=(
+            "Delete managed top-level agent, named PTY, and rotated Loguru files "
+            "older than this many days when `ava logs retention` runs."
+        ),
+        json_schema_extra={
+            "restart_required": "none",
+            "writable": True,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
+
     trace_strip_content: bool = Field(
         default=True,
         alias="AVA_TRACE_STRIP_CONTENT",
