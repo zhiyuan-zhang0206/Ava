@@ -4,13 +4,16 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from itertools import pairwise
+from typing import Any, Never
 
 import psycopg
 import pytest
 from psycopg.types.json import Jsonb
+from psycopg_pool import ConnectionPool
 
 from gateway import events_archive
 from gateway.routers import _inspect_pg, _inspect_stats
+from shared.config import settings
 
 
 class _BoundaryCursor:
@@ -252,6 +255,290 @@ def test_archive_lifecycle_is_chronological_for_one_replay_pass(
     )
     assert [event_name for _, event_name in lifecycle] == ["agent_spawned", "agent_terminated"]
     assert lifecycle == sorted(lifecycle)
+
+
+def test_archive_stats_rollup_matches_raw_reads(db_conn: psycopg.Connection) -> None:
+    agent_id = _insert_agent(db_conn)
+    no_archive_agent_id = _insert_agent(db_conn)
+    now = datetime.now(tz=UTC)
+    _insert_event(
+        db_conn,
+        agent_id=agent_id,
+        event_name="turn_end",
+        ts=now - timedelta(minutes=6),
+        attributes={"duration_seconds": 1.5},
+    )
+    _insert_event(
+        db_conn,
+        agent_id=agent_id,
+        event_name="turn_end",
+        ts=now - timedelta(minutes=5),
+        attributes={"duration_seconds": 2.5},
+    )
+    _insert_event(
+        db_conn,
+        agent_id=agent_id,
+        event_name="turn_end",
+        ts=now - timedelta(minutes=4),
+        attributes={"duration_seconds": 2.5},
+    )
+    _insert_event(
+        db_conn,
+        agent_id=agent_id,
+        event_name="node_exit",
+        ts=now - timedelta(minutes=3),
+        attributes={"duration_seconds": 3.0, "node": "claim"},
+    )
+    _insert_event(
+        db_conn,
+        agent_id=agent_id,
+        event_name="node_exit",
+        ts=now - timedelta(minutes=2),
+        attributes={"duration_seconds": 5.0, "node": "exec"},
+    )
+    _insert_event(
+        db_conn,
+        agent_id=agent_id,
+        event_name="node_exit",
+        ts=now - timedelta(minutes=1, seconds=30),
+        attributes={"duration_seconds": 7.0, "node": "other"},
+    )
+    _insert_event(
+        db_conn,
+        agent_id=agent_id,
+        event_name="agent_spawned",
+        ts=now - timedelta(minutes=1, seconds=15),
+        attributes={},
+    )
+    _insert_event(
+        db_conn,
+        agent_id=agent_id,
+        event_name="agent_terminated",
+        ts=now - timedelta(minutes=1),
+        attributes={},
+    )
+    _insert_event(
+        db_conn,
+        agent_id=agent_id,
+        event_name="freeze_marker",
+        ts=now - timedelta(seconds=30),
+        attributes={},
+    )
+    with db_conn.cursor() as cur:
+        cur.execute(
+            """
+            WITH archive_agents AS (
+                SELECT DISTINCT agent_id FROM events WHERE agent_id IS NOT NULL
+            ),
+            turn_distributions AS (
+                SELECT agent_id, jsonb_agg(jsonb_build_array(value, count) ORDER BY value)
+                    AS turn_distribution
+                FROM (
+                    SELECT agent_id, (attributes ->> 'duration_seconds')::float8 AS value,
+                        count(*) AS count
+                    FROM events
+                    WHERE event_name ~ '^turn_end$'
+                      AND category = ANY(ARRAY['telemetry', 'log'])
+                      AND ts < (SELECT max(ts) FROM events)
+                    GROUP BY agent_id, value
+                ) grouped
+                GROUP BY agent_id
+            ),
+            node_durations AS (
+                SELECT agent_id,
+                    COALESCE(
+                        sum((attributes ->> 'duration_seconds')::float8)
+                            FILTER (WHERE COALESCE(attributes ->> 'node', '') <> 'claim'),
+                        0
+                    ) AS active_seconds,
+                    COALESCE(
+                        sum((attributes ->> 'duration_seconds')::float8)
+                            FILTER (WHERE attributes ->> 'node' = 'exec'),
+                        0
+                    ) AS exec_seconds
+                FROM events
+                WHERE event_name ~ '^node_exit$'
+                  AND ts < (SELECT max(ts) FROM events)
+                GROUP BY agent_id
+            ),
+            lifecycle_events AS (
+                SELECT agent_id,
+                    jsonb_agg(
+                        jsonb_build_array(
+                            to_char(ts AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"'),
+                            event_name
+                        )
+                        ORDER BY ts
+                    ) AS lifecycle
+                FROM events
+                WHERE event_name ~ '^(agent_spawned|agent_resurrected|agent_terminated)$'
+                  AND ts < (SELECT max(ts) FROM events)
+                GROUP BY agent_id
+            )
+            INSERT INTO agent_archive_stats (
+                agent_id, turn_distribution, active_seconds, exec_seconds, lifecycle
+            )
+            SELECT archive_agents.agent_id,
+                COALESCE(turn_distributions.turn_distribution, '[]'::jsonb),
+                COALESCE(node_durations.active_seconds, 0),
+                COALESCE(node_durations.exec_seconds, 0),
+                COALESCE(lifecycle_events.lifecycle, '[]'::jsonb)
+            FROM archive_agents
+            LEFT JOIN turn_distributions USING (agent_id)
+            LEFT JOIN node_durations USING (agent_id)
+            LEFT JOIN lifecycle_events USING (agent_id)
+            ON CONFLICT (agent_id) DO UPDATE SET
+                turn_distribution = EXCLUDED.turn_distribution,
+                active_seconds = EXCLUDED.active_seconds,
+                exec_seconds = EXCLUDED.exec_seconds,
+                lifecycle = EXCLUDED.lifecycle,
+                computed_at = EXCLUDED.computed_at
+            """
+        )
+    db_conn.commit()
+
+    assert _inspect_pg.archive_stats(db_conn, agent_id=agent_id) == _inspect_pg.ArchiveStats(
+        turn_distribution=_inspect_pg.archive_distribution(
+            db_conn,
+            field="duration_seconds",
+            agent_id=agent_id,
+            event_names=["^turn_end$"],
+            categories=["telemetry", "log"],
+            attribute_filters=None,
+            from_=None,
+            to=None,
+        ),
+        active_seconds=_inspect_pg.archive_aggregate(
+            db_conn,
+            field="duration_seconds",
+            agg="sum",
+            agent_id=agent_id,
+            event_names=["^node_exit$"],
+            categories=None,
+            attribute_filters={"node": "!=claim"},
+            from_=None,
+            to=None,
+        ),
+        exec_seconds=_inspect_pg.archive_aggregate(
+            db_conn,
+            field="duration_seconds",
+            agg="sum",
+            agent_id=agent_id,
+            event_names=["^node_exit$"],
+            categories=None,
+            attribute_filters={"node": "exec"},
+            from_=None,
+            to=None,
+        ),
+        lifecycle=_inspect_pg.archive_lifecycle(db_conn, agent_id=agent_id, from_=None, to=None),
+    )
+    assert _inspect_pg.archive_stats(db_conn, agent_id=no_archive_agent_id) is None
+
+
+def test_inspect_values_whole_life_prefers_rollup_over_raw_scan(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    agent_id = _insert_agent(db_conn)
+    now = datetime.now(tz=UTC)
+    _insert_event(
+        db_conn,
+        agent_id=agent_id,
+        event_name="turn_end",
+        ts=now - timedelta(minutes=2),
+        attributes={"duration_seconds": 1.0},
+    )
+    _insert_event(
+        db_conn,
+        agent_id=agent_id,
+        event_name="turn_end",
+        ts=now - timedelta(minutes=1),
+        attributes={"duration_seconds": 2.0},
+    )
+    _insert_event(
+        db_conn,
+        agent_id=agent_id,
+        event_name="freeze_marker",
+        ts=now - timedelta(seconds=30),
+        attributes={},
+    )
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agent_archive_stats (agent_id, turn_distribution) VALUES (%s, %s::jsonb)",
+            (agent_id, Jsonb([[41.5, 2]])),
+        )
+    db_conn.commit()
+
+    def raw_archive_read_must_not_run(*_args: Any, **_kwargs: Any) -> Never:
+        raise AssertionError("whole-life inspect must use the archive rollup")
+
+    monkeypatch.setattr(_inspect_pg, "archive_distribution", raw_archive_read_must_not_run)
+    monkeypatch.setattr(_inspect_pg, "archive_aggregate", raw_archive_read_must_not_run)
+    monkeypatch.setattr(_inspect_pg, "archive_lifecycle", raw_archive_read_must_not_run)
+
+    def no_projected_lines(**_kwargs: Any) -> list[tuple[int, int | None, str]]:
+        return []
+
+    monkeypatch.setattr(_inspect_stats.loki_events, "query_projected_lines", no_projected_lines)
+
+    with ConnectionPool(settings.data_plane.db_url, min_size=1, max_size=1) as pool:
+        values = _inspect_stats.inspect_values(pool, agent_id, None, None)
+
+    assert values.stats.turn_p50_seconds == 41.5
+    assert values.stats.turn_p90_seconds == 41.5
+    assert values.stats.turn_min_seconds == 41.5
+    assert values.stats.turn_max_seconds == 41.5
+
+
+def test_inspect_values_windowed_uses_rollup_lifecycle(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    agent_id = _insert_agent(db_conn)
+    now = datetime.now(tz=UTC)
+    _insert_event(
+        db_conn,
+        agent_id=agent_id,
+        event_name="agent_spawned",
+        ts=now - timedelta(hours=3),
+        attributes={},
+    )
+    _insert_event(
+        db_conn,
+        agent_id=agent_id,
+        event_name="turn_end",
+        ts=now - timedelta(minutes=45),
+        attributes={"duration_seconds": 4.5},
+    )
+    _insert_event(
+        db_conn,
+        agent_id=agent_id,
+        event_name="freeze_marker",
+        ts=now - timedelta(minutes=30),
+        attributes={},
+    )
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agent_archive_stats (agent_id, turn_distribution, lifecycle) "
+            "VALUES (%s, %s::jsonb, %s::jsonb)",
+            (
+                agent_id,
+                Jsonb([[99.0, 1]]),
+                Jsonb([["2026-08-12T01:02:03.123456Z", "agent_resurrected"]]),
+            ),
+        )
+    db_conn.commit()
+
+    def no_projected_lines(**_kwargs: Any) -> list[tuple[int, int | None, str]]:
+        return []
+
+    monkeypatch.setattr(_inspect_stats.loki_events, "query_projected_lines", no_projected_lines)
+    with ConnectionPool(settings.data_plane.db_url, min_size=1, max_size=1) as pool:
+        values = _inspect_stats.inspect_values(pool, agent_id, now - timedelta(hours=1), None)
+
+    assert values.lifecycle_events == [
+        (datetime(2026, 8, 12, 1, 2, 3, 123456, tzinfo=UTC), "agent_resurrected")
+    ]
+    assert values.stats.turn_p50_seconds == 4.5
+    assert values.stats.turn_p90_seconds == 4.5
 
 
 def test_three_hour_shards_and_archive_live_percentile_merging_are_exactly_bounded() -> None:

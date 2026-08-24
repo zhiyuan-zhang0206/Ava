@@ -282,6 +282,7 @@ def _projected_live_values(
         from_=min(start for start, _ in spans),
         to=max(end for _, end in spans),
         timeout_s=8.0,
+        limit_per_slice=20000,
     )
 
     turn_total = turn_ok = exec_ok = exec_failed = 0
@@ -371,11 +372,15 @@ def inspect_values(
     the legacy slice. An agent with no indexed start event uses the existing
     `agents_meta.spawned_at → now` fallback; whole-life and 7-day views then
     approximate pre-cutover terminate/resurrect gaps until that slice expires
-    on 2026-08-30. Every interactive Loki read is capped at eight seconds.
+    on 2026-08-30. Whole-life archive distribution, activity, and lifecycle
+    values use the frozen-archive rollup when it exists; windowed reads retain
+    the raw archive fallback. Every interactive Loki read is capped at eight
+    seconds.
     """
     plan = full_day_plan(from_, to)
     with pool.connection() as conn, conn.cursor() as cur:
         freeze = _inspect_pg.freeze_point(cur)
+        rollup = _inspect_pg.archive_stats(conn, agent_id=agent_id)
         if plan.has_full_days:
             max_day = _inspect_pg.newest_ledger_day(
                 conn, agent_id=agent_id, day_from=plan.day_from, day_to=plan.day_to
@@ -400,40 +405,47 @@ def inspect_values(
             ledger = (0, 0, 0.0, None, None, 0, 0, None)
             ledger_tokens = 0
             token_watermark = None
-        archive_distribution = _inspect_pg.archive_distribution(
-            conn,
-            field="duration_seconds",
-            agent_id=agent_id,
-            event_names=["^turn_end$"],
-            categories=["telemetry", "log"],
-            attribute_filters=None,
-            from_=from_,
-            to=to,
-        )
-        archive_active_seconds = _inspect_pg.archive_aggregate(
-            conn,
-            field="duration_seconds",
-            agg="sum",
-            event_names=["^node_exit$"],
-            categories=None,
-            agent_id=agent_id,
-            from_=from_,
-            to=to,
-            attribute_filters={"node": "!=claim"},
-        )
-        archive_exec_seconds = _inspect_pg.archive_aggregate(
-            conn,
-            field="duration_seconds",
-            agg="sum",
-            event_names=["^node_exit$"],
-            categories=None,
-            agent_id=agent_id,
-            from_=from_,
-            to=to,
-            attribute_filters={"node": "exec"},
-        )
-        archive_lifecycle = _inspect_pg.archive_lifecycle(
-            conn, agent_id=agent_id, from_=None, to=None
+        if rollup is not None and from_ is None:
+            archive_distribution = rollup.turn_distribution
+            archive_active_seconds = rollup.active_seconds
+            archive_exec_seconds = rollup.exec_seconds
+        else:
+            archive_distribution = _inspect_pg.archive_distribution(
+                conn,
+                field="duration_seconds",
+                agent_id=agent_id,
+                event_names=["^turn_end$"],
+                categories=["telemetry", "log"],
+                attribute_filters=None,
+                from_=from_,
+                to=to,
+            )
+            archive_active_seconds = _inspect_pg.archive_aggregate(
+                conn,
+                field="duration_seconds",
+                agg="sum",
+                event_names=["^node_exit$"],
+                categories=None,
+                agent_id=agent_id,
+                from_=from_,
+                to=to,
+                attribute_filters={"node": "!=claim"},
+            )
+            archive_exec_seconds = _inspect_pg.archive_aggregate(
+                conn,
+                field="duration_seconds",
+                agg="sum",
+                event_names=["^node_exit$"],
+                categories=None,
+                agent_id=agent_id,
+                from_=from_,
+                to=to,
+                attribute_filters={"node": "exec"},
+            )
+        archive_lifecycle = (
+            rollup.lifecycle
+            if rollup is not None
+            else _inspect_pg.archive_lifecycle(conn, agent_id=agent_id, from_=None, to=None)
         )
 
     turn_total, turn_ok, turn_sum, turn_min, turn_max, exec_ok, exec_failed, watermark = ledger
@@ -458,10 +470,11 @@ def inspect_values(
     )
     distribution = _turn_distribution(archive_distribution, live.distribution)
     minimum = min(
-        (value for value in (turn_min, *live.turn_durations) if value is not None), default=0.0
+        (value for value in (turn_min, *(value for value, _ in distribution)) if value is not None),
+        default=0.0,
     )
     maximum = max(
-        (value for value in (turn_max, *live.turn_durations) if value is not None),
+        (value for value in (turn_max, *(value for value, _ in distribution)) if value is not None),
         default=0.0,
     )
     stats = AgentStats(

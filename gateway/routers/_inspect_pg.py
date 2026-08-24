@@ -10,9 +10,9 @@ from __future__ import annotations
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, date, datetime, time, timedelta
-from typing import Any
+from typing import Any, NamedTuple
 
-from psycopg import Connection, sql
+from psycopg import Connection, errors, sql
 
 from gateway import events_archive
 from shared.loki_index_labels import retention_floor
@@ -21,9 +21,45 @@ _LOKI_SHARD = timedelta(hours=3)
 _LOKI_SHARD_WORKERS = 4
 
 
+class ArchiveStats(NamedTuple):
+    """One agent's materialized frozen-archive inspector values."""
+
+    turn_distribution: list[tuple[float, int]]
+    active_seconds: float
+    exec_seconds: float
+    lifecycle: list[tuple[datetime, str]]
+
+
 def freeze_point(cur: Any) -> datetime | None:
     """Return the exclusive upper bound of the frozen event archive."""
     return events_archive.load_frozen_boundary(cur)
+
+
+def archive_stats(conn: Connection[Any], *, agent_id: int) -> ArchiveStats | None:
+    """Return the materialized frozen-archive rollup row, or None when absent.
+
+    The events archive is frozen, so one computed row serves every whole-life
+    read. An agent with no archive rows has no rollup row; callers fall back
+    to the raw archive reads (which return empty for it anyway).
+    """
+    try:
+        with conn.transaction(), conn.cursor() as cur:
+            cur.execute(
+                "SELECT turn_distribution, active_seconds, exec_seconds, lifecycle "
+                "FROM agent_archive_stats WHERE agent_id = %s",
+                (agent_id,),
+            )
+            row = cur.fetchone()
+    except errors.UndefinedTable:
+        return None
+    if row is None:
+        return None
+    return ArchiveStats(
+        turn_distribution=[(float(value), int(count)) for value, count in row[0]],
+        active_seconds=float(row[1]),
+        exec_seconds=float(row[2]),
+        lifecycle=[(datetime.fromisoformat(ts), str(event_name)) for ts, event_name in row[3]],
+    )
 
 
 def _archive_where(

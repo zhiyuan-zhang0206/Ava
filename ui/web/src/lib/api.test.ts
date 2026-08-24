@@ -397,7 +397,7 @@ describe("stats / config / timeline / system status", () => {
     }));
 
     const request = api.getAgentInspect(7);
-    const timedOut = expect(request).rejects.toThrow("Inspector request exceeded 20000ms");
+    const timedOut = expect(request).rejects.toThrow("Inspector request exceeded 35000ms");
     await vi.runAllTimersAsync();
 
     expect(calls[0].init?.signal?.aborted).toBe(true);
