@@ -8,7 +8,7 @@
 // 2026-08-05 per user ruling — the Grafana embed shows runner health now.)
 //
 // Rendered as a section of the vertical Insights page; `useSectionVisible`
-// starts the 10s status poll on first paint and pauses it once the Status
+// starts the 15s status poll on first paint and pauses it once the Status
 // section scrolls off-screen, so it doesn't keep hitting the gateway while
 // unseen. The update check (a remote `git fetch` on the gateway) is NOT on an
 // interval: it fetches when the section comes on screen and on the explicit
@@ -46,12 +46,12 @@ export default function StatusPage() {
   // sidebar SpawnButton, machine badges, Config) — one key, one poll loop per
   // route. The app root deliberately does NOT poll /api/status (the health
   // hook watches /api/cluster/status only — see use-cluster-health.ts), so
-  // this visibility-gated 10s interval is what keeps the Status view fresh
+  // this visibility-gated 15s interval is what keeps the Status view fresh
   // on this route.
   const { data, isLoading, error } = useQuery({
     queryKey: SYSTEM_STATUS_QUERY_KEY,
     queryFn: api.getSystemStatus,
-    refetchInterval: 10_000,
+    refetchInterval: 15_000,
     enabled: visible,
   });
 
@@ -62,7 +62,7 @@ export default function StatusPage() {
       </div>
     );
   if (error && !data) {
-    // Status auto-refetches every 10s, so a fetch miss is usually transient
+    // Status auto-refetches every 15s, so a fetch miss is usually transient
     // (gateway restarting / momentary network). A cold failure gets a quiet
     // line; a failure WITH cached data keeps showing the data (stale-while-
     // error, Task #1051) instead of swapping the panel for an error page.

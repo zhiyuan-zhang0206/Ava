@@ -25,6 +25,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api } from "./api";
+import { noteTurnStart } from "./interaction-timing";
 import type { BackendTimelineItem, SystemEvent, TimelineResponse } from "./types";
 import { parseItemId } from "./timeline";
 import { useTimelineStore } from "./timeline-store";
@@ -55,6 +56,8 @@ vi.mock("./api", () => ({
     getTimeline: vi.fn(),
   },
 }));
+
+vi.mock("./interaction-timing", () => ({ noteTurnStart: vi.fn() }));
 
 // useAgentEventStream mock: tests invoke events directly via
 // currentEventHandler; currentConnectionHandler simulates SSE connection /
@@ -613,6 +616,24 @@ describe("useTimeline agentId switch", () => {
 });
 
 describe("useTimeline SSE inbound flow", () => {
+  it("notes every event role that starts the timeline turn state", async () => {
+    const showError = vi.fn();
+    renderHook(() => useTimeline(42, showError), { wrapper });
+    await waitFor(() => expect(api.getTimeline).toHaveBeenCalled());
+
+    const starts: SystemEvent[] = [
+      { role: "inbound_arrived", agent_id: 42, inbound_id: 1, kind: "chat", source: "user", content: "hi" },
+      { role: "chat_start", agent_id: 42, item_id: "1.0" },
+      { role: "code_start", agent_id: 42, item_id: "1.1" },
+      { role: "reasoning_start", agent_id: 42, item_id: "1.2" },
+      { role: "exec_start", agent_id: 42, item_id: "1.3" },
+    ];
+    for (const event of starts) pushEvent(event);
+
+    expect(noteTurnStart).toHaveBeenCalledTimes(starts.length);
+    expect(vi.mocked(noteTurnStart).mock.calls).toEqual(starts.map(() => [42]));
+  });
+
   it("inbound_arrived no longer produces an optimistic placeholder — turnActive flips true immediately; items unchanged", async () => {
     const showError = vi.fn();
     vi.mocked(api.getTimeline).mockResolvedValue(tlResp([
@@ -1350,5 +1371,6 @@ describe("useTimeline SSE batch path", () => {
     expect(result.current.items[0].item_id).toBe("7.0");
     expect(result.current.items[0].payload).toBe("print");
     expect(result.current.streamingCode).toBe(true);
+    expect(noteTurnStart).toHaveBeenCalledWith(42);
   });
 });

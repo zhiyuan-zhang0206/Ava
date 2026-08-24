@@ -8,7 +8,7 @@
 // the api layer.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api } from "@/lib/api";
@@ -144,6 +144,32 @@ beforeEach(() => {
     behind: 0,
     frontend_changed: false,
     backend_changed: false,
+  });
+});
+
+describe("StatusPage polling", () => {
+  it("does not refetch status before 15 seconds", async () => {
+    vi.useFakeTimers();
+    const view = wrap(<StatusPage />);
+    try {
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(api.getSystemStatus).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(14_999);
+      });
+      expect(api.getSystemStatus).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
+      });
+      expect(api.getSystemStatus).toHaveBeenCalledTimes(2);
+    } finally {
+      view.unmount();
+      vi.useRealTimers();
+    }
   });
 });
 

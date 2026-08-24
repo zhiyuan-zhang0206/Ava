@@ -13,6 +13,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api, MessageDeliveryUnknownError } from "@/lib/api";
+import { clearMessageSent, markMessageSent } from "@/lib/interaction-timing";
 
 import { Composer } from "./composer";
 
@@ -43,9 +44,16 @@ vi.mock("@/lib/api", () => ({
   },
 }));
 
+vi.mock("@/lib/interaction-timing", () => ({
+  clearMessageSent: vi.fn(),
+  markMessageSent: vi.fn(),
+}));
+
 const getCommandsMock = vi.mocked(api.getCommands);
 
 beforeEach(() => {
+  vi.mocked(clearMessageSent).mockClear();
+  vi.mocked(markMessageSent).mockClear();
   getCommandsMock.mockImplementation((_agentId?: number | null) =>
     Promise.resolve(commandList),
   );
@@ -167,6 +175,19 @@ describe("Composer button mode dispatch", () => {
     await Promise.resolve();
     expect(onSend).toHaveBeenCalledWith("hello", [], expect.any(String));
     expect(onStop).not.toHaveBeenCalled();
+  });
+
+  it("marks send latency at submit time before message delivery starts", () => {
+    const onSend = vi.fn(() => new Promise<boolean>(() => undefined));
+    render(<Composer {...baseProps} agentId={42} mode="idle" onSend={onSend} />);
+    fireEvent.change(screen.getByTestId("composer-input"), { target: { value: "hello" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(markMessageSent).toHaveBeenCalledWith(42);
+    expect(vi.mocked(markMessageSent).mock.invocationCallOrder[0]).toBeLessThan(
+      onSend.mock.invocationCallOrder[0],
+    );
   });
 
   it("mode='busy' + non-empty input → click triggers onSend (goes through inbound queue, doesn't stop turn)", async () => {
@@ -415,6 +436,7 @@ describe("Composer input lifecycle", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
     await screen.findByText(/Delivery unconfirmed/);
+    expect(clearMessageSent).not.toHaveBeenCalled();
     expect(ta.readOnly).toBe(true);
     expect(
       screen.getByRole<HTMLButtonElement>("button", { name: "Send message" }).disabled,
@@ -468,6 +490,7 @@ describe("Composer input lifecycle", () => {
     await screen.findByText(/Delivery unconfirmed/);
 
     fireEvent.click(screen.getByRole("button", { name: "Send another anyway" }));
+    expect(clearMessageSent).toHaveBeenCalledWith(7);
     expect(ta.readOnly).toBe(false);
     fireEvent.change(ta, { target: { value: "new explicit message" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
@@ -1452,6 +1475,7 @@ describe("Composer sessionStorage draft persistence", () => {
     expect(sessionStorage.getItem(draftKey(7))).toBe("failed send");
     fireEvent.keyDown(ta, { key: "Enter" });
     await waitFor(() => expect(onSend).toHaveBeenCalled());
+    await waitFor(() => expect(clearMessageSent).toHaveBeenCalledWith(7));
     // Draft survives a failed send.
     expect(sessionStorage.getItem(draftKey(7))).toBe("failed send");
   });

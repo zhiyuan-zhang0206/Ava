@@ -49,6 +49,10 @@ async function beaconBody(sendBeacon: ReturnType<typeof vi.fn>): Promise<BeaconB
 }
 
 beforeEach(() => {
+  Object.defineProperty(document, "visibilityState", {
+    configurable: true,
+    value: "visible",
+  });
   __telemetryResetForTest();
 });
 
@@ -122,6 +126,19 @@ describe("track + flush", () => {
     expect(__telemetryFlushForTest()).toBe(0);
     expect(sendBeacon).not.toHaveBeenCalled();
   });
+
+  it("flushes buffered metrics when the document becomes hidden", () => {
+    const sendBeacon = stubBeacon();
+    track("web-vitals", { key: "lcp", value: 900, dedupe: false });
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "hidden",
+    });
+
+    document.dispatchEvent(new Event("visibilitychange"));
+
+    expect(sendBeacon).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("dedupe", () => {
@@ -155,6 +172,13 @@ describe("dedupe", () => {
       vi.useRealTimers();
     }
   });
+
+  it("keeps repeated samples when dedupe is disabled", () => {
+    stubBeacon();
+    track("web-vitals", { key: "lcp", value: 900, dedupe: false });
+    track("web-vitals", { key: "lcp", value: 950, dedupe: false });
+    expect(__telemetryBufferSize()).toBe(2);
+  });
 });
 
 describe("rate limit", () => {
@@ -179,6 +203,31 @@ describe("rate limit", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("still caps events when dedupe is disabled", () => {
+    stubBeacon();
+    for (let i = 0; i < 105; i++) {
+      track("web-vitals", { key: "lcp", value: i, dedupe: false });
+    }
+    expect(__telemetryBufferSize()).toBe(100);
+  });
+});
+
+describe("instrumentation vocabulary", () => {
+  it("accepts performance telemetry elements", async () => {
+    const sendBeacon = stubBeacon();
+    track("api-timing", { key: "status", value: 801, dedupe: false });
+    track("composer-latency", { key: "send-to-turn-start", value: 120 });
+    track("web-vitals", { key: "fcp", value: 450, dedupe: false });
+
+    expect(__telemetryFlushForTest()).toBe(3);
+    const body = await beaconBody(sendBeacon);
+    expect(body.events.map((event) => event.element)).toEqual([
+      "api-timing",
+      "composer-latency",
+      "web-vitals",
+    ]);
   });
 });
 

@@ -11,10 +11,15 @@ import { usePathname } from "next/navigation";
 import { useEffect, useRef } from "react";
 
 import { normalizePage, setTelemetryPage, track } from "./telemetry";
+import { initWebVitals } from "./web-vitals";
 
 export function TelemetryPageView() {
   const pathname = usePathname();
   const lastPage = useRef<string | null>(null);
+
+  useEffect(() => {
+    initWebVitals();
+  }, []);
 
   useEffect(() => {
     const page = normalizePage(pathname);

@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Frontend UI
-description: Ava's web interface — Next.js 16 + React 19 + Tailwind 4 + shadcn/ui. Browser directly connects to Gateway, SSE push, no polling. Stack + pages/routes + Provider composition.
+description: Ava's web interface — Next.js 16 + React 19 + Tailwind 4 + shadcn/ui. Browser directly connects to Gateway, with SSE push and bounded snapshot polling. Stack + pages/routes + Provider composition.
 tags:
 - frontend
 ---
@@ -39,10 +39,10 @@ Ava's web user interface — Next.js 16 (App Router) + React 19 + Tailwind CSS 4
                               Old /control#status、#metrics (and #metrics-* sub-anchors) deep-link → router.replace to /insights corresponding anchor
                               Section components are also bare routes: control/{guide,config,display,presets,schedules,inventory,skills}/page.tsx
                               inventory/page.tsx exports PluginsInventory/McpInventory (shared /api/inventory query) as Plugins+MCP sections
-/insights                     Observation surface (read) — Status + Metrics two sections, same shell as Control (sharing ControlNav + single scroll container INSIGHTS_SCROLL_ID)
-                              Continuous polling usage (Status 10s + update-check 30s); cluster Restart/Update buttons are right in Status header, "observe health → act in place"
-                              Metrics (pure-read, heavy re-aggregation, per-agent unbounded outlier) co-locates with Status rather than the near-static Control
-                              Section components are also bare routes: insights/{status,metrics}/page.tsx
+/insights                     Observation surface (read) — Status + Ops + Alerts sections, same shell as Control (sharing ControlNav + single scroll container INSIGHTS_SCROLL_ID)
+                              Continuous polling usage (Status 15s; update-check only on entry/manual re-check); cluster Restart/Update buttons are right in Status header, "observe health → act in place"
+                              Ops links to Grafana; Alerts is live via SSE. Retired Metrics bookmarks transition through insights/metrics/page.tsx to Ops when Grafana is reachable.
+                              Section components are also bare routes: insights/{status,ops}/page.tsx; insights/alerts/page.tsx redirects to the Alerts anchor
 /control#skills               Installed skills read-only table: name/layer origin (core=repo|plugin|machine=user|untracked)/enabled/local drift (GET /api/skills, single-machine gateway local read)
 /settings, /settings/*        Redirect to /control, /control/* (next.config.ts redirects, preserves old bookmarks/links)
 ```

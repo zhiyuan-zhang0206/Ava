@@ -2,10 +2,10 @@
 
 // /insights — the cluster's read-only observability surface: live Status and
 // the Grafana Ops dashboard link, split out of Control so the two usage
-// sessions don't share a page. Insights is meant to sit open and poll (Status
-// every 10s, its update-check every 30s); Control is almost entirely static
-// write/manage forms. The standalone Metrics section was retired 2026-08-04 —
-// Grafana covers it.
+// sessions don't share a page. Insights is meant to sit open and poll Status
+// every 15s; its update check runs only on entry or explicit re-check. Control
+// is almost entirely static write/manage forms. The standalone Metrics section
+// was retired 2026-08-04 — Grafana covers it.
 //
 // Same shell as Control (app/control/page.tsx): a page header (back to
 // conversation + title), a left anchor-nav rail, and ONE scroll container

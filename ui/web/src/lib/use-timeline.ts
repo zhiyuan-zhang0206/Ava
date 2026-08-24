@@ -43,6 +43,7 @@ import { startTransition, useCallback, useEffect, useLayoutEffect, useRef } from
 
 import { api } from "./api";
 import { errMsg } from "./errors";
+import { noteTurnStart } from "./interaction-timing";
 import { useTimelineStore } from "./timeline-store";
 import { parseItemId } from "./timeline";
 
@@ -53,6 +54,16 @@ const OLDER_BASE_LIMIT = 50;
 import type { BackendTimelineItem, SystemEvent, TimelineResponse } from "./types";
 import type { ConnectionEvent } from "./useEventStream";
 import { useAgentEventStream } from "./useEventStream";
+
+function startsTurn(event: SystemEvent): boolean {
+  return (
+    event.role === "inbound_arrived" ||
+    event.role === "chat_start" ||
+    event.role === "code_start" ||
+    event.role === "reasoning_start" ||
+    event.role === "exec_start"
+  );
+}
 
 /** SSE connection state — UI uses it to show banners ("disconnected /
  *  reconnecting"). Derived from ConnectionEvent.type (excluding
@@ -69,10 +80,11 @@ export interface UseTimelineResult {
   connectionState: ConnectionState;
   /** Whether the current turn is running — derived from the SSE
    *  event stream; the composer button uses it to switch between
-   *  send / stop. More timely than the agents-table status 5s poll,
+   *  send / stop. More timely than the agents-table status 15s poll,
    *  avoiding the race where you want to cancel after send but the
    *  button is still send. Turn boundaries:
-   *    start: inbound_arrived / inbound_committed / *_start
+   *    start: inbound_arrived / chat_start / code_start / reasoning_start /
+   *           exec_start
    *           (chat/code/reasoning/exec)
    *    end:   llm_done / exec_output / cancelled / error / SSE closed
    *  Multi-step: briefly false between exec_output → next *_start,
@@ -280,6 +292,7 @@ export function useTimeline(
       // token state twice (R10 double-processing). It carries nothing the
       // timeline renders: applySystemEvent treats token_usage as a no-op.
       if (ev.role === "token_usage") return;
+      if (startsTurn(ev)) noteTurnStart(ev.agent_id);
 
       if (isStreamingDelta(ev)) {
         startTransition(() => {
@@ -305,6 +318,9 @@ export function useTimeline(
       // token_usage belongs to useTokenUsage's own per-event subscriber.
       const filtered = events.filter((ev) => ev.role !== "token_usage");
       if (filtered.length === 0) return;
+      for (const ev of filtered) {
+        if (startsTurn(ev)) noteTurnStart(ev.agent_id);
+      }
       const hasStreaming = filtered.some((ev) => isStreamingDelta(ev));
       const apply = () => processSseEventBatch(filtered);
       if (hasStreaming) {

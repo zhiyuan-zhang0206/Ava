@@ -14,12 +14,12 @@
 // only waste this tab's budget, never the table.
 //
 // No free text is ever collected: `element` is a closed union of known
-// interaction points, `page` is the normalized router pathname, and `value`
-// is a sanitized ≤64-char scalar (bool / number / short string) used only
-// for settings-change events. Session id is a random per-tab uuid — it
-// groups one browser session without carrying identity.
+// interaction points, `page` is the normalized router pathname, and
+// instrumentation keys + values are bounded identifiers and sanitized
+// ≤64-char scalars. Session id is a random per-tab uuid — it groups one
+// browser session without carrying identity.
 
-import { API_BASE } from "./api";
+import { API_BASE } from "./api-base";
 
 const TELEMETRY_ENDPOINT = "/api/frontend-telemetry";
 // Dedupe window per (page, element, key) — a double-click or a slider
@@ -37,25 +37,30 @@ const FLUSH_INTERVAL_MS = 15_000;
 /** Closed vocabulary of tracked interaction points — adding one is a
  * deliberate instrumentation decision, never a free string. */
 export type TelemetryElement =
-  | "page-view"
+  | "api-timing"
+  | "compact"
+  | "composer-latency"
   | "composer-send"
   | "composer-stop"
-  | "spawn"
   | "fork"
-  | "terminate"
+  | "page-view"
   | "restart"
   | "resurrect"
-  | "compact"
-  | "setting-change";
+  | "setting-change"
+  | "spawn"
+  | "terminate"
+  | "web-vitals";
 
 export interface TrackOptions {
   /** Override the current page (defaults to the last TelemetryPageView
    *  route). Normalized form, e.g. "fleet" / "control/config". */
   page?: string;
-  /** settings key — setting-change events only. */
+  /** Bounded metric or setting identifier. */
   key?: string;
-  /** settings value — sanitized to a ≤64-char scalar string. */
+  /** Metric or setting value — sanitized to a ≤64-char scalar string. */
   value?: unknown;
+  /** Whether to suppress the same page/element/key within 2s. Defaults to true. */
+  dedupe?: boolean;
 }
 
 interface PendingEvent {
@@ -153,27 +158,36 @@ function flush(): void {
   });
 }
 
+/** Flush buffered telemetry immediately. Lifecycle instrumentation calls this
+ * after enqueueing final page metrics so delivery never depends on listener
+ * registration order. */
+export function flushTelemetry(): void {
+  flush();
+}
+
 function ensureTimer(): void {
   if (flushTimer !== null) return;
   flushTimer = setInterval(flush, FLUSH_INTERVAL_MS);
-  window.addEventListener("visibilitychange", () => {
+  document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "hidden") flush();
   });
   window.addEventListener("pagehide", flush);
   window.addEventListener("beforeunload", flush);
 }
 
-/** Track one interaction. No-op under SSR and while disabled; dedupes and
- *  rate-limits in place. Never throws. */
+/** Track one interaction. No-op under SSR and while disabled; rate-limits in
+ *  place and dedupes unless `dedupe: false`. Never throws. */
 export function track(element: TelemetryElement, opts: TrackOptions = {}): void {
   if (!enabled) return;
   const page = opts.page ?? currentPage;
   const key = opts.key;
-  const dedupeKey = `${page}|${element}|${key ?? ""}`;
   const now = Date.now();
-  const last = lastTracked.get(dedupeKey);
-  if (last !== undefined && now - last < DEDUPE_MS) return;
-  lastTracked.set(dedupeKey, now);
+  if (opts.dedupe !== false) {
+    const dedupeKey = `${page}|${element}|${key ?? ""}`;
+    const last = lastTracked.get(dedupeKey);
+    if (last !== undefined && now - last < DEDUPE_MS) return;
+    lastTracked.set(dedupeKey, now);
+  }
   if (rateLimited()) return;
   const value = sanitizeValue(opts.value);
   const ev: PendingEvent = { page, element, ts: now };

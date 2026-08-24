@@ -4,7 +4,7 @@
 // conversation + title), a left anchor-nav rail, and a single scroll container
 // holding every section top to bottom (Guide, Config, Presets, Display,
 // Plugins, MCP, Skills, Schedules, OKF Graph). The read-only observability sections
-// (Status + Metrics) live on their own page, /insights — see app/insights.
+// (Status + Ops + Alerts) live on their own page, /insights — see app/insights.
 // The horizontal TabBar is long gone: the whole page is Ctrl-F-searchable and
 // every section is deep-linkable (#config-gateway, #skills, …). Named Control,
 // not Settings — it carries operational actions (schedules, config, inventory),
