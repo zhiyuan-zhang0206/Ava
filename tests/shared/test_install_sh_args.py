@@ -76,12 +76,11 @@ def test_install_sh_worktree_excludes_mirror() -> None:
     assert "--mirror" in proc.stderr, f"expected --mirror refusal, got: {proc.stderr!r}"
 
 
-def test_install_sh_worktree_excludes_warm_mcp() -> None:
-    """The npx warm-up is host-global; worktree mode must refuse it rather than
-    silently running it after the 'skips every host-global step' promise."""
+def test_install_sh_rejects_warm_mcp_as_unknown_flag() -> None:
+    """The removed MCP warm-up switch must not be accepted by the installer."""
     proc = _run_install_sh("--worktree", "--warm-mcp")
     assert proc.returncode != 0
-    assert "--warm-mcp" in proc.stderr, f"expected --warm-mcp refusal, got: {proc.stderr!r}"
+    assert "unknown flag" in proc.stderr, f"expected unknown-flag error, got: {proc.stderr!r}"
 
 
 def test_install_sh_has_no_cluster_flag() -> None:

@@ -21,7 +21,6 @@
 #     ./scripts/install.sh --role gateway,agent-runner   # single box (most installs)
 #     ./scripts/install.sh --role gateway                # gateway-only host (pg/redis + gateway)
 #     ./scripts/install.sh --role agent-runner           # runner-only host (no local pg/redis)
-#     ./scripts/install.sh --role gateway,agent-runner --warm-mcp  # + warm up MCP-Atlas npx server
 #     ./scripts/install.sh --role gateway,agent-runner --mirror cn # route pip/npm/brew through CN mirrors
 #     ./scripts/install.sh --worktree [--path P] [--no-seed]       # dev worktree cluster (see below)
 #     # For auth on: read/export AVA_INSTALL_CLUSTER_SECRET without echo first, then run:
@@ -40,8 +39,8 @@
 # only bring-up.
 #
 # --worktree births a dev worktree's own cluster and skips every host-global step
-# (brew/apt, the install-dir guard, the ~/.local/bin symlink; --mirror/--warm-mcp
-# are refused). Identity is the path: home defaults to ~/.ava-<checkout-dir>
+# (brew/apt, the install-dir guard, the ~/.local/bin symlink; --mirror is
+# refused). Identity is the path: home defaults to ~/.ava-<checkout-dir>
 # (derived from this script's checkout, never the cwd) and --path is the only
 # override — there is no name flag. Runs `uv sync --frozen`, births the cluster
 # (single-machine -> NO-AUTH, empty secret unless AVA_INSTALL_CLUSTER_SECRET states one;
@@ -65,7 +64,6 @@ set -euo pipefail
 # No silent role default: a fresh-host operator must state the role explicitly,
 # so the install never quietly picks "gateway" for someone who meant to
 # add an agent-runner.
-WARM_MCP=0
 ROLE=""
 MIRROR=""
 WORKTREE=0
@@ -82,7 +80,6 @@ unset AVA_INSTALL_CLUSTER_SECRET
 
 while [ $# -gt 0 ]; do
     case "$1" in
-        --warm-mcp) WARM_MCP=1; shift ;;
         --cluster-secret=*) CLUSTER_SECRET="${1#--cluster-secret=}"; shift ;;
         --cluster-secret)
             [ $# -ge 2 ] || { echo "install.sh: --cluster-secret requires an argument — the cluster's AVA_CLUSTER_SECRET (URL-safe token), or omit it for the role default (single box: no auth; gateway-only split: minted)" >&2; exit 2; }
@@ -127,11 +124,9 @@ die() { echo "install.sh: $*" >&2; exit 2; }
 # --- flag cross-validation (before any side effect, safe from any cwd) ---------
 if [ "$WORKTREE" = 1 ]; then
     # A worktree cluster is always the single-box gateway,agent-runner shape, and
-    # host-global steps (where a mirror or the npx warm-up matters) are skipped
-    # entirely.
+    # host-global steps (where a mirror matters) are skipped entirely.
     [ -z "$ROLE" ] || die "--worktree and --role are mutually exclusive (a worktree cluster is always gateway,agent-runner)"
     [ -z "$MIRROR" ] || die "--worktree does not take --mirror (no host-global download steps run; uv sync --frozen follows the lock)"
-    [ "$WARM_MCP" = 0 ] || die "--worktree does not take --warm-mcp (the npx warm-up is a host-global step; run it from the prod install)"
 else
     [ -z "$WT_PATH" ] || die "--path requires --worktree"
     [ "$SEED" = 1 ] || die "--no-seed requires --worktree"
@@ -470,15 +465,6 @@ apply_mirror() {
     echo "  · wrote $_AVA_HOME/mirror.env (loaded by every ava command)"
 }
 
-# ===========================================================================
-# MCP-Atlas warm-up (opt-in, shared)
-# ===========================================================================
-warm_mcp() {
-    npx -y @modelcontextprotocol/server-filesystem --version 2>/dev/null || true
-    npx -y @modelcontextprotocol/server-github --version 2>/dev/null || true
-    npx -y @modelcontextprotocol/server-everything --version 2>/dev/null || true
-}
-
 # --- dispatch by capability ---------------------------------------------------
 # A role containing `gateway` (incl. the single-box `gateway,agent-runner`) sets
 # up the data plane (pg/redis) + host wiring; agent-runner adds no host setup
@@ -499,7 +485,3 @@ else
 fi
 
 printf '\n  PATH note: if `ava` is not found in a new shell, add it:\n  export PATH="$HOME/.local/bin:$PATH"\n'
-
-if [ "$WARM_MCP" = "1" ]; then
-    warm_mcp
-fi
