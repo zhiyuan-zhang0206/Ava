@@ -764,6 +764,8 @@ ava cluster down --path PATH   # stop the cluster at a home path (its gateway + 
 ava cluster destroy --path PATH [--drop-db]   # stop a cluster + free its registry slot (port block) + deregister its OS-scheduled jobs (health probe, both watchdog probes, autostart); --drop-db also removes its pg/redis data dirs; refused for the default home ~/.ava
 ```
 
+Down-failure drill: see [down-failure-drill.md](down-failure-drill.md).
+
 **Rollback health guard and observation window.** `ava cluster health-probe` retries
 gateway liveness three times, 30 seconds apart, before declaring it unhealthy. A
 failed liveness or agent-population check is classified against the data plane:

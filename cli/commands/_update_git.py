@@ -10,12 +10,15 @@ directly. Re-imported by `cli/commands/update.py` (and re-exported through
 
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import NamedTuple
 
+import shared.pg_tools
 from cli.commands._repo import _repo_root
 from shared.config import settings
 from shared.gitenv import git_env
@@ -93,6 +96,9 @@ def tracking_target_ref() -> str:
 # every expiry. `run_bounded` kills the tree.
 _GIT_LOCAL_TIMEOUT_S = 60.0
 _GIT_NETWORK_TIMEOUT_S = 180.0
+_PRE_UPDATE_DUMP_TIMEOUT_S = 20 * 60
+_PRE_UPDATE_RESTORE_TIMEOUT_S = 60.0
+_PG_RESTORE_TOC_ENTRY_RE = re.compile(r"^\d+;")
 
 # Network git commands (fetch / pull) are idempotent and their dominant
 # failure mode is a transient network blip — retry a few times with backoff.
@@ -431,6 +437,164 @@ def current_schema_state() -> set[str]:
     # `ava cluster update`'s converge — read the schema from the real Postgres.
     with shared.db.connect(direct=True) as conn:
         return _mig.applied_migration_names(conn)
+
+
+def _verify_snapshot_artifact(artifact: Path) -> None:
+    """Verify an encrypted snapshot while keeping all error paths redacted."""
+    try:
+        _verify_snapshot_artifact_inner(artifact)
+    except RuntimeError:
+        raise
+    except Exception as exc:
+        raise RuntimeError(
+            f"pre-update data snapshot {artifact} is not restorable: verification failed "
+            f"({type(exc).__name__})"
+        ) from None
+
+
+def _verify_snapshot_artifact_inner(artifact: Path) -> None:
+    """Decrypt, unzip, and list a snapshot without exposing its connection URL."""
+    try:
+        artifact_size = artifact.stat().st_size
+    except OSError:
+        raise RuntimeError(
+            f"pre-update data snapshot {artifact} is not restorable: cannot read artifact"
+        ) from None
+    if artifact_size <= 0:
+        raise RuntimeError(
+            f"pre-update data snapshot {artifact} is not restorable: artifact is empty"
+        )
+
+    from services.backup import decrypt_artifact
+
+    with tempfile.TemporaryDirectory(prefix="ava-pre-update-") as temporary_dir:
+        temporary = Path(temporary_dir)
+        compressed_dump = temporary / "snapshot.dump.gz"
+        dump = temporary / "snapshot.dump"
+        try:
+            decrypt_artifact(artifact, compressed_dump)
+        except Exception as exc:
+            raise RuntimeError(
+                f"pre-update data snapshot {artifact} is not restorable: decrypt failed "
+                f"({type(exc).__name__})"
+            ) from None
+        try:
+            compressed_size = compressed_dump.stat().st_size
+        except OSError:
+            raise RuntimeError(
+                f"pre-update data snapshot {artifact} is not restorable: cannot read decrypted dump"
+            ) from None
+        if compressed_size <= 0:
+            raise RuntimeError(
+                f"pre-update data snapshot {artifact} is not restorable: decrypted dump is empty"
+            )
+        try:
+            with dump.open("xb") as raw_dump:
+                uncompressed = run_bounded(
+                    ["gzip", "--decompress", "--stdout", str(compressed_dump)],
+                    timeout=_PRE_UPDATE_RESTORE_TIMEOUT_S,
+                    stdout=raw_dump,
+                    stderr=subprocess.PIPE,
+                )
+        except subprocess.TimeoutExpired:
+            raise RuntimeError(
+                f"pre-update data snapshot {artifact} is not restorable: gunzip timed out after "
+                f"{_PRE_UPDATE_RESTORE_TIMEOUT_S:.0f}s"
+            ) from None
+        except Exception as exc:
+            raise RuntimeError(
+                f"pre-update data snapshot {artifact} is not restorable: gunzip failed "
+                f"({type(exc).__name__})"
+            ) from None
+        if uncompressed.returncode != 0:
+            raise RuntimeError(
+                f"pre-update data snapshot {artifact} is not restorable: gunzip exited "
+                f"{uncompressed.returncode}"
+            )
+        try:
+            dump_size = dump.stat().st_size
+        except OSError:
+            raise RuntimeError(
+                f"pre-update data snapshot {artifact} is not restorable: cannot read decompressed dump"
+            ) from None
+        if dump_size <= 0:
+            raise RuntimeError(
+                f"pre-update data snapshot {artifact} is not restorable: decompressed dump is empty"
+            )
+        try:
+            listing = run_bounded(
+                [str(shared.pg_tools.pg_tool("pg_restore")), "--list", str(dump)],
+                timeout=_PRE_UPDATE_RESTORE_TIMEOUT_S,
+                capture_output=True,
+                text=True,
+            )
+        except subprocess.TimeoutExpired:
+            raise RuntimeError(
+                f"pre-update data snapshot {artifact} is not restorable: pg_restore --list "
+                f"timed out after {_PRE_UPDATE_RESTORE_TIMEOUT_S:.0f}s"
+            ) from None
+        except Exception as exc:
+            raise RuntimeError(
+                f"pre-update data snapshot {artifact} is not restorable: pg_restore --list "
+                f"failed ({type(exc).__name__})"
+            ) from None
+        if listing.returncode != 0:
+            raise RuntimeError(
+                f"pre-update data snapshot {artifact} is not restorable: pg_restore --list "
+                f"exited {listing.returncode}"
+            )
+        if not any(_PG_RESTORE_TOC_ENTRY_RE.match(line) for line in listing.stdout.splitlines()):
+            raise RuntimeError(
+                f"pre-update data snapshot {artifact} is not restorable: pg_restore --list "
+                "returned an empty table of contents"
+            )
+
+
+def snapshot_pre_update_data(target_sha: str) -> Path | None:
+    """Verified pre-upgrade data snapshot, taken BEFORE anything is stopped.
+
+    Returns the dump path when the update will apply migrations (the target's
+    required migration set differs from the DB's current applied set), else None
+    (a code-only update cannot damage data; the daily backup already covers it).
+
+    The dump is a normal managed backup (`services.backup.run_backup`), so it
+    lands in `<home>/backups/db/`, is named `<db>-<ts>.dump.gz.enc`, and is pruned by
+    the standard 7-day rotation. The returned path is threaded through the
+    recovery context so a failed rollout names the exact restore point.
+
+    Raises RuntimeError when the dump cannot be created OR verified: a rollout
+    that will migrate with no recoverable data snapshot is exactly the P1 the
+    audit names, so blowing up loudly — while the gateway is still up — is the
+    right outcome (same philosophy as `_snapshot_known_good`'s schema read).
+    """
+    from cli.commands._cluster_rollback import _migration_set_at_commit
+
+    if _migration_set_at_commit(target_sha) == current_schema_state():
+        return None
+
+    from services.backup import backup_lock, run_backup
+
+    # Hold the same lock as the daily writer through the restore listing. A
+    # verified dump must remain untouched until this function hands its path to
+    # recovery; otherwise a scheduled writer can sweep its partial or replace
+    # the same-second target between creation and verification.
+    with backup_lock(timeout_s=_PRE_UPDATE_DUMP_TIMEOUT_S):
+        try:
+            dump_path = run_backup(timeout_s=_PRE_UPDATE_DUMP_TIMEOUT_S)
+        except subprocess.TimeoutExpired:
+            raise RuntimeError(
+                "could not create pre-update data snapshot: pg_dump timed out after "
+                f"{_PRE_UPDATE_DUMP_TIMEOUT_S:.0f}s"
+            ) from None
+        except Exception as exc:
+            # pg_dump's argv includes the direct DB URL. Do not stringify or
+            # chain its failure into a rollout log.
+            raise RuntimeError(
+                f"could not create pre-update data snapshot: pg_dump failed ({type(exc).__name__})"
+            ) from None
+
+        _verify_snapshot_artifact(dump_path)
+        return dump_path
 
 
 def rollback_schema_to(keep: set[str]) -> list[str]:

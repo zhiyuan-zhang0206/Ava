@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import subprocess
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
@@ -485,3 +486,80 @@ def test_offsite_directory_failure_keeps_local_artifact(
     cast(Any, backup)._copy_offsite(artifact)
 
     assert artifact.read_bytes() == b"encrypted artifact"
+
+
+def test_run_backup_forwards_requested_timeout(bdir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A bounded caller's deadline applies to every backup pipeline process."""
+    timeouts: list[float] = []
+
+    class _Ok:
+        returncode = 0
+        stderr = ""
+
+    def _fake_run(cmd: list[str], **kwargs: object) -> _Ok:
+        timeouts.append(cast(float, kwargs["timeout"]))
+        if cmd[0].endswith("pg_dump"):
+            Path(cmd[cmd.index("--file") + 1]).write_bytes(b"plaintext dump")
+        elif cmd[0] == "gzip":
+            cast(Any, kwargs["stdout"]).write(b"compressed dump")
+        else:
+            Path(cmd[cmd.index("-out") + 1]).write_bytes(b"encrypted dump")
+        return _Ok()
+
+    monkeypatch.setattr(backup.subprocess, "run", _fake_run)
+
+    backup.run_backup(_dt(2026, 8, 8, 3, 0), db_url="dbname=whatever", timeout_s=123.0)
+
+    assert timeouts == [123.0, 123.0, 123.0]
+
+
+def test_run_backup_serializes_dump_creation(bdir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The public entry point holds the cross-process lock around its body."""
+    events: list[str] = []
+    artifact = bdir / "verified.dump.gz.enc"
+
+    @contextmanager
+    def _backup_lock(**_kwargs: object):
+        events.append("lock-enter")
+        try:
+            yield
+        finally:
+            events.append("lock-exit")
+
+    def _run_backup(_now: datetime | None = None, **_kwargs: object) -> Path:
+        events.append("backup-body")
+        return artifact
+
+    monkeypatch.setattr(backup, "backup_lock", _backup_lock)
+    monkeypatch.setattr(backup, "_run_backup", _run_backup)
+
+    assert backup.run_backup(_dt(2026, 8, 8, 3, 0), db_url="dbname=whatever") == artifact
+    assert events == ["lock-enter", "backup-body", "lock-exit"]
+
+
+def test_run_backup_avoids_overwriting_a_same_second_dump(
+    bdir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A second managed writer publishes a new encrypted name, not a replacement."""
+    existing = _touch(bdir, "whatever-20260808T100000Z.dump.gz.enc")
+
+    class _Ok:
+        returncode = 0
+        stderr = ""
+
+    def _fake_run(cmd: list[str], **kwargs: object) -> _Ok:
+        if cmd[0].endswith("pg_dump"):
+            Path(cmd[cmd.index("--file") + 1]).write_bytes(b"plaintext dump")
+        elif cmd[0] == "gzip":
+            cast(Any, kwargs["stdout"]).write(b"compressed dump")
+        else:
+            Path(cmd[cmd.index("-out") + 1]).write_bytes(b"encrypted dump")
+        return _Ok()
+
+    monkeypatch.setattr(backup.subprocess, "run", _fake_run)
+
+    created = backup.run_backup(_dt(2026, 8, 8, 3, 0), db_url="dbname=whatever")
+
+    assert created.name == "whatever-20260808T100001Z.dump.gz.enc"
+    assert existing.read_bytes() == b"x"
+    assert created.read_bytes() == b"encrypted dump"

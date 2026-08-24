@@ -7,8 +7,8 @@ frontend-only fast path and the frontend session relaunch it shares:
 - `_run_frontend_only_update` / `_restart_frontend_session` — the frontend-only
   fast path: pull + rebuild the ava-frontend session, nothing else (no
   quiesce, no migration, no backend restart, no fan-out).
-- `_snapshot_known_good` — HEAD + applied-migration set, taken BEFORE anything
-  is stopped (the recovery anchor for `_update_recover`).
+- `_snapshot_known_good` — HEAD + applied-migration set + verified data snapshot,
+  taken BEFORE anything is stopped (the recovery anchor for `_update_recover`).
 - `_checkout_and_sync` — force-checkout the pinned rollout commit + `uv sync`.
   Grafana provisioning needs no copy step: the LGTM Grafana container mounts
   `deploy/lgtm/config/grafana/provisioning/` read-only straight from the
@@ -32,6 +32,7 @@ import shlex
 import sys
 from pathlib import Path
 
+from cli.commands import _update_git as _git_mod
 from cli.commands._repo import session_name
 from cli.commands._update_git import GitPullFailed, GitPullResult
 from cli.commands._update_recover import _recover_rc
@@ -144,9 +145,11 @@ def _run_frontend_only_update(repo: Path, origin: str) -> int:
     return 0
 
 
-def _snapshot_known_good(*, pull: bool, target_sha: str | None) -> tuple[str, set[str]] | None:
-    """Last-known-good snapshot (HEAD + applied-migration set) for the pull path,
-    taken BEFORE anything is stopped.
+def _snapshot_known_good(
+    *, pull: bool, target_sha: str | None
+) -> tuple[str, set[str], Path | None] | None:
+    """Last-known-good snapshot (HEAD + applied-migration set + data dump) for the
+    pull path, taken BEFORE anything is stopped.
 
     The schema snapshot is from_sha's applied set — `ava start` is what applies
     this update's migrations and has not run yet, so this is the pre-update set.
@@ -168,13 +171,17 @@ def _snapshot_known_good(*, pull: bool, target_sha: str | None) -> tuple[str, se
         raise ValueError("_run_gateway_local_update(pull=True) requires a target_sha")
     from cli.commands import update as _up_mod
 
-    return (_up_mod.git_head_sha(), _up_mod.current_schema_state())
+    return (
+        _up_mod.git_head_sha(),
+        _up_mod.current_schema_state(),
+        _git_mod.snapshot_pre_update_data(target_sha),
+    )
 
 
 def _checkout_and_sync(
     repo: Path,
     target_sha: str,
-    pull_recover: tuple[str, set[str]],
+    pull_recover: tuple[str, set[str], Path | None],
     preserve_frontend: frozenset[str],
 ) -> int | None:
     """Force-checkout the pinned rollout commit + `uv sync`; returns a recovery rc

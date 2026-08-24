@@ -115,7 +115,7 @@ def test_backup_defaults_to_direct_db_url() -> None:
     (AVA_DB_URL carries the pooler port when pooling is on)."""
     from services import backup
 
-    src = inspect.getsource(backup.run_backup)
+    src = inspect.getsource(backup._run_backup)
     assert "direct_db_url" in src
     assert ".pooled_db_url" not in src
 
