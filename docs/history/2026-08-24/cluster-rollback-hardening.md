@@ -22,3 +22,14 @@ mixed: runner watchdogs correctly converge toward the still-new pin. Likewise,
 data-plane restart windows and connection blips are not evidence that reverting
 code will repair the cluster. Delaying LKG promotion keeps a real previous
 rollback anchor available during the first health observations of a new release.
+
+## Boundary
+
+The observation window is finite. Once two healthy passes promote the pending
+target to `last_known_good_sha`, a problem that only manifests later on that
+same commit makes automatic rollback a no-op: the target equals the current
+HEAD, so `ava cluster rollback` reports nothing to roll back to and exits 0.
+The health probe still alerts on the failure, and the manual path remains
+available — `ava cluster rollback --to <older sha>` (or `--to <tag>`), which
+re-arms the observation window for the older commit. Automatic rollback's
+purpose is defending the transition, not policing a long-settled release.
