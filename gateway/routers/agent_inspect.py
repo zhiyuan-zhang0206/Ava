@@ -398,13 +398,15 @@ def _inspect_blocking(
 _INSPECT_CACHE_TTL_S = 75.0
 _INSPECT_CACHE_MAX = 1024
 _INSPECT_SINGLEFLIGHT_MAX = 1024
-# A panel request is an interactive read, not a batch job. One healthy
-# aggregate fan-out finishes well below this bound; overloaded Loki must fail
-# visibly so the browser never waits through the 60s per-query transport bound
-# multiplied across several sequential queries. asyncio cannot safely kill the
-# synchronous leader thread: single-flight keeps it as the one background load
-# for this key, and a late successful result still populates the short TTL.
-_INSPECT_RESPONSE_TIMEOUT_S = 15.0
+# A panel request is an interactive read, not a batch job. Until the unlabeled
+# pre-cutover Loki slice expires on 2026-08-30 11:10Z, a cold 7-day or whole-life
+# load can legitimately take about 15 seconds; 30 seconds prevents those reads
+# from returning 503. Every Loki query remains individually bounded at 8 seconds,
+# so a down backend fails in about 16 seconds rather than waiting for this bound.
+# asyncio cannot safely kill the synchronous leader thread: single-flight keeps it
+# as the one background load for this key, and a late successful result still
+# populates the short TTL.
+_INSPECT_RESPONSE_TIMEOUT_S = 30.0
 _InspectKey = tuple[int, int | None, bool]
 _inspect_query_cache = InspectQueryCache[_InspectKey, _InspectAggregates](
     max_entries=_INSPECT_CACHE_MAX,

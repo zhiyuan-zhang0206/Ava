@@ -1404,6 +1404,42 @@ def test_inspect_archive_and_live_durations_keep_exact_percentiles(
     assert stats["turn_p90_seconds"] == 1.7
 
 
+def test_whole_life_inspect_uses_archive_rollup(
+    db_conn: psycopg.Connection, fake_loki: _FakeLoki
+) -> None:
+    """The all-history response takes its frozen archive distribution from the rollup."""
+    aid = _insert_agent(db_conn)
+    now = datetime.now(UTC)
+    _archive_event(
+        db_conn,
+        agent_id=aid,
+        event="turn_end",
+        attributes={"duration_seconds": 1.25, "ok": True},
+        ts=now - timedelta(minutes=2),
+    )
+    _archive_event(
+        db_conn,
+        agent_id=aid,
+        event="freeze_marker",
+        attributes={},
+        ts=now - timedelta(minutes=1),
+    )
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agent_archive_stats (agent_id, turn_distribution) VALUES (%s, %s::jsonb)",
+            (aid, json.dumps([[73.25, 2]])),
+        )
+    db_conn.commit()
+
+    with TestClient(app) as client:
+        stats = client.get(f"/api/agents/{aid}/inspect").json()["stats"]
+
+    assert stats["turn_p50_seconds"] == 73.25
+    assert stats["turn_p90_seconds"] == 73.25
+    assert stats["turn_min_seconds"] == 73.25
+    assert stats["turn_max_seconds"] == 73.25
+
+
 def _assert_inspect_live_query_budget(fake_loki: _FakeLoki) -> None:
     """The cold panel keeps cost/heartbeat and collapses every other live read."""
     assert sum(fake_loki.wire_calls.values()) <= 12
@@ -1412,6 +1448,12 @@ def _assert_inspect_live_query_budget(fake_loki: _FakeLoki) -> None:
     # Requested stats and the retained per-agent lifecycle leg are separate:
     # the latter is cached for thirty minutes across inspector windows.
     assert fake_loki.wire_calls["query_projected_lines"] == 2
+    lifecycle_calls = _lifecycle_projected_calls(fake_loki)
+    assert len(lifecycle_calls) == 1
+    assert "limit_per_slice" not in lifecycle_calls[0]
+    stats_calls = [call for call in fake_loki.projected_calls if call not in lifecycle_calls]
+    assert len(stats_calls) == 1
+    assert stats_calls[0]["limit_per_slice"] == 20000
     assert fake_loki.wire_calls["count_by_event_name"] == 0
     assert fake_loki.wire_calls["attribute_distribution"] == 0
 

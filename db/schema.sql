@@ -613,6 +613,30 @@ CREATE INDEX idx_events_target_agent_id ON events (target_agent_id);
 -- events-maintenance daemon, same contract as agent_events.
 CREATE TABLE events_default PARTITION OF events DEFAULT;
 
+-- Materialized inspector reads from the frozen events archive. This table is
+-- valid only while `events` remains frozen; live history belongs in Loki.
+CREATE TABLE agent_archive_stats (
+    agent_id          BIGINT PRIMARY KEY REFERENCES agents(id),
+    turn_distribution JSONB NOT NULL DEFAULT '[]'::jsonb,
+    active_seconds    DOUBLE PRECISION NOT NULL DEFAULT 0,
+    exec_seconds      DOUBLE PRECISION NOT NULL DEFAULT 0,
+    lifecycle         JSONB NOT NULL DEFAULT '[]'::jsonb,
+    computed_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+COMMENT ON TABLE agent_archive_stats IS
+    'Materialized inspector reads from the frozen events archive. Valid only while events remains frozen; live history belongs in Loki.';
+COMMENT ON COLUMN agent_archive_stats.turn_distribution IS
+    'Ascending JSON pairs [duration_seconds, count] for archived turn_end events.';
+COMMENT ON COLUMN agent_archive_stats.active_seconds IS
+    'Archived node_exit duration sum excluding claim nodes.';
+COMMENT ON COLUMN agent_archive_stats.exec_seconds IS
+    'Archived node_exit duration sum for exec nodes.';
+COMMENT ON COLUMN agent_archive_stats.lifecycle IS
+    'Ascending JSON pairs [UTC timestamp, event name] for archived lifecycle replay.';
+COMMENT ON COLUMN agent_archive_stats.computed_at IS
+    'Backfill time; this materialization is valid only while the events archive is frozen.';
+
 -- ─────────────── agent_tasks (the task registry) ───────────────
 -- Persistent, process-decoupled work items agents hand off to each other.
 -- owner / created_by name an agent by agents.id; created_by is TEXT because the
