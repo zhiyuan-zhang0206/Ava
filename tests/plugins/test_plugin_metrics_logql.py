@@ -154,8 +154,8 @@ def test_dashboard_json_matches_core_registrations() -> None:
         assert all(target["queryType"] == expected_query_type for target in targets)
 
 
-def test_dashboard_has_86_loki_targets() -> None:
-    """The two unresolved Prometheus gauges replace Loki targets in the total."""
+def test_dashboard_has_89_loki_targets() -> None:
+    """P99 latency views and the sample-count panel add three Loki targets."""
     path = _REPO_ROOT / "deploy/lgtm/config/grafana/provisioning/dashboards/ava-ops-main.json"
     panels = json.loads(path.read_text())["panels"]
     loki_targets = [
@@ -164,7 +164,7 @@ def test_dashboard_has_86_loki_targets() -> None:
         for target in panel.get("targets", [])
         if target.get("datasource", panel.get("datasource", {})).get("uid") == "loki"
     ]
-    assert len(loki_targets) == 86
+    assert len(loki_targets) == 89
 
 
 def test_unresolved_gauge_names_match_the_otlp_contract() -> None:

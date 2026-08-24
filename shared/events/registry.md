@@ -198,7 +198,7 @@ consumers: see the comments at each emit point.
 | `passive_recall` | passive memory recall | noise | — | — | 90d | events |
 | `silent_idle` | silent idle verdict | noise | — | — | 90d | events |
 | `last_msg` | last-message check | noise | — | — | 90d | events |
-| `gateway_latency` | gateway endpoint latency — 60s aggregate per route (p50/p95/max/count) | noise | route, p50_ms, p95_ms, max_ms, count | — | 90d | events |
+| `gateway_latency` | gateway endpoint latency — 60s aggregate per route (p50/p95/p99/max/count) | noise | route, p50_ms, p95_ms, p99_ms, max_ms, count | — | 90d | events |
 | `telemetry_read_stale` | read-side telemetry staleness detected — heartbeat older than threshold | anomaly | source, signal, threshold_s, age_s, action, reason | — | 90d | events |
 | `telemetry_read_recovered` | read-side telemetry heartbeat recovered | observation | source, signal, stale_duration_s | — | 90d | events |
 | `otlp_backend_disabled` | OTLP backend disabled for this process (init failure / collector unreachable); retry scheduled | anomaly | reason, endpoint | — | 90d | events |

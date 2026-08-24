@@ -7,6 +7,7 @@ that async fan-out path and only validate the SystemStatus.cluster data pipeline
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from pathlib import Path
 
 import psycopg
@@ -15,6 +16,19 @@ from fastapi.testclient import TestClient
 
 from gateway.app import app
 from gateway.routers import status as status_router
+
+
+class _RemoteProbeResults(dict[str, tuple[bool, bool | None]]):
+    def __init__(self) -> None:
+        super().__init__()
+        self.calls: list[str] = []
+
+
+@pytest.fixture(autouse=True)
+def _clear_status_cache() -> Iterator[None]:
+    status_router.cache_clear()
+    yield
+    status_router.cache_clear()
 
 
 @pytest.fixture(autouse=True)
@@ -56,7 +70,7 @@ def stub_machine_identity(set_machine_identity) -> None:  # pyright: ignore[repo
 @pytest.fixture
 def stub_remote_probe(
     monkeypatch: pytest.MonkeyPatch,
-) -> dict[str, tuple[bool, bool | None]]:
+) -> _RemoteProbeResults:
     """Replace _probe_agent_runner with a lookup table — key=name,
     val=(online, paused). Local rows in this test suite are all pure gateway
     (handled by lightweight local read, no probe), so the table only needs to
@@ -66,7 +80,7 @@ def stub_remote_probe(
 
     from gateway.schemas import MachineStatus
 
-    results: dict[str, tuple[bool, bool | None]] = {}
+    results = _RemoteProbeResults()
 
     async def fake_probe(
         name: str,
@@ -77,6 +91,7 @@ def stub_remote_probe(
         stopped_at: datetime | None,
         is_staging: bool = False,
     ) -> MachineStatus:
+        results.calls.append(name)
         online, paused = results.get(name, (False, None))
         return MachineStatus(
             name=name,
@@ -228,6 +243,46 @@ class TestClusterPanel:
             r = client.get("/api/status")
         assert r.status_code == 200
         assert r.json()["cluster"]["machines"] == []
+
+    def test_response_cache_reuses_remote_probe(
+        self,
+        db_conn: psycopg.Connection,
+        fake_flag: Path,
+        stub_machine_identity: None,
+        stub_remote_probe: _RemoteProbeResults,
+    ) -> None:
+        _ = fake_flag, stub_machine_identity
+        _insert_machine(db_conn, "wsl-test", None, "agent-runner")
+        stub_remote_probe["wsl-test"] = (True, False)
+
+        with TestClient(app) as client:
+            first = client.get("/api/status")
+            second = client.get("/api/status")
+
+        assert first.status_code == 200
+        assert second.status_code == 200
+        assert stub_remote_probe.calls == ["wsl-test"]
+
+    def test_response_cache_ttl_zero_reprobes(
+        self,
+        db_conn: psycopg.Connection,
+        fake_flag: Path,
+        stub_machine_identity: None,
+        stub_remote_probe: _RemoteProbeResults,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _ = fake_flag, stub_machine_identity
+        monkeypatch.setattr(status_router, "_STATUS_CACHE_TTL_S", 0.0)
+        _insert_machine(db_conn, "wsl-test", None, "agent-runner")
+        stub_remote_probe["wsl-test"] = (True, False)
+
+        with TestClient(app) as client:
+            first = client.get("/api/status")
+            second = client.get("/api/status")
+
+        assert first.status_code == 200
+        assert second.status_code == 200
+        assert stub_remote_probe.calls == ["wsl-test", "wsl-test"]
 
 
 class TestProbeAgentRunner:

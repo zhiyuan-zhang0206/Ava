@@ -725,13 +725,13 @@ core_metrics.register_core_metric(
 
 # ── gateway latency (Task #1091) ─────────────────────────────────────────
 # Producer: gateway/_latency.py — one `gateway_latency` event per (route, 60s
-# bucket) carrying p50/p95/max/count. The panels below read the aggregates;
-# the first is the cluster-wide overview, the second the per-route p95.
+# bucket) carrying p50/p95/p99/max/count. The panels below read the aggregates;
+# the first is the cluster-wide overview, the second the per-route p95/p99.
 
 core_metrics.register_core_metric(
     MetricSpec(
         name="core_gateway_latency",
-        title="Gateway latency — p50/p95/max",
+        title="Gateway latency — p50/p95/p99/max",
         event_name="gateway_latency",
         category="telemetry",
         unit="ms",
@@ -747,10 +747,13 @@ core_metrics.register_core_metric(
             f"unwrap {_GATEWAY_ATTR['p95_ms']} [1m]))",
             f'max(max_over_time({{service_name="unknown_service"}} | json | '
             f'category=~"{{category_re}}|log" | event_name={{event_name}} | '
+            f"unwrap {_GATEWAY_ATTR['p99_ms']} [1m]))",
+            f'max(max_over_time({{service_name="unknown_service"}} | json | '
+            f'category=~"{{category_re}}|log" | event_name={{event_name}} | '
             f"unwrap {_GATEWAY_ATTR['max_ms']} [1m]))",
         ],
         query_type="logql",
-        target_names=["p50", "p95", "max"],
+        target_names=["p50", "p95", "p99", "max"],
         custom={"axisLabel": "ms"},
     )
 )
@@ -758,7 +761,7 @@ core_metrics.register_core_metric(
 core_metrics.register_core_metric(
     MetricSpec(
         name="core_gateway_latency_by_route",
-        title="Gateway latency p95 by route",
+        title="Gateway latency p95/p99 by route",
         event_name="gateway_latency",
         category="telemetry",
         unit="ms",
@@ -770,6 +773,12 @@ core_metrics.register_core_metric(
             f'category=~"{{category_re}}|log" | event_name={{event_name}} | '
             f"unwrap {_GATEWAY_ATTR['p95_ms']} [1m]))"
         ),
+        targets=[
+            f'max by (attributes_route) (max_over_time({{service_name="unknown_service"}} | json | '
+            f'category=~"{{category_re}}|log" | event_name={{event_name}} | '
+            f"unwrap {_GATEWAY_ATTR['p99_ms']} [1m]))"
+        ],
+        target_names=["p95 {{attributes_route}}", "p99 {{attributes_route}}"],
         custom={"axisLabel": "ms"},
     )
 )

@@ -3,9 +3,18 @@
 restarter (a per-host daemon) moved to the per-machine roster; labeler +
 memory_indexer stay here as the gateway-only set."""
 
+from collections.abc import Iterator
+
 import pytest
 
 import gateway.routers.status as status_mod
+
+
+@pytest.fixture(autouse=True)
+def _clear_status_cache() -> Iterator[None]:
+    status_mod.cache_clear()
+    yield
+    status_mod.cache_clear()
 
 
 def test_services_status_is_gateway_only(monkeypatch: pytest.MonkeyPatch):
