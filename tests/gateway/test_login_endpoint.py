@@ -54,6 +54,7 @@ def _wrong_login(
 ) -> None:
     resp = client.post("/api/auth/login", json={"password": password})
     assert resp.status_code == 401
+    assert resp.json()["code"] == "invalid_password"
 
 
 # ── Endpoint contract ─────────────────────────────────────────────────
@@ -65,10 +66,13 @@ def test_sixth_consecutive_failure_is_locked_out() -> None:
             _wrong_login(client)
         resp = client.post("/api/auth/login", json={"password": "wrong-password"})
     assert resp.status_code == 429
-    assert resp.json()["detail"] == "too many failed login attempts"
+    body = resp.json()
+    assert body["code"] == "login_rate_limited"
+    assert body["detail"] == "too many failed login attempts"
+    assert body["retryable"] is True
     retry_after = int(resp.headers["retry-after"])
     assert 0 < retry_after <= rate_limit.LOCKOUT_SECONDS
-    assert resp.json()["retry_after_seconds"] == retry_after
+    assert body["retry_after_seconds"] == retry_after
 
 
 def test_correct_password_is_not_evaluated_while_locked() -> None:

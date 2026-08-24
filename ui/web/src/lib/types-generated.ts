@@ -22,7 +22,7 @@ export interface paths {
          *     On success, returns ``{"ok": true}`` and sets an HTTP-only session
          *     cookie valid for 7 days.
          *
-         *     On failure, returns 401 ``{"detail": "invalid password"}``.
+         *     On failure, returns a typed 401 error envelope with detail ``"invalid password"``.
          *
          *     A no-secret cluster (single-box no-auth posture) has no credential: login
          *     is a no-op 200 success, deliberately BEFORE the rate limiter — there is

@@ -15,7 +15,7 @@ from pydantic import (
 )
 
 from ops.rpc_schemas import _UserContent
-from shared.agents import AgentStatus, ErrorReason
+from shared.agents import AgentStatus
 from shared.priority import Priority
 
 
@@ -244,23 +244,6 @@ class LastMessageResponse(BaseModel):
     """
 
     text: str | None
-
-
-class AgentErrorResponse(BaseModel):
-    """SDK <-> Gateway error wire contract —
-    `@app.exception_handler(AvaAgentError)` returns this schema; the
-    SDK's `_raise_from_response` parses the reason field, looks up
-    EXCEPTION_BY_REASON to reconstruct the matching exception type, and
-    raises to the caller.
-
-    New errors must simultaneously update the `shared.agents.ErrorReason`
-    enum + add a matching exception class.
-    `tests/test_agent_error_wire_equivalence.py` parametrizes
-    EXCEPTION_BY_REASON.values() to lock the end-to-end loop.
-    """
-
-    detail: str
-    reason: ErrorReason
 
 
 class TraceCheckpointMessagesResponse(BaseModel):

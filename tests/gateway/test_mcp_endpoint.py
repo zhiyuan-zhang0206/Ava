@@ -118,6 +118,7 @@ def test_disabled_endpoint_answers_404(monkeypatch: pytest.MonkeyPatch) -> None:
         )
     assert resp.status_code == 404
     assert resp.json()["detail"] == "mcp endpoint is disabled"
+    assert resp.json()["code"] == "mcp_endpoint_disabled"
 
 
 # ── handshake + tool surface ─────────────────────────────────────────────

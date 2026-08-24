@@ -32,8 +32,8 @@ from collections import deque
 from typing import Any
 
 from fastapi import APIRouter, Request, Response
-from fastapi.responses import JSONResponse
 
+from gateway.error_envelope import error_response
 from gateway.schemas.frontend_telemetry import FrontendInteractionIn, FrontendTelemetryBatch
 from shared import telemetry
 
@@ -105,13 +105,22 @@ async def ingest(request: Request) -> Response:
     """
     raw = await request.body()
     if len(raw) > _MAX_BODY_BYTES:
-        return JSONResponse(status_code=413, content={"detail": "batch too large"})
+        return error_response(
+            request,
+            code="telemetry_batch_too_large",
+            status=413,
+            detail="batch too large",
+            retryable=False,
+        )
     try:
         batch = FrontendTelemetryBatch.model_validate_json(raw)
     except Exception as exc:  # validation errors are pydantic's, shape is ours
-        return JSONResponse(
-            status_code=422,
-            content={"detail": f"invalid telemetry batch: {exc}"},
+        return error_response(
+            request,
+            code="invalid_telemetry_batch",
+            status=422,
+            detail=f"invalid telemetry batch: {exc}",
+            retryable=False,
         )
 
     now = time.time()
