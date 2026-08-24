@@ -219,7 +219,7 @@ def test_newest_ledger_day_is_scoped_to_the_requested_range(
     )
 
 
-def test_ledger_distribution_merges_histograms_and_requires_each_ledger_day(
+def test_ledger_distribution_ignores_zero_turn_days_and_requires_histograms_for_turns(
     db_conn: psycopg.Connection,
 ) -> None:
     agent_id = _insert_agent(db_conn)
@@ -228,14 +228,16 @@ def test_ledger_distribution_merges_histograms_and_requires_each_ledger_day(
     final_day = today - timedelta(days=2)
     with db_conn.cursor() as cur:
         cur.execute(
-            "INSERT INTO agent_metrics_daily (agent_id, day, turn_dur_hist) "
-            "VALUES (%s, %s, %s), (%s, %s, %s)",
+            "INSERT INTO agent_metrics_daily (agent_id, day, turn_total, turn_dur_hist) "
+            "VALUES (%s, %s, %s, %s), (%s, %s, %s, %s)",
             (
                 agent_id,
                 first_day,
+                3,
                 Jsonb({"1": 2, "4": 1}),
                 agent_id,
                 final_day,
+                5,
                 Jsonb({"1": 3, "9": 2}),
             ),
         )
@@ -249,7 +251,7 @@ def test_ledger_distribution_merges_histograms_and_requires_each_ledger_day(
 
     with db_conn.cursor() as cur:
         cur.execute(
-            "INSERT INTO agent_metrics_daily (agent_id, day) VALUES (%s, %s)",
+            "INSERT INTO agent_metrics_daily (agent_id, day, turn_total) VALUES (%s, %s, 0)",
             (agent_id, today - timedelta(days=1)),
         )
     db_conn.commit()
@@ -258,6 +260,18 @@ def test_ledger_distribution_merges_histograms_and_requires_each_ledger_day(
         db_conn, agent_id=agent_id, day_from=first_day, day_to=today - timedelta(days=1)
     )
     assert distribution == [(1.0, 5), (4.0, 1), (9.0, 2)]
+    assert complete is True
+
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agent_metrics_daily (agent_id, day, turn_total) VALUES (%s, %s, 1)",
+            (agent_id, today),
+        )
+    db_conn.commit()
+
+    _, complete = _inspect_pg.ledger_distribution(
+        db_conn, agent_id=agent_id, day_from=first_day, day_to=today
+    )
     assert complete is False
 
 

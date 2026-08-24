@@ -104,7 +104,7 @@ def test_aggregate_rollup_file_matches_loki_rollup_semantics(tmp_path: Path) -> 
         jsonl_replay.TokensRow(11, "m1", 2, 1, 1, 12, 5, 2, 1, 0.25),
         jsonl_replay.TokensRow(99, "", 1, 0, 1, 0, 0, 0, 0, 0.0),
     ]
-    assert metrics_rows == [jsonl_replay.MetricsRow(11, 2, 1, 6.5, 2.5, 4.0, 1, 2)]
+    assert metrics_rows == [jsonl_replay.MetricsRow(11, 2, 1, 6.5, 2.5, 4.0, {2: 1, 4: 1}, 1, 2)]
     assert source_agent_ids == {11, 99}
 
 

@@ -1469,6 +1469,39 @@ def test_whole_life_inspect_uses_archive_rollup(
     assert stats["turn_max_seconds"] == 73.25
 
 
+def test_whole_life_histogram_replaces_archive_rollup_for_percentiles(
+    db_conn: psycopg.Connection, fake_loki: _FakeLoki
+) -> None:
+    """A backfilled bucket replaces its archive value rather than duplicating it."""
+    aid = _insert_agent(db_conn)
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agent_archive_stats (agent_id, turn_distribution) VALUES (%s, %s::jsonb)",
+            (aid, json.dumps([[1.6, 1]])),
+        )
+    _metrics_ledger_row(
+        db_conn,
+        agent_id=aid,
+        days_ago=15,
+        turn_total=1,
+        turn_ok=1,
+        turn_duration_seconds=1.6,
+        turn_dur_hist={1: 1},
+    )
+    fake_loki.add(event="turn_end", agent_id=aid, payload={"duration_seconds": 10.0, "ok": True})
+    db_conn.commit()
+
+    with TestClient(app) as client:
+        stats = client.get(f"/api/agents/{aid}/inspect").json()["stats"]
+
+    # Histogram buckets are floored, so their percentile value is 1.0; the
+    # exact archive value remains available only for extrema.
+    assert stats["turn_p50_seconds"] == 5.5
+    assert stats["turn_p90_seconds"] == 9.1
+    assert stats["turn_min_seconds"] == 1.6
+    assert stats["turn_max_seconds"] == 10.0
+
+
 def _assert_inspect_live_query_budget(fake_loki: _FakeLoki) -> None:
     """The cold panel keeps cost/heartbeat and collapses every other live read."""
     assert sum(fake_loki.wire_calls.values()) <= 12
@@ -1682,8 +1715,11 @@ def test_inspect_seven_day_percentiles_use_histogram_and_narrow_live_tail(
     duration_calls = [
         call for call in fake_loki.projected_calls if "^turn_end$" in call["event_names"]
     ]
-    assert duration_calls
-    assert all(call["to"] - call["from_"] <= timedelta(hours=48) for call in duration_calls)
+    # PR #536's single-envelope pass reads the whole live slice in one bounded
+    # call; the histogram keeps the distribution *content* narrow (ledger
+    # buckets + live-tail rows only), which the p50/p90/min/max assertions
+    # above pin down.
+    assert len(duration_calls) == 1
 
 
 def test_inspect_incomplete_histogram_falls_back_to_the_full_raw_window(

@@ -701,7 +701,7 @@ def test_metrics_queries_shapes() -> None:
     assert q["turn_dur_hist"].startswith("sum by (agent_id, bucket) (count_over_time(")
     assert (
         '| json duration_seconds="attributes.duration_seconds" '
-        '| line_format "{{ floor .duration_seconds }}" | pattern "<bucket>"'
+        '| __error__="" | line_format "{{ floor .duration_seconds }}" | pattern "<bucket>"'
     ) in q["turn_dur_hist"]
     assert 'event_name_extracted=~"exec_.+|exec\\\\(.*"' in q["exec_failed"]
     assert 'event_name_extracted=~"exec"' in q["exec_ok"]
@@ -743,6 +743,7 @@ def test_cutover_day_merges_legacy_and_indexed_rollups(monkeypatch: pytest.Monke
             labels["model"] = "m"
         if 'pattern "<bucket>"' in logql:
             labels["bucket"] = "1" if at == cutover else "2"
+            return [(labels, value), ({**labels, "bucket": "not-an-integer"}, value)]
         return [(labels, value)]
 
     def _slices(_start: datetime, _end: datetime) -> tuple[LokiReadSlice, ...]:
