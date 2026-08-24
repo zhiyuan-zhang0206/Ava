@@ -17,7 +17,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { InspectorPanel, InspectorToggle } from "./inspector-panel";
 import { formatAbsolute, formatRelative } from "@/lib/time";
-import type { AgentInspect, AgentInspectLive } from "@/lib/types";
+import type { AgentInspect, AgentInspectLive, PageRow } from "@/lib/types";
 
 // vi.hoisted so the mock fn is initialized before the hoisted vi.mock factory
 // runs (the factory fires during the InspectorPanel import, before module-body
@@ -38,7 +38,7 @@ const { getAgentInspect, getAgentInspectLive, listPages, resolveNotice } = vi.ho
   // section renders its empty state and these render tests stay focused on the
   // /inspect sections. The dedicated use-agent-pages.test.ts covers the fetch +
   // SSE fold.
-  listPages: vi.fn(() => Promise.resolve([])),
+  listPages: vi.fn<(agentId: number) => Promise<PageRow[]>>(() => Promise.resolve([])),
   // Notice resolve — default to success; the notice-reply tests drive it.
   resolveNotice: vi.fn(() => Promise.resolve({ status: "ok" })),
 }));
@@ -332,6 +332,38 @@ describe("InspectorPanel", () => {
     expect(screen.queryByText("State")).toBeNull();
     expect(screen.queryByText("every 5m")).toBeNull();
     expect(screen.getByText("never paused")).toBeTruthy();
+  });
+
+  it("renders the open page title and URL without a redundant Open badge", async () => {
+    const page = {
+      id: 7,
+      agent_id: 1,
+      name: "task-dashboard",
+      port: 4173,
+      title: "Task dashboard",
+      serve_dir: null,
+      url: "http://gateway.test/api/pages/7-task-dashboard/",
+      created_at: "2026-08-24T12:00:00Z",
+      closed_at: null,
+    } satisfies PageRow;
+    listPages.mockResolvedValueOnce([page]);
+
+    render(<InspectorPanel agentId={1} />);
+
+    await waitFor(() => expect(screen.getByText(page.title)).toBeTruthy());
+    const pageSection = screen.getByText("Page").closest("section");
+    expect(pageSection).not.toBeNull();
+    expect(within(pageSection!).getByText(page.url)).toBeTruthy();
+    expect(within(pageSection!).queryByText("Open")).toBeNull();
+  });
+
+  it("renders the empty Page state without a redundant None badge", async () => {
+    render(<InspectorPanel agentId={1} />);
+
+    await waitFor(() => expect(screen.getByText("No open page")).toBeTruthy());
+    const pageSection = screen.getByText("Page").closest("section");
+    expect(pageSection).not.toBeNull();
+    expect(within(pageSection!).queryByText("None")).toBeNull();
   });
 
   it("renders section skeletons instead of a single loading line on a cold split load", () => {
