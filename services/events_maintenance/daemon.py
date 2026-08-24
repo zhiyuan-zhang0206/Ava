@@ -1,6 +1,6 @@
 """Events-maintenance daemon — gateway-owned unified event-stream + checkpoint maintenance.
 
-Always-on gateway daemon (cluster-wide; the gateway owns the data plane). Two
+Always-on gateway daemon (cluster-wide; the gateway owns the data plane). Three
 loops:
 
 - Hourly loop (`AVA_EVENTS_MAINTENANCE_INTERVAL_SECONDS`, default 1h): the
@@ -22,6 +22,12 @@ loops:
 - Fast loop (60s): Rule A — trim overgrown LIVE threads
   (`services.events_maintenance.checkpoint_reaper.trim_overgrown_threads`,
   keep=2 past 20), replacing the removed agent-side idle trim.
+- Resolution loop (`AVA_EVENTS_RESOLUTION_INTERVAL_SECONDS`, default 5m):
+  refresh immutable-event class-resolution state and gauges from Loki.
+
+Each loop reports independent progress, success, and errors in `/healthz`.
+Only completed bounded work or sleeps beat; exceeding a hard deadline fails
+healthz until the watchdog replaces the process and its orphaned worker thread.
 
 The events-archive slices only run when `AVA_EVENTS_MAINTENANCE_ENABLED` is
 set. Since the LGTM cutover (task #1197) the PG `events` copy is a read-only
@@ -75,7 +81,13 @@ from services.events_maintenance.retention import apply_retention
 from services.events_maintenance.rollup import compute_rollup
 from services.events_maintenance.table_retention import apply_table_retention
 from shared.config import settings
-from shared.daemon_health import Liveness, health_port, start_health_server, stop_health_server
+from shared.daemon_health import (
+    LivenessGroup,
+    LoopProgress,
+    health_port,
+    start_health_server,
+    stop_health_server,
+)
 from shared.daemon_shutdown import install_graceful_shutdown
 from shared.events.contract import EVENTS, RETENTION_BY_CATEGORY, retention_days
 from shared.log import init_gateway_process
@@ -84,7 +96,6 @@ from shared.paths import legacy_pid_path
 _log = logging.getLogger("services.events_maintenance.daemon")
 
 _PIDFILE = settings.services.events_maintenance_pidfile
-_LIVENESS_TIMEOUT_S = 60.0
 _LIVENESS_BEAT_STEP_S = 30.0
 
 # Cadence of the Rule A fast loop. #1197 removed the ops-rollup fast loop this
@@ -92,6 +103,10 @@ _LIVENESS_BEAT_STEP_S = 30.0
 # code); it gets its own loop so a continuously working agent's checkpoints are
 # bounded within a minute of crossing the threshold.
 _CHECKPOINT_TRIM_INTERVAL_S = 60.0
+
+
+class WedgedPassError(RuntimeError):
+    """A blocking pass exceeded its deadline and left a worker thread orphaned."""
 
 
 def _retention_policy() -> dict[str, int]:
@@ -114,7 +129,7 @@ def _retention_policy() -> dict[str, int]:
     return policy
 
 
-def _run_maintenance(pool: ConnectionPool) -> None:
+def _run_maintenance(pool: ConnectionPool, progress: LoopProgress) -> None:
     """One hourly pass. The events-archive slices — partition rolling, events
     retention (drop/prune expired months), table retention, index-bloat
     governance (audit M2) — run only when
@@ -142,16 +157,20 @@ def _run_maintenance(pool: ConnectionPool) -> None:
     if settings.daemon.events_maintenance_enabled:
         with pool.connection() as conn:
             created = ensure_month_partitions(conn, now_utc=now)
+        progress.beat()
         with pool.connection() as conn:
             retention = apply_retention(conn, now_utc=now, retention_days=_retention_policy())
+        progress.beat()
         with pool.connection() as conn:
             table_retention = apply_table_retention(conn, now_utc=now)
+        progress.beat()
         # Index-bloat governance (audit M2 / P1-2 ①): REINDEX CONCURRENTLY the hot
         # events partition indexes past their bytes/row threshold. Runs LAST and on
         # its own DIRECT autocommit connection — CONCURRENTLY cannot run in a
         # transaction and must not ride the transaction-mode pooler. A no-op pass
         # (healthy indexes) logs nothing.
         reindex_result = run_governance_pass(now_utc=now)
+        progress.beat()
         if created:
             _log.info("[events-maintenance] created partitions: %s", ", ".join(created))
         if retention.dropped or retention.pruned:
@@ -162,6 +181,7 @@ def _run_maintenance(pool: ConnectionPool) -> None:
             _log.info("[events-maintenance] index governance: %s", reindex_result.summary())
     with pool.connection() as conn:
         result = compute_rollup(conn, now_utc=now)
+    progress.beat()
     if result.start_day is not None:
         _log.info(
             "[events-maintenance] rolled %s..%s — %d metric rows, %d token rows",
@@ -171,10 +191,12 @@ def _run_maintenance(pool: ConnectionPool) -> None:
             result.tokens_rows,
         )
     reaped = reap_stale_checkpoints(pool)
+    progress.beat()
     # Incremental physical reclamation: a plain VACUUM (no lock) over the
     # checkpoint tables, only inside the measured agent-lowest window
     # (05:00-08:00 America/Los_Angeles). Logs size + dead tuples each run.
     vacuum_result = run_blob_vacuum()
+    progress.beat()
     if vacuum_result.ran:
         _log.info("[events-maintenance] blob vacuum: %s", vacuum_result.summary())
     if reaped.agents:
@@ -186,9 +208,10 @@ def _run_maintenance(pool: ConnectionPool) -> None:
             reaped.writes,
             reaped.blobs,
         )
+    progress.mark_success()
 
 
-def _run_checkpoint_trim(pool: ConnectionPool) -> None:
+def _run_checkpoint_trim(pool: ConnectionPool, progress: LoopProgress) -> None:
     """One fast checkpoint-trim pass: Rule A — trim active threads past
     `_LIVE_TRIM_THRESHOLD` checkpoints down to `_LIVE_KEEP` (compaction
     boundaries always kept). Replaces the removed agent-side idle trim, which
@@ -207,12 +230,16 @@ def _run_checkpoint_trim(pool: ConnectionPool) -> None:
             reaped.blobs,
             now.timestamp(),
         )
+    progress.beat()
+    progress.mark_success()
 
 
-def _run_resolution(pool: ConnectionPool) -> None:
+def _run_resolution(pool: ConnectionPool, progress: LoopProgress) -> None:
     """Run the resolution slice while discarding its test-facing summary."""
 
     run_resolution_slice(pool)
+    progress.beat()
+    progress.mark_success()
 
 
 def _write_pidfile() -> None:
@@ -237,36 +264,44 @@ def _is_running() -> bool:
     )
 
 
-async def _sleep_with_liveness(liveness: Liveness, total_s: float) -> None:
-    """Sleep `total_s`, beating liveness every `_LIVENESS_BEAT_STEP_S` so the long
+async def _sleep_with_liveness(progress: LoopProgress, total_s: float) -> None:
+    """Sleep `total_s`, beating progress every `_LIVENESS_BEAT_STEP_S` so the long
     inter-poll wait keeps /healthz fresh instead of reading as a wedged loop."""
     remaining = total_s
     while remaining > 0:
-        liveness.beat()
+        progress.beat()
         step = min(_LIVENESS_BEAT_STEP_S, remaining)
         await asyncio.sleep(step)
         remaining -= step
 
 
 async def _maintenance_with_liveness(
-    pool: ConnectionPool, liveness: Liveness, *, run: Callable[[ConnectionPool], None] | None = None
+    pool: ConnectionPool,
+    progress: LoopProgress,
+    *,
+    run: Callable[[ConnectionPool], None] | None = None,
 ) -> None:
-    """Run the (blocking) maintenance pass in a worker thread while beating liveness
-    every `_LIVENESS_BEAT_STEP_S`. The first run's full-history backfill can outlast
-    `_LIVENESS_TIMEOUT_S`; without beating during it, /healthz would flip 503 and
-    the watchdog would respawn the daemon mid-scan. Re-raises the pass's own
-    exception once the thread finishes. `run` defaults to `_run_maintenance`,
-    resolved at call time (not bound as a default) so tests can monkeypatch it."""
-    fut = asyncio.ensure_future(asyncio.to_thread(run or _run_maintenance, pool))
-    while True:
-        liveness.beat()
-        done, _pending = await asyncio.wait({fut}, timeout=_LIVENESS_BEAT_STEP_S)
-        if fut in done:
-            break
-    await fut  # propagate the maintenance pass's exception, if any
+    """Run one pass within its deadline; unresolved work is not progress.
+    Completion beats before propagating its result; timeout permanently fails
+    the loop. ``run`` remains a test seam.
+    """
+    if run is None:
+
+        def run_with_progress(target_pool: ConnectionPool) -> None:
+            _run_maintenance(target_pool, progress)
+
+        run = run_with_progress
+    fut = asyncio.ensure_future(asyncio.to_thread(run, pool))
+    done, _pending = await asyncio.wait({fut}, timeout=progress.timeout_s)
+    if fut not in done:
+        message = f"{progress.name} pass exceeded hard deadline of {progress.timeout_s:.1f}s"
+        progress.fail(message)
+        raise WedgedPassError(message)
+    progress.beat()
+    await fut  # propagate the completed maintenance pass's exception, if any
 
 
-async def _dispatch_loop(pool: ConnectionPool, liveness: Liveness) -> None:
+async def _dispatch_loop(pool: ConnectionPool, progress: LoopProgress) -> None:
     """Main loop: roll immediately on start (fresh after a restart), then every
     interval. The rollup DB work is synchronous psycopg run in a thread so it does
     not block the healthz event loop. The inter-run sleep is OUTSIDE the try, so a
@@ -281,9 +316,16 @@ async def _dispatch_loop(pool: ConnectionPool, liveness: Liveness) -> None:
     )
     while True:
         try:
-            await _maintenance_with_liveness(pool, liveness)
+            await _maintenance_with_liveness(pool, progress)
         except asyncio.CancelledError:
             raise
+        except WedgedPassError:
+            _log.critical(
+                "[events-maintenance] rollup pass wedged — parking for watchdog respawn",
+                exc_info=True,
+            )
+            while True:
+                await asyncio.sleep(3600)
         except psycopg.ProgrammingError:
             _log.critical(
                 "[events-maintenance] schema / syntax error — code<->DB drift; "
@@ -291,12 +333,13 @@ async def _dispatch_loop(pool: ConnectionPool, liveness: Liveness) -> None:
                 exc_info=True,
             )
             raise
-        except Exception:
+        except Exception as exc:
+            progress.mark_error(str(exc))
             _log.exception("[events-maintenance] rollup iteration failed")
-        await _sleep_with_liveness(liveness, interval)
+        await _sleep_with_liveness(progress, interval)
 
 
-async def _checkpoint_trim_loop(pool: ConnectionPool, liveness: Liveness) -> None:
+async def _checkpoint_trim_loop(pool: ConnectionPool, progress: LoopProgress) -> None:
     """Rule A fast loop: trim overgrown live threads every
     `_CHECKPOINT_TRIM_INTERVAL_S`. Runs unconditionally (independent of
     `AVA_EVENTS_MAINTENANCE_ENABLED`) — the hourly pass only bounds stale
@@ -312,9 +355,20 @@ async def _checkpoint_trim_loop(pool: ConnectionPool, liveness: Liveness) -> Non
     )
     while True:
         try:
-            await _maintenance_with_liveness(pool, liveness, run=_run_checkpoint_trim)
+            await _maintenance_with_liveness(
+                pool,
+                progress,
+                run=lambda target_pool: _run_checkpoint_trim(target_pool, progress),
+            )
         except asyncio.CancelledError:
             raise
+        except WedgedPassError:
+            _log.critical(
+                "[events-maintenance] checkpoint trim pass wedged — parking for watchdog respawn",
+                exc_info=True,
+            )
+            while True:
+                await asyncio.sleep(3600)
         except psycopg.ProgrammingError:
             _log.critical(
                 "[events-maintenance] checkpoint trim schema / syntax error — "
@@ -323,12 +377,13 @@ async def _checkpoint_trim_loop(pool: ConnectionPool, liveness: Liveness) -> Non
                 exc_info=True,
             )
             raise
-        except Exception:
+        except Exception as exc:
+            progress.mark_error(str(exc))
             _log.exception("[events-maintenance] checkpoint trim iteration failed")
-        await _sleep_with_liveness(liveness, _CHECKPOINT_TRIM_INTERVAL_S)
+        await _sleep_with_liveness(progress, _CHECKPOINT_TRIM_INTERVAL_S)
 
 
-async def _resolution_loop(pool: ConnectionPool, liveness: Liveness) -> None:
+async def _resolution_loop(pool: ConnectionPool, progress: LoopProgress) -> None:
     """Refresh immutable-event class-resolution gauges on their own cadence.
 
     The six-hour Loki read and safety-valve write are unrelated to the frozen
@@ -345,9 +400,20 @@ async def _resolution_loop(pool: ConnectionPool, liveness: Liveness) -> None:
     )
     while True:
         try:
-            await _maintenance_with_liveness(pool, liveness, run=_run_resolution)
+            await _maintenance_with_liveness(
+                pool,
+                progress,
+                run=lambda target_pool: _run_resolution(target_pool, progress),
+            )
         except asyncio.CancelledError:
             raise
+        except WedgedPassError:
+            _log.critical(
+                "[events-maintenance] resolution pass wedged — parking for watchdog respawn",
+                exc_info=True,
+            )
+            while True:
+                await asyncio.sleep(3600)
         except psycopg.ProgrammingError:
             _log.critical(
                 "[events-maintenance] resolution schema / syntax error — "
@@ -355,9 +421,10 @@ async def _resolution_loop(pool: ConnectionPool, liveness: Liveness) -> None:
                 exc_info=True,
             )
             raise
-        except Exception:
+        except Exception as exc:
+            progress.mark_error(str(exc))
             _log.exception("[events-maintenance] resolution iteration failed")
-        await _sleep_with_liveness(liveness, interval)
+        await _sleep_with_liveness(progress, interval)
 
 
 async def run() -> None:
@@ -373,16 +440,23 @@ async def run() -> None:
     _write_pidfile()
     _log.info("[events-maintenance] pidfile written: %s", _PIDFILE)
 
-    liveness = Liveness(_LIVENESS_TIMEOUT_S)
+    liveness = LivenessGroup()
+    dispatch_progress = liveness.register(
+        "dispatch", settings.daemon.events_maintenance_pass_deadline_s
+    )
+    trim_progress = liveness.register("trim", settings.daemon.events_maintenance_trim_deadline_s)
+    resolution_progress = liveness.register(
+        "resolution", settings.daemon.events_maintenance_resolution_deadline_s
+    )
     health = await start_health_server("events_maintenance", liveness=liveness)
     _log.info("[events-maintenance] healthz listening on :%s", health_port("events_maintenance"))
 
     pool = shared.db.pool()
     try:
         await asyncio.gather(
-            _dispatch_loop(pool, liveness),
-            _checkpoint_trim_loop(pool, liveness),
-            _resolution_loop(pool, liveness),
+            _dispatch_loop(pool, dispatch_progress),
+            _checkpoint_trim_loop(pool, trim_progress),
+            _resolution_loop(pool, resolution_progress),
         )
     finally:
         pool.close()

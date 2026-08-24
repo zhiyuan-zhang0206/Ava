@@ -1,8 +1,8 @@
 """`services.events_maintenance.daemon` loop-hardening + gating behaviors.
 
 The runtime guards the maintenance daemon needs and that are easy to regress:
-  - liveness is beaten *while* the (blocking) maintenance pass runs, so a long
-    first-run backfill does not read as a wedged loop and get respawned mid-scan;
+  - each concurrent loop owns a progress deadline that sibling loops cannot mask;
+  - blocking passes beat only after completion and permanently wedge on timeout;
   - a failed pass still waits a full interval before retrying, so a transient
     DB error does not become a tight hot-loop against Postgres;
   - the events/checkpoint split (task #1257): the hourly pass skips the
@@ -24,7 +24,8 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 from services.events_maintenance import daemon
-from shared.daemon_health import Liveness
+from shared.config.daemon import DaemonSettings
+from shared.daemon_health import LivenessGroup, LoopProgress
 
 # The pool is never touched — `_run_maintenance` / `_maintenance_with_liveness` are faked.
 _FAKE_POOL: Any = object()
@@ -46,49 +47,120 @@ class _FakePool:
         return self._Conn()
 
 
-def test_liveness_beaten_during_slow_rollup(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A maintenance pass longer than one beat step beats liveness several times
-    while it runs (the old single `await to_thread` beat zero times during the scan)."""
-    monkeypatch.setattr(daemon, "_LIVENESS_BEAT_STEP_S", 0.02)
-    monkeypatch.setattr(daemon, "_run_maintenance", lambda _pool: time.sleep(0.2))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-
-    liveness = Liveness(timeout_s=5.0)
+def test_wedged_pass_fails_without_beating_in_flight(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A worker that exceeds its hard deadline wedges; elapsed time never earns a beat."""
+    progress = LoopProgress("dispatch", timeout_s=0.01)
     beats = 0
-    original_beat = liveness.beat
+    original_beat = progress.beat
 
     def counting_beat() -> None:
         nonlocal beats
         beats += 1
         original_beat()
 
-    monkeypatch.setattr(liveness, "beat", counting_beat)
-    asyncio.run(
-        daemon._maintenance_with_liveness(_FAKE_POOL, liveness)
-    )  # pool unused (fake _run_maintenance)
-    assert beats >= 3
+    monkeypatch.setattr(progress, "beat", counting_beat)
+
+    with pytest.raises(daemon.WedgedPassError, match=r"dispatch.*hard deadline"):
+        asyncio.run(
+            daemon._maintenance_with_liveness(
+                _FAKE_POOL,
+                progress,
+                run=lambda _pool: time.sleep(0.05),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+            )
+        )
+
+    assert beats == 0
+    assert not progress.is_alive()
+    assert progress.snapshot()["wedged"] is True
+
+
+def test_completed_pass_beats_once_after_worker_finishes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A bounded worker completion advances progress exactly once, after it returns."""
+    progress = LoopProgress("dispatch", timeout_s=1.0)
+    finished_at = 0.0
+    beat_at: list[float] = []
+    original_beat = progress.beat
+
+    def run(_pool: object) -> None:
+        nonlocal finished_at
+        finished_at = time.monotonic()
+
+    def counting_beat() -> None:
+        beat_at.append(time.monotonic())
+        original_beat()
+
+    monkeypatch.setattr(progress, "beat", counting_beat)
+    asyncio.run(daemon._maintenance_with_liveness(_FAKE_POOL, progress, run=run))
+
+    assert len(beat_at) == 1
+    assert beat_at[0] >= finished_at
 
 
 def test_failed_rollup_still_waits_before_retry(monkeypatch: pytest.MonkeyPatch) -> None:
     """A maintenance pass that raises a transient (non-ProgrammingError) exception
-    falls through to the inter-run sleep instead of immediately re-running."""
+    beats on completion, records the error, then waits before re-running."""
+    failed_at = 0.0
 
-    async def boom(_pool: object, _liveness: Liveness) -> None:
+    def boom(*_args: object) -> None:
+        nonlocal failed_at
+        failed_at = time.monotonic()
         raise RuntimeError("transient db blip")
 
     slept: list[float] = []
 
-    async def fake_sleep(_liveness: Liveness, total_s: float) -> None:
+    async def fake_sleep(_progress: LoopProgress, total_s: float) -> None:
         slept.append(total_s)
         raise asyncio.CancelledError  # break the otherwise-infinite loop after one sleep
 
-    monkeypatch.setattr(daemon, "_maintenance_with_liveness", boom)
+    monkeypatch.setattr(daemon, "_run_maintenance", boom)
     monkeypatch.setattr(daemon, "_sleep_with_liveness", fake_sleep)
 
-    liveness = Liveness(timeout_s=5.0)
+    progress = LoopProgress("dispatch", timeout_s=5.0)
+    beat_at: list[float] = []
+    original_beat = progress.beat
+
+    def counting_beat() -> None:
+        beat_at.append(time.monotonic())
+        original_beat()
+
+    monkeypatch.setattr(progress, "beat", counting_beat)
     with pytest.raises(asyncio.CancelledError):
-        asyncio.run(daemon._dispatch_loop(_FAKE_POOL, liveness))  # pool unused
-    # Exactly one sleep, of the full configured interval — the failure path waited.
+        asyncio.run(daemon._dispatch_loop(_FAKE_POOL, progress))  # pool unused
+
+    assert len(beat_at) == 1
+    assert beat_at[0] >= failed_at
+    assert progress.snapshot()["last_error"]["message"] == "transient db blip"  # pyright: ignore[reportIndexIssue]
     assert slept == [daemon.settings.daemon.events_maintenance_interval_seconds]
+
+
+def test_wedged_dispatch_parks_without_entering_retry_sleep(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A timed-out worker may still hold a connection, so its loop parks permanently."""
+
+    async def wedge(_pool: object, progress: LoopProgress) -> None:
+        progress.fail("dispatch exceeded hard deadline")
+        raise daemon.WedgedPassError("dispatch exceeded hard deadline")
+
+    parked: list[float] = []
+
+    async def fake_park(total_s: float) -> None:
+        parked.append(total_s)
+        raise asyncio.CancelledError
+
+    async def forbidden_retry_sleep(_progress: LoopProgress, _total_s: float) -> None:
+        pytest.fail("wedged loop entered the normal retry sleep")
+
+    monkeypatch.setattr(daemon, "_maintenance_with_liveness", wedge)
+    monkeypatch.setattr(daemon.asyncio, "sleep", fake_park)
+    monkeypatch.setattr(daemon, "_sleep_with_liveness", forbidden_retry_sleep)
+
+    progress = LoopProgress("dispatch", timeout_s=1.0)
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(daemon._dispatch_loop(_FAKE_POOL, progress))
+
+    assert parked == [3600]
+    assert not progress.is_alive()
 
 
 # ─── the events/checkpoint split (design-regression fix, task #1257) ──────────────
@@ -152,13 +224,25 @@ def test_maintenance_pass_reaps_when_events_disabled(monkeypatch: pytest.MonkeyP
     ~150MB/h unbounded)."""
     monkeypatch.setattr(daemon.settings.daemon, "events_maintenance_enabled", False)
     rec = _instrument_maintenance_slices(monkeypatch)
+    progress = LoopProgress("dispatch", timeout_s=60.0)
+    beats = 0
+    original_beat = progress.beat
 
-    daemon._run_maintenance(cast(ConnectionPool, _FakePool()))  # every slice faked
+    def counting_beat() -> None:
+        nonlocal beats
+        beats += 1
+        original_beat()
+
+    monkeypatch.setattr(progress, "beat", counting_beat)
+
+    daemon._run_maintenance(cast(ConnectionPool, _FakePool()), progress)  # every slice faked
 
     assert rec["rollup"].calls == 1
     assert set(rec["rollup"].kwargs[0]) == {"now_utc"}
     assert rec["reap"].calls == 1
     assert rec["vacuum"].calls == 1
+    assert beats == 3
+    assert progress.snapshot()["last_success_at"] is not None
     for name in _EVENTS_SLICES:
         assert rec[name].calls == 0, f"events slice {name} ran with the flag off"
 
@@ -171,11 +255,23 @@ def test_maintenance_pass_runs_events_slices_when_enabled(
     vacuum."""
     monkeypatch.setattr(daemon.settings.daemon, "events_maintenance_enabled", True)
     rec = _instrument_maintenance_slices(monkeypatch)
+    progress = LoopProgress("dispatch", timeout_s=60.0)
+    beats = 0
+    original_beat = progress.beat
 
-    daemon._run_maintenance(cast(ConnectionPool, _FakePool()))  # every slice faked
+    def counting_beat() -> None:
+        nonlocal beats
+        beats += 1
+        original_beat()
+
+    monkeypatch.setattr(progress, "beat", counting_beat)
+
+    daemon._run_maintenance(cast(ConnectionPool, _FakePool()), progress)  # every slice faked
 
     for name in (*_EVENTS_SLICES, "rollup", "reap", "vacuum"):
         assert rec[name].calls == 1, name
+    assert beats == 7
+    assert progress.snapshot()["last_success_at"] is not None
 
 
 def test_checkpoint_trim_loop_runs_rule_a(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -185,19 +281,96 @@ def test_checkpoint_trim_loop_runs_rule_a(monkeypatch: pytest.MonkeyPatch) -> No
     not be coupled to the events flag (same regression class as the reaper)."""
     ran: list[object] = []
 
-    def fake_trim(pool: object) -> None:
+    def fake_trim(pool: object, progress: LoopProgress) -> None:
         ran.append(pool)
+        progress.beat()
+        progress.mark_success()
 
-    async def fake_sleep(_liveness: Liveness, total_s: float) -> None:
+    async def fake_sleep(_progress: LoopProgress, total_s: float) -> None:
         raise asyncio.CancelledError  # break the otherwise-infinite loop after one run
 
     monkeypatch.setattr(daemon, "_run_checkpoint_trim", fake_trim)
     monkeypatch.setattr(daemon, "_sleep_with_liveness", fake_sleep)
 
-    liveness = Liveness(timeout_s=5.0)
+    progress = LoopProgress("trim", timeout_s=5.0)
     with pytest.raises(asyncio.CancelledError):
-        asyncio.run(daemon._checkpoint_trim_loop(_FAKE_POOL, liveness))  # pool unused
+        asyncio.run(daemon._checkpoint_trim_loop(_FAKE_POOL, progress))  # pool unused
     assert ran == [_FAKE_POOL]
+    assert progress.snapshot()["last_success_at"] is not None
     # The fast-loop cadence is its own constant, not the hourly maintenance interval.
     hourly = daemon.settings.daemon.events_maintenance_interval_seconds
     assert hourly > daemon._CHECKPOINT_TRIM_INTERVAL_S
+
+
+def test_deadline_settings_defaults_and_env_aliases() -> None:
+    defaults = DaemonSettings()
+    assert defaults.events_maintenance_pass_deadline_s == 1500.0
+    assert defaults.events_maintenance_trim_deadline_s == 300.0
+    assert defaults.events_maintenance_resolution_deadline_s == 600.0
+
+    configured = DaemonSettings.model_validate(
+        {
+            "AVA_EVENTS_MAINTENANCE_PASS_DEADLINE_S": "15.5",
+            "AVA_EVENTS_MAINTENANCE_TRIM_DEADLINE_S": "25",
+            "AVA_EVENTS_MAINTENANCE_RESOLUTION_DEADLINE_S": "35.5",
+        }
+    )
+    assert configured.events_maintenance_pass_deadline_s == 15.5
+    assert configured.events_maintenance_trim_deadline_s == 25.0
+    assert configured.events_maintenance_resolution_deadline_s == 35.5
+
+
+def test_run_gives_each_loop_its_own_progress_tracker(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The three concurrent loops cannot share a progress stamp at the run boundary."""
+
+    class _RunPool:
+        def __init__(self) -> None:
+            self.closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    pool = _RunPool()
+    health = object()
+    health_liveness: list[object] = []
+    received: dict[str, LoopProgress] = {}
+
+    async def fake_start(_name: str, *, liveness: object) -> object:
+        health_liveness.append(liveness)
+        return health
+
+    async def fake_stop(server: object) -> None:
+        assert server is health
+
+    async def dispatch(_pool: object, progress: LoopProgress) -> None:
+        received["dispatch"] = progress
+
+    async def trim(_pool: object, progress: LoopProgress) -> None:
+        received["trim"] = progress
+
+    async def resolution(_pool: object, progress: LoopProgress) -> None:
+        received["resolution"] = progress
+
+    def fake_health_port(_name: str) -> int:
+        return 8109
+
+    monkeypatch.setattr(daemon, "_is_running", lambda: False)
+    monkeypatch.setattr(daemon, "_write_pidfile", lambda: None)
+    monkeypatch.setattr(daemon, "_remove_pidfile", lambda: None)
+    monkeypatch.setattr(daemon, "start_health_server", fake_start)
+    monkeypatch.setattr(daemon, "stop_health_server", fake_stop)
+    monkeypatch.setattr(daemon, "health_port", fake_health_port)
+    monkeypatch.setattr(daemon.shared.db, "pool", lambda: pool)
+    monkeypatch.setattr(daemon, "_dispatch_loop", dispatch)
+    monkeypatch.setattr(daemon, "_checkpoint_trim_loop", trim)
+    monkeypatch.setattr(daemon, "_resolution_loop", resolution)
+
+    asyncio.run(daemon.run())
+
+    assert pool.closed
+    assert len(health_liveness) == 1
+    assert isinstance(health_liveness[0], LivenessGroup)
+    assert len({id(progress) for progress in received.values()}) == 3
+    assert received["dispatch"].timeout_s == 1500.0
+    assert received["trim"].timeout_s == 300.0
+    assert received["resolution"].timeout_s == 600.0

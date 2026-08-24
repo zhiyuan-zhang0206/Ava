@@ -21,11 +21,9 @@ Design:
 - bind ``127.0.0.1``-only; daemon healthchecks / RPC are strictly local
 - ``/healthz`` is always present: returns 200 + JSON
   ``{"name": ..., "pid": ..., "home": ..., "started_at": ...}`` — the
-  first three are the identity ``probe_daemon`` verifies. When a
-  ``Liveness`` is passed, a stale main loop (no ``beat()`` within its
-  timeout) flips ``/healthz`` to 503 so the watchdog respawns a
-  process that is alive but whose loop has wedged on a never-returning
-  ``await``
+  first three are the identity ``probe_daemon`` verifies. ``Liveness`` tracks
+  one loop; ``LivenessGroup`` tracks concurrent loops independently. Both flip
+  stale work to 503 so a live sibling cannot hide a wedged loop
 - ``extra_routes``: ``{("POST", "/search"): handler}`` lets a daemon
   expose its own RPCs (e.g. memory_indexer ``/search``, bypassing
   milvus-lite single-process flock restrictions)
@@ -69,6 +67,7 @@ import urllib.error
 import urllib.request
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
 from typing import cast
@@ -257,8 +256,70 @@ class Liveness:
         return self.stale_for() <= self._timeout_s
 
 
+class LoopProgress:
+    """Progress for one loop, closing shared-heartbeat masking by moving only
+    for completed work and making ``fail()`` irreversible until respawn."""
+
+    def __init__(self, name: str, timeout_s: float) -> None:
+        self.name = name
+        self.timeout_s = timeout_s
+        self._last = time.monotonic()
+        self._last_success_at: str | None = None
+        self._last_error: dict[str, str] | None = None
+        self._wedged = False
+
+    def beat(self) -> None:
+        self._last = time.monotonic()
+
+    def mark_success(self) -> None:
+        self._last_success_at = datetime.now(UTC).isoformat()
+
+    def mark_error(self, message: str) -> None:
+        self._last_error = {"message": message, "at": datetime.now(UTC).isoformat()}
+
+    def fail(self, message: str) -> None:
+        self._wedged = True
+        self.mark_error(message)
+
+    def stale_for(self) -> float:
+        return time.monotonic() - self._last
+
+    def is_alive(self) -> bool:
+        return not self._wedged and self.stale_for() <= self.timeout_s
+
+    def snapshot(self) -> dict[str, object]:
+        return {
+            "name": self.name,
+            "stale_for": self.stale_for(),
+            "last_success_at": self._last_success_at,
+            "last_error": self._last_error,
+            "wedged": self._wedged,
+        }
+
+
+class LivenessGroup:
+    """Worst-case liveness across loops, closing the failure where a scheduling
+    sibling keeps one shared stamp fresh while another loop is dead."""
+
+    def __init__(self) -> None:
+        self._loops: dict[str, LoopProgress] = {}
+
+    def register(self, name: str, timeout_s: float) -> LoopProgress:
+        self._loops[name] = LoopProgress(name, timeout_s)
+        return self._loops[name]
+
+    def stale_for(self) -> float:
+        return max((progress.stale_for() for progress in self._loops.values()), default=0.0)
+
+    def is_alive(self) -> bool:
+        return all(progress.is_alive() for progress in self._loops.values())
+
+    def snapshot(self) -> dict[str, dict[str, object]]:
+        return {name: progress.snapshot() for name, progress in self._loops.items()}
+
+
 def _healthz_payload(
-    name: str, pid: int, home: str, started_at: float, liveness: Liveness | None
+    name: str, pid: int, home: str, started_at: float, liveness: Liveness | LivenessGroup | None
 ) -> tuple[int, bytes]:
     """Build the (status, json body) for GET /healthz. 503 when a liveness is
     present and its main loop has gone stale; 200 otherwise.
@@ -283,6 +344,8 @@ def _healthz_payload(
     status = 200
     if liveness is not None:
         payload["stale_for"] = round(liveness.stale_for(), 1)
+        if isinstance(liveness, LivenessGroup):
+            payload["loops"] = liveness.snapshot()
         if not liveness.is_alive():
             status = 503
     return status, json.dumps(payload).encode("utf-8")
@@ -294,7 +357,7 @@ async def start_health_server(
     *,
     host: str = "127.0.0.1",
     extra_routes: Mapping[tuple[str, str], RouteHandler] | None = None,
-    liveness: Liveness | None = None,
+    liveness: Liveness | LivenessGroup | None = None,
     auth_token: str | None = None,
 ) -> asyncio.Server:
     """Start daemon HTTP server; return server instance (caller is responsible for close).
@@ -313,9 +376,10 @@ async def start_health_server(
             content_type). On handler exception -> 500. Body size
             exceeding 64 KB -> 413 (actually returned as 400 for
             simplicity).
-        liveness: optional main-loop heartbeat; when its last ``beat()``
-            is older than the configured timeout, ``/healthz`` returns
-            503 instead of 200 so the watchdog respawns a wedged daemon.
+        liveness: optional main-loop heartbeat or concurrent-loop group; when
+            it is not alive, ``/healthz`` returns 503 instead of 200 so the
+            watchdog respawns a wedged daemon. Groups also expose per-loop
+            progress snapshots in the response.
         auth_token: when set, every ``extra_routes`` request must carry
             ``Authorization: Bearer <auth_token>`` or it gets 401. ``/healthz``
             stays unauthenticated (the watchdog probes it locally and it leaks

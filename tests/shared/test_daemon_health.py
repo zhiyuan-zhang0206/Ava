@@ -19,7 +19,9 @@ import os
 import socket
 import urllib.error
 import urllib.request
+from datetime import datetime
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -76,6 +78,101 @@ async def test_liveness_flips_stale_then_fresh_on_beat() -> None:
     assert lv.stale_for() >= 0.15
     lv.beat()
     assert lv.is_alive()
+
+
+def test_loop_progress_flips_stale_then_fresh_on_completed_unit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A loop becomes stale after its own deadline; another completed unit resets it."""
+    now = 100.0
+    monkeypatch.setattr(daemon_health.time, "monotonic", lambda: now)
+    progress = daemon_health.LoopProgress("dispatch", timeout_s=5.0)
+
+    assert progress.name == "dispatch"
+    assert progress.timeout_s == 5.0
+    assert progress.is_alive()
+
+    now = 106.0
+    assert not progress.is_alive()
+    assert progress.stale_for() == 6.0
+
+    progress.beat()
+    assert progress.is_alive()
+    assert progress.stale_for() == 0.0
+
+
+def test_loop_progress_snapshot_records_success_error_and_permanent_wedge() -> None:
+    """Fail records the reason and permanently wins over later sibling-style beats."""
+    progress = daemon_health.LoopProgress("resolution", timeout_s=60.0)
+    progress.mark_success()
+    progress.mark_error("loki unavailable")
+
+    before_wedge = progress.snapshot()
+    assert before_wedge["name"] == "resolution"
+    assert isinstance(before_wedge["stale_for"], float)
+    assert datetime.fromisoformat(cast(str, before_wedge["last_success_at"]))
+    last_error = cast(dict[str, str], before_wedge["last_error"])
+    assert last_error["message"] == "loki unavailable"
+    assert datetime.fromisoformat(last_error["at"])
+    assert before_wedge["wedged"] is False
+
+    progress.fail("resolution exceeded hard deadline")
+    progress.beat()
+    assert not progress.is_alive()
+    wedged_error = cast(dict[str, str], progress.snapshot()["last_error"])
+    assert wedged_error["message"] == "resolution exceeded hard deadline"
+    assert progress.snapshot()["wedged"] is True
+
+
+def test_liveness_group_reports_the_worst_loop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A fresh sibling cannot hide a loop whose own progress age exceeds its deadline."""
+    now = 10.0
+    monkeypatch.setattr(daemon_health.time, "monotonic", lambda: now)
+    group = daemon_health.LivenessGroup()
+    dispatch = group.register("dispatch", timeout_s=5.0)
+
+    now = 13.0
+    trim = group.register("trim", timeout_s=20.0)
+    now = 16.0
+    trim.beat()
+
+    assert group.stale_for() == 6.0
+    assert not group.is_alive()
+    assert set(group.snapshot()) == {"dispatch", "trim"}
+    assert set(group.snapshot()["dispatch"]) == {
+        "name",
+        "stale_for",
+        "last_success_at",
+        "last_error",
+        "wedged",
+    }
+    assert dispatch.is_alive() is False
+    assert trim.is_alive() is True
+
+
+@pytest.mark.asyncio
+async def test_healthz_group_exposes_loops_and_wedged_loop_is_not_masked() -> None:
+    """The audit regression: a beating sibling cannot keep a wedged loop's healthz at 200."""
+    port = _find_free_port()
+    group = daemon_health.LivenessGroup()
+    dispatch = group.register("dispatch", timeout_s=60.0)
+    trim = group.register("trim", timeout_s=60.0)
+    dispatch.fail("dispatch exceeded hard deadline")
+    trim.beat()
+    server = await daemon_health.start_health_server(
+        "events_maintenance", port=port, liveness=group
+    )
+    try:
+        status, body = await _http_get(port, "/healthz")
+        payload = json.loads(body)
+        assert status == 503
+        assert set(payload["loops"]) == {"dispatch", "trim"}
+        assert payload["loops"]["dispatch"]["wedged"] is True
+        assert payload["loops"]["trim"]["wedged"] is False
+    finally:
+        await daemon_health.stop_health_server(server)
 
 
 @pytest.mark.asyncio
