@@ -67,7 +67,10 @@ drill. The cluster secret itself lives in the surviving unit's `.env`
 (`$AVA_HOME/.env`, mode 0600) — in a disaster-recovery scenario the secret from
 any surviving runner (or the gateway) is sufficient to decrypt every artifact,
 because the passphrase is derived from the cluster secret alone, not from any
-per-host value. The gzip CRC and `pg_restore` failure path detect corruption; the
+per-host value. Note: rotating the cluster secret makes artifacts encrypted
+under the previous value unrecoverable — after any rotation, keep the prior
+secret in escrow (or re-run a backup) until the old artifacts have been
+retired. The gzip CRC and `pg_restore` failure path detect corruption; the
 artifact is encrypted with AES-256-CBC and inherits the local artifact's 0600
 threat model.
 
