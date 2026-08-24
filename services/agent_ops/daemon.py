@@ -114,6 +114,7 @@ from shared.daemon_shutdown import install_graceful_shutdown
 from shared.log import init_gateway_process
 from shared.machine import machine_name
 from shared.paths import legacy_pid_path
+from shared.transport_encryption import verify_transport_encryption
 
 _log = logging.getLogger("services.agent_ops.daemon")
 
@@ -679,6 +680,8 @@ async def _main() -> None:
 
     try:
         bind_host = _ops_bind_host()
+        if bind_host != "127.0.0.1":
+            verify_transport_encryption(settings.data_plane.cluster_secret, bind_host)
         # The gateway presents the cluster secret on every /ops dial when the
         # cluster has one (including a single box's loopback self-dial); a
         # no-secret cluster serves /ops unauthenticated on loopback.

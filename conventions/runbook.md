@@ -895,6 +895,25 @@ another service holds the gateway port, set
 derives this health URL from the reachable `AVA_GATEWAY_URL` written by
 `ava enroll` unless the host sets an explicit health URL override.
 
+### Transport encryption
+
+A secret-bearing cluster that serves the gateway or ops server on a non-loopback
+address MUST declare `AVA_TRANSPORT_ENCRYPTION`; every start checks the
+declaration and refuses to start when it is empty or unsupported. The accepted
+modes are:
+
+- `tls` — TLS terminates at an endpoint immediately in front of each gateway or
+  ops listener. The built-in listeners receive the decrypted connection; this
+  declaration records the deployment boundary and does not configure certificates.
+- `mtls` — mutual TLS authenticates both ends of each protected connection before
+  traffic reaches the gateway or ops listener.
+- `overlay` — an encrypted private overlay network carries the complete path
+  between the gateway, agent-runners, and client devices.
+
+Set the declaration in the cluster configuration before exposing a secret-bearing
+listener. An empty declaration is valid only while every listener remains on
+loopback.
+
 ## Credential rotation
 
 `AVA_CLUSTER_SECRET` is the control-plane bearer only: `/api/bootstrap`,

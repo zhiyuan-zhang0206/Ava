@@ -184,6 +184,24 @@ class DataPlaneSettings(EnvSettings):
         },
     )
 
+    transport_encryption: str = Field(
+        default="",
+        alias="AVA_TRANSPORT_ENCRYPTION",
+        description=(
+            "Declared transport-encryption mode for this cluster's network surface: "
+            "tls (TLS terminates in front of the gateway and ops servers), mtls "
+            "(mutual TLS), or overlay (an encrypted private overlay network carries "
+            "the whole path). Empty is undeclared; a secret cluster serving off-box "
+            "refuses to start until one is declared."
+        ),
+        json_schema_extra={
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     trusted_cidrs: str = Field(
         default="",
         alias="AVA_TRUSTED_CIDRS",
