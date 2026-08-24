@@ -7,6 +7,7 @@ usage_metadata.{input,output}_token_details.
 """
 
 from datetime import UTC, datetime
+from typing import Any
 
 import pytest
 from langchain_core.messages import AIMessage
@@ -146,15 +147,28 @@ def test_price_snapshot_rides_payload(loguru_records):
     assert "cost" not in loguru_records[0]["message"]  # pyright: ignore[reportUnknownArgumentType]
 
 
-def test_price_snapshot_absent_for_unpriced_model(loguru_records):
+def test_price_snapshot_absent_for_unpriced_model(
+    loguru_records: list[dict[str, Any]],
+) -> None:
     """A model with no known price emits NO snapshot fields — absent means
     unpriced (the readers count such calls as unpriced_calls instead of
-    billing them at 0). A null cost_usd would be ambiguous with a $0 call."""
+    billing them at 0). A null cost_usd would be ambiguous with a $0 call.
+    The warning makes the catalog gap actionable instead of silently accruing
+    more unpriced ledger rows."""
     msg = AIMessage(
         content="",
         usage_metadata={"input_tokens": 100, "output_tokens": 10, "total_tokens": 110},
     )
     log_llm_usage(msg, model="no-such-model")
-    extra = loguru_records[0]["extra"]  # pyright: ignore[reportUnknownArgumentType]
+    usage_record = next(
+        record for record in loguru_records if record["extra"].get("event") == "llm_usage"
+    )
+    extra = usage_record["extra"]  # pyright: ignore[reportUnknownArgumentType]
     assert "cost_usd" not in extra
     assert "price_miss" not in extra
+    warnings = [record for record in loguru_records if record["level"].name == "WARNING"]
+    assert len(warnings) == 1
+    warning = warnings[0]["message"]
+    assert "no-such-model" in warning
+    assert "shared/lm/pricing_catalog.json" in warning
+    assert "plugin price registry" in warning

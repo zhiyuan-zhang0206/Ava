@@ -107,6 +107,11 @@ def log_llm_usage(
     else:
         # unpriced=1 makes unpriced call volume countable in Prometheus
         # (ava_llm_usage_unpriced_total); absent on priced calls.
+        logger.warning(
+            "[llm usage] model {model!r} is unpriced; add it to "
+            "shared/lm/pricing_catalog.json or the plugin price registry",
+            model=model,
+        )
         snapshot = {"unpriced": 1}
     logger.info(
         "[llm usage] in={in_total} cached={cache_read}{cache_pct}  "

@@ -378,11 +378,12 @@ COMMENT ON COLUMN api_idempotency.op_status IS
 -- principle: cost is billed at the price in force at the call, never
 -- re-priced against the current registry) — costed_calls counts rows that
 -- carried a snapshot, unpriced_calls the rows without one (they contribute
--- 0 cost). model '' = an llm_usage row that carried no model field. The
--- per-agent daily token total = SUM over that day's model rows (not
--- re-stored in agent_metrics_daily). Whole days land here from the
--- events-maintenance Loki rollup pass; the cost read path is these rows +
--- a live Loki tail for today.
+-- 0 cost), and estimated_calls marks calls costed from an inferred model
+-- instead of an event snapshot. model '' = an llm_usage row that carried no
+-- model field. The per-agent daily token total = SUM over that day's model
+-- rows (not re-stored in agent_metrics_daily). Whole days land here from the
+-- events-maintenance Loki rollup pass; the cost read path is these rows + a
+-- live Loki tail for today.
 CREATE TABLE agent_model_tokens_daily (
     agent_id         BIGINT NOT NULL REFERENCES agents(id),
     day              DATE   NOT NULL,
@@ -395,7 +396,25 @@ CREATE TABLE agent_model_tokens_daily (
     cost_usd         DOUBLE PRECISION NOT NULL DEFAULT 0,
     costed_calls     BIGINT NOT NULL DEFAULT 0,
     unpriced_calls   BIGINT NOT NULL DEFAULT 0,
+    estimated_calls  BIGINT NOT NULL DEFAULT 0,
     PRIMARY KEY (agent_id, day, model)
+);
+
+-- Rollback snapshot retained by the 2026-08-24 unpriced-cost backfill. A
+-- production upgrade fills it from the ledger's pre-state; a fresh database
+-- keeps it empty because there is no historical ledger state to restore.
+CREATE TABLE ledger_unpriced_backfill_20260824 (
+    agent_id       BIGINT,
+    day            DATE,
+    model          TEXT,
+    llm_calls      BIGINT,
+    costed_calls   BIGINT,
+    unpriced_calls BIGINT,
+    tokens_in      BIGINT,
+    tokens_out     BIGINT,
+    tokens_cached  BIGINT,
+    tokens_reasoning BIGINT,
+    cost_usd       DOUBLE PRECISION
 );
 
 -- ─────────────── alerts (system→human alert store, Task #1224) ───────────────
