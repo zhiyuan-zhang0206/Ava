@@ -69,8 +69,8 @@ class StatsDashboard(BaseModel):
     - `warnings` / `errors`: level counts. Agent trial-and-error
       (exec_failed) logs at INFO and is deliberately NOT counted — these
       numbers are operator-facing alerts, not agent activity.
-    - `total_events`: events row count, for ops to monitor growth rate
-      (lifetime estimate, not windowed)
+    - `total_events`: archived event row count (frozen — the PG events copy
+      stopped growing at the LGTM cutover; not a live gauge)
 
     `avg_turn_seconds` None = zero turns in the window (new DB / no
     activity); frontend renders "—"."""

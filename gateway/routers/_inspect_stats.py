@@ -17,9 +17,10 @@ from typing import Any, NamedTuple
 from psycopg_pool import ConnectionPool
 
 from gateway import loki_events
-from gateway.routers import _agent_cost, _inspect_pg
+from gateway.routers import _inspect_pg
 from gateway.routers._inspect_cache import InspectQueryCache
 from gateway.schemas import AgentStats
+from shared.loki_index_labels import ledger_gap_plan, retention_floor
 
 
 class DayPlan(NamedTuple):
@@ -181,7 +182,7 @@ def live_edge_spans(
     A lagging daily rollup leaves completed days after ``watermark``; include
     them through the requested end rather than silently treating them as read.
     """
-    floor_at = _agent_cost._retention_floor()
+    floor_at = retention_floor()
     now = datetime.now(tz=UTC)
     end = min(to or now, now)
     tail_start = max(watermark or floor_at, from_ or floor_at)
@@ -377,18 +378,21 @@ def inspect_values(
             max_day = _inspect_pg.newest_ledger_day(
                 conn, agent_id=agent_id, day_from=plan.day_from, day_to=plan.day_to
             )
-            floor_at = _agent_cost._retention_floor()
-            gap_live = (
-                max_day is not None and datetime.combine(max_day, time.min, tzinfo=UTC) >= floor_at
-            )
-            ledger_day_to = (
-                plan.day_to if max_day is None or not gap_live else max_day - timedelta(days=1)
-            )
+            floor_at = retention_floor()
+            gap = ledger_gap_plan(max_day, floor_at)
+            ledger_day_to = plan.day_to if gap.day_lt is None else gap.day_lt - timedelta(days=1)
             ledger = _inspect_pg.ledger_stats(
                 conn, agent_id=agent_id, day_from=plan.day_from, day_to=ledger_day_to
             )
-            ledger_tokens, token_watermark = _inspect_pg.ledger_tokens(
+            newest_tokens = _inspect_pg.newest_token_day(
                 conn, agent_id=agent_id, day_from=plan.day_from, day_to=plan.day_to
+            )
+            token_gap = ledger_gap_plan(newest_tokens, floor_at)
+            token_day_to = (
+                plan.day_to if token_gap.day_lt is None else token_gap.day_lt - timedelta(days=1)
+            )
+            ledger_tokens, token_watermark = _inspect_pg.ledger_tokens(
+                conn, agent_id=agent_id, day_from=plan.day_from, day_to=token_day_to
             )
         else:
             ledger = (0, 0, 0.0, None, None, 0, 0, None)

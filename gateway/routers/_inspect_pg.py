@@ -15,8 +15,8 @@ from typing import Any
 from psycopg import Connection, sql
 
 from gateway import events_archive
+from shared.loki_index_labels import retention_floor
 
-_LOKI_RETENTION = timedelta(hours=168)
 _LOKI_SHARD = timedelta(hours=3)
 _LOKI_SHARD_WORKERS = 4
 
@@ -192,6 +192,19 @@ def newest_ledger_day(
     return row[0] if row is not None else None
 
 
+def newest_token_day(
+    conn: Connection[Any], *, agent_id: int, day_from: date | None, day_to: date | None
+) -> date | None:
+    """Return the newest token-ledger day in the requested UTC-day range."""
+    where, params = _ledger_day_where(agent_id=agent_id, day_from=day_from, day_to=day_to)
+    with conn.cursor() as cur:
+        cur.execute(
+            sql.SQL("SELECT max(day) FROM agent_model_tokens_daily WHERE {}").format(where), params
+        )
+        row = cur.fetchone()
+    return row[0] if row is not None else None
+
+
 def ledger_stats(
     conn: Connection[Any], *, agent_id: int, day_from: date | None, day_to: date | None
 ) -> tuple[int, int, float, float | None, float | None, int, int, datetime | None]:
@@ -272,7 +285,7 @@ def retained_live_window(
     """Clip an inspect Loki read to its retained, post-archive live side."""
     now = datetime.now(tz=UTC)
     end = min(to or now, now)
-    start = max(from_ or datetime.min.replace(tzinfo=UTC), now - _LOKI_RETENTION)
+    start = max(from_ or datetime.min.replace(tzinfo=UTC), retention_floor(now))
     if freeze is not None:
         start = max(start, freeze)
     return (start, end) if start < end else None

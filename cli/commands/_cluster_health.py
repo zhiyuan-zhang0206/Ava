@@ -167,20 +167,22 @@ def _crash_loop_detection(max_restarts: int, window_minutes: int) -> bool:
 
     from shared.config import settings
 
-    cutoff = datetime.now(UTC) - timedelta(minutes=window_minutes)
-    start = cutoff - timedelta(minutes=window_minutes)
+    end = datetime.now(UTC)
+    start = end - timedelta(minutes=window_minutes)
     try:
         url = settings.observability.telemetry_loki_url.rstrip("/") + "/loki/api/v1/query"
         restarts: dict[str, int] = {}
-        slices = split_index_label_window(start, cutoff)
+        slices = split_index_label_window(start, end)
         for slice_ in slices:
             duration_s = max(1, int((slice_.end - slice_.start).total_seconds()))
             selector = event_stream_selector(
                 era=slice_.era,
                 agent_id=None,
                 event_names=["resurrect"],
-                legacy_streams_only=len(slices) == 2 and slice_.era is LokiReadEra.LEGACY,
+                indexed_labeled=len(slices) == 2 and slice_.era is LokiReadEra.INDEXED,
             )
+            # Instant evaluation at each slice end counts (start, end], so the
+            # final slice covers the current crash-loop window (now-w, now].
             logql = (
                 f"sum by (agent_id) (count_over_time({selector} "
                 f'| event_name="resurrect" | category="audit"[{duration_s}s]))'

@@ -14,11 +14,11 @@ from typing import Literal
 import httpx
 
 from shared import telemetry
+from shared.loki_index_labels import LOKI_QUERY_CONCURRENCY
 
-# Must match deploy/lgtm/config/loki.yaml querier.max_concurrent. Every Loki
-# read path funnels through gateway.loki_events._get_json and therefore this
-# one budget.
-LOKI_QUERY_CONCURRENCY = 4
+# Every Loki read funnels through gateway.loki_events._get_json and therefore
+# this one budget. The shared constant is checked against rendered deployment
+# config before converge publishes it.
 LOKI_QUERY_MAX_WAITERS = 128
 LOKI_QUERY_WAIT_TIMEOUT_S = 10.0
 

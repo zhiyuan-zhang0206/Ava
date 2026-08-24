@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from datetime import timedelta
 from typing import Any, cast
 
 import pytest
@@ -25,6 +26,7 @@ from psycopg_pool import ConnectionPool
 
 from services.events_maintenance import daemon
 from shared.daemon_health import Liveness
+from shared.loki_index_labels import EVENT_STREAM_RETENTION
 
 # The pool is never touched — `_run_maintenance` / `_maintenance_with_liveness` are faked.
 _FAKE_POOL: Any = object()
@@ -44,6 +46,10 @@ class _FakePool:
 
     def connection(self) -> _FakePool._Conn:
         return self._Conn()
+
+
+def test_rollup_lookback_covers_all_retained_days() -> None:
+    assert daemon._LOOKBACK_DAYS == int(EVENT_STREAM_RETENTION / timedelta(days=1)) == 7
 
 
 def test_liveness_beaten_during_slow_rollup(monkeypatch: pytest.MonkeyPatch) -> None:
