@@ -562,9 +562,11 @@ async def _cluster_auth_middleware(
     cookie_token = request.cookies.get(cookie_name())
     if verify_session(cookie_token, secret):
         origin = request.headers.get("Origin")
-        # SameSite=Lax blocks cross-site cookie sending. Checking the exact
-        # origin on mutations also closes the same-site-subdomain vector while
-        # preserving non-browser clients, which commonly omit Origin.
+        # Origin is checked only after valid cookie auth; without it, the request
+        # reaches 401 unless another explicit credential authenticates it.
+        # Bearer callers carry no ambient credential; login is exempt by design,
+        # with SameSite=Lax and the rate limiter bounding its CSRF exposure.
+        # Exact mutation origins also close the same-site-subdomain vector.
         if (
             request.method in _STATE_CHANGING_METHODS
             and origin is not None

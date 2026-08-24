@@ -11,6 +11,8 @@ empty, the gateway derives localhost, `127.0.0.1`, and the configured gateway ho
 at the frontend entry port. A cookie-authenticated POST, PUT, PATCH, or DELETE with
 a non-allowlisted Origin fails closed; bearer and legacy header credentials are not
 ambient browser credentials, and clients without Origin remain supported.
+The Origin check is reached only after valid session-cookie authentication; the
+unauthenticated login boundary is instead constrained by SameSite=Lax and its rate limiter.
 
 Session-cookie transport policy is also gateway configuration. An explicit boolean
 wins; otherwise the `Secure` flag follows the configured gateway URL scheme rather
