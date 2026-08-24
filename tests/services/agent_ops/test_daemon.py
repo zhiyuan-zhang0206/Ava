@@ -1534,3 +1534,89 @@ def test_the_exit_code_survives_the_hard_exit(tmp_path: Path) -> None:
         [sys.executable, "-c", script], capture_output=True, text=True, timeout=30, check=False
     )
     assert done.returncode == 1
+
+
+# ─── op-progress health liveness (tech audit 2026-08-24 P1) ──────────────────
+
+
+def test_op_liveness_idle_is_healthy() -> None:
+    """No op in flight -> stale_for 0 -> /healthz stays 200 on an idle daemon
+    (a beat-based liveness would go stale and get the daemon respawned)."""
+    lv = daemon._OpLiveness(daemon._OP_HEALTH_CAP_S)
+    assert lv.is_alive()
+    assert lv.stale_for() == 0.0
+
+
+def test_op_liveness_tracks_in_flight_age() -> None:
+    """An op in flight reports its age and the liveness flips once the age
+    passes the cap — the half-dead signal (a wedged worker thread keeps the
+    process serving /healthz, so only op age can reflect the wedge)."""
+    lv = daemon._OpLiveness(daemon._OP_HEALTH_CAP_S)
+    daemon._op_started()
+    try:
+        assert daemon._op_in_flight is not None
+        assert lv.stale_for() >= 0.0
+        assert lv.is_alive()  # fresh op — under the cap
+        with daemon._op_health_lock:
+            daemon._op_in_flight = (
+                time.monotonic() - daemon._OP_HEALTH_CAP_S - 10.0,
+                daemon._op_in_flight[1],
+            )
+        assert not lv.is_alive()  # past the cap — healthz will 503
+    finally:
+        daemon._op_finished()
+    assert daemon._op_in_flight is None
+    assert lv.stale_for() == 0.0
+
+
+def test_op_started_finished_refcounts_concurrent_ops() -> None:
+    """Two concurrent ops keep the ORIGINAL start: one finishing must not
+    reset the age of the still-running one."""
+    daemon._op_started()
+    daemon._op_started()
+    try:
+        with daemon._op_health_lock:
+            start, count = daemon._op_in_flight  # type: ignore[misc]
+        assert count == 2
+        daemon._op_finished()  # first op ends
+        with daemon._op_health_lock:
+            kept_start, count = daemon._op_in_flight  # type: ignore[misc]
+        assert count == 1
+        assert kept_start == start  # the oldest start survives
+    finally:
+        daemon._op_finished()
+    assert daemon._op_in_flight is None
+
+
+@pytest.mark.asyncio
+async def test_ops_route_tracks_and_clears_op_progress(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The /ops route marks each dispatch in flight and clears it on every
+    completion — the bookkeeping that flips /healthz to 503 when an op
+    wedges (a wedged op is exactly a start without its finish)."""
+    daemon._dispatch_sem = asyncio.Semaphore(4)
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def _slow_dispatch(kind, payload):  # type: ignore[no-untyped-def]
+        entered.set()
+        await release.wait()
+        return "completed", {"ok": True}
+
+    monkeypatch.setattr(daemon, "_dispatch", _slow_dispatch)  # pyright: ignore[reportUnknownArgumentType]
+    task = asyncio.create_task(
+        daemon._ops_route(json.dumps({"kind": "status_probe", "payload": {}}).encode())
+    )
+    try:
+        await entered.wait()
+        with daemon._op_health_lock:
+            assert daemon._op_in_flight is not None
+            assert daemon._op_in_flight[1] == 1
+    finally:
+        release.set()
+        status, _body, _ctype = await task
+    assert status == 200
+    with daemon._op_health_lock:
+        assert daemon._op_in_flight is None
+    daemon._dispatch_sem = None

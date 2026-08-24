@@ -2,10 +2,12 @@
 
 Every agent operation (spawn, send_message, terminate, compact, status_change,
 skill_invoked, ...) is recorded through these helpers, which enqueue into the
-unified emitter (`shared.telemetry`) — audit events via the unified emitter,
-the single write path for every event in every process. The emitter
-batch-writes the `events` table (the canonical stream; audit rows carry
-category=audit, 365d+ retention).
+unified emitter (`shared.telemetry`) — the single write path for every event in
+every process. The emitter's drain thread appends each batch to the day-stamped
+JSONL mirror (the durable local copy) and exports it to the OTLP backend
+(Loki/Prometheus); the Postgres `events` table is a READ-ONLY archive since the
+LGTM cutover (task #1197, user ruling 2026-08-12) — nothing writes it, the read
+side is Loki, and the JSONL mirror is the durable backfill.
 
 The former contract — "the INSERT rides in the caller's transaction, no
 separate commit" — is deliberately gone: the design (event-system refactor,

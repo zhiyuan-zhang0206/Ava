@@ -8,6 +8,29 @@ Naming: <SURFACE>_<WHAT>. Values are plain strings; f-string composition
 happens at the call site with copy constants as the template.
 """
 
+from shared.alerts_copy import (
+    ALERT_HEAD as ALERT_HEAD,
+)
+from shared.alerts_copy import (
+    ALERT_JUMP_LINK as ALERT_JUMP_LINK,
+)
+from shared.alerts_copy import (
+    ALERT_LANGUAGE_DEFAULT as ALERT_LANGUAGE_DEFAULT,
+)
+from shared.alerts_copy import (
+    ALERT_LANGUAGES as ALERT_LANGUAGES,
+)
+from shared.alerts_copy import (
+    ALERT_TRIGGERED_AT as ALERT_TRIGGERED_AT,
+)
+
+# -- alert push (shared/alerts.py notifies through the IM bridge) -------------
+# The alert templates live in shared/alerts_copy.py (tech-audit P1, 2026-08-25:
+# shared.alerts must not import up into services) and are re-exported above so
+# the IM bridge and its consumers keep one import path — the definitions are
+# never duplicated. `X as X` is the repo's re-export idiom: pyright treats the
+# alias form as a deliberate re-export (no unused-import finding).
+
 # -- generic ---------------------------------------------------------------
 
 QUEUED_NOTICE = "⚠️ Gateway temporarily unavailable — messages queued, will retry automatically"  # emoji-ok: warning glyph the user sees in chat
@@ -83,31 +106,3 @@ PUSH_FAILURE_ALERT = '「{channel}」 push link failed {failures} times consecut
 PUSH_RECOVERED_HINT = (
     "(system note: the '{channel}' push link failed earlier and has now recovered)"
 )
-
-# -- alert push (shared/alerts.py notifies through the IM bridge) -------------
-
-# Alert push templates, per language. Language follows the UI language —
-# user_settings ``display.language`` ("zh" | "en"; missing/unknown falls back
-# to ALERT_LANGUAGE_DEFAULT, user ruling 2026-08-13). Only template/framework
-# copy is translated: alert labels/annotations data (severity, alertname,
-# summary, generator_url) passes through untranslated. The English set keeps
-# the pre-ruling production strings; {severity}/{alertname}/{time}/{url} are
-# filled in at the call site.
-ALERT_LANGUAGES = ("zh", "en")
-ALERT_LANGUAGE_DEFAULT = "zh"
-
-ALERT_HEAD = {
-    "zh": {
-        "firing": "⚠️ 告警 [{severity}] {alertname}",  # emoji-ok: user-designated IM alert format
-        "resolved": "✅ 已恢复 [{severity}] {alertname}",  # emoji-ok: user-designated IM alert format
-    },
-    "en": {
-        "firing": "⚠️ ALERT [{severity}] {alertname}",  # emoji-ok: user-designated IM alert format
-        "resolved": "✅ RESOLVED [{severity}] {alertname}",  # emoji-ok: user-designated IM alert format
-    },
-}
-ALERT_TRIGGERED_AT = {
-    "zh": "触发时间 {time}",
-    "en": "triggered {time}",
-}
-ALERT_JUMP_LINK = "→ {url}/insights/alerts"

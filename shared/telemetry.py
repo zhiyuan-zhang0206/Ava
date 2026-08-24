@@ -30,7 +30,11 @@ mirror is the automated ledger-gap recovery source.
 Backpressure: the queue is bounded (10 000); a producer that outruns the drain
 thread sheds records instead of growing memory, and the shed count is reported
 as one structured `event_log_drop` event per flush — the same semantics the
-former loguru Postgres sink had.
+former loguru Postgres sink had. Audit-category events get a durable lane:
+they block briefly for a slot (bounded backpressure, `_AUDIT_BLOCK_S`) so an
+overloaded queue sheds telemetry/log before audit evidence — a shed record is
+lost from every sink, JSONL mirror included, so the audit lane is what keeps
+the compliance stream intact under load.
 
 `trace_id` / `span_id` are captured from the active OTel span at *enqueue* time
 (the drain thread runs outside the span context), so every event emitted inside
@@ -43,7 +47,9 @@ outside any span (gateway/daemon paths) get NULL.
 home-derived cluster label so a row is never written without either.
 
 Emit is best-effort and never raises: a broken sink must not crash the caller
-(JSONL mirror + loguru file sinks hold every line as the durable backfill).
+(JSONL mirror + loguru file sinks are the durable backfill for everything
+that reaches the drain thread; audit events additionally block briefly at
+enqueue so they are not shed while the queue is overloaded).
 Startup init (`init_telemetry`) is the one place that fails loud — a process
 whose event pipeline cannot come up should not start silently blind.
 
@@ -93,10 +99,20 @@ Level = Literal["debug", "info", "warning", "error", "critical"]
 _BATCH_SIZE = 100
 _FLUSH_INTERVAL_S = 0.5
 # Queue bound: what stops a producer that outruns the drain thread from growing
-# process memory without limit. Past this point records are shed (see
-# `_EventPipeline.enqueue`) — the JSONL mirror holds every line, so what is lost
-# is the DB copy, and `dropped` says how much.
+# process memory without limit. Past this point non-audit records are shed (see
+# `_EventPipeline.enqueue`) and `dropped` says how much. A shed record is gone
+# from EVERY sink — the JSONL mirror only ever holds what reached the drain
+# thread — so audit-category events get a durable lane instead (below).
 _QUEUE_MAXSIZE = 10_000
+
+# How long an audit event's producer blocks on a full queue before the event is
+# shed (bounded backpressure). Audit events are the compliance evidence — the
+# one class that must not vanish under load, which is exactly when the queue
+# fills — so they wait for the drain thread to free a slot instead of dropping
+# immediately. 5s is far above the drain thread's flush cadence (100/batch,
+# 0.5s interval), so a healthy pipeline frees the slot in well under a second
+# and the cap only binds when the drain thread itself is gone.
+_AUDIT_BLOCK_S = 5.0
 
 # JSONL mirror retention (day-stamped files, like the trace mirror).
 _JSONL_RETENTION_DAYS = 7
@@ -379,7 +395,8 @@ class _EventPipeline:
     Same shape as the former loguru Postgres sink (which this replaces): the
     queue bound is the backpressure, the drain thread batches, and shed records
     are counted and reported as one `event_log_drop` event per flush so the ops
-    monitor panel keeps its backlog metric."""
+    monitor panel keeps its backlog metric. Audit events enqueue through a
+    bounded-blocking lane (see `enqueue`) so overload sheds telemetry/log first."""
 
     def __init__(
         self,
@@ -405,7 +422,23 @@ class _EventPipeline:
         self._thread.start()
 
     def enqueue(self, event: Event) -> None:
-        """Non-blocking enqueue — the producer path. Sheds (counted) when full."""
+        """Producer path — non-blocking for regular events, bounded-blocking
+        for audit events.
+
+        Regular events shed (counted) when the queue is full. Audit events
+        instead block up to `_AUDIT_BLOCK_S` for a slot — bounded backpressure
+        — so an overloaded queue sheds telemetry/log before it ever sheds audit
+        evidence; only a sustained overflow past the cap drops an audit event
+        (counted, and reported by the next flush). The drain thread frees slots
+        on its 0.5s cadence, so a healthy pipeline never actually spends the
+        cap."""
+        if event.category == "audit":
+            try:
+                self._queue.put(event, timeout=_AUDIT_BLOCK_S)
+            except queue.Full:
+                with self._dropped_lock:
+                    self.dropped += 1
+            return
         try:
             self._queue.put_nowait(event)
         except queue.Full:
@@ -476,8 +509,9 @@ class _EventPipeline:
                 from shared.log import logger
 
                 logger.warning(
-                    "[event-emitter] dropped {n} event(s) (queue full) — "
-                    "DB copy degraded, JSONL mirror holds every line",
+                    "[event-emitter] dropped {n} event(s) (queue full) — shed "
+                    "before any sink; audit events block first and are only "
+                    "dropped past their own cap",
                     event="event_log_drop",
                     n=n,
                 )
