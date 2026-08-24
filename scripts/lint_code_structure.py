@@ -62,6 +62,7 @@ from __future__ import annotations
 
 import ast
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -126,121 +127,55 @@ def _machine_role_calls(tree: ast.AST) -> list[int]:
 
 
 # Files allowed to exceed _HARD_CEILING — naturally cohesive single units that
-# splitting would only scatter:
-#   shared/config/agent.py - per-domain AgentSettings schema block; splitting breaks `settings.agent.*`
-#   (gateway/schemas.py was split into gateway/schemas/ package — all files under 500 lines)
-_OVERSIZE_ALLOWED = frozenset(
-    {
-        # Per-domain config schema block (AgentSettings) — one cohesive pydantic
-        # class; splitting it would break `settings.agent.*` aggregation or force
-        # inheritance chains that cost more than they save. Same rationale as the
-        # original single-file Settings schema (decomposed into this package,
-        # 2026-08) — the cohesion rationale outlives the file.
-        "shared/config/agent.py",
-        # Per-domain config schema block (ServiceSettings) — the same cohesive
-        # pydantic class as agent.py above, one Field per service port / health
-        # port / pidfile. It crossed 800 when the hosted agent-runner's two
-        # fields landed; splitting it would either break `settings.services.*`
-        # aggregation or scatter one service's three fields across files.
-        "shared/config/services.py",
-        # shared/telemetry_otlp.py — one cohesive OTLP export backend: the
-        # _OtlpBackend exporter class, its _metric_views/_metrics_resource
-        # provider helpers, and the batch/flush/shutdown lifecycle over one
-        # export surface. It crossed 800 in the class-level W/E resolution
-        # wave (#459); splitting the views/providers away from the backend
-        # scatters one exporter surface (debt: a real split is tracked, not
-        # forgotten).
-        "shared/telemetry_otlp.py",
-        # agent/db.py — kernel inbound-queue SQL module: inbound CRUD, claim,
-        # two-phase reconcile + the stale-claimed dead-letter cutoff (Task
-        # #654). One cohesive data-plane surface at the 800-line ceiling; the
-        # reconcile logic shares the claim/status machinery it would have to
-        # import back if split out.
-        "agent/db.py",
-        # agent/state.py — the LangGraph state schema AND the plugin-state
-        # registry, which cannot be separated: `register_plugin_state` fills
-        # `_EXTRA_FIELDS`, `build_agent_state` composes those INTO the
-        # BaseAgentState subclass, and `PluginStateHandle` validates writes
-        # against `_BASE_FIELDS` derived back from that schema — a split forces
-        # the circular import (same argument as shared/plugin_metrics.py).
-        # The one clean-looking cut, lifting the four nested channel models out,
-        # is the one actively unsafe move: `JsonPlusSerializer` serializes them
-        # as ext objects carrying `(module, name)` and
-        # `shared/checkpoint_serde.py` allowlists them as `("agent.state", ...)`,
-        # so relocating them changes `__module__` and stops existing checkpoints
-        # deserializing.
-        "agent/state.py",
-        # cli/commands/update.py was split out of the exemption list with the
-        # 2101-line -> 13-module refactor (2026-08): the orchestration core now
-        # fits the 800-line ceiling on its own, and the `_update_*` helpers each
-        # stay under 500.
-        # The /api/agents/* router surface — CRUD + lifecycle handlers plus the
-        # endpoint-private cross-machine forward helpers (deliberately co-located
-        # per the module docstring, not in ops_*.py); splitting scatters one
-        # cohesive routing surface.
-        "gateway/routers/agents.py",
-        # Inbound dispatch — single cohesive state machine: long-poll wait,
-        # batch claim, kind-based dispatch (chat/restart/terminate/compact/
-        # resurrect/fork), lifecycle routing, and idle-restart gate; splitting
-        # scatters the dispatch control flow across files.
-        # services/im_bridge/core.py — IM Bridge core: envelope, command
-        # routing, per-channel state, SSE subscription push, and the inbound
-        # outbox (Task #1032). One cohesive module; the pieces it was already
-        # split into (spawn_menu, notice_bridge, push_watchdog) live beside it.
-        "services/im_bridge/core.py",
-        "agent/graph/_claim.py",
-        # gateway/loki_events.py — the whole Loki read-side query surface in
-        # one module: history slice, exact count, payload aggregates, projected
-        # rows and grouped counts share the pipeline builders
-        # (_build_logql/_agg_pipeline/_escape_label); splitting would scatter
-        # the shared LogQL machinery (task #1197 A3).
-        "shared/events/contract.py",
-        # The EVENTS registry — one cohesive schema block (every event name +
-        # payload TypedDict in one dict). It grows one entry per event and
-        # crossed 800 with loki_query_failed (task #1289); splitting a flat
-        # name→spec registry scatters the one lookup surface emit() consults.
-        "gateway/loki_events.py",
-        # shared/metrics_aggregate.py — aggregate fetch + report assemblers +
-        # the injected LokiBackend contract: one cohesive unit whose pieces
-        # (counts/groups/projected rows) share the EventAggregate shape (task
-        # #1197 A3).
-        "shared/metrics_aggregate.py",
-        # The grandfathered-DEBT section that sat here is gone: `ops/cluster.py`
-        # and `ops/agents.py` were listed only because `ops/` was ungated until it
-        # entered _SCAN_DIRS, and both are now split. Every entry above is a
-        # deliberate cohesion exemption, so there is no longer a second category —
-        # a new entry here has to argue cohesion, not inheritance.
-        # shared/plugin_metrics.py — the metric registry: MetricSpec schema +
-        # the SQL-template whitelist + dialect routing to the LogQL validation
-        # (split to shared/metrics_logql.py, task #1280) + template rendering,
-        # one cohesive registry surface the gateway and generator both consume;
-        # the SQL-whitelist section (500+ lines) shares its helpers with the
-        # render path, so a split would force a circular import.
-        "shared/plugin_metrics.py",
-        # shared/migrations.py — the migration lifecycle in one module: apply
-        # (with the v0.1.0 squash auto-fold + its completeness guard, P1
-        # 2026-08-11), rollback_to/apply_down, and the applied-set bookkeeping
-        # they all share. Fold, guard, apply and rollback reason over the same
-        # applied-set model; splitting scatters an invariant that must hold
-        # across all of them (the set matches the real schema).
-        "shared/migrations.py",
-        # shared/lm/registry.py — a flat name→spec registry of every model
-        # (one entry per model, same rationale as shared/events/contract.py);
-        # crossed 800 with the deepseek-v4-flash-vision-exp registration
-        # (14f79a1db) without an exemption, and this list is the only lint
-        # enforcement (CI runs no lint-code-structure job), so every later
-        # commit failed until it was listed. Splitting a flat registry
-        # scatters the one lookup surface build_chat_model consults.
-        "shared/lm/registry.py",
-        # ava_builtins/plugins/ava_fleet/task_registry.py — the whole
-        # ava.tasks SDK surface in one cohesive module: the Task model,
-        # create/get/list/update/log, validation and the owner-notification
-        # helpers they share. Crossed 800 with the per-priority reminder
-        # defaults (Task #915); splitting scatters one API surface and forces
-        # the notification/validation helpers to be imported back.
-        "ava_builtins/plugins/ava_fleet/task_registry.py",
-    }
-)
+# splitting would only scatter. Each entry carries three fields (tech audit
+# 2026-08-24 P2): the OWNER accountable for the eventual split, the TARGET
+# line count the file should reach when split, and the EXPIRY date — the
+# exemption lapses on that date. The lint enforces both failure modes: an
+# EXPIRED entry is a hard error (renew it with a current justification, or
+# split the file) and a STALE entry (a listed file now under the hard
+# ceiling) is a hard error too — the list must match reality, same shape as
+# the machine_role() stale-entry alert. Renewal is a deliberate
+# re-justification, never a silent rollover. Owner defaults to #405 (the
+# Ava P0 line) until a renewal names the file's actual maintainer.
+_OVERSIZE_ALLOWED: dict[str, tuple[str, int, str]] = {
+    # Per-domain ServiceSettings schema block — same cohesion rationale as
+    # agent.py, one Field per service port / health port / pidfile.
+    "shared/config/services.py": ("#405", 500, "2026-12-31"),
+    # One cohesive OTLP export backend (exporter class + metric views +
+    # batch/flush lifecycle); a real split is tracked, not forgotten.
+    "shared/telemetry_otlp.py": ("#405", 500, "2026-12-31"),
+    # IM Bridge core: envelope, command routing, per-channel state, SSE
+    # subscription push, inbound outbox — one cohesive dispatch module.
+    "services/im_bridge/core.py": ("#405", 500, "2026-12-31"),
+    # The EVENTS registry — one flat name→spec dict emit() consults; grows
+    # one entry per event. Schema-registry shard split tracked.
+    "shared/events/contract.py": ("#405", 500, "2026-12-31"),
+    # The whole Loki read-side query surface — history slice, counts,
+    # aggregates, grouped rows share the LogQL pipeline builders. The
+    # audit-priority split (query builder / transport) is tracked.
+    "gateway/loki_events.py": ("#405", 500, "2026-12-31"),
+    # Aggregate fetch + report assemblers + injected LokiBackend contract —
+    # one unit sharing the EventAggregate shape.
+    "shared/metrics_aggregate.py": ("#405", 500, "2026-12-31"),
+    # Metric registry: MetricSpec schema + SQL-template whitelist + dialect
+    # routing + template rendering — splitting forces a circular import.
+    "shared/plugin_metrics.py": ("#405", 500, "2026-12-31"),
+    # Migration lifecycle: apply, rollback_to/apply_down, applied-set
+    # bookkeeping — one invariant shared across all of them.
+    "shared/migrations.py": ("#405", 500, "2026-12-31"),
+    # A flat name→spec model registry (one entry per model) — the one lookup
+    # surface build_chat_model consults. Schema-registry shard split tracked.
+    "shared/lm/registry.py": ("#405", 500, "2026-12-31"),
+    # The agent-runner ops daemon: /ops dispatch (all op arms), the
+    # idempotency/dedup machinery, the op-progress health liveness, and the
+    # graceful-exit seams — one cohesive daemon module (tech audit 2026-08-24
+    # P1 added the liveness bookkeeping, crossing 800).
+    "services/agent_ops/daemon.py": ("#405", 500, "2026-12-31"),
+    # The whole ava.tasks SDK surface in one module: Task model,
+    # create/get/list/update/log, validation, owner-notification helpers.
+    "ava_builtins/plugins/ava_fleet/task_registry.py": ("#405", 500, "2026-12-31"),
+}
+
 
 # Files allowed to use `if TYPE_CHECKING:` — real circular import or heavy
 # optional dependency. Empty today; add an entry with a one-line reason.
@@ -317,7 +252,29 @@ def _scan_file(path: Path, rel_path: str) -> list[tuple[int, str, str]]:
 
     n_lines = len(text.splitlines())
     if rel_path in _OVERSIZE_ALLOWED:
-        pass  # grandfathered cohesive file — no line-budget check
+        owner, target_lines, expires_on = _OVERSIZE_ALLOWED[rel_path]
+        if n_lines <= _HARD_CEILING:
+            out.append(
+                (
+                    n_lines,
+                    f"stale _OVERSIZE_ALLOWED entry — {rel_path} is {n_lines} "
+                    f"lines, under the {_HARD_CEILING}-line ceiling; remove it "
+                    "from _OVERSIZE_ALLOWED in scripts/lint_code_structure.py "
+                    "(the list must match reality).",
+                    "error",
+                )
+            )
+        elif datetime.now(UTC).date().isoformat() > expires_on:
+            out.append(
+                (
+                    n_lines,
+                    f"_OVERSIZE_ALLOWED exemption for {rel_path} expired "
+                    f"{expires_on} (owner {owner}, target {target_lines} lines) "
+                    "— renew it with a current justification or split the file "
+                    f"toward its {target_lines}-line target.",
+                    "error",
+                )
+            )
     elif n_lines > _HARD_CEILING:
         out.append(
             (

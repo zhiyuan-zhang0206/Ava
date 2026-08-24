@@ -1,10 +1,11 @@
 """shared.alerts IM-copy contract tests (Task #1261, user ruling 2026-08-13).
 
 Locks the alert-push governance contract: the user-visible alert templates
-live in services/im_bridge/copy.py (no head/trigger/jump-link literals in
-shared/alerts.py), the template language follows user_settings
-``display.language`` ("zh" | "en", default "zh"), and only template/framework
-copy is translated — alert labels/annotations data passes through verbatim.
+live in shared/alerts_copy.py (no head/trigger/jump-link literals in
+shared/alerts.py; services/im_bridge/copy.py re-exports them), the template
+language follows user_settings ``display.language`` ("zh" | "en", default
+"zh"), and only template/framework copy is translated — alert
+labels/annotations data passes through verbatim.
 """
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ import pytest
 from psycopg.types.json import Jsonb
 
 import shared.alerts as shared_alerts
-from services.im_bridge import copy
+from shared import alerts_copy as copy
 from shared.alerts import display_language, format_local, frontend_base_url, notify_text
 
 
@@ -45,8 +46,8 @@ def _head(lang: str, *, resolved: bool, severity: str = "ERROR") -> str:
 
 def test_alert_format_literals_not_hardcoded_in_alerts_module() -> None:
     """Governance (user ruling 2026-08-08): user-visible IM copy lives in
-    services/im_bridge/copy.py — the alert head literals must not creep back
-    into shared/alerts.py."""
+    shared/alerts_copy.py — the alert head literals must not creep back into
+    shared/alerts.py."""
     src = Path(shared_alerts.__file__).read_text(encoding="utf-8")
     for literal in (
         "⚠️ ALERT",  # emoji-ok: asserting the governance guard (head literals banned from shared/alerts.py)
@@ -60,12 +61,12 @@ def test_alert_format_literals_not_hardcoded_in_alerts_module() -> None:
 def test_notify_text_composes_from_copy_templates(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """notify_text output is built from the copy.py templates — patching a
-    template changes the message, so no format string is baked into the
+    """notify_text output is built from the alerts_copy templates — patching
+    a template changes the message, so no format string is baked into the
     alerts module."""
-    monkeypatch.setitem(copy.ALERT_HEAD["en"], "firing", "MARKER [{severity}] {alertname}")
-    monkeypatch.setitem(copy.ALERT_TRIGGERED_AT, "en", "MARKER-TIME {time}")
-    monkeypatch.setattr(copy, "ALERT_JUMP_LINK", "MARKER-LINK {url}/x")
+    monkeypatch.setitem(shared_alerts.ALERT_HEAD["en"], "firing", "MARKER [{severity}] {alertname}")
+    monkeypatch.setitem(shared_alerts.ALERT_TRIGGERED_AT, "en", "MARKER-TIME {time}")
+    monkeypatch.setattr(shared_alerts, "ALERT_JUMP_LINK", "MARKER-LINK {url}/x")
 
     text = notify_text(_alert(), lang="en")
 
@@ -82,7 +83,7 @@ def test_notify_text_omits_jump_link_when_no_frontend_base_url(
     rather than rendered as a bare path."""
 
     monkeypatch.setattr(shared_alerts, "frontend_base_url", lambda: "")
-    monkeypatch.setattr(copy, "ALERT_JUMP_LINK", "MARKER-LINK {url}/x")
+    monkeypatch.setattr(shared_alerts, "ALERT_JUMP_LINK", "MARKER-LINK {url}/x")
 
     text = notify_text(_alert(), lang="en")
 
