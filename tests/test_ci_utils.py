@@ -409,17 +409,216 @@ def test_queue_command_defaults_to_queue_for_normal_state(monkeypatch: pytest.Mo
     assert ci_utils._queue_command("o/r", "abc123") == "@mergifyio queue"
 
 
-# --- --wait (poller) mode: the canonical CI watcher ---------------------------
-# `ci_utils.py <PR> --wait` polls check_ci until the verdict settles, then
-# exits with the monitor contract (0 green / 1 not green / 3 persistent
-# errors / 4 merge failed). check_ci itself is covered above; these tests
-# cover the poller loop by stubbing check_ci with a queue of verdicts and
-# never sleeping.
+def _completed(stdout: str = "", returncode: int = 0) -> Any:
+    return ci_utils.subprocess.CompletedProcess([], returncode, stdout, "boom")
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("2026-08-24T22:36:05Z", 1787610965.0),
+        ('"2026-08-24T22:36:05Z"', 1787610965.0),
+        ("null", None),
+        ("bad", None),
+    ],
+)
+def test_parse_ts(value: str | None, expected: float | None) -> None:
+    assert ci_utils._parse_ts(value) == expected
+
+
+@pytest.mark.parametrize(
+    ("last", "now", "expected"), [(90.0, 100.0, 290), (0.0, 400.0, 0), (None, 100.0, 0)]
+)
+def test_queue_cooldown_seconds(
+    monkeypatch: pytest.MonkeyPatch, last: float | None, now: float, expected: int
+) -> None:
+    monkeypatch.setattr(ci_utils, "_last_head_update", lambda *_a: last)
+    monkeypatch.setattr(ci_utils.time, "time", lambda: now)
+    assert ci_utils._queue_cooldown_seconds("7", "o/r") == expected
+
+
+@pytest.mark.parametrize(
+    ("replies", "expected"),
+    [
+        (
+            [_completed('"2026-08-24T22:36:05Z"'), _completed('"2026-08-24T22:35:00Z"')],
+            1787610965.0,
+        ),
+        ([_completed(returncode=1), _completed('"2026-08-24T22:36:05Z"')], 1787610965.0),
+        ([_completed(returncode=1), _completed(returncode=1)], None),
+        ([_completed("null"), _completed("null")], None),
+    ],
+)
+def test_last_head_update(
+    monkeypatch: pytest.MonkeyPatch, replies: list[Any], expected: float | None
+) -> None:
+    reply_iter = iter(replies)
+    seen: list[list[str]] = []
+    monkeypatch.setattr(
+        ci_utils.subprocess, "run", lambda cmd, **_k: seen.append(cmd) or next(reply_iter)
+    )
+    assert ci_utils._last_head_update("7", "o/r") == expected
+    assert "/issues/7/timeline" in " ".join(seen[0])
+    assert "/pulls/7/commits" in " ".join(seen[1])
+
+
+def _comment(body: str, author: str = "mergify", created: str = "2026-08-24T22:36:05Z") -> dict:
+    return {"author": {"login": author}, "createdAt": created, "body": body}
+
+
+@pytest.mark.parametrize(
+    ("data", "expected"),
+    [
+        (
+            {"comments": [_comment("> queue\nThe pull request was manually updated.")]},
+            "manually updated",
+        ),
+        (
+            {"comments": [_comment("> queue\nAlready running from a previous command.")]},
+            "already running from a previous command",
+        ),
+        (
+            {"comments": [_comment("- [ ] Queue <!-- mergify:queue-control:queue -->")]},
+            "checkbox (command not executed)",
+        ),
+        ({}, None),
+        (None, None),
+        (
+            {
+                "comments": [
+                    _comment(
+                        "<!---\nDO NOT EDIT\n-*- Mergify Payload -*-\n# Merge Queue Status\n<!-- mergify:queue-control:requeue -->"
+                    )
+                ]
+            },
+            None,
+        ),
+        (
+            {
+                "comments": [
+                    _comment("> queue\nremoved from the queue", created="2026-08-24T22:34:00Z")
+                ]
+            },
+            None,
+        ),
+        ({"comments": [_comment("> queue\ncannot be queued", author="alice")]}, None),
+        ({"comments": [_comment("Queued — the merge queue status continues below")]}, None),
+        (
+            {
+                "comments": [
+                    _comment("> queue\nalready running from a previous command"),
+                    _comment(
+                        "Queued — the merge queue status continues", created="2026-08-24T22:37:00Z"
+                    ),
+                ]
+            },
+            None,
+        ),
+        (
+            {
+                "comments": [
+                    _comment("Queued — the merge queue status continues"),
+                    _comment(
+                        "> queue\nalready running from a previous command",
+                        created="2026-08-24T22:37:00Z",
+                    ),
+                ]
+            },
+            None,
+        ),
+    ],
+)
+def test_bot_rejection_reason(data: dict | None, expected: str | None) -> None:
+    assert ci_utils._bot_rejection_reason(data, 1787610900.0) == expected
+
+
+@pytest.mark.parametrize(
+    ("reply", "deadline", "expected"),
+    [
+        (_completed('{"state":"MERGED","comments":[]}'), None, (0, False)),
+        (_completed('{"state":"CLOSED","comments":[]}'), None, (1, False)),
+        (
+            _completed(
+                json.dumps({"state": "OPEN", "comments": [_comment("> queue\nmanually updated")]})
+            ),
+            None,
+            (0, True),
+        ),
+        (_completed(returncode=1), None, (3, False)),
+        (_completed("not json"), None, (3, False)),
+        (_completed('{"state":"OPEN","comments":[]}'), 0.0, (1, False)),
+    ],
+)
+def test_watch_enqueue_results(
+    monkeypatch: pytest.MonkeyPatch, reply: Any, deadline: float | None, expected: tuple[int, bool]
+) -> None:
+    seen = []
+    monkeypatch.setattr(ci_utils.subprocess, "run", lambda cmd, **_k: seen.append(cmd) or reply)
+    assert ci_utils._watch_enqueue("7", "o/r", 1787610900.0, 1, deadline, 5) == expected
+    assert seen[0][-1] == "state,comments"
+
+
+def _stub_merge_flow(
+    monkeypatch: pytest.MonkeyPatch, results: list[Any], watches: list[tuple[int, bool]]
+) -> list[str]:
+    result_iter, watch_iter, commands = iter(results), iter(watches), []
+    monkeypatch.setattr(ci_utils, "_queue_cooldown_seconds", lambda *_a: 0)
+    monkeypatch.setattr(ci_utils, "check_ci", lambda *_a, **_k: next(result_iter))
+    monkeypatch.setattr(
+        ci_utils, "_queue_command", lambda _repo, sha: commands.append(sha) or "@mergifyio queue"
+    )
+    monkeypatch.setattr(ci_utils, "_enqueue_pr", lambda *_a: 0)
+    monkeypatch.setattr(ci_utils, "_watch_enqueue", lambda *_a: next(watch_iter))
+    monkeypatch.setattr(ci_utils.time, "sleep", lambda _s: None)
+    return commands
+
+
+@pytest.mark.parametrize(
+    ("watches", "expected"), [([(0, True), (0, False)], 0), ([(0, True), (0, True)], 4)]
+)
+def test_merge_flow_retries_at_most_once(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    watches: list[tuple[int, bool]],
+    expected: int,
+) -> None:
+    results = [ci_utils.CIResult(CIStatus.ALL_PASSED, head_sha=sha) for sha in ("old", "new")]
+    commands = _stub_merge_flow(monkeypatch, results, watches)
+    assert ci_utils._merge_flow("7", "o/r", 1, 0) == expected
+    assert commands == ["old", "new"]
+    assert ("rejected twice" in capsys.readouterr().err) is (expected == 4)
+
+
+def test_merge_flow_waits_out_cooldown(monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub_merge_flow(monkeypatch, [ci_utils.CIResult(CIStatus.ALL_PASSED)], [(0, False)])
+    remaining = iter([2, 0])
+    monkeypatch.setattr(ci_utils, "_queue_cooldown_seconds", lambda *_a: next(remaining))
+    assert ci_utils._merge_flow("7", "o/r", 1, 0) == 0
+
+
+@pytest.mark.parametrize(
+    ("result", "expected"),
+    [
+        (ci_utils.CIResult(CIStatus.PENDING), 1),
+        (ci_utils.CIResult(CIStatus.ERROR, error_detail="boom"), 3),
+    ],
+)
+def test_merge_flow_stops_when_ci_not_green(
+    monkeypatch: pytest.MonkeyPatch, result: Any, expected: int
+) -> None:
+    _stub_merge_flow(monkeypatch, [result], [])
+    assert ci_utils._merge_flow("7", "o/r", 1, 0) == expected
+
+
+def test_merge_flow_cooldown_honors_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(ci_utils, "_queue_cooldown_seconds", lambda *_a: 10)
+    times = iter([0.0, 2.0])
+    monkeypatch.setattr(ci_utils.time, "monotonic", lambda: next(times))
+    assert ci_utils._merge_flow("7", "o/r", 1, 1) == 1
 
 
 @pytest.fixture
 def no_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A PENDING loop must spin without real waits."""
     monkeypatch.setattr(ci_utils.time, "sleep", lambda _s: None)
 
 
@@ -507,8 +706,7 @@ def test_wait_timeout_while_pending_exits_one(monkeypatch, poll, capsys) -> None
 def test_wait_merge_enqueues_when_green(no_sleep, poll, monkeypatch, capsys) -> None:
     poll(CIStatus.ALL_PASSED)
     captured: dict = {}
-    # The dequeue-detection decision (_queue_command) is covered by its own
-    # unit tests below; stub it here so this test isolates enqueue + merge-wait.
+    monkeypatch.setattr(ci_utils, "_queue_cooldown_seconds", lambda *_a, **_k: 0)
     monkeypatch.setattr(ci_utils, "_queue_command", lambda *_a, **_k: "@mergifyio queue")
 
     def fake_run(cmd, **_kw):
@@ -547,6 +745,7 @@ def test_wait_merge_enqueues_when_green(no_sleep, poll, monkeypatch, capsys) -> 
 
 def test_wait_merge_failure_exits_four(no_sleep, poll, monkeypatch, capsys) -> None:
     poll(CIStatus.ALL_PASSED)
+    monkeypatch.setattr(ci_utils, "_queue_cooldown_seconds", lambda *_a, **_k: 0)
 
     def fake_run(cmd, **_kw):
         class _R:
