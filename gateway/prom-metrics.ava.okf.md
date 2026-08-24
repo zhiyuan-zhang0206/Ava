@@ -39,8 +39,9 @@ datapoint attributes.
 
 ## Consumers
 
-- `GET /api/fleet/graph` — node `total_tokens` (all-time in+out) + windowed
-  `node_score` (in*0.1 + out*1.0); a Prometheus outage degrades the graph to
+- `GET /api/fleet/graph` — node `total_tokens` (restart-proof in+out increase
+  over the retained 7d window) + selected-window `node_score` (in*0.1 + out*1.0);
+  a Prometheus outage degrades the graph to
   a `stale` last-good response when available, otherwise to the PG node set
   with empty edges and zeroed metric fields. After successful Prometheus and
   Loki reads, [[telemetry-staleness.ava.okf.md|the telemetry staleness guard]]
