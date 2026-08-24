@@ -3,27 +3,60 @@
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
+  act,
   cleanup,
   fireEvent,
   render as rtlRender,
   screen,
+  waitFor,
 } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { AgentRow } from "./agent-row";
 import type { AgentRow as AgentRowType } from "@/lib/types";
 
+const prefetchMocks = vi.hoisted(() => ({
+  getAgentInspect: vi
+    .fn<
+      (
+        agentId: number,
+        hours?: number | null,
+        sinceCompact?: boolean,
+        signal?: AbortSignal,
+      ) => Promise<unknown>
+    >()
+    .mockResolvedValue({}),
+  getAgentInspectLive: vi
+    .fn<(agentId: number, signal?: AbortSignal) => Promise<unknown>>()
+    .mockResolvedValue({}),
+}));
 vi.mock("@/lib/api", () => ({
   api: {
     getSystemStatus: vi.fn().mockRejectedValue(new Error("no network in tests")),
     getSettings: vi.fn().mockRejectedValue(new Error("no network in tests")),
     putSetting: vi.fn().mockRejectedValue(new Error("no network in tests")),
+    getAgentInspect: prefetchMocks.getAgentInspect,
+    getAgentInspectLive: prefetchMocks.getAgentInspectLive,
   },
+}));
+
+const inspectorState = { open: false, hours: 24 as number | null };
+vi.mock("@/lib/inspector-panel-store", () => ({
+  useInspectorOpen: () => ({ open: inspectorState.open, toggle: vi.fn() }),
+  useInspectorHours: () => ({
+    inspectorHours: inspectorState.hours,
+    setInspectorHours: vi.fn(),
+  }),
 }));
 
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  vi.useRealTimers();
+  inspectorState.open = false;
+  inspectorState.hours = 24;
+  prefetchMocks.getAgentInspect.mockClear();
+  prefetchMocks.getAgentInspectLive.mockClear();
 });
 
 // Radix ContextMenu calls pointer-capture / scroll APIs that happy-dom
@@ -209,6 +242,159 @@ describe("AgentRow action button visibility", () => {
       <AgentRow {...baseProps} agent={dead} depth={0} ancestorsIsLast={[]} />,
     );
     expect(getByLabelText(/Resurrect Agent #2/).tagName).toBe("BUTTON");
+  });
+});
+
+describe("AgentRow inspector prefetch", () => {
+  function rowButton(container: HTMLElement): HTMLButtonElement {
+    return container.querySelector("li > button")!;
+  }
+
+  it("keeps hover at zero inspect traffic while the panel is closed", async () => {
+    vi.useFakeTimers();
+    const { container } = render(
+      <AgentRow {...baseProps} agent={ag(1)} depth={0} ancestorsIsLast={[]} />,
+    );
+
+    fireEvent.mouseEnter(rowButton(container));
+    await act(() => vi.advanceTimersByTimeAsync(400));
+
+    expect(prefetchMocks.getAgentInspectLive).not.toHaveBeenCalled();
+    expect(prefetchMocks.getAgentInspect).not.toHaveBeenCalled();
+  });
+
+  it("debounces open-panel hover, then prefetches both query halves", async () => {
+    vi.useFakeTimers();
+    inspectorState.open = true;
+    inspectorState.hours = 1;
+    const { container } = render(
+      <AgentRow {...baseProps} agent={ag(7)} depth={0} ancestorsIsLast={[]} />,
+    );
+
+    fireEvent.mouseEnter(rowButton(container));
+    await act(() => vi.advanceTimersByTimeAsync(299));
+    expect(prefetchMocks.getAgentInspectLive).not.toHaveBeenCalled();
+    await act(() => vi.advanceTimersByTimeAsync(1));
+
+    expect(prefetchMocks.getAgentInspectLive).toHaveBeenCalled();
+    expect(prefetchMocks.getAgentInspectLive).toHaveBeenCalledWith(
+      7,
+      expect.any(AbortSignal),
+    );
+    expect(prefetchMocks.getAgentInspect).toHaveBeenCalledWith(
+      7,
+      1,
+      false,
+      expect.any(AbortSignal),
+    );
+  });
+
+  it("cancels the debounce when the pointer leaves quickly", async () => {
+    vi.useFakeTimers();
+    inspectorState.open = true;
+    const { container } = render(
+      <AgentRow {...baseProps} agent={ag(3)} depth={0} ancestorsIsLast={[]} />,
+    );
+    const row = rowButton(container);
+
+    fireEvent.mouseEnter(row);
+    fireEvent.mouseLeave(row);
+    await act(() => vi.advanceTimersByTimeAsync(400));
+
+    expect(prefetchMocks.getAgentInspectLive).not.toHaveBeenCalled();
+    expect(prefetchMocks.getAgentInspect).not.toHaveBeenCalled();
+  });
+
+  it("aborts both prefetched requests when the pointer leaves after they start", async () => {
+    vi.useFakeTimers();
+    inspectorState.open = true;
+    let liveSignal: AbortSignal | undefined;
+    let windowedSignal: AbortSignal | undefined;
+    prefetchMocks.getAgentInspectLive.mockImplementationOnce((_agentId, signal) => {
+      liveSignal = signal;
+      return new Promise(() => undefined);
+    });
+    prefetchMocks.getAgentInspect.mockImplementationOnce(
+      (_agentId, _hours, _sinceCompact, signal) => {
+        windowedSignal = signal;
+        return new Promise(() => undefined);
+      },
+    );
+    const { container } = render(
+      <AgentRow {...baseProps} agent={ag(4)} depth={0} ancestorsIsLast={[]} />,
+    );
+    const row = rowButton(container);
+
+    fireEvent.mouseEnter(row);
+    await act(() => vi.advanceTimersByTimeAsync(300));
+    expect(liveSignal?.aborted).toBe(false);
+    expect(windowedSignal?.aborted).toBe(false);
+    fireEvent.mouseLeave(row);
+    await act(async () => Promise.resolve());
+
+    expect(liveSignal?.aborted).toBe(true);
+    expect(windowedSignal?.aborted).toBe(true);
+  });
+
+  it("aborts a started hover prefetch when the inspector closes", async () => {
+    vi.useFakeTimers();
+    inspectorState.open = true;
+    let liveSignal: AbortSignal | undefined;
+    let windowedSignal: AbortSignal | undefined;
+    prefetchMocks.getAgentInspectLive.mockImplementationOnce((_agentId, signal) => {
+      liveSignal = signal;
+      return new Promise(() => undefined);
+    });
+    prefetchMocks.getAgentInspect.mockImplementationOnce(
+      (_agentId, _hours, _sinceCompact, signal) => {
+        windowedSignal = signal;
+        return new Promise(() => undefined);
+      },
+    );
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const view = rtlRender(
+      <QueryClientProvider client={queryClient}>
+        <AgentRow {...baseProps} agent={ag(5)} depth={0} ancestorsIsLast={[]} />
+      </QueryClientProvider>,
+    );
+
+    fireEvent.mouseEnter(rowButton(view.container));
+    await act(() => vi.advanceTimersByTimeAsync(300));
+    expect(liveSignal?.aborted).toBe(false);
+    expect(windowedSignal?.aborted).toBe(false);
+
+    inspectorState.open = false;
+    view.rerender(
+      <QueryClientProvider client={queryClient}>
+        <AgentRow {...baseProps} agent={ag(5)} depth={0} ancestorsIsLast={[]} />
+      </QueryClientProvider>,
+    );
+
+    await act(async () => Promise.resolve());
+    expect(liveSignal?.aborted).toBe(true);
+    expect(windowedSignal?.aborted).toBe(true);
+  });
+
+  it("prefetches immediately on select while the inspector is open", async () => {
+    inspectorState.open = true;
+    const onSelect = vi.fn();
+    const { container } = render(
+      <AgentRow
+        {...baseProps}
+        onSelect={onSelect}
+        agent={ag(9)}
+        depth={0}
+        ancestorsIsLast={[]}
+      />,
+    );
+
+    fireEvent.click(rowButton(container));
+
+    await waitFor(() => expect(prefetchMocks.getAgentInspectLive).toHaveBeenCalled());
+    expect(prefetchMocks.getAgentInspect).toHaveBeenCalled();
+    expect(onSelect).toHaveBeenCalledOnce();
   });
 });
 

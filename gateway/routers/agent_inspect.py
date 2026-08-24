@@ -21,6 +21,7 @@ from gateway.routers._inspect_live import db_rows_blocking, notice_blocking
 from gateway.schemas import (
     AgentActivity,
     AgentInspect,
+    AgentInspectLive,
     AgentTps,
     HeartbeatInfo,
     HeartbeatLastPause,
@@ -206,6 +207,19 @@ def _heartbeat_last_pause(agent_id: int) -> HeartbeatLastPause | None:
         if row is not None
         else None
     )
+
+
+def _heartbeat_last_pause_or_none(agent_id: int) -> HeartbeatLastPause | None:
+    """Best-effort recent pause for the fast live endpoint.
+
+    The authoritative active pause comes from Postgres. A Loki transport or
+    admission failure must not take down the cheap inspector skeleton merely
+    because its optional historical hint is unavailable.
+    """
+    try:
+        return _heartbeat_last_pause(agent_id)
+    except (httpx.HTTPError, ValueError):
+        return None
 
 
 def _heartbeat(
@@ -453,6 +467,44 @@ def cache_clear() -> None:
     """Test seam: drop the inspect response cache."""
     _inspect_query_cache.clear()
     _inspect_stats.reset_for_tests()
+
+
+@router.get("/api/agents/{agent_id}/inspect/live", response_model=AgentInspectLive)
+async def get_agent_inspect_live(agent_id: int, request: Request) -> AgentInspectLive:
+    """Cheap current-state half of the inspector panel.
+
+    Reads the agent projection and open notice from Postgres, probes shells on
+    the owning runner, and performs only one bounded best-effort Loki lookup for
+    the heartbeat's recent-pause hint. Unknown agents return 404. Shell probe
+    failures degrade to an empty list and Loki failures degrade
+    `heartbeat.last_pause` to None, keeping this endpoint useful as the panel's
+    fast skeleton source. No part of this response is cached.
+    """
+    pool = request.app.state.db_pool
+    db = await asyncio.to_thread(db_rows_blocking, pool, agent_id)
+    notice, shells, last_pause = await asyncio.gather(
+        asyncio.to_thread(notice_blocking, pool, agent_id),
+        _probe_agent_shells(agent_id, db.machine),
+        asyncio.to_thread(_heartbeat_last_pause_or_none, agent_id),
+    )
+    return AgentInspectLive(
+        agent_id=agent_id,
+        machine=db.machine,
+        liveness_state=db.liveness_state,
+        last_probe_at=db.last_probe_at,
+        spawned_at=db.spawned_at,
+        started_at=db.started_at,
+        shells=shells,
+        config_overlay=db.config_overlay,
+        notice=notice,
+        heartbeat=_heartbeat(
+            status=db.status,
+            last_active_at=db.last_active_at,
+            paused_until=db.paused_until,
+            pending_inbound=db.pending_inbound,
+            last_pause=last_pause,
+        ),
+    )
 
 
 @router.get("/api/agents/{agent_id}/inspect")

@@ -52,6 +52,7 @@ const hooksState = {
   focusComposer: vi.fn(),
   setMobileSidebarOpen: vi.fn(),
   setMobileInspectorOpen: vi.fn(),
+  setInspectorHours: vi.fn(),
   requestScrollToBottom: vi.fn(),
   setSetting: vi.fn(),
   // DB-backed user settings — timeline-width ratio is the one HomeContent reads.
@@ -127,6 +128,8 @@ vi.mock("@/lib/store", () => ({
       setMobileSidebarOpen: hooksState.setMobileSidebarOpen,
       mobileInspectorOpen: false,
       setMobileInspectorOpen: hooksState.setMobileInspectorOpen,
+      inspectorHours: 24,
+      setInspectorHours: hooksState.setInspectorHours,
       agents: hooksState.agents,
       clusterUpdating: false,
     };
@@ -316,6 +319,7 @@ beforeEach(() => {
   hooksState.settings = { "display.timeline_width_ratio": 0.4 };
   hooksState.setSetting = vi.fn();
   hooksState.setMobileInspectorOpen = vi.fn();
+  hooksState.setInspectorHours = vi.fn();
   hooksState.isLarge = true;
   hooksState.isDesktop = true;
 });

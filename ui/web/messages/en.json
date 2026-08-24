@@ -43,6 +43,7 @@
     "loadingAgents": "Loading agents…",
     "statistics": "Statistics",
     "statisticsUpdating": "Statistics are updating",
+    "statisticsUpdatingFor": "Updating for {win}…",
     "statisticsRetry": "Retry",
     "searchAgents": "Search agents",
     "collapseSidebar": "Collapse sidebar",

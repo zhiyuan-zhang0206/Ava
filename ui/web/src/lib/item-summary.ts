@@ -50,7 +50,7 @@ export function summarizeCode(
   // them directly — zero false positives from string literals / comments.
   // During streaming the field is absent; fall back to the regex heuristic
   // for the live chip (transient, replaced by the committed snapshot).
-  if (sdkCalls && sdkCalls.length > 0) {
+  if (sdkCalls != null) {
     const totalCalls = sdkCalls.reduce((sum, c) => sum + c.count, 0);
     return { calls: sdkCalls, totalCalls, lines: nonBlankLineCount(payload) };
   }

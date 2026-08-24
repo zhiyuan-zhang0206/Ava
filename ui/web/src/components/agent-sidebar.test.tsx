@@ -698,6 +698,33 @@ describe("StatsCards tri-state (loading / data / error)", () => {
 });
 
 describe("StatsCards window selector", () => {
+  it("hides stale windowed values while retaining the live-agent count", () => {
+    state.agents = [makeAgent({ agent_id: 1 })];
+    state.statsWindowHours = 1;
+    state.stats = {
+      live_count: 5,
+      window_hours: 24,
+      tokens: { input: 12_345, output: 6_789, cache_read: 0, cache_hit_pct: 80 },
+      cost_usd: 1.2345,
+      avg_turn_seconds: 3.14,
+      warnings: 2,
+      errors: 1,
+      total_events: 100,
+    };
+
+    wrap(<AgentSidebar {...handlers} />);
+    openStats();
+
+    expect(screen.getByText("5")).toBeTruthy();
+    expect(screen.getAllByText("…")).toHaveLength(5);
+    expect(screen.queryByText("19.1k")).toBeNull();
+    expect(screen.queryByText("80.00%")).toBeNull();
+    expect(screen.queryByText("$1.23")).toBeNull();
+    expect(screen.queryByText("3s")).toBeNull();
+    expect(screen.queryByText("2 / 1")).toBeNull();
+    expect(screen.getAllByTitle("Updating for 1h…")).toHaveLength(5);
+  });
+
   it("renders all six window options with the persisted value selected", () => {
     state.agents = [makeAgent({ agent_id: 1 })];
     state.statsWindowHours = 72;

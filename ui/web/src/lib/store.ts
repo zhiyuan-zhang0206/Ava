@@ -53,6 +53,11 @@ interface UISlice {
   mobileInspectorOpen: boolean;
   setMobileInspectorOpen: (open: boolean) => void;
 
+  /** Inspector aggregate window. Session-scoped selection shared by the panel
+   *  and sidebar prefetch; null = all time, -1 = since compact. */
+  inspectorHours: number | null;
+  setInspectorHours: (hours: number | null) => void;
+
   /** toast message — when non-null, shows in the bottom-right; auto-clears after 3s */
   toast: string | null;
   showToast: (msg: string) => void;
@@ -129,6 +134,9 @@ export const useStore = create<Store>()((set) => ({
 
   mobileInspectorOpen: false,
   setMobileInspectorOpen: (open) => set({ mobileInspectorOpen: open }),
+
+  inspectorHours: 24,
+  setInspectorHours: (hours) => set({ inspectorHours: hours }),
 
   toast: null,
   showToast: (msg) => {

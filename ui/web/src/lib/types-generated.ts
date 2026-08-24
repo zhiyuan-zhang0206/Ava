@@ -875,6 +875,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/agents/{agent_id}/inspect/live": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Agent Inspect Live
+         * @description Cheap current-state half of the inspector panel.
+         *
+         *     Reads the agent projection and open notice from Postgres, probes shells on
+         *     the owning runner, and performs only one bounded best-effort Loki lookup for
+         *     the heartbeat's recent-pause hint. Unknown agents return 404. Shell probe
+         *     failures degrade to an empty list and Loki failures degrade
+         *     `heartbeat.last_pause` to None, keeping this endpoint useful as the panel's
+         *     fast skeleton source. No part of this response is cached.
+         */
+        get: operations["get_agent_inspect_live_api_agents__agent_id__inspect_live_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/agents/{agent_id}/inspect": {
         parameters: {
             query?: never;
@@ -3537,6 +3564,45 @@ export interface components {
             stats: components["schemas"]["AgentStats"];
             tps: components["schemas"]["AgentTps"];
             activity: components["schemas"]["AgentActivity"];
+            heartbeat: components["schemas"]["HeartbeatInfo"];
+        };
+        /**
+         * AgentInspectLive
+         * @description GET /api/agents/{id}/inspect/live response — the inspector's cheap,
+         *     window-independent skeleton.
+         *
+         *     Every field reflects current database or runner state except
+         *     `heartbeat.last_pause`, which is a single bounded recent-history lookup and
+         *     degrades to None when Loki is unavailable. The response intentionally omits
+         *     cost, stats, TPS, and activity so switching agents does not wait for the
+         *     expensive event-history aggregate fan-out.
+         */
+        AgentInspectLive: {
+            /** Agent Id */
+            agent_id: number;
+            /** Machine */
+            machine: string;
+            /**
+             * Liveness State
+             * @enum {string}
+             */
+            liveness_state: "online" | "offline" | "unknown";
+            /** Last Probe At */
+            last_probe_at?: string | null;
+            /**
+             * Spawned At
+             * Format: date-time
+             */
+            spawned_at: string;
+            /** Started At */
+            started_at?: string | null;
+            /** Shells */
+            shells: components["schemas"]["ShellInfo"][];
+            /** Config Overlay */
+            config_overlay: {
+                [key: string]: unknown;
+            };
+            notice?: components["schemas"]["OpenNotice"] | null;
             heartbeat: components["schemas"]["HeartbeatInfo"];
         };
         /**
@@ -7730,6 +7796,37 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_agent_inspect_live_api_agents__agent_id__inspect_live_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                agent_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentInspectLive"];
                 };
             };
             /** @description Validation Error */
