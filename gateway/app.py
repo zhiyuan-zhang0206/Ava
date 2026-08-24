@@ -45,8 +45,8 @@ this service directly at `<hostname>:8000` (no rewrites proxy — see
 ui/web/next.config.ts).
 
 Endpoint implementations live under `gateway/routers/<domain>.py` and are
-mounted at the bottom of this file. Only lifespan + the two middlewares +
-the AvaAgentError exception handler remain in this module.
+mounted at the bottom of this file. Lifespan and middleware registration remain
+in this module; exception-to-envelope adapters live in `gateway/error_handlers.py`.
 
 Start: `.venv/bin/python scripts/start_gateway.py` (or `python -m gateway`)
 -> uvicorn :8000 on all interfaces, both IPv4 and IPv6 (reachable on the
@@ -61,8 +61,9 @@ from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI, Request, Response
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 import shared.db
 from gateway import (
@@ -77,6 +78,16 @@ from gateway import (
 )
 from gateway import mcp_endpoint as _mcp_endpoint
 from gateway._server import main as _run_gateway
+from gateway.error_envelope import error_response, request_trace_middleware
+from gateway.error_handlers import (
+    _ava_agent_error_handler,
+    _http_exception_handler,
+    _loki_query_budget_error_handler,
+    _observability_read_unavailable_handler,
+    _prom_query_budget_error_handler,
+    _request_validation_error_handler,
+    _unhandled_exception_handler,
+)
 from gateway.routers import (
     _machine_pause as machine_pause_router,
 )
@@ -198,7 +209,6 @@ from gateway.routers import (
     uploads as uploads_router,
 )
 from gateway.schedule_manager import ScheduleManager
-from gateway.schemas import AgentErrorResponse
 from shared.agents import AvaAgentError
 from shared.cluster_auth import (
     cookie_name,
@@ -477,9 +487,12 @@ async def _cluster_pause_middleware(
     if await _cluster_is_paused(request) and not _pause_policy.should_bypass_pause(
         request.method, request.url.path
     ):
-        return JSONResponse(
-            status_code=503,
-            content={"detail": "cluster updating, retry shortly"},
+        return error_response(
+            request,
+            code="cluster_updating",
+            status=503,
+            detail="cluster updating, retry shortly",
+            retryable=True,
             headers={"Retry-After": "30"},
         )
     return await call_next(request)
@@ -558,9 +571,12 @@ async def _cluster_auth_middleware(
     if x_secret and hmac.compare_digest(x_secret, secret):
         return await call_next(request)
 
-    return JSONResponse(
-        status_code=401,
-        content={"detail": "authentication required"},
+    return error_response(
+        request,
+        code="authentication_required",
+        status=401,
+        detail="authentication required",
+        retryable=False,
     )
 
 
@@ -594,104 +610,27 @@ app.add_middleware(
 )
 
 
-@app.exception_handler(AvaAgentError)
-async def _ava_agent_error_handler(request: Request, exc: AvaAgentError) -> JSONResponse:  # noqa: ARG001
-    """Server-side of the SDK <-> Gateway error wire contract — maps any
-    AvaAgentError subclass (AgentNotFound / Fork* / MachineNotRegistered
-    etc.) to `{"detail": str(exc), "reason": exc.reason}` + the http_status
-    bound by the subclass. (ResurrectAlreadyAlive is NOT an AvaAgentError
-    subclass — it is handled locally as an idempotent 200 and never reaches
-    this handler.)
-
-    SDK `_gateway_client._raise_from_response` parses the reason field, looks
-    up `EXCEPTION_BY_REASON`, and reconstructs the corresponding exception
-    class to raise at the caller.
-
-    The `AvaAgentError` parent is never raised directly — only caught;
-    concrete subclasses must declare `reason: ClassVar[ErrorReason]` +
-    `http_status: ClassVar[int]`.
-    """
-    return JSONResponse(
-        status_code=exc.http_status,
-        content=AgentErrorResponse(detail=str(exc), reason=exc.reason).model_dump(mode="json"),
-    )
+# Registered last so every response path, including auth and pause short-circuits,
+# receives a fallback trace id before it reaches an error response builder.
+app.middleware("http")(request_trace_middleware)
 
 
-def _cors_headers(request: Request) -> dict[str, str]:
-    """The Access-Control-* headers CORSMiddleware adds to a normal response.
-
-    ServerErrorMiddleware — which answers unhandled exceptions — sits OUTSIDE
-    every user middleware (Starlette/FastAPI build order), so its response
-    never passes through CORSMiddleware and the catch-all handler below must
-    add the headers itself. Mirrors CORSMiddleware's simple-response behavior
-    for this gateway's fixed configuration: allow_origin_regex=".*" plus
-    allow_credentials=True echoes the concrete Origin with a Vary: Origin
-    (#187).
-    """
-    origin = request.headers.get("origin")
-    if origin is None:
-        return {}
-    return {
-        "Access-Control-Allow-Origin": origin,
-        "Vary": "Origin",
-        "Access-Control-Allow-Credentials": "true",
-    }
-
-
-@app.exception_handler(loki_query_budget.LokiQueryBudgetError)
-async def _loki_query_budget_error_handler(
-    request: Request,  # noqa: ARG001 — FastAPI exception-handler signature
-    exc: loki_query_budget.LokiQueryBudgetError,
-) -> JSONResponse:
-    """Map local Loki admission saturation to one retriable wire contract."""
-    return JSONResponse(
-        status_code=503,
-        content={"detail": f"Loki query budget unavailable ({exc.reason}); retry"},
-        headers={"Retry-After": "1"},
-    )
-
-
-@app.exception_handler(loki_events.ObservabilityReadUnavailable)
-async def _observability_read_unavailable_handler(
-    request: Request,  # noqa: ARG001 — FastAPI exception-handler signature
-    exc: loki_events.ObservabilityReadUnavailable,
-) -> JSONResponse:
-    """Expose a non-LGTM gateway's deliberate read isolation as a clean 503."""
-    return JSONResponse(status_code=503, content={"detail": str(exc)})
-
-
-@app.exception_handler(prom_metrics.PromQueryBudgetError)
-async def _prom_query_budget_error_handler(
-    request: Request,  # noqa: ARG001 — FastAPI exception-handler signature
-    exc: prom_metrics.PromQueryBudgetError,
-) -> JSONResponse:
-    """Map local Prometheus admission saturation to one retriable contract."""
-    return JSONResponse(
-        status_code=503,
-        content={"detail": f"Prometheus query budget unavailable ({exc.reason}); retry"},
-        headers={"Retry-After": "1"},
-    )
-
-
-@app.exception_handler(Exception)
-async def _unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-    """Last-resort handler for route-level unhandled exceptions.
-
-    Without it, an unhandled route exception is caught by Starlette's
-    ServerErrorMiddleware — the one layer OUTSIDE all user middleware — and its
-    bare 500 response carries no Access-Control-* headers, so a browser caller
-    sees "Failed to fetch" instead of the actual status (#187). FastAPI routes
-    the Exception handler to ServerErrorMiddleware, so this handler returns a
-    500 with the CORS headers added explicitly (`_cors_headers`); the
-    traceback is logged here because ServerErrorMiddleware would otherwise be
-    the only observer.
-    """
-    _log.error("unhandled gateway exception", exc_info=exc)
-    return JSONResponse(
-        status_code=500,
-        content={"detail": "Internal Server Error"},
-        headers=_cors_headers(request),
-    )
+app.add_exception_handler(AvaAgentError, _ava_agent_error_handler)  # type: ignore[arg-type]
+app.add_exception_handler(
+    loki_query_budget.LokiQueryBudgetError,
+    _loki_query_budget_error_handler,  # type: ignore[arg-type]
+)
+app.add_exception_handler(
+    loki_events.ObservabilityReadUnavailable,
+    _observability_read_unavailable_handler,  # type: ignore[arg-type]
+)
+app.add_exception_handler(
+    prom_metrics.PromQueryBudgetError,
+    _prom_query_budget_error_handler,  # type: ignore[arg-type]
+)
+app.add_exception_handler(RequestValidationError, _request_validation_error_handler)  # type: ignore[arg-type]
+app.add_exception_handler(StarletteHTTPException, _http_exception_handler)  # type: ignore[arg-type]
+app.add_exception_handler(Exception, _unhandled_exception_handler)
 
 
 # `_publish_inbound_arrived` was inlined into the spawn/lifecycle handlers;

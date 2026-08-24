@@ -31,13 +31,13 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from typing import Any, cast
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from mcp.server.context import CallNext, HandlerResult, ServerRequestContext
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
-from starlette.responses import JSONResponse
 
+from gateway.error_envelope import error_response
 from gateway.routers import agents as _agents_router
 from gateway.routers._delivery import deliver_chat_inbound
 from gateway.routers.agents_lifecycle import post_agent_terminate
@@ -417,7 +417,13 @@ def mcp_gateway(app: FastAPI) -> Callable[..., Awaitable[None]]:
             return
         manager = getattr(app.state, "mcp_manager", None)
         if manager is None:
-            response = JSONResponse({"detail": "mcp endpoint is disabled"}, status_code=404)
+            response = error_response(
+                Request(scope),
+                code="mcp_endpoint_disabled",
+                status=404,
+                detail="mcp endpoint is disabled",
+                retryable=False,
+            )
             await response(scope, receive, send)
             return
         await manager.asgi_app(scope, receive, send)
