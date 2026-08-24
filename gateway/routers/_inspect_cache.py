@@ -1,4 +1,4 @@
-"""Bounded TTL + single-flight cache for the expensive inspector aggregate."""
+"""Bounded TTL + single-flight cache with optional load admission control."""
 
 from __future__ import annotations
 
@@ -22,14 +22,30 @@ class _CacheHit[V]:
 class _CacheClaim[V]:
     future: Future[V]
     leader: bool
+    load_slot_acquired: bool = False
 
 
 class InspectQueryCache[K, V]:
-    """Share one loader per key and retain successful values for a short TTL."""
+    """Share one loader per key and retain successful values for a short TTL.
 
-    def __init__(self, *, max_entries: int, max_inflight: int) -> None:
+    When configured, admission bounds concurrent distinct-key loaders without
+    charging cache hits or followers against the load capacity.
+    """
+
+    def __init__(
+        self,
+        *,
+        max_entries: int,
+        max_inflight: int,
+        max_concurrent_loads: int | None = None,
+    ) -> None:
         self._max_entries = max_entries
         self._max_inflight = max_inflight
+        self._load_slots = (
+            threading.BoundedSemaphore(max_concurrent_loads)
+            if max_concurrent_loads is not None
+            else None
+        )
         self._values: dict[K, tuple[float, V]] = {}
         self._inflight: dict[K, Future[V]] = {}
         self._lock = threading.Lock()
@@ -47,7 +63,14 @@ class InspectQueryCache[K, V]:
             return claim.value
         if not claim.leader:
             return claim.future.result()
-        return self._load_claim(key, claim.future, loader, ttl_s=ttl_s, now=now)
+        return self._load_claim(
+            key,
+            claim.future,
+            loader,
+            release_load_slot=claim.load_slot_acquired,
+            ttl_s=ttl_s,
+            now=now,
+        )
 
     async def get_or_load_async(
         self,
@@ -77,6 +100,7 @@ class InspectQueryCache[K, V]:
                 key,
                 claim.future,
                 loader,
+                release_load_slot=claim.load_slot_acquired,
                 ttl_s=ttl_s,
                 now=now,
             )
@@ -99,9 +123,11 @@ class InspectQueryCache[K, V]:
                 return _CacheClaim(future, leader=False)
             if len(self._inflight) >= self._max_inflight:
                 raise InspectCacheFullError
+            if self._load_slots is not None and not self._load_slots.acquire(blocking=False):
+                raise InspectCacheFullError
             future = Future[V]()
             self._inflight[key] = future
-            return _CacheClaim(future, leader=True)
+            return _CacheClaim(future, leader=True, load_slot_acquired=self._load_slots is not None)
 
     def _load_claim(
         self,
@@ -109,6 +135,7 @@ class InspectQueryCache[K, V]:
         future: Future[V],
         loader: Callable[[], V],
         *,
+        release_load_slot: bool,
         ttl_s: float,
         now: Callable[[], float],
     ) -> V:
@@ -125,6 +152,10 @@ class InspectQueryCache[K, V]:
             with self._lock:
                 if self._inflight.get(key) is future:
                     del self._inflight[key]
+            if release_load_slot:
+                if self._load_slots is None:
+                    raise RuntimeError("load claim cannot release an unconfigured admission slot")
+                self._load_slots.release()
 
     def _store(self, key: K, value: V, *, current: float, expires_at: float) -> None:
         with self._lock:

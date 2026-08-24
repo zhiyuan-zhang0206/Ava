@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import time as time_mod
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeoutError
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, NamedTuple
 
@@ -14,7 +15,7 @@ from psycopg_pool import ConnectionPool
 
 from gateway import loki_events, loki_query_budget, neighbors
 from gateway.routers import _agent_cost, _inspect_stats, _plugin_metrics
-from gateway.routers._agent_cost import window_bounds
+from gateway.routers._agent_cost import _query_timeout, window_bounds
 from gateway.routers._backend_failure import raise_backend_unavailable
 from gateway.routers._inspect_cache import InspectCacheFullError, InspectQueryCache
 from gateway.routers._inspect_live import db_rows_blocking, notice_blocking
@@ -185,7 +186,9 @@ def _agent_activity(
 _HEARTBEAT_PAUSE_LOOKBACK = timedelta(hours=24)
 
 
-def _heartbeat_last_pause(agent_id: int) -> HeartbeatLastPause | None:
+def _heartbeat_last_pause(
+    agent_id: int, *, deadline: float | None = None
+) -> HeartbeatLastPause | None:
     """Newest recent heartbeat pause from Loki; safe to retain with aggregates.
 
     "Last pause" is a recent-history hint; `_inspect_live` reads authoritative
@@ -202,7 +205,7 @@ def _heartbeat_last_pause(agent_id: int) -> HeartbeatLastPause | None:
         event_names=["heartbeat_paused"],
         from_=datetime.now(tz=UTC) - _HEARTBEAT_PAUSE_LOOKBACK,
         limit=1,
-        timeout_s=8.0,
+        timeout_s=_query_timeout(deadline),
     )
     row = rows[0] if rows else None
     return (
@@ -344,10 +347,32 @@ class _InspectAggregates(NamedTuple):
     heartbeat_last_pause: HeartbeatLastPause | None
 
 
-# Parallel workers for one inspect call's three independent history operations:
-# cost, the shared stats/TPS/activity preparation, and heartbeat. Keeping one
-# Loki slot free lets unrelated stats/ops work enter the global FIFO promptly.
-_INSPECT_WORKERS = 3
+# Distinct-key inspect loads admit one leader per Loki query slot. Their three
+# independent sections run on one process-lifetime executor, which stays bounded
+# even when a timed-out caller has released its response task.
+_INSPECT_MAX_CONCURRENT_LOADS = 4
+_INSPECT_EXECUTOR_WORKERS = 4
+_INSPECT_SINGLEFLIGHT_MAX = 32
+_inspect_executor = ThreadPoolExecutor(
+    max_workers=_INSPECT_EXECUTOR_WORKERS,
+    thread_name_prefix="inspect",
+)
+
+
+def _remaining_timeout(deadline: float | None) -> float | None:
+    """Return the remaining load budget or abort once its deadline elapsed."""
+    if deadline is None:
+        return None
+    remaining = deadline - time_mod.monotonic()
+    if remaining <= 0:
+        raise TimeoutError
+    return remaining
+
+
+def _discard_future_exception(future: Future[Any]) -> None:
+    """Consume a late section exception after the load deadline has elapsed."""
+    if not future.cancelled():
+        future.exception()
 
 
 def _inspect_blocking(
@@ -357,27 +382,58 @@ def _inspect_blocking(
     *,
     since_compact: bool,
     spawned_at: datetime | None,
+    deadline: float | None = None,
 ) -> _InspectAggregates:
     """Sync twin of the inspect endpoint's event-history section — runs via
-    asyncio.to_thread so the event loop stays free. Cost, the shared
-    stats/TPS/activity preparation, and heartbeat run on parallel workers."""
+    asyncio.to_thread so the event loop stays free. Its sections run on the
+    shared bounded executor and stop waiting when the load deadline expires."""
+    _remaining_timeout(deadline)
     # `window_start` is the concrete lower-bound instant of the request
     # window — the active-rate denominator clips alive-time to it (alive
     # is replayed in Python). since_compact → the compact halt ts (or
     # None when never compacted); hours → now - N h; neither → None
     # (whole life).
-    from_, window_start = window_bounds(agent_id, hours, since_compact=since_compact)
-    with ThreadPoolExecutor(max_workers=_INSPECT_WORKERS, thread_name_prefix="inspect") as ex:
-        f_cost = ex.submit(
-            _agent_cost.agent_cost, pool, agent_id, hours, since_compact=since_compact
-        )
-        f_values = ex.submit(_inspect_stats.inspect_values, pool, agent_id, from_, None)
-        f_heartbeat_last_pause = ex.submit(_heartbeat_last_pause, agent_id)
-        cost = f_cost.result()
-        values = f_values.result()
+    from_, window_start = window_bounds(
+        agent_id,
+        hours,
+        since_compact=since_compact,
+        deadline=deadline,
+    )
+    # Keep the leader in asyncio.to_thread's default executor. Submitting a
+    # leader that waits on section futures here would deadlock this pool when
+    # every shared worker is occupied by leaders.
+    f_cost = _inspect_executor.submit(
+        _agent_cost.agent_cost,
+        pool,
+        agent_id,
+        hours,
+        since_compact=since_compact,
+        deadline=deadline,
+    )
+    f_values = _inspect_executor.submit(
+        _inspect_stats.inspect_values,
+        pool,
+        agent_id,
+        from_,
+        None,
+        deadline=deadline,
+    )
+    f_heartbeat_last_pause = _inspect_executor.submit(
+        _heartbeat_last_pause,
+        agent_id,
+        deadline=deadline,
+    )
+    futures = (f_cost, f_values, f_heartbeat_last_pause)
+    try:
+        cost = f_cost.result(timeout=_remaining_timeout(deadline))
+        values = f_values.result(timeout=_remaining_timeout(deadline))
         tps = _agent_tps(values, spawned_at)
         activity = _agent_activity(values, window_start, spawned_at)
-        heartbeat_last_pause = f_heartbeat_last_pause.result()
+        heartbeat_last_pause = f_heartbeat_last_pause.result(timeout=_remaining_timeout(deadline))
+    except FutureTimeoutError as exc:
+        for future in futures:
+            future.add_done_callback(_discard_future_exception)
+        raise TimeoutError from exc
     return _InspectAggregates(
         cost=cost,
         stats=values.stats,
@@ -397,20 +453,19 @@ def _inspect_blocking(
 # never ride the cache (see the endpoint). Bound the dict and prune on overflow.
 _INSPECT_CACHE_TTL_S = 75.0
 _INSPECT_CACHE_MAX = 1024
-_INSPECT_SINGLEFLIGHT_MAX = 1024
 # A panel request is an interactive read, not a batch job. Until the unlabeled
 # pre-cutover Loki slice expires on 2026-08-30 11:10Z, a cold 7-day or whole-life
 # load can legitimately take about 15 seconds; 30 seconds prevents those reads
 # from returning 503. Every Loki query remains individually bounded at 8 seconds,
 # so a down backend fails in about 16 seconds rather than waiting for this bound.
-# asyncio cannot safely kill the synchronous leader thread: single-flight keeps it
-# as the one background load for this key, and a late successful result still
-# populates the short TTL.
+# The response budget is also the leader deadline: a timed-out request releases
+# admission once its fan-out stops rather than later populating this cache.
 _INSPECT_RESPONSE_TIMEOUT_S = 30.0
 _InspectKey = tuple[int, int | None, bool]
 _inspect_query_cache = InspectQueryCache[_InspectKey, _InspectAggregates](
     max_entries=_INSPECT_CACHE_MAX,
     max_inflight=_INSPECT_SINGLEFLIGHT_MAX,
+    max_concurrent_loads=_INSPECT_MAX_CONCURRENT_LOADS,
 )
 
 
@@ -424,6 +479,7 @@ def _inspect_rows_cached(
 ) -> _InspectAggregates:
     """Return cached rows or share one in-flight fan-out for this exact key."""
     key: _InspectKey = (agent_id, None if hours is None else int(hours), since_compact)
+    deadline = time_mod.monotonic() + _INSPECT_RESPONSE_TIMEOUT_S
     try:
         return _inspect_query_cache.get_or_load(
             key,
@@ -433,6 +489,7 @@ def _inspect_rows_cached(
                 hours,
                 since_compact=since_compact,
                 spawned_at=spawned_at,
+                deadline=deadline,
             ),
             ttl_s=_INSPECT_CACHE_TTL_S,
             now=time_mod.monotonic,
@@ -451,6 +508,7 @@ async def _inspect_rows_cached_async(
 ) -> _InspectAggregates:
     """Async request twin: followers await single-flight without a worker."""
     key: _InspectKey = (agent_id, None if hours is None else int(hours), since_compact)
+    deadline = time_mod.monotonic() + _INSPECT_RESPONSE_TIMEOUT_S
     try:
         return await _inspect_query_cache.get_or_load_async(
             key,
@@ -460,6 +518,7 @@ async def _inspect_rows_cached_async(
                 hours,
                 since_compact=since_compact,
                 spawned_at=spawned_at,
+                deadline=deadline,
             ),
             ttl_s=_INSPECT_CACHE_TTL_S,
             now=time_mod.monotonic,
@@ -535,19 +594,20 @@ async def get_agent_inspect(
     agents_meta row). `config_overlay` is the spawn-time override map — `{}` when
     the agent runs on cluster defaults (the column is NULL).
 
-    Latency discipline: the event-history sections run on parallel workers
-    (one Loki fan-out per section, overlapped), and only those aggregates ride
-    a 75s TTL cache keyed by (agent_id, hours, since_compact), with concurrent
-    misses sharing one single-flight Future — the panel refetches in bursts
-    (open, notice SSE events, 60s interval), and a burst must not re-run the
-    ~20-query fan-out per request. The agents_meta projection (machine,
-    config, heartbeat inputs, liveness and timestamps), `notice`, and `shells`
-    are fetched fresh on every call and never ride the cache. `shells` is probed
-    on the agent's own machine via the `shell_probe` cluster op (the gateway
-    never runs sessions itself; every machine — its own included — is dialed at its
-    registered ops URL), so a split deployment reflects each agent's runner and
-    an unreachable machine degrades to an empty list rather than failing the
-    panel. `heartbeat` is the agent's idle check-in state: the
+    Latency discipline: event-history sections use a shared bounded executor,
+    and only their aggregates ride a 75s TTL cache keyed by (agent_id, hours,
+    since_compact). Concurrent misses share one single-flight Future; no more
+    than `_INSPECT_MAX_CONCURRENT_LOADS` distinct leaders run at once, and a
+    saturated request gets the queue-full 503. Each leader's 15-second response
+    budget is also its load deadline, so expired work stops and releases its
+    admission slot rather than continuing under transport timeouts. The
+    agents_meta projection (machine, config, heartbeat inputs, liveness and
+    timestamps), `notice`, and `shells` are fetched fresh on every call and
+    never ride the cache. `shells` is probed on the agent's own machine via the
+    `shell_probe` cluster op (the gateway never runs sessions itself; every
+    machine — its own included — is dialed at its registered ops URL), so a
+    split deployment reflects each agent's runner and an unreachable machine
+    degrades to an empty list rather than failing the panel. `heartbeat` is the agent's idle check-in state: the
     projected next check-in when idle (or the active pause / running suppression)
     plus its most recent pause from history.
 
