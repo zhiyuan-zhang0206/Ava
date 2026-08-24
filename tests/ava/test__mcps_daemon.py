@@ -1961,12 +1961,15 @@ async def test_connect_http_oauth_builds_provider(
     assert factory.call_args.kwargs["http_client"] is oauth_client
 
 
-async def test_shared_computer_server_connects_direct_no_child(
+async def test_shared_computer_use_server_connects_direct_no_child(
     fake_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A `"shared": "computer"` server is dialed directly (no stdio child):
+    """A `"shared": "computer_use"` server is dialed directly (no stdio child):
     _connect_server dispatches to connect_computer_direct, never stdio_client."""
-    _write_config(fake_home, {"computer": {"command": ".venv/bin/python", "shared": "computer"}})
+    _write_config(
+        fake_home,
+        {"computer_use": {"command": ".venv/bin/python", "shared": "computer_use"}},
+    )
     session = MagicMock()
     stack = MagicMock()
     direct = AsyncMock(return_value=(session, stack))
@@ -1980,19 +1983,22 @@ async def test_shared_computer_server_connects_direct_no_child(
 
     monkeypatch.setattr(daemon_mod, "stdio_client", _boom, raising=False)
 
-    got_session, got_stack = await daemon_mod._connect_server("computer")
+    got_session, got_stack = await daemon_mod._connect_server("computer_use")
     assert got_session is session and got_stack is stack
     direct.assert_awaited_once_with()
     assert spawned == []
 
 
-async def test_computer_call_stamps_agent_id(
+async def test_computer_use_call_stamps_agent_id(
     fake_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The agent id from the client envelope is stamped onto the computer
+    """The agent id from the client envelope is stamped onto the computer_use
     session before every call_tool, so the computer daemon can gate and audit
     per agent (the line payload carries it)."""
-    _write_config(fake_home, {"computer": {"command": ".venv/bin/python", "shared": "computer"}})
+    _write_config(
+        fake_home,
+        {"computer_use": {"command": ".venv/bin/python", "shared": "computer_use"}},
+    )
     import ava._mcp_computer as computer_mod
 
     received: dict[str, object] = {}
@@ -2023,7 +2029,7 @@ async def test_computer_call_stamps_agent_id(
     req = {
         "id": 1,
         "method": "call_tool",
-        "params": {"server": "computer", "tool": "click", "args": {"x": 1}},
+        "params": {"server": "computer_use", "tool": "click", "args": {"x": 1}},
         "agent_id": 42,
     }
     reader = _make_reader([(json.dumps(req) + "\n").encode()])

@@ -476,18 +476,18 @@ def test_server_url_rejects_oauth_plus_headers() -> None:
         )
 
 
-def test_builtin_mcps_folder_surfaces_computer(
+def test_builtin_mcps_folder_surfaces_computer_use(
     unit_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The repo's mcps/computer/.mcp.json is scanned as a built-in source.
+    """The repo's mcps/computer_use/.mcp.json is scanned as a built-in source.
 
-    The computer server is fronted the same way as chrome: shared="computer"
+    The computer_use server is fronted the same way as chrome: shared="computer_use"
     tells the MCP daemon to dial the per-machine computer-mcp service directly,
     and the wrapper command is the local-fallback path."""
     monkeypatch.setattr(cfg_mod, "_plugin_config_paths", list)
     merged = cfg_mod.load_mcp_config()
-    assert "computer" in merged
-    assert merged["computer"]["shared"] == "computer"
-    assert merged["computer"]["command"] == ".venv/bin/python"
-    assert "services.computer.mcp_wrapper" in merged["computer"]["args"]
-    assert merged["computer"]["requires"] == {"display": True, "unix_socket": True}
+    assert "computer_use" in merged
+    assert merged["computer_use"]["shared"] == "computer_use"
+    assert merged["computer_use"]["command"] == ".venv/bin/python"
+    assert "services.computer.mcp_wrapper" in merged["computer_use"]["args"]
+    assert merged["computer_use"]["requires"] == {"display": True, "unix_socket": True}
