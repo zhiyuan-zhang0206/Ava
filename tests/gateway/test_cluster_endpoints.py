@@ -23,6 +23,7 @@ from fastapi.testclient import TestClient
 
 import gateway.app as gateway_app
 from gateway import loki_events
+from gateway._cors import cors_allowed_origins
 from gateway.app import app
 from ops import cluster as cluster_mod
 from ops import cluster_deploy, cluster_pause, cluster_status
@@ -149,10 +150,11 @@ class TestPauseMiddleware:
         headers — CORSMiddleware is the OUTERMOST middleware, so a browser
         caller sees the real 503 instead of "Failed to fetch" (#187)."""
         fake_flag.write_text("")
+        allowed_origin = cors_allowed_origins()[0]
         with TestClient(app) as client:
-            r = client.get("/api/agents", headers={"Origin": "http://localhost:3000"})
+            r = client.get("/api/agents", headers={"Origin": allowed_origin})
         assert r.status_code == 503
-        assert r.headers["access-control-allow-origin"] == "http://localhost:3000"
+        assert r.headers["access-control-allow-origin"] == allowed_origin
         assert r.headers["access-control-allow-credentials"] == "true"
 
     def test_cluster_status_bypasses_503(self, fake_flag: Path, set_machine_identity) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
