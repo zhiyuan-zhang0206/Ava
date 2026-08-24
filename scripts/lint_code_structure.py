@@ -142,6 +142,14 @@ _OVERSIZE_ALLOWED = frozenset(
         # fields landed; splitting it would either break `settings.services.*`
         # aggregation or scatter one service's three fields across files.
         "shared/config/services.py",
+        # shared/telemetry_otlp.py — one cohesive OTLP export backend: the
+        # _OtlpBackend exporter class, its _metric_views/_metrics_resource
+        # provider helpers, and the batch/flush/shutdown lifecycle over one
+        # export surface. It crossed 800 in the class-level W/E resolution
+        # wave (#459); splitting the views/providers away from the backend
+        # scatters one exporter surface (debt: a real split is tracked, not
+        # forgotten).
+        "shared/telemetry_otlp.py",
         # agent/db.py — kernel inbound-queue SQL module: inbound CRUD, claim,
         # two-phase reconcile + the stale-claimed dead-letter cutoff (Task
         # #654). One cohesive data-plane surface at the 800-line ceiling; the
