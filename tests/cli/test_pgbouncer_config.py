@@ -45,6 +45,8 @@ def test_render_ini_is_transaction_scram_and_socket_server() -> None:
     # the client's `options` startup parameter — the connect_query SET is the
     # one pooler-side delivery path; see shared.db.PG_STATEMENT_TIMEOUT_SET_SQL).
     assert "connect_query='SET statement_timeout = 60000'" in ini
+    assert "log_connections = 0" in ini.splitlines()
+    assert "log_disconnections = 0" in ini.splitlines()
     # admin/stats console is the cluster role.
     assert "admin_users = ava_main" in ini
 

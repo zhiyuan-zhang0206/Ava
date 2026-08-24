@@ -213,6 +213,8 @@ def _render_ini(
             # listener) for `SHOW POOLS` etc.
             f"admin_users = {role}",
             f"stats_users = {role}",
+            "log_connections = 0",
+            "log_disconnections = 0",
             f"logfile = {_logfile_path()}",
             f"pidfile = {_pidfile_path()}",
             "",
