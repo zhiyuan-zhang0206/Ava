@@ -118,6 +118,9 @@ from shared.cluster.ports import (
 from shared.cluster.ports import (
     record_postgres_port as record_postgres_port,
 )
+from shared.cluster.ports import (
+    record_redis_port as record_redis_port,
+)
 from shared.cluster.provision import (
     _adopt_database as _adopt_database,
 )

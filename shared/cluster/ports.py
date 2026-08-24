@@ -3,7 +3,7 @@
 Allocates a free contiguous block from `shared.port_block` at cluster birth
 (`allocate_ports` — overlap-aware against every registered record's block,
 live-bind-checked), and derives the service ports a record does not carry
-(`record_app_port` / `record_pgbouncer_port` / `record_postgres_port` /
+(`record_app_port` / `record_pgbouncer_port` / `record_postgres_port` / `record_redis_port` /
 `record_health_port`): a saved record's `ports` is never rewritten, so old
 records lack late-added slots and every read derives them deterministically
 — the default home's fixed legacy values, or the cluster's own block base
@@ -148,6 +148,22 @@ def record_postgres_port(rec: cluster.ClusterRecord) -> int:
     if cluster.is_default_home(Path(rec.gateway_home)):
         return cast("int", LEGACY_AVA_PORTS.get("postgres"))
     return rec.ports["gateway"] + PORT_OFFSETS["postgres"]
+
+
+def record_redis_port(rec: cluster.ClusterRecord) -> int:
+    """This cluster's Redis port (defensive derive; every real record carries it).
+
+    Same pattern as ``record_postgres_port``: the default home gets its legacy
+    port, while an allocated cluster derives the Redis offset inside its own
+    block. Healthchecks use this registry fact rather than inferring a port from
+    a URL, which may name a reachable host rather than Redis's loopback listener.
+    """
+    port = cast("int | None", rec.ports.get("redis"))
+    if port is not None:
+        return port
+    if cluster.is_default_home(Path(rec.gateway_home)):
+        return cast("int", LEGACY_AVA_PORTS.get("redis"))
+    return rec.ports["gateway"] + PORT_OFFSETS["redis"]
 
 
 # Health-port slots added after every currently-existing registry record was
