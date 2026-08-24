@@ -74,6 +74,7 @@ def respawn_service(
     checkout: Path | None = None,
     extra_env: dict[str, str] | None = None,
     force: bool = False,
+    graceful_timeout_s: float | None = None,
 ) -> bool:
     """Idempotent restart: kill any stale session + launch through the service backend.
 
@@ -94,6 +95,10 @@ def respawn_service(
         force: launch even while the source tree is mid-switch (the
             watchdog-probe's contract — dumb revival that ignores every gate,
             see `cli/commands/_cluster_watchdog_probe.py`). Default False.
+        graceful_timeout_s: when set, ask the existing session to stop and
+            wait no longer than this many seconds before the backend verifies
+            its SIGKILL fallback. Limited to ten seconds so a watchdog round
+            never spends its whole budget on one stuck daemon.
 
     Returns:
         ``True`` = the backend accepted the launch; ``False`` = the launch
@@ -116,6 +121,8 @@ def respawn_service(
             service,
         )
         return False
+    if graceful_timeout_s is not None and not 0 < graceful_timeout_s <= 10.0:
+        raise ValueError("graceful_timeout_s must be greater than 0 and at most 10 seconds")
     # Raise the fd ceiling before the child is spawned: a respawn can be driven
     # from the launchd watchdog-probe (256-fd ceiling), and the child inherits
     # this process's limit. The old runtime-setup did this alongside pointing
@@ -128,10 +135,19 @@ def respawn_service(
 
     backend = get_backend()
     # Kill any stale session first (the daemon process is dead but the session may
-    # still be there); idempotent. The kill's own confirmation (issue #1015) is
-    # what `ok` means, so a session that outlives it is reported by the probe the
-    # caller runs, not by this launch.
-    backend.kill_session(session, graceful=False)
+    # still be there); idempotent. The collector opts into the backend's bounded
+    # graceful ladder, while every other restart keeps its existing immediate
+    # force-kill behavior. A survivor cannot be relaunched over: a second session
+    # would only disguise the original port holder as a launch failure.
+    if graceful_timeout_s is None:
+        stopped, _mode = backend.kill_session(session, graceful=False)
+    else:
+        stopped, _mode = backend.kill_session(session, graceful=True, timeout=graceful_timeout_s)
+    if not stopped:
+        _log.error(
+            "[service_respawn] %s survived its session stop; refusing a replacement launch", session
+        )
+        return False
     # Forward AVA_* / bootstrap env so the respawned daemon gets this unit's
     # config, not a frozen (possibly other-cluster) server env; merge extra_env
     # (per-process markers like AVA_PROCESS_PROFILE) on top. The backend wraps
@@ -154,6 +170,7 @@ def respawn_and_verify(
     deadline_s: float = _VERIFY_DEADLINE_S,
     interval_s: float = _VERIFY_INTERVAL_S,
     extra_env: dict[str, str] | None = None,
+    graceful_timeout_s: float | None = None,
 ) -> DaemonProbe:
     """Respawn `service`, then poll `verify` until the daemon proves it is up.
 
@@ -179,7 +196,13 @@ def respawn_and_verify(
     burning the full deadline on it is what turned a 60s watchdog round into ~45s
     of doomed work on the 2026-07-29 `win`/WSL box.
     """
-    if not respawn_service(service, cmd, repo, extra_env=extra_env):
+    if not respawn_service(
+        service,
+        cmd,
+        repo,
+        extra_env=extra_env,
+        graceful_timeout_s=graceful_timeout_s,
+    ):
         return DaemonProbe.down(f"session launch for {session_name(service)} failed")
     deadline = time.monotonic() + deadline_s
     probe = verify()

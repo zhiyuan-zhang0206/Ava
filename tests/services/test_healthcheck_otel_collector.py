@@ -80,6 +80,7 @@ def test_restart_invokes_verified_respawn(monkeypatch: pytest.MonkeyPatch) -> No
         assert session == "otel-collector"
         assert "otelcol-contrib" in cmd and "config.yaml" in cmd
         assert kwargs["verify"] is hc.probe_collector
+        assert kwargs["graceful_timeout_s"] == 5.0
         return DaemonProbe.up("collector pid 222")
 
     monkeypatch.setattr(hc, "take_over_stale_collector", lambda: took_over.append(1))
@@ -145,8 +146,9 @@ def test_stale_collector_reclaim_uses_configured_self_metrics_port(
     """Takeover inspects this unit's configured listener, not another unit's default."""
     seen: list[tuple[int, ...]] = []
 
-    def _reclaim(_service: str, *, ports: tuple[int, ...], binary: object) -> None:
+    def _reclaim(_service: str, *, ports: tuple[int, ...], binary: object, grace_s: float) -> None:
         assert binary == hc.otel_collector_binary()
+        assert grace_s == 5.0
         seen.append(ports)
 
     monkeypatch.setattr(hc.settings.observability, "otel_collector_metrics_port", 8889)

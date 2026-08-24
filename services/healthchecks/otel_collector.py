@@ -39,6 +39,7 @@ _ENQUEUE_FAILURE_SAMPLE = re.compile(
     r"^otelcol_exporter_enqueue_failed_[^{]+\{(?P<labels>[^}]*)\}\s+(?P<value>[0-9.eE+-]+)$"
 )
 _LABEL = re.compile(r'(?:^|,)\s*(?P<key>[A-Za-z_][A-Za-z0-9_]*)="(?P<value>[^"]*)"')
+_COLLECTOR_RESPAWN_TIMEOUT_S = 5.0
 
 
 @dataclass(frozen=True)
@@ -91,7 +92,10 @@ def probe_collector() -> DaemonProbe:
 def take_over_stale_collector() -> None:
     """Evict only same-binary collector listeners without a live session record."""
     reclaim_stale_supervised_listener(
-        "otel-collector", ports=_collector_ports(), binary=otel_collector_binary()
+        "otel-collector",
+        ports=_collector_ports(),
+        binary=otel_collector_binary(),
+        grace_s=_COLLECTOR_RESPAWN_TIMEOUT_S,
     )
 
 
@@ -146,6 +150,7 @@ def _restart_daemon() -> DaemonProbe:
         project_root,
         verify=probe_collector,
         extra_env={"AVA_PROCESS_PROFILE": "gateway"},
+        graceful_timeout_s=_COLLECTOR_RESPAWN_TIMEOUT_S,
     )
 
 

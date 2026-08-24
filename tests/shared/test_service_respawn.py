@@ -43,6 +43,7 @@ class _FakeBackend:
     def __init__(self, label: str) -> None:
         self.label = label
         self.killed: list[str] = []
+        self.kill_calls: list[tuple[str, bool, float]] = []
         self.launched: list[tuple[str, str, Path, dict[str, str]]] = []
         self.new_ok = True
 
@@ -50,6 +51,7 @@ class _FakeBackend:
         self, name: str, *, graceful: bool = False, timeout: float = 15.0, expected: bool = False
     ) -> tuple[bool, str]:
         self.killed.append(name)
+        self.kill_calls.append((name, graceful, timeout))
         return True, "forced"
 
     def new_session(
@@ -102,6 +104,21 @@ def test_respawn_kills_stale_session_then_starts(monkeypatch: pytest.MonkeyPatch
     # env = the daemon forward view + extra_env wins
     assert env["AVA_PROCESS_PROFILE"] == "gateway"
     assert env["AVA_HOME"]  # forward_env_dict() carried the unit's config
+
+
+def test_respawn_can_give_a_session_a_bounded_graceful_stop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The collector can request a short SIGTERM window before the backend escalates."""
+    monkeypatch.setattr(_sr_mod, "session_name", lambda svc: f"t-{svc}")  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    service = _FakeBackend("service")
+    monkeypatch.setattr("shared.session_backend.get_backend", lambda: service)
+
+    assert respawn_service(
+        "otel-collector", "otelcol --config config.yaml", Path("/repo"), graceful_timeout_s=5.0
+    )
+
+    assert service.kill_calls == [("t-otel-collector", True, 5.0)]
 
 
 # ── source-switch window (an update is mid-checkout) ───────────────────────
