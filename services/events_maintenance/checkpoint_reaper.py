@@ -32,6 +32,7 @@ a pass that finds nothing logs nothing (same convention as the rollup).
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 
 import psycopg
@@ -48,9 +49,12 @@ _KEEP = 1
 # never by heartbeats, so idling-but-alive agents are not misclassified).
 _INACTIVE_HOURS = 24
 # Rule A: an active thread is trimmed once it holds more than this many
-# checkpoints, collapsed back to the keep count.
+# checkpoints. Keep the latest checkpoint plus one immediate rollback step;
+# compaction boundaries always survive separately. In the production-heavy
+# thread simulation, keep=2 cut blob references by ~65% versus keep=5, while
+# boundary-dominated histories were unchanged.
 _LIVE_TRIM_THRESHOLD = 20
-_LIVE_KEEP = 5
+_LIVE_KEEP = 2
 
 
 @dataclass(frozen=True)
@@ -166,15 +170,35 @@ def _still_overgrown(pool: ConnectionPool, agent_id: int, threshold: int) -> boo
 
 
 _MAX_AGENTS_PER_PASS = 8
-"""Cap on candidate threads trimmed in one pass.
+_STALE_MAX_AGENTS_PER_PASS = 64
+"""Caps on candidate threads trimmed in one pass.
 
-The daemon runs the reaper on its hourly loop; a burst of terminated agents
-(an incident, or the first pass after a long downtime) can present hundreds of
-candidates at once. Trimming them all in one pass is a long busy stretch of
-short transactions — fine for the DB (each trim is its own transaction) but it
-monopolizes the maintenance daemon's single worker thread for minutes. Capping
-the pass spreads the same idempotent work across the following hours; Rule A
-(overgrown active threads) still bounds live agents within one interval."""
+Rule A runs every minute and keeps its work bounded to 8 productive threads.
+Rule B can face an incident backlog on its hourly loop, so its larger cap of 64
+clears that backlog within a few passes without monopolizing the maintenance
+daemon's single worker thread by trimming every candidate at once."""
+
+
+def _rotate_candidates(
+    candidates: list[int],
+    *,
+    max_agents: int = _MAX_AGENTS_PER_PASS,
+    now_seconds: float | None = None,
+) -> list[int]:
+    """Rotate the candidate window by the pass size, restart-safe.
+
+    The offset is wall-clock derived (never a daemon cursor — a process restart
+    cannot park the window at the head of the list), and each pass advances it
+    by `max_agents`, so a candidate list longer than the cap is fully covered
+    within ceil(len/cap) passes instead of re-trimming the head forever
+    (2026-08-24: threads 3340/3341/3343, 774/542/186 checkpoints, were never
+    reached while the id-ascending list was consumed from the front)."""
+    n = len(candidates)
+    if n == 0:
+        return []
+    minute = int(time.time() // 60) if now_seconds is None else int(now_seconds // 60)
+    start = (minute * max_agents) % n
+    return candidates[start:] + candidates[:start]
 
 
 def _reap(
@@ -227,7 +251,14 @@ def reap_stale_checkpoints(pool: ConnectionPool) -> ReapCounts:
     counts = _thread_counts(pool)
     candidates = _stale_agents(pool, counts)
     eligible = [aid for aid in candidates if _still_stale(pool, aid)]
-    return _reap(pool, eligible, _KEEP, "stale")
+    rotated = _rotate_candidates(eligible, max_agents=_STALE_MAX_AGENTS_PER_PASS)
+    return _reap(
+        pool,
+        rotated,
+        _KEEP,
+        "stale",
+        max_agents=_STALE_MAX_AGENTS_PER_PASS,
+    )
 
 
 def trim_overgrown_threads(pool: ConnectionPool) -> ReapCounts:
@@ -244,4 +275,11 @@ def trim_overgrown_threads(pool: ConnectionPool) -> ReapCounts:
         for aid in _overgrown_active(pool, counts)
         if aid not in stale and _still_overgrown(pool, aid, _LIVE_TRIM_THRESHOLD)
     ]
-    return _reap(pool, candidates, _LIVE_KEEP, "overgrown")
+    rotated = _rotate_candidates(candidates, max_agents=_MAX_AGENTS_PER_PASS)
+    return _reap(
+        pool,
+        rotated,
+        _LIVE_KEEP,
+        "overgrown",
+        max_agents=_MAX_AGENTS_PER_PASS,
+    )

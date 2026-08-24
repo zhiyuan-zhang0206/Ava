@@ -21,12 +21,14 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
+from itertools import pairwise
 from typing import Any, cast
 
 import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
+import services.events_maintenance.checkpoint_reaper as reaper
 from services.events_maintenance.checkpoint_reaper import (
     ReapCounts,
     reap_stale_checkpoints,
@@ -165,6 +167,65 @@ def _count(pool: ConnectionPool[Any], table: str, thread: str | None = None) -> 
         return cur.fetchone()[0]
 
 
+def test_rotation_window_advances_per_minute_and_is_idempotent() -> None:
+    """Direct lock on the rotation window (QA #3242, 2026-08-25): with a
+    CONSTANT candidate set (the starvation shape — heavy writers re-grow past
+    the threshold within a pass), head-only consumption would never reach the
+    tail. The window must advance by the pass size every minute and be
+    idempotent within a minute."""
+    candidates = list(range(1, 25))
+    windows = [
+        reaper._rotate_candidates(candidates, max_agents=8, now_seconds=now)
+        for now in (1200.0, 1260.0, 1320.0)
+    ]
+
+    # Same minute -> same window (no state, no drift).
+    assert windows[0] == reaper._rotate_candidates(candidates, max_agents=8, now_seconds=1200.0)
+    # Each window is the full candidate set, exactly once (a rotation).
+    for window in windows:
+        assert len(window) == 24 and set(window) == set(candidates)
+    # Consecutive minutes advance the window start by the pass size (mod n).
+    offsets = [candidates.index(window[0]) for window in windows]
+    assert [(b - a) % 24 for a, b in pairwise(offsets)] == [8, 8]
+    # Coverable within ceil(24/8) consecutive windows.
+    covered: set[int] = set()
+    for window in windows:
+        covered |= set(window)
+    assert covered == set(candidates)
+
+
+def test_rotation_reaches_all_overgrown_threads(
+    pool: ConnectionPool[Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A burst of overgrown active threads is spread over passes by the rotation
+    window: every thread is trimmed within ceil(n/cap) passes, not only the first
+    8 by agent id (2026-08-24 starvation: threads 3340/3341/3343 with 774/542/186
+    checkpoints were never reached while the head of the id-ascending list was
+    trimmed every fast loop)."""
+    from types import SimpleNamespace
+
+    for aid in range(401, 425):  # 24 active, over threshold
+        _agent(pool, aid, "running")
+        _thread(pool, str(aid), 25)
+
+    # Freeze the wall clock at one minute so the rotation window is stable
+    # across the three passes below (each pass trims the next 8 candidates).
+    monkeypatch.setattr(
+        "services.events_maintenance.checkpoint_reaper.time",
+        SimpleNamespace(time=lambda: 20 * 60.0),
+    )
+
+    counts = trim_overgrown_threads(pool)
+    assert counts.agents == 8
+    counts = trim_overgrown_threads(pool)
+    assert counts.agents == 8
+    counts = trim_overgrown_threads(pool)
+    assert counts.agents == 8
+
+    for aid in range(401, 425):
+        assert _count(pool, "checkpoints", str(aid)) == 2  # _LIVE_KEEP
+
+
 def test_reaps_terminated_threads_to_keep_one(pool: ConnectionPool[Any]) -> None:
     _agent(pool, 101, "terminated")
     _thread(pool, "101", 5)
@@ -218,15 +279,15 @@ def test_rule_a_trims_overgrown_active_threads(pool: ConnectionPool[Any]) -> Non
 
     counts = trim_overgrown_threads(pool)
 
-    assert counts == ReapCounts(agents=1, checkpoints=20, writes=20, blobs=0)
-    assert _count(pool, "checkpoints", "251") == 5
+    assert counts == ReapCounts(agents=1, checkpoints=23, writes=23, blobs=0)
+    assert _count(pool, "checkpoints", "251") == 2
 
 
 def test_rule_a_skips_under_threshold_and_stale(pool: ConnectionPool[Any]) -> None:
     _agent(pool, 261, "running")
     _thread(pool, "261", 15)  # under threshold -> not a Rule A candidate
     _agent(pool, 262, "terminated")
-    _thread(pool, "262", 25)  # stale -> Rule B's keep=1, never Rule A's keep=5
+    _thread(pool, "262", 25)  # stale -> Rule B's keep=1, never Rule A's keep=2
 
     counts = trim_overgrown_threads(pool)
 
@@ -252,7 +313,6 @@ def test_keeps_compaction_boundaries(pool: ConnectionPool[Any]) -> None:
 def test_resurrect_race_skips_instead_of_reaping(
     pool: ConnectionPool[Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import services.events_maintenance.checkpoint_reaper as reaper
 
     _agent(pool, 301, "terminated")
     _thread(pool, "301", 5)
@@ -299,7 +359,6 @@ def test_missing_checkpoints_table_is_a_noop(pool: ConnectionPool[Any]) -> None:
     """A DB without the saver's `checkpoints` table (fresh cluster, or a
     throwaway DB carrying only events tables) reads as an empty pass — the
     daemon's full-maintenance tests run the reaper against exactly such a DB."""
-    import services.events_maintenance.checkpoint_reaper as reaper
 
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute("DROP TABLE checkpoints")
@@ -326,14 +385,14 @@ def test_sync_trim_batches_large_thread(pool: ConnectionPool[Any]) -> None:
 def test_reap_caps_agents_per_pass(pool: ConnectionPool[Any]) -> None:
     """A burst of stale candidates is spread over passes, not trimmed all at
     once; the remainder stay candidates for the next pass (idempotent)."""
-    for aid in range(301, 315):  # 14 terminated agents, 4 checkpoints each
+    for aid in range(301, 371):  # 70 terminated agents, 4 checkpoints each
         _agent(pool, aid, "terminated")
         _thread(pool, str(aid), 4)
 
     counts = reap_stale_checkpoints(pool)
 
-    assert counts.agents == 8  # _MAX_AGENTS_PER_PASS
-    assert counts.checkpoints == 8 * 3
+    assert counts.agents == 64  # _STALE_MAX_AGENTS_PER_PASS
+    assert counts.checkpoints == 64 * 3
     # Second pass finishes the rest.
     counts2 = reap_stale_checkpoints(pool)
     assert counts2.agents == 6
