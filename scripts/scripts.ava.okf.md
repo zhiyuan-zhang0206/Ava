@@ -44,6 +44,7 @@ The full linter inventory — what each one enforces and where it runs: [[script
 - `multihost/` (`multihost.py` + `agent_runner_entrypoint.sh`), `preview/` (daily deployment + checkpoint rebuild)
 - `cloud-bench-bootstrap.sh`, `metrics.py`
 - `rotate_cluster_secret.py` — end-to-end `AVA_CLUSTER_SECRET` rotation on the gateway machine (default `--dry-run`), reusing `shared.cluster` ensure primitives (cluster role / redis ACL / pgbouncer)
+- `restore_drill.py` — decrypts a managed database backup, restores it into throwaway Postgres, and verifies schema, checkpoint counts, and a readable conversation without touching the live database
 
 ## Key Dependencies
 

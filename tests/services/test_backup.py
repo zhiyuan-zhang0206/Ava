@@ -8,12 +8,15 @@ to the host's timezone would pass or fail by which machine ran it.
 
 from __future__ import annotations
 
+import hashlib
+import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 from zoneinfo import ZoneInfo
 
 import pytest
+from psycopg.conninfo import conninfo_to_dict
 
 from services import backup
 from shared.config import settings
@@ -117,14 +120,19 @@ def test_dump_name_is_utc_stamped(bdir: Path, monkeypatch: pytest.MonkeyPatch) -
         stderr = ""
 
     def _fake_run(cmd: list[str], **_kw: object) -> _Ok:
-        Path(cmd[cmd.index("--file") + 1]).write_bytes(b"x")
+        if cmd[0].endswith("pg_dump"):
+            Path(cmd[cmd.index("--file") + 1]).write_bytes(b"x")
+        elif cmd[0] == "gzip":
+            cast(Any, _kw["stdout"]).write(b"compressed dump")
+        else:
+            Path(cmd[cmd.index("-out") + 1]).write_bytes(b"encrypted dump")
         return _Ok()
 
     monkeypatch.setattr(backup.subprocess, "run", _fake_run)
     path = backup.run_backup(
         datetime(2026, 6, 10, 3, 0, tzinfo=ZoneInfo("Asia/Shanghai")), db_url="dbname=ava"
     )
-    assert path.name == "ava-20260609T190000Z.dump"
+    assert path.name == "ava-20260609T190000Z.dump.gz.enc"
 
 
 def test_prune_order_survives_the_dst_fold(bdir: Path) -> None:
@@ -214,12 +222,13 @@ def test_run_backup_sweeps_stale_partials(bdir: Path, monkeypatch: pytest.Monkey
 
 
 @pytest.mark.skipif(not backup.pg_tool("pg_dump").exists(), reason="needs a native pg_dump binary")
-def test_run_backup_real_dump_and_prune(bdir: Path) -> None:
+def test_run_backup_real_dump_and_prune(bdir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Real pg_dump against the session's provisioned Postgres: dump lands under
     the managed name, the .partial intermediate is gone, and old dumps prune."""
     for i in range(1, backup.BACKUP_KEEP + 1):
         _touch(bdir, f"test-2026060{i}-030000.dump")
 
+    monkeypatch.setattr(backup, "find_writable_google_drive", lambda: None)
     path = backup.run_backup(_dt(2026, 6, 10, 3, 0))
 
     assert path.parent == bdir
@@ -229,11 +238,22 @@ def test_run_backup_real_dump_and_prune(bdir: Path) -> None:
     # BACKUP_KEEP pre-seeded + 1 new -> the oldest pre-seed pruned, KEEP remain.
     assert len(backup._managed_dumps(bdir)) == backup.BACKUP_KEEP
     assert not (bdir / "test-20260601-030000.dump").exists()
-    # The fresh dump is restorable input: pg_restore can list its TOC.
+    # The fresh dump is restorable input: decrypt, gunzip, then list its TOC.
     import subprocess
 
+    compressed = bdir / "listed.dump.gz"
+    restored = bdir / "listed.dump"
+    cast(Any, backup).decrypt_artifact(path, compressed)
+    with restored.open("wb") as raw_dump:
+        uncompressed = subprocess.run(  # noqa: S603
+            ["gzip", "--decompress", "--stdout", str(compressed)],
+            stdout=raw_dump,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+    assert uncompressed.returncode == 0, uncompressed.stderr.decode()
     listing = subprocess.run(  # noqa: S603
-        [str(backup.pg_tool("pg_restore")), "--list", str(path)],
+        [str(backup.pg_tool("pg_restore")), "--list", str(restored)],
         capture_output=True,
         text=True,
         check=False,
@@ -241,31 +261,166 @@ def test_run_backup_real_dump_and_prune(bdir: Path) -> None:
     assert listing.returncode == 0, listing.stderr
 
 
-def test_run_backup_excludes_checkpoint_tables_and_uses_headroom_timeout(
+def test_run_backup_keeps_checkpoints_and_hides_db_password_from_argv(
     bdir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The daily dump excludes the LangGraph runtime tables (checkpoint_blobs
-    alone outgrew the old 30-min ceiling and dead-looped the backup) and runs
-    under the 60-min headroom timeout. #1035 incident pin."""
-    captured: dict[str, list[str] | int] = {}
+    """The recoverable dump includes checkpoints while its child argv omits the
+    database password. A password exposed in `ps` is a credential leak; an
+    excluded checkpoint table loses the sole copy of conversation history."""
+    captured: dict[str, list[list[str]] | list[dict[str, str]] | int] = {
+        "cmds": [],
+        "envs": [],
+    }
 
     class _Ok:
         returncode = 0
         stderr = ""
 
     def _fake_run(cmd: list[str], **kwargs: object) -> _Ok:
-        captured["cmd"] = cmd
+        cast(list[list[str]], captured["cmds"]).append(cmd)
+        cast(list[dict[str, str]], captured["envs"]).append(
+            cast(dict[str, str], kwargs.get("env", {}))
+        )
         captured["timeout"] = cast(int, kwargs.get("timeout"))
-        # the real pg_dump would write the partial; fake it so the rename lands
-        file_idx = cmd.index("--file") + 1
-        Path(cmd[file_idx]).write_bytes(b"x")
+        if cmd[0].endswith("pg_dump"):
+            # The real pg_dump writes the plaintext partial.
+            Path(cmd[cmd.index("--file") + 1]).write_bytes(b"plaintext dump")
+        elif cmd[0] == "gzip":
+            cast(Any, kwargs["stdout"]).write(b"compressed dump")
+        else:
+            # The encryption command would write its encrypted partial.
+            Path(cmd[cmd.index("-out") + 1]).write_bytes(b"encrypted dump")
         return _Ok()
 
     monkeypatch.setattr(backup.subprocess, "run", _fake_run)
-    backup.run_backup(_dt(2026, 8, 8, 3, 0), db_url="dbname=whatever")
+    password = "backup-password"  # noqa: S105 — test credential
+    path = backup.run_backup(
+        _dt(2026, 8, 8, 3, 0),
+        db_url=f"postgresql://backup:{password}@db.example:5432/whatever",
+    )
 
-    cmd = captured["cmd"]
-    assert isinstance(cmd, list)
-    exclusions = [cmd[i + 1] for i, arg in enumerate(cmd) if arg == "--exclude-table"]
-    assert exclusions == list(backup._EXCLUDE_TABLES)
+    # The final artifact must be encrypted and private rather than the plaintext
+    # custom dump whose contents are readable by every account with filesystem access.
+    assert path.name == "whatever-20260808T100000Z.dump.gz.enc"
+    assert path.stat().st_mode & 0o777 == 0o600
+    assert bdir.stat().st_mode & 0o777 == 0o700
+
+    cmds = cast(list[list[str]], captured["cmds"])
+    pg_dump_cmd = next(cmd for cmd in cmds if cmd[0].endswith("pg_dump"))
+    assert "--exclude-table" not in pg_dump_cmd
+    dbname = pg_dump_cmd[pg_dump_cmd.index("--dbname") + 1]
+    assert password not in " ".join(pg_dump_cmd)
+    assert conninfo_to_dict(dbname) == {
+        "dbname": "whatever",
+        "host": "db.example",
+        "port": "5432",
+        "user": "backup",
+    }
+    envs = cast(list[dict[str, str]], captured["envs"])
+    assert envs[cmds.index(pg_dump_cmd)]["PGPASSWORD"] == password
+
+    gzip_cmd = next(cmd for cmd in cmds if cmd[0] == "gzip")
+    assert gzip_cmd[-2:] == ["--stdout", str(bdir / "whatever-20260808T100000Z.dump.partial")]
+    openssl_cmd = next(cmd for cmd in cmds if cmd[0].endswith("openssl"))
+    assert {"enc", "-aes-256-cbc", "-pbkdf2", "-salt", "-kfile"}.issubset(openssl_cmd)
     assert captured["timeout"] == backup._DUMP_TIMEOUT_S
+
+
+def test_encrypted_artifact_decrypts_and_gunzips_to_original_dump(
+    bdir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The published artifact reverses exactly to pg_dump's custom-format bytes.
+
+    This fails if the key-file derivation, compression order, cipher invocation,
+    or artifact name changes incompatibly with the restore procedure.
+    """
+    original_dump = b"custom-format-pg-dump\x00contents"
+    real_run = subprocess.run
+
+    class _Ok:
+        returncode = 0
+        stderr = ""
+
+    def _fake_pg_dump(cmd: list[str], **kwargs: object) -> _Ok | subprocess.CompletedProcess[bytes]:
+        if cmd[0].endswith("pg_dump"):
+            Path(cmd[cmd.index("--file") + 1]).write_bytes(original_dump)
+            return _Ok()
+        return real_run(cmd, **kwargs)  # type: ignore[arg-type, return-value]
+
+    monkeypatch.setattr(backup.subprocess, "run", _fake_pg_dump)
+    monkeypatch.setattr(backup, "find_writable_google_drive", lambda: None, raising=False)
+    artifact = backup.run_backup(_dt(2026, 8, 8, 3, 0), db_url="dbname=whatever")
+
+    assert artifact.name.endswith(".dump.gz.enc")
+    key_file = bdir / "decrypt.key"
+    key_file.write_text(
+        hashlib.sha256(settings.data_plane.cluster_secret.encode()).hexdigest(), encoding="utf-8"
+    )
+    key_file.chmod(0o600)
+    compressed_dump = bdir / "restored.dump.gz"
+    decrypted = real_run(
+        [
+            "openssl",
+            "enc",
+            "-d",
+            "-aes-256-cbc",
+            "-pbkdf2",
+            "-salt",
+            "-kfile",
+            str(key_file),
+            "-in",
+            str(artifact),
+            "-out",
+            str(compressed_dump),
+        ],
+        capture_output=True,
+        check=False,
+    )
+    assert decrypted.returncode == 0, decrypted.stderr.decode()
+    uncompressed = real_run(
+        ["gzip", "--decompress", "--stdout", str(compressed_dump)],
+        capture_output=True,
+        check=False,
+    )
+    assert uncompressed.returncode == 0, uncompressed.stderr.decode()
+    assert uncompressed.stdout == original_dump
+
+
+def test_offsite_copy_prunes_old_managed_artifacts(
+    bdir: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A Drive copy receives only the encrypted artifact and keeps the same
+    retention window as local storage, so off-site history does not grow forever."""
+    drive = tmp_path / "drive"
+    drive.mkdir()
+    monkeypatch.setattr(backup, "find_writable_google_drive", lambda: drive)
+    remote = cast(Path | None, cast(Any, backup)._offsite_directory())
+    assert remote is not None
+    old_names = [f"ava-202606{i:02d}-030000.dump" for i in range(1, backup.BACKUP_KEEP + 1)]
+    for name in old_names:
+        _touch(remote, name)
+
+    artifact = _touch(bdir, "ava-20260608T100000Z.dump.gz.enc")
+    artifact.write_bytes(b"encrypted artifact")
+    cast(Any, backup)._copy_offsite(artifact)
+
+    assert (remote / artifact.name).read_bytes() == b"encrypted artifact"
+    assert not (remote / old_names[0]).exists()
+    assert len(backup._managed_dumps(remote)) == backup.BACKUP_KEEP
+
+
+def test_offsite_directory_failure_keeps_local_artifact(
+    bdir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Drive is optional: a folder-creation failure cannot turn a successful
+    local backup into a failed backup or remove its only local artifact."""
+    artifact = _touch(bdir, "ava-20260608T100000Z.dump.gz.enc")
+    artifact.write_bytes(b"encrypted artifact")
+
+    def _drive_unavailable() -> Path | None:
+        raise OSError("Drive folder is unavailable")
+
+    monkeypatch.setattr(backup, "_offsite_directory", _drive_unavailable, raising=False)
+    cast(Any, backup)._copy_offsite(artifact)
+
+    assert artifact.read_bytes() == b"encrypted artifact"
