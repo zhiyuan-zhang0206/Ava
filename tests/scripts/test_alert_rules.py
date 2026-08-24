@@ -53,6 +53,8 @@ _EXPECTED_UIDS = {
     "ava-ops-gateway-latency-route-warning",
     "ava-ops-gateway-latency-route-error",
     "ava-ops-turn-duration-p95",
+    "ava-ops-gateway-latency-route-slow-warning",
+    "ava-ops-gateway-latency-route-slow-error",
     # infrastructure layer (issue #46) — the sidecar's own scrapes
     "ava-ops-host-cpu-saturated",
     "ava-ops-host-memory-pressure",
@@ -86,7 +88,7 @@ def _load_groups() -> list[dict[str, Any]]:
     assert [group["name"] for group in groups] == ["ava-ops", "ava-ops-slow"]
     assert [group["folder"] for group in groups] == ["Ava", "Ava"]
     assert [group["interval"] for group in groups] == ["1m", "5m"]
-    assert [len(group["rules"]) for group in groups] == [15, 5]
+    assert [len(group["rules"]) for group in groups] == [15, 7]
     return groups
 
 
@@ -119,11 +121,19 @@ def test_rules_have_expected_uids() -> None:
     assert {r["uid"] for r in rules} == _EXPECTED_UIDS
 
 
-def test_low_cost_chronic_rules_use_the_slow_group() -> None:
+def test_low_cost_rules_use_the_slow_group() -> None:
     groups = _load_groups()
     group_for_rule = {rule["uid"]: group["name"] for group in groups for rule in group["rules"]}
-    assert group_for_rule["ava-ops-trace-disk-watermark"] == "ava-ops-slow"
-    assert group_for_rule["ava-ops-llm-billing-quota"] == "ava-ops-slow"
+    for uid in (
+        "ava-ops-trace-disk-watermark",
+        "ava-ops-llm-billing-quota",
+        "ava-ops-gateway-latency-route-warning",
+        "ava-ops-gateway-latency-route-error",
+        "ava-ops-turn-duration-p95",
+        "ava-ops-gateway-latency-route-slow-warning",
+        "ava-ops-gateway-latency-route-slow-error",
+    ):
+        assert group_for_rule[uid] == "ava-ops-slow"
 
 
 def test_rules_never_query_postgres() -> None:
@@ -432,40 +442,44 @@ def test_every_rule_is_silent_on_no_data_and_datasource_error() -> None:
         assert rule["execErrState"] == "OK", rule["uid"]
 
 
-def test_gateway_latency_rules_scope_to_fast_routes() -> None:
-    """R17's two tiers (3s warning / 10s error) alert on UI-facing quick
-    reads only: the emitter classifies LLM-bound and slow-by-design routes,
-    so the query is insulated from route-list drift. Both tiers share the
-    selector, differ only in threshold."""
+@pytest.mark.parametrize(
+    ("uid", "route_class", "threshold", "metric"),
+    [
+        ("ava-ops-gateway-latency-route-warning", "fast", 3000, "gateway_latency_route_p95"),
+        ("ava-ops-gateway-latency-route-error", "fast", 10000, "gateway_latency_route_p95"),
+        (
+            "ava-ops-gateway-latency-route-slow-warning",
+            "slow",
+            5000,
+            "gateway_latency_route_slow_p95",
+        ),
+        (
+            "ava-ops-gateway-latency-route-slow-error",
+            "slow",
+            10000,
+            "gateway_latency_route_slow_p95",
+        ),
+    ],
+)
+def test_gateway_latency_rules_scope_to_route_class(
+    uid: str, route_class: str, threshold: int, metric: str
+) -> None:
+    """R17 and R19 keep fast/slow routes in separately calibrated tiers."""
     rules = {r["uid"]: r for r in _load_rules()}
-    for uid in ("ava-ops-gateway-latency-route-warning", "ava-ops-gateway-latency-route-error"):
-        rule = rules[uid]
-        expr = _exprs(rule, "loki")[0]
-        assert 'event_name="gateway_latency"' in expr
-        assert '| attributes_route_class="fast"' in expr
-        assert "attributes_route !~" not in expr
-        assert "unwrap attributes_p95_ms" in expr
-        assert "max by (attributes_route)" in expr
-        assert rule["for"] == "5m"
-        assert rule["labels"]["notify_im"] == "false"
-    assert _threshold_params(rules["ava-ops-gateway-latency-route-warning"]) == [[3000]]
-    assert _threshold_params(rules["ava-ops-gateway-latency-route-error"]) == [[10000]]
-
-
-def test_gateway_latency_rules_keep_the_route_label() -> None:
-    """The reduce node must fan out by labels (not collapse to a single
-    series), or the alert instance loses attributes_route and the summary
-    names no route."""
-    for rule in _load_rules():
-        if rule["uid"] not in (
-            "ava-ops-gateway-latency-route-warning",
-            "ava-ops-gateway-latency-route-error",
-        ):
-            continue
-        reduce_nodes = [d for d in rule["data"] if d["model"].get("type") == "reduce"]
-        assert reduce_nodes, rule["uid"]
-        assert reduce_nodes[0]["model"].get("mode") == "byLabels"
-        assert "attributes_route" in reduce_nodes[0]["model"].get("includeLabels", [])
+    rule = rules[uid]
+    expr = _exprs(rule, "loki")[0]
+    assert 'event_name="gateway_latency"' in expr
+    assert f'| attributes_route_class="{route_class}"' in expr
+    assert "attributes_route !~" not in expr
+    assert "unwrap attributes_p95_ms" in expr
+    assert "max by (attributes_route)" in expr
+    assert rule["for"] == "5m"
+    assert rule["labels"]["notify_im"] == "false"
+    assert rule["labels"]["metric"] == metric
+    assert _threshold_params(rule) == [[threshold]]
+    reduce_node = next(d for d in rule["data"] if d["model"].get("type") == "reduce")
+    assert reduce_node["model"].get("mode") == "byLabels"
+    assert "attributes_route" in reduce_node["model"].get("includeLabels", [])
 
 
 def test_turn_duration_rule_uses_prometheus_histogram() -> None:

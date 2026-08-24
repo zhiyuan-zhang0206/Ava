@@ -2,13 +2,13 @@
 
 Grafana Alerting rules for the Ava event system, provisioned as code. Since
 the LGTM cutover (Task #1224) they evaluate against the **LGTM read side**:
-R1-R3, R5-R7 and R13 query **Loki** (every event is one OTLP log line under
-`{service_name="unknown_service"}`, body = the full event JSON, so `| json`
-flattens each line to labels), while R4 and the gateway-metrics silence rule
-query **Prometheus** (the `ava_llm_usage_latency_milliseconds` histogram and
-the `ava_gateway_latency_count_total` heartbeat). The retired Postgres events
-read path (#1197) is gone — nothing queries the `ops` datasource from these
-rules.
+R1-R3, R5-R7, R13, R17, and R19 query **Loki** (every event is one OTLP log
+line under `{service_name="unknown_service"}`, body = the full event JSON, so
+`| json` flattens each line to labels), while R4 and the gateway-metrics
+silence rule query **Prometheus** (the `ava_llm_usage_latency_milliseconds`
+histogram, `ava_gateway_latency_count_total` heartbeat, and R18 turn-duration
+histogram). The retired Postgres events read path (#1197) is gone — nothing
+queries the `ops` datasource from these rules.
 
 Datasources are provisioned beside this file (`datasources.yml`, uids
 `loki` / `prometheus`; the `ops` Postgres datasource stays for the ava-ops
@@ -32,12 +32,13 @@ source checkout's `deploy/lgtm/config/grafana/provisioning/alerting`
 directory. The contact point posts to `127.0.0.1:8000`, reaching the gateway
 on the same host loopback.
 
-## Rules (20)
+## Rules (22)
 
 The rules are split between `ava-ops` (15 rules, evaluated every minute:
 R1-R6, the gateway-metrics silence rule, R8-R12, and R14-R16) and
-`ava-ops-slow` (five rules, evaluated every five minutes: R7, R13, R17's two
-route tiers, and R18). Their existing `for` windows remain unchanged.
+`ava-ops-slow` (seven rules, evaluated every five minutes: R7, R13, R17's two
+fast-route tiers, R18, and R19's two slow-route tiers). Each rule retains its
+own `for` window.
 
 Application layer — the Loki event stream plus the LLM latency histogram:
 
@@ -55,6 +56,8 @@ Application layer — the Loki event stream plus the LLM latency histogram:
 | `ava-ops-gateway-latency-route-warning` | `ava-ops-slow` | Gateway latency: fast route p95 | p95 > 3s for 5m (Loki, LLM-bound + inherently-slow routes excluded) | 5m | warning |
 | `ava-ops-gateway-latency-route-error` | `ava-ops-slow` | Gateway latency: fast route p95 | p95 > 10s for 5m (same route filter) | 5m | error |
 | `ava-ops-turn-duration-p95` | `ava-ops-slow` | Turn duration p95 (collective slowdown) | histogram p95 > 75s for 10m (Prometheus, 24h baseline 37.6s × 2) | 10m | warning |
+| `ava-ops-gateway-latency-route-slow-warning` | `ava-ops-slow` | Gateway latency: slow route p95 | p95 > 5s for 5m (Loki, slow route class) | 5m | warning |
+| `ava-ops-gateway-latency-route-slow-error` | `ava-ops-slow` | Gateway latency: slow route p95 | p95 > 10s for 5m (same route class) | 5m | error |
 
 Infrastructure layer (issue #46) — the per-machine OTel Collector sidecar's
 own scrapes, labelled `host` (OS hostname / physical identity) and
@@ -89,15 +92,15 @@ window. The silence query's 5-minute absence window is already its
 debounce, hence no second `for` delay. Its 24-hour historical machine set expires
 retired machines naturally; the fleet heartbeat owns permanent membership.
 
-The three slow-request rules (R17/R18, 2026-08-23, task #1399) close the
-user-visible-latency gap: fast-route p95 thresholds calibrated against 7d
-route data (the emitter's single route-classification source is
-`gateway/_latency.py`), and the turn-duration rule catches fleet-wide slowdown
-(p95 vs the 24h baseline ×2) rather than single long turns. All three carry
-`notify_im: "false"` — the PM slow-request convention is warning-first and
-no IM fan-out (alert-fatigue ruling 2026-08-22); the gateway honors the
-label once the IM gating PR (#3219) lands, until then they reach IM like
-the rest.
+The five slow-request rules (R17-R19) close the user-visible-latency gap:
+R17's fast-route thresholds are calibrated against seven days of route data,
+R19 gives slow-by-design routes separate 5s/10s thresholds calibrated against
+24 hours of route data, and R18 catches fleet-wide slowdown (p95 vs the 24h
+baseline ×2) rather than single long turns. The emitter's single
+route-classification source is `gateway/_latency.py`. All five carry
+`notify_im: "false"` — the PM slow-request convention is warning-first and no
+IM fan-out (alert-fatigue ruling 2026-08-22); the gateway honors the label once
+the IM gating PR (#3219) lands, until then they reach IM like the rest.
 
 Severity follows the alert-system vocabulary (Task #1224):
 critical/warning/error — all three push to IM, no gate. Thresholds are

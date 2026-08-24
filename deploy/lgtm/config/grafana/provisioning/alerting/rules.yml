@@ -1240,9 +1240,9 @@ groups:
                   query:
                     params: [C]
 
-  # Low-cost tier (R7, R13, R17's two rules, R18) at 5m evaluation. R7 is a
-  # chronic 24h condition, R13 counts any rejection in 15m, and R17's
-  # gateway-latency query is the single most expensive rule query
+  # Low-cost tier (R7, R13, R17's two rules, R18, R19's two rules) at 5m
+  # evaluation. R7 is a chronic 24h condition, R13 counts any rejection in
+  # 15m, and the route gateway-latency queries are the most expensive rules
   # (fleet-graph degradation wave, 2026-08-23, #3224). Their `for` windows
   # remain unchanged, so semantics hold at 1/5 the evaluation cost.
   - orgId: 1
@@ -1655,6 +1655,151 @@ groups:
                 - evaluator:
                     type: gt
                     params: [75]
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+
+      # ── R19: Gateway latency by route — slow routes only. Slow routes are
+      #        expected to take longer, so their calibrated warning/error
+      #        thresholds are 5s/10s. Warning-first: no IM push
+      #        (Insights-visible only). ──
+      - uid: ava-ops-gateway-latency-route-slow-warning
+        title: "Gateway latency: slow route p95 above 5000ms"
+        condition: D
+        for: 5m
+        noDataState: OK
+        execErrState: OK
+        labels:
+          severity: warning
+          ruleUID: ava-ops-gateway-latency-route-slow-warning
+          metric: gateway_latency_route_slow_p95
+          team: ava-ops
+          notify_im: "false"
+        annotations:
+          summary: "Slow route {{ $labels.attributes_route }} p95 at {{ $values.C }} ms (threshold 5000 ms)"
+          description: >-
+            The slow route's gateway_latency bucket p95 stayed above 5000ms
+            for 5 minutes. Slow-by-design routes are evaluated separately
+            from UI-facing quick reads.
+        data:
+          - refId: A
+            datasourceUid: loki
+            queryType: ""
+            model:
+              refId: A
+              datasource:
+                type: loki
+                uid: loki
+              editorMode: code
+              expr: >-
+                max by (attributes_route) (max_over_time({service_name="unknown_service"}
+                | json | cluster=".ava" | category=~"telemetry|log" | event_name="gateway_latency"
+                | attributes_route_class="slow"
+                | unwrap attributes_p95_ms [5m]))
+              instant: true
+              range: false
+            relativeTimeRange:
+              from: 300
+              to: 0
+          - refId: C
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: C
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: reduce
+              expression: A
+              reducer: max
+              mode: byLabels
+              includeLabels:
+                - attributes_route
+          - refId: D
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: D
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: threshold
+              expression: C
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [5000]
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+
+      - uid: ava-ops-gateway-latency-route-slow-error
+        title: "Gateway latency: slow route p95 above 10000ms"
+        condition: D
+        for: 5m
+        noDataState: OK
+        execErrState: OK
+        labels:
+          severity: error
+          ruleUID: ava-ops-gateway-latency-route-slow-error
+          metric: gateway_latency_route_slow_p95
+          team: ava-ops
+          notify_im: "false"
+        annotations:
+          summary: "Slow route {{ $labels.attributes_route }} p95 at {{ $values.C }} ms (threshold 10000 ms)"
+          description: >-
+            The slow route's gateway_latency bucket p95 stayed above 10000ms
+            for 5 minutes — a slow-by-design route has degraded severely.
+        data:
+          - refId: A
+            datasourceUid: loki
+            queryType: ""
+            model:
+              refId: A
+              datasource:
+                type: loki
+                uid: loki
+              editorMode: code
+              expr: >-
+                max by (attributes_route) (max_over_time({service_name="unknown_service"}
+                | json | cluster=".ava" | category=~"telemetry|log" | event_name="gateway_latency"
+                | attributes_route_class="slow"
+                | unwrap attributes_p95_ms [5m]))
+              instant: true
+              range: false
+            relativeTimeRange:
+              from: 300
+              to: 0
+          - refId: C
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: C
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: reduce
+              expression: A
+              reducer: max
+              mode: byLabels
+              includeLabels:
+                - attributes_route
+          - refId: D
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: D
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: threshold
+              expression: C
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [10000]
                   operator:
                     type: and
                   query:
