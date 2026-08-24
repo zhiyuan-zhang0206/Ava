@@ -480,8 +480,7 @@
       "ops": "Ops",
       "language": "Language",
       "status-services": "Services",
-      "status-resources": "Resources",
-      "status-gateway-daemons": "Gateway daemons",
+      "status-gateway": "Gateway",
       "ops-metrics": "Metrics (Grafana)",
       "alerts": "Alerts"
     },
