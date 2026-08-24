@@ -11,6 +11,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+from gateway.error_envelope import error_response
 from shared.cluster_auth import (
     clear_cookie_header,
     cookie_name,
@@ -42,7 +43,7 @@ async def login(body: LoginRequest, request: Request) -> JSONResponse:
     On success, returns ``{"ok": true}`` and sets an HTTP-only session
     cookie valid for 7 days.
 
-    On failure, returns 401 ``{"detail": "invalid password"}``.
+    On failure, returns a typed 401 error envelope with detail ``"invalid password"``.
 
     A no-secret cluster (single-box no-auth posture) has no credential: login
     is a no-op 200 success, deliberately BEFORE the rate limiter — there is
@@ -63,12 +64,13 @@ async def login(body: LoginRequest, request: Request) -> JSONResponse:
 
     remaining = login_limiter.lockout_remaining(ip)
     if remaining > 0:
-        return JSONResponse(
-            status_code=429,
-            content={
-                "detail": "too many failed login attempts",
-                "retry_after_seconds": remaining,
-            },
+        return error_response(
+            request,
+            code="login_rate_limited",
+            status=429,
+            detail="too many failed login attempts",
+            retryable=True,
+            extensions={"retry_after_seconds": remaining},
             headers={"Retry-After": str(remaining)},
         )
 
@@ -76,9 +78,12 @@ async def login(body: LoginRequest, request: Request) -> JSONResponse:
 
     if not password:
         login_limiter.record_failure(ip)
-        return JSONResponse(
-            status_code=401,
-            content={"detail": "invalid password"},
+        return error_response(
+            request,
+            code="invalid_password",
+            status=401,
+            detail="invalid password",
+            retryable=False,
         )
 
     # Constant-time comparison to avoid timing attacks
@@ -86,9 +91,12 @@ async def login(body: LoginRequest, request: Request) -> JSONResponse:
 
     if not hmac.compare_digest(password, secret):
         login_limiter.record_failure(ip)
-        return JSONResponse(
-            status_code=401,
-            content={"detail": "invalid password"},
+        return error_response(
+            request,
+            code="invalid_password",
+            status=401,
+            detail="invalid password",
+            retryable=False,
         )
 
     login_limiter.record_success(ip)

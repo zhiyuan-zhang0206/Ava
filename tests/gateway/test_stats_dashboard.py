@@ -220,7 +220,10 @@ def test_observability_read_unavailable_is_clean_503(
         response = client.get("/api/stats/dashboard")
 
     assert response.status_code == 503
-    assert response.json() == {"detail": message}
+    body = response.json()
+    assert body["code"] == "observability_read_unavailable"
+    assert body["detail"] == message
+    assert body["retryable"] is True
 
 
 def test_dashboard_shards_long_loki_windows_and_merges_aggregates(

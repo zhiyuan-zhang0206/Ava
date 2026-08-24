@@ -181,9 +181,9 @@ class TestPriority:
         with TestClient(app) as client:
             resp = client.patch(f"/api/tasks/{tid}", json={"priority": "P9"})
         # Rejected by pydantic (the body types priority as the shared Priority
-        # enum), so the 422 detail is the structured validation error list.
+        # enum), so the 422 envelope carries its structured list in `errors`.
         assert resp.status_code == 422
-        assert "P9" in str(resp.json()["detail"])
+        assert "P9" in str(resp.json()["errors"])
         assert _priority(db_conn, tid) == "P2"  # unchanged
 
 

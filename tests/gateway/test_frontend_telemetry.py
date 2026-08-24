@@ -160,6 +160,7 @@ class TestFrontendTelemetryIngest:
             for body in cases:  # pyright: ignore[reportUnknownVariableType]
                 r = client.post("/api/frontend-telemetry", json=body)
                 assert r.status_code == 422, body
+                assert r.json()["code"] == "invalid_telemetry_batch"
         # nothing landed
         assert _rows(session) == []  # pyright: ignore[reportUnknownVariableType]
 
@@ -172,6 +173,7 @@ class TestFrontendTelemetryIngest:
                 headers={"content-type": "application/json"},
             )
         assert r.status_code == 413
+        assert r.json()["code"] == "telemetry_batch_too_large"
         assert _rows(session) == []  # pyright: ignore[reportUnknownVariableType]
 
     def test_rate_limit_backstop_drops_excess(
