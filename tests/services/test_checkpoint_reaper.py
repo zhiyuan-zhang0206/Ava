@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
+from itertools import pairwise
 from typing import Any, cast
 
 import psycopg
@@ -164,6 +165,33 @@ def _count(pool: ConnectionPool[Any], table: str, thread: str | None = None) -> 
                 (thread,),
             )
         return cur.fetchone()[0]
+
+
+def test_rotation_window_advances_per_minute_and_is_idempotent() -> None:
+    """Direct lock on the rotation window (QA #3242, 2026-08-25): with a
+    CONSTANT candidate set (the starvation shape — heavy writers re-grow past
+    the threshold within a pass), head-only consumption would never reach the
+    tail. The window must advance by the pass size every minute and be
+    idempotent within a minute."""
+    candidates = list(range(1, 25))
+    windows = [
+        reaper._rotate_candidates(candidates, max_agents=8, now_seconds=now)
+        for now in (1200.0, 1260.0, 1320.0)
+    ]
+
+    # Same minute -> same window (no state, no drift).
+    assert windows[0] == reaper._rotate_candidates(candidates, max_agents=8, now_seconds=1200.0)
+    # Each window is the full candidate set, exactly once (a rotation).
+    for window in windows:
+        assert len(window) == 24 and set(window) == set(candidates)
+    # Consecutive minutes advance the window start by the pass size (mod n).
+    offsets = [candidates.index(window[0]) for window in windows]
+    assert [(b - a) % 24 for a, b in pairwise(offsets)] == [8, 8]
+    # Coverable within ceil(24/8) consecutive windows.
+    covered: set[int] = set()
+    for window in windows:
+        covered |= set(window)
+    assert covered == set(candidates)
 
 
 def test_rotation_reaches_all_overgrown_threads(
