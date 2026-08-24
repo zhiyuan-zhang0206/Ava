@@ -103,6 +103,25 @@ def test_rollback_orders_stop_local_pin_fanout_then_notify(
     ]
 
 
+def test_rollback_force_reaps_runners_when_agents_do_not_quiesce(
+    _seams: tuple[list[str], list[dict[str, object]]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A quiesce timeout must force-reap stragglers during runner rollback."""
+    _order, phase_b_calls = _seams
+
+    def _stop_the_world(
+        _runners: list[tuple[str, str | None]], *, mode: str = "smooth"
+    ) -> tuple[set[str], bool]:
+        assert mode == "smooth"
+        return {"runner-a"}, False
+
+    monkeypatch.setattr(_rb, "_stop_the_world", _stop_the_world)
+
+    assert _rb.cmd_rollback(require_confirmation=False) == 0
+
+    assert phase_b_calls[0]["force_reap"] is True
+
+
 def test_rollback_writes_target_pin_after_a_successful_local_leg(
     _seams: tuple[list[str], list[dict[str, object]]],
 ) -> None:

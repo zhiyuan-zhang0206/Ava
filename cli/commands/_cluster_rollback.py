@@ -348,7 +348,11 @@ def _clear_pending_after_rollback() -> None:
 
 
 def _fanout_runner_rollback(
-    target_sha: str, agent_runners: list[tuple[str, str | None]], *, keep_pin: bool
+    target_sha: str,
+    agent_runners: list[tuple[str, str | None]],
+    *,
+    keep_pin: bool,
+    force_reap: bool,
 ) -> tuple[list[str], list[tuple[str, str | None]]]:
     """Write the rollback pin, then converge remote runners without a second drain."""
     if keep_pin:
@@ -366,7 +370,7 @@ def _fanout_runner_rollback(
         fanout_targets,
         target_sha=target_sha,
         restart_only=False,
-        force_reap=False,
+        force_reap=force_reap,
         mode="none",
     )
     mid_transition = _still_converging(polls)
@@ -543,7 +547,7 @@ def cmd_rollback(
     # every early return must compensate across the original target list.
     hosts_to_resume: list[tuple[str, str | None]] = list(agent_runners)
     try:
-        paused_names, _all_quiesced = _stop_the_world(agent_runners, mode="smooth")
+        paused_names, all_quiesced = _stop_the_world(agent_runners, mode="smooth")
         if paused_names is None:
             return 1
         rc = _run_rollback(target_sha, repo=repo, from_sha=from_sha)
@@ -551,7 +555,10 @@ def cmd_rollback(
             return rc
         _clear_pending_after_rollback()
         mid_transition, hosts_to_resume = _fanout_runner_rollback(
-            target_sha, agent_runners, keep_pin=keep_pin
+            target_sha,
+            agent_runners,
+            keep_pin=keep_pin,
+            force_reap=not all_quiesced,
         )
         return _record_completed_rollback(
             from_sha,
