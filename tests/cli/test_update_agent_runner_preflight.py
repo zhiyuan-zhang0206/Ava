@@ -243,7 +243,13 @@ class TestModuleEntry:
         )
         assert ar.main(["--target-sha", "abc1234", "--mode", "none", "--force-reap"]) == 0
         assert calls == [
-            {"target_sha": "abc1234", "restart_only": False, "mode": "none", "force_reap": True}
+            {
+                "target_sha": "abc1234",
+                "restart_only": False,
+                "mode": "none",
+                "force_reap": True,
+                "handoff_generation": None,
+            }
         ]
 
     def test_restart_only_and_defaults(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -255,7 +261,13 @@ class TestModuleEntry:
         )
         assert ar.main(["--restart-only"]) == 7
         assert calls == [
-            {"target_sha": None, "restart_only": True, "mode": "smooth", "force_reap": False}
+            {
+                "target_sha": None,
+                "restart_only": True,
+                "mode": "smooth",
+                "force_reap": False,
+                "handoff_generation": None,
+            }
         ]
 
     def test_rejects_unknown_mode(self, monkeypatch: pytest.MonkeyPatch) -> None:
