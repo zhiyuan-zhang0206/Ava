@@ -38,8 +38,8 @@ def client() -> Iterator[TestClient]:
 
 def test_percentiles_nearest_rank() -> None:
     samples = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]
-    p50, p95, p100 = _latency.percentiles(samples, 50.0, 95.0, 100.0)
-    assert (p50, p95, p100) == (5.0, 10.0, 10.0)
+    p50, p95, p99, p100 = _latency.percentiles(samples, 50.0, 95.0, 99.0, 100.0)
+    assert (p50, p95, p99, p100) == (5.0, 10.0, 10.0, 10.0)
 
 
 def test_percentiles_single_sample() -> None:
@@ -106,9 +106,24 @@ def test_emit_bucket_computes_stats(monkeypatch: pytest.MonkeyPatch) -> None:
         "route_class": "fast",
         "p50_ms": 20.0,
         "p95_ms": 30.0,
+        "p99_ms": 30.0,
         "max_ms": 30.0,
         "count": 3,
     }
+
+
+def test_emit_bucket_distinguishes_tail_percentiles(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_emit(_category: str, _event_name: str, **kwargs: Any) -> None:
+        captured.update(kwargs["attributes"])
+
+    monkeypatch.setattr(_latency.telemetry, "emit", fake_emit)
+    _latency.emit_bucket("/api/health", [float(i) for i in range(1, 101)])
+
+    assert captured["p95_ms"] == 95.0
+    assert captured["p99_ms"] == 99.0
+    assert captured["max_ms"] == 100.0
 
 
 @pytest.mark.parametrize(

@@ -29,9 +29,9 @@ row header. All sections are **expanded by default** (`collapsed: false`,
    events-maintenance daemon's fixed-six-hour Prometheus gauges.
 2. **`LLM`** — throughput tokens/s, the three TPS series, calls/bucket,
    cost USD, LLM errors, and per-agent Top 20.
-3. **`Gateway & execution`** — gateway latency p50/p95/max + by route,
-   turn duration, exec outcomes, syntax-fix triggers, halt classes, SDK
-   Top 20, frontend interactions ×3, settings changes.
+3. **`Gateway & execution`** — gateway latency p50/p95/p99/max + p95/p99 and
+   sample count by route, turn duration, exec outcomes, syntax-fix triggers,
+   halt classes, SDK Top 20, frontend interactions ×3, settings changes.
 4. **`Fleet`** — windowed agent spawns by source, windowed lifecycle totals,
    delivery-stalled total, and SSE backlog.
 5. **`Plugin quality`** — the ava_code / ava_fleet / ava_memory panels
@@ -47,7 +47,7 @@ row header. All sections are **expanded by default** (`collapsed: false`,
 The dashboard timezone is `Asia/Shanghai` (2026-08-23 #384). All panels follow
 the dashboard time picker; there are no per-panel `timeFrom` overrides.
 
-The dashboard now has 75 panels: core ids remain below 1000 (the four new
+The dashboard now has 76 panels: core ids remain below 1000 (the four new
 stat tiles are 44–47), plugin ids are >= 1000, host/data-plane panels are
 2101–2112, the cost-analysis panels are 38, 39, 41–43, and the event panels
 are 2201–2203 (business/anomaly logs, event-type table, raw stream). The
