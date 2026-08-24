@@ -17,6 +17,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import Response
 
 from gateway import loki_events, loki_query_budget, prom_metrics
+from gateway._cors import cors_allowed_origins
 from gateway.app import (
     _ava_agent_error_handler,
     _cluster_auth_middleware,
@@ -157,7 +158,8 @@ def test_global_handlers_emit_typed_envelopes(
     extensions: set[str],
 ) -> None:
     """Every handler keeps its status while exposing one typed response shape."""
-    response = handler_client.get(path, headers={"Origin": "https://ui.example.test"})
+    origin = cors_allowed_origins()[0]
+    response = handler_client.get(path, headers={"Origin": origin})
     _assert_envelope(
         response,
         status=status,
@@ -171,7 +173,7 @@ def test_global_handlers_emit_typed_envelopes(
     if path == "/validation?count=not-an-int":
         assert isinstance(response.json()["errors"], list)
     if path == "/exception":
-        assert response.headers["access-control-allow-origin"] == "https://ui.example.test"
+        assert response.headers["access-control-allow-origin"] == origin
 
 
 def test_active_otel_trace_id_wins_over_request_fallback(
