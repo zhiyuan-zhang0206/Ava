@@ -239,12 +239,16 @@ def test_daemon_maintenance_runs_table_retention(
     def _fake_rollup(_conn: object, **_kwargs: object) -> SimpleNamespace:
         return SimpleNamespace(start_day=None)
 
+    def _fake_replay(_conn: object, **_kwargs: object) -> SimpleNamespace:
+        return SimpleNamespace(days_replayed=[], days_failed=[], metrics_rows=0, tokens_rows=0)
+
     def _fake_partitions(_conn: object, **_kwargs: object) -> list[str]:
         return []
 
     monkeypatch.setattr(daemon, "apply_table_retention", _fake_table_retention)
     monkeypatch.setattr(daemon, "apply_retention", _fake_retention)
     monkeypatch.setattr(daemon, "compute_rollup", _fake_rollup)
+    monkeypatch.setattr(daemon, "replay_gap_days", _fake_replay)
     monkeypatch.setattr(daemon, "ensure_month_partitions", _fake_partitions)
     try:
         with pool:

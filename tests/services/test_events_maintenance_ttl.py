@@ -408,11 +408,15 @@ def test_daemon_maintenance_includes_retention(
     def _fake_rollup(_conn: object, **_kwargs: object) -> SimpleNamespace:
         return SimpleNamespace(start_day=None)
 
+    def _fake_replay(_conn: object, **_kwargs: object) -> SimpleNamespace:
+        return SimpleNamespace(days_replayed=[], days_failed=[], metrics_rows=0, tokens_rows=0)
+
     def _fake_table_retention(_conn: object, **_kwargs: object) -> SimpleNamespace:
         return SimpleNamespace(deleted=())
 
     monkeypatch.setattr(daemon, "apply_retention", _fake_retention)
     monkeypatch.setattr(daemon, "compute_rollup", _fake_rollup)
+    monkeypatch.setattr(daemon, "replay_gap_days", _fake_replay)
     monkeypatch.setattr(daemon, "apply_table_retention", _fake_table_retention)
     try:
         with pool:
