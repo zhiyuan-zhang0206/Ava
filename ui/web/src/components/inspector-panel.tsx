@@ -415,11 +415,7 @@ function WindowedSectionsError({ onRetry }: { onRetry: () => void }) {
 
 function PageSection({ pages }: { pages: PageRow[] }) {
   return (
-    <Section
-      icon={<LayoutPanelTop className="size-3" />}
-      title="Page"
-      badge={pages.length > 0 ? "Open" : "None"}
-    >
+    <Section icon={<LayoutPanelTop className="size-3" />} title="Page">
       {pages.length === 0 ? (
         <p className="font-mono text-[11px] text-muted-foreground/70">No open page</p>
       ) : (
