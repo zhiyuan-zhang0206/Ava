@@ -14,19 +14,6 @@ investigate) from "Actions is scheduled but has not attached a check yet"
 seconds after a push both look like a rollup carrying no workflow checks, and
 that window is exactly when a poll right after pushing lands.
 
-Usage as library:
-    from ci_utils import check_ci, CIStatus
-
-    status = check_ci("502")  # repo defaults to the checkout's own remote
-    if status.verdict == CIStatus.MERGE_CONFLICT:
-        print(f"PR has merge conflicts — rebase first!")
-    elif status.verdict == CIStatus.FAILED:
-        print(f"CI failed: {status.failed}")
-    elif status.verdict == CIStatus.ALL_PASSED:
-        print("All checks passed!")
-    elif status.verdict == CIStatus.PENDING:
-        print(f"Still waiting: {status.pending}")
-
 Usage as CLI:
     .venv/bin/python scripts/ci_utils.py <PR_NUMBER> [--repo owner/repo] [--json]
     .venv/bin/python scripts/ci_utils.py <PR_NUMBER> --wait [--timeout N] [--merge]
@@ -34,13 +21,15 @@ Usage as CLI:
     Default: query once and exit (PENDING prints and exits 0 — a one-shot
     probe, not a poller). `--wait`: poll until the verdict settles, then exit
     with the monitor contract — 0 green, 1 not green (or timed out), 3
-    persistent gh/network errors, 4 enqueue failed. `--merge` implies `--wait`
+    persistent gh/network errors, 4 enqueue failed or was rejected twice.
+    `--merge` implies `--wait`
     and enqueues the PR once green (Mergify merge queue — posts `@mergifyio
     queue` on the PR, or `@mergifyio requeue` if the Mergify check shows the PR
-    was previously queued and dequeued, e.g. by a force-push; Mergify rebases
-    onto latest main, re-runs CI on the rebased head, and rebase-merges it
-    once .mergify.yml merge_conditions are green), then waits for the queue to
-    finish merging. The all-green predicate excludes checks named "Mergify
+    was previously queued and dequeued, e.g. by a force-push). It waits at
+    least five minutes after a head update before queueing, and detects a
+    dropped/rejected command with one automatic retry. Mergify then rebases
+    onto latest main, re-runs CI, and rebase-merges once its conditions are
+    green. The all-green predicate excludes checks named "Mergify
     Merge Queue" — that check reports queue state, not a CI result, and sits
     pending forever after a dequeue, which used to deadlock this wait (issue
     #98). This is the canonical CI watcher: launch it with
@@ -56,7 +45,9 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass, field
+from datetime import datetime
 from enum import Enum
+from math import ceil
 from pathlib import Path
 
 # Allow `python scripts/ci_utils.py` (sys.path[0] = scripts/) to find the
@@ -77,14 +68,7 @@ class CIStatus(Enum):
 
     @property
     def is_terminal(self) -> bool:
-        """True for a settled verdict a watcher must act on.
-
-        PENDING is the only transitional state; every other verdict — green,
-        failed, conflicted, did-not-run, errored — is final and should end a
-        watch loop. Watchers compare `verdict.is_terminal` instead of
-        hard-coding string values, so a mistyped verdict can never silently
-        spin forever (the 2026-08-03 incident: a watcher waiting on
-        "success"/"failure" strings that do not exist)."""
+        """True for every settled verdict; PENDING alone is transitional."""
         return self is not CIStatus.PENDING
 
 
@@ -105,11 +89,7 @@ FAILING = frozenset(
 CONFLICTING = frozenset({"CONFLICTING"})
 
 # ---- --wait (poller) defaults ----
-# The canonical repo: derived from the checkout's origin remote when run
-# inside a git checkout (forks get their own owner/repo for free), falling
-# back to a hard-coded default for contexts without a git remote (watcher
-# processes run from the agent workspace, which is not a checkout).
-# Overridable with --repo.
+# Derived from origin when possible; overridable with --repo.
 _FALLBACK_REPO = "zhiyuan-zhang0206/Ava"
 
 
@@ -134,6 +114,86 @@ def _derive_repo() -> str:
 DEFAULT_REPO = _derive_repo()
 POLL_INTERVAL = 30  # seconds between polls
 MAX_CONSECUTIVE_ERRORS = 3
+QUEUE_COOLDOWN_SECONDS = 300
+RETRY_BACKOFF_SECONDS = 300
+_MERGIFY_BOT_LOGINS = frozenset({"mergify", "mergify[bot]"})
+
+
+def _parse_ts(iso: str | None) -> float | None:
+    """Parse a GitHub RFC3339 timestamp, returning None for bad probes."""
+    try:
+        return datetime.fromisoformat(iso.strip().strip('"')).timestamp() if iso else None
+    except (AttributeError, TypeError, ValueError):
+        return None
+
+
+def _last_head_update(pr: str, repo: str) -> float | None:
+    """Best-effort newest force-push event or head-commit committer date."""
+    probes = (
+        (
+            f"repos/{repo}/issues/{pr}/timeline",
+            "--paginate",
+            '[.[] | select(.event == "head_ref_force_pushed")] | .[-1].created_at',
+        ),
+        (f"repos/{repo}/pulls/{pr}/commits", "", ".[-1].commit.committer.date"),
+    )
+    timestamps: list[float] = []
+    for endpoint, paginate, jq in probes:
+        r = subprocess.run(  # noqa: S603
+            ["gh", "api", endpoint, *((paginate,) if paginate else ()), "--jq", jq],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        parsed = _parse_ts(r.stdout) if r.returncode == 0 else None
+        if parsed is not None:
+            timestamps.append(parsed)
+    return max(timestamps, default=None)
+
+
+def _queue_cooldown_seconds(pr: str, repo: str) -> int:
+    last = _last_head_update(pr, repo)
+    return 0 if last is None else max(0, ceil(QUEUE_COOLDOWN_SECONDS - (time.time() - last)))
+
+
+def _bot_rejection_reason(data: dict, since_ts: float) -> str | None:
+    """Return the newest rejection unless an in-window confirmation proves success.
+
+    A "the merge queue status continues" confirmation wins: the PR is in the
+    queue, so a later rejection can be a force-push dequeue or another agent's
+    command hitting the lock. Retrying feeds the storm; state watch lands or times out."""
+    comments = data.get("comments", []) if isinstance(data, dict) else []
+    if not isinstance(comments, list):
+        return None
+    markers = (
+        "removed from the queue",
+        "manually updated",
+        "already running from a previous command",
+        "cannot be queued",
+    )
+    rejection = None
+    for comment in reversed(comments):
+        if not isinstance(comment, dict):
+            continue
+        author = comment.get("author") or {}
+        created = _parse_ts(comment.get("createdAt"))
+        if (
+            not isinstance(author, dict)
+            or author.get("login") not in _MERGIFY_BOT_LOGINS
+            or created is None
+            or created < since_ts
+        ):
+            continue
+        body = str(comment.get("body") or "").lower()
+        if "the merge queue status continues" in body:
+            return None
+        if body.startswith("<!---\ndo not edit\n-*- mergify payload -*-"):
+            continue
+        if rejection is None and "queue-control:queue" in body:
+            rejection = "checkbox (command not executed)"
+        elif rejection is None and ("> queue" in body or "> requeue" in body):
+            rejection = next((m for m in markers if m in body), None)
+    return rejection
 
 
 @dataclass
@@ -474,17 +534,15 @@ def _query_once(pr: str, repo: str, *, as_json: bool) -> int:
     )
 
 
-def _deadline_hit(deadline: float | None, pr: str, timeout: int) -> bool:
+def _deadline_hit(
+    deadline: float | None, pr: str, timeout: int, what: str = "CI still pending"
+) -> bool:
     """True once `deadline` passes — the --timeout bound for --wait use (which
     has no watchdog). Prints the reason so the completion notice carries it."""
     if deadline is None:
         return False
     if time.monotonic() >= deadline:
-        print(
-            f"PR #{pr} CI still pending after {timeout}s — timed out.",
-            file=sys.stderr,
-            flush=True,
-        )
+        print(f"PR #{pr} {what} after {timeout}s — timed out.", file=sys.stderr, flush=True)
         return True
     return False
 
@@ -492,18 +550,8 @@ def _deadline_hit(deadline: float | None, pr: str, timeout: int) -> bool:
 def _enqueue_pr(pr: str, repo: str, command: str = "@mergifyio queue") -> int:
     """--merge: enqueue the PR once CI is green.
 
-    Mergify drives this repo's merge queue (GitHub's own queue does not
-    support personal private repos). Enqueuing = posting `command` (`@mergifyio
-    queue` for a PR entering fresh, `@mergifyio requeue` for one that was
-    dequeued — see `_queue_command`, issue #98) as a PR comment; Mergify then
-    rebases the PR onto latest main, re-runs CI on the rebased head via the
-    ordinary pull_request event, and lands it with a rebase merge (linear
-    history) once its merge_conditions (see .mergify.yml) are green —
-    replacing the old manual rebase-and-repoll loop. The remote branch is NOT
-    deleted automatically; clean up with `git push origin --delete <branch>`.
-
-    The gh call carries --repo explicitly (same reason as check_ci — no cwd
-    dependency)."""
+    Enqueuing posts `command` as a PR comment. The gh call carries --repo
+    explicitly so it never depends on the current directory."""
     r = subprocess.run(  # noqa: S603
         ["gh", "pr", "comment", pr, "--repo", repo, "--body", command],
         capture_output=True,
@@ -517,53 +565,94 @@ def _enqueue_pr(pr: str, repo: str, command: str = "@mergifyio queue") -> int:
     return 0
 
 
-def _wait_for_merge(pr: str, repo: str, every: int, timeout: int) -> int:
-    """After enqueue: poll until the merge queue lands the PR.
-
-    state=MERGED is the success signal. CLOSED without merging means something
-    cancelled it. Anything else is the queue still working (rebase + CI +
-    merge can take 10-30 min in a busy queue) — bounded by `timeout` like the
-    rest of --wait, so a wedged queue is reported instead of polled forever.
-    """
-    deadline = time.monotonic() + timeout if timeout else None
+def _watch_enqueue(
+    pr: str, repo: str, command_time: float, every: int, deadline: float | None, timeout: int
+) -> tuple[int, bool]:
+    """Watch PR state and post-command Mergify replies in one poll."""
     while True:
         r = subprocess.run(  # noqa: S603
-            ["gh", "pr", "view", pr, "--repo", repo, "--json", "state"],
+            ["gh", "pr", "view", pr, "--repo", repo, "--json", "state,comments"],
             capture_output=True,
             text=True,
             check=False,
         )
         if r.returncode != 0:
-            print(
-                f"[ci] merge-watch poll error: {r.stderr.strip()}",
-                file=sys.stderr,
-                flush=True,
-            )
-            return 3
+            print(f"[ci] merge-watch poll error: {r.stderr.strip()}", file=sys.stderr, flush=True)
+            return 3, False
         try:
             data = json.loads(r.stdout)
         except json.JSONDecodeError:
             print(
-                f"[ci] merge-watch poll JSON error: {r.stdout[:200]}",
+                f"[ci] merge-watch poll JSON error: {r.stdout[:200]}", file=sys.stderr, flush=True
+            )
+            return 3, False
+        if not isinstance(data, dict):
+            print(
+                f"[ci] merge-watch poll JSON error: {r.stdout[:200]}", file=sys.stderr, flush=True
+            )
+            return 3, False
+        state = data.get("state")
+        if state == "MERGED":
+            print(f"PR #{pr} merged by the merge queue")
+            return 0, False
+        if state == "CLOSED":
+            print(f"PR #{pr} CLOSED without merging — investigate", file=sys.stderr, flush=True)
+            return 1, False
+        if reason := _bot_rejection_reason(data, command_time):
+            print(
+                f"PR #{pr} queue command rejected by Mergify: {reason}", file=sys.stderr, flush=True
+            )
+            return 0, True
+        if _deadline_hit(deadline, pr, timeout, "still in the merge queue"):
+            return 1, False
+        time.sleep(every)
+
+
+def _merge_flow(pr: str, repo: str, every: int, timeout: int) -> int:
+    """Cooldown, re-check CI, enqueue, and retry one rejected command."""
+    deadline = time.monotonic() + timeout if timeout else None
+    retried = False
+    while True:
+        while (remaining := _queue_cooldown_seconds(pr, repo)) > 0:
+            if _deadline_hit(deadline, pr, timeout, "queue cooldown not finished"):
+                return 1
+            print(
+                f"PR #{pr} head updated {remaining}s ago — queue cooldown, waiting",
+                file=sys.stderr,
+                flush=True,
+            )
+            time.sleep(min(remaining, every))
+
+        result = check_ci(pr, repo=repo)
+        if result.verdict is CIStatus.ERROR:
+            print(
+                f"PR #{pr} CI error before queueing: {result.error_detail}",
                 file=sys.stderr,
                 flush=True,
             )
             return 3
-        state = data.get("state")
-        if state == "MERGED":
-            print(f"PR #{pr} merged by the merge queue")
-            return 0
-        if state == "CLOSED":
-            print(f"PR #{pr} CLOSED without merging — investigate", file=sys.stderr, flush=True)
+        if result.verdict is not CIStatus.ALL_PASSED:
+            print(f"PR #{pr} CI no longer green: {result.summary()}", file=sys.stderr, flush=True)
             return 1
-        if _deadline_hit(deadline, pr, timeout):
+
+        command = _queue_command(repo, result.head_sha)
+        rc = _enqueue_pr(pr, repo, command)
+        if rc != 0:
+            return rc
+        command_time = time.time()
+        rc, rejected = _watch_enqueue(pr, repo, command_time, every, deadline, timeout)
+        if not rejected:
+            return rc
+        if retried:
             print(
-                f"PR #{pr} still in the queue after {timeout}s — check it manually",
+                "queue command rejected twice by Mergify — not enqueued",
                 file=sys.stderr,
                 flush=True,
             )
-            return 1
-        time.sleep(every)
+            return 4
+        print(f"retrying queue command in {RETRY_BACKOFF_SECONDS}s", file=sys.stderr, flush=True)
+        time.sleep(RETRY_BACKOFF_SECONDS)
+        retried = True
 
 
 def _wait_for_verdict(pr: str, repo: str, every: int, timeout: int, *, merge: bool) -> int:
@@ -628,11 +717,7 @@ def _wait_for_verdict(pr: str, repo: str, every: int, timeout: int, *, merge: bo
         if verdict is CIStatus.ALL_PASSED:
             print(f"PR #{pr} CI green: {result.summary()}")
             if merge:
-                command = _queue_command(repo, result.head_sha)
-                rc = _enqueue_pr(pr, repo, command)
-                if rc != 0:
-                    return rc
-                return _wait_for_merge(pr, repo, every, timeout)
+                return _merge_flow(pr, repo, every, timeout)
             return 0
 
         print(f"PR #{pr} CI NOT green: {result.summary()}", file=sys.stderr, flush=True)
@@ -647,7 +732,7 @@ def _wait_for_verdict(pr: str, repo: str, every: int, timeout: int, *, merge: bo
 def main(argv: list[str] | None = None) -> int:
     """CLI entry. Default: one-shot query (legacy behavior). `--wait`: poll
     until the verdict settles with the monitor exit-code contract; `--merge`
-    implies `--wait` and squash-merges once green."""
+    implies `--wait` and enqueues once green."""
     import argparse
 
     p = argparse.ArgumentParser(description="Check CI status of a GitHub PR")
@@ -679,7 +764,8 @@ def main(argv: list[str] | None = None) -> int:
         "--merge",
         action="store_true",
         help="with --wait: enqueue the PR once CI is green and wait for the "
-        "merge queue to land it (implies --wait; default timeout 1800s)",
+        "merge queue to land it, with head-update cooldown and one rejection "
+        "retry (implies --wait; default timeout 1800s)",
     )
     p.add_argument(
         "--rerun-failed-jobs",
