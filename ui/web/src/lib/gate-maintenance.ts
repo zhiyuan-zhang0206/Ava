@@ -17,10 +17,10 @@ export function reloadThroughGate(
   reload();
 }
 
-export type GateMaintenanceState = {
+export interface GateMaintenanceState {
   status: "inactive" | "updating" | "invalid";
   generation: string | null;
-};
+}
 
 export async function getGateMaintenanceState(): Promise<GateMaintenanceState> {
   const response = await fetch("/__ava/deploy-state", { cache: "no-store" });
