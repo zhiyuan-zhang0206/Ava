@@ -196,6 +196,9 @@ def _instrument_maintenance_slices(
         "rollup": _CallRecorder(
             SimpleNamespace(start_day=None, end_day=None, metrics_rows=0, tokens_rows=0)
         ),
+        "replay": _CallRecorder(
+            SimpleNamespace(days_replayed=[], days_failed=[], metrics_rows=0, tokens_rows=0)
+        ),
         "reindex": _CallRecorder(empty),
         "reap": _CallRecorder(SimpleNamespace(agents=0, checkpoints=0, writes=0, blobs=0)),
         "vacuum": _CallRecorder(SimpleNamespace(ran=False, summary=lambda: "")),
@@ -204,6 +207,7 @@ def _instrument_maintenance_slices(
     monkeypatch.setattr(daemon, "apply_retention", rec["retention"])
     monkeypatch.setattr(daemon, "apply_table_retention", rec["table_retention"])
     monkeypatch.setattr(daemon, "compute_rollup", rec["rollup"])
+    monkeypatch.setattr(daemon, "replay_gap_days", rec["replay"])
     monkeypatch.setattr(daemon, "run_governance_pass", rec["reindex"])
     monkeypatch.setattr(daemon, "reap_stale_checkpoints", rec["reap"])
     monkeypatch.setattr(daemon, "run_blob_vacuum", rec["vacuum"])
@@ -239,6 +243,7 @@ def test_maintenance_pass_reaps_when_events_disabled(monkeypatch: pytest.MonkeyP
 
     assert rec["rollup"].calls == 1
     assert set(rec["rollup"].kwargs[0]) == {"now_utc"}
+    assert rec["replay"].calls == 1
     assert rec["reap"].calls == 1
     assert rec["vacuum"].calls == 1
     assert beats == 3
@@ -268,7 +273,7 @@ def test_maintenance_pass_runs_events_slices_when_enabled(
 
     daemon._run_maintenance(cast(ConnectionPool, _FakePool()), progress)  # every slice faked
 
-    for name in (*_EVENTS_SLICES, "rollup", "reap", "vacuum"):
+    for name in (*_EVENTS_SLICES, "rollup", "replay", "reap", "vacuum"):
         assert rec[name].calls == 1, name
     assert beats == 7
     assert progress.snapshot()["last_success_at"] is not None

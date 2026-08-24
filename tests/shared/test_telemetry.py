@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import json
 import socket
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -27,6 +27,7 @@ from opentelemetry import trace as otel_trace
 from opentelemetry.trace import NonRecordingSpan, SpanContext
 
 from shared import observability, telemetry
+from shared.config import settings
 
 _AGENT = 8901
 
@@ -205,6 +206,68 @@ def test_jsonl_mirror_holds_every_event() -> None:
     assert path.exists(), f"mirror file missing: {path}"
     lines = path.read_text(encoding="utf-8").splitlines()
     assert any('"event_name":"fork"' in line and '"category":"audit"' in line for line in lines)
+
+
+def test_jsonl_rollup_mirror_holds_only_rollup_source_events(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(telemetry, "logs_dir", lambda: tmp_path)
+    now = datetime.now(UTC)
+    event_names = ["llm_usage", "turn_end", "exec", "exec_failed", "exec(timeout)", "fork"]
+    events = [
+        telemetry.Event(
+            ts=now,
+            trace_id=None,
+            span_id=None,
+            agent_id=_AGENT,
+            machine="test-machine",
+            cluster="test-cluster",
+            process="test-proc",
+            category="telemetry" if event_name != "fork" else "audit",
+            event_name=event_name,
+            level="info",
+            source="system",
+            target_agent_id=None,
+        )
+        for event_name in event_names
+    ]
+
+    telemetry._append_jsonl(events)
+
+    day = now.strftime("%Y%m%d")
+    full_rows = [
+        json.loads(line) for line in (tmp_path / f"events-{day}.jsonl").read_text().splitlines()
+    ]
+    rollup_rows = [
+        json.loads(line)
+        for line in (tmp_path / f"events-{day}.rollup.jsonl").read_text().splitlines()
+    ]
+    assert [row["event_name"] for row in full_rows] == event_names
+    assert [row["event_name"] for row in rollup_rows] == event_names[:-1]
+
+
+def test_jsonl_mirror_prunes_full_and_rollup_retention_independently(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(telemetry, "logs_dir", lambda: tmp_path)
+    monkeypatch.setattr(telemetry, "_JSONL_RETENTION_DAYS", 2)
+    monkeypatch.setattr(settings.daemon, "events_jsonl_rollup_retention_days", 4)
+    today = datetime.now(UTC)
+    full_old = tmp_path / f"events-{today - timedelta(days=3):%Y%m%d}.jsonl"
+    full_kept = tmp_path / f"events-{today - timedelta(days=2):%Y%m%d}.jsonl"
+    rollup_old = tmp_path / f"events-{today - timedelta(days=5):%Y%m%d}.rollup.jsonl"
+    rollup_kept = tmp_path / f"events-{today - timedelta(days=4):%Y%m%d}.rollup.jsonl"
+    malformed = tmp_path / "events-0000000x.jsonl"
+    for path in (full_old, full_kept, rollup_old, rollup_kept, malformed):
+        path.write_text("{}\n", encoding="utf-8")
+
+    telemetry._prune_jsonl_mirror()
+
+    assert not full_old.exists()
+    assert full_kept.exists()
+    assert not rollup_old.exists()
+    assert rollup_kept.exists()
+    assert malformed.exists()
 
 
 def test_jsonl_mirror_ids_are_stable_and_match_the_id_free_body() -> None:

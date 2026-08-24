@@ -74,6 +74,7 @@ from services.events_maintenance.checkpoint_reaper import (
     reap_stale_checkpoints,
     trim_overgrown_threads,
 )
+from services.events_maintenance.jsonl_replay import replay_gap_days
 from services.events_maintenance.partitions import ensure_month_partitions
 from services.events_maintenance.reindex import run_governance_pass
 from services.events_maintenance.resolution import run_resolution_slice
@@ -181,6 +182,7 @@ def _run_maintenance(pool: ConnectionPool, progress: LoopProgress) -> None:
             _log.info("[events-maintenance] index governance: %s", reindex_result.summary())
     with pool.connection() as conn:
         result = compute_rollup(conn, now_utc=now)
+        replay_result = replay_gap_days(conn, now_utc=now)
     progress.beat()
     if result.start_day is not None:
         _log.info(
@@ -189,6 +191,15 @@ def _run_maintenance(pool: ConnectionPool, progress: LoopProgress) -> None:
             result.end_day,
             result.metrics_rows,
             result.tokens_rows,
+        )
+    if replay_result.days_replayed or replay_result.days_failed:
+        _log.info(
+            "[events-maintenance] JSONL replay — replayed=%s failed=%s, "
+            "%d metric rows, %d token rows",
+            replay_result.days_replayed,
+            replay_result.days_failed,
+            replay_result.metrics_rows,
+            replay_result.tokens_rows,
         )
     reaped = reap_stale_checkpoints(pool)
     progress.beat()
