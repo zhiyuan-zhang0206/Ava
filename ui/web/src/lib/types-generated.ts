@@ -943,10 +943,11 @@ export interface paths {
          *     projected next check-in when idle (or the active pause / running suppression)
          *     plus its most recent pause from history.
          *
-         *     The retained live lifecycle leg is the exceptional potentially broad
-         *     query until the legacy slice expires on 2026-08-30 19:00 UTC. It has an
-         *     8-second Loki timeout and a per-agent five-minute single-flight cache, so
-         *     changing `hours` or `since_compact` does not repeat that same scan.
+         *     The retained live lifecycle leg begins at the index-label cutover and never
+         *     scans the legacy slice. It has an 8-second Loki timeout and a per-agent
+         *     thirty-minute single-flight cache, so changing `hours` or `since_compact`
+         *     does not repeat that indexed read. Agents whose lifecycle history is wholly
+         *     pre-cutover use the `spawned_at` fallback described by `_alive_seconds`.
          */
         get: operations["get_agent_inspect_api_agents__agent_id__inspect_get"];
         put?: never;
@@ -2752,6 +2753,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/event-resolutions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Event Resolutions
+         * @description List active dismissals or reopened history for the ops review cycle.
+         */
+        get: operations["list_event_resolutions_api_event_resolutions_get"];
+        put?: never;
+        /**
+         * Create Event Resolution
+         * @description Dismiss one event class and emit its immutable transition marker.
+         *
+         *     Gateway auth establishes that this is an operator action but does not carry
+         *     an agent identity, so `dismissed_by=0` is the documented user/operator
+         *     sentinel. The ops agent uses the same authenticated API surface.
+         */
+        post: operations["create_event_resolution_api_event_resolutions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/event-resolutions/{dismissal_id}/reopen": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reopen Event Resolution
+         * @description Manually reopen one active dismissal and emit its transition marker.
+         */
+        post: operations["reopen_event_resolution_api_event_resolutions__dismissal_id__reopen_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/ops/monitor": {
         parameters: {
             query?: never;
@@ -4447,6 +4496,93 @@ export interface components {
             owner_label: string | null;
             /** Reminder Count */
             reminder_count: number;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * EventResolutionCreate
+         * @description One immutable event class to dismiss through the authenticated API.
+         */
+        EventResolutionCreate: {
+            /**
+             * Category
+             * @enum {string}
+             */
+            category: "telemetry" | "log";
+            /**
+             * Level
+             * @enum {string}
+             */
+            level: "warning" | "error" | "critical";
+            /** Event Name */
+            event_name: string;
+            /** Source */
+            source: string;
+            /** Agent Id */
+            agent_id?: number | null;
+            /**
+             * Note
+             * @default
+             */
+            note: string;
+        };
+        /**
+         * EventResolutionListResponse
+         * @description Status-filtered resolution history for the ops agent's review cycle.
+         */
+        EventResolutionListResponse: {
+            /** Resolutions */
+            resolutions: components["schemas"]["EventResolutionRow"][];
+        };
+        /**
+         * EventResolutionRow
+         * @description One persisted class dismissal, including reopened history metadata.
+         */
+        EventResolutionRow: {
+            /** Id */
+            id: number;
+            /**
+             * Category
+             * @enum {string}
+             */
+            category: "telemetry" | "log";
+            /**
+             * Level
+             * @enum {string}
+             */
+            level: "warning" | "error" | "critical";
+            /** Event Name */
+            event_name: string;
+            /** Source */
+            source: string;
+            /** Agent Id */
+            agent_id: number | null;
+            /** Dismissed By */
+            dismissed_by: number;
+            /** Note */
+            note: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "dismissed" | "reopened";
+            /**
+             * Dismissed At
+             * Format: date-time
+             */
+            dismissed_at: string;
+            /** Reopened At */
+            reopened_at: string | null;
+            /** Burst Count */
+            burst_count: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
             /**
              * Updated At
              * Format: date-time
@@ -10079,6 +10215,101 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EventsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_event_resolutions_api_event_resolutions_get: {
+        parameters: {
+            query?: {
+                status?: ("dismissed" | "reopened") | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EventResolutionListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_event_resolution_api_event_resolutions_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EventResolutionCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EventResolutionRow"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reopen_event_resolution_api_event_resolutions__dismissal_id__reopen_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                dismissal_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EventResolutionRow"];
                 };
             };
             /** @description Validation Error */

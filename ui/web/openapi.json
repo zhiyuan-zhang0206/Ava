@@ -1339,7 +1339,7 @@
     "/api/agents/{agent_id}/inspect": {
       "get": {
         "summary": "Get Agent Inspect",
-        "description": "Per-agent inspector panel data in one shot — the agent's live persistent\nshells, its frozen config overlay, its LLM cost, turn/exec stats, idle\nheartbeat state. The\nsingle-agent counterpart to `/api/stats/dashboard` (fleet-wide).\n\n`?hours=` windows `cost` + `stats` to the selected range (0 = last 5m;\n1/6/24/72/168 = hours, anything else 422s); omitted = cumulative since\nspawn.\n`?since_compact=true` windows them to events since the agent's latest\ncompact halt instead — it takes precedence, `hours` is ignored and the\nechoed `window_hours` is None.\n`shells` + `config_overlay` + `heartbeat` are always\ncurrent, independent of the window. 404 if the agent is unknown (no\nagents_meta row). `config_overlay` is the spawn-time override map — `{}` when\nthe agent runs on cluster defaults (the column is NULL).\n\nLatency discipline: the event-history sections run on parallel workers\n(one Loki fan-out per section, overlapped), and only those aggregates ride\na 75s TTL cache keyed by (agent_id, hours, since_compact), with concurrent\nmisses sharing one single-flight Future — the panel refetches in bursts\n(open, notice SSE events, 60s interval), and a burst must not re-run the\n~20-query fan-out per request. The agents_meta projection (machine,\nconfig, heartbeat inputs, liveness and timestamps), `notice`, and `shells`\nare fetched fresh on every call and never ride the cache. `shells` is probed\non the agent's own machine via the `shell_probe` cluster op (the gateway\nnever runs sessions itself; every machine — its own included — is dialed at its\nregistered ops URL), so a split deployment reflects each agent's runner and\nan unreachable machine degrades to an empty list rather than failing the\npanel. `heartbeat` is the agent's idle check-in state: the\nprojected next check-in when idle (or the active pause / running suppression)\nplus its most recent pause from history.\n\nThe retained live lifecycle leg is the exceptional potentially broad\nquery until the legacy slice expires on 2026-08-30 19:00 UTC. It has an\n8-second Loki timeout and a per-agent five-minute single-flight cache, so\nchanging `hours` or `since_compact` does not repeat that same scan.",
+        "description": "Per-agent inspector panel data in one shot — the agent's live persistent\nshells, its frozen config overlay, its LLM cost, turn/exec stats, idle\nheartbeat state. The\nsingle-agent counterpart to `/api/stats/dashboard` (fleet-wide).\n\n`?hours=` windows `cost` + `stats` to the selected range (0 = last 5m;\n1/6/24/72/168 = hours, anything else 422s); omitted = cumulative since\nspawn.\n`?since_compact=true` windows them to events since the agent's latest\ncompact halt instead — it takes precedence, `hours` is ignored and the\nechoed `window_hours` is None.\n`shells` + `config_overlay` + `heartbeat` are always\ncurrent, independent of the window. 404 if the agent is unknown (no\nagents_meta row). `config_overlay` is the spawn-time override map — `{}` when\nthe agent runs on cluster defaults (the column is NULL).\n\nLatency discipline: the event-history sections run on parallel workers\n(one Loki fan-out per section, overlapped), and only those aggregates ride\na 75s TTL cache keyed by (agent_id, hours, since_compact), with concurrent\nmisses sharing one single-flight Future — the panel refetches in bursts\n(open, notice SSE events, 60s interval), and a burst must not re-run the\n~20-query fan-out per request. The agents_meta projection (machine,\nconfig, heartbeat inputs, liveness and timestamps), `notice`, and `shells`\nare fetched fresh on every call and never ride the cache. `shells` is probed\non the agent's own machine via the `shell_probe` cluster op (the gateway\nnever runs sessions itself; every machine — its own included — is dialed at its\nregistered ops URL), so a split deployment reflects each agent's runner and\nan unreachable machine degrades to an empty list rather than failing the\npanel. `heartbeat` is the agent's idle check-in state: the\nprojected next check-in when idle (or the active pause / running suppression)\nplus its most recent pause from history.\n\nThe retained live lifecycle leg begins at the index-label cutover and never\nscans the legacy slice. It has an 8-second Loki timeout and a per-agent\nthirty-minute single-flight cache, so changing `hours` or `since_compact`\ndoes not repeat that indexed read. Agents whose lifecycle history is wholly\npre-cutover use the `spawned_at` fallback described by `_alive_seconds`.",
         "operationId": "get_agent_inspect_api_agents__agent_id__inspect_get",
         "parameters": [
           {
@@ -4824,6 +4824,134 @@
         }
       }
     },
+    "/api/event-resolutions": {
+      "post": {
+        "summary": "Create Event Resolution",
+        "description": "Dismiss one event class and emit its immutable transition marker.\n\nGateway auth establishes that this is an operator action but does not carry\nan agent identity, so `dismissed_by=0` is the documented user/operator\nsentinel. The ops agent uses the same authenticated API surface.",
+        "operationId": "create_event_resolution_api_event_resolutions_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EventResolutionCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventResolutionRow"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "summary": "List Event Resolutions",
+        "description": "List active dismissals or reopened history for the ops review cycle.",
+        "operationId": "list_event_resolutions_api_event_resolutions_get",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "dismissed",
+                    "reopened"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventResolutionListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/event-resolutions/{dismissal_id}/reopen": {
+      "post": {
+        "summary": "Reopen Event Resolution",
+        "description": "Manually reopen one active dismissal and emit its transition marker.",
+        "operationId": "reopen_event_resolution_api_event_resolutions__dismissal_id__reopen_post",
+        "parameters": [
+          {
+            "name": "dismissal_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Dismissal Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventResolutionRow"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/ops/monitor": {
       "get": {
         "summary": "Get Ops Monitor",
@@ -7861,6 +7989,200 @@
         ],
         "title": "EscalationNoticeItem",
         "description": "One open task escalation for GET /api/notices/escalations.\n\nThe operator queue joins the escalation notice to its task and current\nowner, so its consumer can decide whether to reassign, cancel, or retain\nthe task without fetching another resource."
+      },
+      "EventResolutionCreate": {
+        "properties": {
+          "category": {
+            "type": "string",
+            "enum": [
+              "telemetry",
+              "log"
+            ],
+            "title": "Category"
+          },
+          "level": {
+            "type": "string",
+            "enum": [
+              "warning",
+              "error",
+              "critical"
+            ],
+            "title": "Level"
+          },
+          "event_name": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Event Name"
+          },
+          "source": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Source"
+          },
+          "agent_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Id"
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 4000,
+            "title": "Note",
+            "default": ""
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "category",
+          "level",
+          "event_name",
+          "source"
+        ],
+        "title": "EventResolutionCreate",
+        "description": "One immutable event class to dismiss through the authenticated API."
+      },
+      "EventResolutionListResponse": {
+        "properties": {
+          "resolutions": {
+            "items": {
+              "$ref": "#/components/schemas/EventResolutionRow"
+            },
+            "type": "array",
+            "title": "Resolutions"
+          }
+        },
+        "type": "object",
+        "required": [
+          "resolutions"
+        ],
+        "title": "EventResolutionListResponse",
+        "description": "Status-filtered resolution history for the ops agent's review cycle."
+      },
+      "EventResolutionRow": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "telemetry",
+              "log"
+            ],
+            "title": "Category"
+          },
+          "level": {
+            "type": "string",
+            "enum": [
+              "warning",
+              "error",
+              "critical"
+            ],
+            "title": "Level"
+          },
+          "event_name": {
+            "type": "string",
+            "title": "Event Name"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "agent_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Id"
+          },
+          "dismissed_by": {
+            "type": "integer",
+            "title": "Dismissed By"
+          },
+          "note": {
+            "type": "string",
+            "title": "Note"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "dismissed",
+              "reopened"
+            ],
+            "title": "Status"
+          },
+          "dismissed_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Dismissed At"
+          },
+          "reopened_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reopened At"
+          },
+          "burst_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Burst Count"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "category",
+          "level",
+          "event_name",
+          "source",
+          "agent_id",
+          "dismissed_by",
+          "note",
+          "status",
+          "dismissed_at",
+          "reopened_at",
+          "burst_count",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "EventResolutionRow",
+        "description": "One persisted class dismissal, including reopened history metadata."
       },
       "EventRow": {
         "properties": {

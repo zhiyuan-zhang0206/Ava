@@ -20,7 +20,7 @@ from gateway import loki_events
 from gateway.routers import _inspect_pg
 from gateway.routers._inspect_cache import InspectQueryCache
 from gateway.schemas import AgentStats
-from shared.loki_index_labels import ledger_gap_plan, retention_floor
+from shared.loki_index_labels import INDEX_LABEL_CUTOVER_AT, ledger_gap_plan, retention_floor
 
 
 class DayPlan(NamedTuple):
@@ -66,7 +66,7 @@ class _LiveInspectValues(NamedTuple):
 
 _LIFECYCLE_EVENTS = ("agent_spawned", "agent_resurrected", "agent_terminated")
 _LIFECYCLE_EVENT_PATTERNS = [f"^{event}$" for event in _LIFECYCLE_EVENTS]
-_LIFECYCLE_CACHE_TTL_S = 300.0
+_LIFECYCLE_CACHE_TTL_S = 1800.0
 _lifecycle_cache = InspectQueryCache[int, list[tuple[datetime, str]]](
     max_entries=256,
     max_inflight=128,
@@ -86,7 +86,7 @@ def reset_for_tests() -> None:
 def _load_live_lifecycle(
     agent_id: int, window: tuple[datetime, datetime]
 ) -> list[tuple[datetime, str]]:
-    """Read one agent's retained lifecycle leg with the interactive 8s bound."""
+    """Read one agent's indexed retained lifecycle leg with the interactive 8s bound."""
     rows = loki_events.query_projected_lines(
         fields=[],
         template="{{ __line__ }}",
@@ -115,12 +115,12 @@ def cached_live_lifecycle(
     window: tuple[datetime, datetime] | None,
     freeze: datetime | None,
 ) -> list[tuple[datetime, str]]:
-    """Return the once-per-agent live lifecycle leg for about five minutes.
+    """Return the once-per-agent indexed lifecycle leg for about thirty minutes.
 
-    The retained legacy window is independent of the requested inspector
-    window, so one 8-second-bounded cold load serves every `hours` and
-    `since_compact` view for this agent. Lifecycle events are rare; a fresh
-    spawn/resurrect/terminate can lag the panel by up to five minutes, versus
+    The retained window is independent of the requested inspector window, so
+    one 8-second-bounded cold load serves every `hours` and `since_compact`
+    view for this agent. Lifecycle events are rare; a fresh
+    spawn/resurrect/terminate can lag the panel by up to thirty minutes, versus
     its existing 75-second aggregate cache. When the archive freeze changes
     (only test reset in practice), cached live windows are discarded.
     """
@@ -367,9 +367,11 @@ def inspect_values(
     """Build stats, TPS, and activity inputs from one archive/ledger/live view.
 
     The retained live lifecycle stream is separately cached per agent for
-    five minutes: until the 2026-08-30 legacy slice expires it is the one
-    potentially broad read, while requested stats spans stay window-bounded.
-    Every interactive Loki read is capped at eight seconds.
+    thirty minutes and begins at the index-label cutover, so it never scans
+    the legacy slice. An agent with no indexed start event uses the existing
+    `agents_meta.spawned_at → now` fallback; whole-life and 7-day views then
+    approximate pre-cutover terminate/resurrect gaps until that slice expires
+    on 2026-08-30. Every interactive Loki read is capped at eight seconds.
     """
     plan = full_day_plan(from_, to)
     with pool.connection() as conn, conn.cursor() as cur:
@@ -439,7 +441,9 @@ def inspect_values(
     token_spans = live_edge_spans(plan, token_watermark, from_, to)
     distribution_window = _inspect_pg.retained_live_window(from_=from_, to=to, freeze=freeze)
     activity_window = _inspect_pg.retained_live_window(from_=from_, to=to, freeze=freeze)
-    lifecycle_window = _inspect_pg.retained_live_window(from_=None, to=None, freeze=freeze)
+    lifecycle_window = _inspect_pg.retained_live_window(
+        from_=INDEX_LABEL_CUTOVER_AT, to=None, freeze=freeze
+    )
     live = _projected_live_values(
         agent_id,
         stats_spans=stats_spans,
