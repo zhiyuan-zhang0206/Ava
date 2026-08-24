@@ -1,6 +1,6 @@
-# Ava shell
+# Ava App
 
-`ui/app` is the thin Tauri 2 shell around Ava's remotely served web console. It
+`ui/app` is the thin Tauri 2 app around Ava's remotely served web console. It
 does not bundle `ui/web`; the main webview loads the configured gate URL. One
 Rust application targets macOS, Windows, and Android.
 
@@ -86,11 +86,11 @@ cargo test
 cargo check --target aarch64-linux-android
 cd ../../..
 .venv/bin/pytest tests/ui/test_android_overlay.py \
-  tests/scripts/test_build_shell_update_manifest.py -q
+  tests/scripts/test_build_app_update_manifest.py -q
 ```
 
-Tags matching `shell-v<major>.<minor>.<patch>` drive
-`.github/workflows/release-shell.yml`. macOS/Windows updater assets are listed
+Tags matching `app-v<major>.<minor>.<patch>` drive
+`.github/workflows/release-app.yml`. macOS/Windows updater assets are listed
 in `latest.json` only when their Tauri signatures exist. Tag builds fail unless
 updater, OS, and Android signing credentials are present; manual dispatch keeps
 the explicit unsigned validation path without publishing a GitHub Release.

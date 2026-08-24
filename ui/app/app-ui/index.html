@@ -252,7 +252,7 @@
       }
 
       async function render() {
-        const config = await invoke("shell_config");
+        const config = await invoke("app_config");
         const target = config.entryUrl || "";
         const desktop = ["macos", "windows"].includes(config.platform);
         document.getElementById("connecting-target").textContent = target;
@@ -328,7 +328,7 @@
           const raceWindowMs = secret.value.trim() ? 12_000 : SAVE_RESPONSE_TIMEOUT_MS;
           let responseTimer;
           const outcome = await Promise.race([
-            invoke("shell_save_settings", { patch }).then(
+            invoke("app_save_settings", { patch }).then(
               () => ({ kind: "fulfilled" }),
               (error) => ({ kind: "rejected", error }),
             ),
@@ -368,11 +368,11 @@
 
       document.getElementById("retry").addEventListener("click", () => {
         beginConnecting(document.getElementById("server").value);
-        invoke("shell_retry_entry");
+        invoke("app_retry_entry");
       });
       document
         .getElementById("setup-cancel")
-        .addEventListener("click", () => invoke("shell_retry_entry"));
+        .addEventListener("click", () => invoke("app_retry_entry"));
       document.getElementById("change-server").addEventListener("click", () => {
         window.location.hash = "setup";
         show("setup");

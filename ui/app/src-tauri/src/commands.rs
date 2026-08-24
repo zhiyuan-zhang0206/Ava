@@ -2,20 +2,20 @@
 //!
 //! Every command is deliberately small and side-effect-explicit. Remote pages
 //! (the console itself) reach these only through the runtime capability the
-//! shell grants for the configured gate origin — see `window::grant_remote_ipc`.
+//! app grants for the configured gate origin — see `window::grant_remote_ipc`.
 
 use serde::{Deserialize, Serialize};
 use tauri::Manager;
 use tauri::{AppHandle, Runtime, State};
 
-use crate::state::ShellState;
+use crate::state::AppState;
 use crate::{external, window};
 
-/// What the injected prelude publishes as `window.__AVA_SHELL__`, and what the
-/// bundled pages read back through `shell_config`.
+/// What the injected prelude publishes as `window.__AVA_APP__`, and what the
+/// bundled pages read back through `app_config`.
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ShellConfig {
+pub struct AppConfig {
     pub version: String,
     pub platform: &'static str,
     pub entry_url: Option<String>,
@@ -29,12 +29,12 @@ pub struct ShellConfig {
     pub releases_api: Option<String>,
 }
 
-/// Releases listing for the shell's own tags. Desktop uses the updater plugin,
+/// Releases listing for the app's own tags. Desktop uses the updater plugin,
 /// so only Android consults this.
 const RELEASES_API: &str = "https://api.github.com/repos/zhiyuan-zhang0206/Ava/releases";
 
-impl ShellConfig {
-    pub fn build<R: Runtime>(app: &AppHandle<R>, state: &ShellState) -> Self {
+impl AppConfig {
+    pub fn build<R: Runtime>(app: &AppHandle<R>, state: &AppState) -> Self {
         let settings = state.settings();
         let endpoints = state.endpoints();
         Self {
@@ -106,12 +106,12 @@ pub struct SettingsPatch {
 }
 
 #[tauri::command]
-pub fn shell_config(app: AppHandle, state: State<'_, ShellState>) -> ShellConfig {
-    ShellConfig::build(&app, &state)
+pub fn app_config(app: AppHandle, state: State<'_, AppState>) -> AppConfig {
+    AppConfig::build(&app, &state)
 }
 
 #[tauri::command]
-pub fn shell_open_external(app: AppHandle, url: String) -> Result<(), String> {
+pub fn app_open_external(app: AppHandle, url: String) -> Result<(), String> {
     external::open_external(&app, &url)
 }
 
@@ -137,9 +137,9 @@ fn check_cleartext_target(url: &tauri::Url) -> Result<(), String> {
 
 /// Persist a settings patch and queue the resulting entry-window update.
 #[tauri::command]
-pub async fn shell_save_settings(
+pub async fn app_save_settings(
     app: AppHandle,
-    state: State<'_, ShellState>,
+    state: State<'_, AppState>,
     patch: SettingsPatch,
 ) -> Result<(), String> {
     let mut settings = state.settings();
@@ -228,24 +228,24 @@ pub async fn shell_save_settings(
 
 /// Restart the entry-load retry loop (the "Try again" button).
 #[tauri::command]
-pub fn shell_retry_entry(app: AppHandle) {
+pub fn app_retry_entry(app: AppHandle) {
     window::open_entry(&app);
 }
 
 /// Open the bundled settings screen. Remote console pages can ask to show this
 /// page but cannot persist settings themselves; only the bundled origin has
-/// `shell_save_settings` permission.
+/// `app_save_settings` permission.
 #[tauri::command]
-pub fn shell_open_settings(app: AppHandle) {
+pub fn app_open_settings(app: AppHandle) {
     window::open_settings(&app);
 }
 
 /// Raise a local notification. Android only — on desktop the console window is
 /// already the notification surface, so this logs and returns.
 #[tauri::command]
-pub async fn shell_notify(
+pub async fn app_notify(
     app: AppHandle,
-    state: State<'_, ShellState>,
+    state: State<'_, AppState>,
     title: String,
     body: String,
 ) -> Result<(), String> {
@@ -268,8 +268,8 @@ pub async fn shell_notify(
 
 /// Consume an Android notification tap once the authenticated console is ready.
 #[tauri::command]
-pub async fn shell_take_pending_click(app: AppHandle) -> bool {
-    if !app.state::<ShellState>().settings().notifications {
+pub async fn app_take_pending_click(app: AppHandle) -> bool {
+    if !app.state::<AppState>().settings().notifications {
         return false;
     }
     #[cfg(target_os = "android")]
@@ -293,7 +293,7 @@ mod tests {
     use crate::window::REMOTE_PERMISSIONS;
 
     /// The static capability, read as text: a command is reachable from the
-    /// shell's own pages only if its `allow-*` permission is listed there.
+    /// app's own pages only if its `allow-*` permission is listed there.
     const LOCAL_CAPABILITY: &str = include_str!("../capabilities/local.json");
 
     /// `tauri-build` derives permission identifiers by kebab-casing the command.

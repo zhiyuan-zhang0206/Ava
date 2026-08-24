@@ -1,8 +1,8 @@
-# Build and publish the Ava shell (`ui/app`) for a `shell-v*` tag.
+# Build and publish the Ava App (`ui/app`) for an `app-v*` tag.
 #
 # The tag prefix keeps this workflow off release.yml's trigger: that one fires
 # on dated cluster tags (`v0.1.2-20260816`) and turns them into releases from
-# the tag annotation. The shell versions independently of the cluster, so it
+# the app versions independently of the cluster, so it
 # gets its own tag namespace and its own release.
 #
 # A manual dispatch may omit signing secrets and produces unsigned validation
@@ -23,12 +23,12 @@
 # `uses:` is pinned to a commit SHA with the version in a trailing comment, for
 # the same supply-chain reason as ci.yml.
 
-name: Release shell
+name: Release App
 
 on:
   push:
     tags:
-      - 'shell-v[0-9]+.[0-9]+.[0-9]+'
+      - 'app-v[0-9]+.[0-9]+.[0-9]+'
   workflow_dispatch:
 
 permissions:
@@ -41,7 +41,7 @@ env:
 
 jobs:
   prepare:
-    name: Resolve shell version
+    name: Resolve app version
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
@@ -59,9 +59,9 @@ jobs:
           import os, pathlib, re, tomllib
 
           if os.environ["EVENT_NAME"] == "push":
-              match = re.fullmatch(r"shell-v(\d+\.\d+\.\d+)", os.environ["REF_NAME"])
+              match = re.fullmatch(r"app-v(\d+\.\d+\.\d+)", os.environ["REF_NAME"])
               if match is None:
-                  raise SystemExit(f"invalid shell release tag: {os.environ['REF_NAME']}")
+                  raise SystemExit(f"invalid app release tag: {os.environ['REF_NAME']}")
               version = match.group(1)
           else:
               cargo = tomllib.loads(pathlib.Path("ui/app/src-tauri/Cargo.toml").read_text())
@@ -99,7 +99,7 @@ jobs:
       WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
       WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
       EVENT_NAME: ${{ github.event_name }}
-      SHELL_VERSION: ${{ needs.prepare.outputs.version }}
+      APP_VERSION: ${{ needs.prepare.outputs.version }}
       TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
     steps:
@@ -199,7 +199,7 @@ jobs:
         working-directory: ui/app
         shell: bash
         run: |
-          EXTRA=(--config "{\"version\":\"$SHELL_VERSION\"}")
+          EXTRA=(--config "{\"version\":\"$APP_VERSION\"}")
           # With a configured public key Tauri otherwise fails when the private
           # key is absent. --no-sign is the explicit unsigned-build path.
           if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
@@ -222,7 +222,7 @@ jobs:
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: shell-${{ matrix.target }}
+          name: app-${{ matrix.target }}
           path: dist/
           if-no-files-found: error
 
@@ -237,7 +237,7 @@ jobs:
       ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
       EVENT_NAME: ${{ github.event_name }}
       NDK_VERSION: 27.2.12479018
-      SHELL_VERSION: ${{ needs.prepare.outputs.version }}
+      APP_VERSION: ${{ needs.prepare.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -271,7 +271,7 @@ jobs:
 
       # `gen/android` is a build output (see ui/app/android/apply_overlay.py):
       # generated from the current Tauri version's templates, then patched with
-      # the shell's manifest edits, network security config and Kotlin service.
+      # the app's manifest edits, network security config and Kotlin service.
       - name: Generate the Android project
         working-directory: ui/app
         run: cargo tauri android init --skip-targets-install
@@ -307,7 +307,7 @@ jobs:
 
       - name: Build the APK
         working-directory: ui/app
-        run: cargo tauri android build --apk --config "{\"version\":\"$SHELL_VERSION\"}"
+        run: cargo tauri android build --apk --config "{\"version\":\"$APP_VERSION\"}"
 
       - name: Collect artifacts
         run: |
@@ -317,7 +317,7 @@ jobs:
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: shell-android
+          name: app-android
           path: dist/
           if-no-files-found: error
 
@@ -343,7 +343,7 @@ jobs:
       # bundles uploaded fine.
       - name: Build latest.json
         run: |
-          python3 scripts/build_shell_update_manifest.py \
+          python3 scripts/build_app_update_manifest.py \
             --tag "${GITHUB_REF#refs/tags/}" \
             --artifacts artifacts \
             --repo "$GITHUB_REPOSITORY" \
@@ -356,16 +356,16 @@ jobs:
         run: |
           TAG="${GITHUB_REF#refs/tags/}"
           if ! gh release view "$TAG" >/dev/null 2>&1; then
-            gh release create "$TAG" --title "Ava shell $TAG" --generate-notes
+            gh release create "$TAG" --title "Ava App $TAG" --generate-notes
           fi
           gh release upload "$TAG" artifacts/* --clobber
 
           # The repo also publishes dated cluster releases, so GitHub's
-          # /releases/latest alias cannot be the shell update channel. Keep one
+          # /releases/latest alias cannot be the app update channel. Keep one
           # prerelease asset endpoint stable and replace only latest.json.
-          if ! gh release view shell-latest >/dev/null 2>&1; then
-            gh release create shell-latest --target "$GITHUB_SHA" --prerelease \
-              --title "Ava shell updater feed" \
-              --notes "Mutable feed asset for the desktop shell updater."
+          if ! gh release view app-latest >/dev/null 2>&1; then
+            gh release create app-latest --target "$GITHUB_SHA" --prerelease \
+              --title "Ava App updater feed" \
+              --notes "Mutable feed asset for the desktop app updater."
           fi
-          gh release upload shell-latest artifacts/latest.json --clobber
+          gh release upload app-latest artifacts/latest.json --clobber

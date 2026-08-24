@@ -1,8 +1,8 @@
-# The Rust shell has a separate, path-filtered lane: backend/frontend changes
-# do not pay for a Tauri toolchain, while every shell or shell-release change
+# The Rust app has a separate, path-filtered lane: backend/frontend changes
+# do not pay for a Tauri toolchain, while every app or app-release change
 # checks both the desktop crate and the Android Rust target.
 
-name: Shell CI
+name: App CI
 
 on:
   push:
@@ -10,30 +10,30 @@ on:
     paths:
       - 'ui/app/**'
       - 'tests/ui/**'
-      - 'tests/scripts/test_build_shell_update_manifest.py'
-      - 'scripts/build_shell_update_manifest.py'
-      - '.github/workflows/ci-shell.yml'
-      - '.github/workflows/release-shell.yml'
+      - 'tests/scripts/test_build_app_update_manifest.py'
+      - 'scripts/build_app_update_manifest.py'
+      - '.github/workflows/ci-app.yml'
+      - '.github/workflows/release-app.yml'
   pull_request:
     paths:
       - 'ui/app/**'
       - 'tests/ui/**'
-      - 'tests/scripts/test_build_shell_update_manifest.py'
-      - 'scripts/build_shell_update_manifest.py'
-      - '.github/workflows/ci-shell.yml'
-      - '.github/workflows/release-shell.yml'
+      - 'tests/scripts/test_build_app_update_manifest.py'
+      - 'scripts/build_app_update_manifest.py'
+      - '.github/workflows/ci-app.yml'
+      - '.github/workflows/release-app.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: shell-ci-${{ github.ref }}
+  group: app-ci-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  shell:
-    name: shell (rust + android overlay)
+  app:
+    name: app (rust + android overlay)
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -83,5 +83,5 @@ jobs:
           python3 -m pip install pytest==9.0.3
           python3 -m pytest --noconftest tests/ui/test_android_overlay.py \
             tests/ui/test_android_update_check.py \
-            tests/ui/test_shell_release_workflow.py \
-            tests/scripts/test_build_shell_update_manifest.py -q
+            tests/ui/test_app_release_workflow.py \
+            tests/scripts/test_build_app_update_manifest.py -q

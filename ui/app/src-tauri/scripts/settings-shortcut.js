@@ -1,16 +1,16 @@
 // Android has no tray menu, so the remote console needs one narrow route back
-// to the bundled shell settings. The button can only navigate there: the
+// to the bundled app settings. The button can only navigate there: the
 // remote origin has no permission to persist or read settings directly.
 (function () {
   if (window.top !== window) return;
   if (location.protocol === "tauri:" || location.hostname === "tauri.localhost") return;
 
   window.addEventListener("DOMContentLoaded", function () {
-    if (document.querySelector('[data-ava-shell="settings"]')) return;
+    if (document.querySelector('[data-ava-app="settings"]')) return;
     var button = document.createElement("button");
     button.type = "button";
-    button.setAttribute("data-ava-shell", "settings");
-    button.setAttribute("aria-label", "Ava shell settings");
+    button.setAttribute("data-ava-app", "settings");
+    button.setAttribute("aria-label", "Ava App settings");
     button.textContent = "⚙";
     button.style.cssText = [
       "position:fixed",
@@ -27,8 +27,8 @@
       "box-shadow:0 2px 10px rgba(0,0,0,.3)",
     ].join(";");
     button.addEventListener("click", function () {
-      window.__TAURI_INTERNALS__.invoke("shell_open_settings").catch(function (error) {
-        console.error("Ava shell could not open settings", error);
+      window.__TAURI_INTERNALS__.invoke("app_open_settings").catch(function (error) {
+        console.error("Ava App could not open settings", error);
       });
     });
     document.body.appendChild(button);

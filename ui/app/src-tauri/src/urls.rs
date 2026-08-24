@@ -29,7 +29,7 @@ const GATE_PORT: u16 = 3000;
 pub(crate) const CUSTOM_ENTRY_PORT_ERROR: &str =
     "控制台端口为 3000，网关端口 8000 自动推导；自定义端口请走高级设置。";
 
-/// The pair of URLs the shell talks to.
+/// The pair of URLs the app talks to.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Endpoints {
     /// The gate — what the main window loads.
@@ -202,7 +202,7 @@ pub fn resolve_checked(settings: &Settings, private_cleartext_only: bool) -> Opt
 ///
 /// This is the policy Android's network security config is meant to carry but
 /// cannot — `<domain>` takes a hostname or an IP literal, never a prefix — so
-/// the shell enforces it on the one cleartext origin it ever loads. `https`
+/// the app enforces it on the one cleartext origin it ever loads. `https`
 /// URLs are exempt: TLS is the protection this stands in for.
 ///
 /// A host that does not resolve is refused rather than assumed private: the
@@ -256,11 +256,11 @@ pub fn is_private_host(url: &Url) -> bool {
 ///
 /// HTTP(S) only, and the origin must be one of the configured endpoints.
 /// Everything else is
-/// cancelled and handed to the external opener. The shell's own bundled pages
+/// cancelled and handed to the external opener. The app's own bundled pages
 /// (onboarding, the unreachable screen) are served over the Tauri custom
 /// protocol and are always allowed — they are the binary's own assets.
 pub fn is_allowed_nav(url: &Url, endpoints: Option<&Endpoints>) -> bool {
-    if is_shell_asset(url) {
+    if is_app_asset(url) {
         return true;
     }
     if !matches!(url.scheme(), "http" | "https") {
@@ -273,10 +273,10 @@ pub fn is_allowed_nav(url: &Url, endpoints: Option<&Endpoints>) -> bool {
     origin == endpoints.entry.origin() || origin == endpoints.gateway.origin()
 }
 
-/// The shell's own bundled assets, whose origin differs per platform
+/// The app's own bundled assets, whose origin differs per platform
 /// (`tauri://localhost` on macOS/Linux, `http://tauri.localhost` on Windows,
 /// `http://tauri.localhost` on Android).
-fn is_shell_asset(url: &Url) -> bool {
+fn is_app_asset(url: &Url) -> bool {
     match url.scheme() {
         "tauri" | "asset" | "ipc" => true,
         "http" | "https" => matches!(url.host_str(), Some("tauri.localhost")),
@@ -466,7 +466,7 @@ mod tests {
     }
 
     #[test]
-    fn shell_assets_are_allowed_even_before_onboarding() {
+    fn app_assets_are_allowed_even_before_onboarding() {
         assert!(is_allowed_nav(&url("tauri://localhost/index.html"), None));
         assert!(is_allowed_nav(
             &url("http://tauri.localhost/index.html"),

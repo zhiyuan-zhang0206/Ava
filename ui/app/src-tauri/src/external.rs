@@ -1,6 +1,6 @@
-//! External links leave the shell.
+//! External links leave the app.
 //!
-//! The shell has no tabs, so every link that is not the console itself is
+//! The app has no tabs, so every link that is not the console itself is
 //! handed off through this fallback chain:
 //!
 //! 1. the cluster's own headed Chrome (`ava-browser`), when its browser-MCP
@@ -13,12 +13,12 @@
 use tauri::Url;
 use tauri_plugin_opener::OpenerExt;
 
-/// Open `raw` outside the shell without holding the webview's UI thread while
+/// Open `raw` outside the app without holding the webview's UI thread while
 /// the browser-MCP fallback waits on its socket.
 ///
 /// This command crosses from web content into an OS action, so it accepts only
 /// ordinary web links plus the two user-agent schemes the console may render.
-/// In particular, a compromised page cannot ask the shell to open `file:` or a
+/// In particular, a compromised page cannot ask the app to open `file:` or a
 /// custom executable protocol.
 pub fn open_external<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
