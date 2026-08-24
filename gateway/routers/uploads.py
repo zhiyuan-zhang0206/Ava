@@ -24,6 +24,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import uuid
+from pathlib import Path
 
 from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse
@@ -33,7 +36,7 @@ from gateway.routers._delivery import deliver_chat_inbound
 from gateway.schemas import UploadedBatch, UploadedFile
 from shared.agents import AgentNotFound
 from shared.db import agent_exists
-from shared.private_storage import write_private_bytes
+from shared.private_storage import ensure_private_dir, write_private_bytes
 from shared.uploads import (
     MAX_AGENT_UPLOAD_BYTES,
     MAX_AGENT_UPLOAD_FILES,
@@ -50,7 +53,134 @@ router = APIRouter()
 
 _log = logging.getLogger(__name__)
 
+# Agent ids are bounded in practice by the agents this one gateway process has
+# served. Keep each lock for the process lifetime: evicting an unlocked entry
+# can split a waiting request from later requests for the same agent.
+_agent_locks: dict[int, asyncio.Lock] = {}
+_locks_guard = asyncio.Lock()
+
 router = APIRouter()
+
+type _UploadBatchItem = tuple[str, bytes, str]
+
+
+async def _agent_lock(agent_id: int) -> asyncio.Lock:
+    """Return the stable in-process lock serializing one agent's uploads."""
+    async with _locks_guard:
+        lock = _agent_locks.get(agent_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            _agent_locks[agent_id] = lock
+        return lock
+
+
+def _sweep_stale_upload_temps(temp_dir: Path) -> None:
+    """Best-effort removal of crash leftovers directly inside an upload .tmp dir."""
+    ensure_private_dir(temp_dir)
+    for path in temp_dir.iterdir():
+        if path.is_file():
+            try:
+                path.unlink()
+            except OSError:
+                _log.warning("upload: could not remove stale temp %s", path, exc_info=True)
+
+
+def _remove_upload_temps(paths: list[Path]) -> None:
+    """Best-effort cleanup for this batch's temp and backup files."""
+    for path in paths:
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            _log.warning("upload: could not remove batch temp %s", path, exc_info=True)
+
+
+def _rollback_upload_batch(
+    temp_paths: list[Path], backups: dict[Path, Path], created: set[Path], promoted: set[Path]
+) -> None:
+    """Restore overwritten files and remove final names created by a failed batch."""
+    for dest in promoted:
+        backup = backups.get(dest)
+        try:
+            if backup is not None and backup.is_file():
+                os.replace(backup, dest)  # noqa: PTH105 -- required atomic restore
+            elif dest in created:
+                dest.unlink(missing_ok=True)
+        except OSError:
+            _log.warning("upload: could not roll back %s", dest, exc_info=True)
+    _remove_upload_temps(temp_paths)
+
+
+def _per_file_quota_error(safe_name: str) -> HTTPException:
+    return HTTPException(
+        status_code=413,
+        detail=f"upload {safe_name!r} exceeds the {MAX_UPLOAD_BYTES:,}-byte per-file limit",
+    )
+
+
+def _agent_bytes_quota_error(agent_id: int) -> HTTPException:
+    return HTTPException(
+        status_code=413,
+        detail=(
+            f"upload would exceed agent {agent_id}'s {MAX_AGENT_UPLOAD_BYTES:,}-byte total quota"
+        ),
+    )
+
+
+def _agent_files_quota_error(agent_id: int) -> HTTPException:
+    return HTTPException(
+        status_code=413,
+        detail=f"agent {agent_id} already holds {MAX_AGENT_UPLOAD_FILES} uploads",
+    )
+
+
+async def _read_upload_batch(files: list[UploadFile]) -> tuple[list[_UploadBatchItem], int]:
+    """Read and size-check every file before the batch can write a final name."""
+    batch_bytes = 0
+    batch: list[_UploadBatchItem] = []
+    for file in files:
+        safe_name = sanitize_upload_name(file.filename or "untitled")
+        contents = await file.read(MAX_UPLOAD_BYTES + 1)
+        if len(contents) > MAX_UPLOAD_BYTES:
+            raise _per_file_quota_error(safe_name)
+        batch_bytes += len(contents)
+        batch.append((safe_name, contents, file.content_type or "application/octet-stream"))
+    return batch, batch_bytes
+
+
+async def _commit_upload_batch(
+    dest_dir: Path, temp_dir: Path, batch: list[_UploadBatchItem]
+) -> None:
+    """Stage a fully validated batch, then atomically promote its final names."""
+    temp_paths: list[Path] = []
+    backups: dict[Path, Path] = {}
+    created: set[Path] = set()
+    promoted: set[Path] = set()
+    try:
+        for _safe_name, contents, _content_type in batch:
+            temp_path = temp_dir / uuid.uuid4().hex
+            await asyncio.to_thread(write_private_bytes, temp_path, contents)
+            temp_paths.append(temp_path)
+
+        destinations = [
+            (temp_path, dest_dir / safe_name)
+            for temp_path, (safe_name, _, _) in zip(temp_paths, batch, strict=True)
+        ]
+        for dest in {dest for _, dest in destinations}:
+            if await asyncio.to_thread(dest.is_file):
+                backup = temp_dir / uuid.uuid4().hex
+                backups[dest] = backup
+                await asyncio.to_thread(os.link, dest, backup)
+            elif not await asyncio.to_thread(dest.exists):
+                created.add(dest)
+
+        for temp_path, dest in destinations:
+            await asyncio.to_thread(os.replace, temp_path, dest)
+            promoted.add(dest)
+    except BaseException:
+        await asyncio.to_thread(_rollback_upload_batch, temp_paths, backups, created, promoted)
+        raise
+    finally:
+        await asyncio.to_thread(_remove_upload_temps, [*temp_paths, *backups.values()])
 
 
 @router.post("/api/agents/{agent_id}/uploads", response_model=UploadedBatch)
@@ -74,50 +204,34 @@ async def upload_files(
     # Check agent exists first (fail fast before writing any file)
     await asyncio.to_thread(_agent_exists_blocking, request.app.state.db_pool, agent_id)
 
-    dest_dir = agent_upload_dir(agent_id)
+    dest_dir = ensure_private_dir(agent_upload_dir(agent_id))
 
-    # Quota baseline (audit round-2 security P1-2): the endpoint is the
-    # gateway's one authenticated user->disk write surface, so a batch is
-    # bounded before any byte lands — per-file size, per-agent total bytes,
-    # and per-agent file count. Without this an authenticated caller (or a
-    # stolen session cookie) can fill the disk.
-    quota_bytes, quota_files = await asyncio.to_thread(upload_quota_used, dest_dir)
-    batch_bytes = 0
+    lock = await _agent_lock(agent_id)
+    async with lock:
+        temp_dir = dest_dir / ".tmp"
+        await asyncio.to_thread(_sweep_stale_upload_temps, temp_dir)
 
-    saved: list[UploadedFile] = []
-    for file in files:
-        safe_name = sanitize_upload_name(file.filename or "untitled")
-        dest = dest_dir / safe_name
-        contents = await file.read(MAX_UPLOAD_BYTES + 1)
-        if len(contents) > MAX_UPLOAD_BYTES:
-            raise HTTPException(
-                status_code=413,
-                detail=f"upload {safe_name!r} exceeds the {MAX_UPLOAD_BYTES:,}-byte per-file limit",
-            )
-        batch_bytes += len(contents)
+        # The endpoint is the gateway's one authenticated user->disk write
+        # surface, so the per-agent lock makes this baseline and batch commit
+        # atomic relative to every other upload for this agent.
+        quota_bytes, quota_files = await asyncio.to_thread(upload_quota_used, dest_dir)
+        batch, batch_bytes = await _read_upload_batch(files)
         if quota_bytes + batch_bytes > MAX_AGENT_UPLOAD_BYTES:
-            raise HTTPException(
-                status_code=413,
-                detail=(
-                    f"upload would exceed agent {agent_id}'s "
-                    f"{MAX_AGENT_UPLOAD_BYTES:,}-byte total quota"
-                ),
-            )
-        if quota_files + len(saved) >= MAX_AGENT_UPLOAD_FILES:
-            raise HTTPException(
-                status_code=413,
-                detail=f"agent {agent_id} already holds {MAX_AGENT_UPLOAD_FILES} uploads",
-            )
-        await asyncio.to_thread(write_private_bytes, dest, contents)
-        saved.append(
+            raise _agent_bytes_quota_error(agent_id)
+        if quota_files + len(batch) > MAX_AGENT_UPLOAD_FILES:
+            raise _agent_files_quota_error(agent_id)
+        await _commit_upload_batch(dest_dir, temp_dir, batch)
+
+        saved = [
             UploadedFile(
                 filename=safe_name,
-                path=str(dest),
+                path=str(dest_dir / safe_name),
                 url=upload_url(agent_id, safe_name),
                 size=len(contents),
-                content_type=file.content_type or "application/octet-stream",
+                content_type=content_type,
             )
-        )
+            for safe_name, contents, content_type in batch
+        ]
 
     if deliver:
         # One inbound for the whole batch. When the agent runs on a remote

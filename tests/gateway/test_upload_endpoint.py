@@ -7,6 +7,8 @@ agent-not-found -> 404, filename sanitization.
 
 from __future__ import annotations
 
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import psycopg
@@ -219,6 +221,32 @@ class TestUploadLimits:
         assert (base / "a.txt").exists()
         assert not (base / "b.txt").exists()
 
+    def test_agent_quota_rejects_entire_oversized_batch(
+        self, db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A batch over the byte quota does not leave its earlier files behind."""
+        agent_id = _spawn_agent()
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+        import gateway.routers.uploads as uploads_router
+
+        monkeypatch.setattr(uploads_router, "MAX_AGENT_UPLOAD_BYTES", 5)
+        with TestClient(app) as client:
+            resp = client.post(
+                f"/api/agents/{agent_id}/uploads",
+                files=[
+                    ("files", ("a.txt", b"aaa", "text/plain")),
+                    ("files", ("b.txt", b"bbb", "text/plain")),
+                ],
+            )
+
+        base = tmp_path / "Downloads" / f"AvaAgent-{agent_id}"
+        assert resp.status_code == 413
+        assert not (base / "a.txt").exists()
+        assert not (base / "b.txt").exists()
+        assert _inbound_rows(db_conn, agent_id) == []
+        temp_dir = base / ".tmp"
+        assert not temp_dir.exists() or list(temp_dir.iterdir()) == []
+
     def test_file_count_cap_rejected_413(
         self, db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -238,6 +266,125 @@ class TestUploadLimits:
             )
         assert ok.status_code == 200
         assert over.status_code == 413
+
+    def test_file_count_cap_rejects_entire_batch(
+        self, db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A batch over the file-count cap does not partially commit."""
+        agent_id = _spawn_agent()
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+        import gateway.routers.uploads as uploads_router
+
+        monkeypatch.setattr(uploads_router, "MAX_AGENT_UPLOAD_FILES", 1)
+        with TestClient(app) as client:
+            resp = client.post(
+                f"/api/agents/{agent_id}/uploads",
+                files=[
+                    ("files", ("a.txt", b"a", "text/plain")),
+                    ("files", ("b.txt", b"b", "text/plain")),
+                ],
+            )
+
+        base = tmp_path / "Downloads" / f"AvaAgent-{agent_id}"
+        assert resp.status_code == 413
+        assert not (base / "a.txt").exists()
+        assert not (base / "b.txt").exists()
+
+    def test_concurrent_batches_share_agent_quota(
+        self, db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Concurrent uploads serially consume one agent's shared byte quota."""
+        agent_id = _spawn_agent()
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+        import gateway.routers.uploads as uploads_router
+
+        monkeypatch.setattr(uploads_router, "MAX_AGENT_UPLOAD_BYTES", 10)
+        base = tmp_path / "Downloads" / f"AvaAgent-{agent_id}"
+        final_write_barrier = threading.Barrier(2)
+        original_write_bytes = Path.write_bytes
+
+        def _block_direct_final_write(path: Path, contents: bytes) -> int:
+            if path.parent == base:
+                final_write_barrier.wait(timeout=2)
+            return original_write_bytes(path, contents)
+
+        monkeypatch.setattr(Path, "write_bytes", _block_direct_final_write)
+        with TestClient(app) as client, ThreadPoolExecutor(max_workers=2) as executor:
+            responses = [
+                executor.submit(
+                    client.post,
+                    f"/api/agents/{agent_id}/uploads?deliver=false",
+                    files=[("files", (name, b"x" * 6, "text/plain"))],
+                )
+                for name in ("a.txt", "b.txt")
+            ]
+            statuses = [response.result().status_code for response in responses]
+
+        assert sorted(statuses) == [200, 413]
+        stored = [path for path in base.iterdir() if path.is_file()]
+        assert sum(path.stat().st_size for path in stored) <= 10
+        assert len(stored) == 1
+        assert stored[0].read_bytes() == b"x" * 6
+
+    def test_successful_upload_sweeps_stale_temp_files(
+        self, db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Crash leftovers in .tmp do not count toward quota and are removed."""
+        agent_id = _spawn_agent()
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+        import gateway.routers.uploads as uploads_router
+
+        monkeypatch.setattr(uploads_router, "MAX_AGENT_UPLOAD_BYTES", 5)
+        base = tmp_path / "Downloads" / f"AvaAgent-{agent_id}"
+        temp_dir = base / ".tmp"
+        temp_dir.mkdir(parents=True)
+        (temp_dir / "stale").write_bytes(b"x" * 100)
+
+        with TestClient(app) as client:
+            resp = client.post(
+                f"/api/agents/{agent_id}/uploads?deliver=false",
+                files=[("files", ("fresh.txt", b"fresh", "text/plain"))],
+            )
+
+        assert resp.status_code == 200
+        assert (base / "fresh.txt").read_bytes() == b"fresh"
+        assert list(temp_dir.iterdir()) == []
+
+    def test_failed_promotion_removes_new_final_names(
+        self, db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A rename failure restores the directory to its pre-batch state."""
+        agent_id = _spawn_agent()
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+        import gateway.routers.uploads as uploads_router
+
+        base = tmp_path / "Downloads" / f"AvaAgent-{agent_id}"
+        temp_dir = base / ".tmp"
+        original_replace = uploads_router.os.replace
+        promotions = 0
+
+        def _fail_second_promotion(src: str | Path, dest: str | Path) -> None:
+            nonlocal promotions
+            if Path(src).parent == temp_dir and Path(dest).parent == base:
+                promotions += 1
+                if promotions == 2:
+                    raise OSError("injected rename failure")
+            original_replace(src, dest)
+
+        monkeypatch.setattr(uploads_router.os, "replace", _fail_second_promotion)
+        with TestClient(app, raise_server_exceptions=False) as client:
+            resp = client.post(
+                f"/api/agents/{agent_id}/uploads?deliver=false",
+                files=[
+                    ("files", ("a.txt", b"a", "text/plain")),
+                    ("files", ("b.txt", b"b", "text/plain")),
+                ],
+            )
+
+        assert resp.status_code == 500
+        assert not (base / "a.txt").exists()
+        assert not (base / "b.txt").exists()
+        assert list(temp_dir.iterdir()) == []
 
 
 class TestUploadUrlAndAttachMode:
