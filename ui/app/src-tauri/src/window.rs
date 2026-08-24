@@ -1,7 +1,7 @@
 //! The main window: what it loads, what it may navigate to, and what happens
 //! when the gate is not there.
 //!
-//! The shell owns exactly one window. Desktop rebuilds it whenever the resolved
+//! The app owns exactly one window. Desktop rebuilds it whenever the resolved
 //! endpoints change; Android refreshes the injected prelude and navigates the
 //! existing webview because rebuilding wedges wry's Android IPC pipe.
 
@@ -12,21 +12,21 @@ use reqwest::redirect::Policy;
 use reqwest::StatusCode;
 use tauri::{AppHandle, Manager, Url, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 
-use crate::commands::ShellConfig;
-use crate::state::ShellState;
+use crate::commands::AppConfig;
+use crate::state::AppState;
 use crate::urls::Endpoints;
 use crate::{external, urls};
 
 pub const MAIN_WINDOW: &str = "main";
 
 /// Overall entry probe budget. A failed connection must settle to a readable
-/// recovery screen within the same 30-second budget the shell UI displays.
+/// recovery screen within the same 30-second budget the app UI displays.
 const RETRY_BUDGET: Duration = Duration::from_secs(30);
 const RETRY_INTERVAL: Duration = Duration::from_secs(3);
 /// HTTP answers matter here: TCP can accept then leave a webview hanging.
 const PROBE_TIMEOUT: Duration = Duration::from_secs(4);
 
-/// Bundled screens, addressed by fragment on the shell's own `index.html`.
+/// Bundled screens, addressed by fragment on the app's own `index.html`.
 const SETUP_PAGE: &str = "index.html#setup";
 const CONNECTING_PAGE: &str = "index.html#connecting";
 
@@ -37,7 +37,7 @@ const CONNECTING_PAGE: &str = "index.html#connecting";
 /// configured it opens the gate directly, so the happy path costs no extra
 /// round trip.
 pub fn open_entry(app: &AppHandle) {
-    let state = app.state::<ShellState>();
+    let state = app.state::<AppState>();
     let endpoints = state.endpoints();
 
     #[cfg(target_os = "android")]
@@ -94,13 +94,13 @@ pub fn open_entry(app: &AppHandle) {
 /// prelude has refreshed and it has navigated to the current entry URL.
 fn attach_entry(app: &AppHandle, window: WebviewWindow, endpoints: Endpoints) {
     #[cfg(desktop)]
-    if app.state::<ShellState>().settings().auto_login {
+    if app.state::<AppState>().settings().auto_login {
         if let Some(secret) = crate::autologin::cluster_secret() {
             crate::autologin::start(window.clone(), endpoints.clone(), secret);
         }
     }
     #[cfg(target_os = "android")]
-    if !app.state::<ShellState>().take_skip_next_android_autologin() {
+    if !app.state::<AppState>().take_skip_next_android_autologin() {
         let handle = app.clone();
         let login_window = window.clone();
         let login_endpoints = endpoints.clone();
@@ -130,7 +130,7 @@ fn build(app: &AppHandle, target: WebviewUrl) -> tauri::Result<WebviewWindow> {
         // Android's in-place post-save navigation reaches the new gate. Other
         // URLs are cancelled here and handed to the external opener.
         .on_navigation(move |url| {
-            let allowed = navigation_handle.state::<ShellState>().endpoints();
+            let allowed = navigation_handle.state::<AppState>().endpoints();
             if urls::is_allowed_nav(url, allowed.as_ref()) {
                 return true;
             }
@@ -139,11 +139,11 @@ fn build(app: &AppHandle, target: WebviewUrl) -> tauri::Result<WebviewWindow> {
         })
         .on_page_load(move |window, _payload| {
             let script = format!(
-                "{}window.dispatchEvent(new Event('ava-shell-config'));",
+                "{}window.dispatchEvent(new Event('ava-app-config'));",
                 prelude(&page_load_handle),
             );
             if let Err(err) = window.eval(&script) {
-                log::error!("could not refresh the shell config after page load: {err}");
+                log::error!("could not refresh the app config after page load: {err}");
             }
         });
 
@@ -158,17 +158,17 @@ fn build(app: &AppHandle, target: WebviewUrl) -> tauri::Result<WebviewWindow> {
     builder.build()
 }
 
-/// `window.__AVA_SHELL__` — the resolved configuration the injected scripts
+/// `window.__AVA_APP__` — the resolved configuration the injected scripts
 /// read. Serialized rather than templated so a URL can never break out of the
 /// string it sits in.
 fn prelude(app: &AppHandle) -> String {
-    let state = app.state::<ShellState>();
-    let config = ShellConfig::build(app, &state);
+    let state = app.state::<AppState>();
+    let config = AppConfig::build(app, &state);
     let json = serde_json::to_string(&config).unwrap_or_else(|_| "null".to_string());
-    format!("window.__AVA_SHELL__ = {json};")
+    format!("window.__AVA_APP__ = {json};")
 }
 
-/// Let the console's own origin — and only it — reach the shell commands the
+/// Let the console's own origin — and only it — reach the app commands the
 /// injected scripts need.
 ///
 /// The gate address is user configuration, so this capability cannot be a
@@ -193,13 +193,13 @@ fn grant_remote_ipc(app: &AppHandle, entry: &Url) {
 }
 
 /// What the console's origin is allowed to call. Strictly what the injected
-/// scripts need — the shell's settings commands are deliberately absent, so a
-/// page cannot re-point the shell at a server of its choosing.
+/// scripts need — the app's settings commands are deliberately absent, so a
+/// page cannot re-point the app at a server of its choosing.
 pub const REMOTE_PERMISSIONS: &[&str] = &[
-    "allow-shell-open-external",
-    "allow-shell-open-settings",
-    "allow-shell-notify",
-    "allow-shell-take-pending-click",
+    "allow-app-open-external",
+    "allow-app-open-settings",
+    "allow-app-notify",
+    "allow-app-take-pending-click",
 ];
 
 fn capability_identifier(origin: &str) -> String {
@@ -211,7 +211,7 @@ fn capability_identifier(origin: &str) -> String {
     format!("remote-console-{:x}", hasher.finish())
 }
 
-/// Navigate the existing window to the shell-owned settings page.
+/// Navigate the existing window to the app-owned settings page.
 pub fn open_settings(app: &AppHandle) {
     match app.get_webview_window(MAIN_WINDOW) {
         Some(window) => navigate_to_page(&window, SETUP_PAGE),
@@ -250,7 +250,7 @@ impl EntryFailure {
 /// status screens.
 ///
 /// The first probe runs against a window that is already loading the gate: if
-/// the gate answers, nothing happens at all and the user never sees a shell
+/// the gate answers, nothing happens at all and the user never sees an app
 /// screen. Only a failure escalates to "Connecting…"; the 30-second budget
 /// then ends at a classified recovery screen.
 fn watch_entry(window: WebviewWindow, entry: Url) {

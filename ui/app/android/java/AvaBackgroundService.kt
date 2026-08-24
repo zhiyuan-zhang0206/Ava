@@ -1,4 +1,4 @@
-package com.ava.shell
+package com.ava.app
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -12,14 +12,14 @@ import android.os.IBinder
 import androidx.core.app.NotificationCompat
 
 /**
- * Keeps the shell's process — and therefore its webview, and therefore the SSE
+ * Keeps the app's process — and therefore its webview, and therefore the SSE
  * connection the notification bridge rides on — alive while the app is in the
  * background.
  *
  * Android reaps backgrounded processes at will, and a reaped process silently
  * stops delivering notifications. A foreground service is the supported way to
  * opt out, and the persistent notification below is the price Android charges
- * for it. The user can turn the whole thing off in the shell's settings, which
+ * for it. The user can turn the whole thing off in the app's settings, which
  * stops this service.
  */
 class AvaBackgroundService : Service() {

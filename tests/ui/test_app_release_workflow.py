@@ -1,9 +1,9 @@
-"""Release-shell policy checks that do not need a platform toolchain."""
+"""Release-app policy checks that do not need a platform toolchain."""
 
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_WORKFLOW = _REPO_ROOT / ".github" / "workflows" / "release-shell.yml"
+_WORKFLOW = _REPO_ROOT / ".github" / "workflows" / "release-app.yml"
 
 
 def _workflow() -> str:

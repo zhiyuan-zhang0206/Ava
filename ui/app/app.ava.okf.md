@@ -1,7 +1,7 @@
 ---
 type: doc
-title: Ava app shell
-description: Thin Tauri 2 shell that loads the remote Ava console on macOS, Windows, and Android, adding native residency, login, notification, and update behavior.
+title: Ava App
+description: Thin Tauri 2 app that loads the remote Ava console on macOS, Windows, and Android, adding native residency, login, notification, and update behavior.
 tags:
   - frontend
   - desktop
@@ -9,14 +9,14 @@ tags:
   - tauri
 ---
 
-# Ava app shell
+# Ava App
 
 ## What it is
 
 `ui/app/` is one Tauri 2 application for macOS, Windows, and Android. It bundles
-only the small onboarding/retry/settings surface in `shell-ui/`; the product UI
+only the small onboarding/retry/settings surface in `app-ui/`; the product UI
 is always the remote gate-served [[../web/web.ava.okf.md|Next.js console]]. The
-shell owns the native window and capabilities that a browser tab cannot supply.
+app owns the native window and capabilities that a browser tab cannot supply.
 
 ## Entry and trust boundary
 
@@ -32,7 +32,7 @@ maps a bare host or `:3000` to `:8000`). Desktop shares the one-field page but
 preserves its existing arbitrary entry and gateway URLs for worktree clusters.
 
 The bundled Chinese onboarding page immediately changes to a 30-second
-connecting state while saving. `shell_save_settings` persists Android-normalized
+connecting state while saving. `app_save_settings` persists Android-normalized
 settings, then defers the window change until the asynchronous IPC reply flushes.
 Android refreshes the existing webview's prelude and navigates it rather than
 destroying it; its navigation allowlist and page-load prelude resolve from live
@@ -84,7 +84,7 @@ minification. The injected SSE bridge listens to
 `/api/system` and notifies only on busy-to-idle completion or a newly
 awaiting-response notice. Notification IPC also rechecks persisted consent
 natively. The bridge starts from a fresh prelude or waits once for its
-`ava-shell-config` event. All Android plugin calls leave the main looper before waiting for
+`ava-app-config` event. All Android plugin calls leave the main looper before waiting for
 their JNI response; direct synchronous mobile-plugin calls would deadlock it.
 
 Android's network-security XML cannot express IP prefixes, so it permits
@@ -95,14 +95,14 @@ silent installs.
 
 ## Build and release
 
-`Cargo.toml` is version `0.4.0`. `.github/workflows/ci-shell.yml` path-filters
+`Cargo.toml` is version `0.4.0`. `.github/workflows/ci-app.yml` path-filters
 Rust format/clippy, Android-target checking, and overlay/manifest tests.
-`release-shell.yml` builds universal macOS DMG, Windows NSIS, and Android APK
-artifacts for `shell-v*` tags. OS signing and updater signing activate only for
+`release-app.yml` builds universal macOS DMG, Windows NSIS, and Android APK
+artifacts for `app-v*` tags. OS signing and updater signing activate only for
 complete secret groups; tag releases fail closed when any required signing
 group is absent, while manual dispatch may still produce unsigned evidence.
-`scripts/build_shell_update_manifest.py` emits signed updater entries only, and
-the mutable `shell-latest` release carries the stable `latest.json` endpoint.
+`scripts/build_app_update_manifest.py` emits signed updater entries only, and
+the mutable `app-latest` release carries the stable `latest.json` endpoint.
 
 ## Limits
 
@@ -116,7 +116,7 @@ network prefixes.
 
 - `src-tauri/src/` — Rust lifecycle, settings, ACL, navigation, platform wiring
 - `src-tauri/scripts/` — scripts injected into the remote console
-- `shell-ui/index.html` — bundled onboarding/retry/settings UI
+- `app-ui/index.html` — bundled onboarding/retry/settings UI
 - `android/` — Kotlin/XML/ProGuard foreground-service and Keystore overlay plus deterministic patcher
 - [README](README.md) — local build and signing commands
-- [Future distribution work](../../future/ui-shell.md) — remaining external work
+- [Future distribution work](../../future/ui-app.md) — remaining external work

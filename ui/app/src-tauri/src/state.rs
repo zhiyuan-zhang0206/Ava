@@ -1,4 +1,4 @@
-//! Shell state shared between the Tauri commands and the window plumbing.
+//! App state shared between the Tauri commands and the window plumbing.
 
 use std::path::PathBuf;
 #[cfg(any(target_os = "android", test))]
@@ -8,12 +8,12 @@ use std::sync::Mutex;
 use crate::settings::Settings;
 use crate::urls::{self, Endpoints};
 
-/// Managed shell state: persisted settings plus transient Android-native state.
+/// Managed app state: persisted settings plus transient Android-native state.
 ///
 /// The optional Android secret cache mirrors the Keystore result only in
 /// process memory. It lets window construction report login capability without
 /// making a synchronous JNI call on the Android main thread.
-pub struct ShellState {
+pub struct AppState {
     config_dir: PathBuf,
     settings: Mutex<Settings>,
     #[cfg(any(target_os = "android", test))]
@@ -24,7 +24,7 @@ pub struct ShellState {
     skip_next_android_autologin: AtomicBool,
 }
 
-impl ShellState {
+impl AppState {
     pub fn new(config_dir: PathBuf, settings: Settings) -> Self {
         Self {
             config_dir,
@@ -118,12 +118,12 @@ impl ShellState {
 mod tests {
     use std::path::PathBuf;
 
-    use super::ShellState;
+    use super::AppState;
     use crate::settings::Settings;
 
     #[test]
     fn android_autologin_skip_is_consumed_once() {
-        let state = ShellState::new(PathBuf::new(), Settings::default());
+        let state = AppState::new(PathBuf::new(), Settings::default());
 
         assert!(!state.take_skip_next_android_autologin());
         state.skip_next_android_autologin();
@@ -133,7 +133,7 @@ mod tests {
 
     #[test]
     fn android_secret_cache_tracks_when_native_loading_finished() {
-        let state = ShellState::new(PathBuf::new(), Settings::default());
+        let state = AppState::new(PathBuf::new(), Settings::default());
 
         assert!(!state.android_secret_loaded());
         assert_eq!(state.android_secret(), None);
@@ -146,7 +146,7 @@ mod tests {
 
     #[test]
     fn late_android_secret_load_cannot_overwrite_a_newly_saved_secret() {
-        let state = ShellState::new(PathBuf::new(), Settings::default());
+        let state = AppState::new(PathBuf::new(), Settings::default());
         state.cache_android_secret(Some("newly-saved".to_string()));
 
         let retained = state.cache_android_secret_if_unloaded(None);

@@ -1,10 +1,10 @@
-//! Shell settings — `settings.json` in the platform config directory.
+//! App settings — `settings.json` in the platform config directory.
 //!
 //! The file carries the connection keys (`entryUrl`, `gatewayUrl`, `autoLogin`)
 //! plus the two Android residency switches. Android credentials deliberately
 //! live outside this file in Keystore. Every key is optional: a missing or
 //! unparseable file falls back to [`Settings::default`] rather than failing the
-//! launch — a shell that cannot start is worse than a shell on defaults.
+//! launch — an app that cannot start is worse than an app on defaults.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -20,7 +20,7 @@ pub const DEFAULT_ENTRY_URL: &str = "http://localhost:3000";
 /// File name inside the app config directory.
 const FILE_NAME: &str = "settings.json";
 
-/// Persisted shell configuration.
+/// Persisted app configuration.
 ///
 /// `entry_url` is `None` on Android until first-run onboarding stores one; on
 /// desktop it defaults to the local gate. `gateway_url` is `None` unless the
@@ -103,7 +103,7 @@ mod tests {
 
     #[test]
     fn missing_file_yields_defaults() {
-        let dir = std::env::temp_dir().join("ava-shell-settings-missing");
+        let dir = std::env::temp_dir().join("ava-app-settings-missing");
         let _ = fs::remove_dir_all(&dir);
         assert_eq!(Settings::load(&dir), Settings::default());
     }
@@ -117,7 +117,7 @@ mod tests {
 
     #[test]
     fn round_trips_through_disk() {
-        let dir = std::env::temp_dir().join("ava-shell-settings-roundtrip");
+        let dir = std::env::temp_dir().join("ava-app-settings-roundtrip");
         let _ = fs::remove_dir_all(&dir);
         let settings = Settings {
             entry_url: Some("http://box:3000".into()),
@@ -133,7 +133,7 @@ mod tests {
 
     #[test]
     fn partial_json_keeps_defaults_for_absent_keys() {
-        let dir = std::env::temp_dir().join("ava-shell-settings-partial");
+        let dir = std::env::temp_dir().join("ava-app-settings-partial");
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).expect("mkdir");
         fs::write(dir.join(FILE_NAME), r#"{"autoLogin": false}"#).expect("write");
@@ -145,7 +145,7 @@ mod tests {
 
     #[test]
     fn malformed_json_falls_back_instead_of_panicking() {
-        let dir = std::env::temp_dir().join("ava-shell-settings-malformed");
+        let dir = std::env::temp_dir().join("ava-app-settings-malformed");
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).expect("mkdir");
         fs::write(dir.join(FILE_NAME), "{ not json").expect("write");

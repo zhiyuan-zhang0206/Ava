@@ -1,6 +1,6 @@
 // Android local-notification bridge.
 //
-// The shell subscribes to the SAME stream the console does — the gateway's
+// The app subscribes to the SAME stream the console does — the gateway's
 // global broadcast `/api/system`, which forwards the cross-agent, low-frequency
 // GLOBAL_ROLES for every agent. Riding the page's own credentials is the whole
 // point: the webview holds the session cookie, so the bridge needs no second
@@ -14,22 +14,22 @@
 //
 // The notified subset is deliberately small: an agent finishing a turn, and an
 // agent blocking on a user decision. Everything else the console shows on
-// screen; a shell that notified more would be noise.
+// screen; an app that notified more would be noise.
 //
 // Native code captures notification taps because the notification plugin's JS
 // event can be lost on a cold launch. Once this credential-gated SSE opens, the
 // bridge consumes that per-tap marker and navigates the same window to Inbox.
 (function () {
   if (window.top !== window) return;
-  if (window.__AVA_SHELL_NOTIFY__) return;
+  if (window.__AVA_APP_NOTIFY__) return;
   var started = false;
   var sseOpen = false;
 
   function tryStart() {
-    var cfg = window.__AVA_SHELL__;
+    var cfg = window.__AVA_APP__;
     if (started || !cfg || !cfg.notifications || !cfg.gatewayUrl) return;
     started = true;
-    window.__AVA_SHELL_NOTIFY__ = true;
+    window.__AVA_APP_NOTIFY__ = true;
 
     // Statuses that mean the agent was doing something; the transition out of one
     // of these into `idling` is what "finished" means on the wire.
@@ -45,9 +45,9 @@
 
     function notify(title, body) {
       window.__TAURI_INTERNALS__
-        .invoke("shell_notify", { title: title, body: body })
+        .invoke("app_notify", { title: title, body: body })
         .catch(function (error) {
-          console.error("[ava-shell] notification failed", error);
+          console.error("[ava-app] notification failed", error);
         });
     }
 
@@ -57,17 +57,17 @@
       try {
         target = new URL("fleet#inbox", cfg.entryUrl);
       } catch (error) {
-        console.error("[ava-shell] could not resolve Inbox deep link", error);
+        console.error("[ava-app] could not resolve Inbox deep link", error);
         return;
       }
       window.__TAURI_INTERNALS__
-        .invoke("shell_take_pending_click")
+        .invoke("app_take_pending_click")
         .then(function (pending) {
           if (!pending) return;
           window.location.href = target.href;
         })
         .catch(function (error) {
-          console.error("[ava-shell] notification click check failed", error);
+          console.error("[ava-app] notification click check failed", error);
         });
     }
 
@@ -152,8 +152,8 @@
 
   tryStart();
   if (!started) {
-    window.addEventListener("ava-shell-config", function onConfig() {
-      window.removeEventListener("ava-shell-config", onConfig);
+    window.addEventListener("ava-app-config", function onConfig() {
+      window.removeEventListener("ava-app-config", onConfig);
       tryStart();
     });
   }

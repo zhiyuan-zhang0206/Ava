@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build Tauri's static ``latest.json`` from shell release artifacts.
+"""Build Tauri's static ``latest.json`` from app release artifacts.
 
 The desktop updater consumes signed ``.app.tar.gz`` and ``.nsis.zip``
 archives, not the user-facing DMG/EXE installers. A release built without the
@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
-_TAG = re.compile(r"shell-v(?P<version>\d+\.\d+\.\d+)\Z")
+_TAG = re.compile(r"app-v(?P<version>\d+\.\d+\.\d+)\Z")
 
 
 def _signed_archive(artifacts: Path, pattern: str, label: str) -> tuple[Path, str] | None:
@@ -46,7 +46,7 @@ def _platform_entry(repo: str, tag: str, archive: Path, signature: str) -> dict[
 def build_manifest(*, tag: str, artifacts: Path, repo: str) -> dict[str, Any]:
     match = _TAG.fullmatch(tag)
     if match is None:
-        raise ValueError(f"'{tag}' is not a shell-v<major>.<minor>.<patch> tag")
+        raise ValueError(f"'{tag}' is not an app-v<major>.<minor>.<patch> tag")
     if len(repo.split("/")) != 2 or any(not part for part in repo.split("/")):
         raise ValueError(f"'{repo}' is not an owner/repository name")
     if not artifacts.is_dir():

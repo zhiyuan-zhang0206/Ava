@@ -1,7 +1,7 @@
 // Android update check.
 //
 // `tauri-plugin-updater` is desktop-only — there is no in-place APK swap — so
-// Android checks the GitHub Releases API for a newer `shell-v*` tag and, when
+// Android checks the GitHub Releases API for a newer `app-v*` tag and, when
 // it finds one, offers the APK. Delivery is a browser download the user
 // confirms, not a silent install.
 //
@@ -10,14 +10,14 @@
 // on this machine. The console's CSP already allows `connect-src https:`, and
 // the GitHub API answers cross-origin.
 (function () {
-  var cfg = window.__AVA_SHELL__;
+  var cfg = window.__AVA_APP__;
   if (!cfg || !cfg.releasesApi || !cfg.version) return;
   if (window.top !== window) return;
-  var MARKER = "ava-shell-update-checked";
+  var MARKER = "ava-app-update-checked";
   if (!window.sessionStorage || window.sessionStorage.getItem(MARKER)) return;
   window.sessionStorage.setItem(MARKER, "1");
 
-  var TAG_PREFIX = "shell-v";
+  var TAG_PREFIX = "app-v";
 
   /** Compare dotted numeric versions; >0 when `a` is newer than `b`. */
   function compare(a, b) {
@@ -33,7 +33,7 @@
 
   function banner(version, assetUrl) {
     var bar = document.createElement("div");
-    bar.setAttribute("data-ava-shell", "update-banner");
+    bar.setAttribute("data-ava-app", "update-banner");
     bar.style.cssText = [
       "position:fixed",
       "left:0",
@@ -64,9 +64,9 @@
       "border:0;border-radius:6px;padding:6px 12px;background:#4f46e5;color:#fff;font:inherit";
     download.addEventListener("click", function () {
       window.__TAURI_INTERNALS__
-        .invoke("shell_open_external", { url: assetUrl })
+        .invoke("app_open_external", { url: assetUrl })
         .catch(function (error) {
-          console.error("[ava-shell] update download handoff failed", error);
+          console.error("[ava-app] update download handoff failed", error);
         });
       bar.remove();
     });
@@ -102,14 +102,14 @@
     if (!Array.isArray(releases)) return;
 
     // GitHub orders releases by creation time, which is not version order: a
-    // later backfill can appear before a newer shell. Scan the whole response
+    // later backfill can appear before a newer app. Scan the whole response
     // and choose the highest eligible semver that actually has an APK.
     var candidate = null;
     for (var i = 0; i < releases.length; i += 1) {
       var release = releases[i];
       if (!release || release.draft || release.prerelease) continue;
       var tag = String(release.tag_name || "");
-      if (!/^shell-v\d+\.\d+\.\d+$/.test(tag)) continue;
+      if (!/^app-v\d+\.\d+\.\d+$/.test(tag)) continue;
       var version = tag.slice(TAG_PREFIX.length);
       if (compare(version, cfg.version) <= 0) continue;
       var assets = release.assets || [];
@@ -128,12 +128,12 @@
     if (!candidate) return;
     if (cfg.notifications) {
       window.__TAURI_INTERNALS__
-        .invoke("shell_notify", {
+        .invoke("app_notify", {
           title: "Ava " + candidate.version + " is available",
           body: "Tap the download bar in the app to install it.",
         })
         .catch(function (error) {
-          console.error("[ava-shell] update notification failed", error);
+          console.error("[ava-app] update notification failed", error);
         });
     }
     if (document.body) banner(candidate.version, candidate.assetUrl);

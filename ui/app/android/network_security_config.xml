@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Cleartext HTTP policy for the shell.
+  Cleartext HTTP policy for the app.
 
   The cluster speaks plain HTTP on a private network, so cleartext has to be
   permitted at all. The intent is to permit it ONLY towards private space —
@@ -10,8 +10,8 @@
   cannot be enumerated.
 
   So the range policy is enforced where it CAN be expressed precisely: the
-  shell refuses to store a cleartext entry URL whose host resolves outside
-  private space (`urls::is_private_host`, applied in `shell_save_settings` on
+  app refuses to store a cleartext entry URL whose host resolves outside
+  private space (`urls::is_private_host`, applied in `app_save_settings` on
   Android). Since the navigation guard confines the webview to the entry and
   gateway hosts, no other cleartext origin is reachable — which is a stronger
   guarantee than a hostname allow-list would have given, not a weaker one.

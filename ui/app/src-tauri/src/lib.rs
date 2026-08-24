@@ -1,6 +1,6 @@
-//! Ava shell — one Tauri application for macOS, Windows and Android.
+//! Ava App — one Tauri application for macOS, Windows and Android.
 //!
-//! The shell renders no product UI of its own: it loads the cluster's console
+//! The app renders no product UI of its own: it loads the cluster's console
 //! over the network and adds only what a browser tab cannot give it — tray
 //! residency and auto-login on desktop, Keystore-backed auto-login, background
 //! residency and local notifications on Android, and an update path on both.
@@ -22,7 +22,7 @@ mod window;
 use tauri::Manager;
 
 use crate::settings::Settings;
-use crate::state::ShellState;
+use crate::state::AppState;
 
 /// Application entry point, shared by the desktop binary and the Android
 /// library entry `tauri::mobile_entry_point` generates.
@@ -32,7 +32,7 @@ pub fn run() {
 
     #[cfg(desktop)]
     let builder = builder
-        // A second launch focuses the running shell instead of opening a
+        // A second launch focuses the running app instead of opening a
         // second console window against the same cluster.
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             desktop::show_main_window(app);
@@ -52,19 +52,19 @@ pub fn run() {
 
     builder
         .invoke_handler(tauri::generate_handler![
-            commands::shell_config,
-            commands::shell_open_external,
-            commands::shell_save_settings,
-            commands::shell_retry_entry,
-            commands::shell_open_settings,
-            commands::shell_notify,
-            commands::shell_take_pending_click,
+            commands::app_config,
+            commands::app_open_external,
+            commands::app_save_settings,
+            commands::app_retry_entry,
+            commands::app_open_settings,
+            commands::app_notify,
+            commands::app_take_pending_click,
         ])
         .setup(|app| {
             let handle = app.handle();
             let config_dir = settings::config_dir(handle);
             let settings = Settings::load(&config_dir);
-            app.manage(ShellState::new(config_dir, settings));
+            app.manage(AppState::new(config_dir, settings));
 
             window::open_entry(handle);
 
@@ -80,7 +80,7 @@ pub fn run() {
             Ok(())
         })
         .build(tauri::generate_context!())
-        .expect("the shell context must be valid")
+        .expect("the app context must be valid")
         .run(|_app, event| {
             // Tray residency: the last window closing is not a reason to exit.
             // Only the tray's Quit (app.exit) ends the process.

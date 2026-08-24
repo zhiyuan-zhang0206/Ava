@@ -32,7 +32,7 @@ function element() {
 const body = element();
 body.appendChild = function (child) { appended.push(child); };
 const window = {
-  __AVA_SHELL__: {
+  __AVA_APP__: {
     releasesApi: "https://api.github.test/releases",
     version: "0.4.0",
     notifications: false,
@@ -74,7 +74,7 @@ def _release(
             }
         )
     return {
-        "tag_name": f"shell-v{version}",
+        "tag_name": f"app-v{version}",
         "draft": draft,
         "prerelease": prerelease,
         "assets": assets,

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Apply the shell's Android customisations onto a freshly generated project.
+"""Apply the app's Android customisations onto a freshly generated project.
 
 `cargo tauri android init` writes `src-tauri/gen/android/` from the Tauri
 version's own templates. That tree is a build output, not source: committing it
 would freeze a generated Gradle project against one Tauri version and make every
 upgrade a merge. So the release workflow regenerates it and this script layers
-the four things the shell needs on top:
+the four things the app needs on top:
 
   1. the Kotlin foreground service and Keystore plugins (`java/`);
   2. ProGuard rules that preserve the JNI/reflection surface (`proguard-ava.pro`);
@@ -35,12 +35,12 @@ ET.register_namespace("android", ANDROID_NS)
 
 #: Java package the app is generated into — derived from `identifier` in
 #: tauri.conf.json, and hard-coded in the Kotlin sources' `package` line.
-PACKAGE = "com.ava.shell"
+PACKAGE = "com.ava.app"
 
-#: Permissions the shell adds on top of the template's INTERNET.
+#: Permissions the app adds on top of the template's INTERNET.
 #:
 #: FOREGROUND_SERVICE_SPECIAL_USE is the API 34+ typed companion to
-#: FOREGROUND_SERVICE. The shell's persistent, user-visible SSE connection is
+#: FOREGROUND_SERVICE. The app's persistent, user-visible SSE connection is
 #: not media, location, a bounded data sync, or any other named service type;
 #: Android reserves specialUse for exactly that gap. POST_NOTIFICATIONS is the
 #: API 33+ runtime grant the notification bridge needs.
@@ -65,7 +65,7 @@ def _android(attr: str) -> str:
 
 
 def patch_manifest(manifest_xml: str) -> str:
-    """Return `manifest_xml` with the shell's permissions, service and network
+    """Return `manifest_xml` with the app's permissions, service and network
     security config applied. Idempotent.
 
     Raises `ValueError` when the manifest does not have the shape the Tauri

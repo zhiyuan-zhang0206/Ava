@@ -1,4 +1,4 @@
-package com.ava.shell
+package com.ava.app
 
 import android.app.Activity
 import android.content.Intent

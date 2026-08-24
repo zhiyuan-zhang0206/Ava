@@ -50,7 +50,7 @@ GENERATED_MANIFEST = """<?xml version="1.0" encoding="utf-8"?>
 
         <provider
           android:name="androidx.core.content.FileProvider"
-          android:authorities="com.ava.shell.fileprovider"
+          android:authorities="com.ava.app.fileprovider"
           android:exported="false"
           android:grantUriPermissions="true">
           <meta-data
@@ -103,7 +103,7 @@ def patched() -> ET.Element:
     return ET.fromstring(overlay.patch_manifest(GENERATED_MANIFEST))  # noqa: S314
 
 
-def test_adds_the_permissions_the_shell_needs(patched: ET.Element) -> None:
+def test_adds_the_permissions_the_app_needs(patched: ET.Element) -> None:
     names = {_attr(e, "name") for e in patched.findall("uses-permission")}
     assert set(overlay.PERMISSIONS) <= names
     # The template's own permission must survive the patch.
@@ -230,4 +230,4 @@ def test_apply_copies_the_proguard_rules_that_preserve_plugin_reflection(
     overlay.apply(_OVERLAY.parent, tmp_path)
 
     rules = (tmp_path / "app" / "proguard-ava.pro").read_text()
-    assert "-keep class com.ava.shell.** { *; }" in rules
+    assert "-keep class com.ava.app.** { *; }" in rules

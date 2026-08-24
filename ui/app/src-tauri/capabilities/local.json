@@ -1,18 +1,18 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "local",
-  "description": "What the shell's OWN bundled pages (onboarding, connecting, unreachable) may do. The console is a remote origin and gets nothing from here — its narrower grant is added at runtime for the configured gate URL only (src/window.rs).",
+  "description": "What the app's OWN bundled pages (onboarding, connecting, unreachable) may do. The console is a remote origin and gets nothing from here — its narrower grant is added at runtime for the configured gate URL only (src/window.rs).",
   "local": true,
   "windows": ["main"],
   "permissions": [
     "core:default",
     "core:webview:allow-webview-close",
     "opener:default",
-    "allow-shell-config",
-    "allow-shell-open-external",
-    "allow-shell-save-settings",
-    "allow-shell-retry-entry",
-    "allow-shell-notify",
-    "allow-shell-take-pending-click"
+    "allow-app-config",
+    "allow-app-open-external",
+    "allow-app-save-settings",
+    "allow-app-retry-entry",
+    "allow-app-notify",
+    "allow-app-take-pending-click"
   ]
 }

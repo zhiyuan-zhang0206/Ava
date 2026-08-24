@@ -5,7 +5,7 @@
 //! process is reaped loses its webview, and with it the SSE connection the
 //! notification bridge rides on. A foreground service (with the persistent
 //! notification Android requires in exchange) is the supported way to keep the
-//! process alive, so the shell starts one while the setting is on.
+//! process alive, so the app starts one while the setting is on.
 //!
 //! The service itself is Kotlin (`ui/app/android/`), reached through a tiny
 //! Tauri Android plugin. Rust only turns it on and off.
@@ -16,7 +16,7 @@ use tauri::{AppHandle, Manager, Runtime};
 /// Java package the overlay installs the plugin class into. Must match
 /// `identifier` in `tauri.conf.json`, which is what the Android project's
 /// package name is derived from.
-const PLUGIN_PACKAGE: &str = "com.ava.shell";
+const PLUGIN_PACKAGE: &str = "com.ava.app";
 const BACKGROUND_PLUGIN_CLASS: &str = "AvaBackgroundPlugin";
 const BACKGROUND_PLUGIN_NAME: &str = "avabackground";
 const SECRET_PLUGIN_CLASS: &str = "AvaSecretPlugin";
@@ -41,7 +41,7 @@ struct BackgroundPlugin<R: Runtime>(PluginHandle<R>);
 struct SecretPlugin<R: Runtime>(PluginHandle<R>);
 
 /// Managed handle to the notification-click mailbox. A missing overlay means
-/// the shell continues without notification deep-link capture.
+/// the app continues without notification deep-link capture.
 #[derive(Clone)]
 struct ClickPlugin<R: Runtime>(PluginHandle<R>);
 
@@ -92,7 +92,7 @@ pub fn click_plugin<R: Runtime>() -> TauriPlugin<R> {
                     app.manage(ClickPlugin(handle));
                 }
                 // A missing class means the Android overlay was not applied.
-                // The shell still starts; it simply cannot capture click taps.
+                // The app still starts; it simply cannot capture click taps.
                 Err(err) => log::error!("notification-click plugin unavailable: {err}"),
             }
             Ok(())
@@ -165,7 +165,7 @@ pub async fn save_secret_async<R: Runtime>(app: &AppHandle<R>, secret: &str) -> 
 /// The first caller may observe no cached value while this request is in
 /// flight; a read failure is equivalent to no startup credential.
 pub async fn load_stored_secret<R: Runtime>(app: &AppHandle<R>) -> Option<String> {
-    let state = app.state::<crate::state::ShellState>();
+    let state = app.state::<crate::state::AppState>();
     if state.android_secret_loaded() {
         return state.android_secret();
     }
@@ -247,7 +247,7 @@ pub async fn show_notification<R: Runtime>(app: AppHandle<R>, title: String, bod
 /// Startup wiring: restore the persisted notification permission and service
 /// choices. Fresh installs default both off, so onboarding happens first.
 pub fn setup<R: Runtime>(app: &AppHandle<R>) {
-    let settings = app.state::<crate::state::ShellState>().settings();
+    let settings = app.state::<crate::state::AppState>().settings();
     let handle = app.clone();
     tauri::async_runtime::spawn(async move {
         // Prime the cache asynchronously. Window startup uses the same loader

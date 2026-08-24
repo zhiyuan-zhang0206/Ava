@@ -1,6 +1,6 @@
 //! Desktop residency: the tray, the close-hides-to-tray rule, and updates.
 //!
-//! The shell is meant to sit in the tray all day. Closing the window hides it;
+//! The app is meant to sit in the tray all day. Closing the window hides it;
 //! the only real exit is the tray's Quit (or Cmd+Q), keeping the console one
 //! click away.
 
@@ -33,7 +33,7 @@ pub fn show_main_window(app: &AppHandle) {
     }
 }
 
-/// Close hides instead of quitting — the shell stays resident.
+/// Close hides instead of quitting — the app stays resident.
 pub fn attach_window_behavior(window: &WebviewWindow) {
     let handle = window.clone();
     window.on_window_event(move |event| {
