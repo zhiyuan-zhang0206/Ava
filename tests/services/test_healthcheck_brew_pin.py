@@ -18,8 +18,20 @@ def _macos_check(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(hc, "_reported_missing", ())
 
 
-def _brew_output(monkeypatch: pytest.MonkeyPatch, formulae: set[str]) -> None:
+def _brew_output(
+    monkeypatch: pytest.MonkeyPatch,
+    pinned: set[str],
+    installed: set[str] | None = None,
+) -> None:
+    installed_formulae = set(brew_pin.PINNED_BREW_FORMULAE) if installed is None else installed
+
     def fake_run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        if args == ["brew", "list", "--pinned"]:
+            formulae = pinned
+        elif args == ["brew", "list", "--formula"]:
+            formulae = installed_formulae
+        else:
+            raise AssertionError(f"unexpected brew command: {args!r}")
         return subprocess.CompletedProcess(args, 0, stdout="\n".join(sorted(formulae)), stderr="")
 
     monkeypatch.setattr(brew_pin.subprocess, "run", fake_run)
