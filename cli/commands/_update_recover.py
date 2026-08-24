@@ -93,17 +93,18 @@ def _recover_gateway_local(
         )
         return 1
     except MigrationError as exc:
-        # A down failed partway: rollback_to commits each down in its own transaction,
-        # so the higher migrations already came off but the schema is now stranded at
-        # an intermediate set (NOT the snapshot). Do NOT reset the code — that would
-        # add a code/schema skew on top of an already-indeterminate schema. Leave the
-        # half-state for a human; this is the worst case the recovery can produce, so
-        # name it precisely.
+        # A down failure aborts rollback_to's one batch transaction, leaving the
+        # schema at the applied set the failed start left: equal to or a subset of
+        # what the new code expects. Do NOT reset code: old code under that schema
+        # would become CodeBehindSchema. The state is determinate and fix-forwardable,
+        # but the stopped gateway still requires a human decision.
         print(
             f"  ✗✗ MANUAL INTERVENTION: a down migration failed mid-rollback ({exc}); "
-            "earlier downs already committed, so the schema is PARTIALLY rolled back "
-            "(not at the pre-update snapshot) and code was NOT reset. Schema + code "
-            "are inconsistent; the gateway is DOWN.",
+            "rollback aborted atomically, so the schema is unchanged (not partially "
+            "rolled back) and code was NOT reset. Code + schema remain consistent "
+            "for fix-forward: re-run `ava cluster update` or `ava start` on the new "
+            "revision to apply pending migrations. Do NOT reset code; the gateway is "
+            "DOWN and requires a human decision.",
             file=sys.stderr,
         )
         return 1
