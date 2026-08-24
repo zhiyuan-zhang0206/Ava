@@ -2,8 +2,9 @@
 
 The step has two moves. First, decide precisely whether the host's serving
 binaries are allow-listed and name the defect when they are not. Second, repair
-the manifest directly with `socketfilterfw`, which is unprivileged on macOS
-26.5+, and retry through `sudo -n` on releases that still require elevation.
+the manifest directly with `socketfilterfw`, whose root-free behavior was
+empirically verified on the macmini running macOS 15.3.1, and retry through
+`sudo -n` on releases that still require elevation.
 
 A plain `sudo` would prompt for a password, and converge runs unattended from
 `ava start`, the watchdog, and `ava cluster update`. A prompt in that path does

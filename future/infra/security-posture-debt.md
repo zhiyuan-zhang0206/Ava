@@ -38,9 +38,9 @@ unix-socket local trust (OS user is the trust root).
 ## Resolved since the assessment
 
 - macOS ALF manifest drift is reconciled by `ava converge`: manifest globs cover
-  the current inbound binaries, direct `socketfilterfw` mutation works on the
-  verified macOS 26.5 host, and older-platform elevation remains a bounded
-  `sudo -n` / manual-command fallback (2026-08-24, task #1531).
+  the current inbound binaries, direct `socketfilterfw` mutation was empirically
+  verified on the macmini running macOS 15.3.1, and elevation on other platforms
+  remains a bounded `sudo -n` / manual-command fallback (2026-08-24, task #1531).
 - Cloudflare tunnel deprecated (2026-08-02 ruling): the ava-prod user
   LaunchAgent is disabled; the root LaunchDaemon
   `com.cloudflare.cloudflared` (token tunnel) was scheduled for

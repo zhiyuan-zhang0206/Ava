@@ -8,8 +8,9 @@ operator the same machinery on demand, without a full converge:
   and whether the older-macOS sudo fallback grant is installed.
 - `ava firewall sync` — run the rootless-first repair + prune pass now.
 
-macOS 26.5+ accepts the mutations without root. Older releases fall back to
-`sudo -n`, then print manual commands if no non-interactive grant is available.
+Root-free mutation was empirically verified on the macmini running macOS 15.3.1.
+Other releases fall back to `sudo -n`, then print manual commands if no
+non-interactive grant is available.
 """
 
 from __future__ import annotations
@@ -45,7 +46,8 @@ def cmd_firewall_status() -> int:
         print("  sudo fallback grant: installed (used only if direct mutation is rejected)")
     else:
         print(
-            "  sudo fallback grant: not installed (normally unnecessary on macOS 26.5+; "
+            "  sudo fallback grant: not installed (direct mutation was verified on "
+            "the macmini running macOS 15.3.1; "
             "sync prints manual commands if this host requires elevation)"
         )
     return 0

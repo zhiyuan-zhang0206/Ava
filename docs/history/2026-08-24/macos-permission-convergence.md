@@ -13,9 +13,10 @@ desktop annoyance.
 
 ALF membership becomes declarative host convergence. The manifest covers Ava's
 current inbound binaries with version-tolerant globs and human-readable purposes;
-converge directly adds, unblocks, and prunes rules. Direct mutation was verified
-without elevation on macOS 26.5. Compatibility remains fail-open for startup:
-retry with non-interactive `sudo -n`, then report an exact manual command.
+converge directly adds, unblocks, and prunes rules. Direct mutation was
+empirically verified without elevation on the macmini running macOS 15.3.1.
+Compatibility remains fail-open for startup: retry with non-interactive
+`sudo -n`, then report an exact manual command.
 
 A host-global watcher observes TCC and ALF logs, coalesces prompt storms, and
 closes each incident on a result or a 30-minute escalation. It publishes through

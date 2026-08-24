@@ -92,10 +92,11 @@ schema change catches the DB up on its own.
   Version-stamped Python, Postgres, Homebrew, browser, and observability paths mean
   an upgrade can orphan the old ALF identity while loopback keeps working — issue
   #949. The step adds and unblocks resolved manifest paths, then removes stale
-  managed rules. Verified macOS 26.5 hosts accept these `socketfilterfw` mutations
-  without elevation; other versions fall back to `sudo -n` and then an exact manual
-  command without blocking `ava start`. `_gateway_ready` uses the same audit when an
-  off-box probe fails. See [[shared/shared.ava.okf.md|Shared Libraries]].
+  managed rules. These `socketfilterfw` mutations were empirically verified without
+  elevation on the macmini running macOS 15.3.1; other versions fall back to
+  `sudo -n` and then an exact manual command without blocking `ava start`.
+  `_gateway_ready` uses the same audit when an off-box probe fails. See
+  [[shared/shared.ava.okf.md|Shared Libraries]].
 - `_converge_permission_watcher` installs the gateway host's
   `com.ava.permission-watcher` LaunchAgent. An unchanged plist is a strict no-op;
   a changed plist is bootstrapped under the logged-in user domain. The process is
