@@ -21,6 +21,24 @@ PINNED_BREW_FORMULAE: frozenset[str] = frozenset(
     }
 )
 
+# The operator-approved uv version for standalone installs (toolchain.sh on
+# Linux/WSL/Docker, CI setup-uv input). Homebrew hosts pin the `uv` formula
+# above; this is the same version for the GitHub-release-asset path.
+# toolchain.sh embeds these values because it runs before Python exists on a
+# fresh box; tests/scripts/test_toolchain_uv_pin.py asserts the copies match.
+UV_VERSION = "0.10.2"
+
+# SHA256 of each supported platform's release tarball (astral-sh/uv 0.10.2
+# per-asset .sha256 files, e.g. uv-aarch64-apple-darwin.tar.gz.sha256). Keys
+# are the asset-name platform suffix; toolchain.sh maps `uname` output to the
+# same keys.
+UV_ASSET_SHA256: dict[str, str] = {
+    "aarch64-apple-darwin": "3828b2de196687f60e9d199aea8b504299629300831eea0935ff3fe339903d0a",
+    "x86_64-apple-darwin": "3cdbd038333cfe861ce04f3d91678547bf2e726224acf5f42d3f0affa6740e19",
+    "aarch64-unknown-linux-gnu": "4998f545234d52fc6f1280827d392f00a9278295050d59c53a776546dbf0124d",
+    "x86_64-unknown-linux-gnu": "6aa4576c31f791c0b9d4739e256d07358d45e7535695287fec03cf6839e25512",
+}
+
 
 def pinned_brew_formulae() -> set[str] | None:
     """Return Homebrew's pinned formulae, or ``None`` when brew is absent.

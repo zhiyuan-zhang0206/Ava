@@ -7,7 +7,7 @@
 #
 # Does NOT touch: nodejs / uv / Python deps / playwright / mcp-language-server
 # — those are strongly tied to base image and image purpose (main Dockerfile
-# uses nodesource node 22 + astral uv installer + playwright; eval-bench
+# uses nodesource node 22 + the pinned uv download (provision/toolchain.sh) + playwright; eval-bench
 # uses Debian default node + pip install uv + no playwright). Each
 # Dockerfile installs its own.
 #
