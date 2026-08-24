@@ -109,9 +109,10 @@ def test_dashboard_json_matches_core_registrations() -> None:
     """Every core Grafana spec has one exact dashboard counterpart.
 
     The dashboard is hand-maintained, so this protects the user-visible
-    queries, datasource, and Loki query mode against either registry or JSON
+    queries, datasource, and query mode against either registry or JSON
     drifting independently. A ``$__range`` aggregate is a window total and
-    must be instant; fixed-width bucket queries must be range queries.
+    must be instant; fixed-width bucket queries must be range queries. The
+    class-resolution gauges are the deliberate Prometheus exception.
     """
     specs = [spec for spec in _load_core() if "grafana" in spec.output]
     path = _REPO_ROOT / "deploy/lgtm/config/grafana/provisioning/dashboards/ava-ops-main.json"
@@ -127,6 +128,13 @@ def test_dashboard_json_matches_core_registrations() -> None:
             assert panel["datasource"] == {"type": "postgres", "uid": "ops"}
             assert [target["rawSql"] for target in targets] == expected
             assert all("queryType" not in target for target in targets)
+            continue
+        if spec.query_type == "promql":
+            assert panel["datasource"] == {"type": "prometheus", "uid": "prometheus"}
+            assert [target["expr"] for target in targets] == expected
+            assert all(
+                target.get("instant") is True and target.get("range") is False for target in targets
+            )
             continue
 
         datasource = (
@@ -159,6 +167,20 @@ def test_dashboard_has_88_loki_targets() -> None:
         if target.get("datasource", panel.get("datasource", {})).get("uid") == "loki"
     ]
     assert len(loki_targets) == 88
+
+
+def test_unresolved_gauge_names_match_the_otlp_contract() -> None:
+    """Daemon emission, Prometheus instruments, and the visible tiles share names."""
+
+    from shared.telemetry_otlp import _METRIC_DISPOSITION, _strip_unit_suffix
+
+    specs = {spec.name: spec for spec in _load_core()}
+    for field, name in (
+        ("unresolved_warnings", "core_unresolved_warning"),
+        ("unresolved_errors", "core_unresolved_error"),
+    ):
+        assert _METRIC_DISPOSITION[("resolution_status", field)] == "gauge"
+        assert specs[name].query == f"ava_resolution_status_{_strip_unit_suffix(field)}"
 
 
 def test_dashboard_legends_and_time_ranges_are_explicit() -> None:

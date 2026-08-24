@@ -24,8 +24,8 @@ generated from it and never hand-synced. event_names that violate the naming rul
 | mechanism | table/channel | registered event_names | destination | retention |
 |------|------|-------------|------|------|
 | audit (category=audit) | `events` | 20 | events table | 365d+ |
-| telemetry (category=telemetry) | `events` | 107 | events table | 90d |
-| log (category=log) | `events` | 6 | events table | 30d |
+| telemetry (category=telemetry) | `events` | 112 | events table | 90d |
+| log (category=log) | `events` | 4 | events table | 30d |
 | file-only (destination=file) | file log | 1 | file only (not the events table) | — |
 | SSE live | Redis → frontend (not persisted) | 28 role | live projection | ephemeral |
 
@@ -87,7 +87,7 @@ Emit sites and consumers: see the comments at each emit point.
 | `computer_session_end` | computer-use task session closed (idle timeout) | business | task_id, action_count, first_action_at, last_action_at, outcome | 365d | events |
 | `mcp_tool_call` | MCP tool invoked through the gateway /mcp endpoint (agent_id NULL — external client) | business | — | 365d | events |
 
-## 3. Telemetry events (category=telemetry, 107)
+## 3. Telemetry events (category=telemetry, 112)
 
 Telemetry-side event name resolution (`shared/log.py`): **explicit `event=` →
 `label=` fallback → default `"log"`**. Payload = logger extra fields + `msg`
@@ -205,6 +205,11 @@ consumers: see the comments at each emit point.
 | `otlp_backend_recovered` | OTLP backend brought up after a disabled episode (periodic retry) | observation | endpoint, disabled_s | — | 90d | events |
 | `loki_query_budget` | local Loki query-admission transition and capacity metrics | noise | outcome, active, queued, high_water, wait_ms, acquired, queue_full, wait_timeout | — | 90d | events |
 | `prom_query_budget` | local Prometheus query-admission transition and capacity metrics | noise | outcome, active, queued, high_water, wait_ms, acquired, queue_full, wait_timeout | — | 90d | events |
+| `warning_resolved` | class-level warning dismissal marker (legacy target-event attributes remain accepted) | anomaly | target_event_id, match, resolved_by, category, level, event_name, source, agent_id, dismissed_by, note | — | 90d | events |
+| `error_resolved` | class-level error/critical dismissal marker (legacy target-event attributes remain accepted) | anomaly | target_event_id, match, resolved_by, category, level, event_name, source, agent_id, dismissed_by, note | — | 90d | events |
+| `warning_reopened` | class-level warning dismissal reopened manually or by the burst safety valve | anomaly | category, level, event_name, source, agent_id, dismissed_by, note, reopened_by, triggered_by_count | — | 90d | events |
+| `error_reopened` | class-level error/critical dismissal reopened manually or by the burst safety valve | anomaly | category, level, event_name, source, agent_id, dismissed_by, note, reopened_by, triggered_by_count | — | 90d | events |
+| `resolution_status` | absolute unresolved warning/error class counts over the daemon's fixed six-hour window | noise | unresolved_warnings, unresolved_errors, window | — | 90d | events |
 
 ## 4. Log (bare logs, category=log)
 
@@ -214,8 +219,6 @@ consumers: see the comments at each emit point.
 | `loki_query_failed` | a Loki HTTP query failed (timeout / disconnect / non-2xx) — carries the request shape | anomaly | endpoint, duration_s, error, window_from, window_to, query | 30d | events |
 | `prom_query_failed` | a Prometheus HTTP query failed (timeout / disconnect / non-2xx) — carries the request shape | anomaly | endpoint, duration_s, error, query | 30d | events |
 | `page_serve_dir_missing` | a served page directory disappeared; emitted on degradation and auto-close | anomaly | agent_id, key, name, serve_dir, port | 30d | events |
-| `warning_resolved` | mark a warning (or class of warnings, via attributes.match) resolved | anomaly | target_event_id, match, resolved_by | 30d | events |
-| `error_resolved` | mark an error (or class of errors, via attributes.match) resolved | anomaly | target_event_id, match, resolved_by | 30d | events |
 
 ## 5. SSE roles (live channel, not persisted, 28)
 

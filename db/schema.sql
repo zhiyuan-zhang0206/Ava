@@ -439,6 +439,36 @@ CREATE TABLE alerts (
 CREATE INDEX alerts_status_starts_idx ON alerts (status, starts_at DESC);
 CREATE INDEX alerts_unread_idx ON alerts (starts_at DESC) WHERE read_at IS NULL;
 
+-- ─────────────── event_dismissals (Loki event-class resolution, task #1468) ───────────────
+-- Loki log lines are immutable, so a resolution is state about an event class,
+-- never a write-back onto an historical event. NULL agent_id means every agent;
+-- the first API version rejects per-agent dismissals while retaining the field
+-- for the class identity's future extension.
+CREATE TABLE event_dismissals (
+    id           BIGSERIAL PRIMARY KEY,
+    category     TEXT NOT NULL,
+    level        TEXT NOT NULL,
+    event_name   TEXT NOT NULL,
+    source       TEXT NOT NULL,
+    agent_id     INTEGER,
+    dismissed_by INTEGER NOT NULL,
+    note         TEXT NOT NULL DEFAULT '',
+    status       TEXT NOT NULL DEFAULT 'dismissed'
+                 CHECK (status IN ('dismissed', 'reopened')),
+    dismissed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    reopened_at  TIMESTAMPTZ,
+    burst_count  INTEGER,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+COMMENT ON COLUMN event_dismissals.dismissed_by IS
+    'Acting agent id; 0 means a user or operator through the gateway UI/API, -1 is the auto-dismiss system.';
+
+CREATE UNIQUE INDEX event_dismissals_one_active_class_idx
+    ON event_dismissals (category, level, event_name, source, agent_id) NULLS NOT DISTINCT
+    WHERE status = 'dismissed';
+
 -- ─────────────── agent_pages ───────────────
 -- HTML UI server registry. The agent uses ava.ui.show(name, port) to start a server in its own process,
 -- self-reporting its reachable host; the page URL is the direct http://<host>:<port>/ the user's browser

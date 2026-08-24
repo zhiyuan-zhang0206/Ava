@@ -7,7 +7,7 @@ tags: []
 
 # Gateway Routers
 
-Gateway's 37 route modules, split by business domain under `gateway/routers/<domain>.py`, each a FastAPI `APIRouter` `include_router`-mounted to `/api/*` at the bottom of `gateway/app.py` (grafana mounts outside `/api`). `_delivery.py` / `agents_forward.py` are not routers but internal helpers (chat-inbound delivery / cross-machine forward).
+Gateway's 38 route modules, split by business domain under `gateway/routers/<domain>.py`, each a FastAPI `APIRouter` `include_router`-mounted to `/api/*` at the bottom of `gateway/app.py` (grafana mounts outside `/api`). `_delivery.py` / `agents_forward.py` are not routers but internal helpers (chat-inbound delivery / cross-machine forward).
 
 ## Router categories
 
@@ -20,6 +20,7 @@ Gateway's 37 route modules, split by business domain under `gateway/routers/<dom
 - **_delivery** — chat inbound delivery internal helper (not a router)
 - **ops_monitor** (`/api/ops/monitor`) — time-bucketed ops panel series (SSE backlog / LLM latency+TPS / restart counts), see [[gateway/routers/ops-monitor.ava.okf.md]]
 - **alerts** (`/api/alerts` + `/stream` + `/read`) — the system→human alert store (Alertmanager shape, `alerts` table), unresolved-first list + counts, SSE tail, mark-as-read, IM fan-out via im_bridge [[gateway/routers/alerts.ava.okf.md]]
+- **event_resolutions** (`/api/event-resolutions`) — authenticated immutable-Loki warning/error class dismissal history: create, status-filtered review list, and manual reopen; writes `event_dismissals` and emits transition markers, while the events-maintenance daemon publishes the resulting gauges
 
 ### Cluster & configuration
 - **cluster** (`/api/cluster/*`) — cluster status, multi-machine roster, admin events, rollout/update/stop control (admin contracts: [[gateway/routers/ops-surfaces.ava.okf.md]])

@@ -17,16 +17,16 @@ Seven sections, one row per section — `core` is the 2026-08-06 user-ruling
 row header. All sections are **expanded by default** (`collapsed: false`,
 2026-08-23 #382):
 
-1. **`core`** — the user's daily first screen: twelve dashboard-window stat tiles
-   cover the entire Statistics popover (LLM calls / Warning / Error /
-   Warning (all) / Error (all) / Live agents / LLM cost /
+1. **`core`** — the user's daily first screen: twelve stat tiles cover the
+   entire Statistics popover (LLM calls / Warning / Error / Unresolved Warning /
+   Unresolved Error / Live agents / LLM cost /
    Tokens / LLM input tokens / LLM output tokens / Cache hit rate / Avg turn
    duration). It then shows Event health,
    Event rate, Token usage — Input, Token usage — Output + Reasoning, Cache
    hit, Turn success rate, and the three full-width **Events** panels:
    business/anomaly logs, the event-type table, and the parse-clean
-   raw stream for debugging. The two `(all)` tiles remain unfiltered until the
-   `resolved_by` producer ships in task #1468.
+   raw stream for debugging. The two unresolved-class tiles read the
+   events-maintenance daemon's fixed-six-hour Prometheus gauges.
 2. **`LLM`** — throughput tokens/s, the three TPS series, calls/bucket,
    cost USD, LLM errors, and per-agent Top 20.
 3. **`Gateway & execution`** — gateway latency p50/p95/max + by route,
@@ -73,11 +73,13 @@ summaries cover the same information.
     (`ui/web/src/app/insights/status/page.tsx`).
 
 Datasources (provisioned in `../datasources/datasources.yml`): **Loki**
-(fixed uid `loki`) for every event panel; **Postgres** (uid `ops`) for the
-`Live agents` stat (`agents_meta` is not in Loki); **Prometheus** (uid
-`prometheus`) for the host & data-plane panels and the turn-duration histogram
+(fixed uid `loki`) for event panels; **Postgres** (uid `ops`) for the `Live
+agents` stat (`agents_meta` is not in Loki); **Prometheus** (uid `prometheus`)
+for the two unresolved-class tiles, turn-duration percentile alerting, and the
+host & data-plane panels
 (per-machine OTel Collector sidecar scrapes, `job="ava-infra"` + a `host`
-label = the OS hostname).
+label = the OS hostname). The unresolved tiles read the daemon's absolute
+resolution gauges, not raw event lines.
 
 ## Core metrics (registered, not hand-written)
 
@@ -99,10 +101,10 @@ dashboard is provisioning-managed — titles are edited here, as code).
 `shared/plugin_metrics.py` defines `MetricSpec`, shared by core and plugin
 registrations: `name` / `title` / `description` / `event_name` / `category` /
 `unit` / `panel` (`timeseries` / `stat` / `barchart` / `table`) / `query`
-(Grafana query template — usually LogQL over the Loki event stream with
-`query_type="logql"`; the core `Live agents` stat is SQL over `agents_meta`,
-and turn duration is PromQL over the Prometheus histogram), plus the Task #882
-fields:
+(Grafana query template — LogQL over the Loki event stream,
+`query_type="logql"`, for event-stream metrics; `query_type="promql"` for the
+two fixed-window unresolved gauges; the one SQL holdout is the core `Live
+agents` stat over `agents_meta`), plus the Task #882 fields:
 
 - `targets` — extra query templates rendered as refId B/C/... targets on the
   same panel (multi-series panels — e.g. the core TPS panels' max/min-agent
@@ -129,8 +131,10 @@ grouped series (`"{{attributes_route}}"`, `"{{agent_id}}"`). Do not add a
 Range panels use fixed windows selected by metric semantics: count trends use
 `[5m]`, rates use `[1m]`, calls-per-bucket uses `[30m]`, and Fleet/SSE/delivery
 window summaries use instant `[$__range]` queries. Stats and tables remain
-instant over `[$__range]`. Every panel follows the dashboard time picker; no
-panel sets a `timeFrom` or fixed `interval` override.
+instant over `[$__range]`, except the two unresolved-class stats: the
+events-maintenance daemon computes their fixed six-hour window and refreshes
+their Prometheus gauges every five minutes. Every panel follows the dashboard
+time picker; no panel sets a `timeFrom` or fixed `interval` override.
 
 Panels do not set `maxDataPoints`; Grafana derives the `$__interval` step from
 the viewport and selected range. That implicit step is the query-weight knob:

@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, Literal, LiteralString, TypedDict, get_type_hints
+from typing import Any, Literal, LiteralString, NotRequired, TypedDict, get_type_hints
 
 Category = Literal["audit", "telemetry", "log"]
 EventTier = Literal["business", "anomaly", "observation", "noise"]
@@ -385,18 +385,47 @@ class RecallFilter(TypedDict):
     body: str
 
 
-class ResolvedMarker(TypedDict):
-    """`warning_resolved` / `error_resolved` payload.
+class ResolvedMarker(TypedDict, total=False):
+    """`warning_resolved` / `error_resolved` payload, supporting two eras.
 
-    Producers name the target with `target_event_id` (exact id) and/or
-    `match` (msg-LIKE pattern); the maintenance daemon then writes
-    `resolved_by` onto the *target* event's attributes — the read-side
-    contract the unresolved-ops panels filter on.
+    Legacy producers named one mutable Postgres event with `target_event_id`
+    and/or `match`; those attributes remain declared so historical marker
+    lines stay contract-valid. New producers declare an immutable Loki event
+    class and the `event_dismissals` row that carries its resolution state.
     """
 
-    target_event_id: int
-    match: str
-    resolved_by: int
+    target_event_id: NotRequired[int]
+    match: NotRequired[str]
+    resolved_by: NotRequired[int]
+    category: NotRequired[str]
+    level: NotRequired[str]
+    event_name: NotRequired[str]
+    source: NotRequired[str]
+    agent_id: NotRequired[int | None]
+    dismissed_by: NotRequired[int]
+    note: NotRequired[str]
+
+
+class EventClassReopened(TypedDict):
+    """`warning_reopened` / `error_reopened` immutable class-state marker."""
+
+    category: str
+    level: str
+    event_name: str
+    source: str
+    agent_id: int | None
+    dismissed_by: int
+    note: str
+    reopened_by: str
+    triggered_by_count: int | None
+
+
+class ResolutionStatus(TypedDict):
+    """`resolution_status` payload — absolute class-resolution gauges."""
+
+    unresolved_warnings: int
+    unresolved_errors: int
+    window: str
 
 
 class GatewayLatency(TypedDict):
@@ -949,6 +978,39 @@ EVENTS: dict[str, EventSpec] = {
         payload=PromQueryBudget,
         tier="noise",
     ),
+    # Immutable Loki lines cannot be updated with a `resolved_by` attribute.
+    # These markers record class-state transitions while `event_dismissals`
+    # remains the active-resolution source of truth (task #1468).
+    "warning_resolved": _telemetry(
+        "warning_resolved",
+        "class-level warning dismissal marker (legacy target-event attributes remain accepted)",
+        payload=ResolvedMarker,
+        tier="anomaly",
+    ),
+    "error_resolved": _telemetry(
+        "error_resolved",
+        "class-level error/critical dismissal marker (legacy target-event attributes remain accepted)",
+        payload=ResolvedMarker,
+        tier="anomaly",
+    ),
+    "warning_reopened": _telemetry(
+        "warning_reopened",
+        "class-level warning dismissal reopened manually or by the burst safety valve",
+        payload=EventClassReopened,
+        tier="anomaly",
+    ),
+    "error_reopened": _telemetry(
+        "error_reopened",
+        "class-level error/critical dismissal reopened manually or by the burst safety valve",
+        payload=EventClassReopened,
+        tier="anomaly",
+    ),
+    "resolution_status": _telemetry(
+        "resolution_status",
+        "absolute unresolved warning/error class counts over the daemon's fixed six-hour window",
+        payload=ResolutionStatus,
+        tier="noise",
+    ),
     # ── log (category=log) — registry.md §4, the bare-log fallback ──
     "log": EventSpec(
         name="log", category="log", tier="noise", payload=LogPayload, doc="bare log line"
@@ -973,22 +1035,6 @@ EVENTS: dict[str, EventSpec] = {
         tier="anomaly",
         payload=PageServeDirMissing,
         doc="a served page directory disappeared; emitted on degradation and auto-close",
-    ),
-    # unresolved-ops markers: a warning/error (or a class of them) declared fixed —
-    # ops panels filter these out of the "unresolved" views (user ruling 2026-08-09)
-    "warning_resolved": EventSpec(
-        name="warning_resolved",
-        category="log",
-        tier="anomaly",
-        payload=ResolvedMarker,
-        doc="mark a warning (or class of warnings, via attributes.match) resolved",
-    ),
-    "error_resolved": EventSpec(
-        name="error_resolved",
-        category="log",
-        tier="anomaly",
-        payload=ResolvedMarker,
-        doc="mark an error (or class of errors, via attributes.match) resolved",
     ),
 }
 

@@ -25,9 +25,10 @@ Three signals:
   Tempo spans.
 - **metrics** — telemetry-category events become OTLP metrics (Prometheus).
   Each numeric payload field maps to one instrument named
-  ``ava_<event_name>_<field>``: int -> Counter, float -> Histogram (see
-  ``_record_metrics`` for the rules); datapoint attributes are the process
-  dimensions + declared payload scalars only (never loguru decoration
+  ``ava_<event_name>_<field>``: int -> Counter, float -> Histogram, with
+  explicitly declared absolute-state fields exported as Observable Gauges
+  (see ``_record_metrics`` for the rules); datapoint attributes are the
+  process dimensions + declared payload scalars only (never loguru decoration
   extras — a per-event msg string would split every counter into its own
   series). Log/audit events produce no metrics: they are the event stream,
   not a measurement.
@@ -85,6 +86,7 @@ from shared.observability import (
     gateway_observability_home,
 )
 from shared.telemetry import Event
+from shared.telemetry_otlp_gauges import GaugeValues, observable_gauge_callback, record_gauge
 
 __all__ = [
     "COLLECTOR_RETRY_INTERVAL_S",
@@ -149,6 +151,10 @@ _METRIC_DISPOSITION: dict[tuple[str, str], str | None] = {
     ("llm_usage", "price_hit"): None,
     ("llm_usage", "price_out"): None,
     ("llm_usage", "cost_usd"): "counter",
+    # Absolute unresolved counts are non-monotonic. An ObservableGauge holds
+    # the last value rather than adding each five-minute sample forever.
+    ("resolution_status", "unresolved_warnings"): "gauge",
+    ("resolution_status", "unresolved_errors"): "gauge",
 }
 
 # Histogram bucket boundaries for LLM-scale latencies (ms). The OTel defaults
@@ -305,6 +311,8 @@ class _OtlpBackend:
         self._metric_provider: Any = None
         self._meter: Any = None
         self._instruments: dict[tuple[str, str], Any] = {}
+        self._gauge_values: GaugeValues = {}
+        self._gauge_lock = threading.Lock()
         self._init_failed_at: float | None = None
         self._init_lock = threading.Lock()
         self._thread: threading.Thread | None = None
@@ -571,7 +579,8 @@ class _OtlpBackend:
         - int payload field -> Counter (token counts, event counts: things you
           sum). float -> Histogram (latencies/durations: things you
           percentile). `_METRIC_DISPOSITION` overrides per field: a float that
-          is really a sum (cost_usd) records as a Counter; a rate snapshot
+          is really a sum (cost_usd) records as a Counter; an absolute state
+          (resolution_status) records an ObservableGauge; a rate snapshot
           (price_*) records nothing.
         - bool / short-str payload fields become datapoint attributes (model,
           ok, fn); `body` and strings over the length cap never do (content /
@@ -594,8 +603,16 @@ class _OtlpBackend:
                 continue
             if kind == "counter":
                 inst.add(value, attrs)
-            else:
+            elif kind == "histogram":
                 inst.record(value, attrs)
+            else:
+                record_gauge(
+                    self._gauge_values,
+                    self._gauge_lock,
+                    (event.event_name, key),
+                    value,
+                    attrs,
+                )
 
     def _metric_attributes(self, event: Event) -> dict[str, Any]:
         """The datapoint attribute set: process dimensions + declared payload
@@ -641,11 +658,22 @@ class _OtlpBackend:
                     unit=_unit_for(field),
                     description=f"{event_name}.{field} — OTLP-mapped from the unified event stream",
                 )
-            else:
+            elif kind == "histogram":
                 inst = self._meter.create_histogram(
                     name,
                     unit=_unit_for(field),
                     description=f"{event_name}.{field} — OTLP-mapped from the unified event stream",
+                )
+            else:
+                inst = self._meter.create_observable_gauge(
+                    name,
+                    callbacks=[
+                        observable_gauge_callback(
+                            self._gauge_values, self._gauge_lock, (event_name, field)
+                        )
+                    ],
+                    unit=_unit_for(field),
+                    description=f"{event_name}.{field} — OTLP-mapped absolute state from the unified event stream",
                 )
         except Exception as exc:  # report once per pair, skip the pair
             self._report(f"OTLP metric instrument {name!r} creation failed: {exc!r}")
