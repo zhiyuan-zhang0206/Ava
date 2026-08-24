@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-export GRAFANA_ADMIN_PASSWORD="$(cat "{{AVA_HOME}}/lgtm/native/grafana/admin_password")"
+if [[ -f "{{AVA_HOME}}/lgtm/native/grafana/admin_password" ]]; then
+    export GRAFANA_ADMIN_PASSWORD="$(<"{{AVA_HOME}}/lgtm/native/grafana/admin_password")"
+fi
 set -a
 if [ -f "{{REPO}}/deploy/lgtm/.env" ]; then
     . "{{REPO}}/deploy/lgtm/.env"
