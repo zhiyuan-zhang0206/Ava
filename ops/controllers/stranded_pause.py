@@ -70,8 +70,10 @@ from __future__ import annotations
 import logging
 import time
 
+from ops import cluster_session
 from ops.cluster import unpause_local_cluster
 from ops.controllers.base import BlockScope, ReconcileResult
+from shared import pause_owner, ui_update_state, updater_handoff
 from shared.cluster_lock import read_update_lease
 from shared.machine import MachineRole, machine_name
 
@@ -131,7 +133,9 @@ def _stranded_pause_seconds() -> float | None:
     return time.time() - state.updated_at.timestamp()
 
 
-def _pause_owner() -> str | None:
+def _pause_owner(
+    handoff: updater_handoff.UpdaterHandoffSnapshot | None = None,
+) -> str | None:
     """Who, if anyone, is still executing the transition this pause belongs to.
 
     Two signals, because neither covers the other. The **cluster update lease** covers
@@ -158,6 +162,13 @@ def _pause_owner() -> str | None:
     make — which is why `machine_name()` is inside the guarded read too. Not knowing
     which host this is means not knowing whether a hold names it.
     """
+    handoff = updater_handoff.read() if handoff is None else handoff
+    if handoff.status == "invalid":
+        return "updater handoff is unreadable"
+    if handoff.status == "pending" and not handoff.expired:
+        return f"updater handoff {handoff.generation} is pending"
+    if handoff.status == "running" and updater_handoff.owner_is_live(handoff):
+        return f"updater handoff {handoff.generation} has a live process owner"
     try:
         lease = read_update_lease()
     except Exception:
@@ -182,6 +193,16 @@ def _pause_owner() -> str | None:
             "not own the pause; the local-session check still decides",
             lease.describe(),
         )
+    try:
+        live_session = cluster_session.live_orchestration_session()
+    except Exception:
+        _log.warning(
+            "[ops.pause] could not probe local orchestration sessions; deferring "
+            "stranded-pause recovery"
+        )
+        return "unreadable orchestration session"
+    if live_session is not None:
+        return f"local orchestration session {live_session} is in flight"
     from ops.cluster import current_orchestration
 
     try:
@@ -225,23 +246,49 @@ def recover_stranded_pause() -> bool:
     paused_for = _stranded_pause_seconds()
     if paused_for is None or paused_for <= STRANDED_PAUSE_TIMEOUT_S:
         return False
-    owner = _pause_owner()
-    if owner is not None:
-        _log.info(
-            "[ops.pause] paused for %.0fs but %s — that transition still owns this "
-            "pause, not unpausing",
+    with ui_update_state.lifecycle_lock():
+        # The first age check avoids taking the cross-process mutex on ordinary
+        # ticks. Re-read under it so a fresh owner cannot appear between proof
+        # and the destructive unpause/marker clear.
+        paused_for = _stranded_pause_seconds()
+        if paused_for is None or paused_for <= STRANDED_PAUSE_TIMEOUT_S:
+            return False
+        handoff = updater_handoff.read()
+        owner = _pause_owner(handoff)
+        if owner is not None:
+            _log.info(
+                "[ops.pause] paused for %.0fs but %s — that transition still owns this "
+                "pause, not unpausing",
+                paused_for,
+                owner,
+            )
+            return False
+        snapshot = ui_update_state.read()
+        pause_snapshot = pause_owner.read()
+        _log.warning(
+            "[ops.pause] paused for %.0fs and no update is executing (no live lease, or "
+            "only a settle hold waiting for this very host) and no updater is live here, "
+            "so nothing is coming back to resume it; self-unpausing",
             paused_for,
-            owner,
         )
-        return False
-    _log.warning(
-        "[ops.pause] paused for %.0fs and no update is executing (no live lease, or only a "
-        "settle hold waiting for this very host) and no updater is live here, "
-        "so nothing is coming back to resume it; self-unpausing",
-        paused_for,
-    )
-    unpause_local_cluster()
-    return True
+        unpause_local_cluster()
+        # This is the automatic counterpart to `ava cluster recover`: the same
+        # no-owner proof has matured past its safety bound and unpause succeeded.
+        # Clear only afterwards so an unpause failure keeps the maintenance marker
+        # honest and retryable rather than exposing a still-paused broken app.
+        if snapshot.status == "updating" and snapshot.generation is not None:
+            ui_update_state.clear(snapshot.generation)
+        elif snapshot.status == "invalid":
+            ui_update_state.force_clear()
+        if handoff.generation is not None:
+            updater_handoff.clear(handoff.generation)
+        elif handoff.status == "invalid":
+            updater_handoff.force_clear()
+        if pause_snapshot.holder is not None and pause_snapshot.acquired_at is not None:
+            pause_owner.clear(pause_snapshot.holder, pause_snapshot.acquired_at)
+        elif pause_snapshot.status == "invalid":
+            pause_owner.force_clear()
+        return True
 
 
 class PauseController:

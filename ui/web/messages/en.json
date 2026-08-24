@@ -394,12 +394,6 @@
     "contextUsed": "Context: {used} tokens",
     "soft": " · soft {soft} · hard {hard}"
   },
-  "updatingPage": {
-    "systemUpdating": "System updating",
-    "minutesSeconds": "{minutes}m {seconds}s",
-    "seconds": "{seconds}s",
-    "reconnecting": "The cluster is being updated — reconnecting automatically when it's ready…"
-  },
   "noticeDetail": {
     "blocking": "Blocking",
     "dismiss": "Dismiss",

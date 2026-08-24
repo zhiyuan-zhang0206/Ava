@@ -1,4 +1,4 @@
-"""Host-level deploy state — posture + updater lease + mirror file (R1, Task #1021).
+"""Host-level deploy state — posture + updater lease (R1, Task #1021).
 
 One row per machine in `host_deploy_state` answers two questions the old signals
 answered with files, session probes and log mtimes:
@@ -18,16 +18,11 @@ answered with files, session probes and log mtimes:
   liveness as a lease-expiry judgment, replacing "the updater log's mtime has
   not advanced" (stalled-updater controller, Phase-B poll).
 
-The mirror file (`$AVA_HOME/deploy-state.json`) is the host-local projection for
-the offline window — the browser's "updating" page is served from it when the
-gateway/DB is unreachable. Only host-level transitions write it, from this same
-module that writes the DB; a write failure warns and never blocks the transition
-(a degraded label, not an authority).
-
 The old signals were retired by the old-signal sweep (PR5): the `cluster_paused`
 file and `updating.flag` are no longer written or read, and every consumer reads
-this module's row (or the mirror) — the file signals were the expand half of the
-wave, this row is the contract.
+this module's row. The always-up gate's file is now owned separately by
+`shared.ui_update_state`: whole-cluster UI ownership must span local
+pause/converge/start transitions and the complete Phase-B tail.
 
 Layering: `shared` must not import `cli`/`gateway`, and this module is read by
 the gateway middleware, the ops controllers, the updater and the gate — the
@@ -39,18 +34,16 @@ from __future__ import annotations
 import contextlib
 import dataclasses as _dataclasses
 import datetime as _dt
-import json
+import errno
 import logging
 import os
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
 
 import shared.db
 from shared.deploy_timing import NO_PROGRESS_TIMEOUT_S
 from shared.machine import machine_name
-from shared.paths import ava_home, run_dir
+from shared.paths import run_dir
 
 _log = logging.getLogger("shared.host_deploy_state")
 
@@ -67,11 +60,6 @@ _VALID_POSTURES = (POSTURE_IDLE, POSTURE_PAUSED, POSTURE_CONVERGING)
 # "stopped making progress" are two chances to get that wrong. Registered in
 # `shared/timing.py` as an equality constraint.
 UPDATER_LEASE_TTL_S = NO_PROGRESS_TIMEOUT_S
-
-# The mirror file's name under $AVA_HOME. A projection cache, never an
-# authority: it is written by the same transitions that write the DB and read
-# only when the DB is unreachable.
-_MIRROR_NAME = "deploy-state.json"
 
 
 @dataclass(frozen=True)
@@ -271,11 +259,10 @@ def _upsert_posture_only(posture: str) -> None:
 
 
 def set_posture(posture: str) -> None:
-    """Transition THIS host's posture (idle/paused/converging) and mirror it.
+    """Transition THIS host's posture (idle/paused/converging).
 
     Called by the pause/unpause lifecycle (`ops.cluster_pause`) and the updater
-    entry/exit. A DB write failure raises (the caller decides); the mirror write
-    is best-effort and never raises.
+    entry/exit. A DB write failure raises (the caller decides).
 
     Posture and the updater lease are orthogonal facts: this write leaves the
     lease column untouched, so a pause/unpause landing mid-rollout cannot
@@ -286,7 +273,6 @@ def set_posture(posture: str) -> None:
     if posture not in _VALID_POSTURES:
         raise ValueError(f"invalid posture: {posture!r}")
     _upsert_posture_only(posture)
-    _write_mirror(posture)
 
 
 def touch_updater_lease(ttl_s: float = UPDATER_LEASE_TTL_S) -> None:
@@ -299,7 +285,6 @@ def touch_updater_lease(ttl_s: float = UPDATER_LEASE_TTL_S) -> None:
     writer's clock is the one clock that must not enter the arithmetic.
     """
     _upsert(POSTURE_CONVERGING, lease_ttl_s=ttl_s)
-    _write_mirror(POSTURE_CONVERGING)
 
 
 def clear_updater_lease() -> None:
@@ -365,26 +350,36 @@ def try_acquire_updater_lock() -> bool:
         if os.name == "nt":
             import msvcrt
 
-            # msvcrt locks a byte RANGE — give it one stable byte.
-            os.ftruncate(fd, 0)
-            os.write(fd, b"0")
+            # msvcrt locks a byte RANGE — initialize one byte only on first
+            # creation. Never truncate the stable inode while another process
+            # may have that range locked.
+            if os.fstat(fd).st_size == 0:
+                os.write(fd, b"0")
             os.lseek(fd, 0, os.SEEK_SET)
             msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
         else:
             import fcntl
 
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except OSError:
+    except OSError as exc:
         if fd >= 0:
             with contextlib.suppress(OSError):
                 os.close(fd)
-        return False
+        if isinstance(exc, BlockingIOError) or exc.errno in (errno.EACCES, errno.EAGAIN):
+            return False
+        _log.exception("[updater-lock] could not acquire %s", path)
+        raise
     _updater_lock_fds.append(fd)
     return True
 
 
 def release_updater_lock() -> None:
-    """Drop the updater mutex: unlock, close, remove the lock file."""
+    """Drop the updater mutex while preserving its stable lock-file inode.
+
+    Unlinking after close opens a split-inode race: one process can still hold
+    the old inode while another creates and locks a new path. The 0600 file is
+    intentionally permanent; only the advisory lock denotes ownership.
+    """
     while _updater_lock_fds:
         fd = _updater_lock_fds.pop()
         with contextlib.suppress(OSError):
@@ -399,61 +394,3 @@ def release_updater_lock() -> None:
                 fcntl.flock(fd, fcntl.LOCK_UN)
         with contextlib.suppress(OSError):
             os.close(fd)
-    with contextlib.suppress(OSError):
-        _updater_lock_path().unlink(missing_ok=True)
-
-
-# ── mirror file ($AVA_HOME/deploy-state.json) ────────────────────────────────
-
-
-def mirror_path() -> str:
-    """The mirror file's path: `$AVA_HOME/deploy-state.json`."""
-    return str(ava_home() / _MIRROR_NAME)
-
-
-def _write_mirror(posture: str) -> None:
-    """Project the host-level transition onto the local mirror file.
-
-    Best-effort by contract: this is a degraded label for the offline window
-    (gateway/DB unreachable), never an authority — a write failure warns and
-    does not block the DB transition that just happened.
-    """
-    payload = {"posture": posture, "updated_at": _dt.datetime.now(_dt.UTC).isoformat()}
-    path = Path(mirror_path())
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        _fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".deploy-state-", suffix=".tmp")
-        tmp_path = Path(tmp)
-        try:
-            # Write through the mkstemp fd itself — the returned fd was never
-            # closed, so a second open() here leaked one fd per mirror write
-            # (audit 2026-08-08 P1: long-lived pause/unpause processes
-            # accumulated them on every transition).
-            with os.fdopen(_fd, "w") as f:
-                json.dump(payload, f)
-            tmp_path.replace(path)
-        except BaseException:
-            tmp_path.unlink(missing_ok=True)
-            raise
-    except Exception:
-        _log.warning(
-            "[deploy-state] mirror write failed for %s — degraded label only",
-            path,
-            exc_info=True,
-        )
-
-
-def read_mirror(path: str | None = None) -> dict[str, object] | None:
-    """The mirror file's content, or None when absent/unreadable. The offline
-    window's only label; consumers default to idle on any read failure. `path`
-    overrides the default `mirror_path()` — the gate injects its own so tests
-    and multi-home deployments can point it elsewhere.
-    """
-    try:
-        with Path(path or mirror_path()).open() as f:
-            data = json.load(f)
-        if isinstance(data, dict):
-            return cast("dict[str, object]", data)
-        return None
-    except (OSError, ValueError):
-        return None

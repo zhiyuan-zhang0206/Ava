@@ -4,11 +4,10 @@
 // area (not as a full-width page-top bar). Shows SSE connection status
 // without causing layout shifts.
 //
-// No "cluster updating" state here: while a rollout is in flight, an
-// unauthenticated reload is served the full-screen UpdatingPage (see
-// components/auth/auth-guard.tsx), and an already-open authenticated tab
-// just sees this same SSE-drop notice — a separate "updating" banner on top
-// of it would be redundant duplicate signaling.
+// No "cluster updating" state here: while maintenance owns the entry, a
+// reload is served the Gate's full-screen static page. An already-open tab
+// reloads through Gate from the persisted-state/SSE hint, so a separate
+// updating banner would be a second conflicting owner.
 
 import { useStore } from "@/lib/store";
 

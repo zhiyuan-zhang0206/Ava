@@ -401,8 +401,9 @@ async def _cluster_is_paused(request: Request) -> bool:
     in-flight read when the cache expires.
 
     A read failure reads as NOT paused — the same conservative direction the
-    old flag-file stat had (an unreadable flag was an absent flag), and the
-    offline "updating" label comes from the mirror file, not from here.
+    old flag-file stat had (an unreadable flag was an absent flag). Offline
+    maintenance projection comes from the cluster orchestrator's durable Gate
+    marker, not this host posture read.
     """
     now = time.monotonic()
     cached = _pause_cache[0]

@@ -15,11 +15,10 @@
 // SSE disconnect / reconnecting banners moved to the timeline notification
 // area (ConnectionNotice) — they no longer render here. The separate
 // "cluster updating" banner was dropped entirely: the cluster-update-started
-// event drives AuthGuard's full-screen UpdatingPage for already-open tabs, and
-// the status poll clears that state when the orchestration finishes. There is
-// deliberately no completion event: the existing poll edge also reconnects
-// SSE and refetches agents. Only stranded recovery (needs operator action)
-// stays at the root.
+// event and persisted-state poll only reload through the always-up Gate. The
+// Gate is the sole maintenance-page owner. There is deliberately no completion
+// event: the existing poll edge reconnects SSE and refetches agents. Only
+// stranded recovery (needs operator action) stays at the root.
 //
 // Auth-gated: the whole thing only mounts (and only then run its hooks / poll)
 // once authenticated. Pre-auth and on /login the login screen owns the viewport
@@ -33,7 +32,8 @@ import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { errMsg } from "@/lib/errors";
 import { useStore } from "@/lib/store";
-import type { ClusterStatus, SystemEvent } from "@/lib/types";
+import type { SystemEvent } from "@/lib/types";
+import { reloadThroughGate, UI_UPDATE_QUERY_KEY } from "@/lib/gate-maintenance";
 import { AGENTS_QUERY_KEY } from "@/lib/use-agents";
 import {
   CLUSTER_STATUS_QUERY_KEY,
@@ -67,21 +67,10 @@ function ConnectionHealthProvider() {
   // so the timeline's ConnectionNotice can read it.
   const onSystemEvent = useCallback((ev: SystemEvent) => {
     if (ev.role !== "cluster_update_started") return;
-
-    // The status cache may still contain the last pre-update snapshot when the
-    // event arrives. Seed it with the new orchestration before setting the flag
-    // so useClusterHealth's mirror cannot immediately clear the takeover. Real
-    // polls replace this hint; their completion edge clears the flag and also
-    // reconnects SSE/refetches agents.
-    const previous = queryClient.getQueryData<ClusterStatus>(CLUSTER_STATUS_QUERY_KEY);
-    queryClient.setQueryData<ClusterStatus>(
-      CLUSTER_STATUS_QUERY_KEY,
-      previous !== undefined
-        ? { ...previous, current_orchestration: ev.kind }
-        : ({ paused: false, current_orchestration: ev.kind } as unknown as ClusterStatus),
-    );
-    useStore.getState().setClusterUpdating(true);
-  }, [queryClient]);
+    // The spawn path persists the marker before publishing this event. Reload
+    // the current URL through Gate; do not fold the event into page ownership.
+    reloadThroughGate();
+  }, []);
   const onConnectionEvent = useCallback(
     (ev: ConnectionEvent) => {
       if (ev.type === "parse-failed") return;
@@ -99,6 +88,7 @@ function ConnectionHealthProvider() {
     mutationFn: api.recoverCluster,
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: CLUSTER_STATUS_QUERY_KEY });
+      void queryClient.invalidateQueries({ queryKey: UI_UPDATE_QUERY_KEY });
       void queryClient.invalidateQueries({ queryKey: SYSTEM_STATUS_QUERY_KEY });
       void queryClient.invalidateQueries({ queryKey: AGENTS_QUERY_KEY });
       bumpReconnect();

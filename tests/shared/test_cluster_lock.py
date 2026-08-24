@@ -22,6 +22,7 @@ from shared.cluster_lock import (
     SETTLE_TTL_S,
     DeployLease,
     acquire_update_lock,
+    claim_recovery_lock,
     force_release_update_lock,
     read_update_lease,
     release_settle_hold,
@@ -97,6 +98,42 @@ def test_force_release_on_free_lock_returns_none() -> None:
     """Idempotent on an already-free lock — returns None, no error."""
     assert force_release_update_lock() is None
     assert update_lock_holder() is None
+
+
+def test_recovery_claim_loses_if_a_new_rollout_acquires_after_its_free_read() -> None:
+    observed = read_update_lease()
+    assert observed is None
+    assert acquire_update_lock("winner", kind="rollout") is True
+
+    claim = claim_recovery_lock("recovery", observed)
+
+    assert claim.acquired is False
+    assert update_lock_holder() == "winner"
+
+
+def test_recovery_claim_replaces_only_the_exact_dead_lease_identity() -> None:
+    assert acquire_update_lock("dead-holder", kind="rollout") is True
+    observed = read_update_lease()
+    assert observed is not None and observed.acquired_at is not None
+
+    claim = claim_recovery_lock("recovery", observed)
+
+    assert claim.acquired is True
+    assert claim.previous_holder == "dead-holder"
+    assert update_lock_holder() == "recovery"
+
+
+def test_stale_recovery_snapshot_cannot_replace_a_reclaimed_lease() -> None:
+    assert acquire_update_lock("old", kind="rollout") is True
+    observed = read_update_lease()
+    assert observed is not None
+    assert force_release_update_lock() == "old"
+    assert acquire_update_lock("new", kind="restart") is True
+
+    claim = claim_recovery_lock("recovery", observed)
+
+    assert claim.acquired is False
+    assert update_lock_holder() == "new"
 
 
 # ─── the lease as a readable state, and the settle hold ──────────────────────

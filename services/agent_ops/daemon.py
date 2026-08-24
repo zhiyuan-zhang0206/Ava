@@ -89,6 +89,7 @@ from ops.cluster_status import ShellNotFoundError
 from ops.rpc_schemas import (
     AgentSkillViewPayload,
     ClusterSpawnSession,
+    ClusterTransitionPayload,
     ClusterUpdatePayload,
     ConfigWritePayload,
     InventoryWritePayload,
@@ -298,7 +299,11 @@ def _dispatch_sync(kind: str, payload: dict[str, Any]) -> tuple[str, dict[str, o
     """
     match kind:
         case "cluster_stop":
-            return "completed", ops_cluster.cluster_stop_op()
+            transition = ClusterTransitionPayload.model_validate(payload)
+            return "completed", ops_cluster.cluster_stop_op(
+                transition.deploy_holder,
+                transition.deploy_acquired_at,
+            )
         case "cluster_update":
             # restart_only=True is the agent-runner leg of a cluster *restart*
             # (bounce services on current code, no checkout / uv sync);
@@ -320,7 +325,13 @@ def _dispatch_sync(kind: str, payload: dict[str, Any]) -> tuple[str, dict[str, o
         case "cluster_fetch":
             return "completed", ops_cluster.cluster_fetch_op()
         case "cluster_resume":
-            return "completed", ops_cluster.cluster_resume_op()
+            if not payload:
+                return "completed", ops_cluster.cluster_resume_legacy_op()
+            transition = ClusterTransitionPayload.model_validate(payload)
+            return "completed", ops_cluster.cluster_resume_op(
+                transition.deploy_holder,
+                transition.deploy_acquired_at,
+            )
         case "status_probe":
             return "completed", ops_cluster.cluster_status_op().model_dump(mode="json")
         case "config_read":

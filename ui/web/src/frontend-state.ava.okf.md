@@ -15,7 +15,7 @@ Three mechanisms, one writer per cache/flag (`ui/web/CLAUDE.md` + `conventions/f
 | Mechanism | Responsibility | File |
 |---|---|---|
 | TanStack Query | All **server data** (agent list, status, timeline snapshots, token, agent pages, inspect) **+ persistent UI preferences** (`display.*`/`behavior.*` in `user_settings`, via `useUserSettings`/`useDebouncedSetting`); SSE merges into cache, no polling | `lib/use-*.ts` |
-| Zustand `store.ts` | **Volatile UI state** (activeId, composer focus token, mobile drawer, toast, search) + cluster coordination (`reconnectNonce`/`clusterUpdating`/`clusterStranded`); **not persisted** (`persist` middleware removed) | `lib/store.ts` |
+| Zustand `store.ts` | **Volatile UI state** (activeId, composer focus token, mobile drawer, toast, search) + cluster coordination (`reconnectNonce`/`clusterStranded`); **not persisted** (`persist` middleware removed) | `lib/store.ts` |
 | Zustand `timeline-store.ts` | **SSE-driven timeline state** (items/turnActive/streamingCode/streamingIds/hasMoreOlder/parked threads); split from `store.ts` so high-frequency code_delta/chat_delta folding only notifies timeline subscribers, not sidebar/spawn/banner | `lib/timeline-store.ts` |
 | localStorage (bare `useState` + post-mount hydration, no singleton wrapper) | Only 4 **per-device temporary selections** (not synced): current agent (`ava.active.agent_id`), fleet mobile tab (`ava.fleet.mobileTab`), split ratios (`ava.fleet.split`, `ava.fleet.queue-split`) | `use-agents.ts`, `fleet-view.tsx`/`inbox-queue/` |
 
@@ -26,7 +26,7 @@ Server data is not mirrored into Zustand — the sidebar reads `useAgents → us
 ## Zustand `store.ts` (Pure UI + Cluster Coordination)
 
 - **UI state**: `activeId`, composer focus token, mobile drawer, mobile inspector overlay (`mobileInspectorOpen`), toast, search. Spawn selections (`behavior.spawn_*`) and sidebar view mode/sort/stats (`display.sidebar_*`, hooks in `lib/sidebar.ts`) are **not here** — DB settings via `useUserSettings`.
-- **Cluster coordination**: `reconnectNonce` (sole SSE-reconnect lever), `clusterUpdating` (event/poll-driven `UpdatingPage`; the event seeds cached orchestration against stale-poll reversal), `clusterStranded` (drives `AppConnectionBanner`).
+- **Cluster coordination**: `reconnectNonce` (sole SSE-reconnect lever) and `clusterStranded` (drives `AppConnectionBanner`). Maintenance ownership is never mirrored into Zustand: Gate's persisted snapshot is the fact, while SSE/poll only trigger a latched Gate reload.
 
 ## `timeline-store.ts` + Per-Thread Timeline Cache (R1/R2/R3)
 

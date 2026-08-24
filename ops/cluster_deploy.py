@@ -54,6 +54,7 @@ it fans out in two phases by dialing each agent-runner's ops server:
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import shlex
 import subprocess
@@ -63,16 +64,25 @@ from pathlib import Path
 import shared.cluster
 import shared.migrations
 import shared.paths
+import shared.ui_update_state
+import shared.updater_handoff
 from ops import cluster_pause, cluster_session
-from ops._update_shell import SOURCE_SWITCH_OFF, SOURCE_SWITCH_ON, _restart_recovery_cmd
+from ops._update_shell import SOURCE_SWITCH_OFF, _restart_recovery_cmd
 from ops.cluster_session import (
     _CLUSTER_RESTART_SERVICE,
-    _ORCHESTRATION_KINDS,
     _REPO_ROOT,
     _ROLLOUT_SERVICE,
     _UPDATER_SERVICE,
     _native_arg,
 )
+from ops.deploy_spawn import (
+    ClusterUpdateInProgress as ClusterUpdateInProgress,
+)
+from ops.deploy_spawn import (
+    assert_no_orchestration_in_flight as _assert_no_orchestration_in_flight,
+)
+from ops.deploy_spawn import update_entry_args as _update_entry_args
+from ops.deploy_spawn import wait_for_ui_owner as _wait_for_ui_owner
 from ops.update_check import (
     UpdateCheck as UpdateCheck,  # re-export (split out for the file-size ceiling)
 )
@@ -86,22 +96,9 @@ from ops.updater_outcome import mark_native_run, native_exit_line
 from shared.config import settings
 from shared.deploy_timing import NO_PROGRESS_TIMEOUT_S
 from shared.gitenv import git_env
+from shared.platform import LockTimeoutError
 from shared.proc import run_bounded
 from shared.session_env import venv_activation_prefix
-
-
-class ClusterUpdateInProgress(RuntimeError):  # noqa: N818 — state description, same style as ResurrectAlreadyAlive
-    """The `ava-updater` session already exists — an update is in flight.
-
-    Triggered when /api/cluster/update is called while the `ava-updater`
-    session is alive. Racing two update sessions is the 2026-05-25
-    incident: both call `ava stop` concurrently, kill each other's sessions
-    sessions, leave the cluster fully dead with no one to run `ava start`.
-
-    Surfaced as HTTP 409 by the FastAPI handler; caller should wait for
-    the in-flight update to finish (poll /api/cluster/status until
-    paused=false) and only then retry.
-    """
 
 
 class NothingToUpdate(RuntimeError):  # noqa: N818 — state description, same style as ClusterUpdateInProgress
@@ -292,83 +289,7 @@ def reap_stalled_updater_if_hung() -> bool:
 _UPDATER_STALL_TIMEOUT_S: float = NO_PROGRESS_TIMEOUT_S
 
 
-def _assert_no_orchestration_in_flight(*, force: bool = False) -> None:
-    """Refuse a new whole-cluster op while a deploy is in flight **anywhere in the
-    cluster**, not just on this host.
-
-    The whole-cluster orchestration sessions — at most one may run at a time on
-    the gateway (rollout, restart) or this host (updater). They all drive
-    stop/start against the shared paused state, so they must be mutually
-    exclusive: a rollout starting under a restart (or vice versa) would have two
-    `ava cluster update` orchestrations fighting over the same services.
-
-    The local session check alone was not mutual exclusion for the *cluster*. On
-    2026-07-28 a supervised rollout had finished its gateway leg — local session
-    gone, update lock released — while the Windows host was still running its own
-    Phase-B updater. A second `ava cluster update` started here, saw a clean local host,
-    advanced the pin to an unreviewed commit and quiesced into the first rollout's
-    window, force-terminating two agents. So the question asked here is the
-    cluster-wide one (`ops.deploy_window`), which sees that tail.
-
-    `force=True` is the deliberate operator override for a deploy window that is
-    real but stale — evidence this cannot reason about (a host powered off
-    mid-update, say). It skips the cluster-wide question but NOT the local session
-    check: two orchestrations on one host fighting over the same services is never
-    something an operator means to do, and the local check has a precise remedy
-    (kill the named session).
-
-    Raises:
-        ClusterUpdateInProgress: an orchestration session exists here, or a deploy
-            is in flight elsewhere in the cluster.
-    """
-    for service, _ in _ORCHESTRATION_KINDS:
-        session = shared.cluster.session_name(service)
-        if cluster_session._has_orchestration_session(session):
-            raise ClusterUpdateInProgress(
-                f"orchestration session {session!r} already exists; a rollout / restart "
-                f"/ update is in flight. Wait for it to finish — a hung session is "
-                f"force-reaped automatically — or terminate the pid named in "
-                f"$AVA_HOME/run/sessions/{session}.json if it is hung."
-            )
-    if force:
-        _log.warning("[cluster] --force: skipping the cluster-wide deploy-window check")
-        return
-    from ops.deploy_window import deploy_in_flight
-
-    window = deploy_in_flight()
-    if window.active:
-        raise ClusterUpdateInProgress(
-            f"a deploy is already in flight: {window.detail}. Two concurrent deploys "
-            f"defeat the rollout's own safety (each pins its own commit and quiesces "
-            f"into the other's window — the 2026-07-28 collision cost two agents). "
-            f"Wait for `ava cluster status` to show every host on the pin, or re-run "
-            f"with --force if you are certain that deploy is dead."
-        )
-
-
-def _update_entry_args(
-    *,
-    target_sha: str | None = None,
-    mode: str,
-    force_reap: bool,
-) -> str:
-    """The `python -m cli.commands._update_agent_runner` flag tail for the detached
-    POSIX updater session (R1-6 execution-shape convergence).
-
-    `--mode` is always spelled out so the operator-read updater log shows the
-    drain policy; `--target-sha` only when the rollout pinned one (absent = the
-    entry resolves the track ref itself — a watchdog self-heal catching the host
-    up); `--force-reap` only when set (Phase B's quiesce-timeout backstop).
-    """
-    args = f" --mode {shlex.quote(mode)}"
-    if target_sha:
-        args += f" --target-sha {shlex.quote(target_sha)}"
-    if force_reap:
-        args += " --force-reap"
-    return args
-
-
-def spawn_update(
+def spawn_update(  # noqa: PLR0915 — one pause-to-detached-child transaction
     *,
     restart_only: bool = False,
     target_sha: str | None = None,
@@ -438,6 +359,7 @@ def spawn_update(
     # quiesce timed out on stragglers.
     quiesce = mode != "none"
     updater_sess = shared.cluster.session_name(_UPDATER_SERVICE)
+    handoff_generation = shared.updater_handoff.new_generation()
     if cluster_session._has_orchestration_session(updater_sess):
         if _updater_hung(updater_sess) and _reap_stalled_updater(updater_sess):
             # "cleared", not "reaped": what lets this update proceed is the session
@@ -490,7 +412,6 @@ def spawn_update(
             )
         shared.migrations.validate_migrations_at_ref(ref, repo_root=_REPO_ROOT)
 
-    cluster_pause.pause_local_cluster()
     log_path = _new_update_log("updater")
     repo = _REPO_ROOT
     if restart_only:
@@ -508,7 +429,7 @@ def spawn_update(
             f"{{ {venv_activation_prefix()}"
             f"if cd {shlex.quote(str(repo))}; "
             f"then python -m cli.commands._update_agent_runner --restart-only"
-            f"{_update_entry_args(mode=mode, force_reap=force_reap)}; "
+            f"{_update_entry_args(mode=mode, force_reap=force_reap, handoff_generation=handoff_generation)}; "
             f"rc=$?; "
             f"else rc=$?; echo '[updater] cannot enter the repo; nothing to bounce'; fi; "
             f'echo "[session-exit] rc=$rc"; }} '
@@ -517,9 +438,9 @@ def spawn_update(
         # forward_env_dict has already put this venv's bin dir on the child PATH,
         # so `ava` resolves without an activation prefix.
         native_cmd = (
-            "(python -m cli.commands._updater_lease touch || ver>nul)"
+            f"python -m cli.commands._updater_lease touch --handoff-generation {_native_arg(handoff_generation)}"
             f" && {_restart_recovery_cmd(quiesce=quiesce, mode=mode, force_reap=force_reap)}"
-            " & python -m cli.commands._updater_lease clear"
+            f" & python -m cli.commands._updater_lease clear --handoff-generation {_native_arg(handoff_generation)}"
         )
     else:
         # The detached session runs the in-process self-update (R1-6 execution-shape
@@ -541,7 +462,7 @@ def spawn_update(
             f"if cd {shlex.quote(str(repo))}; "
             f"then echo '[updater] self-update to {ref} via in-process path (force-checkout discards any unpushed local commits / dirty tree; recover via git reflog)'; "
             f"python -m cli.commands._update_agent_runner"
-            f"{_update_entry_args(target_sha=target_sha, mode=mode, force_reap=force_reap)}; "
+            f"{_update_entry_args(target_sha=target_sha, mode=mode, force_reap=force_reap, handoff_generation=handoff_generation)}; "
             f"rc=$?; "
             f"else rc=$?; echo '[updater] cannot enter the repo; nothing to update'; fi; "
             f'echo "[session-exit] rc=$rc"; }} '
@@ -572,10 +493,11 @@ def spawn_update(
             # fetch/checkout/sync before the old mid-chain claim left a slow host
             # looking ownerless (stranded-pause controller) mid-update. `ver>nul`
             # is the fail-soft spelling of `|| true`.
-            f"(python -m cli.commands._updater_lease touch || ver>nul){SOURCE_SWITCH_ON}"
-            f" & echo [updater] force-checkout to {native_ref} -- discards any unpushed "
+            f"python -m cli.commands._updater_lease touch --handoff-generation {_native_arg(handoff_generation)}"
+            f" && (python -m cli.commands._source_switch_marker on || ver>nul)"
+            f" && echo [updater] force-checkout to {native_ref} -- discards any unpushed "
             f"local commits or a dirty tree, recover via git reflog"
-            f" & git fetch origin"
+            f" && git fetch origin"
             f" && git checkout --force -B {_native_arg(branch)} {native_ref}"
             f" && git diff --quiet && git diff --cached --quiet"
             f" && uv sync"
@@ -594,9 +516,9 @@ def spawn_update(
             # a live updater for 15 minutes. Phase B reads that claim as "still
             # working" and spends its entire bound on it, and the settle hold then
             # waits on the same host again.
-            f" & python -m cli.commands._updater_lease clear{SOURCE_SWITCH_OFF}"
+            f" & python -m cli.commands._updater_lease clear --handoff-generation {_native_arg(handoff_generation)}{SOURCE_SWITCH_OFF}"
             f" & exit /b 1)"
-            f" & python -m cli.commands._updater_lease clear{SOURCE_SWITCH_OFF}"
+            f" & python -m cli.commands._updater_lease clear --handoff-generation {_native_arg(handoff_generation)}{SOURCE_SWITCH_OFF}"
         )
     # One log holds every native run, so its tail needs a seam to be read by (#1117).
     native_cmd = mark_native_run(native_cmd)
@@ -608,20 +530,45 @@ def spawn_update(
     # lines per update and answers that question outright; the syscall underneath is
     # still unidentified, so the next occurrence has to be readable off the box.
     _log.info("[cluster] spawning updater session %s (log=%s)", updater_sess, log_path)
-    try:
-        cluster_session._spawn_detached_session(
-            updater_sess, shell_cmd=inner_cmd, native_cmd=native_cmd
-        )
-    except Exception:
-        # Roll back: pause was set, but the updater session never started — leaving
-        # the cluster paused with no recovery in flight would strand agents. The
-        # posture row marked by that same pause is rolled back with it: no
-        # updater ever ran, so nothing is updating and the gate must not say so.
-        # (The old flag files were retired with the old-signal sweep, PR5.)
-        from shared.host_deploy_state import set_posture
-
-        set_posture("idle")
-        raise
+    with shared.ui_update_state.lifecycle_lock():
+        # Validation/fetch above is intentionally outside this short mutex.
+        # Recheck now, then make pause + session visibility indivisible from a
+        # recovery actor's no-owner proof.
+        live_session = cluster_session.live_orchestration_session()
+        if live_session is not None:
+            raise ClusterUpdateInProgress(
+                f"orchestration session {live_session!r} already exists; an update is in flight"
+            )
+        try:
+            shared.updater_handoff.begin(
+                expected_session=updater_sess,
+                generation=handoff_generation,
+            )
+        except shared.updater_handoff.UpdaterHandoffActive as exc:
+            raise ClusterUpdateInProgress(
+                "an updater spawn handoff still has a live/fresh owner or is "
+                "unreadable; wait for it or recover the host"
+            ) from exc
+        try:
+            cluster_pause.pause_local_cluster()
+        except BaseException:
+            shared.updater_handoff.clear(handoff_generation)
+            with contextlib.suppress(Exception):
+                cluster_pause.unpause_local_cluster()
+            raise
+        try:
+            cluster_session._spawn_detached_session(
+                updater_sess, shell_cmd=inner_cmd, native_cmd=native_cmd
+            )
+        except cluster_session.OrchestrationSpawnFailed as exc:
+            if exc.started is False:
+                # A definitive backend decline means there is no child that can
+                # recover this pause. An ambiguous post-fork/Popen failure keeps
+                # posture paused: the child may be running, and recovery will
+                # prove liveness or clear it after the safety bound.
+                shared.updater_handoff.clear(handoff_generation)
+                cluster_pause.unpause_local_cluster()
+            raise
     _log.info("[cluster] spawned updater session %s log=%s", updater_sess, log_path)
     return {"session": updater_sess, "log": str(log_path)}
 
@@ -729,9 +676,27 @@ def spawn_rollout(
         f"echo [rollout] triggered by {_native_arg(origin)}"
         f" & ava cluster update --local --origin {_native_arg(origin)} --mode {_native_arg(mode)}"
     )
-    cluster_session._spawn_detached_session(
-        rollout_sess, shell_cmd=inner_cmd, native_cmd=native_cmd
-    )
+    # Recovery holds the same short mutex from its no-owner proof through its
+    # destructive clear/unpause. Recheck liveness inside it and keep it only
+    # until the detached session is visible; the child must acquire this mutex
+    # itself before publishing the marker.
+    try:
+        with shared.ui_update_state.lifecycle_lock():
+            _assert_no_orchestration_in_flight(force=force)
+            snapshot = shared.ui_update_state.read()
+            if snapshot.status != "inactive":
+                raise ClusterUpdateInProgress(
+                    "a persistent maintenance generation is already active or invalid; "
+                    "recover it before starting another rollout"
+                )
+            cluster_session._spawn_detached_session(
+                rollout_sess, shell_cmd=inner_cmd, native_cmd=native_cmd
+            )
+    except LockTimeoutError as exc:
+        raise ClusterUpdateInProgress(
+            "another cluster lifecycle action is publishing or recovering an update; retry"
+        ) from exc
+    _wait_for_ui_owner(session=rollout_sess, kind="rollout", origin=origin)
     _log.info(
         "[cluster] spawned rollout session %s log=%s origin=%s",
         rollout_sess,
@@ -780,17 +745,33 @@ def spawn_restart(origin: str, *, force: bool = False, mode: str = "smooth") -> 
     inner_cmd = (
         f"{{ echo {shlex.quote(f'[cluster-restart] triggered by: {origin}')}; "
         f"cd {shlex.quote(str(repo))} && {venv_activation_prefix()}"
-        f"ava cluster update --local --restart-only --mode {shlex.quote(mode)}; "
+        f"ava cluster update --local --restart-only --origin {shlex.quote(origin)} "
+        f"--mode {shlex.quote(mode)}; "
         f'echo "[session-exit] rc=$?"; }} '
         f"2>&1 | tee -a {shlex.quote(str(log_path))}"
     )
     native_cmd = (
         f"echo [cluster-restart] triggered by {_native_arg(origin)}"
-        f" & ava cluster update --local --restart-only --mode {_native_arg(mode)}"
+        f" & ava cluster update --local --restart-only --origin {_native_arg(origin)}"
+        f" --mode {_native_arg(mode)}"
     )
-    cluster_session._spawn_detached_session(
-        restart_sess, shell_cmd=inner_cmd, native_cmd=native_cmd
-    )
+    try:
+        with shared.ui_update_state.lifecycle_lock():
+            _assert_no_orchestration_in_flight(force=force)
+            snapshot = shared.ui_update_state.read()
+            if snapshot.status != "inactive":
+                raise ClusterUpdateInProgress(
+                    "a persistent maintenance generation is already active or invalid; "
+                    "recover it before starting another restart"
+                )
+            cluster_session._spawn_detached_session(
+                restart_sess, shell_cmd=inner_cmd, native_cmd=native_cmd
+            )
+    except LockTimeoutError as exc:
+        raise ClusterUpdateInProgress(
+            "another cluster lifecycle action is publishing or recovering an update; retry"
+        ) from exc
+    _wait_for_ui_owner(session=restart_sess, kind="restart", origin=origin)
     _log.info(
         "[cluster] spawned cluster-restart session %s log=%s origin=%s",
         restart_sess,

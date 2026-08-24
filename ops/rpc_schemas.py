@@ -477,6 +477,33 @@ class ClusterUpdatePayload(BaseModel):
     force_reap: bool = False
 
 
+class ClusterTransitionPayload(BaseModel):
+    """Exact deploy-lease capability for one stop/resume generation.
+
+    Both fields are required. A delayed request from generation A must not be
+    authorized by whichever generation happens to own the lease when it lands.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    deploy_holder: str = Field(min_length=1)
+    deploy_acquired_at: datetime
+
+    @field_validator("deploy_acquired_at", mode="before")
+    @classmethod
+    def _require_rfc3339_offset(cls, value: object) -> object:
+        if not isinstance(value, str):
+            # Pydantic v2 converts ValueError into a 422 ValidationError; a
+            # TypeError escapes validation and would turn malformed JSON into 500.
+            raise ValueError(  # noqa: TRY004 — Pydantic validation contract
+                "deploy_acquired_at must be an RFC3339 string"
+            )
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            raise ValueError("deploy_acquired_at must carry a timezone offset")
+        return value
+
+
 class ConfigWritePayload(BaseModel):
     """`config_write` op payload. `overrides` is a JSON-merge-patch over the host
     `.env` (a null value unsets a field), so its values stay open-typed."""

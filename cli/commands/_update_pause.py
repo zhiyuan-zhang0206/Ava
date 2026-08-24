@@ -19,10 +19,18 @@ from __future__ import annotations
 
 import sys
 
-from cli.commands._update_fanout import _PHASE_A_TIMEOUT_S, _print_fan_out_results
+from cli.commands._update_fanout import (
+    _PHASE_A_TIMEOUT_S,
+    ClusterOpPayload,
+    _print_fan_out_results,
+)
 
 
-def _run_phase_a(agent_runners: list[tuple[str, str | None]]) -> set[str] | None:
+def _run_phase_a(
+    agent_runners: list[tuple[str, str | None]],
+    *,
+    deploy_capability: ClusterOpPayload,
+) -> set[str] | None:
     """Phase A: pause every agent-runner. Returns the names that **acked**, or None
     when a host answered 5xx and the rollout must abort (nothing has migrated yet, so
     the cluster can still recover; the caller's `finally` resumes anyone paused).
@@ -38,7 +46,12 @@ def _run_phase_a(agent_runners: list[tuple[str, str | None]]) -> set[str] | None
         print("\n→ Phase A: no agent-runner registered, single-host path")
         return set()
     print(f"\n→ Phase A: pause {len(agent_runners)} agent-runner(s)")
-    results = _ns._fan_out(agent_runners, "/api/cluster/stop", _PHASE_A_TIMEOUT_S)
+    results = _ns._fan_out(
+        agent_runners,
+        "/api/cluster/stop",
+        _PHASE_A_TIMEOUT_S,
+        deploy_capability,
+    )
     if _print_fan_out_results("pause", results):
         print(
             "\n✗ Phase A got a 5xx, aborting (schema untouched, cluster can still recover)",
@@ -49,7 +62,10 @@ def _run_phase_a(agent_runners: list[tuple[str, str | None]]) -> set[str] | None
 
 
 def _stop_the_world(
-    agent_runners: list[tuple[str, str | None]], *, mode: str = "smooth"
+    agent_runners: list[tuple[str, str | None]],
+    *,
+    mode: str = "smooth",
+    deploy_capability: ClusterOpPayload,
 ) -> tuple[set[str] | None, bool]:
     """Pause every restarter (local + remote) and quiesce all agents — the
     stop-the-world that precedes the schema migration.
@@ -77,7 +93,7 @@ def _stop_the_world(
 
     # 1b) Phase A: fan-out cluster/stop. None = a 5xx; abort (the finally resumes
     #     every host we may have paused). Otherwise the set of hosts that acked.
-    paused_names = _run_phase_a(agent_runners)
+    paused_names = _run_phase_a(agent_runners, deploy_capability=deploy_capability)
     if paused_names is None:
         return None, False
 

@@ -20,7 +20,7 @@ from cli.commands import update as _up
 
 
 @pytest.fixture(autouse=True)
-def _stub_rollout_target(monkeypatch: pytest.MonkeyPatch) -> None:
+def _stub_rollout_target(monkeypatch: pytest.MonkeyPatch, stub_deploy_lease_identity: None) -> None:
     """The orchestration resolves a pinned `target_sha` (git fetch + rev-parse) and
     takes the cluster update lock before Phase A; stub both so these tests don't hit
     real git or the central-DB lock (the frontend-only / docs-only paths still acquire

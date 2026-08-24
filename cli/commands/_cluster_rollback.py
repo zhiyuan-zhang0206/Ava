@@ -21,7 +21,12 @@ import sys
 from pathlib import Path
 
 from cli.commands._health_alerts import _notify_owner
-from cli.commands._update_fanout import _PHASE_A_TIMEOUT_S, _fan_out, _list_agent_runners
+from cli.commands._update_fanout import (
+    _PHASE_A_TIMEOUT_S,
+    ClusterOpPayload,
+    _fan_out,
+    _list_agent_runners,
+)
 from cli.commands._update_git import (
     GitPullFailed,
     _git,
@@ -36,6 +41,7 @@ from cli.commands._update_phase_b import POLL_OK, _phase_b_and_poll, _still_conv
 from shared.cluster_lock import (
     SETTLE_TTL_S,
     acquire_update_lock,
+    read_update_lease,
     release_update_lock,
     settle_update_lock,
 )
@@ -437,13 +443,19 @@ def _finish_rollback(
     holder: str,
     hosts_to_resume: list[tuple[str, str | None]],
     mid_transition: list[str],
+    deploy_capability: ClusterOpPayload,
 ) -> None:
     """Compensate paused runners and retain a settle hold only when needed."""
     from ops.cluster import unpause_local_cluster
 
     if hosts_to_resume:
         try:
-            _fan_out(hosts_to_resume, "/api/cluster/resume", _PHASE_A_TIMEOUT_S)
+            _fan_out(
+                hosts_to_resume,
+                "/api/cluster/resume",
+                _PHASE_A_TIMEOUT_S,
+                deploy_capability,
+            )
         except Exception as exc:
             print(f"  . could not resume runner(s): {type(exc).__name__}", file=sys.stderr)
     try:
@@ -533,6 +545,15 @@ def cmd_rollback(
             file=sys.stderr,
         )
         return 1
+    lease = read_update_lease()
+    if lease is None or lease.holder != holder or lease.acquired_at is None:
+        release_update_lock(holder)
+        print("\n* could not capture the rollback lease identity; aborting", file=sys.stderr)
+        return 1
+    deploy_capability: ClusterOpPayload = {
+        "deploy_holder": holder,
+        "deploy_acquired_at": lease.acquired_at.isoformat(),
+    }
 
     # Snapshot pre-rollback state before the rollout primitive pauses any host.
     from_sha = git_head_sha()
@@ -547,7 +568,11 @@ def cmd_rollback(
     # every early return must compensate across the original target list.
     hosts_to_resume: list[tuple[str, str | None]] = list(agent_runners)
     try:
-        paused_names, all_quiesced = _stop_the_world(agent_runners, mode="smooth")
+        paused_names, all_quiesced = _stop_the_world(
+            agent_runners,
+            mode="smooth",
+            deploy_capability=deploy_capability,
+        )
         if paused_names is None:
             return 1
         rc = _run_rollback(target_sha, repo=repo, from_sha=from_sha)
@@ -568,7 +593,7 @@ def cmd_rollback(
             mid_transition=mid_transition,
         )
     finally:
-        _finish_rollback(holder, hosts_to_resume, mid_transition)
+        _finish_rollback(holder, hosts_to_resume, mid_transition, deploy_capability)
 
 
 def _note_rollback_on_last_update(from_sha: str, target_sha: str) -> None:

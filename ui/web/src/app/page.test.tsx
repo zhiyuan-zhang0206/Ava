@@ -131,7 +131,6 @@ vi.mock("@/lib/store", () => ({
       inspectorHours: 24,
       setInspectorHours: hooksState.setInspectorHours,
       agents: hooksState.agents,
-      clusterUpdating: false,
     };
     return selector(fakeState);
   },

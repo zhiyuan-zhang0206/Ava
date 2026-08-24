@@ -24,13 +24,13 @@ tags:
 
 ## Concept model
 
-### Deployment state: two tables + a mirror file
+### Deployment state: two tables + a cluster UI marker
 
 **`deployment_state`** (cluster-level, one row) — the existing `cluster_update_lock` becomes a full state row: `phase`, `kind` (`rollout`/`restart`/`update` — replaces session-name probing), `lease_holder`/`lease_expires_at` (existing TTL+renew kept), `settle_hosts`/`settle_note`, `last_outcome` (a record, not a state).
 
 **`host_deploy_state`** (host-level, one row per host) — replaces the `cluster_paused` file, `updating.flag`, session probing, updater-log-mtime liveness: `posture` (`idle`/`paused`/`converging`), `updater_lease_expires_at`, `updated_at`.
 
-**Mirror file** (`$AVA_HOME/deploy-state.json`) — a projection cache of the state table on the host's filesystem for the offline window (gateway/DB unreachable, "updating" page). Only host-level transitions write it, by the same module that writes the DB; cluster-level fields never land in it. Write failure warns, never blocks — a degraded label, not an authority.
+**Cluster UI marker** (`$AVA_HOME/deploy-state.json`) — the generation-guarded active-maintenance fact used while gateway/app processes are replaced. The lock-winning rollout/restart child writes it before pausing; the parent observes that active marker and publishes its start hint before Phase A. The child CAS-clears the same generation only after the full Phase-B/finalization tail. Host posture/start/lease transitions never mutate it. Gate reads it offline and is the sole App/Updating/Not-Working projector; malformed state fails to Not Working rather than guessing. The rollout introducing this code still begins under the old v1 writer, so stable v2 generation/`started_at` ownership starts with a later rollout/restart. Rollback is explicitly outside this marker contract until its older target can no longer overwrite the compatibility path with v1 `idle`.
 
 ### Phases: three states, not five
 
