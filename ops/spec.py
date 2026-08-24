@@ -1,46 +1,25 @@
 """Ops Spec — the single expression of a machine-role's desired state.
 
-Spec is the K8s-shaped desired-state source for the ops module: given a host's
-capability set (``machine_role()``), it answers *what this host should be
-running*. It absorbs ``build_services()`` — the canonical roster of session
-sessions and their probe metadata — and will grow to also hold the data-plane
-and cluster-pin desired state as those converge here (see
-``future/infra/ops-module.md``).
+Given a host's capability set, this K8s-shaped source answers what should run.
+``build_services()`` is the canonical roster and will grow to hold data-plane
+and cluster-pin desired state as those converge here (future/infra/ops-module.md).
 
-Roster shape — **capability-explicit**. Every service declares the set of
-machine capabilities that run it (``ServiceSpec.capabilities``), and the roster
-is authored in three visually-separated groups — gateway-only / agent-runner-only
-/ both. This replaces the old "one flat list + an ``_AGENT_RUNNER_ONLY_SESSIONS``
-exclusion set" encoding, where you had to cross-reference two structures to see
-which machine ran a service. Now it reads off the service itself:
-``services_for_capabilities(roles)`` = every service whose ``capabilities``
-intersect the host's roles.
+Every service declares its ``ServiceSpec.capabilities`` in one of three groups:
+gateway-only, agent-runner-only, or both. ``services_for_capabilities(roles)``
+selects services whose capabilities intersect the host's roles. A service also
+declares ``requires_db`` so the watchdog can hold back exactly the database's
+users during a DB-scoped round block (``ops.controllers.base.BlockScope``).
 
-A service also declares whether it needs the cluster's Postgres
-(``ServiceSpec.requires_db``), for the same reason: the watchdog holds back exactly
-the DB's users when a controller reports a DB-scoped round block, and that fact
-belongs next to the service rather than inside the controller that noticed the DB
-was down (see ``ops.controllers.base.BlockScope``).
+Plugins expose ``services() -> tuple[ServiceSpec, ...]`` from their services
+module. ``_plugin_services()`` discovers code-present plugins and appends them
+to ``build_services()``: plugin declares, ops discovers. Each plugin service's
+own ``ServiceSpec.gate`` keeps cluster-level enablement out of ``_gate_reason``.
+The fleet task daemon follows this path; see
+``decisions/2026-07-19-plugin-registered-services.md``.
 
-Plugins extend the roster without editing this file: a plugin ships a
-``plugins/<name>/services.py`` exposing ``services() -> tuple[ServiceSpec, ...]``,
-and ``_plugin_services()`` discovers the installed plugins (via
-``shared.plugins_config``, keyed on code PRESENCE — not the agent-facing
-enable-state) and folds them onto the tail of ``build_services()`` — "plugin
-declares, ops discovers", no reverse edge into plugin domain code. A plugin
-service carries its own ``ServiceSpec.gate`` (an explicit settings field) so its
-cluster-level on/off lives with the plugin, not in ``_gate_reason``. The fleet
-task-maintenance daemon is registered this way (``ava_builtins/plugins/ava_fleet/services.py``);
-rationale in ``decisions/2026-07-19-plugin-registered-services.md``.
-
-Layer: ``ops``, importing ``shared`` — plus two lazy, function-local reaches into
-shared-tier ``services`` packages that themselves import only ``shared``:
-``_browser_probe`` -> ``services.browser`` (where the headed browser's identity
-check has to live), and ``build_services`` -> ``services.gate.daemon.app_port``
-(the port the gate proxies to IS the port the frontend must bind, so it is read
-from the gate rather than derived a second time here). Nothing here reaches up
-into cli/gateway, so this is THE single roster source for session-hosted services:
-the start path, the watchdog keepalive roster, and ``ava status`` all consume it.
+Layer: ``ops`` importing ``shared``, plus lazy function-local reaches into the
+shared-tier browser identity probe and gate app-port source. Nothing reaches up
+into cli/gateway, so start, watchdog, and ``ava status`` share this one roster.
 
 **Deliberately outside the roster** (each documented at its own site): the
 ``gate`` entry-port service (launchd KeepAlive / pidfile job, no session row —
@@ -254,12 +233,12 @@ def build_services() -> tuple[ServiceSpec, ...]:
 
     # ── gateway-only services ───────────────────────────────────────────────
     # The gateway capability owns the data-plane-adjacent daemons: the HTTP
-    # gateway, the frontend, the cluster-wide heartbeat nudger (it only INSERTs
-    # inbound rows — the insert trigger wakes the owner on any machine, so it
-    # belongs to the single gateway, not each runner), the memory/vector stack,
-    # and the gateway's own watchdog. (The fleet task-maintenance nudger is a
-    # sibling of heartbeat but lives in the ava_fleet plugin — see
-    # `_plugin_services()`.)
+    # gateway, the frontend, and cluster-wide nudgers (heartbeat plus idle shell
+    # reminders). They only INSERT inbound rows — the insert trigger wakes the
+    # owner on any machine, so they belong to the single gateway, not each
+    # runner. The gateway also owns the memory/vector stack and its watchdog.
+    # The fleet task-maintenance nudger lives in the ava_fleet plugin — see
+    # `_plugin_services()`.
     gateway_services = (
         ServiceSpec(
             session="gateway",
@@ -309,6 +288,17 @@ def build_services() -> tuple[ServiceSpec, ...]:
             curl_url=_hz("heartbeat"),
             identity_probe=daemon_identity("heartbeat", settings.services.heartbeat_pidfile),
             healthcheck_module="services.healthchecks.heartbeat",
+        ),
+        ServiceSpec(
+            session="idle-shell-reminder",
+            cmd=".venv/bin/python -m services.idle_shell_reminder.daemon",
+            capabilities=_GATEWAY,
+            requires_db=True,
+            curl_url=_hz("idle_shell_reminder"),
+            identity_probe=daemon_identity(
+                "idle_shell_reminder", settings.services.idle_shell_reminder_pidfile
+            ),
+            healthcheck_module="services.healthchecks.idle_shell_reminder",
         ),
         # delivery-watchdog: cluster-wide stale-pending-inbound tripwire. A
         # gateway daemon — it owns the data plane. Config-gated by
@@ -693,6 +683,8 @@ def _gate_reason(spec: ServiceSpec) -> str | None:
         return _computer_mcp_gate_reason()
     if session == "heartbeat" and not settings.daemon.heartbeat_enabled:
         return "disabled (AVA_HEARTBEAT_ENABLED off)"
+    if session == "idle-shell-reminder" and not settings.daemon.idle_shell_reminder_enabled:
+        return "disabled (AVA_IDLE_SHELL_REMINDER_ENABLED off)"
     if session == "delivery-watchdog" and not settings.daemon.delivery_watchdog_enabled:
         return "disabled (AVA_DELIVERY_WATCHDOG_ENABLED off)"
     if session == "im-bridge" and not settings.services.im_bridge_enabled:

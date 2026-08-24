@@ -60,14 +60,14 @@ def test_allocate_ports_first_block(monkeypatch: pytest.MonkeyPatch):
 
 
 def test_allocate_ports_skips_used_base(monkeypatch: pytest.MonkeyPatch):
-    """An existing record's exact base is skipped; with BLOCK_SIZE=20 the next
-    candidate is 18020 (the R3 pass grew the block to carry page_server, the
-    hosted-runner pass to carry agent_host; overlap-aware skipping lives in
-    test_cluster_env).
+    """An existing record's exact base is skipped; with BLOCK_SIZE=21 the next
+    candidate is 18021 (the R3 pass grew the block to carry page_server, the
+    hosted-runner pass to carry agent_host, and idle-shell-reminder appended the
+    current slot; overlap-aware skipping lives in test_cluster_env).
 
     Concrete on purpose, like its sibling in test_cluster_env: a block growth
     must force someone to re-check allocation rather than slide past a
     derived assertion."""
     monkeypatch.setattr(cluster, "_port_free", lambda _: True)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     ports = cluster.allocate_ports(existing_bases={18000})
-    assert ports["gateway"] == 18020
+    assert ports["gateway"] == 18021

@@ -65,8 +65,11 @@ PORT_OFFSETS: dict[str, int] = {
     # an existing cluster's registry record pins its block base, so renumbering a
     # live offset would move a running daemon's port out from under it.
     "agent_host": 19,
+    # Idle-shell-reminder was added after every existing slot. Append so live
+    # clusters keep every previously assigned offset unchanged.
+    "idle_shell_reminder": 20,
 }
-BLOCK_SIZE = 20
+BLOCK_SIZE = 21
 BLOCK_START = 18000
 BLOCK_MAX = 20000
 
@@ -118,4 +121,7 @@ LEGACY_AVA_PORTS: dict[str, int] = {
     # gateway dials for every runner RPC. `test_legacy_ports_are_unique` is the
     # guard.
     "agent_host": 8114,
+    # 8115 is the next unused fixed port after agent_host; uniqueness is
+    # guarded by tests/shared/test_cluster_alloc.py.
+    "idle_shell_reminder": 8115,
 }
