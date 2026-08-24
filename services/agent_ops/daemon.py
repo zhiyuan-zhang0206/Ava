@@ -101,6 +101,7 @@ from ops.rpc_schemas import (
     UploadReceivePayload,
 )
 from services._pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
+from services.agent_ops import health
 from services.agent_ops._boot import (
     _open_db_pool,
     _ops_auth_token,
@@ -111,7 +112,6 @@ from shared.agents import AvaAgentError
 from shared.config import settings
 from shared.daemon_health import health_port, start_health_server, stop_health_server
 from shared.daemon_shutdown import install_graceful_shutdown
-from shared.health_schema import DEGRADED, OK, component
 from shared.log import init_gateway_process
 from shared.machine import machine_name
 from shared.paths import legacy_pid_path
@@ -120,7 +120,6 @@ from shared.transport_encryption import verify_transport_encryption
 _log = logging.getLogger("services.agent_ops.daemon")
 
 _PIDFILE = settings.services.ops_pidfile
-_WEDGE_AFTER_S = 1800
 
 # ── Idempotency-key dedup (Task #961) ────────────────────────────────────────
 # A request with `idempotency_key` is deduplicated against the shared
@@ -255,34 +254,6 @@ def _op_thread_pool() -> ThreadPoolExecutor:
             thread_name_prefix="ava-ops-arm",
         )
     return _op_executor
-
-
-def ops_components() -> list[dict[str, object]]:
-    """Report control-plane progress; only work past the safe bound degrades it."""
-    now = time.monotonic()
-    if _cluster_update_held_since is None:
-        update_lock = component("update-lock", OK, progress="free")
-    else:
-        held_s = now - _cluster_update_held_since
-        update_lock = component(
-            "update-lock",
-            DEGRADED if held_s > _WEDGE_AFTER_S else OK,
-            progress=f"held {held_s:.0f}s",
-            detail=f"held for {held_s:.0f}s" if held_s > _WEDGE_AFTER_S else None,
-        )
-
-    if not _active_ops:
-        active = component("ops", OK, progress="0 active")
-    else:
-        detail, started_at = min(_active_ops.values(), key=lambda entry: entry[1])
-        age_s = now - started_at
-        active = component(
-            "ops",
-            DEGRADED if age_s > _WEDGE_AFTER_S else OK,
-            progress=f"{len(_active_ops)} active",
-            detail=f"{detail} running for {age_s:.0f}s" if age_s > _WEDGE_AFTER_S else None,
-        )
-    return [component("loop", OK, progress="serving /ops"), update_lock, active]
 
 
 async def _run_arm(kind: str, payload: dict[str, Any]) -> tuple[str, dict[str, object]]:
@@ -729,9 +700,11 @@ async def _main() -> None:
             "ops",
             host=bind_host,
             extra_routes={("POST", "/ops"): _ops_route},
-            components=ops_components,
+            components=lambda: health.ops_components(_cluster_update_held_since, _active_ops),
             extra=lambda: {
-                "saturation": len(_active_ops) / max(1, settings.services.ops_concurrency)
+                "saturation": health.saturation(
+                    _active_ops, max(1, settings.services.ops_concurrency)
+                )
             },
             auth_token=auth_token,
         )

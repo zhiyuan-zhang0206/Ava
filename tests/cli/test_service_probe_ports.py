@@ -121,6 +121,7 @@ def test_all_services_present(monkeypatch: pytest.MonkeyPatch) -> None:
         "mcp-daemon",
         "computer-mcp",
         "page-server",
+        "pg-backup",
         "otel-collector",
         # The hosted agent-runner. build_services() is the UNGATED roster, so it
         # is listed here even though AVA_RUNNER_MODE keeps it off every cluster's

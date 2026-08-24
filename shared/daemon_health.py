@@ -630,10 +630,16 @@ def _health_payload(url: str, timeout_s: float) -> dict[str, object] | DaemonPro
             parsed = json.loads(exc.read(_MAX_BODY_BYTES))
         except json.JSONDecodeError:
             return DaemonProbe.down(detail)
-        if isinstance(parsed, dict) and isinstance(parsed.get("degraded_reasons"), list):
-            reasons = "; ".join(str(reason) for reason in parsed["degraded_reasons"])
-            if reasons:
-                detail += f"; degraded: {reasons}"
+        if isinstance(parsed, dict):
+            reasons_raw = cast("dict[str, object]", parsed).get("degraded_reasons")
+            if isinstance(reasons_raw, list):
+                reasons = "; ".join(
+                    reason
+                    for reason in cast("list[object]", reasons_raw)
+                    if isinstance(reason, str)
+                )
+                if reasons:
+                    detail += f"; degraded: {reasons}"
         return DaemonProbe.down(detail)
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
         return DaemonProbe.down(f"healthz unreachable: {type(exc).__name__}: {exc}")
