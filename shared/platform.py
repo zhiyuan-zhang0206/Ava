@@ -33,6 +33,15 @@ IS_MACOS = sys.platform == "darwin"
 IS_LINUX = sys.platform.startswith("linux")
 
 
+def launchd_job_label() -> str | None:
+    """The launchd label that owns this process, or None outside a LaunchAgent.
+
+    launchd injects ``XPC_SERVICE_NAME`` into the job and its descendants. This
+    is per-process scheduler identity, not operator-configurable Ava settings.
+    """
+    return os.environ.get("XPC_SERVICE_NAME")
+
+
 # WSL is a Linux kernel whose uname release string carries "microsoft" / "WSL".
 # Some host probes (e.g. disk usage) want the Windows host's view, so detect it
 # once here rather than re-deriving it from uname at each call site.

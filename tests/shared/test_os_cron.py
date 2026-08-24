@@ -31,6 +31,21 @@ def _plant_plist(fake_home: Path, label: str) -> Path:
     return p
 
 
+def _record_launchctl(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
+    calls: list[list[str]] = []
+
+    def _run(cmd, **_kw):  # type: ignore[no-untyped-def]
+        calls.append(list(cmd))  # pyright: ignore[reportUnknownArgumentType]
+        return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(os_cron.subprocess, "run", _run)  # pyright: ignore[reportUnknownArgumentType]
+    return calls
+
+
+def _desired_plist(_interval_s: int, _threshold: int) -> str:
+    return "<desired-plist/>"
+
+
 def test_legacy_tokens_cover_convention_and_retired_cluster_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -91,6 +106,66 @@ def test_cleanup_noop_without_legacy_plist(
     monkeypatch.setattr(os_cron.subprocess, "run", lambda *a, **_k: called.append(a))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     os_cron.cleanup_legacy_macos_job("health-probe")
     assert called == []
+
+
+def test_register_macos_never_reloads_its_own_launchd_job(
+    fake_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A health-probe-triggered rollback runs ``ava start`` below the probe's
+    launchd job. Reloading that label would terminate the rollback itself before
+    it can clear the update lease and resume the cluster."""
+    slug = "ava-t-cafe0123"
+    label = f"com.ava.{slug}.health-probe"
+    plist = _plant_plist(fake_home, label)
+    plist.write_text("<old-plist/>")
+    monkeypatch.setenv("XPC_SERVICE_NAME", label)
+    monkeypatch.setattr(os_cron, "_home_slug", lambda: slug)
+    monkeypatch.setattr(os_cron, "_launchd_plist_content", _desired_plist)
+    calls = _record_launchctl(monkeypatch)
+
+    assert os_cron._register_macos(300, 3) == 0
+    assert plist.read_text() == "<old-plist/>"
+    assert calls == []
+
+
+def test_register_macos_never_relabels_its_own_legacy_launchd_job(
+    fake_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A pre-path-only probe can execute upgraded code. Its relabel cleanup is
+    still a self-bootout and must wait for an external converge."""
+    slug = "ava-t-cafe0123"
+    legacy_label = "com.ava.t.health-probe"
+    legacy_plist = _plant_plist(fake_home, legacy_label)
+    desired_plist = fake_home / "Library" / "LaunchAgents" / f"com.ava.{slug}.health-probe.plist"
+    monkeypatch.setenv("XPC_SERVICE_NAME", legacy_label)
+    monkeypatch.setattr(os_cron, "_home_slug", lambda: slug)
+    monkeypatch.setattr(os_cron, "_legacy_label_tokens", lambda: ["t"])
+    monkeypatch.setattr(os_cron, "_launchd_plist_content", _desired_plist)
+    calls = _record_launchctl(monkeypatch)
+
+    assert os_cron._register_macos(300, 3) == 0
+    assert legacy_plist.exists()
+    assert not desired_plist.exists()
+    assert calls == []
+
+
+def test_register_macos_still_reloads_from_another_launchd_job(
+    fake_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The self-protection is label-specific: boot autostart also runs
+    ``ava start`` under launchd and must still converge the health probe."""
+    slug = "ava-t-cafe0123"
+    health_label = f"com.ava.{slug}.health-probe"
+    plist = _plant_plist(fake_home, health_label)
+    plist.write_text("<old-plist/>")
+    monkeypatch.setenv("XPC_SERVICE_NAME", f"com.ava.{slug}.autostart")
+    monkeypatch.setattr(os_cron, "_home_slug", lambda: slug)
+    monkeypatch.setattr(os_cron, "_launchd_plist_content", _desired_plist)
+    calls = _record_launchctl(monkeypatch)
+
+    assert os_cron._register_macos(300, 3) == 0
+    assert plist.read_text() == "<desired-plist/>"
+    assert [call[1] for call in calls] == ["bootout", "bootstrap"]
 
 
 def test_register_linux_aborts_when_crontab_read_fails(

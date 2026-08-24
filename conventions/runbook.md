@@ -807,6 +807,11 @@ tasks on Windows (`shared/os_schtasks.py`). Two properties are load-bearing:
   launchd plist / crontab line pin `AVA_HOME` explicitly, so a job registered by
   cluster X can never run cluster Y's `ava` against cluster Y's home. A Windows
   task action has no env slot and relies on the interpreter path alone.
+- **A health probe never reloads its own launchd label.** Auto-rollback runs
+  `ava start` below the health-probe LaunchAgent, and `launchctl bootout` would
+  terminate that whole recovery process tree. Registration recognizes the
+  inherited `XPC_SERVICE_NAME`, leaves the existing plist untouched, and lets
+  the next external converge apply any pending spec change.
 - **Windows task settings are stated, not inherited.** Registration goes through a
   task definition (`schtasks /Create /XML`, written to
   `$AVA_HOME/run/schtasks/<kind>.xml`) rather than `/Create` flags, because Task

@@ -32,6 +32,15 @@ executing any given rollout is always the old code, and why new orchestration
 behavior takes effect one rollout later than it lands.
 Evidence: [`postmortems/0001`](../postmortems/0001-a-rollout-cannot-deliver-its-own-protection.md).
 
+### A supervisor cannot replace itself from inside its own process tree
+
+Scheduler unload operations terminate the job they own, including descendants
+performing recovery on its behalf. Before converging an OS job, compare the
+current scheduler identity with every label that job owns, including transition
+aliases. On a match, leave the durable spec untouched and defer replacement to
+an external converge so the pending change remains detectable.
+Evidence: [`postmortems/0005`](../postmortems/0005-a-supervisor-cannot-replace-itself.md).
+
 ### A flag cannot fix the rollout that introduces it
 
 A parameter only arrives if the caller knows to pass it, and on the deciding
