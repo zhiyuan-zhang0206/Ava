@@ -92,7 +92,7 @@ def _park(
 
 
 def _open_page(db: psycopg.Connection, aid: int, name: str = "report") -> None:
-    """Seed one open agent_pages row (audit B2 tests)."""
+    """Seed one open show() row, which terminate cascades may close (audit B2)."""
     with db.cursor() as cur:
         cur.execute(
             "INSERT INTO agent_pages (agent_id, name, port, host, title) "
@@ -242,8 +242,8 @@ class TestTerminationSourceStamping:
         closed = _capture_page_closed(monkeypatch, agent_launch)
         agent_launch._confirm_launch_or_force_terminated(aid)
         assert _row(db_conn, aid) == ("terminated", "launch-confirm")
-        # audit B2: an unclaimed 'idling' row can hold pages (resurrect cascade_open) —
-        # the force-terminate must clear the frontend popover via PageClosed.
+        # audit B2: an unclaimed 'idling' row can hold a show() page (resurrect
+        # cascade_open reopens it) — force-terminate clears it via PageClosed.
         assert closed == [(aid, "report")]
         with db_conn.cursor() as cur:
             cur.execute("SELECT closed_at IS NOT NULL FROM agent_pages WHERE agent_id = %s", (aid,))
@@ -313,6 +313,28 @@ class TestTerminationSourceStamping:
         assert _row(db_conn, aid) == ("terminated", "launch-confirm")
         # audit B2: PageClosed for the open page.
         assert closed == [(aid, "report")]
+
+    def test_preclaim_terminate_keeps_daemon_page_open(
+        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A rejected boot closes only its agent-owned show() pages."""
+        aid = _park(db_conn, status="idling", pid=None, live_lease=False)
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO agent_pages (agent_id, name, port, host, title, serve_dir) "
+                "VALUES (%s, 'persistent', 18001, '127.0.0.1', 'Persistent', '/tmp/serve')",
+                (aid,),
+            )
+        db_conn.commit()
+        closed = _capture_page_closed(monkeypatch, _starting)
+
+        _starting._mark_preclaim_terminated(aid)
+
+        assert _row(db_conn, aid) == ("terminated", "launch-confirm")
+        assert closed == []
+        with db_conn.cursor() as cur:
+            cur.execute("SELECT closed_at IS NULL FROM agent_pages WHERE agent_id = %s", (aid,))
+            assert cur.fetchone()[0] is True  # type: ignore[index]
 
     def test_boot_gate_leaves_a_row_some_other_process_took_alone(
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
@@ -1001,10 +1023,10 @@ class TestBootRevivePass:
 
 class TestWedgedForceTerminatePublishesPageClosed:
     """The wedged controller force-marks the stuck row 'terminated' before
-    killing it — pages cascade-close and must be announced (audit B2), exactly
-    like the reaper / launch paths. The immediate resurrect reopens them (the
-    cascade_open trigger) and the boot re-serve re-publishes PageOpened, so the
-    frontend ends consistent either way."""
+    killing it — agent-owned show() pages cascade-close and must be announced
+    (audit B2), exactly like the reaper / launch paths. Daemon-supervised
+    serve() pages stay open. The immediate resurrect reopens show() rows the
+    cascade closed, so the frontend ends consistent either way."""
 
     def test_reconcile_publishes_page_closed_for_open_pages(
         self,

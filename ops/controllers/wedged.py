@@ -180,8 +180,8 @@ class WedgedAgentController:
                         and locked_row[2] is True
                         and locked_identity is not AgentProcessIdentity.UNREADABLE
                     ):
-                        # Capture pages only after the row lock proves this is
-                        # still the claimed live incarnation.
+                        # Capture cascade-closable show() pages only after the
+                        # row lock proves this is still the claimed live incarnation.
                         page_names = list_open_page_names(conn, agent_id)
                         cur.execute(
                             "UPDATE agents_meta SET status = 'terminated', "

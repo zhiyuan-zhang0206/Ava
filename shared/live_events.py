@@ -346,13 +346,14 @@ class PageOpened(_Base):
 
 
 class PageClosed(_Base):
-    """Published when the agent calls `ava.ui.close(name)` or the
-    terminate cascade closes a page, or when the page-server daemon closes a
-    row whose serve_dir remains unavailable — the frontend Pages popover
+    """Published when the agent calls `ava.ui.close(name)`, the terminate
+    cascade closes an agent-owned show() page, or the page-server daemon closes
+    a row whose serve_dir remains unavailable — the frontend Pages popover
     removes the entry.
 
     Terminate path: SQL trigger `cascade_close_agent_pages` silently
-    marks closed on `UPDATE agents_meta.status='terminated'`; all
+    marks only serve_dir-NULL show() rows closed on
+    `UPDATE agents_meta.status='terminated'`; all
     three terminate entries (gateway `mark_agent_exited_op` self-exit /
     `_force_mark_terminated` zombie cleanup / gateway force=true)
     SELECT page names before the UPDATE and publish each after

@@ -49,11 +49,12 @@ def claim_agent_row_or_die_on_stale_schema(agent_id: int) -> None:
 
 
 def _mark_preclaim_terminated(agent_id: int) -> None:
-    """Mark an unclaimed row terminated after a boot gate rejects this child."""
+    """Mark an unclaimed row terminated and close its show() pages after boot rejection."""
     with shared.db.connect() as conn, conn.cursor() as cur:
-        # Capture open pages before the terminal transition triggers their close.
+        # Capture only agent-owned pages before the terminal transition closes them.
         cur.execute(
-            "SELECT name FROM agent_pages WHERE agent_id = %s AND closed_at IS NULL",
+            "SELECT name FROM agent_pages "
+            "WHERE agent_id = %s AND closed_at IS NULL AND serve_dir IS NULL",
             (agent_id,),
         )
         page_names = [r[0] for r in cur.fetchall()]

@@ -266,8 +266,8 @@ def _mark_exited_blocking(
     the exit event_log row, the AgentUpdated publish). Returns
     (rowcount, page_names, actual_status)."""
     with db_pool.connection() as conn:
-        # SELECT before UPDATE — the cascade_close_agent_pages trigger closes
-        # the pages on the status flip, after which closed_at IS NULL no longer matches.
+        # SELECT cascade-closable show() pages before UPDATE; daemon-supervised
+        # serve() pages stay open and must not emit PageClosed.
         page_names = list_open_page_names(conn, agent_id)
         with conn.cursor() as cur:
             cur.execute(

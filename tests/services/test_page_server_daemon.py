@@ -342,6 +342,32 @@ def test_closed_row_kills_its_page_session(
     assert managed == {}
 
 
+def test_terminated_agent_keeps_daemon_page_session(
+    sync_pool: ConnectionPool,
+    db_conn: psycopg.Connection,
+    backend: _FakeShellBackend,
+    tmp_path: Path,
+) -> None:
+    """Agent termination does not close a daemon-supervised page row or shell."""
+    agent_id = spawn_agent()
+    key = (agent_id, "persistent")
+    _insert_page_row(db_conn, agent_id, key[1], 12016, tmp_path)
+    managed: dict[tuple[int, str], psd._ServerHandle] = {}
+
+    _reconcile(sync_pool, managed, {}, {})
+    page_session = managed[key].session_name
+    with db_conn.cursor() as cur:
+        cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
+    db_conn.commit()
+
+    _reconcile(sync_pool, managed, {}, {})
+
+    assert backend.killed == []
+    assert backend.sessions == {page_session}
+    assert set(managed) == {key}
+    assert [(row.agent_id, row.name) for row in psd._open_rows(sync_pool, _HOST)] == [key]
+
+
 def test_daemon_restart_kills_the_persisted_session_of_a_closed_row(
     sync_pool: ConnectionPool,
     db_conn: psycopg.Connection,
