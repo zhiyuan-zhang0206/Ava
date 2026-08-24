@@ -27,11 +27,11 @@ import json
 import re
 import time
 from datetime import UTC, datetime, timedelta
-from typing import Any, overload
+from typing import Any, cast, overload
 
 import httpx
 
-from gateway import loki_query_budget
+from gateway import loki_events_cache, loki_query_budget
 from shared import telemetry
 from shared.config import settings
 from shared.events.contract import TIER_BY_EVENT, EventTier
@@ -512,6 +512,28 @@ def count_events(
     window = _window(from_, to)
     if window is None:
         return 0
+    cache_key = loki_events_cache.make_key(
+        "count_events",
+        {
+            "agent_id": agent_id,
+            "exclude_agent_ids": exclude_agent_ids,
+            "service_only": service_only,
+            "event_names": event_names,
+            "level_min": level_min,
+            "level": level,
+            "grep": grep,
+            "categories": categories,
+            "tiers": tiers,
+            "cluster": cluster,
+            "machine": machine,
+            "trace_id": trace_id,
+            "attribute_filters": attribute_filters,
+        },
+        *window,
+    )
+    cached = loki_events_cache.get(cache_key)
+    if cached is not None:
+        return cast(int, cached)
     url = settings.observability.telemetry_loki_url.rstrip("/") + "/loki/api/v1/query"
     slices = _read_slices(window)
     total = 0
@@ -545,6 +567,7 @@ def count_events(
         if result:
             value = result[0].get("value") or result[0].get("values", [None])[-1]
             total += int(value[1]) if value else 0
+    loki_events_cache.put(cache_key, total)
     return total
 
 
@@ -955,6 +978,32 @@ def attribute_aggregate(
     window = _window(from_, to)
     if window is None:
         return [] if group_by else 0.0
+    cache_key = loki_events_cache.make_key(
+        "attribute_aggregate",
+        {
+            "field": field,
+            "agg": agg,
+            "quantile": quantile,
+            "group_by": group_by,
+            "agent_id": agent_id,
+            "service_only": service_only,
+            "event_names": event_names,
+            "level_min": level_min,
+            "level": level,
+            "grep": grep,
+            "categories": categories,
+            "cluster": cluster,
+            "machine": machine,
+            "trace_id": trace_id,
+            "attribute_filters": attribute_filters,
+        },
+        *window,
+    )
+    cached = loki_events_cache.get(cache_key)
+    if isinstance(cached, list):
+        return list(cast(list[tuple[str, float]], cached))
+    if cached is not None:
+        return cast(float, cached)
     pipelines = _agg_pipelines(
         window,
         agent_id=agent_id,
@@ -973,7 +1022,7 @@ def attribute_aggregate(
     if agg == "quantile":
         if quantile is None:
             raise ValueError("attribute_aggregate(agg='quantile') needs quantile")
-        return _quantile_aggregate(
+        result = _quantile_aggregate(
             pipelines=pipelines,
             field=field,
             quantile=quantile,
@@ -981,30 +1030,32 @@ def attribute_aggregate(
             timeout_s=timeout_s,
         )
 
-    if agg == "count":
-        return _count_attribute_slices(
+    elif agg == "count":
+        result = _count_attribute_slices(
             pipelines=pipelines,
             group_by=group_by,
             timeout_s=timeout_s,
         )
-
-    ops = {
-        "sum": ("sum_over_time", "sum"),
-        "min": ("min_over_time", "min"),
-        "max": ("max_over_time", "max"),
-    }
-    if agg not in ops:
-        raise ValueError(f"attribute_aggregate: unknown agg {agg!r}")
-    range_op, cross_op = ops[agg]
-    return _numeric_attribute_slices(
-        pipelines=pipelines,
-        field=field,
-        agg=agg,
-        group_by=group_by,
-        range_op=range_op,
-        cross_op=cross_op,
-        timeout_s=timeout_s,
-    )
+    else:
+        ops = {
+            "sum": ("sum_over_time", "sum"),
+            "min": ("min_over_time", "min"),
+            "max": ("max_over_time", "max"),
+        }
+        if agg not in ops:
+            raise ValueError(f"attribute_aggregate: unknown agg {agg!r}")
+        range_op, cross_op = ops[agg]
+        result = _numeric_attribute_slices(
+            pipelines=pipelines,
+            field=field,
+            agg=agg,
+            group_by=group_by,
+            range_op=range_op,
+            cross_op=cross_op,
+            timeout_s=timeout_s,
+        )
+    loki_events_cache.put(cache_key, list(result) if isinstance(result, list) else result)
+    return result
 
 
 def count_by_event_name(
