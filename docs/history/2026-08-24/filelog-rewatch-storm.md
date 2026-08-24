@@ -20,3 +20,6 @@ receiver design preserves those diagnostic streams while keeping banner-only
 agent main stdout out of filelog; structured agent records continue through
 OTLP. This change incorporates the final receiver split coordinated with
 #3279.
+
+Update: the broad seven-day PTY-startup deletion path was superseded by the
+explicit, active-handle-safe policy in [log-retention-cli](log-retention-cli.md).

@@ -68,6 +68,7 @@ from cli.parsers.host import (
     _h_stop,
     _h_trace_ship,
 )
+from cli.parsers.logs import _h_logs_retention
 from cli.parsers.management import (
     _h_config_get,
     _h_config_set,
@@ -152,6 +153,7 @@ __all__ = [
     "_h_converge",
     "_h_firewall_status",
     "_h_firewall_sync",
+    "_h_logs_retention",
     "_h_mcp_add",
     "_h_mcp_disable",
     "_h_mcp_enable",
@@ -257,6 +259,7 @@ _LITE_VERBS = frozenset(
         "config",
         "presets",
         "schedules",
+        "logs",
         "mcp",
         "memory",
         "plugins",
@@ -277,7 +280,7 @@ _LITE_VERBS = frozenset(
 # absent — both REQUIRE `--path` and address a home by name, so they never act on the
 # current one; and why the read-only (`ls`, `status`) and probe-registration
 # subcommands are absent too.
-_ANCHORED_HOME_VERBS = frozenset({"stop", "restart", "converge"})
+_ANCHORED_HOME_VERBS = frozenset({"stop", "restart", "converge", "logs"})
 _ANCHORED_HOME_CLUSTER_SUBVERBS = frozenset(
     {"update", "restart", "rollback", "recover", "ensure-db-role", "ensure-runner-role"}
 )
