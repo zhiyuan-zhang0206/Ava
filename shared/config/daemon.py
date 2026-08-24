@@ -423,12 +423,48 @@ class DaemonSettings(EnvSettings):
         },
     )
 
+    events_maintenance_pass_deadline_s: float = Field(
+        default=1500.0,
+        alias="AVA_EVENTS_MAINTENANCE_PASS_DEADLINE_S",
+        description="Hard deadline in seconds for one hourly events-maintenance pass. Its longest slice, the Loki rollup, is bounded by its own pass deadline; exceeding this bound wedges the loop for watchdog respawn.",
+        json_schema_extra={
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     events_rollup_pass_deadline_s: float = Field(
         default=1200.0,
         alias="AVA_EVENTS_ROLLUP_PASS_DEADLINE_S",
         description="Wall-clock budget in seconds for one Loki-to-Postgres rollup pass. The daemon stops between day probes or full recomputes when the budget is exhausted, leaving untouched days dirty for the next pass.",
         json_schema_extra={
             "capability": "gateway",
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    events_maintenance_trim_deadline_s: float = Field(
+        default=300.0,
+        alias="AVA_EVENTS_MAINTENANCE_TRIM_DEADLINE_S",
+        description="Hard deadline in seconds for one events-maintenance checkpoint-trim pass; exceeding it wedges the loop for watchdog respawn.",
+        json_schema_extra={
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    events_maintenance_resolution_deadline_s: float = Field(
+        default=600.0,
+        alias="AVA_EVENTS_MAINTENANCE_RESOLUTION_DEADLINE_S",
+        description="Hard deadline in seconds for one events-maintenance class-resolution pass; exceeding it wedges the loop for watchdog respawn.",
+        json_schema_extra={
             "restart_required": "all",
             "writable": True,
             "sensitive": False,
