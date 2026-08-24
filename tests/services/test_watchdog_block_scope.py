@@ -180,7 +180,7 @@ def test_db_scoped_block_holds_back_exactly_the_dbs_users(monkeypatch: pytest.Mo
 def test_db_scoped_block_keeps_db_free_pseudo_checks_and_drops_pg_backup(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Host policy and data-plane repairs survive a pg outage; pg_dump does not."""
+    """DB-free pseudo-checks survive an outage; the pg-backup spec does not."""
     monkeypatch.setattr(wd, "read_skipped", set)
 
     kept = {c.name for c in wd._checks_for_round("gateway", BlockScope.DB_DEPENDENT)}

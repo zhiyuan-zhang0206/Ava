@@ -1,12 +1,11 @@
-"""Daily local Postgres backup, driven by the watchdog tick on gateway hosts.
+"""Daily local Postgres backup, driven by the gateway scheduler daemon.
 
 One `pg_dump --format=custom` per day into `$AVA_HOME/backups/db/`,
-keeping the newest BACKUP_KEEP dumps. The watchdog runs
-`maybe_run_daily_backup` every tick on gateway-capable hosts (registered like
-a healthcheck, so `ava start --disable-service pg-backup` disables it); the
-function is a no-op until the first tick at/after BACKUP_HOUR CLUSTER time with
-no dump for the current cluster day — a host that was down at 03:00 catches up
-on its next tick instead of skipping the day.
+keeping the newest BACKUP_KEEP dumps. `services.backup_scheduler.daemon`
+calls `is_due()` and `run_backup()` independently of watchdog rounds. The
+scheduler runs at the first wake after BACKUP_HOUR cluster time with no dump
+for the current cluster day, so a host that was down at 03:00 catches up.
+The scheduler is the only production caller of `is_due()` and `run_backup()`.
 
 Two clocks, deliberately different ones:
 
@@ -293,10 +292,9 @@ def run_backup(now: datetime | None = None, *, db_url: str | None = None) -> Pat
         db_conninfo,
     ]
     try:
-        # The timeout is load-bearing: the watchdog tick awaits this check, so
-        # a pg_dump hung on a lock or stalled I/O would otherwise stall every
-        # subsequent healthcheck forever. subprocess.run kills the child on
-        # expiry and TimeoutExpired propagates as a failing check.
+        # The scheduler owns this subprocess in its own process, so its bound
+        # cannot delay watchdog supervision. subprocess.run kills the child on
+        # expiry and TimeoutExpired lets the scheduler schedule its retry.
         proc = subprocess.run(  # noqa: S603
             dump_cmd,
             capture_output=True,
@@ -363,14 +361,3 @@ def run_backup(now: datetime | None = None, *, db_url: str | None = None) -> Pat
         len(removed),
     )
     return target
-
-
-def maybe_run_daily_backup() -> None:
-    """Watchdog tick entry: run the day's backup if due, else no-op.
-
-    Raises on pg_dump failure — the watchdog tick logs it like any failing
-    check and retries next tick (is_due stays true until a dump succeeds).
-    """
-    now = datetime.now(UTC)
-    if is_due(now):
-        run_backup(now)

@@ -63,6 +63,8 @@ class ClusterPorts(TypedDict):
     # lacks it, and unlike the two above its offset falls outside those records'
     # allocated block — see `_LATE_HEALTH_SLOTS`.
     agent_host: NotRequired[int]
+    # Added after the prior block growth; legacy records derive its fixed port.
+    pg_backup: NotRequired[int]
 
 
 def _port_free(port: int) -> bool:
@@ -172,14 +174,11 @@ def record_redis_port(rec: cluster.ClusterRecord) -> int:
 # fallback at runtime — the derive must agree with that, or the port-preflight
 # map would name a port nothing binds.
 #
-# `agent_host` is here for a second, sharper reason: it is the first slot whose
-# offset (19) lands OUTSIDE the block an existing record actually owns. Those
-# records were allocated at BLOCK_SIZE 19, so they hold base..base+18, and the
-# `base + PORT_OFFSETS[svc]` derive below would hand out base+19 — the first
-# port of the NEXT cluster's block. Deriving the legacy value keeps every
-# answer inside the ports the record was born with, so growing the block can
-# never rename a running neighbour's port.
-_LATE_HEALTH_SLOTS = frozenset({"im_bridge", "delivery_watchdog", "agent_host"})
+# `agent_host` and `pg_backup` are here for a second, sharper reason: their
+# offsets land outside blocks records allocated before those slots actually own.
+# Deriving the legacy value keeps every answer inside the ports the record was
+# born with, so growing the block can never rename a running neighbour's port.
+_LATE_HEALTH_SLOTS = frozenset({"im_bridge", "delivery_watchdog", "agent_host", "pg_backup"})
 
 
 def record_health_port(rec: cluster.ClusterRecord, svc: str) -> int:
@@ -198,9 +197,10 @@ def record_health_port(rec: cluster.ClusterRecord, svc: str) -> int:
     plus the service's offset, always inside the cluster's port block.
 
     One exception: slots that did not exist at ANY existing record's birth —
-    the S4 isolation pass (`im_bridge` / `delivery_watchdog`) and the hosted
-    agent-runner (`agent_host`). Their missing-key derive is the legacy value,
-    never a block offset — see `_LATE_HEALTH_SLOTS`."""
+    the S4 isolation pass (`im_bridge` / `delivery_watchdog`), hosted
+    agent-runner (`agent_host`), and pg-backup scheduler (`pg_backup`). Their
+    missing-key derive is the legacy value, never a block offset — see
+    `_LATE_HEALTH_SLOTS`."""
     port = rec.ports.get(svc)  # type: ignore[literal-required]
     if port is not None:
         return port

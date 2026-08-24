@@ -372,6 +372,16 @@ def build_services() -> tuple[ServiceSpec, ...]:
             curl_url=_fe_url,
             healthcheck_module="services.healthchecks.frontend",
         ),
+        ServiceSpec(
+            session="pg-backup",
+            cmd=".venv/bin/python -m services.backup_scheduler.daemon",
+            capabilities=_GATEWAY,
+            requires_db=True,  # dumps that very database
+            pidfile=settings.services.pg_backup_pidfile,
+            curl_url=_hz("pg_backup"),
+            identity_probe=daemon_identity("pg_backup", settings.services.pg_backup_pidfile),
+            healthcheck_module="services.healthchecks.pg_backup",
+        ),
         # One watchdog PER CAPABILITY (not a role-union daemon): two co-located
         # units on one host would otherwise collide on a single host-singleton
         # watchdog session, leaving one capability's services unrevived. The
