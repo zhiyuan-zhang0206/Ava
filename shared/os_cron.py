@@ -30,7 +30,7 @@ from pathlib import Path
 from loguru import logger
 
 from shared.config import settings
-from shared.platform import crontab_lock
+from shared.platform import crontab_lock, launchd_job_label
 
 DEFAULT_INTERVAL_SECONDS = 300  # 5 minutes
 DEFAULT_CONSECUTIVE_THRESHOLD = 3
@@ -320,11 +320,23 @@ def _register_macos(interval_s: int, threshold: int) -> int:
     """Register the health probe as a launchd User LaunchAgent.
 
     Writes the plist to ~/Library/LaunchAgents/ and loads it with
-    `launchctl bootstrap`. Idempotent: re-running updates the plist
-    and reloads."""
+    `launchctl bootstrap`. A call descended from this job leaves its own loaded
+    spec untouched; the next external converge applies any pending change."""
     slug = _home_slug()
     label = _health_probe_label(slug)
     plist_path = _launchd_plist_path(slug)
+
+    # `bootout` terminates the job's whole process tree. Auto-rollback invokes
+    # `ava start` below this LaunchAgent, so replacing the job here would kill
+    # the rollback before its finally block can resume the cluster and release
+    # the update lease. Leave the old plist in place so a later external start
+    # still sees any desired-content change and performs the deferred reload.
+    current_job = launchd_job_label()
+    if current_job is not None:
+        own_labels = {label, *(_health_probe_label(token) for token in _legacy_label_tokens())}
+        if current_job in own_labels:
+            logger.info("Health probe '{}' is registering itself — deferring reload", current_job)
+            return 0
 
     # Ensure the LaunchAgents directory exists.
     plist_path.parent.mkdir(parents=True, exist_ok=True)
