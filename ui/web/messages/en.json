@@ -27,7 +27,6 @@
     "retrySameMessage": "Retry same message",
     "sendAnotherAnyway": "Send another anyway"
   },
-  "alerts": { "unresolved": "unresolved" },
   "nav": {
     "openSidebar": "Open sidebar",
     "memoryGraph": "Memory graph",

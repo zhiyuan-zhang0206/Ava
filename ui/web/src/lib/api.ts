@@ -496,13 +496,6 @@ export const api = {
     return f(`/api/alerts${qs ? `?${qs}` : ""}`).then(ok<AlertsResponse>);
   },
 
-  // Mark specific alerts read — or with `all: true`, every alert. Returns
-  // the number updated. ids are alerts row ids (int, per the backend schema).
-  markAlertsRead: (ids: readonly number[]): Promise<{ updated: number }> =>
-    f("/api/alerts/read", PATCH_JSON({ ids })).then(ok<{ updated: number }>),
-  markAllAlertsRead: (): Promise<{ updated: number }> =>
-    f("/api/alerts/read", PATCH_JSON({ all: true })).then(ok<{ updated: number }>),
-
   // --- config (runtime config panel) ---
   //
   // `machine` targets a specific host's view; omitted = this gateway

@@ -6,7 +6,7 @@
 //
 // One EventSource to /api/alerts/stream feeds the TanStack Query ["alerts"]
 // prefix: every frame (one AlertRow JSON per ingest) folds into every
-// matching cache (the badge/bar query with default params, the section query
+// matching cache (the badge query with default params, the section query
 // with includeRead=true) — no polling for SSE-backed data (frontend AGENTS.md
 // state rule). The initial GET /api/alerts is the fetch fallback for rows
 // ingested before the subscription opened.
@@ -16,25 +16,19 @@
 // fail to parse are dropped, a wedged socket reopens, a CLOSED stream
 // reconnects with capped backoff.
 //
-// Cache shape: AlertsResponse (alerts + meta.unresolved_count +
-// meta.unread_count). Frames upsert by row id and apply count deltas; the
-// mark-all-read mutation is the one other writer, patching every matching
-// cache in place so the badge clears immediately.
+// Cache shape: AlertsResponse (alerts + meta.unresolved_count). Frames upsert
+// by row id and apply unresolved-count deltas.
 
 import {
-  createContext,
   useCallback,
-  useContext,
   useEffect,
   useState,
   type ReactNode,
 } from "react";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { API_BASE, api } from "./api";
-import { errMsg } from "./errors";
-import { useStore } from "./store";
 import type { Alert, AlertsResponse } from "./types";
 
 // Half-dead-connection watchdog window (same value as useEventStream: the
@@ -46,7 +40,7 @@ const WATCHDOG_MS = 45_000;
 const RECONNECT_BASE_MS = 1_000;
 const RECONNECT_MAX_MS = 30_000;
 
-/** The default-params cache key (badge / floating bar / provider warm-up). */
+/** The default-params cache key (badge / provider warm-up). */
 export const ALERTS_QUERY_KEY = ["alerts"] as const;
 
 /** The section's cache key (includeRead=true — the history list). */
@@ -72,8 +66,8 @@ function isAlertRow(raw: unknown): raw is Alert {
   );
 }
 
-/** Fold one SSE frame into an existing cache: upsert by id, apply count
- *  deltas (unread / unresolved) so the badge + bar stay exact. */
+/** Fold one SSE frame into an existing cache: upsert by id and apply the
+ *  unresolved-count delta so the badge stays exact. */
 export function foldAlert(prev: AlertsResponse | undefined, row: Alert): AlertsResponse {
   if (!prev) {
     return {
@@ -83,7 +77,6 @@ export function foldAlert(prev: AlertsResponse | undefined, row: Alert): AlertsR
         include_read: true,
         total: 1,
         unresolved_count: row.status === "unresolved" ? 1 : 0,
-        unread_count: row.read_at === null ? 1 : 0,
       },
     };
   }
@@ -91,28 +84,22 @@ export function foldAlert(prev: AlertsResponse | undefined, row: Alert): AlertsR
   const alerts = existing
     ? prev.alerts.map((a) => (a.id === row.id ? row : a))
     : [row, ...prev.alerts].slice(0, 200);
-  let unread = prev.meta.unread_count;
   let unresolved = prev.meta.unresolved_count;
   if (existing) {
-    if (existing.read_at && !row.read_at) unread += 1;
-    if (!existing.read_at && row.read_at) unread -= 1;
     if (existing.status === "resolved" && row.status === "unresolved") unresolved += 1;
     if (existing.status === "unresolved" && row.status === "resolved") unresolved -= 1;
   } else {
-    if (!row.read_at) unread += 1;
     if (row.status === "unresolved") unresolved += 1;
   }
   return {
     alerts,
-    meta: { ...prev.meta, unread_count: Math.max(0, unread), unresolved_count: Math.max(0, unresolved) },
+    meta: { ...prev.meta, unresolved_count: Math.max(0, unresolved) },
   };
 }
 
-const AlertsContext = createContext<{ connected: boolean } | null>(null);
-
 export function AlertsProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
-  // The badge/bar counts stay warm for the whole app via this always-on
+  // The badge count stays warm for the whole app via this always-on
   // default-params query (the initial fetch fallback).
   useQuery<AlertsResponse>({
     queryKey: ALERTS_QUERY_KEY,
@@ -121,7 +108,6 @@ export function AlertsProvider({ children }: { children: ReactNode }) {
     staleTime: Infinity,
   });
 
-  const [connected, setConnected] = useState(false);
   const [reconnectNonce, setReconnectNonce] = useState(0);
   const [retryNonce, setRetryNonce] = useState(0);
 
@@ -137,7 +123,6 @@ export function AlertsProvider({ children }: { children: ReactNode }) {
     const armWatchdog = () => {
       if (watchdog !== null) clearTimeout(watchdog);
       watchdog = setTimeout(() => {
-        setConnected(false);
         bumpReconnect();
       }, WATCHDOG_MS);
     };
@@ -165,7 +150,7 @@ export function AlertsProvider({ children }: { children: ReactNode }) {
         return;
       }
       if (isHeartbeat(parsed) || !isAlertRow(parsed)) return;
-      // Fold into every ["alerts", ...] cache (the badge/bar query and the
+      // Fold into every ["alerts", ...] cache (the badge query and the
       // section query — prefix match keeps one writer per cache).
       const caches = queryClient.getQueryCache().findAll({ queryKey: ALERTS_QUERY_KEY });
       for (const cache of caches) {
@@ -176,7 +161,6 @@ export function AlertsProvider({ children }: { children: ReactNode }) {
     const es = new EventSource(`${API_BASE}/api/alerts/stream`, { withCredentials: true });
     es.onopen = () => {
       failCount = 0;
-      setConnected(true);
       armWatchdog();
     };
     es.onmessage = (e) => {
@@ -188,12 +172,10 @@ export function AlertsProvider({ children }: { children: ReactNode }) {
     es.onerror = () => {
       switch (es.readyState) {
         case EventSource.CLOSED:
-          setConnected(false);
           scheduleReopen();
           return;
         case EventSource.CONNECTING:
-          // The browser is already auto-retrying — surface it, don't double up.
-          setConnected(false);
+          // The browser is already auto-retrying — don't double up.
           return;
         case EventSource.OPEN:
           return; // transient fault absorbed by the browser
@@ -211,15 +193,10 @@ export function AlertsProvider({ children }: { children: ReactNode }) {
     // stable identities included only to satisfy the lint.
   }, [queryClient, reconnectNonce, retryNonce, bumpReconnect]);
 
-  return <AlertsContext.Provider value={{ connected }}>{children}</AlertsContext.Provider>;
+  return children;
 }
 
-/** Live-connection state — the floating bar renders a quiet reconnect hint. */
-export function useAlertsConnection(): boolean {
-  return useContext(AlertsContext)?.connected ?? false;
-}
-
-/** The badge/bar counts + rows (default params, warmed by the provider). */
+/** The badge count + rows (default params, warmed by the provider). */
 export function useAlerts() {
   return useQuery<AlertsResponse>({ queryKey: ALERTS_QUERY_KEY, staleTime: Infinity });
 }
@@ -231,30 +208,5 @@ export function useAlertsSection() {
     queryFn: () => api.getAlerts({ window: "24h", includeRead: true, limit: 200 }),
     staleTime: 30_000,
     refetchOnWindowFocus: false,
-  });
-}
-
-/** Mark everything read — patches every ["alerts", ...] cache in place so
- *  the badge clears and the section's rows dim immediately. */
-export function useMarkAllAlertsRead() {
-  const queryClient = useQueryClient();
-  const showToast = useStore((s) => s.showToast);
-  return useMutation({
-    mutationFn: () => api.markAllAlertsRead(),
-    onSuccess: () => {
-      const caches = queryClient.getQueryCache().findAll({ queryKey: ALERTS_QUERY_KEY });
-      for (const cache of caches) {
-        queryClient.setQueryData<AlertsResponse>(cache.queryKey, (old) => {
-          if (!old) return old;
-          return {
-            alerts: old.alerts.map((a) =>
-              a.read_at === null ? { ...a, read_at: new Date().toISOString() } : a,
-            ),
-            meta: { ...old.meta, unread_count: 0 },
-          };
-        });
-      }
-    },
-    onError: (err: unknown) => showToast(`Failed to mark alerts read: ${errMsg(err)}`),
   });
 }

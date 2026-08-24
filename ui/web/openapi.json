@@ -1339,7 +1339,7 @@
     "/api/agents/{agent_id}/inspect": {
       "get": {
         "summary": "Get Agent Inspect",
-        "description": "Per-agent inspector panel data in one shot — the agent's live persistent\nshells, its frozen config overlay, its LLM cost, turn/exec stats, idle\nheartbeat state. The\nsingle-agent counterpart to `/api/stats/dashboard` (fleet-wide).\n\n`?hours=` windows `cost` + `stats` to the selected range (0 = last 5m;\n1/6/24/72/168 = hours, anything else 422s); omitted = cumulative since\nspawn.\n`?since_compact=true` windows them to events since the agent's latest\ncompact halt instead — it takes precedence, `hours` is ignored and the\nechoed `window_hours` is None.\n`shells` + `config_overlay` + `heartbeat` are always\ncurrent, independent of the window. 404 if the agent is unknown (no\nagents_meta row). `config_overlay` is the spawn-time override map — `{}` when\nthe agent runs on cluster defaults (the column is NULL).\n\nLatency discipline: the event-history sections run on parallel workers\n(one Loki fan-out per section, overlapped), and only those aggregates ride\na 75s TTL cache keyed by (agent_id, hours, since_compact), with concurrent\nmisses sharing one single-flight Future — the panel refetches in bursts\n(open, notice SSE events, 60s interval), and a burst must not re-run the\n~20-query fan-out per request. The agents_meta projection (machine,\nconfig, heartbeat inputs, liveness and timestamps), `notice`, and `shells`\nare fetched fresh on every call and never ride the cache. `shells` is probed\non the agent's own machine via the `shell_probe` cluster op (the gateway\nnever runs sessions itself; every machine — its own included — is dialed at its\nregistered ops URL), so a split deployment reflects each agent's runner and\nan unreachable machine degrades to an empty list rather than failing the\npanel. `heartbeat` is the agent's idle check-in state: the\nprojected next check-in when idle (or the active pause / running suppression)\nplus its most recent pause from history.\n\nThe retained live lifecycle leg begins at the index-label cutover and never\nscans the legacy slice. It has an 8-second Loki timeout and a per-agent\nthirty-minute single-flight cache, so changing `hours` or `since_compact`\ndoes not repeat that indexed read. Agents whose lifecycle history is wholly\npre-cutover use the `spawned_at` fallback described by `_alive_seconds`.",
+        "description": "Per-agent inspector panel data in one shot — the agent's live persistent\nshells, its frozen config overlay, its LLM cost, turn/exec stats, idle\nheartbeat state. The\nsingle-agent counterpart to `/api/stats/dashboard` (fleet-wide).\n\n`?hours=` windows `cost` + `stats` to the selected range (0 = last 5m;\n1/6/24/72/168 = hours, anything else 422s); omitted = cumulative since\nspawn.\n`?since_compact=true` windows them to events since the agent's latest\ncompact halt instead — it takes precedence, `hours` is ignored and the\nechoed `window_hours` is None.\n`shells` + `config_overlay` + `heartbeat` are always\ncurrent, independent of the window. 404 if the agent is unknown (no\nagents_meta row). `config_overlay` is the spawn-time override map — `{}` when\nthe agent runs on cluster defaults (the column is NULL).\n\nLatency discipline: event-history sections use a shared bounded executor,\nand only their aggregates ride a 75s TTL cache keyed by (agent_id, hours,\nsince_compact). Concurrent misses share one single-flight Future; no more\nthan `_INSPECT_MAX_CONCURRENT_LOADS` distinct leaders run at once, and a\nsaturated request gets the queue-full 503. Each leader's 15-second response\nbudget is also its load deadline, so expired work stops and releases its\nadmission slot rather than continuing under transport timeouts. The\nagents_meta projection (machine, config, heartbeat inputs, liveness and\ntimestamps), `notice`, and `shells` are fetched fresh on every call and\nnever ride the cache. `shells` is probed on the agent's own machine via the\n`shell_probe` cluster op (the gateway never runs sessions itself; every\nmachine — its own included — is dialed at its registered ops URL), so a\nsplit deployment reflects each agent's runner and an unreachable machine\ndegrades to an empty list rather than failing the panel. `heartbeat` is the agent's idle check-in state: the\nprojected next check-in when idle (or the active pause / running suppression)\nplus its most recent pause from history.\n\nThe retained live lifecycle leg begins at the index-label cutover and never\nscans the legacy slice. It has an 8-second Loki timeout and a per-agent\nthirty-minute single-flight cache, so changing `hours` or `since_compact`\ndoes not repeat that indexed read. Agents whose lifecycle history is wholly\npre-cutover use the `spawned_at` fallback described by `_alive_seconds`.",
         "operationId": "get_agent_inspect_api_agents__agent_id__inspect_get",
         "parameters": [
           {
@@ -5079,7 +5079,7 @@
       },
       "get": {
         "summary": "List Alerts",
-        "description": "Unresolved-first alert history for the alert section.\n\nUnresolved instances float above resolved ones (a resolved alert that is\nstill unread no longer buries new firings — 2026-08-05 user ruling);\nwithin a status class, unread rows come first, then newest start.\nDefault excludes read rows (``include_read=true`` brings them back).\n``meta.unresolved_count`` backs the timeline's floating bar,\n``meta.unread_count`` the top-bar badge, ``meta.total`` the full\nmatch count.",
+        "description": "Unresolved-first alert history for the alert section.\n\nUnresolved instances float above resolved ones (a resolved alert that is\nstill unread no longer buries new firings — 2026-08-05 user ruling);\nwithin a status class, unread rows come first, then newest start.\nDefault excludes read rows (``include_read=true`` brings them back).\n``meta.unresolved_count`` backs the top-bar badge and ``meta.total`` is\nthe full match count.",
         "operationId": "list_alerts_api_alerts_get",
         "parameters": [
           {
@@ -5261,7 +5261,7 @@
     "/api/stats/dashboard": {
       "get": {
         "summary": "Get Stats Dashboard",
-        "description": "Pull all data for the sidebar-top stats card in one shot.\n\nData sources:\n- `live_count`: agents_meta table — all non-terminated agents (running/idling/restarting/hibernating)\n- `tokens` / `cost_usd`: telemetry `llm_usage` events in Loki\n- average turn duration / warning/error counts: Loki's unified event stream\n- `total_events`: archived event row count (frozen at the LGTM cutover;\n  not a live gauge)\n\n`?hours=` selects the aggregation window (0 = last 5m; 1/6/24/72/168 =\nhours), whitelisted by `StatsWindowHours` (anything else 422s). Zero-data\nscenario: tokens all 0, cost_usd 0.0, avg_turn_seconds None (frontend\nshows \"—\").",
+        "description": "Pull all data for the sidebar-top stats card in one shot.\n\nData sources:\n- `live_count`: agents_meta table — all non-terminated agents (running/idling/restarting/hibernating)\n- `tokens` / `cost_usd`: full UTC days from the fleet ledger plus a Loki tail\n- average turn duration: Loki's unified event stream in 12-hour shards\n- warning/error counts: one grouped Loki query per 12-hour shard\n- `total_events`: archived event row count (frozen at the LGTM cutover;\n  not a live gauge)\n\n`?hours=` selects the aggregation window (0 = last 5m; 1/6/24/72/168 =\nhours), whitelisted by `StatsWindowHours` (anything else 422s). Zero-data\nscenario: tokens all 0, cost_usd 0.0, avg_turn_seconds None (frontend\nshows \"—\"). Until the unlabeled legacy slice expires on 2026-08-30,\nthe ledger removes the fixed-cost full-window token scans; afterward the\nindexed Loki tail keeps the same self-healing late-write behavior.",
         "operationId": "get_stats_dashboard_api_stats_dashboard_get",
         "parameters": [
           {
@@ -7203,10 +7203,6 @@
           "unresolved_count": {
             "type": "integer",
             "title": "Unresolved Count"
-          },
-          "unread_count": {
-            "type": "integer",
-            "title": "Unread Count"
           }
         },
         "type": "object",
@@ -7214,8 +7210,7 @@
           "window",
           "include_read",
           "total",
-          "unresolved_count",
-          "unread_count"
+          "unresolved_count"
         ],
         "title": "AlertsListMeta",
         "description": "Query provenance of one GET /api/alerts response."
@@ -7239,7 +7234,7 @@
           "meta"
         ],
         "title": "AlertsListResponse",
-        "description": "Unresolved-first alert history + the counts the UI badges show."
+        "description": "Unresolved-first alert history + the count the UI badge shows."
       },
       "AlertsReadRequest": {
         "properties": {

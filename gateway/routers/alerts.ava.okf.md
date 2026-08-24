@@ -116,12 +116,10 @@ an IM recovery without Grafana's resolved notification payload.
 ### List
 
 `GET /api/alerts?window=1h|6h|24h|7d&status=&severity=&limit=&include_read=`
-→ `{alerts: [row...], meta: {window, include_read, total, unresolved_count,
-unread_count}}`, ordered `(status = 'unresolved') DESC, (read_at IS NULL)
-DESC, starts_at DESC`. Default excludes read rows; `unresolved_count` backs
-the timeline's floating bar (same window/severity scope, read ignored,
-0 when scoped to resolved), `unread_count` the top-bar badge (same full
-filters, always unread).
+→ `{alerts: [row...], meta: {window, include_read, total, unresolved_count}}`,
+ordered `(status = 'unresolved') DESC, (read_at IS NULL) DESC, starts_at DESC`.
+Default excludes read rows; `unresolved_count` backs the top-bar badge (same
+window/severity scope, read ignored, 0 when scoped to resolved).
 
 ### Mark read
 

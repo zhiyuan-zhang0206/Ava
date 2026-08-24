@@ -5,7 +5,7 @@ Same posture as the old test_ops_alerts_api.py: real SQL on the session DB.
 Locks the contract: Alertmanager-webhook upsert + (fingerprint, starts_at)
 dedup, severity label parsing (critical/warning/error), the fingerprint
 computation when the payload omits it, the unresolved-first list + counts
-(unresolved for the floating bar, unread for the badge), mark-as-read, the
+(including the badge's unresolved count), mark-as-read, the
 ingest auth split (webhook token / loopback), the SSE publish on every
 ingest, and the IM-notify gate (the im_bridge fan-out is mocked — the
 endpoint's side effect is that it POSTs to the daemon, which has its own
@@ -681,9 +681,8 @@ def _seed(db: psycopg.Connection, rows: list[dict[str, Any]]) -> None:
 
 
 def test_list_unread_first_and_filters(db_conn: psycopg.Connection, client: TestClient) -> None:
-    """Default list = unread only, unread_count under the same filters, order
-    unread-first then recency; include_read brings read rows back; the
-    counts ride meta."""
+    """Default list = unread only, ordered unread-first then recency;
+    include_read brings read rows back and the counts ride meta."""
     now = datetime.now(UTC)
     _seed(
         db_conn,
@@ -722,7 +721,7 @@ def test_list_unread_first_and_filters(db_conn: psycopg.Connection, client: Test
     assert resp.status_code == 200
     body = resp.json()
     assert [a["fingerprint"] for a in body["alerts"]] == ["f3", "f1"]
-    assert body["meta"]["unread_count"] == 2
+    assert set(body["meta"]) == {"window", "include_read", "total", "unresolved_count"}
     assert body["meta"]["unresolved_count"] == 2
     assert body["meta"]["total"] == 2
     assert body["meta"]["include_read"] is False
@@ -730,7 +729,6 @@ def test_list_unread_first_and_filters(db_conn: psycopg.Connection, client: Test
     resp = client.get("/api/alerts?include_read=true")
     body = resp.json()
     assert [a["fingerprint"] for a in body["alerts"]] == ["f3", "f1", "f2"]
-    assert body["meta"]["unread_count"] == 2
     assert body["meta"]["total"] == 3
 
     resp = client.get("/api/alerts?severity=warning&include_read=true")
@@ -742,7 +740,7 @@ def test_list_unread_first_and_filters(db_conn: psycopg.Connection, client: Test
     resp = client.get("/api/alerts?status=resolved&include_read=true")
     body = resp.json()
     assert [a["fingerprint"] for a in body["alerts"]] == ["f2"]
-    assert body["meta"]["unresolved_count"] == 0  # scoped to resolved -> bar count 0
+    assert body["meta"]["unresolved_count"] == 0  # scoped to resolved -> badge count 0
 
     resp = client.get("/api/alerts?window=1h")
     assert [a["fingerprint"] for a in resp.json()["alerts"]] == ["f3"]
@@ -787,7 +785,6 @@ def test_list_unresolved_before_resolved_unread(
     body = resp.json()
     # unresolved (older) sorts above resolved (newer, unread)
     assert [a["fingerprint"] for a in body["alerts"]] == ["f2", "f1"]
-    assert body["meta"]["unread_count"] == 2
 
 
 # -- read --------------------------------------------------------------------

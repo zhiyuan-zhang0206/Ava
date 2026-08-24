@@ -11,8 +11,8 @@ channel — nothing here touches agent_notices.
   channel for the SSE stream, and fanned out to the user's connected IM
   channels via the local im_bridge daemon — every severity pushes
   (critical/warning/error).
-- ``GET /api/alerts`` — unresolved-first history list + counts (unresolved
-  for the floating bar, unread for the top-bar badge).
+- ``GET /api/alerts`` — unresolved-first history list + unresolved count for
+  the top-bar badge.
 - ``GET /api/alerts/stream`` — SSE tail of every ingest (reuses the
   agent_events SSE machinery; broadcast mode, no agent filter).
 - ``PATCH /api/alerts/read`` — mark read by ids or everything.
@@ -251,9 +251,8 @@ def list_alerts(
     still unread no longer buries new firings — 2026-08-05 user ruling);
     within a status class, unread rows come first, then newest start.
     Default excludes read rows (``include_read=true`` brings them back).
-    ``meta.unresolved_count`` backs the timeline's floating bar,
-    ``meta.unread_count`` the top-bar badge, ``meta.total`` the full
-    match count.
+    ``meta.unresolved_count`` backs the top-bar badge and ``meta.total`` is
+    the full match count.
     """
 
     since = datetime.now(UTC) - _WINDOWS[window]
@@ -269,11 +268,10 @@ def list_alerts(
         where.append("read_at IS NULL")
     where_sql = " AND ".join(where)
 
-    # meta counts (one connection, three cheap queries):
+    # meta counts (one connection, two cheap queries):
     # - unresolved: same window/severity scope, always unresolved, read state
-    #   ignored (the bar counts unresolved, read or not). Trivially 0 when the
-    #   caller already scopes to resolved.
-    # - unread: the same full filters, but always read_at IS NULL.
+    #   ignored (the badge counts unresolved, read or not). Trivially 0 when
+    #   the caller already scopes to resolved.
     # - total: rows matching the filters before the limit.
     with request.app.state.db_pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
         if status == "resolved":
@@ -289,12 +287,6 @@ def list_alerts(
                 base_params,
             )
             unresolved_count = cur.fetchone()["n"]
-        unread_where = [w for w in where if w != "read_at IS NULL"] + ["read_at IS NULL"]
-        cur.execute(
-            f"SELECT count(*) AS n FROM alerts WHERE {' AND '.join(unread_where)}",  # noqa: S608 — fixed fragments
-            params,
-        )
-        unread_count = cur.fetchone()["n"]
         cur.execute(f"SELECT count(*) AS n FROM alerts WHERE {where_sql}", params)  # noqa: S608 — fixed fragments
         total = cur.fetchone()["n"]
 
@@ -314,7 +306,6 @@ def list_alerts(
             include_read=include_read,
             total=total,
             unresolved_count=unresolved_count,
-            unread_count=unread_count,
         ),
     )
 
