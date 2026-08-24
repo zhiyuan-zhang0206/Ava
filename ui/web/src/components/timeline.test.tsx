@@ -1205,6 +1205,64 @@ describe("load-older prepend anchor (#659)", () => {
     expect(viewport.scrollTop).toBe(350);
   });
 
+  it.each([
+    { detailsMode: "none" as const, summaryShape: "collapsed", summaryMounted: false },
+    { detailsMode: "all" as const, summaryShape: "expanded", summaryMounted: true },
+  ])(
+    "skips pinned compact-summary context when its turn is $summaryShape",
+    ({ detailsMode, summaryMounted }) => {
+      setToggleState({ detailsMode });
+      const loadOlder = vi.fn();
+      const items = [
+        makeItem({
+          item_id: "0.0",
+          kind: "system_prompt",
+          payload: "prompt",
+          created_at: null,
+        }),
+        makeItem({
+          item_id: "6.0",
+          kind: "inbound_compact_summary",
+          payload: "summary",
+        }),
+        makeItem({ item_id: "960.1", kind: "agent_chat", payload: "recent" }),
+      ];
+      let moved = false;
+      vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+        function (this: HTMLElement) {
+          if (this.dataset.itemId === "960.1") return rect(moved ? 250 : 0);
+          return rect(0);
+        },
+      );
+
+      const { rerender } = render(
+        <TimelineView items={items} hasMoreOlder onLoadOlder={loadOlder} />,
+      );
+      const viewport = screen.getByTestId("scroll-viewport");
+      const summaryNode = viewport.querySelector('[data-item-id="6.0"]');
+      expect(summaryNode == null).toBe(!summaryMounted);
+
+      viewport.scrollTop = 100;
+      viewport.dispatchEvent(new Event("scroll"));
+      expect(loadOlder).toHaveBeenCalledTimes(1);
+
+      moved = true;
+      rerender(
+        <TimelineView
+          items={[
+            items[0],
+            items[1],
+            makeItem({ item_id: "915.1", kind: "agent_chat", payload: "older" }),
+            items[2],
+          ]}
+          hasMoreOlder
+          onLoadOlder={loadOlder}
+        />,
+      );
+      expect(viewport.scrollTop).toBe(350);
+    },
+  );
+
   it("skips ephemeral _marker rows too — the anchor is the first real message (#817)", () => {
     const loadOlder = vi.fn();
     const items = [

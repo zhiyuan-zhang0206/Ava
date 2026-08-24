@@ -4,6 +4,8 @@
 //
 // isEventForThread lives here: it is a hook-level SSE gate, not fold logic.
 
+import type { BackendTimelineItem } from "./types";
+
 export {
   applySystemEvent,
   clearCodeClocks,
@@ -12,6 +14,11 @@ export {
   parseItemId,
   sortByItemId,
 } from "./fold/timeline";
+
+/** Standing context the gateway re-attaches ahead of the initial timeline window. */
+export function isReattachedTimelineContext(item: BackendTimelineItem): boolean {
+  return item.kind === "system_prompt" || item.kind === "inbound_compact_summary";
+}
 
 export function isEventForThread(
   ev: { readonly agent_id: number },
