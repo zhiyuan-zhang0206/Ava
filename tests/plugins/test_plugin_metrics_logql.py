@@ -132,17 +132,18 @@ def test_dashboard_json_matches_core_registrations() -> None:
         if spec.query_type == "promql":
             assert panel["datasource"] == {"type": "prometheus", "uid": "prometheus"}
             assert [target["expr"] for target in targets] == expected
-            assert all(
-                target.get("instant") is True and target.get("range") is False for target in targets
-            )
+            if spec.panel == "stat":
+                assert all(
+                    target.get("instant") is True and target.get("range") is False
+                    for target in targets
+                )
+            else:
+                assert all(target["queryType"] == "range" for target in targets)
+            assert spec.target_names is not None
+            assert [target["legendFormat"] for target in targets] == spec.target_names
             continue
 
-        datasource = (
-            {"type": "prometheus", "uid": "prometheus"}
-            if spec.query_type == "promql"
-            else {"type": "loki", "uid": "loki"}
-        )
-        assert panel["datasource"] == datasource
+        assert panel["datasource"] == {"type": "loki", "uid": "loki"}
         assert [target["expr"] for target in targets] == expected
         expected_query_type = (
             "instant"
@@ -151,13 +152,10 @@ def test_dashboard_json_matches_core_registrations() -> None:
             else "range"
         )
         assert all(target["queryType"] == expected_query_type for target in targets)
-        if spec.query_type == "promql":
-            assert spec.target_names is not None
-            assert [target["legendFormat"] for target in targets] == spec.target_names
 
 
-def test_dashboard_has_88_loki_targets() -> None:
-    """Removing the three Loki turn-duration targets leaves the measured total."""
+def test_dashboard_has_86_loki_targets() -> None:
+    """The two unresolved Prometheus gauges replace Loki targets in the total."""
     path = _REPO_ROOT / "deploy/lgtm/config/grafana/provisioning/dashboards/ava-ops-main.json"
     panels = json.loads(path.read_text())["panels"]
     loki_targets = [
@@ -166,7 +164,7 @@ def test_dashboard_has_88_loki_targets() -> None:
         for target in panel.get("targets", [])
         if target.get("datasource", panel.get("datasource", {})).get("uid") == "loki"
     ]
-    assert len(loki_targets) == 88
+    assert len(loki_targets) == 86
 
 
 def test_unresolved_gauge_names_match_the_otlp_contract() -> None:
