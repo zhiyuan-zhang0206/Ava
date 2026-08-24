@@ -9,7 +9,7 @@
 // per preset, derived from the presets query cache in _nav.tsx via
 // `presetAnchorId` — so they are NOT listed here.
 //
-// The two lists never overlap: Status + Metrics live only in Insights, the
+// The two lists never overlap: Status + Ops + Alerts live only in Insights, the
 // remaining sections only in Control — see CONTROL_SECTIONS / INSIGHTS_SECTIONS
 // below.
 

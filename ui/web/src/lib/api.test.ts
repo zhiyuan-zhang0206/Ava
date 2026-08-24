@@ -9,6 +9,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api, MessageDeliveryUnknownError } from "./api";
+import { track } from "./telemetry";
+
+vi.mock("./telemetry", () => ({ track: vi.fn() }));
 
 interface FetchCall {
   url: string;
@@ -19,6 +22,7 @@ let calls: FetchCall[];
 
 beforeEach(() => {
   calls = [];
+  vi.mocked(track).mockReset();
   vi.stubGlobal(
     "fetch",
     vi.fn((url: string, init?: RequestInit) => {
@@ -40,6 +44,56 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
+});
+
+describe("browser API timing", () => {
+  it("reports a slow request with query strings removed and numeric segments collapsed", async () => {
+    vi.spyOn(performance, "now")
+      .mockReturnValueOnce(1_000)
+      .mockReturnValueOnce(1_801);
+
+    await api.getAgentInspect(2697, 1);
+
+    expect(track).toHaveBeenCalledWith("api-timing", {
+      key: "agents/id/inspect",
+      value: 801,
+      dedupe: false,
+    });
+  });
+
+  it("does not report a request at the 800 ms threshold", async () => {
+    vi.spyOn(performance, "now")
+      .mockReturnValueOnce(1_000)
+      .mockReturnValueOnce(1_800);
+
+    await api.head("/api/status");
+
+    expect(track).not.toHaveBeenCalled();
+  });
+
+  it("does not time the frontend telemetry endpoint", async () => {
+    vi.spyOn(performance, "now")
+      .mockReturnValueOnce(1_000)
+      .mockReturnValueOnce(2_000);
+
+    await api.head("/api/frontend-telemetry");
+
+    expect(track).not.toHaveBeenCalled();
+  });
+
+  it("reports slow fetch failures before preserving the rejection", async () => {
+    vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new TypeError("offline"))));
+    vi.spyOn(performance, "now")
+      .mockReturnValueOnce(1_000)
+      .mockReturnValueOnce(1_900);
+
+    await expect(api.head("/api/status")).rejects.toThrow("offline");
+    expect(track).toHaveBeenCalledWith("api-timing", {
+      key: "status",
+      value: 900,
+      dedupe: false,
+    });
+  });
 });
 
 describe("lifecycle endpoints", () => {

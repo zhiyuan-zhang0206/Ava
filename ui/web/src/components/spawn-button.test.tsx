@@ -21,7 +21,7 @@
 // default) option — no catalog model does today.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SpawnButton } from "./spawn-button";
@@ -294,6 +294,33 @@ beforeEach(() => {
     providers: {},
     models: {},
     default: "",
+  });
+});
+
+describe("SpawnButton status polling", () => {
+  it("does not refetch before the shared 15 second cadence", async () => {
+    vi.useFakeTimers();
+    vi.mocked(api.getSystemStatus).mockResolvedValue(singleMachineStatus());
+    const view = wrap(<SpawnButton variant="sm" onSpawn={vi.fn()} />);
+    try {
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(api.getSystemStatus).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(14_999);
+      });
+      expect(api.getSystemStatus).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
+      });
+      expect(api.getSystemStatus).toHaveBeenCalledTimes(2);
+    } finally {
+      view.unmount();
+      vi.useRealTimers();
+    }
   });
 });
 

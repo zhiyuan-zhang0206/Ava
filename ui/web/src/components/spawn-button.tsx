@@ -18,7 +18,7 @@
 // the aligned price column makes cross-model price comparison easy.
 //
 // QueryKey ["status"] is shared with the Control page — TanStack Query
-// dedupes automatically. We set refetchInterval: 5000 so the spawnable
+// dedupes automatically. We set refetchInterval: 15000 so the spawnable
 // list stays fresh while the sidebar is mounted. Without it, a host that
 // transiently dropped offline (probe timeout, sleep, network blip) at
 // mount time would leave the picker stuck on the single-spawnable path
@@ -54,7 +54,7 @@ export function SpawnButton({ onSpawn, variant }: Props) {
   const { data: statusData } = useQuery({
     queryKey: ["status"],
     queryFn: () => api.getSystemStatus(),
-    refetchInterval: 5000,
+    refetchInterval: 15_000,
   });
   const { data: modelsData } = useQuery({
     queryKey: ["models"],
