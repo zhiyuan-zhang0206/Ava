@@ -32,7 +32,6 @@ import { useCallback, useState } from "react";
 
 import { AgentSidebar } from "@/components/agent-sidebar";
 import { AlertsBadge } from "@/components/alerts-badge";
-import { AlertsFloatingBar } from "@/components/alerts-floating-bar";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { Composer } from "@/components/composer";
 import { ContentToggle } from "@/components/content-toggle";
@@ -368,13 +367,11 @@ function HomeContent({
             onOpenSidebar={() => setMobileSidebarOpen(true)}
             maxWidthCss={contentColumnMaxWidth}
           >
-            {/* Alert system (Task #1224): unread badge in the top bar; the
-                floating aggregation bar sits at the column's top center,
-                below the header, and jumps to /insights#alerts. */}
+            {/* Alert system (Task #1224): unresolved badge in the top bar
+                jumps to /insights#alerts. */}
             <AlertsBadge />
             <InspectorToggle />
           </HeaderBar>
-          <AlertsFloatingBar />
           {/* Bottom stack: pending strip + composer in normal flow (user
               ruling 2026-08-06 11:35): a growing textarea pushes the timeline
               up instead of overlapping it. The composer's own top divider

@@ -137,12 +137,11 @@ class AlertsListMeta(BaseModel):
     window: str
     include_read: bool
     total: int  # rows matching the filters before the limit
-    unresolved_count: int  # unresolved rows matching the filters (the floating bar)
-    unread_count: int  # unread rows matching the filters (the top-bar badge)
+    unresolved_count: int  # unresolved rows matching the filters (the top-bar badge)
 
 
 class AlertsListResponse(BaseModel):
-    """Unresolved-first alert history + the counts the UI badges show."""
+    """Unresolved-first alert history + the count the UI badge shows."""
 
     model_config = ConfigDict(frozen=True)
 

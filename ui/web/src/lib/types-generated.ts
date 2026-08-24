@@ -928,19 +928,20 @@ export interface paths {
          *     agents_meta row). `config_overlay` is the spawn-time override map — `{}` when
          *     the agent runs on cluster defaults (the column is NULL).
          *
-         *     Latency discipline: the event-history sections run on parallel workers
-         *     (one Loki fan-out per section, overlapped), and only those aggregates ride
-         *     a 75s TTL cache keyed by (agent_id, hours, since_compact), with concurrent
-         *     misses sharing one single-flight Future — the panel refetches in bursts
-         *     (open, notice SSE events, 60s interval), and a burst must not re-run the
-         *     ~20-query fan-out per request. The agents_meta projection (machine,
-         *     config, heartbeat inputs, liveness and timestamps), `notice`, and `shells`
-         *     are fetched fresh on every call and never ride the cache. `shells` is probed
-         *     on the agent's own machine via the `shell_probe` cluster op (the gateway
-         *     never runs sessions itself; every machine — its own included — is dialed at its
-         *     registered ops URL), so a split deployment reflects each agent's runner and
-         *     an unreachable machine degrades to an empty list rather than failing the
-         *     panel. `heartbeat` is the agent's idle check-in state: the
+         *     Latency discipline: event-history sections use a shared bounded executor,
+         *     and only their aggregates ride a 75s TTL cache keyed by (agent_id, hours,
+         *     since_compact). Concurrent misses share one single-flight Future; no more
+         *     than `_INSPECT_MAX_CONCURRENT_LOADS` distinct leaders run at once, and a
+         *     saturated request gets the queue-full 503. Each leader's 15-second response
+         *     budget is also its load deadline, so expired work stops and releases its
+         *     admission slot rather than continuing under transport timeouts. The
+         *     agents_meta projection (machine, config, heartbeat inputs, liveness and
+         *     timestamps), `notice`, and `shells` are fetched fresh on every call and
+         *     never ride the cache. `shells` is probed on the agent's own machine via the
+         *     `shell_probe` cluster op (the gateway never runs sessions itself; every
+         *     machine — its own included — is dialed at its registered ops URL), so a
+         *     split deployment reflects each agent's runner and an unreachable machine
+         *     degrades to an empty list rather than failing the panel. `heartbeat` is the agent's idle check-in state: the
          *     projected next check-in when idle (or the active pause / running suppression)
          *     plus its most recent pause from history.
          *
@@ -2841,9 +2842,8 @@ export interface paths {
          *     still unread no longer buries new firings — 2026-08-05 user ruling);
          *     within a status class, unread rows come first, then newest start.
          *     Default excludes read rows (``include_read=true`` brings them back).
-         *     ``meta.unresolved_count`` backs the timeline's floating bar,
-         *     ``meta.unread_count`` the top-bar badge, ``meta.total`` the full
-         *     match count.
+         *     ``meta.unresolved_count`` backs the top-bar badge and ``meta.total`` is
+         *     the full match count.
          */
         get: operations["list_alerts_api_alerts_get"];
         put?: never;
@@ -2967,15 +2967,18 @@ export interface paths {
          *
          *     Data sources:
          *     - `live_count`: agents_meta table — all non-terminated agents (running/idling/restarting/hibernating)
-         *     - `tokens` / `cost_usd`: telemetry `llm_usage` events in Loki
-         *     - average turn duration / warning/error counts: Loki's unified event stream
+         *     - `tokens` / `cost_usd`: full UTC days from the fleet ledger plus a Loki tail
+         *     - average turn duration: Loki's unified event stream in 12-hour shards
+         *     - warning/error counts: one grouped Loki query per 12-hour shard
          *     - `total_events`: archived event row count (frozen at the LGTM cutover;
          *       not a live gauge)
          *
          *     `?hours=` selects the aggregation window (0 = last 5m; 1/6/24/72/168 =
          *     hours), whitelisted by `StatsWindowHours` (anything else 422s). Zero-data
          *     scenario: tokens all 0, cost_usd 0.0, avg_turn_seconds None (frontend
-         *     shows "—").
+         *     shows "—"). Until the unlabeled legacy slice expires on 2026-08-30,
+         *     the ledger removes the fixed-cost full-window token scans; afterward the
+         *     indexed Loki tail keeps the same self-healing late-write behavior.
          */
         get: operations["get_stats_dashboard_api_stats_dashboard_get"];
         put?: never;
@@ -4071,12 +4074,10 @@ export interface components {
             total: number;
             /** Unresolved Count */
             unresolved_count: number;
-            /** Unread Count */
-            unread_count: number;
         };
         /**
          * AlertsListResponse
-         * @description Unresolved-first alert history + the counts the UI badges show.
+         * @description Unresolved-first alert history + the count the UI badge shows.
          */
         AlertsListResponse: {
             /** Alerts */

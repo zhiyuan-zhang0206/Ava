@@ -1,12 +1,9 @@
 "use client";
 
 // The alert section (/insights#alerts) — the system→human alert history list
-// (Task #1224, user design: timeline bar + badge jump here). Unresolved
-// first, then unread, then newest start (the backend's order; SSE frames
-// prepend). Visiting the section auto-marks everything read — the badge
-// clears and unread rows dim. Alert is fully separate from Notice.
-
-import { useEffect } from "react";
+// (Task #1224, user design: the badge jumps here). Unresolved alerts are
+// listed first (the backend owns ordering; SSE frames prepend). Alert is fully
+// separate from Notice.
 
 import { Loader2 } from "lucide-react";
 
@@ -22,10 +19,8 @@ import { formatDuration } from "@/lib/item-summary";
 import { FLEX } from "@/lib/layout";
 import { formatRelativeTime } from "@/lib/sidebar";
 import type { Alert, AlertSeverity, AlertStatus } from "@/lib/types";
-import { useAlertsSection, useMarkAllAlertsRead } from "@/lib/use-alerts";
+import { useAlertsSection } from "@/lib/use-alerts";
 import { cn } from "@/lib/utils";
-
-import { useSectionVisible } from "@/app/control/_visibility";
 
 // Unresolved severity pill fill — critical = destructive, error = orange,
 // warning = yellow. Resolved pills use muted tokens below; the word stays
@@ -61,21 +56,7 @@ function summaryOf(a: Alert): string {
 }
 
 export default function AlertsSection() {
-  const visible = useSectionVisible();
   const { data, isLoading, error } = useAlertsSection();
-  const markAllRead = useMarkAllAlertsRead();
-  // Auto-mark-read: while the section is visible, any unread rows clear
-  // immediately (the badge goes with them). The mutation is idempotent and
-  // the onSuccess cache patch drops unread_count to 0, so this only fires
-  // again when a NEW unread alert lands while the section stays open.
-  useEffect(() => {
-    if (!visible) return;
-    const unread = data?.meta.unread_count ?? 0;
-    // isPending guard: mutating flips isPending (a new effect pass) BEFORE
-    // the onSuccess cache patch lands — without the guard the same unread
-    // batch would fire twice.
-    if (unread > 0 && !markAllRead.isPending) markAllRead.mutate();
-  }, [visible, data, markAllRead]);
 
   const alerts = data?.alerts ?? [];
 
@@ -108,11 +89,7 @@ export default function AlertsSection() {
             </TableHeader>
             <TableBody>
               {alerts.map((a) => (
-                <TableRow
-                  key={a.id}
-                  className={cn(a.read_at === null && "bg-accent/40")}
-                  data-testid={`alert-row-${a.id}`}
-                >
+                <TableRow key={a.id} data-testid={`alert-row-${a.id}`}>
                   <TableCell>
                     <span
                       className={cn(

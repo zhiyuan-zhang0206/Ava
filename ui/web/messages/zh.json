@@ -27,7 +27,6 @@
     "retrySameMessage": "重试同一条消息",
     "sendAnotherAnyway": "仍然发送另一条"
   },
-  "alerts": { "unresolved": "条未解决" },
   "nav": {
     "openSidebar": "打开侧边栏",
     "memoryGraph": "记忆图谱",

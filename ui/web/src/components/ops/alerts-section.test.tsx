@@ -1,6 +1,5 @@
 // The alert section (/insights#alerts) — unresolved-first history rendered
-// from the ["alerts", "section"] cache, with auto-mark-all-read on first
-// visibility (the badge clears with it). Alert is separate from Notice.
+// from the ["alerts", "section"] cache. Alert is separate from Notice.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
@@ -24,7 +23,6 @@ function response(overrides: Partial<AlertsResponse> = {}): AlertsResponse {
       include_read: true,
       total: 0,
       unresolved_count: 0,
-      unread_count: 0,
     },
     ...overrides,
   };
@@ -57,7 +55,6 @@ function wrap(ui: React.ReactElement) {
 
 describe("AlertsSection", () => {
   it("renders rows with severity, alert name, summary, status and source", async () => {
-    vi.spyOn(api, "markAllAlertsRead").mockResolvedValue({ updated: 1 });
     vi.spyOn(api, "getAlerts").mockResolvedValue(
       response({
         alerts: [
@@ -77,7 +74,6 @@ describe("AlertsSection", () => {
           include_read: true,
           total: 2,
           unresolved_count: 1,
-          unread_count: 1,
         },
       }),
     );
@@ -100,21 +96,8 @@ describe("AlertsSection", () => {
   });
 
   it("shows the empty state when there are no alerts", async () => {
-    vi.spyOn(api, "markAllAlertsRead").mockResolvedValue({ updated: 0 });
     vi.spyOn(api, "getAlerts").mockResolvedValue(response());
     wrap(<AlertsSection />);
     await waitFor(() => screen.getByText(/No alerts in the last 24h/));
-  });
-
-  it("auto-marks everything read on first visibility with unread rows", async () => {
-    const markAll = vi
-      .spyOn(api, "markAllAlertsRead")
-      .mockResolvedValue({ updated: 2 });
-    vi.spyOn(api, "getAlerts").mockResolvedValue(
-      response({ alerts: [ROW, { ...ROW, id: 9 }], meta: { window: "24h", include_read: true, total: 2, unresolved_count: 2, unread_count: 2 } }),
-    );
-    wrap(<AlertsSection />);
-    await waitFor(() => screen.getByTestId("alert-row-7"));
-    await waitFor(() => expect(markAll).toHaveBeenCalledTimes(1));
   });
 });
