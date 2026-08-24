@@ -11,6 +11,8 @@ on the LogQL text, the query params, and the parse/paging semantics
 from __future__ import annotations
 
 import asyncio
+import importlib
+import importlib.util
 import json
 import os
 import threading
@@ -272,6 +274,22 @@ def _wait_for_budget_waiters(expected: int) -> None:
 
 
 class TestGlobalQueryBudget:
+    def test_budget_contract_is_reexported_from_shared(self) -> None:
+        spec = importlib.util.find_spec("shared.loki_query_budget")
+        assert spec is not None, "shared.loki_query_budget must own the reusable budget contract"
+        shared_budget = importlib.import_module("shared.loki_query_budget")
+        for name in (
+            "BudgetErrorFactory",
+            "BudgetMetrics",
+            "BudgetObservation",
+            "BudgetObserver",
+            "BudgetOutcome",
+            "BudgetRejectReason",
+            "FairQueryBudget",
+            "LokiQueryBudgetError",
+        ):
+            assert getattr(loki_query_budget, name) is getattr(shared_budget, name)
+
     def test_matches_loki_real_max_concurrent(self) -> None:
         repo = Path(__file__).parents[2]
         configs = [
