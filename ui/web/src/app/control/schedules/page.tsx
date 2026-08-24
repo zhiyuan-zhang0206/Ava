@@ -371,7 +371,7 @@ function ScheduleDetail({
   const t = useTranslations("schedules");
   const showToast = useStore((s) => s.showToast);
   // This detail block mounts when a row is expanded. Two intents combined:
-  //   - enabled: visible — gate the detail queries (especially the 5s logs poll)
+  //   - enabled: visible — gate the detail queries (especially the 15s logs poll)
   //     to on-screen time, so an expanded schedule scrolled out of view stops
   //     polling;
   //   - staleTime: 0 — so the moment the section becomes visible (expand) the
@@ -389,7 +389,7 @@ function ScheduleDetail({
   const logs = useQuery({
     queryKey: ["schedule-logs", id],
     queryFn: () => api.scheduleLogs(id),
-    refetchInterval: 5_000,
+    refetchInterval: 15_000,
     enabled: visible,
     staleTime: 0,
   });

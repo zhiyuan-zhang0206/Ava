@@ -8,8 +8,8 @@
 // queries immediately on mount — the page must land fully populated, not
 // waiting for scroll to reach a section (that read as a broken "collapsed
 // until scrolled to" page). Firing everything on mount is still bounded: with
-// this many sections' polls (Status 10s + Schedules 15s + Config's three
-// parallel reads + Metrics, ...) running forever regardless of scroll would
+// this many sections' polls (Status 15s + Schedules 15s + Config's three
+// parallel reads, ...) running forever regardless of scroll would
 // blow the per-connection budget once
 // several tabs/users have the page open — so each section is wrapped in a
 // visibility provider that keeps polling only while on (or near) screen, via

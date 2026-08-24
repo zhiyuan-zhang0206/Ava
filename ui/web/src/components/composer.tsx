@@ -13,6 +13,7 @@ import { SendButton } from "@/components/ui/send-button";
 import { Textarea } from "@/components/ui/textarea";
 import { api, MessageDeliveryUnknownError } from "@/lib/api";
 import { errMsg } from "@/lib/errors";
+import { clearMessageSent, markMessageSent } from "@/lib/interaction-timing";
 import { track } from "@/lib/telemetry";
 import type { CommandItem } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -444,6 +445,7 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
       setUncertainAttempt(null);
       if (sendingAgentId != null) {
         writeSession(sendAttemptKey(sendingAgentId), JSON.stringify(attempt));
+        markMessageSent(sendingAgentId);
       }
       const ok = await onSend(content, imageUrls, attempt.clientMessageId);
       // Only clear on success — keep the user's text + images on failure
@@ -474,9 +476,14 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
           writeSession(sendAttemptKey(uncertain.agentId), JSON.stringify(uncertain));
         }
         setUncertainAttempt(uncertain);
+      } else if (sendingAgentId != null) {
+        clearMessageSent(sendingAgentId);
       }
     } catch (error: unknown) {
-      if (!(error instanceof MessageDeliveryUnknownError)) throw error;
+      if (!(error instanceof MessageDeliveryUnknownError)) {
+        if (activeAttempt?.agentId != null) clearMessageSent(activeAttempt.agentId);
+        throw error;
+      }
       if (activeAttempt != null) {
         const uncertain = { ...activeAttempt, uncertain: true };
         sendAttemptRef.current = uncertain;
@@ -517,6 +524,7 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
     if (!activeUncertain) return;
     if (uncertainAttempt.agentId != null) {
       removeSession(sendAttemptKey(uncertainAttempt.agentId));
+      clearMessageSent(uncertainAttempt.agentId);
     }
     if (sendAttemptRef.current?.clientMessageId === uncertainAttempt.clientMessageId) {
       sendAttemptRef.current = null;

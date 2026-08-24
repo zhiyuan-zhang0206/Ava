@@ -1,19 +1,13 @@
 // Thin fetch wrapper over FastAPI endpoints.
 //
-// API_BASE resolution order (at module evaluation; once on server, once on client):
-//   1. `NEXT_PUBLIC_API_BASE` set → use it (override knob for unusual setups).
-//   2. Not set + client → `${protocol}//<host>:<gateway-port>`. Frontend (:3000)
-//      and the gateway are co-located on the gateway host but on different
-//      ports, so the gateway is the same hostname on the gateway port — works for
-//      localhost and any private-network address. The port is
-//      `NEXT_PUBLIC_GATEWAY_PORT`, injected at build time from `AVA_GATEWAY_PORT`
-//      (the frontend build command sets it; see cli/commands/_repo.py). Default
-//      8000; override it on a host where another service holds the port.
-//   3. SSR (window undefined) + no env → "" (SSR doesn't fetch, placeholder).
+// API_BASE is resolved in api-base.ts so telemetry can share it without an
+// api.ts ↔ telemetry.ts import cycle.
 //
 // The gateway is reachable only on the cluster's private network (one trust group)
 // Authentication is via session cookie (browser) or Bearer token (SDK).
 
+import { API_BASE } from "./api-base";
+import { track } from "./telemetry";
 import type { NoticesFeed,
   UserSettingListResponse,
   UserSettingRow,
@@ -77,17 +71,7 @@ import { projectAgentStatus } from "./types";
 import { sendMessageWithReconciliation } from "./message-delivery";
 
 export { MessageDeliveryUnknownError } from "./message-delivery";
-
-export const API_BASE = ((): string => {
-  if (process.env.NEXT_PUBLIC_API_BASE) return process.env.NEXT_PUBLIC_API_BASE;
-  if (typeof window === "undefined") return "";
-  // Frontend (:3000) and the gateway are co-located on the gateway host
-  // but on different ports, so the gateway is the same hostname on the gateway
-  // port — works for localhost and any private-network address.
-  const port = process.env.NEXT_PUBLIC_GATEWAY_PORT ?? "8000";
-  const { hostname, protocol } = window.location;
-  return `${protocol}//${hostname}:${port}`;
-})();
+export { API_BASE } from "./api-base";
 
 // Thrown by `ok()` for any non-2xx response. Carries the HTTP status so
 // callers can distinguish "the server answered but rejected the request"
@@ -119,10 +103,32 @@ const url = (path: string): string => `${API_BASE}${path}`;
 // <img src> needs the gateway base prepended.
 export const assetUrl = (path: string): string => `${API_BASE}${path}`;
 
+function apiTimingKey(path: string): string {
+  const pathname = path.split("?", 1)[0].replace(/^\/api\/?/, "");
+  // Numeric route segments use the schema-safe literal `id` (no braces), so
+  // every concrete agent/schedule/session id folds into one bounded key.
+  return pathname
+    .split("/")
+    .map((segment) => (/^\d+$/.test(segment) ? "id" : segment))
+    .join("/");
+}
+
 // All fetch calls go through this. ``credentials: "include"`` sends the
 // session cookie on cross-origin requests (frontend :3000 -> gateway :8000).
-function f(path: string, init?: RequestInit): Promise<Response> {
-  return fetch(url(path), { ...init, credentials: "include" });
+async function f(path: string, init?: RequestInit): Promise<Response> {
+  const startedAt = performance.now();
+  try {
+    return await fetch(url(path), { ...init, credentials: "include" });
+  } finally {
+    const durationMs = performance.now() - startedAt;
+    if (durationMs > 800 && path.split("?", 1)[0] !== "/api/frontend-telemetry") {
+      track("api-timing", {
+        key: apiTimingKey(path),
+        value: Math.round(durationMs),
+        dedupe: false,
+      });
+    }
+  }
 }
 
 async function jsonWithTimeout<T>(

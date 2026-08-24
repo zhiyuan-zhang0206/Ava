@@ -119,7 +119,7 @@ describe("ControlPage shell", () => {
 });
 
 describe("ControlPage deep-link forwarding", () => {
-  // Status + Metrics anchors moved to /insights; their old /control#… deep
+  // Status + retired Metrics anchors moved to /insights; their old /control#… deep
   // links redirect there so a bookmark still lands on the right section.
   it.each(["#status", "#ops"])(
     "forwards a migrated %s deep link to /insights",

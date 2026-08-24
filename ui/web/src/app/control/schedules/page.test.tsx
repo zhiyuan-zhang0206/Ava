@@ -5,7 +5,7 @@
 // router is mocked.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api } from "@/lib/api";
@@ -181,6 +181,37 @@ describe("SchedulesPage", () => {
     expect(screen.getByText(/boom traceback/)).toBeTruthy();
     await waitFor(() => expect(screen.getByText("log-line-1")).toBeTruthy());
     expect(screen.getByText(/did the thing/)).toBeTruthy();
+  });
+
+  it("does not refetch expanded schedule logs before 15 seconds", async () => {
+    vi.spyOn(api, "listSchedules").mockResolvedValue([SCHEDULE]);
+    vi.spyOn(api, "getSchedule").mockResolvedValue(FULL);
+    const logs = vi.spyOn(api, "scheduleLogs").mockResolvedValue({ source: "none", lines: [] });
+    vi.spyOn(api, "scheduleRuns").mockResolvedValue([]);
+    const view = wrap(<SchedulesPage />);
+    await waitFor(() => expect(screen.getByText("memory-arbiter")).toBeTruthy());
+
+    vi.useFakeTimers();
+    try {
+      fireEvent.click(screen.getByRole("button", { name: "Expand" }));
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(logs).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(14_999);
+      });
+      expect(logs).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
+      });
+      expect(logs).toHaveBeenCalledTimes(2);
+    } finally {
+      view.unmount();
+      vi.useRealTimers();
+    }
   });
 
   it("edit: opens the editor and saves a new script", async () => {
