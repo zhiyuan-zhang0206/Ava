@@ -431,12 +431,14 @@ class ResolutionStatus(TypedDict):
 class GatewayLatency(TypedDict):
     """`gateway_latency` payload — gateway/_latency.py 60s aggregator.
 
-    One event per (route, 60s bucket) — never per request (Task #1091).
+    One event per (route, 60s bucket) carrying p50/p95/p99/max/count — never
+    per request (Task #1091).
     """
 
     route: str  # matched route pattern, e.g. /api/agents/{agent_id}/messages
     p50_ms: float
     p95_ms: float
+    p99_ms: float
     max_ms: float
     count: int
 
@@ -940,7 +942,7 @@ EVENTS: dict[str, EventSpec] = {
     # by gateway/_latency.py — one event per (route, bucket), never per request
     "gateway_latency": _telemetry(
         "gateway_latency",
-        "gateway endpoint latency — 60s aggregate per route (p50/p95/max/count)",
+        "gateway endpoint latency — 60s aggregate per route (p50/p95/p99/max/count)",
         payload=GatewayLatency,
         tier="noise",
     ),

@@ -5,7 +5,7 @@ keyed by the **matched route pattern** (``/api/agents/{agent_id}/messages``,
 not the concrete URL — ids in URLs would explode the key space). A lifespan
 background task drains the accumulator every 60s and emits one
 ``gateway_latency`` telemetry event per (route, bucket) carrying the bucket's
-p50 / p95 / max / count.
+p50 / p95 / p99 / max / count.
 
 Why aggregate instead of one event per request: the ``events`` stream is the
 cheapest place for the ops dashboard to read, but per-request rows at gateway
@@ -156,7 +156,7 @@ def emit_bucket(route: str, samples: list[float]) -> None:
     """
     if not samples:
         return
-    p50, p95, max_ms = percentiles(samples, 50.0, 95.0, 100.0)
+    p50, p95, p99, max_ms = percentiles(samples, 50.0, 95.0, 99.0, 100.0)
     telemetry.emit(
         "telemetry",
         "gateway_latency",
@@ -165,6 +165,7 @@ def emit_bucket(route: str, samples: list[float]) -> None:
             "route_class": classify_route(route),
             "p50_ms": round(p50, 1),
             "p95_ms": round(p95, 1),
+            "p99_ms": round(p99, 1),
             "max_ms": round(max_ms, 1),
             "count": len(samples),
         },
