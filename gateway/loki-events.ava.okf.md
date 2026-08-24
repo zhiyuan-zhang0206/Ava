@@ -51,8 +51,10 @@ structured metadata.
 - **Aggregation result cache** — `count_events()` and
   `attribute_aggregate()` share successful results for 60 seconds. Window
   bounds are keyed on a minute grid so repeated 30-second dashboard polls and
-  common clock-aligned shards reuse the same Loki result; failures are never
-  cached, and grouped results are copied before returning to callers.
+  common clock-aligned shards reuse the same Loki result; concurrent misses for
+  one key share the leader's result, while bounded waiters fall back to their
+  own query if the leader never finishes. Failures are never cached, and
+  grouped results are copied before returning to callers.
 - **Read gate** — a gateway home without `lgtm-host` refuses the implicit
   loopback Loki URL before any HTTP call. The gateway maps the typed refusal to
   HTTP 503. An explicit `AVA_TELEMETRY_LOKI_URL` is the operator escape hatch;
