@@ -49,12 +49,17 @@ class TestUploadReceiveOp:
         monkeypatch.setattr(Path, "home", lambda: tmp_path)
         raw = b"Hello, world!"
         seen = _stub_gateway(monkeypatch, raw)
+        directory = tmp_path / "Downloads" / "AvaAgent-7"
+        directory.mkdir(parents=True)
+        directory.chmod(0o755)
 
         result = upload_receive_op(UploadReceivePayload(agent_id=7, name="report.pdf"))
 
         assert seen["urls"] == ["http://gw.test:8000/api/agents/7/uploads/report.pdf"]
         dest = tmp_path / "Downloads" / "AvaAgent-7" / "report.pdf"
         assert dest.read_bytes() == raw
+        assert directory.stat().st_mode & 0o777 == 0o700
+        assert dest.stat().st_mode & 0o777 == 0o600
         assert result.path == str(dest)
 
     def test_sanitizes_filename(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

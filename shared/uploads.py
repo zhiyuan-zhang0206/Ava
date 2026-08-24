@@ -18,6 +18,8 @@ from __future__ import annotations
 import base64
 from pathlib import Path
 
+from shared.private_storage import ensure_private_dir
+
 # Suffix -> MIME for image uploads that can be inlined as native model content.
 # Mirrors the image row of `ava._understand`'s media map; a suffix not listed
 # here is not treated as an inlineable image (the message endpoint 422s a
@@ -33,7 +35,7 @@ IMAGE_MIME: dict[str, str] = {
 
 def agent_upload_dir(agent_id: int) -> Path:
     """Directory holding agent `agent_id`'s uploaded files."""
-    return Path.home() / "Downloads" / f"AvaAgent-{agent_id}"
+    return ensure_private_dir(Path.home() / "Downloads" / f"AvaAgent-{agent_id}")
 
 
 def sanitize_upload_name(filename: str) -> str:

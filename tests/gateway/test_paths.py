@@ -25,6 +25,16 @@ def test_ava_home_auto_mkdirs(tmp_path: Path):
     assert target.is_dir()
 
 
+def test_ava_home_repairs_owner_only_mode(tmp_path: Path):
+    """The unit root cannot retain permissions inherited from a lax umask."""
+    target = tmp_path / "ava"
+    target.mkdir()
+    target.chmod(0o755)
+
+    assert paths.ava_home() == target
+    assert target.stat().st_mode & 0o777 == 0o700
+
+
 def test_plugins_config_path_under_ava_home(tmp_path: Path):
     assert paths.plugins_config_path() == tmp_path / "ava" / "plugins.json"
 

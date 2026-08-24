@@ -11,13 +11,13 @@ the same variable, no manual passing required.
 from pathlib import Path
 
 from shared.config import settings
+from shared.private_storage import ensure_private_dir
 
 
 def ava_home() -> Path:
     """User data root directory; create if missing."""
     root = Path(settings.general.ava_home).expanduser()
-    root.mkdir(parents=True, exist_ok=True)
-    return root
+    return ensure_private_dir(root)
 
 
 def run_dir() -> Path:
