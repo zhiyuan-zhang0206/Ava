@@ -66,7 +66,10 @@ def _alive_seconds(
     ended before `window_start` correctly reports 0 (it was not alive in the
     window) and must not fall back. A best-effort approximation that may
     overcount for resurrected/terminated agents (includes terminated gaps);
-    real lifecycle events are more accurate.
+    real lifecycle events are more accurate. This is also the intentional
+    bridge when inspect excludes pre-index-cutover lifecycle events: the open
+    alive tail remains exact for the default 24-hour view, while whole-life
+    and 7-day views can include pre-cutover gaps until legacy retention ends.
 
     Consecutive starts without an intervening terminate (the crash/reaper
     shape — SIGKILL/OOM leaves no `agent_terminated`, then the crash-resurrect
@@ -546,10 +549,11 @@ async def get_agent_inspect(
     projected next check-in when idle (or the active pause / running suppression)
     plus its most recent pause from history.
 
-    The retained live lifecycle leg is the exceptional potentially broad
-    query until the legacy slice expires on 2026-08-30 19:00 UTC. It has an
-    8-second Loki timeout and a per-agent five-minute single-flight cache, so
-    changing `hours` or `since_compact` does not repeat that same scan.
+    The retained live lifecycle leg begins at the index-label cutover and never
+    scans the legacy slice. It has an 8-second Loki timeout and a per-agent
+    thirty-minute single-flight cache, so changing `hours` or `since_compact`
+    does not repeat that indexed read. Agents whose lifecycle history is wholly
+    pre-cutover use the `spawned_at` fallback described by `_alive_seconds`.
     """
     pool = request.app.state.db_pool
     # Release the agents_meta borrow before entering the potentially queued

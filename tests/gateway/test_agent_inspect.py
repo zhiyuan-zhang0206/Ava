@@ -40,6 +40,7 @@ from gateway.loki_events import _weighted_quantile
 from gateway.routers import _agent_cost, _inspect_stats, agent_inspect
 from gateway.routers._inspect_cache import InspectCacheFullError, InspectQueryCache
 from shared.config import settings
+from shared.loki_index_labels import INDEX_LABEL_CUTOVER_AT
 
 
 def _insert_agent_row(db: psycopg.Connection, label: str = "t") -> int:
@@ -110,6 +111,7 @@ class _FakeLoki:
     def __init__(self) -> None:
         self.rows: list[dict[str, Any]] = []
         self.wire_calls: Counter[str] = Counter()
+        self.projected_calls: list[dict[str, Any]] = []
 
     def _record_wire_call(self, method: str) -> None:
         self.wire_calls[method] += 1
@@ -257,6 +259,7 @@ class _FakeLoki:
     def query_projected_lines(self, **kwargs: Any) -> list[tuple[int, int | None, str]]:
         """Return the raw event body format the inspector reduces client-side."""
         self._record_wire_call("query_projected_lines")
+        self.projected_calls.append(kwargs)
         assert kwargs["fields"] == []
         assert kwargs["template"] == "{{ __line__ }}"
         rows: list[tuple[int, int | None, str]] = []
@@ -316,6 +319,14 @@ def _lifecycle_line(ts: datetime, event_name: str = "agent_spawned") -> tuple[in
     return (int(ts.timestamp() * 1e9), 7, json.dumps(body, separators=(",", ":")))
 
 
+def _lifecycle_projected_calls(fake_loki: _FakeLoki) -> list[dict[str, Any]]:
+    return [
+        call
+        for call in fake_loki.projected_calls
+        if call["event_names"] == ["^agent_spawned$", "^agent_resurrected$", "^agent_terminated$"]
+    ]
+
+
 def test_lifecycle_cache_is_per_agent_not_inspect_window_and_expires(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -323,19 +334,21 @@ def test_lifecycle_cache_is_per_agent_not_inspect_window_and_expires(
     now = datetime(2026, 8, 23, tzinfo=UTC)
     window = (now - timedelta(days=7), now)
     calls: list[dict[str, Any]] = []
-    clock = iter((0.0, 0.0, 299.0, 301.0, 301.0))
+    clock = [0.0]
 
     def projected(**kwargs: Any) -> list[tuple[int, int, str]]:
         calls.append(kwargs)
         return [_lifecycle_line(now)]
 
     monkeypatch.setattr(loki_events, "query_projected_lines", projected)
-    monkeypatch.setattr(_inspect_stats.time_mod, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(_inspect_stats.time_mod, "monotonic", lambda: clock[0])
 
     first = _inspect_stats.cached_live_lifecycle(7, window=window, freeze=now)
     # h=1 and h=24 calculate this same retained lifecycle window; the cache
     # key deliberately remains only the agent id.
+    clock[0] = 301.0
     second = _inspect_stats.cached_live_lifecycle(7, window=window, freeze=now)
+    clock[0] = 1801.0
     third = _inspect_stats.cached_live_lifecycle(7, window=window, freeze=now)
 
     assert first == second == third == [(now, "agent_spawned")]
@@ -376,6 +389,55 @@ def test_lifecycle_cache_cold_miss_is_single_flight(monkeypatch: pytest.MonkeyPa
         release.set()
         assert first.result(timeout=2) == second.result(timeout=2)
     assert calls == 1
+
+
+def test_inspect_pre_cutover_agent_uses_indexed_lifecycle_window(
+    db_conn: psycopg.Connection,
+    fake_loki: _FakeLoki,
+) -> None:
+    """The live lifecycle leg skips legacy rows without losing open alive-time."""
+    aid = _insert_agent(db_conn)
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "UPDATE agents_meta SET spawned_at = %s WHERE id = %s",
+            (INDEX_LABEL_CUTOVER_AT - timedelta(hours=12), aid),
+        )
+    db_conn.commit()
+
+    with TestClient(app) as client:
+        response = client.get(f"/api/agents/{aid}/inspect", params={"hours": 24})
+
+    assert response.status_code == 200
+    lifecycle_calls = _lifecycle_projected_calls(fake_loki)
+    assert len(lifecycle_calls) == 1
+    assert lifecycle_calls[0]["from_"] == INDEX_LABEL_CUTOVER_AT
+    alive_seconds = response.json()["activity"]["alive_seconds"]
+    assert alive_seconds == pytest.approx(24 * 60 * 60, abs=30)  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_inspect_lifecycle_window_is_clipped_by_archive_freeze(
+    db_conn: psycopg.Connection,
+    fake_loki: _FakeLoki,
+) -> None:
+    """A post-cutover archive boundary remains the live lifecycle lower bound."""
+    aid = _insert_agent(db_conn)
+    freeze = datetime.now(UTC) - timedelta(minutes=30)
+    _archive_event(
+        db_conn,
+        agent_id=aid,
+        event="freeze_marker",
+        attributes={},
+        ts=freeze,
+    )
+    db_conn.commit()
+
+    with TestClient(app) as client:
+        response = client.get(f"/api/agents/{aid}/inspect")
+
+    assert response.status_code == 200
+    lifecycle_calls = _lifecycle_projected_calls(fake_loki)
+    assert len(lifecycle_calls) == 1
+    assert lifecycle_calls[0]["from_"] == freeze
 
 
 def _ledger_row(
@@ -1348,7 +1410,7 @@ def _assert_inspect_live_query_budget(fake_loki: _FakeLoki) -> None:
     assert fake_loki.wire_calls["attribute_aggregate"] == 7
     assert fake_loki.wire_calls["query_events"] == 1
     # Requested stats and the retained per-agent lifecycle leg are separate:
-    # the latter is cached for five minutes across inspector windows.
+    # the latter is cached for thirty minutes across inspector windows.
     assert fake_loki.wire_calls["query_projected_lines"] == 2
     assert fake_loki.wire_calls["count_by_event_name"] == 0
     assert fake_loki.wire_calls["attribute_distribution"] == 0
