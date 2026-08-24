@@ -5261,7 +5261,7 @@
     "/api/status": {
       "get": {
         "summary": "Get System Status",
-        "description": "System status panel — pull services / shells / cluster in one shot.\n\nEach block queries independently — a single failure does not affect\nthe others (each has its own try/except that falls back to a\ndegraded value).",
+        "description": "System status panel — pull services / shells / cluster in one shot.\n\nProbe wall time follows the slowest machine, while multiple frontend pollers\nrequest this roster. Fifteen-second staleness is acceptable for diagnostics;\nsingle-flight prevents expiry stampedes.\nEach block queries independently — a single failure does not affect\nthe others (each has its own try/except that falls back to a\ndegraded value).",
         "operationId": "get_system_status_api_status_get",
         "responses": {
           "200": {
@@ -8518,6 +8518,23 @@
             "type": "boolean",
             "title": "Truncated",
             "default": false
+          },
+          "telemetry_stale": {
+            "type": "boolean",
+            "title": "Telemetry Stale",
+            "default": false
+          },
+          "snapshot_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snapshot At"
           }
         },
         "type": "object",
@@ -8526,7 +8543,7 @@
           "edges"
         ],
         "title": "FleetGraphResponse",
-        "description": "GET /api/fleet/graph response.\n\n`stale` is the degraded-signal flag (R4 layer 2, audit gateway.md\nP2-10): the graph query is canceled (statement timeout under load) the\nresponse is an EMPTY graph with `stale=True` — the frontend must render\n\"data temporarily unavailable\" instead of an empty fleet, because an\nempty graph and a failed graph are not the same state."
+        "description": "GET /api/fleet/graph response.\n\n`stale` identifies data-level degradation: a fallback snapshot, truncated\nedge stream, or failed source response. `telemetry_stale` separately says\nthe heartbeat guard was old or missing while this otherwise fresh graph was\nread. `snapshot_at` records when a successful graph snapshot was produced;\na fallback retains that timestamp so clients can show its age."
       },
       "GuideDraftRequest": {
         "properties": {

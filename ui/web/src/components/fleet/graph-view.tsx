@@ -61,6 +61,19 @@ const DECAY_LAMBDA = 0.5;
 // keeps its own key so the two graphs' tunings stay independent.
 const FORCE_PARAMS_KEY = "display.graph_force_params";
 
+function formatSnapshotAge(snapshotAt: string): string | null {
+  const snapshotMs = Date.parse(snapshotAt);
+  if (Number.isNaN(snapshotMs)) return null;
+
+  const minutes = Math.max(0, Math.floor((Date.now() - snapshotMs) / 60_000));
+  if (minutes < 1) return "less than a minute ago";
+  if (minutes < 60) return `${minutes}m ago`;
+
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
+
 export function GraphView({
   selectedAgentId,
   onSelectAgent,
@@ -88,6 +101,7 @@ export function GraphView({
     hours: windowHours,
     decayLambda: DECAY_LAMBDA,
   });
+  const snapshotAge = graph.snapshot_at ? formatSnapshotAge(graph.snapshot_at) : null;
 
   // A selected agent that was in the graph and then disappeared (transitioned to
   // terminated) — clear the stale selection so the canvas and selection stay in sync.
@@ -205,13 +219,23 @@ export function GraphView({
           </select>
         }
       />
-      {graph.stale && graph.nodes.length > 0 ? (
+      {graph.stale ? (
         <p
           role="status"
           className="pointer-events-none absolute right-3 top-3 inline-flex items-center gap-1 rounded border border-amber-500/30 bg-background/80 px-2 py-1 text-[10px] text-amber-600 backdrop-blur dark:text-amber-400"
         >
           <span aria-hidden className="size-1.5 rounded-full bg-amber-500" />
-          Stale — last known graph
+          {snapshotAge
+            ? `Stale — snapshot from ${snapshotAge}`
+            : "Stale — last known graph"}
+        </p>
+      ) : graph.telemetry_stale ? (
+        <p
+          role="status"
+          className="pointer-events-none absolute right-3 top-3 inline-flex items-center gap-1 rounded border border-border bg-background/80 px-2 py-1 text-[10px] text-muted-foreground backdrop-blur"
+        >
+          <span aria-hidden className="size-1.5 rounded-full bg-muted-foreground" />
+          Telemetry degraded — updates may lag
         </p>
       ) : null}
       {graph.truncated ? (

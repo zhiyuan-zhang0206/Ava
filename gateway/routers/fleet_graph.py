@@ -14,8 +14,9 @@ Data sources (task #1197 LGTM cutover):
   which the PG side collapses and this read becomes Loki-only.
 
 Successful Prometheus/Loki reads also pass through the gateway-latency
-heartbeat guard. Old or missing heartbeat samples keep the fetched data but
-mark it stale and prevent it from replacing either Redis cache.
+heartbeat guard. Old or missing heartbeat samples retain and cache the fetched
+graph, marked separately as telemetry-degraded; only incomplete or fallback
+data uses the graph's stale flag.
 """
 
 from __future__ import annotations
@@ -170,23 +171,30 @@ def _finalize_graph_response(
     edges: list[FleetGraphEdge],
     truncated: bool = False,
 ) -> FleetGraphResponse:
-    """Mark heartbeat staleness and cache only a fresh full response."""
+    """Cache a successful graph while reporting heartbeat health separately."""
     try:
-        stale = telemetry_staleness.check_and_report(timeout_s=3.0)
+        telemetry_stale = telemetry_staleness.check_and_report(timeout_s=3.0)
     except Exception as exc:
         logger.debug("fleet_graph telemetry staleness guard failed open: {}", exc)
-        stale = False
+        telemetry_stale = False
 
-    response = FleetGraphResponse(nodes=nodes, edges=edges, stale=stale, truncated=truncated)
-    if stale:
-        return response
-    # A truncated-but-fresh graph is still the best current view, so cache it
-    # under the fresh-only rule; the next poll will re-read its capped edge tail.
+    response = FleetGraphResponse(
+        nodes=nodes,
+        edges=edges,
+        stale=truncated,
+        truncated=truncated,
+        telemetry_stale=telemetry_stale,
+        snapshot_at=datetime.now(UTC),
+    )
+    # A truncated graph is the best current view for the next poll, but it is
+    # not a complete fallback snapshot. Heartbeat lag is observability health,
+    # not a reason to discard an otherwise successful complete snapshot.
     try:
         with sync_redis(decode_responses=True) as redis:
             serialized = response.model_dump_json()
-            redis.set(_last_good_cache_key(key), serialized, ex=_LAST_GOOD_CACHE_TTL_SECONDS)
             redis.set(key, serialized, ex=_CACHE_TTL_SECONDS)
+            if not truncated:
+                redis.set(_last_good_cache_key(key), serialized, ex=_LAST_GOOD_CACHE_TTL_SECONDS)
     except Exception as exc:
         # Fail-open: a cache write failure must not fail the response.
         logger.debug("fleet_graph cache write failed: {}", exc)
