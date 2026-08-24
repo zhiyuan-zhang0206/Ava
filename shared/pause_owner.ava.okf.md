@@ -1,4 +1,5 @@
 ---
+type: doc
 title: Deploy pause owner
 description: Host-local exact capability journal for DB-independent pause compensation.
 status: current
