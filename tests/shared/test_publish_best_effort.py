@@ -21,6 +21,28 @@ from shared.config import settings
 from shared.redis_client import publish_best_effort, publish_best_effort_sync
 
 
+@pytest.fixture(autouse=True)
+def _skip_acl_backoff_waits(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Exercise the terminal best-effort contract without waiting 45.5 seconds.
+
+    Retry cadence and its bound are asserted in test_redis_client; these tests
+    own warning classification after retries have been exhausted.
+    """
+
+    async def _no_async_wait(_delay: float) -> None:
+        return None
+
+    def _no_sync_wait(_delay: float) -> None:
+        return None
+
+    def _max_jitter(delay_cap: float) -> float:
+        return delay_cap
+
+    monkeypatch.setattr(redis_client, "_sleep_sync", _no_sync_wait)
+    monkeypatch.setattr(redis_client, "_sleep_async", _no_async_wait)
+    monkeypatch.setattr(redis_client, "_auth_retry_jitter", _max_jitter)
+
+
 class _BoomSyncClient:
     """A sync redis stand-in whose publish raises — asserts the wrapper swallows."""
 

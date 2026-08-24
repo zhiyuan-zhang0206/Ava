@@ -29,13 +29,13 @@ from collections.abc import AsyncGenerator
 from typing import Any
 
 import redis
-import redis.asyncio as aioredis
 from fastapi import Request
 from pydantic import ValidationError
+from redis.exceptions import AuthenticationError, NoPermissionError
 
 from shared.config import settings
 from shared.live_events import EVENT_ADAPTER, Error
-from shared.redis_client import _TransportAwareAsyncConnection
+from shared.redis_client import open_async_redis, retry_auth_failures_async
 
 _log = logging.getLogger(__name__)
 
@@ -53,6 +53,7 @@ _DISCONNECT_POLL_SECONDS = settings.gateway.sse_disconnect_poll_seconds
 # The SSE stream is a per-request short-lived connection, so treat it as any
 # other IO failure: emit an error frame and let the frontend reconnect.
 _REDIS_IO_ERRORS = (redis.ConnectionError, redis.TimeoutError, OSError, TypeError)
+_REDIS_ACL_ERRORS = (AuthenticationError, NoPermissionError)
 
 # Heartbeat: after this much silence, emit a real `data:` event the browser
 # EventSource `onmessage` can see — so a client-side watchdog can detect a
@@ -138,12 +139,7 @@ async def event_stream(
         bytes: SSE frame (`data: ...\n\n`).
     """
     _channel = channel if channel is not None else settings.data_plane.events_channel
-    client = aioredis.from_url(
-        redis_url,
-        decode_responses=True,
-        # Dead-transport detection: see shared.redis_client._TransportAwareAsyncConnection.
-        connection_class=_TransportAwareAsyncConnection,
-    )
+    client = open_async_redis(redis_url)
     pubsub = client.pubsub()  # pyright: ignore[reportUnknownMemberType]
     # Attach/detach bracket: a reconnect storm (client watchdog cycling) or a
     # subscriber that never detaches is invisible without the pair; the detach
@@ -153,7 +149,7 @@ async def event_stream(
     data_frames = 0
     _log.info("sse attach: agent_id=%s channel=%s broadcast=%s", agent_id, _channel, broadcast)
     try:
-        await pubsub.subscribe(_channel)
+        await retry_auth_failures_async(lambda: pubsub.subscribe(_channel))
 
         yield b": stream open\n\n"
 
@@ -167,11 +163,13 @@ async def event_stream(
             try:
                 if await request.is_disconnected():
                     return
-                msg = await pubsub.get_message(
-                    ignore_subscribe_messages=True,
-                    timeout=_DISCONNECT_POLL_SECONDS,
+                msg = await retry_auth_failures_async(
+                    lambda: pubsub.get_message(
+                        ignore_subscribe_messages=True,
+                        timeout=_DISCONNECT_POLL_SECONDS,
+                    )
                 )
-            except _REDIS_IO_ERRORS as exc:
+            except _REDIS_IO_ERRORS + _REDIS_ACL_ERRORS as exc:
                 _log.warning("sse pubsub read failed: %r agent_id=%s", exc, agent_id)
                 yield _sse_frame(
                     Error(
@@ -254,9 +252,11 @@ async def _drain_redis_messages(
         if remaining <= 0:
             break
         poll = min(remaining, 0.1)
-        msg = await pubsub.get_message(  # pyright: ignore[reportUnknownMemberType]
-            ignore_subscribe_messages=True,
-            timeout=poll,
+        msg = await retry_auth_failures_async(
+            lambda poll=poll: pubsub.get_message(  # pyright: ignore[reportUnknownMemberType]
+                ignore_subscribe_messages=True,
+                timeout=poll,
+            )
         )
         if msg is None:
             break
@@ -303,12 +303,7 @@ async def throttled_event_stream(
         bytes: SSE frame (``data: [...]\n\n``).
     """
     _channel = channel if channel is not None else settings.data_plane.events_channel
-    client = aioredis.from_url(
-        redis_url,
-        decode_responses=True,
-        # Dead-transport detection: see shared.redis_client._TransportAwareAsyncConnection.
-        connection_class=_TransportAwareAsyncConnection,
-    )
+    client = open_async_redis(redis_url)
     pubsub = client.pubsub()  # pyright: ignore[reportUnknownMemberType]
     opened = time.monotonic()
     data_frames = 0
@@ -320,7 +315,7 @@ async def throttled_event_stream(
         throttle_rate,
     )
     try:
-        await pubsub.subscribe(_channel)
+        await retry_auth_failures_async(lambda: pubsub.subscribe(_channel))
 
         yield b": stream open\n\n"
 
@@ -329,7 +324,7 @@ async def throttled_event_stream(
         while True:
             try:
                 buffer, disconnected = await _drain_redis_messages(pubsub, request, flush_interval)
-            except _REDIS_IO_ERRORS as exc:
+            except _REDIS_IO_ERRORS + _REDIS_ACL_ERRORS as exc:
                 _log.warning("sse throttle pubsub read failed: %r", exc)
                 yield _sse_batch_frame(
                     [
