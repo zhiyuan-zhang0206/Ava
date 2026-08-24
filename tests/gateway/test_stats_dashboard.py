@@ -357,8 +357,7 @@ def test_dashboard_168h_reads_tokens_from_ledger(
             tokens_cached=tokens_cached,
             cost_usd=cost_usd,
         )
-    # The newest day establishes the retained live reread seam; its zero row
-    # keeps the settled days above representative of the ledger contribution.
+    # Zero newest-day row establishes the retained live reread seam.
     _insert_token_ledger_row(
         db_conn,
         agent_id=first_agent,
@@ -461,9 +460,11 @@ def test_token_window_plan_24h_at_midnight_stays_pure_loki() -> None:
     """A UTC-aligned 24-hour window has no ledger-safe settled day."""
     now = datetime(2026, 8, 25, tzinfo=UTC)
 
-    assert _stats_dashboard.token_window_plan(
-        now - timedelta(hours=24), now
-    ) == (None, None, [(now - timedelta(hours=24), now)])
+    assert _stats_dashboard.token_window_plan(now - timedelta(hours=24), now) == (
+        None,
+        None,
+        [(now - timedelta(hours=24), now)],
+    )
 
 
 def test_dashboard_empty_db_returns_zeros(db_conn: psycopg.Connection) -> None:
