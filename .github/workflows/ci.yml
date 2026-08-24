@@ -201,6 +201,20 @@ jobs:
       - name: Install Python deps
         run: uv sync --frozen
 
+      # types-codegen-fresh shells out to `npx openapi-typescript` inside
+      # ui/web (scripts/check-types-fresh.sh), so the node toolchain + deps
+      # are part of this job's surface, not just the frontend job's.
+      - name: Install Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ui/web/package-lock.json
+
+      - name: Install frontend deps (codegen freshness)
+        working-directory: ui/web
+        run: npm ci
+
       - name: Run pre-commit structural gates (--all-files)
         run: uv run pre-commit run --all-files
 
