@@ -1,0 +1,98 @@
+# Branch protection and workflow activation live in GitHub, outside the git
+# tree that declares Ava's merge gate. This read-only audit makes drift visible;
+# only its alert/resolve loop writes the single tracked issue.
+
+name: Audit Branch Protection
+
+on:
+  schedule:
+    - cron: '13 3 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+  issues: write
+
+concurrency:
+  group: audit-branch-protection
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    name: audit branch protection
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: 0.10.2
+
+      - name: Install locked Python environment
+        run: uv sync --frozen
+
+      - name: Audit live protection state
+        id: audit
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -o pipefail
+          uv run python scripts/audit_branch_protection.py --json 2>&1 | tee /tmp/audit.out
+
+      - name: Alert on verified drift
+        if: steps.audit.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          result="$(grep '^AUDIT_RESULT=' /tmp/audit.out | tail -n 1)"
+          if [ "$result" != "AUDIT_RESULT=drift" ]; then
+            exit 1
+          fi
+
+          marker='<!-- branch-protection-audit-drift -->'
+          report="$(cat /tmp/audit.out)"
+          gh api --method GET "repos/${GITHUB_REPOSITORY}/issues" \
+            -f state=open -f per_page=100 --paginate \
+            --jq '.[] | select(has("pull_request") | not) | select((.body // "") | contains("<!-- branch-protection-audit-drift -->")) | .number' \
+            > /tmp/branch-protection-issues
+          issue_number="$(sed -n '1p' /tmp/branch-protection-issues)"
+          body="$marker
+
+          Branch-protection drift is still present:
+
+          \`\`\`json
+          $report
+          \`\`\`"
+          if [ -n "$issue_number" ]; then
+            gh api --method POST \
+              "repos/${GITHUB_REPOSITORY}/issues/${issue_number}/comments" \
+              -f body="$body"
+          else
+            gh issue create --title "Branch protection drift detected" --body "$body"
+          fi
+          exit 1
+
+      - name: Close resolved drift alerts
+        if: steps.audit.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh api --method GET "repos/${GITHUB_REPOSITORY}/issues" \
+            -f state=open -f per_page=100 --paginate \
+            --jq '.[] | select(has("pull_request") | not) | select((.body // "") | contains("<!-- branch-protection-audit-drift -->")) | .number' \
+            > /tmp/branch-protection-issues
+          while IFS= read -r issue_number; do
+            [ -n "$issue_number" ] || continue
+            gh api --method POST \
+              "repos/${GITHUB_REPOSITORY}/issues/${issue_number}/comments" \
+              -f body="Branch-protection drift resolved."
+            gh api --method PATCH "repos/${GITHUB_REPOSITORY}/issues/${issue_number}" \
+              -f state=closed -f state_reason=completed
+          done < /tmp/branch-protection-issues
