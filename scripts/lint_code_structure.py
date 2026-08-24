@@ -101,6 +101,7 @@ _SCAN_DIRS = (
 _MACHINE_ROLE_ALLOWED: dict[str, str] = {
     "shared/machine.py": "defines machine_role() and its capability wrappers is_gateway()/is_agent_runner() — the implementation itself",
     "shared/observability.py": "does this process serve the gateway capability whose LGTM marker governs telemetry (what do I serve)",
+    "services/healthchecks/otel_collector.py": "does this unit own the LGTM collector healthcheck, preserving pure-runner relay behavior (what do I serve)",
     "cli/commands/start.py": "which daemons do I bring up (what do I serve)",
     "cli/commands/_repo.py": "resolve this host's capability set, None when unset, for stop/status/converge (what do I serve)",
     "cli/commands/_gateway_ready.py": "audit this host's role for the readiness report (what do I serve)",

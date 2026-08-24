@@ -10,11 +10,118 @@ from __future__ import annotations
 
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 import pytest
 
 from services.healthchecks import otel_collector as hc
 from shared.daemon_health import DaemonProbe
+from shared.machine import MachineRoleInvalid, MachineRoleMissing
+
+
+def _ignore_process_init(_name: str) -> None:
+    return None
+
+
+def _fail_probe() -> DaemonProbe:
+    pytest.fail("probe must be skipped")
+
+
+def _fail_liveness_probe() -> bool:
+    pytest.fail("liveness probe must be skipped")
+
+
+def _fail_metrics_probe() -> hc.CollectorPressure | None:
+    pytest.fail("metrics probe must be skipped")
+
+
+def _fail_restart() -> DaemonProbe:
+    pytest.fail("restart must be skipped")
+
+
+def test_collector_serves_this_home_fails_closed_without_machine_role(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(hc, "machine_role", lambda: (_ for _ in ()).throw(MachineRoleMissing()))
+    assert hc._collector_serves_this_home() is False
+
+    monkeypatch.setattr(
+        hc, "machine_role", lambda: (_ for _ in ()).throw(MachineRoleInvalid("bad"))
+    )
+    assert hc._collector_serves_this_home() is False
+
+
+def test_collector_serves_this_home_keeps_runner_and_unconfigured_behavior(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(hc, "machine_role", lambda: frozenset({"agent-runner"}))
+    assert hc._collector_serves_this_home() is True
+
+    monkeypatch.setattr(hc, "machine_role", lambda: frozenset({"gateway"}))
+    monkeypatch.setattr(hc, "gateway_observability_home", lambda: None)
+    assert hc._collector_serves_this_home() is True
+
+
+def test_collector_serves_this_home_requires_gateway_lgtm_marker(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(hc, "machine_role", lambda: frozenset({"gateway", "agent-runner"}))
+    monkeypatch.setattr(hc, "gateway_observability_home", lambda: tmp_path)
+    assert hc._collector_serves_this_home() is False
+    (tmp_path / "lgtm-host").touch()
+    assert hc._collector_serves_this_home() is True
+
+
+def test_main_skips_non_lgtm_gateway_before_probe_or_restart(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(hc, "init_gateway_process", _ignore_process_init)
+    monkeypatch.setattr(hc, "_collector_serves_this_home", lambda: False)
+    monkeypatch.setattr(hc, "probe_collector", _fail_probe)
+    monkeypatch.setattr(hc, "_is_alive", _fail_liveness_probe)
+    monkeypatch.setattr(hc, "_queue_pressure", _fail_metrics_probe)
+    monkeypatch.setattr(hc, "_restart_daemon", _fail_restart)
+
+    records: list[str] = []
+
+    class _Log:
+        def bind(self, **kw: object) -> _Log:
+            assert kw == {"_no_emitter": True, "component": "otel-collector-healthcheck"}
+            return self
+
+        def warning(self, message: str, *args: object) -> None:
+            records.append(message.format(*args))
+
+    monkeypatch.setattr(hc, "logger", _Log())
+    hc.main()
+
+    assert len(records) == 1
+    assert "this gateway home is not the LGTM host" in records[0]
+    assert "telemetry export is unavailable" in records[0]
+
+
+@pytest.mark.parametrize(
+    "roles,marker", [(frozenset({"gateway"}), True), (frozenset({"agent-runner"}), False)]
+)
+def test_main_runs_collector_path_for_gateway_marker_and_runner(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    roles: frozenset[str],
+    marker: bool,
+) -> None:
+    monkeypatch.setattr(hc, "init_gateway_process", _ignore_process_init)
+    calls: list[str] = []
+    monkeypatch.setattr(hc, "machine_role", lambda: roles)
+    monkeypatch.setattr(hc, "gateway_observability_home", lambda: tmp_path)
+    if marker:
+        (tmp_path / "lgtm-host").touch()
+    monkeypatch.setattr(
+        hc, "probe_collector", lambda: (calls.append("probe"), DaemonProbe.up("ok"))[1]
+    )
+    monkeypatch.setattr(hc, "_queue_pressure", lambda: (calls.append("pressure"), None)[1])
+    hc.main()
+    assert calls == ["probe", "pressure"]
 
 
 def test_is_alive_rejecting_valid_otlp_is_not_healthy(monkeypatch: pytest.MonkeyPatch) -> None:

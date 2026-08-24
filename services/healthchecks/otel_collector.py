@@ -9,9 +9,12 @@ loopback Prometheus endpoint (the per-unit AVA_OTELCOL_METRICS_PORT, default
 collector config exports the same queue/drop metrics to central Prometheus for
 alerting.
 
-The sidecar is the local OTLP entry for every agent on this machine — when it
-is down, trace/event/metric export drops (agents retry briefly, then shed)
-until the watchdog revives it within a minute.
+The sidecar is the local OTLP entry for every agent on this machine — except
+that a gateway without its home's ``lgtm-host`` marker has no local collector
+responsibility and its healthcheck warns/returns; pure runners retain relay
+collector behavior. When responsible and down, trace/event/metric export
+drops (agents retry briefly, then shed) until the watchdog revives it within a
+minute.
 """
 
 import logging
@@ -24,6 +27,8 @@ from pathlib import Path
 from shared.config import settings
 from shared.daemon_health import DaemonProbe
 from shared.log import init_gateway_process, logger
+from shared.machine import MachineRoleInvalid, MachineRoleMissing, machine_role
+from shared.observability import gateway_observability_home
 from shared.paths import otel_collector_binary, otel_collector_config
 from shared.service_respawn import respawn_and_verify, run_keepalive
 from shared.supervised_listener import (
@@ -40,6 +45,18 @@ _ENQUEUE_FAILURE_SAMPLE = re.compile(
 )
 _LABEL = re.compile(r'(?:^|,)\s*(?P<key>[A-Za-z_][A-Za-z0-9_]*)="(?P<value>[^"]*)"')
 _COLLECTOR_RESPAWN_TIMEOUT_S = 5.0
+
+
+def _collector_serves_this_home() -> bool:
+    """Whether this unit owns a collector that the healthcheck should probe."""
+    try:
+        roles = machine_role()
+    except (MachineRoleMissing, MachineRoleInvalid):
+        return False
+    if "gateway" not in roles:
+        return True
+    home = gateway_observability_home()
+    return home is None or (home / "lgtm-host").exists()
 
 
 @dataclass(frozen=True)
@@ -156,6 +173,11 @@ def _restart_daemon() -> DaemonProbe:
 
 def main() -> None:
     init_gateway_process("otel-collector")
+    if not _collector_serves_this_home():
+        logger.bind(_no_emitter=True, component="otel-collector-healthcheck").warning(
+            "collector skipped — this gateway home is not the LGTM host; telemetry export is unavailable"
+        )
+        return
     if not probe_collector().alive:
         run_keepalive("otel-collector", _log, probe=probe_collector, respawn=_restart_daemon)
         return
