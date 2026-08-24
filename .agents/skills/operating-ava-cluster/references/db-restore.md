@@ -63,7 +63,11 @@ chmod 600 "$scratch_dir/backup.dump"
 
 The key file is the SHA-256 hex digest of the cluster secret. It is private,
 never passed on argv, and must be deleted with the scratch directory after the
-drill. The gzip CRC and `pg_restore` failure path detect corruption; the
+drill. The cluster secret itself lives in the surviving unit's `.env`
+(`$AVA_HOME/.env`, mode 0600) — in a disaster-recovery scenario the secret from
+any surviving runner (or the gateway) is sufficient to decrypt every artifact,
+because the passphrase is derived from the cluster secret alone, not from any
+per-host value. The gzip CRC and `pg_restore` failure path detect corruption; the
 artifact is encrypted with AES-256-CBC and inherits the local artifact's 0600
 threat model.
 
