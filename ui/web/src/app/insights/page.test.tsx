@@ -12,7 +12,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Stubs carry the section element ids (their bodies are covered by each
 // page's own test file) so the nav's sub-anchor jumps have a real target.
-vi.mock("@/app/insights/status/page", () => ({ default: () => <div id="status-services">STATUS_BODY</div> }));
+vi.mock("@/app/insights/status/page", () => ({
+  default: () => (
+    <div id="status-services">
+      STATUS_BODY
+      <div id="status-gateway" />
+    </div>
+  ),
+}));
 vi.mock("@/app/insights/ops/page", () => ({ default: () => <div id="ops-metrics">OPS_BODY</div> }));
 vi.mock("@/components/ops/alerts-section", () => ({ default: () => <div id="alerts-section">ALERTS_BODY</div> }));
 
@@ -22,11 +29,16 @@ import InsightsPage from "./page";
 
 afterEach(cleanup);
 
+let scrolledIds: string[];
+
 beforeEach(() => {
   vi.restoreAllMocks();
   window.location.hash = "";
   // happy-dom doesn't implement scrollIntoView; the nav + hash effect call it.
-  Element.prototype.scrollIntoView = vi.fn();
+  scrolledIds = [];
+  Element.prototype.scrollIntoView = vi.fn(function (this: Element) {
+    scrolledIds.push(this.id);
+  });
 });
 
 function wrap(ui: React.ReactElement) {
@@ -99,5 +111,14 @@ describe("InsightsPage shell", () => {
     fireEvent.click(within(nav).getByRole("button", { name: "Metrics (Grafana)" }));
     expect(spy).toHaveBeenCalled();
     expect(window.location.hash).toBe("#ops-metrics");
+  });
+
+  it.each([
+    ["resources", "status"],
+    ["gateway-daemons", "status-gateway"],
+  ])("forwards retired Status %s deep links to %s", (anchorSuffix, targetId) => {
+    window.location.hash = `#status-${anchorSuffix}`;
+    wrap(<InsightsPage />);
+    expect(scrolledIds).toContain(targetId);
   });
 });

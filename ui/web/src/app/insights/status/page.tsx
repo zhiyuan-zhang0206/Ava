@@ -1,13 +1,11 @@
 "use client";
 
-// /insights#status — live cluster status. Gateway and agent-runners are
-// SERVICES of the cluster, not "machines": the Services block renders the
-// gateway as a single card (host / status / health / last seen) and the
-// agent-runners as a table (host / status / agents / last seen), with the
-// cluster-wide Update / Restart actions on the shared header. Below it: the
-// resource charts and the gateway's daemon list. (The per-agent session tree
-// was removed 2026-08-05 per user ruling — the Grafana embed shows runner
-// health now.)
+// /insights#status — live cluster status. Services renders the cluster-wide
+// Update / Restart actions and agent-runners table; Gateway combines the
+// gateway card (host / status / health / up since) with its daemon list. The
+// Resources block was removed 2026-08-24 because Grafana's "Host & data plane"
+// row covers per-host resource charts. (The per-agent session tree was removed
+// 2026-08-05 per user ruling — the Grafana embed shows runner health now.)
 //
 // Rendered as a section of the vertical Insights page; `useSectionVisible`
 // starts the 10s status poll on first paint and pauses it once the Status
@@ -22,7 +20,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2, RefreshCw, RotateCcw, Server } from "lucide-react";
 import { type ComponentType, type ReactNode } from "react";
 
-import { ResourceReadout } from "@/components/metrics/resource-readout";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -86,8 +83,7 @@ export default function StatusPage() {
   return (
     <div className="space-y-4">
       <ServicesPanel data={data.cluster} />
-      <ResourcesSection data={data.cluster} />
-      <GatewayDaemonsSection data={data} />
+      <GatewaySection data={data} />
     </div>
   );
 }
@@ -205,7 +201,7 @@ function upSinceLabel(m: MachineStatus): string {
   return "—";
 }
 
-// ── Services: gateway card + agent-runner table + cluster-wide actions ──
+// ── Services: agent-runner table + cluster-wide actions ──
 
 function ServicesPanel({ data }: { data: ClusterPanel }) {
   const visible = useSectionVisible();
@@ -318,7 +314,6 @@ function ServicesPanel({ data }: { data: ClusterPanel }) {
     if (ok) restart.mutate();
   };
 
-  const gateways = data.machines.filter((m) => m.serve_gateway);
   const runners = data.machines.filter((m) => m.serve_agent_runner);
 
   return (
@@ -432,12 +427,7 @@ function ServicesPanel({ data }: { data: ClusterPanel }) {
           (no host has run `ava start` yet)
         </p>
       ) : (
-        <div className="space-y-3">
-          {gateways.map((m) => (
-            <GatewayCard key={m.name} m={m} currentMachine={data.current_machine} />
-          ))}
-          {runners.length > 0 && <AgentRunnersCard runners={runners} />}
-        </div>
+        runners.length > 0 && <AgentRunnersCard runners={runners} />
       )}
     </div>
   );
@@ -589,73 +579,50 @@ function AgentRunnersCard({ runners }: { runners: MachineStatus[] }) {
   );
 }
 
-// The gateway-only daemons (labeler, memory indexer) — pidfile liveness.
+// Gateway host status plus gateway-only daemons (labeler, memory indexer).
 // Per-host daemons (restarter, watchdog) ride each machine's probe and feed
 // the Gateway card's health verdict instead.
-function GatewayDaemonsSection({ data }: { data: SystemStatus }) {
+function GatewaySection({ data }: { data: SystemStatus }) {
+  const gateways = data.cluster.machines.filter((m) => m.serve_gateway);
   const services = data.services.items;
   const cur = data.cluster.current_machine;
   return (
-    <StatusSection id="status-gateway-daemons" icon={Server} title="Gateway daemons" subtitle={`(${cur})`}>
-      {services.length === 0 ? (
-        <p className="text-xs text-muted-foreground">No service data</p>
-      ) : (
-        <div className="border border-border rounded-md overflow-x-auto">
-          <Table className="[&_th]:border-r [&_th]:border-border [&_th:last-child]:border-r-0 [&_td]:border-r [&_td]:border-border [&_td:last-child]:border-r-0">
-            <TableBody>
-            {services.map((svc) => (
-              <TableRow key={svc.name}>
-                <TableCell className="w-full">
-                  <span className="inline-flex items-center gap-2">
-                    <span
-                      className={`size-2 rounded-full ${
-                        svc.online === true
-                          ? "bg-green-500"
-                          : svc.online === false
-                            ? "bg-destructive"
-                            : "bg-muted-foreground/30"
-                      }`}
-                    />
-                    {svc.label}
-                  </span>
-                </TableCell>
-                <TableCell className="text-right text-muted-foreground font-mono">
-                  {svc.detail ?? (svc.pid != null ? `PID ${svc.pid}` : "—")}
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-          </Table>
-        </div>
-      )}
-    </StatusSection>
-  );
-}
-
-function ResourcesSection({ data }: { data: ClusterPanel }) {
-  // One readout row per online machine that reported a reading.
-  // Machine dedup is inherent: the roster is already per-machine-name.
-  const machinesWithData = data.machines.flatMap((m) =>
-    m.online && m.resource ? [{ name: m.name, sample: m.resource }] : [],
-  );
-  if (machinesWithData.length === 0) return null;
-
-  return (
-    <StatusSection
-      id="status-resources"
-      icon={Server}
-      title="Resources"
-      subtitle="(live — CPU / memory / disk)"
-    >
+    <StatusSection id="status-gateway" icon={Server} title="Gateway" subtitle={`(${cur})`}>
       <div className="space-y-3">
-        {machinesWithData.map((m) => (
-          <div key={m.name}>
-            {machinesWithData.length > 1 && (
-              <div className="text-xs text-muted-foreground mb-1.5 font-medium">{m.name}</div>
-            )}
-            <ResourceReadout sample={m.sample} />
-          </div>
+        {gateways.map((m) => (
+          <GatewayCard key={m.name} m={m} currentMachine={cur} />
         ))}
+        {services.length === 0 ? (
+          <p className="text-xs text-muted-foreground">No service data</p>
+        ) : (
+          <div className="border border-border rounded-md overflow-x-auto">
+            <Table className="[&_th]:border-r [&_th]:border-border [&_th:last-child]:border-r-0 [&_td]:border-r [&_td]:border-border [&_td:last-child]:border-r-0">
+              <TableBody>
+                {services.map((svc) => (
+                  <TableRow key={svc.name}>
+                    <TableCell className="w-full">
+                      <span className="inline-flex items-center gap-2">
+                        <span
+                          className={`size-2 rounded-full ${
+                            svc.online === true
+                              ? "bg-green-500"
+                              : svc.online === false
+                                ? "bg-destructive"
+                                : "bg-muted-foreground/30"
+                          }`}
+                        />
+                        {svc.label}
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-right text-muted-foreground font-mono">
+                      {svc.detail ?? (svc.pid != null ? `PID ${svc.pid}` : "—")}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        )}
       </div>
     </StatusSection>
   );

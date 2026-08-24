@@ -33,6 +33,14 @@ import StatusPage from "@/app/insights/status/page";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0, OVERFLOW_HIDDEN } from "@/lib/layout";
 import { cn } from "@/lib/utils";
 
+// Retired 2026-08-24: Resources moved to Grafana and gateway daemons merged
+// into Gateway. Keep old bookmarks landing on the closest current surface.
+const STATUS_ANCHOR_PREFIX = "status-";
+const RETIRED_STATUS_ANCHOR_TARGETS: Record<string, string> = {
+  [`${STATUS_ANCHOR_PREFIX}resources`]: "status",
+  [`${STATUS_ANCHOR_PREFIX}gateway-daemons`]: "status-gateway",
+};
+
 export default function InsightsPage() {
   // Honor a #anchor on first load / direct link (including forwards from old
   // /control#status deep links): resolve the target once, from the URL hash
@@ -45,7 +53,9 @@ export default function InsightsPage() {
   const [anchorTarget] = useState<string | null>(() => {
     if (typeof window === "undefined") return null;
     const id = window.location.hash.slice(1);
-    return id ? (RETIRED_INSIGHTS_ANCHORS.has(id) ? "ops" : id) : null;
+    return id
+      ? (RETIRED_STATUS_ANCHOR_TARGETS[id] ?? (RETIRED_INSIGHTS_ANCHORS.has(id) ? "ops" : id))
+      : null;
   });
   useSettledAnchorScroll(INSIGHTS_SCROLL_ID, anchorTarget);
 
@@ -77,7 +87,7 @@ export default function InsightsPage() {
             <ControlSection
               id="status"
               label="Status"
-              description="Live cluster health: services, agents, resources."
+              description="Live cluster health: services and agents."
             >
               <StatusPage />
             </ControlSection>
@@ -85,7 +95,7 @@ export default function InsightsPage() {
             <ControlSection
               id="ops"
               label="Ops"
-              description="Grafana dashboard link — SSE/event-log backlog, LLM latency + TPS, process restarts."
+              description="Grafana dashboard link — SSE/event-log backlog, LLM latency + TPS, process restarts, host resources."
             >
               <OpsPage />
             </ControlSection>
