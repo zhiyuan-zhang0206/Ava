@@ -38,8 +38,10 @@ Three entry points, three session classes:
 
 `kill_session(name, graceful=...)` → `(ok, mode)`, and the platform-neutral `process_alive` / `request_stop` / `force_kill` trio for the processes that are not sessions, live in [[stopping.ava.okf.md|stopping]].
 
-### macOS firewall audit
-The read-only Application Firewall allow-list audit (issue #949, converge report + OFF_BOX_UNREACHABLE attribution): [[shared/session-backend/firewall-audit.ava.okf.md]].
+### macOS firewall manifest
+The Application Firewall allow-list manifest, reconciliation, status rendering,
+and OFF_BOX_UNREACHABLE attribution (issue #949):
+[[shared/session-backend/firewall-audit.ava.okf.md]].
 
 ## Entry points
 

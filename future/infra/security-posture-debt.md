@@ -31,15 +31,16 @@ unix-socket local trust (OS user is the trust root).
    pure static content, no auth, reachable from LAN/private network (ALF has a
    rule for it). Fix direction pending user decision: bind loopback / route via
    the gateway reverse proxy / private-network-only.
-3. **macOS ALF firewall rules stale** — 9/17 manifest binaries lack rules (uv
-   3.11.14/3.12.11, Chrome Helper, etc.), 5 obsolete rules; `/etc/sudoers.d/
-   ava-firewall` not installed, so the auto-repair path is inert.
-4. **World-readable `~/.ava` files** — `logs/`, `workspaces/` (710 dirs),
+3. **World-readable `~/.ava` files** — `logs/`, `workspaces/` (710 dirs),
    `memory/` are 755/644, containing health/financial data; `.env` (600) and
    `secrets/` (700) are correct.
 
 ## Resolved since the assessment
 
+- macOS ALF manifest drift is reconciled by `ava converge`: manifest globs cover
+  the current inbound binaries, direct `socketfilterfw` mutation works on the
+  verified macOS 26.5 host, and older-platform elevation remains a bounded
+  `sudo -n` / manual-command fallback (2026-08-24, task #1531).
 - Cloudflare tunnel deprecated (2026-08-02 ruling): the ava-prod user
   LaunchAgent is disabled; the root LaunchDaemon
   `com.cloudflare.cloudflared` (token tunnel) was scheduled for

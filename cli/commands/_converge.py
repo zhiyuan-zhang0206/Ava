@@ -27,6 +27,7 @@ from cli.commands._converge_os_jobs import (
     ensure_watchdog_probe,
     reap_stale_schtasks,
 )
+from cli.commands._converge_permission_watcher import ensure_permission_watcher
 
 # The step contract lives in _converge_spec so step implementations can span
 # modules without an import cycle; re-exported here because every caller and
@@ -591,10 +592,20 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
         requires_unit_config=True,
     ),
     # macOS Application Firewall allow rules for the binaries this host serves
-    # off-box ports from. Read-only (the repair needs root — issue #949), both
-    # capabilities (a gateway serves HTTP, a runner serves its ops port), and
-    # silent on every host that cannot have the defect.
+    # off-box ports from. Rootless-first repair with an older-macOS `sudo -n`
+    # fallback; both capabilities (a gateway serves HTTP, a runner serves its
+    # ops port), and silent on every host that cannot have the defect.
     ConvergeStep("macOS firewall allow list", ensure_firewall_allowlist),
+    # One prod LaunchAgent per macOS host observes TCC/ALF prompt lifecycles and
+    # writes FYI notices through the gateway's local PgBouncer connection. A pure
+    # runner has no local AVA_DB_URL, so registration is gateway-scoped.
+    ConvergeStep(
+        "macOS permission prompt watcher",
+        ensure_permission_watcher,
+        roles=frozenset({"gateway"}),
+        requires_unit_config=True,
+        host_global=True,
+    ),
     # Warning-only assertion of the operator-approved Homebrew pins. Both roles
     # may share the same macOS host; drift is detected, never repaired here.
     ConvergeStep("Homebrew formula pins", ensure_brew_pin),
