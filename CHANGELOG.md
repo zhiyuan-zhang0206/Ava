@@ -9,10 +9,10 @@ and the matching GitHub Releases, cut by `scripts/release_cut.py`.
 
 ### Added
 - Browser-mcp daemon now keeps a valid gateway session cookie in the shared
-  managed Chrome: mints it locally from the cluster secret (`sign_session`, no
-  login round-trip) and injects it over CDP (`Network.setCookie`), refreshed
-  every 6h. The managed browser can open auth-gated gateway URLs (agent-served
-  pages behind the gateway reverse proxy) on any machine, fresh profile or not.
+  managed Chrome: logs in through the gateway, injects the returned opaque
+  server-side session over CDP (`Network.setCookie`), and refreshes every 6h.
+  The managed browser can open auth-gated gateway URLs (agent-served pages
+  behind the gateway reverse proxy) on any machine, fresh profile or not.
 - Delivery observability: `inbound_messages.claimed_at` (set on claim; pickup
   latency = claimed_at - created_at), degraded idle-wake logged at WARNING when
   the pub/sub fast path is lost, and a gateway delivery watchdog that alerts on

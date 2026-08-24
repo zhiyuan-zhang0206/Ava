@@ -20,7 +20,7 @@ export interface paths {
          *     Request body: ``{"password": "<cluster-secret>"}``
          *
          *     On success, returns ``{"ok": true}`` and sets an HTTP-only session
-         *     cookie valid for 7 days.
+         *     cookie whose lifetime is controlled by ``session_ttl_seconds``.
          *
          *     On failure, returns a typed 401 error envelope with detail ``"invalid password"``.
          *
@@ -53,7 +53,7 @@ export interface paths {
         put?: never;
         /**
          * Logout
-         * @description Clear the session cookie — no auth required (idempotent).
+         * @description Revoke and clear the current session cookie; repeated calls are safe.
          */
         post: operations["logout_api_auth_logout_post"];
         delete?: never;
@@ -79,6 +79,46 @@ export interface paths {
         get: operations["check_api_auth_check_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Sessions
+         * @description List active browser sessions, marking the request's current cookie.
+         */
+        get: operations["sessions_api_auth_sessions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/sessions/{session_id}/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Revoke Other Session
+         * @description Revoke a non-current browser session.
+         */
+        post: operations["revoke_other_session_api_auth_sessions__session_id__revoke_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -928,19 +968,20 @@ export interface paths {
          *     agents_meta row). `config_overlay` is the spawn-time override map — `{}` when
          *     the agent runs on cluster defaults (the column is NULL).
          *
-         *     Latency discipline: the event-history sections run on parallel workers
-         *     (one Loki fan-out per section, overlapped), and only those aggregates ride
-         *     a 75s TTL cache keyed by (agent_id, hours, since_compact), with concurrent
-         *     misses sharing one single-flight Future — the panel refetches in bursts
-         *     (open, notice SSE events, 60s interval), and a burst must not re-run the
-         *     ~20-query fan-out per request. The agents_meta projection (machine,
-         *     config, heartbeat inputs, liveness and timestamps), `notice`, and `shells`
-         *     are fetched fresh on every call and never ride the cache. `shells` is probed
-         *     on the agent's own machine via the `shell_probe` cluster op (the gateway
-         *     never runs sessions itself; every machine — its own included — is dialed at its
-         *     registered ops URL), so a split deployment reflects each agent's runner and
-         *     an unreachable machine degrades to an empty list rather than failing the
-         *     panel. `heartbeat` is the agent's idle check-in state: the
+         *     Latency discipline: event-history sections use a shared bounded executor,
+         *     and only their aggregates ride a 75s TTL cache keyed by (agent_id, hours,
+         *     since_compact). Concurrent misses share one single-flight Future; no more
+         *     than `_INSPECT_MAX_CONCURRENT_LOADS` distinct leaders run at once, and a
+         *     saturated request gets the queue-full 503. Each leader's 15-second response
+         *     budget is also its load deadline, so expired work stops and releases its
+         *     admission slot rather than continuing under transport timeouts. The
+         *     agents_meta projection (machine, config, heartbeat inputs, liveness and
+         *     timestamps), `notice`, and `shells` are fetched fresh on every call and
+         *     never ride the cache. `shells` is probed on the agent's own machine via the
+         *     `shell_probe` cluster op (the gateway never runs sessions itself; every
+         *     machine — its own included — is dialed at its registered ops URL), so a
+         *     split deployment reflects each agent's runner and an unreachable machine
+         *     degrades to an empty list rather than failing the panel. `heartbeat` is the agent's idle check-in state: the
          *     projected next check-in when idle (or the active pause / running suppression)
          *     plus its most recent pause from history.
          *
@@ -2967,15 +3008,18 @@ export interface paths {
          *
          *     Data sources:
          *     - `live_count`: agents_meta table — all non-terminated agents (running/idling/restarting/hibernating)
-         *     - `tokens` / `cost_usd`: telemetry `llm_usage` events in Loki
-         *     - average turn duration / warning/error counts: Loki's unified event stream
+         *     - `tokens` / `cost_usd`: full UTC days from the fleet ledger plus a Loki tail
+         *     - average turn duration: Loki's unified event stream in 12-hour shards
+         *     - warning/error counts: one grouped Loki query per 12-hour shard
          *     - `total_events`: archived event row count (frozen at the LGTM cutover;
          *       not a live gauge)
          *
          *     `?hours=` selects the aggregation window (0 = last 5m; 1/6/24/72/168 =
          *     hours), whitelisted by `StatsWindowHours` (anything else 422s). Zero-data
          *     scenario: tokens all 0, cost_usd 0.0, avg_turn_seconds None (frontend
-         *     shows "—").
+         *     shows "—"). Until the unlabeled legacy slice expires on 2026-08-30,
+         *     the ledger removes the fixed-cost full-window token scans; afterward the
+         *     indexed Loki tail keeps the same self-healing late-write behavior.
          */
         get: operations["get_stats_dashboard_api_stats_dashboard_get"];
         put?: never;
@@ -7174,6 +7218,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+        };
+    };
+    sessions_api_auth_sessions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    }[];
+                };
+            };
+        };
+    };
+    revoke_other_session_api_auth_sessions__session_id__revoke_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
