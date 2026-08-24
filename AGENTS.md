@@ -9,7 +9,7 @@ Small core, minimal by design. One tool (`execute_code`), one namespace (`ava.*`
 2. **Fail fast** — no fallbacks for model mistakes; use `[]` not `.get()`, explode on unknown enums.
 3. **Don't reinvent** — LangGraph, psycopg, uv; swap only when they get in the way.
 4. **Single tool** — `execute_code(code: str)` + `ava.*` namespace = all capabilities.
-5. **Latest stable** — Python 3.12, Postgres 17, Redis 8.8; no beta/nightly.
+5. **Approved stable** — Python 3.12, Postgres 17, Redis 8.2; upgrades require manual approval; no beta/nightly.
 6. **English primary** — docs, comments, prompts, error messages in English.
 
 Full elaboration: [`conventions/philosophy.md`](conventions/philosophy.md)
@@ -27,7 +27,7 @@ with no escape hell.
 | Layer | Choice |
 |---|---|
 | DB | Postgres 17 |
-| Cache | Redis 8.8 |
+| Cache | Redis 8.2 |
 | Framework | LangGraph (8-node self-looping graph) |
 | SDK | `ava` (this repo) |
 | Package manager | uv |

@@ -12,6 +12,9 @@
 # and Windows (via Docker — see docker-compose.windows.yml).
 set -euo pipefail
 
+# Provisioning must never upgrade formulae without explicit operator approval.
+export HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_UPGRADE=1
+
 prov_log() { echo "  [provision] $*"; }
 prov_die() { echo "provision: $*" >&2; exit 2; }
 

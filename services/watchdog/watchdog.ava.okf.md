@@ -26,14 +26,9 @@ A gate blocks by **scope**: how wide its finding is, matched against each servic
 - **Healthcheck every 60s**: imports and sequentially runs the corresponding healthcheck modules, failure → kills the session → re-spawns.
 - **First tick delayed one interval**: so services started sequentially by `ava start` have time to warm up, avoiding false-kill of a just-started gateway.
 
-## Checklist derived from single source: build_services()
-The checklist is **no longer hardcoded**: derived from `build_services()`'s `ServiceSpec.healthcheck_module` ([[services.ava.okf.md|single truth]]), any service that declares a healthcheck is automatically wired; a new service registered into `build_services()` gets liveness monitoring without touching watchdog (including services registered by plugins via `plugins/<name>/services.py`). Role home + config/capability gating reuses the `services_for_capabilities_annotated` used by `ava start`; gating reasons computed by `_gate_reason` (enabled for heartbeat, capability for browser), while services with `ServiceSpec.gate` (e.g., task-maintenance’s `AVA_TASK_MAINTENANCE_ENABLED`) carry their own gate — all unified into the same annotated view, originating from the launch roster; gated-out services are not resurrected (reason logged at debug, operational surface via `ava status`). Four pseudo-checks without ServiceSpec are hand-added: `redis-acl` + `pgbouncer` (prepended), `lgtm` + `pg-backup` (appended; `lgtm` marker-gated).
-
-## gateway checklist (order matters)
-`redis-acl` (**manually prepended at front** — fix redis ACL before resurrecting services that depend on it) → `pgbouncer` → `gateway` → `labeler` → `heartbeat` → `events-maintenance` → `milvus` → `frontend` → `task-maintenance` → `memory-indexer` (milvus before it, cold start needs to connect) → `lgtm` (marker-gated) → `pg-backup` (**manually appended at tail** — not a healthcheck, [[backup.ava.okf.md|daily backup]] piggybacks on the tick, future move to CronJob). Middle segment order follows `build_services()` registration order (no dependency constraints).
-
-## agent-runner checklist
-`restarter` → `ops` (order follows `build_services()` registration order, no dependency constraint between them); conditionally appends `browser` + `browser-mcp` (`AVA_BROWSER_ENABLED` and presence of display/Chrome/npx). `--disable-service X` removes from checklist (including pseudo-checks).
+## Healthcheck checklist
+The derived roster, hand-added pseudo-checks, capability gates, and exact
+per-role order: [[services/watchdog/checklist.ava.okf.md]].
 
 ## Key dependencies
 - [[healthchecks.ava.okf.md]] — each service corresponds to a healthcheck module

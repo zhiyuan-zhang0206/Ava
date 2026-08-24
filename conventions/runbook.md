@@ -202,8 +202,8 @@ in is declared on the field itself — every `Settings` field carries a `scope`
 (`cluster-pinned` / `cluster-default` / `host` / `agent`) in `shared/config/`,
 and `BOOTSTRAP_FIELDS` is derived from it.
 
-Postgres and Redis run as native processes (no Docker — the binaries come from brew
-on macOS / apt on Linux, but Ava drives them directly via `pg_ctl` + `redis-server`,
+Postgres and Redis run as native processes (no Docker — the binaries come from brew's
+`redis@8.2` keg on macOS / apt on Linux, but Ava drives them directly via `pg_ctl` + `redis-server`,
 not `brew services`/launchd/systemd). Every cluster — including `main` — brings up its
 OWN pair under `$AVA_HOME` on its per-cluster ports (`cli/commands/_cluster_instance.py`):
 `initdb` into `$AVA_HOME/pg` (template-cached through a host-level dir beside the

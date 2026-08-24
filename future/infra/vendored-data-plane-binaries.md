@@ -93,7 +93,7 @@ half-present runtime). The redis leg reuses this step.
 
 Split because the two have different risk: PG reuses an existing third-party
 artifact (download only); redis stands up our own build-publish pipeline. That is
-also why PG went first — it is the heavy prerequisite, and redis via brew is a small
+also why PG went first — it is the heavy prerequisite, and `redis@8.2` via brew is a small
 single binary, so the remaining leg buys the *last* step of "no package manager"
 rather than the bulk of the value.
 

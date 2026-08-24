@@ -2,7 +2,7 @@
 # Ava install script — OS-aware, capability-scoped entry across macOS / Linux (incl. WSL / containers) / Windows (WSL2).
 #
 # Capabilities (a host carries one or both):
-#   gateway        macOS: brew pg17 + redis (native); Linux: apt pg17 + redis.
+#   gateway        macOS: brew pg17 + redis@8.2 (native); Linux: apt pg17 + redis.
 #   agent-runner   no local pg/redis (a runner-only host connects to a gateway's instance).
 #
 # Linux provision (CLI tools / node / pg17 / redis / pgbouncer) presence-checks
@@ -315,13 +315,13 @@ common_host_wiring() {
 
 # ===========================================================================
 # gateway path: owns the data plane (pg/redis).
-#   macOS  — brew installs pg17 + redis (native, no docker); brew initdb's pg.
+#   macOS  — brew installs pg17 + redis@8.2 (native, no docker); brew initdb's pg.
 #   Linux  — apt installs pg17 + redis-server; one-time initdb bootstrap.
 # ===========================================================================
 install_gateway() {
     case "$OS" in
         Darwin)
-            # macOS: native pg/redis via Homebrew (no docker). `brew install`
+            # macOS: native pg/redis@8.2 via Homebrew (no docker). `brew install`
             # runs initdb for postgresql@17; `ava start`
             # (cli/commands/_cluster_instance.py) creates the `ava` role + db
             # on first boot and runs the per-cluster data plane under $AVA_HOME.

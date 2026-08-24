@@ -289,10 +289,11 @@ def test_checks_for_capability_agent_runner_returns_ops_restarter(
     # hosts lack the helper and would otherwise drop the service).
     monkeypatch.setattr("ops.spec._computer_mcp_gate_reason", lambda: None)
     names = [c.name for c in wd._checks_for_capability("agent-runner")]
-    # Order follows build_services() (restarter before page-server before ops);
-    # browser/browser-mcp gated out above; computer-mcp / mcp-daemon are plain
-    # agent-runner services (no browser gate).
+    # brew-pin is the hand-added host-policy check; the remaining order follows
+    # build_services() (restarter before page-server before ops). Browser checks
+    # are gated out above; computer-mcp / mcp-daemon have no browser gate.
     assert names == [
+        "brew-pin",
         "restarter",
         "page-server",
         "ops",

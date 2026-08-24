@@ -73,12 +73,13 @@ from services._pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidf
 from services.backup import maybe_run_daily_backup
 
 # The statically imported healthchecks are the ones with NO ServiceSpec in
-# build_services(): redis/pgbouncer are native per-cluster processes (not
-# sessions) and the LGTM stack is a docker compose project, so they are not
-# part of the build_services-derived roster — they are added by hand. Every
-# other healthcheck is resolved from its ServiceSpec.healthcheck_module via
+# build_services(): brew-pin asserts host package policy, redis/pgbouncer are
+# native per-cluster processes (not sessions), and the LGTM stack is a docker
+# compose project, so they are not part of the build_services-derived roster.
+# Every other healthcheck is resolved from its ServiceSpec.healthcheck_module via
 # importlib (see _checks_for_capability), so build_services() stays the single
 # source of the keepalive roster.
+from services.healthchecks.brew_pin import main as brew_pin_healthcheck
 from services.healthchecks.lgtm import main as lgtm_healthcheck
 from services.healthchecks.pgbouncer import main as pgbouncer_healthcheck
 from services.healthchecks.redis_acl import main as redis_acl_healthcheck
@@ -150,8 +151,8 @@ def _checks_for_capability(role: MachineRole) -> list[_Check]:
     60s; the durable operator surface is `ava status`), so a revive can never
     crash-loop a service `ava start` chose not to launch.
 
-    Three pseudo-checks have NO ServiceSpec (they are not session-backed services) and are
-    added by hand for the gateway capability — so they state their own
+    Five pseudo-checks have NO ServiceSpec (they are not session-backed services) and are
+    added by hand — so they state their own
     ``requires_db`` right here, the same fact the other entries carry from their spec:
     - redis-acl FIRST — repairs the per-cluster redis ACL user; every daemon below
       depends on redis auth, and a redis-server restart drops the in-memory ACL, so
@@ -165,6 +166,10 @@ def _checks_for_capability(role: MachineRole) -> list[_Check]:
       unreachable, and holding back the check that repairs the front door to it
       would be a deadlock — the pooler probe is the admin console, which needs no
       backend.
+    - brew-pin on BOTH capabilities — detects drift from the operator-approved
+      Homebrew pin set on any macOS unit. It is warning-only and host-local, so
+      neither role ownership nor database availability should suppress it
+      (``requires_db=False``).
     - pg-backup LAST — the daily local pg_dump is a scheduled job that rides the
       tick contract (capability gating, --disable-service pg-backup, per-check error
       logging), not a service healthcheck; no-op except the first tick at/after its
@@ -183,6 +188,7 @@ def _checks_for_capability(role: MachineRole) -> list[_Check]:
     if role == "gateway":
         checks.append(_Check("redis-acl", redis_acl_healthcheck, requires_db=False))
         checks.append(_Check("pgbouncer", pgbouncer_healthcheck, requires_db=False))
+    checks.append(_Check("brew-pin", brew_pin_healthcheck, requires_db=False))
     for spec, gate_reason in services_for_capabilities_annotated(frozenset({role})):
         if spec.healthcheck_module is None:
             continue  # not watchdog-monitored (the watchdog daemons themselves)

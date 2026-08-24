@@ -11,7 +11,7 @@ These guard the invariants that make the importlib-based derivation safe:
    ServiceSpec used to say None, which would have dropped it from the derived
    roster).
 3. The derived roster covers exactly the build_services services that declare a
-   healthcheck_module + are gated in for the capability (plus the two
+   healthcheck_module + are gated in for the capability (plus the
    pseudo-checks) — a new service is auto-wired, none is silently dropped.
 """
 
@@ -74,8 +74,12 @@ def test_derived_roster_covers_all_role_healthchecks(
         if spec.healthcheck_module is not None and reason is None
     }
     got = {c.name for c in wd._checks_for_capability(role)}
-    # The roster is the derived set plus the gateway-only pseudo-checks (no
-    # ServiceSpec: redis and pgbouncer are native per-cluster data-plane processes,
-    # lgtm is a docker compose stack, pg-backup is a scheduled job).
-    pseudo = {"redis-acl", "pgbouncer", "lgtm", "pg-backup"} if role == "gateway" else set()  # pyright: ignore[reportUnknownVariableType]
+    # The roster is the derived set plus pseudo-checks with no ServiceSpec:
+    # brew-pin is host-local on both roles; the native data-plane processes,
+    # lgtm stack, and scheduled backup are gateway-only.
+    pseudo = (
+        {"redis-acl", "pgbouncer", "lgtm", "pg-backup", "brew-pin"}
+        if role == "gateway"
+        else {"brew-pin"}
+    )
     assert got == expected | pseudo

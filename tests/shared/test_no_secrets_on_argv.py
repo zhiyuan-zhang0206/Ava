@@ -400,7 +400,11 @@ def test_redis_bringup(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     # would permanently poison that cache with "PONG" (brew's stdout stand-in)
     # for every other test in this worker, real infra tests included. Stub the
     # resolved path directly so `brew_prefix` is never called here at all.
-    monkeypatch.setattr(ci, "_redis_server_bin", lambda: "/opt/homebrew/opt/redis/bin/redis-server")
+    monkeypatch.setattr(
+        ci,
+        "_redis_server_bin",
+        lambda: "/opt/homebrew/opt/redis@8.2/bin/redis-server",
+    )
 
     # down on the first probe (so the full start path runs), up on the next
     probes = iter([False, True, True])
