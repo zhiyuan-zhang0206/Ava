@@ -57,7 +57,12 @@ So `services/browser/probe.py` asks identity a different way — a Chrome whose 
 
 ## The documented exceptions: the two data-plane repairs
 
-`redis_acl.check` raises on purpose when the **repair** path fails — admin auth rejected, or the re-affirmed ACL user still cannot authenticate. There is no process to restart and no liveness verdict to report, so it lets the watchdog log the failure rather than deciding what to swallow. It is not a liveness probe; it is a repair step that rides the same tick contract.
+`redis_acl.check` raises on purpose when the **repair** path fails — `_start_redis`
+returned non-zero, admin auth was rejected, or the repaired Redis still cannot
+authenticate the cluster identity. Its PING distinguishes a reachable Redis that
+lost its in-memory ACL from a dead local Redis; the latter reuses the same
+idempotent bring-up as `ava start`, then verifies PING. It lets the watchdog log a
+failed repair rather than deciding what to swallow.
 
 `pgbouncer.check` raises on the same grounds and for the same reason: `ensure_pgbouncer` returned non-zero, or after the restart either probe still fails — the loopback admin console does not answer, or the reachable-address listener is still missing (a degraded double bind; task #1288). A pooler that cannot be brought back leaves the cluster with no pooled database front door, and that belongs on the operator's screen every round rather than in a swallowed verdict. Its probe is narrower than a liveness probe on purpose — the admin console, never the end-to-end `SELECT 1` — so that a Postgres outage cannot be misread as a dead pooler and answered with a restart every 60s. The second probe (`pgbouncer_public_listener_reachable`) adds the same narrow dial against the configured reachable address: pgbouncer treats a failed bind on one `listen_addr` entry as a WARNING and keeps running on the rest, so a loopback-only probe would read a silently degraded pooler as healthy.
 
