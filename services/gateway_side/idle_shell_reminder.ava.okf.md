@@ -29,6 +29,8 @@ config-gated by `AVA_IDLE_SHELL_REMINDER_ENABLED` and never closes a session.
 - **Owner merge and standing exemption**: all sessions due for one owner in a
   tick share one inbound id. An AI reply containing `保留` after that inbound
   exempts every covered session until it ends.
+- **Daemon-owned page sessions**: shells whose suffix starts `page-` run page
+  servers and are excluded from idle reminders.
 
 ## Entry points
 

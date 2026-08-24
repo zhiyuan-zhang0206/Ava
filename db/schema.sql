@@ -470,11 +470,9 @@ CREATE UNIQUE INDEX event_dismissals_one_active_class_idx
     WHERE status = 'dismissed';
 
 -- ─────────────── agent_pages ───────────────
--- HTML UI server registry. The agent uses ava.ui.show(name, port) to start a server in its own process,
--- self-reporting its reachable host; the page URL is the direct http://<host>:<port>/ the user's browser
--- (on the same private network) opens in a new tab — no gateway reverse proxy. Lifecycle belongs entirely to the
--- agent (start server / explicit close / terminate cascade), and the DB doesn't actively kill server
--- processes. See migrations/20260807T054700_pages-serve-dir-reopen.sql (post-baseline).
+-- HTML UI server registry. ava.ui.show(name, port) registers an agent-owned
+-- server, while ava.ui.serve()/serve_markdown() rows are supervised by the
+-- page-server daemon inside a persistent shell belonging to the owning agent.
 CREATE TABLE agent_pages (
     id         BIGSERIAL PRIMARY KEY,
     agent_id   BIGINT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
@@ -482,13 +480,15 @@ CREATE TABLE agent_pages (
     port       INTEGER NOT NULL CHECK (port > 0 AND port < 65536),
     host       TEXT,
     title      TEXT,
-    serve_dir  TEXT,  -- set by ava.ui.serve()/serve_markdown(); NULL for ava.ui.show(). Agent boot uses it to re-serve a dead page server after resurrect/restart (Task #955).
+    serve_dir  TEXT,  -- set by ava.ui.serve()/serve_markdown(); NULL for ava.ui.show().
+    server_token TEXT, -- durable per-page /health identity, minted by the page-server daemon.
+    session_name TEXT, -- daemon-owned persistent shell; NULL for show() and pre-session rows.
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     closed_at  TIMESTAMPTZ
 );
 
 COMMENT ON COLUMN agent_pages.serve_dir IS
-    'Directory the page server serves, set by ava.ui.serve()/serve_markdown(); NULL for ava.ui.show(). Agent boot uses it to re-serve a dead page server after resurrect/restart (Task #955).';
+    'Directory the page server serves, set by ava.ui.serve()/serve_markdown(); NULL for ava.ui.show().';
 
 CREATE UNIQUE INDEX agent_pages_unique_open
     ON agent_pages (agent_id, name)

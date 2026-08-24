@@ -291,20 +291,6 @@ class ServiceSettings(EnvSettings):
         },
     )
 
-    page_server_log_dir: Path = Field(
-        default_factory=lambda: _unit_home() / "logs",
-        alias="AVA_PAGE_SERVER_LOG_DIR",
-        description="Directory for page server process stdout/stderr logs (one file per page).",
-        json_schema_extra={
-            "capability": "agent-runner",
-            "restart_required": "",
-            "writable": True,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": False,
-        },
-    )
-
     labeler_pidfile: Path = Field(
         default_factory=lambda: _unit_home() / "run" / "labeler.pid",
         alias="AVA_LABELER_PIDFILE",

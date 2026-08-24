@@ -11,7 +11,7 @@
   (detected at converge) to the user, exactly once
 - `reconcile_open_pages` — probe every open page's server and restore it
   (re-serve dead serve_dir pages, close dead no-dir pages); runs at boot
-  and on heartbeat (cluster rollouts kill page servers while agents live)
+  and on heartbeat as a catch-all for server death
 - `_close_open_page` — CAS open->closed for a dead page row
 """
 
@@ -267,15 +267,11 @@ async def reconcile_open_pages(
 ) -> None:
     """Probe every open page's server and restore it — runs at boot and on heartbeat.
 
-    A page server runs in its own persistent shell session — a detached
-    per-session pty host — so it survives the agent process exiting
-    (terminate / restart / update) and a cluster rollout alike: the resurrect
-    trigger re-opens its page row and the old link works again. The heartbeat
-    probe remains the catch-all for every other way a server can die (crash,
-    OOM, manual kill): an idle agent checks its pages on every heartbeat and
-    self-heals. (Origin: Task #973, 2026-08-07 — a rollout-era session tree
-    rebuild killed 8 page servers with no boot recovery; sessions no longer
-    die with rollouts, the probe stays for the rest.)
+    The page-server daemon creates and supervises every serve() page inside a
+    daemon-owned persistent shell session for this agent. Those sessions are
+    outside rollout service teardown, while the heartbeat probe remains the
+    catch-all for server death (crash, OOM, or manual kill): an idle agent
+    checks its pages on every heartbeat and self-heals.
 
     Per open page row:
     - server alive -> keep (log only)
