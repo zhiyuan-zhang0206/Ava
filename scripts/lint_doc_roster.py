@@ -157,8 +157,8 @@ _HEALTHCHECK_ROSTER = _REPO_ROOT / "services" / "healthchecks" / "check-roster.a
 
 _WATCHDOG_DAEMON = _REPO_ROOT / "services" / "watchdog" / "daemon.py"
 
-# The watchdog's hand-added checks (no ServiceSpec — native per-cluster
-# processes / a docker compose stack; see services/watchdog/daemon.py). Parsed
+# The watchdog's hand-added checks (no ServiceSpec — host policy, native
+# per-cluster processes, or a compose stack; see services/watchdog/daemon.py). Parsed
 # from the watchdog's own `from services.healthchecks.<x> import main as`
 # imports rather than hardcoded, so a hand-added check added or removed there
 # must be reflected in the roster table on the next lint run.
@@ -169,7 +169,7 @@ _HAND_ADDED_IMPORT = re.compile(
 
 def hand_added_healthchecks() -> set[str]:
     """The healthcheck modules the watchdog imports directly, outside the
-    ServiceSpec roster (redis-acl, pgbouncer, lgtm)."""
+    ServiceSpec roster (brew-pin, redis-acl, pgbouncer, lgtm)."""
     names: set[str] = set()
     for line in _WATCHDOG_DAEMON.read_text(encoding="utf-8").splitlines():
         m = _HAND_ADDED_IMPORT.match(line)

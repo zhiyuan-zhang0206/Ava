@@ -19,7 +19,7 @@ Not a rough port — an absent one.
   `linux-x86_64`; `_platform_key()` raises for Windows. Redis is not vendored on
   any platform yet ("a prebuilt we publish — not here yet").
 - `_redis_server_bin()` / `_redis_cli_bin()` (`cli/commands/_cluster_instance.py`)
-  resolve a brew keg on macOS and a bare `redis-server` elsewhere. No `.exe`, no
+  resolve the `redis@8.2` brew keg on macOS and a bare `redis-server` elsewhere. No `.exe`, no
   Memurai branch.
 - `_start_redis` passes `--daemonize yes`. Windows redis forks do not implement
   it.

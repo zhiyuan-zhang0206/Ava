@@ -174,19 +174,18 @@ def test_db_scoped_block_holds_back_exactly_the_dbs_users(monkeypatch: pytest.Mo
     monkeypatch.setattr("ops.spec.browser_mcp_incapability", lambda: None)
 
     kept = {c.name for c in wd._checks_for_round("agent-runner", BlockScope.DB_DEPENDENT)}
-    assert kept == {"browser", "browser-mcp", "mcp-daemon", "otel-collector"}
+    assert kept == {"brew-pin", "browser", "browser-mcp", "mcp-daemon", "otel-collector"}
 
 
-def test_db_scoped_block_keeps_redis_acl_and_drops_pg_backup(
+def test_db_scoped_block_keeps_db_free_pseudo_checks_and_drops_pg_backup(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The two hand-added pseudo-checks are classified like everything else: the redis
-    ACL repair is redis-only and keeps running (a pg outage has no claim on it), while
-    the pg_dump that would dump that very database is held back."""
+    """Host policy and data-plane repairs survive a pg outage; pg_dump does not."""
     monkeypatch.setattr(wd, "read_skipped", set)
 
     kept = {c.name for c in wd._checks_for_round("gateway", BlockScope.DB_DEPENDENT)}
     assert "redis-acl" in kept
+    assert "brew-pin" in kept
     assert "pg-backup" not in kept
 
 

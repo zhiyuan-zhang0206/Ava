@@ -125,7 +125,7 @@ A complete Ava cluster is now running on your machine:
 ┌── Your machine ──────────────────────────────┐
 │                                                │
 │  Postgres 17  ←──  Persistent state            │
-│  Redis 8.8    ←──  Real-time event stream      │
+│  Redis 8.2    ←──  Real-time event stream      │
 │  Gateway      ←──  HTTP API (:8000)            │
 │  Agent Runner ←──  Runs agent processes        │
 │  Frontend     ←──  Web UI (:3000)              │

@@ -16,6 +16,7 @@ tags:
 |--------|---------|----------------|----------------|------------------------------------------------|
 | `browser.py` | Chrome | CDP `GET /json/version` **verified against this cluster's Chrome** (profile argv token + LISTEN socket on the CDP port, both directions) **and** ava-browser session liveness | `respawn_service` (an orphan of ours is swept + rebuilt; skipped when another unit's browser holds the port — see Notes) | the supervised Chrome of this cluster actually serves CDP — two questions, because either alone lies |
 | `browser_mcp.py` | MCP upstream | Unix socket protocol `ping` (JSON request, `ok` reply — the daemon's accept/read loop must answer) | `respawn_service` | the browser-MCP daemon's loop answers requests; lock-free by design (a slow browser op must not read as death) |
+| `brew_pin.py` | Homebrew dependency pin policy | read-only `brew list --pinned`; non-macOS and hosts without brew are silent no-ops | none — one ERROR per drift episode tells the operator to run `brew pin <formula>` manually | every formula in the operator-approved manifest remains pinned; it never changes package state |
 | `computer_mcp.py` | Computer-use service | Unix socket protocol `ping` (lock-free; does not take the action lock) | `respawn_service` | the computer-MCP daemon's accept/read loop answers |
 | `mcp_daemon.py` | Shared MCP daemon | Unix socket protocol `ping` | `respawn_and_verify` (probe-confirmed) | the shared MCP daemon's loop answers |
 | `delivery_watchdog.py` | Delivery watchdog | HTTP `/healthz` (identity-verified) with Liveness beat | `respawn_and_verify` | our daemon's work loop is still ticking (a wedged loop 503s via Liveness) |
@@ -38,6 +39,6 @@ tags:
 
 The roster is pinned to reality by `scripts/lint_doc_roster.py` (set equality against the module directory and the ServiceSpec + hand-added registrations) — a module added, removed, or renamed without updating this table fails the lint.
 
-Audit 2026-08-21 (issue #192): all 21 checks traverse what they certify. `milvus.py` was the one port-open-only probe and was upgraded to a real RPC; the phantom `task_maintenance` row and seven missing rows are fixed here.
+Audit 2026-08-21 (issue #192): all 22 checks traverse what they certify. `milvus.py` was the one port-open-only probe and was upgraded to a real RPC; the phantom `task_maintenance` row and seven missing rows are fixed here. The later `brew_pin.py` assertion traverses Homebrew's own read-only pin roster.
 
 Parent: [[services/healthchecks/healthchecks.ava.okf.md|healthchecks]].
