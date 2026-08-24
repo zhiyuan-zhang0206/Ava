@@ -93,6 +93,7 @@ class MetricsRow:
     turn_dur_sum: float
     turn_dur_min: float | None
     turn_dur_max: float | None
+    turn_dur_hist: dict[int, int]
     exec_ok: int
     exec_failed: int
 
@@ -219,6 +220,10 @@ def _metrics_queries(
         indexed_labeled=indexed_labeled,
     )
     dur = ' | json duration_seconds="attributes.duration_seconds" | __error__="" | unwrap duration_seconds'
+    hist = (
+        ' | json duration_seconds="attributes.duration_seconds"'
+        ' | line_format "{{ floor .duration_seconds }}" | pattern "<bucket>"'
+    )
     return {
         "turn_total": f"sum by (agent_id) (count_over_time(({turn})[{duration_s}s]))",
         "turn_ok": (
@@ -228,6 +233,9 @@ def _metrics_queries(
         "turn_dur_sum": f"sum by (agent_id) (sum_over_time(({turn}{dur})[{duration_s}s]))",
         "turn_dur_min": f"min by (agent_id) (min_over_time(({turn}{dur})[{duration_s}s]))",
         "turn_dur_max": f"max by (agent_id) (max_over_time(({turn}{dur})[{duration_s}s]))",
+        "turn_dur_hist": (
+            f"sum by (agent_id, bucket) (count_over_time(({turn}{hist})[{duration_s}s]))"
+        ),
         "exec_ok": f"sum by (agent_id) (count_over_time(({exec_ok})[{duration_s}s]))",
         "exec_failed": f"sum by (agent_id) (count_over_time(({exec_failed})[{duration_s}s]))",
     }
@@ -290,6 +298,7 @@ def _day_aggregates(day: date) -> tuple[list[TokensRow], list[MetricsRow]] | Non
 
     tok: dict[tuple[int, str], dict[str, float]] = {}
     met: dict[int, dict[str, float]] = {}
+    hist: dict[int, dict[int, int]] = {}
     slices = split_index_label_window(day_start, day_end)
     for slice_ in slices:
         slice_row_count = 0
@@ -314,8 +323,13 @@ def _day_aggregates(day: date) -> tuple[list[TokensRow], list[MetricsRow]] | Non
             result_rows = _query_instant(logql, slice_.end)
             slice_row_count += len(result_rows)
             for labels, value in result_rows:
-                values = met.setdefault(int(labels["agent_id"]), {})
-                if name == "turn_dur_min":
+                agent_id = int(labels["agent_id"])
+                values = met.setdefault(agent_id, {})
+                if name == "turn_dur_hist":
+                    bucket = int(labels["bucket"])
+                    agent_hist = hist.setdefault(agent_id, {})
+                    agent_hist[bucket] = agent_hist.get(bucket, 0) + int(value)
+                elif name == "turn_dur_min":
                     values[name] = min(values.get(name, value), value)
                 elif name == "turn_dur_max":
                     values[name] = max(values.get(name, value), value)
@@ -347,6 +361,7 @@ def _day_aggregates(day: date) -> tuple[list[TokensRow], list[MetricsRow]] | Non
             turn_dur_sum=float(v.get("turn_dur_sum", 0.0)),
             turn_dur_min=v.get("turn_dur_min"),
             turn_dur_max=v.get("turn_dur_max"),
+            turn_dur_hist=hist.get(agent_id, {}),
             exec_ok=int(v.get("exec_ok", 0)),
             exec_failed=int(v.get("exec_failed", 0)),
         )
@@ -376,14 +391,15 @@ _TOKENS_UPSERT = """
 _METRICS_UPSERT = """
     INSERT INTO agent_metrics_daily
         (agent_id, day, turn_total, turn_ok, turn_dur_sum, turn_dur_min,
-         turn_dur_max, exec_ok, exec_failed)
-    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+         turn_dur_max, turn_dur_hist, exec_ok, exec_failed)
+    VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s)
     ON CONFLICT (agent_id, day) DO UPDATE SET
         turn_total   = EXCLUDED.turn_total,
         turn_ok      = EXCLUDED.turn_ok,
         turn_dur_sum = EXCLUDED.turn_dur_sum,
         turn_dur_min = EXCLUDED.turn_dur_min,
         turn_dur_max = EXCLUDED.turn_dur_max,
+        turn_dur_hist = EXCLUDED.turn_dur_hist,
         exec_ok      = EXCLUDED.exec_ok,
         exec_failed  = EXCLUDED.exec_failed
 """
@@ -557,6 +573,7 @@ def _write_rollup(
                         metrics_row.turn_dur_sum,
                         metrics_row.turn_dur_min,
                         metrics_row.turn_dur_max,
+                        json.dumps(metrics_row.turn_dur_hist),
                         metrics_row.exec_ok,
                         metrics_row.exec_failed,
                     ),

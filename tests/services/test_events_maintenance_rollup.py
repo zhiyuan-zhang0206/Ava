@@ -79,6 +79,7 @@ def _metrics_row(agent_id: int, **kw: object) -> MetricsRow:
         "turn_dur_sum": 6.0,
         "turn_dur_min": 1.0,
         "turn_dur_max": 3.0,
+        "turn_dur_hist": {1: 1, 2: 1, 3: 1},
         "exec_ok": 4,
         "exec_failed": 1,
     }
@@ -123,7 +124,7 @@ def _fetch_metrics(db: psycopg.Connection) -> dict[tuple[int, str], tuple[object
     with db.cursor() as cur:
         cur.execute(
             "SELECT agent_id, day::text, turn_total, turn_ok, turn_dur_sum, turn_dur_min, "
-            "turn_dur_max, exec_ok, exec_failed FROM agent_metrics_daily"
+            "turn_dur_max, turn_dur_hist, exec_ok, exec_failed FROM agent_metrics_daily"
         )
         return {(r[0], r[1]): tuple(r[2:]) for r in cur.fetchall()}
 
@@ -180,6 +181,8 @@ def _cutover_query(
         labels = {"agent_id": str(agent_id)}
         if "llm_usage" in logql:
             labels["model"] = "m1"
+        if 'pattern "<bucket>"' in logql:
+            labels["bucket"] = "1"
         return [(labels, value)]
 
     return query
@@ -249,7 +252,16 @@ def test_rolls_retained_days_up_to_yesterday(
     assert tokens[(aid, "2026-06-08", "m1")] == (2, 100, 50, 10, 5, 0.25, 2, 0)
     assert tokens[(aid, "2026-06-09", "m2")] == (1, 100, 50, 10, 5, 0.0, 0, 1)
     metrics = _fetch_metrics(db)
-    assert metrics[(aid, "2026-06-08")] == (3, 2, 6.0, 1.0, 3.0, 4, 1)
+    assert metrics[(aid, "2026-06-08")] == (
+        3,
+        2,
+        6.0,
+        1.0,
+        3.0,
+        {"1": 1, "2": 1, "3": 1},
+        4,
+        1,
+    )
 
 
 def test_unknown_agent_rows_are_skipped_without_aborting_rollup(
@@ -406,7 +418,7 @@ def test_zero_row_indexed_slice_refuses_day_rewrite(
     assert _fetch_tokens(db)[(aid, str(day), "m1")] == (7, 70, 35, 7, 3, 1.25, 7, 0)
     assert _fetch_tokens(db)[(aid, str(next_day), "m1")] == (2, 2, 2, 2, 2, 2.0, 2, 0)
     assert (aid, str(day)) not in _fetch_metrics(db)
-    assert _fetch_metrics(db)[(aid, str(next_day))] == (2, 2, 2.0, 2.0, 2.0, 2, 2)
+    assert _fetch_metrics(db)[(aid, str(next_day))] == (2, 2, 2.0, 2.0, 2.0, {"1": 2}, 2, 2)
     assert len(warnings) == 1
     assert str(day) in warnings[0]
     assert "indexed slice returned zero rows" in warnings[0]
@@ -435,7 +447,7 @@ def test_nonzero_indexed_slice_rewrites_day(
 
     assert result == RollupResult(day, day, 1, 1)
     assert _fetch_tokens(db)[(aid, str(day), "m1")] == (3, 3, 3, 3, 3, 3.0, 3, 0)
-    assert _fetch_metrics(db)[(aid, str(day))] == (3, 3, 3.0, 1.0, 2.0, 3, 3)
+    assert _fetch_metrics(db)[(aid, str(day))] == (3, 3, 3.0, 1.0, 2.0, {"1": 3}, 3, 3)
 
 
 def test_retention_clamp_never_rewrites_archive_days(
@@ -686,6 +698,11 @@ def test_metrics_queries_shapes() -> None:
     q = rollup._metrics_queries()
     assert q["turn_ok"].count('| json ok="attributes.ok" | ok="true"') == 1
     assert q["turn_dur_min"].startswith("min by (agent_id) (min_over_time(")
+    assert q["turn_dur_hist"].startswith("sum by (agent_id, bucket) (count_over_time(")
+    assert (
+        '| json duration_seconds="attributes.duration_seconds" '
+        '| line_format "{{ floor .duration_seconds }}" | pattern "<bucket>"'
+    ) in q["turn_dur_hist"]
     assert 'event_name_extracted=~"exec_.+|exec\\\\(.*"' in q["exec_failed"]
     assert 'event_name_extracted=~"exec"' in q["exec_ok"]
 
@@ -724,6 +741,8 @@ def test_cutover_day_merges_legacy_and_indexed_rollups(monkeypatch: pytest.Monke
         labels = {"agent_id": "7"}
         if "llm_usage" in logql:
             labels["model"] = "m"
+        if 'pattern "<bucket>"' in logql:
+            labels["bucket"] = "1" if at == cutover else "2"
         return [(labels, value)]
 
     def _slices(_start: datetime, _end: datetime) -> tuple[LokiReadSlice, ...]:
@@ -758,6 +777,7 @@ def test_cutover_day_merges_legacy_and_indexed_rollups(monkeypatch: pytest.Monke
             turn_dur_sum=3.0,
             turn_dur_min=1.0,
             turn_dur_max=2.0,
+            turn_dur_hist={1: 1, 2: 2},
             exec_ok=3,
             exec_failed=3,
         )

@@ -487,6 +487,9 @@ def _metrics_ledger_row(
     turn_total: int,
     turn_ok: int,
     turn_duration_seconds: float,
+    turn_dur_hist: dict[int, int] | None = None,
+    turn_min_seconds: float | None = None,
+    turn_max_seconds: float | None = None,
     exec_ok: int = 0,
     exec_failed: int = 0,
 ) -> None:
@@ -494,16 +497,18 @@ def _metrics_ledger_row(
     with db.cursor() as cur:
         cur.execute(
             "INSERT INTO agent_metrics_daily "
-            "(agent_id, day, turn_total, turn_ok, turn_dur_sum, turn_dur_min, turn_dur_max, exec_ok, exec_failed) "
-            "VALUES (%s, (now() AT TIME ZONE 'UTC')::date - %s, %s, %s, %s, %s, %s, %s, %s)",
+            "(agent_id, day, turn_total, turn_ok, turn_dur_sum, turn_dur_min, turn_dur_max, "
+            "turn_dur_hist, exec_ok, exec_failed) "
+            "VALUES (%s, (now() AT TIME ZONE 'UTC')::date - %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s)",
             (
                 agent_id,
                 days_ago,
                 turn_total,
                 turn_ok,
                 turn_duration_seconds,
-                turn_duration_seconds,
-                turn_duration_seconds,
+                turn_duration_seconds if turn_min_seconds is None else turn_min_seconds,
+                turn_duration_seconds if turn_max_seconds is None else turn_max_seconds,
+                json.dumps(turn_dur_hist or {}),
                 exec_ok,
                 exec_failed,
             ),
@@ -1623,6 +1628,94 @@ def test_inspect_whole_life_gap_day_events_read_live_and_not_double_counted(
     assert stats["turn_p90_seconds"] == 4.9
     assert stats["turn_min_seconds"] == 4.0
     assert stats["turn_max_seconds"] == 5.0
+
+
+def test_inspect_seven_day_percentiles_use_histogram_and_narrow_live_tail(
+    db_conn: psycopg.Connection, fake_loki: _FakeLoki
+) -> None:
+    """Complete daily histograms replace the settled days' raw duration scan."""
+    aid = _insert_agent(db_conn)
+    now = datetime.now(UTC)
+    today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    for days_ago, bucket in ((6, 1), (5, 2), (4, 3), (3, 4), (2, 5)):
+        _metrics_ledger_row(
+            db_conn,
+            agent_id=aid,
+            days_ago=days_ago,
+            turn_total=1,
+            turn_ok=1,
+            turn_duration_seconds=float(bucket) + 0.75,
+            turn_dur_hist={bucket: 1},
+            turn_min_seconds=1.75 if days_ago == 6 else float(bucket) + 0.75,
+        )
+    # The newest completed day is reread live, as is today.
+    _metrics_ledger_row(
+        db_conn,
+        agent_id=aid,
+        days_ago=1,
+        turn_total=1,
+        turn_ok=1,
+        turn_duration_seconds=99.0,
+    )
+    fake_loki.add(
+        event="turn_end",
+        agent_id=aid,
+        payload={"duration_seconds": 10.25, "ok": True},
+        ts=today - timedelta(hours=12),
+    )
+    fake_loki.add(
+        event="turn_end",
+        agent_id=aid,
+        payload={"duration_seconds": 20.6, "ok": True},
+        ts=now - timedelta(seconds=1),
+    )
+    db_conn.commit()
+
+    with TestClient(app) as client:
+        stats = client.get(f"/api/agents/{aid}/inspect?hours=168").json()["stats"]
+
+    assert stats["turn_p50_seconds"] == 4.0
+    assert stats["turn_p90_seconds"] == 14.39
+    # The histogram's floor bucket must never lower the exact ledger minimum.
+    assert stats["turn_min_seconds"] == 1.75
+    assert stats["turn_max_seconds"] == 20.6
+    duration_calls = [
+        call for call in fake_loki.projected_calls if "^turn_end$" in call["event_names"]
+    ]
+    assert duration_calls
+    assert all(call["to"] - call["from_"] <= timedelta(hours=48) for call in duration_calls)
+
+
+def test_inspect_incomplete_histogram_falls_back_to_the_full_raw_window(
+    db_conn: psycopg.Connection, fake_loki: _FakeLoki
+) -> None:
+    """A pre-migration ledger row preserves the existing full-window read."""
+    aid = _insert_agent(db_conn)
+    now = datetime.now(UTC)
+    _metrics_ledger_row(
+        db_conn,
+        agent_id=aid,
+        days_ago=4,
+        turn_total=1,
+        turn_ok=1,
+        turn_duration_seconds=8.0,
+    )
+    fake_loki.add(
+        event="turn_end",
+        agent_id=aid,
+        payload={"duration_seconds": 8.0, "ok": True},
+        ts=now - timedelta(days=4),
+    )
+    db_conn.commit()
+
+    with TestClient(app) as client:
+        stats = client.get(f"/api/agents/{aid}/inspect?hours=168").json()["stats"]
+
+    assert stats["turn_p50_seconds"] == 8.0
+    duration_calls = [
+        call for call in fake_loki.projected_calls if "^turn_end$" in call["event_names"]
+    ]
+    assert min(call["from_"] for call in duration_calls) < now - timedelta(days=2)
 
 
 def test_inspect_exec_ok_fail_split(db_conn: psycopg.Connection, fake_loki: _FakeLoki) -> None:

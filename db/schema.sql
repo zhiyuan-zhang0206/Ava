@@ -324,9 +324,8 @@ CREATE UNIQUE INDEX idx_inbound_messages_client_message_id
 --
 -- agent_metrics_daily: per agent x UTC-day turn / exec counters plus the mergeable
 -- turn-duration stats. turn_dur_sum feeds both the lifetime mean and lm_stage_tps.
--- p50 / p90 are deliberately NOT here — percentiles are not mergeable across days,
--- so they stay a near-window read-time computation over the raw rows still in the
--- retention window (the lifetime total / mean / min / max stay exact).
+-- turn_dur_hist is a mergeable integer-second histogram for p50 / p90; its bucket
+-- precision never supplies the exact lifetime min / max values.
 CREATE TABLE agent_metrics_daily (
     agent_id      BIGINT NOT NULL REFERENCES agents(id),
     day           DATE   NOT NULL,
@@ -335,10 +334,14 @@ CREATE TABLE agent_metrics_daily (
     turn_dur_sum  DOUBLE PRECISION NOT NULL DEFAULT 0,  -- Σ turn_end.duration_seconds → lm_stage_tps denominator + lifetime mean
     turn_dur_min  DOUBLE PRECISION,
     turn_dur_max  DOUBLE PRECISION,
+    turn_dur_hist JSONB NOT NULL DEFAULT '{}'::jsonb,  -- floor(duration_seconds) integer-second bucket → count
     exec_ok       BIGINT NOT NULL DEFAULT 0,            -- event = 'exec'
     exec_failed   BIGINT NOT NULL DEFAULT 0,            -- event LIKE 'exec\_%' OR LIKE 'exec(%'
     PRIMARY KEY (agent_id, day)
 );
+
+COMMENT ON COLUMN agent_metrics_daily.turn_dur_hist IS
+    'Integer-second floor(duration_seconds) bucket-to-count map; mergeable across days and backfilled for archive-era ledger rows.';
 
 -- ─────────────── api_idempotency ───────────────
 -- Generic AtLeastOnceWithKey dedup (R3 doorplate ①): routes whose contract
