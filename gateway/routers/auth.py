@@ -11,6 +11,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+from gateway._cors import session_cookie_secure
 from gateway.error_envelope import error_response
 from shared.cluster_auth import (
     clear_cookie_header,
@@ -101,8 +102,7 @@ async def login(body: LoginRequest, request: Request) -> JSONResponse:
 
     login_limiter.record_success(ip)
     token = sign_session(secret)
-    secure = request.url.scheme == "https"
-    headers = session_cookie_header(token, secure=secure)
+    headers = session_cookie_header(token, secure=session_cookie_secure())
     return JSONResponse(content={"ok": True}, headers=headers)
 
 

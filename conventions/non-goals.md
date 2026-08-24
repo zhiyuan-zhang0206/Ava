@@ -118,28 +118,17 @@ first and ask "what changed that made it worth doing".
 - **Anthropic prompt caching**: `cache_control` on system prompt + long prefix —
   trigger: when switching to Anthropic as the gateway model, add this at the same time (doing the plumbing alongside the model API
   evolution is more cost-effective at that point). Currently DeepSeek's server-side auto cache is observably sufficient
-- **Auth / multi-user**: no login. The gateway binds all interfaces but is reachable
-  **only over the private network** (the gateway host has no public IP), and many
-  users will just run the whole thing on one machine (localhost) — so the **trust
-  boundary is the user's own machine / single-user private network**, and the cluster runs
-  unauthenticated. This is deliberate, not debt, and the reasoning is sharper than "the
-  private network is trusted": the agent itself holds `execute_code` (= arbitrary bash + the full
-  SDK), so it is the most powerful actor *inside* the boundary — gateway auth can neither
-  restrain it nor needs to. Per-caller auth only buys something against actors *outside*
-  the boundary (a second person on a shared private network; the public internet), which do not
-  exist in the single-user model. **Corollary** (this is why the reduce-compare page
-  callback is fine): the wide-open CORS (`allow_origins=["*"]`) and the unauthenticated
-  page→agent callback (an agent-built page's browser JS POSTing to
-  `/api/agents/{id}/messages`) add no real surface — a prompt-injected agent page is
-  strictly *weaker* than the agent's own bash, so it grants nothing the agent couldn't
-  already do directly; the one thing CORS/auth would defend (a public web origin bridged
-  in through the user's browser) presupposes the gateway being reachable off the private
-  network, which is exactly the trigger. **Trigger** — and only then add per-caller gateway
-  auth *and* lock CORS off `*`: exposing the gateway beyond the private network (a public tunnel /
-  open port), or onboarding distinct users who need separate identities/permissions.
-  Before that, adding auth is machinery for a threat that does not exist. The earlier
-  "`127.0.0.1` bind" framing is retired: the move to private-network-only + no-auth shipped
-  2026-06-05.
+- **Multi-user authorization**: gateway authentication is cluster-wide, not an
+  identity or permissions system. A cluster secret authenticates SDK callers
+  directly and browser users through an HttpOnly session cookie; an exact CORS
+  allowlist and cookie-mutation `Origin` check constrain that ambient browser
+  credential. An empty secret remains the explicit single-box no-auth posture,
+  with loopback-only binding. This does not attempt to restrain an agent inside
+  the boundary: the agent itself holds `execute_code` (= arbitrary bash + the
+  full SDK), so any per-agent token available to its process could be read or
+  bypassed. **Trigger** for distinct identities and permissions: onboarding
+  multiple users with different authority, or adding a sandbox that creates a
+  real capability boundary around agent code.
 - **Agent permission verification / Gateway routing of SDK calls**: at current SDK shape, a lineage
   check (e.g. which peers an agent may act on) to prevent agent misoperation is sufficient; the real security boundary
   only makes sense with a sandbox. Changing SDK calls from "agent code directly SQL" to "agent code

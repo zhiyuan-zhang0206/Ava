@@ -6,7 +6,10 @@ env alias so the .env surface is unchanged. Aggregated by shared/config.
 
 from __future__ import annotations
 
-from pydantic import AliasChoices, Field
+from typing import Annotated
+
+from pydantic import AliasChoices, Field, field_validator
+from pydantic_settings import NoDecode
 
 from shared.config._base import EnvSettings
 
@@ -234,6 +237,36 @@ class GatewaySettings(EnvSettings):
         },
     )
 
+    cors_allowed_origins: Annotated[list[str], NoDecode] = Field(
+        default_factory=list,
+        alias="AVA_GATEWAY_CORS_ALLOWED_ORIGINS",
+        description=(
+            "Comma-separated exact browser origins allowed to call the gateway. "
+            "Empty derives the frontend origins from gateway and service settings."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    session_cookie_secure: bool | None = Field(
+        default=None,
+        alias="AVA_GATEWAY_SESSION_COOKIE_SECURE",
+        description=(
+            "Whether gateway session cookies carry Secure. Unset derives the "
+            "policy from AVA_GATEWAY_URL."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     auth_middleware_enabled: bool = Field(
         default=True,
         validation_alias=AliasChoices("AVA_AUTH_MIDDLEWARE_ENABLED", "AVA_SKIP_AUTH"),
@@ -327,3 +360,10 @@ class GatewaySettings(EnvSettings):
             "remote_writable": False,
         },
     )
+
+    @field_validator("cors_allowed_origins", mode="before")
+    @classmethod
+    def _split_cors_allowed_origins(cls, value: object) -> object:
+        if isinstance(value, str):
+            return [origin.strip() for origin in value.split(",") if origin.strip()]
+        return value

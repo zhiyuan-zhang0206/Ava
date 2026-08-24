@@ -93,7 +93,7 @@ def session_cookie_header(token: str, *, secure: bool = False) -> dict[str, str]
 
     Args:
         token: a signed token from ``sign_session``.
-        secure: if True, add ``Secure`` flag (requires HTTPS).
+        secure: the gateway's effective cookie policy; if True, add ``Secure``.
     """
     # Max-Age mirrors the token's own TTL: without it Chromium treats the
     # cookie as a session cookie and never persists it, so every app/browser
