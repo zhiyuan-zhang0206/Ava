@@ -17,7 +17,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { InspectorPanel, InspectorToggle } from "./inspector-panel";
 import { formatAbsolute, formatRelative } from "@/lib/time";
-import type { AgentInspect, AgentInspectLive } from "@/lib/types";
+import type { AgentInspect, AgentInspectLive, PageRow } from "@/lib/types";
 
 // vi.hoisted so the mock fn is initialized before the hoisted vi.mock factory
 // runs (the factory fires during the InspectorPanel import, before module-body
@@ -34,11 +34,10 @@ const { getAgentInspect, getAgentInspectLive, listPages, resolveNotice } = vi.ho
     >(),
   getAgentInspectLive:
     vi.fn<(agentId: number, signal?: AbortSignal) => Promise<AgentInspectLive>>(),
-  // useAgentPages fetches the open-pages list; default to none so the Page
-  // section renders its empty state and these render tests stay focused on the
-  // /inspect sections. The dedicated use-agent-pages.test.ts covers the fetch +
-  // SSE fold.
-  listPages: vi.fn(() => Promise.resolve([])),
+  // useAgentPages fetches the open-pages list; default to none so these render
+  // tests stay focused on the /inspect sections. The dedicated
+  // use-agent-pages.test.ts covers the fetch + SSE fold.
+  listPages: vi.fn<(agentId: number) => Promise<PageRow[]>>(() => Promise.resolve([])),
   // Notice resolve — default to success; the notice-reply tests drive it.
   resolveNotice: vi.fn(() => Promise.resolve({ status: "ok" })),
 }));
@@ -108,6 +107,7 @@ afterEach(() => {
   cleanup();
   getAgentInspect.mockReset();
   getAgentInspectLive.mockReset();
+  listPages.mockClear();
   resolveNotice.mockClear();
   toggle.mockReset();
   panelState.open = true;
@@ -191,6 +191,21 @@ function liveFixture(overrides: Partial<AgentInspectLive> = {}): AgentInspectLiv
     config_overlay: full.config_overlay,
     notice: full.notice,
     heartbeat: full.heartbeat,
+  };
+}
+
+function pageFixture(overrides: Partial<PageRow> = {}): PageRow {
+  return {
+    id: 41,
+    agent_id: 1,
+    name: "build-report",
+    port: 9100,
+    title: "Build report",
+    serve_dir: null,
+    url: "http://gateway.test/api/pages/41-build-report/",
+    created_at: "2026-08-24T08:00:00Z",
+    closed_at: null,
+    ...overrides,
   };
 }
 
@@ -334,13 +349,56 @@ describe("InspectorPanel", () => {
     expect(screen.getByText("never paused")).toBeTruthy();
   });
 
+  it("renders an open page as a linked persistent-shell entry when no shells are open", async () => {
+    const page = pageFixture();
+    listPages.mockResolvedValueOnce([page]);
+    getAgentInspectLive.mockResolvedValue(liveFixture({ shells: [] }));
+    render(<InspectorPanel agentId={1} />);
+
+    const title = await screen.findByText("Persistent shells");
+    const section = title.closest("section");
+    expect(section).not.toBeNull();
+    expect(within(section!).getByText("1")).toBeTruthy();
+    expect(within(section!).queryByText("None open")).toBeNull();
+    expect(within(section!).getByText("Build report")).toBeTruthy();
+    expect(within(section!).getByText(page.url)).toBeTruthy();
+    const link = within(section!).getByRole("link", { name: /Build report/ });
+    expect(link.getAttribute("href")).toBe(page.url);
+    expect(link.getAttribute("target")).toBe("_blank");
+    expect(link.getAttribute("rel")).toBe("noopener noreferrer");
+    expect(screen.queryByText("Page")).toBeNull();
+  });
+
+  it("renders shell rows before page entries and counts both in the badge", async () => {
+    const page = pageFixture({ title: null, name: "fallback-page" });
+    listPages.mockResolvedValueOnce([page]);
+    getAgentInspectLive.mockResolvedValue(
+      liveFixture({
+        shells: [
+          { id: 7, name: "active-shell", created_at: null, uptime_seconds: 30 },
+        ],
+      }),
+    );
+    render(<InspectorPanel agentId={1} />);
+
+    const title = await screen.findByText("Persistent shells");
+    const section = title.closest("section");
+    expect(section).not.toBeNull();
+    expect(within(section!).getByText("2")).toBeTruthy();
+    const shellName = within(section!).getByText("active-shell");
+    const pageName = within(section!).getByText("fallback-page");
+    expect(
+      shellName.compareDocumentPosition(pageName) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
   it("renders section skeletons instead of a single loading line on a cold split load", () => {
     getAgentInspectLive.mockReturnValue(new Promise<AgentInspectLive>(() => undefined));
     getAgentInspect.mockReturnValue(new Promise<AgentInspect>(() => undefined));
 
     render(<InspectorPanel agentId={1} />);
 
-    expect(screen.getByText("Page")).toBeTruthy();
+    expect(screen.queryByText("Page")).toBeNull();
     expect(screen.getByLabelText("Persistent shells loading")).toBeTruthy();
     expect(screen.getByLabelText("Liveness loading")).toBeTruthy();
     expect(screen.getByLabelText("Configuration overlay loading")).toBeTruthy();
