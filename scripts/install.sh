@@ -276,15 +276,15 @@ warn_node_macos() {
 # ===========================================================================
 common_host_wiring() {
     # uv via the shared toolchain piece (idempotent — skips if uv is present). The
-    # astral installer needs curl, which the gateway path already has but a
+    # pinned uv release download needs curl, which the gateway path already has but a
     # runner-only Linux host may not, so ensure it first.
     if [ "$OS" != "Darwin" ] && ! command -v curl >/dev/null 2>&1; then
         export DEBIAN_FRONTEND=noninteractive
         prov_sudo apt-get update && prov_sudo apt-get install -y --no-install-recommends curl ca-certificates
     fi
     # Under a mirror on macOS, install uv via Homebrew (already routed through the
-    # bottle mirror) so the astral installer's GitHub-release binary download is
-    # skipped; toolchain.sh then sees uv present and no-ops.
+    # bottle mirror) so the pinned uv release's GitHub download is skipped;
+    # toolchain.sh then sees uv present and no-ops.
     if [ -n "$MIRROR" ] && [ "$OS" = "Darwin" ] && ! command -v uv >/dev/null 2>&1; then
         brew install uv
     fi

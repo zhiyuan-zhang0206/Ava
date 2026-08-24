@@ -67,7 +67,7 @@ private-network address when split. There is no special "local" path.
   node** — it only warns when node is missing or too old, because it cannot
   install it silently; run `brew install node@22` yourself, or run the gateway
   headless (`ava start --disable-service frontend`).
-- **uv** — `install.sh` bootstraps it from `curl -LsSf https://astral.sh/uv/install.sh`.
+- **uv** — `install.sh` bootstraps it from `scripts/provision/toolchain.sh`, which downloads the operator-pinned release (fixed version + sha256; canonical pin in `shared/brew_pin.py`).
 - **Python 3.12** — `install.sh` calls `uv python install 3.12`.
 
 ## The canonical path
