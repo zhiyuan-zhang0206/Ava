@@ -272,19 +272,23 @@ def test_infra_pipeline_stamps_machine_name(monkeypatch: pytest.MonkeyPatch) -> 
     assert 'set(attributes["machine_name"], "test-machine")' in statements
 
 
-def test_collector_self_metrics_address_is_per_unit(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_collector_self_metrics_reader_is_per_unit(monkeypatch: pytest.MonkeyPatch) -> None:
     """Each unit binds and scrapes its own configurable collector metrics port."""
     default_cfg = _render_real_template(monkeypatch, frozenset({"gateway"}))
-    assert default_cfg["service"]["telemetry"]["metrics"]["address"] == "localhost:8888"
-    default_scrape = default_cfg["receivers"]["prometheus/otelcol"]["config"]["scrape_configs"]
-    assert default_scrape[0]["static_configs"] == [{"targets": ["localhost:8888"]}]
+    default_reader = default_cfg["service"]["telemetry"]["metrics"]["readers"][0]["pull"][
+        "exporter"
+    ]["prometheus"]
+    assert default_reader == {"host": "localhost", "port": 8888}
 
     override_cfg = _render_real_template(
         monkeypatch,
         frozenset({"gateway"}),
         self_metrics_port=8889,
     )
-    assert override_cfg["service"]["telemetry"]["metrics"]["address"] == "localhost:8889"
+    override_reader = override_cfg["service"]["telemetry"]["metrics"]["readers"][0]["pull"][
+        "exporter"
+    ]["prometheus"]
+    assert override_reader == {"host": "localhost", "port": 8889}
     override_scrape = override_cfg["receivers"]["prometheus/otelcol"]["config"]["scrape_configs"]
     assert override_scrape[0]["static_configs"] == [{"targets": ["localhost:8889"]}]
 
