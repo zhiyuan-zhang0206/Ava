@@ -44,6 +44,7 @@ from services.events_maintenance.retention import (
     apply_retention,
 )
 from shared.config import settings
+from shared.daemon_health import LoopProgress
 
 # Fixed "now" so partition ages are deterministic: 2026-08-04, with audit 365d /
 # telemetry 90d / log 30d as the default policy.
@@ -417,7 +418,7 @@ def test_daemon_maintenance_includes_retention(
         with pool:
             with pool.connection() as conn:
                 ensure_month_partitions(conn, now_utc=_NOW)
-            daemon._run_maintenance(pool)
+            daemon._run_maintenance(pool, LoopProgress("dispatch", timeout_s=60.0))
     finally:
         pool.close()
 
