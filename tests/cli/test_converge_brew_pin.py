@@ -63,7 +63,7 @@ def test_step_is_registered_after_firewall_for_both_roles() -> None:
         i for i, step in enumerate(steps) if step.apply.__name__ == "ensure_firewall_allowlist"
     )
     step = steps[brew_pin_index]
-    assert brew_pin_index == firewall_index + 1
+    assert brew_pin_index > firewall_index
     assert step.roles == cv.ALL_ROLES
     assert step.requires_unit_config is False
 

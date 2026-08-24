@@ -26,10 +26,11 @@ process is wrong.
 
 ## Why repair is unprivileged-first
 
-On macOS 26.5.2, all three manifest mutations (`--add`, `--unblockapp`, and
-`--remove`) succeed as the ordinary Ava user. Converge therefore calls
-`socketfilterfw` directly first. The commands are idempotent, so every start can
-repair a new version-stamped binary before its next bind without prompting.
+Empirical verification on macOS 15.3.1 showed that all three manifest mutations
+(`--add`, `--unblockapp`, and `--remove`) succeed as the ordinary Ava user.
+Converge therefore calls `socketfilterfw` directly first. The commands are
+idempotent, so every start can repair a new version-stamped binary before its
+next bind without prompting.
 
 Other macOS releases may still reject an unprivileged mutation. That platform
 difference degrades through two bounded fallbacks: retry the same command with
@@ -625,12 +626,12 @@ class FirewallRepair:
 def repair_allowlist(paths: tuple[Path, ...], *, rules: dict[str, bool]) -> FirewallRepair:
     """Add Allow rules for every path in ``paths`` that lacks one.
 
-    Mutating — direct on macOS 26.5+, with ``sudo -n`` as an older-platform
-    fallback. ``--add`` creates the rule; ``--unblockapp`` un-blocks a rule that
-    exists in the Block state, which ``--add`` alone would leave blocking. Both
-    verbs are idempotent, so re-running after a partial failure is safe. A path
-    whose commands did not all succeed lands in ``failed`` for the caller to
-    report.
+    Mutating — direct first, as empirically verified on macOS 15.3.1, with
+    ``sudo -n`` as a fallback on platforms that reject that path. ``--add``
+    creates the rule; ``--unblockapp`` un-blocks a rule that exists in the Block
+    state, which ``--add`` alone would leave blocking. Both verbs are idempotent,
+    so re-running after a partial failure is safe. A path whose commands did not
+    all succeed lands in ``failed`` for the caller to report.
     """
     missing = missing_allow_rules(paths, rules)
     allowed: list[Path] = []

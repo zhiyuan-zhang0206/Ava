@@ -19,9 +19,9 @@ Use the rules below to keep that churn bounded and observable.
 
 Run `ava firewall status` to inspect every declarative ALF entry, its purpose and
 glob, each resolved binary, and the Allow/Block/Missing result. `ava converge`
-repairs and prunes the manifest. Direct mutation is verified without elevation on
-macOS 26.5; other releases may require the bounded `sudo -n` fallback or the
-manual command printed by converge.
+repairs and prunes the manifest. Direct mutation was empirically verified without
+elevation on macOS 15.3.1; other releases may require the bounded `sudo -n`
+fallback or the manual command printed by converge.
 
 ## Optional immediate containment: authorize uv Python
 
