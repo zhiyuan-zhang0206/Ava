@@ -369,6 +369,19 @@ class ServiceSettings(EnvSettings):
         },
     )
 
+    pg_backup_pidfile: Path = Field(
+        default_factory=lambda: _unit_home() / "run" / "pg_backup.pid",
+        alias="AVA_PG_BACKUP_PIDFILE",
+        description="Postgres backup scheduler daemon pidfile path.",
+        json_schema_extra={
+            "restart_required": "",
+            "writable": False,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
+
     gateway_pidfile: Path = Field(
         default_factory=lambda: _unit_home() / "run" / "gateway.pid",
         alias="AVA_GATEWAY_PIDFILE",
@@ -573,6 +586,19 @@ class ServiceSettings(EnvSettings):
         },
     )
 
+    pg_backup_health_url: str = Field(
+        default="",
+        alias="AVA_PG_BACKUP_HEALTH_URL",
+        description="Postgres backup scheduler healthcheck URL. Empty = derive via shared.daemon_health.health_port('pg_backup').",
+        json_schema_extra={
+            "restart_required": "",
+            "writable": False,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
+
     restarter_health_url: str = Field(
         default="",
         alias="AVA_RESTARTER_HEALTH_URL",
@@ -730,6 +756,19 @@ class ServiceSettings(EnvSettings):
         default=None,
         alias="AVA_EVENTS_MAINTENANCE_HEALTH_PORT",
         description="Events-maintenance daemon /healthz port override (per unit). Unset = shared default 8109.",
+        json_schema_extra={
+            "restart_required": "",
+            "writable": False,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
+
+    pg_backup_health_port: int | None = Field(
+        default=None,
+        alias="AVA_PG_BACKUP_HEALTH_PORT",
+        description="Postgres backup scheduler /healthz port override (per unit). Unset = shared default 8116.",
         json_schema_extra={
             "restart_required": "",
             "writable": False,

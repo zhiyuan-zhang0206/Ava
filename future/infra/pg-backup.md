@@ -29,6 +29,10 @@
 > in which two dumps also collided on one name. Retention is `BACKUP_KEEP = 7`
 > (raised from the 1 quoted above), so the off-site leg is no longer the only
 > history.
+>
+> **Update 2026-08-25:** the gateway-owned pg-backup scheduler daemon now owns
+> the local schedule. The watchdog probes and restarts that daemon but never
+> runs `pg_dump` in its supervision round.
 
 ## Future work
 

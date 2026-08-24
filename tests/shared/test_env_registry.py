@@ -194,6 +194,7 @@ class TestConsumptionMatrixDeclarations:
             "heartbeat",
             "task_maintenance",
             "events_maintenance",
+            "pg_backup",
             "memory_indexer",
             "ops",
             "delivery_watchdog",

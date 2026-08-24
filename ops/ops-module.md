@@ -4,8 +4,8 @@ Blueprint for the unified ops layer. The design decision is
 [`2026-07-19-ops-k8s-semantics-without-k8s.md`](../decisions/2026-07-19-ops-k8s-semantics-without-k8s.md);
 this describes the end state, and sequencing is left to the implementing agents.
 
-> **Status: mostly built. Three rows of the vocabulary table below are still
-> unrealized** — `ops/identity.py`, the shared Drain primitive, and CronJob.
+> **Status: mostly built. Two rows of the vocabulary table below are still
+> unrealized** — `ops/identity.py` and the shared Drain primitive.
 > Landed: `ops/spec.py` (the desired-state expression), `ops/observe.py`, the
 > controller set under `ops/controllers/` (respawn, pin, schema, stranded-pause,
 > hibernate, resurrect, wedged, update-trigger, over a shared `base`), and
@@ -22,7 +22,7 @@ this describes the end state, and sequencing is left to the implementing agents.
 | Status | `ops/observe.py` — probe set | `services/healthchecks/` + status commands | ✅ built |
 | Controller | `ops/controllers/<dimension>.py`, one per state dimension | watchdog's inline gates + restarter reapers | ✅ built |
 | controller-manager | `ops/manager.py` — tick loop running the controller list | `services/watchdog/daemon.py` (680-line mix) | ✅ built |
-| CronJob | scheduled jobs: pg-backup, debt sweeper | pg-backup hand-appended to the watchdog tick (`_checks_for_capability`) | ⬜ not built — pg-backup is still appended to the tick's check list by hand |
+| CronJob | scheduled jobs: pg-backup, debt sweeper | pg-backup hand-appended to the watchdog tick (`_checks_for_capability`) | ✅ built — pg-backup is a supervised scheduler `ServiceSpec`; debt sweeper remains separate |
 | Drain | agent quiesce as a shared primitive | update and stop each rolling their own | ⬜ not built — `_quiesce_all_agents` still lives in `cli/commands/update.py` |
 
 ## Spec content

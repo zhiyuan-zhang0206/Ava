@@ -20,21 +20,22 @@ the `services_for_capabilities_annotated` view used by `ava start`, so a service
 that start gates out is not resurrected; the reason is logged at debug and
 surfaced by `ava status`.
 
-Five pseudo-checks have no ServiceSpec. `brew-pin` runs for both capabilities;
+Four pseudo-checks have no ServiceSpec. `brew-pin` runs for both capabilities;
 gateway watchdogs prepend `redis-acl` and `pgbouncer`, then append marker-gated
-`lgtm` and scheduled `pg-backup`. `--disable-service X` also removes
-pseudo-checks.
+`lgtm`. `pg-backup` is a regular service healthcheck. `--disable-service X`
+also removes pseudo-checks.
 
 ## Gateway order
 
-`redis-acl` → `pgbouncer` → `brew-pin` → `gateway` → `labeler` → `heartbeat` →
-`events-maintenance` → `milvus` → `frontend` → `task-maintenance` →
-`memory-indexer` → `lgtm` → `pg-backup`.
+`redis-acl` → `pgbouncer` → `brew-pin` → `gateway` → `im-bridge` → `labeler` →
+`heartbeat` → `idle-shell-reminder` → `delivery-watchdog` →
+`events-maintenance` → `milvus` → `frontend` → `pg-backup` →
+`otel-collector` → `task-maintenance` → `memory-indexer` → `lgtm`.
 
 The Redis ACL repair runs first because services depend on Redis authentication.
 The middle follows `build_services()` registration order, including Milvus
-before the memory indexer that connects to it on cold start. `pg-backup` is last:
-it is a scheduled job piggybacking on the tick, not a healthcheck
+before the memory indexer that connects to it on cold start. `pg-backup` owns
+its own schedule and the watchdog only probes its last-success health
 ([[backup.ava.okf.md|daily backup]]).
 
 ## Agent-runner order

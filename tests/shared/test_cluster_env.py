@@ -28,6 +28,7 @@ def _rec(tmp_path: Path):
             "delivery_watchdog": 18016,
             "im_bridge": 18017,
             "agent_host": 18019,
+            "pg_backup": 18021,
         },
         gateway_home=str(tmp_path / ".ava-t1"),
         created_at="x",
@@ -43,6 +44,7 @@ def _old_rec(tmp_path: Path):
     del ports["delivery_watchdog"]
     del ports["im_bridge"]
     del ports["agent_host"]
+    del ports["pg_backup"]
     return cluster.ClusterRecord(
         ports=cast("cluster.ClusterPorts", ports),
         gateway_home=str(tmp_path / ".ava-t1"),
@@ -281,6 +283,7 @@ def test_derive_env_old_record_health_ports_fall_back_to_legacy(tmp_path: Path):
         LEGACY_AVA_PORTS["delivery_watchdog"]
     )
     assert installed["AVA_IM_BRIDGE_HEALTH_PORT"] == str(LEGACY_AVA_PORTS["im_bridge"])
+    assert installed["AVA_PG_BACKUP_HEALTH_PORT"] == str(LEGACY_AVA_PORTS["pg_backup"])
     # the 7 original daemons keep their block offsets (the record carries them)
     assert installed["AVA_RESTARTER_HEALTH_PORT"] == "18003"
 
@@ -298,7 +301,11 @@ def test_record_health_port_late_slot_legacy_for_old_record(tmp_path: Path):
         cluster.record_health_port(_old_rec(tmp_path), "delivery_watchdog")
         == (LEGACY_AVA_PORTS["delivery_watchdog"])
     )
+    assert (
+        cluster.record_health_port(_old_rec(tmp_path), "pg_backup") == LEGACY_AVA_PORTS["pg_backup"]
+    )
     assert cluster.record_health_port(_rec(tmp_path), "im_bridge") == 18017
+    assert cluster.record_health_port(_rec(tmp_path), "pg_backup") == 18021
     # pre-existing slots keep the base+offset derive for old records
     assert cluster.record_health_port(_old_rec(tmp_path), "heartbeat") == 18002
 
@@ -329,7 +336,7 @@ def test_record_health_port_agent_host_never_reaches_past_the_allocated_block(tm
 def test_allocate_ports_skips_blocks_overlapping_legacy_16_port_records(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    """BLOCK_SIZE has grown repeatedly (16 -> 18 -> 19 -> 20 -> 21), but every
+    """BLOCK_SIZE has grown repeatedly (16 -> 18 -> 19 -> 20 -> 21 -> 22), but every
     pre-existing record still occupies a 16-port block at 18000+16k — and a
     candidate inside such a block would overlap it. allocate_ports must skip
     overlapping blocks, not just exact bases, or a DOWN cluster's block gets
@@ -345,12 +352,12 @@ def test_allocate_ports_skips_blocks_overlapping_legacy_16_port_records(
 
     monkeypatch.setattr(cl, "_port_free", lambda _port: True)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
 
-    # existing record at 18016 occupies 18016..18031 — at BLOCK_SIZE 21,
-    # candidates 18000 (block 18000..18020 overlaps 18016..18020) and 18021
-    # (18021..18041 overlaps 18021..18031) must be skipped; the first legal
-    # base is 18042
+    # existing record at 18016 occupies 18016..18031 — at BLOCK_SIZE 22,
+    # candidates 18000 (block 18000..18021 overlaps 18016..18021) and 18022
+    # (18022..18043 overlaps 18022..18031) must be skipped; the first legal
+    # base is 18044
     ports = cl.allocate_ports({18016})
-    assert ports["gateway"] == 18042
+    assert ports["gateway"] == 18044
     assert set(ports) == set(cl.PORT_OFFSETS)
     # without any existing record, the allocator starts at BLOCK_START
     assert cl.allocate_ports(set())["gateway"] == BLOCK_START

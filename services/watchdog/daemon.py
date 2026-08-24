@@ -70,7 +70,6 @@ from pathlib import Path
 from ops.controllers.base import BlockScope
 from ops.manager import ControllerManager
 from services._pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
-from services.backup import maybe_run_daily_backup
 
 # The statically imported healthchecks are the ones with NO ServiceSpec in
 # build_services(): brew-pin asserts host package policy, redis/pgbouncer are
@@ -151,7 +150,7 @@ def _checks_for_capability(role: MachineRole) -> list[_Check]:
     60s; the durable operator surface is `ava status`), so a revive can never
     crash-loop a service `ava start` chose not to launch.
 
-    Five pseudo-checks have NO ServiceSpec (they are not session-backed services) and are
+    Four pseudo-checks have NO ServiceSpec (they are not session-backed services) and are
     added by hand — so they state their own
     ``requires_db`` right here, the same fact the other entries carry from their spec:
     - redis-acl FIRST — repairs the per-cluster redis ACL user; every daemon below
@@ -170,11 +169,8 @@ def _checks_for_capability(role: MachineRole) -> list[_Check]:
       Homebrew pin set on any macOS unit. It is warning-only and host-local, so
       neither role ownership nor database availability should suppress it
       (``requires_db=False``).
-    - pg-backup LAST — the daily local pg_dump is a scheduled job that rides the
-      tick contract (capability gating, --disable-service pg-backup, per-check error
-      logging), not a service healthcheck; no-op except the first tick at/after its
-      backup hour. `requires_db=True` — it dumps that very database. Future home is a
-      proper CronJob (future/infra/ops-module.md).
+    pg-backup is instead a regular DB-dependent `ServiceSpec` scheduler. Its
+    healthcheck probes last-success age and never runs a dump in this round.
     """
     # The roster lives in ops.spec (services < ops is fine; this also drops the
     # old services->cli edge the roster import used to carry). Local import keeps
@@ -211,7 +207,6 @@ def _checks_for_capability(role: MachineRole) -> list[_Check]:
         # no-op. The stack needs no Postgres: `requires_db=False` — the
         # observability read path must not be held hostage by a DB outage.
         checks.append(_Check("lgtm", lgtm_healthcheck, requires_db=False))
-        checks.append(_Check("pg-backup", maybe_run_daily_backup, requires_db=True))
 
     # Honor an operator's durable `ava start --disable-service X`: `_gate_reason`
     # does not cover the disable-service marker, so filter it here (also covers the

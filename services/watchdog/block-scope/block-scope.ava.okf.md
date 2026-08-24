@@ -17,7 +17,7 @@ tags: []
 ## The division of knowledge
 A controller states only the **blast radius of its own finding** and never names services. Each service states what it needs, on its own spec: `ServiceSpec.requires_db` (required, no default — see [[services/services.ava.okf.md]]). `services/watchdog/daemon.py:_checks_for_round` is the ONE place the two meet: `ALL` runs nothing (returning before the roster is even built, so a paused host costs nothing per round), `DB_DEPENDENT` keeps the `requires_db=False` entries, `NONE` keeps everything. It is total over the enum — an unhandled member raises rather than defaulting to "run everything" (unsafe) or "run nothing" (the bug below).
 
-The hand-added pseudo-checks classify themselves the same way: `redis-acl`, `pgbouncer`, `lgtm`, and `brew-pin` are DB-free (`False`); `pg-backup` dumps the database (`True`).
+The hand-added pseudo-checks classify themselves the same way: `redis-acl`, `pgbouncer`, `lgtm`, and `brew-pin` are DB-free (`False`). `pg-backup` is a regular DB-dependent `ServiceSpec` service.
 
 ## Why (the defect it replaced)
 `blocks_tick: bool` conflated "my own reconcile failed" with "nothing else should run either", which forced one controller's local failure to be a global verdict. The schema controller's DB-unreachable arm skipped the WHOLE agent-runner roster, so `browser` / `browser-mcp` — no DB at boot, none at runtime ([[services/agent_runner_side/browser/browser.ava.okf.md]]) — went unrevived for the entire duration of a database outage. A DB outage took out the recovery path for an unrelated Chrome crash, and it did so through a controller deciding on behalf of services it knows nothing about.
@@ -44,7 +44,7 @@ Why it is logged every round and not once on change: a skipped round and an all-
 The per-round line is an alarm, never a rate limit. Bounding the *action* a block retries — the ~85 failed `ava update` triggers of that window — is a separate mechanism, and a backed-off round still reports its block: [[services/watchdog/block-scope/heal-backoff.ava.okf.md]].
 
 ## DB-free services today
-`browser`, `browser-mcp`, `milvus`, `memory-indexer`, `frontend`, plus the `redis-acl`, `pgbouncer`, `lgtm`, and `brew-pin` pseudo-checks. Everything else on the roster calls `assert_schema_current` at boot and then reads or writes the DB (except `pg-backup`, which is explicitly DB-dependent).
+`browser`, `browser-mcp`, `milvus`, `memory-indexer`, `frontend`, plus the `redis-acl`, `pgbouncer`, `lgtm`, and `brew-pin` pseudo-checks. Everything else on the roster calls `assert_schema_current` at boot and then reads or writes the DB.
 
 ## Key dependencies
 - [[services/watchdog/watchdog.ava.okf.md]] — the tick that consumes the scope

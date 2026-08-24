@@ -68,8 +68,11 @@ PORT_OFFSETS: dict[str, int] = {
     # Idle-shell-reminder was added after every existing slot. Append so live
     # clusters keep every previously assigned offset unchanged.
     "idle_shell_reminder": 20,
+    # The backup scheduler is a first-class health daemon. Append its slot so
+    # existing cluster records retain their assigned ports.
+    "pg_backup": 21,
 }
-BLOCK_SIZE = 21
+BLOCK_SIZE = 22
 BLOCK_START = 18000
 BLOCK_MAX = 20000
 
@@ -124,4 +127,5 @@ LEGACY_AVA_PORTS: dict[str, int] = {
     # 8115 is the next unused fixed port after agent_host; uniqueness is
     # guarded by tests/shared/test_cluster_alloc.py.
     "idle_shell_reminder": 8115,
+    "pg_backup": 8116,
 }

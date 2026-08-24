@@ -14,7 +14,7 @@ tags:
 
 | Module | Service | Liveness Probe | Restart Method | What it certifies (how the probe traverses it) |
 |--------|---------|----------------|----------------|------------------------------------------------|
-| `browser.py` | Chrome | CDP `GET /json/version` **verified against this cluster's Chrome** (profile argv token + LISTEN socket on the CDP port, both directions) **and** ava-browser session liveness | `respawn_service` (an orphan of ours is swept + rebuilt; skipped when another unit's browser holds the port — see Notes) | the supervised Chrome of this cluster actually serves CDP — two questions, because either alone lies |
+| `browser.py` | Chrome | CDP `GET /json/version`, profile argv token, listener socket, and session liveness | `respawn_service` (our orphan is rebuilt; another unit's holder is skipped) | the supervised Chrome of this cluster serves CDP |
 | `browser_mcp.py` | MCP upstream | Unix socket protocol `ping` (JSON request, `ok` reply — the daemon's accept/read loop must answer) | `respawn_service` | the browser-MCP daemon's loop answers requests; lock-free by design (a slow browser op must not read as death) |
 | `brew_pin.py` | Homebrew dependency pin policy | read-only `brew list --pinned` + `brew list --formula`; non-macOS and hosts without brew are silent no-ops | none — one ERROR per drift episode tells the operator to run `brew pin <formula>` manually | every installed formula in the operator-approved manifest remains pinned; it never changes package state |
 | `computer_mcp.py` | Computer-use service | Unix socket protocol `ping` (lock-free; does not take the action lock) | `respawn_service` | the computer-MCP daemon's accept/read loop answers |
@@ -26,6 +26,7 @@ tags:
 | `labeler.py` | Labeler | HTTP `/healthz` (identity-verified) with Liveness beat | `respawn_and_verify` | our daemon's work loop is still ticking |
 | `memory_indexer.py` | Memory-indexer | HTTP `/healthz` (identity-verified) with Liveness beat | `respawn_and_verify` | our daemon's work loop is still ticking |
 | `events_maintenance.py` | Events-maintenance | HTTP `/healthz` (identity-verified), per-loop progress with hard deadlines | `respawn_and_verify` | each loop completes bounded work; a timed-out worker wedges its tracker and 503s |
+| `pg_backup.py` | PG-backup scheduler | HTTP `/healthz` (identity-verified), backup last-success age | `respawn_and_verify` | scheduler progress: a fresh dump, boot grace, or running dump; otherwise 503 |
 | `restarter.py` | Restarter | HTTP `/healthz` (identity-verified) with Liveness beat | `respawn_and_verify`, **then** a stand-in `RespawnController` pass if the respawn never verifies — see Notes | our daemon's work loop is still ticking; the stand-in path runs the daemon's own dispatch controller (real DB traversal) |
 | `agent_host.py` | Agent host | HTTP `/healthz` (identity-verified) with Liveness beat | `respawn_and_verify` | our daemon's work loop is still ticking |
 | `page_server.py` | Page-server supervisor | HTTP `/healthz` (identity-verified) with Liveness beat | `respawn_and_verify` | our daemon's work loop is still ticking |
