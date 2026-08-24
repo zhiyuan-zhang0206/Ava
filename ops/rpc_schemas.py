@@ -21,7 +21,7 @@ from pydantic import (
 from shared.envelope import validate_source
 
 _MAX_CONTENT_CHARS = 1_000_000
-"""TEXT-backed content needs a memory-abuse guardrail, not a 64 KiB wire contract.
+"""Prompt/reply content needs a memory-abuse guardrail, not a 64 KiB wire contract.
 
 The model provider context window is the downstream input bound; one million
 characters is roughly 1 MiB, leaving legitimate handoffs and reports intact
@@ -40,7 +40,7 @@ class TextContentBlock(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     type: Literal["text"]
-    text: Annotated[str, StringConstraints(max_length=_MAX_CONTENT_CHARS)]
+    text: str
 
 
 class ImageUrlRef(BaseModel):
@@ -76,7 +76,7 @@ ContentBlock = Annotated[
 _MessageContent = (
     Annotated[
         str,
-        StringConstraints(strip_whitespace=True, min_length=1, max_length=_MAX_CONTENT_CHARS),
+        StringConstraints(strip_whitespace=True, min_length=1),
     ]
     | Annotated[list[ContentBlock], Field(min_length=1)]
 )

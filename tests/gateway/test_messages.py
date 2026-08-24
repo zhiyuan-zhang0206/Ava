@@ -73,15 +73,57 @@ def test_post_message_large_content_is_accepted(db_conn: psycopg.Connection) -> 
     assert _pending_rows(db_conn, tid) == [("chat", "pending", content)]
 
 
-def test_post_message_content_over_one_million_chars_is_422(db_conn: psycopg.Connection) -> None:
-    """The one-megabyte schema guardrail rejects abusive request bodies."""
+def test_post_message_content_at_one_mib_is_accepted(db_conn: psycopg.Connection) -> None:
+    """The byte cap is inclusive: exactly 1 MiB remains deliverable."""
     tid = _seed_agent(db_conn)
-    content = "a" * 1_000_001
+    content = "a" * 1_048_576
     with TestClient(app) as client:
         resp = client.post(
             f"/api/agents/{tid}/messages", json={"content": content, "source": "user"}
         )
-    assert resp.status_code == 422
+    assert resp.status_code == 201
+    assert _pending_rows(db_conn, tid) == [("chat", "pending", content)]
+
+
+def test_post_message_content_over_one_mib_is_413(db_conn: psycopg.Connection) -> None:
+    """The limit counts UTF-8 bytes and tells callers how to deliver large content."""
+    tid = _seed_agent(db_conn)
+    content = "é" * 524_289
+    assert len(content.encode("utf-8")) > 1_048_576
+    with TestClient(app) as client:
+        resp = client.post(
+            f"/api/agents/{tid}/messages", json={"content": content, "source": "user"}
+        )
+    assert resp.status_code == 413
+    assert "1 MiB" in resp.json()["detail"]
+    assert "file path" in resp.json()["detail"]
+    assert _pending_rows(db_conn, tid) == []
+
+
+def test_post_message_block_list_over_one_mib_is_413(db_conn: psycopg.Connection) -> None:
+    """The limit also counts serialized content-block lists, not only strings."""
+    tid = _seed_agent(db_conn)
+    blocks = [{"type": "text", "text": "a" * 1_100_000}]
+    with TestClient(app) as client:
+        resp = client.post(
+            f"/api/agents/{tid}/messages", json={"content": blocks, "source": "user"}
+        )
+    assert resp.status_code == 413
+    assert "1 MiB" in resp.json()["detail"]
+    assert _pending_rows(db_conn, tid) == []
+
+
+def test_reconcile_rejects_over_limit_after_timeout(db_conn: psycopg.Connection) -> None:
+    """The idempotency reconcile route carries the same byte gate as the POST."""
+    tid = _seed_agent(db_conn)
+    content = "é" * 524_289
+    with TestClient(app) as client:
+        resp = client.post(
+            f"/api/agents/{tid}/messages/reconcile",
+            json={"content": content, "source": "user"},
+            headers={"Idempotency-Key": "k1"},
+        )
+    assert resp.status_code == 413
     assert _pending_rows(db_conn, tid) == []
 
 

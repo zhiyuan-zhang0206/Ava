@@ -612,7 +612,7 @@
     "/api/agents/{agent_id}/messages": {
       "post": {
         "summary": "Post Agent Message",
-        "description": "Deliver a chat inbound to the specified agent.\n\n`content` is either a plain string or a list of OpenAI-shaped content blocks\n(multimodal: text + `image_url` referencing an upload of this agent). A\nstring is a pure INSERT + return; a block list is capability-gated (422 if\nthe agent's model cannot see images) and stored with the blocks in the\ninbound's JSONB payload for the claim node to inline natively.\n\nAuto-resurrect in `deliver_chat_inbound` ensures the message always reaches\na live agent — the caller does not branch on status. An optional\n`Idempotency-Key` is stored transactionally with the inbound; same-key\nretries return the same `inbound_id` and mismatched key reuse fails 409.\n\n404: agent_id does not exist (AgentNotFound -> handler returns 404 + reason).\n409: the key already identifies a different agent/body/source.\n422: a block list gated out (non-vision model) or referencing a bad upload.",
+        "description": "Deliver a chat inbound to the specified agent.\n\n`content` is either a plain string or a list of OpenAI-shaped content blocks\n(multimodal: text + `image_url` referencing an upload of this agent). A\nstring is a pure INSERT + return; a block list is capability-gated (422 if\nthe agent's model cannot see images) and stored with the blocks in the\ninbound's JSONB payload for the claim node to inline natively.\n\nAuto-resurrect in `deliver_chat_inbound` ensures the message always reaches\na live agent — the caller does not branch on status. An optional\n`Idempotency-Key` is stored transactionally with the inbound; same-key\nretries return the same `inbound_id` and mismatched key reuse fails 409.\n\n404: agent_id does not exist (AgentNotFound -> handler returns 404 + reason).\n409: the key already identifies a different agent/body/source.\n413: message content exceeds the 1 MiB transport limit.\n422: a block list gated out (non-vision model) or referencing a bad upload.",
         "operationId": "post_agent_message_api_agents__agent_id__messages_post",
         "parameters": [
           {
@@ -6469,7 +6469,6 @@
             "anyOf": [
               {
                 "type": "string",
-                "maxLength": 1000000,
                 "minLength": 1
               },
               {
@@ -12635,7 +12634,6 @@
           },
           "text": {
             "type": "string",
-            "maxLength": 1000000,
             "title": "Text"
           }
         },

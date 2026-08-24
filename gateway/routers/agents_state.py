@@ -9,6 +9,7 @@ routers/agents.py; the lifecycle surface in routers/agents_lifecycle.py.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from typing import Any, cast
 
@@ -44,6 +45,8 @@ from shared.uploads import image_mime_for, parse_upload_url, resolve_upload_path
 
 router = APIRouter()
 _log = logging.getLogger(__name__)
+
+_MAX_MESSAGE_CONTENT_BYTES = 1_048_576
 
 # Compatibility re-export for callers and tests that used this lookup before
 # result-read enforcement was centralized.
@@ -137,6 +140,13 @@ def _normalize_message_content(
     return text, payload
 
 
+def _message_content_size_bytes(content: str | list[ContentBlock]) -> int:
+    if isinstance(content, str):
+        return len(content.encode("utf-8"))
+    wire_content = [block.model_dump(mode="json") for block in content]
+    return len(json.dumps(wire_content, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+
+
 @router.post("/api/agents/{agent_id}/messages", status_code=201)
 async def post_agent_message(
     agent_id: int,
@@ -161,8 +171,17 @@ async def post_agent_message(
 
     404: agent_id does not exist (AgentNotFound -> handler returns 404 + reason).
     409: the key already identifies a different agent/body/source.
+    413: message content exceeds the 1 MiB transport limit.
     422: a block list gated out (non-vision model) or referencing a bad upload.
     """
+    if _message_content_size_bytes(body.content) > _MAX_MESSAGE_CONTENT_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                "message content exceeds the 1 MiB limit; write large content "
+                "to a file and send the file path instead"
+            ),
+        )
     # AgentNotFound is returned 404 + reason by the handler; first SELECT
     # to verify existence then INSERT (same pattern as frontend
     # `/agents/{id}/messages`). After INSERT, SELECT once more to get the
@@ -215,6 +234,14 @@ async def reconcile_agent_message(
     idempotency_key: str = Header(alias="Idempotency-Key", min_length=1, max_length=128),
 ) -> AgentMessageEnqueued:
     """Resolve a timed-out POST and heal its still-pending delivery tail."""
+    if _message_content_size_bytes(body.content) > _MAX_MESSAGE_CONTENT_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                "message content exceeds the 1 MiB limit; write large content "
+                "to a file and send the file path instead"
+            ),
+        )
     await asyncio.to_thread(get_agent_status, agent_id)
     text, payload = _normalize_message_content(body.content)
     try:
