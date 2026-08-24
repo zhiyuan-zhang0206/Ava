@@ -602,7 +602,7 @@ function CostSection({ inspect }: { inspect: AgentInspect }) {
 }
 
 /**
- * Activity — LLM-stage throughput plus absolute time spent in LLM reasoning,
+ * Activity — TPS plus absolute time spent in LLM reasoning,
  * code execution, and idle/blocked states. The duration cells follow the
  * header window.
  */
@@ -613,9 +613,9 @@ function ActivitySection({ inspect }: { inspect: AgentInspect }) {
   return (
     <Section icon={<Timer className="size-3" />} title="Activity">
       <div className="grid grid-cols-2 gap-1">
-        <Metric label="LLM stage" value={formatTps(tps.lm_stage_tps)} />
+        <Metric label="TPS" value={formatTps(tps.lm_stage_tps)} />
         <Metric
-          label="LLM reasoning / output"
+          label="LLM output"
           value={
             hasLife
               ? formatInterval(Math.round(activity.llm_seconds))

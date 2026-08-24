@@ -312,14 +312,14 @@ describe("InspectorPanel", () => {
     expect(screen.getByText("142")).toBeTruthy(); // LLM calls
     expect(screen.getByText("91.70%")).toBeTruthy(); // cache hit
 
-    // activity: LLM-stage TPS leads the grid, followed by LM / exec / idle
+    // activity: TPS leads the grid, followed by LM / exec / idle
     const activitySection = screen.getByText("Activity").closest("section");
     expect(activitySection).not.toBeNull();
-    expect(within(activitySection!).getByText("LLM stage")).toBeTruthy();
+    expect(within(activitySection!).getByText("TPS")).toBeTruthy();
     expect(within(activitySection!).getByText("42.5")).toBeTruthy();
     expect(screen.queryByText("Active rate")).toBeNull();
     expect(screen.queryByText("50%")).toBeNull();
-    expect(screen.queryByText("TPS")).toBeNull();
+    expect(screen.queryByText("LLM stage")).toBeNull();
     expect(screen.getByText("20m")).toBeTruthy(); // 1200s LM
     expect(screen.getByText("8m")).toBeTruthy(); // 450s exec
     expect(screen.getByText("Idle")).toBeTruthy();
@@ -515,7 +515,7 @@ describe("InspectorPanel", () => {
     expect(screen.getByText("24d 3h")).toBeTruthy();
   });
 
-  it("activity durations show em dashes when alive is 0 while LLM stage remains visible", async () => {
+  it("activity durations show em dashes when alive is 0 while TPS remains visible", async () => {
     getAgentInspect.mockResolvedValue(
       fixture({ activity: { active_seconds: 0, alive_seconds: 0, active_rate: 0, llm_seconds: 0, exec_seconds: 0 } }),
     );
