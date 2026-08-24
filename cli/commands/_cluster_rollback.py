@@ -257,8 +257,10 @@ def _run_rollback(
         except MigrationError as exc:
             print(
                 f"  ** MANUAL INTERVENTION: a down migration failed mid-rollback ({exc}); "
-                "earlier downs already committed, schema is PARTIALLY rolled back. "
-                "Do NOT reset code. Manual fix required.",
+                "rollback aborted atomically, so the schema is unchanged at its pre-rollback "
+                "applied set and code was NOT reset. Code + schema remain consistent: "
+                "fix-forward or choose a different target. The gateway is DOWN; manual "
+                "intervention is required.",
                 file=sys.stderr,
             )
             return 2

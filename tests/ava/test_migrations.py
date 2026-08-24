@@ -691,6 +691,39 @@ def test_rollback_to_descends(
         assert cur.fetchall() == [(_BASELINE_NAME,)]
 
 
+def test_rollback_to_aborts_all_downs_on_failure(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A failing down leaves every migration row and schema object unchanged."""
+    (tmp_path / f"{_SYN2}.down.sql").write_text("DROP TABLE rollback_atomic_second_t;")
+    (tmp_path / f"{_SYN}.down.sql").write_text("DROP TABLE definitely_missing_rollback_atomic_t;")
+    monkeypatch.setattr("shared.migrations.MIGRATIONS_DIR", tmp_path)
+    with db_conn.cursor() as cur:
+        cur.execute("CREATE TABLE rollback_atomic_first_t (id int)")
+        cur.execute("CREATE TABLE rollback_atomic_second_t (id int)")
+        for stem in (_SYN, _SYN2):
+            cur.execute("INSERT INTO schema_migrations (name) VALUES (%s)", (stem,))
+    db_conn.commit()
+
+    try:
+        with pytest.raises(MigrationFailed):
+            rollback_to(db_conn, {_BASELINE_NAME})
+
+        with db_conn.cursor() as cur:
+            cur.execute("SELECT name FROM schema_migrations ORDER BY name")
+            assert cur.fetchall() == [(_BASELINE_NAME,), (_SYN,), (_SYN2,)]
+            cur.execute("SELECT to_regclass('rollback_atomic_first_t')")
+            assert cur.fetchone() == ("rollback_atomic_first_t",)
+            cur.execute("SELECT to_regclass('rollback_atomic_second_t')")
+            assert cur.fetchone() == ("rollback_atomic_second_t",)
+    finally:
+        with db_conn.cursor() as cur:
+            cur.execute("DROP TABLE IF EXISTS rollback_atomic_first_t")
+            cur.execute("DROP TABLE IF EXISTS rollback_atomic_second_t")
+            cur.execute("DELETE FROM schema_migrations WHERE name IN (%s, %s)", (_SYN, _SYN2))
+        db_conn.commit()
+
+
 # ─── migration-apply advisory lock (serializes concurrent appliers) ───────────
 
 
