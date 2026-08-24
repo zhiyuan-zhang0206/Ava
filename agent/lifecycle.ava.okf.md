@@ -20,7 +20,7 @@ Agent process lifecycle management—runs in the `finally` block of `main()` and
   - Exception → `"exception:<TypeName>"`
   - No exception → `"normal"` (terminate inbound go to END)
 - **Signal handlers** (`_install_lifecycle_signal_handlers`): SIGHUP / SIGTERM / SIGUSR1 → `SystemExit("signal:NAME")`, ensuring the finally block runs. **SIGUSR1 (hibernation swap-out) additionally synchronously sets `_hibernate_requested=True`**—because asyncio converts the handler's SystemExit into a task `CancelledError`, by the time finally runs, `sys.exc_info()` no longer sees SystemExit; the module flag is set before exception propagation, cutting through this conversion, providing a reliable channel for "this is a hibernate exit".
-- **Exit notification**: `_notify_exit` → `POST /api/agents/{id}/exited` (gateway sets `terminated` + closes page); `_notify_hibernate` → `POST /api/agents/{id}/hibernating` (gateway parks `hibernating`, **retains page, does not write exit event**). `agent/loop.py:_route_process_end_notify` routes between the two based on `_exit_reason()`.
+- **Exit notification**: `_notify_exit` → `POST /api/agents/{id}/exited` (gateway sets `terminated`, closes only agent-owned `ava.ui.show()` pages, and retains daemon-supervised `ava.ui.serve()` / `serve_markdown()` pages); `_notify_hibernate` → `POST /api/agents/{id}/hibernating` (gateway parks `hibernating`, **retains pages, does not write exit event**). `agent/loop.py:_route_process_end_notify` routes between the two based on `_exit_reason()`.
 
 ## Key Dependencies
 

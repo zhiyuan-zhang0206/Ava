@@ -200,11 +200,12 @@ def close_all_agent_pages(
 
 
 def list_open_page_names(db: psycopg.Connection, agent_id: int) -> list[str]:
-    """Used before a terminate cascade — SELECT the names of currently
-    open pages. After the caller UPDATEs agents_meta.status='terminated'
-    and the SQL trigger silently closes those pages, this list is used
-    to publish PageClosed events so the frontend popover removes entries
-    in real time.
+    """Return the pages a terminate cascade will close.
+
+    Daemon-supervised serve() pages have a ``serve_dir`` and remain open across
+    termination; only agent-owned show() pages are captured for PageClosed
+    events. After the caller UPDATEs agents_meta.status='terminated', the SQL
+    trigger silently closes these rows and the frontend removes them in real time.
 
     Does not return full PageRow — publishing only needs name (PageClosed
     fields are only agent_id + name). Separate SELECT to avoid the
@@ -212,7 +213,8 @@ def list_open_page_names(db: psycopg.Connection, agent_id: int) -> list[str]:
     path)."""
     with db.cursor() as cur:
         cur.execute(
-            "SELECT name FROM agent_pages WHERE agent_id = %s AND closed_at IS NULL",
+            "SELECT name FROM agent_pages "
+            "WHERE agent_id = %s AND closed_at IS NULL AND serve_dir IS NULL",
             (agent_id,),
         )
         return [r[0] for r in cur.fetchall()]

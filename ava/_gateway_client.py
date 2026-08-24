@@ -608,8 +608,9 @@ def exited(agent_id: int) -> None:
 
     Called from the process-exit path itself (not by a peer): the gateway
     finalizes status to 'terminated' (guarded, so a concurrent restart's
-    'restarting' is left untouched) and closes this agent's pages. No body —
-    the agent is finalizing itself.
+    'restarting' is left untouched), closes this agent's show() pages, and
+    keeps daemon-supervised serve() pages open. No body — the agent is
+    finalizing itself.
     """
     resp = _post(f"/api/agents/{agent_id}/exited")
     _raise_from_response(resp)
@@ -623,7 +624,8 @@ def hibernating(agent_id: int) -> None:
     by the hibernation swap-out signal (SIGUSR1). The gateway parks the row as
     'hibernating' (guarded WHERE status IN running/idling), keeping the agent's
     pages open and writing no exit event — unlike /exited, which finalizes to
-    'terminated' and closes pages. No body — the agent is parking itself.
+    'terminated' and closes only show() pages. No body — the agent is parking
+    itself.
     """
     resp = _post(f"/api/agents/{agent_id}/hibernating")
     _raise_from_response(resp)

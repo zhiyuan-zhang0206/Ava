@@ -160,9 +160,8 @@ def _reap_local_unclaimed_idling(
     reaped: list[int] = []
     for agent_id in ids:
         with pool.connection() as conn, conn.cursor() as cur:
-            # Capture open page names BEFORE the status flip — the
-            # cascade_close_agent_pages trigger closes the page rows on
-            # 'terminated', after which the open-page query matches nothing.
+            # Capture cascade-closable show() page names before the status
+            # flip. Daemon-supervised serve() pages stay open.
             page_names = list_open_page_names(conn, agent_id)
             cur.execute(
                 "UPDATE agents_meta SET status = 'terminated', termination_source = 'reaper' "

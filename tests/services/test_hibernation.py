@@ -222,7 +222,7 @@ class TestMarkAgentHibernatedOp:
     async def test_pages_stay_open(
         self, db_conn: psycopg.Connection, sync_pool: ConnectionPool
     ) -> None:
-        """Unlike /exited (which cascade-closes pages), hibernation keeps them open —
+        """Unlike /exited (which closes show() pages), hibernation keeps them open —
         the cascade_close_agent_pages trigger fires only on 'terminated'."""
         aid = _park(db_conn, status="idling", pid=_DEAD_PID)
         with db_conn.cursor() as cur:

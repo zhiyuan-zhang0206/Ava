@@ -6,8 +6,8 @@ Covers:
 - close: open→closed CAS + already-closed → 404
 - list: only returns open
 - agent terminated: register returns 409
-- DB trigger: agents_meta status transitions to terminated → auto cascade-close all
-  open pages
+- DB trigger: agent termination cascade-closes agent-owned show() pages while
+  leaving daemon-supervised serve() pages open
 
 Pages are served through the gateway reverse proxy (see test_pages_proxy.py):
 url is the gateway's own /api/pages/<id>-<name>/ (composite key; the old
@@ -235,8 +235,8 @@ def test_list_all_pages_spans_agents_open_only(db_conn: psycopg.Connection) -> N
 
 
 def test_cascade_close_on_agent_terminate(db_conn: psycopg.Connection) -> None:
-    """DB trigger: agents_meta.status flip to terminated -> all open pages auto closed."""
-    # Create two agents, one page each (single-page-per-agent model).
+    """Agent termination closes show() pages but keeps serve() pages listed."""
+    # Create two agents: one owns its server and the other is daemon-supervised.
     a1 = create_agent(db_conn)
     a2 = create_agent(db_conn)
     with db_conn.cursor() as cur:
@@ -251,20 +251,26 @@ def test_cascade_close_on_agent_terminate(db_conn: psycopg.Connection) -> None:
     db_conn.commit()
     with TestClient(app) as client:
         client.post(f"/api/agents/{a1}/pages", json={"name": "x", "port": 8001, "host": _HOST})
-        client.post(f"/api/agents/{a2}/pages", json={"name": "y", "port": 8002, "host": _HOST})
+        client.post(
+            f"/api/agents/{a2}/pages",
+            json={"name": "y", "port": 8002, "host": _HOST, "serve_dir": "/data/y"},
+        )
     # Terminate both agents.
     with db_conn.cursor() as cur:
         cur.execute("UPDATE agents_meta SET status='terminated' WHERE id=%s", (a1,))
         cur.execute("UPDATE agents_meta SET status='terminated' WHERE id=%s", (a2,))
     db_conn.commit()
 
-    for aid in (a1, a2):
-        rows = _page_rows(db_conn, aid)  # pyright: ignore[reportUnknownVariableType]
-        assert all(closed_at is not None for (*_rest, closed_at) in rows)  # pyright: ignore[reportUnknownVariableType]
+    assert _page_rows(db_conn, a1)[0][5] is not None  # pyright: ignore[reportUnknownVariableType]
+    assert _page_rows(db_conn, a2)[0][5] is None  # pyright: ignore[reportUnknownVariableType]
+    with TestClient(app) as client:
+        response = client.get(f"/api/agents/{a2}/pages")
+    assert response.status_code == 200
+    assert [page["name"] for page in response.json()] == ["y"]
 
 
 def test_list_open_page_names_returns_open_only(db_conn: psycopg.Connection) -> None:
-    """terminate cascade entry: SELECT currently open page names, closed excluded."""
+    """Terminate events list only show() pages that the cascade will close."""
     from ops.pages import list_open_page_names
 
     aid = create_agent(db_conn)
@@ -280,8 +286,15 @@ def test_list_open_page_names_returns_open_only(db_conn: psycopg.Connection) -> 
         # Register another — this auto-closes "x" (single page per agent).
         client.post(f"/api/agents/{aid}/pages", json={"name": "y", "port": 8002, "host": _HOST})
     db_conn.rollback()
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agent_pages (agent_id, name, port, host, serve_dir) "
+            "VALUES (%s, 'serve', 8003, %s, '/data/serve')",
+            (aid, _HOST),
+        )
+    db_conn.commit()
     names = list_open_page_names(db_conn, aid)
-    assert names == ["y"]  # only y is still open; x was auto-closed
+    assert names == ["y"]  # x is closed; serve is daemon-supervised
 
 
 def test_register_page_with_serve_dir(db_conn: psycopg.Connection) -> None:
@@ -330,8 +343,7 @@ def test_register_page_without_serve_dir_leaves_null(db_conn: psycopg.Connection
 
 
 def test_cascade_reopen_on_resurrect(db_conn: psycopg.Connection) -> None:
-    """DB trigger: status 从 'terminated' 离开（resurrect 的唯一入口）→ terminate 时刻
-    cascade 关闭的页面行重开；用户更早主动 close 的历史行不被误重开。"""
+    """Resurrect reopens only show() rows the terminate cascade closed."""
     aid = create_agent(db_conn)
     with db_conn.cursor() as cur:
         cur.execute(
@@ -340,21 +352,31 @@ def test_cascade_reopen_on_resurrect(db_conn: psycopg.Connection) -> None:
         )
     db_conn.commit()
     with TestClient(app) as client:
-        # 页面 x：用户在 terminate 之前主动 close（历史行，不应被重开）
+        # x: explicitly closed before termination and must remain historical.
         client.post(f"/api/agents/{aid}/pages", json={"name": "x", "port": 8001, "host": _HOST})
         client.delete(f"/api/agents/{aid}/pages/x")
-        # 页面 y：terminate 时仍 open，会被 cascade 关闭
+        # y: an open show() page, so termination closes it.
         client.post(f"/api/agents/{aid}/pages", json={"name": "y", "port": 8002, "host": _HOST})
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agent_pages (agent_id, name, port, host, serve_dir) "
+            "VALUES (%s, 'serve', 8003, %s, '/data/serve')",
+            (aid, _HOST),
+        )
+    db_conn.commit()
 
-    # terminate → cascade 关闭 y（x 保持它自己的 closed_at）
+    # Termination closes y and leaves both the old x row and serve row unchanged.
     with db_conn.cursor() as cur:
         cur.execute("UPDATE agents_meta SET status='terminated' WHERE id=%s", (aid,))
     db_conn.commit()
     db_conn.rollback()
     rows = _page_rows(db_conn, aid)  # pyright: ignore[reportUnknownVariableType]
-    assert all(closed_at is not None for (*_rest, closed_at) in rows)  # pyright: ignore[reportUnknownVariableType]
+    by_name = {name: closed_at for name, _port, _host, _title, _sd, closed_at in rows}  # pyright: ignore[reportUnknownVariableType]
+    assert by_name["x"] is not None
+    assert by_name["y"] is not None
+    assert by_name["serve"] is None
 
-    # resurrect（terminated → running）→ y 重开，x 保持 closed
+    # Resurrect reopens y only; x remains closed and serve never needed reopening.
     with db_conn.cursor() as cur:
         cur.execute("UPDATE agents_meta SET status='running' WHERE id=%s", (aid,))
     db_conn.commit()
@@ -363,10 +385,11 @@ def test_cascade_reopen_on_resurrect(db_conn: psycopg.Connection) -> None:
     by_name = {name: closed_at for name, _port, _host, _title, _sd, closed_at in rows}  # pyright: ignore[reportUnknownVariableType]
     assert by_name["y"] is None
     assert by_name["x"] is not None
+    assert by_name["serve"] is None
 
 
 def test_cascade_reopen_repeated_terminate_resurrect(db_conn: psycopg.Connection) -> None:
-    """两次 terminate/resurrect 循环：每次只重开当次 terminate 关闭的行。"""
+    """Each terminate/resurrect cycle reopens only its closed show() rows."""
     aid = create_agent(db_conn)
     with db_conn.cursor() as cur:
         cur.execute(
@@ -376,22 +399,42 @@ def test_cascade_reopen_repeated_terminate_resurrect(db_conn: psycopg.Connection
     db_conn.commit()
     with TestClient(app) as client:
         client.post(f"/api/agents/{aid}/pages", json={"name": "a", "port": 8001, "host": _HOST})
-    # 第一轮 terminate → resurrect
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agent_pages (agent_id, name, port, host, serve_dir) "
+            "VALUES (%s, 'serve', 8003, %s, '/data/serve')",
+            (aid, _HOST),
+        )
+    db_conn.commit()
+    # First terminate → resurrect cycle.
     with db_conn.cursor() as cur:
         cur.execute("UPDATE agents_meta SET status='terminated' WHERE id=%s", (aid,))
     db_conn.commit()
+    rows = _page_rows(db_conn, aid)  # pyright: ignore[reportUnknownVariableType]
+    by_name = {name: closed_at for name, _p, _h, _t, _sd, closed_at in rows}  # pyright: ignore[reportUnknownVariableType]
+    assert by_name["a"] is not None
+    assert by_name["serve"] is None
     with db_conn.cursor() as cur:
         cur.execute("UPDATE agents_meta SET status='running' WHERE id=%s", (aid,))
     db_conn.commit()
     db_conn.rollback()
     rows = _page_rows(db_conn, aid)  # pyright: ignore[reportUnknownVariableType]
-    assert (
-        len(rows) == 1 and rows[0][5] is None  # pyright: ignore[reportUnknownArgumentType]
-    )  # 重开  # pyright: ignore[reportUnknownArgumentType]
+    by_name = {name: closed_at for name, _p, _h, _t, _sd, closed_at in rows}  # pyright: ignore[reportUnknownVariableType]
+    assert by_name["a"] is None
+    assert by_name["serve"] is None
 
-    # 第二轮：重新注册（auto-close 旧行）→ terminate → resurrect → 只重开新行
-    with TestClient(app) as client:
-        client.post(f"/api/agents/{aid}/pages", json={"name": "b", "port": 8002, "host": _HOST})
+    # Second cycle: the old show() page is closed before termination, the new
+    # show() page is cascade-closed/reopened, and the daemon page stays open.
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "UPDATE agent_pages SET closed_at = now() WHERE agent_id = %s AND name = 'a'",
+            (aid,),
+        )
+        cur.execute(
+            "INSERT INTO agent_pages (agent_id, name, port, host) VALUES (%s, 'b', 8002, %s)",
+            (aid, _HOST),
+        )
+    db_conn.commit()
     with db_conn.cursor() as cur:
         cur.execute("UPDATE agents_meta SET status='terminated' WHERE id=%s", (aid,))
     db_conn.commit()
@@ -401,8 +444,9 @@ def test_cascade_reopen_repeated_terminate_resurrect(db_conn: psycopg.Connection
     db_conn.rollback()
     rows = _page_rows(db_conn, aid)  # pyright: ignore[reportUnknownVariableType]
     by_name = {name: closed_at for name, _p, _h, _t, _sd, closed_at in rows}  # pyright: ignore[reportUnknownVariableType]
-    assert by_name["b"] is None  # 第二轮重开
-    assert by_name["a"] is not None  # 第一轮的旧行（第二轮 terminate 前被 auto-close）不再重开
+    assert by_name["b"] is None  # reopened by the second cycle
+    assert by_name["a"] is not None  # closed before the second termination
+    assert by_name["serve"] is None
 
 
 # ── audit round-2 P1-4: page proxy SSRF guard ─────────────────────────

@@ -491,7 +491,7 @@ CREATE UNIQUE INDEX event_dismissals_one_active_class_idx
 -- ─────────────── agent_pages ───────────────
 -- HTML UI server registry. ava.ui.show(name, port) registers an agent-owned
 -- server, while ava.ui.serve()/serve_markdown() rows are supervised by the
--- page-server daemon inside a persistent shell belonging to the owning agent.
+-- page-server daemon in persistent sessions that outlive the agent process.
 CREATE TABLE agent_pages (
     id         BIGSERIAL PRIMARY KEY,
     agent_id   BIGINT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
@@ -521,7 +521,7 @@ CREATE OR REPLACE FUNCTION cascade_close_agent_pages() RETURNS TRIGGER AS $$
 BEGIN
     IF NEW.status = 'terminated' AND OLD.status IS DISTINCT FROM 'terminated' THEN
         UPDATE agent_pages SET closed_at = now()
-        WHERE agent_id = NEW.id AND closed_at IS NULL;
+        WHERE agent_id = NEW.id AND closed_at IS NULL AND serve_dir IS NULL;
     END IF;
     RETURN NEW;
 END;
