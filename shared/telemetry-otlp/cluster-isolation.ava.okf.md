@@ -23,15 +23,22 @@ collector's filelog/infra pipelines.
 
 ## Lifecycle and producer gates
 
-`$AVA_HOME/lgtm-host` names the one gateway home that owns the host's LGTM
-stack and local collector. A gateway without the marker neither installs that
-collector nor exports logs, metrics, or traces to the implicit loopback
-endpoint; unified events continue into the local JSONL mirror. An explicit
-`AVA_TELEMETRY_OTLP_ENDPOINT` opts the process into a caller-managed collector.
-The cached producer verdict warns once per process and applies at restart.
+The implicit loopback event exporter requires a registered machine identity and
+the production cluster label `.ava`. Tests, ad-hoc processes with hostname
+fallback, and non-production homes do not export by default; their unified
+events continue into the local JSONL mirror. An explicit
+`AVA_TELEMETRY_OTLP_ENDPOINT` is the operator escape hatch and opts any process
+into a caller-managed collector before the production-identity check.
 
-Pure agent-runner homes retain their authenticated relay collector regardless
-of the marker: they are transport participants, not competing backend owners.
+`$AVA_HOME/lgtm-host` names the production gateway home that owns the host's
+LGTM stack and local collector. A production gateway without the marker neither
+installs that collector nor exports logs, metrics, or traces to the implicit
+loopback endpoint. The cached producer verdict warns once per process when this
+marker gate declines export and applies at restart.
+
+Production-identity pure agent-runner homes retain their authenticated relay
+collector regardless of the marker: they are transport participants, not
+competing backend owners. Non-production runners require an explicit endpoint.
 The collector also omits its Postgres receiver when the direct URL has no
 password because otelcol-contrib rejects that configuration; its valid no-auth
 Redis receiver remains.

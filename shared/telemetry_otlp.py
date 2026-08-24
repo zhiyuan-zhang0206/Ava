@@ -52,16 +52,18 @@ Three layers:
    call again (``_export_otlp``) — even a programming error here cannot cost a
    batch its JSONL copy.
 
-Flag semantics: every process, including disposable exec children, reads
-``AVA_TELEMETRY_OTLP_ENABLED`` / ``AVA_TELEMETRY_OTLP_ENDPOINT`` from the
-startup-frozen settings singleton (``restart_required`` on the config fields).
-Exec children call ``warmup()`` before agent code runs so constructing the OTel
-SDK cannot first happen during interpreter shutdown. This is **startup-applied**,
-matching every other config field in the system — there is no live-reload
-mechanism in ``shared/config``, and the isolation above makes the flag a rare
-emergency kill switch, not the primary defense. Off means JSONL mirror only:
-Loki and Prometheus stop advancing. Flipping it + restarting is the documented
-apply path.
+Flag semantics: the implicit collector is available only to a registered
+machine running against the production ``~/.ava`` cluster. Other processes,
+including disposable exec children in test or ad-hoc homes, stay off unless an
+operator explicitly sets ``AVA_TELEMETRY_OTLP_ENDPOINT``. Every allowed process
+reads ``AVA_TELEMETRY_OTLP_ENABLED`` from the startup-frozen settings singleton
+(``restart_required`` on the config fields). Exec children call ``warmup()``
+before agent code runs so constructing the OTel SDK cannot first happen during
+interpreter shutdown. This is **startup-applied**, matching every other config
+field in the system — there is no live-reload mechanism in ``shared/config``,
+and the isolation above makes the flag a rare emergency kill switch, not the
+primary defense. Off means JSONL mirror only: Loki and Prometheus stop advancing.
+Flipping it + restarting is the documented apply path.
 
 Backend initialization is retried every five minutes after a failed collector
 probe or SDK setup. Each disabled/recovered attempt is emitted as a real event,
@@ -84,6 +86,7 @@ from shared.observability import (
     cluster_label,
     endpoint_override_is_explicit,
     gateway_observability_home,
+    production_identity,
 )
 from shared.telemetry import Event
 from shared.telemetry_otlp_gauges import GaugeValues, observable_gauge_callback, record_gauge
@@ -171,11 +174,15 @@ _NO_EMITTER = "_no_emitter"
 @cache
 def _observability_export_allowed() -> bool:
     """Whether this process may arm OTLP export, frozen once per process."""
+    if endpoint_override_is_explicit("AVA_TELEMETRY_OTLP_ENDPOINT"):
+        return True
+    if not production_identity():
+        return False
     home = gateway_observability_home()
     if home is None:
         return True
     marker = home / "lgtm-host"
-    allowed = marker.exists() or endpoint_override_is_explicit("AVA_TELEMETRY_OTLP_ENDPOINT")
+    allowed = marker.exists()
     if not allowed:
         from shared.log import logger
 
