@@ -1856,6 +1856,7 @@ def test_gateway_local_update_starts_in_fresh_process(
     pending migrations itself early in boot — there is no separate migrate step.
     Order: stop -> force-checkout target_sha -> uv sync -> grafana provisioning
     sync (new-tree venv subprocess) -> `ava start`."""
+    from cli.commands import _update_git as _git_mod
     from cli.commands import update as _up
 
     repo = tmp_path
@@ -1863,11 +1864,16 @@ def test_gateway_local_update_starts_in_fresh_process(
     cmds: list[list] = []
 
     monkeypatch.setattr(_up, "_do_stop", lambda *_a, **_kw: calls.append("stop") or 0)  # pyright: ignore[reportUnknownArgumentType]
+
     # Pre-checkout last-known-good snapshot + the force-checkout itself are orthogonal
     # to the start sequence asserted below; stub them so they add no git subprocess /
     # DB read to the captured commands.
+    def _no_data_snapshot(_sha: str) -> Path | None:
+        return None
+
     monkeypatch.setattr(_up, "git_head_sha", lambda: "aaaaaaa")
     monkeypatch.setattr(_up, "current_schema_state", lambda: {"00000000T000000_baseline"})
+    monkeypatch.setattr(_git_mod, "snapshot_pre_update_data", _no_data_snapshot)
     monkeypatch.setattr(_up, "git_checkout_sha", lambda _sha: calls.append("checkout") or "aaaaaaa")  # pyright: ignore[reportUnknownArgumentType]
 
     def _no_inprocess_migrate():

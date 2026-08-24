@@ -53,9 +53,12 @@ import re
 import shutil
 import subprocess
 import tempfile
-from contextlib import suppress
-from datetime import UTC, datetime
+import threading
+from collections.abc import Generator
+from contextlib import contextmanager, suppress
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import cast
 from zoneinfo import ZoneInfo
 
 from psycopg.conninfo import conninfo_to_dict, make_conninfo
@@ -64,6 +67,7 @@ from shared.config import settings
 from shared.db import direct_db_url
 from shared.google_drive import find_writable_google_drive
 from shared.pg_tools import pg_tool
+from shared.platform import file_lock
 from shared.private_storage import ensure_private_dir, ensure_private_file
 
 _log = logging.getLogger(__name__)
@@ -79,6 +83,9 @@ _NAME_RE = re.compile(r"^(?P<db>.+)-(?P<ts>\d{8}T\d{6}Z|\d{8}-\d{6})\.dump(?:\.g
 _TS_FORMAT = "%Y%m%dT%H%M%SZ"  # UTC, offset-bearing by construction
 _LEGACY_TS_FORMAT = "%Y%m%d-%H%M%S"  # pre-cutover names: wall clock, no offset
 _OFFSITE_ROOT = "Ava Backups"
+_TARGET_NAME_ATTEMPTS = 60
+_backup_lock_guard = threading.RLock()
+_backup_lock_state = threading.local()
 
 
 def _cluster_tz() -> ZoneInfo:
@@ -112,6 +119,32 @@ def backup_dir() -> Path:
     # under `backups/<cluster-name>` are left in place (at most BACKUP_KEEP of
     # them); rotation continues in the new dir.
     return Path(settings.general.ava_home).expanduser() / "backups" / "db"
+
+
+@contextmanager
+def backup_lock(*, timeout_s: float | None = None) -> Generator[None]:
+    """Serialize backup creation and verification across local processes.
+
+    The lock is re-entrant within one thread, so a pre-update snapshot can hold
+    it while calling `run_backup` and checking that dump's restore TOC.
+    """
+    with _backup_lock_guard:
+        depth = getattr(_backup_lock_state, "depth", 0)
+        if depth:
+            _backup_lock_state.depth = depth + 1
+            try:
+                yield
+            finally:
+                _backup_lock_state.depth -= 1
+            return
+
+        lock_path = backup_dir().parent / ".db-backup.lock"
+        with file_lock(lock_path, timeout_s=timeout_s):
+            _backup_lock_state.depth = 1
+            try:
+                yield
+            finally:
+                del _backup_lock_state.depth
 
 
 def _managed_dumps(directory: Path) -> list[tuple[datetime, Path]]:
@@ -250,12 +283,41 @@ def _copy_offsite(artifact: Path) -> None:
         _log.exception("[backup] encrypted off-site copy failed; local artifact retained")
 
 
-def run_backup(now: datetime | None = None, *, db_url: str | None = None) -> Path:
+def _available_target(directory: Path, dbname: str, now: datetime) -> Path:
+    """Return an unused managed dump path without replacing a prior snapshot."""
+    for offset_s in range(_TARGET_NAME_ATTEMPTS):
+        stamp = (now + timedelta(seconds=offset_s)).astimezone(UTC).strftime(_TS_FORMAT)
+        target = directory / f"{dbname}-{stamp}.dump.gz.enc"
+        if not target.exists():
+            return target
+    raise RuntimeError("could not choose a distinct backup filename within 60 seconds")
+
+
+def run_backup(
+    now: datetime | None = None,
+    *,
+    db_url: str | None = None,
+    timeout_s: float = _DUMP_TIMEOUT_S,
+) -> Path:
     """Dump the cluster DB into backup_dir() and prune; return the dump path.
 
     Plaintext and encrypted intermediates use `.partial` names; only the
     encrypted gzip artifact is published after every pipeline step succeeds.
+
+    `timeout_s` lets bounded callers such as the pre-update snapshot use a
+    tighter ceiling than the daily backup default.
     """
+    with backup_lock():
+        return _run_backup(now, db_url=db_url, timeout_s=timeout_s)
+
+
+def _run_backup(
+    now: datetime | None = None,
+    *,
+    db_url: str | None = None,
+    timeout_s: float = _DUMP_TIMEOUT_S,
+) -> Path:
+    """Write one managed dump while `backup_lock` is held."""
     now = _require_aware(now) if now is not None else datetime.now(UTC)
     # direct_db_url() (the admin-plane direct URL, derived from the
     # registry record): pg_dump needs a real Postgres session (it holds a consistent
@@ -271,9 +333,9 @@ def run_backup(now: datetime | None = None, *, db_url: str | None = None) -> Pat
         with suppress(OSError):
             stale.unlink()
     db_conninfo, password = _passwordless_conninfo(db_url)
-    dbname = conninfo_to_dict(db_url)["dbname"]
-    stem = f"{dbname}-{now.astimezone(UTC).strftime(_TS_FORMAT)}"
-    target = directory / f"{stem}.dump.gz.enc"
+    dbname = cast(str, conninfo_to_dict(db_url)["dbname"])
+    target = _available_target(directory, dbname, now)
+    stem = target.name.removesuffix(".dump.gz.enc")
     dump_partial = directory / f"{stem}.dump.partial"
     gzip_partial = directory / f"{stem}.dump.gz.partial"
     encrypted_partial = target.with_name(target.name + ".partial")
@@ -300,7 +362,7 @@ def run_backup(now: datetime | None = None, *, db_url: str | None = None) -> Pat
             capture_output=True,
             check=False,
             env=dump_env,
-            timeout=_DUMP_TIMEOUT_S,
+            timeout=timeout_s,
         )
         if proc.returncode != 0:
             raise RuntimeError(f"pg_dump exited {proc.returncode}")
@@ -313,7 +375,7 @@ def run_backup(now: datetime | None = None, *, db_url: str | None = None) -> Pat
                 stdout=compressed,
                 stderr=subprocess.PIPE,
                 check=False,
-                timeout=_DUMP_TIMEOUT_S,
+                timeout=timeout_s,
             )
         if proc.returncode != 0:
             raise RuntimeError(f"gzip exited {proc.returncode}")
@@ -338,7 +400,7 @@ def run_backup(now: datetime | None = None, *, db_url: str | None = None) -> Pat
                 ],
                 capture_output=True,
                 check=False,
-                timeout=_DUMP_TIMEOUT_S,
+                timeout=timeout_s,
             )
             if proc.returncode != 0:
                 raise RuntimeError(f"backup encryption exited {proc.returncode}")

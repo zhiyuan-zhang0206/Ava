@@ -54,8 +54,24 @@ class RolloutOutcome(StrEnum):
     ABORTED = "aborted"
 
 
+def _print_pre_update_data_snapshot_restore(data_snapshot: Path | None) -> None:
+    """Name the verified restore point without exposing the cluster DB URL."""
+    if data_snapshot is not None:
+        print(
+            f"  · pre-update data snapshot: {data_snapshot} — restore: decrypt + gunzip, then "
+            "pg_restore --clean --if-exists -d <db_url> <decrypted-dump> "
+            "(drill: conventions/down-failure-drill.md)",
+            file=sys.stderr,
+        )
+
+
 def _recover_gateway_local(
-    repo: Path, from_sha: str, schema_snapshot: set[str], *, preserve_sessions: frozenset[str]
+    repo: Path,
+    from_sha: str,
+    schema_snapshot: set[str],
+    *,
+    preserve_sessions: frozenset[str],
+    data_snapshot: Path | None = None,
 ) -> int:
     """Restore the gateway to last-known-good (`from_sha`) after a failed
     local update.
@@ -65,7 +81,9 @@ def _recover_gateway_local(
     + a fresh `ava start` on the known-good revision. `schema_snapshot` is the
     applied set captured before the failed start; when the start never advanced the
     schema the rollback is a no-op. `preserve_sessions` forwards `--disable-service` for a
-    backend-only update (the frontend was left running, so don't rebuild it).
+    backend-only update (the frontend was left running, so don't rebuild it). A verified
+    `data_snapshot` lets manual recovery restore data when schema rollback cannot fully
+    reverse a destructive migration.
 
     Returns 0 when the gateway is back up on last-known-good; 1 when it
     cannot be (the rollback would cross the squashed baseline, which has no down —
@@ -91,6 +109,7 @@ def _recover_gateway_local(
             "schema on the new revision (consistent, fix-forward); the gateway is DOWN.",
             file=sys.stderr,
         )
+        _print_pre_update_data_snapshot_restore(data_snapshot)
         return 1
     except MigrationError as exc:
         # A down failure aborts rollback_to's one batch transaction, leaving the
@@ -107,6 +126,7 @@ def _recover_gateway_local(
             "DOWN and requires a human decision.",
             file=sys.stderr,
         )
+        _print_pre_update_data_snapshot_restore(data_snapshot)
         return 1
     if rolled:
         print(f"  · rolled back {len(rolled)} migration(s): {rolled}", file=sys.stderr)
@@ -125,6 +145,7 @@ def _recover_gateway_local(
             "last-known-good",
             file=sys.stderr,
         )
+        _print_pre_update_data_snapshot_restore(data_snapshot)
         return 1
     print(f"  · git reset --hard {from_sha[:7]}", file=sys.stderr)
     sync = subprocess.run(["uv", "sync"], cwd=repo, capture_output=False, check=False)
@@ -133,6 +154,7 @@ def _recover_gateway_local(
             "  ✗✗ MANUAL INTERVENTION: recovery `uv sync` failed; gateway DOWN",
             file=sys.stderr,
         )
+        _print_pre_update_data_snapshot_restore(data_snapshot)
         return 1
 
     print("\n→ recover: ava start on last-known-good", file=sys.stderr)
@@ -169,21 +191,26 @@ def _recover_gateway_local(
             "gateway DOWN",
             file=sys.stderr,
         )
+        _print_pre_update_data_snapshot_restore(data_snapshot)
         return 1
     print(f"  ✓ gateway recovered to {from_sha[:7]}", file=sys.stderr)
     return 0
 
 
 def _recover_rc(
-    repo: Path, recover_ctx: tuple[str, set[str]], preserve_sessions: frozenset[str]
+    repo: Path, recover_ctx: tuple[str, set[str], Path | None], preserve_sessions: frozenset[str]
 ) -> int:
     """Recover, mapping the outcome onto the non-zero rc `_run_gateway_local_update`
     returns: 1 = recovered to last-known-good (gateway back, deferred resumes deliver),
     2 = gateway DOWN (no auto-fix; a human is needed). The update failed either
     way, so this is always non-zero."""
-    from_sha, schema_snapshot = recover_ctx
+    from_sha, schema_snapshot, data_snapshot = recover_ctx
     rec = _recover_gateway_local(
-        repo, from_sha, schema_snapshot, preserve_sessions=preserve_sessions
+        repo,
+        from_sha,
+        schema_snapshot,
+        preserve_sessions=preserve_sessions,
+        data_snapshot=data_snapshot,
     )
     return 1 if rec == 0 else 2
 
