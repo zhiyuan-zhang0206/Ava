@@ -15,6 +15,7 @@ from shared.log import init_gateway_process
 from shared.machine import is_gateway
 from shared.migrations import assert_schema_current
 from shared.platform import raise_fd_limit
+from shared.transport_encryption import verify_transport_encryption
 
 
 def main() -> None:
@@ -80,6 +81,8 @@ def main() -> None:
     # v4-only wildcard — dev-only, and browsers fall back from the refused
     # IPv6 dial instantly.
     host = "" if is_gateway() and settings.data_plane.cluster_secret else "127.0.0.1"
+    if host != "127.0.0.1":
+        verify_transport_encryption(settings.data_plane.cluster_secret, host)
     reload = settings.gateway.gateway_reload
     # log_config=None: uvicorn's default LOGGING_CONFIG dictConfig would
     # clobber the root-handler install (`_StdlibInterceptHandler`) that

@@ -1,13 +1,13 @@
 ---
 type: doc
 title: Gateway
-description: 'Ava cluster HTTP API gateway—FastAPI service running on **port 8000**, bound to loopback without a cluster secret / to reachable addresses with one. Pure JSON API, no HTML rendering — with one deliberate exception: GET /api/okf/graph serves a self-contained HTML page (D3 OKF knowledge-graph visualization).'
+description: 'Ava cluster HTTP API gateway—FastAPI service running on **port 8000**, bound to loopback without a cluster secret / to reachable addresses only with a secret and declared transport encryption. Pure JSON API, no HTML rendering — with one deliberate exception: GET /api/okf/graph serves a self-contained HTML page (D3 OKF knowledge-graph visualization).'
 tags: []
 ---
 
 # Gateway
 
-Ava cluster HTTP API gateway—FastAPI service running on **port 8000** (loopback-only when no cluster secret is set, reachable addresses when one is — `gateway/app.py:504-519`). Pure JSON API, no HTML rendering — with a small enumerated set of exceptions: `GET /api/okf/graph` (D3 knowledge-graph page), uploads `FileResponse`, the agents' page-server reverse proxy, and the grafana reverse proxy. Frontend, CLI, agent SDK (`ava.agents.*`), bootstrap scripts all access the cluster through the same set of `/api/*` endpoints.
+Ava cluster HTTP API gateway—FastAPI service running on **port 8000** (loopback-only when no cluster secret is set; reachable addresses require both a secret and declared transport encryption — `gateway/_server.py:main`). Pure JSON API, no HTML rendering — with a small enumerated set of exceptions: `GET /api/okf/graph` (D3 knowledge-graph page), uploads `FileResponse`, the agents' page-server reverse proxy, and the grafana reverse proxy. Frontend, CLI, agent SDK (`ava.agents.*`), bootstrap scripts all access the cluster through the same set of `/api/*` endpoints.
 
 ## Terminology (domain ubiquitous language)
 
