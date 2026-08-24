@@ -232,6 +232,18 @@ def _in_spans(value: datetime, spans: list[tuple[datetime, datetime]]) -> bool:
     return any(start <= value <= end for start, end in spans)
 
 
+def _spans_cover(
+    coverage: list[tuple[datetime, datetime]], required: list[tuple[datetime, datetime]]
+) -> bool:
+    """Whether every required span fits wholly inside one coverage span."""
+    return all(
+        any(
+            covered_start <= start and end <= covered_end for covered_start, covered_end in coverage
+        )
+        for start, end in required
+    )
+
+
 def _attribute_text(attributes: dict[str, Any], key: str) -> str:
     """Match JSON/JSONB text filters, including JSON booleans and missing keys."""
     value = attributes.get(key)
@@ -252,26 +264,85 @@ def _attribute_number(attributes: dict[str, Any], key: str) -> float | None:
         return None
 
 
+def _projected_query_plans(
+    *,
+    stats_spans: list[tuple[datetime, datetime]],
+    token_spans: list[tuple[datetime, datetime]],
+    distribution_spans: list[tuple[datetime, datetime]],
+    histogram_complete: bool,
+    activity_window: tuple[datetime, datetime] | None,
+) -> dict[tuple[tuple[datetime, datetime], ...], list[str]]:
+    """Group event families by the minimal Loki spans each needs to read."""
+    if not histogram_complete:
+        spans = [*stats_spans, *token_spans, *distribution_spans]
+        if activity_window is not None:
+            spans.append(activity_window)
+        if not spans:
+            return {}
+        return {
+            (
+                (
+                    min(start for start, _ in spans),
+                    max(end for _, end in spans),
+                ),
+            ): ["^turn_end$", "^exec$", "^exec_.*", "^exec\\(.*", "^llm_usage$", "^node_exit$"]
+        }
+
+    turn_spans = _merge_spans([*stats_spans, *distribution_spans])
+    merged_token_spans = _merge_spans(token_spans)
+    activity_spans = [] if activity_window is None else [activity_window]
+    if _spans_cover(turn_spans, merged_token_spans) and _spans_cover(turn_spans, activity_spans):
+        return {
+            tuple(turn_spans): [
+                "^turn_end$",
+                "^exec$",
+                "^exec_.*",
+                "^exec\\(.*",
+                "^llm_usage$",
+                "^node_exit$",
+            ]
+        }
+
+    plans: dict[tuple[tuple[datetime, datetime], ...], list[str]] = {}
+    for spans, event_names in (
+        (turn_spans, ["^turn_end$", "^exec$", "^exec_.*", "^exec\\(.*"]),
+        (merged_token_spans, ["^llm_usage$"]),
+        (activity_spans, ["^node_exit$"]),
+    ):
+        if not spans:
+            continue
+        planned_events = plans.setdefault(tuple(spans), [])
+        for event_name in event_names:
+            if event_name not in planned_events:
+                planned_events.append(event_name)
+    return plans
+
+
 def _projected_live_values(
     agent_id: int,
     *,
     stats_spans: list[tuple[datetime, datetime]],
     token_spans: list[tuple[datetime, datetime]],
-    distribution_window: tuple[datetime, datetime] | None,
+    distribution_spans: list[tuple[datetime, datetime]],
+    histogram_complete: bool,
     activity_window: tuple[datetime, datetime] | None,
     deadline: float | None = None,
 ) -> _LiveInspectValues:
     """Reduce one raw Loki line pass over every live interval inspect needs.
 
-    The pass uses one envelope rather than one aggregation shape per interval.
-    A row is still admitted to each ledger/archive seam only through that
-    section's original span, preserving the existing double-count prevention.
+    Event families with identical coverage share one request. Different spans
+    remain separate so a histogram-backed turn distribution cannot widen to a
+    token or activity window; a row still enters each section only through its
+    original span, preserving the existing double-count prevention.
     """
-    spans = [*stats_spans, *token_spans]
-    for window in (distribution_window, activity_window):
-        if window is not None:
-            spans.append(window)
-    if not spans:
+    query_plans = _projected_query_plans(
+        stats_spans=stats_spans,
+        token_spans=token_spans,
+        distribution_spans=distribution_spans,
+        histogram_complete=histogram_complete,
+        activity_window=activity_window,
+    )
+    if not query_plans:
         return _LiveInspectValues(0, 0, 0, 0, [], [], 0.0, 0.0, 0.0)
 
     rows = loki_events.query_projected_lines(
@@ -329,8 +400,7 @@ def _projected_live_values(
             telemetry_or_log
             and event_name == "turn_end"
             and duration is not None
-            and distribution_window is not None
-            and _in_spans(timestamp, [distribution_window])
+            and _in_spans(timestamp, distribution_spans)
         ):
             distribution.append((duration, 1))
 
@@ -363,10 +433,32 @@ def _projected_live_values(
 
 
 def _turn_distribution(
-    archive: list[tuple[float, int]], live: list[tuple[float, int]]
+    archive: list[tuple[float, int]],
+    ledger: list[tuple[float, int]],
+    live: list[tuple[float, int]],
 ) -> list[tuple[float, int]]:
-    """Merge the frozen archive and live values without reducing precision."""
-    return merge_exact_distribution([archive, live])
+    """Merge archive, bucketed ledger, and exact live duration distributions."""
+    return merge_exact_distribution([archive, ledger, live])
+
+
+def _duration_bounds(
+    *,
+    histogram_complete: bool,
+    ledger_min: float | None,
+    ledger_max: float | None,
+    archive_distribution: list[tuple[float, int]],
+    live: _LiveInspectValues,
+    distribution: list[tuple[float, int]],
+) -> tuple[float, float]:
+    """Return exact extrema without treating a floored histogram bucket as one."""
+    if histogram_complete:
+        values = [*[value for value, _ in archive_distribution], *live.turn_durations]
+    else:
+        values = [value for value, _ in distribution]
+    return (
+        min((value for value in (ledger_min, *values) if value is not None), default=0.0),
+        max((value for value in (ledger_max, *values) if value is not None), default=0.0),
+    )
 
 
 def inspect_values(
@@ -386,10 +478,14 @@ def inspect_values(
     approximate pre-cutover terminate/resurrect gaps until that slice expires
     on 2026-08-30. Whole-life archive distribution, activity, and lifecycle
     values use the frozen-archive rollup when it exists; windowed reads retain
-    the raw archive fallback. Every interactive Loki read is capped at eight
-    seconds.
+    the raw archive fallback. Complete ledger days contribute integer-second
+    duration buckets, making their percentiles accurate to about ±0.5 seconds;
+    archive and live-tail values remain exact. Every interactive Loki read is
+    capped at eight seconds.
     """
     plan = full_day_plan(from_, to)
+    ledger_distribution: list[tuple[float, int]] = []
+    histogram_complete = False
     with pool.connection() as conn, conn.cursor() as cur:
         freeze = _inspect_pg.freeze_point(cur)
         rollup = _inspect_pg.archive_stats(conn, agent_id=agent_id)
@@ -403,6 +499,10 @@ def inspect_values(
             ledger = _inspect_pg.ledger_stats(
                 conn, agent_id=agent_id, day_from=plan.day_from, day_to=ledger_day_to
             )
+            ledger_distribution, histogram_complete = _inspect_pg.ledger_distribution(
+                conn, agent_id=agent_id, day_from=plan.day_from, day_to=ledger_day_to
+            )
+            histogram_complete = histogram_complete and bool(ledger_distribution)
             newest_tokens = _inspect_pg.newest_token_day(
                 conn, agent_id=agent_id, day_from=plan.day_from, day_to=plan.day_to
             )
@@ -463,7 +563,13 @@ def inspect_values(
     turn_total, turn_ok, turn_sum, turn_min, turn_max, exec_ok, exec_failed, watermark = ledger
     stats_spans = live_edge_spans(plan, watermark, from_, to)
     token_spans = live_edge_spans(plan, token_watermark, from_, to)
-    distribution_window = _inspect_pg.retained_live_window(from_=from_, to=to, freeze=freeze)
+    if histogram_complete:
+        distribution_spans = stats_spans
+        ledger_duration_distribution = ledger_distribution
+    else:
+        distribution_window = _inspect_pg.retained_live_window(from_=from_, to=to, freeze=freeze)
+        distribution_spans = [] if distribution_window is None else [distribution_window]
+        ledger_duration_distribution = []
     activity_window = _inspect_pg.retained_live_window(from_=from_, to=to, freeze=freeze)
     lifecycle_window = _inspect_pg.retained_live_window(
         from_=INDEX_LABEL_CUTOVER_AT, to=None, freeze=freeze
@@ -474,7 +580,8 @@ def inspect_values(
         agent_id,
         stats_spans=stats_spans,
         token_spans=token_spans,
-        distribution_window=distribution_window,
+        distribution_spans=distribution_spans,
+        histogram_complete=histogram_complete,
         activity_window=activity_window,
         deadline=deadline,
     )
@@ -486,14 +593,16 @@ def inspect_values(
         freeze=freeze,
         timeout_s=_query_timeout(deadline),
     )
-    distribution = _turn_distribution(archive_distribution, live.distribution)
-    minimum = min(
-        (value for value in (turn_min, *(value for value, _ in distribution)) if value is not None),
-        default=0.0,
+    distribution = _turn_distribution(
+        archive_distribution, ledger_duration_distribution, live.distribution
     )
-    maximum = max(
-        (value for value in (turn_max, *(value for value, _ in distribution)) if value is not None),
-        default=0.0,
+    minimum, maximum = _duration_bounds(
+        histogram_complete=histogram_complete,
+        ledger_min=turn_min,
+        ledger_max=turn_max,
+        archive_distribution=archive_distribution,
+        live=live,
+        distribution=distribution,
     )
     stats = AgentStats(
         turn_total=turn_total + live.turn_total,

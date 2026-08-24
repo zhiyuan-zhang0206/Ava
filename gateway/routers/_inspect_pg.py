@@ -271,6 +271,39 @@ def ledger_stats(
     )
 
 
+def ledger_distribution(
+    conn: Connection[Any], *, agent_id: int, day_from: date | None, day_to: date | None
+) -> tuple[list[tuple[float, int]], bool]:
+    """Merge daily duration buckets and report whether every ledger row has one.
+
+    Missing ledger days are historical gaps, not coverage failures. A present
+    ledger row with an empty histogram is incomplete and makes callers retain
+    the raw full-window fallback until the maintenance pass repairs it.
+    """
+    where, params = _ledger_day_where(agent_id=agent_id, day_from=day_from, day_to=day_to)
+    with conn.cursor() as cur:
+        cur.execute(
+            sql.SQL("SELECT day, turn_dur_hist FROM agent_metrics_daily WHERE {}").format(where),
+            params,
+        )
+        rows = cur.fetchall()
+
+    merged: dict[int, int] = {}
+    ledger_days: set[date] = set()
+    histogram_days: set[date] = set()
+    for day, histogram in rows:
+        ledger_days.add(day)
+        if not histogram:
+            continue
+        histogram_days.add(day)
+        for bucket, count in histogram.items():
+            bucket_int = int(bucket)
+            merged[bucket_int] = merged.get(bucket_int, 0) + int(count)
+    return [(float(bucket), count) for bucket, count in sorted(merged.items())], (
+        ledger_days == histogram_days
+    )
+
+
 def ledger_tokens(
     conn: Connection[Any], *, agent_id: int, day_from: date | None, day_to: date | None
 ) -> tuple[int, datetime | None]:
