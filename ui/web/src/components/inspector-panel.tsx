@@ -8,6 +8,7 @@ import {
   DollarSign,
   ExternalLink,
   HeartPulse,
+  LayoutPanelTop,
   RefreshCw,
   SlidersHorizontal,
   Terminal,
@@ -246,9 +247,10 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
           </div>
         ) : (
           <div className="space-y-4">
+            <PageSection pages={pages} />
             {liveData ? (
               <>
-                <ShellsSection inspect={liveData} pages={pages} />
+                <ShellsSection inspect={liveData} />
                 <LivenessSection inspect={liveData} />
                 <ConfigOverlaySection inspect={liveData} />
               </>
@@ -411,6 +413,40 @@ function WindowedSectionsError({ onRetry }: { onRetry: () => void }) {
   );
 }
 
+function PageSection({ pages }: { pages: PageRow[] }) {
+  return (
+    <Section
+      icon={<LayoutPanelTop className="size-3" />}
+      title="Page"
+      badge={pages.length > 0 ? "Open" : "None"}
+    >
+      {pages.length === 0 ? (
+        <p className="font-mono text-[11px] text-muted-foreground/70">No open page</p>
+      ) : (
+        pages.map((p) => (
+          <a
+            key={p.name}
+            href={p.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={cn("items-center gap-2 rounded bg-sidebar-accent/40 px-2 py-1.5 font-mono text-[11px] hover:bg-sidebar-accent group", FLEX)}
+          >
+            <ExternalLink className="size-3 shrink-0 text-muted-foreground group-hover:text-foreground" />
+            <span className={cn(FLEX, FLEX_COL, MIN_W_0, FLEX_1)}>
+              <span className="truncate text-foreground">{p.title ?? p.name}</span>
+              <span
+                className="truncate text-[10px] text-muted-foreground"
+              >
+                {p.url}
+              </span>
+            </span>
+          </a>
+        ))
+      )}
+    </Section>
+  );
+}
+
 // The agent's single open notice, rendered at the bottom of the panel as an
 // interactive reply surface (mirrors the fleet "waiting on you" queue): a
 // require_response notice gets a reply box + Dismiss, an FYI gets Mark read.
@@ -449,44 +485,20 @@ function NoticeReplySection({
   );
 }
 
-function ShellsSection({
-  inspect,
-  pages,
-}: {
-  inspect: AgentInspectLive;
-  pages: PageRow[];
-}) {
+function ShellsSection({ inspect }: { inspect: AgentInspectLive }) {
   const { shells } = inspect;
   return (
     <Section
       icon={<Terminal className="size-3" />}
       title="Persistent shells"
-      badge={String(shells.length + pages.length)}
+      badge={String(shells.length)}
     >
-      {shells.length === 0 && pages.length === 0 ? (
+      {shells.length === 0 ? (
         <p className="font-mono text-[11px] text-muted-foreground/70">None open</p>
       ) : (
         <ul className="space-y-1">
           {shells.map((s) => (
             <ShellRow key={s.id} agentId={inspect.agent_id} shell={s} />
-          ))}
-          {pages.map((p) => (
-            <li key={`page-${p.name}`}>
-              <a
-                href={p.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className={cn("items-center gap-2 rounded bg-sidebar-accent/40 px-2 py-1.5 font-mono text-[11px] hover:bg-sidebar-accent group", FLEX)}
-              >
-                <ExternalLink className="size-3 shrink-0 text-muted-foreground group-hover:text-foreground" />
-                <span className={cn(FLEX, FLEX_COL, MIN_W_0, FLEX_1)}>
-                  <span className="truncate text-foreground">{p.title ?? p.name}</span>
-                  <span className="truncate text-[10px] text-muted-foreground">
-                    {p.url}
-                  </span>
-                </span>
-              </a>
-            </li>
           ))}
         </ul>
       )}
