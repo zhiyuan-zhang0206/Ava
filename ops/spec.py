@@ -117,8 +117,7 @@ class ServiceSpec:
             service alive — the keepalive roster is DERIVED from this field. None
             = not watchdog-monitored (the watchdog daemons themselves).
         curl_url: HTTP probe URL (2xx/3xx = up); None = no curl probe.
-        tcp_port: TCP-connect probe port for non-HTTP services (milvus gRPC);
-            None = no TCP probe.
+        tcp_port: TCP-connect probe port for non-HTTP services (milvus gRPC).
         identity_probe: the probe that answers "is the thing on that port MINE",
             returning a ``DaemonProbe`` verdict. Set for every service whose
             endpoint can prove it — the ``/healthz`` daemons (name + home + pid,
@@ -130,20 +129,16 @@ class ServiceSpec:
             oversight: the frontend serves Next.js, milvus speaks gRPC, and a
             watchdog's only signal is its own pidfile. Consumers show which of the
             two a row got, so an operator can tell an identity-verified ✓ from a
-            2xx (`cli.commands._probe`).
-
-            It exists as a field rather than being re-derived per consumer because
-            the disagreement it removes is the bug: the watchdog verified identity
-            while ``ava status`` and ``ava cluster health-probe`` believed a bare
-            2xx, so an occupant read green on exactly the surface a human reads.
+            2xx (`cli.commands._probe`). It exists as a field rather than being
+            re-derived per consumer: the alternative let watchdog verify identity
+            while operator surfaces trusted a bare 2xx from an occupant.
         gate: optional predicate returning a gate reason (a string = gated OUT of
             the start roster + why, None = will start). When set it OVERRIDES the
-            built-in ``_gate_reason`` lookup, so a service can carry its own gate
-            instead of adding a branch to the central function — used by
-            plugin-registered services (e.g. task-maintenance's
-            ``AVA_TASK_MAINTENANCE_ENABLED`` toggle) so the fleet-domain gate
-            travels with the plugin, not ops. Core services still flow through
-            ``_gate_reason``.
+            built-in ``_gate_reason`` lookup, so a plugin service carries its own
+            domain gate instead of adding a central branch; core services still
+            flow through ``_gate_reason``.
+        before_launch: optional preflight run immediately before creating the
+            session, for a service-specific safe takeover.
         no_profile_marker: True = the launcher sets NO ``AVA_PROCESS_PROFILE``
             for this service's session, so the process boots profile-less (full
             Settings construction, no env-authority pop). Default False = the
@@ -169,6 +164,7 @@ class ServiceSpec:
     tcp_port: int | None = None
     gate: Callable[[], str | None] | None = None
     identity_probe: Callable[[], DaemonProbe] | None = None
+    before_launch: Callable[[], None] | None = None
     no_profile_marker: bool = False
 
 
@@ -246,6 +242,7 @@ def build_services() -> tuple[ServiceSpec, ...]:
     # re-derived here — the gate PROXIES to this port, so a second derivation that
     # drifts is a gate forwarding to nothing.
     from services.gate.daemon import app_port
+    from services.healthchecks.otel_collector import probe_collector, take_over_stale_collector
 
     _fe_port = app_port()
     _fe_url = f"http://localhost:{_fe_port}"
@@ -538,9 +535,10 @@ def build_services() -> tuple[ServiceSpec, ...]:
             cmd=f"{otel_collector_binary()} --config {otel_collector_config()}",
             capabilities=_BOTH,
             requires_db=False,
-            # The healthcheck POSTs a valid empty ExportTraceServiceRequest and
-            # requires 2xx; a bare TCP connect, 401, or 415 is not ingestion.
+            # The healthcheck POSTs a valid empty ExportTraceServiceRequest; bare TCP is insufficient.
             tcp_port=4318,
+            identity_probe=probe_collector,
+            before_launch=take_over_stale_collector,
             healthcheck_module="services.healthchecks.otel_collector",
         ),
     )

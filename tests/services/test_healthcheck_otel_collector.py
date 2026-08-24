@@ -14,6 +14,7 @@ import urllib.request
 import pytest
 
 from services.healthchecks import otel_collector as hc
+from shared.daemon_health import DaemonProbe
 
 
 def test_is_alive_rejecting_valid_otlp_is_not_healthy(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -70,16 +71,45 @@ def test_is_alive_connection_refused(monkeypatch: pytest.MonkeyPatch) -> None:
     assert hc._is_alive() is False
 
 
-def test_restart_invokes_respawn_service(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`_restart_daemon` respawns the collector with the roster's command."""
+def test_restart_invokes_verified_respawn(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`_restart_daemon` takes over stale holders and verifies the roster command."""
 
-    def fake_respawn(session: str, cmd: str, _repo, **kwargs) -> bool:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+    took_over: list[int] = []
+
+    def fake_respawn(session: str, cmd: str, _repo, **kwargs) -> DaemonProbe:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
         assert session == "otel-collector"
         assert "otelcol-contrib" in cmd and "config.yaml" in cmd
-        return True
+        assert kwargs["verify"] is hc.probe_collector
+        return DaemonProbe.up("collector pid 222")
 
-    monkeypatch.setattr(hc, "respawn_service", fake_respawn)  # pyright: ignore[reportUnknownArgumentType]
-    assert hc._restart_daemon() is True
+    monkeypatch.setattr(hc, "take_over_stale_collector", lambda: took_over.append(1))
+    monkeypatch.setattr(hc, "respawn_and_verify", fake_respawn)  # pyright: ignore[reportUnknownArgumentType]
+    assert hc._restart_daemon().alive is True
+    assert took_over == [1]
+
+
+def test_main_restarts_a_stale_collector_even_when_its_otlp_port_answers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A stale collector's 2xx cannot suppress the restarter's recovery path."""
+    monkeypatch.setattr(hc, "init_gateway_process", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(hc, "_is_alive", lambda: True)
+    monkeypatch.setattr(
+        hc,
+        "probe_collector",
+        lambda: DaemonProbe.down("collector pid 1109 has no live ava-otel-collector record"),
+        raising=False,
+    )
+    restarts: list[int] = []
+    monkeypatch.setattr(
+        hc,
+        "_restart_daemon",
+        lambda: (restarts.append(1), DaemonProbe.up("collector pid 222"))[1],
+    )
+
+    hc.main()
+
+    assert restarts == [1]
 
 
 def test_queue_pressure_reports_full_queue_and_drop_counter(
@@ -127,6 +157,7 @@ def test_main_warns_on_queue_pressure_without_restart_loop(
 
     monkeypatch.setattr(hc, "init_gateway_process", _ignore_process_init)
     monkeypatch.setattr(hc, "_is_alive", lambda: True)
+    monkeypatch.setattr(hc, "probe_collector", lambda: DaemonProbe.up("collector pid 111"))
     monkeypatch.setattr(hc, "_queue_pressure", lambda: pressure)
     monkeypatch.setattr(
         hc,
