@@ -6,25 +6,19 @@
 > **Update 2026-06-09: the local leg landed.** `services/backup.py` runs a
 > daily `pg_dump --format=custom` on the gateway host via the watchdog tick
 > (03:00 local, `$AVA_HOME/backups/db/`, `BACKUP_KEEP=1` — retention was cut
-> from 3 to 1 in #832 when daily dumps filled the Mac mini's disk) — see `.agents/skills/recover-a-cluster/references/db-restore.md`. The old R2-era `scripts/pg_backup.sh` was removed
+> from 3 to 1 in #832 when daily dumps filled the Mac mini's disk) — see `.agents/skills/operating-ava-cluster/references/db-restore.md`. The old R2-era `scripts/pg_backup.sh` was removed
 > with it. Local dumps cover bad migrations / accidental deletes / DB
 > corruption; what remains open here is the **disk-loss** scenario — and a
 > one-dump local window makes the off-site leg below the *only* history.
 >
-> **Update 2026-08-08 (#1035): the dump excludes the LangGraph runtime tables**
-> (`checkpoint_blobs` / `checkpoints` / `checkpoint_writes` — `_EXCLUDE_TABLES`
-> in `services/backup.py`). checkpoint_blobs alone outgrew the dump's 30-min
-> ceiling and dead-looped the backup (dump killed → partial swept → retry →
-> killed; the old dump never pruned, disk stuck ~90%). The checkpoints are
-> RUNTIME execution state, not the system of record — the conversation stream
-> lives in the `events` table (the unified read path since the W9 cutover),
-> which IS dumped; checkpoints are rebuildable from events (the reconstruction
-> was proven by `scripts/preview/rebuild-checkpoints.py`, since removed with
-> its hardcoded secret — re-derive from `git show bdad80caa` if ever needed).
-> A restore loses in-flight graph state (pending interrupts), not history.
-> The remaining DB dumps in ~1 min at ~0.7 GB; `_DUMP_TIMEOUT_S` is 60 min of
-> pure headroom. The excluded tables' unbounded growth (18 GB and counting,
-> no retention) is a separate open item — a checkpoint retention policy.
+> **Update 2026-08-25 (#1553): the dump includes the LangGraph checkpoint
+> tables** (`checkpoint_blobs` / `checkpoints` / `checkpoint_writes`) because
+> they are the only copy of full conversation history. The Postgres `events`
+> table is a frozen archive; the live event stream is in Loki. Each completed
+> dump is encrypted before publication, and the restore drill validates a
+> decrypted artifact in an isolated Postgres instance. The measured full dump
+> is about 849 MiB and 6.3 minutes; `_DUMP_TIMEOUT_S` remains 60 minutes of
+> headroom. Checkpoint retention is owned separately by the checkpoint reaper.
 >
 > **Update 2026-08-19: the two clocks are pinned.** `BACKUP_HOUR = 3` is read
 > on the **cluster** wall clock (`AVA_TIMEZONE`), and dumps are named in UTC
@@ -38,10 +32,15 @@
 
 ## Future work
 
-1. **Add the off-site leg.** `services/backup.py:run_backup` is structured as
-   `dump -> (upload slot) -> prune`; an off-site backend (GCS bucket +
-   service-account creds, or a re-minted R2 token) is an upload step between
-   the dump and the prune, plus a remote lifecycle/retention rule.
-2. **Run a restore drill.** Pull the latest dump → `pg_restore` into a scratch
-   PG → spot-check row counts. The restore path has never been exercised; it
-   is not a backup until it has been restored once.
+1. **Off-site encrypted copy — delivered.** After encryption and before local
+   pruning, the gateway copies the published artifact to the existing writable
+   Google Drive sync folder in a cluster-scoped backup directory, verifies its
+   byte count, and applies the same seven-artifact lifecycle there. The copy is
+   encrypted before it reaches Drive; a missing or non-writable sync folder
+   warns without discarding the local backup. Object storage remains a future
+   alternative when a host cannot use Drive.
+2. **Restore drill — delivered.** `scripts/restore_drill.py` decrypts the
+   latest managed artifact (or a supplied path), restores it into scratch
+   Postgres, and validates schema, agent rows, checkpoint rows, a checkpoint
+   reader sample, and a service smoke. The operator schedules the first
+   production-sized execution separately.
