@@ -417,6 +417,18 @@ CREATE TABLE ledger_unpriced_backfill_20260824 (
     cost_usd       DOUBLE PRECISION
 );
 
+-- One row per Loki-sourced rollup day. source_count is the event-family count
+-- observed at the last successful roll; failed days remain dirty until a later
+-- pass can replace the failure marker with a successful watermark.
+CREATE TABLE rollup_day_state (
+    day          DATE PRIMARY KEY,
+    status       TEXT NOT NULL DEFAULT 'rolled'
+                 CHECK (status IN ('rolled', 'failed')),
+    source_count BIGINT NOT NULL,
+    rolled_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    error        TEXT
+);
+
 -- ─────────────── alerts (system→human alert store, Task #1224) ───────────────
 -- One row = one alert instance, in the Alertmanager standard webhook payload
 -- shape (status + labels + annotations + startsAt/endsAt + fingerprint +

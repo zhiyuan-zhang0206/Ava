@@ -7,9 +7,8 @@ Checks whether the events-maintenance daemon is alive:
   (`shared.service_respawn.run_keepalive` holds the shared policy)
 
 The rollup is idempotent and self-catching-up; no catchup logic is needed when
-the daemon dies — the next poll re-rolls the whole tail (start day is anchored to
-the last rolled day, end is always yesterday), so a downtime gap is recovered on
-the first run after respawn.
+the daemon dies — the next poll resumes the retained dirty-day watermark scan,
+so untouched or failed days are retried without repeating clean full rerolls.
 
 Usage (watchdog / crontab):
     * * * * * cd /path/to/ava && .venv/bin/python -m services.healthchecks.events_maintenance

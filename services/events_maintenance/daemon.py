@@ -56,7 +56,7 @@ import logging
 import os
 import sys
 from collections.abc import Callable
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 import psycopg
 from psycopg_pool import ConnectionPool
@@ -79,7 +79,6 @@ from shared.daemon_health import Liveness, health_port, start_health_server, sto
 from shared.daemon_shutdown import install_graceful_shutdown
 from shared.events.contract import EVENTS, RETENTION_BY_CATEGORY, retention_days
 from shared.log import init_gateway_process
-from shared.loki_index_labels import EVENT_STREAM_RETENTION
 from shared.paths import legacy_pid_path
 
 _log = logging.getLogger("services.events_maintenance.daemon")
@@ -87,11 +86,6 @@ _log = logging.getLogger("services.events_maintenance.daemon")
 _PIDFILE = settings.services.events_maintenance_pidfile
 _LIVENESS_TIMEOUT_S = 60.0
 _LIVENESS_BEAT_STEP_S = 30.0
-
-# Recompute all Loki-retained closed days: a late write anywhere in retained
-# history must reach the durable ledger. The extra daily work is bounded by
-# retention itself.
-_LOOKBACK_DAYS = int(EVENT_STREAM_RETENTION / timedelta(days=1))
 
 # Cadence of the Rule A fast loop. #1197 removed the ops-rollup fast loop this
 # pass rode on, silently killing Rule A (trim_overgrown_threads became dead
@@ -167,7 +161,7 @@ def _run_maintenance(pool: ConnectionPool) -> None:
         if reindex_result.summary():
             _log.info("[events-maintenance] index governance: %s", reindex_result.summary())
     with pool.connection() as conn:
-        result = compute_rollup(conn, now_utc=now, lookback_days=_LOOKBACK_DAYS)
+        result = compute_rollup(conn, now_utc=now)
     if result.start_day is not None:
         _log.info(
             "[events-maintenance] rolled %s..%s — %d metric rows, %d token rows",
@@ -278,13 +272,12 @@ async def _dispatch_loop(pool: ConnectionPool, liveness: Liveness) -> None:
     not block the healthz event loop. The inter-run sleep is OUTSIDE the try, so a
     transient failure waits a full interval before retrying instead of hot-looping
     against Postgres (the rollup is idempotent and self-catching-up — the next run
-    re-rolls the whole tail — so there is no value in an immediate retry)."""
+    re-probes dirty days — so there is no value in an immediate retry)."""
     interval = settings.daemon.events_maintenance_interval_seconds
     _log.info(
-        "[events-maintenance] daemon started, pid=%s, interval=%.0fs, lookback=%dd",
+        "[events-maintenance] daemon started, pid=%s, interval=%.0fs",
         os.getpid(),
         interval,
-        _LOOKBACK_DAYS,
     )
     while True:
         try:

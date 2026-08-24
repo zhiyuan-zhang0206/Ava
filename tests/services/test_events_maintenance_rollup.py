@@ -16,16 +16,19 @@ clock; the retention floor derives from it the same way.
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
+from contextlib import contextmanager
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import LiteralString, cast
 
 import psycopg
 import pytest
+from pydantic import ValidationError
 
 from services.events_maintenance import rollup
 from services.events_maintenance.rollup import MetricsRow, RollupResult, TokensRow, compute_rollup
+from shared.config.daemon import DaemonSettings
 from shared.loki_index_labels import INDEX_LABEL_CUTOVER_AT, LokiReadEra, LokiReadSlice
 
 # A fixed "now" so today = 2026-06-10 (UTC); rolled days are 06-07..06-09.
@@ -96,6 +99,16 @@ class _FakeLokiDays:
         return self.days.get(day, ([], []))
 
 
+class _FakeSourceCounts:
+    def __init__(self, counts: Mapping[date, int | None]) -> None:
+        self.counts = counts
+        self.queried: list[date] = []
+
+    def __call__(self, day: date) -> int | None:
+        self.queried.append(day)
+        return self.counts.get(day, 0)
+
+
 def _fetch_tokens(db: psycopg.Connection) -> dict[tuple[int, str, str], tuple[object, ...]]:
     with db.cursor() as cur:
         cur.execute(
@@ -115,6 +128,20 @@ def _fetch_metrics(db: psycopg.Connection) -> dict[tuple[int, str], tuple[object
         return {(r[0], r[1]): tuple(r[2:]) for r in cur.fetchall()}
 
 
+def _fetch_state(db: psycopg.Connection) -> dict[str, tuple[str, int, str | None]]:
+    with db.cursor() as cur:
+        cur.execute("SELECT day::text, status, source_count, error FROM rollup_day_state")
+        return {row[0]: (row[1], row[2], row[3]) for row in cur.fetchall()}
+
+
+def _state(db: psycopg.Connection, day: date, count: int, status: str = "rolled") -> None:
+    with db.cursor() as cur:
+        cur.execute(
+            "INSERT INTO rollup_day_state (day, status, source_count) VALUES (%s, %s, %s)",
+            (day, status, count),
+        )
+
+
 def _roll(
     db: psycopg.Connection,
     fake: _FakeLokiDays,
@@ -122,9 +149,20 @@ def _roll(
     *,
     now: datetime = _NOW,
     lookback: int = 1,
+    counts: dict[date, int | None] | None = None,
+    pass_deadline_s: float | None = None,
 ) -> RollupResult:
     monkeypatch.setattr(rollup, "_day_aggregates", fake)
-    return compute_rollup(db, now_utc=now, lookback_days=lookback)
+    inferred = {day: int(bool(tokens or metrics)) for day, (tokens, metrics) in fake.days.items()}
+    monkeypatch.setattr(
+        rollup, "_day_source_count", _FakeSourceCounts(counts or inferred), raising=False
+    )
+    return compute_rollup(
+        db,
+        now_utc=now,
+        lookback_days=lookback,
+        pass_deadline_s=pass_deadline_s,
+    )
 
 
 def _cutover_query(
@@ -145,6 +183,39 @@ def _cutover_query(
         return [(labels, value)]
 
     return query
+
+
+def test_query_instant_enters_the_daemon_budget(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert hasattr(rollup, "_query_budget")
+    assert rollup._query_budget._capacity == 1
+    transitions: list[str] = []
+
+    class FakeBudget:
+        @contextmanager
+        def slot(self):  # pyright: ignore[reportUnknownParameterType, reportMissingReturnType]
+            transitions.append("entered")
+            yield
+            transitions.append("released")
+
+    class FakeResponse:
+        def __enter__(self) -> FakeResponse:
+            assert transitions == ["entered"]
+            return self
+
+        def __exit__(self, *_exc: object) -> None:
+            return None
+
+        def read(self) -> bytes:
+            return b'{"data":{"result":[]}}'
+
+    def open_response(*_args: object, **_kwargs: object) -> FakeResponse:
+        return FakeResponse()
+
+    monkeypatch.setattr(rollup, "_query_budget", FakeBudget())
+    monkeypatch.setattr(rollup.urllib.request, "urlopen", open_response)
+
+    assert rollup._query_instant('sum(rate({service_name="test"}[1m]))', _NOW) == []
+    assert transitions == ["entered", "released"]
 
 
 # ── happy path ────────────────────────────────────────────────────────────────
@@ -222,10 +293,56 @@ def test_unknown_agent_rows_are_skipped_without_aborting_rollup(
     assert "metrics rows dropped: 1" in warnings[0]
 
 
-def test_no_data_is_noop_rows(db: psycopg.Connection, monkeypatch: pytest.MonkeyPatch) -> None:
-    result = _roll(db, _FakeLokiDays({}), monkeypatch)
+def test_first_pass_rolls_the_whole_retained_window_once(
+    db: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake = _FakeLokiDays({})
+    result = _roll(db, fake, monkeypatch)
+    expected = [_FLOOR + timedelta(days=offset) for offset in range(6)]
+    assert fake.queried == expected
+    assert _fetch_state(db) == {str(day): ("rolled", 0, None) for day in expected}
     assert result.tokens_rows == 0 and result.metrics_rows == 0
     assert _fetch_tokens(db) == {}
+
+
+def test_matching_source_count_skips_full_reroll(
+    db: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    day = date(2026, 6, 9)
+    _state(db, day, 7)
+    fake = _FakeLokiDays({day: ([], [])})
+    result = _roll(db, fake, monkeypatch, lookback=0, counts={day: 7})
+    assert result == RollupResult(None, None, 0, 0)
+    assert fake.queried == []
+    assert _fetch_state(db)[str(day)] == ("rolled", 7, None)
+
+
+def test_changed_source_count_rerolls_and_advances_watermark(
+    db: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    aid = _agent(db)
+    day = date(2026, 6, 9)
+    _state(db, day, 1)
+    fake = _FakeLokiDays({day: ([_tokens_row(aid)], [])})
+    result = _roll(db, fake, monkeypatch, lookback=0, counts={day: 2})
+    assert result == RollupResult(day, day, 0, 1)
+    assert fake.queried == [day]
+    assert _fetch_state(db)[str(day)] == ("rolled", 2, None)
+
+
+def test_failed_day_stays_dirty_until_success(
+    db: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    aid = _agent(db)
+    failed_day = date(2026, 6, 7)
+    yesterday = date(2026, 6, 9)
+    _state(db, failed_day, 1, "failed")
+    _state(db, yesterday, 1)
+    fake = _FakeLokiDays({failed_day: ([], [_metrics_row(aid)])})
+    result = _roll(db, fake, monkeypatch, lookback=0, counts={failed_day: 1, yesterday: 1})
+    assert result == RollupResult(failed_day, failed_day, 1, 0)
+    assert fake.queried == [failed_day]
+    assert _fetch_state(db)[str(failed_day)] == ("rolled", 1, None)
 
 
 def test_rerun_is_idempotent(db: psycopg.Connection, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -245,7 +362,9 @@ def test_late_write_lookback_re_rolls_closed_day(
     _roll(db, _FakeLokiDays({day: ([_tokens_row(aid, calls=1, tokens_in=10)], [])}), monkeypatch)
     # A late OTLP write raised the day's totals — the lookback re-roll
     # overwrites with the new full-day aggregate.
-    _roll(db, _FakeLokiDays({day: ([_tokens_row(aid, calls=2, tokens_in=20)], [])}), monkeypatch)
+    reroll = _FakeLokiDays({day: ([_tokens_row(aid, calls=2, tokens_in=20)], [])})
+    _roll(db, reroll, monkeypatch)
+    assert reroll.queried == [day]
     assert _fetch_tokens(db)[(aid, "2026-06-09", "m1")][0] == 2
     assert _fetch_tokens(db)[(aid, "2026-06-09", "m1")][1] == 20
 
@@ -263,6 +382,7 @@ def test_zero_row_indexed_slice_refuses_day_rewrite(
             "costed_calls, unpriced_calls) VALUES (%s, %s, 'm1', 7, 70, 35, 7, 3, 1.25, 7, 0)",
             (aid, day),
         )
+    _state(db, day, 1, "failed")
     warnings: list[str] = []
     populated_query = _cutover_query(aid, indexed_value=2.0)
     cutover_day_end = datetime.combine(next_day, datetime.min.time(), tzinfo=UTC)
@@ -290,6 +410,7 @@ def test_zero_row_indexed_slice_refuses_day_rewrite(
     assert len(warnings) == 1
     assert str(day) in warnings[0]
     assert "indexed slice returned zero rows" in warnings[0]
+    assert _fetch_state(db)[str(day)][0] == "failed"
 
 
 def test_nonzero_indexed_slice_rewrites_day(
@@ -303,6 +424,7 @@ def test_nonzero_indexed_slice_rewrites_day(
             "VALUES (%s, %s, 'm1', 7)",
             (aid, day),
         )
+    _state(db, day, 1, "failed")
     monkeypatch.setattr(rollup, "_query_instant", _cutover_query(aid, indexed_value=2.0))
 
     result = compute_rollup(
@@ -358,11 +480,10 @@ def test_gap_beyond_retention_clamps_and_continues(
     assert (aid, "2026-06-09", "m1") in _fetch_tokens(db)
 
 
-def test_nothing_rollable_yet_is_noop(
+def test_missing_state_triggers_catchup_despite_existing_ledger(
     db: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """When the watermark already covers yesterday and lookback 0 days remain
-    (start > yesterday), the pass is a clean no-op."""
+    """Ledger maxima are not dirty watermarks after the state migration."""
     aid = _agent(db)
     with db.cursor() as cur:
         cur.execute(
@@ -372,13 +493,103 @@ def test_nothing_rollable_yet_is_noop(
         )
     fake = _FakeLokiDays({})
     result = _roll(db, fake, monkeypatch, lookback=0)
-    # lookback 0 -> start = max rolled day (06-09) - 0 = 06-09 <= yesterday:
-    # still re-rolls yesterday once (overwrite-idempotent), so use a stricter
-    # now where yesterday is already covered by the watermark minus lookback.
-    assert result.end_day == date(2026, 6, 9)
+    assert result == RollupResult(_FLOOR, date(2026, 6, 9), 0, 0)
+    assert fake.queried == [_FLOOR + timedelta(days=offset) for offset in range(6)]
+
+
+def test_pass_deadline_stops_before_remaining_dirty_days(
+    db: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    days = [_FLOOR + timedelta(days=offset) for offset in range(6)]
+    for day in days:
+        _state(db, day, 0, "failed")
+    clock = [0.0]
+    queried: list[date] = []
+
+    def slow_aggregates(day: date) -> tuple[list[TokensRow], list[MetricsRow]]:
+        queried.append(day)
+        clock[0] = 2.0
+        return [], []
+
+    warnings: list[str] = []
+
+    def capture_warning(message: object) -> None:
+        warnings.append(str(message))
+
+    monkeypatch.setattr(rollup, "_day_aggregates", slow_aggregates)
+    monkeypatch.setattr(rollup, "_day_source_count", _FakeSourceCounts({}))
+    monkeypatch.setattr(rollup.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(rollup.logger, "warning", capture_warning)
+
+    result = compute_rollup(db, now_utc=_NOW, lookback_days=0, pass_deadline_s=1.0)
+
+    assert result == RollupResult(days[0], days[0], 0, 0)
+    assert queried == [days[0]]
+    state = _fetch_state(db)
+    assert state[str(days[0])][0] == "rolled"
+    assert all(state[str(day)][0] == "failed" for day in days[1:])
+    assert str(days[1]) in warnings[-1] and str(days[-1]) in warnings[-1]
+
+
+def test_probe_failure_rerolls_but_keeps_previous_watermark(
+    db: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    aid = _agent(db)
+    day = date(2026, 6, 9)
+    _state(db, day, 5)
+    fake = _FakeLokiDays({day: ([_tokens_row(aid)], [])})
+    warnings: list[str] = []
+
+    def capture_warning(message: object) -> None:
+        warnings.append(str(message))
+
+    monkeypatch.setattr(rollup.logger, "warning", capture_warning)
+
+    result = _roll(db, fake, monkeypatch, lookback=0, counts={day: None})
+
+    assert result == RollupResult(day, day, 0, 1)
+    assert fake.queried == [day]
+    assert _fetch_state(db)[str(day)] == ("rolled", 5, None)
+    assert any("source-count probe failed" in warning for warning in warnings)
 
 
 # ── the archive backfill migration ───────────────────────────────────────────
+
+
+def test_rollup_day_state_migration_creates_writable_watermark(
+    db: psycopg.Connection,
+) -> None:
+    migrations = sorted(
+        (Path(__file__).resolve().parents[2] / "migrations").glob("*_rollup-day-state.sql")
+    )
+    assert len(migrations) == 1
+    migration_sql = cast(LiteralString, migrations[0].read_text())
+    with db.cursor() as cur:
+        cur.execute("DROP TABLE IF EXISTS rollup_day_state")
+        cur.execute(migration_sql)
+        cur.execute(migration_sql)  # baseline convergence and repeated apply are safe
+        cur.execute(
+            "INSERT INTO rollup_day_state (day, source_count) VALUES (%s, %s)",
+            (date(2026, 6, 9), 7),
+        )
+        cur.execute(
+            "SELECT status, source_count, error FROM rollup_day_state WHERE day = %s",
+            (date(2026, 6, 9),),
+        )
+        assert cur.fetchone() == ("rolled", 7, None)
+
+
+def test_rollup_settings_defaults_aliases_and_lookback_bound() -> None:
+    fields = DaemonSettings.model_fields
+    assert fields["events_rollup_pass_deadline_s"].default == 1200.0
+    assert fields["events_rollup_pass_deadline_s"].alias == "AVA_EVENTS_ROLLUP_PASS_DEADLINE_S"
+    assert fields["events_rollup_late_write_lookback_days"].default == 1
+    assert (
+        fields["events_rollup_late_write_lookback_days"].alias
+        == "AVA_EVENTS_ROLLUP_LATE_WRITE_LOOKBACK_DAYS"
+    )
+    with pytest.raises(ValidationError):
+        DaemonSettings.model_validate({"AVA_EVENTS_ROLLUP_LATE_WRITE_LOOKBACK_DAYS": 0})
 
 
 def test_migration_backfills_cost_columns_from_events(db: psycopg.Connection) -> None:
@@ -477,6 +688,23 @@ def test_metrics_queries_shapes() -> None:
     assert q["turn_dur_min"].startswith("min by (agent_id) (min_over_time(")
     assert 'event_name_extracted=~"exec_.+|exec\\\\(.*"' in q["exec_failed"]
     assert 'event_name_extracted=~"exec"' in q["exec_ok"]
+
+
+def test_source_count_query_uses_the_union_body_truth_pipeline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, datetime]] = []
+
+    def query(logql: str, at: datetime) -> list[tuple[dict[str, str], float]]:
+        calls.append((logql, at))
+        return [({}, 5.0)]
+
+    monkeypatch.setattr(rollup, "_query_instant", query)
+    assert rollup._day_source_count(date(2026, 6, 9)) == 5
+    assert len(calls) == 1
+    logql, _at = calls[0]
+    assert logql.startswith("sum(count_over_time((") and logql.endswith(")[86400s]))")
+    assert 'event_name_extracted=~"llm_usage|turn_end|exec|exec_.+|exec\\\\(.*"' in logql
 
 
 def test_cutover_day_merges_legacy_and_indexed_rollups(monkeypatch: pytest.MonkeyPatch) -> None:

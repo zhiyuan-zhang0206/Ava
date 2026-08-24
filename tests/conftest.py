@@ -560,6 +560,7 @@ _PER_TEST_TRUNCATE_TABLES = (
     "agents_meta",
     "events",
     "event_dismissals",
+    "rollup_day_state",
     "agents",
     "ledger_unpriced_backfill_20260824",
     "alerts",

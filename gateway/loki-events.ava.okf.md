@@ -93,8 +93,9 @@ structured metadata.
 - Every query runs through one long-lived module-level `httpx.Client`
   (the lazy `_client()` accessor — the seam tests swap): connection reuse
   across the gateway's fan-out reads instead of a TCP connection per query.
-- Every HTTP query also crosses the process-wide FIFO budget in
-  `gateway/loki_query_budget.py`: four active slots, matching Loki's deployed
+- Every HTTP query also crosses the gateway process's FIFO singleton in
+  `gateway/loki_query_budget.py`: its reusable state machine lives in
+  `shared/loki_query_budget.py`; the gateway adapter supplies four active slots, matching Loki's deployed
   `querier.max_concurrent`, plus a bounded waiter queue and 10s acquisition
   deadline. Inspect, stats, events, and ops therefore share one backpressure
   boundary; timeout/cancellation always releases the slot. `queue_full` and

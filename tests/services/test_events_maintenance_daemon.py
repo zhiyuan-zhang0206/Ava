@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import asyncio
 import time
-from datetime import timedelta
 from typing import Any, cast
 
 import pytest
@@ -26,7 +25,6 @@ from psycopg_pool import ConnectionPool
 
 from services.events_maintenance import daemon
 from shared.daemon_health import Liveness
-from shared.loki_index_labels import EVENT_STREAM_RETENTION
 
 # The pool is never touched — `_run_maintenance` / `_maintenance_with_liveness` are faked.
 _FAKE_POOL: Any = object()
@@ -46,10 +44,6 @@ class _FakePool:
 
     def connection(self) -> _FakePool._Conn:
         return self._Conn()
-
-
-def test_rollup_lookback_covers_all_retained_days() -> None:
-    assert daemon._LOOKBACK_DAYS == int(EVENT_STREAM_RETENTION / timedelta(days=1)) == 7
 
 
 def test_liveness_beaten_during_slow_rollup(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -106,9 +100,11 @@ class _CallRecorder:
     def __init__(self, result: Any) -> None:
         self.result = result
         self.calls = 0
+        self.kwargs: list[dict[str, object]] = []
 
     def __call__(self, *args: object, **kwargs: object) -> Any:
         self.calls += 1
+        self.kwargs.append(kwargs)
         return self.result
 
 
@@ -160,6 +156,7 @@ def test_maintenance_pass_reaps_when_events_disabled(monkeypatch: pytest.MonkeyP
     daemon._run_maintenance(cast(ConnectionPool, _FakePool()))  # every slice faked
 
     assert rec["rollup"].calls == 1
+    assert set(rec["rollup"].kwargs[0]) == {"now_utc"}
     assert rec["reap"].calls == 1
     assert rec["vacuum"].calls == 1
     for name in _EVENTS_SLICES:
