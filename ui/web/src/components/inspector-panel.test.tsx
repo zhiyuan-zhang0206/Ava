@@ -842,17 +842,20 @@ describe("InspectorPanel birth (cell in the merged Liveness section, Task #1195)
       );
       render(<InspectorPanel agentId={1} />);
       await waitFor(() => expect(screen.getByText("Birth")).toBeTruthy());
-      // Two lines inside the cell: relative on the value line, absolute below
-      // (the old single-line "1mo ago, 2026-06-14 Sun 12:00:00" moved into
-      // the 2×2 grid, Task #1195). Assert against the shared helper's own
-      // output — not a reimplementation of it (tz audit, 2026-08: the prior
-      // version of this test re-derived the formatting and asserted against
-      // itself, so a regression in the component's actual formatting call
-      // would never fail it).
-      expect(screen.getByText(formatRelative(spawned))).toBeTruthy();
-      expect(screen.getByText(formatAbsolute(spawned))).toBeTruthy();
+      // One line inside the cell: "relative, absolute" (user ruling 2026-08-24:
+      // relative + absolute joined by a comma on a single line, e.g.
+      // "3d ago, 2026-08-21 17:02:31 GMT+8"). Assert against the shared
+      // helper's own output — not a reimplementation of it (tz audit, 2026-08:
+      // the prior version of this test re-derived the formatting and asserted
+      // against itself, so a regression in the component's actual formatting
+      // call would never fail it).
+      expect(
+        screen.getByText(`${formatRelative(spawned)}, ${formatAbsolute(spawned)}`),
+      ).toBeTruthy();
       // …anchored to the spawn time, not the (possibly refreshed) started_at.
-      expect(screen.queryByText(formatAbsolute(started))).toBeNull();
+      expect(
+        screen.queryByText(`${formatRelative(started)}, ${formatAbsolute(started)}`),
+      ).toBeNull();
     }
   });
 });
