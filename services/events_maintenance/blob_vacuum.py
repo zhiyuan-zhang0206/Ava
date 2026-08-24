@@ -116,7 +116,7 @@ def vacuum_checkpoint_tables(conn: Any) -> VacuumResult:
         after = _physical_state(cur)
     result = VacuumResult(ran=True, total_bytes=after[0], dead_tuples=after[1])
     logger.info(
-        "[events-maintenance] blob vacuum: %s (before=%sMB dead=%s)",
+        "[events-maintenance] blob vacuum: {} (before={}MB dead={})",
         result.summary(),
         _mb(before[0]),
         before[1],

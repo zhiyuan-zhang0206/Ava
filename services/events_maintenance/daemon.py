@@ -21,7 +21,7 @@ loops:
   (`services.events_maintenance.blob_vacuum`).
 - Fast loop (60s): Rule A — trim overgrown LIVE threads
   (`services.events_maintenance.checkpoint_reaper.trim_overgrown_threads`,
-  keep=5 past 20), replacing the removed agent-side idle trim.
+  keep=2 past 20), replacing the removed agent-side idle trim.
 
 The events-archive slices only run when `AVA_EVENTS_MAINTENANCE_ENABLED` is
 set. Since the LGTM cutover (task #1197) the PG `events` copy is a read-only
