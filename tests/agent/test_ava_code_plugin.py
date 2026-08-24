@@ -1,6 +1,6 @@
-"""`plugins.ava_code` integration tests — ava.cwd namespace, files.read wrap, AGENTS.md
-injection dedup. Plugin import uses `_load_extensions` real path loading, testing the whole
-register_plugin_state + register_namespace + wrap end-to-end behavior.
+"""`plugins.ava_code` integration tests — ava.cwd namespace, files.read and ui.serve wraps,
+AGENTS.md injection dedup. Plugin import uses `_load_extensions` real path loading, testing
+the whole register_plugin_state + register_namespace + wrap end-to-end behavior.
 """
 
 import io
@@ -876,6 +876,59 @@ def test_shell_run_wrap_passes_logical_cwd_without_changing_process_cwd(tmp_path
     finally:
         ava.state = None
         ava.state_update = None
+
+
+# ── ava.ui.serve wrap ─────────────────────────────────────────────────────
+
+
+def test_serve_wrap_resolves_relative_dir_against_cwd(tmp_path: Path):
+    from ava_builtins.plugins.ava_code.plugin import _wrapped_serve
+
+    captured: dict[str, object] = {}
+
+    def fake_inner(dir: str, name: str, port: int | None = None, title: str | None = None) -> str:
+        captured.update(dir=dir, name=name, port=port, title=title)
+        return "served"
+
+    ava.state = _make_state_with_cwd(str(tmp_path))
+    ava.state_update = {}
+    try:
+        assert _wrapped_serve(fake_inner, "site", "preview", port=8123, title="Preview") == "served"
+        assert captured == {
+            "dir": str((tmp_path / "site").resolve()),
+            "name": "preview",
+            "port": 8123,
+            "title": "Preview",
+        }
+    finally:
+        ava.state = None
+        ava.state_update = None
+
+
+def test_serve_wrap_passes_absolute_dir_through(tmp_path: Path):
+    from ava_builtins.plugins.ava_code.plugin import _wrapped_serve
+
+    captured: dict[str, object] = {}
+
+    def fake_inner(dir: str, name: str, port: int | None = None, title: str | None = None) -> str:
+        captured.update(dir=dir, name=name, port=port, title=title)
+        return "served"
+
+    logical_cwd = tmp_path / "cwd"
+    logical_cwd.mkdir()
+    absolute_dir = tmp_path / "site"
+    ava.state = _make_state_with_cwd(str(logical_cwd))
+    ava.state_update = {}
+    try:
+        assert _wrapped_serve(fake_inner, str(absolute_dir), "preview") == "served"
+        assert captured["dir"] == str(absolute_dir.resolve())
+    finally:
+        ava.state = None
+        ava.state_update = None
+
+
+def test_serve_wrap_registered():
+    assert ava.extend.stack("ui.serve")
 
 
 # ── project-local skill source (set_cwd surfaces + records) ────────────────

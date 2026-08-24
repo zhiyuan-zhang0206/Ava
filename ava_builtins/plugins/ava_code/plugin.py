@@ -4,7 +4,8 @@ Two pieces, cwd and context-file injection:
 - cwd: `ava_code__cwd` state field (default: the agent's workspace dir; $HOME
   when no process identity is bound); the agent reads/writes via
   `ava.cwd.get` / `set`; the wraps use it to resolve relative paths in
-  `ava.files.*` / `ava.shell.run` / each `ava.understand` target's `paths`.
+  `ava.files.*` / `ava.shell.run` / each `ava.understand` target's `paths` /
+  `ava.ui.serve`'s `dir`.
 - context-file auto-injection: wraps `ava.files.read`, walks up the resolved
   path to git root or `$HOME` (whichever is farther), and surfaces any AGENTS.md
   / CLAUDE.md files along the way as a system note (tag=CONTEXT) so the agent
@@ -34,7 +35,7 @@ from __future__ import annotations
 
 import hashlib
 from datetime import UTC, datetime
-from typing import Annotated
+from typing import Annotated, Any
 
 __description__ = "Ava Code conventions — maintains cwd and auto-injects project AGENTS.md / CLAUDE.md (walking up from ava.files.read paths)"
 
@@ -488,6 +489,26 @@ def _wrapped_understand(
 
 
 ava.extend.wrap("understand", _wrapped_understand)
+
+
+# ── wrap ava.ui.serve ────────────────────────────────────────────────────
+# serve(dir) registers the served directory with the platform; a relative
+# dir must resolve against the plugin-tracked cwd like every other SDK path
+# (files / shell / understand), not the agent process cwd — otherwise the
+# page-server daemon reports serve_dir missing and the page degrades
+# (Task #1523).
+def _wrapped_serve(
+    inner: Callable[..., Any],
+    dir: str,
+    name: str,
+    port: int | None = None,
+    title: str | None = None,
+) -> Any:
+    p = _resolve_for_cwd(dir)
+    return inner(str(p), name, port=port, title=title)
+
+
+ava.extend.wrap("ui.serve", _wrapped_serve)
 
 
 # ── system prompt section: coding tool advertising ──────────────────────────
