@@ -24,7 +24,7 @@ import httpx
 import pytest
 import yaml
 
-from gateway import loki_events, loki_query_budget
+from gateway import loki_events, loki_events_cache, loki_query_budget
 from shared.loki_index_labels import (
     EVENT_STREAM_RETENTION,
     LOKI_QUERY_CONCURRENCY,
@@ -118,6 +118,13 @@ def _fresh_query_budget() -> Any:
 
 
 @pytest.fixture(autouse=True)
+def _fresh_aggregation_cache() -> Any:
+    loki_events_cache.clear()
+    yield
+    loki_events_cache.clear()
+
+
+@pytest.fixture(autouse=True)
 def _stable_default_read_era(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep non-rollout tests independent of the wall-clock cutover date."""
 
@@ -125,6 +132,43 @@ def _stable_default_read_era(monkeypatch: pytest.MonkeyPatch) -> None:
         return (LokiReadSlice(LokiReadEra.LEGACY, *window),)
 
     monkeypatch.setattr(loki_events, "_read_slices", _single_legacy)
+
+
+def test_aggregation_cache_key_is_canonical_and_minute_aligned() -> None:
+    first = loki_events_cache.make_key(
+        "shape",
+        {"z": None, "filters": {"b": 2, "a": 1}, "names": ["turn_end"]},
+        datetime(2026, 8, 1, 0, 0, 5, tzinfo=UTC),
+        datetime(2026, 8, 1, 1, 0, 5, tzinfo=UTC),
+    )
+    second = loki_events_cache.make_key(
+        "shape",
+        {"names": ["turn_end"], "filters": {"a": 1, "b": 2}},
+        datetime(2026, 8, 1, 0, 0, 55, tzinfo=UTC),
+        datetime(2026, 8, 1, 1, 0, 55, tzinfo=UTC),
+    )
+
+    assert first == second
+
+
+def test_aggregation_cache_expires_at_ttl(monkeypatch: pytest.MonkeyPatch) -> None:
+    now = 100.0
+    monkeypatch.setattr(loki_events_cache.time, "monotonic", lambda: now)
+    key = ("shape", "params", 1, 2)
+
+    loki_events_cache.put(key, 42)
+    assert loki_events_cache.get(key) == 42
+    now += loki_events_cache.TTL_S
+    assert loki_events_cache.get(key) is None
+
+
+def test_aggregation_cache_clears_at_entry_cap() -> None:
+    for value in range(1025):
+        loki_events_cache.put((value,), value)
+
+    assert loki_events_cache.get((0,)) is None
+    assert loki_events_cache.get((1023,)) is None
+    assert loki_events_cache.get((1024,)) == 1024
 
 
 def _loki_payload(lines: list[tuple[str, str]]) -> dict[str, Any]:
@@ -975,6 +1019,46 @@ class TestQueryEvents:
 
 
 class TestCountEvents:
+    def test_count_events_cache_hit_within_minute(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        client = _install(
+            monkeypatch,
+            {"data": {"result": [{"metric": {}, "value": [1723300000, "42"]}]}},
+        )
+        from_ = datetime(2026, 8, 1, 0, 0, 5, tzinfo=UTC)
+        to = datetime(2026, 8, 1, 1, 0, 5, tzinfo=UTC)
+
+        assert loki_events.count_events(event_names=["turn_end"], from_=from_, to=to) == 42
+        assert (
+            loki_events.count_events(
+                event_names=["turn_end"],
+                from_=from_ + timedelta(seconds=40),
+                to=to + timedelta(seconds=40),
+            )
+            == 42
+        )
+        assert len(client.calls) == 1
+
+    def test_count_events_cache_miss_on_new_minute(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        client = _install(
+            monkeypatch,
+            [
+                {"data": {"result": [{"metric": {}, "value": [1723300000, "42"]}]}},
+                {"data": {"result": [{"metric": {}, "value": [1723300120, "7"]}]}},
+            ],
+        )
+        from_ = datetime(2026, 8, 1, tzinfo=UTC)
+        to = datetime(2026, 8, 1, 1, tzinfo=UTC)
+
+        assert loki_events.count_events(from_=from_, to=to) == 42
+        assert (
+            loki_events.count_events(
+                from_=from_ + timedelta(seconds=120),
+                to=to + timedelta(seconds=120),
+            )
+            == 7
+        )
+        assert len(client.calls) == 2
+
     def test_instant_query_shape(self, monkeypatch: pytest.MonkeyPatch) -> None:
         client = _install(
             monkeypatch, {"data": {"result": [{"metric": {}, "value": [1723300000, "42"]}]}}
@@ -1161,6 +1245,64 @@ class TestAttributeFilters:
 class TestAttributeAggregate:
     def _q(self, client: _FakeClient) -> str:
         return client.calls[0][1]["query"]
+
+    def test_attribute_aggregate_caches_scalar_and_list(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from_ = datetime(2026, 8, 1, tzinfo=UTC)
+        to = datetime(2026, 8, 2, tzinfo=UTC)
+        scalar_client = _install(
+            monkeypatch,
+            {"data": {"result": [{"metric": {}, "value": [1, "42.5"]}]}},
+        )
+
+        assert loki_events.attribute_aggregate(
+            field="duration_seconds", agg="sum", from_=from_, to=to
+        ) == loki_events.attribute_aggregate(
+            field="duration_seconds", agg="sum", from_=from_, to=to
+        )
+        assert len(scalar_client.calls) == 1
+
+        list_client = _install(
+            monkeypatch,
+            {
+                "data": {
+                    "result": [
+                        {"metric": {"model": "deepseek-v4-flash"}, "value": [1, "100.0"]},
+                        {"metric": {"model": "deepseek-v4-pro"}, "value": [1, "200.0"]},
+                    ]
+                }
+            },
+        )
+        first = loki_events.attribute_aggregate(
+            field="in_total", agg="sum", group_by="model", from_=from_, to=to
+        )
+        first.append(("caller-mutation", -1.0))
+        second = loki_events.attribute_aggregate(
+            field="in_total", agg="sum", group_by="model", from_=from_, to=to
+        )
+
+        assert second == [("deepseek-v4-flash", 100.0), ("deepseek-v4-pro", 200.0)]
+        assert len(list_client.calls) == 1
+
+    def test_attribute_aggregate_does_not_cache_failures(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        client = _install(monkeypatch, [_SeriesLimitResponse(), _SeriesLimitResponse()])
+
+        def aggregate() -> float | list[tuple[str, float]]:
+            return loki_events.attribute_aggregate(
+                field="duration_seconds",
+                agg="sum",
+                from_=datetime(2026, 8, 1, tzinfo=UTC),
+                to=datetime(2026, 8, 2, tzinfo=UTC),
+            )
+
+        with pytest.raises(httpx.HTTPStatusError):
+            aggregate()
+        with pytest.raises(httpx.HTTPStatusError):
+            aggregate()
+        assert len(client.calls) == 2
 
     @pytest.mark.parametrize(
         ("era", "indexed_labeled"),
