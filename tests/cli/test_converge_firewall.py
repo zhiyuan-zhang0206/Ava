@@ -4,9 +4,9 @@ The audit's own decision table is pinned in `tests/shared/test_macos_firewall.py
 What is asserted here is the step's two jobs on top of it — picking the right set
 of serving binaries per capability, and reporting rather than raising.
 
-**Nothing here mutates a real firewall.** The step *does* attempt repair through
-`sudo -n` (the whole point of Task #648), but every test stubs the mutation seam
-(`shared.macos_firewall._sudo_mutate` / `subprocess.run`), so what is asserted is
+**Nothing here mutates a real firewall.** The step attempts an unprivileged
+mutation first and falls back to `sudo -n`, but every test stubs the mutation seam
+(`shared.macos_firewall._sudo_mutate` / `run_bounded`), so what is asserted is
 output and decision-making, never ALF state.
 """
 
@@ -19,6 +19,7 @@ import pytest
 
 import cli.commands._converge as cv
 import cli.commands._converge_firewall as cfw
+import cli.commands._firewall as firewall_cmd
 from shared import macos_firewall as fw
 from shared.macos_firewall import FirewallAudit, FirewallVerdict
 
@@ -125,14 +126,11 @@ def _stub_sudo_mutate(monkeypatch: pytest.MonkeyPatch, ok: bool) -> None:
     monkeypatch.setattr(fw, "_sudo_mutate", lambda _verb, _path: ok)  # pyright: ignore[reportUnknownArgumentType]
 
 
-def test_missing_rules_without_grant_print_the_exact_repair_and_do_not_raise(
+def test_failed_direct_and_sudo_repairs_print_exact_commands_and_do_not_raise(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
 ) -> None:
-    """No sudoers grant → `sudo -n` fails fast → the historical fallback: name the
-    binary, print the commands. It must not raise. A missing rule does not stop
-    this host serving loopback, and `ava start` is how an operator recovers —
-    blocking that over something converge cannot fix would turn a reachability
-    defect into an outage.
+    """Direct mutation and the old-macOS fallback both fail, so the historical
+    manual commands are printed without raising or blocking recovery.
     """
     missing = Path("/uv/cpython-3.12.11/bin/python3.12")
     _stub_audit(
@@ -141,13 +139,23 @@ def test_missing_rules_without_grant_print_the_exact_repair_and_do_not_raise(
     )
     _stub_rules(monkeypatch, {})  # nothing allow-listed yet
     monkeypatch.setattr(fw, "manifest_paths", lambda: ())  # host-independent
-    _stub_sudo_mutate(monkeypatch, False)  # no grant — repair fails fast
+    calls: list[list[str]] = []
+
+    def fail(cmd: list[str], **_kw: object):  # pyright: ignore[reportMissingReturnType]
+        calls.append(cmd)
+        return type("R", (), {"returncode": 1})()
+
+    monkeypatch.setattr(fw, "run_bounded", fail)
     cfw.ensure_firewall_allowlist(_ctx(tmp_path, frozenset({"gateway"})))  # no raise
     err = capsys.readouterr().err
     assert "1 of 1 managed binaries have no ALF allow rule" in err
     assert str(missing) in err
     assert "--add" in err and "--unblockapp" in err
-    assert "needs root" in err
+    assert calls == [
+        [fw.SOCKETFILTERFW, "--add", str(missing)],
+        ["sudo", "-n", fw.SOCKETFILTERFW, "--add", str(missing)],
+    ]
+    assert "older macOS" in err
     # The rule alone is not enough: an already-bound socket keeps its old policy.
     assert "re-bind" in err
     # Both halves of the diagnosis name each other. An operator who skims this warning
@@ -219,3 +227,28 @@ def test_unconfigured_unit_audits_the_interpreter(
     _stub_sudo_mutate(monkeypatch, False)
     cfw.ensure_firewall_allowlist(_ctx(tmp_path, None))
     assert seen == [frozenset()]
+
+
+def test_firewall_status_renders_manifest_details(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import cli.commands as command_namespace
+
+    monkeypatch.setattr(command_namespace, "_roles_or_none", lambda: {"gateway"})
+    monkeypatch.setattr(
+        firewall_cmd,
+        "audit_this_host",
+        lambda _roles: FirewallAudit(FirewallVerdict.ALLOWED, "all allow-listed"),  # pyright: ignore[reportUnknownArgumentType]
+    )
+    monkeypatch.setattr(fw, "allowlisted_paths", lambda: {"/bin/listener": True})
+    monkeypatch.setattr(
+        fw,
+        "render_manifest_status",
+        lambda rules: f"  rendered manifest with {len(rules)} rule",  # pyright: ignore[reportUnknownArgumentType]
+    )
+    monkeypatch.setattr(fw, "stale_manifest_rules", lambda _rules: ())  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(fw, "sudo_grant_installed", lambda: False)
+    assert firewall_cmd.cmd_firewall_status() == 0
+    output = capsys.readouterr().out
+    assert "rendered manifest with 1 rule" in output
+    assert "sudo fallback grant" in output

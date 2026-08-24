@@ -52,9 +52,10 @@ The shared-layer public entry points: [[shared/entry-points.ava.okf.md]].
 
 ## Notes
 
-- `shared/macos_firewall.py` — read-only audit of the macOS Application
-  Firewall's per-binary allow list (needs root to mutate, which Ava does not
-  have); see [[shared/session-backend/session-backend.ava.okf.md|session backend]].
+- `shared/macos_firewall.py` — declarative macOS Application Firewall manifest,
+  audit, status renderer, and rootless-first reconciliation with bounded
+  `sudo -n` / manual-command fallback; see
+  [[shared/session-backend/session-backend.ava.okf.md|session backend]].
 - Layer constraints are enforced by `import-linter`: shared < ava < agent < gateway < cli
 - There is no internal layer restriction within shared; services must not import agent kernel
 - File line budget: soft limit 500 / hard limit 800 (enforced by lint)

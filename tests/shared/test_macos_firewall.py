@@ -3,16 +3,12 @@
 ## What these tests do and do not prove
 
 They prove the *decision*: given a `--getglobalstate` / `--listapps` answer, which
-verdict the audit reaches and which binaries it names. That is the whole of the
-shipped behaviour, because the module only ever reads — the repair is a pair of
-`sudo` commands it prints for a human.
+verdict the audit reaches and which binaries it names. Mutation tests replace the
+subprocess seam, so no test changes the host firewall.
 
-**No test here mutates a real firewall, and none can.** `socketfilterfw --add`
-answers `Must be root to change settings.` to an unprivileged caller, CI does not
-run as root, and CI does not run on macOS at all for this path — so a test that
-tried would either be skipped into vacuity or would reconfigure the host it ran
-on. The `_query` seam is stubbed in every test below, so what is asserted is the
-parse-and-decide layer and nothing about ALF's own behaviour.
+**No test here mutates a real firewall.** Read and mutation subprocess seams are
+stubbed. The latter pins the macOS 26.5+ unprivileged-first path and the fallback
+for versions that still require `sudo -n`.
 
 One thing *was* verified against the real tool during development, on a macOS
 26.5.2 box: `allowlisted_paths()` parsed that host's genuine `--listapps` output
@@ -292,7 +288,10 @@ def test_manifest_paths_resolves_globs_and_drops_absent(
     (tmp_path / "pg" / "17.5.0" / "bin").mkdir(parents=True)
     (tmp_path / "pg" / "17.5.0" / "bin" / "postgres").write_text("#!/bin/sh\n")
     (tmp_path / "pg" / "18.0.0" / "bin").mkdir(parents=True)  # no binary inside
-    _stub_manifest(monkeypatch, (fw.ManifestEntry("pg", (f"{tmp_path}/pg/*/bin/postgres",)),))
+    _stub_manifest(
+        monkeypatch,
+        (fw.ManifestEntry("pg", (f"{tmp_path}/pg/*/bin/postgres",), "Accept Postgres clients"),),
+    )
     got = fw.manifest_paths()
     assert [p.name for p in got] == ["postgres", "postgres"]
 
@@ -304,7 +303,10 @@ def test_manifest_paths_filters_machine_scoped_entries(
     app = tmp_path / "app" / "bin" / "app"
     app.parent.mkdir(parents=True)
     app.write_text("#!/bin/sh\n")
-    _stub_manifest(monkeypatch, (fw.ManifestEntry("app", (str(app),), machine="machine-1"),))
+    _stub_manifest(
+        monkeypatch,
+        (fw.ManifestEntry("app", (str(app),), "Accept app clients", machine="machine-1"),),
+    )
     monkeypatch.setattr(fw, "_machine_name", lambda: "otherhost")
     assert fw.manifest_paths() == ()
     monkeypatch.setattr(fw, "_machine_name", lambda: "machine-1")
@@ -317,8 +319,35 @@ def test_manifest_paths_skips_config_shims(monkeypatch: pytest.MonkeyPatch, tmp_
     real = tmp_path / "bin" / "python3.12"
     real.write_text("#!/bin/sh\n")
     (tmp_path / "bin" / "python3.12-config").write_text("#!/bin/sh\n")
-    _stub_manifest(monkeypatch, (fw.ManifestEntry("py", (f"{tmp_path}/bin/python3.*",)),))
+    _stub_manifest(
+        monkeypatch,
+        (fw.ManifestEntry("py", (f"{tmp_path}/bin/python3.*",), "Run Python listeners"),),
+    )
     assert fw.manifest_paths() == (real,)
+
+
+def test_observability_manifest_entries_resolve_installed_globs(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A Grafana/Loki/otelcol install under the stable Ava paths is discovered.
+
+    Removing any of the three manifest entries would let that binary's next bind
+    recreate the ALF prompt storm after an upgrade.
+    """
+    paths = (
+        tmp_path / ".ava/lgtm/native/grafana-home/bin/grafana",
+        tmp_path / ".ava/lgtm/native/bin/loki",
+        tmp_path / ".ava/otel-collector/otelcol-contrib",
+    )
+    for path in paths:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("#!/bin/sh\n")
+    ids = {"grafana", "loki", "otel collector"}
+    entries = tuple(entry for entry in fw.FIREWALL_MANIFEST if entry.id in ids)
+    assert {entry.id for entry in entries} == ids
+    monkeypatch.setenv("HOME", str(tmp_path))
+    _stub_manifest(monkeypatch, entries)
+    assert set(paths).issubset(fw.manifest_paths())
 
 
 def test_stale_manifest_rules_only_touches_managed_absent_paths(
@@ -335,20 +364,52 @@ def test_stale_manifest_rules_only_touches_managed_absent_paths(
     }
     _stub_manifest(
         monkeypatch,
-        (fw.ManifestEntry("node", ("/opt/homebrew/Cellar/node/*/bin/node",)),),
+        (
+            fw.ManifestEntry(
+                "node", ("/opt/homebrew/Cellar/node/*/bin/node",), "Serve frontend traffic"
+            ),
+        ),
     )
     assert fw.stale_manifest_rules(rules) == (Path("/opt/homebrew/Cellar/node/25.6.1/bin/node"),)
 
 
 def test_stale_manifest_rules_covers_legacy_family(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """The moved Android-SDK adb is retired by the legacy family glob."""
     monkeypatch.setattr(fw, "FIREWALL_MANIFEST", ())
-    monkeypatch.setattr(fw, "FIREWALL_LEGACY_FAMILY", ("~/Library/Android/sdk/platform-tools/adb",))
-    stale_path = Path("~/Library/Android/sdk/platform-tools/adb").expanduser()
+    stale_path = tmp_path / "retired-android-sdk/platform-tools/adb"
+    monkeypatch.setattr(fw, "FIREWALL_LEGACY_FAMILY", (str(stale_path),))
     rules = {str(stale_path): True}
     assert fw.stale_manifest_rules(rules) == (stale_path,)
+
+
+def test_render_manifest_status_shows_entry_patterns_paths_and_states(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    allow = _existing(tmp_path, "allowed")
+    block = _existing(tmp_path, "blocked")
+    missing = _existing(tmp_path, "missing")
+    absent_pattern = str(tmp_path / "not-installed/*/daemon")
+    _stub_manifest(
+        monkeypatch,
+        (
+            fw.ManifestEntry(
+                "listeners",
+                (str(allow), str(block), str(missing), absent_pattern),
+                "Accept inbound test traffic",
+            ),
+        ),
+    )
+    rendered = fw.render_manifest_status({str(allow): True, str(block): False})
+    assert "listeners — Accept inbound test traffic" in rendered
+    assert f"pattern: {allow}" in rendered
+    assert f"resolved: {allow} [Allow]" in rendered
+    assert f"resolved: {block} [Block]" in rendered
+    assert f"resolved: {missing} [Missing]" in rendered
+    assert f"pattern: {absent_pattern}" in rendered
+    assert "resolved: (no installed binary)" in rendered
+    assert "Summary: 1 entries; 3 resolved paths (Allow 1, Block 1, Missing 1)" in rendered
 
 
 def test_missing_allow_rules_ignores_covered(
@@ -362,7 +423,7 @@ def test_missing_allow_rules_ignores_covered(
     assert fw.missing_allow_rules((py,), rules) == (py,)
 
 
-# --- repair + prune (mutating — always through the stubbed subprocess seam) -
+# --- repair + prune (mutating — always through the stubbed bounded-process seam) -
 
 
 class _FakeProc:
@@ -379,12 +440,34 @@ def test_repair_allowlist_issues_both_verbs_per_binary(
     py = tmp_path / "python3.12"
     py.write_text("#!/bin/sh\n")
     calls: list[list[str]] = []
-    monkeypatch.setattr(fw.subprocess, "run", lambda _cmd, **_kw: calls.append(_cmd) or _FakeProc())  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(fw, "run_bounded", lambda _cmd, **_kw: calls.append(_cmd) or _FakeProc())  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     repair = fw.repair_allowlist((py,), rules={})
     assert repair.allowed == (py,)
     assert repair.failed == ()
     assert calls == [
+        [fw.SOCKETFILTERFW, "--add", str(py)],
+        [fw.SOCKETFILTERFW, "--unblockapp", str(py)],
+    ]
+
+
+def test_repair_falls_back_to_noninteractive_sudo_on_older_macos(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    py = _existing(tmp_path, "python3.12")
+    calls: list[list[str]] = []
+
+    def fake(cmd: list[str], **_kw: object) -> _FakeProc:
+        calls.append(cmd)
+        return _FakeProc(rc=0 if cmd[:2] == ["sudo", "-n"] else 1)
+
+    monkeypatch.setattr(fw, "run_bounded", fake)
+    repair = fw.repair_allowlist((py,), rules={})
+    assert repair.allowed == (py,)
+    assert repair.failed == ()
+    assert calls == [
+        [fw.SOCKETFILTERFW, "--add", str(py)],
         ["sudo", "-n", fw.SOCKETFILTERFW, "--add", str(py)],
+        [fw.SOCKETFILTERFW, "--unblockapp", str(py)],
         ["sudo", "-n", fw.SOCKETFILTERFW, "--unblockapp", str(py)],
     ]
 
@@ -397,7 +480,7 @@ def test_repair_reports_partial_failure(monkeypatch: pytest.MonkeyPatch, tmp_pat
     def fake(cmd: list[str], **kw: object) -> _FakeProc:
         return _FakeProc(rc=0 if cmd[-2] == "--add" else 1)
 
-    monkeypatch.setattr(fw.subprocess, "run", fake)
+    monkeypatch.setattr(fw, "run_bounded", fake)
     repair = fw.repair_allowlist((py,), rules={})
     assert repair.allowed == ()
     assert repair.failed == (py,)
@@ -409,17 +492,19 @@ def test_prune_stale_rules_removes_managed_orphans(
     monkeypatch.setattr(
         fw,
         "FIREWALL_MANIFEST",
-        (fw.ManifestEntry("node", ("/opt/homebrew/Cellar/node/*/bin/node",)),),
+        (
+            fw.ManifestEntry(
+                "node", ("/opt/homebrew/Cellar/node/*/bin/node",), "Serve frontend traffic"
+            ),
+        ),
     )
     monkeypatch.setattr(fw, "FIREWALL_LEGACY_FAMILY", ())
     calls: list[list[str]] = []
-    monkeypatch.setattr(fw.subprocess, "run", lambda _cmd, **_kw: calls.append(_cmd) or _FakeProc())  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(fw, "run_bounded", lambda _cmd, **_kw: calls.append(_cmd) or _FakeProc())  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     rules = {"/opt/homebrew/Cellar/node/25.6.1/bin/node": True}
     repair = fw.prune_stale_rules(rules)
     assert repair.removed == (Path("/opt/homebrew/Cellar/node/25.6.1/bin/node"),)
-    assert calls == [
-        ["sudo", "-n", fw.SOCKETFILTERFW, "--remove", "/opt/homebrew/Cellar/node/25.6.1/bin/node"]
-    ]
+    assert calls == [[fw.SOCKETFILTERFW, "--remove", "/opt/homebrew/Cellar/node/25.6.1/bin/node"]]
 
 
 def test_sudo_grant_probe_sees_the_alias(monkeypatch: pytest.MonkeyPatch) -> None:
