@@ -206,6 +206,15 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
         note="computer-use task replay (Phase 3, task #1101): one task's desktop trail"
     ),
     ("GET", "/api/events"): RouteContract(),
+    # ── gateway/routers/event_resolutions.py ────────────────────────
+    ("GET", "/api/event-resolutions"): RouteContract(),
+    ("POST", "/api/event-resolutions"): RouteContract(
+        Idempotency.NON_IDEMPOTENT,
+        note="create class dismissal — INSERT; retries receive a conflict rather than a replay",
+    ),
+    ("POST", "/api/event-resolutions/{dismissal_id}/reopen"): RouteContract(
+        note="guarded active-state transition — repeats cannot reopen twice"
+    ),
     # ── gateway/routers/fleet.py ───────────────────────────────────
     ("GET", "/api/fleet/graph"): RouteContract(),
     # ── gateway/routers/frontend_telemetry.py ─────────────────────────
