@@ -314,14 +314,41 @@ def test_started_ats_maps_absent_sessions_to_none(monkeypatch: pytest.MonkeyPatc
     """session_started_ats answers every asked name — a live session with its
     record epoch, an absent one with None — from ONE record scan."""
 
+    calls = 0
+
     def _fake_live(prefix: str = "") -> dict[str, object]:
+        nonlocal calls
         del prefix
+        calls += 1
         return _fake_records(["ava-agent-1-shell-1"])
 
     monkeypatch.setattr("shared.pty_sessions.cli.live_sessions", _fake_live)
     epochs = _backend().session_started_ats(["ava-agent-1-shell-1", "ava-agent-1-shell-9"])
     assert epochs["ava-agent-1-shell-1"] == 100.0
     assert epochs["ava-agent-1-shell-9"] is None
+    assert calls == 1
+
+
+def test_started_ats_falls_back_when_record_scan_fails(monkeypatch: pytest.MonkeyPatch):
+    """A transient batch-scan I/O failure falls back to the single-record
+    path, preserving timestamps for records that remain individually readable."""
+    backend = _backend()
+    names = ["ava-agent-1-shell-1", "ava-agent-1-shell-9"]
+    single_reads: list[str] = []
+
+    def _failed_scan(prefix: str = "") -> dict[str, object]:
+        del prefix
+        raise OSError("record directory changed during scan")
+
+    def _single_read(name: str) -> float | None:
+        single_reads.append(name)
+        return 100.0 if name == names[0] else None
+
+    monkeypatch.setattr("shared.pty_sessions.cli.live_sessions", _failed_scan)
+    monkeypatch.setattr(backend, "session_started_at", _single_read)
+
+    assert backend.session_started_ats(names) == {names[0]: 100.0, names[1]: None}
+    assert single_reads == names
 
 
 def test_session_log_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):

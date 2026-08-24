@@ -12,7 +12,7 @@ tags:
 
 ## What it is
 
-`shared/session_backend.py` is the interface every long-running named session goes through. It unifies three platform supervisors behind one protocol: **posixproc** (`shared/posixproc.py`, POSIX native), the **per-session pty hosts** (`shared/pty_sessions/`), and **winproc** (`shared/winproc.py`, Windows). The `SessionBackend` surface: `has_session` / `new_session` / `kill_session` / `list_sessions`, plus optional `session_started_at` (uptime; a backend without a timestamp source answers None and consumers render no uptime) and `session_log_path` (the file this backend redirects output to — asked by liveness-from-freshness consumers such as `ops.cluster_deploy._reap_stalled_updater`). PTY-only ops (`send` / `send_keys` / `capture_pane`) raise `NotImplementedError` on backends without a terminal.
+`shared/session_backend.py` is the interface every long-running named session goes through. It unifies three platform supervisors behind one protocol: **posixproc** (`shared/posixproc.py`, POSIX native), the **per-session pty hosts** (`shared/pty_sessions/`), and **winproc** (`shared/winproc.py`, Windows). The `SessionBackend` surface: `has_session` / `new_session` / `kill_session` / `list_sessions`, plus optional `session_started_at` and its bulk counterpart `session_started_ats` (uptime; the base bulk implementation falls back to individual reads, and a backend without a timestamp source answers None so consumers render no uptime), and `session_log_path` (the file this backend redirects output to — asked by liveness-from-freshness consumers such as `ops.cluster_deploy._reap_stalled_updater`). PTY-only ops (`send` / `send_keys` / `capture_pane`) raise `NotImplementedError` on backends without a terminal.
 
 Three entry points, three session classes:
 
@@ -31,7 +31,7 @@ Three entry points, three session classes:
 ### Backends
 
 - **PosixProcSessionBackend** — the native supervisor for services: double-fork reparent to init, `SessionRecord` + logs under `$AVA_HOME/run/sessions/` / `$AVA_HOME/logs/`. No PTY is allocated, so the per-box PTY ceiling (`kern.tty.ptmx_max`) does not bound service count.
-- **PtySessionBackend** — agent shells / watchers. Each mutating op is a `python -m shared.pty_sessions.cli` subprocess whose exit code maps to the interface shape (enumeration reads the records in-process); env rides a 0600 file, the launch command rides base64 (never argv), and the session's host submits it only once the login shell's prompt is ready. `login_shell=False` raises `NotImplementedError` (interactive login shells only); the kill timeout is owned by the host. See [[shared/pty_sessions/pty_sessions.ava.okf.md|pty sessions]].
+- **PtySessionBackend** — agent shells / watchers. Each mutating op is a `python -m shared.pty_sessions.cli` subprocess whose exit code maps to the interface shape; enumeration and bulk launch timestamps use one in-process record scan, with individual record reads as the I/O-failure fallback. Env rides a 0600 file, the launch command rides base64 (never argv), and the session's host submits it only once the login shell's prompt is ready. `login_shell=False` raises `NotImplementedError` (interactive login shells only); the kill timeout is owned by the host. See [[shared/pty_sessions/pty_sessions.ava.okf.md|pty sessions]].
 - **WinprocSessionBackend** — Windows; kills stop at session boundaries (`winproc._spared_pids`).
 
 ### Stopping a session
