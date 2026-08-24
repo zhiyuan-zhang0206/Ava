@@ -57,34 +57,36 @@ Application layer — the Loki event stream plus the LLM latency histogram:
 | `ava-ops-turn-duration-p95` | `ava-ops-slow` | Turn duration p95 (collective slowdown) | histogram p95 > 75s for 10m (Prometheus, 24h baseline 37.6s × 2) | 10m | warning |
 
 Infrastructure layer (issue #46) — the per-machine OTel Collector sidecar's
-own scrapes, labelled `host` (deliberately not `machine`: the two names can
-differ, and one label with two meanings is worse than two labels). These
+own scrapes, labelled `host` (OS hostname / physical identity) and
+`machine_name` (Ava roster identity). Per the 2026-08-24 user ruling, alerts
+group by `machine_name`, so win and wsl remain separate series. These
 thresholds are deployment facts, not framework constants — what counts as
 "too much CPU" depends on box specs and co-tenancy:
 
 | uid | Metric | Condition | `for` | Severity |
 |-----|--------|-----------|-------|----------|
-| `ava-ops-host-cpu-saturated` | non-idle CPU | avg by host > 0.90 (Prometheus) | 15m | warning |
-| `ava-ops-host-memory-pressure` | memory utilization | avg by host > 0.90 (Prometheus) | 15m | warning |
-| `ava-ops-host-disk-watermark` | filesystem utilization | max by host+mountpoint > 0.90 (Prometheus) | 15m | warning |
+| `ava-ops-host-cpu-saturated` | non-idle CPU | avg by machine_name > 0.90 (Prometheus) | 15m | warning |
+| `ava-ops-host-memory-pressure` | memory utilization | avg by machine_name > 0.90 (Prometheus) | 15m | warning |
+| `ava-ops-host-disk-watermark` | filesystem utilization | max by machine_name+mountpoint > 0.90 (Prometheus) | 15m | warning |
 | `ava-ops-pg-connection-saturation` | Postgres backends vs max | ratio > 0.80 (Prometheus) | 15m | warning |
 | `ava-ops-redis-memory` | Redis resident set | > 2 GiB (Prometheus) | 15m | warning |
 
-Collector delivery layer — each sidecar scrapes its own loopback `:8888`
-metrics and relays them through `metrics/infra`. Prometheus's OTLP translation
-adds `_total` to the raw monotonic counters:
+Collector delivery layer — each sidecar scrapes its per-unit loopback
+self-metrics endpoint (`AVA_OTELCOL_METRICS_PORT`, default 8888) and relays it
+through `metrics/infra`. Prometheus's OTLP translation adds `_total` to the raw
+monotonic counters:
 
 | uid | Metric | Condition | `for` | Severity |
 |-----|--------|-----------|-------|----------|
-| `ava-ops-otelcol-queue-pressure` | exporter queue size/capacity | current ratio > 0.80 per host+exporter+signal | 5m | error |
+| `ava-ops-otelcol-queue-pressure` | exporter queue size/capacity | current ratio > 0.80 per machine_name+exporter+signal | 5m | error |
 | `ava-ops-otelcol-enqueue-failures` | new enqueue rejections | `increase(otelcol_exporter_enqueue_failed_*_total[5m]) > 0` | 0m | error |
-| `ava-ops-otelcol-host-silent` | recently-seen collector absent | host seen in 24h has no `otelcol_process_uptime_total` in 5m | 0m | error |
+| `ava-ops-otelcol-host-silent` | recently-seen collector absent | machine seen in 24h has no `otelcol_process_uptime_total` in 5m | 0m | error |
 
 The queue rule uses current gauges so it resolves after recovery; the reject
 rule uses a bounded counter delta so one historical drop does not keep
 alerting until the process restarts — it resolves after a clean 5-minute
 window. The silence query's 5-minute absence window is already its
-debounce, hence no second `for` delay. Its 24-hour historical host set expires
+debounce, hence no second `for` delay. Its 24-hour historical machine set expires
 retired machines naturally; the fleet heartbeat owns permanent membership.
 
 The three slow-request rules (R17/R18, 2026-08-23, task #1399) close the

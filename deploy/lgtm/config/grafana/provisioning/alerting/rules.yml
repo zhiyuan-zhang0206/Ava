@@ -23,10 +23,11 @@
 #   attributes.
 # - INFRASTRUCTURE metrics (R8-R12, R14-R16, issue #46) come from each
 #   machine's OTel Collector sidecar (host/data-plane receivers plus its own
-#   queue/drop/uptime scrape) and live
-#   under `job="ava-infra"` with a `host` label = the OS hostname. `host` is
-#   deliberately not `machine`: the two names can differ, and one label with
-#   two meanings is worse than two labels. Names below were read off a live
+#   queue/drop/uptime scrape) and live under `job="ava-infra"` with both
+#   `host` = the OS hostname (physical identity) and `machine_name` = the Ava
+#   roster identity baked from the unit at converge. Per the 2026-08-24 user
+#   ruling, rules group by `machine_name`, so win and wsl remain separate
+#   series; each label keeps one meaning. Names below were read off a live
 #   Prometheus 3.13.2, not inferred from the OTLP names.
 #
 # R8-R11 wrap their ratio in PromQL `round(..., 0.001)`: the value is
@@ -589,9 +590,9 @@ groups:
           metric: host_cpu
           team: ava-ops
         annotations:
-          summary: "{{ $labels.host }} CPU at {{ $values.C }} (threshold 0.90) for 15m"
+          summary: "{{ $labels.machine_name }} CPU at {{ $values.C }} (threshold 0.90) for 15m"
           description: >-
-            Non-idle CPU on {{ $labels.host }} has averaged
+            Non-idle CPU on {{ $labels.machine_name }} has averaged
             {{ $values.C }} (fraction of all cores) for 15 minutes. This is
             not a limit the kernel enforces — a training or eval job may
             legitimately own the box. The operator decides: identify the
@@ -608,7 +609,7 @@ groups:
                 uid: prometheus
               editorMode: code
               expr: >-
-                round(1 - avg by (host)
+                round(1 - avg by (machine_name)
                 (system_cpu_utilization_ratio{state="idle"}), 0.001)
               instant: true
               range: false
@@ -661,9 +662,9 @@ groups:
           metric: host_memory
           team: ava-ops
         annotations:
-          summary: "{{ $labels.host }} memory at {{ $values.C }} used (threshold 0.90) for 15m"
+          summary: "{{ $labels.machine_name }} memory at {{ $values.C }} used (threshold 0.90) for 15m"
           description: >-
-            Used memory on {{ $labels.host }} has held at {{ $values.C }} of
+            Used memory on {{ $labels.machine_name }} has held at {{ $values.C }} of
             RAM for 15 minutes (reclaimable cache excluded). Sustained
             pressure precedes swapping and the OOM killer, whose visible form
             is an agent restart spike (R3). Check the per-agent footprint and
@@ -679,7 +680,7 @@ groups:
                 uid: prometheus
               editorMode: code
               expr: >-
-                round(avg by (host)
+                round(avg by (machine_name)
                 (system_memory_utilization_ratio{state="used"}), 0.001)
               instant: true
               range: false
@@ -722,7 +723,8 @@ groups:
       # silently disabling span recording (R7 — a CONSEQUENCE alert). This
       # rule fires on the cause, per mountpoint, so the pg data dir, the
       # traces mirror and the LGTM host's Loki volumes are all covered by
-      # whichever filesystem carries them. One instance per (host, mountpoint):
+      # whichever filesystem carries them. One instance per
+      # (machine_name, mountpoint):
       # on macOS the volumes of one APFS container all report the container's
       # fullness, so a single full disk legitimately fires twice.
       - uid: ava-ops-host-disk-watermark
@@ -737,9 +739,9 @@ groups:
           metric: host_disk
           team: ava-ops
         annotations:
-          summary: "{{ $labels.host }} {{ $labels.mountpoint }} at {{ $values.C }} full (threshold 0.90)"
+          summary: "{{ $labels.machine_name }} {{ $labels.mountpoint }} at {{ $values.C }} full (threshold 0.90)"
           description: >-
-            Filesystem {{ $labels.mountpoint }} on {{ $labels.host }} is
+            Filesystem {{ $labels.mountpoint }} on {{ $labels.machine_name }} is
             {{ $values.C }} full. 0.90 is also AVA_TRACE_DISK_WATERMARK's
             default, so crossing it silently degrades trace recording on that
             machine (R7 reports that consequence). Triage: find the growth —
@@ -757,7 +759,7 @@ groups:
                 uid: prometheus
               editorMode: code
               expr: >-
-                round(max by (host, mountpoint)
+                round(max by (machine_name, mountpoint)
                 (system_filesystem_utilization_ratio), 0.001)
               instant: true
               range: false
@@ -815,9 +817,9 @@ groups:
           metric: pg_connections
           team: ava-ops
         annotations:
-          summary: "{{ $labels.host }} Postgres backends at {{ $values.C }} of max_connections (threshold 0.80)"
+          summary: "{{ $labels.machine_name }} Postgres backends at {{ $values.C }} of max_connections (threshold 0.80)"
           description: >-
-            Open Postgres backends on {{ $labels.host }} are at
+            Open Postgres backends on {{ $labels.machine_name }} are at
             {{ $values.C }} of the server's max_connections. Past 1.0 new
             connections are refused and every process that needs the database
             fails at once. Check the PgBouncer pooler is up and pooling
@@ -833,8 +835,8 @@ groups:
                 uid: prometheus
               editorMode: code
               expr: >-
-                round(max by (host) (postgresql_backends)
-                / max by (host) (postgresql_connection_max), 0.001)
+                round(max by (machine_name) (postgresql_backends)
+                / max by (machine_name) (postgresql_connection_max), 0.001)
               instant: true
               range: false
             relativeTimeRange:
@@ -889,9 +891,9 @@ groups:
           metric: redis_memory
           team: ava-ops
         annotations:
-          summary: "{{ $labels.host }} Redis using {{ $values.C }} bytes (threshold 2 GiB)"
+          summary: "{{ $labels.machine_name }} Redis using {{ $values.C }} bytes (threshold 2 GiB)"
           description: >-
-            Redis on {{ $labels.host }} is holding {{ $values.C }} bytes for
+            Redis on {{ $labels.machine_name }} is holding {{ $values.C }} bytes for
             15 minutes, above the 2 GiB deployment threshold. Inspect the
             keyspace for an unbounded producer; the events channel is a
             stream, not a store, so a growing resident set is normally a
@@ -907,7 +909,7 @@ groups:
                 uid: prometheus
               editorMode: code
               expr: >-
-                max by (host) (redis_memory_used_bytes)
+                max by (machine_name) (redis_memory_used_bytes)
               instant: true
               range: false
             relativeTimeRange:
@@ -946,8 +948,9 @@ groups:
       # ── R14: collector exporter queue pressure (current ratio > 0.80) ──
       # The queue gauges are current state. This deliberately does NOT use the
       # process-lifetime enqueue-failure counter: one old outage must resolve
-      # after the route recovers. One instance per host/exporter/data_type says
-      # which machine and signal path is blocked.
+      # after the route recovers. One instance per
+      # machine_name/exporter/data_type says which machine and signal path is
+      # blocked.
       - uid: ava-ops-otelcol-queue-pressure
         title: "OTel Collector exporter queue pressure"
         condition: D
@@ -960,9 +963,9 @@ groups:
           metric: otelcol_queue
           team: ava-ops
         annotations:
-          summary: "{{ $labels.host }} collector {{ $labels.exporter }} {{ $labels.data_type }} queue at {{ $values.C }} (threshold 0.80)"
+          summary: "{{ $labels.machine_name }} collector {{ $labels.exporter }} {{ $labels.data_type }} queue at {{ $values.C }} (threshold 0.80)"
           description: >-
-            The OTel Collector exporter queue on {{ $labels.host }} for
+            The OTel Collector exporter queue on {{ $labels.machine_name }} for
             {{ $labels.exporter }} ({{ $labels.data_type }}) has stayed above
             80% capacity for 5 minutes. The destination or runner-to-gateway
             relay is not keeping up. Check gateway reachability, the collector
@@ -979,9 +982,9 @@ groups:
                 uid: prometheus
               editorMode: code
               expr: >-
-                round(max by (host, exporter, data_type)
+                round(max by (machine_name, exporter, data_type)
                 (otelcol_exporter_queue_size)
-                / clamp_min(max by (host, exporter, data_type)
+                / clamp_min(max by (machine_name, exporter, data_type)
                 (otelcol_exporter_queue_capacity), 1), 0.001)
               instant: true
               range: false
@@ -1034,9 +1037,9 @@ groups:
           metric: otelcol_enqueue_failed
           team: ava-ops
         annotations:
-          summary: "{{ $labels.host }} collector {{ $labels.exporter }} rejected {{ $values.C }} telemetry items in 5m"
+          summary: "{{ $labels.machine_name }} collector {{ $labels.exporter }} rejected {{ $values.C }} telemetry items in 5m"
           description: >-
-            The OTel Collector on {{ $labels.host }} could not enqueue
+            The OTel Collector on {{ $labels.machine_name }} could not enqueue
             {{ $values.C }} log records, metric points, or spans for exporter
             {{ $labels.exporter }} in the last 5 minutes. This is active data
             loss, not historical backlog. Restore the runner-to-gateway relay
@@ -1052,7 +1055,7 @@ groups:
                 uid: prometheus
               editorMode: code
               expr: >-
-                sum by (host, exporter)
+                sum by (machine_name, exporter)
                 (increase({__name__=~"otelcol_exporter_enqueue_failed_(log_records|metric_points|spans)_total"}[5m]))
               instant: true
               range: false
@@ -1090,10 +1093,11 @@ groups:
                     params: [C]
 
       # ── R16: recently-seen collector stopped reporting ──
-      # noDataState=OK cannot name one missing host. This set subtraction keeps
-      # the per-host identity: hosts observed in 24h but absent for 5m. The
-      # instance naturally retires after 24h; machine-heartbeat alerting owns
-      # permanent fleet membership, while this rule owns the collector path.
+      # noDataState=OK cannot name one missing machine. This set subtraction
+      # keeps the per-machine identity: machines observed in 24h but absent for
+      # 5m. The instance naturally retires after 24h; machine-heartbeat
+      # alerting owns permanent fleet membership, while this rule owns the
+      # collector path.
       - uid: ava-ops-otelcol-host-silent
         title: "OTel Collector stopped reporting"
         condition: D
@@ -1108,9 +1112,9 @@ groups:
           metric: otelcol_silence
           team: ava-ops
         annotations:
-          summary: "{{ $labels.host }} collector has not reported for 5 minutes"
+          summary: "{{ $labels.machine_name }} collector has not reported for 5 minutes"
           description: >-
-            Host {{ $labels.host }} reported OTel Collector uptime within the
+            Machine {{ $labels.machine_name }} reported OTel Collector uptime within the
             last 24 hours but no sample arrived in the last 5 minutes. The
             collector may be down or its runner-to-gateway metrics relay may
             be broken. Check the local ava-otel-collector session and the
@@ -1126,9 +1130,9 @@ groups:
                 uid: prometheus
               editorMode: code
               expr: >-
-                max by (host) (max_over_time(otelcol_process_uptime_total[24h]))
-                unless on(host)
-                max by (host) (max_over_time(otelcol_process_uptime_total[5m]))
+                max by (machine_name) (max_over_time(otelcol_process_uptime_total[24h]))
+                unless on(machine_name)
+                max by (machine_name) (max_over_time(otelcol_process_uptime_total[5m]))
               instant: true
               range: false
             relativeTimeRange:

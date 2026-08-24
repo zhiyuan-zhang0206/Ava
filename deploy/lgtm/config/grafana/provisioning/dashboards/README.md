@@ -77,8 +77,9 @@ Datasources (provisioned in `../datasources/datasources.yml`): **Loki**
 agents` stat (`agents_meta` is not in Loki); **Prometheus** (uid `prometheus`)
 for the two unresolved-class tiles, turn-duration percentile alerting, and the
 host & data-plane panels
-(per-machine OTel Collector sidecar scrapes, `job="ava-infra"` + a `host`
-label = the OS hostname). The unresolved tiles read the daemon's absolute
+(per-machine OTel Collector sidecar scrapes, `job="ava-infra"` + `host` (OS
+hostname) and `machine_name` (Ava roster name) labels; panels group by
+`machine_name`). The unresolved tiles read the daemon's absolute
 resolution gauges, not raw event lines.
 
 ## Core metrics (registered, not hand-written)
