@@ -1023,7 +1023,7 @@ CREATE INDEX ON schedule_runs (schedule_id, ran_at DESC);
 -- migrations/20260808T104500_agent-watchers.sql.
 CREATE TABLE agent_watchers (
     session_id     INTEGER NOT NULL,      -- the watcher's shell-session id (per-agent counter)
-    agent_id       INTEGER NOT NULL,      -- the spawning agent
+    agent_id       BIGINT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,  -- the spawning agent
     PRIMARY KEY (agent_id, session_id),
     kind           TEXT NOT NULL CHECK (kind IN ('at', 'cron', 'launch')),
     name           TEXT NOT NULL,         -- the lowercase slug

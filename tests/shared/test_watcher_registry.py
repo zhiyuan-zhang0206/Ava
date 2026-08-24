@@ -17,8 +17,23 @@ import pytest
 
 from shared import watcher_registry as wr
 from shared.config import settings
+from shared.test_db_guard import assert_test_db_url
 
 _FUTURE = datetime.datetime.now(datetime.UTC) + datetime.timedelta(hours=1)
+_WATCHER_AGENT_IDS = (1, 2, 7, 42)
+
+
+def _seed_agents(*agent_ids: int) -> None:
+    """Create the agent rows required by the watcher registry FK."""
+    from ava._settings import DB_URL
+
+    assert_test_db_url(str(DB_URL), context="test_watcher_registry._seed_agents")
+    with psycopg.connect(DB_URL, autocommit=True) as conn:
+        for agent_id in agent_ids:
+            conn.execute(
+                "INSERT INTO agents (id) VALUES (%s) ON CONFLICT (id) DO NOTHING",
+                (agent_id,),
+            )
 
 
 @pytest.fixture(autouse=True)
@@ -27,9 +42,22 @@ def _clean_watcher_rows() -> Iterator[None]:
     business data), so clear it before and after each test."""
     with psycopg.connect(settings.data_plane.db_url, autocommit=True) as conn:
         conn.execute("DELETE FROM agent_watchers")
+    _seed_agents(*_WATCHER_AGENT_IDS)
     yield
     with psycopg.connect(settings.data_plane.db_url, autocommit=True) as conn:
         conn.execute("DELETE FROM agent_watchers")
+
+
+def test_register_rejects_nonexistent_agent() -> None:
+    """An orphan watcher is rejected instead of silently entering the registry."""
+    with (
+        psycopg.connect(settings.data_plane.db_url, autocommit=True) as conn,
+        pytest.raises(psycopg.errors.ForeignKeyViolation),
+    ):
+        conn.execute(
+            "INSERT INTO agent_watchers (session_id, agent_id, kind, name) "
+            "VALUES (1, 999_999, 'at', 'orphan')"
+        )
 
 
 def test_register_and_read_roundtrip() -> None:
