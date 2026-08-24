@@ -106,17 +106,13 @@ $REMOTE_OTLP_RECEIVER
             - targets: [$SELF_METRICS_PORT]
 
   # ── Session-log tailing (2026-08-23 cutover; replaces promtail) ──────────
-  # Each machine's collector tails the local session stdout the way promtail
-  # did (job/service labels become resource service.name -> Loki's
-  # service_name stream label). start_at: end = no backfill; offsets persist
-  # in file_storage/logoffsets so a restart does not re-read.
+  # Shell-session logs carry the real output. Main-agent logs contain only
+  # identical Traceloop startup banners, so their fileconsumer fingerprints
+  # collide and cause perpetual re-watch storms. start_at: end = no backfill;
+  # offsets persist in file_storage/logoffsets so a restart does not re-read.
   filelog/sessions:
     include:
-      - $AVA_HOME/logs/*.out.log
-    # The collector is itself a session named ava-otel-collector. Tailing its
-    # stdout would feed exported log diagnostics back into this receiver.
-    exclude:
-      - $AVA_HOME/logs/ava-otel-collector.out.log
+      - $AVA_HOME/logs/ava-agent-*-shell-*.out.log
     start_at: end
     include_file_name: true
     include_file_path: false

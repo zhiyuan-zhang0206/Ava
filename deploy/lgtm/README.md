@@ -107,13 +107,16 @@ receivers ship session and orchestration logs directly to Loki.
 ## Session logs in Loki
 
 The collector's `filelog/sessions` and `filelog/orchestration` receivers ship
-session stdout and orchestration tee logs, excluding the collector's own
-`ava-otel-collector.out.log` to prevent a self-ingestion echo. The file name
-becomes resource `service.name`, which Loki exposes as the `service_name` stream
-label. Read offsets persist under `$AVA_HOME/otel-collector/log-offsets`, so a
-collector restart does not replay the log history. Structured agent logs still
-arrive through the collector's OTLP receiver and carry no `log.file.name`, so
-the filelog transform leaves them untouched.
+agent shell-session stdout (`ava-agent-*-shell-*.out.log`) and orchestration tee
+logs. Main-agent stdout contains only identical Traceloop startup banners; its
+content fingerprints collide in fileconsumer and cause perpetual re-watch
+storms. The narrowed shell glob also cannot match the collector's own output.
+The file name becomes resource `service.name`, which Loki exposes as the
+`service_name` stream label. Read offsets persist under
+`$AVA_HOME/otel-collector/log-offsets`, so a collector restart does not replay
+the log history. Structured agent logs still arrive through the collector's
+OTLP receiver and carry no `log.file.name`, so the filelog transform leaves
+them untouched.
 
 ## Environment overrides
 

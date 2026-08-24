@@ -11,7 +11,7 @@ tags: []
 
 Long-running **daemon/service** processes (agent-runner, gateway, services) run as named **sessions on the platform session backend** (`shared/session_backend.get_backend()` — the native process supervisor on POSIX, `shared.winproc` on Windows). An **agent's main process** is a detached native process (double-fork + reparent, `native_proc()` via `ops/agent_launch.py`; see [[process-lifecycle.ava.okf.md]]). The **shell sub-sessions an agent creates** (`ava-agent-<id>-shell-<n>`) each run in their own detached pty host (`get_shell_backend()` → `shared/pty_sessions`), and they are **not** cleaned up when the agent exits — by design, so background work (shell sessions, watchers, Claude Code, etc.) can outlive the process.
 
-Every session has a **record** (`$AVA_HOME/run/sessions/<name>.json`: pid + start time) and a **log** (`$AVA_HOME/logs/<name>.out.log`). `ava cluster status` enumerates the same sessions; raw session output is queried in Loki (the LGTM backend — LogQL via Grafana Explore / logcli / the Loki HTTP API, label `service` = session name; see `deploy/lgtm/README.md`).
+Every session has a **record** (`$AVA_HOME/run/sessions/<name>.json`: pid + start time) and a **log** (`$AVA_HOME/logs/<name>.out.log`). `ava cluster status` enumerates the same sessions; raw agent-shell and orchestration output is queried in Loki (the LGTM backend — LogQL via Grafana Explore / logcli / the Loki HTTP API, label `service_name` = session name; see `deploy/lgtm/README.md`).
 
 ## Core Responsibilities
 

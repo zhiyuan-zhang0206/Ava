@@ -390,18 +390,15 @@ def test_non_lgtm_gateway_converge_skips_collector_install(
     assert "collector skipped" in err
 
 
-def test_session_filelog_excludes_collectors_own_output(
+def test_session_filelog_tails_only_shell_output(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The collector tails every service session except its own output, which
-    would otherwise be re-ingested recursively through the logs exporter."""
+    """Shell logs carry session output without main-agent fingerprint collisions."""
     cfg = _render_real_template(monkeypatch, frozenset({"gateway", "agent-runner"}))
 
     receiver = cfg["receivers"]["filelog/sessions"]
-    assert receiver["include"] == ["/home/u/.ava/logs/*.out.log"]
-    assert receiver["exclude"] == [
-        "/home/u/.ava/logs/ava-otel-collector.out.log",
-    ]
+    assert receiver["include"] == ["/home/u/.ava/logs/ava-agent-*-shell-*.out.log"]
+    assert "exclude" not in receiver
 
 
 def test_runner_forwards_to_authenticated_gateway_ingress_without_renaming_queues(
