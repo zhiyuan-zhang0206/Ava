@@ -6,7 +6,9 @@ applies the unified `events` retention policy (`services.events_maintenance.rete
 — drop/prune expired categories), and upserts the Since-Birth
 rollups (agent_metrics_daily / agent_model_tokens_daily — the durable
 token+cost ledger, aggregated from Loki since the LGTM cutover;
-`services.events_maintenance.rollup`). A separate five-minute resolution slice
+`services.events_maintenance.rollup`), then repairs pre-retention gaps from the
+90-day filtered JSONL replay source (`services.events_maintenance.jsonl_replay`).
+A separate five-minute resolution slice
 reads immutable Loki event classes, combines them with `event_dismissals`, and
 publishes unresolved warning/error gauges (`services.events_maintenance.resolution`).
 See `services.events_maintenance.daemon` for the poll loops.

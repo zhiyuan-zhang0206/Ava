@@ -486,6 +486,19 @@ class DaemonSettings(EnvSettings):
         },
     )
 
+    events_jsonl_rollup_retention_days: int = Field(
+        default=90,
+        ge=1,
+        alias="AVA_EVENTS_JSONL_ROLLUP_RETENTION_DAYS",
+        description="Retention in days for the filtered local JSONL replay source (llm_usage, turn_end, and exec-family events). This must remain longer than Loki retention so the events-maintenance daemon can repair ledger gaps after an extended outage.",
+        json_schema_extra={
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     events_resolution_burst_threshold: int = Field(
         default=5,
         ge=0,

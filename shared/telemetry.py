@@ -10,8 +10,9 @@ Pipeline (Layer 1): a bounded queue + drain thread per process. Every `emit()`
 enqueues one event; the drain thread batch-writes (default 100/batch, 0.5 s
 interval) in one transaction:
 
-1. append the batch to the local JSONL mirror (durable fallback, day-stamped
-   files under `logs_dir()`), then
+1. append the batch to the local JSONL mirrors under `logs_dir()` — the full
+   event stream for 7 days plus a filtered ledger-rollup source for 90 days by
+   default — then
 2. export the batch to the OTLP backend (`shared.telemetry_otlp`) — events ->
    OTLP logs (Loki), telemetry numeric payloads -> OTLP metrics (Prometheus) —
    when `AVA_TELEMETRY_OTLP_ENABLED` is on (default). Fully failure-isolated:
@@ -22,8 +23,9 @@ The Postgres `events` copy was retired with the LGTM cutover (task #1197,
 user ruling 2026-08-12): the PG table is now a read-only archive — nothing
 writes it, the read side is Loki/Prometheus, and `events_maintenance`'s
 events-archive slices are disabled (the daemon still always runs its checkpoint
-reaper + blob vacuum, which are independent of the events pipeline). The JSONL
-mirror remains the durable local backfill.
+reaper + blob vacuum, which are independent of the events pipeline). The full
+JSONL mirror remains the local debugging backfill; its filtered rollup-source
+mirror is the automated ledger-gap recovery source.
 
 Backpressure: the queue is bounded (10 000); a producer that outruns the drain
 thread sheds records instead of growing memory, and the shed count is reported
@@ -98,6 +100,21 @@ _QUEUE_MAXSIZE = 10_000
 
 # JSONL mirror retention (day-stamped files, like the trace mirror).
 _JSONL_RETENTION_DAYS = 7
+_JSONL_ROLLUP_RETENTION_DAYS = 90
+
+# MUST match the event selectors aggregated by
+# services/events_maintenance/rollup.py:_tokens_queries/_metrics_queries
+# (shared cannot import services without reversing the layer boundary).
+_JSONL_ROLLUP_SOURCE_EVENTS = frozenset({"llm_usage", "turn_end"})
+
+
+def _is_rollup_source(event_name: str) -> bool:
+    """Whether an event feeds the durable token/metrics ledger rollup."""
+    return (
+        event_name in _JSONL_ROLLUP_SOURCE_EVENTS
+        or event_name == "exec"
+        or event_name.startswith(("exec_", "exec("))
+    )
 
 
 def event_id(line: str, ts_ns: int) -> int:
@@ -203,16 +220,26 @@ _state: dict[str, Any] = {
 
 
 def _prune_jsonl_mirror() -> None:
-    """Delete day-stamped mirror files older than the retention window.
+    """Delete day-stamped mirror files older than their retention tier.
 
     Runs once per day (guarded by the `jsonl_day` stamp). The mirror is the
     durable fallback for audit events; log-stream lines are also held by the
     loguru file sinks, so the mirror's own retention is what bounds its disk
     footprint."""
-    cutoff = (datetime.now(UTC) - timedelta(days=_JSONL_RETENTION_DAYS)).strftime("%Y%m%d")
-    for path in logs_dir().glob("events-*.jsonl"):
-        m = path.name.removeprefix("events-").removesuffix(".jsonl")
-        if len(m) == 8 and m < cutoff:
+    from shared.config import settings
+
+    now = datetime.now(UTC)
+    full_cutoff = (now - timedelta(days=_JSONL_RETENTION_DAYS)).strftime("%Y%m%d")
+    for path in logs_dir().glob("events-????????.jsonl"):
+        day = path.name.removeprefix("events-").removesuffix(".jsonl")
+        if day.isdigit() and day < full_cutoff:
+            with contextlib.suppress(OSError):
+                path.unlink()
+    rollup_retention_days = settings.daemon.events_jsonl_rollup_retention_days
+    rollup_cutoff = (now - timedelta(days=rollup_retention_days)).strftime("%Y%m%d")
+    for path in logs_dir().glob("events-????????.rollup.jsonl"):
+        day = path.name.removeprefix("events-").removesuffix(".rollup.jsonl")
+        if day.isdigit() and day < rollup_cutoff:
             with contextlib.suppress(OSError):
                 path.unlink()
 
@@ -237,6 +264,7 @@ def _append_jsonl(events: list[Event]) -> None:
             _prune_jsonl_mirror()
     try:
         lines: list[str] = []
+        rollup_lines: list[str] = []
         for e in events:
             body = {
                 "ts": e.ts.isoformat(),
@@ -256,19 +284,23 @@ def _append_jsonl(events: list[Event]) -> None:
             body_str = json.dumps(body, default=str, separators=(",", ":"), ensure_ascii=False)
             ts_ns = int(e.ts.timestamp() * 1_000_000_000)
             eid = event_id(body_str, ts_ns)
-            lines.append(
+            line = (
                 json.dumps(
-                    {**body, "id": eid},
-                    default=str,
-                    separators=(",", ":"),
-                    ensure_ascii=False,
+                    {**body, "id": eid}, default=str, separators=(",", ":"), ensure_ascii=False
                 )
                 + "\n"
             )
+            lines.append(line)
+            if _is_rollup_source(e.event_name):
+                rollup_lines.append(line)
         path = logs_dir() / f"events-{day}.jsonl"
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as f:
             f.write("".join(lines))
+        if rollup_lines:
+            rollup_path = logs_dir() / f"events-{day}.rollup.jsonl"
+            with rollup_path.open("a", encoding="utf-8") as f:
+                f.write("".join(rollup_lines))
     except Exception as exc:  # report, never raise
         global _jsonl_failures  # noqa: PLW0603 — module-level counter
         _jsonl_failures += 1

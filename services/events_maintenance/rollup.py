@@ -25,8 +25,9 @@ existing ledger rows while continuing with the remaining days.
 Loki bounds what is recoverable: retention is 7d
 (deploy/lgtm/config/loki.yaml `retention_period: 168h`), so the
 recompute window clamps to the first FULLY-retained day — a maintenance
-outage longer than retention loses those days' aggregates (logged loudly;
-the JSONL mirror remains the manual recovery source). The clamp also
+outage longer than retention leaves a gap in the Loki-sourced aggregates
+(logged loudly; the filtered rollup-source JSONL mirror is the automated replay
+source). The clamp also
 protects history: a day at/below the floor is never recomputed, so
 archive-backfilled rows cannot be overwritten with zeros.
 
