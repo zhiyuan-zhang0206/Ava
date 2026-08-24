@@ -179,6 +179,16 @@ CLOCKS: dict[str, Clock] = {
         lambda: deploy.SERVICE_READY_TIMEOUT_S,
         "how long `ava start` waits for freshly launched services to pass liveness",
     ),
+    "ORCHESTRATION_OWNER_WAIT_S": Clock(
+        "deploy",
+        lambda: deploy.ORCHESTRATION_OWNER_WAIT_S,
+        "server-side wait for a detached orchestration to publish its durable UI owner",
+    ),
+    "CLUSTER_DISPATCH_TIMEOUT_S": Clock(
+        "deploy",
+        lambda: deploy.CLUSTER_DISPATCH_TIMEOUT_S,
+        "client-side bound that must outlive orchestration ownership publication",
+    ),
     # --- agent-lease family (values in shared/deploy_timing.py) ---
     "AGENT_LEASE_TTL_S": Clock(
         "agent-lease",
@@ -315,6 +325,13 @@ CONSTRAINTS: list[Constraint] = [
         "a settle hold waits exactly as long as the host it waits for deserves "
         "the benefit of the doubt — the same instant its host-local reaper would "
         "call its updater hung",
+    ),
+    Constraint(
+        "<",
+        "ORCHESTRATION_OWNER_WAIT_S",
+        "CLUSTER_DISPATCH_TIMEOUT_S",
+        "the detached child must publish ownership before the dispatching client "
+        "can time out and invite a duplicate submission",
     ),
     # --- agent-lease family ---
     Constraint(
