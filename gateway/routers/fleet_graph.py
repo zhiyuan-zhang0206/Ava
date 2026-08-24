@@ -6,8 +6,9 @@ dynamic weight that sums per-event recency decay over a time window.
 Data sources (task #1197 LGTM cutover):
 - `agents_meta` + `agents` (Postgres): node identity, liveness, labels.
 - Prometheus (`gateway/prom_metrics.py`): the llm_usage token aggregates —
-  all-time totals + windowed scores — from the OTLP-mapped counters
-  `ava_llm_usage_in_total` / `ava_llm_usage_out_total`.
+  retained-window (7d) totals + selected-window scores — from the OTLP-mapped
+  counters `ava_llm_usage_in_total` / `ava_llm_usage_out_total`. The retained
+  total uses `increase()` so exporter restarts do not reset the reported value.
 - Edge events (audit category, spawn/send_message/fork/resurrect): the
   frozen PG `events` archive (pre-cutover structural history) stitched with
   Loki (the live tail). Task #1281 imports the archive into Loki, after
@@ -52,7 +53,7 @@ from shared.redis_client import sync_redis
 router = APIRouter()
 
 # The fleet view polls every 30s while the underlying data moves slowly
-# (all-time token totals, recency-decayed edge weights). A 60s Redis TTL makes
+# (retained-window token totals, recency-decayed edge weights). A 60s Redis TTL makes
 # alternating polls cache hits, cutting expensive composite reads in half while
 # SSE invalidation still carries lifecycle changes promptly. Cache is fail-open:
 # a Redis outage degrades to a direct query, never to a 500.
@@ -406,22 +407,24 @@ def _fetch_pg_graph(
 def _fetch_prom_tokens(
     hours: StatsWindowHours | None,
 ) -> tuple[dict[str, float], dict[str, float], dict[str, float], dict[str, float]]:
-    """Fetch independent all-time and selected-window token counters in parallel."""
-    # All four counter reads are independent, including the all-time and
+    """Fetch independent retained and selected-window token aggregates in parallel."""
+    # All four counter reads are independent, including the retained and
     # selected-window pairs, so issue them together instead of adding four
     # 8-second waits to the route's sync worker occupancy.
     with ThreadPoolExecutor(max_workers=4, thread_name_prefix="fleet-prom") as executor:
         futures = {
-            "in_all": executor.submit(
+            "in_retained": executor.submit(
                 prom_metrics.sum_by,
                 _IN_METRIC,
                 "agent_id",
+                window=timedelta(days=7),
                 timeout_s=_TELEMETRY_READ_TIMEOUT_S,
             ),
-            "out_all": executor.submit(
+            "out_retained": executor.submit(
                 prom_metrics.sum_by,
                 _OUT_METRIC,
                 "agent_id",
+                window=timedelta(days=7),
                 timeout_s=_TELEMETRY_READ_TIMEOUT_S,
             ),
             "in_window": executor.submit(
@@ -440,8 +443,8 @@ def _fetch_prom_tokens(
             ),
         }
         return (
-            futures["in_all"].result(),
-            futures["out_all"].result(),
+            futures["in_retained"].result(),
+            futures["out_retained"].result(),
             futures["in_window"].result(),
             futures["out_window"].result(),
         )
@@ -450,14 +453,14 @@ def _fetch_prom_tokens(
 def _build_nodes(
     node_rows: list[tuple[Any, ...]],
     *,
-    in_all: dict[str, float] | None = None,
-    out_all: dict[str, float] | None = None,
+    in_retained: dict[str, float] | None = None,
+    out_retained: dict[str, float] | None = None,
     in_win: dict[str, float] | None = None,
     out_win: dict[str, float] | None = None,
 ) -> list[FleetGraphNode]:
     """Build graph nodes, retaining PG identity when metrics are unavailable."""
-    in_all = in_all or {}
-    out_all = out_all or {}
+    in_retained = in_retained or {}
+    out_retained = out_retained or {}
     in_win = in_win or {}
     out_win = out_win or {}
     return [
@@ -468,7 +471,7 @@ def _build_nodes(
             liveness_state=r[3],
             spawner=r[4],
             machine=r[5],
-            total_tokens=round(in_all.get(str(r[0]), 0.0) + out_all.get(str(r[0]), 0.0)),
+            total_tokens=round(in_retained.get(str(r[0]), 0.0) + out_retained.get(str(r[0]), 0.0)),
             node_score=round(in_win.get(str(r[0]), 0.0) * 0.1 + out_win.get(str(r[0]), 0.0), 2),
         )
         for r in node_rows
@@ -483,12 +486,13 @@ def get_fleet_graph(
         Query(description="Include terminated agents"),
     ] = False,
     hours: Annotated[StatsWindowHours | None, Query()] = None,
-    decay_lambda: Annotated[float, Query(ge=0)] = 0.5,
+    decay_lambda: Annotated[float, Query(ge=0, le=10)] = 0.5,
 ) -> FleetGraphResponse:
     """Fleet-wide weighted agent graph — nodes (agents) + edges (lineage + messages).
 
-    Nodes carry status, label, a windowed recent-work `node_score`, and the
-    all-time `total_tokens`. Edges split into two families: lineage
+    Nodes carry status, label, a windowed recent-work `node_score`, and
+    restart-proof `total_tokens` consumed in the retained window (7d). Edges
+    split into two families: lineage
     (spawn/fork/resurrect) is structural and permanent; messages (send_message)
     decay with recency. Terminated agents — and edges touching a terminated
     agent — are excluded by default (user ruling 2026-08-09 #1104: terminated
@@ -501,15 +505,21 @@ def get_fleet_graph(
     archive.
 
     `?hours=` (0 = last 5m; 1/6/24/72/168 = hours; omitted = all-time) windows
-    both the node score and the edge events. `?decay_lambda=` (>= 0, default
-    0.5) is the per-day decay constant for the message edge weight.
+    both the node score and the edge events. `?decay_lambda=` (range [0, 10],
+    default 0.5) is the per-day decay constant for the message edge weight,
+    quantized to 2dp before both computation and cache-key construction. Its
+    1001 values, two terminated states, and the bounded hour-window choices
+    cap the cache-key space at approximately 16k entries. Per-caller rate
+    limiting was considered and deferred: this endpoint is auth-gated, and the
+    bounded key space leaves no present threat that warrants that infrastructure.
 
     Node score (windowed, drives node size):
         node_score = SUM(in_total) * 0.1 + SUM(out_total) * 1.0
     over the agent's `llm_usage` counters in the window — read from
     Prometheus (`ava_llm_usage_in_total` / `ava_llm_usage_out_total`,
-    windowed via `increase(...)`). `total_tokens` is the all-time sum of
-    the same two counters (cumulative since the exporting process started).
+    windowed via `increase(...)`). `total_tokens` is the sum of the same two
+    counters over the retained 7d window, also using `increase(...)` so
+    exporter process restarts do not reset it.
 
     Edge weight:
         lineage (spawn/fork/resurrect): weight = event_count * 2.0 (no time decay,
@@ -517,6 +527,8 @@ def get_fleet_graph(
         message (send_message): weight = SUM(EXP(-decay_lambda * days_ago)) * 1.0
             (recency-decayed; dropped below 0.01)
     """
+    decay_lambda = round(decay_lambda, 2)
+
     # Windowed-filter fragment spliced into the edge SQL below. Kept as a literal
     # (not an f-string) so the composed query stays a LiteralString for psycopg.
     # None => all-time (no filter, no param). The node token window is applied in
@@ -562,12 +574,12 @@ def get_fleet_graph(
         return _stale_graph(key, _build_nodes(node_rows))
 
     # --- Token aggregates from Prometheus (the llm_usage counters) ---
-    # total_tokens is the all-time counter sum (tooltip); node_score is the
-    # windowed weighted score (node size). Both read the OTLP-mapped counters
-    # via gateway/prom_metrics; the `hours` window becomes a PromQL range
-    # selector (increase over [Nh]) instead of a SQL fragment.
+    # total_tokens is the restart-proof retained-window sum; node_score is the
+    # selected-window weighted score (node size). Both read the OTLP-mapped
+    # counters via gateway/prom_metrics; configured windows become PromQL
+    # range selectors (increase over [Nh]) instead of SQL fragments.
     try:
-        in_all, out_all, in_win, out_win = _fetch_prom_tokens(hours)
+        in_retained, out_retained, in_win, out_win = _fetch_prom_tokens(hours)
     except prom_metrics.PromQueryBudgetError as exc:
         logger.warning("fleet_graph Prometheus query budget refused — serving stale graph: {}", exc)
         return _stale_graph(key, _build_nodes(node_rows))
@@ -577,8 +589,8 @@ def get_fleet_graph(
 
     nodes = _build_nodes(
         node_rows,
-        in_all=in_all,
-        out_all=out_all,
+        in_retained=in_retained,
+        out_retained=out_retained,
         in_win=in_win,
         out_win=out_win,
     )

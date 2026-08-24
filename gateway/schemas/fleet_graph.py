@@ -30,8 +30,8 @@ class FleetGraphNode(BaseModel):
     # summed from the agent's llm_usage events. Drives node size in the graph
     # (output tokens weigh 10x input — the agent's actual produced work).
     node_score: float
-    # Cumulative tokens consumed (input + output, all-time) — summed from the
-    # agent's llm_usage events. Reference figure shown in the node tooltip.
+    # Tokens consumed in the retained window (input + output, 7d), restart-proof
+    # via Prometheus increase(). Reference figure shown in the node tooltip.
     total_tokens: int
 
 

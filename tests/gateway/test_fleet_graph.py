@@ -3,9 +3,9 @@
 FastAPI TestClient + real ava_test DB. The SQL is the one place a column-name /
 cast / filter typo passes the frontend tests (which feed mock data) but breaks
 live, so it is exercised against a real DB here. Covers:
-- `total_tokens` — per-agent all-time in+out llm_usage counter sum, read from
-  Prometheus via gateway/prom_metrics (mocked here; its own unit tests lock
-  the PromQL text).
+- `total_tokens` — per-agent retained-window in+out llm_usage counter increase,
+  read from Prometheus via gateway/prom_metrics (mocked here; its own unit
+  tests lock the PromQL text).
 - `node_score` — windowed SUM(in)*0.1 + SUM(out)*1.0 (drives node size).
 - edge weight — lineage (spawn/fork/resurrect) permanent COUNT*2.0 (no decay,
   always shown); message (send_message) recency-decayed, dropped below 0.01.
@@ -102,17 +102,19 @@ def _fresh_telemetry_heartbeat(monkeypatch: pytest.MonkeyPatch) -> None:
 def _install_prom(
     monkeypatch: pytest.MonkeyPatch,
     *,
-    all_time: dict[str, dict[str, float]] | None = None,
+    retained: dict[str, dict[str, float]] | None = None,
     windowed: dict[str, dict[str, float]] | None = None,
 ) -> None:
-    """Fake gateway.prom_metrics.sum_by: `all_time` maps metric ->
-    {agent_id: value} for window=None calls, `windowed` for windowed
-    calls. A metric absent from both maps reads as {} (no llm_usage series)."""
+    """Fake retained totals and selected-window Prometheus token reads.
+
+    The unbounded node-score view reuses `retained` values in tests that do
+    not need to distinguish it. A metric absent from both maps reads as {}.
+    """
 
     def fake_sum_by(
         metric: str, by: str, *, window: timedelta | None = None, timeout_s: float | None = None
     ) -> dict[str, float]:
-        src = windowed if window is not None else all_time
+        src = retained if window in (None, timedelta(days=7)) else windowed
         return (src or {}).get(metric, {})
 
     monkeypatch.setattr(prom_metrics, "sum_by", fake_sum_by)
@@ -228,12 +230,42 @@ def test_total_tokens_sums_in_plus_out_counters(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     a = _seed_agent(db_conn)
-    _install_prom(monkeypatch, all_time={_IN_METRIC: {str(a): 300.0}, _OUT_METRIC: {str(a): 80.0}})
+    _install_prom(monkeypatch, retained={_IN_METRIC: {str(a): 300.0}, _OUT_METRIC: {str(a): 80.0}})
 
     with TestClient(app) as client:
         nodes = _nodes_by_id(client)  # pyright: ignore[reportUnknownVariableType]
 
     assert nodes[a]["total_tokens"] == 380  # in 300 + out 80
+
+
+def test_total_tokens_reads_restart_proof_retained_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, timedelta | None]] = []
+
+    def fake_sum_by(
+        metric: str,
+        by: str,
+        *,
+        window: timedelta | None = None,
+        timeout_s: float | None = None,
+    ) -> dict[str, float]:
+        assert by == "agent_id"
+        assert timeout_s == 8.0
+        calls.append((metric, window))
+        return {}
+
+    monkeypatch.setattr(prom_metrics, "sum_by", fake_sum_by)
+
+    fleet_graph._fetch_prom_tokens(fleet_graph.StatsWindowHours.H24)
+
+    assert len(calls) == 4
+    assert set(calls) == {
+        (_IN_METRIC, timedelta(days=7)),
+        (_OUT_METRIC, timedelta(days=7)),
+        (_IN_METRIC, timedelta(hours=24)),
+        (_OUT_METRIC, timedelta(hours=24)),
+    }
 
 
 def test_node_exposes_canonical_status_and_independent_liveness(
@@ -273,7 +305,7 @@ def test_total_tokens_comes_from_llm_usage_counters_only(
     turn_end-style payload can never leak into token totals — lock the mock
     contract: in+out counters are the only input."""
     a = _seed_agent(db_conn)
-    _install_prom(monkeypatch, all_time={_IN_METRIC: {str(a): 100.0}, _OUT_METRIC: {str(a): 50.0}})
+    _install_prom(monkeypatch, retained={_IN_METRIC: {str(a): 100.0}, _OUT_METRIC: {str(a): 50.0}})
 
     with TestClient(app) as client:
         nodes = _nodes_by_id(client)  # pyright: ignore[reportUnknownVariableType]
@@ -288,7 +320,7 @@ def test_total_tokens_scoped_per_agent(
     b = _seed_agent(db_conn)
     _install_prom(
         monkeypatch,
-        all_time={
+        retained={
             _IN_METRIC: {str(a): 100.0, str(b): 1.0},
             _OUT_METRIC: {str(a): 50.0, str(b): 1.0},
         },
@@ -310,7 +342,7 @@ def test_node_score_weights_output_ten_times_input(
     a = _seed_agent(db_conn)
     _install_prom(
         monkeypatch,
-        all_time={_IN_METRIC: {str(a): 300.0}, _OUT_METRIC: {str(a): 80.0}},
+        retained={_IN_METRIC: {str(a): 300.0}, _OUT_METRIC: {str(a): 80.0}},
         windowed={_IN_METRIC: {str(a): 300.0}, _OUT_METRIC: {str(a): 80.0}},
     )
 
@@ -336,20 +368,20 @@ def test_node_score_windowed_excludes_old_events(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     a = _seed_agent(db_conn)
-    # all-time counters carry the old + recent increments; the 24h window
-    # (increase over [24h]) only the recent one — the Prometheus side applies
-    # the window, the route just merges the two views.
+    # The retained 7d total carries the old + recent increments; the 24h score
+    # only the recent one — the Prometheus side applies both windows, and the
+    # route just merges the two views.
     _install_prom(
         monkeypatch,
-        all_time={_IN_METRIC: {str(a): 100.0 + 999.0}, _OUT_METRIC: {str(a): 100.0 + 999.0}},
+        retained={_IN_METRIC: {str(a): 100.0 + 999.0}, _OUT_METRIC: {str(a): 100.0 + 999.0}},
         windowed={_IN_METRIC: {str(a): 100.0}, _OUT_METRIC: {str(a): 100.0}},
     )
 
     with TestClient(app) as client:
         nodes = _nodes_by_id(client, "?hours=24")  # pyright: ignore[reportUnknownVariableType]
 
-    # Only the recent event scores: 100*0.1 + 100*1.0 = 110. total_tokens stays
-    # all-time (both events).
+    # Only the recent event scores: 100*0.1 + 100*1.0 = 110. total_tokens keeps
+    # both events because they fall inside its retained 7d window.
     assert nodes[a]["node_score"] == 110.0
     assert nodes[a]["total_tokens"] == 100 + 100 + 999 + 999
 
@@ -506,6 +538,45 @@ def test_decay_lambda_param_steepens_decay(db_conn: psycopg.Connection) -> None:
     assert steep < gentle
 
 
+def test_decay_lambda_is_quantized_for_edge_computation(
+    db_conn: psycopg.Connection,
+) -> None:
+    s = _seed_agent(db_conn)
+    c = _seed_agent(db_conn)
+    _event(db_conn, source_agent=s, target_agent=c, event_type="send_message", age_hours=48)
+    _archive_boundary_anchor(db_conn)
+
+    with TestClient(app) as client:
+        weight = _edges_by_type(client, "?decay_lambda=0.551")["send_message"]["weight"]  # pyright: ignore[reportUnknownVariableType]
+
+    assert weight == pytest.approx(math.exp(-0.55 * 2.0), abs=1e-4)  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_decay_lambda_quantization_aliases_cache_key(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    a = _seed_agent(db_conn)
+    _install_prom(monkeypatch, retained={_IN_METRIC: {str(a): 100.0}})
+
+    with TestClient(app) as client:
+        first = client.get("/api/fleet/graph", params={"decay_lambda": 0.55})
+        assert first.status_code == 200
+
+        # A cache miss would expose this changed upstream value.
+        _install_prom(monkeypatch, retained={_IN_METRIC: {str(a): 9999.0}})
+        second = client.get("/api/fleet/graph", params={"decay_lambda": 0.551})
+
+    assert second.status_code == 200
+    assert second.json() == first.json()
+
+
+def test_decay_lambda_above_maximum_is_rejected() -> None:
+    with TestClient(app) as client:
+        response = client.get("/api/fleet/graph", params={"decay_lambda": 10.01})
+
+    assert response.status_code == 422
+
+
 # ── terminated endpoint filtering (SQL layer) ──────────────────────────
 
 
@@ -655,14 +726,14 @@ def test_cache_serves_stale_graph_within_ttl(
     re-query Prometheus: change the mocked counters after the first request
     and assert the response still carries the first request's data."""
     a = _seed_agent(db_conn)
-    _install_prom(monkeypatch, all_time={_IN_METRIC: {str(a): 100.0}, _OUT_METRIC: {str(a): 50.0}})
+    _install_prom(monkeypatch, retained={_IN_METRIC: {str(a): 100.0}, _OUT_METRIC: {str(a): 50.0}})
 
     with TestClient(app) as client:
         first = _nodes_by_id(client)  # pyright: ignore[reportUnknownVariableType]
 
     # Counter values change after the first request — must NOT be visible.
     _install_prom(
-        monkeypatch, all_time={_IN_METRIC: {str(a): 9999.0}, _OUT_METRIC: {str(a): 9999.0}}
+        monkeypatch, retained={_IN_METRIC: {str(a): 9999.0}, _OUT_METRIC: {str(a): 9999.0}}
     )
 
     with TestClient(app) as client:
@@ -680,7 +751,7 @@ def test_cache_key_separates_params(
     a = _seed_agent(db_conn)
     _install_prom(
         monkeypatch,
-        all_time={_IN_METRIC: {str(a): 200.0}, _OUT_METRIC: {str(a): 150.0}},
+        retained={_IN_METRIC: {str(a): 200.0}, _OUT_METRIC: {str(a): 150.0}},
         windowed={_IN_METRIC: {str(a): 100.0}, _OUT_METRIC: {str(a): 50.0}},
     )
 
@@ -700,7 +771,7 @@ def test_cache_fail_open_when_redis_down(
     """A Redis outage (sync_redis raising) degrades to a direct DB query —
     never a 500."""
     a = _seed_agent(db_conn)
-    _install_prom(monkeypatch, all_time={_IN_METRIC: {str(a): 100.0}, _OUT_METRIC: {str(a): 50.0}})
+    _install_prom(monkeypatch, retained={_IN_METRIC: {str(a): 100.0}, _OUT_METRIC: {str(a): 50.0}})
 
     import gateway.routers.fleet_graph as fg
 

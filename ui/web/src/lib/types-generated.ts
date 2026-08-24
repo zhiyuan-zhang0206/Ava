@@ -3108,8 +3108,9 @@ export interface paths {
          * Get Fleet Graph
          * @description Fleet-wide weighted agent graph — nodes (agents) + edges (lineage + messages).
          *
-         *     Nodes carry status, label, a windowed recent-work `node_score`, and the
-         *     all-time `total_tokens`. Edges split into two families: lineage
+         *     Nodes carry status, label, a windowed recent-work `node_score`, and
+         *     restart-proof `total_tokens` consumed in the retained window (7d). Edges
+         *     split into two families: lineage
          *     (spawn/fork/resurrect) is structural and permanent; messages (send_message)
          *     decay with recency. Terminated agents — and edges touching a terminated
          *     agent — are excluded by default (user ruling 2026-08-09 #1104: terminated
@@ -3122,15 +3123,21 @@ export interface paths {
          *     archive.
          *
          *     `?hours=` (0 = last 5m; 1/6/24/72/168 = hours; omitted = all-time) windows
-         *     both the node score and the edge events. `?decay_lambda=` (>= 0, default
-         *     0.5) is the per-day decay constant for the message edge weight.
+         *     both the node score and the edge events. `?decay_lambda=` (range [0, 10],
+         *     default 0.5) is the per-day decay constant for the message edge weight,
+         *     quantized to 2dp before both computation and cache-key construction. Its
+         *     1001 values, two terminated states, and the bounded hour-window choices
+         *     cap the cache-key space at approximately 16k entries. Per-caller rate
+         *     limiting was considered and deferred: this endpoint is auth-gated, and the
+         *     bounded key space leaves no present threat that warrants that infrastructure.
          *
          *     Node score (windowed, drives node size):
          *         node_score = SUM(in_total) * 0.1 + SUM(out_total) * 1.0
          *     over the agent's `llm_usage` counters in the window — read from
          *     Prometheus (`ava_llm_usage_in_total` / `ava_llm_usage_out_total`,
-         *     windowed via `increase(...)`). `total_tokens` is the all-time sum of
-         *     the same two counters (cumulative since the exporting process started).
+         *     windowed via `increase(...)`). `total_tokens` is the sum of the same two
+         *     counters over the retained 7d window, also using `increase(...)` so
+         *     exporter process restarts do not reset it.
          *
          *     Edge weight:
          *         lineage (spawn/fork/resurrect): weight = event_count * 2.0 (no time decay,
