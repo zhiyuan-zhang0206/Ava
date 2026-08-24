@@ -24,10 +24,11 @@ to, would break the installer.
 These were deliberate — they keep the workflow small — and each is still open:
 
 - ~~**No native-app job.**~~ Closed: `.github/workflows/ci-app.yml` is a
-  path-filtered hosted lane for the Tauri app. It runs Rust format/clippy,
-  checks the Android Rust target, and tests the generated-Android overlay and
-  updater manifest builder. Platform packaging is covered by the independent
-  `app-v*` release workflow.
+  path-filtered hosted lane for the Tauri app. It runs Rust format/clippy on
+  Ubuntu, macOS, and Windows; builds an installable Android debug APK after the
+  generated-project overlay; and tests the overlay and updater-manifest builder.
+  Signed platform packaging remains covered by the independent `app-v*` release
+  workflow.
 - **No `pre-commit` job.** The pre-commit config carries ~25 lint hooks
   (`lint-ava-okf`, `lint-doc-symbols`, `lint-skill-*`, `lint-fail-fast`,
   `lint-no-os-environ`, the import-linter contracts, …). CI runs only the subset
