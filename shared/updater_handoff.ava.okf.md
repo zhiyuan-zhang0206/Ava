@@ -1,4 +1,5 @@
 ---
+type: doc
 title: Updater spawn handoff
 description: Host-local process ownership across the pause-to-detached-updater lifetime.
 status: current
