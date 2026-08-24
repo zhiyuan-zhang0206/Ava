@@ -33,6 +33,7 @@ from gateway.routers._delivery import deliver_chat_inbound
 from gateway.schemas import UploadedBatch, UploadedFile
 from shared.agents import AgentNotFound
 from shared.db import agent_exists
+from shared.private_storage import write_private_bytes
 from shared.uploads import (
     MAX_AGENT_UPLOAD_BYTES,
     MAX_AGENT_UPLOAD_FILES,
@@ -74,7 +75,6 @@ async def upload_files(
     await asyncio.to_thread(_agent_exists_blocking, request.app.state.db_pool, agent_id)
 
     dest_dir = agent_upload_dir(agent_id)
-    dest_dir.mkdir(parents=True, exist_ok=True)
 
     # Quota baseline (audit round-2 security P1-2): the endpoint is the
     # gateway's one authenticated user->disk write surface, so a batch is
@@ -108,7 +108,7 @@ async def upload_files(
                 status_code=413,
                 detail=f"agent {agent_id} already holds {MAX_AGENT_UPLOAD_FILES} uploads",
             )
-        await asyncio.to_thread(dest.write_bytes, contents)
+        await asyncio.to_thread(write_private_bytes, dest, contents)
         saved.append(
             UploadedFile(
                 filename=safe_name,

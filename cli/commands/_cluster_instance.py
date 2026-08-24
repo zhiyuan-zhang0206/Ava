@@ -59,6 +59,7 @@ from shared.machine import reachable_host
 from shared.paths import ava_home
 from shared.pg_tools import PG_BIN_LINUX, brew_prefix, is_macos, pg_shm_args, pg_tool, pg_tz_args
 from shared.platform_backend import get_backend
+from shared.private_storage import ensure_private_dir
 
 _LOOPBACK_ALIASES = frozenset({"127.0.0.1", "::1", "localhost", "ip6-localhost"})
 
@@ -225,7 +226,7 @@ def _ensure_pg_data() -> Path:
     return data
 
 
-def _pg_socket_dir() -> Path:
+def _pg_socket_dir(socket_root: Path | None = None) -> Path:
     """A SHORT, cluster-unique socket directory. The Postgres socket path
     (`<dir>/.s.PGSQL.<port>`) is capped at 103 bytes, so it cannot live under a
     deep `$AVA_HOME` / pytest-tmp data dir — a short `/tmp/ava-pg-<home-slug>`
@@ -234,9 +235,9 @@ def _pg_socket_dir() -> Path:
     keeps it owner-only."""
     from shared.cluster import home_slug
 
-    d = Path("/tmp") / f"ava-pg-{home_slug(ava_home())}"  # noqa: S108 — short socket path, owner-only below
-    d.mkdir(mode=0o700, parents=True, exist_ok=True)
-    return d
+    root = Path("/tmp") if socket_root is None else socket_root  # noqa: S108 — OS-fixed production socket root
+    d = root / f"ava-pg-{home_slug(ava_home())}"
+    return ensure_private_dir(d)
 
 
 def _live_pg_socket_dir(pg_port: int, probe_root: Path = Path("/tmp")) -> Path:  # noqa: S108 — the OS-fixed short socket root
@@ -326,6 +327,7 @@ def _start_pg(pg_port: int, cluster_secret: str) -> int:
             "-o",
             f"-p {pg_port} -c listen_addresses={listen} "
             f"-c unix_socket_directories={_pg_socket_dir()} "
+            f"-c unix_socket_permissions=0700 "
             f"-c max_connections={_PG_MAX_CONNECTIONS} "
             f"{pg_tz_args()} {pg_shm_args()}",
         ],

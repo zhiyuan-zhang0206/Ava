@@ -6,12 +6,19 @@ down. `_wait_for_reachable_bind` blocks (bounded) until the address is assigned,
 fails fast on timeout. A loopback-only single box never waits.
 """
 
+import os
 from pathlib import Path
 
 import pytest
 
 from cli.commands import _cluster_instance as _ci
 from shared.config import settings
+
+
+def _pg_socket_path(root: Path, home: Path) -> Path:
+    from shared.cluster import home_slug
+
+    return root / f"ava-pg-{home_slug(home)}"
 
 
 def test_macos_redis_binaries_use_versioned_formula(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -233,6 +240,44 @@ def test_start_redis_does_not_use_shared_pg_bind_addrs(
 # ─── task #1303: postgres gets the same secret-gated reachable-bind wait ──────
 
 
+def test_pg_socket_dir_rejects_symlink(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """The predictable /tmp socket location cannot follow a pre-placed symlink."""
+    home = tmp_path / "home"
+    monkeypatch.setattr(_ci, "ava_home", lambda: home)
+    socket_dir = _pg_socket_path(tmp_path, home)
+    socket_dir.symlink_to(tmp_path / "elsewhere", target_is_directory=True)
+
+    with pytest.raises(RuntimeError, match="symlink"):
+        _ci._pg_socket_dir(tmp_path)
+
+
+def test_pg_socket_dir_rejects_foreign_owner(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A socket directory owned by another local account is refused."""
+    home = tmp_path / "home"
+    monkeypatch.setattr(_ci, "ava_home", lambda: home)
+    socket_dir = _pg_socket_path(tmp_path, home)
+    socket_dir.mkdir()
+    owner = os.geteuid()
+    monkeypatch.setattr(os, "geteuid", lambda: owner + 1)
+
+    with pytest.raises(RuntimeError, match="not owned by the current user"):
+        _ci._pg_socket_dir(tmp_path)
+
+
+def test_pg_socket_dir_repairs_mode_drift(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Existing socket directories are tightened before Postgres binds a trust socket."""
+    home = tmp_path / "home"
+    monkeypatch.setattr(_ci, "ava_home", lambda: home)
+    socket_dir = _pg_socket_path(tmp_path, home)
+    socket_dir.mkdir()
+    socket_dir.chmod(0o755)
+
+    assert _ci._pg_socket_dir(tmp_path) == socket_dir
+    assert socket_dir.stat().st_mode & 0o777 == 0o700
+
+
 def _wire_pg_start(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: object,
@@ -269,6 +314,17 @@ def test_start_pg_loopback_only_bind_never_waits(
 
     assert _ci._start_pg(5433, "") == 0
     assert calls != [], "the start must proceed without waiting"
+
+
+def test_start_pg_sets_owner_only_socket_permissions(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Postgres itself creates local trust sockets without group/world access."""
+    calls = _wire_pg_start(monkeypatch, tmp_path)
+
+    assert _ci._start_pg(5433, "") == 0
+    options = calls[0][calls[0].index("-o") + 1]
+    assert "unix_socket_permissions=0700" in options
 
 
 def test_start_pg_waits_and_fails_fast_on_timeout(

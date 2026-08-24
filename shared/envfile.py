@@ -11,6 +11,7 @@ from datetime import datetime
 from pathlib import Path
 
 from shared.platform import file_lock
+from shared.private_storage import ensure_private_dir, ensure_private_file
 
 _log = logging.getLogger(__name__)
 
@@ -55,8 +56,7 @@ def snapshot_env(path: Path, *, keep: int = ENV_BACKUP_KEEP) -> Path | None:
         if not content.strip():
             return None
         backup_dir = path.parent / "backups" / "env"
-        backup_dir.mkdir(parents=True, exist_ok=True)
-        backup_dir.chmod(0o700)
+        ensure_private_dir(backup_dir)
         existing = sorted(backup_dir.glob(".env.*"))
         if existing and existing[-1].read_text() == content:
             return None
@@ -64,12 +64,12 @@ def snapshot_env(path: Path, *, keep: int = ENV_BACKUP_KEEP) -> Path | None:
         # stays unique across rapid successive writes.
         dest = backup_dir / f".env.{datetime.now().astimezone().strftime('%Y%m%d-%H%M%S-%f')}"
         dest.write_text(content)
-        dest.chmod(0o600)
+        ensure_private_file(dest)
         if keep > 0:
             for old in sorted(backup_dir.glob(".env.*"))[:-keep]:
                 old.unlink(missing_ok=True)
         return dest
-    except OSError:
+    except (OSError, RuntimeError):
         _log.warning("snapshot_env: could not back up %s", path, exc_info=True)
         return None
 
@@ -106,8 +106,8 @@ def _chmod_private(path: Path) -> None:
     copy, so its mode must not depend on umask (audit round-2 security P1-3:
     snapshot_env already chmods 0600, the main file did not)."""
     try:
-        path.chmod(0o600)
-    except OSError:
+        ensure_private_file(path)
+    except (OSError, RuntimeError):
         _log.warning("could not chmod 0600 %s", path, exc_info=True)
 
 

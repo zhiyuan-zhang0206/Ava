@@ -127,6 +127,29 @@ def test_dump_name_is_utc_stamped(bdir: Path, monkeypatch: pytest.MonkeyPatch) -
     assert path.name == "ava-20260609T190000Z.dump"
 
 
+def test_run_backup_repairs_storage_permissions(
+    bdir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The backup directory and completed dump are owner-only despite umask drift."""
+    bdir.chmod(0o755)
+
+    class _Ok:
+        returncode = 0
+        stderr = ""
+
+    def _fake_run(cmd: list[str], **_kw: object) -> _Ok:
+        partial = Path(cmd[cmd.index("--file") + 1])
+        partial.write_bytes(b"dump")
+        partial.chmod(0o644)
+        return _Ok()
+
+    monkeypatch.setattr(backup.subprocess, "run", _fake_run)
+    target = backup.run_backup(_dt(2026, 6, 10, 3, 0), db_url="dbname=ava")
+
+    assert bdir.stat().st_mode & 0o777 == 0o700
+    assert target.stat().st_mode & 0o777 == 0o600
+
+
 def test_prune_order_survives_the_dst_fold(bdir: Path) -> None:
     """The two dumps in the DST fall-back hour order by instant, not wall clock.
 
