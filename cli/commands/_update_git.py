@@ -437,8 +437,8 @@ def rollback_schema_to(keep: set[str]) -> list[str]:
     """Roll the DB schema back to the applied set `keep` (the snapshot from
     current_schema_state); return the migration names rolled back (empty when the
     schema never advanced past `keep`). Fresh non-autocommit connection, same
-    isolation rationale as apply_pending_migrations; each down commits in its own
-    transaction inside rollback_to.
+    isolation rationale as apply_pending_migrations; the whole rollback runs in
+    one transaction, so a failing down leaves the schema unchanged.
 
     Raises:
         RollbackBelowFloor: `keep` is below the squashed baseline — no down to

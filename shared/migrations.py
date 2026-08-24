@@ -871,6 +871,8 @@ def apply_pending_migrations(conn: psycopg.Connection) -> list[str]:
 def apply_down(conn: psycopg.Connection, name: str) -> None:
     """Run a migration's `.down.sql` + delete its schema_migrations row, one
     transaction (the reverse of forward apply). Requires a non-autocommit conn.
+    Inside `rollback_to`'s single rollback transaction, this transaction is a
+    savepoint; standalone, it is its own transaction.
 
     Exceptions:
         MigrationFailed: the down SQL failed; `__cause__` is the psycopg error.
@@ -902,22 +904,27 @@ def rollback_to(conn: psycopg.Connection, keep: set[str]) -> list[str]:
     refused: the baseline has no down, and crossing it would strand a set-tracked
     DB under pre-cutover code.
 
+    The whole rollback runs in one transaction. If any down fails, the batch
+    aborts atomically and leaves the schema and applied set unchanged, so the
+    caller can fix-forward safely.
+
     Exceptions:
         RollbackBelowFloor: the rollback set includes the baseline (target
             predates the cutover).
         MigrationFailed / MigrationLayoutError: from `apply_down`.
     """
     with _schema_mutation_lock(conn):
-        applied = _applied_migration_set(conn)
-        to_roll = applied - keep
-        if _BASELINE_NAME in to_roll:
-            raise RollbackBelowFloor(
-                "rollback target is below the squashed baseline (the baseline has "
-                "no down migration). Choose a target at or after the re-baseline "
-                "cutover, or fix-forward."
-            )
         rolled: list[str] = []
-        for name in sorted(to_roll, reverse=True):
-            apply_down(conn, name)
-            rolled.append(name)
+        with conn.transaction():
+            applied = _applied_migration_set(conn)
+            to_roll = applied - keep
+            if _BASELINE_NAME in to_roll:
+                raise RollbackBelowFloor(
+                    "rollback target is below the squashed baseline (the baseline has "
+                    "no down migration). Choose a target at or after the re-baseline "
+                    "cutover, or fix-forward."
+                )
+            for name in sorted(to_roll, reverse=True):
+                apply_down(conn, name)
+                rolled.append(name)
     return rolled

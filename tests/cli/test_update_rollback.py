@@ -186,10 +186,11 @@ def test_recover_migration_failed_mid_rollback_does_not_reset(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A down failing mid-rollback (MigrationFailed) -> return 1 WITHOUT git reset.
-    rollback_to commits each down in its own txn, so the schema is partially rolled
-    back; resetting the code on top would compound the inconsistency. Leave the
-    half-state for a human (the I2 review finding — MigrationError must be caught,
-    not just RollbackBelowFloor, or this escapes as a bare traceback)."""
+    rollback_to aborts the batch atomically, so the schema is unchanged and remains
+    consistent with the new revision for fix-forward. Resetting code would create
+    CodeBehindSchema; leave the determinate stopped-gateway state for a human (the
+    I2 review finding — MigrationError must be caught, not just RollbackBelowFloor,
+    or this escapes as a bare traceback)."""
     order, fake = _patch_recover(
         monkeypatch, rollback=MigrationFailed("down migration 0023 (...) failed")
     )
