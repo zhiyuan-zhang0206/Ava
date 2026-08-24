@@ -593,12 +593,9 @@ def respawn_agent(agent_id: int) -> bool:
             # integrity fault for a recurring background WARN that ops learns to
             # ignore. Reusing 'launch-confirm' here to save the enum value would do
             # exactly that. Ops resurrects by hand after looking at the row.
-            # Capture open page names BEFORE the status flip — the
-            # cascade_close_agent_pages trigger closes the page rows on
-            # 'terminated', after which the open-page query matches nothing.
-            # A 'restarting' row can hold open pages (restart keeps them
-            # open across processes); the frontend popover needs the
-            # PageClosed events to drop them.
+            # Capture cascade-closable show() page names BEFORE the status
+            # flip. Daemon-supervised serve() pages stay open; the frontend
+            # only needs PageClosed events for pages the cascade closes.
             integrity_page_names = list_open_page_names(conn, agent_id)
             cur.execute(
                 "UPDATE agents_meta SET status = 'terminated', "

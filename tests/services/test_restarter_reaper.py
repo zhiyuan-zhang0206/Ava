@@ -72,7 +72,7 @@ def test_reaps_dead_boot_phase_row_with_dead_pid(
 
 
 def _open_page(db_conn: psycopg.Connection, aid: int, name: str = "report") -> None:
-    """Seed one open agent_pages row (audit B2 tests)."""
+    """Seed one open show() row, which terminate cascades may close (audit B2)."""
     with db_conn.cursor() as cur:
         cur.execute(
             "INSERT INTO agent_pages (agent_id, name, port, host, title) "
@@ -85,9 +85,11 @@ def _open_page(db_conn: psycopg.Connection, aid: int, name: str = "report") -> N
 def test_reaping_dead_boot_phase_row_publishes_page_closed(
     db_conn: psycopg.Connection, sync_pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A reaped boot-phase row holding open pages emits one PageClosed per page
-    (audit B2) — the cascade trigger closes the page rows, the events clear the
-    frontend popover instead of leaving stale entries until the next refresh."""
+    """A reaped boot-phase row holding a show() page emits one PageClosed.
+
+    The cascade closes this agent-owned row, so the event clears the frontend
+    popover instead of leaving a stale entry until the next refresh.
+    """
     _stub_probe(monkeypatch, AgentProcessIdentity.GONE)
     tid = _make_dead_boot_phase_agent(db_conn)
     _open_page(db_conn, tid)

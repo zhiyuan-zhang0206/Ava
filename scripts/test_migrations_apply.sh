@@ -50,18 +50,24 @@ INSERT INTO agents (label) VALUES ('smoke-agent');
 INSERT INTO agents_meta (id, status, machine)
     VALUES ((SELECT max(id) FROM agents), 'running', 'smoke-machine');
 INSERT INTO agent_pages (agent_id, name, port)
-    VALUES ((SELECT max(id) FROM agents), 'p1', 9001);
+    VALUES ((SELECT max(id) FROM agents), 'show', 9001);
+INSERT INTO agent_pages (agent_id, name, port, serve_dir)
+    VALUES ((SELECT max(id) FROM agents), 'serve', 9002, '/tmp/serve');
 UPDATE agents_meta SET status = 'terminated'
     WHERE id = (SELECT max(id) FROM agents);
 
 DO $$
-DECLARE closed_count INT;
+DECLARE show_closed_count INT;
+DECLARE serve_open_count INT;
 BEGIN
-    SELECT COUNT(*) INTO closed_count
+    SELECT COUNT(*) FILTER (WHERE name = 'show' AND closed_at IS NOT NULL),
+           COUNT(*) FILTER (WHERE name = 'serve' AND closed_at IS NULL)
+      INTO show_closed_count, serve_open_count
         FROM agent_pages
-        WHERE closed_at IS NOT NULL;
-    IF closed_count <> 1 THEN
-        RAISE EXCEPTION 'cascade_close_agent_pages did not fire — closed_count=%', closed_count;
+        WHERE name IN ('show', 'serve');
+    IF show_closed_count <> 1 OR serve_open_count <> 1 THEN
+        RAISE EXCEPTION 'cascade_close_agent_pages wrong result — show_closed_count=%, serve_open_count=%',
+            show_closed_count, serve_open_count;
     END IF;
 END $$;
 SQL

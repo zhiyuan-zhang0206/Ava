@@ -141,13 +141,12 @@ def publish_page_closed_sync(agent_id: int, name: str) -> None:
     """Publish PageClosed from a sync context (restarter controllers, launch /
     boot-failure force-terminate paths).
 
-    The page rows are cascade-closed by the `cascade_close_agent_pages` trigger
-    the moment status flips to 'terminated'; this broadcast is the frontend's
-    real-time removal hint (the popover). Callers that force-'terminated' a row
-    that may hold open pages must emit one PageClosed per page name captured
-    BEFORE the status UPDATE (the trigger closes the rows, after which the open
-    page query matches nothing). Best-effort like every announce — a redis
-    outage degrades to "the frontend refreshes on its next full fetch"."""
+    The `cascade_close_agent_pages` trigger closes only agent-owned show() rows
+    when status flips to 'terminated'; daemon-supervised serve() rows remain
+    open. Callers capture the former before the status UPDATE and emit one
+    PageClosed per name so the frontend removes those entries in real time.
+    Best-effort like every announce — a redis outage degrades to "the frontend
+    refreshes on its next full fetch"."""
     ev = PageClosed(agent_id=agent_id, name=name)
     publish_best_effort_sync(
         settings.data_plane.events_channel, ev.model_dump_json(), context="page_closed"

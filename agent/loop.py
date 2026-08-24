@@ -19,7 +19,8 @@ Entry point `python -m agent --agent-id N`:
    vetoes it — see the veto block in `agent/graph/_claim.py`), claim → goto
    END with `exit_requested=True` → the runloop returns instead of re-invoking.
 5. After the runloop returns, notify the gateway (`POST /api/agents/{id}/exited`)
-   to finalize status='terminated' + close pages; process exits naturally.
+   to finalize status='terminated' + close agent-owned show() pages; daemon-
+   supervised serve() pages continue in persistent page sessions.
 
 New processes don't start directly — always go through gateway route
 `POST /api/agents`; the gateway internally creates a row via

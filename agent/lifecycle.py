@@ -4,8 +4,8 @@ Covers:
 - `_exit_reason` — derive a tag for the `process_exit` event from sys.exc_info()
 - `_install_lifecycle_signal_handlers` — SIGHUP / SIGTERM → SystemExit
 - `_notify_exit` — tell the gateway this process has exited so it finalizes
-  status='terminated' + closes pages (the gateway owns agents_meta + the
-  pages table; the agent only notifies)
+  status='terminated' + closes agent-owned show() pages (daemon-supervised
+  serve() pages stay open; the gateway owns agents_meta + the pages table)
 - `_route_process_end_notify` — route the finally-block notify by exit reason
   (hibernation swap-out parks 'hibernating', everything else finalizes)
 
@@ -137,7 +137,8 @@ def _install_lifecycle_signal_handlers() -> None:
 
 def _notify_exit(agent_id: int) -> None:
     """Tell the gateway this process has reached its exit — it finalizes
-    status='terminated' + closes the agent's pages.
+    status='terminated' + closes its agent-owned show() pages. Daemon-supervised
+    serve() pages stay open in their persistent page sessions.
 
     The gateway owns agents_meta and the pages table; the agent only notifies
     (`POST /api/agents/{id}/exited`). The finalize is guarded server-side so a
@@ -166,7 +167,8 @@ def _notify_exit(agent_id: int) -> None:
 def _notify_hibernate(agent_id: int) -> None:
     """Tell the gateway this process is swapping out for hibernation — it parks
     the row as 'hibernating' (WHERE status IN running/idling), keeping the agent's
-    pages open and writing no exit event, unlike the /exited terminate path.
+    pages open and writing no exit event, unlike the /exited terminate path that
+    closes only agent-owned show() pages.
 
     main()'s finally routes here (instead of `_notify_exit`) when the exit reason
     is a hibernation swap-out (`HIBERNATE_EXIT_REASON`, set by the SIGUSR1

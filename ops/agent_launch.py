@@ -389,9 +389,8 @@ def _confirm_launch_or_force_terminated(agent_id: int) -> bool:
             event="launch_confirm_failed",
         )
     with shared.db.connect() as conn, conn.cursor() as cur:
-        # Capture open page names BEFORE the status flip — the
-        # cascade_close_agent_pages trigger closes the page rows on
-        # 'terminated', after which the open-page query matches nothing.
+        # Capture cascade-closable show() page names BEFORE the status flip.
+        # Daemon-supervised serve() pages stay open across termination.
         # An unclaimed 'idling' row can hold open pages (resurrect's cascade_open
         # reopens them at the flip); the frontend popover needs the
         # PageClosed events to drop them.
@@ -493,11 +492,9 @@ def _launch_or_force_terminated(
                     event="launch_force_terminated",
                 )
                 with shared.db.connect() as conn, conn.cursor() as cur:
-                    # Capture open page names BEFORE the status flip — the
-                    # cascade_close_agent_pages trigger closes the page rows on
-                    # 'terminated', after which the open-page query matches nothing
-                    # (an unclaimed 'idling' row can hold open pages: resurrect's
-                    # cascade_open reopens them at the flip).
+                    # Capture cascade-closable show() page names BEFORE the
+                    # status flip. Daemon-supervised serve() pages stay open;
+                    # resurrect reopens only show() rows the cascade closed.
                     page_names = list_open_page_names(conn, agent_id)
                     cur.execute(
                         # 'launch-confirm': retries exhausted, the wake never came up

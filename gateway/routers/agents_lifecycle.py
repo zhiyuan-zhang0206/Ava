@@ -142,7 +142,8 @@ async def post_agent_terminate(
 @router.post("/api/agents/{agent_id}/exited", status_code=204)
 async def post_agent_exited(agent_id: int, request: Request) -> Response:
     """An agent process reports it has reached its own exit finally block —
-    finalize its status to 'terminated' and close its pages.
+    finalize its status to 'terminated', close its agent-owned show() pages,
+    and keep daemon-supervised serve() pages open.
 
     Called by the agent itself (`ava.self`'s exit path), not by a user/peer.
     Distinct from `/terminate`, which *initiates* termination (inserts a

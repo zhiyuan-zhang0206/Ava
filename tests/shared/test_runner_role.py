@@ -539,8 +539,8 @@ def test_runner_grant_matrix(runner_db: str) -> None:
             (agent_id,),
         )
         conn.execute("UPDATE agent_watchers SET status = 'missed' WHERE agent_id = %s", (agent_id,))
-        # ... and the page close at exit (agent_pages UPDATE; the row itself
-        # was seeded by the gateway side above)
+        # ... and the show-page close at exit (agent_pages UPDATE; the row
+        # itself was seeded by the gateway side above)
         conn.execute("UPDATE agent_pages SET closed_at = now() WHERE agent_id = %s", (agent_id,))
         # machine_units register_self (INSERT + UPDATE + SELECT)
         conn.execute("INSERT INTO machine_units (machine_name, home) VALUES ('m1', '/h1')")
