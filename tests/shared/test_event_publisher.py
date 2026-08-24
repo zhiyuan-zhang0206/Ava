@@ -14,8 +14,10 @@ from __future__ import annotations
 import asyncio
 from typing import Any, cast
 
+import pytest
 import redis.asyncio as aredis
 
+from shared import redis_client
 from shared.event_publisher import AgentEventPublisher
 
 
@@ -35,7 +37,12 @@ class _FakePipeline:
         return self
 
     async def execute(self, raise_on_error: bool = True) -> list[object]:
-        from redis.exceptions import ResponseError
+        from redis.exceptions import AuthenticationError, ResponseError
+
+        self._redis.pipeline_attempts += 1
+        if self._redis.auth_failures_remaining > 0:
+            self._redis.auth_failures_remaining -= 1
+            return [AuthenticationError("ACL is being re-affirmed") for _ in self._cmds]
 
         results: list[object] = []
         for channel, payload in self._cmds:
@@ -61,6 +68,8 @@ class _FakeRedis:
         self.published: list[tuple[str, str]] = []
         self.fail: set[str] = set()
         self.hang: set[str] = set()
+        self.auth_failures_remaining = 0
+        self.pipeline_attempts = 0
         self.connection_pool: object | None = None  # real clients carry a pool; see reconnect test
 
     def pipeline(self, transaction: bool = True) -> _FakePipeline:
@@ -89,6 +98,29 @@ async def test_emits_in_fifo_order() -> None:
         pub.emit(f"e{i}")
     await pub.aclose()  # bounded drain flushes the queue
     assert [p for _, p in redis.published] == ["e0", "e1", "e2", "e3", "e4"]
+
+
+async def test_batch_retries_acl_transition_without_real_waiting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    redis = _FakeRedis()
+    redis.auth_failures_remaining = 2
+    delays: list[float] = []
+
+    async def _record_sleep(delay: float) -> None:
+        delays.append(delay)
+
+    def _max_jitter(delay_cap: float) -> float:
+        return delay_cap
+
+    monkeypatch.setattr(redis_client, "_sleep_async", _record_sleep)
+    monkeypatch.setattr(redis_client, "_auth_retry_jitter", _max_jitter)
+
+    await _pub(redis)._publish_batch(["event"])
+
+    assert redis.pipeline_attempts == 3
+    assert delays == [0.5, 1.0]
+    assert redis.published == [("ch", "event")]
 
 
 async def test_emit_never_blocks_or_raises_even_unstarted() -> None:

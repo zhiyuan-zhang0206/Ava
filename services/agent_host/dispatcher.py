@@ -331,16 +331,15 @@ class InboundWakeDispatcher:
         the delivery watchdog's re-publish and the claim SELECT recheck already
         cover for process mode, and they cover it here unchanged.
         """
-        from redis import asyncio as aredis
-
         from shared.cluster import redis_channel_prefix
+        from shared.redis_client import open_async_redis, retry_auth_failures_async
 
         pattern = f"{redis_channel_prefix()}{_INBOUND_PATTERN_SUFFIX}"
         while True:
-            redis = aredis.Redis.from_url(self._redis_url, decode_responses=True)  # pyright: ignore[reportUnknownMemberType]
+            redis = open_async_redis(self._redis_url)
             try:
                 pubsub = redis.pubsub(ignore_subscribe_messages=True)  # pyright: ignore[reportUnknownMemberType]
-                await pubsub.psubscribe(pattern)
+                await retry_auth_failures_async(lambda pubsub=pubsub: pubsub.psubscribe(pattern))
                 logger.info(
                     "hosted dispatcher subscribed to {pattern}",
                     event="host_dispatcher_subscribed",
