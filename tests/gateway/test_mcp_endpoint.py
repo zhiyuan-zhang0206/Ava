@@ -14,6 +14,7 @@ from tests/gateway/conftest.py standing in for the local runner.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import UTC, datetime
 from typing import Any
@@ -44,20 +45,27 @@ def _sse_messages(body: str) -> list[dict[str, Any]]:
     return out
 
 
-def _post(
-    client: TestClient, payload: dict[str, Any], *, auth: bool = False
-) -> list[dict[str, Any]]:
-    headers = {"Accept": _ACCEPT, "Content-Type": "application/json"}
-    if auth:
-        headers.update(bearer_header(_SECRET))
+def _create_token(client: TestClient, *, name: str = "test", scope: str = "write") -> str:
+    response = client.post("/api/mcp/clients", json={"name": name, "scope": scope})
+    assert response.status_code == 200, response.text
+    return str(response.json()["token"])
+
+
+def _post(client: TestClient, token: str, payload: dict[str, Any]) -> list[dict[str, Any]]:
+    headers = {
+        "Accept": _ACCEPT,
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {token}",
+    }
     resp = client.post("/mcp", json=payload, headers=headers)
-    assert resp.status_code == 200, resp.text
+    assert resp.status_code == 200, f"history={resp.history!r} body={resp.text}"
     return _sse_messages(resp.text)
 
 
-def _initialize(client: TestClient) -> list[dict[str, Any]]:
+def _initialize(client: TestClient, token: str) -> list[dict[str, Any]]:
     return _post(
         client,
+        token,
         {
             "jsonrpc": "2.0",
             "id": 0,
@@ -72,10 +80,15 @@ def _initialize(client: TestClient) -> list[dict[str, Any]]:
 
 
 def _tool_call(
-    client: TestClient, name: str, args: dict[str, Any], req_id: int = 1
+    client: TestClient,
+    token: str,
+    name: str,
+    args: dict[str, Any],
+    req_id: int = 1,
 ) -> dict[str, Any]:
     messages = _post(
         client,
+        token,
         {
             "jsonrpc": "2.0",
             "id": req_id,
@@ -105,6 +118,22 @@ def _tool_result(message: dict[str, Any]) -> Any:
     return structured
 
 
+def _audit_hits(tool: str, client_name: str) -> list[dict[str, Any]]:
+    telemetry.sync()
+    from shared.paths import logs_dir
+
+    day = datetime.now(UTC).strftime("%Y%m%d")
+    mirror = logs_dir() / f"events-{day}.jsonl"
+    lines = mirror.read_text(encoding="utf-8").splitlines()
+    return [
+        json.loads(line)
+        for line in lines
+        if json.loads(line).get("event_name") == "mcp_tool_call"
+        and json.loads(line).get("attributes", {}).get("tool") == tool
+        and json.loads(line).get("attributes", {}).get("client_name") == client_name
+    ]
+
+
 # ── flag off: additive surface, nothing changes ──────────────────────────
 
 
@@ -126,9 +155,10 @@ def test_disabled_endpoint_answers_404(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_initialize_negotiates_and_lists_seven_tools() -> None:
     with TestClient(app) as client:
-        init = _initialize(client)
+        token = _create_token(client)
+        init = _initialize(client, token)
         assert init[0]["result"]["protocolVersion"]
-        messages = _post(client, {"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+        messages = _post(client, token, {"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
     tools = {t["name"] for t in messages[0]["result"]["tools"]}
     assert tools == {
         "list_agents",
@@ -143,7 +173,8 @@ def test_initialize_negotiates_and_lists_seven_tools() -> None:
 
 def test_list_agents_returns_compact_rows() -> None:
     with TestClient(app) as client:
-        result = _tool_call(client, "list_agents", {})
+        token = _create_token(client)
+        result = _tool_call(client, token, "list_agents", {})
     rows = _tool_result(result)
     assert rows == []  # empty fleet in this test DB
     assert not result["result"].get("isError")
@@ -151,7 +182,8 @@ def test_list_agents_returns_compact_rows() -> None:
 
 def test_list_agents_rejects_unknown_status() -> None:
     with TestClient(app) as client:
-        result = _tool_call(client, "list_agents", {"status": "active"})
+        token = _create_token(client)
+        result = _tool_call(client, token, "list_agents", {"status": "active"})
     assert result["result"].get("isError") is True
     assert "unknown agent status" in _tool_result(result)
 
@@ -161,45 +193,97 @@ def test_list_agents_rejects_unknown_status() -> None:
 
 def test_spawn_get_terminate_round_trip() -> None:
     with TestClient(app) as client:
-        payload = _tool_result(_tool_call(client, "spawn_agent", {"prompt": "test goal"}))
+        token = _create_token(client)
+        payload = _tool_result(_tool_call(client, token, "spawn_agent", {"prompt": "test goal"}))
         agent_id = int(payload["id"])
 
-        row = _tool_result(_tool_call(client, "get_agent", {"agent_id": agent_id}))
+        row = _tool_result(_tool_call(client, token, "get_agent", {"agent_id": agent_id}))
         assert row["agent_id"] == agent_id
         assert row["spawner"] == "mcp"
 
-        status = _tool_result(_tool_call(client, "terminate_agent", {"agent_id": agent_id}))
+        status = _tool_result(_tool_call(client, token, "terminate_agent", {"agent_id": agent_id}))
         assert status["status"] == "enqueued"
 
 
 def test_get_agent_not_found_is_an_error() -> None:
     with TestClient(app) as client:
-        result = _tool_call(client, "get_agent", {"agent_id": 999999})
+        token = _create_token(client)
+        result = _tool_call(client, token, "get_agent", {"agent_id": 999999})
     assert result["result"].get("isError") is True
     assert "does not exist" in _tool_result(result)
 
 
 def test_send_message_and_get_messages() -> None:
     with TestClient(app) as client:
+        token = _create_token(client)
         agent_id = int(
-            _tool_result(_tool_call(client, "spawn_agent", {"prompt": "test goal"}))["id"]
+            _tool_result(_tool_call(client, token, "spawn_agent", {"prompt": "test goal"}))["id"]
         )
 
         sent = _tool_result(
-            _tool_call(client, "send_message", {"agent_id": agent_id, "content": "hello"})
+            _tool_call(
+                client,
+                token,
+                "send_message",
+                {"agent_id": agent_id, "content": "hello"},
+            )
         )
         # "idling" is the true delivery-time status of a never-claimed
         # agent — the same value the REST endpoint returns in tests.
         assert sent["status"] in {"queued", "claimed", "idling"}
 
         payload = _tool_result(
-            _tool_call(client, "get_messages", {"agent_id": agent_id, "limit": 10})
+            _tool_call(
+                client,
+                token,
+                "get_messages",
+                {"agent_id": agent_id, "limit": 10},
+            )
         )
         # A never-run test agent has no checkpoint yet — the shape is the
         # contract, the count is honest zero.
         assert isinstance(payload["total"], int)
         assert isinstance(payload["messages"], list)
         assert {m["role"] for m in payload["messages"]} <= {"human", "ai", "system"}
+
+
+def test_read_scope_cannot_call_write_tools() -> None:
+    with TestClient(app) as client:
+        token = _create_token(client, name="read-client", scope="read")
+        denied = _tool_call(client, token, "spawn_agent", {"prompt": "must not run"})
+        agents = _tool_result(_tool_call(client, token, "list_agents", {}))
+
+    assert denied["result"].get("isError") is True
+    assert "requires write scope" in _tool_result(denied)
+    assert agents == []
+
+
+def test_scope_denial_is_audited_as_an_error_without_raw_args() -> None:
+    prompt = "blocked sensitive prompt"
+    with TestClient(app) as client:
+        token = _create_token(client, name="audit-read-client", scope="read")
+        _tool_call(client, token, "spawn_agent", {"prompt": prompt})
+
+    hits = _audit_hits("spawn_agent", "audit-read-client")
+    assert hits, "no mcp_tool_call event for the denied spawn reached the mirror"
+    attributes = hits[-1]["attributes"]
+    assert attributes["outcome"] == "error"
+    assert attributes["error"] == "tool call returned an error"
+    assert prompt not in json.dumps(attributes, ensure_ascii=False)
+
+
+def test_tool_error_does_not_reintroduce_raw_args_into_audit() -> None:
+    status = "private-invalid-status"
+    with TestClient(app) as client:
+        token = _create_token(client, name="audit-error-client", scope="read")
+        result = _tool_call(client, token, "list_agents", {"status": status})
+
+    assert status in _tool_result(result)
+    hits = _audit_hits("list_agents", "audit-error-client")
+    assert hits, "no mcp_tool_call event for invalid status reached the mirror"
+    attributes = hits[-1]["attributes"]
+    assert attributes["outcome"] == "error"
+    assert status not in json.dumps(attributes, ensure_ascii=False)
 
 
 def test_cluster_status_reports_this_host(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -210,45 +294,127 @@ def test_cluster_status_reports_this_host(monkeypatch: pytest.MonkeyPatch) -> No
 
     monkeypatch.setattr(_cluster_router, "is_agent_runner", lambda: False)
     with TestClient(app) as client:
-        payload = _tool_result(_tool_call(client, "cluster_status", {}))
+        token = _create_token(client)
+        payload = _tool_result(_tool_call(client, token, "cluster_status", {}))
     assert payload["machine_name"]
     assert isinstance(payload["paused"], bool)
 
 
-# ── auth: same cluster middleware as every route ─────────────────────────
+# ── auth: dedicated per-client credentials ───────────────────────────────
 
 
-def test_mcp_requires_auth_when_middleware_is_on(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("authorization", [None, "Bearer not-a-client-token"])
+def test_mcp_rejects_missing_or_bad_client_token(
+    monkeypatch: pytest.MonkeyPatch, authorization: str | None
+) -> None:
+    monkeypatch.setattr(config.settings.gateway, "auth_middleware_enabled", False)
+    headers = {"Accept": _ACCEPT, "Content-Type": "application/json"}
+    if authorization is not None:
+        headers["Authorization"] = authorization
+    with TestClient(app) as client:
+        resp = client.post(
+            "/mcp",
+            json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+            headers=headers,
+        )
+    assert resp.status_code == 401
+    assert resp.json() == {"detail": "invalid or revoked MCP client token"}
+
+
+def test_cluster_secret_bearer_is_not_an_mcp_client_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(config.settings.gateway, "auth_middleware_enabled", True)
     monkeypatch.setattr(config.settings.data_plane, "cluster_secret", _SECRET)
     with TestClient(app) as client:
         resp = client.post(
             "/mcp",
             json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
-            headers={"Accept": _ACCEPT, "Content-Type": "application/json"},
+            headers={
+                "Accept": _ACCEPT,
+                "Content-Type": "application/json",
+                **bearer_header(_SECRET),
+            },
         )
     assert resp.status_code == 401
+
+
+def test_client_token_works_when_cluster_auth_is_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(config.settings.gateway, "auth_middleware_enabled", True)
+    monkeypatch.setattr(config.settings.data_plane, "cluster_secret", _SECRET)
+    with TestClient(app) as client:
+        created = client.post(
+            "/api/mcp/clients",
+            json={"name": "separate-auth-client", "scope": "read"},
+            headers=bearer_header(_SECRET),
+        )
+        assert created.status_code == 200, created.text
+
+        messages = _post(
+            client,
+            created.json()["token"],
+            {"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+        )
+        listed = client.get("/api/mcp/clients", headers=bearer_header(_SECRET))
+
+    assert messages[0]["result"]["tools"]
+    assert listed.status_code == 200, listed.text
+    assert listed.json()[0]["last_used_at"] is not None
+
+
+def test_revoked_client_token_is_rejected() -> None:
+    with TestClient(app) as client:
+        created = client.post(
+            "/api/mcp/clients",
+            json={"name": "revoked-client", "scope": "write"},
+        )
+        assert created.status_code == 200, created.text
+        body = created.json()
+        revoked = client.post(f"/api/mcp/clients/{body['id']}/revoke")
+        assert revoked.status_code == 200, revoked.text
+
+        resp = client.post(
+            "/mcp",
+            json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+            headers={
+                "Accept": _ACCEPT,
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {body['token']}",
+            },
+        )
+
+    assert resp.status_code == 401
+    assert resp.json() == {"detail": "invalid or revoked MCP client token"}
 
 
 # ── audit: every tools/call lands in the unified event stream ────────────
 
 
-def test_tool_call_is_audited() -> None:
+def test_tool_call_audit_identifies_client_and_redacts_args() -> None:
+    prompt = "sensitive audit prompt"
     with TestClient(app) as client:
-        _tool_call(client, "list_agents", {}, req_id=7)
-    telemetry.sync()
-    from shared.paths import logs_dir
+        created = client.post(
+            "/api/mcp/clients",
+            json={"name": "audit-write-client", "scope": "write"},
+        )
+        assert created.status_code == 200, created.text
+        body = created.json()
+        _tool_call(client, body["token"], "spawn_agent", {"prompt": prompt}, req_id=7)
 
-    day = datetime.now(UTC).strftime("%Y%m%d")
-    mirror = logs_dir() / f"events-{day}.jsonl"
-    lines = mirror.read_text(encoding="utf-8").splitlines()
-    hits = [
-        json.loads(line)
-        for line in lines
-        if json.loads(line).get("event_name") == "mcp_tool_call"
-        and json.loads(line).get("attributes", {}).get("tool") == "list_agents"
-    ]
-    assert hits, "no mcp_tool_call event for list_agents reached the mirror"
-    assert hits[-1]["attributes"]["outcome"] == "ok"
+    hits = _audit_hits("spawn_agent", "audit-write-client")
+    assert hits, "no mcp_tool_call event for spawn_agent reached the mirror"
+    attributes = hits[-1]["attributes"]
+    encoded = json.dumps(prompt, ensure_ascii=False)
+    assert attributes["client_id"] == body["id"]
+    assert attributes["client_name"] == "audit-write-client"
+    assert attributes["outcome"] == "ok"
+    assert attributes["args"] == {
+        "schema": {"prompt": "string"},
+        "size": {"prompt": len(encoded)},
+        "sha256": {"prompt": hashlib.sha256(encoded.encode()).hexdigest()},
+    }
+    assert prompt not in json.dumps(attributes, ensure_ascii=False)
     assert hits[-1]["category"] == "audit"
     assert hits[-1]["source"] == "mcp"

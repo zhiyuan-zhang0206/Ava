@@ -25,31 +25,45 @@ the rollout that ships the endpoint code.
 
 ## Connect a client
 
-Auth is the same cluster middleware as every API route: a valid session cookie
-or `Authorization: Bearer <cluster secret>`. A remote MCP client has no cookie,
-so it presents the secret (the same credential the SDK and the CLI present):
+Create one credential per external client through the cluster-authenticated
+admin API. Choose `read` for inspection only, or `write` when the client must
+spawn, message, or terminate agents. The plaintext token appears only in this
+response; the gateway stores its SHA-256 hash:
 
 ```bash
-claude mcp add --transport http ava http://<gateway-host>/mcp   --header "Authorization: Bearer <cluster-secret>"
+curl -s http://<gateway-host>/api/mcp/clients \
+  -H "Authorization: Bearer <cluster-secret>" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"claude","scope":"write"}'
+```
+
+Configure the client with the returned `token`, not the cluster secret:
+
+```bash
+claude mcp add --transport http ava http://<gateway-host>/mcp \
+  --header "Authorization: Bearer <mcp-client-token>"
 ```
 
 Codex takes the same shape (`codex mcp add`). `<gateway-host>` is the address
-the cluster advertises (`AVA_GATEWAY_URL`); never expose the endpoint beyond
-that network — the bearer is a full-control credential for the cluster.
+the cluster advertises (`AVA_GATEWAY_URL`). `/mcp` requires a client token even
+on a no-secret cluster; a session cookie or cluster-secret Bearer is rejected.
+
+List client metadata with `GET /api/mcp/clients`. Revoke one immediately with
+`POST /api/mcp/clients/<id>/revoke`; a revoked token receives 401 thereafter.
 
 ## Verify
 
 ```bash
 curl -s http://<gateway-host>/mcp \
-  -H "Authorization: Bearer <cluster-secret>" \
+  -H "Authorization: Bearer <mcp-client-token>" \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 ```
 
 A healthy endpoint answers an SSE stream whose single `data:` frame carries the
-seven tools. A cluster with the flag off (or a missing bearer) gets a plain
-404/401 JSON body instead.
+seven tools. A cluster with the flag off gets 404; a missing, invalid, or
+revoked client token gets 401.
 
 ## Notes
 
@@ -57,9 +71,9 @@ seven tools. A cluster with the flag off (or a missing bearer) gets a plain
   keeps no server-side session state, so clients must not rely on
   `Mcp-Session-Id` resumability.
 - **Audited**: every `tools/call` lands in the unified event stream as an
-  `mcp_tool_call` audit event (tool, args, outcome). `agent_id` is NULL —
-  external clients have no agent identity; a per-client `client_key` model
-  arrives with the machine-routing step.
+  `mcp_tool_call` audit event with the client id/name and outcome. Argument
+  values are never recorded — only each argument's JSON type, character size,
+  and SHA-256. `agent_id` is NULL because the client identity is service-level.
 - **The stdio form is deprecated**: `ava mcp serve` keeps working unchanged
   until the machine-routing steps land, then retires; new integrations should
   point at `/mcp`.

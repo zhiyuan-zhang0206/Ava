@@ -663,7 +663,7 @@ EVENTS: dict[str, EventSpec] = {
     ),
     "mcp_tool_call": _audit(
         "mcp_tool_call",
-        "MCP tool invoked through the gateway /mcp endpoint (agent_id NULL — external client)",
+        "MCP tool invoked through the gateway /mcp endpoint (client-scoped, args redacted)",
     ),
     # ── telemetry (category=telemetry) — registry.md §3 ──
     # frontend user modeling

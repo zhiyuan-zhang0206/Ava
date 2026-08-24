@@ -5403,6 +5403,106 @@
         }
       }
     },
+    "/api/mcp/clients": {
+      "get": {
+        "summary": "Get Mcp Clients",
+        "description": "List MCP clients without their credential hashes.",
+        "operationId": "get_mcp_clients_api_mcp_clients_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/McpClientView"
+                  },
+                  "type": "array",
+                  "title": "Response Get Mcp Clients Api Mcp Clients Get"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Post Mcp Client",
+        "description": "Create an MCP client and reveal its plaintext token once.",
+        "operationId": "post_mcp_client_api_mcp_clients_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/McpClientCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpClientCreated"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/mcp/clients/{client_id}/revoke": {
+      "post": {
+        "summary": "Post Mcp Client Revoke",
+        "description": "Revoke one active MCP client.",
+        "operationId": "post_mcp_client_revoke_api_mcp_clients__client_id__revoke_post",
+        "parameters": [
+          {
+            "name": "client_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Client Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpClientRevoked"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/fleet/graph": {
       "get": {
         "summary": "Get Fleet Graph",
@@ -9675,6 +9775,132 @@
         ],
         "title": "MachineStatus",
         "description": "A machines-table row state — augmented with live probe results.\n\n`online` / `paused` come from probing the gateway's\n/api/cluster/status (2s timeout):\n- online=True + paused has a value: probe succeeded\n- online=False + paused=None: probe failed (network unreachable /\n  gateway down)\n- online=True + paused=None: probe got through but response did not\n  match ClusterStatus (abnormal)"
+      },
+      "McpClientCreate": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "read",
+              "write"
+            ],
+            "title": "Scope",
+            "default": "read"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "McpClientCreate"
+      },
+      "McpClientCreated": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "read",
+              "write"
+            ],
+            "title": "Scope"
+          },
+          "token": {
+            "type": "string",
+            "title": "Token"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "scope",
+          "token"
+        ],
+        "title": "McpClientCreated"
+      },
+      "McpClientRevoked": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ok"
+        ],
+        "title": "McpClientRevoked"
+      },
+      "McpClientView": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "read",
+              "write"
+            ],
+            "title": "Scope"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "revoked_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revoked At"
+          },
+          "last_used_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Used At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "scope",
+          "created_at",
+          "revoked_at",
+          "last_used_at"
+        ],
+        "title": "McpClientView"
       },
       "MemoryGraphEdge": {
         "properties": {
