@@ -33,21 +33,20 @@ class FakeLoki:
         ts_offset_hours: float = 0,
         category: str = "telemetry",
     ) -> None:
-        self.rows.append(
-            {
-                "id": len(self.rows) + 1,
-                "ts": datetime.now(UTC) - timedelta(hours=ts_offset_hours),
-                "agent_id": agent_id,
-                "machine": "test",
-                "process": "test",
-                "category": category,
-                "event_name": event,
-                "level": level,
-                "source": "test",
-                "target_agent_id": target_agent_id,
-                "attributes": payload or {},
-            }
-        )
+        row = {
+            "id": len(self.rows) + 1,
+            "ts": datetime.now(UTC) - timedelta(hours=ts_offset_hours),
+            "agent_id": agent_id,
+            "machine": "test",
+            "process": "test",
+            "category": category,
+            "event_name": event,
+            "level": level,
+            "source": "test",
+            "target_agent_id": target_agent_id,
+            "attributes": payload or {},
+        }
+        self.rows.append(row)
 
     def _match(self, **kwargs: Any) -> list[dict[str, Any]]:
         out: list[dict[str, Any]] = []
@@ -56,6 +55,7 @@ class FakeLoki:
         categories: Any = kwargs.get("categories")
         event_names: list[str] = kwargs.get("event_names") or []
         attribute_filters: dict[str, str] = kwargs.get("attribute_filters") or {}
+        cluster: Any = kwargs.get("cluster")
         from_: Any = kwargs.get("from_")
         to: Any = kwargs.get("to")
         grep: Any = kwargs.get("grep")
@@ -67,6 +67,8 @@ class FakeLoki:
             if kwargs.get("service_only") and r["agent_id"] is not None:
                 continue
             if categories and r["category"] not in categories:
+                continue
+            if cluster is not None and r.get("cluster") not in (None, cluster):
                 continue
             if event_names and not any(re.search(e, r["event_name"]) for e in event_names):
                 continue

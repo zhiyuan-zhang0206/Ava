@@ -4,6 +4,7 @@ Split out of the former monolithic ops/schemas.py; FastAPI registers these
 unchanged, so the OpenAPI codegen is byte-identical to the wire before.
 """
 
+from datetime import datetime
 from typing import Literal
 
 from pydantic import (
@@ -50,11 +51,11 @@ class FleetGraphEdge(BaseModel):
 class FleetGraphResponse(BaseModel):
     """GET /api/fleet/graph response.
 
-    `stale` is the degraded-signal flag (R4 layer 2, audit gateway.md
-    P2-10): the graph query is canceled (statement timeout under load) the
-    response is an EMPTY graph with `stale=True` — the frontend must render
-    "data temporarily unavailable" instead of an empty fleet, because an
-    empty graph and a failed graph are not the same state.
+    `stale` identifies data-level degradation: a fallback snapshot, truncated
+    edge stream, or failed source response. `telemetry_stale` separately says
+    the heartbeat guard was old or missing while this otherwise fresh graph was
+    read. `snapshot_at` records when a successful graph snapshot was produced;
+    a fallback retains that timestamp so clients can show its age.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -63,3 +64,5 @@ class FleetGraphResponse(BaseModel):
     edges: list[FleetGraphEdge]
     stale: bool = False
     truncated: bool = False
+    telemetry_stale: bool = False
+    snapshot_at: datetime | None = None

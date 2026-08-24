@@ -1,5 +1,6 @@
 """Regression tests for fleet-graph upstream failures and Redis fallbacks."""
 
+import json
 from datetime import UTC, datetime, timedelta
 
 import httpx
@@ -164,11 +165,10 @@ def test_success_writes_short_cache_and_last_good_graph(
     }
 
 
-def test_stale_heartbeat_marks_response_and_skips_all_cache_writes(
+def test_stale_heartbeat_marks_telemetry_and_keeps_fresh_graph_cached(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Successful source queries with an old heartbeat stay visible but are
-    marked stale and cannot replace either graph cache."""
+    """A heartbeat outage does not turn a complete graph into stale data."""
     _seed_agent(db_conn)
     redis = _FakeRedis()
 
@@ -200,8 +200,13 @@ def test_stale_heartbeat_marks_response_and_skips_all_cache_writes(
         resp = client.get("/api/fleet/graph")
 
     assert resp.status_code == 200
-    assert resp.json()["stale"] is True
-    assert redis.writes == []
+    body = resp.json()
+    assert body["stale"] is False
+    assert body["telemetry_stale"] is True
+    assert body["snapshot_at"] is not None
+    key = fg._cache_key(include_terminated=False, hours=None, decay_lambda=0.5)
+    assert {write[0] for write in redis.writes} == {key, f"fleet_graph:last_good:{key}"}
+    assert redis.values[key] == redis.values[f"fleet_graph:last_good:{key}"]
     assert emitted[0][0] == "telemetry_read_stale"
     assert emitted[0][1]["source"] == "prometheus"
 
@@ -213,12 +218,16 @@ def test_loki_failure_serves_last_good_graph_without_writing_short_cache(
     _seed_agent(db_conn)
     redis = _FakeRedis()
     query_args: dict[str, object] = {}
-    last_good = _last_good_graph().model_copy(update={"truncated": True})
+    snapshot_at = datetime(2026, 8, 24, 23, 31, tzinfo=UTC)
+    last_good = _last_good_graph().model_copy(
+        update={"truncated": True, "snapshot_at": snapshot_at}
+    )
 
     import gateway.routers.fleet_graph as fg
 
     key = fg._cache_key(include_terminated=False, hours=None, decay_lambda=0.5)
-    redis.values[f"fleet_graph:last_good:{key}"] = last_good.model_dump_json()
+    serialized_last_good = last_good.model_dump(mode="json")
+    redis.values[f"fleet_graph:last_good:{key}"] = json.dumps(serialized_last_good)
     monkeypatch.setattr(fg, "sync_redis", _RedisFactory(redis))
     monkeypatch.setattr(prom_metrics, "sum_by", _empty_prom)
 
@@ -242,7 +251,7 @@ def test_loki_failure_serves_last_good_graph_without_writing_short_cache(
 def test_loki_edge_cap_marks_a_fresh_graph_truncated(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The edge fetch's lookahead is visible, not confused with staleness."""
+    """The edge fetch's lookahead is visible as incomplete graph data."""
     _seed_agent(db_conn)
     redis = _FakeRedis()
 
@@ -258,8 +267,11 @@ def test_loki_edge_cap_marks_a_fresh_graph_truncated(
         response = client.get("/api/fleet/graph")
 
     assert response.status_code == 200
-    assert response.json()["stale"] is False
+    assert response.json()["stale"] is True
     assert response.json()["truncated"] is True
+    key = fg._cache_key(include_terminated=False, hours=None, decay_lambda=0.5)
+    assert {write[0] for write in redis.writes} == {key}
+    assert redis.values[key]
 
 
 def test_pg_phase_exceeding_route_budget_serves_stale_before_telemetry(

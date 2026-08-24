@@ -12,7 +12,14 @@ import { api } from "./api";
 import { projectAgentStatusValue } from "./types";
 import type { FleetGraph, GraphEventType, WireFleetGraph } from "./types";
 
-const EMPTY_GRAPH: FleetGraph = { nodes: [], edges: [], stale: false, truncated: false };
+const EMPTY_GRAPH: FleetGraph = {
+  nodes: [],
+  edges: [],
+  stale: false,
+  truncated: false,
+  telemetry_stale: false,
+  snapshot_at: null,
+};
 
 export interface FleetGraphResult {
   readonly graph: FleetGraph;

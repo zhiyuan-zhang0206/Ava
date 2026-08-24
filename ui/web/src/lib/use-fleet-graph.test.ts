@@ -60,6 +60,8 @@ const API_GRAPH: WireFleetGraph = {
   ],
   stale: false,
   truncated: false,
+  telemetry_stale: false,
+  snapshot_at: null,
 };
 
 function withClient(client: QueryClient) {
@@ -89,7 +91,14 @@ describe("useFleetGraph", () => {
       wrapper: withClient(freshClient()),
     });
 
-    expect(result.current.graph).toEqual({ nodes: [], edges: [], stale: false, truncated: false });
+    expect(result.current.graph).toEqual({
+      nodes: [],
+      edges: [],
+      stale: false,
+      truncated: false,
+      telemetry_stale: false,
+      snapshot_at: null,
+    });
     expect(result.current.loading).toBe(true);
     expect(result.current.error).toBe(false);
   });
@@ -169,6 +178,8 @@ describe("useFleetGraph", () => {
       edges: [],
       stale: false,
       truncated: false,
+      telemetry_stale: false,
+      snapshot_at: null,
     } as unknown as WireFleetGraph;
     getFleetGraph.mockResolvedValue(raw);
 
@@ -192,11 +203,25 @@ describe("useFleetGraph", () => {
 
     await waitFor(() => expect(result.current.error).toBe(true));
     expect(result.current.loading).toBe(false);
-    expect(result.current.graph).toEqual({ nodes: [], edges: [], stale: false, truncated: false });
+    expect(result.current.graph).toEqual({
+      nodes: [],
+      edges: [],
+      stale: false,
+      truncated: false,
+      telemetry_stale: false,
+      snapshot_at: null,
+    });
   });
 
   it("preserves the generated stale flag and renders a degraded 200 as unavailable", async () => {
-    getFleetGraph.mockResolvedValue({ nodes: [], edges: [], stale: true, truncated: false });
+    getFleetGraph.mockResolvedValue({
+      nodes: [],
+      edges: [],
+      stale: true,
+      truncated: false,
+      telemetry_stale: false,
+      snapshot_at: null,
+    });
 
     const { result } = renderHook(() => useFleetGraph(), {
       wrapper: withClient(freshClient()),
