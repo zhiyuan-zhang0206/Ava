@@ -19,6 +19,10 @@ import yaml
 from cli.commands import _otel_collector as oc
 
 
+def _fail_ensure_otel_collector(*_args: object, **_kwargs: object) -> None:
+    pytest.fail("must skip")
+
+
 def test_platform_tag_maps_machines(monkeypatch: pytest.MonkeyPatch) -> None:
     """The pinned asset tags cover darwin/linux/windows amd64+arm64; anything
     else is unsupported (None → sidecar skipped, agents auto-disable OTLP)."""
@@ -393,6 +397,29 @@ def test_non_lgtm_gateway_converge_skips_collector_install(
     assert "gateway" in err
     assert "lgtm-host" in err
     assert "collector skipped" in err
+
+
+def test_non_lgtm_gateway_reports_and_preserves_residual_config(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    home = tmp_path / ".ava-preview"
+    collector = home / "otel-collector"
+    collector.mkdir(parents=True)
+    config = collector / "config.yaml"
+    config.write_text("stale: true\n", encoding="utf-8")
+    ctx = oc.ConvergeCtx(
+        repo=Path(__file__).resolve().parents[2],
+        ava_home=home,
+        roles=frozenset({"gateway"}),
+    )
+
+    monkeypatch.setattr(oc, "ensure_otel_collector", _fail_ensure_otel_collector)
+    oc.ensure_otel_collector_step(ctx)
+
+    assert config.read_text(encoding="utf-8") == "stale: true\n"
+    assert "stale/residual" in capsys.readouterr().err
 
 
 def test_session_filelog_receivers_are_disjoint_and_bound_discovery(

@@ -624,5 +624,12 @@ def ensure_otel_collector_step(ctx: ConvergeCtx) -> None:
             f"the LGTM host ({marker} is absent); telemetry export is unavailable",
             file=sys.stderr,
         )
+        residual = ctx.ava_home / "otel-collector/config.yaml"
+        if residual.exists():
+            print(
+                f"  ! otel-collector: stale/residual config remains at {residual}; "
+                "collector files were preserved",
+                file=sys.stderr,
+            )
         return
     ensure_otel_collector(ctx.repo, ctx.ava_home, ctx.roles)
