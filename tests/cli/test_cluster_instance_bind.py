@@ -14,6 +14,21 @@ from cli.commands import _cluster_instance as _ci
 from shared.config import settings
 
 
+def test_macos_redis_binaries_use_versioned_formula(monkeypatch: pytest.MonkeyPatch) -> None:
+    formulae: list[str] = []
+
+    def fake_brew_prefix(formula: str) -> Path:
+        formulae.append(formula)
+        return Path("/opt/homebrew/opt") / formula
+
+    monkeypatch.setattr(_ci, "is_macos", lambda: True)
+    monkeypatch.setattr(_ci, "brew_prefix", fake_brew_prefix)
+
+    assert _ci._redis_server_bin() == "/opt/homebrew/opt/redis@8.2/bin/redis-server"
+    assert _ci._redis_cli_bin() == "/opt/homebrew/opt/redis@8.2/bin/redis-cli"
+    assert formulae == ["redis@8.2", "redis@8.2"]
+
+
 def test_addr_assigned_loopback_is_true() -> None:
     assert _ci._addr_assigned("127.0.0.1") is True
 

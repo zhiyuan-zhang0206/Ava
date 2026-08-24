@@ -51,7 +51,7 @@ private-network address when split. There is no special "local" path.
   `ava cluster update` / the watchdog self-heal; the CLI is the only entry point,
   `ava.self.update()` raises).
 - **Postgres 17 + Redis (native, no Docker)** for the `gateway` capability:
-  `install.sh` `brew install`s `postgresql@17 redis pgbouncer` on macOS and
+  `install.sh` `brew install`s `postgresql@17 redis@8.2 pgbouncer` on macOS and
   apt-installs the equivalents on Linux. A pure `agent-runner` host needs neither.
 - **Linux: a non-root user with passwordless sudo.** The install births a
   per-cluster Postgres via `initdb`, and Postgres refuses to run `initdb` as

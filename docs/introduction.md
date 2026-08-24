@@ -5,7 +5,7 @@
 ![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)
 ![License Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-green.svg)
 ![Postgres 17](https://img.shields.io/badge/postgres-17-336791.svg)
-![Redis 8.8](https://img.shields.io/badge/redis-8.8-D82C20.svg)
+![Redis 8.2](https://img.shields.io/badge/redis-8.2-D82C20.svg)
 ![LangGraph](https://img.shields.io/badge/built%20on-LangGraph-1C3C3C.svg)
 
 Ava agents act by **writing code**, not by picking from a menu of tools. They
@@ -311,7 +311,7 @@ cluster; that has to come from outside Ava today. Full policy and reporting:
 | Layer | Choice |
 |---|---|
 | DB | Postgres 17 |
-| Cache | Redis 8.8 |
+| Cache | Redis 8.2 |
 | Framework | LangGraph (8-node self-looping graph) |
 | SDK | `ava` (this repo) |
 | Models | 8 providers side by side (DeepSeek, Claude, Gemini, GPT, MiMo, Kimi, GLM, Qwen) — picked once per agent at spawn, never routed at runtime ([why](../conventions/non-goals.md)) |

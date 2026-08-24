@@ -17,6 +17,7 @@ import re
 import sys
 from pathlib import Path
 
+from cli.commands._converge_brew_pin import ensure_brew_pin
 from cli.commands._converge_firewall import ensure_firewall_allowlist
 from cli.commands._converge_frontend_env import ensure_no_frontend_env_overrides
 from cli.commands._converge_gate import ensure_gate
@@ -594,6 +595,9 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
     # capabilities (a gateway serves HTTP, a runner serves its ops port), and
     # silent on every host that cannot have the defect.
     ConvergeStep("macOS firewall allow list", ensure_firewall_allowlist),
+    # Warning-only assertion of the operator-approved Homebrew pins. Both roles
+    # may share the same macOS host; drift is detected, never repaired here.
+    ConvergeStep("Homebrew formula pins", ensure_brew_pin),
     ConvergeStep("reap legacy-named sessions", _reap_legacy_sessions_step),
     ConvergeStep("registry home-path keys", _migrate_registry_keys_step),
     # Pure file work under this cluster's home, so it needs no unit config and no

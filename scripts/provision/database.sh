@@ -60,7 +60,7 @@ case "$OS" in
     # superuser; ava start provisions the per-cluster role + db on first boot
     # (cli/commands/_cluster_instance.py) and drives pg via pg_ctl, not brew
     # services.
-    brew install postgresql@17 redis pgbouncer
+    brew install postgresql@17 redis@8.2 pgbouncer
     ;;
   windows)
     # PostgreSQL and Redis are provided via Docker Desktop (WSL2 backend).

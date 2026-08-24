@@ -91,11 +91,11 @@ def _pg_template_dir() -> Path:
 
 
 def _redis_server_bin() -> str:
-    return str(brew_prefix("redis") / "bin" / "redis-server") if is_macos() else "redis-server"
+    return str(brew_prefix("redis@8.2") / "bin" / "redis-server") if is_macos() else "redis-server"
 
 
 def _redis_cli_bin() -> str:
-    return str(brew_prefix("redis") / "bin" / "redis-cli") if is_macos() else "redis-cli"
+    return str(brew_prefix("redis@8.2") / "bin" / "redis-cli") if is_macos() else "redis-cli"
 
 
 def _pg_bin(name: str) -> str:
