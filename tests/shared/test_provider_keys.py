@@ -9,6 +9,7 @@ from urllib.parse import urlsplit
 import pytest
 
 from shared import paths
+from shared.envfile import upsert_env
 
 pytest_plugins = ("tests.shared.test_provider_plugins",)
 
@@ -25,6 +26,12 @@ def plugin_env() -> Generator[Path, None, None]:
         path.write_bytes(original)
 
 
+def _write_bootstrap_env(path: Path, contents: str) -> None:
+    """Write a plugin fixture with the runner credential bootstrap requires."""
+    path.write_text(contents)
+    upsert_env(path, {"AVA_RUNNER_DB_PASSWORD": "abc"})
+
+
 def test_bootstrap_serves_an_enabled_plugin_key_from_the_env_file(
     provider_plugin: Callable[..., None], plugin_env: Path
 ) -> None:
@@ -32,7 +39,7 @@ def test_bootstrap_serves_an_enabled_plugin_key_from_the_env_file(
     from shared import config
 
     provider_plugin()
-    plugin_env.write_text("TESTP_API_KEY=sk-x\n")
+    _write_bootstrap_env(plugin_env, "TESTP_API_KEY=sk-x\n")
 
     payload = config.bootstrap_config_values()
     assert payload["TESTP_API_KEY"] == "sk-x"
@@ -49,7 +56,7 @@ def test_bootstrap_omits_an_absent_plugin_key(
     from shared import config
 
     provider_plugin()
-    plugin_env.write_text("")
+    _write_bootstrap_env(plugin_env, "")
 
     assert "TESTP_API_KEY" not in config.bootstrap_config_values()
 
@@ -61,7 +68,7 @@ def test_bootstrap_omits_a_disabled_plugin_key(
     from shared import config
 
     provider_plugin()
-    plugin_env.write_text("TESTP_API_KEY=sk-x\n")
+    _write_bootstrap_env(plugin_env, "TESTP_API_KEY=sk-x\n")
     (paths.ava_home() / "plugins_config.json").write_text(
         '{"plugins": {"test_provider": {"enabled": false}}}'
     )
@@ -77,7 +84,7 @@ def test_bootstrap_serves_a_duplicate_plugin_key_once(
 
     provider_plugin()
     provider_plugin(prefix="testq-", model="testq-1", dir_name="test_provider_q")
-    plugin_env.write_text("TESTP_API_KEY=sk-x\n")
+    _write_bootstrap_env(plugin_env, "TESTP_API_KEY=sk-x\n")
 
     payload = config.bootstrap_config_values()
     assert payload["TESTP_API_KEY"] == "sk-x"
@@ -91,7 +98,7 @@ def test_bootstrap_keeps_modeled_alias_after_reachable_host_rewrite(
     from shared import config
 
     provider_plugin(key_env="AVA_DB_URL")
-    plugin_env.write_text("AVA_DB_URL=postgresql://ava:pw@127.0.0.1:5433/ava\n")
+    _write_bootstrap_env(plugin_env, "AVA_DB_URL=postgresql://ava:pw@127.0.0.1:5433/ava\n")
     monkeypatch.setattr(config, "_self_machine_host", lambda: "100.64.0.3")
 
     assert urlsplit(config.bootstrap_config_values()["AVA_DB_URL"]).hostname == "100.64.0.3"

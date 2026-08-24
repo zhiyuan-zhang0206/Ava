@@ -60,6 +60,9 @@ def test_gateway_data_plane_brings_up_own_instance(monkeypatch: pytest.MonkeyPat
             "pg_port": 5433,
             "redis_port": 6380,
             "cluster_secret": "sek",
+            "db_admin_password": "sek",
+            "redis_admin_password": "sek",
+            "redis_password": "sek",
             "pgbouncer_port": 6433,
             "identity": "ava_main",
         }

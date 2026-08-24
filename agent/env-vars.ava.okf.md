@@ -21,7 +21,9 @@ Ava's **key environment variables** and their propagation chain. These variables
 ### Cluster & Data Plane
 | Variable | Set at | Purpose |
 |------|--------|------|
-| `AVA_CLUSTER_SECRET` | `ava start` or enroll | Cluster authentication secret, used for Postgres/Redis connections |
+| `AVA_CLUSTER_SECRET` | `ava start` or enroll | Control-plane bearer for the gateway API, `/ops`, bootstrap, and machine registration; never a Postgres or Redis password |
+| `AVA_DB_URL` | gateway `.env` / bootstrap | Gateway owner URL locally; `ava_runner` URL when projected to an agent-runner |
+| `AVA_REDIS_URL` | gateway `.env` / bootstrap | Redis runtime ACL URL; its password remains embedded and is never separately forwarded to agents |
 | `AVA_HOME` | `install.sh` / converge | Data plane root directory, also **is** the cluster identity itself |
 
 Cluster identity is **path-only** (`shared/cluster/`, #629/#633): there is no `AVA_CLUSTER` environment variable—the single-machine self-referencing identity is `$AVA_HOME` itself; the human-readable label (`home_label()`) is computed from the basename of the home directory for display only, not persisted anywhere; the identity given to a remote agent-runner during enrollment is the gateway URL + cluster secret. The old `AVA_CLUSTER` field is retired, and `cli/enroll.py` simply ignores that key if a legacy gateway payload still sends it.

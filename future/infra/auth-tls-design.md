@@ -3,15 +3,14 @@
 > **Status: Phases 1 + 2 landed and deployed. Phase 3 (TLS) is the only remaining
 > slice.**
 >
-> Phase 1 (the gateway auth middleware) merged and is **fail-closed**: every
-> `/api/*` route except a four-path bypass list requires a session cookie or a
-> Bearer cluster secret, and an empty `cluster_secret` is *not* a bypass — the
-> gateway refuses to start without one (`gateway/app.py`, `_cluster_auth_middleware`
-> + `_require_auth_secret`). Phase 2 shipped as **cookie-based session auth**, not
+> Phase 1 (the gateway auth middleware) merged: every `/api/*` route except a
+> four-path bypass list requires a session cookie or a Bearer cluster secret
+> when the cluster has one; an empty bearer is the supported loopback-only
+> single-box posture. Phase 2 shipped as **cookie-based session auth**, not
 > the Next.js proxy this doc originally recommended (see "Decision" below).
 >
-> Current edge posture (auth always on, loopback + `AVA_MACHINE_HOST` binds, trusted
-> CIDRs) is in `AGENTS.md` "Running" + [`runbook.md`](../../conventions/runbook.md).
+> Current edge posture (bearer-gated when configured, loopback + `AVA_MACHINE_HOST`
+> binds, trusted CIDRs) is in `AGENTS.md` "Running" + [`runbook.md`](../../conventions/runbook.md).
 > Everything below is kept for the *why* — chiefly why cookies beat a proxy and
 > beat bearer tokens in the browser.
 

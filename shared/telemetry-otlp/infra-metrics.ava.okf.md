@@ -32,8 +32,8 @@ Ava code participates and a box with no agents running still reports.
 - `postgresql` + `redis`, every 60 s, on a **gateway-capable unit only** —
   this cluster's own data plane. Postgres is dialed DIRECT (never PgBouncer:
   `pg_stat_*` over a transaction-pooled session is not trustworthy) as the
-  cluster's NOSUPERUSER owner role; Redis authenticates with the cluster
-  secret, which is also its `requirepass`. A pure agent-runner's URLs point at
+  cluster's NOSUPERUSER owner role; Redis authenticates with the gateway-local
+  Redis-admin password, which is also its `requirepass`. A pure agent-runner's URLs point at
   the GATEWAY's data plane, so rendering those receivers there would only
   duplicate the gateway's series — `_data_plane_receivers` in
   `cli/commands/_otel_collector.py` omits them, and the rendered config is

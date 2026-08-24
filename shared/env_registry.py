@@ -127,6 +127,9 @@ WINDOWS_SYSTEM_ENV_KEYS = frozenset(row.key for row in _WINDOWS_SYSTEM_ROWS)
 # they are process-bound carriers the launcher writes and agent.loop pops.
 AGENT_CONFIG_OVERLAY_ENV = "AVA_AGENT_CONFIG_OVERLAY"
 AGENT_BIRTH_CONFIG_ENV = "AVA_AGENT_BIRTH_CONFIG"
+# The Redis ACL runtime password is a file-only data-plane credential like the
+# runner database password. derive_env emits it and process isolation strips it.
+REDIS_PASSWORD_ENV = "AVA_REDIS_PASSWORD"  # noqa: S105 — env key, not a credential
 
 # Bootstrap/identity guide keys an agent that self-fetches its config still
 # needs forwarded before Settings: the home to resolve before Settings; the
@@ -134,7 +137,7 @@ AGENT_BIRTH_CONFIG_ENV = "AVA_AGENT_BIRTH_CONFIG"
 # fallback; the TLS bundle for the fetch on corp-MITM hosts. Plus the two JSON
 # carriers above. The Settings aliases are declared by field name so an alias
 # rename follows automatically; the rest are passthrough rows.
-_GUIDE_FIELDS = frozenset({"ava_home", "cluster_secret", "gateway_url", "gateway_port", "db_url"})
+_GUIDE_FIELDS = frozenset({"ava_home", "cluster_secret", "gateway_url", "gateway_port"})
 _GUIDE_PASSTHROUGH_KEYS = frozenset(
     {"SSL_CERT_FILE", "REQUESTS_CA_BUNDLE", AGENT_CONFIG_OVERLAY_ENV, AGENT_BIRTH_CONFIG_ENV}
 )
@@ -158,7 +161,10 @@ _TEMP_DIR_KEYS = frozenset({"TMPDIR", "TEMP", "TMP"})
 _PASSTHROUGH_ROWS = (
     _HOST_PASSTHROUGH_ROWS
     + _WINDOWS_SYSTEM_ROWS
-    + tuple(EnvField(key) for key in _GUIDE_PASSTHROUGH_KEYS | {AVA_PRIMARY_GATEWAY_URL})
+    + tuple(
+        EnvField(key)
+        for key in _GUIDE_PASSTHROUGH_KEYS | {AVA_PRIMARY_GATEWAY_URL, REDIS_PASSWORD_ENV}
+    )
     + tuple(EnvField(key) for key in _OS_CANONICAL_KEYS | _TEMP_DIR_KEYS)
 )
 
@@ -274,8 +280,13 @@ _DERIVED_FIELDS = frozenset(
         "permissions_helper_port",
         "db_url",
         "redis_url",
+        "db_admin_password",
+        "redis_admin_password",
         "events_channel",
     }
+)
+ADMIN_DATA_PLANE_ALIASES = frozenset(
+    {"AVA_DB_ADMIN_PASSWORD", "AVA_REDIS_ADMIN_PASSWORD", REDIS_PASSWORD_ENV}
 )
 
 
@@ -333,8 +344,10 @@ def derived_env_keys() -> frozenset[str]:
     authoritative; otherwise the parent process (which imported shared.config
     and thereby loaded its own prod .env into os.environ) would leak prod
     AVA_DB_URL / AVA_REDIS_URL into the child."""
-    return frozenset(field_alias(n) for n in _DERIVED_FIELDS) | frozenset(
-        health_port_env_aliases().values()
+    return (
+        frozenset(field_alias(n) for n in _DERIVED_FIELDS)
+        | frozenset(health_port_env_aliases().values())
+        | {REDIS_PASSWORD_ENV}
     )
 
 
@@ -410,7 +423,7 @@ def _agent_guide_keys() -> frozenset[str]:
 def agent_forward_keys() -> frozenset[str]:
     """The detached-agent child allowlist: the session set plus the agent-scope
     aliases (per-agent knobs: AVA_LLM_OVERRIDE etc.) plus the boot-time guide
-    keys (cluster secret + db URL as the fetch fallback, TLS bundle, the
+    keys (cluster secret, TLS bundle, the
     overlay/birth JSON carriers — never argv, issue #974)."""
     return session_forward_keys() | _scope_aliases("agent") | _agent_guide_keys()
 

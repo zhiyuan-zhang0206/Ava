@@ -37,7 +37,14 @@ from shared.paths import ava_home
 _log = logging.getLogger("services.healthchecks.pgbouncer")
 
 
-def check(*, listen_port: int, pg_port: int, identity: str, cluster_secret: str) -> None:
+def check(
+    *,
+    listen_port: int,
+    pg_port: int,
+    identity: str,
+    cluster_secret: str,
+    db_admin_password: str = "",
+) -> None:
     """Probe the pooler's listener; restart it when it is gone, and verify.
 
     Ports and identity are passed in rather than read here — they are registry
@@ -49,13 +56,14 @@ def check(*, listen_port: int, pg_port: int, identity: str, cluster_secret: str)
     keeps failing is a real "the pooler cannot start here" and belongs on the
     operator's screen every round.
     """
+    db_admin_password = db_admin_password or cluster_secret
     from cli.commands._pgbouncer import (
         ensure_pgbouncer,
         pgbouncer_listener_reachable,
         pgbouncer_public_listener_reachable,
     )
 
-    listener_ok = pgbouncer_listener_reachable(listen_port, identity, cluster_secret)
+    listener_ok = pgbouncer_listener_reachable(listen_port, identity, db_admin_password)
     # Evaluated lazily: when the pooler is fully dead, skip the extra dial to the
     # reachable address (paid in full when it is firewalled rather than refused)
     # so the repair starts as fast as possible.
@@ -88,10 +96,11 @@ def check(*, listen_port: int, pg_port: int, identity: str, cluster_secret: str)
         db_name=identity,
         role=identity,
         cluster_secret=cluster_secret,
+        db_admin_password=db_admin_password,
     )
     if (
         rc != 0
-        or not pgbouncer_listener_reachable(listen_port, identity, cluster_secret)
+        or not pgbouncer_listener_reachable(listen_port, identity, db_admin_password)
         or not pgbouncer_public_listener_reachable(listen_port, identity, cluster_secret)
     ):
         raise RuntimeError(
@@ -160,6 +169,9 @@ def main() -> None:
         pg_port=record_postgres_port(rec),
         identity=identity,
         cluster_secret=settings.data_plane.cluster_secret,
+        db_admin_password=(
+            settings.data_plane.db_admin_password or settings.data_plane.cluster_secret
+        ),
     )
 
 

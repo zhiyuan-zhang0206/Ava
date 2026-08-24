@@ -259,6 +259,7 @@ os.environ["AVA_TELEGRAM_OWNER_ID"] = "0"
             f"AVA_DB_URL={os.environ['AVA_DB_URL']}",
             f"AVA_REDIS_URL={os.environ['AVA_REDIS_URL']}",
             f"AVA_CLUSTER_SECRET={os.environ['AVA_CLUSTER_SECRET']}",
+            "AVA_RUNNER_DB_PASSWORD=test-runner-db-password",
             f"AVA_GATEWAY_URL={os.environ['AVA_GATEWAY_URL']}",
             f"AVA_TELEGRAM_BOT_TOKEN={os.environ['AVA_TELEGRAM_BOT_TOKEN']}",
             f"AVA_TELEGRAM_OWNER_ID={os.environ['AVA_TELEGRAM_OWNER_ID']}",

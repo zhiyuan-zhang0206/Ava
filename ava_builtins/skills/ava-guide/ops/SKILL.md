@@ -41,14 +41,14 @@ stop a dev worktree cluster with `ava cluster down --path <home>`, not a bare
 Redis auth has two users, and confusing them is what turns an auth error into a
 self-inflicted outage:
 
-- `default` (admin) — its `requirepass` **is** the cluster secret (the redis is
-  single-tenant, so there is no separate box-level admin secret). It exists only
-  to provision the runtime ACL user and run admin probes.
+- `default` (admin) — its `requirepass` is the gateway-only
+  `AVA_REDIS_ADMIN_PASSWORD`. It exists only to provision the runtime ACL user
+  and run admin probes.
 - the cluster's **ACL user** — your runtime identity (mirrors the per-cluster
-  Postgres role), also authenticating with the cluster secret but scoped to this
-  cluster's keys + channels. It is **runtime-provisioned, not persisted**: only
-  `requirepass` lives in `redis.conf`, so a bare `redis-server` restart brings
-  redis back with the ACL user *gone*, and runtime connections fail with
+  Postgres role), authenticating with its separate runtime password embedded in
+  `AVA_REDIS_URL` and scoped to this cluster's keys + channels. It is
+  **runtime-provisioned, not persisted**: only `requirepass` lives in
+  `redis.conf`, so a bare `redis-server` restart brings redis back with the ACL user *gone*, and runtime connections fail with
   WRONGPASS / NOPERM until it is re-created.
 
 So an auth error from inside your cluster is *the dropped ACL user*, not a
@@ -106,8 +106,9 @@ unset AVA_CLUSTER_SECRET
 Enrollment presents the cluster secret (`AVA_CLUSTER_SECRET`) to the gateway's
 authenticated `/api/bootstrap`, which returns the cluster's connection bundle
 (db / redis URLs, channels). The runner's database URL carries a separately
-minted least-privilege `ava_runner` password; the cluster secret remains the
-HTTP bearer and the gateway/main-Postgres/Redis credential.
+minted least-privilege `ava_runner` password and its Redis URL carries the
+runtime ACL password. The cluster secret remains the HTTP bearer only; the
+gateway keeps independent Postgres-owner and Redis-admin credentials.
 `--machine-host` is the runner's own reachable address (how the gateway dials
 back to its ops server) and is **required**. The runner starts no gateway
 process of its own; it needs both network reachability to the gateway *and* the

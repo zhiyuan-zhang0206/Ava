@@ -12,14 +12,15 @@ Model (mirrors `shared.pg_tools.throwaway_postgres`, but persistent + authed):
   multi-second init — and is started via `pg_ctl` on the cluster's pg port.
   pg_hba: the local unix socket is `trust` (provisioning by the initdb superuser
   is passwordless), every TCP connection is `scram-sha-256` when the cluster has
-  a secret (a co-located cluster hitting the port still needs it). A no-secret
+  a bearer (a co-located cluster hitting the port still needs its role password).
+  A no-secret
   cluster writes local + loopback `trust` only, and binds loopback alone. The
-  runtime role carries the secret; provisioning connects over the socket.
+  owner role carries its independent password; provisioning connects over the socket.
 - Redis runs `redis-server` on the cluster's redis port with `requirepass` = the
-  cluster secret when one is set; the cluster's ACL user is added on top (the
-  runtime identity). A no-secret cluster runs without requirepass and without an
+  gateway-only Redis admin password when one is set; the cluster's ACL user has
+  its own runtime password. A no-secret cluster runs without requirepass and without an
   ACL user, on the loopback-only bind. Data dir under `$AVA_HOME/redis`. The
-  secret reaches redis through a 0600 `redis.conf` and reaches `redis-cli`
+  Redis admin password reaches redis through a 0600 `redis.conf` and reaches `redis-cli`
   through `$REDISCLI_AUTH` — never argv, which `ps` shows to any local user
   (issue #974).
 
@@ -161,7 +162,7 @@ def _wait_for_reachable_bind() -> bool:
 
 def _pg_hba_body(cluster_secret: str) -> str:
     """The local socket is trust (the initdb superuser provisions passwordless);
-    every TCP connection is scram (a co-located cluster needs the cluster secret).
+    every TCP connection is scram (a co-located cluster needs its role password).
     Reachable/trusted ranges get the same scram treatment.
 
     A no-secret cluster has NO scram host lines at all: local trust + loopback
@@ -357,22 +358,22 @@ def pg_admin_url(pg_port: int) -> str:
     )
 
 
-def _redis_cli_env(cluster_secret: str) -> dict[str, str]:
+def _redis_cli_env(redis_admin_password: str) -> dict[str, str]:
     """Child env that authenticates `redis-cli` without putting the secret on its
     command line — `-a <secret>` is argv, which `ps` shows to any local user
     (issue #974). `$REDISCLI_AUTH` is redis-cli's own answer to exactly this
     (it is also why the tool prints no auth warning for it). A no-secret cluster
     sets nothing — `REDISCLI_AUTH=""` would make redis-cli send an AUTH the
     server has no password for."""
-    if not cluster_secret:
+    if not redis_admin_password:
         return dict(os.environ)
-    return {**os.environ, "REDISCLI_AUTH": cluster_secret}
+    return {**os.environ, "REDISCLI_AUTH": redis_admin_password}
 
 
-def _redis_running(redis_port: int, cluster_secret: str) -> bool:
+def _redis_running(redis_port: int, redis_admin_password: str) -> bool:
     out = subprocess.run(
         [_redis_cli_bin(), "-h", "127.0.0.1", "-p", str(redis_port), "ping"],
-        env=_redis_cli_env(cluster_secret),
+        env=_redis_cli_env(redis_admin_password),
         capture_output=True,
         text=True,
         check=False,
@@ -380,10 +381,10 @@ def _redis_running(redis_port: int, cluster_secret: str) -> bool:
     return "PONG" in (out.stdout or "")
 
 
-def _write_redis_conf(data: Path, cluster_secret: str) -> Path:
+def _write_redis_conf(data: Path, redis_admin_password: str) -> Path:
     """Write the cluster's `requirepass` into a 0600 `redis.conf` and return it.
 
-    `redis-server --requirepass <secret>` would carry the cluster secret on argv.
+    `redis-server --requirepass <password>` would carry the Redis admin password on argv.
     redis overwrites its own process title moments later, so `ps` only sees it
     during startup — but a startup window is still a window, and the conf file is
     the mechanism redis itself documents. Everything else stays a flag: redis
@@ -395,26 +396,36 @@ def _write_redis_conf(data: Path, cluster_secret: str) -> Path:
     conf = data / "redis.conf"
     fd = os.open(conf, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as handle:
-        # The secret's charset is constrained to URL-safe unreserved characters
-        # (see DataPlaneSettings.cluster_secret), so it needs no escaping — but
-        # quote it anyway so a future widening cannot silently truncate it.
-        if cluster_secret:
-            handle.write(f'requirepass "{cluster_secret}"\n')
+        # Escape the only Redis config-string metacharacters before writing the
+        # gateway-local admin password. This is a config file, never argv.
+        if redis_admin_password:
+            escaped = redis_admin_password.replace("\\", "\\\\").replace('"', '\\"')
+            handle.write(f'requirepass "{escaped}"\n')
     return conf
 
 
-def _start_redis(redis_port: int, cluster_secret: str, identity: str) -> int:
-    if _redis_running(redis_port, cluster_secret):
+def _start_redis(
+    redis_port: int,
+    redis_admin_password: str,
+    runtime_password: str,
+    cluster_secret: str,
+    identity: str,
+) -> int:
+    # The bearer controls only the network-auth posture outside Redis. Keep it
+    # explicit in this boundary's signature even though Redis itself is always
+    # loopback-only and uses the independent admin/runtime passwords below.
+    del cluster_secret
+    if _redis_running(redis_port, redis_admin_password):
         print(f"  ✓ redis already running (127.0.0.1:{redis_port})")
         # Re-affirm the ACL user on every start (survives a restart that drops
         # the in-memory ACL) — including no-secret clusters, whose identity
         # user is created with `nopass` (see _ensure_redis_acl).
-        return _ensure_redis_acl(redis_port, cluster_secret, identity)
+        return _ensure_redis_acl(redis_port, redis_admin_password, runtime_password, identity)
     data = _redis_data_dir()
     data.mkdir(parents=True, exist_ok=True)
     args = [
         _redis_server_bin(),
-        str(_write_redis_conf(data, cluster_secret)),  # requirepass — see the helper
+        str(_write_redis_conf(data, redis_admin_password)),  # requirepass — see the helper
         "--daemonize",
         "yes",
         "--port",
@@ -439,7 +450,7 @@ def _start_redis(redis_port: int, cluster_secret: str, identity: str) -> int:
         return 1
     # redis-server --daemonize returns immediately; wait for the port to answer.
     for _ in range(60):
-        if _redis_running(redis_port, cluster_secret):
+        if _redis_running(redis_port, redis_admin_password):
             break
         time.sleep(0.1)
     else:
@@ -451,28 +462,30 @@ def _start_redis(redis_port: int, cluster_secret: str, identity: str) -> int:
     # identity as username, and redis-py AUTHes when a URL has a username, so a
     # missing user would WRONGPASS forever and the redis wake bus would never
     # deliver to agents.
-    return _ensure_redis_acl(redis_port, cluster_secret, identity)
+    return _ensure_redis_acl(redis_port, redis_admin_password, runtime_password, identity)
 
 
-def _ensure_redis_acl(redis_port: int, cluster_secret: str, identity: str) -> int:
+def _ensure_redis_acl(
+    redis_port: int, redis_admin_password: str, runtime_password: str, identity: str
+) -> int:
     """Add the cluster's ACL user (the runtime identity, names-as-data — passed in
     by the caller, never derived from a name) on top of `requirepass`. requirepass
     authenticates the `default` admin user, which provisions the ACL user.
     Re-affirmed every start (survives a restart that drops the in-memory ACL).
 
-    Empty `cluster_secret` (single-box no-auth): requirepass stays off and the
+    Empty runtime password (single-box no-auth): requirepass stays off and the
     user is created with `nopass` — the identity-carrying runtime URLs still
     AUTH as a named user, and the AUTH must succeed for the wake bus."""
     admin = (
-        f"redis://default:{cluster_secret}@127.0.0.1:{redis_port}"
-        if cluster_secret
+        f"redis://default:{redis_admin_password}@127.0.0.1:{redis_port}"
+        if redis_admin_password
         else f"redis://127.0.0.1:{redis_port}"
     )
     try:
         ensure_cluster_redis_acl(
             identity,
             redis_admin_url=admin,
-            cluster_secret=cluster_secret,
+            runtime_password=runtime_password,
             channel_prefix=settings.data_plane.events_channel.removesuffix(":events"),
         )
     except Exception as exc:
@@ -486,6 +499,7 @@ def _start_pgbouncer(
     pg_port: int,
     listen_port: int,
     cluster_secret: str,
+    db_admin_password: str,
     identity: str,
     runner_password: str | None = None,
 ) -> int:
@@ -506,6 +520,7 @@ def _start_pgbouncer(
         db_name=identity,
         role=identity,
         cluster_secret=cluster_secret,
+        db_admin_password=db_admin_password,
         runner_password=runner_password
         if runner_password is not None
         else runner_password_from_env(),
@@ -517,6 +532,9 @@ def ensure_cluster_instance(
     pg_port: int,
     redis_port: int,
     cluster_secret: str,
+    db_admin_password: str = "",
+    redis_admin_password: str = "",
+    redis_password: str = "",
     pgbouncer_port: int,
     identity: str,
     runner_password: str | None = None,
@@ -554,16 +572,24 @@ def ensure_cluster_instance(
             file=sys.stderr,
         )
         return 1
+    db_admin_password = db_admin_password or cluster_secret
+    redis_admin_password = redis_admin_password or cluster_secret
+    redis_password = redis_password or cluster_secret
     print(f"\n→ per-cluster data plane (pg :{pg_port}, redis :{redis_port})")
     if (rc := _start_pg(pg_port, cluster_secret)) != 0:
         return rc
-    if (rc := _start_redis(redis_port, cluster_secret, identity)) != 0:
+    if (
+        rc := _start_redis(
+            redis_port, redis_admin_password, redis_password, cluster_secret, identity
+        )
+    ) != 0:
         return rc
     if settings.data_plane.pgbouncer_enabled:
         return _start_pgbouncer(
             pg_port=pg_port,
             listen_port=pgbouncer_port,
             cluster_secret=cluster_secret,
+            db_admin_password=db_admin_password,
             identity=identity,
             runner_password=runner_password,
         )
@@ -571,8 +597,9 @@ def ensure_cluster_instance(
 
 
 def _redis_reachable(redis_port: int) -> bool:
-    """True if this cluster's redis answers PING as the `default` user (requirepass =
-    the cluster secret). Used by `ava status`; degrades to False on any error."""
+    """True if this cluster's Redis answers PING as its `default` user (using
+    the gateway-only Redis admin password). Used by `ava status`; degrades to
+    False on any error."""
     import redis as _redis
 
     client = _redis.Redis(
@@ -580,7 +607,9 @@ def _redis_reachable(redis_port: int) -> bool:
         port=redis_port,
         # A no-secret cluster has no requirepass — pass None so redis-py sends
         # no AUTH (an empty-string password would send `AUTH ""` and fail).
-        password=settings.data_plane.cluster_secret or None,
+        password=(
+            settings.data_plane.redis_admin_password or settings.data_plane.cluster_secret or None
+        ),
         socket_connect_timeout=3,
     )
     try:
@@ -598,16 +627,16 @@ def print_data_plane_status() -> None:
     then an authenticated `SELECT 1` over the cluster's POOLED front door
     (`connect()` — PgBouncer when enabled, the direct URL when not; the same swap
     every consumer dials). A server that is up but whose client credential has
-    drifted off the cluster secret reports `✗ ... connect failed` rather than a
+    drifted from the owner password reports `✗ ... connect failed` rather than a
     false `✓` — that drift silently fails every DB-backed endpoint while pg_isready
-    alone (loopback `trust`) stays green. Redis pings with the cluster secret. Both
+    alone (loopback `trust`) stays green. Redis pings with its admin password. Both
     ports come from this cluster's own db_url / redis_url (its per-cluster
     instance).
 
     The probe goes POOLED, never `direct=True` (user ruling 2026-08: every consumer
     sits behind PgBouncer): the pooled `SELECT 1` proves the path consumers
     actually use — client scram against the pooler's userlist (rewritten every
-    start from the cluster secret) plus the pooler → Postgres trust-socket hop.
+    start from the owner password) plus the pooler → Postgres trust-socket hop.
     PG-side scram verifier drift is unreachable through the pooler by design (the
     backend hop carries no credential), so a direct probe would test a path no
     consumer dials. With PgBouncer disabled `pooled_db_url == db_url` and the probe
@@ -645,7 +674,12 @@ def print_data_plane_status() -> None:
         else:
             port = record_pgbouncer_port(rec)
             identity = db_identity()
-            ok = pgbouncer_reachable(port, identity, identity, settings.data_plane.cluster_secret)
+            ok = pgbouncer_reachable(
+                port,
+                identity,
+                identity,
+                settings.data_plane.db_admin_password or settings.data_plane.cluster_secret,
+            )
             print(f"  {'✓' if ok else '✗'} pgbouncer (127.0.0.1:{port}, transaction pooling)")
 
 
@@ -659,7 +693,7 @@ def _redis_endpoint() -> tuple[int, str | None] | None:
     if not parts.port:
         return None
     # parts.password may already be None on a no-secret URL — `or` keeps that.
-    return parts.port, parts.password or settings.data_plane.cluster_secret or None
+    return parts.port, parts.password or None
 
 
 def stop_cluster_instance() -> int:

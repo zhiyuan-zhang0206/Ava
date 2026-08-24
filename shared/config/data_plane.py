@@ -85,8 +85,8 @@ class DataPlaneSettings(EnvSettings):
 
     redis_url: str = Field(
         alias="AVA_REDIS_URL",
-        description="Redis connection URL. Carries the cluster secret as userinfo "
-        "(requirepass is always on), so it is sensitive.",
+        description="Redis connection URL. Carries the runtime ACL user's password "
+        "as userinfo, so it is sensitive.",
         json_schema_extra={
             "restart_required": "all",
             "writable": False,
@@ -136,17 +136,51 @@ class DataPlaneSettings(EnvSettings):
             "cluster: the gateway API and /ops serve without auth, Postgres/Redis "
             "run without scram/requirepass (loopback-trust only), and every surface "
             "binds loopback alone — the single-box no-secret posture. NON-EMPTY = "
-            "the gateway/main Postgres password, every Redis password, and the bearer "
-            "authenticating cross-machine control surfaces (/ops dials and runner "
-            "/api/bootstrap). A runner's Postgres credential is separately projected "
-            "as ava_runner. Set the secret on the gateway and hand it to each runner "
-            "out-of-band as AVA_CLUSTER_SECRET for `ava enroll`."
+            "the bearer authenticating cross-machine control surfaces (/ops dials and "
+            "runner /api/bootstrap). Data-plane credentials are independent: the owner "
+            "and Redis default-user passwords remain gateway-local, while runner "
+            "credentials are projected inside their connection URLs. Set the secret on "
+            "the gateway and hand it to each runner out-of-band as AVA_CLUSTER_SECRET "
+            "for `ava enroll`."
         ),
         json_schema_extra={
             "restart_required": "all",
             "writable": True,
             "sensitive": True,
             "scope": "cluster-pinned",
+        },
+    )
+
+    db_admin_password: str = Field(
+        default="",
+        alias="AVA_DB_ADMIN_PASSWORD",
+        description=(
+            "Password for the main Postgres owner role. Gateway-local only: it is "
+            "never distributed by bootstrap or passed to agent processes."
+        ),
+        json_schema_extra={
+            "restart_required": "all",
+            "writable": False,
+            "sensitive": True,
+            "scope": "cluster-pinned",
+            "bootstrap": False,
+        },
+    )
+
+    redis_admin_password: str = Field(
+        default="",
+        alias="AVA_REDIS_ADMIN_PASSWORD",
+        description=(
+            "Password for Redis's default administrative user and requirepass. "
+            "Gateway-local only: it is never distributed by bootstrap or passed to "
+            "agent processes."
+        ),
+        json_schema_extra={
+            "restart_required": "all",
+            "writable": False,
+            "sensitive": True,
+            "scope": "cluster-pinned",
+            "bootstrap": False,
         },
     )
 
@@ -171,40 +205,40 @@ class DataPlaneSettings(EnvSettings):
     @field_validator("cluster_secret")
     @classmethod
     def _validate_cluster_secret(cls, v: str) -> str:
-        """A non-empty cluster secret must be a URL-safe token. It is embedded in
-        the pg/redis URLs (userinfo), written raw into redis.conf (`requirepass`),
-        and sent as an HTTP bearer header, so a value with whitespace / newlines /
-        non-printables could inject a redis directive or break a URL. Restrict it
-        to the RFC 3986 unreserved set so every one of those uses is safe."""
+        """A non-empty cluster secret must be a URL-safe bearer token.
+
+        It is sent in HTTP authorization headers and written to runner enrollment
+        state. Restrict it to the RFC 3986 unreserved set so it is safe to carry
+        through those URL-adjacent control-plane surfaces; data-plane passwords
+        have independent generation and handling paths.
+        """
         allowed = set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._~-")
         if v and not set(v) <= allowed:
             raise ValueError(
                 "AVA_CLUSTER_SECRET must be a URL-safe token (letters, digits, and "
-                "'._~-') — it goes in the pg/redis URLs, the redis config, and a "
-                "bearer header"
+                "'._~-') — it is used as a control-plane bearer"
             )
         return v
 
     @model_validator(mode="after")
-    def _apply_cluster_secret(self) -> DataPlaneSettings:
-        """Re-apply the cluster secret as the data-plane PASSWORD on every load,
+    def _apply_data_plane_passwords(self) -> DataPlaneSettings:
+        """Re-apply the main Postgres owner password on every load,
         keeping the URL's username and database untouched.
 
         Names-as-data (path-only identity): the db/role/ACL identifier a cluster
         uses is whatever its `.env` URLs carry — an existing cluster on the
         historical `ava_main`, a fresh one on the fixed `ava` — and nothing
-        re-derives it from a name. Only the password is re-derived, so a secret
-        rotation self-heals (the `.env` password snapshot can go stale without
-        ever reaching the wire) while a data-plane rename stays a pure ops edit
-        of the URLs.
+        re-derives it from a name. Only the owner password is re-derived, so an
+        out-of-date DB URL self-heals after owner-password rotation while a
+        data-plane rename stays a pure ops edit of the URLs. Redis is left
+        verbatim because its URL carries the independent runtime ACL password.
 
         One identity is exempt: the least-privilege `ava_runner` db role (Task
         #1236). Its URL is projected by the gateway's /api/bootstrap?role=runner
         with the runner's OWN password (AVA_RUNNER_DB_PASSWORD), freshly read
         from the gateway .env at every fetch — never stale, and deliberately NOT
-        the cluster secret (an independent credential, so a secret rotation and a
-        runner-credential rotation stay separable). Overwriting it with the
-        cluster secret would make every runner SASL-fail: the role's stored
+        the owner password. Overwriting it with the owner password would make
+        every runner SASL-fail: the role's stored
         verifier is its own password, not the secret. The runner is identified by
         its URL username (names-as-data — the same read the rest of the system
         uses), so an ops rename of the main identity cannot mis-classify it.
@@ -213,10 +247,14 @@ class DataPlaneSettings(EnvSettings):
         the identity username with no password; tests / an unprovisioned checkout
         leave the URLs verbatim) or, for db_url, when it is the unanchored sentinel
         (it carries no userinfo and must stay byte-identical for the connect guard)."""
-        if self.cluster_secret:
-            if self.db_url != UNANCHORED_DB_SENTINEL and not _is_runner_db_url(self.db_url):
-                self.db_url = url_with_password(self.db_url, self.cluster_secret)
-            self.redis_url = url_with_password(self.redis_url, self.cluster_secret)
+        if (
+            self.cluster_secret
+            and self.db_url != UNANCHORED_DB_SENTINEL
+            and not _is_runner_db_url(self.db_url)
+        ):
+            self.db_url = url_with_password(
+                self.db_url, self.db_admin_password or self.cluster_secret
+            )
         return self
 
     @model_validator(mode="after")

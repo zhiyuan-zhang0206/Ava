@@ -63,16 +63,15 @@ clusters apart *inside one instance* is unnecessary. The bulk is in
   `redis_prefix`, `allocate_redis_index`, `redis_channel_prefix`,
   `ava:<cluster>:*`). Every instance is single-cluster: DB 0, bare channel names,
   no neighbour to prefix away from.
-- **Redis ACL users + box-level `default`-admin-secret dance**
-  (`redis_admin_secret`, `ensure_cluster_redis_acl`,
-  `RedisAdminSecretMissing`). One redis per cluster sets a single `requirepass`
-  = the cluster secret directly; there are no per-cluster ACL users to provision,
-  so the admin secret used to provision them disappears.
+- **Shared-instance Redis ACL users + box-level admin-secret dance**
+  (`redis_admin_secret`, `RedisAdminSecretMissing`). The physical-instance model
+  keeps one runtime ACL user per cluster, but its `requirepass` is now the
+  gateway-local Redis-admin credential and its runtime password is independent.
 - **Per-cluster role inside a shared instance + the legacy-role reassignment**
   (`ensure_cluster_role`'s "reassign ownership from the legacy `ava` role" path,
   the bootstrap-superuser-provisions-every-cluster's-role model). Each instance
-  `initdb`s its own superuser; a slim role + db owned by it (password = cluster
-  secret, for the scram TCP connection) is all that remains.
+  `initdb`s its own superuser; a slim role + db owned by it uses the independent
+  gateway-local DB-owner password for the scram TCP connection.
 - **Shared-instance foreign/neighbour probes** — `_shared_infra_running`,
   `_foreign_redis_error`, `_redis_listening`. A per-cluster instance on its own
   port with its own data dir under `$AVA_HOME` is unambiguously this cluster's;
@@ -86,15 +85,13 @@ more than the marginal isolation a unix socket would buy on a single box (it
 would force single-box connection strings into socket paths while split clusters
 stay `host:port` — an asymmetry not worth its weight).
 
-So `AVA_CLUSTER_SECRET` **stays, uniformly**. A per-cluster TCP port on loopback
-is reachable by *any* local process — including a co-located cluster — so each
-instance still needs a password to keep other clusters off its port: Redis
-`requirepass` = the cluster secret, Postgres role scram = the cluster secret. The
-difference from today is that this is a *single password per instance*, not the
-per-cluster-ACL-user + logical-index + channel-prefix + shared-instance-role
-machinery. Isolation comes from *each cluster having its own instance* (which
-kills cross-talk); auth is the one remaining lock ("don't connect to the wrong
-port"), identical on a single box and across machines.
+`AVA_CLUSTER_SECRET` stays as the control-plane bearer. A per-cluster TCP port
+on loopback is reachable by *any* local process — including a co-located
+cluster — so each authenticated instance keeps independent data-plane locks:
+the Postgres owner password, Redis `default`/`requirepass` password, runner DB
+password, and Redis runtime ACL password. Isolation comes from *each cluster
+having its own instance* (which kills cross-talk); authority is separated so a
+runner cannot use its bearer to become an owner or Redis administrator.
 
 Postgres bind posture is unchanged — loopback + this host's reachable address,
 never all interfaces — while Redis is loopback-only; only the ports become
@@ -131,10 +128,11 @@ from-scratch supervision lift.
 - **`initdb` template cache.** A fresh per-cluster `initdb` adds ~1-3 s to
   bring-up — noticeable in tests. Cache the `initdb` output as a template data
   dir and copy it per cluster, so spin-up is a directory copy, not a fresh init.
-- **Birth no longer provisions an ACL/redis-index.** For a new (non-prod)
-  cluster it `initdb`s (or copies the template), starts the instance on the
-  cluster's port with `requirepass` = cluster secret, creates the slim role + db,
-  and runs the schema. The registry record drops `redis_db_index` / `redis_prefix`.
+- **Birth no longer provisions a shared-instance ACL/redis-index.** For a new
+  (non-prod) cluster it `initdb`s (or copies the template), starts the instance
+  with the independent Redis-admin `requirepass`, creates the owner and runner
+  roles, re-affirms the runtime ACL user, and runs the schema. The registry
+  record drops `redis_db_index` / `redis_prefix`.
 
 ### Slices
 
@@ -144,7 +142,7 @@ runs on it, so deletion follows the prod migration, not slice 1.
 
 1. **✅ Done — per-cluster instance path for new clusters.** A new (non-prod)
    cluster `initdb`s its own instance under `$AVA_HOME` on its allocated pg/redis
-   ports, `requirepass`/scram = cluster secret, runs the schema, and connects
+   ports, separate owner/Redis-admin/runtime credentials, runs the schema, and connects
    there; prod stayed on the shared path (byte-identical prod bring-up). `initdb`
    template cache so a new cluster / a test spins up by directory copy. Delivered the
    cross-talk fix + test-flake removal without touching prod.
@@ -171,7 +169,7 @@ The "What it deletes" list above describes the end state, now reached in slices 
 - [`runbook.md`](../../conventions/runbook.md) — the entire shared-instance + logical-isolation
   description (per-cluster db/role/redis-index/channel-prefix, the `requirepass`
   vs ACL-user model, the bootstrap superuser) is rewritten to the per-cluster
-  instance model with uniform per-cluster-port TCP + cluster-secret auth.
+  instance model with uniform per-cluster-port TCP + separately scoped credentials.
 - Supersedes the north star in the `redis-data-plane-ownership` design note and
   the "external/managed data plane as a knob" framing — the data plane is always
   Ava-owned and per-cluster; the only remaining knob is whether an instance is

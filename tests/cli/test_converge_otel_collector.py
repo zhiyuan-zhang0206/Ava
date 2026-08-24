@@ -159,12 +159,11 @@ def _render_real_template(
     self_metrics_port: int = 8888,
 ) -> dict[str, Any]:
     """Render the shipped template for `roles` and parse it as YAML."""
+    monkeypatch.setattr("shared.db.direct_db_url", lambda: "postgresql://ava:abc@10.0.0.2:5433/ava")
     monkeypatch.setattr(
-        "shared.db.direct_db_url", lambda: "postgresql://ava:s3cr3t@10.0.0.2:5433/ava"
+        "shared.config.settings.data_plane.redis_url", "redis://:abc@10.0.0.2:6380/0"
     )
-    monkeypatch.setattr(
-        "shared.config.settings.data_plane.redis_url", "redis://:s3cr3t@10.0.0.2:6380/0"
-    )
+    monkeypatch.setattr("shared.config.settings.data_plane.redis_admin_password", "abc")
     monkeypatch.setattr("shared.config.settings.gateway.gateway_url", gateway_url)
     monkeypatch.setattr("shared.config.settings.data_plane.cluster_secret", cluster_secret)
     monkeypatch.setattr(
@@ -193,10 +192,11 @@ def test_gateway_config_scrapes_this_clusters_own_data_plane(
     receivers = cfg["receivers"]
     assert receivers["postgresql"]["endpoint"] == "10.0.0.2:5433"
     assert receivers["postgresql"]["username"] == "ava"
-    assert receivers["postgresql"]["password"] == "s3cr3t"  # noqa: S105 — fixture value
+    assert receivers["postgresql"]["password"] == "abc"  # noqa: S105 — fixture value
     assert receivers["postgresql"]["databases"] == ["ava"]
     assert receivers["redis"]["endpoint"] == "10.0.0.2:6380"
-    assert receivers["redis"]["password"] == "s3cr3t"  # noqa: S105 — fixture value
+    assert receivers["redis"]["password"] == "abc"  # noqa: S105 — fixture value
+    assert receivers["redis"]["password"] != "cluster-token"  # noqa: S105 — fixture token
     infra = cfg["service"]["pipelines"]["metrics/infra"]
     assert infra["receivers"] == [
         "host_metrics",
@@ -668,11 +668,9 @@ def test_config_file_is_owner_only(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
     (tmp_path / "otel-collector/otelcol-contrib").write_bytes(b"bin")
     (tmp_path / "otel-collector/version").write_text(oc.OTELCOL_CONTRIB_VERSION, encoding="utf-8")
     monkeypatch.setattr(oc, "_download_and_verify", lambda _tag, _dir: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr("shared.db.direct_db_url", lambda: "postgresql://ava:abc@10.0.0.2:5433/ava")
     monkeypatch.setattr(
-        "shared.db.direct_db_url", lambda: "postgresql://ava:s3cr3t@10.0.0.2:5433/ava"
-    )
-    monkeypatch.setattr(
-        "shared.config.settings.data_plane.redis_url", "redis://:s3cr3t@10.0.0.2:6380/0"
+        "shared.config.settings.data_plane.redis_url", "redis://:abc@10.0.0.2:6380/0"
     )
     monkeypatch.setattr("shared.config.settings.gateway.gateway_url", "http://100.64.0.10:8000")
     monkeypatch.setattr("shared.config.settings.data_plane.cluster_secret", "cluster-token")

@@ -24,3 +24,15 @@ secret:
     # avoid one detector hit is not worth a 37-commit force-rebase).
     - name: pw123 — test-only login fixture in tests/gateway/test_login_endpoint.py
       match: pw123
+    # `s3cr3t` appears only as a fixed test fixture for the Redis and database
+    # admin-password paths in the converge and PgBouncer healthcheck tests.
+    - name: s3cr3t — test-only data-plane admin-password fixture
+      match: s3cr3t
+    # `new-db` is an expected-value fixture in the data-plane rotation tests,
+    # not a credential accepted by any deployed cluster.
+    - name: new-db — test-only data-plane rotation expected value
+      match: new-db
+    # `new-runner-db` is likewise an expected-value fixture in the data-plane
+    # rotation tests, never a deployed runner credential.
+    - name: new-runner-db — test-only runner rotation expected value
+      match: new-runner-db

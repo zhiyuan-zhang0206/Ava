@@ -40,7 +40,7 @@ def _registry_redis_port(_rec: object) -> int:
 def _provision(admin_url: str) -> str:
     """Create the cluster ACL user; return the cluster-identity URL."""
     ensure_cluster_redis_acl(
-        _USER, redis_admin_url=admin_url, cluster_secret=_SECRET, channel_prefix=_PREFIX
+        _USER, redis_admin_url=admin_url, runtime_password=_SECRET, channel_prefix=_PREFIX
     )
     return url_with_userinfo(admin_url, _USER, _SECRET)
 
@@ -85,15 +85,15 @@ def test_unreachable_server_is_restarted_and_verified(monkeypatch: pytest.Monkey
     """A dead Redis is restarted through the same idempotent bring-up as `ava start`,
     then PINGed again before the check claims recovery."""
     pings: list[Exception | None] = [ConnectionError("connection refused"), None]
-    starts: list[tuple[int, str, str]] = []
+    starts: list[tuple[int, str, str, str, str]] = []
 
     def _mock_ping(_url: str) -> None:
         outcome = pings.pop(0)
         if outcome is not None:
             raise outcome
 
-    def _start(port: int, secret: str, identity: str) -> int:
-        starts.append((port, secret, identity))
+    def _start(port: int, redis_admin: str, runtime: str, bearer: str, identity: str) -> int:
+        starts.append((port, redis_admin, runtime, bearer, identity))
         return 0
 
     monkeypatch.setattr(redis_acl, "_ping", _mock_ping)
@@ -105,7 +105,7 @@ def test_unreachable_server_is_restarted_and_verified(monkeypatch: pytest.Monkey
 
     _check("redis://ava_feat_x@127.0.0.1:16380/0", "redis://127.0.0.1:16380/0")
 
-    assert starts == [(_REDIS_PORT, _SECRET, _USER)]
+    assert starts == [(_REDIS_PORT, _SECRET, _SECRET, _SECRET, _USER)]
     assert pings == []
 
 
@@ -116,7 +116,7 @@ def test_failed_redis_restart_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     def _dead_ping(_url: str) -> None:
         raise ConnectionError("connection refused")
 
-    def _failed_start(_port: int, _secret: str, _identity: str) -> int:
+    def _failed_start(_port: int, _admin: str, _runtime: str, _bearer: str, _identity: str) -> int:
         return 1
 
     monkeypatch.setattr(redis_acl, "_ping", _dead_ping)
@@ -135,7 +135,7 @@ def test_repairs_via_password_authed_admin() -> None:
             r.execute_command("CONFIG", "SET", "requirepass", "boxadminsecret")  # pyright: ignore[reportUnknownMemberType]
         authed_admin = url_with_userinfo(admin_url, "default", "boxadminsecret")
         ensure_cluster_redis_acl(
-            _USER, redis_admin_url=authed_admin, cluster_secret=_SECRET, channel_prefix=_PREFIX
+            _USER, redis_admin_url=authed_admin, runtime_password=_SECRET, channel_prefix=_PREFIX
         )
         cluster_url = url_with_userinfo(admin_url, "ava_feat_x", _SECRET)
         with redis.Redis.from_url(authed_admin) as r:  # pyright: ignore[reportUnknownMemberType]
@@ -147,6 +147,8 @@ def test_repairs_via_password_authed_admin() -> None:
             cluster_url=cluster_url,
             admin_url=authed_admin,
             cluster_secret=_SECRET,
+            redis_admin_password="boxadminsecret",  # noqa: S106 — test fixture
+            runtime_password=_SECRET,
             channel_prefix=_PREFIX,
             reaffirm_acl=True,
         )
@@ -238,19 +240,19 @@ def test_no_secret_unreachable_server_is_restarted(monkeypatch: pytest.MonkeyPat
     """No-secret mode skips the ACL branch but still uses `_start_redis` to restore
     the message bus after its local listener disappears."""
     pings: list[Exception | None] = [ConnectionError("connection refused"), None]
-    starts: list[tuple[int, str, str]] = []
+    starts: list[tuple[int, str, str, str, str]] = []
 
     def _mock_ping(_url: str) -> None:
         outcome = pings.pop(0)
         if outcome is not None:
             raise outcome
 
-    def _start(port: int, secret: str, identity: str) -> int:
-        starts.append((port, secret, identity))
+    def _start(port: int, redis_admin: str, runtime: str, bearer: str, identity: str) -> int:
+        starts.append((port, redis_admin, runtime, bearer, identity))
         return 0
 
     def _unexpected_acl(
-        _user: str, *, redis_admin_url: str, cluster_secret: str, channel_prefix: str
+        _user: str, *, redis_admin_url: str, runtime_password: str, channel_prefix: str
     ) -> None:
         pytest.fail("no-secret liveness repair must skip ACL re-affirmation")
 
@@ -272,7 +274,7 @@ def test_no_secret_unreachable_server_is_restarted(monkeypatch: pytest.MonkeyPat
         reaffirm_acl=False,
     )
 
-    assert starts == [(_REDIS_PORT, "", _USER)]
+    assert starts == [(_REDIS_PORT, "", "", "", _USER)]
     assert pings == []
 
 
@@ -284,7 +286,7 @@ def test_no_secret_auth_failure_does_not_reaffirm_acl(monkeypatch: pytest.Monkey
         raise AuthenticationError("bad auth")
 
     def _unexpected_acl(
-        _user: str, *, redis_admin_url: str, cluster_secret: str, channel_prefix: str
+        _user: str, *, redis_admin_url: str, runtime_password: str, channel_prefix: str
     ) -> None:
         pytest.fail("no-secret mode must skip ACL re-affirmation")
 

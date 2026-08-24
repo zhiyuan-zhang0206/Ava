@@ -20,14 +20,15 @@ A born cluster consists of four things, all produced here:
 - a registry entry, **keyed by home path** (host-level `~/.ava/clusters.json`)
 - the cluster's own pg/redis instance under `$AVA_HOME`
 - a provisioned database + owning role
-- `$AVA_HOME/.env` — the connection facts; the secret follows the role (below)
+- `$AVA_HOME/.env` — the connection facts plus separately scoped bearer and
+  data-plane credentials (below)
 
 The data-plane identity (db / role / ACL user) is the fixed
 `shared.cluster.DATA_PLANE_IDENTITY` (`"ava"`), chosen **only here**. Everywhere
 else it is read back out of the `.env` URL as data, so nothing re-derives an
 identifier from a name.
 
-## The cluster secret (no-auth single box by default)
+## The control-plane bearer (no-auth single box by default)
 
 User decision (2026-08): off is fully off. Secret precedence: the compatibility
 `--cluster-secret` flag > the one-shot `AVA_INSTALL_CLUSTER_SECRET` input > the
@@ -35,8 +36,10 @@ home's existing `.env` secret (never rotated) > the role default. The role
 default: a **single-machine** role
 (`gateway,agent-runner`) births a NO-AUTH cluster with an EMPTY secret — every
 surface (gateway API, /ops, pg/redis) serves unauthenticated on loopback. A
-**gateway-only split host** mints a fresh secret — remote agent-runners depend
-on it (scram/requirepass + bearer), so a split deployment always has one. The
+**gateway-only split host** mints a fresh bearer — remote agent-runners depend
+on it for control-plane auth, so a split deployment always has one. Authenticated
+births also mint independent DB-owner, Redis-admin, runner-DB, and Redis-runtime
+passwords; only the runner credentials are projected to runners. The
 generic runtime environment is never consulted (an inherited
 `AVA_CLUSTER_SECRET` must not leak in); the dedicated install variable is
 consumed before bootstrap and forwarded only to the birth child. The URLs

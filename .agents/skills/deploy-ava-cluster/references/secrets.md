@@ -19,16 +19,17 @@ agent reaches for it.
 
 One URL-safe token per cluster, minted at install and never rotated by a
 re-install. The gateway API and each runner's `/ops` accept it as a bearer
-token. It is also the gateway/main Postgres identity's password and the Redis
-ACL password (each cluster's Redis is single-tenant, so `requirepass` is the
-same secret — there is no separate box-level admin secret).
+token. It does not authenticate Postgres, PgBouncer, or Redis.
 
 Remote runners are least-privilege at Postgres: the gateway provisions an
 independent `ava_runner` role with `AVA_RUNNER_DB_PASSWORD` and projects that
 credential inside the runner's bootstrap `AVA_DB_URL`. The standalone runner
 password is never served as an env key, and `shared/config/data_plane.py`
-deliberately does not overwrite it with `AVA_CLUSTER_SECRET`. Runner Redis and
-HTTP `/ops` access still use the cluster secret.
+deliberately does not overwrite it with `AVA_CLUSTER_SECRET`. Runner Redis has
+the independent `AVA_REDIS_PASSWORD`, embedded only in the bootstrap URL. The
+gateway's owner DB URL uses `AVA_DB_ADMIN_PASSWORD`; Redis `default`/
+`requirepass` uses `AVA_REDIS_ADMIN_PASSWORD`. All four data-plane credentials
+remain file-only on the gateway.
 
 Which install shape gets one is decided by `--role`:
 
@@ -51,9 +52,10 @@ unset AVA_INSTALL_CLUSTER_SECRET
 ```
 
 A secret already present in the `.env` is never overwritten, so a re-install is
-safe; rotate deliberately with `scripts/rotate_cluster_secret.py`. Gateway/main
-Postgres URLs and all Redis URLs re-derive their live password from
-`AVA_CLUSTER_SECRET` on load, so a stale embedded password cannot reach the
-wire. The `ava_runner` Postgres URL is the explicit exception: bootstrap
-projects its separate password, and rotating that credential is independent of
-rotating the cluster secret.
+safe; rotate the bearer only for control-plane emergencies with
+`scripts/rotate_cluster_secret.py`. Rotate data-plane credentials independently
+with `scripts/rotate_data_plane_secrets.py`. The gateway owner DB URL is
+reapplied from `AVA_DB_ADMIN_PASSWORD` (falling back to the bearer only when
+upgrading a legacy installation); Redis URLs are used verbatim. Bootstrap
+projects the runner's separate Postgres and Redis credentials, and their
+rotation is independent of bearer rotation.

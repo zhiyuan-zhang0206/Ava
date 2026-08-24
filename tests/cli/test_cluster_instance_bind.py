@@ -200,7 +200,7 @@ def test_start_redis_binds_loopback_only_without_secret(
     monkeypatch.setattr(_ci, "reachable_host", lambda: "100.64.0.5")
     started = _wire_redis_start(monkeypatch, tmp_path)
 
-    assert _ci._start_redis(6380, "", "ava") == 0
+    assert _ci._start_redis(6380, "", "", "", "ava") == 0
     assert _redis_bind_arg(started[0]) == ["--bind", "127.0.0.1"]
 
 
@@ -211,7 +211,7 @@ def test_start_redis_binds_loopback_only_with_secret(
     monkeypatch.setattr(_ci, "reachable_host", lambda: "100.64.0.5")
     started = _wire_redis_start(monkeypatch, tmp_path)
 
-    assert _ci._start_redis(6380, "s3cr3t", "ava") == 0
+    assert _ci._start_redis(6380, "redis-admin", "redis-runtime", "s3cr3t", "ava") == 0
     assert _redis_bind_arg(started[0]) == ["--bind", "127.0.0.1"]
 
 
@@ -226,7 +226,7 @@ def test_start_redis_does_not_use_shared_pg_bind_addrs(
     )
     started = _wire_redis_start(monkeypatch, tmp_path)
 
-    assert _ci._start_redis(6380, "s3cr3t", "ava") == 0
+    assert _ci._start_redis(6380, "redis-admin", "redis-runtime", "s3cr3t", "ava") == 0
     assert _redis_bind_arg(started[0]) == ["--bind", "127.0.0.1"]
 
 

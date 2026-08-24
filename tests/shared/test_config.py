@@ -174,9 +174,11 @@ def test_bootstrap_serves_comma_list_not_repr(monkeypatch: pytest.MonkeyPatch, t
     """A NoDecode comma-list field set in .env reaches an agent as the raw "a,b"
     env text, not a Python list repr (which the agent would split into garbage)."""
     from shared import runtime_config as rt
+    from shared.envfile import upsert_env
 
     monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)
     rt.write_fields({"skills_to_inject_into_system_prompt": ["alpha", "beta"]}, set())
+    upsert_env(tmp_path / ".env", {"AVA_RUNNER_DB_PASSWORD": "runner-password"})
 
     vals = config.bootstrap_config_values()
     assert vals["AVA_SKILLS_TO_INJECT_INTO_SYSTEM_PROMPT"] == "alpha,beta"
@@ -324,11 +326,13 @@ def test_bootstrap_fields_derived_from_scope() -> None:
         for name, field in FIELD_INFOS.items()
         if isinstance(field.json_schema_extra, dict)
         and field.json_schema_extra.get("scope") in ("cluster-pinned", "cluster-default")  # pyright: ignore[reportUnknownMemberType]
+        and field.json_schema_extra.get("bootstrap", True) is not False  # pyright: ignore[reportUnknownMemberType]
     }
     assert set(BOOTSTRAP_FIELDS) == derived
     # cluster identity + a behavior knob both present (the intended delta);
     # host / agent fields excluded.
     assert {"db_url", "llm_model", "exec_timeout_seconds"} <= set(BOOTSTRAP_FIELDS)
+    assert not ({"db_admin_password", "redis_admin_password"} & set(BOOTSTRAP_FIELDS))
     assert not ({"machine_name", "gateway_pidfile", "sdk_disable"} & set(BOOTSTRAP_FIELDS))
 
 
@@ -339,7 +343,11 @@ def test_bootstrap_distributes_a_behavior_knob(monkeypatch: pytest.MonkeyPatch) 
 
     # .env file may carry a stale value from another test; bypass it so the
     # monkeypatched settings value is the only source.
-    monkeypatch.setattr(runtime_config, "read_env_aliases", dict)
+    monkeypatch.setattr(
+        runtime_config,
+        "read_env_aliases",
+        lambda: {"AVA_RUNNER_DB_PASSWORD": "runner-password"},
+    )
     monkeypatch.setattr(cfg.settings.sandbox, "exec_timeout_seconds", 123.0)
     values = cfg.bootstrap_config_values()
     assert values["AVA_EXEC_TIMEOUT_SECONDS"] == "123.0"

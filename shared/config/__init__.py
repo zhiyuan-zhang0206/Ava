@@ -364,6 +364,7 @@ BOOTSTRAP_FIELDS: tuple[str, ...] = tuple(
     name
     for name, ref in _FIELDS.items()
     if _schema_extra(ref.info).get("scope") in ("cluster-pinned", "cluster-default")
+    and _schema_extra(ref.info).get("bootstrap", True) is not False
 )
 
 

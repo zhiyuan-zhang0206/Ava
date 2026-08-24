@@ -26,17 +26,24 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
-def _provision(identity: str, *, base_admin_url: str, cluster_secret: str) -> bool:
+def _provision(identity: str, *, base_admin_url: str, db_admin_password: str) -> bool:
     """Thin wrapper around cluster.provision_database for monkeypatching in tests."""
     from shared import cluster as cl
 
     return cl.provision_database(
-        identity, base_admin_url=base_admin_url, cluster_secret=cluster_secret
+        identity, base_admin_url=base_admin_url, db_admin_password=db_admin_password
     )
 
 
 def _ensure_cluster_instance(
-    rec: Any, cluster_secret: str, identity: str, runner_password: str | None = None
+    rec: Any,
+    cluster_secret: str,
+    identity: str,
+    runner_password: str | None = None,
+    *,
+    db_admin_password: str = "",
+    redis_admin_password: str = "",
+    redis_password: str = "",
 ) -> int:
     """Thin wrapper around the per-cluster Postgres+Redis bring-up (for
     monkeypatching in tests, like `_provision`). `identity` is the data-plane
@@ -51,6 +58,9 @@ def _ensure_cluster_instance(
         pg_port=rec.ports["postgres"],
         redis_port=rec.ports["redis"],
         cluster_secret=cluster_secret,
+        db_admin_password=db_admin_password or cluster_secret,
+        redis_admin_password=redis_admin_password or cluster_secret,
+        redis_password=redis_password or cluster_secret,
         pgbouncer_port=record_pgbouncer_port(rec),
         identity=identity,
         runner_password=runner_password,

@@ -3,7 +3,7 @@ that uses them.
 
 Names-as-data (path-only identity): a URL's username and database ARE the
 cluster's data-plane identifiers, never re-derived from a name. Settings
-re-applies only the PASSWORD (the cluster secret) on load — a rotated secret
+re-applies only the main DB-owner password on load — an owner-password rotation
 self-heals while a `.env` on the historical `ava_main` identifiers (prod before
 the ops rename) keeps dialing exactly what it says.
 
@@ -89,29 +89,46 @@ class TestUrlWithUserinfo:
         assert out == "postgresql://ava_dev@db.host:5432/ava"
 
 
-def _settings_with(*, db_url: str, redis_url: str, secret: str) -> DataPlaneSettings:
+def _settings_with(
+    *,
+    db_url: str,
+    redis_url: str,
+    secret: str,
+    db_admin_password: str = "",
+    redis_admin_password: str = "",
+) -> DataPlaneSettings:
     # Construct a fresh Settings from init kwargs (highest-priority source, so the
     # session's env is irrelevant) — the model-validator runs at construction, which
     # is what setattr on the singleton could not exercise. Kwargs are the field
     # aliases, since the fields populate by alias.
     return DataPlaneSettings(  # pyright: ignore[reportCallIssue]
-        AVA_DB_URL=db_url, AVA_REDIS_URL=redis_url, AVA_CLUSTER_SECRET=secret
+        AVA_DB_URL=db_url,
+        AVA_REDIS_URL=redis_url,
+        AVA_CLUSTER_SECRET=secret,
+        AVA_DB_ADMIN_PASSWORD=db_admin_password,
+        AVA_REDIS_ADMIN_PASSWORD=redis_admin_password,
     )
 
 
-class TestSettingsAppliesClusterSecret:
-    def test_password_reapplied_username_and_db_kept(self) -> None:
-        # Names-as-data: the stale PASSWORD is overwritten with the secret; the
+class TestSettingsAppliesDataPlanePasswords:
+    def test_main_url_uses_the_database_admin_password(self) -> None:
+        # Names-as-data: the stale PASSWORD is overwritten with the DB owner password; the
         # username and database stay exactly what the URL says (here the
         # historical prod identifiers), so an existing cluster keeps dialing its
         # own db across the rename window.
+        db_admin = "-".join(("db", "admin", "v2"))
+        redis_admin = "-".join(("redis", "admin", "v2"))
         s = _settings_with(
             db_url=_pg("STALE", host="gw.host:5432", user="ava_main", db="ava_main"),
             redis_url=_redis("STALE", host="gw.host:6379", user="ava_main"),
             secret=_SECRET,
+            db_admin_password=db_admin,
+            redis_admin_password=redis_admin,
         )
-        assert s.db_url == _pg(_SECRET, host="gw.host:5432", user="ava_main", db="ava_main")
-        assert s.redis_url == _redis(_SECRET, host="gw.host:6379", user="ava_main")
+        assert s.db_url == _pg(db_admin, host="gw.host:5432", user="ava_main", db="ava_main")
+        assert s.redis_url == _redis("STALE", host="gw.host:6379", user="ava_main")
+        assert s.db_admin_password == db_admin
+        assert s.redis_admin_password == redis_admin
 
     def test_fresh_cluster_fixed_identity_passes_through(self) -> None:
         # A path-only birth writes the fixed `ava` identifiers; Settings keeps them.
@@ -121,25 +138,26 @@ class TestSettingsAppliesClusterSecret:
             secret=_SECRET,
         )
         assert s.db_url == _pg(_SECRET, host="gw.host:5432", user="ava", db="ava")
-        assert s.redis_url == _redis(_SECRET, host="gw.host:6379", user="ava")
+        assert s.redis_url == _redis("STALE", host="gw.host:6379", user="ava")
 
-    def test_usernameless_redis_url_gets_password_only(self) -> None:
-        # A bare base URL (no username) authenticates as the redis `default`
-        # admin user, whose requirepass IS the cluster secret.
+    def test_redis_url_stays_verbatim(self) -> None:
+        # The Redis URL carries the ACL runtime password, independent from both
+        # the bearer and the Redis default-user admin password. Mint/rotation is
+        # the only path that rewrites it.
         s = _settings_with(
             db_url=_pg("STALE", host="gw.host:5432"),
             redis_url="redis://gw.host:6379/0",
             secret=_SECRET,
         )
-        assert s.redis_url == _redis(_SECRET, host="gw.host:6379")
+        assert s.redis_url == "redis://gw.host:6379/0"
 
     def test_runner_projected_url_keeps_its_own_password(self) -> None:
         # The least-privilege runner URL (Task #1236) carries the runner's OWN
         # credential (AVA_RUNNER_DB_PASSWORD), freshly projected by the gateway
         # at every fetch — deliberately NOT the cluster secret. Overwriting it
         # would SASL-fail every runner: the role's stored verifier is its own
-        # password, not the secret (prod finding, #2599 follow-up). redis keeps
-        # the secret — the redis ACL user is the main identity for runners too.
+        # password, not the bearer (prod finding, #2599 follow-up). Redis also
+        # stays verbatim: its ACL password is an independent runtime credential.
         runner_pw = "runner-pw-v1"
         s = _settings_with(
             db_url=_pg(runner_pw, host="gw.host:5432", user="ava_runner", db="ava"),
@@ -147,7 +165,7 @@ class TestSettingsAppliesClusterSecret:
             secret=_SECRET,
         )
         assert s.db_url == _pg(runner_pw, host="gw.host:5432", user="ava_runner", db="ava")
-        assert s.redis_url == _redis(_SECRET, host="gw.host:6379", user="ava")
+        assert s.redis_url == _redis("STALE", host="gw.host:6379", user="ava")
 
     def test_empty_secret_leaves_urls_verbatim(self) -> None:
         # An unprovisioned checkout / the no-secret test path must not rewrite URLs.
@@ -167,8 +185,8 @@ class TestSettingsAppliesClusterSecret:
             secret=_SECRET,
         )
         assert s.db_url == UNANCHORED_DB_SENTINEL
-        # redis still gets the password — only db_url has a sentinel.
-        assert s.redis_url == _redis(_SECRET, host="h:6379")
+        # Redis is independent from the bearer and remains verbatim.
+        assert s.redis_url == _redis("OLD", host="h:6379")
 
 
 @pytest.fixture
@@ -217,7 +235,7 @@ class TestSelfHostDialsLoopback:
         # loopback host IS an IPv4 literal, so libpq's own resolution-bypass
         # applies here too, same as any other literal host.
         assert s.db_url == _pg(_SECRET, host="127.0.0.1:5433") + "?hostaddr=127.0.0.1"
-        assert s.redis_url == _redis(_SECRET, host="127.0.0.1:6380")
+        assert s.redis_url == _redis("STALE", host="127.0.0.1:6380")
 
     def test_foreign_host_is_untouched(self, tmp_path: Path) -> None:
         # A runner whose URLs point at the (remote) gateway must keep dialing it.
@@ -266,7 +284,7 @@ class TestSelfHostDialsLoopback:
             secret=_SECRET,
         )
         assert s.db_url == _pg(_SECRET, host="localhost:5433")
-        assert s.redis_url == _redis(_SECRET, host="localhost:6380")
+        assert s.redis_url == _redis("STALE", host="localhost:6380")
 
     def test_machine_host_file_fallback_matches(self, tmp_path: Path) -> None:
         # env unset -> the `$AVA_HOME/machine_host` file (written by enroll) wins.
@@ -309,7 +327,7 @@ class TestPinIpv4Hostaddr:
         )
         assert s.db_url == _pg(_SECRET, host="198.51.100.7:5433") + "?hostaddr=198.51.100.7"
         # redis has no hostaddr mechanism -- untouched.
-        assert s.redis_url == _redis(_SECRET, host="198.51.100.7:6380")
+        assert s.redis_url == _redis("OLD", host="198.51.100.7:6380")
 
     def test_hostname_host_gets_no_hostaddr(self) -> None:
         s = _settings_with(

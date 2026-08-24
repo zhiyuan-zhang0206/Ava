@@ -214,26 +214,24 @@ is no standalone infra verb, and no shared host instance to survive across
 checkouts/worktrees.
 
 The data-plane posture is uniform — the default is multi-machine, a single box is just
-the case where the reachable address is loopback (no single-vs-multi branch). **Auth is
-always on, per-cluster**: each cluster authenticates to Postgres as its own role
-and to redis as its own ACL user (the identifier its URLs carry), both with `AVA_CLUSTER_SECRET`
-when one is set (an EMPTY secret — the single-box default — serves everything
-unauthenticated on loopback: no scram, no requirepass, no bearer). The redis instance is single-tenant, so
-its `requirepass` — the `default` admin user, used only to provision that ACL user — IS
-the cluster secret; there is no separate box-level admin secret. pg loopback stays
-`trust`, so the pg role password is only consulted once `AVA_TRUSTED_CIDRS` is declared.
-Settings re-applies the db_url + redis_url password (the secret) on every
-load, so a `.env` snapshot out of step can never reach the wire. On the same load, a
-data-plane URL whose host is this machine's own reachable address (`AVA_MACHINE_HOST`)
-dials `127.0.0.1` instead (`shared/config/data_plane.py`): self-dial never leaves the box
-— it must not route through the NIC or a VPN's network extension, which can transiently
-black-hole a self-connect to its own IP. The `.env` value, the verbatim bootstrap
-payload, and the registered address stay untouched — only the in-memory dial host
-changes, so remote runners keep dialing the gateway's real address.
+the case where the reachable address is loopback (no single-vs-multi branch). When the
+control-plane bearer is set, Postgres authenticates its owner role with the gateway-only
+`AVA_DB_ADMIN_PASSWORD`; Redis authenticates its `default` administrative user and
+`requirepass` with the gateway-only `AVA_REDIS_ADMIN_PASSWORD`; and the Redis ACL runtime
+identity uses `AVA_REDIS_PASSWORD` embedded in `AVA_REDIS_URL`. The runner database role
+has its separate `AVA_RUNNER_DB_PASSWORD`, embedded only in its projected URL. The bearer
+never authenticates the data plane. An EMPTY bearer — the single-box default — keeps all
+credentials empty and serves everything unauthenticated on loopback. Postgres loopback
+stays `trust`, so the owner password is consulted on TCP connections. Settings re-applies
+only the owner password to a main-identity DB URL; it leaves the Redis runtime URL
+verbatim. On the same load, a data-plane URL whose host is this machine's own reachable
+address (`AVA_MACHINE_HOST`) dials `127.0.0.1` instead (`shared/config/data_plane.py`):
+self-dial never leaves the box. The `.env` value, bootstrap payload, and registered
+address stay untouched, so remote runners keep dialing the gateway's real address.
 
 **Least-privilege runner role** (`ava_runner`, Task #1236): runner processes do
-not dial the main data-plane identity. A bootstrap fetch with `?role=runner`
-returns `AVA_DB_URL` projected onto the fixed `ava_runner` role (LOGIN
+not dial the main data-plane identity. Every bootstrap projection returns
+`AVA_DB_URL` projected onto the fixed `ava_runner` role (LOGIN
 NOSUPERUSER NOCREATEDB NOCREATEROLE), whose grants cover exactly the audited
 runner surface: SELECT on every table (plus sequence USAGE), SELECT/UPDATE on
 `agents_meta` (status/liveness), SELECT/UPDATE/INSERT on `inbound_messages`
@@ -264,8 +262,8 @@ The redis ACL user is added live at `ava start` (`ensure_cluster_redis_acl`), sc
 the cluster's pub/sub channels (`ava:*`); it is re-affirmed on every start (not persisted
 to redis.conf) and by the `redis-acl` gateway-watchdog healthcheck, so a redis restart
 that drops the in-memory ACL is repaired before agents reconnect. Provisioning uses that
-instance's own `default` user (requirepass == the cluster secret). A legacy `.env`
-whose redis_url carries no username (`redis://:<secret>@host/0`, born before the
+instance's own `default` user (the independent Redis admin password). A legacy `.env`
+whose redis_url carries no username (`redis://:<runtime-password>@host/0`, born before the
 names-as-data ACL model) dials as that `default` user — no ACL identity exists to
 drop, so the healthcheck warns and skips rather than raising every round, and `ava
 start` converge backfills the username into the URL (from the db_url identity) so the
@@ -874,8 +872,8 @@ as a bearer token (agent-runner / `/api/bootstrap`
 / `/ops`) or a signed session cookie (browser login). See
 [`decisions/2026-06-11-multihost-deployment.md`](../decisions/2026-06-11-multihost-deployment.md)
 (explicitly flags its own §4/§5/§9 "no auth" description as superseded history)
-and [`Cluster secret rotation`](#cluster-secret-rotation) below for the secret
-itself. The user opens the UI / API at the gateway's private-network
+and [`Credential rotation`](#credential-rotation) below for the bearer and
+data-plane procedures. The user opens the UI / API at the gateway's private-network
 address (on a VPN overlay, prefer its DNS name over a raw
 `100.x`-style IP where the overlay offers one — IPv6-only carrier networks
 NAT64-synthesize IPv4 literals and the request never enters the tunnel):
@@ -893,62 +891,29 @@ the private network. On a host where another service holds the gateway port, set
 derives this health URL from the reachable `AVA_GATEWAY_URL` written by
 `ava enroll` unless the host sets an explicit health URL override.
 
-## Cluster secret rotation
+## Credential rotation
 
-`AVA_CLUSTER_SECRET` is the single per-cluster pre-shared key: the Postgres
-role's password, redis's `requirepass` + the cluster's redis ACL user's
-password, and (when PgBouncer is enabled) its client-facing scram credential —
-and it is the bearer token every authenticated cross-machine call presents
-(`/api/bootstrap`, `/ops`, `gateway_auth_headers()`; see the access-model note
-above). A leak of it (e.g. via a captured `ps` output, an incident transcript)
-means rotating all of that, end to end.
+`AVA_CLUSTER_SECRET` is the control-plane bearer only: `/api/bootstrap`,
+`/ops`, gateway API requests, and machine registration. It is normally stable;
+run [`scripts/rotate_cluster_secret.py`](../scripts/rotate_cluster_secret.py)
+only after a bearer leak. Its dry-run preflights `GET /api/bootstrap` with the
+current bearer and a rejected invalid bearer. Execute stages only the new bearer
+in the gateway `.env`; restart that gateway, then push the bearer to every
+enrolled runner and restart them. It does not change Postgres, Redis, ACLs, or
+PgBouncer.
 
-`scripts/rotate_cluster_secret.py` does the cluster-secret half. Run it on the
-gateway box, against its own cluster (checkout-anchored `settings`, like any
-other `cli`/`scripts` entry point — there is no `--home` flag):
+Routine data-plane rotation is independent and uses
+[`scripts/rotate_data_plane_secrets.py`](../scripts/rotate_data_plane_secrets.py):
 
 ```bash
-.venv/bin/python scripts/rotate_cluster_secret.py            # dry-run (default): read-only,
-                                                               # prints the plan + preflight probes
-.venv/bin/python scripts/rotate_cluster_secret.py --execute   # mints a new secret and rotates
+.venv/bin/python scripts/rotate_data_plane_secrets.py                 # dry-run, both scopes
+.venv/bin/python scripts/rotate_data_plane_secrets.py --scope admin --execute
+.venv/bin/python scripts/rotate_data_plane_secrets.py --scope runner --execute
 ```
 
-It reuses the exact idempotent "ensure" primitives `ava start` already calls
-on every bring-up (`shared.cluster.ensure_cluster_role`,
-`shared.cluster.ensure_cluster_redis_acl`, `cli.commands._pgbouncer.ensure_pgbouncer`)
-— rotation is just calling them with a new secret instead of the current one.
-Sequence: mint -> re-affirm the Postgres role's password (loopback trust
-socket, no restart) -> re-affirm the redis ACL user + flip `default`'s
-`requirepass` (both live `CONFIG SET`, no redis-server restart — this
-cluster's redis runs `--save ""`, so a restart is an avoidable data-loss
-event) -> reload PgBouncer's `userlist.txt` (SIGHUP, when enabled) -> verify
-the new secret authenticates everywhere and the old one no longer does ->
-rewrite this gateway's own `.env` (`upsert_env`, which snapshots the old
-`.env` first). Any failure writes a JSON recovery state
-(`$AVA_HOME/backups/secret-rotation/rotate-<timestamp>.json`, `0600` — holds
-both secrets in plaintext, same posture as `.env` itself) recording the last
-completed phase and prints the exact `--resume` command; every phase is safe
-to re-run.
-
-**What it deliberately does NOT do** (left to the operator — narrow blast
-radius, no new service-lifecycle coupling in the script):
-
-- **Restart the gateway process.** Existing connections survive the pg/redis
-  steps untouched (neither kicks a session on a password change); the
-  gateway's in-memory Settings only pick up the new secret on its next boot.
-  Bounce it once the script reports success.
-- **Push the new secret to already-enrolled agent-runners.** A runner fetches
-  its cluster config (db/redis URLs, channels, provider keys) from the gateway
-  at every process start, but its own `AVA_CLUSTER_SECRET` — the bearer for
-  that very fetch — cannot be re-pulled through the endpoint it gates. The
-  script prints the current agent-runner roster (name + URL, read from the
-  `machines` table) as a checklist — for each: hand-edit `AVA_CLUSTER_SECRET`
-  in that host's own `.env` (or, once the gateway expects the new value, expose
-  it to the command as `AVA_CLUSTER_SECRET` and re-run `ava enroll --gateway ...
-  --machine-name ... --machine-host ...`), then restart it. Do not put the
-  secret in argv or shell history.
-- **Provider API keys.** They live in the same `.env` but rotate through each
-  provider's own console — checklist below.
+Both scripts are gateway-home scoped, default to read-only, and save 0600 resume
+state on failure. The complete upgrade, verification, runner-restart, and
+recovery procedure is [Data-plane credential split](data-plane-secret-split.md).
 
 **Provider API key rotation** — mint the new key in each console, then
 `ava config set KEY=VALUE` (a merge patch over just that key; it prints

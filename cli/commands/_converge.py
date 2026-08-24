@@ -130,8 +130,8 @@ def _ensure_redis_url_identity_step(ctx: ConvergeCtx) -> None:
     identity is read from the cluster's own db_url (`identity_from_url` —
     names-as-data; db/role/ACL share one identifier), falling back to the fixed
     birth identifier only when db_url carries no username either. Safe to write
-    mid-flight: Settings re-applies the cluster secret as the password on every
-    load, and `ava start` re-affirms the ACL user under this same identity
+    mid-flight: the file-only Redis runtime password stays inside the URL, and
+    `ava start` re-affirms the ACL user under this same identity
     (ensure_cluster_instance takes it from db_identity) before daemons dial with
     the new URL.
 
@@ -142,7 +142,7 @@ def _ensure_redis_url_identity_step(ctx: ConvergeCtx) -> None:
     """
     from urllib.parse import urlsplit
 
-    from shared.cluster import DATA_PLANE_IDENTITY, identity_from_url
+    from shared.cluster import DATA_PLANE_IDENTITY, identity_from_url, redis_password_from_env
     from shared.envfile import upsert_env
     from shared.url_secret import url_with_userinfo
 
@@ -156,14 +156,17 @@ def _ensure_redis_url_identity_step(ctx: ConvergeCtx) -> None:
             break
     if not raw or urlsplit(raw).username:
         return
-    secret = settings.data_plane.cluster_secret
-    if not secret:
+    runtime_password = redis_password_from_env() or settings.data_plane.cluster_secret
+    if not runtime_password:
         return  # no-secret test/unprovisioned homes: userinfo cannot be minted
     try:
         identity = identity_from_url(settings.data_plane.db_url)
     except ValueError:
         identity = DATA_PLANE_IDENTITY
-    upsert_env(env_path, {"AVA_REDIS_URL": url_with_userinfo(raw, identity, secret)})
+    upsert_env(
+        env_path,
+        {"AVA_REDIS_URL": url_with_userinfo(raw, identity, runtime_password)},
+    )
     print(f"  · backfilled AVA_REDIS_URL username {identity!r} (legacy URL carried none)")
 
 

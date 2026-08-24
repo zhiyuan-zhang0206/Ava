@@ -1,10 +1,16 @@
 """Unit tests for the bootstrap config allowlist (Plan B2)."""
 
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import pytest
 
 from shared import config
+from shared.envfile import upsert_env
+
+
+def _write_runner_password(home: Path) -> None:
+    upsert_env(home / ".env", {"AVA_RUNNER_DB_PASSWORD": "runner-password"})
 
 
 def test_bootstrap_values_use_env_aliases_and_skip_unset() -> None:
@@ -12,14 +18,17 @@ def test_bootstrap_values_use_env_aliases_and_skip_unset() -> None:
     # DB/Redis URLs are required (always set in test env) → present, keyed by alias.
     assert "AVA_DB_URL" in vals
     assert "AVA_REDIS_URL" in vals
-    # The served db URL is the settings value — except on a multi-host gateway,
-    # where loopback is rewritten to the reachable address for remote runners
-    # (the host's own machine_host file may set it even in tests).
+    # Every bootstrap projection is the runner identity; only the host may be
+    # rewritten for a remote runner.
     expected = str(config.settings.data_plane.db_url)
     reachable = config._self_machine_host()
     if not config.is_loopback_host(reachable):
         expected = config.url_with_host(expected, reachable)
-    assert vals["AVA_DB_URL"] == expected
+    served, owner = urlsplit(vals["AVA_DB_URL"]), urlsplit(expected)
+    assert served.username == "ava_runner"
+    assert served.hostname == owner.hostname
+    assert served.port == owner.port
+    assert served.path == owner.path
     # values are strings
     assert all(isinstance(v, str) for v in vals.values())
 
@@ -47,6 +56,7 @@ def test_bootstrap_serves_explicit_set_to_empty(
     from shared import runtime_config as rt
 
     monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)  # no .env overrides
+    _write_runner_password(tmp_path)
     monkeypatch.setattr(config.settings.agent, "skills_to_inject_into_system_prompt", [])
 
     vals = config.bootstrap_config_values()
@@ -59,6 +69,7 @@ def test_bootstrap_still_skips_none(monkeypatch: pytest.MonkeyPatch, tmp_path: P
     from shared import runtime_config as rt
 
     monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)
+    _write_runner_password(tmp_path)
     monkeypatch.setattr(config.settings.observability, "trace_tags", None)
 
     vals = config.bootstrap_config_values()
@@ -130,6 +141,7 @@ def test_bootstrap_serves_reachable_host_for_loopback_urls(
     from shared import runtime_config as rt
 
     monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)  # no .env overrides
+    _write_runner_password(tmp_path)
     monkeypatch.setattr(config, "_self_machine_host", lambda: "100.64.0.3")
 
     db = str(config.settings.data_plane.db_url)
@@ -154,10 +166,15 @@ def test_bootstrap_keeps_loopback_when_gateway_is_single_box(
     from shared import runtime_config as rt
 
     monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)
+    _write_runner_password(tmp_path)
     monkeypatch.setattr(config, "_self_machine_host", lambda: "localhost")
 
     vals = config.bootstrap_config_values()
-    assert vals["AVA_DB_URL"] == str(config.settings.data_plane.db_url)
+    served, owner = urlsplit(vals["AVA_DB_URL"]), urlsplit(config.settings.data_plane.db_url)
+    assert served.username == "ava_runner"
+    assert served.hostname == owner.hostname
+    assert served.port == owner.port
+    assert served.path == owner.path
 
 
 def test_bootstrap_keeps_existing_reachable_url_host(
@@ -168,6 +185,7 @@ def test_bootstrap_keeps_existing_reachable_url_host(
     from shared import runtime_config as rt
 
     monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)
+    _write_runner_password(tmp_path)
     monkeypatch.setattr(config, "_self_machine_host", lambda: "100.64.0.3")
     dp = config.settings.data_plane
     # parts-built, scanner-safe (same convention as tests/cli/test_converge.py)
@@ -175,4 +193,8 @@ def test_bootstrap_keeps_existing_reachable_url_host(
     monkeypatch.setattr(dp, "db_url", host_url)
 
     vals = config.bootstrap_config_values()
-    assert vals["AVA_DB_URL"] == host_url
+    served, owner = urlsplit(vals["AVA_DB_URL"]), urlsplit(host_url)
+    assert served.username == "ava_runner"
+    assert served.hostname == owner.hostname
+    assert served.port == owner.port
+    assert served.path == owner.path

@@ -281,12 +281,28 @@ def test_gateway_only_role_serve_flags_and_mints_secret(
     env = dotenv_values(home / ".env")
     assert env["AVA_MACHINE_SERVE_GATEWAY"] == "true"
     assert env["AVA_MACHINE_SERVE_AGENT_RUNNER"] == "false"
-    # a split gateway-only host mints a fresh secret — remote agent-runners
-    # depend on it (scram/requirepass + bearer), so a split deployment always
-    # has one
+    # A split gateway-only host mints a bearer plus three independent data-plane
+    # credentials. Runners receive only their least-privilege projections.
     assert env["AVA_CLUSTER_SECRET"]
-    assert env["AVA_CLUSTER_SECRET"] in (env["AVA_DB_URL"] or "")
-    assert env["AVA_CLUSTER_SECRET"] in (env["AVA_REDIS_URL"] or "")
+    db_url = env["AVA_DB_URL"]
+    redis_url = env["AVA_REDIS_URL"]
+    db_admin_password = env["AVA_DB_ADMIN_PASSWORD"]
+    redis_password = env["AVA_REDIS_PASSWORD"]
+    assert db_url is not None and db_admin_password is not None
+    assert redis_url is not None and redis_password is not None
+    assert db_admin_password in db_url
+    assert redis_password in redis_url
+    assert (
+        len(
+            {
+                env["AVA_CLUSTER_SECRET"],
+                env["AVA_DB_ADMIN_PASSWORD"],
+                env["AVA_REDIS_ADMIN_PASSWORD"],
+                env["AVA_REDIS_PASSWORD"],
+            }
+        )
+        == 4
+    )
 
 
 def test_single_machine_explicit_secret_turns_auth_on(
@@ -298,8 +314,16 @@ def test_single_machine_explicit_secret_turns_auth_on(
     assert _install(home, cluster_secret="stated-secret-123") == 0  # noqa: S106 — test fixture
     env = dotenv_values(home / ".env")
     assert env["AVA_CLUSTER_SECRET"] == "stated-secret-123"  # noqa: S105 — test fixture
-    assert "stated-secret-123" in (env["AVA_DB_URL"] or "")
-    assert "stated-secret-123" in (env["AVA_REDIS_URL"] or "")
+    db_url = env["AVA_DB_URL"]
+    redis_url = env["AVA_REDIS_URL"]
+    db_admin_password = env["AVA_DB_ADMIN_PASSWORD"]
+    redis_password = env["AVA_REDIS_PASSWORD"]
+    assert db_url is not None and db_admin_password is not None
+    assert redis_url is not None and redis_password is not None
+    assert db_admin_password in db_url
+    assert redis_password in redis_url
+    assert "stated-secret-123" not in db_url
+    assert "stated-secret-123" not in redis_url
 
 
 def test_single_machine_keeps_existing_secret(

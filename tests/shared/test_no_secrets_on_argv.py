@@ -409,7 +409,7 @@ def test_redis_bringup(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     # down on the first probe (so the full start path runs), up on the next
     probes = iter([False, True, True])
     monkeypatch.setattr(ci, "_redis_running", lambda *_a: next(probes))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    assert ci._start_redis(46999, _SECRET, "ava") == 0
+    assert ci._start_redis(46999, _SECRET, _SECRET, _SECRET, "ava") == 0
 
     for argv in calls:
         _assert_clean(argv, label="redis bring-up")
