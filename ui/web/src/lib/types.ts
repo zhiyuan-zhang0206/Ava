@@ -578,8 +578,8 @@ export type CommandItem = Schemas["CommandItem"];
 //
 // The raw endpoint types come from OpenAPI below. The console overlays only
 // its public lifecycle vocabulary and normalized edge-event vocabulary; every
-// other field (including liveness, nullable machine, and stale) stays pinned to
-// the generated wire contract.
+// other field (including liveness, nullable machine, data staleness, telemetry
+// health, and snapshot time) stays pinned to the generated wire contract.
 
 // Lineage ties (spawn / fork / resurrect) + the message tie. The backend emits
 // the raw event_log value `send_message`; normalizeGraph maps it to `message`

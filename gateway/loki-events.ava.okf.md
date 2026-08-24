@@ -23,7 +23,9 @@ structured metadata.
 ## Core responsibilities
 
 - **`query_events()`** — the row list: LogQL `{service_name="unknown_service"}`
-  selector → line filters → `| json` → `cluster=<this home>` plus other
+  selector → line filters → `| json` → `cluster=<this home> or cluster=""`
+  (the empty branch retains this single-cluster Loki's pre-labeling history)
+  plus other
   structured-metadata filters →
   `query_range` (backward, newest-first). Every matching line parses back to
   the `EventRow` shape; row `id` is a stable blake2b surrogate over

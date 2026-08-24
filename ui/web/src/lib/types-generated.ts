@@ -2995,6 +2995,9 @@ export interface paths {
          * Get System Status
          * @description System status panel — pull services / shells / cluster in one shot.
          *
+         *     Probe wall time follows the slowest machine, while multiple frontend pollers
+         *     request this roster. Fifteen-second staleness is acceptable for diagnostics;
+         *     single-flight prevents expiry stampedes.
          *     Each block queries independently — a single failure does not affect
          *     the others (each has its own try/except that falls back to a
          *     degraded value).
@@ -4727,11 +4730,11 @@ export interface components {
          * FleetGraphResponse
          * @description GET /api/fleet/graph response.
          *
-         *     `stale` is the degraded-signal flag (R4 layer 2, audit gateway.md
-         *     P2-10): the graph query is canceled (statement timeout under load) the
-         *     response is an EMPTY graph with `stale=True` — the frontend must render
-         *     "data temporarily unavailable" instead of an empty fleet, because an
-         *     empty graph and a failed graph are not the same state.
+         *     `stale` identifies data-level degradation: a fallback snapshot, truncated
+         *     edge stream, or failed source response. `telemetry_stale` separately says
+         *     the heartbeat guard was old or missing while this otherwise fresh graph was
+         *     read. `snapshot_at` records when a successful graph snapshot was produced;
+         *     a fallback retains that timestamp so clients can show its age.
          */
         FleetGraphResponse: {
             /** Nodes */
@@ -4748,6 +4751,13 @@ export interface components {
              * @default false
              */
             truncated: boolean;
+            /**
+             * Telemetry Stale
+             * @default false
+             */
+            telemetry_stale: boolean;
+            /** Snapshot At */
+            snapshot_at?: string | null;
         };
         /** GuideDraftRequest */
         GuideDraftRequest: {

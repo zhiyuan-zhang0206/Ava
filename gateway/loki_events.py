@@ -295,6 +295,10 @@ def _build_logql(
     """LogQL for the event-history slice. Line filters (`|=`) come before
     the `| json` stage; json-parsed label filters after it.
 
+    A cluster filter accepts both the requested cluster and a missing cluster
+    field. Unlabeled rows predate cluster labeling and therefore belong to the
+    single-cluster deployment's local history; labeled rows remain isolated.
+
     ``attribute_filters`` matches on **nested payload keys** (the event
     `attributes` object), e.g. `{"ok": "true"}`. Each key needs its own
     `| json k="attributes.k"` stage (multiple extractions in one stage are a
@@ -323,7 +327,7 @@ def _build_logql(
         parts.append(f'|= "{_escape_label(grep)}"')
     parts.append("| json")
     if cluster is not None:
-        parts.append(f'| cluster="{_escape_label(cluster)}"')
+        parts.append(f'| cluster="{_escape_label(cluster)}" or cluster=""')
     if drop_json_errors:
         parts.append('| __error__=""')
     if attribute_filters:
@@ -596,6 +600,9 @@ def _agg_pipeline(
     batch. A plain `| json` stage would flatten nested `attributes` into
     per-line labels and split the aggregation into per-line series, so every
     extracted field gets its own stage.
+
+    A cluster filter accepts both the requested cluster and unlabeled rows,
+    which are this deployment's pre-labeling local history.
     """
     parts = [
         event_stream_selector(
@@ -609,7 +616,7 @@ def _agg_pipeline(
     if grep:
         parts.append(f'|= "{_escape_label(grep)}"')
     if cluster is not None:
-        parts.append(f'| cluster="{_escape_label(cluster)}"')
+        parts.append(f'| cluster="{_escape_label(cluster)}" or cluster=""')
     if agent_id is not None:
         parts.append('| json agent_id_extracted="agent_id"')
         parts.append(f'| agent_id_extracted="{agent_id}"')

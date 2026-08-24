@@ -26,3 +26,5 @@ makes alternating polls Redis hits, limiting expensive source reads to once per
 minute; SSE invalidation still carries lifecycle changes promptly. Message-edge
 opacity now scales across each graph's own weight range rather than raw weight
 values.
+
+> Superseded in part by [Fleet graph freshness semantics](../2026-08-24/fleet-graph-freshness-semantics.md): a heartbeat-stale but successful graph remains cacheable and reports telemetry health separately from data freshness.

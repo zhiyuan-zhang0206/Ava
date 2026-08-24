@@ -93,13 +93,29 @@ function richGraph(): FleetGraph {
       edge(1, id, "message", { weight: 5, last_seen_at: seen }),
     ),
   ];
-  return { nodes, edges, stale: false, truncated: false };
+  return {
+    nodes,
+    edges,
+    stale: false,
+    truncated: false,
+    telemetry_stale: false,
+    snapshot_at: null,
+  };
 }
 
 function ok(
-  graph: Omit<FleetGraph, "stale" | "truncated"> & { stale?: boolean; truncated?: boolean },
+  graph: Omit<FleetGraph, "stale" | "truncated" | "telemetry_stale" | "snapshot_at"> & {
+    stale?: boolean;
+    truncated?: boolean;
+    telemetry_stale?: boolean;
+    snapshot_at?: string | null;
+  },
 ): FleetGraphResult {
-  return { graph: { stale: false, truncated: false, ...graph }, loading: false, error: false };
+  return {
+    graph: { stale: false, truncated: false, telemetry_stale: false, snapshot_at: null, ...graph },
+    loading: false,
+    error: false,
+  };
 }
 
 beforeEach(() => {
@@ -306,12 +322,20 @@ describe("GraphView", () => {
     expect(container.querySelector("title")?.textContent).toContain("Offline");
   });
 
-  it("flags a non-empty graph served as stale", () => {
-    useFleetGraph.mockReturnValue(ok({ nodes: [node(1)], edges: [], stale: true }));
+  it("shows the stale snapshot age for a non-empty fallback graph", () => {
+    const snapshotAt = new Date(Date.now() - 12 * 60 * 1000).toISOString();
+    useFleetGraph.mockReturnValue(
+      ok({
+        nodes: [node(1)],
+        edges: [],
+        stale: true,
+        snapshot_at: snapshotAt,
+      }),
+    );
 
     renderGraph(<GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />);
 
-    expect(screen.getByRole("status").textContent).toBe("Stale — last known graph");
+    expect(screen.getByRole("status").textContent).toBe("Stale — snapshot from 12m ago");
   });
 
   it("does not flag a fresh graph as stale", () => {
@@ -320,6 +344,18 @@ describe("GraphView", () => {
     renderGraph(<GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />);
 
     expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("shows a telemetry warning without labeling a fresh graph stale", () => {
+    useFleetGraph.mockReturnValue(
+      ok({ nodes: [node(1)], edges: [], telemetry_stale: true }),
+    );
+
+    renderGraph(<GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />);
+
+    expect(screen.getByRole("status").textContent).toBe(
+      "Telemetry degraded — updates may lag",
+    );
   });
 
   it("marks a fresh graph whose Loki edge response was truncated", () => {
@@ -364,7 +400,18 @@ describe("GraphView", () => {
   });
 
   it("empty graph (not loading, no error) shows the empty placeholder", () => {
-    useFleetGraph.mockReturnValue({ graph: { nodes: [], edges: [], stale: false, truncated: false }, loading: false, error: false });
+    useFleetGraph.mockReturnValue({
+      graph: {
+        nodes: [],
+        edges: [],
+        stale: false,
+        truncated: false,
+        telemetry_stale: false,
+        snapshot_at: null,
+      },
+      loading: false,
+      error: false,
+    });
 
     renderGraph(<GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />);
 
@@ -373,7 +420,18 @@ describe("GraphView", () => {
   });
 
   it("empty graph while loading shows the loading placeholder", () => {
-    useFleetGraph.mockReturnValue({ graph: { nodes: [], edges: [], stale: false, truncated: false }, loading: true, error: false });
+    useFleetGraph.mockReturnValue({
+      graph: {
+        nodes: [],
+        edges: [],
+        stale: false,
+        truncated: false,
+        telemetry_stale: false,
+        snapshot_at: null,
+      },
+      loading: true,
+      error: false,
+    });
 
     renderGraph(<GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />);
 
@@ -381,7 +439,18 @@ describe("GraphView", () => {
   });
 
   it("error (endpoint absent / gateway down) shows the unavailable placeholder", () => {
-    useFleetGraph.mockReturnValue({ graph: { nodes: [], edges: [], stale: false, truncated: false }, loading: false, error: true });
+    useFleetGraph.mockReturnValue({
+      graph: {
+        nodes: [],
+        edges: [],
+        stale: false,
+        truncated: false,
+        telemetry_stale: false,
+        snapshot_at: null,
+      },
+      loading: false,
+      error: true,
+    });
 
     renderGraph(<GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />);
 

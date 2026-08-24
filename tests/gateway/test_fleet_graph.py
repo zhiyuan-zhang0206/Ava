@@ -193,6 +193,31 @@ def test_loki_edge_tail_is_scoped_to_this_cluster(monkeypatch: pytest.MonkeyPatc
     assert calls[0]["cluster"] == home_label(ava_home())
 
 
+def test_loki_edge_tail_keeps_unlabeled_history_and_excludes_other_cluster(
+    db_conn: psycopg.Connection, fake_loki: FakeLoki
+) -> None:
+    """A pre-labeling edge is local history; a labeled foreign edge is not."""
+    source = _seed_agent(db_conn)
+    target = _seed_agent(db_conn)
+    _archive_boundary_anchor(db_conn)
+    _event_loki(fake_loki, source_agent=source, target_agent=target, event_type="spawn")
+    _event_loki(fake_loki, source_agent=source, target_agent=target, event_type="spawn")
+    fake_loki.rows[-1]["cluster"] = "other-cluster"
+
+    with TestClient(app) as client:
+        response = client.get("/api/fleet/graph")
+
+    assert response.status_code == 200
+    edges = response.json()["edges"]
+    assert len(edges) == 1
+    assert edges[0]["from_agent"] == target
+    assert edges[0]["to_agent"] == source
+    assert edges[0]["event_type"] == "spawn"
+    assert edges[0]["weight"] == 2.0
+    assert edges[0]["event_count"] == 1
+    assert edges[0]["last_seen_at"]
+
+
 def _nodes_by_id(client: TestClient, query: str = "") -> dict[int, dict]:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
     resp = client.get(f"/api/fleet/graph{query}")
     assert resp.status_code == 200, resp.text
@@ -709,7 +734,14 @@ def test_query_canceled_degrades_to_empty_graph(
         resp = client.get("/api/fleet/graph")
 
     assert resp.status_code == 200
-    assert resp.json() == {"nodes": [], "edges": [], "stale": True, "truncated": False}
+    assert resp.json() == {
+        "nodes": [],
+        "edges": [],
+        "stale": True,
+        "truncated": False,
+        "telemetry_stale": False,
+        "snapshot_at": None,
+    }
 
 
 # ── audit gateway.md P2-10: failed != empty (R4 layer 2) ───────────────

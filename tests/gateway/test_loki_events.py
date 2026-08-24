@@ -631,7 +631,15 @@ class TestBuildLogql:
     def test_cluster_filter_follows_json_stage(self) -> None:
         q = loki_events._build_logql(cluster=".ava-preview")
         assert q == (
-            '{service_name="unknown_service", stream!="archive"} | json | cluster=".ava-preview"'
+            '{service_name="unknown_service", stream!="archive"} | json | cluster=".ava-preview" or cluster=""'
+        )
+
+    def test_cluster_filter_keeps_unlabeled_history_in_aggregation_pipeline(self) -> None:
+        q = loki_events._agg_pipeline(cluster=".ava-preview")
+
+        assert (
+            q
+            == '{service_name="unknown_service", stream!="archive"} | cluster=".ava-preview" or cluster=""'
         )
 
     def test_indexed_selector_narrows_before_pipeline_filters(self) -> None:
@@ -1001,7 +1009,7 @@ class TestQueryEvents:
         assert '| event_name_extracted=~"spawn|terminate"' in q
         assert '| level=~"warning|error|critical"' in q
         assert '|= "boom"' in q
-        assert '| cluster=".ava-preview"' in q
+        assert '| cluster=".ava-preview" or cluster=""' in q
         assert '| machine="machine-1"' in q
         assert '| trace_id="abc"' in q
 
@@ -1238,7 +1246,7 @@ class TestAttributeFilters:
         assert n == 7
         q = client.calls[0][1]["query"]
         assert '| json ok="attributes.ok" | ok="true"' in q
-        assert '| cluster=".ava-preview"' in q
+        assert '| cluster=".ava-preview" or cluster=""' in q
         assert '| event_name_extracted=~"turn_end"' in q
 
 
@@ -1338,7 +1346,7 @@ class TestAttributeAggregate:
         q = self._q(client)
         assert q.startswith("sum(sum_over_time((")
         assert 'agent_id_extracted="3"' in q
-        assert 'cluster=".ava-preview"' in q
+        assert 'cluster=".ava-preview" or cluster=""' in q
         assert 'event_name_extracted=~"turn_end"' in q
         assert '| json duration_seconds="attributes.duration_seconds"' in q
         assert "| unwrap duration_seconds" in q
@@ -1632,7 +1640,7 @@ class TestCountEventsSeries:
         q = params["query"]
         assert q.startswith("sum by (kind) (count_over_time((")
         assert '| event_name_extracted=~"sse_drop"' in q
-        assert '| cluster=".ava-preview"' in q
+        assert '| cluster=".ava-preview" or cluster=""' in q
         assert '| json kind="attributes.kind"' in q
         assert q.endswith(")[300s]))")
         assert params["step"] == "300s"
