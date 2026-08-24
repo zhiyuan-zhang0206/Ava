@@ -409,12 +409,18 @@ class PtySessionBackend(SessionBackend):
         """Launch epochs for MANY sessions in one record scan — no subprocess
         (the per-session CLI path costs one python startup each, and a status
         snapshot queries every session serially: ~0.58s per CLI invocation on
-        a WSL runner, measured 2026-08-12, task #1200)."""
+        a WSL runner, measured 2026-08-12, task #1200).
+
+        Falls back to individual record reads when the directory scan fails
+        with an I/O error, preserving the pre-batch behavior."""
         if not names:
             return {}
         from shared.pty_sessions.cli import live_sessions
 
-        live = live_sessions()
+        try:
+            live = live_sessions()
+        except OSError:
+            return super().session_started_ats(names)
         return {name: (live[name].started_at if name in live else None) for name in names}
 
     def session_log_path(self, name: str) -> Path | None:
