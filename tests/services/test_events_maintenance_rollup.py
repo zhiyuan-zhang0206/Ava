@@ -181,6 +181,47 @@ def test_rolls_retained_days_up_to_yesterday(
     assert metrics[(aid, "2026-06-08")] == (3, 2, 6.0, 1.0, 3.0, 4, 1)
 
 
+def test_unknown_agent_rows_are_skipped_without_aborting_rollup(
+    db: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    aid = _agent(db)
+    unknown_aid = 424242
+    fake = _FakeLokiDays(
+        {
+            date(2026, 6, 8): (
+                [_tokens_row(aid)],
+                [_metrics_row(aid), _metrics_row(unknown_aid)],
+            ),
+            date(2026, 6, 9): (
+                [_tokens_row(aid), _tokens_row(unknown_aid)],
+                [_metrics_row(aid)],
+            ),
+        }
+    )
+    warnings: list[str] = []
+
+    def _fake_warning(message: object, *args: object, **kwargs: object) -> None:
+        warnings.append(str(message))
+
+    monkeypatch.setattr(rollup.logger, "warning", _fake_warning)
+
+    result = _roll(db, fake, monkeypatch)
+
+    assert result == RollupResult(_FLOOR, date(2026, 6, 9), 2, 2)
+    assert set(_fetch_tokens(db)) == {
+        (aid, "2026-06-08", "m1"),
+        (aid, "2026-06-09", "m1"),
+    }
+    assert set(_fetch_metrics(db)) == {
+        (aid, "2026-06-08"),
+        (aid, "2026-06-09"),
+    }
+    assert len(warnings) == 1
+    assert "424242" in warnings[0]
+    assert "tokens rows dropped: 1" in warnings[0]
+    assert "metrics rows dropped: 1" in warnings[0]
+
+
 def test_no_data_is_noop_rows(db: psycopg.Connection, monkeypatch: pytest.MonkeyPatch) -> None:
     result = _roll(db, _FakeLokiDays({}), monkeypatch)
     assert result.tokens_rows == 0 and result.metrics_rows == 0
