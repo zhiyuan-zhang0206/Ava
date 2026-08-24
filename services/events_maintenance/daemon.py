@@ -70,6 +70,7 @@ from services.events_maintenance.checkpoint_reaper import (
 )
 from services.events_maintenance.partitions import ensure_month_partitions
 from services.events_maintenance.reindex import run_governance_pass
+from services.events_maintenance.resolution import run_resolution_slice
 from services.events_maintenance.retention import apply_retention
 from services.events_maintenance.rollup import compute_rollup
 from services.events_maintenance.table_retention import apply_table_retention
@@ -214,6 +215,12 @@ def _run_checkpoint_trim(pool: ConnectionPool) -> None:
         )
 
 
+def _run_resolution(pool: ConnectionPool) -> None:
+    """Run the resolution slice while discarding its test-facing summary."""
+
+    run_resolution_slice(pool)
+
+
 def _write_pidfile() -> None:
     if not acquire_pidfile(_PIDFILE, "services.events_maintenance.daemon"):
         _log.info("[events_maintenance] daemon already running (pidfile=%s), exiting", _PIDFILE)
@@ -328,6 +335,38 @@ async def _checkpoint_trim_loop(pool: ConnectionPool, liveness: Liveness) -> Non
         await _sleep_with_liveness(liveness, _CHECKPOINT_TRIM_INTERVAL_S)
 
 
+async def _resolution_loop(pool: ConnectionPool, liveness: Liveness) -> None:
+    """Refresh immutable-event class-resolution gauges on their own cadence.
+
+    The six-hour Loki read and safety-valve write are unrelated to the frozen
+    archive's hourly rollup and must run while archive maintenance is disabled.
+    As with the checkpoint loops, a transient backend outage waits one full
+    configured interval; schema drift exits for watchdog recovery.
+    """
+
+    interval = settings.daemon.events_resolution_interval_seconds
+    _log.info(
+        "[events-maintenance] resolution loop started, pid=%s, interval=%ds",
+        os.getpid(),
+        interval,
+    )
+    while True:
+        try:
+            await _maintenance_with_liveness(pool, liveness, run=_run_resolution)
+        except asyncio.CancelledError:
+            raise
+        except psycopg.ProgrammingError:
+            _log.critical(
+                "[events-maintenance] resolution schema / syntax error — "
+                "code<->DB drift; retry will not self-heal, restart after fix",
+                exc_info=True,
+            )
+            raise
+        except Exception:
+            _log.exception("[events-maintenance] resolution iteration failed")
+        await _sleep_with_liveness(liveness, interval)
+
+
 async def run() -> None:
     """Start the daemon: healthz server -> write pidfile -> connect DB -> enter main loop."""
     if _is_running():
@@ -350,6 +389,7 @@ async def run() -> None:
         await asyncio.gather(
             _dispatch_loop(pool, liveness),
             _checkpoint_trim_loop(pool, liveness),
+            _resolution_loop(pool, liveness),
         )
     finally:
         pool.close()

@@ -98,7 +98,9 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     from shared.telemetry import _TELEMETRY_KINDS
 
     assert telemetry_events() == frozenset(_TELEMETRY_KINDS)
-    assert len(_TELEMETRY_KINDS) == 107
+    # Main's exec_envelope raised this to 107; the resolution change moves two
+    # legacy markers to telemetry and adds three new resolution events.
+    assert len(_TELEMETRY_KINDS) == 112
 
 
 def test_category_for_kind() -> None:
@@ -205,14 +207,34 @@ def test_registry_covers_all_whitelisted_historical_names() -> None:
         assert EVENTS[name].category == "telemetry"
 
 
-def test_resolved_marker_events_are_log_category() -> None:
-    """warning_resolved / error_resolved are ops-panel markers: log-category,
-    events-table destination, so the unresolved-views can filter them out
-    (user ruling 2026-08-09)."""
-    for name in ("warning_resolved", "error_resolved"):
+def test_class_resolution_markers_are_telemetry_category() -> None:
+    """Class-resolution transitions are telemetry so their state can be observed.
+
+    The resolved pair still declares the legacy target-event keys, while the
+    new class keys make Loki's immutable-state transition explicit.
+    """
+    for name in ("warning_resolved", "error_resolved", "warning_reopened", "error_reopened"):
         spec = EVENTS[name]
-        assert spec.category == "log"
+        assert spec.category == "telemetry"
         assert spec.destination == "events"
+
+    assert payload_keys("warning_resolved") == (
+        "target_event_id",
+        "match",
+        "resolved_by",
+        "category",
+        "level",
+        "event_name",
+        "source",
+        "agent_id",
+        "dismissed_by",
+        "note",
+    )
+    assert payload_keys("resolution_status") == (
+        "unresolved_warnings",
+        "unresolved_errors",
+        "window",
+    )
 
 
 def test_computer_session_events_registered_as_audit() -> None:

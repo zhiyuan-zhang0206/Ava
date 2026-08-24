@@ -131,13 +131,14 @@ class MetricSpec(BaseModel):
     panel: PanelType = "timeseries"
     query: str = Field(min_length=1)
     # Query dialect: "sql" (postgres datasource over the legacy `events`
-    # table), "logql" (loki event stream), or "promql" (Prometheus).
+    # table), "logql" (Loki event stream, #1280), or static "promql"
+    # (Prometheus gauges/counters; Grafana-only).
     query_type: Literal["sql", "logql", "promql"] = "sql"
     # Additional query targets (refIds B/C/...) for multi-series panels —
     # each target is validated and rendered exactly like `query`.
     targets: list[str] | None = None
     # Legend names for the rendered targets (refIds A, B, ...), one per
-    # series. LogQL and PromQL aggregates carry no labels, so Grafana targets
+    # series. LogQL/PromQL aggregates carry no labels, so Grafana targets
     # render these as legendFormat values; SQL targets are named by their
     # column aliases and must not combine with target_names.
     target_names: list[str] | None = None
@@ -174,10 +175,10 @@ class MetricSpec(BaseModel):
     def _target_names_consistent(self) -> MetricSpec:
         if self.target_names is None:
             return self
-        if self.query_type == "sql":
+        if self.query_type not in ("logql", "promql"):
             raise ValueError(
-                "target_names requires query_type='logql' or 'promql' (SQL "
-                "targets are named by their column aliases)"
+                "target_names requires query_type='logql' or 'promql' (SQL targets are "
+                "named by their column aliases)"
             )
         expected = 1 + len(self.targets or [])
         if len(self.target_names) != expected:
@@ -185,6 +186,14 @@ class MetricSpec(BaseModel):
                 f"target_names must name every rendered target ({expected} names, "
                 f"got {len(self.target_names)})"
             )
+        return self
+
+    @model_validator(mode="after")
+    def _promql_is_grafana_only(self) -> MetricSpec:
+        """PromQL core tiles have no gateway inspector execution path yet."""
+
+        if self.query_type == "promql" and self.output != ["grafana"]:
+            raise ValueError("query_type='promql' is currently supported only for grafana output")
         return self
 
 
@@ -760,17 +769,27 @@ def validate_spec_sql(spec: MetricSpec) -> None:
         return
     if spec.query_type == "promql":
         for template in [spec.query, *(spec.targets or [])]:
-            if any(
-                placeholder in template
-                for placeholder in ("{event_name}", "{category}", "{{agent_id}}")
-            ):
-                raise InvalidMetricQuery(
-                    "PromQL metric queries cannot use event-stream template placeholders: "
-                    f"{template!r}"
-                )
+            _validate_promql(template)
         return
     for template in [spec.query, *(spec.targets or [])]:
         validate_metric_sql(template)
+
+
+def _validate_promql(template: str) -> None:
+    """Keep Grafana-only PromQL static and single-expression.
+
+    Prometheus is the evaluator; metric registrations only need to prevent a
+    dashboard template from accidentally inheriting SQL/LogQL placeholders or
+    carrying a multi-statement string. The current use is absolute OTLP gauges.
+    """
+
+    if ";" in template or "\n" in template:
+        raise InvalidMetricQuery("PromQL metric must be one expression without semicolons/newlines")
+    if any(
+        token in template
+        for token in ("{event_name}", "{category}", "{category_re}", "{{agent_id}}")
+    ):
+        raise InvalidMetricQuery("PromQL metric must not contain metric-template placeholders")
 
 
 def registered_metrics() -> list[MetricSpec]:

@@ -277,6 +277,40 @@ def test_metrics_resource_carries_cluster(monkeypatch: pytest.MonkeyPatch) -> No
     assert resource.attributes["cluster"] == ".ava-preview"
 
 
+def test_resolution_status_uses_latest_value_gauges(otlp_backend) -> None:
+    """Absolute unresolved counts are gauges, not counters adding every pass."""
+
+    backend, _, metric_reader = otlp_backend
+    backend.export_batch(  # pyright: ignore[reportUnknownMemberType]
+        [
+            _event(
+                event_name="resolution_status",
+                attributes={
+                    "unresolved_warnings": 9,
+                    "unresolved_errors": 4,
+                    "window": "6h",
+                },
+            ),
+            _event(
+                event_name="resolution_status",
+                attributes={
+                    "unresolved_warnings": 2,
+                    "unresolved_errors": 1,
+                    "window": "6h",
+                },
+            ),
+        ]
+    )
+    backend.flush()  # pyright: ignore[reportUnknownMemberType]
+
+    metrics = _metrics(metric_reader)
+    warning = metrics["ava_resolution_status_unresolved_warnings"]
+    error = metrics["ava_resolution_status_unresolved_errors"]
+    assert warning.data.data_points[0].value == 2.0
+    assert error.data.data_points[0].value == 1.0
+    assert _attrs_of(warning.data.data_points[0])["window"] == "6h"
+
+
 def test_metric_disposition_cost_counter_price_excluded(otlp_backend) -> None:
     """The per-field disposition overrides: cost_usd (a float that is a SUM)
     records as a float Counter; the price_* rate snapshot mints no metric at

@@ -102,8 +102,10 @@ def test_collect_core_metrics_includes_statistics_coverage() -> None:
     avg_turn = by_name["core_avg_turn_duration_24h"].query
     assert avg_turn.count('attributes_ok="true"') == 2
     assert "sum(count_over_time(" in avg_turn
-    for name in ("core_unresolved_warning", "core_unresolved_error"):
-        assert 'category=~"telemetry|log"' in by_name[name].query
+    assert by_name["core_unresolved_warning"].query_type == "promql"
+    assert by_name["core_unresolved_warning"].query == "ava_resolution_status_unresolved_warnings"
+    assert by_name["core_unresolved_error"].query_type == "promql"
+    assert by_name["core_unresolved_error"].query == "ava_resolution_status_unresolved_errors"
 
 
 # ── LogQL dialect (task #1280) ────────────────────────────────────────────────
@@ -165,18 +167,18 @@ def test_register_core_metric_validates_logql() -> None:
     assert spec.query_type == "logql"
 
 
-def test_unresolved_events_allow_the_fixed_category_union() -> None:
-    """Resolution records span telemetry and log, regardless of spec metadata."""
-    spec = core_metrics.register_core_metric(
-        _logql_spec(
-            name="core_unresolved_events",
-            query=(
-                'sum(count_over_time({service_name="unknown_service"} | json | '
-                'category=~"telemetry|log" | level="warning" [$__range]))'
-            ),
+def test_logql_rejects_an_untemplated_cross_category_filter() -> None:
+    """Class resolution uses Prometheus gauges, not a raw union query."""
+    with pytest.raises(InvalidMetricQuery, match="placeholders"):
+        core_metrics.register_core_metric(
+            _logql_spec(
+                name="core_unresolved_events",
+                query=(
+                    'sum(count_over_time({service_name="unknown_service"} | json | '
+                    'category=~"telemetry|log" | level="warning" [$__range]))'
+                ),
+            )
         )
-    )
-    assert spec.name == "core_unresolved_events"
 
 
 def test_render_logql_quotes_and_agent_placeholder() -> None:

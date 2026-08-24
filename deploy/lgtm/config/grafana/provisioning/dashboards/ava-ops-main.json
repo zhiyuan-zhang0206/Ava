@@ -202,8 +202,8 @@
   },
   {
    "datasource": {
-    "type": "loki",
-    "uid": "loki"
+    "type": "prometheus",
+    "uid": "prometheus"
    },
    "fieldConfig": {
     "defaults": {
@@ -244,26 +244,27 @@
     },
     "textMode": "auto"
    },
-   "title": "Warning (all)",
+   "title": "Unresolved Warning",
    "type": "stat",
    "targets": [
     {
      "datasource": {
-      "type": "loki",
-      "uid": "loki"
+      "type": "prometheus",
+      "uid": "prometheus"
      },
      "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=~\"telemetry|log\" | level=\"warning\" [$__range]))",
+     "expr": "ava_resolution_status_unresolved_warnings",
+     "instant": true,
+     "range": false,
      "refId": "A",
-     "queryType": "instant",
-     "legendFormat": "warning_all"
+     "legendFormat": "unresolved_warning"
     }
    ]
   },
   {
    "datasource": {
-    "type": "loki",
-    "uid": "loki"
+    "type": "prometheus",
+    "uid": "prometheus"
    },
    "fieldConfig": {
     "defaults": {
@@ -305,19 +306,20 @@
     "textMode": "auto",
     "noValue": "0"
    },
-   "title": "Error (all)",
+   "title": "Unresolved Error",
    "type": "stat",
    "targets": [
     {
      "datasource": {
-      "type": "loki",
-      "uid": "loki"
+      "type": "prometheus",
+      "uid": "prometheus"
      },
      "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\"} | json | category=~\"telemetry|log\" | level=~\"error|critical\" [$__range]))",
+     "expr": "ava_resolution_status_unresolved_errors",
+     "instant": true,
+     "range": false,
      "refId": "A",
-     "queryType": "instant",
-     "legendFormat": "error_all"
+     "legendFormat": "unresolved_error"
     }
    ]
   },

@@ -120,6 +120,9 @@ from gateway.routers import (
     default_model as default_model_router,
 )
 from gateway.routers import (
+    event_resolutions as event_resolutions_router,
+)
+from gateway.routers import (
     events as events_router,
 )
 from gateway.routers import (
@@ -724,6 +727,7 @@ app.include_router(skills_router.router)
 app.include_router(packages_router.router)
 app.include_router(metrics_router.router)
 app.include_router(events_router.router)
+app.include_router(event_resolutions_router.router)
 app.include_router(ops_monitor_router.router)
 app.include_router(alerts_router.router)
 app.include_router(status_router.router)

@@ -1,11 +1,11 @@
 ---
 type: doc
-title: Events Maintenance — cost-ledger rollup + archive maintenance
-description: Gateway-owned maintenance daemon — hourly Loki→PG day-grain rollup (the durable token+cost ledger), unconditional checkpoint reaper / blob vacuum, and the flag-gated PG events-archive slices (partition rolling, retention, index governance). The ops_metrics pre-aggregation was retired with the ops-monitor LGTM migration (task #1197).
+title: Events Maintenance — cost-ledger rollup + class resolution
+description: Gateway-owned maintenance daemon — hourly Loki→PG day-grain rollup (the durable token+cost ledger), fixed-window immutable-Loki warning/error class resolution gauges, unconditional checkpoint reaper / blob vacuum, and the flag-gated PG events-archive slices (partition rolling, retention, index governance). The ops_metrics pre-aggregation was retired with the ops-monitor LGTM migration (task #1197).
 tags: []
 ---
 
-# Events Maintenance — cost-ledger rollup + archive maintenance
+# Events Maintenance — cost-ledger rollup + class resolution
 
 ## What it is
 Gateway-owned background daemon (`services/events_maintenance/daemon.py`). Since the LGTM cutover (#1197) the live event stream lives in **Loki** (168h retention) and the PG `events` table is a frozen read-only archive; this daemon's steady-state job is to make the short-lived Loki stream durable: every `AVA_EVENTS_MAINTENANCE_INTERVAL_SECONDS` (default 1h) it aggregates whole UTC days from Loki into the two day-grain rollup tables — `agent_metrics_daily` and `agent_model_tokens_daily`, the cluster's **durable token + cost ledger** — so whole-life statistics survive Loki's retention horizon. It also hosts the checkpoint reaper (Rule A fast loop + Rule B hourly) and the blob vacuum.
@@ -17,6 +17,7 @@ Gateway-owned background daemon (`services/events_maintenance/daemon.py`). Since
 - **Retention-floor clamp**: a day is recomputable only while its 00:00 start is inside Loki's 168h retention; older days are never overwritten (this protects the one-time pre-LGTM archive backfill written by the `llm-cost-rollup-columns` migration — the frozen archive's last-ever code reader). A progress gap exceeding retention is logged loudly: those days are not aggregatable and stay missing (the JSONL mirror is the manual recovery source).
 - **Readers**: window requests (≤ `StatsWindowHours` = 168h) are pure Loki; whole-life = ledger + Loki tail from the watermark (midnight after the newest rolled day) — `gateway/routers/_agent_cost.py`.
 - **Archive slices (flag-gated)** — for clusters that still maintain the PG archive: monthly partition roll (`services/events_maintenance/partitions.py:ensure_month_partitions` — current+next month, drains months stranded in DEFAULT; idempotent carve), category-aware retention (`services/events_maintenance/retention.py:apply_retention` — drops a month partition once every category outlived its retention, prunes expired categories from live ones; audit 365d / telemetry 90d / log 30d via `AVA_EVENTS_RETENTION_{AUDIT,TELEMETRY,LOG}_DAYS`), table retention, index-bloat governance (REINDEX CONCURRENTLY on its own direct autocommit connection). Each step runs on a separate pool connection so partition DDL commits before the potentially long rollup.
+- **Class resolution** (every `AVA_EVENTS_RESOLUTION_INTERVAL_SECONDS`, default 5m) — queries one grouped fixed-six-hour Loki window, subtracts active rows in `event_dismissals`, and emits the absolute `ava_resolution_status_unresolved_warnings` / `ava_resolution_status_unresolved_errors` Prometheus gauges. Loki lines remain immutable: resolution never mutates a historical event. A second ten-minute grouped read reopens an active class when its count exceeds `AVA_EVENTS_RESOLUTION_BURST_THRESHOLD` (default 5), recording the burst and emitting the reopen marker. Manual authenticated gateway API marking is primary; `AVA_EVENTS_AUTO_DISMISS_ENABLED` is an off-by-default daily stable-class scan.
 - **Liveness heartbeat**: the maintenance pass runs in a thread; the main loop beats liveness every 30s so the watchdog never falsely declares a hang during a long pass.
 
 ## Key dependencies
@@ -26,6 +27,7 @@ Gateway-owned background daemon (`services/events_maintenance/daemon.py`). Since
 ## Entry points
 - `services/events_maintenance/daemon.py` — `.venv/bin/python -m services.events_maintenance.daemon`
 - `services/events_maintenance/rollup.py:compute_rollup` — aggregation core (steady-state; the migration backfill was one-shot SQL)
+- `services/events_maintenance/resolution.py:run_resolution_slice` — immutable Loki class resolution, marker transitions, and unresolved gauges
 - `services/events_maintenance/partitions.py:ensure_month_partitions` — monthly partition roll (gated)
 - Watchdog keeps alive via `services/healthchecks/events_maintenance.py`
 

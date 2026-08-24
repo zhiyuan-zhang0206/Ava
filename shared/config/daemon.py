@@ -410,6 +410,61 @@ class DaemonSettings(EnvSettings):
         },
     )
 
+    events_resolution_burst_threshold: int = Field(
+        default=5,
+        ge=0,
+        alias="AVA_EVENTS_RESOLUTION_BURST_THRESHOLD",
+        description="A dismissed Loki event class reopens when its trailing ten-minute count is greater than this threshold. 0 reopens on the first matching event; the default 5 leaves normal low-volume recurrence dismissed.",
+        json_schema_extra={
+            "capability": "gateway",
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    events_resolution_interval_seconds: int = Field(
+        default=300,
+        ge=1,
+        alias="AVA_EVENTS_RESOLUTION_INTERVAL_SECONDS",
+        description="Cadence in seconds for the immutable-event class-resolution slice: Loki count queries, burst reopen safety valve, and the six-hour unresolved gauges.",
+        json_schema_extra={
+            "capability": "gateway",
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    events_auto_dismiss_enabled: bool = Field(
+        default=False,
+        alias="AVA_EVENTS_AUTO_DISMISS_ENABLED",
+        description="Enable the daily stable-class auto-dismiss scan. Off by default: the normal resolution flow is an explicit authenticated API call by the ops agent or operator.",
+        json_schema_extra={
+            "capability": "gateway",
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    events_auto_dismiss_days: int = Field(
+        default=7,
+        ge=1,
+        alias="AVA_EVENTS_AUTO_DISMISS_DAYS",
+        description="Days of consecutive non-empty six-hour Loki slices required before the optional stable-class auto-dismiss creates a dismissal.",
+        json_schema_extra={
+            "capability": "gateway",
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     events_retention_audit_days: int = Field(
         default=365,
         ge=0,

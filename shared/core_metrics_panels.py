@@ -7,30 +7,30 @@ The core dashboard panels (ids < 1000) are registered here as core metrics.
 The four statistics-coverage tiles are included with the original panels, and
 the hand-maintained JSON remains the rendered dashboard source of truth.
 
-Query dialect (Task #1280): every panel reads the event stream from Loki
-instead of the retired PG ``events`` table — the same read the alert rules
-(R1-R7) use. Each LogQL template selects ``{service_name="unknown_service"}``
-(the unified emitter's OTLP resource), pipelines ``| json`` (event fields are
-structured metadata, NOT stream labels), and filters on the flattened labels
-(``attributes.in_total`` -> ``attributes_in_total``). Stat/table panels run as
-instant queries over ``[$__range]`` (the whole panel window); range panels use
-fixed windows chosen for their metric semantics. The one panel that does NOT
-read events — ``core_live_agents`` (the ``agents_meta`` table, still live in
-PG) — stays SQL by design.
+Query dialect (Task #1280): event panels read the stream from Loki instead of
+the retired PG ``events`` table — the same read the alert rules (R1-R7) use.
+Each LogQL template selects ``{service_name="unknown_service"}`` (the unified
+emitter's OTLP resource), pipelines ``| json`` (event fields are structured
+metadata, NOT stream labels), and filters on the flattened labels
+(``attributes.in_total`` -> ``attributes_in_total``). The two unresolved tiles
+are the exception: their resolution count is computed by the events-maintenance
+daemon (task #1468) over a fixed six-hour window and published as a Prometheus
+gauge every five minutes. ``core_live_agents`` stays SQL because ``agents_meta``
+is live Postgres state.
 
 Per-panel provenance:
 
-- **12 stat panels** (LLM calls / Warning / Error / Warning (all) /
-  Error (all) / Live agents / LLM cost / Tokens / LLM input tokens /
+- **12 stat panels** (LLM calls / Warning / Error / Unresolved Warning /
+  Unresolved Error / Live agents / LLM cost / Tokens / LLM input tokens /
   LLM output tokens / Cache hit rate / Avg turn duration): explicit 8x4 grid
   (three per row). The generator's stat color default (fixed blue) remains
   unless a panel overrides it; Warning (fixed orange) and Error (fixed red)
   set the color via ``field_defaults``, and LLM cost carries the original
   ``decimals: 2``. Error keeps the original ``unit: "s"`` and the
   ``noValue: "0"`` option.
-- **Warning (all) / Error (all)**: resolution filtering is not shipped, so
-  these all-event tiles deliberately show every warning/error event until task
-  #1468 adds the ``resolved_by`` producer.
+- **Unresolved Warning / Unresolved Error**: fixed-six-hour class totals
+  computed by events-maintenance and published as Prometheus gauges every five
+  minutes; the tiles do not query raw event lines.
 - **8 chart panels** (SSE backlog / LLM throughput / Token usage —
   Output + Reasoning / Cache hit / Input+Output+Gen-stage TPS / LLM calls /
   bucket / Event health / Token usage — Input): default 12x7 grid with the
@@ -148,17 +148,14 @@ core_metrics.register_core_metric(
 core_metrics.register_core_metric(
     MetricSpec(
         name="core_unresolved_warning",
-        title="Warning (all)",
-        event_name="warning_resolved",
-        category="log",
+        title="Unresolved Warning",
+        event_name="resolution_status",
+        category="telemetry",
         unit="short",
         panel="stat",
-        query=_count(
-            'category=~"telemetry|log" | level="warning"',
-            "$__range",
-        ),
-        query_type="logql",
-        target_names=["warning_all"],
+        query="ava_resolution_status_unresolved_warnings",
+        query_type="promql",
+        target_names=["unresolved_warning"],
         field_defaults={"color": {"mode": "fixed", "fixedColor": "orange"}},
         width=8,
         height=4,
@@ -168,17 +165,14 @@ core_metrics.register_core_metric(
 core_metrics.register_core_metric(
     MetricSpec(
         name="core_unresolved_error",
-        title="Error (all)",
-        event_name="error_resolved",
-        category="log",
+        title="Unresolved Error",
+        event_name="resolution_status",
+        category="telemetry",
         unit="short",
         panel="stat",
-        query=_count(
-            'category=~"telemetry|log" | level=~"error|critical"',
-            "$__range",
-        ),
-        query_type="logql",
-        target_names=["error_all"],
+        query="ava_resolution_status_unresolved_errors",
+        query_type="promql",
+        target_names=["unresolved_error"],
         options={"noValue": "0"},
         field_defaults={"color": {"mode": "fixed", "fixedColor": "red"}},
         width=8,
