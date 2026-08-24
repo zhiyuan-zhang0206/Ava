@@ -82,7 +82,7 @@ class DaemonSettings(EnvSettings):
     page_server_poll_interval_seconds: float = Field(
         default=2.0,
         alias="AVA_PAGE_SERVER_POLL_INTERVAL_SECONDS",
-        description="Page server supervisor daemon poll interval (seconds): how often it reconciles open agent_pages rows against live page server processes.",
+        description="Page server supervisor daemon poll interval (seconds): how often it reconciles open agent_pages rows against live page sessions.",
         json_schema_extra={
             "capability": "agent-runner",
             "restart_required": "all",

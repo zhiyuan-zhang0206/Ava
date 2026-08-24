@@ -30,6 +30,8 @@ class _PageRow:
     port: int
     host: str
     serve_dir: str
+    server_token: str | None = None
+    session_name: str | None = None
 
 
 @dataclass

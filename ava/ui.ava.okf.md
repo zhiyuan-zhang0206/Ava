@@ -1,7 +1,7 @@
 ---
 type: doc
 title: ava.ui — User Interface
-description: '`ava.ui` allows agents to display rich web pages and notifications to users. The agent runs its own HTTP server, and the UI system presents the link to the user.'
+description: '`ava.ui` lets agents display rich web pages and notifications to users; serve() pages run in persistent shells owned by their agents.'
 tags:
 - agent-view
 - sdk
@@ -12,7 +12,7 @@ tags:
 
 ## What it is
 
-`ava.ui` allows agents to display rich web pages and notifications to users. The agent runs its own HTTP server, and the UI system presents the link to the user. The page server binds the machine's reachable host (loopback on a single box) and is served to the user through the **gateway reverse proxy** — the link is the gateway's own authenticated URL (`/api/agents/<id>/pages/<name>/`), so the browser never dials the page server directly.
+`ava.ui` allows agents to display rich web pages and notifications to users. `serve()` and `serve_markdown()` are run by the page-server daemon inside persistent shell sessions owned by their agents; `show()` registers an HTTP server the agent already owns. The page server binds the machine's reachable host (loopback on a single box) and is served to the user through the **gateway reverse proxy** — the link is the gateway's own authenticated URL (`/api/agents/<id>/pages/<name>/`), so the browser never dials the page server directly.
 
 ## Core API (core SDK: page serving)
 
@@ -25,14 +25,8 @@ Each agent has a default port reserved for itself (derived from agent id), used 
 
 `name` must match `^[a-zA-Z0-9_-]+$` (1-64 chars). Returned `Page`: id, name, port, title, url.
 
-### Port-occupancy contract
-`serve` probes the port on the **reachable host** (not the wildcard — a specific-address occupant would be missed by a `0.0.0.0` probe on macOS). Three cases:
-
-1. **Own orphan** (a page server this agent started in an earlier run, surviving a restart — identified by its `ava_ui_` server-script marker in the command line): reclaimed automatically, then the new server starts. This is why a re-serve after restart works without manual session cleanup.
-2. **Another process** (no `ava_ui_` marker): `serve` **directly errors, never forcibly kills the occupier** (error message includes occupier pid/cmdline). Re-serve path: kill the shell session holding the old server (`ava.shell.sessions.list()` then `ava.shell.sessions.kill(id)`; if the old page is still within this process, use `ava.ui.close(name)`), or use a free `port`.
-3. **Stale server answering `/health`**: the liveness poll only accepts `ok:<per-launch token>` from the script just written — a stale occupant answering plain `ok` can never satisfy it, so `serve` can never report success against old content.
-
-Each `serve` embeds a random token in the server script; `/health` echoes it. The poll loops until the token matches (or 6s timeout → `PageError`), so startup confirmation is always about *this* launch, never about whatever happens to be on the port.
+### Server lifecycle
+The daemon keeps each serve() page in an agent shell named with a `page-` suffix. It persists a per-page health token and adopts live page sessions after its own restart. A crashed server is relaunched in the same shell; a stale server that is still a child of that shell causes the daemon to replace the shell. Detached legacy servers and orphaned rows are reclaimed, while a foreign port occupant is left alone and retried with backoff.
 
 ## ava_fleet Plugin Injections (Notifications)
 

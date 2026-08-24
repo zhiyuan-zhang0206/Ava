@@ -1,18 +1,15 @@
-"""Page server supervisor daemon tests (R3 door ③).
-
-Covers the supervision contract: the agent_pages table is the truth source,
-the daemon spawns a server per open serve_dir row on this host, kills it
-when the row closes or the process dies, and backs off after a failed
-spawn. `_spawn_server` is exercised against a real subprocess in one test
-(the server module really answers /health with the token); the reconcile
-passes stub the spawn so no stray processes leak from tests.
-"""
+"""Page-server daemon tests for persistent agent page shells."""
 
 from __future__ import annotations
 
+import os
+import secrets
+import socket
+import subprocess
+import sys
+import time
 from collections.abc import Iterator
 from pathlib import Path
-from types import SimpleNamespace
 
 import psycopg
 import pytest
@@ -23,7 +20,7 @@ import services.page_server.degradation as page_degradation
 from shared.machine import reset_identity, set_identity
 from tests.conftest import spawn_agent
 
-_HOST = "100.64.0.1"  # injected reachable address; rows use it so the daemon claims them
+_HOST = "127.0.0.1"
 
 
 @pytest.fixture(autouse=True)
@@ -33,525 +30,522 @@ def _identity() -> Iterator[None]:
     reset_identity()
 
 
-def _insert_page_row(
-    db_conn: psycopg.Connection,
-    agent_id: int,
-    name: str,
-    port: int,
-    *,
-    serve_dir: str | None,
-    host: str = _HOST,
-) -> None:
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO agent_pages (agent_id, name, port, host, serve_dir) "
-            "VALUES (%s, %s, %s, %s, %s)",
-            (agent_id, name, port, host, serve_dir),
-        )
-    db_conn.commit()
+class _FakeShellBackend:
+    def __init__(self) -> None:
+        self.sessions: set[str] = set()
+        self.new_calls: list[tuple[str, str, Path, dict[str, str]]] = []
+        self.sent: list[tuple[str, str]] = []
+        self.keys: list[tuple[str, tuple[str, ...]]] = []
+        self.killed: list[str] = []
+        self.new_result = True
+        self.supports_send = True
 
+    def has_session(self, name: str) -> bool:
+        return name in self.sessions
 
-def _close_row(db_conn: psycopg.Connection, agent_id: int, name: str) -> None:
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "UPDATE agent_pages SET closed_at = now() "
-            "WHERE agent_id = %s AND name = %s AND closed_at IS NULL",
-            (agent_id, name),
-        )
-    db_conn.commit()
+    def new_session(
+        self, name: str, command: str, cwd: Path, *, env: dict[str, str], **_kwargs: object
+    ) -> bool:
+        self.new_calls.append((name, command, cwd, env))
+        if self.new_result:
+            self.sessions.add(name)
+        return self.new_result
+
+    def send(self, name: str, text: str) -> None:
+        if not self.supports_send:
+            raise NotImplementedError
+        self.sent.append((name, text))
+
+    def send_keys(self, name: str, *keys: str) -> None:
+        self.keys.append((name, keys))
+
+    def kill_session(self, name: str, **_kwargs: object) -> tuple[bool, str]:
+        self.killed.append(name)
+        self.sessions.discard(name)
+        return True, "forced"
 
 
 @pytest.fixture
-def sync_pool(db_conn: psycopg.Connection):
-    """A ConnectionPool over the test DB, mirroring the daemon's pool."""
+def backend(monkeypatch: pytest.MonkeyPatch) -> _FakeShellBackend:
+    fake = _FakeShellBackend()
+    monkeypatch.setattr(psd, "get_shell_backend", lambda: fake)
+    monkeypatch.setattr(psd, "_page_server_occupants", dict)
+    monkeypatch.setattr(psd, "_page_session_shell_pids", lambda _wanted: {})  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    return fake
 
+
+@pytest.fixture
+def sync_pool(db_conn: psycopg.Connection) -> Iterator[ConnectionPool]:
     from shared.config import settings
 
-    pool = ConnectionPool(settings.data_plane.db_url, min_size=1, max_size=2, open=True)
+    pool: ConnectionPool = ConnectionPool(
+        settings.data_plane.db_url, min_size=1, max_size=2, open=True
+    )
     yield pool
     pool.close()
 
 
-def _stub_handle(
-    port: int = 12345,
-    serve_dir: str = "/tmp/serve",  # noqa: S108
-    agent_id: int = 1,
-    name: str = "p",
-) -> psd._ServerHandle:
-    import subprocess as _sp
-    from typing import cast as _cast
+def _insert_page_row(
+    conn: psycopg.Connection,
+    agent_id: int,
+    name: str,
+    port: int,
+    serve_dir: Path,
+    *,
+    token: str | None = None,
+    session: str | None = None,
+) -> None:
+    with conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agent_pages (agent_id, name, port, host, serve_dir, server_token, session_name) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s)",
+            (agent_id, name, port, _HOST, str(serve_dir), token, session),
+        )
+    conn.commit()
 
-    proc = _cast(
-        _sp.Popen[bytes],
-        SimpleNamespace(
-            poll=lambda: None,
-            terminate=lambda: None,
-            kill=lambda: None,
-            wait=lambda _timeout: None,  # pyright: ignore[reportUnknownLambdaType]
-            pid=9999,
-            returncode=None,
-        ),
+
+def _close_row(conn: psycopg.Connection, agent_id: int, name: str) -> None:
+    with conn.cursor() as cur:
+        cur.execute(
+            "UPDATE agent_pages SET closed_at = now() WHERE agent_id = %s AND name = %s",
+            (agent_id, name),
+        )
+    conn.commit()
+
+
+def _reconcile(
+    pool: ConnectionPool,
+    managed: dict[tuple[int, str], psd._ServerHandle],
+    backoff: dict[tuple[int, str], float],
+    degraded: dict[tuple[int, str], psd._DegradedServeDir],
+) -> None:
+    psd._reconcile_once(pool, managed, backoff, degraded, _HOST)  # pyright: ignore[reportUnknownArgumentType]
+
+
+def _token_and_session(conn: psycopg.Connection, agent_id: int, name: str) -> tuple[str, str]:
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT server_token, session_name FROM agent_pages WHERE agent_id = %s AND name = %s",
+            (agent_id, name),
+        )
+        row = cur.fetchone()
+    assert row is not None and row[0] is not None and row[1] is not None
+    return str(row[0]), str(row[1])
+
+
+def test_open_row_creates_persistent_page_session_and_persists_token(
+    sync_pool: ConnectionPool,
+    db_conn: psycopg.Connection,
+    backend: _FakeShellBackend,
+    tmp_path: Path,
+) -> None:
+    agent_id = spawn_agent()
+    _insert_page_row(db_conn, agent_id, "My_Page", 12001, tmp_path)
+    managed: dict[tuple[int, str], psd._ServerHandle] = {}
+    backoff: dict[tuple[int, str], float] = {}
+    degraded: dict[tuple[int, str], psd._DegradedServeDir] = {}
+
+    _reconcile(sync_pool, managed, backoff, degraded)
+
+    token, page_session = _token_and_session(db_conn, agent_id, "My_Page")
+    assert page_session == f"ava-agent-{agent_id}-shell-0-page-my-page"
+    assert set(managed) == {(agent_id, "My_Page")}
+    assert backend.new_calls == [
+        (
+            page_session,
+            f"{sys.executable} -m services.page_server.server --port 12001 --host {_HOST} --dir {tmp_path}",
+            tmp_path,
+            {**os.environ, "PAGE_SERVER_TOKEN": token},
+        )
+    ]
+
+    _reconcile(sync_pool, managed, backoff, degraded)
+    assert _token_and_session(db_conn, agent_id, "My_Page") == (token, page_session)
+    assert len(backend.new_calls) == 1
+
+
+def test_healthy_page_is_not_resent(
+    sync_pool: ConnectionPool,
+    db_conn: psycopg.Connection,
+    backend: _FakeShellBackend,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    agent_id = spawn_agent()
+    page_session = f"ava-agent-{agent_id}-shell-3-page-live"
+    backend.sessions.add(page_session)
+    _insert_page_row(
+        db_conn,
+        agent_id,
+        "live",
+        12002,
+        tmp_path,
+        token=secrets.token_hex(16),
+        session=page_session,
     )
-    return psd._ServerHandle(
-        agent_id=agent_id,
-        name=name,
-        port=port,
-        serve_dir=serve_dir,
-        token="t",  # noqa: S106
-        proc=proc,
-        log_path=Path("/tmp/p.log"),  # noqa: S108
+    monkeypatch.setattr(psd, "_server_is_healthy", lambda *_args: True)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    managed: dict[tuple[int, str], psd._ServerHandle] = {}
+
+    _reconcile(sync_pool, managed, {}, {})
+
+    assert set(managed) == {(agent_id, "live")}
+    assert backend.new_calls == []
+    assert backend.sent == []
+
+
+def test_crashed_server_is_relaunched_in_same_session(
+    sync_pool: ConnectionPool,
+    db_conn: psycopg.Connection,
+    backend: _FakeShellBackend,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    agent_id = spawn_agent()
+    page_session = f"ava-agent-{agent_id}-shell-3-page-crashed"
+    backend.sessions.add(page_session)
+    _insert_page_row(
+        db_conn,
+        agent_id,
+        "crashed",
+        12003,
+        tmp_path,
+        token=secrets.token_hex(16),
+        session=page_session,
     )
+    monkeypatch.setattr(psd, "_server_is_healthy", lambda *_args: False)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(psd, "_probe_port", lambda *_args: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    managed: dict[tuple[int, str], psd._ServerHandle] = {}
 
+    _reconcile(sync_pool, managed, {}, {})
 
-class TestOpenRows:
-    def test_filters_by_host_and_serve_dir(
-        self, sync_pool, db_conn: psycopg.Connection, tmp_path: Path
-    ) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-        agent_id = spawn_agent()
-        serve_dir = str(tmp_path)
-        _insert_page_row(db_conn, agent_id, "managed", 12001, serve_dir=serve_dir)
-        _insert_page_row(
-            db_conn, agent_id, "other-host", 12002, serve_dir=serve_dir, host="10.0.0.9"
+    assert backend.sent == [
+        (
+            page_session,
+            f"{sys.executable} -m services.page_server.server --port 12003 --host {_HOST} --dir {tmp_path}",
         )
-        _insert_page_row(db_conn, agent_id, "agent-owned", 12003, serve_dir=None)
-        _insert_page_row(db_conn, agent_id, "closed", 12004, serve_dir=serve_dir)
-        _close_row(db_conn, agent_id, "closed")
-
-        rows = psd._open_rows(sync_pool, _HOST)  # pyright: ignore[reportUnknownArgumentType]
-        names = {(r.agent_id, r.name) for r in rows}
-        assert (agent_id, "managed") in names
-        assert (agent_id, "other-host") not in names
-        assert (agent_id, "agent-owned") not in names
-        assert (agent_id, "closed") not in names
+    ]
+    assert backend.keys == [(page_session, ("Enter",))]
+    assert backend.new_calls == []
 
 
-class TestSpawnServer:
-    def test_spawn_verify_kill_roundtrip(self, sync_pool, tmp_path: Path) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-        """A real server subprocess comes up, answers /health with our token,
-        and dies on _kill_server."""
-        import socket
-        import time
+def test_windows_style_backend_recreates_the_session_when_it_cannot_send(
+    sync_pool: ConnectionPool,
+    db_conn: psycopg.Connection,
+    backend: _FakeShellBackend,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    agent_id = spawn_agent()
+    page_session = f"ava-agent-{agent_id}-shell-3-page-windows"
+    backend.sessions.add(page_session)
+    backend.supports_send = False
+    _insert_page_row(
+        db_conn,
+        agent_id,
+        "windows",
+        12015,
+        tmp_path,
+        token=secrets.token_hex(16),
+        session=page_session,
+    )
+    monkeypatch.setattr(psd, "_server_is_healthy", lambda *_args: False)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(psd, "_probe_port", lambda *_args: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
 
-        # Find a free port, release it, let the server take it.
-        with socket.socket() as s:
-            s.bind(("127.0.0.1", 0))
-            port = s.getsockname()[1]
+    _reconcile(sync_pool, {}, {}, {})
 
-        row = psd._PageRow(1, 1, "p", port, "127.0.0.1", str(tmp_path))
-        handle = psd._spawn_server(row, tmp_path / "logs")
-        try:
-            assert handle.proc.poll() is None, "server process is alive"
-            assert psd._server_is_healthy("127.0.0.1", port, handle.token)
-            assert not psd._server_is_healthy("127.0.0.1", port, "wrong-token")
-        finally:
-            psd._kill_server(handle)
-        time.sleep(0.2)
-        assert handle.proc.poll() is not None, "server killed"
-        assert not psd._server_is_healthy("127.0.0.1", port, handle.token)
+    assert backend.killed == [page_session]
+    assert [call[0] for call in backend.new_calls] == [page_session]
 
 
-class TestReconcile:
-    def test_spawns_missing_and_kills_closed(
-        self,
-        sync_pool,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-        db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-        tmp_path: Path,
-    ) -> None:
-        spawned: list[tuple[int, str]] = []
-        killed: list[tuple[int, str]] = []
+def test_stale_server_in_its_page_session_replaces_that_session(
+    sync_pool: ConnectionPool,
+    db_conn: psycopg.Connection,
+    backend: _FakeShellBackend,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    agent_id = spawn_agent()
+    key = (agent_id, "stale")
+    page_session = f"ava-agent-{agent_id}-shell-3-page-stale"
+    backend.sessions.add(page_session)
+    _insert_page_row(
+        db_conn,
+        agent_id,
+        "stale",
+        12004,
+        tmp_path,
+        token=secrets.token_hex(16),
+        session=page_session,
+    )
+    monkeypatch.setattr(psd, "_server_is_healthy", lambda *_args: False)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(psd, "_probe_port", lambda *_args: "ok:old-token")  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(
+        psd, "_page_server_occupants", lambda: {12004: (5001, str(psd.settings.general.ava_home))}
+    )
+    monkeypatch.setattr(psd, "_page_session_owner", lambda pid, _pids: key if pid == 5001 else None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    managed: dict[tuple[int, str], psd._ServerHandle] = {}
 
-        def fake_spawn(row: psd._PageRow, log_dir: Path) -> psd._ServerHandle:
-            spawned.append((row.agent_id, row.name))
-            return _stub_handle(row.port, row.serve_dir, row.agent_id, row.name)
+    _reconcile(sync_pool, managed, {}, {})
 
-        def fake_kill(handle: psd._ServerHandle) -> None:
-            killed.append((handle.agent_id, handle.name))
+    assert backend.killed == [page_session]
+    assert managed == {}
 
-        monkeypatch.setattr(psd, "_spawn_server", fake_spawn)
-        monkeypatch.setattr(psd, "_kill_server", fake_kill)
 
-        agent_id = spawn_agent()
-        _insert_page_row(db_conn, agent_id, "a", 12011, serve_dir=str(tmp_path))
-        _insert_page_row(db_conn, agent_id, "b", 12012, serve_dir=str(tmp_path))
+def test_foreign_port_occupant_is_left_alone_and_backed_off(
+    sync_pool: ConnectionPool,
+    db_conn: psycopg.Connection,
+    backend: _FakeShellBackend,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    agent_id = spawn_agent()
+    page_session = f"ava-agent-{agent_id}-shell-3-page-foreign"
+    backend.sessions.add(page_session)
+    _insert_page_row(
+        db_conn,
+        agent_id,
+        "foreign",
+        12005,
+        tmp_path,
+        token=secrets.token_hex(16),
+        session=page_session,
+    )
+    monkeypatch.setattr(psd, "_server_is_healthy", lambda *_args: False)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(psd, "_probe_port", lambda *_args: "wrong")  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(psd, "_page_server_occupants", lambda: {12005: (5002, None)})
+    managed: dict[tuple[int, str], psd._ServerHandle] = {}
+    backoff: dict[tuple[int, str], float] = {}
 
-        managed: dict[tuple[int, str], psd._ServerHandle] = {}
-        backoff: dict[tuple[int, str], float] = {}
-        degraded: dict[tuple[int, str], psd._DegradedServeDir] = {}
-        psd._reconcile_once(sync_pool, managed, backoff, degraded, _HOST, Path("/tmp/logs"))  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
-        assert set(spawned) == {(agent_id, "a"), (agent_id, "b")}
-        assert set(managed) == {(agent_id, "a"), (agent_id, "b")}
+    _reconcile(sync_pool, managed, backoff, {})
 
-        # Close one row: next pass kills its server only.
-        _close_row(db_conn, agent_id, "a")
-        psd._reconcile_once(sync_pool, managed, backoff, degraded, _HOST, Path("/tmp/logs"))  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
-        assert killed == [(agent_id, "a")]
-        assert set(managed) == {(agent_id, "b")}
+    assert backend.killed == []
+    assert backend.sent == []
+    assert backoff[(agent_id, "foreign")] > time.monotonic()
 
-    def test_respawns_dead_process(
-        self,
-        sync_pool,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-        db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-        tmp_path: Path,
-    ) -> None:
-        import subprocess as _sp
-        from typing import cast as _cast
 
-        dead = _stub_handle(12021, serve_dir=str(tmp_path))
-        dead.proc = _cast(
-            _sp.Popen[bytes],
-            SimpleNamespace(
-                poll=lambda: 1,
-                terminate=lambda: None,
-                kill=lambda: None,
-                wait=lambda _timeout: None,  # pyright: ignore[reportUnknownLambdaType]
-                pid=1,
-                returncode=1,
-            ),
+def test_closed_row_kills_its_page_session(
+    sync_pool: ConnectionPool,
+    db_conn: psycopg.Connection,
+    backend: _FakeShellBackend,
+    tmp_path: Path,
+) -> None:
+    agent_id = spawn_agent()
+    _insert_page_row(db_conn, agent_id, "closed", 12006, tmp_path)
+    managed: dict[tuple[int, str], psd._ServerHandle] = {}
+
+    _reconcile(sync_pool, managed, {}, {})
+    page_session = managed[(agent_id, "closed")].session_name
+    _close_row(db_conn, agent_id, "closed")
+    _reconcile(sync_pool, managed, {}, {})
+
+    assert backend.killed == [page_session]
+    assert managed == {}
+
+
+def test_daemon_restart_kills_the_persisted_session_of_a_closed_row(
+    sync_pool: ConnectionPool,
+    db_conn: psycopg.Connection,
+    backend: _FakeShellBackend,
+    tmp_path: Path,
+) -> None:
+    agent_id = spawn_agent()
+    page_session = f"ava-agent-{agent_id}-shell-4-page-closed-after-restart"
+    backend.sessions.add(page_session)
+    _insert_page_row(
+        db_conn, agent_id, "closed-after-restart", 12014, tmp_path, session=page_session
+    )
+    _close_row(db_conn, agent_id, "closed-after-restart")
+
+    _reconcile(sync_pool, {}, {}, {})
+
+    assert backend.killed == [page_session]
+
+
+def test_changed_port_or_directory_kills_then_recreates_the_page_session(
+    sync_pool: ConnectionPool,
+    db_conn: psycopg.Connection,
+    backend: _FakeShellBackend,
+    tmp_path: Path,
+) -> None:
+    agent_id = spawn_agent()
+    old_dir = tmp_path / "old"
+    old_dir.mkdir()
+    new_dir = tmp_path / "new"
+    new_dir.mkdir()
+    _insert_page_row(db_conn, agent_id, "changed", 12007, old_dir)
+    managed: dict[tuple[int, str], psd._ServerHandle] = {}
+    backoff: dict[tuple[int, str], float] = {}
+    degraded: dict[tuple[int, str], psd._DegradedServeDir] = {}
+
+    _reconcile(sync_pool, managed, backoff, degraded)
+    old_session = managed[(agent_id, "changed")].session_name
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "UPDATE agent_pages SET port = 12008, serve_dir = %s WHERE agent_id = %s AND name = 'changed'",
+            (str(new_dir), agent_id),
         )
-        managed: dict[tuple[int, str], psd._ServerHandle] = {(1, "p"): dead}
-        backoff: dict[tuple[int, str], float] = {}
-
-        spawned: list[tuple[int, str]] = []
-
-        def fake_spawn(row: psd._PageRow, log_dir: Path) -> psd._ServerHandle:
-            spawned.append((row.agent_id, row.name))
-            return _stub_handle(row.port, row.serve_dir, row.agent_id, row.name)
-
-        monkeypatch.setattr(psd, "_spawn_server", fake_spawn)
-        monkeypatch.setattr(psd, "_kill_server", lambda _h: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-
-        agent_id = spawn_agent()
-        _insert_page_row(db_conn, agent_id, "p", 12021, serve_dir=str(tmp_path))
-        # The managed key must match the row's key for the dead-process branch.
-        managed = {(agent_id, "p"): dead}
-        degraded: dict[tuple[int, str], psd._DegradedServeDir] = {}
-        psd._reconcile_once(sync_pool, managed, backoff, degraded, _HOST, Path("/tmp/logs"))  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
-        assert (agent_id, "p") in spawned, "dead process respawned"
-        assert (agent_id, "p") in managed
-
-    def test_backoff_after_failed_spawn(
-        self,
-        sync_pool,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-        db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-        tmp_path: Path,
-    ) -> None:
-        calls: list[bool] = []
-
-        def flaky_spawn(row: psd._PageRow, log_dir: Path) -> psd._ServerHandle:
-            calls.append(True)
-            raise RuntimeError("port in use")
-
-        monkeypatch.setattr(psd, "_spawn_server", flaky_spawn)
-
-        agent_id = spawn_agent()
-        _insert_page_row(db_conn, agent_id, "p", 12031, serve_dir=str(tmp_path))
-
-        managed: dict[tuple[int, str], psd._ServerHandle] = {}
-        backoff: dict[tuple[int, str], float] = {}
-        degraded: dict[tuple[int, str], psd._DegradedServeDir] = {}
-        psd._reconcile_once(sync_pool, managed, backoff, degraded, _HOST, Path("/tmp/logs"))  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
-        assert len(calls) == 1
-        assert (agent_id, "p") in backoff, "failed spawn recorded for backoff"
-        assert (agent_id, "p") not in managed
-
-        # Immediate re-pass: backed off, no spawn attempt.
-        psd._reconcile_once(sync_pool, managed, backoff, degraded, _HOST, Path("/tmp/logs"))  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
-        assert len(calls) == 1, "no hot-looping a broken row"
-
-    def test_degrades_missing_serve_dir_without_spawning(
-        self,
-        sync_pool,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-        db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-        tmp_path: Path,
-    ) -> None:
-        agent_id = spawn_agent()
-        name = "missing"
-        serve_dir = tmp_path / "removed"
-        _insert_page_row(db_conn, agent_id, name, 12032, serve_dir=str(serve_dir))
-
-        spawned: list[tuple[int, str]] = []
-        warnings: list[str] = []
-
-        def fake_spawn(row: psd._PageRow, log_dir: Path) -> psd._ServerHandle:
-            spawned.append((row.agent_id, row.name))
-            return _stub_handle(row.port, row.serve_dir, row.agent_id, row.name)
-
-        def fake_warning(message: str, *args: object, **kwargs: object) -> None:
-            del kwargs
-            warnings.append(message % args)
-
-        monkeypatch.setattr(psd, "_spawn_server", fake_spawn)
-        monkeypatch.setattr(psd._log, "warning", fake_warning)
-
-        managed: dict[tuple[int, str], psd._ServerHandle] = {}
-        backoff: dict[tuple[int, str], float] = {}
-        degraded: dict[tuple[int, str], psd._DegradedServeDir] = {}
-        psd._reconcile_once(sync_pool, managed, backoff, degraded, _HOST, Path("/tmp/logs"))  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
-
-        key = (agent_id, name)
-        assert spawned == []
-        assert degraded[key].observations == 1
-        assert degraded[key].retry_at >= 30.0
-        assert backoff == {}
-        assert any("degrading" in warning and str(serve_dir) in warning for warning in warnings)
-        psd._reconcile_once(sync_pool, managed, backoff, degraded, _HOST, Path("/tmp/logs"))  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
-        assert warnings == [
-            f"[page-server] degrading {key}: serve_dir is missing or not a directory: {serve_dir}"
-        ]
-        with db_conn.cursor() as cur:
-            cur.execute(
-                "SELECT closed_at FROM agent_pages WHERE agent_id = %s AND name = %s",
-                (agent_id, name),
-            )
-            row = cur.fetchone()
-            assert row is not None
-            assert row[0] is None
-
-    def test_missing_serve_dir_backoff_grows_and_caps(self) -> None:
-        assert [
-            page_degradation._missing_serve_dir_backoff_s(observations)
-            for observations in range(1, 6)
-        ] == [30.0, 60.0, 120.0, 240.0, 300.0]
-
-    def test_auto_closes_persistently_missing_serve_dir_and_publishes_page_closed(
-        self,
-        sync_pool,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-        db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-        tmp_path: Path,
-    ) -> None:
-        from shared.live_events import PageClosed
-
-        agent_id = spawn_agent()
-        name = "missing"
-        serve_dir = tmp_path / "removed"
-        _insert_page_row(db_conn, agent_id, name, 12033, serve_dir=str(serve_dir))
-
-        clock = [0.0]
-        published: list[tuple[str, str, str]] = []
-        emitted: list[str] = []
-
-        def monotonic() -> float:
-            return clock[0]
-
-        async def fake_publish(channel: str, payload: str, *, context: str = "") -> int:
-            published.append((channel, payload, context))
-            return 0
-
-        def fake_emit(category: str, event_name: str, **kwargs: object) -> None:
-            del category, kwargs
-            emitted.append(event_name)
-
-        monkeypatch.setattr(psd.time, "monotonic", monotonic)
-        monkeypatch.setattr(page_degradation, "publish_best_effort", fake_publish)
-        monkeypatch.setattr(page_degradation.telemetry, "emit", fake_emit)
-
-        managed: dict[tuple[int, str], psd._ServerHandle] = {}
-        backoff: dict[tuple[int, str], float] = {}
-        degraded: dict[tuple[int, str], psd._DegradedServeDir] = {}
-        for now in (0.0, 30.0, 90.0, 210.0, 450.0):
-            clock[0] = now
-            psd._reconcile_once(sync_pool, managed, backoff, degraded, _HOST, tmp_path / "logs")  # pyright: ignore[reportUnknownArgumentType]
-
-        assert published == [
-            (
-                psd.settings.data_plane.events_channel,
-                PageClosed(agent_id=agent_id, name=name).model_dump_json(),
-                "page_server_serve_dir_missing",
-            )
-        ]
-        assert emitted == ["page_serve_dir_missing", "page_serve_dir_missing"]
-        assert degraded == {}
-        with db_conn.cursor() as cur:
-            cur.execute(
-                "SELECT closed_at FROM agent_pages WHERE agent_id = %s AND name = %s",
-                (agent_id, name),
-            )
-            row = cur.fetchone()
-            assert row is not None
-            assert row[0] is not None
-
-    def test_recovers_when_serve_dir_reappears(
-        self,
-        sync_pool,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-        db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-        tmp_path: Path,
-    ) -> None:
-        agent_id = spawn_agent()
-        name = "recovered"
-        serve_dir = tmp_path / "recreated"
-        _insert_page_row(db_conn, agent_id, name, 12034, serve_dir=str(serve_dir))
-
-        spawned: list[tuple[int, str]] = []
-        infos: list[str] = []
-
-        def fake_spawn(row: psd._PageRow, log_dir: Path) -> psd._ServerHandle:
-            spawned.append((row.agent_id, row.name))
-            return _stub_handle(row.port, row.serve_dir, row.agent_id, row.name)
-
-        def fake_info(message: str, *args: object, **kwargs: object) -> None:
-            del kwargs
-            infos.append(message % args)
-
-        monkeypatch.setattr(psd, "_spawn_server", fake_spawn)
-        monkeypatch.setattr(psd._log, "info", fake_info)
-
-        managed: dict[tuple[int, str], psd._ServerHandle] = {}
-        backoff: dict[tuple[int, str], float] = {}
-        degraded: dict[tuple[int, str], psd._DegradedServeDir] = {}
-        psd._reconcile_once(sync_pool, managed, backoff, degraded, _HOST, Path("/tmp/logs"))  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
-        assert degraded[(agent_id, name)].observations == 1
-
-        serve_dir.mkdir()
-        psd._reconcile_once(sync_pool, managed, backoff, degraded, _HOST, Path("/tmp/logs"))  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
-
-        assert spawned == [(agent_id, name)]
-        assert (agent_id, name) in managed
-        assert degraded == {}
-        assert any("recovered" in info for info in infos)
+    db_conn.commit()
+    _reconcile(sync_pool, managed, backoff, degraded)
+    assert backend.killed == [old_session]
+    assert managed[(agent_id, "changed")].session_name == old_session
+    assert len(backend.new_calls) == 2
 
 
-class TestReclaim:
-    """Daemon restart leaves detached page servers behind; the reconcile
-    pass must kill them (audit round 2, P1) — `managed` is empty but the
-    processes survive."""
+def test_daemon_restart_adopts_a_healthy_live_page_session(
+    sync_pool: ConnectionPool,
+    db_conn: psycopg.Connection,
+    backend: _FakeShellBackend,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    agent_id = spawn_agent()
+    page_session = f"ava-agent-{agent_id}-shell-5-page-adopted"
+    backend.sessions.add(page_session)
+    _insert_page_row(
+        db_conn,
+        agent_id,
+        "adopted",
+        12009,
+        tmp_path,
+        token=secrets.token_hex(16),
+        session=page_session,
+    )
+    monkeypatch.setattr(psd, "_server_is_healthy", lambda *_args: True)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    managed: dict[tuple[int, str], psd._ServerHandle] = {}
 
-    def _reconcile_with_occupants(
-        self,
-        sync_pool,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-        db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,
-        occupants: dict[int, int],
-    ) -> tuple[list[int], list[tuple[int, str]]]:
-        killed: list[int] = []
-        spawned: list[tuple[int, str]] = []
+    _reconcile(sync_pool, managed, {}, {})
 
-        # occupants entries are (pid, ava_home); the helper fills in this
-        # daemon's own home so existing call sites pass plain {port: pid}.
-        monkeypatch.setattr(
-            psd,
-            "_page_server_occupants",
-            lambda: {p: (pid, str(psd.settings.general.ava_home)) for p, pid in occupants.items()},
-        )
-        monkeypatch.setattr(psd, "_kill_pid", killed.append)
-        monkeypatch.setattr(
-            psd,
-            "_spawn_server",
-            lambda row, _log_dir: _stub_handle(row.port, row.serve_dir, row.agent_id, row.name),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType, reportUnknownMemberType]
-        )
+    assert set(managed) == {(agent_id, "adopted")}
+    assert backend.new_calls == []
+    assert backend.killed == []
+    assert backend.sent == []
 
-        managed: dict[tuple[int, str], psd._ServerHandle] = {}
-        backoff: dict[tuple[int, str], float] = {}
-        degraded: dict[tuple[int, str], psd._DegradedServeDir] = {}
-        psd._reconcile_once(sync_pool, managed, backoff, degraded, _HOST, Path("/tmp/logs"))  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
-        return killed, spawned
 
-    def test_reclaims_wanted_port_occupant(
-        self,
-        sync_pool,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-        db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-        tmp_path: Path,
-    ) -> None:
-        """After a restart, an occupant on a still-open row's port is killed
-        and the row respawned with a fresh token (the old token is
-        unknowable — adopt is impossible, kill+respawn is the fix)."""
-        agent_id = spawn_agent()
-        _insert_page_row(db_conn, agent_id, "p", 12041, serve_dir=str(tmp_path))
-        killed, _ = self._reconcile_with_occupants(sync_pool, db_conn, monkeypatch, {12041: 5555})  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-        assert killed == [5555]
+def test_reclaim_preserves_in_session_server_and_kills_detached_orphan(
+    sync_pool: ConnectionPool,
+    db_conn: psycopg.Connection,
+    backend: _FakeShellBackend,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    agent_id = spawn_agent()
+    key = (agent_id, "kept")
+    page_session = f"ava-agent-{agent_id}-shell-6-page-kept"
+    backend.sessions.add(page_session)
+    _insert_page_row(
+        db_conn,
+        agent_id,
+        "kept",
+        12010,
+        tmp_path,
+        token=secrets.token_hex(16),
+        session=page_session,
+    )
+    monkeypatch.setattr(
+        psd,
+        "_page_server_occupants",
+        lambda: {
+            12010: (5010, str(psd.settings.general.ava_home)),
+            12011: (5011, str(psd.settings.general.ava_home)),
+        },
+    )
+    monkeypatch.setattr(psd, "_page_session_owner", lambda pid, _pids: key if pid == 5010 else None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    killed: list[int] = []
+    monkeypatch.setattr(psd, "_kill_pid", killed.append)
+    monkeypatch.setattr(psd, "_server_is_healthy", lambda *_args: True)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
 
-    def test_kills_orphan_of_closed_row(
-        self,
-        sync_pool,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-        db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-        tmp_path: Path,
-    ) -> None:
-        """A server of a since-closed row (daemon was down when it closed)
-        is killed — previously it leaked the process and port forever."""
-        agent_id = spawn_agent()
-        _insert_page_row(db_conn, agent_id, "gone", 12042, serve_dir=str(tmp_path))
-        _close_row(db_conn, agent_id, "gone")
-        killed, _ = self._reconcile_with_occupants(sync_pool, db_conn, monkeypatch, {12042: 5556})  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-        assert killed == [5556]
+    _reconcile(sync_pool, {}, {}, {})
 
-    def test_never_kills_own_managed_process(
-        self,
-        sync_pool,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-        db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-        tmp_path: Path,
-    ) -> None:
-        """The reclaim pass must not kill a process this daemon itself
-        manages (normal steady state — occupant and managed are the same)."""
-        agent_id = spawn_agent()
-        _insert_page_row(db_conn, agent_id, "p", 12043, serve_dir=str(tmp_path))
-        own = _stub_handle(12043, serve_dir=str(tmp_path), agent_id=agent_id)
-        managed: dict[tuple[int, str], psd._ServerHandle] = {(agent_id, "p"): own}
-        backoff: dict[tuple[int, str], float] = {}
-        degraded: dict[tuple[int, str], psd._DegradedServeDir] = {}
-        killed: list[int] = []
+    assert killed == [5011]
 
-        monkeypatch.setattr(
-            psd,
-            "_page_server_occupants",
-            lambda: {12043: (9999, str(psd.settings.general.ava_home))},
-        )
-        monkeypatch.setattr(psd, "_kill_pid", killed.append)
-        psd._reconcile_once(sync_pool, managed, backoff, degraded, _HOST, Path("/tmp/logs"))  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
-        assert killed == [], "own managed process must not be killed"
 
-    def test_skips_foreign_cluster_occupant(
-        self,
-        sync_pool,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-        db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-        tmp_path: Path,
-    ) -> None:
-        """A page-server process whose AVA_HOME names another cluster's home
-        is NOT this daemon's orphan: killing it would tear down a co-located
-        second cluster's pages (#1129, 2026-08-10 — preview's daemon reaped
-        main's pages on the shared box in an endless respawn loop)."""
-        agent_id = spawn_agent()
-        _insert_page_row(db_conn, agent_id, "p", 12044, serve_dir=str(tmp_path))
-        killed: list[int] = []
-        managed: dict[tuple[int, str], psd._ServerHandle] = {}
-        backoff: dict[tuple[int, str], float] = {}
-        degraded: dict[tuple[int, str], psd._DegradedServeDir] = {}
+def test_failed_session_creation_uses_spawn_backoff(
+    sync_pool: ConnectionPool,
+    db_conn: psycopg.Connection,
+    backend: _FakeShellBackend,
+    tmp_path: Path,
+) -> None:
+    agent_id = spawn_agent()
+    _insert_page_row(db_conn, agent_id, "backoff", 12012, tmp_path)
+    backend.new_result = False
+    managed: dict[tuple[int, str], psd._ServerHandle] = {}
+    backoff: dict[tuple[int, str], float] = {}
 
-        monkeypatch.setattr(
-            psd, "_page_server_occupants", lambda: {12044: (5557, "/other/cluster/home")}
-        )
-        monkeypatch.setattr(psd, "_kill_pid", killed.append)
-        psd._reconcile_once(sync_pool, managed, backoff, degraded, _HOST, Path("/tmp/logs"))  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
-        assert killed == [], "foreign-cluster page server must not be killed"
+    _reconcile(sync_pool, managed, backoff, {})
+    _reconcile(sync_pool, managed, backoff, {})
 
-    def test_skips_occupant_with_unreadable_env(
-        self,
-        sync_pool,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-        db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
-        tmp_path: Path,
-    ) -> None:
-        """A page-server whose AVA_HOME cannot be read (None) is NOT provably
-        ours — skip, never guess. The pre-fix code fell through on None and
-        reaped a co-located cluster's pages whose env was unreadable (Task
-        #1141, 2026-08-10 — three SIGTERM waves on main's pages coincided
-        with preview worker activity)."""
-        agent_id = spawn_agent()
-        _insert_page_row(db_conn, agent_id, "p", 12045, serve_dir=str(tmp_path))
-        killed: list[int] = []
-        managed: dict[tuple[int, str], psd._ServerHandle] = {}
-        backoff: dict[tuple[int, str], float] = {}
-        degraded: dict[tuple[int, str], psd._DegradedServeDir] = {}
+    assert managed == {}
+    assert len(backend.new_calls) == 1
+    assert (agent_id, "backoff") in backoff
 
-        monkeypatch.setattr(psd, "_page_server_occupants", lambda: {12045: (5558, None)})
-        monkeypatch.setattr(psd, "_kill_pid", killed.append)
-        psd._reconcile_once(sync_pool, managed, backoff, degraded, _HOST, Path("/tmp/logs"))  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
-        assert killed == [], "unreadable-env page server must not be killed"
+
+def test_missing_serve_dir_uses_the_existing_degradation_ladder(
+    sync_pool: ConnectionPool,
+    db_conn: psycopg.Connection,
+    backend: _FakeShellBackend,
+    tmp_path: Path,
+) -> None:
+    agent_id = spawn_agent()
+    missing = tmp_path / "gone"
+    _insert_page_row(db_conn, agent_id, "missing", 12013, missing)
+    degraded: dict[tuple[int, str], psd._DegradedServeDir] = {}
+
+    _reconcile(sync_pool, {}, {}, degraded)
+
+    assert backend.new_calls == []
+    assert degraded[(agent_id, "missing")].observations == 1
+    assert [page_degradation._missing_serve_dir_backoff_s(n) for n in range(1, 6)] == [
+        30.0,
+        60.0,
+        120.0,
+        240.0,
+        300.0,
+    ]
+
+
+def test_page_session_owner_walks_process_ancestry(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _Parent:
+        def __init__(self, pid: int) -> None:
+            self.pid = pid
+
+    class _Proc:
+        @staticmethod
+        def parents() -> list[_Parent]:
+            return [_Parent(11), _Parent(12)]
+
+    monkeypatch.setattr(psd.psutil, "Process", lambda _pid: _Proc())  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    assert psd._page_session_owner(99, {12: (7, "page")}) == (7, "page")
+
+
+def test_server_module_still_serves_a_tokenized_health_endpoint(tmp_path: Path) -> None:
+    with socket.socket() as sock:
+        sock.bind((_HOST, 0))
+        port = sock.getsockname()[1]
+    env = {**os.environ, "PAGE_SERVER_TOKEN": "roundtrip"}
+    proc = subprocess.Popen(  # noqa: S603 -- server module receives fixed test arguments
+        [
+            sys.executable,
+            "-m",
+            "services.page_server.server",
+            "--port",
+            str(port),
+            "--host",
+            _HOST,
+            "--dir",
+            str(tmp_path),
+        ],
+        cwd=Path.cwd(),
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    try:
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline:
+            if psd._server_is_healthy(_HOST, port, "roundtrip"):
+                break
+            time.sleep(0.05)
+        assert psd._server_is_healthy(_HOST, port, "roundtrip")
+    finally:
+        proc.terminate()
+        proc.wait(timeout=2.0)

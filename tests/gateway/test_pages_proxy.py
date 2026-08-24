@@ -61,7 +61,7 @@ class _SSEHandler(http.server.BaseHTTPRequestHandler):
 
 @pytest.fixture
 def page_server(tmp_path: Path) -> Iterator[int]:
-    """A real static page server (what ava.ui.serve launches), serving
+    """A real static page server (what the page-server daemon launches), serving
     tmp_path on 127.0.0.1. Returns its port."""
     (tmp_path / "index.html").write_text("<h1>hello</h1>", encoding="utf-8")
     (tmp_path / "sub").mkdir()
