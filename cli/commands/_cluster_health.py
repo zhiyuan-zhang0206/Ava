@@ -69,6 +69,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -98,6 +99,11 @@ DEFAULT_AGENT_MIN = 1
 DEFAULT_CRASH_LOOP_MAX_RESTARTS = 5
 DEFAULT_CRASH_LOOP_WINDOW_MINUTES = 10
 DEFAULT_CONSECUTIVE_THRESHOLD = 3
+_LIVENESS_ATTEMPTS = 3
+_LIVENESS_RETRY_INTERVAL_S = 30.0
+PENDING_LKG_PASSES = 2
+PENDING_LKG_MIN_AGE_S = 600.0
+PENDING_LKG_PASSES_FILE = "health_probe_pending_lkg_passes"
 
 # Data-volume used fraction at which the probe fails (alert-only, see
 # `_disk_usage_failure`). Same line the 312 resource watcher alerts at
@@ -125,6 +131,37 @@ def _gateway_liveness() -> bool:
         return False
 
 
+def _gateway_liveness_with_retry() -> bool:
+    """Filter a short gateway/data-plane restart window before declaring failure."""
+    for attempt in range(_LIVENESS_ATTEMPTS):
+        if _gateway_liveness():
+            return True
+        if attempt < _LIVENESS_ATTEMPTS - 1:
+            time.sleep(_LIVENESS_RETRY_INTERVAL_S)
+    return False
+
+
+def _data_plane_abnormal() -> bool:
+    """True when either dependency behind the gateway is currently unreachable."""
+    import shared.db
+    from shared.redis_client import sync_redis
+
+    try:
+        with shared.db.connect(autocommit=True):
+            pass
+    except Exception:
+        return True
+    try:
+        client = sync_redis()
+        try:
+            client.ping()  # pyright: ignore[reportUnknownMemberType] — redis-py types ping's optional argument as Unknown.
+        finally:
+            client.close()
+    except Exception:
+        return True
+    return False
+
+
 def _agent_population(min_agents: int) -> bool:
     """Check that at least `min_agents` agents are in running/idling status.
 
@@ -148,6 +185,90 @@ def _agent_population(min_agents: int) -> bool:
         # an unhealthy state. The gateway liveness check would also fail in
         # that case, so this is a secondary signal.
         return False
+
+
+def _agent_population_failure_class(min_agents: int) -> str | None:
+    """Classify a failed population check without turning DB loss into code evidence."""
+    import shared.db
+
+    try:
+        with shared.db.connect(autocommit=True) as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT COUNT(*) FROM agents_meta WHERE status IN ('running', 'idling') "
+                "AND lease_expires_at > now()"
+            )
+            row = cur.fetchone()
+    except Exception:
+        return "environment"
+    if row is None:
+        return "code"
+    return "code" if row[0] < min_agents else None
+
+
+def _reset_pending_lkg_streak(home: Path) -> None:
+    """Forget a partial observation window after any rollback-gating failure."""
+    (home / PENDING_LKG_PASSES_FILE).unlink(missing_ok=True)
+
+
+def _advance_pending_lkg(home: Path) -> None:
+    """Record a healthy gating pass and promote a mature pending LKG candidate."""
+    from shared.cluster_pin import get_pending_known_good, promote_pending_known_good_if_ready
+
+    marker = home / PENDING_LKG_PASSES_FILE
+    try:
+        pending = get_pending_known_good()
+        if pending is None:
+            marker.unlink(missing_ok=True)
+            return
+        pending_sha, _pending_at = pending
+        try:
+            stored_sha, stored_count = marker.read_text().splitlines()
+            count = int(stored_count) + 1 if stored_sha == pending_sha else 1
+        except (FileNotFoundError, ValueError):
+            count = 1
+        marker.write_text(f"{pending_sha}\n{count}")
+        if count >= PENDING_LKG_PASSES and promote_pending_known_good_if_ready(
+            min_age_s=PENDING_LKG_MIN_AGE_S
+        ):
+            print(f"  ✓ last-known-good advanced -> {pending_sha[:7]} (observation window passed)")
+            marker.unlink(missing_ok=True)
+    except Exception as exc:
+        print(
+            f"  . pending last-known-good observation unavailable: {type(exc).__name__}",
+            file=sys.stderr,
+        )
+
+
+def _unhealthy(
+    home: Path,
+    message: str,
+    *,
+    auto_rollback: bool,
+    threshold: int,
+    failure_class: str = "code",
+) -> int:
+    """Alert a gating failure, counting only code/config evidence toward rollback."""
+    print(message, file=sys.stderr)
+    _reset_pending_lkg_streak(home)
+    deploying = _deploy_suppression() if auto_rollback else None
+    if deploying is None:
+        _alert_failure(home, message)
+        if failure_class == "environment":
+            print("  environment-class failure — NOT counted toward auto-rollback", file=sys.stderr)
+        elif auto_rollback:
+            _handle_consecutive_failure(
+                home, threshold, failure_class=failure_class, reason=message
+            )
+        return 1
+
+    print(f"  deploy in flight — NOT alerting ({deploying})", file=sys.stderr)
+    _reset_failure_count(home)
+    print(
+        f"  deploy in flight — NOT counting this failure toward auto-rollback "
+        f"(counter reset; the pre-deploy failures were about the old commit): {deploying}",
+        file=sys.stderr,
+    )
+    return 1
 
 
 def _crash_loop_detection(max_restarts: int, window_minutes: int) -> bool:
@@ -385,46 +506,16 @@ def run_health_probe(
         print(f"health-probe refused: {refusal}", file=sys.stderr)
         return 2
 
-    def _unhealthy(message: str) -> int:
-        print(message, file=sys.stderr)
-        # A deploy suppresses the ROLLBACK and the alert: the rollout itself
-        # reports failure (log + IM), and every check here fails by design
-        # while services stop and migrate (2026-08-05 user ruling — the
-        # cluster-health alert misfired on every deploy).
-        deploying = _deploy_suppression() if auto_rollback else None
-        if deploying is None:
-            _alert_failure(home, message)
-            if auto_rollback:
-                _handle_consecutive_failure(home, threshold)
-        else:
-            # Deploy in flight — gateway/services going down is the expected
-            # mid-transition state, not an incident; the rollout itself reports
-            # failure (rollout log + IM). Do NOT alert: 2026-08-05 user ruling
-            # — the cluster-health alert misfired on every deploy, resolved by
-            # the time the owner looked. A probe run after the deploy window
-            # closes still alerts normally (the state file is untouched).
-            print(f"  deploy in flight — NOT alerting ({deploying})", file=sys.stderr)
-            # Reset, not freeze. "Consecutive" has to mean consecutive: a deploy in the
-            # middle of the run of failures breaks the adjacency, and the failures
-            # before it were evidence about the commit the deploy has just *replaced*.
-            # Freezing the counter let 2 pre-deploy failures plus 1 post-deploy failure
-            # reach a threshold of 3 and roll production back to "last known good" on
-            # the strength of two observations of code that is no longer running.
-            # Resetting costs nothing a cold start would not also cost: the countdown
-            # cannot advance during the deploy either way, so a release that really is
-            # bad still trips `threshold` probes after the window closes.
-            _reset_failure_count(home)
-            print(
-                f"  deploy in flight — NOT counting this failure toward auto-rollback "
-                f"(counter reset; the pre-deploy failures were about the old commit): "
-                f"{deploying}",
-                file=sys.stderr,
-            )
-        return 1
-
     # 1. Gateway liveness (primary signal)
-    if not _gateway_liveness():
-        return _unhealthy("FAIL: gateway liveness — health endpoint unreachable or non-200")
+    if not _gateway_liveness_with_retry():
+        failure_class = "environment" if _data_plane_abnormal() else "code"
+        return _unhealthy(
+            home,
+            "FAIL: gateway liveness — health endpoint unreachable or non-200",
+            auto_rollback=auto_rollback,
+            threshold=threshold,
+            failure_class=failure_class,
+        )
     print("  ✓ gateway liveness")
 
     # 2. Agent population
@@ -438,7 +529,11 @@ def run_health_probe(
         agent_min = settings.daemon.health_probe_agent_min
     if not _agent_population(agent_min):
         return _unhealthy(
-            f"FAIL: agent population — fewer than {agent_min} agent(s) running/idling"
+            home,
+            f"FAIL: agent population — fewer than {agent_min} agent(s) running/idling",
+            auto_rollback=auto_rollback,
+            threshold=threshold,
+            failure_class=_agent_population_failure_class(agent_min) or "code",
         )
     print(f"  ✓ agent population (>= {agent_min})")
 
@@ -446,8 +541,11 @@ def run_health_probe(
     if check_crash_loops:
         if not _crash_loop_detection(crash_loop_max_restarts, crash_loop_window_minutes):
             return _unhealthy(
+                home,
                 f"FAIL: crash-loop detected — agent(s) restarted > {crash_loop_max_restarts} "
-                f"times in {crash_loop_window_minutes} min"
+                f"times in {crash_loop_window_minutes} min",
+                auto_rollback=auto_rollback,
+                threshold=threshold,
             )
         print(
             f"  ✓ crash-loop check (<= {crash_loop_max_restarts} restarts / "
@@ -458,7 +556,10 @@ def run_health_probe(
     if check_schema:
         if not _schema_health():
             return _unhealthy(
-                "FAIL: schema health — applied version behind required (CodeBehindSchema)"
+                home,
+                "FAIL: schema health — applied version behind required (CodeBehindSchema)",
+                auto_rollback=auto_rollback,
+                threshold=threshold,
             )
         print("  ✓ schema health")
 
@@ -471,6 +572,7 @@ def run_health_probe(
     # nothing a cold start would not also cost).
     if auto_rollback:
         _reset_failure_count(home)
+    _advance_pending_lkg(home)
 
     # 5. Per-service health + the fleet UI entry port — alert-only: fails the probe
     # but does NOT feed the auto-rollback counter (see module docstring), so it

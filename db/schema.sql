@@ -847,7 +847,9 @@ CREATE TABLE cluster_pin (
     updated_at TIMESTAMPTZ,
     updated_by TEXT,
     last_known_good_sha TEXT,
-    last_known_good_at TIMESTAMPTZ
+    last_known_good_at TIMESTAMPTZ,
+    pending_known_good_sha TEXT,
+    pending_known_good_at TIMESTAMPTZ
 );
 INSERT INTO cluster_pin (id, target_sha) VALUES (1, NULL);
 

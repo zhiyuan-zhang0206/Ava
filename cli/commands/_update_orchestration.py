@@ -6,9 +6,8 @@ under the size ceiling; these are the standalone steps:
 - `_classify_rollout` — decide what kind of change is imminent + whether to
   fast-path (docs-only / frontend-only) out of the full pause/migrate/fan-out.
 - `_persist_cluster_pin` — record the cluster's standing `cluster_target_sha`
-  after the gateway reaches the rollout target, and advance `last_known_good_sha`
-  when the rollout changed backend code (so the health-probe rollback has a
-  fallback anchor).
+  after the gateway reaches the rollout target, and stage backend changes for
+  health-probe observation before they advance `last_known_good_sha`.
 - `_resolve_fanout_targets` — the fan-out target list, reconciled against a live
   probe of every host the `stopped_at` filter would drop, and reported as
   "N of M registered agent-runner(s)".
@@ -35,10 +34,10 @@ def _persist_cluster_pin(target_sha: str, *, origin: str, advance_known_good: bo
     """Record `target_sha` as the cluster's standing pin (`cluster_target_sha`)
     once the gateway's local update reaches it.
 
-    When `advance_known_good=True` (a backend-changing rollout), the current
-    `target_sha` is atomically moved to `last_known_good_sha` before writing the
-    new target — so the health-probe rollback has the previous release as its
-    automatic fallback. Frontend-only / docs-only / restart-only rollouts pass
+    When `advance_known_good=True` (a backend-changing rollout), the target is
+    recorded as pending-known-good. The health probe promotes it only after its
+    observation window, preserving the prior release as the automatic rollback
+    anchor. Frontend-only / docs-only / restart-only rollouts pass
     `advance_known_good=False` (no code change, so the known-good anchor stays
     on the last real code change).
 
@@ -46,16 +45,22 @@ def _persist_cluster_pin(target_sha: str, *, origin: str, advance_known_good: bo
     node's HEAD against it. `origin` (who triggered the rollout) rides into the
     pin's `updated_by` alongside the executing process, so the pin row alone
     answers "who moved the cluster"."""
-    from shared.cluster_pin import advance_pin, set_cluster_target_sha
+    from shared.cluster_pin import (
+        get_last_known_good_sha,
+        set_cluster_target_sha,
+        set_target_with_pending_known_good,
+    )
     from shared.machine import machine_name
 
     set_by = f"{machine_name()}:pid{os.getpid()} origin={origin}"
     if advance_known_good:
-        old = advance_pin(target_sha, set_by=set_by)
-        old_display = old[:7] if old else "(none)"
+        old_lkg = get_last_known_good_sha()
+        old_display = old_lkg[:7] if old_lkg else "(none)"
+        set_target_with_pending_known_good(target_sha, set_by=set_by)
         print(
-            f"  ✓ cluster pin advanced -> {target_sha[:7]} "
-            f"(last-known-good: {old_display}, origin={origin})"
+            f"  ✓ cluster pin updated -> {target_sha[:7]} "
+            f"(last-known-good NOT advanced: {old_display} pending for the observation window, "
+            f"origin={origin})"
         )
     else:
         set_cluster_target_sha(target_sha, set_by=set_by)
