@@ -560,6 +560,7 @@ _PER_TEST_TRUNCATE_TABLES = (
     "events",
     "event_dismissals",
     "agents",
+    "ledger_unpriced_backfill_20260824",
     "alerts",
     "machines",
     "machine_probe",
