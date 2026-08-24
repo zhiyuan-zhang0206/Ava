@@ -27,7 +27,7 @@ from gateway.app import app
 from ops import cluster as cluster_mod
 from ops import cluster_deploy, cluster_pause, cluster_status
 from ops import update_check as update_check_mod
-from shared.cluster_lock import DeployLease
+from shared.cluster_lock import DeployLease, RecoveryClaim
 
 
 @pytest.fixture
@@ -284,6 +284,7 @@ class _FakeSessionBackend:
         self.alive_answer: bool | list[bool] = False
         self.alive_by_name: dict[str, bool] = {}
         self.spawn_ok = True
+        self.spawn_ok_by_name: dict[str, bool] = {}
 
     def _alive(self, name: str) -> bool:
         if name in self.alive_by_name:
@@ -304,7 +305,7 @@ class _FakeSessionBackend:
     def new_session(self, name: str, cmd: str, cwd: object, *, env: object, **_: object) -> bool:
         self.spawned.append(name)
         self.spawn_calls.append((name, cmd, cwd))
-        return self.spawn_ok
+        return self.spawn_ok_by_name.get(name, self.spawn_ok)
 
     def list_sessions(self, prefix: str = "") -> list[str]:
         return []
@@ -325,7 +326,15 @@ def spawn_backend(monkeypatch: pytest.MonkeyPatch) -> _FakeSessionBackend:
     every in-flight probe (`_has_orchestration_session`) to the fake, so the
     spawn tests below assert on the recorded command instead of a raw argv."""
     backend = _FakeSessionBackend()
+
+    def _skip_ui_owner(**_kw: object) -> None:
+        return None
+
     monkeypatch.setattr("shared.session_backend.get_backend", lambda: backend)
+    # Command-shape tests have no detached child to acquire the DB lease and
+    # publish the UI owner. The wait/child-ownership contract is covered by the
+    # dedicated lifecycle and spawn-backend suites.
+    monkeypatch.setattr(cluster_deploy, "_wait_for_ui_owner", _skip_ui_owner)
     return backend
 
 
@@ -708,7 +717,7 @@ class TestSpawnUpdate:
         monkeypatch.setattr("shared.paths.ava_home", lambda: tmp_path)
         posture: list[str] = []
         monkeypatch.setattr("shared.host_deploy_state.set_posture", posture.append)
-        spawn_backend.spawn_ok = False
+        spawn_backend.spawn_ok_by_name["ava-test-updater"] = False
 
         with pytest.raises(cluster_mod.OrchestrationSpawnFailed):
             cluster_mod.spawn_update()
@@ -1319,17 +1328,30 @@ class TestClusterRecoverEndpoint:
         monkeypatch.setattr(ops_mod, "read_update_lease", lambda: None)
         monkeypatch.setattr(ops_mod, "updater_lease_live", lambda: False)
         monkeypatch.setattr(ops_mod, "unpause_local_cluster", lambda: calls.append("unpause"))
+
+        def _claim(
+            _holder: str, _observed: DeployLease | None, *, ttl_s: float = 60.0
+        ) -> RecoveryClaim:
+            del ttl_s
+            calls.append("claim")
+            return RecoveryClaim(acquired=True, previous_holder="stale-holder")
+
+        def _release(_holder: str) -> None:
+            calls.append("release")
+
+        monkeypatch.setattr(ops_mod, "claim_recovery_lock", _claim)
         monkeypatch.setattr(
             ops_mod,
-            "force_release_update_lock",
-            lambda: calls.append("force_release") or "stale-holder",
+            "release_update_lock",
+            _release,
         )
         with TestClient(app) as client:
             r = client.post("/api/cluster/recover")
         assert r.status_code == 200
         assert r.json() == {"unlocked_holder": "stale-holder"}
-        # Clear the lock first, THEN unpause (a clear-failure leaves it safely paused).
-        assert calls == ["force_release", "unpause"]
+        # Claim the exact observed generation, unpause while recovery owns the
+        # lease, then release only that recovery holder.
+        assert calls == ["claim", "unpause", "release"]
 
     def test_recovers_when_holder_is_dead(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """A held-but-stale lease (holder pid dead) is force-cleared at once — the
@@ -1342,15 +1364,27 @@ class TestClusterRecoverEndpoint:
         monkeypatch.setattr(ops_mod, "_lock_holder_is_live", lambda _h, **_kw: False)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
         monkeypatch.setattr(ops_mod, "updater_lease_live", lambda: False)
         monkeypatch.setattr(ops_mod, "unpause_local_cluster", lambda: calls.append("unpause"))
+
+        def _claim(
+            _holder: str, _observed: DeployLease | None, *, ttl_s: float = 60.0
+        ) -> RecoveryClaim:
+            del ttl_s
+            calls.append("claim")
+            return RecoveryClaim(acquired=True, previous_holder="mc:pid999")
+
+        def _release(_holder: str) -> None:
+            calls.append("release")
+
+        monkeypatch.setattr(ops_mod, "claim_recovery_lock", _claim)
         monkeypatch.setattr(
             ops_mod,
-            "force_release_update_lock",
-            lambda: calls.append("force_release") or "mc:pid999",
+            "release_update_lock",
+            _release,
         )
         with TestClient(app) as client:
             r = client.post("/api/cluster/recover")
         assert r.status_code == 200
-        assert calls == ["force_release", "unpause"]
+        assert calls == ["claim", "unpause", "release"]
 
     def test_refuses_409_when_updater_lease_live(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """The lease-less watchdog-spawned updater is visible only through this
@@ -1361,9 +1395,15 @@ class TestClusterRecoverEndpoint:
         monkeypatch.setattr(ops_mod, "read_update_lease", lambda: None)
         monkeypatch.setattr(ops_mod, "updater_lease_live", lambda: True)
         monkeypatch.setattr(ops_mod, "unpause_local_cluster", lambda: calls.append("unpause"))
-        monkeypatch.setattr(
-            ops_mod, "force_release_update_lock", lambda: calls.append("force_release")
-        )
+
+        def _unexpected_claim(
+            _holder: str, _observed: DeployLease | None, *, ttl_s: float = 60.0
+        ) -> RecoveryClaim:
+            del ttl_s
+            calls.append("claim")
+            return RecoveryClaim(acquired=False)
+
+        monkeypatch.setattr(ops_mod, "claim_recovery_lock", _unexpected_claim)
         with TestClient(app) as client:
             r = client.post("/api/cluster/recover")
         assert r.status_code == 409
@@ -1380,9 +1420,15 @@ class TestClusterRecoverEndpoint:
         monkeypatch.setattr(ops_mod, "read_update_lease", lambda: self._lease("mc:pid123"))
         monkeypatch.setattr(ops_mod, "_lock_holder_is_live", lambda _h, **_kw: True)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
         monkeypatch.setattr(ops_mod, "unpause_local_cluster", lambda: calls.append("unpause"))
-        monkeypatch.setattr(
-            ops_mod, "force_release_update_lock", lambda: calls.append("force_release")
-        )
+
+        def _unexpected_claim(
+            _holder: str, _observed: DeployLease | None, *, ttl_s: float = 60.0
+        ) -> RecoveryClaim:
+            del ttl_s
+            calls.append("claim")
+            return RecoveryClaim(acquired=False)
+
+        monkeypatch.setattr(ops_mod, "claim_recovery_lock", _unexpected_claim)
         with TestClient(app) as client:
             r = client.post("/api/cluster/recover")
         assert r.status_code == 409

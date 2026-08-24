@@ -30,9 +30,11 @@ def _main(argv: list[str]) -> int:
     from shared.host_deploy_state import clear_updater_lease, touch_updater_lease
 
     parser = argparse.ArgumentParser(prog="python -m cli.commands._updater_lease")
-    parser.add_argument("verb", choices=("touch", "clear"), nargs="?", default="touch")
+    parser.add_argument("verb", nargs="?", default="touch")
     parser.add_argument("--handoff-generation", default=None)
     args = parser.parse_args(argv[1:])
+    if args.verb not in ("touch", "clear"):
+        return 1
     if args.verb == "touch":
         if args.handoff_generation is not None:
             import os
