@@ -141,8 +141,6 @@ def ledger_token_plan(
     if ledger_from is None:
         return _TokenLedgerSums(0, 0, 0, 0, 0.0), tail_spans
     newest_day = _newest_token_ledger_day(pool)
-    ledger_from, ledger_to, tail_spans = token_window_plan(
-        window_start, now, newest_day=newest_day
-    )
+    ledger_from, ledger_to, tail_spans = token_window_plan(window_start, now, newest_day=newest_day)
     ledger = ledger_token_sums(pool, day_from=ledger_from, day_to=ledger_to)
     return ledger or _TokenLedgerSums(0, 0, 0, 0, 0.0), tail_spans
