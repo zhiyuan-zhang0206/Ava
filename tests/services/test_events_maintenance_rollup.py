@@ -199,7 +199,11 @@ def test_unknown_agent_rows_are_skipped_without_aborting_rollup(
         }
     )
     warnings: list[str] = []
-    monkeypatch.setattr(rollup.logger, "warning", lambda message: warnings.append(str(message)))
+
+    def _fake_warning(message: object, *args: object, **kwargs: object) -> None:
+        warnings.append(str(message))
+
+    monkeypatch.setattr(rollup.logger, "warning", _fake_warning)
 
     result = _roll(db, fake, monkeypatch)
 
