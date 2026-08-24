@@ -18,6 +18,7 @@ from psycopg_pool import ConnectionPool
 
 from gateway import loki_events
 from gateway.routers import _inspect_pg
+from gateway.routers._agent_cost import _INSPECT_QUERY_TIMEOUT_S, _query_timeout
 from gateway.routers._inspect_cache import InspectQueryCache
 from gateway.schemas import AgentStats
 from shared.loki_index_labels import INDEX_LABEL_CUTOVER_AT, ledger_gap_plan, retention_floor
@@ -84,9 +85,12 @@ def reset_for_tests() -> None:
 
 
 def _load_live_lifecycle(
-    agent_id: int, window: tuple[datetime, datetime]
+    agent_id: int,
+    window: tuple[datetime, datetime],
+    *,
+    timeout_s: float | None = None,
 ) -> list[tuple[datetime, str]]:
-    """Read one agent's indexed retained lifecycle leg with the interactive 8s bound."""
+    """Read one agent's indexed retained lifecycle leg within its query bound."""
     rows = loki_events.query_projected_lines(
         fields=[],
         template="{{ __line__ }}",
@@ -94,7 +98,7 @@ def _load_live_lifecycle(
         event_names=_LIFECYCLE_EVENT_PATTERNS,
         from_=window[0],
         to=window[1],
-        timeout_s=8.0,
+        timeout_s=timeout_s,
     )
     events: list[tuple[datetime, str]] = []
     seen: set[tuple[int, str]] = set()
@@ -114,6 +118,7 @@ def cached_live_lifecycle(
     *,
     window: tuple[datetime, datetime] | None,
     freeze: datetime | None,
+    timeout_s: float | None = None,
 ) -> list[tuple[datetime, str]]:
     """Return the once-per-agent indexed lifecycle leg for about thirty minutes.
 
@@ -131,9 +136,10 @@ def cached_live_lifecycle(
         if _lifecycle_cache_freeze != freeze:
             _lifecycle_cache.clear()
             _lifecycle_cache_freeze = freeze
+    load_timeout_s = _INSPECT_QUERY_TIMEOUT_S if timeout_s is None else timeout_s
     return _lifecycle_cache.get_or_load(
         agent_id,
-        lambda: _load_live_lifecycle(agent_id, window),
+        lambda: _load_live_lifecycle(agent_id, window, timeout_s=load_timeout_s),
         ttl_s=_LIFECYCLE_CACHE_TTL_S,
         now=time_mod.monotonic,
     )
@@ -253,6 +259,7 @@ def _projected_live_values(
     token_spans: list[tuple[datetime, datetime]],
     distribution_window: tuple[datetime, datetime] | None,
     activity_window: tuple[datetime, datetime] | None,
+    deadline: float | None = None,
 ) -> _LiveInspectValues:
     """Reduce one raw Loki line pass over every live interval inspect needs.
 
@@ -281,7 +288,7 @@ def _projected_live_values(
         ],
         from_=min(start for start, _ in spans),
         to=max(end for _, end in spans),
-        timeout_s=8.0,
+        timeout_s=_query_timeout(deadline),
         limit_per_slice=20000,
     )
 
@@ -363,7 +370,12 @@ def _turn_distribution(
 
 
 def inspect_values(
-    pool: ConnectionPool[Any], agent_id: int, from_: datetime | None, to: datetime | None
+    pool: ConnectionPool[Any],
+    agent_id: int,
+    from_: datetime | None,
+    to: datetime | None,
+    *,
+    deadline: float | None = None,
 ) -> InspectValues:
     """Build stats, TPS, and activity inputs from one archive/ledger/live view.
 
@@ -456,17 +468,23 @@ def inspect_values(
     lifecycle_window = _inspect_pg.retained_live_window(
         from_=INDEX_LABEL_CUTOVER_AT, to=None, freeze=freeze
     )
+    if deadline is not None and deadline <= time_mod.monotonic():
+        raise TimeoutError
     live = _projected_live_values(
         agent_id,
         stats_spans=stats_spans,
         token_spans=token_spans,
         distribution_window=distribution_window,
         activity_window=activity_window,
+        deadline=deadline,
     )
+    if deadline is not None and deadline <= time_mod.monotonic():
+        raise TimeoutError
     live_lifecycle = cached_live_lifecycle(
         agent_id,
         window=lifecycle_window,
         freeze=freeze,
+        timeout_s=_query_timeout(deadline),
     )
     distribution = _turn_distribution(archive_distribution, live.distribution)
     minimum = min(
