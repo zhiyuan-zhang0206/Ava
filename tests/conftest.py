@@ -552,9 +552,8 @@ def pytest_sessionstart(session: pytest.Session) -> None:
 # constant so tests/test_lint_truncate_isolation.py can AST-parse it and fail
 # when a new per-test data table is not covered (by this list, an FK-cascade
 # from it, or an explicit exemption there). Singleton/infra tables
-# (deployment_state, cluster_update_lock, ...) and registries with their own
-# cleaning fixtures (agent_watchers) are deliberately absent — see the guard's
-# exemption list for the reasons.
+# (deployment_state, cluster_update_lock, ...) are deliberately absent — see
+# the guard's exemption list for the reasons.
 _PER_TEST_TRUNCATE_TABLES = (
     "inbound_messages",
     "agents_meta",
