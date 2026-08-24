@@ -105,6 +105,9 @@ _JSONL_ROLLUP_RETENTION_DAYS = 90
 # MUST match the event selectors aggregated by
 # services/events_maintenance/rollup.py:_tokens_queries/_metrics_queries
 # (shared cannot import services without reversing the layer boundary).
+# Loki additionally restricts llm_usage/turn_end to telemetry|log; those
+# families are emitted only in those categories today, so this name-only filter
+# is equivalent. A category change must update both selectors together.
 _JSONL_ROLLUP_SOURCE_EVENTS = frozenset({"llm_usage", "turn_end"})
 
 
