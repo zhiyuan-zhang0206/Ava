@@ -30,6 +30,7 @@ import pytest
 
 from shared.platform import IS_LINUX, IS_WINDOWS
 from shared.pty_sessions import cli as pty_cli
+from shared.pty_sessions import host as pty_host
 from shared.pty_sessions._paths import host_identity, record_path, socket_path
 from shared.pty_sessions.cli import write_env_file
 from shared.pty_sessions.host import PtySession, _op_is_idle, _parse_request
@@ -209,6 +210,85 @@ def test_transcript_log_is_capped(tmp_path: Path) -> None:
     s.log_write(b"c" * 50)
     assert s._log_written == 100
     assert len(log_file.read_bytes()) == 100, "log must not grow past the cap"
+
+
+def test_prune_stale_transcripts_only_removes_old_top_level_out_logs(tmp_path: Path) -> None:
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    old_transcript = logs / "ava-agent-1-shell-1.out.log"
+    fresh_transcript = logs / "ava-agent-1-shell-2.out.log"
+    host_log = logs / "ava-agent-1-shell-1.host.log"
+    other_suffix = logs / "ava-agent-1-shell-1.stderr.log"
+    matching_directory = logs / "directory.out.log"
+    trash = tmp_path / "logs-trash-old-20260824"
+    trash_transcript = trash / "ava-agent-1.out.log"
+    matching_directory.mkdir()
+    trash.mkdir()
+    for path in (old_transcript, fresh_transcript, host_log, other_suffix, trash_transcript):
+        path.write_text(path.name, encoding="utf-8")
+    old_mtime = time.time() - 8 * 24 * 60 * 60
+    for path in (old_transcript, host_log, other_suffix, trash_transcript):
+        os.utime(path, (old_mtime, old_mtime))
+
+    pty_host.prune_stale_transcripts(logs)
+
+    assert not old_transcript.exists()
+    assert fresh_transcript.exists()
+    assert host_log.exists()
+    assert other_suffix.exists()
+    assert matching_directory.is_dir()
+    assert trash_transcript.exists()
+
+
+def test_prune_stale_transcripts_runs_at_most_once_per_day(tmp_path: Path) -> None:
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    first = logs / "first.out.log"
+    first.write_text("first", encoding="utf-8")
+    old_mtime = time.time() - 8 * 24 * 60 * 60
+    os.utime(first, (old_mtime, old_mtime))
+
+    pty_host.prune_stale_transcripts(logs)
+    stamp = logs / ".transcript-retention.stamp"
+    stamped_at = stamp.read_text(encoding="ascii")
+    assert not first.exists()
+
+    second = logs / "second.out.log"
+    second.write_text("second", encoding="utf-8")
+    os.utime(second, (old_mtime, old_mtime))
+    pty_host.prune_stale_transcripts(logs)
+
+    assert second.exists(), "a second host startup on the same day must not rescan"
+    assert stamp.read_text(encoding="ascii") == stamped_at
+
+
+def test_host_startup_prunes_its_transcript_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    logs = tmp_path / "logs"
+    transcript = logs / "ava-test-retention-startup.out.log"
+    pruned: list[Path] = []
+
+    def _ignore_call(*_args: object, **_kwargs: object) -> None:
+        pass
+
+    monkeypatch.setattr(pty_host.signal, "signal", _ignore_call)
+    monkeypatch.setattr(pty_host.logger, "add", _ignore_call)
+    monkeypatch.setattr(pty_host, "prune_stale_transcripts", pruned.append)
+
+    result = pty_host.main(
+        [
+            "ava-test-retention-startup",
+            str(tmp_path),
+            str(tmp_path / "missing.env.sh"),
+            str(tmp_path / "record.json"),
+            str(tmp_path / "session.sock"),
+            str(transcript),
+        ]
+    )
+
+    assert result == 1
+    assert pruned == [logs]
 
 
 def test_parse_request_rejects_non_object() -> None:
