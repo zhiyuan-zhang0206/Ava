@@ -24,6 +24,7 @@ EXPECTED_PINNED_FORMULAE = frozenset(
         "redis",
         "redis@8.2",
         "tailscale",
+        "uv",
     }
 )
 
@@ -32,9 +33,20 @@ def _ctx(tmp_path: Path) -> cv.ConvergeCtx:
     return cv.ConvergeCtx(repo=Path("/repo"), ava_home=tmp_path, roles=cv.ALL_ROLES)
 
 
-def _brew_output(monkeypatch: pytest.MonkeyPatch, formulae: set[str]) -> None:
+def _brew_output(
+    monkeypatch: pytest.MonkeyPatch,
+    pinned: set[str],
+    installed: set[str] | None = None,
+) -> None:
+    installed_formulae = set(EXPECTED_PINNED_FORMULAE) if installed is None else installed
+
     def fake_run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
-        assert args == ["brew", "list", "--pinned"]
+        if args == ["brew", "list", "--pinned"]:
+            formulae = pinned
+        elif args == ["brew", "list", "--formula"]:
+            formulae = installed_formulae
+        else:
+            raise AssertionError(f"unexpected brew command: {args!r}")
         return subprocess.CompletedProcess(args, 0, stdout="\n".join(sorted(formulae)), stderr="")
 
     monkeypatch.setattr(brew_pin.subprocess, "run", fake_run)
@@ -83,6 +95,36 @@ def test_missing_formula_warns_with_manual_repin_command(
     assert warning.startswith("  ! brew-pin:")
     assert "redis@8.2" in warning
     assert "brew pin redis@8.2" in warning
+
+
+def test_uninstalled_manifest_formula_is_not_flagged(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(cbp, "IS_MACOS", True)
+    installed = set(EXPECTED_PINNED_FORMULAE - {"grafana"})
+    _brew_output(monkeypatch, installed, installed=installed)
+
+    cbp.ensure_brew_pin(_ctx(tmp_path))
+
+    assert capsys.readouterr().err == ""
+
+
+def test_installed_but_unpinned_formula_still_warns(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(cbp, "IS_MACOS", True)
+    pinned = set(EXPECTED_PINNED_FORMULAE - {"grafana"})
+    _brew_output(monkeypatch, pinned, installed=set(EXPECTED_PINNED_FORMULAE))
+
+    cbp.ensure_brew_pin(_ctx(tmp_path))
+
+    warning = capsys.readouterr().err
+    assert "grafana" in warning
+    assert "brew pin grafana" in warning
 
 
 def test_brew_absent_is_silent(
