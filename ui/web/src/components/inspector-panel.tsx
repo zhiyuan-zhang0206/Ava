@@ -657,8 +657,7 @@ function LivenessSection({ inspect }: { inspect: AgentInspectLive }) {
         <Metric
           className="col-span-2"
           label="Birth"
-          value={formatRelative(spawned_at)}
-          sub={formatAbsolute(spawned_at)}
+          value={`${formatRelative(spawned_at)}, ${formatAbsolute(spawned_at)}`}
         />
         <Metric label="Next heartbeat" value={next.value} />
         <Metric
