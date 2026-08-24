@@ -99,13 +99,22 @@ def test_self_unpauses_when_old(
     fake_pause(sp.STRANDED_PAUSE_TIMEOUT_S + 60)
     monkeypatch.setattr(sp, "read_update_lease", lambda: None)
     unpaused: list[bool] = []
-    marker_clears: list[bool] = []
+    marker_clears: list[str] = []
     monkeypatch.setattr(sp, "unpause_local_cluster", lambda: unpaused.append(True))
-    monkeypatch.setattr(sp.ui_update_state, "force_clear", lambda: marker_clears.append(True))
+    monkeypatch.setattr(
+        sp.ui_update_state,
+        "read",
+        lambda: sp.ui_update_state.UiUpdateSnapshot(
+            status="updating",
+            generation="stale-generation",
+            kind="rollout",
+        ),
+    )
+    monkeypatch.setattr(sp.ui_update_state, "clear", marker_clears.append)
     with caplog.at_level("WARNING"):
         assert sp.recover_stranded_pause() is True
     assert unpaused == [True]
-    assert marker_clears == [True]
+    assert marker_clears == ["stale-generation"]
     assert any("nothing is coming back" in r.message for r in caplog.records)
 
 

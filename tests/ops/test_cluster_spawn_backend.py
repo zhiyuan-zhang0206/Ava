@@ -458,16 +458,22 @@ def test_spawn_update_logs_nonzero_validate_fetch(
 def test_native_updater_chains_touch_and_clear_the_lease(
     restart_only: bool, native_host: _FakeSessionBackend
 ) -> None:
-    """Both native updater shapes carry the R1 lease steps (Task #1021): a
-    fail-soft `_updater_lease touch` ahead of the restart and a trailing clear,
-    so the stalled-updater controller and Phase B judge the session by its
-    lease instead of log mtimes. `ver>nul` is the cmd.exe `|| true`."""
+    """Both native updater shapes claim the handoff before any mutation.
+
+    The claim is a hard gate: unlike the observational DB-lease write inside
+    ``touch``, its failure must short-circuit the checkout/restart chain.  Every
+    terminal arm still attempts the generation-scoped clear.
+    """
     cluster_mod.spawn_update(restart_only=restart_only)
 
     cmd = native_host.spawned[0][1]
-    assert "cli.commands._updater_lease touch" in cmd
+    touch = "cli.commands._updater_lease touch"
+    assert touch in cmd
     assert "cli.commands._updater_lease clear" in cmd
-    assert "|| ver>nul" in cmd
+    after_touch = cmd.split(touch, 1)[1]
+    claim, separator, _mutations = after_touch.partition("&&")
+    assert separator == "&&"
+    assert "||" not in claim
 
 
 @pytest.mark.real_cluster_spawn
@@ -643,7 +649,29 @@ def test_backend_decline_raises_orchestration_spawn_failed(
     dependency."""
     calls: list[str] = []
     monkeypatch.setattr("shared.host_deploy_state.set_posture", calls.append)
-    monkeypatch.setattr(posix_native_host, "new_session", lambda *_a, **_k: False)  # pyright: ignore[reportUnknownArgumentType]
+    original_new_session = posix_native_host.new_session
+
+    def _decline_only_updater(
+        name: str,
+        cmd: str,
+        cwd: Path,
+        *,
+        env: dict[str, str],
+        login_shell: bool = True,
+        exec_cmd: bool = True,
+    ) -> bool:
+        if name == "ava-test-updater":
+            return False
+        return original_new_session(
+            name,
+            cmd,
+            cwd,
+            env=env,
+            login_shell=login_shell,
+            exec_cmd=exec_cmd,
+        )
+
+    monkeypatch.setattr(posix_native_host, "new_session", _decline_only_updater)
 
     with pytest.raises(cluster_mod.OrchestrationSpawnFailed):
         cluster_mod.spawn_update(restart_only=True)
