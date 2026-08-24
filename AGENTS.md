@@ -51,14 +51,17 @@ Windows unit carries `agent-runner` only
 ([setup](conventions/windows-setup.md)). Rationale + the remaining slice:
 [`future/infra/embedded-per-cluster-data-plane.md`](future/infra/embedded-per-cluster-data-plane.md).
 
-**Auth follows the secret.** With a secret set, each cluster connects to
-Postgres as its own role and to redis as its own ACL user (the identifiers its
-URLs carry, as data — never derived from a name), authenticating with
-`AVA_CLUSTER_SECRET`; the gateway API + /ops require it as a bearer, Postgres and
-its pooler bind loopback + this host's reachable address only, and Redis is always
-loopback-only with off-box inbound carried by the host-level relay bridge. An
-EMPTY secret (single-box default — off is fully off) serves everything
-unauthenticated, loopback-only.
+**Auth follows the authority boundary.** `AVA_CLUSTER_SECRET` is the
+control-plane bearer for the gateway API, `/ops`, bootstrap, and machine
+registration. The gateway alone holds the independent Postgres owner password
+(`AVA_DB_ADMIN_PASSWORD`) and Redis default-user password
+(`AVA_REDIS_ADMIN_PASSWORD`); agents receive only the runner DB projection and
+the Redis ACL credential embedded in `AVA_REDIS_URL`. Identity stays data in URL
+usernames, never derived from a name. The bearer still decides the network
+posture: Postgres and its pooler bind loopback + this host's reachable address
+only when set; Redis is always loopback-only with off-box inbound carried by the
+host-level relay bridge. An EMPTY secret (single-box default — off is fully off)
+keeps every credential empty and serves everything unauthenticated, loopback-only.
 
 | Path | Role |
 |---|---|
@@ -67,8 +70,9 @@ unauthenticated, loopback-only.
 
 Cluster identity is born at **install time** (`scripts/install.sh` →
 `python -m cli.install_cluster`): registry record + port block + the cluster's
-own pg/redis + provisioned db + cluster `.env` (secret: single-machine =
-NO-AUTH empty; gateway-only = minted; existing secrets never rotate). The home
+own pg/redis + provisioned db + cluster `.env` (single-machine = NO-AUTH empty;
+gateway-only = minted bearer plus independent data-plane credentials; existing
+credentials never rotate at install). The home
 is resolved **checkout-anchored** (`AVA_HOME` env > prod source → `~/.ava` > the
 checkout's `.ava_home` pointer; a contradicting env refuses outright unless
 `AVA_HOME_OVERRIDE=1`) — never cwd, never a flag. `ava start` is a pure

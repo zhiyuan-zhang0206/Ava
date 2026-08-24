@@ -14,6 +14,8 @@ import pytest
 
 from ops import agent_launch
 
+_RUNNER_URL = "postgresql://ava_runner:runner-password@x/db"
+
 
 def test_agent_spawn_forwards_display(monkeypatch: pytest.MonkeyPatch) -> None:
     """The agent process gates its chrome MCP on the same display verdict, so the
@@ -24,7 +26,7 @@ def test_agent_spawn_forwards_display(monkeypatch: pytest.MonkeyPatch) -> None:
         os,
         "environ",
         {
-            "AVA_DB_URL": "postgresql://x/db",
+            "AVA_DB_URL": _RUNNER_URL,
             "DISPLAY": ":0",
             "WAYLAND_DISPLAY": "wayland-0",
             "HOME": "/Users/op",
@@ -41,7 +43,7 @@ def test_agent_spawn_does_not_forward_empty_display(monkeypatch: pytest.MonkeyPa
     so an empty passthrough is dropped rather than carried through as "" (which
     would re-enable the chrome MCP gate on a headless box via a stripped-but-
     present-looking $DISPLAY)."""
-    monkeypatch.setattr(os, "environ", {"AVA_DB_URL": "postgresql://x/db", "DISPLAY": ""})
+    monkeypatch.setattr(os, "environ", {"AVA_DB_URL": _RUNNER_URL, "DISPLAY": ""})
     env = agent_launch.agent_spawn_env_dict()
     assert "DISPLAY" not in env
 
@@ -51,7 +53,7 @@ def test_agent_spawn_drops_secrets_and_fetch_skip(monkeypatch: pytest.MonkeyPatc
         os,
         "environ",
         {
-            "AVA_DB_URL": "postgresql://x/db",  # guide key (cluster-pinned but forwarded)
+            "AVA_DB_URL": _RUNNER_URL,
             "AVA_GATEWAY_PORT": "9000",  # guide key (single-box localhost fallback)
             "AVA_LLM_OVERRIDE": "mod:fac",  # agent-scope, not in bootstrap payload
             "AVA_RESTARTER_HEALTH_PORT": "8102",  # host-scope daemon port — forwarded
@@ -60,7 +62,7 @@ def test_agent_spawn_drops_secrets_and_fetch_skip(monkeypatch: pytest.MonkeyPatc
         },
     )
     env = agent_launch.agent_spawn_env_dict()
-    assert env["AVA_DB_URL"] == "postgresql://x/db"
+    assert env["AVA_DB_URL"] == _RUNNER_URL
     assert env["AVA_GATEWAY_PORT"] == "9000"
     assert env["AVA_LLM_OVERRIDE"] == "mod:fac"
     assert "DEEPSEEK_API_KEY" not in env  # dropped so the child re-fetches
@@ -77,6 +79,32 @@ def test_agent_spawn_drops_secrets_and_fetch_skip(monkeypatch: pytest.MonkeyPatc
     assert "AVA_CONFIG_SOURCE" not in env
 
 
+def test_agent_spawn_replaces_gateway_owner_url_with_runner_projection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The launcher is the final privilege boundary: an agent receives the
+    runner URL even when its gateway parent carries the owner URL, and never
+    receives either data-plane admin password."""
+    monkeypatch.setattr(
+        os,
+        "environ",
+        {
+            "AVA_DB_URL": "postgresql://ava:owner-password@127.0.0.1:5433/ava",
+            "AVA_DB_ADMIN_PASSWORD": "db-admin-only",
+            "AVA_REDIS_ADMIN_PASSWORD": "redis-admin-only",
+            "AVA_REDIS_PASSWORD": "redis-runtime-only",
+        },
+    )
+    monkeypatch.setattr("shared.cluster.runner_password_from_env", lambda: "runner-password")
+
+    env = agent_launch.agent_spawn_env_dict()
+
+    assert env["AVA_DB_URL"] == "postgresql://ava_runner:runner-password@127.0.0.1:5433/ava"
+    assert "AVA_DB_ADMIN_PASSWORD" not in env
+    assert "AVA_REDIS_ADMIN_PASSWORD" not in env
+    assert "AVA_REDIS_PASSWORD" not in env
+
+
 def test_agent_spawn_never_pins_a_config_source(monkeypatch: pytest.MonkeyPatch) -> None:
     """The child derives its config source from its own role at Settings build
     (shared.bootstrap.config_source_is_local); no pin rides in the env. A
@@ -85,7 +113,7 @@ def test_agent_spawn_never_pins_a_config_source(monkeypatch: pytest.MonkeyPatch)
         os,
         "environ",
         {
-            "AVA_DB_URL": "postgresql://x/db",
+            "AVA_DB_URL": _RUNNER_URL,
             "DEEPSEEK_API_KEY": "secret",
             "AVA_CONFIG_FETCH": "skip",
         },
@@ -117,7 +145,7 @@ def test_agent_spawn_carries_temp_dir(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         os,
         "environ",
-        {"AVA_DB_URL": "postgresql://x/db", "TMPDIR": "/tmp/agent-tmp"},  # noqa: S108 — literal env values, never opened
+        {"AVA_DB_URL": _RUNNER_URL, "TMPDIR": "/tmp/agent-tmp"},  # noqa: S108 — literal env values, never opened
     )
     env = agent_launch.agent_spawn_env_dict()
     assert env["TMPDIR"] == "/tmp/agent-tmp"  # noqa: S108 — literal, never opened
@@ -134,7 +162,7 @@ def test_agent_spawn_carries_windows_system_keys(monkeypatch: pytest.MonkeyPatch
         os,
         "environ",
         {
-            "AVA_DB_URL": "postgresql://x/db",
+            "AVA_DB_URL": _RUNNER_URL,
             "SYSTEMROOT": r"C:\Windows",
             "WINDIR": r"C:\Windows",
         },
@@ -154,7 +182,7 @@ def test_agent_spawn_windows_sets_utf8_mode(monkeypatch: pytest.MonkeyPatch) -> 
     so subprocess input with CJK crashes ('charmap' codec — win agent 2197,
     2026-08-07). PYTHONUTF8=1 in the child env forces UTF-8 everywhere, the
     same default Python 3.15 moves to; POSIX already runs UTF-8 via locale."""
-    monkeypatch.setattr(os, "environ", {"AVA_DB_URL": "postgresql://x/db"})
+    monkeypatch.setattr(os, "environ", {"AVA_DB_URL": _RUNNER_URL})
     # POSIX: not set — the locale already provides UTF-8.
     env = agent_launch.agent_spawn_env_dict()
     assert "PYTHONUTF8" not in env

@@ -292,3 +292,33 @@ def test_run_backup_excludes_checkpoint_tables_and_uses_headroom_timeout(
     exclusions = [cmd[i + 1] for i, arg in enumerate(cmd) if arg == "--exclude-table"]
     assert exclusions == list(backup._EXCLUDE_TABLES)
     assert captured["timeout"] == backup._DUMP_TIMEOUT_S
+
+
+def test_run_backup_keeps_database_password_out_of_argv(
+    bdir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """pg_dump's connection target is visible in argv, so its password must be
+    supplied only through the child-only PGPASSWORD environment variable."""
+    captured: dict[str, object] = {}
+
+    class _Ok:
+        returncode = 0
+        stderr = ""
+
+    def _fake_run(cmd: list[str], **kwargs: object) -> _Ok:
+        captured["cmd"] = cmd
+        captured["env"] = kwargs["env"]
+        Path(cmd[cmd.index("--file") + 1]).write_bytes(b"x")
+        return _Ok()
+
+    monkeypatch.setattr(backup.subprocess, "run", _fake_run)
+    password = "password-not-in-argv"  # noqa: S105 — assertion sentinel, not a credential
+    backup.run_backup(
+        _dt(2026, 8, 8, 3, 0),
+        db_url=f"postgresql://ava:{password}@127.0.0.1:5433/ava",
+    )
+
+    cmd = cast(list[str], captured["cmd"])
+    env = cast(dict[str, str], captured["env"])
+    assert password not in " ".join(cmd)
+    assert env["PGPASSWORD"] == password

@@ -31,7 +31,7 @@ def test_ensure_creates_enabled_channel_scoped_user() -> None:
         ensure_cluster_redis_acl(
             "ava_feat_x",
             redis_admin_url=admin_url,
-            cluster_secret=_SECRET,
+            runtime_password=_SECRET,
             channel_prefix="ava:feat-x",
         )
         users = _acl_users(admin_url)
@@ -56,7 +56,7 @@ def test_ensure_is_idempotent() -> None:
             ensure_cluster_redis_acl(
                 "ava_feat_x",
                 redis_admin_url=admin_url,
-                cluster_secret=_SECRET,
+                runtime_password=_SECRET,
                 channel_prefix="ava:feat-x",
             )
         assert sum("ava_feat_x" in u for u in _acl_users(admin_url)) == 1
@@ -70,7 +70,7 @@ def test_ensure_invalidates_the_previous_secret_on_rotation() -> None:
         ensure_cluster_redis_acl(
             "ava_feat_x",
             redis_admin_url=admin_url,
-            cluster_secret=_SECRET,
+            runtime_password=_SECRET,
             channel_prefix="ava:feat-x",
         )
         old_user_url = url_with_userinfo(admin_url, "ava_feat_x", _SECRET)
@@ -81,7 +81,7 @@ def test_ensure_invalidates_the_previous_secret_on_rotation() -> None:
         ensure_cluster_redis_acl(
             "ava_feat_x",
             redis_admin_url=admin_url,
-            cluster_secret=new_secret,
+            runtime_password=new_secret,
             channel_prefix="ava:feat-x",
         )
 

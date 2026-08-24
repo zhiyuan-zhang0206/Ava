@@ -86,7 +86,6 @@ class TestScopeDerivationRules:
                 "AVA_CLUSTER_SECRET",
                 "AVA_GATEWAY_URL",
                 "AVA_GATEWAY_PORT",
-                "AVA_DB_URL",
                 "SSL_CERT_FILE",
                 "REQUESTS_CA_BUNDLE",
                 "AVA_AGENT_CONFIG_OVERLAY",
@@ -150,6 +149,9 @@ class TestConsumptionMatrixDeclarations:
             "AVA_PERMISSIONS_HELPER_PORT",
             "AVA_DB_URL",
             "AVA_REDIS_URL",
+            "AVA_DB_ADMIN_PASSWORD",
+            "AVA_REDIS_ADMIN_PASSWORD",
+            "AVA_REDIS_PASSWORD",
             "AVA_EVENTS_CHANNEL",
         } | set(health_port_env_aliases().values())
         assert derived_env_keys() == expected
@@ -236,6 +238,7 @@ class TestRegistryInvariants:
             "REQUESTS_CA_BUNDLE",
             "AVA_AGENT_CONFIG_OVERLAY",
             "AVA_AGENT_BIRTH_CONFIG",
+            "AVA_REDIS_PASSWORD",
             "AVA_PRIMARY_GATEWAY_URL",
             "PATH",
             "VIRTUAL_ENV",

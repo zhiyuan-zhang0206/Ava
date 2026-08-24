@@ -232,7 +232,7 @@ def test_pure_runner_settings_build_fetches_and_overrides(tmp_path: Path) -> Non
     pre-cutover .env materialization (migration tolerance)."""
     handler = _BootstrapHandler
     handler.payload = {
-        "AVA_DB_URL": "postgresql://ava:fetched@db:5432/ava",
+        "AVA_DB_URL": "postgresql://ava_runner:runner-fetched@db:5432/ava",
         "AVA_REDIS_URL": "redis://db:6380/0",
         "DEEPSEEK_API_KEY": "sk-fetched",
         "AVA_EVENTS_CHANNEL": "ava:events",
@@ -264,9 +264,9 @@ def test_pure_runner_settings_build_fetches_and_overrides(tmp_path: Path) -> Non
         )
         assert result.returncode == 0, result.stderr
         lines = result.stdout.strip().splitlines()
-        # The fetched URL wins over the stale .env value; DataPlaneSettings then
-        # re-applies the cluster secret as the URL password (auth is always on).
-        assert lines[0] == "postgresql://ava:test-cluster-secret@db:5432/ava", lines
+        # The fetched runner projection wins over the stale owner URL. Settings
+        # leaves ava_runner URLs untouched, preserving its independent password.
+        assert lines[0] == "postgresql://ava_runner:runner-fetched@db:5432/ava", lines
         assert lines[1] == "ava:events", lines
         # The runner's Settings-build fetch requests the runner projection.
         assert handler.queries == ["role=runner"], handler.queries
@@ -296,7 +296,7 @@ def test_runner_daemon_boot_from_session_env_handoff(
 
     handler = _BootstrapHandler
     handler.payload = {
-        "AVA_DB_URL": "postgresql://ava:fetched@db:5432/ava",
+        "AVA_DB_URL": "postgresql://ava_runner:runner-fetched@db:5432/ava",
         "AVA_REDIS_URL": "redis://db:6380/0",
         "DEEPSEEK_API_KEY": "sk-fetched",
         "AVA_EVENTS_CHANNEL": "ava:events",
@@ -361,10 +361,9 @@ def test_runner_daemon_boot_from_session_env_handoff(
         )
         assert result.returncode == 0, result.stderr
         lines = result.stdout.strip().splitlines()
-        # the FETCHED config is what the daemon runs with — not the stale copy
-        # the spawner froze (the URL's password is the cluster secret re-applied
-        # by DataPlaneSettings: auth is always on)
-        assert lines[0] == "postgresql://ava:test-cluster-secret@db:5432/ava", lines
+        # The fetched runner projection is what the daemon runs with — not the
+        # stale owner URL the spawner froze.
+        assert lines[0] == "postgresql://ava_runner:runner-fetched@db:5432/ava", lines
         assert lines[1] == "sk-fetched", lines
         # host-scope facts survived the handoff
         assert lines[2] == str(home), lines

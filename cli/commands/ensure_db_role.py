@@ -63,6 +63,7 @@ def cmd_ensure_db_role() -> int:
 
     identity = cl.identity_from_url(db_url)
     cluster_secret = (env.get("AVA_CLUSTER_SECRET") or "").strip()
+    db_admin_password = (env.get("AVA_DB_ADMIN_PASSWORD") or cluster_secret).strip()
     runner_password = (env.get(cl.RUNNER_DB_PASSWORD_ENV) or "").strip()
     if not runner_password:
         runner_password = secrets.token_urlsafe(32)
@@ -70,7 +71,7 @@ def cmd_ensure_db_role() -> int:
     base_admin_url = pg_admin_url(rec.ports["postgres"])
 
     cl.ensure_checkpoint_schema(
-        identity, base_admin_url=base_admin_url, cluster_secret=cluster_secret
+        identity, base_admin_url=base_admin_url, db_admin_password=db_admin_password
     )
     cl.ensure_runner_role(
         identity,
@@ -92,6 +93,7 @@ def cmd_ensure_db_role() -> int:
                 db_name=identity,
                 role=identity,
                 cluster_secret=cluster_secret,
+                db_admin_password=db_admin_password,
                 runner_password=runner_password,
             )
             print("  ✓ pooler userlist refreshed (ava_runner entry live now)")

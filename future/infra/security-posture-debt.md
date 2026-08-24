@@ -10,13 +10,16 @@
 
 ## Trust model (context, not debt)
 
-One `AVA_CLUSTER_SECRET` (43-char high-entropy) = all trust: gateway API bearer +
-ops RPC + pg scram + redis requirepass. No per-agent identity inside the cluster;
-every agent process env carries the secret + all 11 provider keys. Data plane:
-Postgres and PgBouncer bind loopback + the machine's reachable private-network
-address only; Redis remains loopback-only and off-box inbound uses the relay bridge;
-`pg_hba` allows the whole private network (100.64.0.0/10) with scram;
-unix-socket local trust (OS user is the trust root).
+`AVA_CLUSTER_SECRET` (43-char high-entropy) authorizes the gateway API and ops
+RPC only. The data plane has separate file-only gateway administrator credentials
+(`AVA_DB_ADMIN_PASSWORD`, `AVA_REDIS_ADMIN_PASSWORD`) and independent runner
+runtime credentials (`AVA_RUNNER_DB_PASSWORD`, `AVA_REDIS_PASSWORD`), so a
+runner bearer cannot become a data-plane administrator. No per-agent identity
+inside the cluster; every agent process environment carries the bearer + all 11
+provider keys. Postgres and PgBouncer bind loopback + the machine's reachable
+private-network address only; Redis remains loopback-only and off-box inbound
+uses the relay bridge; `pg_hba` allows the whole private network (100.64.0.0/10)
+with scram; unix-socket local trust (OS user is the trust root).
 
 ## User rulings (do NOT "fix")
 

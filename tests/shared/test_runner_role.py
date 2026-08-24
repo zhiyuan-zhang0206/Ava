@@ -115,7 +115,7 @@ def test_ensure_checkpoint_schema_creates_tables_owned_by_identity(runner_db: st
         ensure_checkpoint_schema(
             identity,
             base_admin_url=admin,
-            cluster_secret=_CLUSTER_SECRET,
+            db_admin_password=_CLUSTER_SECRET,
             database_created=True,
         )
         with psycopg.connect(
@@ -178,7 +178,9 @@ def test_fresh_install_dependency_drift_precedes_checkpoint_setup(
 
         monkeypatch.setattr(PostgresSaver, "MIGRATIONS", [*PostgresSaver.MIGRATIONS, "SELECT 1"])
         with pytest.raises(CheckpointDependencyDriftError, match="paired Ava timestamp migration"):
-            ensure_checkpoint_schema(identity, base_admin_url=admin, cluster_secret=_CLUSTER_SECRET)
+            ensure_checkpoint_schema(
+                identity, base_admin_url=admin, db_admin_password=_CLUSTER_SECRET
+            )
 
         with psycopg.connect(db_url, autocommit=True) as conn:
             row = conn.execute("SELECT to_regclass('public.checkpoint_migrations')").fetchone()
@@ -208,7 +210,7 @@ def test_default_missing_schema_refuses_setup(
     monkeypatch.setattr(PostgresSaver, "setup", setup_must_not_run)
     with pytest.raises(CheckpointSchemaMismatchError):
         ensure_checkpoint_schema(
-            _IDENTITY, base_admin_url=_admin_url(runner_db), cluster_secret=_CLUSTER_SECRET
+            _IDENTITY, base_admin_url=_admin_url(runner_db), db_admin_password=_CLUSTER_SECRET
         )
 
     with psycopg.connect(runner_db, autocommit=True) as conn:
@@ -235,7 +237,7 @@ def test_default_schema_check_never_setup_after_concurrent_repair(
     monkeypatch.setattr(PostgresSaver, "setup", setup_must_not_run)
 
     ensure_checkpoint_schema(
-        _IDENTITY, base_admin_url=_admin_url(runner_db), cluster_secret=_CLUSTER_SECRET
+        _IDENTITY, base_admin_url=_admin_url(runner_db), db_admin_password=_CLUSTER_SECRET
     )
     with pytest.raises(StopIteration):
         next(observed)
@@ -253,7 +255,8 @@ def test_new_database_setup_failure_is_dropped_then_retry_converges(
     original_setup = PostgresSaver.setup
 
     assert (
-        provision_database(identity, base_admin_url=admin, cluster_secret=_CLUSTER_SECRET) is True
+        provision_database(identity, base_admin_url=admin, db_admin_password=_CLUSTER_SECRET)
+        is True
     )
 
     def fail_after_v0(_self: PostgresSaver) -> None:
@@ -267,7 +270,7 @@ def test_new_database_setup_failure_is_dropped_then_retry_converges(
         ensure_checkpoint_schema(
             identity,
             base_admin_url=admin,
-            cluster_secret=_CLUSTER_SECRET,
+            db_admin_password=_CLUSTER_SECRET,
             database_created=True,
         )
     with psycopg.connect(admin, autocommit=True) as conn:
@@ -277,13 +280,13 @@ def test_new_database_setup_failure_is_dropped_then_retry_converges(
     monkeypatch.setattr(PostgresSaver, "setup", original_setup)
     try:
         assert (
-            provision_database(identity, base_admin_url=admin, cluster_secret=_CLUSTER_SECRET)
+            provision_database(identity, base_admin_url=admin, db_admin_password=_CLUSTER_SECRET)
             is True
         )
         ensure_checkpoint_schema(
             identity,
             base_admin_url=admin,
-            cluster_secret=_CLUSTER_SECRET,
+            db_admin_password=_CLUSTER_SECRET,
             database_created=True,
         )
         with psycopg.connect(db_url, autocommit=True) as conn:
@@ -349,7 +352,7 @@ def test_current_checkpoint_schema_skips_setup(
 
     monkeypatch.setattr(PostgresSaver, "setup", setup_must_not_run)
     ensure_checkpoint_schema(
-        _IDENTITY, base_admin_url=_admin_url(runner_db), cluster_secret=_CLUSTER_SECRET
+        _IDENTITY, base_admin_url=_admin_url(runner_db), db_admin_password=_CLUSTER_SECRET
     )
 
 
@@ -403,7 +406,7 @@ def test_existing_behind_schema_never_falls_back_to_setup(
     monkeypatch.setattr(PostgresSaver, "setup", setup_must_not_run)
     with pytest.raises(CheckpointSchemaMismatchError):
         ensure_checkpoint_schema(
-            _IDENTITY, base_admin_url=_admin_url(runner_db), cluster_secret=_CLUSTER_SECRET
+            _IDENTITY, base_admin_url=_admin_url(runner_db), db_admin_password=_CLUSTER_SECRET
         )
 
 
@@ -426,7 +429,7 @@ def test_birth_retry_resumes_contiguous_prefix_after_setup_crash(
         ensure_checkpoint_schema(
             _IDENTITY,
             base_admin_url=_admin_url(runner_db),
-            cluster_secret=_CLUSTER_SECRET,
+            db_admin_password=_CLUSTER_SECRET,
             resume_partial=True,
         )
 
@@ -438,7 +441,7 @@ def test_birth_retry_resumes_contiguous_prefix_after_setup_crash(
     ensure_checkpoint_schema(
         _IDENTITY,
         base_admin_url=_admin_url(runner_db),
-        cluster_secret=_CLUSTER_SECRET,
+        db_admin_password=_CLUSTER_SECRET,
         resume_partial=True,
     )
     with psycopg.connect(runner_db, autocommit=True) as conn:
@@ -463,7 +466,7 @@ def test_birth_retry_refuses_non_prefix_checkpoint_state(
         ensure_checkpoint_schema(
             _IDENTITY,
             base_admin_url=_admin_url(runner_db),
-            cluster_secret=_CLUSTER_SECRET,
+            db_admin_password=_CLUSTER_SECRET,
             resume_partial=True,
         )
 

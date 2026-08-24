@@ -18,7 +18,7 @@ from urllib.parse import urlsplit
 
 from shared import cluster
 from shared.config import settings
-from shared.env_registry import health_port_env_aliases
+from shared.env_registry import REDIS_PASSWORD_ENV, health_port_env_aliases
 from shared.url_secret import url_with_port, url_with_userinfo
 
 # The db / Postgres-role / redis-ACL identifier a newly-born cluster uses. Fixed:
@@ -159,17 +159,45 @@ def redis_admin_url() -> str:
     provision the cluster's redis ACL user + run admin-plane probes. Not a
     per-cluster runtime identity.
 
-    Every cluster owns its redis instance, whose `requirepass` IS the cluster
-    secret (single-tenant, so the `default` admin password equals it — no separate
-    box-level admin secret). Host/port come from this cluster's own `redis_url`
-    (loopback + its per-cluster port), never a hardcoded 6379."""
+    Every cluster owns its Redis instance. Its `default` user password is an
+    independent gateway-only credential; a pre-split .env temporarily falls
+    back to the bearer until `ava start` mints the split. Host/port come from
+    this cluster's own `redis_url` (loopback + its per-cluster port), never a
+    hardcoded 6379."""
     parts = urlsplit(settings.data_plane.redis_url)
     # `parts.port` is None when the URL carries no explicit port — the
     # stringified ":None" would be a connect error with a confusing message
     # (audit 2026-08-08 P3: settings normally carry the port, this is the
     # defensive floor).
     port = parts.port or 6379
-    return f"redis://default:{settings.data_plane.cluster_secret}@{parts.hostname or '127.0.0.1'}:{port}"
+    password = settings.data_plane.redis_admin_password or settings.data_plane.cluster_secret
+    return f"redis://default:{password}@{parts.hostname or '127.0.0.1'}:{port}"
+
+
+def redis_password_from_env() -> str:
+    """This gateway home's file-only Redis ACL runtime password, or an empty
+    string when a legacy cluster has not completed the split mint step."""
+    from dotenv import dotenv_values
+
+    from shared.paths import ava_home
+
+    return (dotenv_values(ava_home() / ".env").get(REDIS_PASSWORD_ENV) or "").strip()
+
+
+def runner_password_from_env(home: Path | None = None) -> str:
+    """Read a gateway home's runner DB password from its `.env` file.
+
+    The runner credential is deliberately not a Settings field: it is gateway
+    secret material that bootstrap projects only inside the runner database URL.
+    ``home`` exists for the pooler, which may reconcile a specified home; normal
+    callers read this process's checkout-anchored home.
+    """
+    from dotenv import dotenv_values
+
+    from shared.paths import ava_home
+
+    env_path = (home if home is not None else ava_home()) / ".env"
+    return (dotenv_values(env_path).get(RUNNER_DB_PASSWORD_ENV) or "").strip()
 
 
 def redis_channel_prefix() -> str:
@@ -203,89 +231,50 @@ def wake_key(agent_id: int) -> str:
     return f"{redis_channel_prefix()}:wake:{agent_id}"
 
 
-def ensure_cluster_redis_acl(
-    user: str, *, redis_admin_url: str, cluster_secret: str, channel_prefix: str
-) -> None:
-    """Create (or re-affirm) the cluster's redis ACL user `user` — the runtime
-    redis identity, mirroring the per-cluster Postgres role. Idempotent; safe on
-    every bring-up. `user` is names-as-data: read from the cluster's own
-    redis_url (`identity_from_url`) for an existing cluster, `DATA_PLANE_IDENTITY`
-    at birth. The user authenticates with the cluster secret and is scoped
-    to keys (`~*`) + pub/sub channels (`&<channel_prefix>:*`); `-@dangerous` denies
-    FLUSHALL / CONFIG / SHUTDOWN. The secret travels over the redis connection, never
-    a process argv.
-
-    `resetpass` precedes `>cluster_secret`: Redis ACL passwords are additive by
-    default (`>password` ADDS a valid password rather than replacing the set), so
-    without it a secret rotation would leave the PREVIOUS secret still
-    authenticating this user indefinitely — confirmed empirically while building
-    `scripts/rotate_cluster_secret.py`. `resetpass` clears the password list first,
-    so re-affirming with an unchanged secret still ends at exactly one valid
-    password (this call is idempotent either way), and re-affirming with a
-    rotated one actually invalidates the old one.
-
-    redis_admin_url connects as the redis `default` (admin) user, whose password is
-    the cluster secret (each cluster's redis is single-tenant, so `requirepass` == the
-    cluster secret)."""
-    import redis
-
-    # redis-py types from_url's **kwargs as Unknown; the call itself is fully typed.
-    client = redis.Redis.from_url(redis_admin_url, decode_responses=True)  # pyright: ignore[reportUnknownMemberType]
-    try:
-        # redis-py types execute_command()'s signature as partially Unknown; the call is fully typed.
-        client.execute_command(  # pyright: ignore[reportUnknownMemberType]
-            "ACL",
-            "SETUSER",
-            user,
-            "on",
-            "resetpass",
-            f">{cluster_secret}",
-            "resetkeys",
-            "~*",
-            "resetchannels",
-            f"&{channel_prefix}:*",
-            "+@all",
-            "-@dangerous",
-        )
-    finally:
-        client.close()
-
-
 def derive_env(
     rec: cluster.ClusterRecord,
     *,
     base_db_url: str,
     base_redis_url: str,
     cluster_secret: str,
+    db_admin_password: str = "",
+    redis_admin_password: str = "",
+    redis_password: str = "",
     pgbouncer_enabled: bool = True,
 ) -> dict[str, str]:
     """Map a cluster record to the env vars a unit needs. Daemons read these via
     settings, so the cluster layer touches no daemon code.
 
-    `cluster_secret` is written into the cluster's `.env` two ways: as
-    `AVA_CLUSTER_SECRET` itself (so every cluster process reads it from the
-    cluster home even when nothing is inherited), and embedded in
-    `AVA_DB_URL` / `AVA_REDIS_URL`. Both URLs carry the cluster's data-plane
-    identity — the fixed `DATA_PLANE_IDENTITY` db/role/ACL user — **as data**:
-    every consumer reads the identity back from these URLs; nothing re-derives
-    it from a name. Settings re-applies only the PASSWORD on load, so a rotated
-    secret self-heals while the identity stays whatever the `.env` says. An
-    empty secret still writes the identity username — names-as-data holds
-    without auth. Pub/sub channels are fixed (`ava:*`).
+    `cluster_secret` is written as `AVA_CLUSTER_SECRET`, the control-plane
+    bearer every enrolled runner needs. `AVA_DB_URL` instead carries the
+    gateway-local Postgres owner password and `AVA_REDIS_URL` the runtime ACL
+    password. Both URLs carry the fixed `DATA_PLANE_IDENTITY` db/role/ACL user
+    **as data**: every consumer reads the identity back from these URLs; nothing
+    re-derives it from a name. The three data-plane passwords are independently
+    persisted so their rotation self-heals the matching URLs without changing
+    the bearer. An empty secret writes empty data-plane passwords and still
+    retains the identity username — names-as-data holds without auth. Pub/sub
+    channels are fixed (`ava:*`).
 
     `AVA_DB_URL` is the ONE access URL every process dials as-is;
     `pgbouncer_enabled` decides its port at generation — pooler (default) or
     direct Postgres. No pgbouncer-port env key."""
     p = rec.ports
+    db_password = db_admin_password or cluster_secret
+    redis_default_password = redis_admin_password or cluster_secret
+    runtime_password = redis_password or cluster_secret
     db_url = url_with_userinfo(
         cluster._swap_db(base_db_url, cluster.DATA_PLANE_IDENTITY),
         cluster.DATA_PLANE_IDENTITY,
-        cluster_secret,
+        db_password,
     )
     if pgbouncer_enabled:
         db_url = url_with_port(db_url, cluster.record_pgbouncer_port(rec))
     env = {
         "AVA_CLUSTER_SECRET": cluster_secret,
+        "AVA_DB_ADMIN_PASSWORD": db_password,
+        "AVA_REDIS_ADMIN_PASSWORD": redis_default_password,
+        REDIS_PASSWORD_ENV: runtime_password,
         "AVA_GATEWAY_PORT": str(p["gateway"]),
         # A gateway box reaches its OWN gateway over loopback (same-machine call);
         # the address remote agent-runners dial is handed to them out-of-band at
@@ -302,7 +291,7 @@ def derive_env(
         "AVA_PERMISSIONS_HELPER_PORT": str(cluster.record_health_port(rec, "permissions_helper")),
         "AVA_DB_URL": db_url,
         "AVA_REDIS_URL": url_with_userinfo(
-            base_redis_url, cluster.DATA_PLANE_IDENTITY, cluster_secret
+            base_redis_url, cluster.DATA_PLANE_IDENTITY, runtime_password
         ),
         "AVA_EVENTS_CHANNEL": "ava:events",
     }
@@ -320,8 +309,8 @@ def derive_env(
 
 def per_cluster_base_urls(rec: cluster.ClusterRecord) -> tuple[str, str]:
     """The base `(db_url, redis_url)` for a cluster's own instance — loopback at the
-    cluster's allocated pg/redis ports. `derive_env` swaps in the db name and the
-    data-plane identity + secret on top."""
+    cluster's allocated pg/redis ports. `derive_env` swaps in the db name,
+    data-plane identity, and independently scoped passwords on top."""
     return (
         f"postgresql://x@127.0.0.1:{rec.ports['postgres']}/postgres",
         f"redis://127.0.0.1:{rec.ports['redis']}/0",

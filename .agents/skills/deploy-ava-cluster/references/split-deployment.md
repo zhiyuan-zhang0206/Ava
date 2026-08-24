@@ -54,15 +54,16 @@ de-duplicated — never a wildcard — and Redis to loopback alone. The relay br
 listens on the chosen private-network address at the Redis port and forwards to
 `127.0.0.1`; remote clients still need the credential. pg_hba trusts the local
 unix socket but requires `scram-sha-256` from the
-`AVA_TRUSTED_CIDRS` ranges. The gateway's main Postgres identity and its Redis
-ACL user authenticate with `AVA_CLUSTER_SECRET`; the single-tenant Redis
-`requirepass` is that same secret. A runner does **not** receive the main
-Postgres credential: `/api/bootstrap?role=runner` rewrites `AVA_DB_URL` to the
-least-privilege `ava_runner` identity with its independent
+`AVA_TRUSTED_CIDRS` ranges. The gateway's main Postgres identity authenticates
+with `AVA_DB_ADMIN_PASSWORD`, and Redis's `default`/`requirepass` administrator
+uses `AVA_REDIS_ADMIN_PASSWORD`. A runner does **not** receive either
+administrator credential: `/api/bootstrap?role=runner` rewrites `AVA_DB_URL` to
+the least-privilege `ava_runner` identity with its independent
 `AVA_RUNNER_DB_PASSWORD`, freshly read gateway-side and carried only inside the
-served URL. The runner's Redis URL still uses the cluster secret. Every remote
-connection therefore needs private-network reachability plus the credential
-for its role.
+served URL. Its Redis URL embeds the independent `AVA_REDIS_PASSWORD` runtime
+ACL credential. Every remote connection therefore needs private-network
+reachability plus the credential for its role; `AVA_CLUSTER_SECRET` remains
+only the gateway and `/ops` bearer.
 
 On the gateway, the born URLs stay loopback self-dial URLs. When serving a
 runner bootstrap, `shared/config/service_read.py` rewrites their loopback hosts

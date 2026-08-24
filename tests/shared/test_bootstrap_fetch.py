@@ -28,10 +28,17 @@ def test_fetch_bootstrap_config_against_live_endpoint(
 
     monkeypatch.setattr(bootstrap, "dial_get", fake_get)  # pyright: ignore[reportUnknownArgumentType]
     values = bootstrap.fetch_bootstrap_config("http://cp")
-    # Served verbatim from the gateway's settings — except on a multi-host
-    # gateway, where loopback URLs are rewritten to the reachable address for
-    # remote runners (the host's own machine_host file may set it even in tests).
-    expected = str(config.settings.data_plane.db_url)
+    # Bootstrap serves the runner projection. A multi-host gateway also rewrites
+    # its loopback host to the reachable address for remote runners.
+    from shared import runtime_config
+    from shared.cluster.derive import RUNNER_DB_PASSWORD_ENV, RUNNER_ROLE
+    from shared.url_secret import url_with_userinfo
+
+    expected = url_with_userinfo(
+        str(config.settings.data_plane.db_url),
+        RUNNER_ROLE,
+        runtime_config.read_env_aliases()[RUNNER_DB_PASSWORD_ENV],
+    )
     reachable = config._self_machine_host()
     if not config.is_loopback_host(reachable):
         expected = config.url_with_host(expected, reachable)

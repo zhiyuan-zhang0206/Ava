@@ -8,6 +8,8 @@ dials it; only an enrolling agent-runner does, and it presents the secret.
 """
 
 from pathlib import Path
+from typing import cast
+from urllib.parse import urlsplit
 
 import pytest
 from fastapi.testclient import TestClient
@@ -28,16 +30,22 @@ def test_bootstrap_returns_config_with_secret(db_conn, monkeypatch: pytest.Monke
     with TestClient(app) as client:
         resp = client.get("/api/bootstrap", headers=_auth())
     assert resp.status_code == 200
-    body = resp.json()
-    # Served verbatim from the gateway's settings — except on a multi-host
-    # gateway, where loopback URLs are rewritten to the reachable address for
-    # remote runners (the host's own machine_host file may set it even in tests).
+    body = cast(dict[str, str], resp.json())
+    # Every projection uses the least-privilege DB role; only the host may be
+    # rewritten for a remote runner.
     expected = str(config.settings.data_plane.db_url)
     reachable = config._self_machine_host()
     if not config.is_loopback_host(reachable):
         expected = config.url_with_host(expected, reachable)
-    assert body["AVA_DB_URL"] == expected
+    served, owner = urlsplit(body["AVA_DB_URL"]), urlsplit(expected)
+    assert served.username == "ava_runner"
+    assert served.hostname == owner.hostname
+    assert served.port == owner.port
+    assert served.path == owner.path
     assert "AVA_REDIS_URL" in body
+    assert "AVA_DB_ADMIN_PASSWORD" not in body
+    assert "AVA_REDIS_ADMIN_PASSWORD" not in body
+    assert "AVA_REDIS_PASSWORD" not in body
 
 
 def test_bootstrap_carries_no_cluster_name(db_conn, monkeypatch: pytest.MonkeyPatch) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
@@ -87,8 +95,6 @@ def test_bootstrap_role_runner_projects_ava_runner_url(
     """?role=runner serves AVA_DB_URL as the least-privilege ava_runner identity
     with its own password, carried inside the URL (Task #1236) — and never as a
     standalone key."""
-    from urllib.parse import urlsplit
-
     from shared import runtime_config as rt
 
     runner_pw = "runner-endpoint-pw"

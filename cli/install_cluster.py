@@ -3,8 +3,8 @@
 The thin entry `scripts/install.sh` runs as its final step, so an install ends
 with a born cluster: registry record (keyed by the home path — identity IS the
 path, there is no cluster name) + the cluster's own Postgres/Redis instance +
-provisioned database + `$AVA_HOME/.env` (the cluster secret follows the role —
-see below; the db/role/ACL identifier is the fixed
+provisioned database + `$AVA_HOME/.env` (the bearer follows the role; data-plane
+passwords are independently scoped — see below; the db/role/ACL identifier is the fixed
 `shared.cluster.DATA_PLANE_IDENTITY`). `ava start` then finds the record and is
 a pure bring-up. A role without `gateway` does not birth — an agent-runner's
 connection facts arrive via `ava enroll` — it only gets the serve flags
@@ -19,7 +19,8 @@ single-machine role (`gateway,agent-runner` on one box) births a NO-AUTH
 cluster: the secret stays empty unless `AVA_INSTALL_CLUSTER_SECRET` states one, and every
 surface (gateway API, /ops, pg/redis) serves unauthenticated on loopback. A
 split `gateway`-only host mints a fresh secret (remote agent-runners depend on
-it — scram/requirepass + bearer auth). The compatibility `--cluster-secret`
+its bearer auth). Authenticated births also mint independent owner, Redis-admin,
+runner-DB, and Redis-runtime passwords. The compatibility `--cluster-secret`
 flag overrides the dedicated environment input. A secret already in the home's
 `.env` is never rotated.
 
@@ -139,8 +140,7 @@ def _resolve_secret(env_path: Path, *, role: frozenset[str], explicit: str | Non
 
     1. `explicit` (preferred `AVA_INSTALL_CLUSTER_SECRET`, or the compatibility
        `--cluster-secret`) — the operator states the secret; it is
-       validated URL-safe (it lands in the pg/redis URLs, redis.conf, and HTTP
-       bearer headers).
+       validated URL-safe (it is stored and distributed as the HTTP bearer).
     2. The one already in this home's `.env` (a re-install must not rotate a
        live cluster's data-plane password).
     3. A single-machine role (`gateway,agent-runner` on one box) leaves the
@@ -158,8 +158,7 @@ def _resolve_secret(env_path: Path, *, role: frozenset[str], explicit: str | Non
         if not _is_urlsafe_token(explicit):
             raise ValueError(
                 "the install cluster secret must be a URL-safe token (letters, digits, and "
-                "'._~-') — it goes in the pg/redis URLs, the redis config, and a "
-                "bearer header"
+                "'._~-') — it is used as the control-plane bearer"
             )
         return explicit
     if env_path.exists():
@@ -175,9 +174,11 @@ def _resolve_secret(env_path: Path, *, role: frozenset[str], explicit: str | Non
 
 
 def _is_urlsafe_token(value: str) -> bool:
-    """URL-safe charset check mirroring DataPlaneSettings.cluster_secret — the
-    value lands in URLs, redis.conf, and bearer headers, so the same restriction
-    applies at install time (install_cluster cannot build Settings yet)."""
+    """URL-safe charset check for the control-plane bearer.
+
+    It mirrors DataPlaneSettings.cluster_secret without constructing Settings
+    during the bootstrap sequence.
+    """
     allowed = set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._~-")
     return bool(value) and set(value) <= allowed
 
@@ -198,6 +199,32 @@ def _resolve_runner_password(env_path: Path) -> str:
     import secrets
 
     return secrets.token_urlsafe(32)
+
+
+def _resolve_data_plane_passwords(env_path: Path, *, secret: str) -> tuple[str, str, str]:
+    """Return independent DB-owner, Redis-admin, and Redis-runtime passwords.
+
+    Authenticated births mint each value independently while preserving values
+    written by a partially completed install. A no-auth birth keeps all three
+    empty, matching its unauthenticated local data plane.
+    """
+    if not secret:
+        return "", "", ""
+
+    import secrets
+
+    from dotenv import dotenv_values
+
+    existing = dotenv_values(env_path) if env_path.exists() else {}
+
+    def _value(key: str) -> str:
+        return (existing.get(key) or "").strip() or secrets.token_urlsafe(32)
+
+    return (
+        _value("AVA_DB_ADMIN_PASSWORD"),
+        _value("AVA_REDIS_ADMIN_PASSWORD"),
+        _value("AVA_REDIS_PASSWORD"),
+    )
 
 
 def seed_convenience_env(*, target_env: Path, source_env: Path) -> list[str]:
@@ -247,9 +274,19 @@ def _birth(*, home: Path, secret: str) -> int:
     rec, created = lifecycle._ensure_record(home)
     home.mkdir(parents=True, exist_ok=True)
 
-    runner_password = _resolve_runner_password(home / ".env")
+    env_path = home / ".env"
+    runner_password = _resolve_runner_password(env_path)
+    db_admin_password, redis_admin_password, redis_password = _resolve_data_plane_passwords(
+        env_path, secret=secret
+    )
     rc = lifecycle._ensure_cluster_instance(
-        rec, secret, cl.DATA_PLANE_IDENTITY, runner_password=runner_password
+        rec,
+        secret,
+        cl.DATA_PLANE_IDENTITY,
+        runner_password=runner_password,
+        db_admin_password=db_admin_password,
+        redis_admin_password=redis_admin_password,
+        redis_password=redis_password,
     )
     if rc != 0:
         _rollback_record(created, home)
@@ -263,7 +300,9 @@ def _birth(*, home: Path, secret: str) -> int:
         base_admin_url = pg_admin_url(rec.ports["postgres"])
         base_db_url, base_redis_url = cl.per_cluster_base_urls(rec)
         database_created = lifecycle._provision(
-            cl.DATA_PLANE_IDENTITY, base_admin_url=base_admin_url, cluster_secret=secret
+            cl.DATA_PLANE_IDENTITY,
+            base_admin_url=base_admin_url,
+            db_admin_password=db_admin_password,
         )
         # The runner's least-privilege surface: checkpoint tables first (created
         # as the main role, so the gateway's own checkpoint readers keep working),
@@ -272,7 +311,7 @@ def _birth(*, home: Path, secret: str) -> int:
         cl.ensure_checkpoint_schema(
             cl.DATA_PLANE_IDENTITY,
             base_admin_url=base_admin_url,
-            cluster_secret=secret,
+            db_admin_password=db_admin_password,
             database_created=database_created,
             resume_partial=True,
         )
@@ -294,6 +333,9 @@ def _birth(*, home: Path, secret: str) -> int:
             base_db_url=base_db_url,
             base_redis_url=base_redis_url,
             cluster_secret=secret,
+            db_admin_password=db_admin_password,
+            redis_admin_password=redis_admin_password,
+            redis_password=redis_password,
             pgbouncer_enabled=pgbouncer_enabled,
         )
         # The runner role password is a gateway-side secret (never a derived

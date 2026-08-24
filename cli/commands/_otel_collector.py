@@ -149,9 +149,9 @@ _POSTGRES_RECEIVER_BLOCK = """
 """
 
 _REDIS_RECEIVER_BLOCK = """
-  # This cluster's OWN Redis. Password is the cluster secret (requirepass ==
-  # the secret); an empty secret is the no-auth single-box default and the
-  # receiver simply skips AUTH.
+  # This cluster's OWN Redis. The receiver dials the default administrative
+  # user, so it uses the gateway-only Redis admin password; an empty password
+  # is the no-auth single-box default and the receiver skips AUTH.
   redis:
     endpoint: {redis_endpoint}
     transport: tcp
@@ -193,6 +193,9 @@ def _data_plane_receivers(roles: MachineRoles | None) -> tuple[str, str]:
         return "", ""
     pg = urlsplit(db_url)
     redis_url = settings.data_plane.redis_url
+    from shared.cluster import redis_admin_url
+
+    redis_admin = redis_admin_url()
     blocks: list[str] = []
     receivers: list[str] = []
     if pg.password:
@@ -211,7 +214,7 @@ def _data_plane_receivers(roles: MachineRoles | None) -> tuple[str, str]:
     blocks.append(
         _REDIS_RECEIVER_BLOCK.format(
             redis_endpoint=_endpoint(redis_url, "redis"),
-            redis_password=_yaml_quote(unquote(urlsplit(redis_url).password or "")),
+            redis_password=_yaml_quote(unquote(urlsplit(redis_admin).password or "")),
         )
     )
     receivers.append("redis")
@@ -224,7 +227,7 @@ def gateway_otel_ingress_endpoint() -> str:
     `AVA_GATEWAY_URL` is already the runner's cluster-private route to the
     gateway. OTLP owns a separate fixed port on that same host; it does not
     inherit the gateway API's port or path. The receiver is deliberately HTTP:
-    the cluster private network (normally Tailnet) supplies transport privacy,
+    the cluster private network supplies transport privacy,
     while the cluster bearer authenticates the sender exactly like the gateway
     API already does.
     """

@@ -762,6 +762,38 @@ def test_agent_profile_keeps_an_unmodeled_provider_key_from_dotenv(
     assert os.environ["TESTP_API_KEY"] == "sk-plugin-test"
 
 
+def test_agent_profile_keeps_launcher_runner_url_and_drops_admin_passwords(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The gateway's .env holds the owner URL and admin passwords, but an agent
+    must retain the launcher's runner projection and scrub every unprojected
+    data-plane password."""
+    monkeypatch.setitem(os.environ, "AVA_PROCESS_PROFILE", "agent")
+    monkeypatch.setitem(os.environ, "AVA_DB_ADMIN_PASSWORD", "db-admin-only")
+    monkeypatch.setitem(os.environ, "AVA_REDIS_ADMIN_PASSWORD", "redis-admin-only")
+    monkeypatch.setitem(os.environ, "AVA_REDIS_PASSWORD", "redis-runtime-only")
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "AVA_DB_URL=postgresql://ava:owner-password@127.0.0.1:5433/ava\n"
+        "AVA_DB_ADMIN_PASSWORD=db-admin-only\n"
+        "AVA_REDIS_ADMIN_PASSWORD=redis-admin-only\n"
+        "AVA_REDIS_PASSWORD=redis-runtime-only\n"
+    )
+    _point_env_at(monkeypatch, env_file, tmp_path)
+    monkeypatch.setitem(
+        os.environ,
+        "AVA_DB_URL",
+        "postgresql://ava_runner:runner-password@127.0.0.1:5433/ava",
+    )
+
+    dotenv_boot._enforce_cluster_env_authority()
+
+    assert os.environ["AVA_DB_URL"].startswith("postgresql://ava_runner:")
+    assert "AVA_DB_ADMIN_PASSWORD" not in os.environ
+    assert "AVA_REDIS_ADMIN_PASSWORD" not in os.environ
+    assert "AVA_REDIS_PASSWORD" not in os.environ
+
+
 # ─── legacy inverted AVA_SKIP_* alias translation ───
 
 

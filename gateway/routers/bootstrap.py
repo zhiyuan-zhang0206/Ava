@@ -28,17 +28,16 @@ def get_bootstrap(
     """Return cluster-common config ({ENV_ALIAS: value}, unmasked) for an
     agent-runner to load into its environment.
 
-    `role` selects the credential projection: `runner` serves the least-
-    privilege `ava_runner` AVA_DB_URL (the role's own password, carried inside
-    the URL — never a standalone key), anything else serves the main identity
-    (Task #1236; see shared.config.bootstrap_config_values).
+    `role=None` and `role="runner"` both serve the least-privilege
+    `ava_runner` AVA_DB_URL (the role's own password, carried inside the URL —
+    never a standalone key). The main identity and all admin credentials remain
+    gateway-local (see shared.config.bootstrap_config_values).
 
     Raises:
         HTTPException: 401 when the request does not carry
             `Authorization: Bearer <cluster secret>` (a no-secret cluster serves
             without auth — there is no credential to require); 400 for an
-            unknown role value, and when the runner projection is requested on
-            a cluster whose ava_runner credential is not provisioned yet.
+            unknown role value, and when the runner credential is not provisioned.
     """
     secret = config.settings.data_plane.cluster_secret
     if secret and not verify_bearer(authorization, secret):

@@ -188,7 +188,7 @@ def _wait_for_agent_claim(agent_id: int) -> None:
 # `child_env("agent", ...)`): host-scope facts (machine identity, health ports,
 # AVA_HOME, the gateway URL the fetch dials), the agent-scope knobs
 # (AVA_LLM_OVERRIDE for the e2e fake model, ...), the boot-time guide keys
-# (cluster secret + db URL as the fetch fallback), the overlay/birth JSON
+# (cluster secret), the overlay/birth JSON
 # carriers, and the ambient display passthroughs. It never carries a
 # config-source pin (the child derives it from its own role at Settings build;
 # AVA_CONFIG_SOURCE is gone). Indirected below for test monkeypatching.
@@ -201,10 +201,8 @@ def agent_spawn_env_dict() -> dict[str, str]:
     agent. The keys are copied from the dict outright (not blanked): omitting
     a key lets the child fall back to the field DEFAULT, where a blank string
     would fail the typed fields' parsing and crash the agent's Settings build.
-    The cluster-scope guide keys (AVA_CLUSTER_SECRET / AVA_DB_URL) ARE carried
-    as boot-time fallbacks — on a runner the child's own fetch overrides them,
-    and a child that skips the fetch (the multihost rig's containers) reads
-    them from the inherited env.
+    AVA_CLUSTER_SECRET is carried as the boot-time bearer. AVA_DB_URL is injected
+    below as an ava_runner projection, never copied from the parent allowlist.
     """
     from shared.env_registry import child_env
 
@@ -212,6 +210,23 @@ def agent_spawn_env_dict() -> dict[str, str]:
     # boot-time guide keys + the ambient display/temp-dir passthroughs
     # (non-empty only) + the Windows system keys on Windows.
     env = child_env("agent", "windows" if IS_WINDOWS else "posix")
+    db_url = os.environ.get("AVA_DB_URL", "")
+    if db_url:
+        from shared.cluster import runner_password_from_env
+        from shared.cluster.derive import RUNNER_ROLE
+        from shared.config.data_plane import _is_runner_db_url
+        from shared.url_secret import url_with_userinfo
+
+        if _is_runner_db_url(db_url):
+            env["AVA_DB_URL"] = db_url
+        else:
+            runner_password = runner_password_from_env()
+            if not runner_password:
+                raise RuntimeError(
+                    "AVA_RUNNER_DB_PASSWORD is not set in the gateway's .env — run "
+                    "`ava cluster ensure-db-role` before spawning agents."
+                )
+            env["AVA_DB_URL"] = url_with_userinfo(db_url, RUNNER_ROLE, runner_password)
     # Mark this process as an agent so shared.dotenv_boot does not apply the
     # gateway profile filter (the gateway pop would drop cluster-scoped
     # agent-runner keys that the agent needs to backfill from .env on a

@@ -51,7 +51,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from psycopg.conninfo import conninfo_to_dict
+from psycopg.conninfo import conninfo_to_dict, make_conninfo
 
 from shared.config import settings
 from shared.db import direct_db_url
@@ -170,7 +170,12 @@ def run_backup(now: datetime | None = None, *, db_url: str | None = None) -> Pat
     for stale in directory.glob("*.partial"):
         with suppress(OSError):
             stale.unlink()
-    dbname = conninfo_to_dict(db_url)["dbname"]
+    conninfo = {key: str(value) for key, value in conninfo_to_dict(db_url).items()}
+    dbname = conninfo["dbname"]
+    password = conninfo.pop("password", None)
+    # pg_dump's argv is observable to sibling processes. Keep its connection
+    # target explicit, but carry the password only in the child environment.
+    safe_db_url = make_conninfo(**conninfo)
     target = directory / f"{dbname}-{now.astimezone(UTC).strftime(_TS_FORMAT)}.dump"
     partial = target.with_name(target.name + ".partial")
     cmd = [
@@ -179,7 +184,7 @@ def run_backup(now: datetime | None = None, *, db_url: str | None = None) -> Pat
         "--file",
         str(partial),
         "--dbname",
-        db_url,
+        safe_db_url,
     ]
     for table in _EXCLUDE_TABLES:
         cmd += ["--exclude-table", table]
@@ -188,8 +193,17 @@ def run_backup(now: datetime | None = None, *, db_url: str | None = None) -> Pat
         # a pg_dump hung on a lock or stalled I/O would otherwise stall every
         # subsequent healthcheck forever. subprocess.run kills the child on
         # expiry and TimeoutExpired propagates as a failing check.
+        # Pass only the credential this process owns to pg_dump. In particular,
+        # do not inherit a shell's PGPASSWORD: a no-auth cluster must not
+        # accidentally authenticate with another cluster's value.
+        env = {"PGPASSWORD": password} if password else {}
         proc = subprocess.run(  # noqa: S603
-            cmd, capture_output=True, text=True, check=False, timeout=_DUMP_TIMEOUT_S
+            cmd,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=_DUMP_TIMEOUT_S,
+            env=env,
         )
         if proc.returncode != 0:
             raise RuntimeError(f"pg_dump exited {proc.returncode}: {proc.stderr.strip()[:500]}")
