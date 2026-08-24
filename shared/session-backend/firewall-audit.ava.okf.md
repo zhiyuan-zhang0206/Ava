@@ -23,13 +23,14 @@ reports "permitted" for a path with no rule and cannot detect a missing entry.
 The status renderer joins the manifest to that audit and reports every pattern,
 resolved path, and Allow/Block/Missing state.
 
-Reconciliation adds, unblocks, and prunes managed rules. On verified macOS 26.5
-systems the three `socketfilterfw` mutations work without elevation. A failed
-direct mutation is retried with bounded, non-interactive `sudo -n`; if that also
-fails, converge reports the exact manual command and continues rather than
-blocking unattended startup. `cli/commands/_converge_firewall.py` uses the
-reconciler proactively, while `_gateway_ready.py` uses the same audit to explain
-an `OFF_BOX_UNREACHABLE` verdict — see [[cli/commands/commands.ava.okf.md]].
+Reconciliation adds, unblocks, and prunes managed rules. The three
+`socketfilterfw` mutations were empirically verified without elevation on the
+macmini running macOS 15.3.1. A failed direct mutation is retried with bounded,
+non-interactive `sudo -n`; if that also fails, converge reports the exact manual
+command and continues rather than blocking unattended startup.
+`cli/commands/_converge_firewall.py` uses the reconciler proactively, while
+`_gateway_ready.py` uses the same audit to explain an `OFF_BOX_UNREACHABLE`
+verdict — see [[cli/commands/commands.ava.okf.md]].
 
 
 Parent: [[shared/session-backend/session-backend.ava.okf.md|session backend]].

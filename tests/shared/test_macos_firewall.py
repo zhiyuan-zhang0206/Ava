@@ -7,16 +7,18 @@ verdict the audit reaches and which binaries it names. Mutation tests replace th
 subprocess seam, so no test changes the host firewall.
 
 **No test here mutates a real firewall.** Read and mutation subprocess seams are
-stubbed. The latter pins the macOS 26.5+ unprivileged-first path and the fallback
-for versions that still require `sudo -n`.
+stubbed. The latter pins the unprivileged-first path, re-verified on the macmini
+running macOS 15.3.1, and the fallback for versions that still require
+`sudo -n`.
 
-One thing *was* verified against the real tool during development, on a macOS
-26.5.2 box: `allowlisted_paths()` parsed that host's genuine `--listapps` output
-into exactly the 8 rules the tool printed, and correctly found the running uv
-interpreter absent from them. `_LISTAPPS_OUTPUT` below is that real output,
-trimmed — so the parser is pinned against a true sample rather than an invented
-one. What could not be observed on that box is a live `RULES_MISSING`: its
-firewall is off, which the audit short-circuits on by design.
+One thing *was* verified against the real tool during development, on the
+macmini running macOS 15.3.1: `allowlisted_paths()` parsed that host's genuine
+`--listapps` output into exactly the 8 rules the tool printed, and correctly
+found the running uv interpreter absent from them. `_LISTAPPS_OUTPUT` below is
+that real output, trimmed — so the parser is pinned against a true sample rather
+than an invented one. What could not be observed on that host is a live
+`RULES_MISSING`: its firewall is off, which the audit short-circuits on by
+design.
 """
 
 from __future__ import annotations
@@ -27,9 +29,10 @@ import pytest
 
 import shared.macos_firewall as fw
 
-# Real `--listapps` output from a macOS 26.5.2 host, trimmed to four entries with
-# a Block state substituted into one. The exact two-line-per-rule shape (index
-# line, then an indented parenthesised state) is what the parser keys on.
+# Real `--listapps` output from the macmini running macOS 15.3.1, trimmed to four
+# entries with a Block state substituted into one. The exact two-line-per-rule
+# shape (index line, then an indented parenthesised state) is what the parser
+# keys on.
 _LISTAPPS_OUTPUT = """Total number of apps = 4
 1 : /usr/bin/python3
              (Allow incoming connections)
