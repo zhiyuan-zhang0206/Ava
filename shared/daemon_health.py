@@ -74,16 +74,11 @@ from pathlib import Path
 from typing import cast
 
 from shared import process_sha
-from shared.cluster import session_name
 from shared.cluster_auth import verify_bearer
 from shared.config import get_field
 from shared.env_registry import health_port_env_aliases
-from shared.paths import ava_home, legacy_pid_path, run_dir
+from shared.paths import ava_home, legacy_pid_path
 from shared.port_block import LEGACY_AVA_PORTS
-from shared.port_preflight import listeners_on
-from shared.proc import force_kill
-from shared.session_backend import get_backend
-from shared.session_record import SessionRecord
 
 _log = logging.getLogger("shared.daemon_health")
 
@@ -566,68 +561,6 @@ def probe_home(url: str, *, timeout_s: float = _PROBE_TIMEOUT_S) -> DaemonProbe:
     except Exception as exc:
         _log.exception("[probe_home] %s probe raised unexpectedly; treating as down", url)
         return DaemonProbe.down(f"probe raised {type(exc).__name__}: {exc}")
-
-
-@dataclass(frozen=True)
-class SupervisedListenerProbe:
-    probe: DaemonProbe
-    stale_pids: tuple[int, ...] = ()
-
-
-def _listener_matches_binary(pid: int, binary: Path) -> bool:
-    import psutil
-
-    try:
-        return Path(psutil.Process(pid).exe()).resolve() == binary.resolve()
-    except (psutil.Error, OSError):
-        return False
-
-
-def probe_supervised_listener(
-    service: str, *, ports: tuple[int, ...], binary: Path
-) -> SupervisedListenerProbe:
-    """Classify listeners as supervised, reclaimable stale, or foreign.
-
-    Native services detach, so PPID=1 is insufficient; the record names the PID.
-    """
-    session = session_name(service)
-    record = SessionRecord.read(run_dir() / "sessions" / f"{session}.json")
-    supervised = record is not None and get_backend().has_session(session)
-    holders = {port: tuple(dict.fromkeys(listeners_on(port))) for port in ports}
-    pids = tuple(dict.fromkeys(pid for port in ports for pid in holders[port]))
-    expected = tuple(pid for pid in pids if _listener_matches_binary(pid, binary))
-    stale = tuple(pid for pid in expected if not supervised or record is None or record.pid != pid)
-    foreign = tuple(pid for pid in pids if pid not in expected)
-    if foreign:
-        return SupervisedListenerProbe(
-            DaemonProbe.port_taken(
-                f"{service} ports {ports} include pid(s) {foreign} not executing {binary}"
-            ),
-            stale,
-        )
-    if not holders[ports[0]]:
-        return SupervisedListenerProbe(
-            DaemonProbe.down(f"nothing listening on {service} port {ports[0]}"), stale
-        )
-    if stale:
-        return SupervisedListenerProbe(
-            DaemonProbe.down(
-                f"{service} listener pid(s) {stale} execute {binary} without a live {session} record"
-            ),
-            stale,
-        )
-    pid = record.pid if record is not None else "unknown"
-    return SupervisedListenerProbe(DaemonProbe.up(f"{service} listener pid {pid} is supervised"))
-
-
-def reclaim_stale_supervised_listener(
-    service: str, *, ports: tuple[int, ...], binary: Path
-) -> SupervisedListenerProbe:
-    result = probe_supervised_listener(service, ports=ports, binary=binary)
-    for pid in result.stale_pids:
-        if pid in probe_supervised_listener(service, ports=ports, binary=binary).stale_pids:
-            force_kill(pid)
-    return probe_supervised_listener(service, ports=ports, binary=binary)
 
 
 def _probe_home(url: str, *, timeout_s: float = _PROBE_TIMEOUT_S) -> DaemonProbe:

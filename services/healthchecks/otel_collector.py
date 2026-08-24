@@ -21,14 +21,14 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from shared.config import settings
-from shared.daemon_health import (
-    DaemonProbe,
-    probe_supervised_listener,
-    reclaim_stale_supervised_listener,
-)
+from shared.daemon_health import DaemonProbe
 from shared.log import init_gateway_process, logger
 from shared.paths import otel_collector_binary, otel_collector_config
 from shared.service_respawn import respawn_and_verify, run_keepalive
+from shared.supervised_listener import (
+    probe_supervised_listener,
+    reclaim_stale_supervised_listener,
+)
 
 _METRICS_URL = "http://127.0.0.1:8888/metrics"
 _COLLECTOR_PORTS = (4318, 8888)
