@@ -26,7 +26,7 @@ from psycopg_pool import ConnectionPool
 
 from ops import agent_launch
 from ops import cluster_rpc as _cluster_rpc
-from ops.agent_identity import AgentProcessIdentity, probe_agent_process
+from ops.agent_identity import RESIDENT_IDENTITIES, AgentProcessIdentity, probe_agent_process
 from ops.agent_wake import ResurrectTriggerStaleError
 from ops.agents import (
     get_agent_machine,
@@ -66,7 +66,7 @@ from shared.live_events import (
 )
 from shared.log import logger
 from shared.machine import machine_name
-from shared.proc import force_kill, process_alive
+from shared.proc import force_kill
 from shared.redis_client import publish_best_effort
 from shared.session_backend import native_proc
 
@@ -546,14 +546,8 @@ def _terminate_graceful_blocking(
         cur.execute("SELECT pid FROM agents_meta WHERE id=%s", (agent_id,))
         row = cur.fetchone()
     pid = row[0] if row else None
-    if pid is not None and not process_alive(pid):
-        _, _, zombie_closed_page_names, inbound_id = _force_terminate_transaction(
-            agent_id,
-            db_pool,
-            source=body.source,
-            kill_process=True,
-        )
-        _publish_force_terminate_inbound(agent_id, inbound_id, body.source)
+    if pid is not None and probe_agent_process(pid, agent_id) not in RESIDENT_IDENTITIES:
+        zombie_closed_page_names = _force_mark_terminated(agent_id, db_pool, source=body.source)
         with db_pool.connection() as conn:
             publish_agent_updated_sync(conn, agent_id)
         return "already_terminated", None, zombie_closed_page_names

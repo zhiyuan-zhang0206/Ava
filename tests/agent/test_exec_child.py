@@ -213,6 +213,58 @@ def test_child_sigterm_writes_timed_out_envelope(tmp_path: Path) -> None:
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals")
+def test_child_installs_signal_handlers_before_reading_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A signal arriving during request decoding must become an in-band result,
+    so SIGTERM's child handler is installed before the read begins."""
+    from agent import exec_child
+    from agent.graph._exec_protocol import RequestPayload, ResultPayload
+
+    old_sigint = signal.getsignal(signal.SIGINT)
+    old_sigterm = signal.getsignal(signal.SIGTERM)
+
+    def fake_read_request(_path: Path) -> RequestPayload:
+        handler = signal.getsignal(signal.SIGTERM)
+        assert getattr(handler, "__name__", None) == "_raise_timeout_error"
+        return RequestPayload(code="pass", agent_id=None, timeout_s=0.0, state=None)
+
+    def fake_apply_scope(
+        _birth: dict[str, object] | None,
+        _overlay: dict[str, object] | None,
+        *,
+        scope: str,
+    ) -> bool:
+        return False
+
+    def fake_build_state_slot(_state: dict[str, Any] | None) -> None:
+        return None
+
+    def fake_run_code(_code: str, _payload: ResultPayload) -> None:
+        return None
+
+    def fake_write_result(_path: Path, _payload: ResultPayload) -> None:
+        return None
+
+    monkeypatch.setattr(exec_child, "_line_buffered_output", lambda: None)
+    monkeypatch.setattr(exec_child, "read_request", fake_read_request)
+    monkeypatch.setattr(exec_child, "_pop_overlay_env", lambda: (None, None))
+    monkeypatch.setattr(exec_child, "_apply_overlay_scope", fake_apply_scope)
+    monkeypatch.setattr(exec_child, "_build_state_slot", fake_build_state_slot)
+    monkeypatch.setattr(exec_child, "_run_code", fake_run_code)
+    monkeypatch.setattr(exec_child, "write_result", fake_write_result)
+    monkeypatch.setattr("ava._ensure_plugins_loaded", lambda: None)
+    monkeypatch.setattr("ava.security.take_findings", list)
+    monkeypatch.setattr("ava._attach.take_attachments", list)
+
+    try:
+        exec_child._run("request.json", "result.json")
+    finally:
+        signal.signal(signal.SIGINT, old_sigint)
+        signal.signal(signal.SIGTERM, old_sigterm)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals")
 def test_child_watchdog_hard_exits_124(tmp_path: Path) -> None:
     """With no parent to signal it, the child's own watchdog os._exit(124)s
     past (timeout + grace + margin) — an orphaned exec child cannot run long."""

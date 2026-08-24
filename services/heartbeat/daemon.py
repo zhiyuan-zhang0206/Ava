@@ -118,33 +118,26 @@ def _select_idle_agents_needing_heartbeat(
     hibernation controller on the agent's home machine polls for a hibernating
     row with a pending inbound and relaunches it (clean restart), after which the
     woken process claims the check-in — identical to how a never-swapped idle
-    agent handles it. That time has two mutually exclusive regimes:
+    agent handles it. Its next check-in is the later of the pause window and the
+    idle clock: `GREATEST(heartbeat_paused_until, last_active_at +
+    idle_threshold_s + jitter)`. The pause window is a floor; while it dominates,
+    no check-in can arrive before its end. A real turn during that window starts a
+    new normal idle clock, so after the window expires the check-in still waits
+    `last_active_at + idle_threshold_s + jitter`. PostgreSQL `GREATEST` ignores a
+    NULL pause window, which leaves the unpaused idle-clock behavior unchanged.
 
-    - Not paused — `heartbeat_paused_until` NULL, or set no later than the last
-      real turn: next check-in is `last_active_at + idle_threshold_s` plus a
-      per-agent jitter offset (see `jitter_span_s`). Every real turn (a genuine
-      wake — chat, or a check-in the agent actually processes) bumps
-      `last_active_at`, restarting the idle clock; a continually-active agent
-      never gets one.
-    - Paused — `heartbeat_paused_until` strictly later than `last_active_at`:
-      next check-in is exactly `heartbeat_paused_until` (never jittered — the
-      pause window is absolute from the `pause_heartbeat()` call). A real turn
-      during the window still bumps `last_active_at`, but while it stays before
-      the window's end it cannot push the check-in out — only another
-      `pause_heartbeat()` moves it. Once a real turn (or the check-in itself)
-      lands after the window expires, `last_active_at` overtakes
-      `heartbeat_paused_until` and the normal idle clock resumes.
-
-    `jitter_span_s` de-phases the unpaused due-time by a deterministic per-agent
+    `jitter_span_s` de-phases the idle-clock term by a deterministic per-agent
     offset `id mod jitter_span_s` seconds, spreading a fleet that went idle
     together across a `jitter_span_s`-wide window so it does not come due (and
     wake) in one batch. Deterministic on `id`, so it survives across cycles and
     breaks the self-synchronization the check-in itself would otherwise induce. `0`
     (the default) disables jitter — the `NULLIF` guards the `mod` against a
-    divide-by-zero and collapses the offset to 0. `limit` caps the batch (the
-    hard per-step wake-rate ceiling); with oldest-idle-first ordering the most
-    overdue agents drain first. Both default to the un-jittered, unlimited
-    behaviour so existing timing tests read the raw predicate.
+    divide-by-zero and collapses the offset to 0. Jitter affects only the
+    idle-clock term; while the pause floor dominates, there is no jitter. `limit`
+    caps the batch (the hard per-step wake-rate ceiling); with oldest-idle-first
+    ordering the most overdue agents drain first. Both default to the
+    un-jittered, unlimited behaviour so existing timing tests read the raw
+    predicate.
 
     No machine filter: the inbound-insert trigger wakes the agent wherever it
     runs.
@@ -159,13 +152,11 @@ def _select_idle_agents_needing_heartbeat(
         "SELECT id, EXTRACT(EPOCH FROM (now() - last_active_at)) / 60.0 AS idle_minutes "
         "FROM agents_meta "
         "WHERE (status = 'hibernating' OR (status = 'idling' AND lease_expires_at > now())) "
-        "AND now() >= CASE "
-        "    WHEN heartbeat_paused_until IS NOT NULL "
-        "         AND heartbeat_paused_until > last_active_at "
-        "      THEN heartbeat_paused_until "
-        "    ELSE last_active_at "
-        "         + make_interval(secs => %s + COALESCE(mod(id, NULLIF(%s, 0)::int), 0)) "
-        "  END "
+        "AND now() >= GREATEST("
+        "  heartbeat_paused_until, "
+        "  last_active_at "
+        "  + make_interval(secs => %s + COALESCE(mod(id, NULLIF(%s, 0)::int), 0))"
+        ") "
         "AND NOT EXISTS ("
         "  SELECT 1 FROM inbound_messages im "
         "  WHERE im.agent_id = agents_meta.id AND im.status = 'pending' "

@@ -4,19 +4,10 @@
 clock is `last_active_at` (the last completed LLM turn — real work), NOT
 `status_changed_at` (bumped by every status flip, including ops lifecycle churn).
 `TestIdleClockCountsRealActivityOnly` pins that semantic: an ops restart resets
-status_changed_at without a real turn and must not reset the idle clock. Two
-mutually exclusive next-check-in regimes:
-
-- not paused: `last_active_at + idle_threshold` (every real turn bumps
-  last_active_at, so a busy agent's clock keeps restarting).
-- paused: exactly `heartbeat_paused_until` (absolute from the pause call; a
-  real turn during the window must NOT push the check-in out past it).
-
-The pause regime is the regression guard for the timing bug: the daemon used to
-AND the idle-threshold check with the pause check, so a wake-up during a pause
-refreshed the clock and the check-in slipped a full idle_threshold past the
-window's end. `test_wake_during_pause_does_not_delay_checkin_past_window` pins
-the fixed behavior.
+status_changed_at without a real turn and must not reset the idle clock. The
+pause window is a floor on the next check-in time. A real turn during the window
+starts the normal idle clock, so after the window expires the agent still waits
+`last_active_at + idle_threshold` (plus its deterministic jitter offset).
 """
 
 from __future__ import annotations
@@ -230,16 +221,40 @@ class TestSelectIdleAgents:
         aid = _make_idle(db_conn, status_changed_s_ago=600, paused_until_s_ahead=1800)
         assert aid not in _selected(pool)
 
-    def test_wake_during_pause_does_not_delay_checkin_past_window(
+    def test_real_turn_during_pause_delays_checkin_past_window(
         self, pool: ConnectionPool, db_conn: psycopg.Connection
     ) -> None:
-        """Regression for the timing bug. A wake-up landed 10s ago (recent
-        status_changed_at) while a long pause was active; the window has now just
-        expired. The pause window is absolute, so the check-in is due immediately —
-        the recent wake must NOT push it a fresh idle_threshold into the future
-        (which the old AND-of-conditions select did)."""
-        aid = _make_idle(db_conn, status_changed_s_ago=10, paused_until_s_ahead=-1)
-        assert aid in _selected(pool)
+        """R-6: the pause window is a floor, not an absolute check-in time. A
+        real turn during the window starts the normal idle clock, so after expiry
+        the agent must wait the idle threshold instead of taking a wasted wake."""
+        aid = _make_idle(
+            db_conn,
+            status_changed_s_ago=10,
+            last_active_s_ago=10,
+            paused_until_s_ahead=-1,
+        )
+        assert aid not in _selected(pool)
+
+    def test_open_pause_window_still_suppresses_checkin_after_real_turn(
+        self, pool: ConnectionPool, db_conn: psycopg.Connection
+    ) -> None:
+        """The R-6 pause floor wins while it is open, then the real turn's
+        idle clock wins after expiry; both edges are one unified due-time rule."""
+        open_window = _make_idle(
+            db_conn,
+            status_changed_s_ago=10,
+            last_active_s_ago=10,
+            paused_until_s_ahead=60,
+        )
+        expired_window = _make_idle(
+            db_conn,
+            status_changed_s_ago=10,
+            last_active_s_ago=10,
+            paused_until_s_ahead=-1,
+        )
+        selected = _selected(pool)
+        assert open_window not in selected
+        assert expired_window not in selected
 
     def test_pause_expired_before_last_wake_uses_normal_clock(
         self, pool: ConnectionPool, db_conn: psycopg.Connection

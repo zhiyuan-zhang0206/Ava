@@ -10,6 +10,7 @@ GET /api/agents (full snapshot of agents_meta table)
 from __future__ import annotations
 
 import json
+import os
 import signal
 
 import psycopg
@@ -320,6 +321,187 @@ class TestTerminate:
             resp = client.post(f"/api/agents/{agent_id}/terminate")
         assert resp.status_code == 200
         assert resp.json() == {"status": "enqueued"}
+        assert _inbound_rows(db_conn, agent_id) == [("", "terminate", "user")]
+
+    def test_terminate_foreign_pid_force_marks_without_killing(
+        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A recycled live pid belongs to somebody else, so graceful terminate
+        reconciles only the stale row and never touches that process or session."""
+        from ops.agent_identity import AgentProcessIdentity
+
+        session_kills: list[tuple[str, bool]] = []
+        pid_kills: list[int] = []
+        published_agent_ids: list[int] = []
+
+        def _capture_agent_updated(_conn: psycopg.Connection, published_agent_id: int) -> None:
+            published_agent_ids.append(published_agent_id)
+
+        class _RecordingSupervisor:
+            @staticmethod
+            def kill_session(name: str, *, graceful: bool) -> tuple[bool, str]:
+                session_kills.append((name, graceful))
+                return True, "noop"
+
+        monkeypatch.setattr("ops.ops_lifecycle.native_proc", lambda: _RecordingSupervisor)
+        monkeypatch.setattr("ops.ops_lifecycle.force_kill", pid_kills.append)
+        monkeypatch.setattr(
+            "ops.ops_lifecycle.publish_agent_updated_sync",
+            _capture_agent_updated,
+        )
+
+        def _foreign_process(_pid: int, _agent_id: int) -> AgentProcessIdentity:
+            return AgentProcessIdentity.FOREIGN
+
+        monkeypatch.setattr(
+            "ops.ops_lifecycle.probe_agent_process",
+            _foreign_process,
+        )
+
+        with TestClient(app) as client:
+            agent_id = client.post("/api/agents", json={}).json()["id"]
+            with db_conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE agents_meta SET pid = %s WHERE id = %s", (os.getpid(), agent_id)
+                )
+            db_conn.commit()
+            resp = client.post(f"/api/agents/{agent_id}/terminate")
+
+        assert resp.json() == {"status": "already_terminated"}
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "SELECT status, termination_source FROM agents_meta WHERE id = %s", (agent_id,)
+            )
+            assert cur.fetchone() == ("terminated", "user")
+        assert _inbound_rows(db_conn, agent_id) == [("", "terminate", "user")]
+        assert session_kills == []
+        assert pid_kills == []
+        assert published_agent_ids == [agent_id]
+
+    def test_terminate_gone_pid_force_marks_without_killing(
+        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A dead pid is a stale row, not an excuse to clear a possibly reused
+        session name while reconciling the requested termination."""
+        from ops.agent_identity import AgentProcessIdentity
+
+        session_kills: list[tuple[str, bool]] = []
+        pid_kills: list[int] = []
+
+        class _RecordingSupervisor:
+            @staticmethod
+            def kill_session(name: str, *, graceful: bool) -> tuple[bool, str]:
+                session_kills.append((name, graceful))
+                return True, "noop"
+
+        monkeypatch.setattr("ops.ops_lifecycle.native_proc", lambda: _RecordingSupervisor)
+        monkeypatch.setattr("ops.ops_lifecycle.force_kill", pid_kills.append)
+
+        def _gone_process(_pid: int, _agent_id: int) -> AgentProcessIdentity:
+            return AgentProcessIdentity.GONE
+
+        monkeypatch.setattr(
+            "ops.ops_lifecycle.probe_agent_process",
+            _gone_process,
+        )
+
+        with TestClient(app) as client:
+            agent_id = client.post("/api/agents", json={}).json()["id"]
+            with db_conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE agents_meta SET pid = %s WHERE id = %s", (2_147_483_647, agent_id)
+                )
+            db_conn.commit()
+            resp = client.post(f"/api/agents/{agent_id}/terminate")
+
+        assert resp.json() == {"status": "already_terminated"}
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "SELECT status, termination_source FROM agents_meta WHERE id = %s", (agent_id,)
+            )
+            assert cur.fetchone() == ("terminated", "user")
+        assert _inbound_rows(db_conn, agent_id) == [("", "terminate", "user")]
+        assert session_kills == []
+        assert pid_kills == []
+
+    def test_terminate_owned_pid_enqueues_even_when_liveness_probe_is_inconclusive(
+        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Positive identity evidence keeps graceful termination on the inbound
+        path even if the obsolete liveness check would report the pid dead."""
+        from ops.agent_identity import AgentProcessIdentity
+
+        _stub_native_kill(monkeypatch)
+
+        def _no_kill(_pid: int) -> None:
+            return None
+
+        def _not_alive(_pid: int) -> bool:
+            return False
+
+        def _owned_process(_pid: int, _agent_id: int) -> AgentProcessIdentity:
+            return AgentProcessIdentity.OWNED
+
+        monkeypatch.setattr("ops.ops_lifecycle.force_kill", _no_kill)
+        monkeypatch.setattr("ops.ops_lifecycle.process_alive", _not_alive, raising=False)
+        monkeypatch.setattr(
+            "ops.ops_lifecycle.probe_agent_process",
+            _owned_process,
+        )
+
+        with TestClient(app) as client:
+            agent_id = client.post("/api/agents", json={}).json()["id"]
+            with db_conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE agents_meta SET pid = %s WHERE id = %s", (os.getpid(), agent_id)
+                )
+            db_conn.commit()
+            resp = client.post(f"/api/agents/{agent_id}/terminate")
+
+        assert resp.json() == {"status": "enqueued"}
+        with db_conn.cursor() as cur:
+            cur.execute("SELECT status FROM agents_meta WHERE id = %s", (agent_id,))
+            assert cur.fetchone() == ("idling",)
+        assert _inbound_rows(db_conn, agent_id) == [("", "terminate", "user")]
+
+    def test_terminate_unreadable_pid_enqueues_as_resident(
+        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A pid with unreadable argv remains resident: lack of identity evidence
+        must not turn a graceful request into an immediate termination."""
+        from ops.agent_identity import AgentProcessIdentity
+
+        _stub_native_kill(monkeypatch)
+
+        def _no_kill(_pid: int) -> None:
+            return None
+
+        def _not_alive(_pid: int) -> bool:
+            return False
+
+        def _unreadable_process(_pid: int, _agent_id: int) -> AgentProcessIdentity:
+            return AgentProcessIdentity.UNREADABLE
+
+        monkeypatch.setattr("ops.ops_lifecycle.force_kill", _no_kill)
+        monkeypatch.setattr("ops.ops_lifecycle.process_alive", _not_alive, raising=False)
+        monkeypatch.setattr(
+            "ops.ops_lifecycle.probe_agent_process",
+            _unreadable_process,
+        )
+
+        with TestClient(app) as client:
+            agent_id = client.post("/api/agents", json={}).json()["id"]
+            with db_conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE agents_meta SET pid = %s WHERE id = %s", (os.getpid(), agent_id)
+                )
+            db_conn.commit()
+            resp = client.post(f"/api/agents/{agent_id}/terminate")
+
+        assert resp.json() == {"status": "enqueued"}
+        with db_conn.cursor() as cur:
+            cur.execute("SELECT status FROM agents_meta WHERE id = %s", (agent_id,))
+            assert cur.fetchone() == ("idling",)
         assert _inbound_rows(db_conn, agent_id) == [("", "terminate", "user")]
 
     def test_terminate_already_terminated_is_noop(self, db_conn: psycopg.Connection) -> None:
