@@ -8,9 +8,10 @@ cluster's ports, stated here beside the record code they read:
 - `expected_cluster_ports` / `unit_port_map` — the service->port map the
   cluster / this unit expects to own (registry record, or the legacy block for
   a record-less default home; `unit_port_map` adds the per-unit health ports);
-- `occupied_ports` / `listeners_on` — the ports currently bound on this host
-  and the pids holding them (a bind probe, with an optional `is_ours` filter
-  so an idempotent restart's own daemons do not read as conflicts);
+- `occupied_ports` / `listeners_on` / `listener_addrs` — the ports currently
+  bound on this host, the pids holding them, and their local bind addresses (a
+  bind probe, with an optional `is_ours` filter so an idempotent restart's own
+  daemons do not read as conflicts);
 - `process_mentions` / `listener_is_ours` — the pid ownership predicate (the
   #1603/#1606 lineage): a listener counts as this unit's when its argv,
   resolved executable, or working directory mentions the unit's repo or home
@@ -27,6 +28,7 @@ from pathlib import Path
 from typing import cast
 from urllib.parse import urlsplit
 
+import shared.proc
 from shared.cluster import (
     LEGACY_AVA_PORTS,
     ClusterPorts,
@@ -194,6 +196,68 @@ def listeners_on(port: int) -> list[int]:
             except ValueError:
                 continue
     return list(dict.fromkeys(pids))
+
+
+def listener_addrs(port: int) -> set[str]:
+    """Local addresses with a TCP listener on `port`, best-effort.
+
+    psutil is the primary, cross-platform socket-table scan. As with
+    `listeners_on`, macOS may reject the whole scan when any process is
+    unreadable, so POSIX hosts fall back to lsof's machine-readable name fields.
+    An empty set means no listener address could be proven — either none exists
+    or both inspection paths failed — and callers must treat that uncertainty
+    conservatively rather than as proof that no listener exists.
+    """
+    import psutil
+
+    try:
+        conns = psutil.net_connections(kind="tcp")
+    except (psutil.Error, OSError):
+        conns = None
+    if conns is not None:
+        addrs: set[str] = set()
+        for conn in conns:
+            if conn.status != "LISTEN":
+                continue
+            addr = conn.laddr
+            if len(addr) < 2:
+                continue
+            if addr[1] == port:
+                addrs.add(addr[0])
+        return addrs
+
+    import subprocess
+
+    try:
+        # S603: static argv; the only interpolated piece is an int port.
+        out = shared.proc.run_bounded(
+            ["lsof", "-nP", "-Fpn", "-sTCP:LISTEN", f"-iTCP:{port}"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return set()
+    if out.returncode != 0:
+        return set()
+
+    addrs = set()
+    for line in out.stdout.splitlines():
+        if not line.startswith("n"):
+            continue
+        host, separator, port_text = line[1:].rpartition(":")
+        if not separator:
+            continue
+        try:
+            if int(port_text) != port:
+                continue
+        except ValueError:
+            continue
+        if host.startswith("[") and host.endswith("]"):
+            host = host[1:-1]
+        if host:
+            addrs.add(host)
+    return addrs
 
 
 def process_mentions(pid: int, markers: tuple[str, ...]) -> bool:

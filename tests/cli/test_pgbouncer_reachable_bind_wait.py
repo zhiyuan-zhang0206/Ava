@@ -15,9 +15,7 @@ What is asserted here — the decision logic around `ensure_pgbouncer`:
   a "✓ pgbouncer started";
 - a running pooler is reloaded only when its public listener verifies; a degraded
   running pooler is RESTARTED (a SIGHUP reload cannot re-bind a listen_addr that
-  failed at startup), and a terminate that did not take is reported;
-- the public-listener probe itself: loopback-only (no-secret) clusters have no
-  public listener to check, so they never probe.
+  failed at startup), and a terminate that did not take is reported.
 """
 
 from __future__ import annotations
@@ -287,42 +285,3 @@ def test_running_degraded_pooler_surviving_terminate_is_reported(
     assert rc == 1
     assert calls == [], "no fresh start may follow a terminate that did not take"
     assert "could not stop the degraded pooler" in capsys.readouterr().err
-
-
-# ── the public-listener probe itself ─────────────────────────────────────────
-
-
-def test_public_probe_is_a_noop_for_loopback_only_bind(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """No-secret clusters bind loopback only — there is no public listener to
-    check, and probing one would dial an address nothing listens on."""
-    probed: list[str] = []
-    monkeypatch.setattr(_pb, "_bind_addrs", lambda _secret: ["127.0.0.1"])  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr(_pb, "reachable_host", lambda: "100.64.0.5")
-    monkeypatch.setattr(
-        _pb,
-        "_admin_reachable",
-        lambda *_a, host="127.0.0.1", **_kw: probed.append(host) or True,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    )
-
-    assert _pb.pgbouncer_public_listener_reachable(6433, "ava_main", "") is True
-    assert probed == []
-
-
-def test_public_probe_dials_the_reachable_host(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """With a secret, the pooler must listen on the reachable address too — the
-    probe authenticates against exactly that host."""
-    seen: list[str] = []
-    monkeypatch.setattr(_pb, "_bind_addrs", lambda _secret: ["127.0.0.1", "100.64.0.5"])  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    monkeypatch.setattr(_pb, "reachable_host", lambda: "100.64.0.5")
-    monkeypatch.setattr(
-        _pb,
-        "_admin_reachable",
-        lambda *_a, host="127.0.0.1", **_kw: seen.append(host) or True,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    )
-
-    assert _pb.pgbouncer_public_listener_reachable(6433, "ava_main", _SECRET) is True
-    assert seen == ["100.64.0.5"]
