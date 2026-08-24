@@ -20,6 +20,9 @@ from gateway.schemas.cluster import (
 from gateway.schemas.commands import (
     CommandItem,
 )
+from gateway.schemas.errors import (
+    ErrorEnvelope,
+)
 from gateway.schemas.events import (
     AgentEventRow,
     AgentEventsResponse,
@@ -69,7 +72,6 @@ from gateway.schemas.memory import (
     MemorySearchResultItem,
 )
 from gateway.schemas.messages import (
-    AgentErrorResponse,
     AgentMessageEnqueued,
     AgentMessagesResponse,
     CancelRequest,
@@ -167,7 +169,6 @@ from shared.api_contracts import (
 __all__ = [
     "AgentActivity",
     "AgentCost",
-    "AgentErrorResponse",
     "AgentEventRow",
     "AgentEventsResponse",
     "AgentInspect",
@@ -194,6 +195,7 @@ __all__ = [
     "ContextSection",
     "DefaultModelView",
     "DefaultModelWrite",
+    "ErrorEnvelope",
     "EscalationNoticeItem",
     "EventRow",
     "EventsMeta",

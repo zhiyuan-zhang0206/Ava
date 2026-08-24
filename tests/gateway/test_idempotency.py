@@ -591,7 +591,7 @@ def _fake_contract_for(_method: str, _path: str) -> _FakeAlwkContract:
 
 def _run_middleware_once(
     key: str, path: str, call_next: Callable[[Request], Awaitable[Response]]
-) -> None:
+) -> Response:
     """Drive idempotency_middleware for one request on the real app/DB."""
     scope = {
         "type": "http",
@@ -605,10 +605,39 @@ def _run_middleware_once(
         "app": app,
     }
 
-    async def _run() -> None:
-        await _idempotency.idempotency_middleware(Request(scope), call_next)
+    async def _run() -> Response:
+        return await _idempotency.idempotency_middleware(Request(scope), call_next)
 
-    asyncio.run(_run())
+    return asyncio.run(_run())
+
+
+def test_in_flight_key_timeout_uses_typed_retriable_envelope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A live owner timeout remains retriable without exposing a detail-only body."""
+    monkeypatch.setattr(_idempotency.contracts, "contract_for", _fake_contract_for)
+    monkeypatch.setattr(app.state, "db_pool", object(), raising=False)
+
+    def claim_false(*_args: object) -> bool:
+        return False
+
+    def fetch_none(*_args: object) -> None:
+        return None
+
+    monkeypatch.setattr(_idempotency, "_claim", claim_false)
+    monkeypatch.setattr(_idempotency, "_fetch", fetch_none)
+    monotonic_values = iter((0.0, _idempotency._MAX_WAIT_SECONDS))
+    monkeypatch.setattr(_idempotency, "_monotonic", lambda: next(monotonic_values))
+
+    async def call_next(_request: Request) -> Response:
+        raise AssertionError("an in-flight request must not execute again")
+
+    response = _run_middleware_once("key-in-flight", "/api/test-keyed", call_next)
+    assert response.status_code == 503
+    assert response.headers["retry-after"] == "1"
+    body = json.loads(bytes(response.body))
+    assert body["code"] == "idempotency_in_flight"
+    assert body["retryable"] is True
 
 
 def test_follower_polling_uses_capped_exponential_backoff(

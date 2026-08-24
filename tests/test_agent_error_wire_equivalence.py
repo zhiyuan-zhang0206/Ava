@@ -1,13 +1,12 @@
 """SDK ↔ Gateway error wire-equivalence.
 
-Locks in the "server raise X → handler encodes reason+http_status → SDK parse → reconstruct X"
+Locks in the "server raise X → handler encodes typed envelope + reason → SDK parse → reconstruct X"
 end-to-end invariant.
 
 Every AvaAgentError subclass is parametrized to run two assertions:
   1. **handler encoding correct**: register handler on an isolated FastAPI app + a synthetic
-     endpoint that raises cls; TestClient hits it; checks response.status_code
-     ==cls.http_status / body.reason==cls.reason / body.detail matches the raised
-     message
+     endpoint that raises cls; TestClient hits it; checks the typed envelope plus
+     body.reason==cls.reason / body.detail matches the raised message
   2. **SDK reconstruction correct**: feed a synthetic httpx.Response to _gateway_client.
      _raise_from_response; checks the raised exception is the same cls + same message
 
@@ -35,7 +34,7 @@ from shared.agents import EXCEPTION_BY_REASON, AvaAgentError
     ids=[r.value for r in EXCEPTION_BY_REASON],
 )
 def test_handler_emits_expected_wire(reason, cls):
-    """server-side: handler encodes cls.reason / cls.http_status / str(exc) into body."""
+    """Server-side: handler encodes the full envelope plus SDK wire reason."""
     app = FastAPI()
     # FastAPI's add_exception_handler second parameter is typed as ExceptionHandler
     # (Exception input); our handler input is an AvaAgentError subtype — pyright
@@ -52,8 +51,13 @@ def test_handler_emits_expected_wire(reason, cls):
 
     assert resp.status_code == cls.http_status
     body = resp.json()
+    assert body["type"] == "about:blank"
+    assert body["code"] == reason.value
+    assert body["status"] == cls.http_status
     assert body["reason"] == reason
     assert body["detail"] == "forced wire-test message"
+    assert body["retryable"] is False
+    assert isinstance(body["trace_id"], str) and body["trace_id"]
 
 
 @pytest.mark.parametrize(

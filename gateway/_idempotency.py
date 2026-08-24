@@ -41,6 +41,7 @@ from fastapi import Request, Response
 from fastapi.responses import JSONResponse
 from psycopg_pool import ConnectionPool
 
+from gateway.error_envelope import error_response
 from shared import contracts
 from shared.contracts import Idempotency
 
@@ -228,9 +229,12 @@ async def idempotency_middleware(
         else:
             # Owner still executing past the wait bound — do NOT double-execute.
             # 503 with a short Retry-After: the client's retry loop picks it up.
-            return JSONResponse(
-                status_code=503,
-                content={"detail": "idempotent request still in flight, retry shortly"},
+            return error_response(
+                request,
+                code="idempotency_in_flight",
+                status=503,
+                detail="idempotent request still in flight, retry shortly",
+                retryable=True,
                 headers={"Retry-After": "1"},
             )
 
