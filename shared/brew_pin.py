@@ -17,6 +17,7 @@ PINNED_BREW_FORMULAE: frozenset[str] = frozenset(
         "redis",
         "redis@8.2",
         "tailscale",
+        "uv",
     }
 )
 

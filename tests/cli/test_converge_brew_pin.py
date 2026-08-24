@@ -24,6 +24,7 @@ EXPECTED_PINNED_FORMULAE = frozenset(
         "redis",
         "redis@8.2",
         "tailscale",
+        "uv",
     }
 )
 

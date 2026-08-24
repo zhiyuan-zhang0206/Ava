@@ -14,7 +14,7 @@ The macOS data-plane install and runtime resolver target the versioned
 `redis@8.2` formula. Provisioning exports Homebrew's no-auto-update and
 no-install-upgrade controls before any install path can invoke brew.
 
-The approved pin manifest contains eleven formulae, including both `redis` and
+The approved pin manifest contains twelve formulae, including both `redis` and
 `redis@8.2`: the versioned formula is Ava's runtime, while the installed
 unversioned formula must also remain pinned so a broad upgrade cannot move it.
 Converge checks the manifest during lifecycle commands, and both watchdog roles
