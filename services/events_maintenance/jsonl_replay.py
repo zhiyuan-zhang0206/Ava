@@ -44,6 +44,7 @@ def aggregate_rollup_file(path: Path) -> tuple[list[TokensRow], list[MetricsRow]
     """
     tokens: dict[tuple[int, str], dict[str, float]] = {}
     metrics: dict[int, dict[str, float]] = {}
+    hist: dict[int, dict[int, int]] = {}
     source_agent_ids: set[int] = set()
 
     with path.open(encoding="utf-8") as source:
@@ -86,6 +87,9 @@ def aggregate_rollup_file(path: Path) -> tuple[list[TokensRow], list[MetricsRow]
                     values["turn_dur_sum"] = values.get("turn_dur_sum", 0.0) + duration
                     values["turn_dur_min"] = min(values.get("turn_dur_min", duration), duration)
                     values["turn_dur_max"] = max(values.get("turn_dur_max", duration), duration)
+                    bucket = int(duration // 1)
+                    agent_hist = hist.setdefault(agent_id, {})
+                    agent_hist[bucket] = agent_hist.get(bucket, 0) + 1
             elif event_name == "exec":
                 values["exec_ok"] = values.get("exec_ok", 0.0) + 1
             else:
@@ -114,6 +118,7 @@ def aggregate_rollup_file(path: Path) -> tuple[list[TokensRow], list[MetricsRow]
             turn_dur_sum=float(values.get("turn_dur_sum", 0.0)),
             turn_dur_min=values.get("turn_dur_min"),
             turn_dur_max=values.get("turn_dur_max"),
+            turn_dur_hist=hist.get(agent_id, {}),
             exec_ok=int(values.get("exec_ok", 0)),
             exec_failed=int(values.get("exec_failed", 0)),
         )
@@ -211,6 +216,7 @@ def _upsert_day(
                     row.turn_dur_sum,
                     row.turn_dur_min,
                     row.turn_dur_max,
+                    json.dumps(row.turn_dur_hist),
                     row.exec_ok,
                     row.exec_failed,
                 ),

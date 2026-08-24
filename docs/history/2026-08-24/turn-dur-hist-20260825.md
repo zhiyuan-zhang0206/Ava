@@ -15,17 +15,23 @@ the rollup converts it to an integer before writing JSONB. This mechanism was
 validated against production Loki on 2026-08-25 for agent 3269: 47 buckets and
 856 rows exactly matched client-side `floor(duration_seconds)`.
 
-Whole-life percentiles merge the frozen archive's exact distribution, complete
-daily histogram rows, and the exact live tail. Windowed requests use the ledger
-histogram plus the same tail. Ledger-covered buckets trade precision for bounded
-reads: their percentile contribution has approximately ±0.5-second precision;
-the exact daily min/max columns continue to supply extrema, so a floor bucket
-cannot lower the reported minimum.
+Whole-life and windowed percentiles merge the daily integer-second histogram
+rows with the exact live tail; the frozen archive's exact distribution is
+merged only as a raw fallback. When coverage is complete, archive-era
+backfilled days contribute the same approximately ±0.5-second bucket precision
+as settled days, and the exact daily min/max columns plus the archive and live
+extrema continue to supply extrema, so a floor bucket cannot lower the
+reported minimum.
 
-Coverage is all-or-nothing for the requested ledger rows. Every present ledger
-day must have a non-empty histogram; absent historical ledger-gap days do not
-count against coverage. Any present empty histogram takes the existing raw
-full-window duration pass, preserving correctness while the ledger repairs.
+Coverage is all-or-nothing for the requested ledger rows: every present ledger
+day with turns must have a non-empty histogram, a zero-turn day is complete
+without one, and absent historical ledger-gap days do not count against
+coverage. Any present empty histogram on a day with turns keeps the existing
+raw full-window duration pass, preserving correctness while the maintenance
+daemon repairs coverage. Known limitation: a windowed read in which an
+archive-era day has events but no ledger row leaves those durations out of the
+percentiles; extrema are unaffected because the archive distribution still
+supplies bounds.
 
 After deployment, the hourly maintenance daemon self-heals histogram coverage
 for 2026-08-17 through yesterday within one hour. The earlier 2026-08-14 through

@@ -222,7 +222,7 @@ def _metrics_queries(
     dur = ' | json duration_seconds="attributes.duration_seconds" | __error__="" | unwrap duration_seconds'
     hist = (
         ' | json duration_seconds="attributes.duration_seconds"'
-        ' | line_format "{{ floor .duration_seconds }}" | pattern "<bucket>"'
+        ' | __error__="" | line_format "{{ floor .duration_seconds }}" | pattern "<bucket>"'
     )
     return {
         "turn_total": f"sum by (agent_id) (count_over_time(({turn})[{duration_s}s]))",
@@ -324,12 +324,17 @@ def _day_aggregates(day: date) -> tuple[list[TokensRow], list[MetricsRow]] | Non
             slice_row_count += len(result_rows)
             for labels, value in result_rows:
                 agent_id = int(labels["agent_id"])
-                values = met.setdefault(agent_id, {})
                 if name == "turn_dur_hist":
-                    bucket = int(labels["bucket"])
+                    try:
+                        bucket = int(labels["bucket"])
+                    except (KeyError, ValueError):
+                        continue
+                    met.setdefault(agent_id, {})
                     agent_hist = hist.setdefault(agent_id, {})
                     agent_hist[bucket] = agent_hist.get(bucket, 0) + int(value)
-                elif name == "turn_dur_min":
+                    continue
+                values = met.setdefault(agent_id, {})
+                if name == "turn_dur_min":
                     values[name] = min(values.get(name, value), value)
                 elif name == "turn_dur_max":
                     values[name] = max(values.get(name, value), value)
