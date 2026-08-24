@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from shared import daemon_health
+from shared import session_backend, session_record, supervised_listener
 
 
 class _Record:
@@ -34,15 +34,19 @@ def _wire_listener(
     def _matches(_pid: int, _binary: Path) -> bool:
         return holder_matches_binary
 
-    monkeypatch.setattr(daemon_health, "listeners_on", lambda _port: [1109])  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(supervised_listener, "listeners_on", lambda _port: [1109])  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     monkeypatch.setattr(
-        daemon_health,
+        supervised_listener,
         "_listener_matches_binary",
         _matches,
     )
-    monkeypatch.setattr(daemon_health.SessionRecord, "read", lambda _path: record)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    # Method-local imports inside probe_supervised_listener read these at call
+    # time, so the patches target the owning modules (test_update_import_timing
+    # forbids top-level imports of the kill chain anywhere in the updater's
+    # import closure).
+    monkeypatch.setattr(session_record.SessionRecord, "read", lambda _path: record)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     monkeypatch.setattr(
-        daemon_health,
+        session_backend,
         "get_backend",
         lambda: _Backend(supervised_pid is not None),
     )
@@ -54,7 +58,7 @@ def test_probe_marks_same_binary_without_a_live_session_record_reclaimable(
     """A PPID=1 collector is ours only when its supervisor record names its PID."""
     _wire_listener(monkeypatch, holder_matches_binary=True, supervised_pid=None)
 
-    result = daemon_health.probe_supervised_listener(
+    result = supervised_listener.probe_supervised_listener(
         "otel-collector", ports=(4318, 8888), binary=Path("/home/u/.ava/otelcol-contrib")
     )
 
@@ -69,7 +73,7 @@ def test_probe_keeps_the_listener_named_by_the_live_session_record(
     """A detached native service stays alive when the record identifies its PID."""
     _wire_listener(monkeypatch, holder_matches_binary=True, supervised_pid=1109)
 
-    result = daemon_health.probe_supervised_listener(
+    result = supervised_listener.probe_supervised_listener(
         "otel-collector", ports=(4318, 8888), binary=Path("/home/u/.ava/otelcol-contrib")
     )
 
@@ -81,9 +85,9 @@ def test_takeover_kills_only_the_verified_stale_binary(monkeypatch: pytest.Monke
     """A collector that lost its record is reclaimed before the replacement binds."""
     _wire_listener(monkeypatch, holder_matches_binary=True, supervised_pid=None)
     killed: list[int] = []
-    monkeypatch.setattr(daemon_health, "force_kill", killed.append)
+    monkeypatch.setattr(supervised_listener, "force_kill", killed.append)
 
-    daemon_health.reclaim_stale_supervised_listener(
+    supervised_listener.reclaim_stale_supervised_listener(
         "otel-collector", ports=(4318, 8888), binary=Path("/home/u/.ava/otelcol-contrib")
     )
 
@@ -96,9 +100,9 @@ def test_takeover_refuses_a_different_process_on_the_collector_ports(
     """Port number alone never authorizes a kill on a co-located unit."""
     _wire_listener(monkeypatch, holder_matches_binary=False, supervised_pid=None)
     killed: list[int] = []
-    monkeypatch.setattr(daemon_health, "force_kill", killed.append)
+    monkeypatch.setattr(supervised_listener, "force_kill", killed.append)
 
-    result = daemon_health.reclaim_stale_supervised_listener(
+    result = supervised_listener.reclaim_stale_supervised_listener(
         "otel-collector", ports=(4318, 8888), binary=Path("/home/u/.ava/otelcol-contrib")
     )
 
