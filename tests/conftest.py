@@ -179,6 +179,10 @@ os.environ["AVA_REDIS_URL"] = "redis://127.0.0.1:1/0"
 # passes the cluster_secret validator. Individual auth tests monkeypatch it (incl.
 # to "" for the unset-fail-closed paths).
 os.environ["AVA_CLUSTER_SECRET"] = "test-cluster-secret"  # noqa: S105 — test fixture
+# The suite's secret-bearing servers include the e2e ops daemon, which binds
+# non-loopback. The deployment precondition requires a declared mode; overlay
+# records the suite's private-network posture.
+os.environ["AVA_TRANSPORT_ENCRYPTION"] = "overlay"
 
 # The suite's data-plane identity is `ava_citest`, carried entirely by the URLs
 # the provisioning fixtures write (names-as-data — Settings keeps username/db
@@ -260,6 +264,7 @@ os.environ["AVA_TELEGRAM_OWNER_ID"] = "0"
             f"AVA_REDIS_URL={os.environ['AVA_REDIS_URL']}",
             f"AVA_CLUSTER_SECRET={os.environ['AVA_CLUSTER_SECRET']}",
             "AVA_RUNNER_DB_PASSWORD=test-runner-db-password",
+            f"AVA_TRANSPORT_ENCRYPTION={os.environ['AVA_TRANSPORT_ENCRYPTION']}",
             f"AVA_GATEWAY_URL={os.environ['AVA_GATEWAY_URL']}",
             f"AVA_TELEGRAM_BOT_TOKEN={os.environ['AVA_TELEGRAM_BOT_TOKEN']}",
             f"AVA_TELEGRAM_OWNER_ID={os.environ['AVA_TELEGRAM_OWNER_ID']}",

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
+
 import pytest
 
 from shared.config import settings
@@ -9,6 +12,15 @@ from shared.transport_encryption import (
     TransportEncryptionUndeclared,
     verify_transport_encryption,
 )
+
+
+def test_test_cluster_declares_transport_encryption() -> None:
+    """The suite's secret-bearing e2e ops daemon binds off-box."""
+    assert os.environ["AVA_TRANSPORT_ENCRYPTION"] == "overlay"
+    assert (
+        "AVA_TRANSPORT_ENCRYPTION=overlay"
+        in (Path(os.environ["AVA_HOME"]) / ".env").read_text().splitlines()
+    )
 
 
 def test_no_secret_does_not_require_transport_encryption() -> None:
