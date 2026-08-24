@@ -106,14 +106,25 @@ receivers ship session and orchestration logs directly to Loki.
 
 ## Session logs in Loki
 
-The collector's `filelog/sessions` and `filelog/orchestration` receivers ship
-session stdout and orchestration tee logs, excluding the collector's own
-`ava-otel-collector.out.log` to prevent a self-ingestion echo. The file name
-becomes resource `service.name`, which Loki exposes as the `service_name` stream
-label. Read offsets persist under `$AVA_HOME/otel-collector/log-offsets`, so a
-collector restart does not replay the log history. Structured agent logs still
-arrive through the collector's OTLP receiver and carry no `log.file.name`, so
-the filelog transform leaves them untouched.
+The collector splits raw output into disjoint receivers. `filelog/sessions`
+admits only `$AVA_HOME/logs/ava-agent-*-shell-*.out.log` transcripts;
+`filelog/services` admits the broad `*.out.log` service set but excludes every
+`ava-agent-*` file and the collector's own output; `filelog/orchestration`
+ships updater/rollout tees. Agent main stdout is banner-only on this surface,
+and its structured records already arrive through OTLP, so excluding it loses
+no diagnostic stream while avoiding content-fingerprint collisions.
+
+Both session and service receivers poll every 10 seconds, archive 50 generations
+of EOF metadata, and cap discovery at 200 concurrent files. The slower poll cuts
+discovery churn 50x, the archive lets a returning EOF file reuse its reader
+metadata, and the cap bounds the discovered set. File names become resource
+`service.name`, which Loki exposes as `service_name`; read offsets persist under
+`$AVA_HOME/otel-collector/log-offsets`, so a restart does not replay history.
+The pty-host startup path prunes only top-level local `*.out.log` files older
+than 7 days, at most once per machine per day. It does not recurse into
+`logs-trash-old-*` or `logs-trash-dup-*` directories, which belong to the
+separate cleanup flow. Structured agent logs carry no `log.file.name`, so the
+filelog transform leaves them untouched.
 
 ## Environment overrides
 
