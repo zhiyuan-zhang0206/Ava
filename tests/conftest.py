@@ -558,6 +558,7 @@ _PER_TEST_TRUNCATE_TABLES = (
     "inbound_messages",
     "agents_meta",
     "events",
+    "event_dismissals",
     "agents",
     "alerts",
     "machines",

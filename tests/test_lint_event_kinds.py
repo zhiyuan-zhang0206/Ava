@@ -57,6 +57,14 @@ _SQL_OR_DYNAMIC_KINDS = frozenset(
         "otlp_backend_disabled",  # shared/telemetry_otlp.py:_emit_backend_event
         "otlp_backend_recovered",  # shared/telemetry_otlp.py:_emit_backend_event
         "prom_query_budget",  # gateway/prom_metrics.py:_emit_budget_observation
+        # Class-resolution markers select their name from the event level at
+        # runtime; services/events_maintenance/resolution.py emits the reopen
+        # markers and resolution_status, while the gateway emits resolved ones.
+        "warning_resolved",
+        "error_resolved",
+        "warning_reopened",
+        "error_reopened",
+        "resolution_status",
         # 历史括号名：W8 改名前的旧值，仍是 migrate_events.py 的映射目标且
         # DB 有存量行。新代码禁止产生，保留注册只为回填口径。
         "exec(cancelled)",
