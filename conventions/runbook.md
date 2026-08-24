@@ -1010,18 +1010,21 @@ resources. It fans out:
   no node_exporter / postgres_exporter / redis_exporter — because the pinned
   contrib collector already carries the receivers. They ride their own
   `metrics/infra` pipeline (host identity attached there, app metrics
-  untouched) and land in Prometheus under `job="ava-infra"` with a `host`
-  label = the OS hostname. A pure agent-runner's DB/Redis URLs point at the
-  gateway's data plane, so its config omits those two receivers entirely
-  rather than duplicating the gateway's series. A gateway whose Postgres URL
-  has an empty password omits the contrib Postgres receiver (which rejects an
-  empty password) but keeps its unauthenticated Redis receiver.
-- **collector delivery metrics** — every sidecar scrapes its loopback `:8888`
-  endpoint every 30s into `metrics/infra`. Grafana rules alert on current
-  queue pressure, new enqueue failures over 5m (counter delta, never lifetime
-  absolute value), and a recently-seen host whose collector stopped reporting
-  for 5m. The local watchdog logs current full queues but does not restart a
-  healthy receiver for remote backpressure.
+  untouched) and land in Prometheus under `job="ava-infra"` with `host` = the
+  OS hostname (physical identity) and `machine_name` = the Ava roster identity
+  baked into that unit's config at converge. Dashboards and alerts group by
+  `machine_name`. A pure agent-runner's DB/Redis URLs point at the gateway's
+  data plane, so its config omits those two receivers entirely rather than
+  duplicating the gateway's series. A gateway whose Postgres URL has an empty
+  password omits the contrib Postgres receiver (which rejects an empty
+  password) but keeps its unauthenticated Redis receiver.
+- **collector delivery metrics** — every sidecar scrapes its per-unit loopback
+  self-metrics endpoint every 30s into `metrics/infra`
+  (`AVA_OTELCOL_METRICS_PORT`, default 8888). The local watchdog probes the same
+  endpoint. Grafana rules alert on current queue pressure, new enqueue failures
+  over 5m (counter delta, never lifetime absolute value), and a recently-seen
+  machine whose collector stopped reporting for 5m. The watchdog logs current
+  full queues but does not restart a healthy receiver for remote backpressure.
 
 **Event-label canary.** After an OTLP-emitter rollout, query a post-rollout
 window and require every event stream label to equal its JSON event name. This
@@ -1204,6 +1207,9 @@ depends on machine specs and co-tenancy, which the kernel cannot know. The
 same boundary is why `execute_code` has no compute budget (issue #45).
 
 What the operator watches, and where it reads:
+
+Infrastructure views and alerts group `job="ava-infra"` series by the Ava
+roster `machine_name`; `host` remains the OS hostname for physical diagnosis.
 
 | Axis | Read | Alert |
 |---|---|---|

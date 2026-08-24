@@ -3842,8 +3842,8 @@
    "targets": [
     {
      "refId": "A",
-     "expr": "1 - avg by (host) (system_cpu_utilization_ratio{state=\"idle\"})",
-     "legendFormat": "{{host}}"
+     "expr": "1 - avg by (machine_name) (system_cpu_utilization_ratio{state=\"idle\"})",
+     "legendFormat": "{{machine_name}}"
     }
    ],
    "fieldConfig": {
@@ -3889,8 +3889,8 @@
    "targets": [
     {
      "refId": "A",
-     "expr": "avg by (host) (system_memory_utilization_ratio{state=\"used\"})",
-     "legendFormat": "{{host}}"
+     "expr": "avg by (machine_name) (system_memory_utilization_ratio{state=\"used\"})",
+     "legendFormat": "{{machine_name}}"
     }
    ],
    "fieldConfig": {
@@ -3937,17 +3937,17 @@
     {
      "refId": "A",
      "expr": "system_cpu_load_average_1m",
-     "legendFormat": "{{host}} 1m"
+     "legendFormat": "{{machine_name}} 1m"
     },
     {
      "refId": "B",
      "expr": "system_cpu_load_average_5m",
-     "legendFormat": "{{host}} 5m"
+     "legendFormat": "{{machine_name}} 5m"
     },
     {
      "refId": "C",
      "expr": "system_cpu_load_average_15m",
-     "legendFormat": "{{host}} 15m"
+     "legendFormat": "{{machine_name}} 15m"
     }
    ],
    "fieldConfig": {
@@ -3991,8 +3991,8 @@
    "targets": [
     {
      "refId": "A",
-     "expr": "max by (host, mountpoint) (system_filesystem_utilization_ratio)",
-     "legendFormat": "{{host}} {{mountpoint}}"
+     "expr": "max by (machine_name, mountpoint) (system_filesystem_utilization_ratio)",
+     "legendFormat": "{{machine_name}} {{mountpoint}}"
     }
    ],
    "fieldConfig": {
@@ -4038,8 +4038,8 @@
    "targets": [
     {
      "refId": "A",
-     "expr": "sum by (host, direction) (rate(system_disk_io_bytes_total[5m]))",
-     "legendFormat": "{{host}} {{direction}}"
+     "expr": "sum by (machine_name, direction) (rate(system_disk_io_bytes_total[5m]))",
+     "legendFormat": "{{machine_name}} {{direction}}"
     }
    ],
    "fieldConfig": {
@@ -4083,8 +4083,8 @@
    "targets": [
     {
      "refId": "A",
-     "expr": "sum by (host, direction) (rate(system_network_io_bytes_total[5m]))",
-     "legendFormat": "{{host}} {{direction}}"
+     "expr": "sum by (machine_name, direction) (rate(system_network_io_bytes_total[5m]))",
+     "legendFormat": "{{machine_name}} {{direction}}"
     }
    ],
    "fieldConfig": {
@@ -4128,13 +4128,13 @@
    "targets": [
     {
      "refId": "A",
-     "expr": "max by (host) (postgresql_backends)",
-     "legendFormat": "{{host}} backends"
+     "expr": "max by (machine_name) (postgresql_backends)",
+     "legendFormat": "{{machine_name}} backends"
     },
     {
      "refId": "B",
-     "expr": "max by (host) (postgresql_connection_max)",
-     "legendFormat": "{{host}} max_connections"
+     "expr": "max by (machine_name) (postgresql_connection_max)",
+     "legendFormat": "{{machine_name}} max_connections"
     }
    ],
    "fieldConfig": {
@@ -4179,13 +4179,13 @@
    "targets": [
     {
      "refId": "A",
-     "expr": "sum by (host) (rate(postgresql_commits_total[5m]))",
-     "legendFormat": "{{host}} commits/s"
+     "expr": "sum by (machine_name) (rate(postgresql_commits_total[5m]))",
+     "legendFormat": "{{machine_name}} commits/s"
     },
     {
      "refId": "B",
-     "expr": "sum by (host) (rate(postgresql_rollbacks_total[5m]))",
-     "legendFormat": "{{host}} rollbacks/s"
+     "expr": "sum by (machine_name) (rate(postgresql_rollbacks_total[5m]))",
+     "legendFormat": "{{machine_name}} rollbacks/s"
     }
    ],
    "fieldConfig": {
@@ -4229,8 +4229,8 @@
    "targets": [
     {
      "refId": "A",
-     "expr": "max by (host) (postgresql_db_size_bytes)",
-     "legendFormat": "{{host}}"
+     "expr": "max by (machine_name) (postgresql_db_size_bytes)",
+     "legendFormat": "{{machine_name}}"
     }
    ],
    "fieldConfig": {
@@ -4274,13 +4274,13 @@
    "targets": [
     {
      "refId": "A",
-     "expr": "max by (host) (redis_memory_used_bytes)",
-     "legendFormat": "{{host}} used"
+     "expr": "max by (machine_name) (redis_memory_used_bytes)",
+     "legendFormat": "{{machine_name}} used"
     },
     {
      "refId": "B",
-     "expr": "max by (host) (redis_memory_rss_bytes)",
-     "legendFormat": "{{host}} rss"
+     "expr": "max by (machine_name) (redis_memory_rss_bytes)",
+     "legendFormat": "{{machine_name}} rss"
     }
    ],
    "fieldConfig": {
@@ -4324,13 +4324,13 @@
    "targets": [
     {
      "refId": "A",
-     "expr": "max by (host) (redis_clients_connected)",
-     "legendFormat": "{{host}} clients"
+     "expr": "max by (machine_name) (redis_clients_connected)",
+     "legendFormat": "{{machine_name}} clients"
     },
     {
      "refId": "B",
-     "expr": "sum by (host) (rate(redis_keys_evicted_total[5m]))",
-     "legendFormat": "{{host}} evictions/s"
+     "expr": "sum by (machine_name) (rate(redis_keys_evicted_total[5m]))",
+     "legendFormat": "{{machine_name}} evictions/s"
     }
    ],
    "fieldConfig": {
@@ -4375,8 +4375,8 @@
    "targets": [
     {
      "refId": "A",
-     "expr": "max by (host) (redis_commands_per_second)",
-     "legendFormat": "{{host}}"
+     "expr": "max by (machine_name) (redis_commands_per_second)",
+     "legendFormat": "{{machine_name}}"
     }
    ],
    "fieldConfig": {
@@ -4715,5 +4715,5 @@
  "timezone": "Asia/Shanghai",
  "title": "Ava Ops",
  "uid": "ava-ops-main",
- "version": 3
+ "version": 5
 }

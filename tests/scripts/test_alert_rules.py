@@ -8,12 +8,13 @@ Keeps the rules in sync with the emitter's LogQL/OTLP contract.
 
 R8-R12 (issue #46) are the infrastructure layer and query a DIFFERENT
 Prometheus family: series the per-machine OTel Collector sidecar scrapes
-(host_metrics / postgresql / redis), labelled `host`, not `machine`. The metric
-names asserted below were read off a live Prometheus 3.13.2 — the OTLP-to-
+(host_metrics / postgresql / redis), labelled with both the OS `host` and Ava
+roster `machine_name`; rules group by `machine_name`. The metric names asserted
+below were read off a live Prometheus 3.13.2 — the OTLP-to-
 Prometheus translation adds unit suffixes (`_ratio`, `_bytes`) and `_total` on
 monotonic counters, so they cannot be derived from the OTLP names by eye.
 R14-R16 are the collector delivery layer: current queue pressure, NEW enqueue
-failures in a bounded window, and a recently-seen host whose collector stopped
+failures in a bounded window, and a recently-seen machine whose collector stopped
 reporting. They use the collector's own Prometheus endpoint, scraped by that
 same sidecar and relayed with the infrastructure pipeline.
 """
@@ -330,15 +331,13 @@ def test_infra_rule_queries_its_scraped_metric(uid: str, metric: str) -> None:
 
 
 @pytest.mark.parametrize("uid", sorted(_INFRA_RULE_METRICS))
-def test_infra_rule_groups_by_host(uid: str) -> None:
-    """Aggregation must keep `host`, so one saturated machine produces one
-    alert instance naming it rather than a cluster-wide average that hides
-    which box is in trouble. `host` is the sidecar's label — deliberately not
-    `machine`, which application metrics use for the Ava machine name."""
+def test_infra_rule_groups_by_machine_name(uid: str) -> None:
+    """Per the 2026-08-24 user ruling, aggregation keeps the Ava roster
+    `machine_name`, so win and wsl remain distinct alert instances."""
     rules = {r["uid"]: r for r in _load_rules()}
     expr = _exprs(rules[uid], "prometheus")[0]
-    assert "by (host" in expr, f"{uid}: aggregates away the host:\n{expr}"
-    assert "{{ $labels.host }}" in rules[uid]["annotations"]["summary"]
+    assert "by (machine_name" in expr, f"{uid}: aggregates away the machine name:\n{expr}"
+    assert "{{ $labels.machine_name }}" in rules[uid]["annotations"]["summary"]
 
 
 def test_disk_watermark_rule_is_per_mountpoint() -> None:
@@ -347,7 +346,7 @@ def test_disk_watermark_rule_is_per_mountpoint() -> None:
     would name no path to clear."""
     rules = {r["uid"]: r for r in _load_rules()}
     expr = _exprs(rules["ava-ops-host-disk-watermark"], "prometheus")[0]
-    assert "by (host, mountpoint)" in expr
+    assert "by (machine_name, mountpoint)" in expr
     assert (
         "{{ $labels.mountpoint }}" in rules["ava-ops-host-disk-watermark"]["annotations"]["summary"]
     )
@@ -384,13 +383,13 @@ def test_infra_rule_thresholds() -> None:
 def test_collector_queue_pressure_is_current_and_per_exporter() -> None:
     """A lifetime failure counter never resolves after recovery. Queue
     pressure must instead compare the CURRENT size/capacity gauges and retain
-    both host and exporter so the alert names the blocked route."""
+    both machine_name and exporter so the alert names the blocked route."""
     rules = {r["uid"]: r for r in _load_rules()}
     rule = rules["ava-ops-otelcol-queue-pressure"]
     expr = _exprs(rule, "prometheus")[0]
     assert "otelcol_exporter_queue_size" in expr
     assert "otelcol_exporter_queue_capacity" in expr
-    assert "by (host, exporter, data_type)" in expr
+    assert "by (machine_name, exporter, data_type)" in expr
     assert "increase(" not in expr
     assert _threshold_params(rule) == [[0.8]]
     assert rule["for"] == "5m"
@@ -405,13 +404,13 @@ def test_collector_enqueue_failure_rule_uses_window_delta() -> None:
     assert "otelcol_exporter_enqueue_failed_(log_records|metric_points|spans)_total" in expr
     assert "increase(" in expr
     assert "[5m]" in expr
-    assert "sum by (host, exporter)" in expr
+    assert "sum by (machine_name, exporter)" in expr
     assert _threshold_params(rule) == [[0]]
 
 
-def test_collector_silence_rule_tracks_recently_seen_hosts() -> None:
-    """NoDataState=OK cannot detect one vanished host by itself. Compare a
-    historical host set with the current one and retain `host` in the result."""
+def test_collector_silence_rule_tracks_recently_seen_machines() -> None:
+    """NoDataState=OK cannot detect one vanished machine by itself. Compare
+    historical/current sets and retain `machine_name` per the 2026-08-24 ruling."""
     rules = {r["uid"]: r for r in _load_rules()}
     rule = rules["ava-ops-otelcol-host-silent"]
     expr = _exprs(rule, "prometheus")[0]
@@ -419,10 +418,10 @@ def test_collector_silence_rule_tracks_recently_seen_hosts() -> None:
     assert "max_over_time" in expr
     assert "[24h]" in expr
     assert "[5m]" in expr
-    assert "unless on(host)" in expr
-    assert "max by (host)" in expr
+    assert "unless on(machine_name)" in expr
+    assert "max by (machine_name)" in expr
     assert rule["for"] == "0m", "the 5m absence window is already the debounce"
-    assert "{{ $labels.host }}" in rule["annotations"]["summary"]
+    assert "{{ $labels.machine_name }}" in rule["annotations"]["summary"]
 
 
 def test_every_rule_is_silent_on_no_data_and_datasource_error() -> None:

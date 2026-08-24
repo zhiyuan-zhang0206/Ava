@@ -3,10 +3,11 @@
 Probes the sidecar's OTLP/HTTP receiver at 127.0.0.1:4318 with a valid empty
 ExportTraceServiceRequest and requires a 2xx. A socket that merely answers 401
 or 415 is not a working ingestion path. It also reads the collector's pinned
-loopback Prometheus endpoint (8888) for current exporter queue saturation.
-Remote pressure is logged, not "fixed" by restarting a healthy local process;
-the self-scrape in the collector config exports the same queue/drop metrics to
-central Prometheus for alerting.
+loopback Prometheus endpoint (the per-unit AVA_OTELCOL_METRICS_PORT, default
+8888) for current exporter queue saturation. Remote pressure is logged, not
+"fixed" by restarting a healthy local process; the self-scrape in the
+collector config exports the same queue/drop metrics to central Prometheus for
+alerting.
 
 The sidecar is the local OTLP entry for every agent on this machine — when it
 is down, trace/event/metric export drops (agents retry briefly, then shed)
@@ -30,8 +31,6 @@ from shared.supervised_listener import (
     reclaim_stale_supervised_listener,
 )
 
-_METRICS_URL = "http://127.0.0.1:8888/metrics"
-_COLLECTOR_PORTS = (4318, 8888)
 _log = logging.getLogger("services.healthchecks.otel_collector")
 _QUEUE_SAMPLE = re.compile(
     r"^otelcol_exporter_queue_(?P<kind>capacity|size)\{(?P<labels>[^}]*)\}\s+(?P<value>[0-9.eE+-]+)$"
@@ -46,6 +45,16 @@ _LABEL = re.compile(r'(?:^|,)\s*(?P<key>[A-Za-z_][A-Za-z0-9_]*)="(?P<value>[^"]*
 class CollectorPressure:
     saturated: tuple[str, ...]
     enqueue_failures: dict[str, int]
+
+
+def _metrics_url() -> str:
+    """This unit's collector self-metrics endpoint, shared with converge config."""
+    return f"http://localhost:{settings.observability.otel_collector_metrics_port}/metrics"
+
+
+def _collector_ports() -> tuple[int, int]:
+    """Listener ports owned by this unit's collector process."""
+    return (4318, settings.observability.otel_collector_metrics_port)
 
 
 def _labels(text: str) -> dict[str, str]:
@@ -70,7 +79,7 @@ def _is_alive() -> bool:
 def probe_collector() -> DaemonProbe:
     """The collector is alive only when its OTLP response and supervisor agree."""
     listener = probe_supervised_listener(
-        "otel-collector", ports=_COLLECTOR_PORTS, binary=otel_collector_binary()
+        "otel-collector", ports=_collector_ports(), binary=otel_collector_binary()
     ).probe
     if not listener.alive:
         return listener
@@ -82,7 +91,7 @@ def probe_collector() -> DaemonProbe:
 def take_over_stale_collector() -> None:
     """Evict only same-binary collector listeners without a live session record."""
     reclaim_stale_supervised_listener(
-        "otel-collector", ports=_COLLECTOR_PORTS, binary=otel_collector_binary()
+        "otel-collector", ports=_collector_ports(), binary=otel_collector_binary()
     )
 
 
@@ -95,7 +104,7 @@ def _queue_pressure() -> CollectorPressure | None:
     `increase(...[5m])` on the self-scraped series instead.
     """
     try:
-        with urllib.request.urlopen(_METRICS_URL, timeout=2.0) as response:  # noqa: S310 — fixed loopback probe
+        with urllib.request.urlopen(_metrics_url(), timeout=2.0) as response:  # noqa: S310 — fixed loopback probe
             payload = response.read().decode("utf-8", errors="replace")
     except Exception:
         return None
@@ -149,7 +158,7 @@ def main() -> None:
     if pressure is None:
         logger.bind(_no_emitter=True, component="otel-collector-healthcheck").warning(
             "collector ingestion is alive but internal queue metrics are unreadable at {}",
-            _METRICS_URL,
+            _metrics_url(),
         )
     elif pressure.saturated:
         failed = sum(pressure.enqueue_failures.get(name, 0) for name in pressure.saturated)

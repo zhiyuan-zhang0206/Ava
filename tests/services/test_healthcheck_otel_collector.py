@@ -112,6 +112,51 @@ def test_main_restarts_a_stale_collector_even_when_its_otlp_port_answers(
     assert restarts == [1]
 
 
+def test_queue_pressure_uses_configured_self_metrics_port(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The watchdog probes the same per-unit endpoint that converge renders."""
+    seen: list[str] = []
+
+    class _Resp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_a: object) -> None:
+            return None
+
+        def read(self) -> bytes:
+            return b""
+
+    def _open(url: str, **_kw: object) -> _Resp:
+        seen.append(url)
+        return _Resp()
+
+    monkeypatch.setattr(hc.settings.observability, "otel_collector_metrics_port", 8889)
+    monkeypatch.setattr(urllib.request, "urlopen", _open)
+
+    assert hc._queue_pressure() == hc.CollectorPressure(saturated=(), enqueue_failures={})
+    assert seen == ["http://localhost:8889/metrics"]
+
+
+def test_stale_collector_reclaim_uses_configured_self_metrics_port(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Takeover inspects this unit's configured listener, not another unit's default."""
+    seen: list[tuple[int, ...]] = []
+
+    def _reclaim(_service: str, *, ports: tuple[int, ...], binary: object) -> None:
+        assert binary == hc.otel_collector_binary()
+        seen.append(ports)
+
+    monkeypatch.setattr(hc.settings.observability, "otel_collector_metrics_port", 8889)
+    monkeypatch.setattr(hc, "reclaim_stale_supervised_listener", _reclaim)
+
+    hc.take_over_stale_collector()
+
+    assert seen == [(4318, 8889)]
+
+
 def test_queue_pressure_reports_full_queue_and_drop_counter(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

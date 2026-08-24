@@ -152,6 +152,7 @@ def _render_real_template(
     gateway_url: str = "http://100.64.0.10:8000",
     machine_host: str = "100.64.0.10",
     cluster_secret: str = "cluster-token",  # noqa: S107 — fixture token
+    self_metrics_port: int = 8888,
 ) -> dict[str, Any]:
     """Render the shipped template for `roles` and parse it as YAML."""
     monkeypatch.setattr(
@@ -162,7 +163,11 @@ def _render_real_template(
     )
     monkeypatch.setattr("shared.config.settings.gateway.gateway_url", gateway_url)
     monkeypatch.setattr("shared.config.settings.data_plane.cluster_secret", cluster_secret)
+    monkeypatch.setattr(
+        "shared.config.settings.observability.otel_collector_metrics_port", self_metrics_port
+    )
     monkeypatch.setattr("shared.machine.reachable_host", lambda: machine_host)
+    monkeypatch.setattr("shared.machine.machine_name", lambda: "test-machine")
     repo = Path(__file__).resolve().parents[2]
     out = oc.generate_config(repo, Path("/home/u/.ava"), roles)
     # No placeholder left unconsumed. (A literal dollar survives on purpose:
@@ -227,8 +232,8 @@ def test_runner_config_has_host_metrics_but_no_data_plane_receivers(
 ) -> None:
     """A pure agent-runner's DB/Redis URLs point at the GATEWAY's data plane.
     Scraping from there would duplicate the gateway's own series under a
-    second `host` label, so the two receivers are omitted entirely — host
-    metrics, which ARE this machine's, stay."""
+    second `host` / `machine_name` identity, so the two receivers are omitted
+    entirely — host metrics, which ARE this machine's, stay."""
     cfg = _render_real_template(monkeypatch, frozenset({"agent-runner"}))
     assert "postgresql" not in cfg["receivers"]
     assert "redis" not in cfg["receivers"]
@@ -257,6 +262,31 @@ def test_infra_metrics_ride_their_own_pipeline(monkeypatch: pytest.MonkeyPatch) 
     assert "transform/host_label" not in pipelines["metrics"]["processors"]
     assert "transform/host_label" in pipelines["metrics/infra"]["processors"]
     assert "resource_detection/host" in pipelines["metrics/infra"]["processors"]
+
+
+def test_infra_pipeline_stamps_machine_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Infra datapoints keep physical host identity and gain Ava roster identity."""
+    cfg = _render_real_template(monkeypatch, frozenset({"gateway"}))
+    statements = cfg["processors"]["transform/host_label"]["metric_statements"][0]["statements"]
+    assert 'set(attributes["host"], resource.attributes["host.name"])' in statements
+    assert 'set(attributes["machine_name"], "test-machine")' in statements
+
+
+def test_collector_self_metrics_address_is_per_unit(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Each unit binds and scrapes its own configurable collector metrics port."""
+    default_cfg = _render_real_template(monkeypatch, frozenset({"gateway"}))
+    assert default_cfg["service"]["telemetry"]["metrics"]["address"] == "localhost:8888"
+    default_scrape = default_cfg["receivers"]["prometheus/otelcol"]["config"]["scrape_configs"]
+    assert default_scrape[0]["static_configs"] == [{"targets": ["localhost:8888"]}]
+
+    override_cfg = _render_real_template(
+        monkeypatch,
+        frozenset({"gateway"}),
+        self_metrics_port=8889,
+    )
+    assert override_cfg["service"]["telemetry"]["metrics"]["address"] == "localhost:8889"
+    override_scrape = override_cfg["receivers"]["prometheus/otelcol"]["config"]["scrape_configs"]
+    assert override_scrape[0]["static_configs"] == [{"targets": ["localhost:8889"]}]
 
 
 def test_logs_merge_event_and_filelog_transforms_before_batch(
@@ -566,7 +596,7 @@ def test_collector_self_metrics_are_scraped_for_queue_and_drop_visibility(
         {
             "job_name": "ava-otel-collector",
             "scrape_interval": "30s",
-            "static_configs": [{"targets": ["127.0.0.1:8888"]}],
+            "static_configs": [{"targets": ["localhost:8888"]}],
         }
     ]
 

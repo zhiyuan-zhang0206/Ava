@@ -209,8 +209,10 @@ module docstring of `scripts/release_cut.py`.
 Every machine's OTel Collector sidecar scrapes the traditional SRE layer into
 Prometheus: host CPU / memory / load / disk / filesystem / network everywhere,
 plus `postgresql` and `redis` against the cluster's own data plane on a
-gateway-capable unit. They live under `job="ava-infra"` with a `host` label
-(the OS hostname), and the Grafana dashboard `ava-ops-main` (its "Host & data plane" section) is the view.
+gateway-capable unit. They live under `job="ava-infra"` with `host` (the OS
+hostname / physical identity) and `machine_name` (the Ava roster identity)
+labels. The Grafana dashboard `ava-ops-main` (its "Host & data plane" section)
+groups by `machine_name` and is the view.
 
 **There are no resource limits in the code, deliberately.** A saturated box
 may be a runaway loop or a training job doing exactly what it was asked; which
