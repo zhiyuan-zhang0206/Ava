@@ -50,6 +50,7 @@ import sys
 import time
 from pathlib import Path
 
+import shared.port_preflight
 from cli.commands._cluster_instance import (
     _BIND_WAIT_TIMEOUT_S,
     _bind_addrs,
@@ -362,11 +363,8 @@ def _admin_reachable(
     extended-protocol execute is rejected there).
 
     `host` defaults to loopback — the listener that is always up once the pooler
-    runs. Probing a non-loopback host answers "is the pooler actually listening on
-    the address remote consumers dial" (the configured reachable bind, `reachable_host()`),
-    which a loopback probe cannot see: pgbouncer logs a WARNING and keeps running
-    when one `listen_addr` entry fails to bind, so a loopback-only probe reads a
-    silently degraded pooler as healthy (task #1288)."""
+    runs. Public-bind verification is deliberately separate: it reads the local
+    socket table rather than making a network self-dial."""
     import psycopg
 
     from shared.url_secret import url_with_userinfo
@@ -391,11 +389,23 @@ def pgbouncer_public_listener_reachable(listen_port: int, role: str, cluster_sec
     (task #1288: 2026-08-16 a boot-time address race left the pooler loopback-only
     for two days).
 
+    A local socket-table read is the authoritative fact for this question. A
+    network self-dial through the reachable address is a hairpin route that VPN
+    filtering can intermittently block even while the listener remains bound;
+    treating that routing failure as a missing bind causes destructive false
+    restarts. The exact reachable address and IPv4/IPv6 wildcard binds all cover
+    the public front door. An empty table proves nothing and remains degraded.
+
     A no-secret cluster's pooler binds loopback only by design (`_bind_addrs`), so
-    there is no public listener to check — returns True without probing."""
+    there is no public listener to check — returns True without inspecting the
+    host or socket table. `role` remains in the stable probe signature shared by
+    the healthcheck and bring-up callers; socket inspection needs no credential."""
+    del role
     if _bind_addrs(cluster_secret) == ["127.0.0.1"]:
         return True
-    return _admin_reachable(listen_port, role, cluster_secret, host=reachable_host())
+    reachable = reachable_host()
+    addrs = shared.port_preflight.listener_addrs(listen_port)
+    return bool(addrs & {reachable, "0.0.0.0", "::", "*"})  # noqa: S104 — matching OS wildcard binds, not opening one
 
 
 def _reachable(listen_port: int, db_name: str, role: str, cluster_secret: str) -> bool:

@@ -46,14 +46,7 @@ The probe is not the only place a healthcheck can lose its restart — the rule 
 
 ## browser's two questions
 
-A CDP 200 answers neither of the questions that matter. It cannot tell the supervised Chrome from an orphan holding the same port — and `services/browser/daemon.py` deliberately refuses to launch while that port is served, so a CDP-only check stayed green forever with no browser under supervision — and it cannot tell OUR Chrome from another unit's, because CDP carries no field we control (measured: `/json/version` returns browser/protocol/UA/V8/WebKit strings and a per-launch websocket uuid; `DevToolsActivePort` is written only for an auto-assigned port).
-
-So `services/browser/probe.py` asks identity a different way — a Chrome whose argv carries this cluster's `--user-data-dir` (the positive token `services/browser/orphan.py` established) **and** which holds the LISTEN socket on the CDP port — and `browser.py` asks supervision separately:
-
-- verdict `PORT_TAKEN` (someone else's Chrome, or ownership unconfirmable) → report at ERROR, exit `EXIT_PORT_TAKEN`, **never respawn**. Asked first: our own session being alive does not make a respawn able to bind a port another netns won.
-- session-dead + ours-alive → report at ERROR, do not respawn. An unsupervised Chrome of our own; `ava stop --stop-browser` sweeps it by profile.
-- session-dead + CDP-dead → respawn.
-- session-alive + CDP-dead → respawn (`respawn_service` kills the stale session first).
+[[services/healthchecks/probe-contract/browser-two-questions.ava.okf.md]]
 
 ## The documented exceptions: the two data-plane repairs
 
@@ -64,7 +57,7 @@ lost its in-memory ACL from a dead local Redis; the latter reuses the same
 idempotent bring-up as `ava start`, then verifies PING. It lets the watchdog log a
 failed repair rather than deciding what to swallow.
 
-`pgbouncer.check` raises on the same grounds and for the same reason: `ensure_pgbouncer` returned non-zero, or after the restart either probe still fails — the loopback admin console does not answer, or the reachable-address listener is still missing (a degraded double bind; task #1288). A pooler that cannot be brought back leaves the cluster with no pooled database front door, and that belongs on the operator's screen every round rather than in a swallowed verdict. Its probe is narrower than a liveness probe on purpose — the admin console, never the end-to-end `SELECT 1` — so that a Postgres outage cannot be misread as a dead pooler and answered with a restart every 60s. The second probe (`pgbouncer_public_listener_reachable`) adds the same narrow dial against the configured reachable address: pgbouncer treats a failed bind on one `listen_addr` entry as a WARNING and keeps running on the rest, so a loopback-only probe would read a silently degraded pooler as healthy.
+`pgbouncer.check` raises on the same grounds and for the same reason: `ensure_pgbouncer` returned non-zero, or after the restart either probe still fails — the loopback admin console does not answer, or the reachable-address listener is still missing (a degraded double bind; task #1288). A pooler that cannot be brought back leaves the cluster with no pooled database front door, and that belongs on the operator's screen every round rather than in a swallowed verdict. Its protocol probe is narrower than a liveness probe on purpose — the admin console, never the end-to-end `SELECT 1` — so that a Postgres outage cannot be misread as a dead pooler and answered with a restart every 60s. The second probe (`pgbouncer_public_listener_reachable`) reads the local socket table for the configured reachable address or an IPv4/IPv6 wildcard. It does not self-dial through host networking: hairpin filtering can reject that route while the bind remains healthy. PgBouncer treats a failed bind on one `listen_addr` entry as a WARNING and keeps running on the rest, so the socket-table check still detects the loopback-only degraded state without turning a routing failure into a destructive restart.
 
 ## Key Dependencies
 - [[services/healthchecks/terminal-verdict/terminal-verdict.ava.okf.md]] — the next question after "what is the verdict": whether a respawn can act on it
