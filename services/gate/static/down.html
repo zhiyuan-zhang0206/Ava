@@ -9,11 +9,9 @@
 <style>
 /*__THEME_CSS__*/
 
-/* The gate's own "machine unreachable" screen — sibling of updating.html
-   (same tokens, same auto-refresh + elapsed line), deliberately NOT the
-   updating screen: the posture mirror is idle/absent, so this is a machine that
-   is off / crashed / partitioned, and the copy has to say that plainly
-   instead of promising a reconnecting rollout. */
+/* The gate's generic unavailable screen — sibling of updating.html. It cannot
+   confirm a valid maintenance generation or a required component did not
+   answer. Gate does not invent whether the cause is state, service, or host. */
 
 .screen {
   align-items: center;
@@ -36,11 +34,6 @@
   line-height: 1.75rem;
 }
 
-.waiting {
-  font-size: 0.75rem;
-  line-height: 1rem;
-  color: color-mix(in oklab, var(--muted-foreground) 60%, transparent);
-}
 </style>
 </head>
 <body>
@@ -53,42 +46,8 @@
     </svg>
     <div class="headline stack">
       <h1>Service unavailable</h1>
-      <p class="muted">This machine is not reachable — no update is in progress. It may be powered off, asleep, or crashed. Retrying automatically…</p>
+      <p class="muted">A valid maintenance state could not be confirmed, or a required service is unavailable. It may be a service failure or a machine/network problem. Retrying automatically…</p>
     </div>
-    <p class="waiting" id="waiting" hidden></p>
   </main>
-  <script>
-    // Elapsed-time line, same contract as updating.html: the meta refresh
-    // reloads every 4s, so the start instant lives in sessionStorage and a gap
-    // longer than a few refresh cycles restarts the clock. Sharing the storage
-    // key with the updating page is deliberate — the two pages never coexist,
-    // and a wait that crosses an update boundary keeps its elapsed time.
-    (function () {
-      var KEY = "ava-gate-waiting-since";
-      var STALE_MS = 30000;
-      var line = document.getElementById("waiting");
-      var now = Date.now();
-      var since = now;
-
-      try {
-        var saved = JSON.parse(sessionStorage.getItem(KEY) || "null");
-        if (saved && now - saved.seen < STALE_MS) since = saved.since;
-        sessionStorage.setItem(KEY, JSON.stringify({ since: since, seen: now }));
-      } catch (e) {
-        // Storage blocked — the counter still runs, just from this load.
-      }
-
-      function tick() {
-        var total = Math.floor((Date.now() - since) / 1000);
-        var minutes = Math.floor(total / 60);
-        var seconds = total % 60;
-        line.textContent = "Waiting " + (minutes > 0 ? minutes + "m " + seconds + "s" : seconds + "s");
-        line.hidden = false;
-      }
-
-      tick();
-      setInterval(tick, 1000);
-    })();
-  </script>
 </body>
 </html>

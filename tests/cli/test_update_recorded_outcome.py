@@ -25,10 +25,11 @@ import pytest
 from cli import commands as _cli
 from cli.commands import _update_recover as _rec
 from cli.commands import update as _up
+from cli.commands._update_fanout import ClusterOpPayload
 
 
 @pytest.fixture(autouse=True)
-def _orchestration_seams(monkeypatch: pytest.MonkeyPatch) -> None:
+def _orchestration_seams(monkeypatch: pytest.MonkeyPatch, stub_deploy_lease_identity: None) -> None:
     """Everything between the preflight and the `finally`, stubbed to nothing: these
     tests are about what reaches `finalize_rollout`, not about the rollout."""
     monkeypatch.setattr(_up, "acquire_update_lock", lambda _holder, **_kw: True)  # pyright: ignore[reportUnknownArgumentType]
@@ -115,7 +116,26 @@ def _record_via_finalize(monkeypatch: pytest.MonkeyPatch, **kw: Any) -> list[Any
 
     written: list[Any] = []
     monkeypatch.setattr(_lu, "finish_update", lambda outcome, **_kw: written.append(outcome))  # pyright: ignore[reportUnknownArgumentType]
-    _rec.finalize_rollout([], lambda *_a, **_k: [], 1.0, pin_advanced=False, **kw)  # pyright: ignore[reportUnknownArgumentType]
+
+    def _fan_out(
+        _hosts: list[tuple[str, str | None]],
+        _path: str,
+        _timeout_s: float,
+        _payload: ClusterOpPayload,
+    ) -> list[tuple[str, str, str]]:
+        return []
+
+    _rec.finalize_rollout(
+        [],
+        _fan_out,
+        1.0,
+        deploy_capability={
+            "deploy_holder": "g",
+            "deploy_acquired_at": "2026-08-25T00:00:00Z",
+        },
+        pin_advanced=False,
+        **kw,
+    )  # pyright: ignore[reportUnknownArgumentType]
     return written
 
 

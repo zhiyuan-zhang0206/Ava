@@ -12,11 +12,14 @@ this layer is the agent-runner-callable RPC surface the ops server dispatches
 
 from __future__ import annotations
 
+import os
+from datetime import datetime
 from pathlib import Path
 from typing import Any, cast
 
 from langgraph.checkpoint.postgres import PostgresSaver
 
+from ops import cluster_session
 from ops.cluster import (
     ClusterStatus,
     ClusterUpdateInProgress,
@@ -36,8 +39,13 @@ from ops.rpc_schemas import (
     ShellCaptureResult,
     ShellProbeResult,
 )
+from shared import pause_owner, ui_update_state, updater_handoff
 from shared.checkpoint_serde import STATIC_CHECKPOINT_MSGPACK_TYPES
-from shared.cluster_lock import force_release_update_lock, read_update_lease
+from shared.cluster_lock import (
+    claim_recovery_lock,
+    read_update_lease,
+    release_update_lock,
+)
 from shared.config.turn_view import resolve_agent_config_pins
 from shared.gitenv import git_env
 from shared.host_deploy_state import updater_lease_live
@@ -55,15 +63,115 @@ _FETCH_TIMEOUT_S = 30.0
 _RESOLVE_TIMEOUT_S = 5.0
 
 
-def cluster_stop_op() -> dict[str, object]:
+def _require_executing_deploy(
+    deploy_holder: str,
+    deploy_acquired_at: datetime,
+) -> None:
+    """Reject a delayed transition unless its exact lease generation still runs."""
+    lease = read_update_lease()
+    if (
+        lease is None
+        or lease.note is not None
+        or lease.acquired_at is None
+        or lease.holder != deploy_holder
+        or lease.acquired_at != deploy_acquired_at
+    ):
+        raise ClusterUpdateInProgress(
+            "cluster transition refused: its exact executing deploy lease is no longer current"
+        )
+
+
+def cluster_stop_op(
+    deploy_holder: str,
+    deploy_acquired_at: datetime,
+) -> dict[str, object]:
     """Local pause — posture row -> paused + kill restarter."""
-    pause_local_cluster()
+    with ui_update_state.lifecycle_lock():
+        # Phase A is valid only while an executing rollout/restart owns the
+        # cluster lease. Recheck under the same local mutex recovery uses: if a
+        # cross-host recover CAS-claimed the lease first, this delayed stop must
+        # not re-pause the just-recovered host.
+        _require_executing_deploy(deploy_holder, deploy_acquired_at)
+        pause_owner.mark_paused(deploy_holder, deploy_acquired_at)
+        try:
+            # Close the cross-host lease-change window between the first DB
+            # proof and publishing the local capability.
+            _require_executing_deploy(deploy_holder, deploy_acquired_at)
+        except BaseException:
+            pause_owner.clear(deploy_holder, deploy_acquired_at)
+            raise
+        try:
+            pause_local_cluster()
+        except BaseException:
+            try:
+                unpause_local_cluster()
+            except Exception:
+                # Partial pause + failed compensation is conservative: retain
+                # the paused journal so an exact retry/recover can repair it.
+                logger.warning(
+                    "[cluster] pause failed and compensating unpause also failed; "
+                    "retaining exact pause owner"
+                )
+            else:
+                pause_owner.mark_resumed(deploy_holder, deploy_acquired_at)
+            raise
     return {}
 
 
-def cluster_resume_op() -> dict[str, object]:
-    """Local unpause — posture row -> idle + respawn restarter (idempotent)."""
-    unpause_local_cluster()
+def _refuse_live_local_updater() -> None:
+    """Keep a deploy resume from unpausing a newer host-local updater."""
+    handoff = updater_handoff.read()
+    if handoff.status == "invalid":
+        raise ClusterUpdateInProgress(
+            "cluster resume refused: local updater ownership is unreadable"
+        )
+    if handoff.status == "pending" and not handoff.expired:
+        raise ClusterUpdateInProgress("cluster resume refused: a newer local updater is pending")
+    if handoff.status == "running" and updater_handoff.owner_is_live(handoff):
+        raise ClusterUpdateInProgress("cluster resume refused: a newer local updater is running")
+
+
+def cluster_resume_op(
+    deploy_holder: str,
+    deploy_acquired_at: datetime,
+) -> dict[str, object]:
+    """Generation-scoped unpause — never resume a later rollout's pause."""
+    with ui_update_state.lifecycle_lock():
+        owner = pause_owner.read()
+        if not owner.matches(deploy_holder, deploy_acquired_at):
+            raise ClusterUpdateInProgress(
+                "cluster resume refused: this host is paused by a different deploy generation"
+            )
+        if owner.status == "resumed":
+            return {}
+        if owner.status != "paused":
+            raise ClusterUpdateInProgress("cluster resume refused: pause owner is unreadable")
+        _refuse_live_local_updater()
+        unpause_local_cluster()
+        if not pause_owner.mark_resumed(deploy_holder, deploy_acquired_at):
+            raise RuntimeError("lost the local pause-owner capability after unpausing")
+    return {}
+
+
+def cluster_resume_legacy_op() -> dict[str, object]:
+    """One-rollout bridge for an old orchestrator resuming a newly updated host.
+
+    An old Phase-A receiver writes no exact pause-owner journal. After that host
+    updates onto this code, the still-old in-memory orchestrator sends an empty
+    resume payload. Only an absent or already-completed legacy journal may take
+    this path; any exact or malformed owner fails closed.
+    """
+    with ui_update_state.lifecycle_lock():
+        owner = pause_owner.read()
+        if owner.status == "legacy-resumed":
+            return {}
+        if owner.status != "inactive":
+            raise ClusterUpdateInProgress(
+                "legacy cluster resume refused: an exact or unreadable pause owner exists"
+            )
+        _refuse_live_local_updater()
+        unpause_local_cluster()
+        pause_owner.mark_legacy_resumed()
     return {}
 
 
@@ -146,24 +254,73 @@ def cluster_recover_op() -> dict[str, object]:
 
     Returns {"unlocked_holder": <prior lock holder or None>}.
     """
-    lease = read_update_lease()
-    if lease is not None and _lock_holder_is_live(lease.holder, held_for_s=lease.held_for_s):
-        what = lease.kind or "deploy"
-        raise ClusterUpdateInProgress(
-            f"the cluster deploy lease ({what}) is held by a live process "
-            f"({lease.holder}) — recovery refused; wait for it to finish or kill it "
-            "first. A holder on another machine cannot be probed from here: run "
-            "recover there, or wait out the lease TTL"
-        )
-    if updater_lease_live():
-        raise ClusterUpdateInProgress(
-            "an update is in flight on this host — its updater lease is live; "
-            "recovery refused; wait for it to finish or kill its session first"
-        )
-    cleared = force_release_update_lock()
-    unpause_local_cluster()
+    with ui_update_state.lifecycle_lock():
+        handoff = updater_handoff.read()
+        if handoff.status == "invalid":
+            raise ClusterUpdateInProgress(
+                "an updater spawn handoff is still active or unreadable — recovery "
+                "refused until its child publishes the DB lease or its safety bound expires"
+            )
+        if handoff.status == "pending" and not handoff.expired:
+            raise ClusterUpdateInProgress(
+                "an updater child is still inside its protected startup window — "
+                "recovery refused until that pending handoff expires"
+            )
+        if handoff.status == "running" and updater_handoff.owner_is_live(handoff):
+            raise ClusterUpdateInProgress(
+                "an updater process still owns this host pause — recovery refused"
+            )
+        live_session = cluster_session.live_orchestration_session()
+        if live_session is not None:
+            raise ClusterUpdateInProgress(
+                f"orchestration session {live_session!r} is still alive — recovery refused; "
+                "wait for it to acquire/finish its deploy lease or terminate that session first"
+            )
+        lease = read_update_lease()
+        if lease is not None and _lock_holder_is_live(lease.holder, held_for_s=lease.held_for_s):
+            what = lease.kind or "deploy"
+            raise ClusterUpdateInProgress(
+                f"the cluster deploy lease ({what}) is held by a live process "
+                f"({lease.holder}) — recovery refused; wait for it to finish or kill it "
+                "first. A holder on another machine cannot be probed from here: run "
+                "recover there, or wait out the lease TTL"
+            )
+        if updater_lease_live():
+            raise ClusterUpdateInProgress(
+                "an update is in flight on this host — its updater lease is live; "
+                "recovery refused; wait for it to finish or kill its session first"
+            )
+        snapshot = ui_update_state.read()
+        pause_snapshot = pause_owner.read()
+        recovery_holder = f"recovery:{machine_name()}:pid{os.getpid()}"
+        claim = claim_recovery_lock(recovery_holder, lease)
+        if not claim.acquired:
+            raise ClusterUpdateInProgress(
+                "the cluster deploy lease changed while recovery was proving it stale; "
+                "a new owner may have started, so recovery refused without unpausing or clearing"
+            )
+        try:
+            unpause_local_cluster()
+            if snapshot.status == "updating" and snapshot.generation is not None:
+                ui_update_state.clear(snapshot.generation)
+            elif snapshot.status == "invalid":
+                ui_update_state.force_clear()
+            if handoff.generation is not None:
+                updater_handoff.clear(handoff.generation)
+            if pause_snapshot.holder is not None and pause_snapshot.acquired_at is not None:
+                pause_owner.clear(
+                    pause_snapshot.holder,
+                    pause_snapshot.acquired_at,
+                )
+            elif pause_snapshot.status == "invalid":
+                pause_owner.force_clear()
+        finally:
+            release_update_lock(recovery_holder)
+        cleared = claim.previous_holder
     logger.info(
-        "[cluster] manual recover: force-released lock (was {holder}) + unpaused", holder=cleared
+        "[cluster] manual recover: force-released lock (was {holder}) + unpaused + "
+        "cleared the UI update marker",
+        holder=cleared,
     )
     return {"unlocked_holder": cleared}
 
@@ -200,38 +357,21 @@ def cluster_update_op(
     quiesce-timeout backstop that kills a host's still-live agents before the
     bounce (Phase B's stragglers).
 
-    Phase A (cluster_stop_op, dialed separately) has already paused this host
-    before this call ever lands. If spawn_update raises before it manages to spawn
-    the `ava-updater` orchestration session (e.g. MigrationLayoutError from the
-    validate-before-kill vet, or any other pre-spawn failure), nothing on this host
-    will ever run `ava start`/`ava restart` to clear the pause — the host would sit
-    paused until the gateway's compensating /api/cluster/resume lands (which can
-    itself be delayed or dropped) or the 10-minute stranded-pause watchdog fires.
-    Self-heal immediately instead: unpause locally (idempotent — a later resume
-    call is harmless) and re-raise so the caller still sees the failure.
-
-    A `ClusterUpdateInProgress` means an update/rollout/restart is genuinely
-    already running on this host — that in-flight run owns the pause, so it must
-    not be touched here.
+    `spawn_update` validates before its own pause, then publishes a host-local
+    handoff across pause -> DB lease. It is the only layer with enough evidence
+    to compensate a definitive no-child failure; this wrapper never guesses
+    from exception type/timing.
     """
-    try:
-        return spawn_update(
-            restart_only=restart_only,
-            target_sha=target_sha,
-            mode=mode,
-            force_reap=force_reap,
-        )
-    except ClusterUpdateInProgress:
-        raise
-    except Exception:
-        logger.warning(
-            "[cluster] cluster_update_op failed before spawning ava-updater; "
-            "self-unpausing this host immediately rather than waiting on the "
-            "gateway's compensating resume or the stranded-pause watchdog",
-            exc_info=True,
-        )
-        unpause_local_cluster()
-        raise
+    # `spawn_update` owns the exact pause/spawn boundary and therefore owns
+    # compensation: only a definitive backend decline CAS-clears its handoff
+    # and unpauses. This wrapper cannot infer "no child" from an exception — a
+    # post-fork/Popen session-record failure is ambiguous and must stay paused.
+    return spawn_update(
+        restart_only=restart_only,
+        target_sha=target_sha,
+        mode=mode,
+        force_reap=force_reap,
+    )
 
 
 def cluster_rollout_op(

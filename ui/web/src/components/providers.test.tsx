@@ -22,6 +22,12 @@ vi.mock("@/lib/use-alerts", () => ({
   AlertsProvider: ({ children }: { children: React.ReactNode }) => children,
 }));
 
+// The Gate poll has its own focused test. Keep this composition smoke test
+// network-free even though the real provider is intentionally auth-independent.
+vi.mock("@/components/gate-maintenance-provider", () => ({
+  GateMaintenanceProvider: () => null,
+}));
+
 // Two of Providers' children fire real api calls on mount if left unmocked —
 // unmocked, these are live fetches that silently "succeed" against a local
 // dev gateway but ECONNREFUSED with no gateway around (CI), the source of a

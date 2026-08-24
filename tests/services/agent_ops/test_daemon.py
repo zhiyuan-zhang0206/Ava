@@ -18,6 +18,7 @@ import sys
 import textwrap
 import threading
 import time
+from datetime import datetime
 from pathlib import Path
 
 import psycopg
@@ -152,10 +153,48 @@ async def test_dispatch_cluster_update_rejects_non_str_target_sha(
 async def test_dispatch_routes_cluster_resume(monkeypatch: pytest.MonkeyPatch) -> None:
     """cluster_resume kind -> ops.cluster_resume_op (compensating unpause)."""
     monkeypatch.setattr(daemon, "_db_pool", _stub_pool())
-    monkeypatch.setattr(daemon.ops_cluster, "cluster_resume_op", lambda: {"resumed": True})
+    seen: list[tuple[str, datetime]] = []
+
+    def _resume(holder: str, acquired: datetime) -> dict[str, bool]:
+        seen.append((holder, acquired))
+        return {"resumed": True}
+
+    monkeypatch.setattr(
+        daemon.ops_cluster,
+        "cluster_resume_op",
+        _resume,
+    )
+    status, result = await daemon._dispatch(
+        "cluster_resume",
+        {"deploy_holder": "g:pid1", "deploy_acquired_at": "2026-08-25T00:00:00Z"},
+    )
+    assert status == "completed"
+    assert result == {"resumed": True}
+    assert seen[0][0] == "g:pid1"
+
+
+@pytest.mark.asyncio
+async def test_first_adoption_empty_resume_uses_only_the_legacy_bridge(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An old in-memory sender can resume a host it just updated to new code."""
+    monkeypatch.setattr(daemon, "_db_pool", _stub_pool())
+    called: list[bool] = []
+    monkeypatch.setattr(
+        daemon.ops_cluster,
+        "cluster_resume_legacy_op",
+        lambda: called.append(True) or {"resumed": True},
+    )
+
+    def _refuse_exact(_holder: str, _acquired: datetime) -> None:
+        pytest.fail("empty legacy payload cannot enter exact resume")
+
+    monkeypatch.setattr(daemon.ops_cluster, "cluster_resume_op", _refuse_exact)
+
     status, result = await daemon._dispatch("cluster_resume", {})
     assert status == "completed"
     assert result == {"resumed": True}
+    assert called == [True]
 
 
 @pytest.mark.asyncio
@@ -1254,12 +1293,19 @@ async def test_an_unrelated_op_still_dispatches_while_an_update_is_stuck(
         return {"session": "ava-updater", "log": "x"}
 
     monkeypatch.setattr(daemon.ops_cluster, "cluster_update_op", _wedged)
-    monkeypatch.setattr(daemon.ops_cluster, "cluster_resume_op", lambda: {"resumed": True})
+
+    def _resume(_holder: str, _acquired: datetime) -> dict[str, bool]:
+        return {"resumed": True}
+
+    monkeypatch.setattr(daemon.ops_cluster, "cluster_resume_op", _resume)
 
     stuck = asyncio.ensure_future(daemon._dispatch("cluster_update", {}))
     await asyncio.to_thread(started.wait, 10)
 
-    status, result = await daemon._dispatch("cluster_resume", {})
+    status, result = await daemon._dispatch(
+        "cluster_resume",
+        {"deploy_holder": "g:pid1", "deploy_acquired_at": "2026-08-25T00:00:00Z"},
+    )
     assert (status, result) == ("completed", {"resumed": True})
 
     release.set()

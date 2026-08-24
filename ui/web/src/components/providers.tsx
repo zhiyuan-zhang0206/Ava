@@ -5,6 +5,7 @@ import { ThemeProvider } from "next-themes";
 import { useState } from "react";
 
 import { AppConnectionBanner } from "@/components/app-connection-banner";
+import { GateMaintenanceProvider } from "@/components/gate-maintenance-provider";
 import { ThemePackTokens } from "@/components/theme-pack-tokens";
 import { ToastHost } from "@/components/toast";
 import { LanguageProvider } from "@/i18n/language-provider";
@@ -38,9 +39,9 @@ import { AlertsProvider } from "@/lib/use-alerts";
 // caches. The all-events, high-frequency stream stays scoped to the
 // conversation view (page.tsx).
 //
-// AppConnectionBanner also rides that connection here at the root, so the
-// SSE-disconnect / cluster-updating / stranded-recovery chrome (and the
-// cluster-health poller behind it) protects every page, not just the home view.
+// AppConnectionBanner also rides that connection here at the root, so
+// disconnect/recovery chrome and Gate reload hints protect every page, not
+// just the home view. Gate alone owns maintenance classification and timing.
 export function createQueryClient(): QueryClient {
   return new QueryClient({
     queryCache: new QueryCache({
@@ -80,6 +81,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(() => createQueryClient());
   return (
     <QueryClientProvider client={queryClient}>
+      <GateMaintenanceProvider />
       <AuthProvider>
         <EventStreamProvider>
           <AlertsProvider>

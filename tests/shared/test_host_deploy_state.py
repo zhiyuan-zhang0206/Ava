@@ -1,13 +1,14 @@
-"""shared.host_deploy_state — posture/updater-lease/mirror row (R1, Task #1021).
+"""shared.host_deploy_state — posture/updater-lease row (R1, Task #1021).
 
 Covers the R1 host-level explicit model: the posture transitions the pause
 lifecycle drives (idle -> paused -> idle), the updater lease liveness judgment,
-and the mirror file as the degraded offline label (written by the same
-transitions, read back, and never blocking the DB write).
+Host transitions must never mutate the separate cluster UI-maintenance marker.
 """
 
 from __future__ import annotations
 
+import multiprocessing
+import os
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -42,19 +43,34 @@ def test_no_row_reads_as_none() -> None:
     assert hds.read() is None
 
 
-def test_set_posture_paused_writes_row_and_mirror(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+def test_host_transitions_never_mutate_an_existing_ui_marker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # Point the mirror at a tmp location so the test observes it without touching
-    # the real $AVA_HOME.
-    monkeypatch.setattr(hds, "mirror_path", lambda: str(tmp_path / "deploy-state.json"))  # type: ignore[attr-defined]
+    """Host posture is control-plane state, not maintenance-page ownership.
+
+    A local pause/start inside a rollout must not create or clear the cluster UI
+    generation, which spans the full Phase-B tail.
+    """
+    marker = tmp_path / "deploy-state.json"
+    original = b'{"schema_version":2,"generation":"owner"}'
+    marker.write_bytes(original)
+
+    # Use an explicit sentinel file: an absence assertion against an unrelated
+    # tmp_path would be vacuous and could not catch host-state code clearing the
+    # real cluster marker.
+    from shared import ui_update_state
+
+    monkeypatch.setattr(ui_update_state, "state_path", lambda: marker)
     hds.set_posture("paused")
+    hds.touch_updater_lease(ttl_s=600)
+    hds.clear_updater_lease()
+    hds.set_posture("idle")
+
     state = hds.read()
     assert state is not None
-    assert state.posture == "paused"
+    assert state.posture == "idle"
     assert state.updater_lease_expires_at is None
-    mirror = hds.read_mirror()
-    assert mirror is not None and mirror["posture"] == "paused"
+    assert marker.read_bytes() == original
 
 
 def test_invalid_posture_is_rejected() -> None:
@@ -84,27 +100,6 @@ def test_clear_updater_lease_drops_liveness_keeps_posture() -> None:
 def test_expired_lease_reads_as_not_live() -> None:
     hds.touch_updater_lease(ttl_s=-10)
     assert hds.updater_lease_live() is False
-
-
-def test_mirror_read_absent_returns_none(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(hds, "mirror_path", lambda: str(tmp_path / "missing.json"))  # type: ignore[attr-defined]
-    assert hds.read_mirror() is None
-
-
-def test_mirror_write_failure_does_not_block(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """The mirror is a degraded label: a write failure warns and the DB row still
-    stands (set_posture raised nothing and the row is readable)."""
-    import shutil
-
-    blocker = tmp_path / "blocked.json"
-    blocker.mkdir()  # a directory where the file would go -> replace fails
-    monkeypatch.setattr(hds, "mirror_path", lambda: str(blocker))  # type: ignore[attr-defined]
-    hds.set_posture("paused")  # must not raise
-    state = hds.read()
-    assert state is not None and state.posture == "paused"
-    shutil.rmtree(blocker)  # leave tmp_path clean
 
 
 def test_set_posture_paused_stamps_paused_at() -> None:
@@ -190,14 +185,45 @@ def test_updater_lock_is_exclusive_and_releasable(
     """Two concurrent updaters must not both hold the host lock — a second
     acquire fails while the first is held (flock/msvcrt contend per fd, so a
     same-process second acquire is a faithful stand-in for a second process),
-    and release makes the lock acquirable again and removes the file."""
+    and release makes the lock acquirable again without replacing its inode."""
     monkeypatch.setattr(hds, "_updater_lock_path", lambda: tmp_path / "updater.lock")
     assert hds.try_acquire_updater_lock() is True
     assert hds.try_acquire_updater_lock() is False  # second updater: declines
     hds.release_updater_lock()
+    inode = (tmp_path / "updater.lock").stat().st_ino
     assert hds.try_acquire_updater_lock() is True
     hds.release_updater_lock()
-    assert not (tmp_path / "updater.lock").exists()
+    assert (tmp_path / "updater.lock").stat().st_ino == inode
+
+
+@pytest.mark.skipif(os.name == "nt", reason="fork barrier exercises POSIX flock inode identity")
+def test_updater_lock_contends_across_processes_on_one_stable_inode(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A second process cannot acquire until the first releases the same inode."""
+    path = tmp_path / "updater.lock"
+    held = multiprocessing.get_context("fork").Event()
+    release = multiprocessing.get_context("fork").Event()
+
+    def _holder() -> None:
+        hds._updater_lock_path = lambda: path  # type: ignore[method-assign]
+        assert hds.try_acquire_updater_lock()
+        held.set()
+        assert release.wait(5)
+        hds.release_updater_lock()
+
+    monkeypatch.setattr(hds, "_updater_lock_path", lambda: path)
+    proc = multiprocessing.get_context("fork").Process(target=_holder)
+    proc.start()
+    assert held.wait(5)
+    inode = path.stat().st_ino
+    assert hds.try_acquire_updater_lock() is False
+    release.set()
+    proc.join(5)
+    assert proc.exitcode == 0
+    assert hds.try_acquire_updater_lock() is True
+    hds.release_updater_lock()
+    assert path.stat().st_ino == inode
 
 
 def test_updater_lock_uncontended_on_fresh_host(

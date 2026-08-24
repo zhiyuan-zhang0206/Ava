@@ -39,7 +39,7 @@ from ops.cluster import (
     current_orchestration,
 )
 from ops.cluster import is_paused as cluster_is_paused
-from ops.rpc_schemas import ClusterSpawnSession
+from ops.rpc_schemas import ClusterSpawnSession, ClusterTransitionPayload
 from shared import machines
 from shared.cluster_drift import prod_source_head_sha
 from shared.config import settings
@@ -144,24 +144,25 @@ async def _dispatch_op(
 
 
 @router.post("/api/cluster/stop", status_code=200)
-async def post_cluster_stop() -> dict[str, bool]:
+async def post_cluster_stop(body: ClusterTransitionPayload) -> dict[str, bool]:
     """Phase A handler — pause this host (posture row -> 503 + stop the
     restarter), executed by this host's ops server via a cluster_stop op.
     """
-    await _dispatch_op(machine_name(), "cluster_stop", {})
+    await _dispatch_op(machine_name(), "cluster_stop", body.model_dump(mode="json"))
     return {"paused": True}
 
 
 @router.post("/api/cluster/resume", status_code=200)
-async def post_cluster_resume() -> dict[str, bool]:
+async def post_cluster_resume(body: ClusterTransitionPayload) -> dict[str, bool]:
     """Compensating unpause — posture row -> idle + respawn restarter,
     executed by this host's ops server via a cluster_resume op.
 
     Symmetric inverse of `/api/cluster/stop`. The orchestration's failure path
-    fans this out (by dialing each host's ops server) to every host it had paused; also
-    usable directly to recover a host stuck paused.
+    fans this out (by dialing each host's ops server) to every host it had paused.
+    Operators recover a stranded host through `/api/cluster/recover`; this route
+    requires the opaque exact capability of the deploy that created the pause.
     """
-    await _dispatch_op(machine_name(), "cluster_resume", {})
+    await _dispatch_op(machine_name(), "cluster_resume", body.model_dump(mode="json"))
     return {"paused": False}
 
 

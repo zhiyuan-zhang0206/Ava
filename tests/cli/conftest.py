@@ -23,6 +23,28 @@ import pytest
 from shared.config import settings
 
 
+@pytest.fixture
+def stub_deploy_lease_identity(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pair tests' fake successful acquire with the exact lease it implies."""
+    from datetime import UTC, datetime
+
+    from cli.commands import update as _up
+    from shared.cluster_lock import DeployLease
+
+    monkeypatch.setattr(
+        _up,
+        "read_update_lease",
+        lambda: DeployLease(
+            holder=_up.self_holder(),
+            held_for_s=0,
+            expires_in_s=60,
+            note=None,
+            kind="rollout",
+            acquired_at=datetime(2026, 8, 25, tzinfo=UTC),
+        ),
+    )
+
+
 @pytest.fixture(autouse=True)
 def _gate_probe_offline(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep the gate observation off this box's real entry port and real launchd.

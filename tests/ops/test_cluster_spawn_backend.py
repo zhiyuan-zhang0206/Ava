@@ -33,6 +33,8 @@ from ops import updater_outcome as uo
 from shared.exit_codes import RESTART_DECLINED_EXIT_CODE
 from shared.platform_backend import MacPlatformBackend, WindowsPlatformBackend
 
+_REAL_WAIT_FOR_UI_OWNER = cluster_deploy._wait_for_ui_owner
+
 
 class _FakeSessionBackend:
     """Records `new_session` instead of launching anything."""
@@ -98,6 +100,24 @@ def _pin_session_names(monkeypatch: pytest.MonkeyPatch) -> None:
     """Deterministic session names + empty env forwarding, matching
     tests/gateway/test_cluster_endpoints.py."""
     monkeypatch.setattr("shared.cluster.session_name", lambda svc: f"ava-test-{svc}")  # pyright: ignore[reportUnknownArgumentType]
+
+
+@pytest.fixture(autouse=True)
+def _detached_child_publishes_ui_owner(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The recording backend does not execute its child command.
+
+    Model the authoritative child claim at the parent's wait seam; focused
+    tests below exercise the wait's liveness/timeout behavior itself.
+    """
+
+    def _publish(*, session: str, kind: str, origin: str) -> None:
+        del session
+        from shared import ui_update_state
+
+        if ui_update_state.read().status == "inactive":
+            ui_update_state.begin(kind=kind, origin=origin)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(cluster_deploy, "_wait_for_ui_owner", _publish)
 
 
 @pytest.fixture
@@ -228,6 +248,144 @@ def test_spawn_site_reaches_session_backend(
 
 
 @pytest.mark.real_cluster_spawn
+@pytest.mark.parametrize(
+    ("drive", "kind"),
+    [(_drive_rollout, "rollout"), (_drive_restart, "restart")],
+)
+def test_cluster_ui_marker_exists_before_detached_spawn_returns(
+    drive: Callable[[pytest.MonkeyPatch], None],
+    kind: str,
+    posix_native_host: _FakeSessionBackend,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The browser may receive the start SSE as soon as the spawn returns, so
+    the durable marker must already own the maintenance surface."""
+    drive(monkeypatch)
+
+    from shared.ui_update_state import read
+
+    snapshot = read()
+    assert snapshot.status == "updating"
+    assert snapshot.kind == kind
+    assert snapshot.generation is not None
+
+
+@pytest.mark.real_cluster_spawn
+def test_definitive_rollout_spawn_decline_never_creates_a_marker(
+    posix_native_host: _FakeSessionBackend,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ops.cluster_session import OrchestrationSpawnFailed
+    from shared.ui_update_state import read
+
+    monkeypatch.setattr(
+        cluster_deploy,
+        "update_check",
+        lambda: cluster_mod.UpdateCheck(behind=2, frontend_changed=False, backend_changed=True),
+    )
+    posix_native_host.new_session = lambda *_a, **_kw: False  # type: ignore[method-assign]
+
+    with pytest.raises(OrchestrationSpawnFailed):
+        cluster_mod.spawn_rollout("test-origin")
+
+    assert read().status == "inactive"
+
+
+@pytest.mark.real_cluster_spawn
+def test_second_spawn_never_reuses_or_clears_the_first_generation(
+    posix_native_host: _FakeSessionBackend,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A second parent that observes a child-owned marker refuses unchanged."""
+    _drive_rollout(monkeypatch)
+
+    from shared.ui_update_state import read
+
+    first = read()
+    assert first.generation is not None
+    # Model the session record disappearing while its durable owner survives.
+    posix_native_host.alive.clear()
+
+    with pytest.raises(cluster_mod.ClusterUpdateInProgress):
+        cluster_mod.spawn_restart("second-caller")
+
+    after = read()
+    assert after.generation == first.generation
+    assert after.kind == "rollout"
+
+
+@pytest.mark.real_cluster_spawn
+def test_ambiguous_post_launch_failure_never_clears_child_owned_marker(
+    posix_native_host: _FakeSessionBackend,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Popen/fork can succeed before session-record bookkeeping raises.
+
+    The parent never owns a marker and therefore cannot clear the child state
+    merely because its backend call reported an ambiguous failure.
+    """
+    from ops.cluster_session import OrchestrationSpawnFailed
+    from shared import ui_update_state
+
+    monkeypatch.setattr(
+        cluster_deploy,
+        "update_check",
+        lambda: cluster_mod.UpdateCheck(behind=2, frontend_changed=False, backend_changed=True),
+    )
+
+    def _child_started_then_record_failed(*_args: object, **_kwargs: object) -> None:
+        ui_update_state.begin(kind="rollout", origin="first-caller")
+        raise OrchestrationSpawnFailed("injected post-launch record failure", started=None)
+
+    monkeypatch.setattr(
+        cluster_deploy.cluster_session,
+        "_spawn_detached_session",
+        _child_started_then_record_failed,
+    )
+
+    with pytest.raises(OrchestrationSpawnFailed):
+        cluster_mod.spawn_rollout("first-caller")
+
+    remaining = ui_update_state.read()
+    assert remaining.status == "updating"
+    assert remaining.kind == "rollout"
+    assert remaining.origin == "first-caller"
+
+
+@pytest.mark.real_cluster_spawn
+def test_parent_wait_accepts_a_slow_live_child_that_publishes_after_five_seconds(
+    posix_native_host: _FakeSessionBackend,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The old arbitrary 5s wait falsely reported failure on a slow DB lock."""
+    from shared import ui_update_state
+
+    clock = [0.0]
+    posix_native_host.alive.add("ava-test-rollout")
+    monkeypatch.setattr(cluster_deploy.time, "monotonic", lambda: clock[0])
+
+    def _advance(delay: float) -> None:
+        clock[0] += max(delay, 1.0)
+        if clock[0] >= 6.0 and ui_update_state.read().status == "inactive":
+            ui_update_state.begin(kind="rollout", origin="slow-db")
+
+    monkeypatch.setattr(cluster_deploy.time, "sleep", _advance)
+
+    _REAL_WAIT_FOR_UI_OWNER(session="ava-test-rollout", kind="rollout", origin="slow-db")
+    assert clock[0] >= 6.0
+
+
+@pytest.mark.real_cluster_spawn
+def test_parent_wait_fails_immediately_when_the_session_dies(
+    posix_native_host: _FakeSessionBackend,
+) -> None:
+    from ops.cluster_session import OrchestrationSpawnFailed
+
+    with pytest.raises(OrchestrationSpawnFailed, match="exited before publishing"):
+        _REAL_WAIT_FOR_UI_OWNER(session="ava-test-rollout", kind="rollout", origin="dead-child")
+
+
+@pytest.mark.real_cluster_spawn
 def test_unpause_respawns_the_restarter_on_the_native_backend(
     posix_native_host: _FakeSessionBackend,
 ) -> None:
@@ -300,16 +458,22 @@ def test_spawn_update_logs_nonzero_validate_fetch(
 def test_native_updater_chains_touch_and_clear_the_lease(
     restart_only: bool, native_host: _FakeSessionBackend
 ) -> None:
-    """Both native updater shapes carry the R1 lease steps (Task #1021): a
-    fail-soft `_updater_lease touch` ahead of the restart and a trailing clear,
-    so the stalled-updater controller and Phase B judge the session by its
-    lease instead of log mtimes. `ver>nul` is the cmd.exe `|| true`."""
+    """Both native updater shapes claim the handoff before any mutation.
+
+    The claim is a hard gate: unlike the observational DB-lease write inside
+    ``touch``, its failure must short-circuit the checkout/restart chain.  Every
+    terminal arm still attempts the generation-scoped clear.
+    """
     cluster_mod.spawn_update(restart_only=restart_only)
 
     cmd = native_host.spawned[0][1]
-    assert "cli.commands._updater_lease touch" in cmd
+    touch = "cli.commands._updater_lease touch"
+    assert touch in cmd
     assert "cli.commands._updater_lease clear" in cmd
-    assert "|| ver>nul" in cmd
+    after_touch = cmd.split(touch, 1)[1]
+    claim, separator, _mutations = after_touch.partition("&&")
+    assert separator == "&&"
+    assert "||" not in claim
 
 
 @pytest.mark.real_cluster_spawn
@@ -485,7 +649,29 @@ def test_backend_decline_raises_orchestration_spawn_failed(
     dependency."""
     calls: list[str] = []
     monkeypatch.setattr("shared.host_deploy_state.set_posture", calls.append)
-    monkeypatch.setattr(posix_native_host, "new_session", lambda *_a, **_k: False)  # pyright: ignore[reportUnknownArgumentType]
+    original_new_session = posix_native_host.new_session
+
+    def _decline_only_updater(
+        name: str,
+        cmd: str,
+        cwd: Path,
+        *,
+        env: dict[str, str],
+        login_shell: bool = True,
+        exec_cmd: bool = True,
+    ) -> bool:
+        if name == "ava-test-updater":
+            return False
+        return original_new_session(
+            name,
+            cmd,
+            cwd,
+            env=env,
+            login_shell=login_shell,
+            exec_cmd=exec_cmd,
+        )
+
+    monkeypatch.setattr(posix_native_host, "new_session", _decline_only_updater)
 
     with pytest.raises(cluster_mod.OrchestrationSpawnFailed):
         cluster_mod.spawn_update(restart_only=True)

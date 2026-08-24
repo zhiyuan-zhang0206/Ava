@@ -450,11 +450,11 @@ class TaskUpdated(_Base):
 
 class ClusterUpdateStarted(_Base):
     """Published after a whole-cluster rollout or restart orchestration is
-    successfully spawned. The frontend uses this event to show the full-screen
-    updating page before the gateway stops.
+    successfully spawned. The frontend treats it only as a hint to reload
+    through Gate, which projects the persistent marker and owns the page/clock.
 
     This cluster-level event has no owning agent, so ``agent_id`` is always 0.
-    It is a live-projection render hint and is never persisted.
+    It is a non-authoritative reload hint and is never persisted.
     """
 
     role: Literal["cluster_update_started"] = "cluster_update_started"

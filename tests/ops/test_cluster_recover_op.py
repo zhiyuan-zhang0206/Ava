@@ -17,7 +17,7 @@ import pytest
 
 import ops.ops_cluster as _ops
 from ops.cluster import ClusterUpdateInProgress
-from shared.cluster_lock import DeployLease
+from shared.cluster_lock import DeployLease, RecoveryClaim
 
 _Kind = Literal["rollout", "restart", "update"]
 
@@ -43,14 +43,65 @@ def recover_calls(monkeypatch: pytest.MonkeyPatch) -> dict[str, bool]:
     calls = {"released": False, "unpaused": False}
     monkeypatch.setattr(_ops, "machine_name", lambda: "m1")
     monkeypatch.setattr(_ops, "updater_lease_live", lambda: False)
+    monkeypatch.setattr(_ops.cluster_session, "live_orchestration_session", lambda: None)
 
-    def _release() -> str | None:
+    def _claim(_holder: str, observed: DeployLease | None) -> RecoveryClaim:
+        return RecoveryClaim(
+            acquired=True,
+            previous_holder=observed.holder if observed is not None else None,
+        )
+
+    def _release(_holder: str) -> None:
         calls["released"] = True
-        return "m1:pid123"
 
-    monkeypatch.setattr(_ops, "force_release_update_lock", _release)
+    monkeypatch.setattr(_ops, "claim_recovery_lock", _claim)
+    monkeypatch.setattr(_ops, "release_update_lock", _release)
     monkeypatch.setattr(_ops, "unpause_local_cluster", lambda: calls.update(unpaused=True))
+    monkeypatch.setattr(
+        _ops.ui_update_state,
+        "read",
+        lambda: _ops.ui_update_state.UiUpdateSnapshot(status="inactive"),
+    )
     return calls
+
+
+def test_recover_clears_the_stranded_ui_marker_after_liveness_refusal_passes(
+    monkeypatch: pytest.MonkeyPatch, recover_calls: dict[str, bool]
+) -> None:
+    _set_lease(monkeypatch, None)
+    cleared: list[str] = []
+    monkeypatch.setattr(
+        _ops.ui_update_state,
+        "read",
+        lambda: _ops.ui_update_state.UiUpdateSnapshot(
+            status="updating", generation="stranded", kind="rollout"
+        ),
+    )
+    monkeypatch.setattr(_ops.ui_update_state, "clear", cleared.append)
+
+    _ops.cluster_recover_op()
+
+    assert cleared == ["stranded"]
+
+
+@pytest.mark.parametrize("session", ["ava-rollout", "ava-cluster-restart"])
+def test_recover_refuses_a_spawned_session_before_its_db_lease_exists(
+    session: str,
+    monkeypatch: pytest.MonkeyPatch,
+    recover_calls: dict[str, bool],
+) -> None:
+    """begin -> detached spawn -> child lock acquisition is a real live-owner
+    window even though neither DB lease exists yet."""
+    _set_lease(monkeypatch, None)
+    monkeypatch.setattr(_ops.cluster_session, "live_orchestration_session", lambda: session)
+    marker_clears: list[bool] = []
+    monkeypatch.setattr(_ops.ui_update_state, "force_clear", lambda: marker_clears.append(True))
+
+    with pytest.raises(ClusterUpdateInProgress, match=session):
+        _ops.cluster_recover_op()
+
+    assert recover_calls == {"released": False, "unpaused": False}
+    assert marker_clears == []
 
 
 def _set_lease(monkeypatch: pytest.MonkeyPatch, lease: DeployLease | None) -> None:
@@ -139,6 +190,42 @@ def test_no_lease_still_unpauses_a_stranded_host(
     assert recover_calls == {"released": True, "unpaused": True}
 
 
+def test_recover_cas_loses_to_a_new_owner_without_unpausing_or_clearing(
+    monkeypatch: pytest.MonkeyPatch, recover_calls: dict[str, bool]
+) -> None:
+    _set_lease(monkeypatch, None)
+    marker_clears: list[str] = []
+
+    def _lose_claim(
+        _recovery_holder: str,
+        _observed: DeployLease | None,
+        *,
+        ttl_s: float = 60.0,
+    ) -> RecoveryClaim:
+        del ttl_s
+        return RecoveryClaim(acquired=False)
+
+    monkeypatch.setattr(
+        _ops,
+        "claim_recovery_lock",
+        _lose_claim,
+    )
+    monkeypatch.setattr(
+        _ops.ui_update_state,
+        "read",
+        lambda: _ops.ui_update_state.UiUpdateSnapshot(
+            status="updating", generation="winner", kind="rollout"
+        ),
+    )
+    monkeypatch.setattr(_ops.ui_update_state, "clear", marker_clears.append)
+
+    with pytest.raises(ClusterUpdateInProgress, match="lease changed"):
+        _ops.cluster_recover_op()
+
+    assert recover_calls == {"released": False, "unpaused": False}
+    assert marker_clears == []
+
+
 def test_recycled_pid_on_an_old_lease_reads_as_dead(
     monkeypatch: pytest.MonkeyPatch, recover_calls: dict[str, bool]
 ) -> None:
@@ -149,7 +236,7 @@ def test_recycled_pid_on_an_old_lease_reads_as_dead(
 
     result = _ops.cluster_recover_op()
 
-    assert result == {"unlocked_holder": "m1:pid123"}
+    assert result == {"unlocked_holder": f"m1:pid{os.getpid()}"}
     assert recover_calls == {"released": True, "unpaused": True}
 
 

@@ -238,7 +238,7 @@ def test_every_non_serving_verdict_has_its_own_guidance() -> None:
 
 
 @pytest.fixture(autouse=True)
-def _stub_rollout_target(monkeypatch: pytest.MonkeyPatch) -> None:
+def _stub_rollout_target(monkeypatch: pytest.MonkeyPatch, stub_deploy_lease_identity: None) -> None:
     """Same seams as tests/cli/test_update_autounpause.py: no real git, no real lock."""
     monkeypatch.setattr(_up, "git_resolve_origin_main", lambda: "TARGETSHA")
     monkeypatch.setattr(_up, "acquire_update_lock", lambda _holder, **_kw: True)  # pyright: ignore[reportUnknownArgumentType]

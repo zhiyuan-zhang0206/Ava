@@ -17,12 +17,16 @@ from collections.abc import Callable
 from enum import StrEnum
 from pathlib import Path
 
+from cli.commands._update_fanout import ClusterOpPayload
 from cli.commands._update_git import GitPullFailed, git_reset_hard, rollback_schema_to
 from shared.exit_codes import SERVICES_NOT_READY_EXIT_CODE
 
 # The `_fan_out` the orchestration injects into `finalize_rollout`: POST a
 # path-addressed op to each (name, ops_url) host, return (name, status, detail).
-_FanOut = Callable[[list[tuple[str, str | None]], str, float], list[tuple[str, str, str]]]
+_FanOut = Callable[
+    [list[tuple[str, str | None]], str, float, ClusterOpPayload],
+    list[tuple[str, str, str]],
+]
 
 
 class RolloutOutcome(StrEnum):
@@ -202,6 +206,7 @@ def finalize_rollout(
     fan_out: _FanOut,
     resume_timeout_s: float,
     *,
+    deploy_capability: ClusterOpPayload,
     outcome: RolloutOutcome,
     pin_advanced: bool,
     failing_step: str | None = None,
@@ -255,7 +260,12 @@ def finalize_rollout(
             file=sys.stderr,
         )
         try:
-            results = fan_out(hosts_to_resume, "/api/cluster/resume", resume_timeout_s)
+            results = fan_out(
+                hosts_to_resume,
+                "/api/cluster/resume",
+                resume_timeout_s,
+                deploy_capability,
+            )
             reached = [name for name, status, _ in results if status == "ok"]
             unreached = [name for name, status, _ in results if status != "ok"]
         except Exception as exc:

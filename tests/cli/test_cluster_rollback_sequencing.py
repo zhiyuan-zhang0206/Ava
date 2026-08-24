@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import os
+from datetime import UTC, datetime
+
 import pytest
 
 from cli.commands import _cluster_rollback as _rb
 from cli.commands._update_phase_b import POLL_OK, POLL_STALLED, PollVerdict
+from shared.cluster_lock import DeployLease
 
 _SNAP = {"00000000T000000_baseline"}
 
@@ -17,7 +21,7 @@ def _seams(monkeypatch: pytest.MonkeyPatch) -> tuple[list[str], list[dict[str, o
     phase_b_calls: list[dict[str, object]] = []
 
     def _stop_the_world(
-        _runners: list[tuple[str, str | None]], *, mode: str = "smooth"
+        _runners: list[tuple[str, str | None]], *, mode: str = "smooth", **_kw: object
     ) -> tuple[set[str], bool]:
         assert mode == "smooth"
         order.append("stop-the-world")
@@ -57,6 +61,17 @@ def _seams(monkeypatch: pytest.MonkeyPatch) -> tuple[list[str], list[dict[str, o
     monkeypatch.setattr(_rb, "_resolve_rollback_target", lambda _to: "TARGETSHA")  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_rb, "_validate_rollout_target", lambda _sha: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_rb, "acquire_update_lock", lambda _h, **_kw: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(
+        _rb,
+        "read_update_lease",
+        lambda: DeployLease(
+            holder=f"test-host:pid{os.getpid()}",
+            held_for_s=0,
+            expires_in_s=60,
+            note=None,
+            acquired_at=datetime(2026, 8, 25, tzinfo=UTC),
+        ),
+    )
     monkeypatch.setattr(_rb, "release_update_lock", lambda _h: order.append("release-lock"))  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_rb, "settle_update_lock", lambda _h, **_kw: order.append("settle-lock"))  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_rb, "git_head_sha", lambda: "FROMSHA")
@@ -110,7 +125,7 @@ def test_rollback_force_reaps_runners_when_agents_do_not_quiesce(
     _order, phase_b_calls = _seams
 
     def _stop_the_world(
-        _runners: list[tuple[str, str | None]], *, mode: str = "smooth"
+        _runners: list[tuple[str, str | None]], *, mode: str = "smooth", **_kw: object
     ) -> tuple[set[str], bool]:
         assert mode == "smooth"
         return {"runner-a"}, False

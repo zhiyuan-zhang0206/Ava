@@ -90,6 +90,14 @@ from __future__ import annotations
 # `ops.cluster_deploy._UPDATER_STALL_TIMEOUT_S`.
 NO_PROGRESS_TIMEOUT_S = 900.0
 
+# The gateway waits this long for a newly detached rollout/restart child to
+# publish its persistent UI owner. The HTTP client must outlive that wait plus
+# rollout's worst-case read-only release preflight (three 15 s git commands),
+# otherwise it reports a timeout after the orchestration actually started and
+# invites a duplicate submission.
+ORCHESTRATION_OWNER_WAIT_S = 30.0
+CLUSTER_DISPATCH_TIMEOUT_S = 90.0
+
 # How often the process running an orchestration re-arms its own lease. Small
 # relative to `LOCK_TTL_S` so a missed round (a slow DB, one dropped connection) is
 # never fatal, and large enough that a multi-minute rollout costs a handful of

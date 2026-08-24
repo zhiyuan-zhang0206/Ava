@@ -254,7 +254,11 @@ def test_the_inline_reap_log_does_not_claim_a_kill_on_the_recheck_path(
     _lease(monkeypatch, expires_in_s=-60.0)
     # Alive for spawn_update's liveness check, gone by the recheck after the kill.
     answers = iter([True, False])
-    monkeypatch.setattr(cluster_session, "_has_orchestration_session", lambda _name: next(answers))  # pyright: ignore[reportUnknownArgumentType]
+
+    def _session_alive(_name: str) -> bool:
+        return next(answers, False)
+
+    monkeypatch.setattr(cluster_session, "_has_orchestration_session", _session_alive)
     # The pause and the spawn are a different mechanism; this test is the log line
     # between them, and neither may run for real.
     monkeypatch.setattr(cluster_pause, "pause_local_cluster", lambda: None)

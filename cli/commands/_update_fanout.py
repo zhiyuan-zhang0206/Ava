@@ -43,6 +43,8 @@ class ClusterOpPayload(TypedDict, total=False):
     target_sha: str
     mode: str
     force_reap: bool
+    deploy_holder: str
+    deploy_acquired_at: str
 
 
 def _list_agent_runners() -> list[tuple[str, str | None]]:

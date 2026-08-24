@@ -464,7 +464,13 @@ def cmd_cluster_restart() -> int:
 
     url = f"{gateway_api_base()}/api/cluster/restart"
     print(f"[ava cluster restart] POST {url}")
-    resp = dial_post(url, timeout=30.0, headers=gateway_auth_headers())
+    from shared.deploy_timing import CLUSTER_DISPATCH_TIMEOUT_S
+
+    resp = dial_post(
+        url,
+        timeout=CLUSTER_DISPATCH_TIMEOUT_S,
+        headers=gateway_auth_headers(),
+    )
     if resp.status_code == _DEPLOY_REFUSED_STATUS:
         print(f"\n✗ {_conflict_detail(resp)}", file=sys.stderr)
         return 1

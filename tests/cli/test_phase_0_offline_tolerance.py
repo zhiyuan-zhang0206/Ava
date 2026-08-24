@@ -33,7 +33,7 @@ ME = "orchestrator-box"
 
 
 @pytest.fixture(autouse=True)
-def _stub_rollout_target(monkeypatch: pytest.MonkeyPatch) -> None:
+def _stub_rollout_target(monkeypatch: pytest.MonkeyPatch, stub_deploy_lease_identity: None) -> None:
     """Same seams as tests/cli/test_phase_b_self_exclusion.py: no real git, no real
     lock, no real pin write."""
     monkeypatch.setattr(_up, "git_resolve_origin_main", lambda: "TARGETSHA")

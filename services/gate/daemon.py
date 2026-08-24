@@ -8,24 +8,19 @@ the gate is a launchd job OUTSIDE the update lifecycle, so the entry never
 blacks out: users see the updating page during the rollout and land back on
 the app automatically when it finishes.
 
-Auth is the gateway's session cookie (host-only, shared across ports): the
-gate forwards the client's Cookie to `GET /api/auth/check` and serves the
-static login page when unauthenticated, the app when authenticated, and one
-of two maintenance pages whenever the gateway is unreachable or 503. Which
-one is decided by the posture mirror (`$AVA_HOME/deploy-state.json`): a
-rollout/update marks it before the gateway goes down and clears it when the
-host serves again (the posture mirror), so a non-idle mirror means
-"updating" and the flag absent means the machine itself is unreachable —
-powered off, crashed, or partitioned — a genuinely different thing that the
-old single page could not say.
+Auth is the gateway's session cookie (host-only, shared across ports). One
+immutable `$AVA_HOME/deploy-state.json` snapshot is read at the start of each
+request. A valid active generation owns the response immediately; otherwise
+the gate forwards Cookie to `GET /api/auth/check` and serves login/app. Every
+transport failure (gateway or app) reuses that same snapshot, so a recovering
+service cannot make one request say "unavailable" and the next invent
+"updating" from a different condition.
 
 The SPA's own API/SSE traffic goes straight to the gateway (never through
 this proxy), so a simple buffering proxy suffices — no streaming needed.
 
-All three static pages are rebuilds of the app's own screens
-(`login/page.tsx`, `updating-page.tsx`) from a copy of its design tokens,
-down to reading the theme the user picked in the app — a rollout swaps one
-for the other, and
+All three static pages use a copy of the app's design tokens, down to reading
+the theme the user picked in the app — a rollout swaps one for the other, and
 that should not look like landing on a different product. They stay
 dependency-free: no build output, no network fetch, everything inlined.
 """
@@ -33,6 +28,7 @@ dependency-free: no build output, no network fetch, everything inlined.
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import json
 import logging
 import urllib.error
@@ -42,6 +38,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from shared.config import settings
+from shared.ui_update_state import UiUpdateSnapshot
 
 _log = logging.getLogger("services.gate")
 
@@ -62,7 +59,7 @@ class Gate:
         gateway_base: str,
         app_base: str,
         static_dir: Path,
-        mirror_path: str | None = None,
+        state_path: str | None = None,
     ) -> None:
         self.gateway_base = gateway_base.rstrip("/")
         self.app_base = app_base.rstrip("/")
@@ -88,19 +85,26 @@ class Gate:
         self.login_page = page("login.html").replace("__GATEWAY_BASE__", self.gateway_base)
         self.updating_page = page("updating.html")
         self.down_page = page("down.html")
-        # The mirror file tells the two maintenance pages apart (R1, Task
-        # #1021): `$AVA_HOME/deploy-state.json` is the host-local projection of
-        # the posture row, written by the same transitions that write the DB.
-        # A path is injected (tests pass a tmp file); the default resolves from
-        # the same AVA_HOME the rollout orchestration writes to — the gate and
-        # the gateway are always on one machine, so the file is always local.
-        self.mirror_path = mirror_path
+        # A path is injected by tests. In production the default resolves from
+        # the same AVA_HOME whose rollout/restart spawn owns the generation.
+        self.state_path = state_path
 
-    def verdict(self, cookie: str) -> str:
+    def deploy_snapshot(self) -> UiUpdateSnapshot:
+        """One lock-free, atomic-file snapshot for the whole HTTP request."""
+        from shared.ui_update_state import read
+
+        return read(self.state_path)
+
+    def verdict(self, cookie: str, snapshot: UiUpdateSnapshot) -> str:
         """ "up" (authenticated, cluster healthy) | "login" (healthy, no session)
-        | "updating" (gateway unreachable / 503 while the posture mirror is non-idle)
-        | "down" (gateway unreachable / 503 with no flag — the machine itself
-        | is not answering)."""
+        | "updating" (one valid generation owns the maintenance surface)
+        | "down" (no valid active generation and a service is not answering)."""
+        # The marker is checked before any dependency. Once a generation owns
+        # the maintenance surface, gateway/app flapping cannot change the page.
+        if snapshot.status == "updating":
+            return "updating"
+        if snapshot.status == "invalid":
+            return "down"
         req = urllib.request.Request(  # noqa: S310 — operator-declared internal URL, never request input
             f"{self.gateway_base}/api/auth/check",
             headers={"Cookie": cookie} if cookie else {},
@@ -112,20 +116,11 @@ class Gate:
                 body = json.loads(resp.read())
                 return "up" if body.get("authenticated") else "login"
         except Exception:  # any probe failure means "not serving"; never crash a request
-            # The mirror file separates the two things "not serving" can mean: the
-            # pause transition wrote it (posture != idle) before the gateway went
-            # down, so a non-idle mirror says "updating", and an absent / idle
-            # mirror says the machine is unreachable (R1, Task #1021 — replaces
-            # the old updating.flag existence read).
-            from shared.host_deploy_state import read_mirror
+            return "down"
 
-            mirror = read_mirror(self.mirror_path)
-            posture = mirror.get("posture") if mirror else None
-            return "updating" if posture not in (None, "idle") else "down"
-
-    def proxy_app(self, handler: BaseHTTPRequestHandler) -> None:
-        """Fetch the path from the app and stream it back; on failure serve the
-        updating page (the app may be mid-rebuild during a rollout).
+    def proxy_app(self, handler: BaseHTTPRequestHandler, snapshot: UiUpdateSnapshot) -> None:
+        """Fetch the path from the app and stream it back; on transport failure
+        project maintenance from the request's persisted snapshot.
 
         An app that answers with an HTTP error status (404, 500, ...) is
         proxied through as-is: the app is up and its answer is meaningful —
@@ -157,9 +152,48 @@ class Gate:
             handler.send_header("Content-Length", str(len(body)))
             handler.end_headers()
             handler.wfile.write(body)
-        except Exception:  # transport failure — app down/rebuilding is the maintenance case
+        except Exception:  # transport failure — use the SAME request snapshot
             _log.warning("app proxy failed for %s", handler.path)
-            self._serve_static(handler, self.updating_page, 502)
+            self.serve_maintenance(handler, snapshot)
+
+    def serve_maintenance(
+        self, handler: BaseHTTPRequestHandler, snapshot: UiUpdateSnapshot
+    ) -> None:
+        """Exhaustive maintenance projection from one persisted snapshot."""
+        if snapshot.status != "updating":
+            self._serve_static(handler, self.down_page, 503)
+            return
+        if snapshot.started_at is None:
+            self._serve_static(handler, self.down_page, 503)
+            return
+        now = dt.datetime.now(dt.UTC)
+        # The server and marker live on the same gateway host. Compute the base
+        # here, clamp a future timestamp, and let the page add performance.now()
+        # so browser wall-clock drift/storage policy cannot reset the duration.
+        base_ms = max(0, int((now - snapshot.started_at).total_seconds() * 1000))
+        page = self.updating_page.replace(
+            "/*__AVA_DEPLOY_STARTED_AT__*/", json.dumps(snapshot.started_at.isoformat())
+        )
+        page = page.replace("/*__AVA_UPDATE_BASE_ELAPSED_MS__*/", str(base_ms))
+        self._serve_static(handler, page, 503)
+
+    @staticmethod
+    def serve_deploy_snapshot(handler: BaseHTTPRequestHandler, snapshot: UiUpdateSnapshot) -> None:
+        """Same-origin reload hint for an already-open SPA.
+
+        Minimal on purpose: the browser needs only whether to reload. The Gate
+        itself remains the owner of classification, timing and diagnostics.
+        """
+        body = json.dumps(
+            {"status": snapshot.status, "generation": snapshot.generation},
+            separators=(",", ":"),
+        ).encode()
+        handler.send_response(200)
+        handler.send_header("Content-Type", "application/json")
+        handler.send_header("Cache-Control", "no-store")
+        handler.send_header("Content-Length", str(len(body)))
+        handler.end_headers()
+        handler.wfile.write(body)
 
     @staticmethod
     def _serve_static(handler: BaseHTTPRequestHandler, page: str, status: int = 200) -> None:
@@ -192,13 +226,23 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _handle(self) -> None:
         cookie = self.headers.get("Cookie") or ""
-        state = self.gate.verdict(cookie)
+        snapshot = self.gate.deploy_snapshot()
+        if urlsplit(self.path).path == "/__ava/deploy-state":
+            if self.command != "GET":
+                self.send_response(405)
+                self.send_header("Allow", "GET")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            self.gate.serve_deploy_snapshot(self, snapshot)
+            return
+        state = self.gate.verdict(cookie, snapshot)
         if state == "up":
-            self.gate.proxy_app(self)
+            self.gate.proxy_app(self, snapshot)
         elif state == "login":
             self.gate._serve_static(self, self.gate.login_page)
         elif state == "updating":
-            self.gate._serve_static(self, self.gate.updating_page, 503)
+            self.gate.serve_maintenance(self, snapshot)
         else:
             self.gate._serve_static(self, self.gate.down_page, 503)
 
@@ -277,6 +321,7 @@ def main() -> None:
         gateway_base=_gateway_base(),
         app_base=_app_base(),
         static_dir=static_dir,
+        state_path=None,
     )
     server = ThreadingHTTPServer(("0.0.0.0", port), _Handler)  # noqa: S104 — the entry must be reachable off-box
     server.gate = gate  # type: ignore[attr-defined]  # handler reads it off the instance

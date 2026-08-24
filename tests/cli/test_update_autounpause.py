@@ -17,7 +17,7 @@ from cli.commands import update as _up
 
 
 @pytest.fixture(autouse=True)
-def _stub_rollout_target(monkeypatch: pytest.MonkeyPatch) -> None:
+def _stub_rollout_target(monkeypatch: pytest.MonkeyPatch, stub_deploy_lease_identity: None) -> None:
     """The orchestration resolves a pinned `target_sha` (git fetch + rev-parse) and
     takes the cluster update lock before Phase A; stub both so these tests don't hit
     real git or the central-DB lock (and never contend on it under xdist)."""
@@ -251,6 +251,7 @@ def test_finalize_rollout_prints_aftermath_on_abnormal_exit(
         [("a", "http://a:8106")],
         _record_fan_out(calls),  # pyright: ignore[reportUnknownArgumentType]
         10.0,
+        deploy_capability={"deploy_holder": "g", "deploy_acquired_at": "2026-08-25T00:00:00Z"},
         outcome=_rec.RolloutOutcome.ABORTED,
         pin_advanced=False,
     )
@@ -269,6 +270,7 @@ def test_finalize_rollout_silent_on_clean_exit(capsys: pytest.CaptureFixture[str
         [("b", "http://b:8106")],
         _record_fan_out(calls),  # pyright: ignore[reportUnknownArgumentType]
         10.0,
+        deploy_capability={"deploy_holder": "g", "deploy_acquired_at": "2026-08-25T00:00:00Z"},
         outcome=_rec.RolloutOutcome.CLEAN,
         pin_advanced=True,
     )
@@ -290,6 +292,7 @@ def test_finalize_rollout_incomplete_is_not_reported_as_aborted(
         [("win", "http://win:8106")],
         _record_fan_out(calls),  # pyright: ignore[reportUnknownArgumentType]
         10.0,
+        deploy_capability={"deploy_holder": "g", "deploy_acquired_at": "2026-08-25T00:00:00Z"},
         outcome=_rec.RolloutOutcome.INCOMPLETE,
         pin_advanced=True,
     )
@@ -317,6 +320,7 @@ def test_the_pin_line_does_not_promise_a_self_heal_to_a_still_paused_host(
         [("win", "http://win:8106")],
         _failing_fan_out,  # pyright: ignore[reportUnknownArgumentType]
         10.0,
+        deploy_capability={"deploy_holder": "g", "deploy_acquired_at": "2026-08-25T00:00:00Z"},
         outcome=_rec.RolloutOutcome.INCOMPLETE,
         pin_advanced=True,
     )
@@ -344,6 +348,7 @@ def test_the_pin_line_quotes_no_recovery_deadline(
         [("win", "http://win:8106")],
         _failing_fan_out,  # pyright: ignore[reportUnknownArgumentType]
         10.0,
+        deploy_capability={"deploy_holder": "g", "deploy_acquired_at": "2026-08-25T00:00:00Z"},
         outcome=_rec.RolloutOutcome.INCOMPLETE,
         pin_advanced=True,
     )
@@ -365,6 +370,7 @@ def test_the_pin_line_is_unchanged_when_every_host_was_resumed(
         [("win", "http://win:8106")],
         _record_fan_out(calls),  # pyright: ignore[reportUnknownArgumentType]
         10.0,
+        deploy_capability={"deploy_holder": "g", "deploy_acquired_at": "2026-08-25T00:00:00Z"},
         outcome=_rec.RolloutOutcome.INCOMPLETE,
         pin_advanced=True,
     )
@@ -389,6 +395,7 @@ def test_finalize_rollout_never_raises_when_resume_dial_raises(
         [("a", "http://a:8106")],
         _raising_fan_out,  # pyright: ignore[reportUnknownArgumentType]
         10.0,
+        deploy_capability={"deploy_holder": "g", "deploy_acquired_at": "2026-08-25T00:00:00Z"},
         outcome=_rec.RolloutOutcome.ABORTED,
         pin_advanced=False,
     )

@@ -9,7 +9,7 @@ The paused state is the `host_deploy_state.posture` row (R1, Task #1021) —
 one row per machine in the central DB, so the gateway's middleware, the
 stranded-pause controller and the rollout poll all read the same authority.
 The old `cluster_paused` file and `updating.flag` were retired by the
-old-signal sweep (PR5): this module writes the row and the local mirror only.
+old-signal sweep (PR5): this module writes only the host posture row.
 """
 
 from __future__ import annotations
@@ -38,8 +38,8 @@ def is_paused() -> bool:
     Gateway middleware checks this on every request. The row is read from the
     central DB, which the gateway owns; a read failure (DB unreachable) reads as
     NOT paused — the same conservative direction the old file stat had (an
-    unreadable flag was an absent flag), and the offline "updating" label comes
-    from the mirror file, not from here.
+    unreadable flag was an absent flag). The offline maintenance page is owned
+    separately by the cluster orchestrator's Gate marker.
     """
     from shared.host_deploy_state import read
 
@@ -70,10 +70,9 @@ def pause_local_cluster() -> None:
     Idempotent: already paused -> harmless repeat (upsert / kill are both
     idempotent).
     """
-    # R1 (Task #1021): the posture row + the local mirror file are the pause —
-    # the row is the authority the 503 middleware and stranded-pause controller
-    # read; the mirror labels the offline "updating" page. The old flag files
-    # were retired with the old-signal sweep (PR5).
+    # R1 (Task #1021): the posture row is the host pause authority read by the
+    # 503 middleware and stranded-pause controller. The cluster orchestrator's
+    # separate Gate marker owns the offline maintenance page.
     from shared.host_deploy_state import set_posture
 
     set_posture("paused")
@@ -122,12 +121,9 @@ def unpause_local_cluster() -> None:
     gateway's compensating unpause may be delivered after a host already
     recovered on its own, so a repeat call must do nothing.
     """
-    # R1 (Task #1021): the posture row + the local mirror file are the unpause —
-    # the row the 503 middleware reads returns to idle (paused_at cleared), and
-    # the offline "updating" label goes with it: the gate must not keep showing
-    # "updating" once this host is serving again (or about to be: every recovery
-    # path that unpauses ends in `ava start`, and a host that is down after a
-    # failed recovery is DOWN, not updating).
+    # R1 (Task #1021): unpause owns host posture only. The cluster UI marker is
+    # deliberately separate and spans local pause/start plus the full Phase-B
+    # tail; only its orchestration generation or proven recovery clears it.
     from shared.host_deploy_state import set_posture
 
     set_posture("idle")

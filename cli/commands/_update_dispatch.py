@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import sys
 
+from shared.deploy_timing import CLUSTER_DISPATCH_TIMEOUT_S
 from shared.proc import hosting_supervised_session
 
 
@@ -87,7 +88,11 @@ def cmd_update(
 
 
 def _run_in_process(
-    *, restart_only: bool, origin: str | None, rollout_log: str | None, mode: str
+    *,
+    restart_only: bool,
+    origin: str | None,
+    rollout_log: str | None,
+    mode: str,
 ) -> int:
     """The foreground orchestration leg (`--local`, optionally combined with
     `--restart-only`). No role check: the user explicitly asked for the local
@@ -161,7 +166,7 @@ def _post_cluster_rollout(*, origin: str | None, mode: str, force: bool) -> int:
     try:
         resp = dial_post(
             url,
-            timeout=30.0,
+            timeout=CLUSTER_DISPATCH_TIMEOUT_S,
             headers=gateway_auth_headers(),
             json={
                 "origin": origin or f"cli:{machine_name()}",
@@ -171,7 +176,7 @@ def _post_cluster_rollout(*, origin: str | None, mode: str, force: bool) -> int:
         )
     except httpx.TimeoutException as exc:
         print(
-            f"✗ gateway at {url} did not respond within 30s: {exc}",
+            f"✗ gateway at {url} did not respond within {CLUSTER_DISPATCH_TIMEOUT_S:g}s: {exc}",
             file=sys.stderr,
         )
         return 1
@@ -232,13 +237,13 @@ def _post_cluster_restart(*, origin: str | None, mode: str) -> int:
     try:
         resp = dial_post(
             url,
-            timeout=30.0,
+            timeout=CLUSTER_DISPATCH_TIMEOUT_S,
             headers=gateway_auth_headers(),
             json={"origin": origin or f"cli:{machine_name()}", "mode": mode},
         )
     except httpx.TimeoutException as exc:
         print(
-            f"✗ gateway at {url} did not respond within 30s: {exc}",
+            f"✗ gateway at {url} did not respond within {CLUSTER_DISPATCH_TIMEOUT_S:g}s: {exc}",
             file=sys.stderr,
         )
         return 1

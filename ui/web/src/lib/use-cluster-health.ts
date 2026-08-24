@@ -11,11 +11,7 @@
 // a rollout finishes (`paused` flips true -> false) we reconnect SSE and
 // refetch agents promptly instead of waiting on the watchdog.
 //
-// It also feeds `clusterUpdating` into the store so AuthGuard shows the
-// full-screen UpdatingPage for the whole known update window, regardless of
-// auth state (see components/auth/auth-guard.tsx).
-//
-// ONE poll loop, on `/api/cluster/status`: it alone carries every signal this
+// The operational poll on `/api/cluster/status` carries every signal this
 // hook needs (`paused` + `current_orchestration`), and it is the one status
 // path that bypasses the cluster-paused 503 middleware, so it stays readable
 // *while* paused — which also lets it distinguish a normal in-flight rollout
@@ -57,13 +53,10 @@ const IDLE_POLL_MS = 15_000;
 const UPDATING_POLL_MS = 5_000;
 
 /**
- * Poll cluster status, mirror `paused` into the store, and on the
- * paused true -> false edge (a rollout/restart just finished) reconnect SSE
- * + refetch agents. Call once at the app root.
+ * Poll authenticated cluster status and drive reconnect/recovery state.
  */
 export function useClusterHealth(): void {
   const queryClient = useQueryClient();
-  const setClusterUpdating = useStore((s) => s.setClusterUpdating);
   const setClusterStranded = useStore((s) => s.setClusterStranded);
   const bumpReconnect = useStore((s) => s.bumpReconnect);
 
@@ -94,25 +87,6 @@ export function useClusterHealth(): void {
   }, [stranded, setClusterStranded]);
 
   const paused = data?.paused ?? false;
-  // current_orchestration flips true the moment a rollout/restart's detached
-  // session spawns — minutes before the gateway pauses itself — and stays
-  // true for the whole run. The banner keys off it (OR paused) so it shows for
-  // the entire update, matching the Settings buttons, instead of only the late
-  // paused window. The reconnect edge below still keys off `paused` alone: that
-  // tracks the actual gateway bounce, which is what severs the SSE socket.
-  const updating = paused || data?.current_orchestration != null;
-
-  // Mirror the updating state into the store. Only act on successful data —
-  // a failed poll (data === undefined) must not flip clusterUpdating to false,
-  // or the "cluster updating" message disappears during the gateway restart
-  // window (exactly when the auth guard needs it to show the updating page
-  // instead of redirecting to login).
-  useEffect(() => {
-    if (data !== undefined) {
-      setClusterUpdating(updating);
-    }
-  }, [data, updating, setClusterUpdating]);
-
   // Edge-detect paused true -> false (update finished). prevPaused starts
   // false, so a first poll that lands while still paused arms the edge; the
   // following poll that sees it clear fires the reconnect. A cold start that

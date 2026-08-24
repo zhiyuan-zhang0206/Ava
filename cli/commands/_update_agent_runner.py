@@ -31,6 +31,7 @@ def _run_agent_runner_self_update(
     restart_only: bool = False,
     mode: str = "smooth",
     force_reap: bool = False,
+    handoff_generation: str | None = None,
 ) -> int:
     """`ava cluster update` implementation on an agent-runner — local self-update.
 
@@ -55,6 +56,7 @@ def _run_agent_runner_self_update(
     session (spawned by spawn_update()), this function runs in a detached pane so
     a mid-flow `ava stop` does not take itself out.
     """
+    from shared import ui_update_state, updater_handoff
     from shared.host_deploy_state import (
         clear_updater_lease,
         release_updater_lock,
@@ -70,6 +72,9 @@ def _run_agent_runner_self_update(
     # "provably stopped" and move on. Fail-soft: try_acquire returns False only
     # for a genuine concurrent holder, never for a filesystem quirk.
     if not try_acquire_updater_lock():
+        if handoff_generation is not None:
+            with contextlib.suppress(Exception), ui_update_state.lifecycle_lock():
+                updater_handoff.clear(handoff_generation)
         print(
             "[updater] another self-update is already running on this host — declining "
             "(concurrent updaters race the checkout/converge writes)"
@@ -77,14 +82,42 @@ def _run_agent_runner_self_update(
         return RESTART_DECLINED_EXIT_CODE
 
     try:
-        # R1 (Task #1021): this process IS the updater — its lease says "this host's
-        # updater is alive" to the stalled-updater controller and Phase B. Written on
-        # entry, cleared in the finally below (a crash leaves it to expire on the TTL).
+        from shared.cluster import session_name
 
-        # Fail-soft: the lease is a liveness signal, not a gate — an unwritable lease
-        # must not abort an update. The consequence of a lost lease is the safe
-        # direction: stalled-updater and Phase B read "no lease" as not-hung (never a
-        # provable stop), so this update simply is not reaped mid-flight.
+        expected_session = (
+            session_name("updater")
+            if handoff_generation is not None
+            else f"direct-updater:pid{os.getpid()}"
+        )
+        owned_generation = handoff_generation
+        with ui_update_state.lifecycle_lock():
+            if owned_generation is None:
+                try:
+                    owned_generation = updater_handoff.begin(
+                        expected_session=expected_session
+                    ).generation
+                except updater_handoff.UpdaterHandoffActive:
+                    owned_generation = None
+            claimed = owned_generation is not None and updater_handoff.claim_running(
+                owned_generation,
+                expected_session=expected_session,
+            )
+        if not claimed or owned_generation is None:
+            if owned_generation is not None:
+                with contextlib.suppress(Exception):
+                    updater_handoff.clear(owned_generation)
+            print(
+                "[updater] spawn handoff ownership does not match this updater — "
+                "declining without touching checkout or services"
+            )
+            return RESTART_DECLINED_EXIT_CODE
+
+        # R1 (Task #1021): this process IS the updater. The DB lease is a
+        # fail-soft observation used by Phase B, while the running handoff's
+        # exact PID identity is the local recovery proof even if the DB write or
+        # detached-session record is unavailable. Keep it for the complete
+        # updater lifetime; clearing it after one successful touch would reopen
+        # the same liveness gap when that lease later expires.
         with contextlib.suppress(Exception):
             touch_updater_lease()
 
@@ -99,6 +132,8 @@ def _run_agent_runner_self_update(
         finally:
             with contextlib.suppress(Exception):
                 clear_updater_lease()
+            with contextlib.suppress(Exception):
+                updater_handoff.clear(owned_generation)
     finally:
         release_updater_lock()
 
@@ -425,6 +460,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="kill still-live agents before the bounce (Phase-B backstop)",
     )
+    parser.add_argument(
+        "--handoff-generation",
+        default=None,
+        help="generation-scoped pause-to-lease handoff from the detached parent",
+    )
     args = parser.parse_args(argv)
     return _run_agent_runner_self_update(
         _repo_root(),
@@ -432,6 +472,7 @@ def main(argv: list[str] | None = None) -> int:
         restart_only=args.restart_only,
         mode=args.mode,
         force_reap=args.force_reap,
+        handoff_generation=args.handoff_generation,
     )
 
 
