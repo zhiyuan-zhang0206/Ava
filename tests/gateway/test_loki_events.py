@@ -578,7 +578,10 @@ class TestBuildLogql:
 
     def test_agent_id_filter(self) -> None:
         q = loki_events._build_logql(agent_id=42)
-        assert '| agent_id="42"' in q
+        # Body fields are authoritative when structured metadata was promoted
+        # from a different record in the same OTLP batch (task #1515).
+        assert '| agent_id_extracted="42"' in q
+        assert '| agent_id="42"' not in q
         assert "| json" in q
 
     def test_cluster_filter_follows_json_stage(self) -> None:
@@ -596,8 +599,10 @@ class TestBuildLogql:
         assert q.startswith(
             '{service_name="unknown_service", stream!="archive", agent_id="42", event_name=~"spawn|terminate"}'
         )
-        assert '| agent_id="42"' in q
-        assert '| event_name=~"spawn|terminate"' in q
+        assert '| agent_id_extracted="42"' in q
+        assert '| event_name_extracted=~"spawn|terminate"' in q
+        assert '| agent_id="42"' not in q
+        assert '| event_name=~"spawn|terminate"' not in q
 
     def test_service_only_matches_null_agent_id(self) -> None:
         # json turns a JSON null into an absent field; empty-string matches it.
@@ -613,7 +618,8 @@ class TestBuildLogql:
 
     def test_event_names_become_or_regex(self) -> None:
         q = loki_events._build_logql(event_names=["spawn", "terminate"])
-        assert '| event_name=~"spawn|terminate"' in q
+        assert '| event_name_extracted=~"spawn|terminate"' in q
+        assert '| event_name=~"spawn|terminate"' not in q
 
     def test_level_min_is_a_threshold_regex(self) -> None:
         q = loki_events._build_logql(level_min="warning")
@@ -777,8 +783,8 @@ class TestQueryEvents:
         url, params = client.calls[0]
         assert url.endswith("/loki/api/v1/query_range")
         assert (
-            params["query"]
-            == '{service_name="unknown_service", stream!="archive"} | json | agent_id="3"'
+            params["query"] == '{service_name="unknown_service", stream!="archive"} | json '
+            '| agent_id_extracted="3"'
         )
         assert params["direction"] == "backward"
         assert params["limit"] == 101  # limit + offset + 1 lookahead
@@ -946,9 +952,9 @@ class TestQueryEvents:
             limit=50,
         )
         q = client.calls[0][1]["query"]
-        assert '| agent_id="5"' in q
+        assert '| agent_id_extracted="5"' in q
         assert '| category=~"telemetry|log"' in q
-        assert '| event_name=~"spawn|terminate"' in q
+        assert '| event_name_extracted=~"spawn|terminate"' in q
         assert '| level=~"warning|error|critical"' in q
         assert '|= "boom"' in q
         assert '| cluster=".ava-preview"' in q
@@ -987,9 +993,9 @@ class TestCountEvents:
         assert q.startswith("sum(count_over_time((")
         assert q.endswith(")[86400s]))")
         assert '| __error__=""' in q
-        assert '| agent_id="7"' in q
+        assert '| agent_id_extracted="7"' in q
         assert '| category=~"telemetry|log"' in q
-        assert '| event_name=~"spawn"' in q
+        assert '| event_name_extracted=~"spawn"' in q
         assert params["time"] == datetime(2026, 8, 2, tzinfo=UTC).timestamp()
 
     def test_straddling_window_sums_both_slice_durations(
@@ -1149,12 +1155,31 @@ class TestAttributeFilters:
         q = client.calls[0][1]["query"]
         assert '| json ok="attributes.ok" | ok="true"' in q
         assert '| cluster=".ava-preview"' in q
-        assert '| event_name=~"turn_end"' in q
+        assert '| event_name_extracted=~"turn_end"' in q
 
 
 class TestAttributeAggregate:
     def _q(self, client: _FakeClient) -> str:
         return client.calls[0][1]["query"]
+
+    @pytest.mark.parametrize(
+        ("era", "indexed_labeled"),
+        [(LokiReadEra.LEGACY, False), (LokiReadEra.INDEXED, True)],
+    )
+    def test_agent_llm_usage_pipeline_filters_on_body_truth(
+        self, era: LokiReadEra, indexed_labeled: bool
+    ) -> None:
+        q = loki_events._agg_pipeline(
+            era=era,
+            indexed_labeled=indexed_labeled,
+            agent_id=42,
+            event_names=["llm_usage"],
+        )
+
+        assert '| json agent_id_extracted="agent_id" | agent_id_extracted="42"' in q
+        assert ('| json event_name_extracted="event_name" | event_name_extracted=~"llm_usage"') in q
+        assert '| agent_id="42"' not in q
+        assert '| event_name=~"llm_usage"' not in q
 
     def test_sum_scalar(self, monkeypatch: pytest.MonkeyPatch) -> None:
         client = _install(monkeypatch, {"data": {"result": [{"metric": {}, "value": [1, "42.5"]}]}})
@@ -1170,9 +1195,9 @@ class TestAttributeAggregate:
         assert v == 42.5
         q = self._q(client)
         assert q.startswith("sum(sum_over_time((")
-        assert 'agent_id="3"' in q
+        assert 'agent_id_extracted="3"' in q
         assert 'cluster=".ava-preview"' in q
-        assert 'event_name=~"turn_end"' in q
+        assert 'event_name_extracted=~"turn_end"' in q
         assert '| json duration_seconds="attributes.duration_seconds"' in q
         assert "| unwrap duration_seconds" in q
         assert "[86400s])" in q
@@ -1227,7 +1252,7 @@ class TestAttributeAggregate:
             'label_format duration_seconds_bucket="{{ regexReplaceAll \\"([0-9]+)[.][0-9]+\\" .duration_seconds \\"$1\\" }}"'
             in q2
         )
-        assert 'event_name=~"turn_end"' in q2
+        assert 'event_name_extracted=~"turn_end"' in q2
 
     def test_quantile_non_series_limit_400_propagates(
         self, monkeypatch: pytest.MonkeyPatch
@@ -1464,7 +1489,7 @@ class TestCountEventsSeries:
         assert _url.endswith("/loki/api/v1/query_range")
         q = params["query"]
         assert q.startswith("sum by (kind) (count_over_time((")
-        assert '| event_name=~"sse_drop"' in q
+        assert '| event_name_extracted=~"sse_drop"' in q
         assert '| cluster=".ava-preview"' in q
         assert '| json kind="attributes.kind"' in q
         assert q.endswith(")[300s]))")

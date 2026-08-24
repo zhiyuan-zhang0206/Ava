@@ -301,9 +301,10 @@ def _build_logql(
     LogQL parse error), followed by the comparison stage; a value prefixed
     `!=` becomes a negated match (`{"node": "!=claim"}` → `| node!="claim"`).
 
-    ``exclude_agent_ids`` drops a closed set of agents (`| agent_id!~"a|b"`)
-    while keeping service rows — the since_compact rest-partition filter
-    (metrics aggregate path). It is mutually exclusive with ``agent_id``.
+    ``exclude_agent_ids`` drops a closed set of agents
+    (`| agent_id_extracted!~"a|b"`) while keeping service rows — the
+    since_compact rest-partition filter (metrics aggregate path). It is
+    mutually exclusive with ``agent_id``.
 
     With ``drop_json_errors`` the `| json` stage is followed by
     `| __error__=""`, dropping lines that failed to parse — the exact-total
@@ -333,12 +334,12 @@ def _build_logql(
             else:
                 parts.append(f'| {_escape_label(key)}="{_escape_label(value)}"')
     if agent_id is not None:
-        parts.append(f'| agent_id="{agent_id}"')
+        parts.append(f'| agent_id_extracted="{agent_id}"')
     elif exclude_agent_ids:
         # since_compact partitioning: drop a closed set of agents, keep the
         # rest including service rows (no agent_id).
         joined = "|".join(str(a) for a in exclude_agent_ids)
-        parts.append(f'| agent_id!~"{joined}"')
+        parts.append(f'| agent_id_extracted!~"{joined}"')
     elif service_only:
         # json turns a JSON null into an absent/empty field — empty matches.
         parts.append('| agent_id=""')
@@ -347,7 +348,7 @@ def _build_logql(
         parts.append(f'| category=~"{joined}"')
     if event_names:
         joined = "|".join(_escape_label(e) for e in event_names)
-        parts.append(f'| event_name=~"{joined}"')
+        parts.append(f'| event_name_extracted=~"{joined}"')
     if level_min is not None:
         idx = _LEVELS.index(level_min)
         joined = "|".join(_LEVELS[idx:])
@@ -565,11 +566,14 @@ def _agg_pipeline(
     trace_id: str | None = None,
     attribute_filters: dict[str, str] | None = None,
 ) -> str:
-    """Filter pipeline for the numeric-aggregation path — structured
-    metadata filters directly (no `| json` — a plain json stage would
-    flatten the nested `attributes` object into per-line labels and split
-    the aggregation into per-line series), then one json stage per nested
-    attribute filter."""
+    """Filter pipeline for the numeric-aggregation path.
+
+    Body-truth event and agent fields use targeted json extraction because
+    their structured metadata may belong to another record from a mixed OTLP
+    batch. A plain `| json` stage would flatten nested `attributes` into
+    per-line labels and split the aggregation into per-line series, so every
+    extracted field gets its own stage.
+    """
     parts = [
         event_stream_selector(
             era=era,
@@ -584,10 +588,12 @@ def _agg_pipeline(
     if cluster is not None:
         parts.append(f'| cluster="{_escape_label(cluster)}"')
     if agent_id is not None:
-        parts.append(f'| agent_id="{agent_id}"')
+        parts.append('| json agent_id_extracted="agent_id"')
+        parts.append(f'| agent_id_extracted="{agent_id}"')
     elif exclude_agent_ids:
         joined = "|".join(str(a) for a in exclude_agent_ids)
-        parts.append(f'| agent_id!~"{joined}"')
+        parts.append('| json agent_id_extracted="agent_id"')
+        parts.append(f'| agent_id_extracted!~"{joined}"')
     elif service_only:
         parts.append('| agent_id=""')
     if categories:
@@ -595,7 +601,8 @@ def _agg_pipeline(
         parts.append(f'| category=~"{joined}"')
     if event_names:
         joined = "|".join(_escape_label(e) for e in event_names)
-        parts.append(f'| event_name=~"{joined}"')
+        parts.append('| json event_name_extracted="event_name"')
+        parts.append(f'| event_name_extracted=~"{joined}"')
     if level_min is not None:
         idx = _LEVELS.index(level_min)
         parts.append(f'| level=~"{"|".join(_LEVELS[idx:])}"')
@@ -934,12 +941,12 @@ def attribute_aggregate(
     Returns a float for scalar aggregates, `list[tuple[str, float]]` when
     `group_by` is set (empty list = no matching lines).
 
-    Notes (verified against real Loki, task #1197):
-    - the event filters (agent_id / event_name / level / ...) match Loki
-      **structured metadata directly** — no `| json` stage is needed for
-      them, and a plain `| json` must NOT be added here: it flattens the
-      nested `attributes` object into per-line labels and would split the
-      aggregation into per-line series;
+    Notes (verified against real Loki, tasks #1197 and #1515):
+    - agent_id and event_name are extracted individually from the event body
+      because mixed-batch structured metadata can disagree with it; other
+      event filters match structured metadata directly. A plain `| json` must
+      NOT be added here: it flattens the nested `attributes` object into
+      per-line labels and would split the aggregation into per-line series;
     - the numeric field needs its own `| json f="attributes.f"` stage (one
       extraction per stage — multiple extractions are a parse error);
     - `unwrap` only parses inside range aggregations.
