@@ -559,6 +559,7 @@ export interface paths {
          *
          *     404: agent_id does not exist (AgentNotFound -> handler returns 404 + reason).
          *     409: the key already identifies a different agent/body/source.
+         *     413: message content exceeds the 1 MiB transport limit.
          *     422: a block list gated out (non-vision model) or referencing a bad upload.
          */
         post: operations["post_agent_message_api_agents__agent_id__messages_post"];

@@ -97,6 +97,10 @@ distributor:
 # default `reject_old_samples: true` is now restored as the clock-drift guard.
 # Keep reject_old_samples_max_age as that guard's age bound.
 limits_config:
+  # Task #1546: Loki's default 4 MB/s caused HTTP 429s (5575 retries /
+  # 1365 drops in one day); prod runs at 32/64 since 2026-08-24 (disk file synced post-deploy).
+  ingestion_rate_mb: 32
+  ingestion_burst_size_mb: 64
   retention_period: 168h
   retention_stream:
     - selector: '{stream="archive"}'
