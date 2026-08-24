@@ -220,9 +220,6 @@ _LIVENESS_ONLY_SESSIONS = {
     "mcp-daemon",  # MCP over a Unix socket; its healthcheck dials + pings it
     "gateway-watchdog",  # not a server; its pidfile is the whole signal
     "agent-runner-watchdog",
-    # OTLP loopback receiver — its healthcheck's OTLP-path probe is the
-    # strongest signal it can give; loopback-bound, so no cross-host impostor.
-    "otel-collector",
 }
 
 

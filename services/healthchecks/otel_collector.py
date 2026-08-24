@@ -13,19 +13,26 @@ is down, trace/event/metric export drops (agents retry briefly, then shed)
 until the watchdog revives it within a minute.
 """
 
+import logging
 import re
-import sys
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
 from shared.config import settings
+from shared.daemon_health import (
+    DaemonProbe,
+    probe_supervised_listener,
+    reclaim_stale_supervised_listener,
+)
 from shared.log import init_gateway_process, logger
 from shared.paths import otel_collector_binary, otel_collector_config
-from shared.service_respawn import respawn_service
+from shared.service_respawn import respawn_and_verify, run_keepalive
 
 _METRICS_URL = "http://127.0.0.1:8888/metrics"
+_COLLECTOR_PORTS = (4318, 8888)
+_log = logging.getLogger("services.healthchecks.otel_collector")
 _QUEUE_SAMPLE = re.compile(
     r"^otelcol_exporter_queue_(?P<kind>capacity|size)\{(?P<labels>[^}]*)\}\s+(?P<value>[0-9.eE+-]+)$"
 )
@@ -58,6 +65,25 @@ def _is_alive() -> bool:
             return True
     except Exception:
         return False
+
+
+def probe_collector() -> DaemonProbe:
+    """The collector is alive only when its OTLP response and supervisor agree."""
+    listener = probe_supervised_listener(
+        "otel-collector", ports=_COLLECTOR_PORTS, binary=otel_collector_binary()
+    ).probe
+    if not listener.alive:
+        return listener
+    if not _is_alive():
+        return DaemonProbe.down("supervised collector does not accept a valid OTLP trace request")
+    return listener
+
+
+def take_over_stale_collector() -> None:
+    """Evict only same-binary collector listeners without a live session record."""
+    reclaim_stale_supervised_listener(
+        "otel-collector", ports=_COLLECTOR_PORTS, binary=otel_collector_binary()
+    )
 
 
 def _queue_pressure() -> CollectorPressure | None:
@@ -101,37 +127,37 @@ def _queue_pressure() -> CollectorPressure | None:
     return CollectorPressure(saturated=saturated, enqueue_failures=failures)
 
 
-def _restart_daemon() -> bool:
-    """Start the collector in the ava-otel-collector session via the service backend."""
+def _restart_daemon() -> DaemonProbe:
+    """Take over a verified stale collector, then respawn and verify its replacement."""
     project_root = settings.services.project_root or Path(__file__).resolve().parent.parent.parent
-    return respawn_service(
+    take_over_stale_collector()
+    return respawn_and_verify(
         "otel-collector",
         f"{otel_collector_binary()} --config {otel_collector_config()}",
         project_root,
+        verify=probe_collector,
         extra_env={"AVA_PROCESS_PROFILE": "gateway"},
     )
 
 
 def main() -> None:
     init_gateway_process("otel-collector")
-    if _is_alive():
-        pressure = _queue_pressure()
-        if pressure is None:
-            logger.bind(_no_emitter=True, component="otel-collector-healthcheck").warning(
-                "collector ingestion is alive but internal queue metrics are unreadable at {}",
-                _METRICS_URL,
-            )
-        elif pressure.saturated:
-            failed = sum(pressure.enqueue_failures.get(name, 0) for name in pressure.saturated)
-            logger.bind(_no_emitter=True, component="otel-collector-healthcheck").warning(
-                "collector exporter queue saturated: exporters={} lifetime enqueue failures={}",
-                ",".join(pressure.saturated),
-                failed,
-            )
+    if not probe_collector().alive:
+        run_keepalive("otel-collector", _log, probe=probe_collector, respawn=_restart_daemon)
         return
-    sys.stderr.write("ava-otel-collector down — restarting\n")
-    if not _restart_daemon():
-        sys.exit(1)
+    pressure = _queue_pressure()
+    if pressure is None:
+        logger.bind(_no_emitter=True, component="otel-collector-healthcheck").warning(
+            "collector ingestion is alive but internal queue metrics are unreadable at {}",
+            _METRICS_URL,
+        )
+    elif pressure.saturated:
+        failed = sum(pressure.enqueue_failures.get(name, 0) for name in pressure.saturated)
+        logger.bind(_no_emitter=True, component="otel-collector-healthcheck").warning(
+            "collector exporter queue saturated: exporters={} lifetime enqueue failures={}",
+            ",".join(pressure.saturated),
+            failed,
+        )
 
 
 if __name__ == "__main__":
