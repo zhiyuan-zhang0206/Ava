@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 from collections import Counter
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from itertools import pairwise
 from types import SimpleNamespace
 from typing import Any, Literal
@@ -39,6 +39,7 @@ def fake_loki(monkeypatch: pytest.MonkeyPatch) -> FakeLoki:
     fake = FakeLoki()
     monkeypatch.setattr(loki_events, "query_events", fake.query_events)
     monkeypatch.setattr(loki_events, "count_events", fake.count_events)
+    monkeypatch.setattr(loki_events, "count_grouped", fake.count_grouped)
     monkeypatch.setattr(loki_events, "attribute_aggregate", fake.attribute_aggregate)
     return fake
 
@@ -65,6 +66,27 @@ def _insert_agent(db: psycopg.Connection, *, status: str = "running", spawner: s
             (tid, spawner, status),
         )
     return tid
+
+
+def _insert_token_ledger_row(
+    db: psycopg.Connection,
+    *,
+    agent_id: int,
+    days_ago: int,
+    model: str,
+    tokens_in: int,
+    tokens_out: int,
+    tokens_cached: int,
+    cost_usd: float,
+) -> None:
+    """Add one per-agent, per-model daily token rollup row."""
+    with db.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agent_model_tokens_daily "
+            "(agent_id, day, model, tokens_in, tokens_out, tokens_cached, cost_usd) "
+            "VALUES (%s, (now() AT TIME ZONE 'UTC')::date - %s, %s, %s, %s, %s, %s)",
+            (agent_id, days_ago, model, tokens_in, tokens_out, tokens_cached, cost_usd),
+        )
 
 
 def _insert_event(
@@ -144,8 +166,14 @@ def test_dashboard_does_not_hold_db_connection_during_loki_queries(
         clusters.append(kwargs.get("cluster"))
         return 0
 
+    def assert_db_released_grouped(*args: Any, **kwargs: Any) -> dict[str, int]:
+        assert pool.active is False
+        clusters.append(kwargs.get("cluster"))
+        return {}
+
     monkeypatch.setattr(loki_events, "attribute_aggregate", assert_db_released)
     monkeypatch.setattr(loki_events, "count_events", assert_db_released)
+    monkeypatch.setattr(loki_events, "count_grouped", assert_db_released_grouped)
     request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(db_pool=pool)))
     result = status.get_stats_dashboard(request, StatsWindowHours.H24)  # type: ignore[arg-type]
     assert result.live_count == 2
@@ -228,7 +256,7 @@ def test_dashboard_shards_long_loki_windows_and_merges_aggregates(
     fake_loki: FakeLoki,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Only turn and alert reads shard; llm_usage fields use full-window instants."""
+    """Turn reads use 12h shards; each W/E shard has one grouped query."""
     aid = _insert_agent(db_conn, status="running")
     fake_loki.add(
         event="turn_end",
@@ -258,8 +286,10 @@ def test_dashboard_shards_long_loki_windows_and_merges_aggregates(
     llm_usage_windows: list[tuple[datetime, datetime]] = []
     sharded_aggregate_spans: list[tuple[datetime, datetime]] = []
     count_spans: list[tuple[datetime, datetime]] = []
+    grouped_spans: list[tuple[datetime, datetime]] = []
     real_aggregate = fake_loki.attribute_aggregate
     real_count = fake_loki.count_events
+    real_grouped = fake_loki.count_grouped
 
     def spy_aggregate(**kwargs: Any) -> float | list[tuple[str, float]]:
         spans = (
@@ -274,11 +304,16 @@ def test_dashboard_shards_long_loki_windows_and_merges_aggregates(
         count_spans.append((kwargs["from_"], kwargs["to"]))
         return real_count(**kwargs)
 
+    def spy_grouped(**kwargs: Any) -> dict[str, int]:
+        grouped_spans.append((kwargs["from_"], kwargs["to"]))
+        return real_grouped(**kwargs)
+
     monkeypatch.setattr(loki_events, "attribute_aggregate", spy_aggregate)
     monkeypatch.setattr(loki_events, "count_events", spy_count)
+    monkeypatch.setattr(loki_events, "count_grouped", spy_grouped)
     db_conn.commit()
     with TestClient(app) as client:
-        body = client.get("/api/stats/dashboard", params={"hours": 6}).json()
+        body = client.get("/api/stats/dashboard", params={"hours": 24}).json()
 
     assert body["avg_turn_seconds"] == 6.0
     assert body["warnings"] == 1
@@ -287,15 +322,149 @@ def test_dashboard_shards_long_loki_windows_and_merges_aggregates(
     assert body["cost_usd"] == 2.0
     assert len(llm_usage_windows) == 4
     assert len(set(llm_usage_windows)) == 1
-    assert llm_usage_windows[0][1] - llm_usage_windows[0][0] == timedelta(hours=6)
+    assert llm_usage_windows[0][1] - llm_usage_windows[0][0] == timedelta(hours=24)
     aggregate_counts = Counter(sharded_aggregate_spans)
     spans = sorted(aggregate_counts)
     assert len(spans) > 1
-    assert sum((end - start for start, end in spans), timedelta()) == timedelta(hours=6)
-    assert all(end - start <= timedelta(hours=6) for start, end in spans)
+    assert sum((end - start for start, end in spans), timedelta()) == timedelta(hours=24)
+    assert all(end - start <= timedelta(hours=12) for start, end in spans)
     assert all(end == next_start for (_, end), (next_start, _) in pairwise(spans))
     assert set(aggregate_counts.values()) == {1}
-    assert Counter(count_spans) == Counter(dict.fromkeys(spans, 3))
+    assert Counter(count_spans) == aggregate_counts
+    assert Counter(grouped_spans) == aggregate_counts
+
+
+def test_dashboard_168h_reads_tokens_from_ledger(
+    db_conn: psycopg.Connection,
+    fake_loki: FakeLoki,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A wide dashboard window reads settled days from the fleet token ledger."""
+    first_agent = _insert_agent(db_conn)
+    second_agent = _insert_agent(db_conn)
+    for days_ago, model, agent_id, tokens_in, tokens_out, tokens_cached, cost_usd in (
+        (6, "model-a", first_agent, 100, 10, 50, 1.0),
+        (6, "model-b", second_agent, 200, 20, 25, 2.0),
+        (5, "model-a", first_agent, 300, 30, 100, 3.0),
+    ):
+        _insert_token_ledger_row(
+            db_conn,
+            agent_id=agent_id,
+            days_ago=days_ago,
+            model=model,
+            tokens_in=tokens_in,
+            tokens_out=tokens_out,
+            tokens_cached=tokens_cached,
+            cost_usd=cost_usd,
+        )
+    # Zero newest-day row establishes the retained live reread seam.
+    _insert_token_ledger_row(
+        db_conn,
+        agent_id=first_agent,
+        days_ago=1,
+        model="model-a",
+        tokens_in=0,
+        tokens_out=0,
+        tokens_cached=0,
+        cost_usd=0.0,
+    )
+    fake_loki.add(
+        event="llm_usage",
+        payload={"in_total": 20, "out_total": 2, "cache_read": 5, "cost_usd": 0.5},
+        ts_offset_hours=1,
+    )
+    llm_usage_spans: list[tuple[datetime, datetime]] = []
+    real_aggregate = fake_loki.attribute_aggregate
+
+    def spy_aggregate(**kwargs: Any) -> float | list[tuple[str, float]]:
+        if kwargs.get("event_names") == ["llm_usage"]:
+            llm_usage_spans.append((kwargs["from_"], kwargs["to"]))
+        return real_aggregate(**kwargs)
+
+    monkeypatch.setattr(loki_events, "attribute_aggregate", spy_aggregate)
+    db_conn.commit()
+    with TestClient(app) as client:
+        body = client.get("/api/stats/dashboard", params={"hours": 168}).json()
+
+    assert body["tokens"] == {"input": 620, "output": 62, "cache_read": 180, "cache_hit_pct": 29.03}
+    assert body["cost_usd"] == pytest.approx(6.5)  # pyright: ignore[reportUnknownMemberType]
+    assert len(llm_usage_spans) == 8
+    assert len(set(llm_usage_spans)) == 2
+    assert all(end - start < timedelta(hours=168) for start, end in llm_usage_spans)
+
+
+def test_dashboard_72h_uses_ledger_and_tail_seam(
+    db_conn: psycopg.Connection, fake_loki: FakeLoki
+) -> None:
+    """The newest retained ledger day is reread live, not double counted."""
+    aid = _insert_agent(db_conn)
+    _insert_token_ledger_row(
+        db_conn,
+        agent_id=aid,
+        days_ago=2,
+        model="model-a",
+        tokens_in=100,
+        tokens_out=10,
+        tokens_cached=40,
+        cost_usd=1.0,
+    )
+    _insert_token_ledger_row(
+        db_conn,
+        agent_id=aid,
+        days_ago=1,
+        model="model-a",
+        tokens_in=500,
+        tokens_out=50,
+        tokens_cached=200,
+        cost_usd=5.0,
+    )
+    fake_loki.add(
+        event="llm_usage",
+        payload={"in_total": 150, "out_total": 15, "cache_read": 60, "cost_usd": 1.5},
+        ts_offset_hours=30,
+    )
+    db_conn.commit()
+
+    with TestClient(app) as client:
+        body = client.get("/api/stats/dashboard", params={"hours": 72}).json()
+
+    assert body["tokens"] == {"input": 250, "output": 25, "cache_read": 100, "cache_hit_pct": 40}
+    assert body["cost_usd"] == pytest.approx(2.5)  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_dashboard_24h_stays_pure_loki(
+    db_conn: psycopg.Connection,
+    fake_loki: FakeLoki,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A one-day window has no complete UTC day and performs no ledger sum."""
+    fake_loki.add(
+        event="llm_usage",
+        payload={"in_total": 10, "out_total": 5, "cache_read": 4, "cost_usd": 0.25},
+        ts_offset_hours=1,
+    )
+
+    def unexpected_ledger_read(*args: Any, **kwargs: Any) -> None:
+        pytest.fail("24h dashboard windows must not read the token ledger")
+
+    monkeypatch.setattr(_stats_dashboard, "ledger_token_sums", unexpected_ledger_read)
+    db_conn.commit()
+    with TestClient(app) as client:
+        body = client.get("/api/stats/dashboard", params={"hours": 24}).json()
+
+    assert body["tokens"] == {"input": 10, "output": 5, "cache_read": 4, "cache_hit_pct": 40}
+    assert body["cost_usd"] == pytest.approx(0.25)  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_token_window_plan_24h_at_midnight_stays_pure_loki() -> None:
+    """A UTC-aligned 24-hour window has no ledger-safe settled day."""
+    now = datetime(2026, 8, 25, tzinfo=UTC)
+
+    assert _stats_dashboard.token_window_plan(now - timedelta(hours=24), now) == (
+        None,
+        None,
+        [(now - timedelta(hours=24), now)],
+    )
 
 
 def test_dashboard_empty_db_returns_zeros(db_conn: psycopg.Connection) -> None:
@@ -317,7 +486,7 @@ def test_dashboard_empty_db_returns_zeros(db_conn: psycopg.Connection) -> None:
     assert body["total_events"] == 0
 
 
-def test_dashboard_folds_critical_into_error_gauge(
+def test_dashboard_warn_error_folds_critical(
     db_conn: psycopg.Connection, fake_loki: FakeLoki
 ) -> None:
     """critical-level events count in the sidebar's error gauge — they used to
