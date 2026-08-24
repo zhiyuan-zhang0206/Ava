@@ -410,9 +410,20 @@ def compute_rollup(
         day += timedelta(days=1)
 
     tokens_count = metrics_count = 0
+    skipped_tokens_count = skipped_metrics_count = 0
+    skipped_agent_ids: set[int] = set()
     with conn.transaction(), conn.cursor() as cur:
+        # Loki is a shared stream and can carry events for agent IDs that no
+        # longer exist (test harnesses, deleted agents). The FK remains the
+        # guardrail, but one rogue ID must not block the whole ledger roll.
+        cur.execute("SELECT id FROM agents")
+        known_agent_ids = {int(row[0]) for row in cur.fetchall()}
         for day, tokens_rows, metrics_rows in per_day:
             for t in tokens_rows:
+                if t.agent_id not in known_agent_ids:
+                    skipped_agent_ids.add(t.agent_id)
+                    skipped_tokens_count += 1
+                    continue
                 cur.execute(
                     _TOKENS_UPSERT,
                     (
@@ -431,6 +442,10 @@ def compute_rollup(
                 )
                 tokens_count += cur.rowcount
             for m in metrics_rows:
+                if m.agent_id not in known_agent_ids:
+                    skipped_agent_ids.add(m.agent_id)
+                    skipped_metrics_count += 1
+                    continue
                 cur.execute(
                     _METRICS_UPSERT,
                     (
@@ -446,5 +461,12 @@ def compute_rollup(
                     ),
                 )
                 metrics_count += cur.rowcount
+
+    if skipped_agent_ids:
+        logger.warning(
+            f"[events-maintenance] skipped rollup rows for unknown agent ids "
+            f"{sorted(skipped_agent_ids)}; tokens rows dropped: {skipped_tokens_count}, "
+            f"metrics rows dropped: {skipped_metrics_count}"
+        )
 
     return RollupResult(start_day, yesterday, metrics_count, tokens_count)
