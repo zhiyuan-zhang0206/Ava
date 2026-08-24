@@ -394,12 +394,6 @@
     "contextUsed": "上下文：{used} tokens",
     "soft": " · 软 {soft} · 硬 {hard}"
   },
-  "updatingPage": {
-    "systemUpdating": "系统更新中",
-    "minutesSeconds": "{minutes} 分 {seconds} 秒",
-    "seconds": "{seconds} 秒",
-    "reconnecting": "集群正在更新——就绪后自动重连…"
-  },
   "noticeDetail": {
     "blocking": "阻塞中",
     "dismiss": "忽略",

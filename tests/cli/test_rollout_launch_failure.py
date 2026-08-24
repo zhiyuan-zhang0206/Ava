@@ -185,7 +185,7 @@ def test_aftermath_names_the_local_session_and_the_local_fix(capsys) -> None:
 
 
 def test_local_launch_failure_downgrades_the_rollout_without_aborting_it(
-    monkeypatch: pytest.MonkeyPatch, capsys
+    monkeypatch: pytest.MonkeyPatch, capsys, stub_deploy_lease_identity: None
 ) -> None:
     """The full orchestration's verdict, end to end.
 

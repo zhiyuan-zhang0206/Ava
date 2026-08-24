@@ -31,7 +31,17 @@ class OrchestrationSpawnFailed(RuntimeError):  # noqa: N818 — state descriptio
     """The session backend declined to start an orchestration session.
 
     The gateway surfaces this as a 503 — a transient infra condition, the same
-    class the old missing-backend error reported, minus the legacy dependency."""
+    class the old missing-backend error reported, minus the legacy dependency.
+
+    ``started`` is False only when the backend definitively returned a decline.
+    None means launch outcome is ambiguous: fork/Popen may have succeeded before
+    session-record bookkeeping raised, so callers must not undo child-owned
+    lifecycle state based on the exception alone.
+    """
+
+    def __init__(self, message: str, *, started: bool | None = None) -> None:
+        super().__init__(message)
+        self.started = started
 
 
 _log = logging.getLogger(__name__)
@@ -119,13 +129,15 @@ def _spawn_detached_session(session: str, *, shell_cmd: str, native_cmd: str) ->
         ok = get_backend().new_session(
             session, cmd, _REPO_ROOT, env=forward_env_dict(), exec_cmd=False
         )
-    except RuntimeError as exc:
+    except Exception as exc:
         raise OrchestrationSpawnFailed(
-            f"session backend could not start orchestration session {session!r}: {exc}"
+            f"session backend could not confirm orchestration session {session!r}: {exc}",
+            started=None,
         ) from exc
     if not ok:
         raise OrchestrationSpawnFailed(
-            f"session backend could not start orchestration session {session!r}"
+            f"session backend could not start orchestration session {session!r}",
+            started=False,
         )
 
 
@@ -142,6 +154,22 @@ def _has_orchestration_session(session: str) -> bool:
     from shared.session_backend import get_backend
 
     return get_backend().has_session(session)
+
+
+def live_orchestration_session() -> str | None:
+    """Return this host's first live orchestration session, if any.
+
+    Action/recovery paths need the process fact during the narrow spawn -> DB
+    lease-acquire window. ``current_orchestration`` intentionally projects DB
+    leases for status and therefore cannot close that lifecycle gap.
+    """
+    import shared.cluster
+
+    for service, _kind in _ORCHESTRATION_KINDS:
+        session = shared.cluster.session_name(service)
+        if _has_orchestration_session(session):
+            return session
+    return None
 
 
 def current_orchestration() -> OrchestrationKind | None:

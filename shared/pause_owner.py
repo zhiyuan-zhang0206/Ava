@@ -1,0 +1,190 @@
+"""Host-local capability journal for generation-scoped pause/resume.
+
+The gateway's deploy lease proves who may pause a runner, but a compensating
+resume must still work while the gateway database is down. The stop op copies
+the exact ``(holder, acquired_at)`` capability into this atomic local journal
+before pausing. Resume matches only that journal; a delayed generation A resume
+can therefore never unpause generation B.
+"""
+
+from __future__ import annotations
+
+import contextlib
+import datetime as dt
+import json
+import logging
+import os
+import tempfile
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Literal, Never, cast
+
+import shared.paths
+from shared.platform import file_lock
+
+_LOCK_TIMEOUT_S = 5.0
+_log = logging.getLogger("shared.pause_owner")
+
+
+def _invalid(message: str) -> Never:
+    raise ValueError(message)
+
+
+@dataclass(frozen=True)
+class PauseOwnerSnapshot:
+    status: Literal["inactive", "paused", "resumed", "legacy-resumed", "invalid"]
+    holder: str | None = None
+    acquired_at: dt.datetime | None = None
+
+    def matches(self, holder: str, acquired_at: dt.datetime) -> bool:
+        return self.holder == holder and self.acquired_at == acquired_at
+
+
+def state_path() -> Path:
+    return shared.paths.run_dir() / "deploy-pause-owner.json"
+
+
+def lock_path() -> Path:
+    return shared.paths.run_dir() / "deploy-pause-owner.lock"
+
+
+def _read_unlocked(path: Path) -> PauseOwnerSnapshot:
+    try:
+        raw = json.loads(path.read_text())
+        if not isinstance(raw, dict):
+            _invalid("root must be an object")
+        raw = cast("dict[str, object]", raw)
+        state = raw["state"]
+        if state == "legacy-resumed":
+            return PauseOwnerSnapshot(status="legacy-resumed")
+        holder = raw["holder"]
+        acquired_raw = raw["acquired_at"]
+        if state not in ("paused", "resumed"):
+            _invalid("state must be paused or resumed")
+        if not isinstance(holder, str) or not holder:
+            _invalid("holder must be a non-empty string")
+        if not isinstance(acquired_raw, str):
+            _invalid("acquired_at must be RFC3339")
+        acquired_at = dt.datetime.fromisoformat(acquired_raw.replace("Z", "+00:00"))
+        if acquired_at.tzinfo is None:
+            _invalid("acquired_at must carry a timezone")
+    except FileNotFoundError:
+        return PauseOwnerSnapshot(status="inactive")
+    except (KeyError, OSError, TypeError, ValueError) as exc:
+        _log.warning("[pause-owner] invalid %s: %s", path, exc)
+        return PauseOwnerSnapshot(status="invalid")
+    return PauseOwnerSnapshot(
+        status=state,
+        holder=holder,
+        acquired_at=acquired_at.astimezone(dt.UTC),
+    )
+
+
+def read() -> PauseOwnerSnapshot:
+    return _read_unlocked(state_path())
+
+
+def _fsync_parent(path: Path) -> None:
+    if os.name == "nt":
+        return
+    fd = os.open(path.parent, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def _write_atomic(path: Path, payload: dict[str, str]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, raw_tmp = tempfile.mkstemp(dir=path.parent, prefix=".pause-owner-", suffix=".tmp")
+    if os.name != "nt":
+        os.fchmod(fd, 0o600)
+    tmp = Path(raw_tmp)
+    try:
+        with os.fdopen(fd, "w") as stream:
+            json.dump(payload, stream, separators=(",", ":"), sort_keys=True)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(tmp, path)  # noqa: PTH105 — explicit atomic replace injection seam
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+    try:
+        _fsync_parent(path)
+    except OSError:
+        _log.warning("[pause-owner] directory fsync failed after commit", exc_info=True)
+
+
+def mark_paused(holder: str, acquired_at: dt.datetime) -> PauseOwnerSnapshot:
+    """Publish the DB-validated capability immediately before local pause."""
+    if not holder or acquired_at.tzinfo is None:
+        raise ValueError("holder and timezone-aware acquired_at are required")
+    path = state_path()
+    with file_lock(lock_path(), timeout_s=_LOCK_TIMEOUT_S):
+        _write_atomic(
+            path,
+            {
+                "state": "paused",
+                "holder": holder,
+                "acquired_at": acquired_at.astimezone(dt.UTC).isoformat(),
+            },
+        )
+        return _read_unlocked(path)
+
+
+def mark_resumed(holder: str, acquired_at: dt.datetime) -> bool:
+    """CAS-record completion of exactly the generation that was unpaused."""
+    path = state_path()
+    with file_lock(lock_path(), timeout_s=_LOCK_TIMEOUT_S):
+        current = _read_unlocked(path)
+        if not current.matches(holder, acquired_at):
+            return False
+        if current.status == "resumed":
+            return True
+        if current.status != "paused":
+            return False
+        _write_atomic(
+            path,
+            {
+                "state": "resumed",
+                "holder": holder,
+                "acquired_at": acquired_at.astimezone(dt.UTC).isoformat(),
+            },
+        )
+        return True
+
+
+def mark_legacy_resumed() -> PauseOwnerSnapshot:
+    """Record the one-rollout tokenless resume as an idempotent tombstone."""
+    path = state_path()
+    with file_lock(lock_path(), timeout_s=_LOCK_TIMEOUT_S):
+        current = _read_unlocked(path)
+        if current.status not in ("inactive", "legacy-resumed"):
+            raise RuntimeError("an exact or invalid pause owner replaced the legacy resume")
+        _write_atomic(path, {"state": "legacy-resumed"})
+        return _read_unlocked(path)
+
+
+def clear(holder: str, acquired_at: dt.datetime) -> bool:
+    """CAS-clear one recovered/completed generation; never a replacement."""
+    path = state_path()
+    with file_lock(lock_path(), timeout_s=_LOCK_TIMEOUT_S):
+        current = _read_unlocked(path)
+        if not current.matches(holder, acquired_at):
+            return False
+        path.unlink(missing_ok=True)
+        with contextlib.suppress(OSError):
+            _fsync_parent(path)
+        return True
+
+
+def force_clear() -> bool:
+    """Explicit recovery of malformed state after its no-live-owner proof."""
+    path = state_path()
+    with file_lock(lock_path(), timeout_s=_LOCK_TIMEOUT_S):
+        existed = path.exists()
+        path.unlink(missing_ok=True)
+        if existed:
+            with contextlib.suppress(OSError):
+                _fsync_parent(path)
+        return existed

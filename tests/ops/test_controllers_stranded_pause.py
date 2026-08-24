@@ -79,6 +79,8 @@ def _no_local_orchestration(monkeypatch: pytest.MonkeyPatch) -> None:
     """Default every test to "nothing is executing here". The tests about the local
     session say so explicitly."""
     monkeypatch.setattr("ops.cluster.current_orchestration", lambda: None)
+    monkeypatch.setattr(sp.cluster_session, "live_orchestration_session", lambda: None)
+    monkeypatch.setattr(sp.ui_update_state, "force_clear", lambda: False)
 
 
 @pytest.fixture(autouse=True)
@@ -97,10 +99,13 @@ def test_self_unpauses_when_old(
     fake_pause(sp.STRANDED_PAUSE_TIMEOUT_S + 60)
     monkeypatch.setattr(sp, "read_update_lease", lambda: None)
     unpaused: list[bool] = []
+    marker_clears: list[bool] = []
     monkeypatch.setattr(sp, "unpause_local_cluster", lambda: unpaused.append(True))
+    monkeypatch.setattr(sp.ui_update_state, "force_clear", lambda: marker_clears.append(True))
     with caplog.at_level("WARNING"):
         assert sp.recover_stranded_pause() is True
     assert unpaused == [True]
+    assert marker_clears == [True]
     assert any("nothing is coming back" in r.message for r in caplog.records)
 
 
@@ -136,6 +141,40 @@ def test_defers_to_a_live_local_updater_that_holds_no_lease(
     monkeypatch.setattr(sp, "unpause_local_cluster", lambda: unpaused.append(True))
     assert sp.recover_stranded_pause() is False
     assert unpaused == []
+
+
+def test_live_detached_session_blocks_unpause_and_marker_clear(
+    fake_pause: Callable[[float | None], None], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake_pause(sp.STRANDED_PAUSE_TIMEOUT_S + 60)
+    monkeypatch.setattr(sp, "read_update_lease", lambda: None)
+    monkeypatch.setattr(sp.cluster_session, "live_orchestration_session", lambda: "ava-rollout")
+    unpaused: list[bool] = []
+    marker_clears: list[bool] = []
+    monkeypatch.setattr(sp, "unpause_local_cluster", lambda: unpaused.append(True))
+    monkeypatch.setattr(sp.ui_update_state, "force_clear", lambda: marker_clears.append(True))
+
+    assert sp.recover_stranded_pause() is False
+    assert unpaused == []
+    assert marker_clears == []
+
+
+def test_unpause_failure_preserves_marker_for_retry(
+    fake_pause: Callable[[float | None], None], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake_pause(sp.STRANDED_PAUSE_TIMEOUT_S + 60)
+    monkeypatch.setattr(sp, "read_update_lease", lambda: None)
+    marker_clears: list[bool] = []
+
+    def _fail_unpause() -> None:
+        raise RuntimeError("still paused")
+
+    monkeypatch.setattr(sp, "unpause_local_cluster", _fail_unpause)
+    monkeypatch.setattr(sp.ui_update_state, "force_clear", lambda: marker_clears.append(True))
+
+    with pytest.raises(RuntimeError, match="still paused"):
+        sp.recover_stranded_pause()
+    assert marker_clears == []
 
 
 def test_an_owned_pause_is_declined_however_long_it_has_run(

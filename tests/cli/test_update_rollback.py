@@ -37,7 +37,7 @@ _SNAP = {"00000000T000000_baseline"}
 
 
 @pytest.fixture(autouse=True)
-def _stub_update_lock(monkeypatch: pytest.MonkeyPatch) -> None:
+def _stub_update_lock(monkeypatch: pytest.MonkeyPatch, stub_deploy_lease_identity: None) -> None:
     """The orchestration wrapper takes the cluster update lock; stub it so the
     orchestration-threading tests don't hit / contend the central-DB lock. The
     lock-held test re-stubs `acquire_update_lock` to return False."""

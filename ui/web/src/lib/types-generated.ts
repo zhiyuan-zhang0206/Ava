@@ -1611,8 +1611,9 @@ export interface paths {
          *     executed by this host's ops server via a cluster_resume op.
          *
          *     Symmetric inverse of `/api/cluster/stop`. The orchestration's failure path
-         *     fans this out (by dialing each host's ops server) to every host it had paused; also
-         *     usable directly to recover a host stuck paused.
+         *     fans this out (by dialing each host's ops server) to every host it had paused.
+         *     Operators recover a stranded host through `/api/cluster/recover`; this route
+         *     requires the opaque exact capability of the deploy that created the pause.
          */
         post: operations["post_cluster_resume_api_cluster_resume_post"];
         delete?: never;
@@ -4222,6 +4223,22 @@ export interface components {
                 [key: string]: unknown;
             }[];
             resource?: components["schemas"]["ResourceSample"] | null;
+        };
+        /**
+         * ClusterTransitionPayload
+         * @description Exact deploy-lease capability for one stop/resume generation.
+         *
+         *     Both fields are required. A delayed request from generation A must not be
+         *     authorized by whichever generation happens to own the lease when it lands.
+         */
+        ClusterTransitionPayload: {
+            /** Deploy Holder */
+            deploy_holder: string;
+            /**
+             * Deploy Acquired At
+             * Format: date-time
+             */
+            deploy_acquired_at: string;
         };
         /**
          * CommandItem
@@ -8764,7 +8781,11 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClusterTransitionPayload"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
@@ -8777,6 +8798,15 @@ export interface operations {
                     };
                 };
             };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
     post_cluster_resume_api_cluster_resume_post: {
@@ -8786,7 +8816,11 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClusterTransitionPayload"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
@@ -8797,6 +8831,15 @@ export interface operations {
                     "application/json": {
                         [key: string]: boolean;
                     };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

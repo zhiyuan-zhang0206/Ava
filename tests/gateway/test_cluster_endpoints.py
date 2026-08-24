@@ -1754,15 +1754,27 @@ class TestClusterEndpoints:
             retries=None,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
             idempotency_key=None,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
         ):  # type: ignore[no-untyped-def]
-            dispatched.append({"target_machine": target_machine, "kind": kind})  # pyright: ignore[reportUnknownMemberType]
+            dispatched.append({"target_machine": target_machine, "kind": kind, "payload": payload})  # pyright: ignore[reportUnknownMemberType]
             return {}  # pyright: ignore[reportUnknownVariableType]
 
         monkeypatch.setattr(cluster_router._cluster_rpc, "dispatch_to_machine", _fake_dispatch)  # pyright: ignore[reportUnknownArgumentType]
         with TestClient(app) as client:
-            r = client.post("/api/cluster/stop")
+            r = client.post(
+                "/api/cluster/stop",
+                json={"deploy_holder": "g:pid1", "deploy_acquired_at": "2026-08-25T00:00:00Z"},
+            )
         assert r.status_code == 200
         assert r.json() == {"paused": True}
-        assert dispatched == [{"target_machine": "test-host", "kind": "cluster_stop"}]
+        assert dispatched == [
+            {
+                "target_machine": "test-host",
+                "kind": "cluster_stop",
+                "payload": {
+                    "deploy_holder": "g:pid1",
+                    "deploy_acquired_at": "2026-08-25T00:00:00Z",
+                },
+            }
+        ]
 
     def test_post_resume_dispatches_cluster_resume(
         self,
@@ -1785,15 +1797,43 @@ class TestClusterEndpoints:
             retries=None,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
             idempotency_key=None,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
         ):  # type: ignore[no-untyped-def]
-            dispatched.append({"target_machine": target_machine, "kind": kind})  # pyright: ignore[reportUnknownMemberType]
+            dispatched.append({"target_machine": target_machine, "kind": kind, "payload": payload})  # pyright: ignore[reportUnknownMemberType]
             return {}  # pyright: ignore[reportUnknownVariableType]
 
         monkeypatch.setattr(cluster_router._cluster_rpc, "dispatch_to_machine", _fake_dispatch)  # pyright: ignore[reportUnknownArgumentType]
         with TestClient(app) as client:
-            r = client.post("/api/cluster/resume")
+            r = client.post(
+                "/api/cluster/resume",
+                json={"deploy_holder": "g:pid1", "deploy_acquired_at": "2026-08-25T00:00:00Z"},
+            )
         assert r.status_code == 200
         assert r.json() == {"paused": False}
-        assert dispatched == [{"target_machine": "test-host", "kind": "cluster_resume"}]
+        assert dispatched == [
+            {
+                "target_machine": "test-host",
+                "kind": "cluster_resume",
+                "payload": {
+                    "deploy_holder": "g:pid1",
+                    "deploy_acquired_at": "2026-08-25T00:00:00Z",
+                },
+            }
+        ]
+
+    def test_post_resume_never_mints_a_capability_from_current_state(self) -> None:
+        with TestClient(app) as client:
+            r = client.post("/api/cluster/resume")
+        assert r.status_code == 422
+
+    def test_transition_capability_requires_an_rfc3339_offset(self) -> None:
+        with TestClient(app) as client:
+            r = client.post(
+                "/api/cluster/resume",
+                json={
+                    "deploy_holder": "g:pid1",
+                    "deploy_acquired_at": "2026-08-25T00:00:00",
+                },
+            )
+        assert r.status_code == 422
 
     def test_post_stopping_marks_machine(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """POST /api/cluster/stopping?machine=<name>&home=<home> retracts that unit."""

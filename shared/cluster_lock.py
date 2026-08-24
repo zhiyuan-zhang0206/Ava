@@ -66,6 +66,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Literal
 
 import shared.db
@@ -132,6 +133,10 @@ class DeployLease:
     # explicit replacement for session-name probing. None for a kind-less holder
     # (a rollback) and for legacy rows.
     kind: Literal["rollout", "restart", "update"] | None = None
+    # Exact DB identity used only by operator recovery's compare-and-set claim.
+    # Optional keeps legacy/test-constructed snapshots readable; a real DB read
+    # always supplies it.
+    acquired_at: datetime | None = None
 
     def awaits(self, machine: str) -> bool:
         """True when this lease is a **settle hold whose recorded waiting set names
@@ -371,6 +376,75 @@ def force_release_update_lock() -> str | None:
         return row[0] if row is not None else None
 
 
+@dataclass(frozen=True)
+class RecoveryClaim:
+    """Result of atomically replacing the exact lease recovery inspected."""
+
+    acquired: bool
+    previous_holder: str | None = None
+
+
+def claim_recovery_lock(
+    recovery_holder: str,
+    observed: DeployLease | None,
+    *,
+    ttl_s: float = 60.0,
+) -> RecoveryClaim:
+    """CAS-claim the deploy row for one short recovery critical section.
+
+    ``observed=None`` may claim only a still-free/expired row. A dead live
+    lease may be replaced only while both its holder and ``acquired_at`` still
+    match the snapshot whose process liveness the caller proved. Therefore a
+    new rollout that lands after the proof wins the race and recovery refuses;
+    it is never unconditionally deleted by a stale observation from another
+    machine.
+    """
+    observed_holder = observed.holder if observed is not None else None
+    observed_acquired_at = observed.acquired_at if observed is not None else None
+    if observed is not None and observed_acquired_at is None:
+        logger.warning(
+            "[cluster-lock] recovery claim refused: observed lease lacks acquired_at identity"
+        )
+        return RecoveryClaim(acquired=False)
+    with shared.db.connect(autocommit=True) as conn, conn.cursor() as cur:
+        cur.execute(
+            "WITH prev AS MATERIALIZED ("
+            "  SELECT holder FROM deployment_state WHERE id = 1 AND ("
+            "    (%s::text IS NULL AND (holder IS NULL OR expires_at < now())) OR "
+            "    (%s::text IS NOT NULL AND holder = %s AND acquired_at = %s)"
+            "  ) FOR UPDATE"
+            "), claimed AS ("
+            "  UPDATE deployment_state SET holder = %s, acquired_at = now(), "
+            "    expires_at = now() + make_interval(secs => %s), note = NULL, "
+            "    settle_hosts = NULL, settle_note = NULL, phase = 'updating', kind = NULL "
+            "  WHERE id = 1 AND EXISTS (SELECT 1 FROM prev) RETURNING 1"
+            ") SELECT (SELECT count(*) FROM claimed), (SELECT holder FROM prev)",
+            (
+                observed_holder,
+                observed_holder,
+                observed_holder,
+                observed_acquired_at,
+                recovery_holder,
+                ttl_s,
+            ),
+        )
+        row = cur.fetchone()
+    acquired = row is not None and row[0] == 1
+    previous_holder = row[1] if acquired and row is not None else None
+    if acquired:
+        logger.warning(
+            "[cluster-lock] recovery claimed by {holder}; replaced {previous}",
+            holder=recovery_holder,
+            previous=previous_holder,
+        )
+    else:
+        logger.warning(
+            "[cluster-lock] recovery claim by {holder} refused: inspected lease changed",
+            holder=recovery_holder,
+        )
+    return RecoveryClaim(acquired=acquired, previous_holder=previous_holder)
+
+
 def settle_update_lock(holder: str, *, hosts: list[str], ttl_s: float = SETTLE_TTL_S) -> bool:
     """Keep the lease held after `holder` has stopped executing, for a bounded settle
     window, because the cluster is still converging. Returns True if the hold landed.
@@ -470,7 +544,7 @@ def read_update_lease() -> DeployLease | None:
     with shared.db.connect(autocommit=True) as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT holder, extract(epoch FROM now() - acquired_at), "
-            "       extract(epoch FROM expires_at - now()), note, kind "
+            "       extract(epoch FROM expires_at - now()), note, kind, acquired_at "
             "FROM deployment_state WHERE id = 1 AND expires_at > now()"
         )
         row = cur.fetchone()
@@ -482,6 +556,7 @@ def read_update_lease() -> DeployLease | None:
             expires_in_s=float(row[2] or 0.0),
             note=row[3],
             kind=row[4],
+            acquired_at=row[5],
         )
 
 

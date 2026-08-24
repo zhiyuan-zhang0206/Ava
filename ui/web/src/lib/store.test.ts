@@ -49,7 +49,6 @@ describe("create() initial defaults (fresh module)", () => {
     expect(s.toast).toBeNull();
     expect(s.searchQuery).toBe("");
     expect(s.reconnectNonce).toBe(0);
-    expect(s.clusterUpdating).toBe(false);
     expect(s.clusterStranded).toBe(false);
   });
 });

@@ -16,7 +16,6 @@ import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useStore } from "@/lib/store";
-import { CLUSTER_STATUS_QUERY_KEY } from "@/lib/use-cluster-health";
 import type { ConnectionEvent } from "@/lib/useEventStream";
 
 import { AppConnectionBanner } from "./app-connection-banner";
@@ -33,6 +32,12 @@ vi.mock("@/lib/use-cluster-health", () => ({
   useClusterHealth,
   SYSTEM_STATUS_QUERY_KEY: ["system-status"],
   CLUSTER_STATUS_QUERY_KEY: ["cluster-status"],
+}));
+
+const { reloadThroughGate } = vi.hoisted(() => ({ reloadThroughGate: vi.fn() }));
+vi.mock("@/lib/gate-maintenance", () => ({
+  reloadThroughGate,
+  UI_UPDATE_QUERY_KEY: ["ui-update-state"],
 }));
 
 // Capture the connection handler so a test can drive SSE state transitions.
@@ -70,9 +75,9 @@ beforeEach(() => {
   connRef.current = null;
   systemRef.current = null;
   useClusterHealth.mockClear();
+  reloadThroughGate.mockClear();
   act(() => {
     useStore.setState({
-      clusterUpdating: false,
       clusterStranded: false,
       connState: "open",
     });
@@ -134,8 +139,8 @@ describe("AppConnectionBanner", () => {
     expect(useStore.getState().connState).toBe("open");
   });
 
-  it("marks the cluster as updating as soon as the global start event arrives", () => {
-    const { queryClient } = renderBanner();
+  it("reloads through Gate when the durable-marker start event arrives", () => {
+    renderBanner();
     expect(systemRef.current).not.toBeNull();
 
     act(() => {
@@ -147,37 +152,6 @@ describe("AppConnectionBanner", () => {
       });
     });
 
-    expect(useStore.getState().clusterUpdating).toBe(true);
-    expect(queryClient.getQueryData(CLUSTER_STATUS_QUERY_KEY)).toMatchObject({
-      paused: false,
-      current_orchestration: "rollout",
-    });
-  });
-
-  it("replaces a cached pre-update snapshot when the start event arrives", () => {
-    const { queryClient } = renderBanner();
-    queryClient.setQueryData(CLUSTER_STATUS_QUERY_KEY, {
-      machine_name: "gateway-a",
-      serve_gateway: true,
-      serve_agent_runner: true,
-      paused: true,
-      current_orchestration: null,
-      shell_count: 0,
-    });
-
-    act(() => {
-      systemRef.current?.({
-        role: "cluster_update_started",
-        agent_id: 0,
-        kind: "restart",
-        origin: "agent:7",
-      });
-    });
-
-    expect(queryClient.getQueryData(CLUSTER_STATUS_QUERY_KEY)).toMatchObject({
-      machine_name: "gateway-a",
-      paused: true,
-      current_orchestration: "restart",
-    });
+    expect(reloadThroughGate).toHaveBeenCalledTimes(1);
   });
 });

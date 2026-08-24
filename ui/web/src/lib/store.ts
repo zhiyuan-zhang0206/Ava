@@ -102,11 +102,6 @@ interface ClusterSlice {
   connState: ConnectionState;
   setConnState: (s: ConnectionState) => void;
 
-  /** True while an update / rollout / restart is in flight. Drives
-   * AuthGuard's full-screen UpdatingPage takeover for every auth status. */
-  clusterUpdating: boolean;
-  setClusterUpdating: (b: boolean) => void;
-
   /** True when this host is paused but no orchestration is running — a rollout
    * was hard-killed and left the pause/lock behind. Drives AppConnectionBanner's
    * recovery state (offers a manual force-recover), the only banner still
@@ -157,9 +152,6 @@ export const useStore = create<Store>()((set) => ({
   // -- Cluster-coordination defaults --
   reconnectNonce: 0,
   bumpReconnect: () => set((s) => ({ reconnectNonce: s.reconnectNonce + 1 })),
-
-  clusterUpdating: false,
-  setClusterUpdating: (b) => set({ clusterUpdating: b }),
 
   clusterStranded: false,
   setClusterStranded: (b) => set({ clusterStranded: b }),

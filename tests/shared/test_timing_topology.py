@@ -35,6 +35,14 @@ def test_default_lattice_holds() -> None:
     assert failures == [], "lattice violated:\n  " + "\n  ".join(failures)
 
 
+def test_dispatch_client_outlives_owner_wait_and_release_preflight() -> None:
+    """A true start must not surface as a client timeout and invite a retry."""
+    release_preflight_max_s = 3 * 15.0
+    assert (
+        deploy.ORCHESTRATION_OWNER_WAIT_S + release_preflight_max_s
+    ) < deploy.CLUSTER_DISPATCH_TIMEOUT_S
+
+
 def test_boot_chain_is_registered_and_pinned() -> None:
     """The boot chain stall < confirm < budget < grace, with the exact default
     values that the 2026-07-30 spawn incident taught us to pin."""

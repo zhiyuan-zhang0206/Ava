@@ -270,11 +270,12 @@ from cli.commands._update_report import (
     _print_local_launch_failure_block as _print_local_launch_failure_block,
 )
 from cli.commands.stop import _do_stop as _do_stop
-from shared import launch_failures
+from shared import launch_failures, ui_update_state
 from shared.cluster import get_record as get_record
 from shared.cluster_lock import (
     SETTLE_TTL_S,
     acquire_update_lock,
+    read_update_lease,
     release_update_lock,
     self_holder,
     settle_update_lock,
@@ -291,7 +292,7 @@ from shared.repo_change import (
 )
 
 
-def _run_gateway_orchestration(
+def _run_gateway_orchestration(  # noqa: PLR0915 — one transaction-shaped lifecycle
     repo: Path,
     *,
     restart_only: bool = False,
@@ -323,14 +324,84 @@ def _run_gateway_orchestration(
     # answer. A restart-only bounce is a `restart`; everything else that takes
     # the lease here is a full `rollout` (the runner-side `update` kind is the
     # updater's own lease in host_deploy_state, not this gateway row).
-    if not acquire_update_lock(holder, kind="restart" if restart_only else "rollout"):
-        print(
-            f"\n✗ another cluster update is in progress (held by {update_lock_holder()}); "
-            "aborting (the lock auto-expires after its TTL if that holder crashed)",
-            file=sys.stderr,
-        )
-        return 1
+    owned_generation: str | None = None
     unconverged: list[str] = []
+    expected_kind: ui_update_state.UiUpdateKind = "restart" if restart_only else "rollout"
+
+    # Publish execution + UI ownership as one short critical section against
+    # manual/automatic recovery. The parent releases this mutex immediately
+    # after the detached session becomes visible, so this child can enter it.
+    # Once both the DB lease and marker exist, recovery can safely observe an
+    # owner without the mutex staying held for the multi-minute rollout.
+    with ui_update_state.lifecycle_lock():
+        if not acquire_update_lock(holder, kind=expected_kind):
+            print(
+                f"\n✗ another cluster update is in progress (held by "
+                f"{update_lock_holder()}); aborting (the lock auto-expires after "
+                "its TTL if that holder crashed)",
+                file=sys.stderr,
+            )
+            return 1
+        try:
+            marker = ui_update_state.read()
+            if marker.status == "inactive":
+                marker = ui_update_state.begin(kind=expected_kind, origin=origin)
+                owned_generation = marker.generation
+            elif marker.status == "updating" and marker.legacy:
+                # Introducing-rollout compatibility: an old in-memory parent
+                # can launch the new-on-disk child after writing v1 posture.
+                # The authoritative DB lease makes this child the safe adopter.
+                owned_generation = marker.generation
+            else:
+                print(
+                    "\n✗ orchestration refused: a persistent maintenance "
+                    "generation is already active or invalid; recover it before retrying",
+                    file=sys.stderr,
+                )
+                release_update_lock(holder)
+                return 1
+            if owned_generation is None:
+                print(
+                    "\n✗ active maintenance owner has no generation; aborting",
+                    file=sys.stderr,
+                )
+                release_update_lock(holder)
+                return 1
+            if not ui_update_state.set_phase(owned_generation, "orchestrating", origin=origin):
+                print(
+                    "\n✗ orchestration lost UI generation ownership before pausing "
+                    "the cluster; aborting",
+                    file=sys.stderr,
+                )
+                ui_update_state.clear(owned_generation)
+                release_update_lock(holder)
+                return 1
+            lease = read_update_lease()
+            if (
+                lease is None
+                or lease.holder != holder
+                or lease.acquired_at is None
+                or lease.note is not None
+            ):
+                print(
+                    "\n✗ orchestration could not capture its exact deploy lease "
+                    "identity before Phase A; aborting",
+                    file=sys.stderr,
+                )
+                ui_update_state.clear(owned_generation)
+                release_update_lock(holder)
+                return 1
+            deploy_capability: ClusterOpPayload = {
+                "deploy_holder": holder,
+                "deploy_acquired_at": lease.acquired_at.isoformat(),
+            }
+        except BaseException:
+            try:
+                if owned_generation is not None:
+                    ui_update_state.clear(owned_generation)
+            finally:
+                release_update_lock(holder)
+            raise
     try:
         return _run_gateway_orchestration_inner(
             repo,
@@ -339,22 +410,26 @@ def _run_gateway_orchestration(
             rollout_log=rollout_log,
             unconverged=unconverged,
             mode=mode,
+            deploy_capability=deploy_capability,
         )
     finally:
-        if unconverged:
-            # The hosts go in structurally, not as prose: the release path re-probes
-            # exactly this set, read back out of the lease's note.
-            settle_update_lock(holder, hosts=unconverged)
-            note = f"waiting for {', '.join(sorted(unconverged))} to reach the pin"
-            print(
-                f"\n⚠ holding the cluster deploy lease for up to a "
-                f"{SETTLE_TTL_S / 60:.0f}m settle window: {note}. No new deploy can start "
-                f"until those hosts reach the pin or the window lapses; `ava cluster status` "
-                f"to watch, `ava cluster recover` to break the hold.",
-                file=sys.stderr,
-            )
-        else:
-            release_update_lock(holder)
+        try:
+            if unconverged:
+                # The hosts go in structurally, not as prose: the release path re-probes
+                # exactly this set, read back out of the lease's note.
+                settle_update_lock(holder, hosts=unconverged)
+                note = f"waiting for {', '.join(sorted(unconverged))} to reach the pin"
+                print(
+                    f"\n⚠ holding the cluster deploy lease for up to a "
+                    f"{SETTLE_TTL_S / 60:.0f}m settle window: {note}. No new deploy can start "
+                    f"until those hosts reach the pin or the window lapses; `ava cluster status` "
+                    f"to watch, `ava cluster recover` to break the hold.",
+                    file=sys.stderr,
+                )
+            else:
+                release_update_lock(holder)
+        finally:
+            ui_update_state.clear(owned_generation)
 
 
 def _begin_update_record(
@@ -397,6 +472,7 @@ def _run_gateway_orchestration_inner(
     rollout_log: str | None = None,
     unconverged: list[str] | None = None,
     mode: str = "smooth",
+    deploy_capability: ClusterOpPayload,
 ) -> int:
     """`ava cluster update` three-phase orchestration body (runs under the update lock — see
     the wrapper `_run_gateway_orchestration`).
@@ -474,7 +550,11 @@ def _run_gateway_orchestration_inner(
     try:
         # 1-1c) pause restarters (local + remote) + quiesce all agents. None = a
         #       Phase-A 5xx; abort with nothing migrated (the finally resumes).
-        paused_names, all_quiesced = _stop_the_world(agent_runners, mode=mode)
+        paused_names, all_quiesced = _stop_the_world(
+            agent_runners,
+            mode=mode,
+            deploy_capability=deploy_capability,
+        )
         if paused_names is None:
             return 1
         # Stragglers (quiesce timeout) or an explicit force mode: every host's
@@ -601,6 +681,7 @@ def _run_gateway_orchestration_inner(
             _ns._fan_out,
             _PHASE_A_TIMEOUT_S,
             outcome=outcome,
+            deploy_capability=deploy_capability,
             pin_advanced=pin_advanced,
             failing_step=failing_step,
             recovered=recovered,

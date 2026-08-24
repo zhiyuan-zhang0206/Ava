@@ -1,3 +1,4 @@
+# pyright: reportUnknownArgumentType=warning, reportUnknownLambdaType=warning
 """`gateway/ops_*.py` — ops-server-callable RPC implementations.
 
 Free functions backing both FastAPI handlers in gateway/app.py and the
@@ -421,18 +422,369 @@ async def test_explicit_v2_resurrect_dispatches_manual_op(
 
 def test_cluster_stop_op_invokes_pause(monkeypatch: pytest.MonkeyPatch) -> None:
     called: list[bool] = []
+    from datetime import UTC, datetime
+
+    from shared.cluster_lock import DeployLease
+
+    acquired = datetime(2026, 8, 25, tzinfo=UTC)
+    monkeypatch.setattr(
+        ops_cluster,
+        "read_update_lease",
+        lambda: DeployLease(
+            holder="gateway:pid1",
+            held_for_s=1,
+            expires_in_s=600,
+            note=None,
+            kind="rollout",
+            acquired_at=acquired,
+        ),
+    )
+    monkeypatch.setattr(ops_cluster.pause_owner, "mark_paused", lambda *_a: None)
     monkeypatch.setattr(ops_cluster, "pause_local_cluster", lambda: called.append(True))
-    result = ops_cluster.cluster_stop_op()
+    result = ops_cluster.cluster_stop_op("gateway:pid1", acquired)
     assert result == {}
     assert called == [True]
+
+
+@pytest.mark.parametrize("kind", [None, "rollout", "restart"])
+def test_cluster_stop_accepts_every_executing_lease_including_legacy_and_rollback(
+    kind: str | None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from datetime import UTC, datetime
+
+    from shared.cluster_lock import DeployLease
+
+    acquired = datetime(2026, 8, 25, tzinfo=UTC)
+    paused: list[bool] = []
+    monkeypatch.setattr(
+        ops_cluster,
+        "read_update_lease",
+        lambda: DeployLease(
+            holder="gateway:pid1",
+            held_for_s=1,
+            expires_in_s=600,
+            note=None,
+            kind=kind,  # type: ignore[arg-type]
+            acquired_at=acquired,
+        ),
+    )
+    monkeypatch.setattr(ops_cluster.pause_owner, "mark_paused", lambda *_a: None)
+    monkeypatch.setattr(ops_cluster, "pause_local_cluster", lambda: paused.append(True))
+
+    assert ops_cluster.cluster_stop_op("gateway:pid1", acquired) == {}
+    assert paused == [True]
+
+
+def test_cluster_stop_refuses_a_settle_hold_without_pausing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from datetime import UTC, datetime
+
+    from ops.cluster import ClusterUpdateInProgress
+    from shared.cluster_lock import DeployLease
+
+    acquired = datetime(2026, 8, 25, tzinfo=UTC)
+    monkeypatch.setattr(
+        ops_cluster,
+        "read_update_lease",
+        lambda: DeployLease(
+            holder="gateway:pid1",
+            held_for_s=1,
+            expires_in_s=600,
+            note="settling, waiting for: win",
+            kind="rollout",
+            acquired_at=acquired,
+        ),
+    )
+    monkeypatch.setattr(
+        ops_cluster,
+        "pause_local_cluster",
+        lambda: pytest.fail("settle hold cannot authorize a new pause"),
+    )
+    monkeypatch.setattr(
+        ops_cluster.pause_owner,
+        "mark_paused",
+        lambda *_a: pytest.fail("a mismatched first proof cannot journal a pause owner"),
+    )
+
+    with pytest.raises(ClusterUpdateInProgress, match="exact executing deploy lease"):
+        ops_cluster.cluster_stop_op("gateway:pid1", acquired)
+
+
+def test_cluster_stop_clears_its_journal_if_lease_changes_before_pause(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from datetime import UTC, datetime
+
+    from ops.cluster import ClusterUpdateInProgress
+    from shared.cluster_lock import DeployLease
+
+    acquired = datetime(2026, 8, 25, tzinfo=UTC)
+    reads = iter(
+        [
+            DeployLease("A", 1, 600, None, "rollout", acquired),
+            DeployLease("B", 0, 600, None, "rollout", acquired),
+        ]
+    )
+    cleared: list[tuple[object, ...]] = []
+    monkeypatch.setattr(ops_cluster, "read_update_lease", lambda: next(reads))
+    monkeypatch.setattr(ops_cluster.pause_owner, "mark_paused", lambda *_a: None)
+    monkeypatch.setattr(ops_cluster.pause_owner, "clear", lambda *a: cleared.append(a) or True)
+    monkeypatch.setattr(
+        ops_cluster,
+        "pause_local_cluster",
+        lambda: pytest.fail("a replaced lease must not authorize pause"),
+    )
+
+    with pytest.raises(ClusterUpdateInProgress):
+        ops_cluster.cluster_stop_op("A", acquired)
+    assert cleared == [("A", acquired)]
+
+
+@pytest.mark.parametrize("compensation_succeeds", [True, False])
+def test_cluster_stop_records_only_a_successful_pause_compensation(
+    compensation_succeeds: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from datetime import UTC, datetime
+
+    from shared.cluster_lock import DeployLease
+
+    acquired = datetime(2026, 8, 25, tzinfo=UTC)
+    lease = DeployLease("A", 1, 600, None, "rollout", acquired)
+    resumed: list[tuple[object, ...]] = []
+    monkeypatch.setattr(ops_cluster, "read_update_lease", lambda: lease)
+    monkeypatch.setattr(ops_cluster.pause_owner, "mark_paused", lambda *_a: None)
+    monkeypatch.setattr(
+        ops_cluster.pause_owner, "mark_resumed", lambda *a: resumed.append(a) or True
+    )
+    monkeypatch.setattr(
+        ops_cluster, "pause_local_cluster", lambda: (_ for _ in ()).throw(OSError("pause"))
+    )
+    if compensation_succeeds:
+        monkeypatch.setattr(ops_cluster, "unpause_local_cluster", lambda: None)
+    else:
+        monkeypatch.setattr(
+            ops_cluster,
+            "unpause_local_cluster",
+            lambda: (_ for _ in ()).throw(OSError("unpause")),
+        )
+
+    with pytest.raises(OSError, match="pause"):
+        ops_cluster.cluster_stop_op("A", acquired)
+    assert resumed == ([("A", acquired)] if compensation_succeeds else [])
 
 
 def test_cluster_resume_op_invokes_unpause(monkeypatch: pytest.MonkeyPatch) -> None:
+    from datetime import UTC, datetime
+
+    from shared.pause_owner import PauseOwnerSnapshot
+
+    acquired = datetime(2026, 8, 25, tzinfo=UTC)
     called: list[bool] = []
+    monkeypatch.setattr(
+        ops_cluster.updater_handoff,
+        "read",
+        lambda: ops_cluster.updater_handoff.UpdaterHandoffSnapshot(status="inactive"),
+    )
+    monkeypatch.setattr(
+        ops_cluster.pause_owner,
+        "read",
+        lambda: PauseOwnerSnapshot(status="paused", holder="gateway:pid1", acquired_at=acquired),
+    )
+    monkeypatch.setattr(ops_cluster.pause_owner, "mark_resumed", lambda *_a: True)
     monkeypatch.setattr(ops_cluster, "unpause_local_cluster", lambda: called.append(True))
-    result = ops_cluster.cluster_resume_op()
+    monkeypatch.setattr(
+        ops_cluster,
+        "read_update_lease",
+        lambda: pytest.fail("resume must not require the gateway DB"),
+    )
+    result = ops_cluster.cluster_resume_op("gateway:pid1", acquired)
     assert result == {}
     assert called == [True]
+
+
+def test_late_resume_cannot_unpause_a_new_generation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    from ops.cluster import ClusterUpdateInProgress
+    from shared.pause_owner import PauseOwnerSnapshot
+
+    acquired_a = datetime(2026, 8, 25, tzinfo=UTC)
+    acquired_b = acquired_a + timedelta(seconds=1)
+    monkeypatch.setattr(
+        ops_cluster.updater_handoff,
+        "read",
+        lambda: ops_cluster.updater_handoff.UpdaterHandoffSnapshot(status="inactive"),
+    )
+    monkeypatch.setattr(
+        ops_cluster.pause_owner,
+        "read",
+        lambda: PauseOwnerSnapshot(status="paused", holder="same", acquired_at=acquired_b),
+    )
+    monkeypatch.setattr(
+        ops_cluster,
+        "unpause_local_cluster",
+        lambda: pytest.fail("generation A must not unpause generation B"),
+    )
+    with pytest.raises(ClusterUpdateInProgress, match="different deploy generation"):
+        ops_cluster.cluster_resume_op("same", acquired_a)
+
+
+def test_stale_deploy_resume_cannot_unpause_a_live_local_updater(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from datetime import UTC, datetime
+
+    from ops.cluster import ClusterUpdateInProgress
+    from shared.pause_owner import PauseOwnerSnapshot
+
+    acquired = datetime(2026, 8, 25, tzinfo=UTC)
+    monkeypatch.setattr(
+        ops_cluster.updater_handoff,
+        "read",
+        lambda: ops_cluster.updater_handoff.UpdaterHandoffSnapshot(
+            status="running",
+            generation="local-B",
+            owner_pid=123,
+            owner_create_time=1.0,
+        ),
+    )
+    monkeypatch.setattr(ops_cluster.updater_handoff, "owner_is_live", lambda _s: True)
+    monkeypatch.setattr(
+        ops_cluster.pause_owner,
+        "read",
+        lambda: PauseOwnerSnapshot(status="paused", holder="deploy-A", acquired_at=acquired),
+    )
+    monkeypatch.setattr(
+        ops_cluster,
+        "unpause_local_cluster",
+        lambda: pytest.fail("stale deploy A must not unpause local updater B"),
+    )
+    with pytest.raises(ClusterUpdateInProgress, match="local updater is running"):
+        ops_cluster.cluster_resume_op("deploy-A", acquired)
+
+
+@pytest.mark.parametrize("boundary", ["invalid-journal", "invalid-handoff", "pending"])
+def test_cluster_resume_fails_closed_at_corrupt_or_pending_owner_boundaries(
+    boundary: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    from ops.cluster import ClusterUpdateInProgress
+    from shared.pause_owner import PauseOwnerSnapshot
+
+    acquired = datetime(2026, 8, 25, tzinfo=UTC)
+    owner = (
+        PauseOwnerSnapshot(status="invalid")
+        if boundary == "invalid-journal"
+        else PauseOwnerSnapshot(status="paused", holder="A", acquired_at=acquired)
+    )
+    handoff = (
+        ops_cluster.updater_handoff.UpdaterHandoffSnapshot(status="invalid")
+        if boundary == "invalid-handoff"
+        else ops_cluster.updater_handoff.UpdaterHandoffSnapshot(
+            status="pending",
+            generation="B",
+            expires_at=acquired + timedelta(minutes=1),
+            expired=False,
+        )
+    )
+    monkeypatch.setattr(ops_cluster.pause_owner, "read", lambda: owner)
+    monkeypatch.setattr(ops_cluster.updater_handoff, "read", lambda: handoff)
+    monkeypatch.setattr(
+        ops_cluster,
+        "unpause_local_cluster",
+        lambda: pytest.fail("an unreadable/newer owner must not be unpaused"),
+    )
+
+    with pytest.raises(ClusterUpdateInProgress):
+        ops_cluster.cluster_resume_op("A", acquired)
+
+
+def test_retried_completed_resume_is_idempotent_during_a_later_local_update(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from datetime import UTC, datetime
+
+    from shared.pause_owner import PauseOwnerSnapshot
+
+    acquired = datetime(2026, 8, 25, tzinfo=UTC)
+    monkeypatch.setattr(
+        ops_cluster.pause_owner,
+        "read",
+        lambda: PauseOwnerSnapshot(status="resumed", holder="deploy-A", acquired_at=acquired),
+    )
+    monkeypatch.setattr(
+        ops_cluster.updater_handoff,
+        "read",
+        lambda: pytest.fail("resumed retry must return before inspecting a later updater"),
+    )
+    monkeypatch.setattr(
+        ops_cluster,
+        "unpause_local_cluster",
+        lambda: pytest.fail("resumed retry must make no posture write"),
+    )
+    assert ops_cluster.cluster_resume_op("deploy-A", acquired) == {}
+
+
+def test_first_adoption_legacy_resume_is_idempotent_without_an_exact_journal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from shared.pause_owner import PauseOwnerSnapshot
+
+    owners = iter(
+        [PauseOwnerSnapshot(status="inactive"), PauseOwnerSnapshot(status="legacy-resumed")]
+    )
+    unpaused: list[bool] = []
+    marked: list[bool] = []
+    monkeypatch.setattr(ops_cluster.pause_owner, "read", lambda: next(owners))
+    monkeypatch.setattr(
+        ops_cluster.updater_handoff,
+        "read",
+        lambda: ops_cluster.updater_handoff.UpdaterHandoffSnapshot(status="inactive"),
+    )
+    monkeypatch.setattr(ops_cluster, "unpause_local_cluster", lambda: unpaused.append(True))
+    monkeypatch.setattr(
+        ops_cluster.pause_owner,
+        "mark_legacy_resumed",
+        lambda: marked.append(True) or PauseOwnerSnapshot(status="legacy-resumed"),
+    )
+
+    assert ops_cluster.cluster_resume_legacy_op() == {}
+    assert ops_cluster.cluster_resume_legacy_op() == {}
+    assert unpaused == [True]
+    assert marked == [True]
+
+
+@pytest.mark.parametrize("owner_status", ["paused", "resumed", "invalid"])
+def test_legacy_resume_never_bypasses_an_exact_or_invalid_journal(
+    owner_status: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from datetime import UTC, datetime
+
+    from ops.cluster import ClusterUpdateInProgress
+    from shared.pause_owner import PauseOwnerSnapshot
+
+    exact = owner_status in ("paused", "resumed")
+    monkeypatch.setattr(
+        ops_cluster.pause_owner,
+        "read",
+        lambda: PauseOwnerSnapshot(
+            status=owner_status,  # type: ignore[arg-type]
+            holder="B" if exact else None,
+            acquired_at=datetime(2026, 8, 25, tzinfo=UTC) if exact else None,
+        ),
+    )
+    monkeypatch.setattr(
+        ops_cluster,
+        "unpause_local_cluster",
+        lambda: pytest.fail("legacy compatibility must not unpause exact B"),
+    )
+
+    with pytest.raises(ClusterUpdateInProgress, match="exact or unreadable"):
+        ops_cluster.cluster_resume_legacy_op()
 
 
 def test_cluster_update_op_returns_session_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -468,14 +820,14 @@ def test_cluster_update_op_forwards_target_sha(monkeypatch: pytest.MonkeyPatch) 
     assert seen["sha"] == "PINNEDSHA"
 
 
-def test_cluster_update_op_unpauses_on_pre_spawn_failure(
+def test_cluster_update_op_never_guesses_spawn_failure_compensation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """spawn_update raising before it manages to spawn ava-updater (e.g. a
-    MigrationLayoutError from the validate-before-kill vet) must not leave this
-    host paused forever — cluster_update_op self-heals by unpausing locally
-    instead of waiting on the gateway's compensating resume or the 10-minute
-    stranded-pause watchdog. The original exception still propagates."""
+    """Only spawn_update knows definitive-not-started from post-Popen ambiguity.
+
+    The RPC wrapper must propagate the error without unpausing a child that may
+    already be running; definitive compensation is locked at the spawn seam.
+    """
 
     def _boom(**_kw: object) -> dict[str, str]:
         raise ValueError("migrations layout broken")
@@ -486,7 +838,7 @@ def test_cluster_update_op_unpauses_on_pre_spawn_failure(
 
     with pytest.raises(ValueError, match="migrations layout broken"):
         ops_cluster.cluster_update_op()
-    assert called == [True]
+    assert called == []
 
 
 def test_cluster_update_op_in_progress_does_not_unpause(

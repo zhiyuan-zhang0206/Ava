@@ -538,9 +538,9 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
     # serve"; when the gateway crashes between phase A and B leaving
     # a paused posture row so agent-runners are stuck at 503, a manual
     # `ava start` can also recover (no longer requires ssh + rm coordination).
-    # R1 (Task #1021): the posture row + mirror file are the state — this host
-    # is serving again, so the row and the offline "updating" label return to
-    # idle. The old flag files were retired with the old-signal sweep (PR5).
+    # R1 (Task #1021): this transition changes only the host posture row. The
+    # cluster orchestrator's separate Gate marker spans restart and Phase B;
+    # local start must never clear or reclassify that maintenance owner.
     from shared.host_deploy_state import set_posture
 
     set_posture("idle")

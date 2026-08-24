@@ -50,7 +50,7 @@ $AVA_HOME/
 ├── plugins/<name>/plugin.py    # externally installed plugins
 ├── machine_name, machine_host, machine_serve_*   # setup fields written by `ava start` flags
 ├── disabled_services           # durable `--disable-service` set the watchdog honors
-└── deploy-state.json           # posture mirror: the offline "updating" label (R1, Task #1021)
+└── deploy-state.json           # generation-guarded cluster UI maintenance owner
 ```
 
 `~/.ava/clusters.json` is the exception — a **host-level** registry keyed by home
