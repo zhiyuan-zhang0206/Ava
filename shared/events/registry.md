@@ -85,7 +85,7 @@ Emit sites and consumers: see the comments at each emit point.
 | `computer_action` | computer-use desktop action (executed or refused) | business | action, app, outcome, error, coords, path, task_id | 365d | events |
 | `computer_session_start` | computer-use task session opened (first action with a task_id) | business | task_id, first_tool, first_action_at | 365d | events |
 | `computer_session_end` | computer-use task session closed (idle timeout) | business | task_id, action_count, first_action_at, last_action_at, outcome | 365d | events |
-| `mcp_tool_call` | MCP tool invoked through the gateway /mcp endpoint (agent_id NULL — external client) | business | — | 365d | events |
+| `mcp_tool_call` | MCP tool invoked through the gateway /mcp endpoint (client-scoped, args redacted) | business | — | 365d | events |
 
 ## 3. Telemetry events (category=telemetry, 112)
 

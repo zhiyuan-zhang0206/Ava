@@ -3116,6 +3116,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/mcp/clients": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Mcp Clients
+         * @description List MCP clients without their credential hashes.
+         */
+        get: operations["get_mcp_clients_api_mcp_clients_get"];
+        put?: never;
+        /**
+         * Post Mcp Client
+         * @description Create an MCP client and reveal its plaintext token once.
+         */
+        post: operations["post_mcp_client_api_mcp_clients_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/mcp/clients/{client_id}/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Post Mcp Client Revoke
+         * @description Revoke one active MCP client.
+         */
+        post: operations["post_mcp_client_revoke_api_mcp_clients__client_id__revoke_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/fleet/graph": {
         parameters: {
             query?: never;
@@ -5300,6 +5344,57 @@ export interface components {
                 [key: string]: unknown;
             }[];
             resource?: components["schemas"]["ResourceSample"] | null;
+        };
+        /** McpClientCreate */
+        McpClientCreate: {
+            /** Name */
+            name: string;
+            /**
+             * Scope
+             * @default read
+             * @enum {string}
+             */
+            scope: "read" | "write";
+        };
+        /** McpClientCreated */
+        McpClientCreated: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "read" | "write";
+            /** Token */
+            token: string;
+        };
+        /** McpClientRevoked */
+        McpClientRevoked: {
+            /** Ok */
+            ok: boolean;
+        };
+        /** McpClientView */
+        McpClientView: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "read" | "write";
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Revoked At */
+            revoked_at: string | null;
+            /** Last Used At */
+            last_used_at: string | null;
         };
         /**
          * MemoryGraphEdge
@@ -10695,6 +10790,90 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MemoryGraphResponse"];
+                };
+            };
+        };
+    };
+    get_mcp_clients_api_mcp_clients_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpClientView"][];
+                };
+            };
+        };
+    };
+    post_mcp_client_api_mcp_clients_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["McpClientCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpClientCreated"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_mcp_client_revoke_api_mcp_clients__client_id__revoke_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                client_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpClientRevoked"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

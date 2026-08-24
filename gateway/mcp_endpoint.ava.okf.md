@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Gateway /mcp endpoint — control plane as an MCP server
-description: '`gateway/mcp_endpoint.py` — the cluster control plane exposed over Streamable HTTP at `/mcp` on the gateway (design task #1212 step 1). Seven tools (list_agents / get_agent / spawn_agent / send_message / get_messages / terminate_agent / cluster_status) are thin handlers over the same internal functions the REST routers call; stateless transport (2026-07-28 revision), cluster-middleware auth, every tools/call audited as a `mcp_tool_call` event. Flag-gated off by default (AVA_MCP_ENDPOINT_ENABLED).'
+description: '`gateway/mcp_endpoint.py` — the cluster control plane exposed over Streamable HTTP at `/mcp` on the gateway. Seven tools are thin handlers over the REST routers'' internal functions; stateless transport, revocable read/write client tokens, and client-identified audit events with redacted arguments. Flag-gated off by default (AVA_MCP_ENDPOINT_ENABLED).'
 tags:
 - gateway
 - mcp
@@ -16,8 +16,8 @@ The first step of the MCP-over-gateway design (task #1212): one Streamable HTTP
 MCP endpoint on the gateway that external MCP clients (Claude Code / Codex /
 anything) dial to drive the fleet — the same control effects the web UI and the
 `ava` CLI reach over the REST API. Later steps add the machine-routing layer
-(per-machine tool servers, client_key identity, stash+chunk large payloads);
-this step is control plane only.
+(per-machine tool servers, stash+chunk large payloads); this step is control
+plane only.
 
 The seven tools are **thin handlers over the same internal functions the REST
 routers call** (`_spawn_preflight_blocking` + `_forward_spawn_to_remote`,
@@ -41,11 +41,17 @@ endpoint replaces over time.
   server-side session state, no idle reaping. `host=""` skips the SDK's
   loopback-only DNS-rebinding auto-guard (this endpoint is embedded in the
   gateway and dialed at the machine's reachable hostname).
-- **Auth**: the cluster middleware (session cookie / Bearer secret) like every
-  other route — no bypass entry.
+- **Auth**: `/mcp` bypasses the cluster middleware and its ASGI wrapper requires
+  `Authorization: Bearer <MCP client token>`. Tokens are generated per client,
+  stored only as SHA-256 hashes in `mcp_clients`, and can be revoked through the
+  cluster-authenticated `/api/mcp/clients` admin routes. A no-secret cluster
+  still requires an MCP client token; cluster cookies and secrets never count.
+- **Scope**: `read` clients may list/inspect agents, messages, and cluster
+  status. `spawn_agent`, `send_message`, and `terminate_agent` require `write`.
 - **Audit**: a `_AuditMiddleware` on the MCPServer records every `tools/call`
-  as a `mcp_tool_call` audit event (tool, args, outcome ok/error, error text;
-  agent_id NULL — external clients have no agent identity yet).
+  as a `mcp_tool_call` event with client id/name and outcome. Each argument is
+  represented only by its JSON type, character size, and SHA-256; raw values
+  never enter the event. `agent_id` stays NULL for this service-level identity.
 
 ## Why not a router
 

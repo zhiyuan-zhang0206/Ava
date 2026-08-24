@@ -24,6 +24,7 @@ Ava cluster HTTP API gateway—FastAPI service running on **port 8000** (loopbac
 - **Alert truth reconciliation**: startup + five-minute reads of Grafana's active Alertmanager instances repair stored alert resolutions whose one-shot webhook was lost
 - **Schedule keep-alive**: built-in ScheduleManager, keeping schedule resident processes alive in their own sessions (not a timer trigger — timing logic is inside the script, the manager only ensures stay-up)
 - **Cluster ops API**: cluster, config, inventory, metrics, system and other management endpoints
+- **MCP control plane**: revocable scoped tokens guard default-off `/mcp`; cluster-authenticated `/api/mcp/clients` manages them
 - **Per-agent command views**: `GET /api/commands?agent_id=` resolves the agent's runner then asks its `agent_skill_view` op for the command catalog that runner discovers from its own converged load dir plus the agent's persisted cwd; an unavailable, unknown, or version-skewed runner falls back to the gateway-local catalog
 - **Authentication and browser-origin policy**: with a cluster secret, `/api/*` requires an opaque server-side session or bearer secret, except health and browser login/check/logout; auth can be disabled for tests. Login creates a TTL-bounded `web_sessions` row; middleware caches positive checks for 30 seconds and touches recent use once per minute. Active sessions can be listed, non-current ones revoked, and logout revokes the current one. Cookie-authenticated mutations with an `Origin` require an exact CORS allowlist match; bearer and originless callers are unaffected. Cookie `Secure` is explicit or derived from `gateway_url`. An EMPTY secret is the unauthenticated, loopback-only posture; `/api/bootstrap` registers agent-runners.
 
@@ -49,6 +50,7 @@ Browser (frontend:3000) ──HTTP──▶ Gateway (:8000) ──▶ Postgres /
 - [[sse.ava.okf.md]] — Redis → SSE event stream
 - [[gateway/routers/ops-monitor.ava.okf.md]] — `GET /api/ops/monitor` ops panel series
 - [[telemetry-staleness.ava.okf.md]] — Loki/Prometheus heartbeat guard for stale telemetry reads
+- [[mcp_endpoint.ava.okf.md]] — MCP boundary details
 - [[scheduler.ava.okf.md]] — ScheduleManager + ScheduleRunner
 - [[db.ava.okf.md]] — Postgres connection pool
 

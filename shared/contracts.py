@@ -280,6 +280,15 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("POST", "/api/agents/{agent_id}/restart"): RouteContract(
         note="enqueue restart — repeats are harmless"
     ),
+    # ── gateway/routers/mcp_clients.py ─────────────────────────────
+    ("GET", "/api/mcp/clients"): RouteContract(),
+    ("POST", "/api/mcp/clients"): RouteContract(
+        Idempotency.NON_IDEMPOTENT,
+        note="client creation — plaintext token is revealed once",
+    ),
+    ("POST", "/api/mcp/clients/{client_id}/revoke"): RouteContract(
+        note="client revocation — guarded update; repeats cannot revoke twice"
+    ),
     # ── gateway/routers/memory.py ───────────────────────────────────
     ("GET", "/api/memory/graph"): RouteContract(),
     ("POST", "/api/memory/refresh"): RouteContract(note="re-scan — repeats are harmless"),
