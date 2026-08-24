@@ -642,6 +642,15 @@ class TestBuildLogql:
             == '{service_name="unknown_service", stream!="archive"} | cluster=".ava-preview" or cluster=""'
         )
 
+    def test_count_grouped_cluster_filter(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        client = _install(
+            monkeypatch,
+            {"data": {"result": [{"metric": {"level": "warning"}, "value": [1, "2"]}]}},
+        )
+
+        assert loki_events.count_grouped(group_by="level", cluster=".ava-preview") == {"warning": 2}
+        assert 'cluster=".ava-preview" or cluster=""' in client.calls[0][1]["query"]
+
     def test_indexed_selector_narrows_before_pipeline_filters(self) -> None:
         q = loki_events._build_logql(
             era=LokiReadEra.INDEXED,

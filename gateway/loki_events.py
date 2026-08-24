@@ -1467,11 +1467,13 @@ def count_grouped(
     level: str | None = None,
     grep: str | None = None,
     categories: list[str] | None = None,
+    cluster: str | None = None,
     machine: str | None = None,
     trace_id: str | None = None,
     attribute_filters: dict[str, str] | None = None,
     from_: datetime | None = None,
     to: datetime | None = None,
+    timeout_s: float | None = None,
 ) -> dict[str, int]:
     """Count event lines grouped by one key — `sum by (X) (count_over_time)`
     as an instant query at the window end. `group_by` is a stream label
@@ -1491,6 +1493,7 @@ def count_grouped(
         level=level,
         grep=grep,
         categories=categories,
+        cluster=cluster,
         machine=machine,
         trace_id=trace_id,
         attribute_filters=attribute_filters,
@@ -1502,7 +1505,7 @@ def count_grouped(
         if from_attributes:
             pipeline += f' | json {key}="attributes.{key}"'
         logql = f"sum by ({key}) (count_over_time(({pipeline})[{_slice_duration_s(slice_)}s]))"
-        for series in _query_instant(logql, slice_.end):
+        for series in _query_instant(logql, slice_.end, timeout_s=timeout_s):
             value = _result_value(series)
             if value is None:
                 continue
