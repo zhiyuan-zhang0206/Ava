@@ -19,6 +19,11 @@ single Redis pipeline, so a degraded link's round-trip cost is amortized across
 many events instead of paid once per event (a link where one publish takes 1s
 would otherwise drain at 1 event/s and fill the queue within seconds).
 
+An ACL user re-affirmation is distinct from a transport failure: the worker
+retries its rejected batch with the shared bounded auth backoff, then resumes
+without emitting an authentication-error storm. Each Redis command attempt
+keeps the same short timeout, so a hung transport still sheds the batch.
+
 A full queue sheds the OLDEST buffered event to make room for the newest (the
 live view is worth the most-recent state; a gap in the past is corrected by the
 next authoritative snapshot at the end of every turn). The live view degrades;
@@ -33,8 +38,10 @@ import time
 from contextlib import suppress
 
 import redis.asyncio as aredis
+from redis.exceptions import AuthenticationError, NoPermissionError
 
 from shared.log import logger
+from shared.redis_client import retry_auth_failures_async
 
 _DEFAULT_MAXSIZE = 2048
 _DEFAULT_PUBLISH_TIMEOUT_S = 2.0
@@ -127,7 +134,7 @@ class AgentEventPublisher:
                 while len(batch) < _BATCH_SIZE:
                     batch.append(self._queue.get_nowait())
             try:
-                await asyncio.wait_for(self._publish_batch(batch), timeout=self._publish_timeout)
+                await self._publish_batch(batch)
             except asyncio.CancelledError:
                 raise  # aclose cancelled us — propagate to exit the worker
             except Exception as exc:
@@ -153,18 +160,34 @@ class AgentEventPublisher:
         """Publish a whole batch in ONE pipeline round-trip (FIFO preserved:
         commands on a single connection execute in order).
 
-        Command-level failures (e.g. an ACL NOPERM on this channel) shed only
-        the failing event — the rest of the batch still goes out, returned as
-        Exception objects in the results under `raise_on_error=False`. A
-        connection-level failure (socket dead / timed out) raises from
-        execute() and sheds the whole batch — there is no way to know which
-        commands the server executed, so none are retried; best-effort by
-        design, and the turn-end snapshot corrects any gap."""
-        pipe = self._redis.pipeline(transaction=False)
-        for payload in batch:
-            # redis-py types publish()'s **kwargs as Unknown; the call itself is fully typed.
-            pipe.publish(self._events_channel, payload)  # pyright: ignore[reportUnknownMemberType]
-        results = await pipe.execute(raise_on_error=False)
+        Authentication and ACL-denial results retry the whole batch with the
+        shared bounded backoff. Every command targets this one events channel,
+        so an ACL transition rejects the complete batch before any publish can
+        land. Other command-level failures shed only their failing event; a
+        connection-level failure or a per-attempt timeout sheds the batch as
+        before, so transport-failure behavior stays best-effort."""
+
+        async def _execute_batch() -> list[object]:
+            pipe = self._redis.pipeline(transaction=False)
+            for payload in batch:
+                # redis-py types publish()'s **kwargs as Unknown; the call itself is fully typed.
+                pipe.publish(self._events_channel, payload)  # pyright: ignore[reportUnknownMemberType]
+            results = await pipe.execute(raise_on_error=False)
+            auth_failure = next(
+                (
+                    result
+                    for result in results
+                    if isinstance(result, (AuthenticationError, NoPermissionError))
+                ),
+                None,
+            )
+            if auth_failure is not None:
+                raise auth_failure
+            return results
+
+        results = await retry_auth_failures_async(
+            _execute_batch, attempt_timeout_s=self._publish_timeout
+        )
         failed = [r for r in results if isinstance(r, Exception)]
         if failed:
             self._note_drop("publish_error", detail=repr(failed[0]))

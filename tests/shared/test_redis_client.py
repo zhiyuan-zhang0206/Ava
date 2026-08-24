@@ -10,6 +10,8 @@ from typing import Any
 import pytest
 import redis.asyncio as aredis
 from redis.asyncio.connection import AbstractConnection
+from redis.exceptions import AuthenticationError, NoPermissionError
+from redis.exceptions import ConnectionError as RedisConnectionError
 
 from shared import redis_client as mod
 from shared.config import settings
@@ -43,6 +45,118 @@ def test_get_async_redis_requires_running_loop() -> None:
     """Calling outside an async context fails fast (asyncio.get_running_loop raises)."""
     with pytest.raises(RuntimeError):
         mod.get_async_redis()
+
+
+class _EventuallyAsyncPublisher:
+    """Publish stand-in that holds auth failures until a configured attempt."""
+
+    def __init__(self, error: type[Exception], failures: int) -> None:
+        self._error = error
+        self._failures = failures
+        self.attempts = 0
+
+    async def publish(self, _channel: str, _payload: str) -> int:
+        self.attempts += 1
+        if self.attempts <= self._failures:
+            raise self._error("ACL is being re-affirmed")
+        return 3
+
+
+class _EventuallySyncPublisher:
+    """Synchronous equivalent used to lock the one-off client contract."""
+
+    def __init__(self, failures: int) -> None:
+        self._failures = failures
+        self.attempts = 0
+
+    def publish(self, _channel: str, _payload: str) -> int:
+        self.attempts += 1
+        if self.attempts <= self._failures:
+            raise AuthenticationError("ACL is being re-affirmed")
+        return 3
+
+    def close(self) -> None:
+        pass
+
+
+def _max_jitter(delay_cap: float) -> float:
+    return delay_cap
+
+
+@pytest.mark.parametrize("error", (AuthenticationError, NoPermissionError))
+async def test_publish_retries_auth_failures_with_bounded_exponential_delays(
+    monkeypatch: pytest.MonkeyPatch, error: type[Exception]
+) -> None:
+    publisher = _EventuallyAsyncPublisher(error, failures=2)
+    delays: list[float] = []
+
+    async def _record_sleep(delay: float) -> None:
+        delays.append(delay)
+
+    monkeypatch.setattr(mod, "get_async_redis", lambda: publisher)
+    monkeypatch.setattr(mod, "_sleep_async", _record_sleep, raising=False)
+    monkeypatch.setattr(mod, "_auth_retry_jitter", _max_jitter, raising=False)
+
+    assert await mod.publish_best_effort("ava:events", "payload") == 3
+    assert publisher.attempts == 3
+    assert delays == [0.5, 1.0]
+
+
+async def test_publish_auth_retry_stops_within_its_total_wait_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    publisher = _EventuallyAsyncPublisher(AuthenticationError, failures=100)
+    delays: list[float] = []
+
+    async def _record_sleep(delay: float) -> None:
+        delays.append(delay)
+
+    monkeypatch.setattr(mod, "get_async_redis", lambda: publisher)
+    monkeypatch.setattr(mod, "_sleep_async", _record_sleep, raising=False)
+    monkeypatch.setattr(mod, "_auth_retry_jitter", _max_jitter, raising=False)
+
+    assert await mod.publish_best_effort("ava:events", "payload") is None
+    assert publisher.attempts > 1
+    assert sum(delays) <= 60.0
+    assert max(delays) <= 10.0
+
+
+async def test_publish_does_not_retry_connection_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    publisher = _EventuallyAsyncPublisher(RedisConnectionError, failures=100)
+    delays: list[float] = []
+
+    async def _record_sleep(delay: float) -> None:
+        delays.append(delay)
+
+    monkeypatch.setattr(mod, "get_async_redis", lambda: publisher)
+    monkeypatch.setattr(mod, "_sleep_async", _record_sleep, raising=False)
+
+    assert await mod.publish_best_effort("ava:events", "payload") is None
+    assert publisher.attempts == 1
+    assert delays == []
+
+
+def test_sync_publish_retries_auth_failures_with_bounded_exponential_delays(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    publisher = _EventuallySyncPublisher(failures=2)
+    delays: list[float] = []
+
+    def _record_sleep(delay: float) -> None:
+        delays.append(delay)
+
+    def _fake_sync_redis(*, decode_responses: bool = False) -> _EventuallySyncPublisher:
+        return publisher
+
+    monkeypatch.setattr(mod, "sync_redis", _fake_sync_redis)
+    monkeypatch.setattr(mod, "_sleep_sync", _record_sleep, raising=False)
+    monkeypatch.setattr(mod, "_auth_retry_jitter", _max_jitter, raising=False)
+
+    assert mod.publish_best_effort_sync("ava:events", "payload") == 3
+    assert publisher.attempts == 3
+    assert delays == [0.5, 1.0]
 
 
 async def test_different_loops_get_different_clients() -> None:
