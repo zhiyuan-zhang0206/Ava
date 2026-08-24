@@ -18,6 +18,8 @@ interface FetchCall {
   init: RequestInit | undefined;
 }
 
+const GATEWAY_TELEMETRY_KEY_PATTERN = /^[a-z0-9._-]{1,128}$/;
+
 let calls: FetchCall[];
 
 beforeEach(() => {
@@ -55,10 +57,31 @@ describe("browser API timing", () => {
     await api.getAgentInspect(2697, 1);
 
     expect(track).toHaveBeenCalledWith("api-timing", {
-      key: "agents/id/inspect",
+      key: "agents.id.inspect",
       value: 801,
       dedupe: false,
     });
+  });
+
+  it("emits gateway-valid keys for representative API routes", async () => {
+    const routes = [
+      ["/api/status", "status"],
+      ["/api/stats/dashboard?hours=6", "stats.dashboard"],
+      ["/api/agents/2697/inspect?hours=1", "agents.id.inspect"],
+      ["/api/agents/2697/shell/42", "agents.id.shell.id"],
+      ["/api/fleet/graph", "fleet.graph"],
+      ["/api/memory/search?q=x", "memory.search"],
+    ] as const;
+    const now = vi.spyOn(performance, "now");
+
+    for (const [path] of routes) {
+      now.mockReturnValueOnce(1_000).mockReturnValueOnce(1_801);
+      await api.head(path);
+    }
+
+    const keys = vi.mocked(track).mock.calls.map(([, options]) => options?.key);
+    expect(keys).toEqual(routes.map(([, expected]) => expected));
+    for (const key of keys) expect(key).toMatch(GATEWAY_TELEMETRY_KEY_PATTERN);
   });
 
   it("does not report a request at the 800 ms threshold", async () => {

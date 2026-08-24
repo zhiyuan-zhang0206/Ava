@@ -105,12 +105,13 @@ export const assetUrl = (path: string): string => `${API_BASE}${path}`;
 
 function apiTimingKey(path: string): string {
   const pathname = path.split("?", 1)[0].replace(/^\/api\/?/, "");
-  // Numeric route segments use the schema-safe literal `id` (no braces), so
-  // every concrete agent/schedule/session id folds into one bounded key.
+  // Numeric route segments use the schema-safe literal `id`. Dot separators
+  // keep keys within the gateway's lowercase letters, digits, dots, dashes,
+  // and underscores alphabet: `^[a-z0-9._-]{1,128}$` (no slashes or braces).
   return pathname
     .split("/")
     .map((segment) => (/^\d+$/.test(segment) ? "id" : segment))
-    .join("/");
+    .join(".");
 }
 
 // All fetch calls go through this. ``credentials: "include"`` sends the
