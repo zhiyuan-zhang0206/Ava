@@ -538,40 +538,59 @@ def count_events(
     cached = loki_events_cache.get(cache_key)
     if cached is not None:
         return cast(int, cached)
-    url = settings.observability.telemetry_loki_url.rstrip("/") + "/loki/api/v1/query"
-    slices = _read_slices(window)
-    total = 0
-    for slice_ in slices:
-        pipeline = _build_logql(
-            era=slice_.era,
-            indexed_labeled=len(slices) == 2 and slice_.era is LokiReadEra.INDEXED,
-            agent_id=agent_id,
-            exclude_agent_ids=exclude_agent_ids,
-            service_only=service_only,
-            event_names=event_names,
-            level_min=level_min,
-            level=level,
-            grep=grep,
-            categories=categories,
-            tiers=tiers,
-            cluster=cluster,
-            machine=machine,
-            trace_id=trace_id,
-            attribute_filters=attribute_filters,
-            drop_json_errors=True,
-        )
-        logql = f"sum(count_over_time(({pipeline})[{_slice_duration_s(slice_)}s]))"
-        payload = _get_json(
-            url,
-            {"query": logql, "time": slice_.end.timestamp()},
-            endpoint="query",
-            timeout_s=timeout_s,
-        )
-        result = payload.get("data", {}).get("result", [])
-        if result:
-            value = result[0].get("value") or result[0].get("values", [None])[-1]
-            total += int(value[1]) if value else 0
-    loki_events_cache.put(cache_key, total)
+    holder, is_leader = loki_events_cache.begin(cache_key)
+    if is_leader:
+        cached = loki_events_cache.get(cache_key)
+        if cached is not None:
+            loki_events_cache.finish(cache_key, holder, value=cached)
+            return cast(int, cached)
+    else:
+        holder.event.wait(loki_events_cache._INFLIGHT_WAIT_S)
+        if holder.error is not None:
+            raise holder.error
+        if holder.value is not None:
+            return cast(int, holder.value)
+    try:
+        url = settings.observability.telemetry_loki_url.rstrip("/") + "/loki/api/v1/query"
+        slices = _read_slices(window)
+        total = 0
+        for slice_ in slices:
+            pipeline = _build_logql(
+                era=slice_.era,
+                indexed_labeled=len(slices) == 2 and slice_.era is LokiReadEra.INDEXED,
+                agent_id=agent_id,
+                exclude_agent_ids=exclude_agent_ids,
+                service_only=service_only,
+                event_names=event_names,
+                level_min=level_min,
+                level=level,
+                grep=grep,
+                categories=categories,
+                tiers=tiers,
+                cluster=cluster,
+                machine=machine,
+                trace_id=trace_id,
+                attribute_filters=attribute_filters,
+                drop_json_errors=True,
+            )
+            logql = f"sum(count_over_time(({pipeline})[{_slice_duration_s(slice_)}s]))"
+            payload = _get_json(
+                url,
+                {"query": logql, "time": slice_.end.timestamp()},
+                endpoint="query",
+                timeout_s=timeout_s,
+            )
+            result = payload.get("data", {}).get("result", [])
+            if result:
+                value = result[0].get("value") or result[0].get("values", [None])[-1]
+                total += int(value[1]) if value else 0
+        loki_events_cache.put(cache_key, total)
+    except BaseException as exc:
+        if is_leader:
+            loki_events_cache.finish(cache_key, holder, error=exc)
+        raise
+    if is_leader:
+        loki_events_cache.finish(cache_key, holder, value=total)
     return total
 
 
@@ -1011,57 +1030,84 @@ def attribute_aggregate(
         return list(cast(list[tuple[str, float]], cached))
     if cached is not None:
         return cast(float, cached)
-    pipelines = _agg_pipelines(
-        window,
-        agent_id=agent_id,
-        service_only=service_only,
-        event_names=event_names,
-        level_min=level_min,
-        level=level,
-        grep=grep,
-        categories=categories,
-        cluster=cluster,
-        machine=machine,
-        trace_id=trace_id,
-        attribute_filters=attribute_filters,
-    )
-
-    if agg == "quantile":
-        if quantile is None:
-            raise ValueError("attribute_aggregate(agg='quantile') needs quantile")
-        result = _quantile_aggregate(
-            pipelines=pipelines,
-            field=field,
-            quantile=quantile,
-            group_by=group_by,
-            timeout_s=timeout_s,
-        )
-
-    elif agg == "count":
-        result = _count_attribute_slices(
-            pipelines=pipelines,
-            group_by=group_by,
-            timeout_s=timeout_s,
-        )
+    ops = {
+        "sum": ("sum_over_time", "sum"),
+        "min": ("min_over_time", "min"),
+        "max": ("max_over_time", "max"),
+    }
+    if agg == "quantile" and quantile is None:
+        raise ValueError("attribute_aggregate(agg='quantile') needs quantile")
+    if agg not in {*ops, "quantile", "count"}:
+        raise ValueError(f"attribute_aggregate: unknown agg {agg!r}")
+    holder, is_leader = loki_events_cache.begin(cache_key)
+    if is_leader:
+        cached = loki_events_cache.get(cache_key)
+        if isinstance(cached, list):
+            cached_list = cast(list[tuple[str, float]], cached)
+            loki_events_cache.finish(cache_key, holder, value=cached_list)
+            return list(cached_list)
+        if cached is not None:
+            loki_events_cache.finish(cache_key, holder, value=cached)
+            return cast(float, cached)
     else:
-        ops = {
-            "sum": ("sum_over_time", "sum"),
-            "min": ("min_over_time", "min"),
-            "max": ("max_over_time", "max"),
-        }
-        if agg not in ops:
-            raise ValueError(f"attribute_aggregate: unknown agg {agg!r}")
-        range_op, cross_op = ops[agg]
-        result = _numeric_attribute_slices(
-            pipelines=pipelines,
-            field=field,
-            agg=agg,
-            group_by=group_by,
-            range_op=range_op,
-            cross_op=cross_op,
-            timeout_s=timeout_s,
+        holder.event.wait(loki_events_cache._INFLIGHT_WAIT_S)
+        if holder.error is not None:
+            raise holder.error
+        inflight_value = cast(float | list[tuple[str, float]] | None, holder.value)
+        if isinstance(inflight_value, list):
+            return list(inflight_value)
+        if inflight_value is not None:
+            return inflight_value
+    try:
+        pipelines = _agg_pipelines(
+            window,
+            agent_id=agent_id,
+            service_only=service_only,
+            event_names=event_names,
+            level_min=level_min,
+            level=level,
+            grep=grep,
+            categories=categories,
+            cluster=cluster,
+            machine=machine,
+            trace_id=trace_id,
+            attribute_filters=attribute_filters,
         )
-    loki_events_cache.put(cache_key, list(result) if isinstance(result, list) else result)
+
+        if agg == "quantile":
+            result = _quantile_aggregate(
+                pipelines=pipelines,
+                field=field,
+                quantile=cast(float, quantile),
+                group_by=group_by,
+                timeout_s=timeout_s,
+            )
+
+        elif agg == "count":
+            result = _count_attribute_slices(
+                pipelines=pipelines,
+                group_by=group_by,
+                timeout_s=timeout_s,
+            )
+        else:
+            range_op, cross_op = ops[agg]
+            result = _numeric_attribute_slices(
+                pipelines=pipelines,
+                field=field,
+                agg=agg,
+                group_by=group_by,
+                range_op=range_op,
+                cross_op=cross_op,
+                timeout_s=timeout_s,
+            )
+        stored_result = list(result) if isinstance(result, list) else result
+        loki_events_cache.put(cache_key, stored_result)
+    except BaseException as exc:
+        if is_leader:
+            loki_events_cache.finish(cache_key, holder, error=exc)
+        raise
+    if is_leader:
+        loki_events_cache.finish(cache_key, holder, value=stored_result)
     return result
 
 

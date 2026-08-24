@@ -73,6 +73,34 @@ class _FakeClient:
         return item if isinstance(item, _FakeResponse) else _FakeResponse(item)
 
 
+class _SlowClient:
+    """Return one reusable response slowly so callers overlap in flight."""
+
+    def __init__(
+        self,
+        response: _FakeResponse,
+        *,
+        delay_s: float = 0.2,
+        release: threading.Event | None = None,
+    ) -> None:
+        self.response = response
+        self.delay_s = delay_s
+        self.release = release
+        self.calls: list[tuple[str, dict[str, Any]]] = []
+        self.entered = threading.Event()
+        self._lock = threading.Lock()
+
+    def get(self, url: str, params: dict[str, Any]) -> _FakeResponse:
+        with self._lock:
+            self.calls.append((url, params))
+        self.entered.set()
+        if self.release is None:
+            time.sleep(self.delay_s)
+        else:
+            assert self.release.wait(timeout=2)
+        return self.response
+
+
 class _SeriesLimitResponse(_FakeResponse):
     """Loki's max_query_series rejection (400) — raise_for_status raises the
     real exception type the gateway sees (httpx.HTTPStatusError), carrying
@@ -169,6 +197,27 @@ def test_aggregation_cache_clears_at_entry_cap() -> None:
     assert loki_events_cache.get((0,)) is None
     assert loki_events_cache.get((1023,)) is None
     assert loki_events_cache.get((1024,)) == 1024
+
+
+def test_aggregation_cache_clear_detaches_inflight_without_stranding_waiters() -> None:
+    key = ("shape", "params", 1, 2)
+    holder, is_leader = loki_events_cache.begin(key)
+    waiter, waiter_is_leader = loki_events_cache.begin(key)
+
+    assert is_leader is True
+    assert waiter_is_leader is False
+    assert waiter is holder
+
+    loki_events_cache.clear()
+    replacement, replacement_is_leader = loki_events_cache.begin(key)
+    assert replacement_is_leader is True
+    assert replacement is not holder
+
+    loki_events_cache.finish(key, holder, value=42)
+    assert waiter.event.wait(timeout=0.1)
+    assert waiter.value == 42
+
+    loki_events_cache.finish(key, replacement, value=43)
 
 
 def _loki_payload(lines: list[tuple[str, str]]) -> dict[str, Any]:
@@ -1055,6 +1104,75 @@ class TestCountEvents:
         )
         assert len(client.calls) == 1
 
+    def test_count_events_deduplicates_concurrent_same_key_misses(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        client = _SlowClient(
+            _FakeResponse({"data": {"result": [{"metric": {}, "value": [1, "42"]}]}})
+        )
+        monkeypatch.setattr(loki_events, "_client", _accessor(client))
+        barrier = threading.Barrier(2)
+
+        def count() -> int:
+            barrier.wait(timeout=1)
+            return loki_events.count_events(
+                event_names=["turn_end"],
+                from_=datetime(2026, 8, 1, tzinfo=UTC),
+                to=datetime(2026, 8, 2, tzinfo=UTC),
+            )
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = [
+                future.result(timeout=2) for future in [pool.submit(count) for _ in range(2)]
+            ]
+
+        assert results == [42, 42]
+        assert len(client.calls) == 1
+
+    def test_count_events_rechecks_cache_after_claiming_a_retired_key(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        client = _install(
+            monkeypatch,
+            {"data": {"result": [{"metric": {}, "value": [1, "42"]}]}},
+        )
+        first_miss = threading.Event()
+        resume_first = threading.Event()
+        real_get = loki_events_cache.get
+        get_count = 0
+        get_lock = threading.Lock()
+
+        def pause_first_miss(key: tuple[object, ...]) -> object | None:
+            nonlocal get_count
+            result = real_get(key)
+            with get_lock:
+                get_count += 1
+                this_get = get_count
+            if this_get == 1 and result is None:
+                first_miss.set()
+                assert resume_first.wait(timeout=2)
+            return result
+
+        monkeypatch.setattr(loki_events_cache, "get", pause_first_miss)
+
+        def count() -> int:
+            return loki_events.count_events(
+                event_names=["turn_end"],
+                from_=datetime(2026, 8, 1, tzinfo=UTC),
+                to=datetime(2026, 8, 2, tzinfo=UTC),
+            )
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            paused = pool.submit(count)
+            assert first_miss.wait(timeout=1)
+            try:
+                assert pool.submit(count).result(timeout=2) == 42
+            finally:
+                resume_first.set()
+            assert paused.result(timeout=2) == 42
+
+        assert len(client.calls) == 1
+
     def test_count_events_cache_miss_on_new_minute(self, monkeypatch: pytest.MonkeyPatch) -> None:
         client = _install(
             monkeypatch,
@@ -1319,6 +1437,165 @@ class TestAttributeAggregate:
             aggregate()
         with pytest.raises(httpx.HTTPStatusError):
             aggregate()
+        assert len(client.calls) == 2
+
+    def test_attribute_aggregate_deduplicates_concurrent_same_key_misses(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        response = _FakeResponse(
+            {
+                "data": {
+                    "result": [
+                        {"metric": {"model": "deepseek-v4-flash"}, "value": [1, "100.0"]},
+                        {"metric": {"model": "deepseek-v4-pro"}, "value": [1, "200.0"]},
+                    ]
+                }
+            }
+        )
+        client = _SlowClient(response)
+        monkeypatch.setattr(loki_events, "_client", _accessor(client))
+        barrier = threading.Barrier(2)
+
+        def aggregate() -> float | list[tuple[str, float]]:
+            barrier.wait(timeout=1)
+            return loki_events.attribute_aggregate(
+                field="in_total",
+                agg="sum",
+                group_by="model",
+                from_=datetime(2026, 8, 1, tzinfo=UTC),
+                to=datetime(2026, 8, 2, tzinfo=UTC),
+            )
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = [
+                future.result(timeout=2) for future in [pool.submit(aggregate) for _ in range(2)]
+            ]
+
+        expected = [("deepseek-v4-flash", 100.0), ("deepseek-v4-pro", 200.0)]
+        assert results == [expected, expected]
+        assert results[0] is not results[1]
+        assert len(client.calls) == 1
+
+    def test_attribute_aggregate_waiter_isolated_from_leader_list_mutation(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        response = _FakeResponse(
+            {
+                "data": {
+                    "result": [
+                        {"metric": {"model": "deepseek-v4-flash"}, "value": [1, "100.0"]},
+                    ]
+                }
+            }
+        )
+        release_leader_query = threading.Event()
+        client = _SlowClient(response, release=release_leader_query)
+        monkeypatch.setattr(loki_events, "_client", _accessor(client))
+        waiter_claimed = threading.Event()
+        waiter_has_result = threading.Event()
+        release_waiter = threading.Event()
+        real_begin = loki_events_cache.begin
+
+        class _GatedEvent(threading.Event):
+            def __init__(self, event: threading.Event) -> None:
+                super().__init__()
+                self._event = event
+
+            def set(self) -> None:
+                self._event.set()
+
+            def wait(self, timeout: float | None = None) -> bool:
+                ready = self._event.wait(timeout)
+                waiter_has_result.set()
+                assert release_waiter.wait(timeout=2)
+                return ready
+
+        def gate_waiter(key: tuple[object, ...]) -> tuple[loki_events_cache._Inflight, bool]:
+            holder, is_leader = real_begin(key)
+            if not is_leader:
+                holder.event = _GatedEvent(holder.event)
+                waiter_claimed.set()
+            return holder, is_leader
+
+        monkeypatch.setattr(loki_events_cache, "begin", gate_waiter)
+
+        def aggregate() -> float | list[tuple[str, float]]:
+            return loki_events.attribute_aggregate(
+                field="in_total",
+                agg="sum",
+                group_by="model",
+                from_=datetime(2026, 8, 1, tzinfo=UTC),
+                to=datetime(2026, 8, 2, tzinfo=UTC),
+            )
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            leader = pool.submit(aggregate)
+            assert client.entered.wait(timeout=1)
+            waiter = pool.submit(aggregate)
+            try:
+                assert waiter_claimed.wait(timeout=1)
+                release_leader_query.set()
+                assert waiter_has_result.wait(timeout=2)
+                leader_result = leader.result(timeout=1)
+                assert isinstance(leader_result, list)
+                leader_result.append(("caller-mutation", -1.0))
+            finally:
+                release_leader_query.set()
+                release_waiter.set()
+            waiter_result = waiter.result(timeout=1)
+
+        assert waiter_result == [("deepseek-v4-flash", 100.0)]
+
+    def test_attribute_aggregate_propagates_leader_failure_to_waiter(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        client = _SlowClient(_SeriesLimitResponse())
+        monkeypatch.setattr(loki_events, "_client", _accessor(client))
+        barrier = threading.Barrier(2)
+
+        def aggregate() -> float | list[tuple[str, float]]:
+            barrier.wait(timeout=1)
+            return loki_events.attribute_aggregate(
+                field="duration_seconds",
+                agg="sum",
+                from_=datetime(2026, 8, 1, tzinfo=UTC),
+                to=datetime(2026, 8, 2, tzinfo=UTC),
+            )
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = [pool.submit(aggregate) for _ in range(2)]
+            for future in futures:
+                with pytest.raises(httpx.HTTPStatusError):
+                    future.result(timeout=2)
+
+        assert len(client.calls) == 1
+
+    def test_attribute_aggregate_wait_timeout_falls_back_to_own_query(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        client = _SlowClient(
+            _FakeResponse({"data": {"result": [{"metric": {}, "value": [1, "42.5"]}]}}),
+            delay_s=0.1,
+        )
+        monkeypatch.setattr(loki_events, "_client", _accessor(client))
+        monkeypatch.setattr(loki_events_cache, "_INFLIGHT_WAIT_S", 0.01)
+        barrier = threading.Barrier(2)
+
+        def aggregate() -> float | list[tuple[str, float]]:
+            barrier.wait(timeout=1)
+            return loki_events.attribute_aggregate(
+                field="duration_seconds",
+                agg="sum",
+                from_=datetime(2026, 8, 1, tzinfo=UTC),
+                to=datetime(2026, 8, 2, tzinfo=UTC),
+            )
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = [
+                future.result(timeout=2) for future in [pool.submit(aggregate) for _ in range(2)]
+            ]
+
+        assert results == [42.5, 42.5]
         assert len(client.calls) == 2
 
     @pytest.mark.parametrize(
