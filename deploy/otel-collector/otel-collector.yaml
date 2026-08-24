@@ -103,7 +103,7 @@ $REMOTE_OTLP_RECEIVER
         - job_name: ava-otel-collector
           scrape_interval: 30s
           static_configs:
-            - targets: [127.0.0.1:8888]
+            - targets: [$SELF_METRICS_PORT]
 
   # ── Session-log tailing (2026-08-23 cutover; replaces promtail) ──────────
   # Each machine's collector tails the local session stdout the way promtail
@@ -173,14 +173,17 @@ processors:
     send_batch_max_size: 1024
     timeout: 5s
 
-  # The infra pipeline's extra processors. host_metrics/postgresql/redis
-  # carry no host identity of their own, so detection supplies host.name and
-  # the transform copies it onto every datapoint: a resource attribute would
-  # land in Prometheus's `target_info` instead of on the series, which no
-  # alert expression can select on. The label is `host` (the OS hostname) —
-  # deliberately NOT `machine` (the Ava machine name that app metrics carry),
-  # because the two can differ and one label with two meanings is worse than
-  # two labels.
+  # The infra pipeline's extra processors. host_metrics/postgresql/redis carry
+  # no host identity of their own, so detection supplies host.name and the
+  # transform puts both identities on every datapoint: `host` is the OS
+  # hostname (physical identity; the fleet's Windows box reports zzy-lenovo
+  # while its Ava name is win), and `machine_name` is the Ava roster identity
+  # baked from this unit at converge via $MACHINE_NAME (macmini / macbook-air /
+  # win / wsl). One label per meaning; dashboards and alert rules group by
+  # `machine_name`. App metrics already carry `machine` / `agent_id`, and this
+  # transform cannot touch them because it sits on the infra pipeline only.
+  # Datapoint attributes are required: resource attributes land in
+  # Prometheus's `target_info`, where alert expressions cannot select on them.
   resource_detection/host:
     detectors: [system]
     system:
@@ -198,6 +201,7 @@ processors:
       - context: datapoint
         statements:
           - set(attributes["host"], resource.attributes["host.name"])
+          - set(attributes["machine_name"], $MACHINE_NAME)
   # Loki can promote OTLP resource attributes, not log attributes. Copy the
   # bounded event dimensions before the logs exporter; service rows keep no
   # agent_id label instead of minting an empty stream dimension.
@@ -245,6 +249,9 @@ $OTLP_EXPORTERS
       max_backups: 16
 
 service:
+  telemetry:
+    metrics:
+      address: $SELF_METRICS_PORT
   extensions: [file_storage, file_storage/logoffsets$CLUSTER_AUTH_SERVICE_EXTENSION]
   pipelines:
     traces:

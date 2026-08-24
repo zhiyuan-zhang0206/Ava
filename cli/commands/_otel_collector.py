@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import hashlib
 import ipaddress
+import json
 import os
 import platform
 import shutil
@@ -104,6 +105,11 @@ def _config_template(repo: Path) -> str:
 def _yaml_quote(value: str) -> str:
     """A single-quoted YAML scalar — the form that needs no escaping but ''."""
     return "'" + value.replace("'", "''") + "'"
+
+
+def _ottl_quote(value: str) -> str:
+    """A JSON string literal, which is also an escaped OTTL string literal."""
+    return json.dumps(value, ensure_ascii=False)
 
 
 def _unspecified_address(host: str) -> bool:
@@ -440,18 +446,21 @@ def generate_config(repo: Path, ava_home: Path, roles: MachineRoles | None) -> s
     """Render the sidecar config from the repo template + this unit's settings."""
     from shared.cluster import home_label
     from shared.config import settings
+    from shared.machine import machine_name
 
     obs = settings.observability
     data_plane_block, data_plane_pipeline = _data_plane_receivers(roles)
     substitutions = {
         "AVA_HOME": str(ava_home),
         "CLUSTER_LABEL": home_label(ava_home),
+        "MACHINE_NAME": _ottl_quote(machine_name()),
         # Kept as named generation inputs for small downstream/custom templates;
         # the shipped template consumes the role-specific OTLP_EXPORTERS block.
         "TEMPO_ENDPOINT": obs.telemetry_tempo_endpoint.rstrip("/"),
         "LOKI_BASE": obs.telemetry_loki_url.rstrip("/") + "/otlp",
         "PROM_BASE": obs.telemetry_prometheus_url.rstrip("/") + "/api/v1/otlp",
         "RETENTION_DAYS": str(obs.trace_retention_days),
+        "SELF_METRICS_PORT": f"localhost:{obs.otel_collector_metrics_port}",
         "DATA_PLANE_RECEIVERS": data_plane_block,
         "DATA_PLANE_PIPELINE_RECEIVERS": data_plane_pipeline,
         "OTLP_EXPORTERS": _otlp_exporters(roles),

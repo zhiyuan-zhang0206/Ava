@@ -1,7 +1,7 @@
 ---
 type: doc
 title: "Infrastructure metrics — the sidecar's own scrapes"
-description: "The traditional SRE layer (issue #46): each running OTel Collector scrapes host metrics and its own queue/drop/uptime metrics; the marked gateway also scrapes its usable data-plane receivers. The dedicated `metrics/infra` pipeline attaches `host` and lands in central Prometheus without extra exporter binaries."
+description: "The traditional SRE layer (issue #46): each running OTel Collector scrapes host metrics and its own queue/drop/uptime metrics; the marked gateway also scrapes its usable data-plane receivers. The dedicated `metrics/infra` pipeline attaches physical `host` and Ava roster `machine_name` identities and lands in central Prometheus without extra exporter binaries."
 tags:
 - shared
 - telemetry
@@ -24,10 +24,11 @@ Ava code participates and a box with no agents running still reports.
   only; the per-core cumulative `system.cpu.time` is disabled), load, memory,
   disk, filesystem, network.
 - `prometheus/otelcol`, on every **collector-bearing** machine, every 30 s from the collector's
-  loopback `127.0.0.1:8888` endpoint — exporter queue size/capacity, enqueue
-  failure counters and process uptime. These are the delivery path's own
-  observability: queue pressure and new drops must not hide behind a receiver
-  that merely remains alive.
+  loopback self-metrics endpoint — exporter queue size/capacity, enqueue
+  failure counters and process uptime. Its port is per-unit configurable via
+  `AVA_OTELCOL_METRICS_PORT` (default 8888), so two units on one host do not
+  collide. These are the delivery path's own observability: queue pressure and
+  new drops must not hide behind a receiver that merely remains alive.
 - `postgresql` + `redis`, every 60 s, on a **gateway-capable unit only** —
   this cluster's own data plane. Postgres is dialed DIRECT (never PgBouncer:
   `pg_stat_*` over a transaction-pooled session is not trustworthy) as the
@@ -50,17 +51,22 @@ The infra receivers ride `metrics/infra`, a pipeline of their own, so the
 host-identity processors never touch app metrics (which already carry
 `machine` / `agent_id` datapoint attributes from the emitter):
 
-- `resource_detection/host` supplies `host.name`;
+- `resource_detection/host` supplies the OS `host.name` (physical identity);
 - `resource/infra` pins `service.name=ava-infra`, which Prometheus's OTLP
   receiver turns into `job="ava-infra"` — without it the series would land
   under a synthesized unknown-service job;
-- `transform/host_label` copies `host.name` onto every datapoint as `host`.
-  A *resource* attribute would land in Prometheus's `target_info` instead of
-  on the series, where no alert expression can select on it.
+- `transform/host_label` copies `host.name` onto every datapoint as `host` and
+  stamps `machine_name` from the unit's Ava roster identity baked into the
+  config at converge. A *resource* attribute would land in Prometheus's
+  `target_info` instead of on the series, where no alert expression can select
+  on it.
 
-`host` is the OS hostname and deliberately not named `machine`: the Ava
-machine name can differ, and one label with two meanings is worse than two
-labels.
+One label has one meaning: `host` is the OS hostname (physical identity; the
+fleet's Windows box reports `zzy-lenovo`) and `machine_name` is the Ava roster
+identity (`macmini` / `macbook-air` / `win` / `wsl`). Per the 2026-08-24 user
+ruling, dashboards and alert rules group by `machine_name`, so Windows and WSL
+remain separate series. App metrics keep their existing `machine` / `agent_id`
+attributes because the transform sits only on `metrics/infra`.
 
 Cardinality is filtered at the source, not in Prometheus: synthetic mounts
 (`/System/Volumes/*`, devfs, autofs …) and macOS's ~30 virtual interfaces
@@ -103,9 +109,11 @@ gateway collector writes to loopback Prometheus.
 
 - Alert rules R8-R12 read host/data-plane series. R14-R16 read collector
   delivery series: current queue ratio over 0.80, `increase` of the translated
-  `otelcol_exporter_enqueue_failed_*_total` counters over 5 minutes, and a host
-  seen in 24h whose `otelcol_process_uptime_total` disappeared for 5 minutes.
-  The suffixes are Prometheus 3's OTLP translation, not the raw `:8888` names.
+  `otelcol_exporter_enqueue_failed_*_total` counters over 5 minutes, and a
+  machine seen in 24h whose `otelcol_process_uptime_total` disappeared for 5
+  minutes.
+  The suffixes are Prometheus 3's OTLP translation, not the raw collector
+  self-metrics names.
   Rules and the `ava-ops-main` dashboard (its "Host & data plane" section) live in
   `deploy/lgtm/config/grafana/provisioning/`.
 - Metric names were read off a live Prometheus 3.13.2, not inferred from the

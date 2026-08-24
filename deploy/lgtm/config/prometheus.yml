@@ -8,7 +8,9 @@
 # Collector sidecar (`host_metrics` receiver, plus `postgresql` + `redis` on a
 # gateway unit). One already-pinned binary per machine instead of three more,
 # and the same path for a remote runner that this Prometheus cannot scrape.
-# Those series land under `job="ava-infra"` with a `host` label.
+# Those series land under `job="ava-infra"` with `host` (OS hostname / physical
+# identity) and `machine_name` (Ava roster identity); consumers group by the
+# latter.
 global:
   scrape_interval: 15s
   evaluation_interval: 15s
