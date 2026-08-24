@@ -162,10 +162,10 @@ async function jsonWithTimeout<T>(
   }
 }
 
-// The backend's aggregate deadline is 15s. This slightly wider client bound
-// covers response serialization/network transit while still bounding a dead
-// gateway or a response body that never completes.
-const INSPECT_REQUEST_TIMEOUT_MS = 20_000;
+// The backend's aggregate deadline is 30s. This wider client bound adds
+// serialization/network transit margin while still bounding a dead gateway
+// or a response body that never completes.
+const INSPECT_REQUEST_TIMEOUT_MS = 35_000;
 
 function isAmbiguousDeliveryError(error: unknown): boolean {
   if (!(error instanceof ApiError)) return true;
