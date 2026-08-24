@@ -480,8 +480,7 @@
       "ops": "Ops",
       "language": "语言",
       "status-services": "服务",
-      "status-resources": "资源",
-      "status-gateway-daemons": "Gateway 守护进程",
+      "status-gateway": "网关",
       "ops-metrics": "指标 (Grafana)",
       "alerts": "告警"
     },

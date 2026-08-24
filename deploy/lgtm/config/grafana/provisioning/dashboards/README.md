@@ -67,9 +67,10 @@ summaries cover the same information.
     event panels; only the logs panel survived (into `core`), and the
     Tempo panel left with it.
   - `ava-host-dataplane.json` — content merged into the `Host & data
-    plane` section. Its uid was load-bearing (the status page's Resources
-    "History" link); that link now points at ava-ops-main
-    (`ui/web/src/app/insights/status/page.tsx`).
+    plane` section. The Resources block on `/insights` was removed 2026-08-24
+    (user ruling, task #1479): Grafana's `Host & data plane` section is now the
+    only surface for per-host CPU/memory/load/filesystem/disk/network, while
+    Insights Status renders Services and a merged Gateway section.
 
 Datasources (provisioned in `../datasources/datasources.yml`): **Loki**
 (fixed uid `loki`) for every event panel; **Postgres** (uid `ops`) for the

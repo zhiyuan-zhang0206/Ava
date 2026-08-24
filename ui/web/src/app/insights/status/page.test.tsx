@@ -1,6 +1,6 @@
 // Status section tests — the tri-state (loading / quiet-error / data), the
-// Services block (gateway card + agent-runner table + cluster-wide Update /
-// Restart actions), pin/off-pin display, and the gateway daemon list.
+// Services block (agent-runner table + cluster-wide Update / Restart actions),
+// pin/off-pin display, and the merged Gateway card + daemon section.
 //
 // Renders <StatusPage /> directly (no Control page shell): useSectionVisible
 // defaults true outside a provider, so the status poll enables and goes through
@@ -165,8 +165,8 @@ describe("StatusPage states", () => {
   });
 });
 
-describe("StatusPage Services block", () => {
-  it("gateway renders as a card, agent-runners as a table", async () => {
+describe("StatusPage Services and Gateway sections", () => {
+  it("keeps agent runners under Services and the gateway card under Gateway", async () => {
     wrap(<StatusPage />);
     await waitFor(() => screen.getByText("Services"));
     expect(screen.getByText(/this host: test-host \(gateway\)/)).toBeTruthy();
@@ -180,6 +180,8 @@ describe("StatusPage Services block", () => {
     const table = screen.getByTestId("agent-runners-card");
     expect(table.textContent).toMatch(/wsl/);
     expect(table.textContent).toMatch(/test-host-2/);
+    expect(document.getElementById("status-services")?.contains(table)).toBe(true);
+    expect(document.getElementById("status-gateway")?.contains(card)).toBe(true);
   });
 
   it("staging machines carry a staging badge but stay roster-visible", async () => {
@@ -487,6 +489,21 @@ describe("StatusPage Services block", () => {
     expect(screen.getByText(/no host has run/)).toBeTruthy();
   });
 
+  it("gateway-only host does not render the no-host or agent-runners states", async () => {
+    vi.spyOn(api, "getSystemStatus").mockResolvedValue({
+      ...STATUS_OK,
+      cluster: {
+        ...STATUS_OK.cluster,
+        machines: [STATUS_OK.cluster.machines[0]],
+      },
+    });
+    wrap(<StatusPage />);
+    await waitFor(() => screen.getByTestId("gateway-card-test-host"));
+    expect(screen.queryByText(/no host has run/)).toBeNull();
+    expect(screen.queryByTestId("agent-runners-card")).toBeNull();
+    expect(screen.getByTestId("gateway-card-test-host")).toBeTruthy();
+  });
+
   it("single-box host (both flags) appears as the gateway card AND a runner row", async () => {
     vi.spyOn(api, "getSystemStatus").mockResolvedValue({
       ...STATUS_OK,
@@ -609,11 +626,11 @@ describe("StatusPage Services block", () => {
   });
 });
 
-describe("StatusPage gateway daemons", () => {
+describe("StatusPage gateway section", () => {
   it("all three online states (true/false/null) render", async () => {
     wrap(<StatusPage />);
     await waitFor(() => screen.getByText("Labeler"));
-    expect(screen.getByText("Gateway daemons")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Gateway", level: 3 })).toBeTruthy();
     expect(screen.getAllByText("Gateway").length).toBeGreaterThan(0);
     expect(screen.getByText("Labeler")).toBeTruthy();
     expect(screen.getByText("Memory Indexer")).toBeTruthy();
@@ -632,14 +649,10 @@ describe("StatusPage gateway daemons", () => {
 });
 
 describe("StatusPage sub-anchors", () => {
-  it("each block carries its nav anchor id (Services / Resources / daemons)", async () => {
+  it("each block carries its nav anchor id (Services / Gateway)", async () => {
     wrap(<StatusPage />);
     await waitFor(() => screen.getByText("Services"));
-    for (const id of [
-      "status-services",
-      "status-resources",
-      "status-gateway-daemons",
-    ]) {
+    for (const id of ["status-services", "status-gateway"]) {
       expect(document.getElementById(id), id).toBeTruthy();
     }
   });

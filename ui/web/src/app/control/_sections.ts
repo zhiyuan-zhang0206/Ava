@@ -108,7 +108,9 @@ export const CONTROL_SECTIONS: ControlSectionDef[] = [
 // Grafana, and old Metrics deep links forward to the Ops section — see
 // RETIRED_INSIGHTS_ANCHORS below.
 // The cluster Restart / Update actions ride the Status section header (see
-// status/page.tsx), so "watch health → act" stays one glance.
+// status/page.tsx), so "watch health → act" stays one glance. Status now has
+// Services + Gateway; Resources was retired 2026-08-24 in favor of Grafana's
+// "Host & data plane" row, and gateway daemons were merged into Gateway.
 export const INSIGHTS_SECTIONS: ControlSectionDef[] = [
   {
     id: "status",
@@ -116,8 +118,7 @@ export const INSIGHTS_SECTIONS: ControlSectionDef[] = [
     labelKey: "status",
     subs: [
       { id: "status-services", label: "Services", labelKey: "status-services" },
-      { id: "status-resources", label: "Resources", labelKey: "status-resources" },
-      { id: "status-gateway-daemons", label: "Gateway daemons", labelKey: "status-gateway-daemons" },
+      { id: "status-gateway", label: "Gateway", labelKey: "status-gateway" },
     ],
   },
   {
