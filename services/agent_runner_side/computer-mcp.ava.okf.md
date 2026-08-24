@@ -53,8 +53,8 @@ the watchdog respawns it on death.
 ## Wire path
 ```
 agent execute_code
-  -> ava.mcps.computer.<tool>            [ava/mcps.py — generic client]
-  -> mcp-daemon                          [ava/_mcps_daemon.py, shared="computer"]
+  -> ava.mcps.computer_use.<tool>        [ava/mcps.py — generic client]
+  -> mcp-daemon                          [ava/_mcps_daemon.py, shared="computer_use"]
   -> ava/_mcp_computer.py (direct dial, per-connection socket)
   -> services/computer/mcp_daemon.py     [serialize + audit + execute]
   -> services/permissions_helper.client  [the one TCC grant-holder]

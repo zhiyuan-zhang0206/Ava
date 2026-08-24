@@ -14,7 +14,7 @@ Protocol (JSON-line, one request/response per line):
 Server subprocess sharing: a server entry may declare `"shared"` in its
 .mcp.json to avoid one stdio child per agent connection:
 
-- `"shared": "browser"` / `"shared": "computer"` — no child at all: the daemon
+- `"shared": "browser"` / `"shared": "computer_use"` — no child at all: the daemon
   dials the per-machine browser-mcp / computer-mcp service's line protocol
   directly (each connection keeps its own socket, so page affinity / agent
   identity stays per agent). Replaces the 60+MB mcp_wrapper.
@@ -56,7 +56,7 @@ def _load_config() -> dict[str, dict[str, Any]]:
 # A `.mcp.json` entry may declare `"shared"` to stop paying one stdio child
 # per agent connection (chrome's wrapper alone is ~63MB RSS per agent):
 #
-# - `"shared": "browser"` / `"shared": "computer"` — the server is fronted by
+# - `"shared": "browser"` / `"shared": "computer_use"` — the server is fronted by
 #   a per-machine service (browser-mcp / computer-mcp); the daemon dials its
 #   line protocol directly and spawns no child. Each connection keeps its own
 #   socket, so the service's per-connection affinity still isolates agents (a
@@ -83,7 +83,7 @@ def _session_buckets(
 
     `"shared": true` servers use the daemon-wide buckets (one child for every
     agent connection, released only at daemon shutdown). Everything else —
-    including `"shared": "browser"` / `"shared": "computer"`, which dial the
+    including `"shared": "browser"` / `"shared": "computer_use"`, which dial the
     per-machine browser-mcp / computer-mcp services directly — uses the
     caller's per-connection buckets: each connection keeps its own socket, so
     the service's per-connection affinity (page context / agent identity)
@@ -179,14 +179,14 @@ async def _connect_server(server: str) -> Any:
     shared = spec.get("shared")
     if shared == "browser":
         return await connect_browser_direct()
-    if shared == "computer":
+    if shared == "computer_use":
         from ._mcp_computer import connect_computer_direct
 
         return await connect_computer_direct()
     if shared not in (None, False, True):
         raise ValueError(
             f"Server {server!r}: unknown shared value {shared!r} "
-            f'(expected true, "browser", or "computer")'
+            f'(expected true, "browser", or "computer_use")'
         )
     cmd = resolve_command(spec["command"])
     args_list = spec.get("args") or []

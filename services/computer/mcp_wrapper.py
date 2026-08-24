@@ -7,7 +7,7 @@ The tool list passes through verbatim from the daemon (single source of truth).
 `agent_id` is stamped on every request from this process's identity, so the
 audit stream carries the acting agent.
 
-Wired in ava_builtins/mcps/computer/.mcp.json as the local-fallback command
+Wired in ava_builtins/mcps/computer_use/.mcp.json as the local-fallback command
 (the MCP daemon's primary path dials the service directly — see
 ava/_mcp_computer.py). Takes no arguments (the socket path is derived from
 settings, matching the daemon). The MCP daemon spawns it with cwd pinned to the
@@ -146,7 +146,7 @@ async def _serve() -> None:
         )
         return types.CallToolResult.model_validate(result)
 
-    server: Server[Any] = Server("computer", on_list_tools=_list_tools, on_call_tool=_call_tool)
+    server: Server[Any] = Server("computer_use", on_list_tools=_list_tools, on_call_tool=_call_tool)
 
     async with stdio_server() as (server_read, server_write):
         await server.run(server_read, server_write, server.create_initialization_options())
