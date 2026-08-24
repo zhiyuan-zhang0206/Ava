@@ -10,6 +10,7 @@ real cmd_start / cmd_cluster_status / etc.
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 
 import pytest
@@ -58,6 +59,20 @@ def test_dispatch_invokes_per_subcommand_handler(
     rc = _main.main(argv)
     assert rc == 42
     assert "args" in captured
+
+
+def test_cli_discards_an_inherited_process_profile(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The CLI always constructs the full settings domain set."""
+    monkeypatch.setenv("AVA_PROCESS_PROFILE", "agent")
+    assert "AVA_PROCESS_PROFILE" in os.environ
+
+    def _fake(_args: argparse.Namespace) -> int:
+        return 0
+
+    monkeypatch.setattr(_main, "_h_status", _fake)
+
+    assert _main.main(["status"]) == 0
+    assert "AVA_PROCESS_PROFILE" not in os.environ
 
 
 def test_status_handler_body_forwards_the_parsed_namespace(

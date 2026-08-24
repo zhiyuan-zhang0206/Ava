@@ -319,6 +319,11 @@ def _print_settings_load_failure(e: ValidationError) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    os.environ.pop("AVA_PROCESS_PROFILE", None)
+    # The CLI is a settings-full process and must never inherit a launcher-set
+    # process profile: with no marker, profiles.py constructs every domain as before.
+    # Importing shared.config.profiles initializes shared.config first, so that
+    # constant cannot be used before this cleanup without constructing Settings.
     # `ava enroll` bootstraps a fresh agent-runner that has no full config yet, so
     # it must run BEFORE any cli.commands import (handlers defer that import, but
     # parser building doesn't need it either — argparse builds fine without
