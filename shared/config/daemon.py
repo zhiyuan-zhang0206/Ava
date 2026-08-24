@@ -156,6 +156,19 @@ class DaemonSettings(EnvSettings):
         },
     )
 
+    idle_shell_reminder_enabled: bool = Field(
+        default=True,
+        alias="AVA_IDLE_SHELL_REMINDER_ENABLED",
+        description="Run the gateway daemon that reminds agents about persistently idle shell sessions. On by default; set false to disable reminders without closing any sessions.",
+        json_schema_extra={
+            "restart_required": "",
+            "writable": False,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": True,
+        },
+    )
+
     heartbeat_interval_seconds: float = Field(
         default=300.0,
         alias="AVA_HEARTBEAT_INTERVAL_SECONDS",

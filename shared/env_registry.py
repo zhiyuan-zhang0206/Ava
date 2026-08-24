@@ -187,6 +187,7 @@ _HEALTH_PORT_SERVICES: tuple[str, ...] = (
     "im_bridge",
     "page_server",
     "agent_host",
+    "idle_shell_reminder",
 )
 
 

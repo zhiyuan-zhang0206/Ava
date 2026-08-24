@@ -330,6 +330,20 @@ class ServiceSettings(EnvSettings):
             "remote_writable": False,
         },
     )
+
+    idle_shell_reminder_pidfile: Path = Field(
+        default_factory=lambda: _unit_home() / "run" / "idle_shell_reminder.pid",
+        alias="AVA_IDLE_SHELL_REMINDER_PIDFILE",
+        description="Idle-shell-reminder daemon pidfile path.",
+        json_schema_extra={
+            "restart_required": "",
+            "writable": False,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
+
     delivery_watchdog_pidfile: Path = Field(
         default_factory=lambda: _unit_home() / "run" / "delivery_watchdog.pid",
         alias="AVA_DELIVERY_WATCHDOG_PIDFILE",
@@ -673,6 +687,20 @@ class ServiceSettings(EnvSettings):
             "remote_writable": False,
         },
     )
+
+    idle_shell_reminder_health_port: int | None = Field(
+        default=None,
+        alias="AVA_IDLE_SHELL_REMINDER_HEALTH_PORT",
+        description="Idle-shell-reminder /healthz port override (per unit). Unset = shared default 8115.",
+        json_schema_extra={
+            "restart_required": "",
+            "writable": False,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
+
     delivery_watchdog_health_port: int | None = Field(
         default=None,
         alias="AVA_DELIVERY_WATCHDOG_HEALTH_PORT",

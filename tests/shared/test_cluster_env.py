@@ -329,7 +329,7 @@ def test_record_health_port_agent_host_never_reaches_past_the_allocated_block(tm
 def test_allocate_ports_skips_blocks_overlapping_legacy_16_port_records(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    """BLOCK_SIZE has grown repeatedly (16 -> 18 -> 19 -> 20), but every
+    """BLOCK_SIZE has grown repeatedly (16 -> 18 -> 19 -> 20 -> 21), but every
     pre-existing record still occupies a 16-port block at 18000+16k — and a
     candidate inside such a block would overlap it. allocate_ports must skip
     overlapping blocks, not just exact bases, or a DOWN cluster's block gets
@@ -345,12 +345,12 @@ def test_allocate_ports_skips_blocks_overlapping_legacy_16_port_records(
 
     monkeypatch.setattr(cl, "_port_free", lambda _port: True)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
 
-    # existing record at 18016 occupies 18016..18031 — at BLOCK_SIZE 20,
-    # candidates 18000 (block 18000..18019 overlaps 18016..18019) and 18020
-    # (18020..18039 overlaps 18020..18031) must be skipped; the first legal
-    # base is 18040
+    # existing record at 18016 occupies 18016..18031 — at BLOCK_SIZE 21,
+    # candidates 18000 (block 18000..18020 overlaps 18016..18020) and 18021
+    # (18021..18041 overlaps 18021..18031) must be skipped; the first legal
+    # base is 18042
     ports = cl.allocate_ports({18016})
-    assert ports["gateway"] == 18040
+    assert ports["gateway"] == 18042
     assert set(ports) == set(cl.PORT_OFFSETS)
     # without any existing record, the allocator starts at BLOCK_START
     assert cl.allocate_ports(set())["gateway"] == BLOCK_START

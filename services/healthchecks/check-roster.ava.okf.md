@@ -22,6 +22,7 @@ tags:
 | `delivery_watchdog.py` | Delivery watchdog | HTTP `/healthz` (identity-verified) with Liveness beat | `respawn_and_verify` | our daemon's work loop is still ticking (a wedged loop 503s via Liveness) |
 | `im_bridge.py` | IM Bridge | HTTP `/healthz` (identity-verified); before respawn, a second bounded read accepts this unit's matching `name` + `home` even on a stale 503 or pidfile mismatch | `respawn_and_verify` | our daemon still owns and answers the health port; Liveness staleness is warning-only because an IM long poll can legitimately block the work loop |
 | `heartbeat.py` | Heartbeat | HTTP `/healthz` (identity-verified) with Liveness beat | `respawn_and_verify` | our daemon's work loop is still ticking |
+| `idle_shell_reminder.py` | Idle-shell-reminder | HTTP `/healthz` (identity-verified) with Liveness beat | `respawn_and_verify` | the daemon's work loop is still ticking |
 | `labeler.py` | Labeler | HTTP `/healthz` (identity-verified) with Liveness beat | `respawn_and_verify` | our daemon's work loop is still ticking |
 | `memory_indexer.py` | Memory-indexer | HTTP `/healthz` (identity-verified) with Liveness beat | `respawn_and_verify` | our daemon's work loop is still ticking |
 | `events_maintenance.py` | Events-maintenance | HTTP `/healthz` (identity-verified) with Liveness beat | `respawn_and_verify` | our daemon's work loop is still ticking |
@@ -39,6 +40,6 @@ tags:
 
 The roster is pinned to reality by `scripts/lint_doc_roster.py` (set equality against the module directory and the ServiceSpec + hand-added registrations) — a module added, removed, or renamed without updating this table fails the lint.
 
-Audit 2026-08-21 (issue #192): all 22 checks traverse what they certify. `milvus.py` was the one port-open-only probe and was upgraded to a real RPC; the phantom `task_maintenance` row and seven missing rows are fixed here. The later `brew_pin.py` assertion traverses Homebrew's own read-only pin roster.
+Audit 2026-08-21 (issue #192): all 22 checks present at the audit traversed what they certify. `milvus.py` was the one port-open-only probe and was upgraded to a real RPC; the phantom `task_maintenance` row and seven missing rows are fixed here. The later `brew_pin.py` assertion traverses Homebrew's own read-only pin roster; later additions follow the same traversal rule.
 
 Parent: [[services/healthchecks/healthchecks.ava.okf.md|healthchecks]].

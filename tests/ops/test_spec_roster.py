@@ -23,6 +23,7 @@ _GATEWAY_SESSIONS = {
     "labeler",
     "heartbeat",
     "delivery-watchdog",
+    "idle-shell-reminder",
     "events-maintenance",
     "task-maintenance",
     "milvus",

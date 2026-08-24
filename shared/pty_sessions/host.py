@@ -1,48 +1,23 @@
-"""PTY session host — one detached process per agent interactive shell.
+"""One detached PTY host per persistent agent shell.
 
-``python -m shared.pty_sessions.host <name> <cwd> <envfile> <record>
-<socket> <transcript> [cmd_b64]``
+Usage: ``python -m shared.pty_sessions.host <name> <cwd> <envfile> <record>
+<socket> <transcript> [cmd_b64]``.
 
-The spawner (``cli.py`` ``new``) launches this module through
-``shared._reparent``, so the host reparents to init the instant it is born:
-it is nobody's child, belongs to no service roster, and no infra teardown —
-``ava stop``, a cluster update, a watchdog respawn — can reach it as part of
-a process tree. The session it carries dies only through its own ``kill``
-op, its shell exiting, or this one process crashing (blast radius: exactly
-one session). That per-session sovereignty is what makes the SDK's
-"sessions persist across terminate/restart/update" promise structurally
-true (decisions/2026-08-13-per-session-pty-hosts.md).
+The spawner reparents this process through ``shared._reparent``. No service
+roster or infra teardown can reach it by process tree; only its ``kill`` op,
+the shell exiting, or this host crashing ends the session. That sovereignty is
+the SDK's persistence guarantee (decisions/2026-08-13-per-session-pty-hosts.md).
 
-**Memory discipline (P1, 2026-08-13)**: one host exists per live session, so
-its import closure is the fleet's steady-state RSS. The record/socket/
-transcript paths arrive pre-resolved on argv so this process never imports
-``shared.paths``/``shared.config`` (the pydantic Settings chain, ~30 MB per
-process); ``shared.log`` itself went on an import-time diet for the same
-reason (its settings pulls are init_*-local now) so the logger is affordable
-here; pyte is imported lazily on the first screen need (a capture, or the
-initial-command prompt wait) — a watcher/schedule host that is never
-captured skips it entirely.
+One host owns the login-shell child, PTY master, bounded raw ring, optional
+lazy pyte screen, byte transcript, identity record, and JSON-line Unix socket.
+The 0600 env file and all paths arrive resolved on argv. Per-session memory is
+fleet memory, so this module avoids the Settings import chain and loads pyte
+only when capture or initial-command prompt detection needs it.
 
-One host owns:
-
-- the ``pty.fork()`` child running ``bash -l -i`` (the pane shape) with its
-  env loaded from a 0600 envfile — never argv (#974);
-- the pty master, fed into a raw ring buffer (and, once anything needs a
-  screen, a pyte model replayed from that ring) + a byte transcript;
-- the session's record (shell pid + start-time as the liveness key, plus
-  this host's own pid) and its unix socket answering send/send_keys/
-  capture/resize/kill/ping as JSON lines.
-
-Session death semantics: the session dies with its shell. The reader reaps
-the child and, on EOF or reap, IMMEDIATELY unlinks the record and socket
-(so a concurrent same-name ``new`` can never adopt a dying host — the
-ghost-success race, P2 review), then closes the master (hanging up the
-slave's foreground group) and exits the process.
-
-The host ignores SIGHUP/SIGTERM/SIGPIPE: a stray hangup or a TERM aimed at
-the shell's tree must not take the session down — ending a session is the
-``kill`` op's job. SIGKILL ends the host and therefore the session; that is
-the accepted per-session equivalent of closing one terminal window.
+On child death the reader immediately unlinks the record and socket before
+closing the master, preventing a dying host from being adopted by a concurrent
+same-name spawn. SIGHUP/SIGTERM/SIGPIPE are ignored; ending a session remains
+the ``kill`` op's responsibility. SIGKILL has one-session blast radius.
 """
 
 from __future__ import annotations
@@ -185,6 +160,7 @@ class PtySession:
         self._lock = threading.Lock()
         self._dead = False
         self._cond = threading.Condition(self._lock)
+        self.last_output_at = time.monotonic()
 
     def feed(self, data: bytes) -> None:
         """Reader-thread ingest: the live screen when one exists, the raw
@@ -192,6 +168,7 @@ class PtySession:
         bug would kill the shell with it) — feed errors are swallowed and
         the ring remains the degraded capture source."""
         with self._lock:
+            self.last_output_at = time.monotonic()
             screen = self._screen
             if screen is None:
                 self._ring += data
@@ -407,6 +384,28 @@ def _op_send(session: PtySession, req: dict[str, Any]) -> dict[str, Any]:
     return ok()
 
 
+def _op_is_idle(session: PtySession, req: dict[str, Any]) -> dict[str, Any]:
+    """Whether the shell owns its tty foreground process group.
+
+    Foreground jobs create their own process group, while background jobs leave
+    the interactive shell in front. A dying or unreadable tty is conservatively
+    busy: it must never produce a reminder based on uncertain process state.
+    """
+    del req
+    if session.dead:
+        return err(3, f"no such pty session: {session.name}")
+    try:
+        foreground_pgrp, shell_pgrp = os.tcgetpgrp(session.master_fd), os.getpgid(session.pid)
+    except OSError:
+        return ok({"idle": False, "idle_since": None})
+    idle = foreground_pgrp > 0 and foreground_pgrp == shell_pgrp
+    if not idle:
+        return ok({"idle": False, "idle_since": None})
+    with session._lock:
+        idle_since = session.last_output_at
+    return ok({"idle": True, "idle_since": idle_since})
+
+
 def _op_capture(session: PtySession, req: dict[str, Any]) -> dict[str, Any]:
     if session.dead:
         return err(3, f"no such pty session: {session.name}")
@@ -508,6 +507,7 @@ _OPS: dict[str, Callable[[PtySession, dict[str, Any]], dict[str, Any]]] = {
     "ping": _op_ping,
     "send": _op_send,
     "send_keys": _op_send,  # keys arrive pre-translated to bytes (cli side)
+    "is_idle": _op_is_idle,
     "capture": _op_capture,
     "resize": _op_resize,
     "kill": _op_kill,
