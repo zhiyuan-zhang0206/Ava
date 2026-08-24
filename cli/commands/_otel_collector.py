@@ -460,7 +460,7 @@ def generate_config(repo: Path, ava_home: Path, roles: MachineRoles | None) -> s
         "LOKI_BASE": obs.telemetry_loki_url.rstrip("/") + "/otlp",
         "PROM_BASE": obs.telemetry_prometheus_url.rstrip("/") + "/api/v1/otlp",
         "RETENTION_DAYS": str(obs.trace_retention_days),
-        "SELF_METRICS_PORT": f"localhost:{obs.otel_collector_metrics_port}",
+        "SELF_METRICS_PORT": str(settings.observability.otel_collector_metrics_port),
         "DATA_PLANE_RECEIVERS": data_plane_block,
         "DATA_PLANE_PIPELINE_RECEIVERS": data_plane_pipeline,
         "OTLP_EXPORTERS": _otlp_exporters(roles),

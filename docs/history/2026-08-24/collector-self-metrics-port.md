@@ -15,3 +15,6 @@ occurred when the WSL box carried both production and preview units.
 target. The watchdog queue-pressure probe reads the same setting rather than a
 fixed port. Co-located units must use distinct values, while a single-unit
 machine keeps the existing default.
+
+Update: the collector schema correction is recorded in
+[collector-telemetry-schema-incident.md](collector-telemetry-schema-incident.md).

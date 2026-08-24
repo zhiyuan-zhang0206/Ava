@@ -103,7 +103,7 @@ $REMOTE_OTLP_RECEIVER
         - job_name: ava-otel-collector
           scrape_interval: 30s
           static_configs:
-            - targets: [$SELF_METRICS_PORT]
+            - targets: [localhost:$SELF_METRICS_PORT]
 
   # ── Session-log tailing (2026-08-23 cutover; replaces promtail) ──────────
   # Each machine's collector tails the local session stdout the way promtail
@@ -251,7 +251,12 @@ $OTLP_EXPORTERS
 service:
   telemetry:
     metrics:
-      address: $SELF_METRICS_PORT
+      readers:
+        - pull:
+            exporter:
+              prometheus:
+                host: localhost
+                port: $SELF_METRICS_PORT
   extensions: [file_storage, file_storage/logoffsets$CLUSTER_AUTH_SERVICE_EXTENSION]
   pipelines:
     traces:
