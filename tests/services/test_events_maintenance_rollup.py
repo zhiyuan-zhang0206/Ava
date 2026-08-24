@@ -399,8 +399,12 @@ def test_migration_backfills_cost_columns_from_events(db: psycopg.Connection) ->
 # ── LogQL shape locks ────────────────────────────────────────────────────────
 
 
-def test_tokens_queries_shapes() -> None:
-    q = rollup._tokens_queries()
+@pytest.mark.parametrize(
+    ("era", "indexed_labeled"),
+    [(LokiReadEra.LEGACY, False), (LokiReadEra.INDEXED, True)],
+)
+def test_tokens_queries_shapes(era: LokiReadEra, indexed_labeled: bool) -> None:
+    q = rollup._tokens_queries(era=era, indexed_labeled=indexed_labeled)
     assert set(q) == {
         "calls",
         "costed_calls",
@@ -410,7 +414,14 @@ def test_tokens_queries_shapes() -> None:
         "tokens_reasoning",
         "cost_usd",
     }
-    assert 'event_name="llm_usage"' in q["calls"]
+    # Body fields are authoritative when structured metadata was promoted
+    # from a different record in the same OTLP batch (task #1515).
+    assert '| json agent_id_extracted="agent_id" | agent_id_extracted=~".+"' in q["calls"]
+    assert (
+        '| json event_name_extracted="event_name" | event_name_extracted=~"llm_usage"' in q["calls"]
+    )
+    assert "| agent_id=" not in q["calls"]
+    assert "| event_name=" not in q["calls"]
     assert q["calls"].startswith("sum by (agent_id, model) (count_over_time(")
     assert '| cost_usd!=""' in q["costed_calls"]
     assert "| unwrap in_total" in q["tokens_in"] and "[86400s]" in q["tokens_in"]
@@ -423,8 +434,8 @@ def test_metrics_queries_shapes() -> None:
     q = rollup._metrics_queries()
     assert q["turn_ok"].count('| json ok="attributes.ok" | ok="true"') == 1
     assert q["turn_dur_min"].startswith("min by (agent_id) (min_over_time(")
-    assert 'event_name=~"exec_.+|exec\\\\(.*"' in q["exec_failed"]
-    assert 'event_name="exec"' in q["exec_ok"]
+    assert 'event_name_extracted=~"exec_.+|exec\\\\(.*"' in q["exec_failed"]
+    assert 'event_name_extracted=~"exec"' in q["exec_ok"]
 
 
 def test_cutover_day_merges_legacy_and_indexed_rollups(monkeypatch: pytest.MonkeyPatch) -> None:

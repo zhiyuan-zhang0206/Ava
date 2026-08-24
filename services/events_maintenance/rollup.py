@@ -124,14 +124,16 @@ def _event_pipeline(
         event_names=event_names,
         indexed_labeled=indexed_labeled,
     )
-    parts = [selector, '| agent_id!=""']
+    parts = [
+        selector,
+        '| json agent_id_extracted="agent_id"',
+        '| agent_id_extracted=~".+"',
+    ]
     if telemetry_only:
         parts.append('| category=~"telemetry|log"')
-    if len(event_names) == 1:
-        parts.append(f'| event_name="{escape_logql_label(event_names[0])}"')
-    else:
-        joined = "|".join(escape_logql_label(event_name) for event_name in event_names)
-        parts.append(f'| event_name=~"{joined}"')
+    joined = "|".join(escape_logql_label(event_name) for event_name in event_names)
+    parts.append('| json event_name_extracted="event_name"')
+    parts.append(f'| event_name_extracted=~"{joined}"')
     return " ".join(parts)
 
 
@@ -143,9 +145,9 @@ def _tokens_queries(
 ) -> dict[str, str]:
     """The per-(agent, model) instant queries for one day's tokens/cost row.
 
-    Structured-metadata dims (agent_id / event_name / category) filter
-    directly; `model` and each numeric field need their own single-extraction
-    `| json` stage (multiple extractions in one stage are a parse error)."""
+    Body-truth agent_id / event_name and payload fields each need their own
+    single-extraction `| json` stage (multiple extractions in one stage are a
+    parse error); category filters structured metadata directly."""
     llm = _event_pipeline(
         era=era,
         event_names=["llm_usage"],
