@@ -21,8 +21,10 @@ or collect, and the `cluster` Resource boundary that isolates co-located homes,
 are specified in [[cluster-isolation.ava.okf.md|Telemetry cluster isolation]].
 
 - `shared/telemetry_otlp.py` — events → OTLP logs + metrics when enabled
-  (default **on**). Exec children warm and flush the same backend; their
-  handshake does not bypass export.
+  (default **on** for the registered `.ava` production identity). Production
+  exec children warm and flush the same backend; test/ad-hoc exec children stay
+  off unless an operator supplies an explicit endpoint. Their request-file
+  handshake is not an export authority.
 - `shared/trace.py` — spans → OTLP/HTTP (protobuf wire, content-stripped) to
   the sidecar's `/v1/traces`; the sidecar's file exporter writes the mirror.
   A missing sidecar reports once and starts one five-minute daemon retry loop.
@@ -66,8 +68,8 @@ are specified in [[cluster-isolation.ava.okf.md|Telemetry cluster isolation]].
   init retries every five minutes, emitting `otlp_backend_disabled` per failure
   and `otlp_backend_recovered` on recovery. A dead collector cannot cost the
   JSONL copy; status events land there when OTLP itself is unavailable. The
-  cached home-role gate warns at most once per process when an unmarked gateway
-  declines the default exporter.
+  cached production-identity/home-role gate warns at most once per process when
+  an unmarked gateway declines the default exporter.
 
 ## Read side
 

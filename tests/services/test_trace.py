@@ -16,6 +16,11 @@ from shared.trace import OtlpJsonHttpSpanExporter, initialize_tracing, turn_span
 
 
 @pytest.fixture(autouse=True)
+def _production_process_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(telemetry_otlp, "production_identity", lambda: True, raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _reset_init_flag():
     """Reset trace-init and retry-loop state between tests."""
     gate = getattr(telemetry_otlp, "_observability_export_allowed", None)
@@ -116,6 +121,7 @@ def test_gateway_trace_recording_skips_without_lgtm_marker(
     home = tmp_path / ".ava-preview"
     home.mkdir()
     monkeypatch.setattr("shared.config.settings.observability.trace_enabled", True)
+    monkeypatch.setattr(telemetry_otlp, "production_identity", lambda: True)
     monkeypatch.setattr("shared.machine.machine_role", lambda: frozenset({"gateway"}))
     monkeypatch.setattr("shared.paths.ava_home", lambda: home)
     monkeypatch.delitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
@@ -140,6 +146,7 @@ def test_gateway_trace_recording_arms_with_lgtm_marker(
     home.mkdir()
     (home / "lgtm-host").touch()
     monkeypatch.setattr("shared.config.settings.observability.trace_enabled", True)
+    monkeypatch.setattr(telemetry_otlp, "production_identity", lambda: True)
     monkeypatch.setattr("shared.machine.machine_role", lambda: frozenset({"gateway"}))
     monkeypatch.setattr("shared.paths.ava_home", lambda: home)
     monkeypatch.setattr("shared.trace.traces_dir", lambda: tmp_path / "traces")

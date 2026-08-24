@@ -34,6 +34,22 @@ def cluster_label(home: Path | None = None) -> str:
             return ".unknown"
 
 
+def production_identity() -> bool:
+    """Whether this process has the registered production identity.
+
+    The default implicit collector belongs only to a configured machine running
+    against the production ``~/.ava`` cluster. Tests, ad-hoc processes without a
+    machine identity, and other homes must opt into their own explicit endpoint.
+    """
+    from shared.machine import MachineNameMissing, machine_name
+
+    try:
+        machine_name()
+    except MachineNameMissing:
+        return False
+    return cluster_label() == ".ava"
+
+
 def endpoint_override_is_explicit(variable: ObservabilityEndpointVariable) -> bool:
     """Whether the process environment explicitly selected an endpoint.
 
