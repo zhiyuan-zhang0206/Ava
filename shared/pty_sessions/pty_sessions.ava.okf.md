@@ -16,7 +16,7 @@ tags:
 host process per session**, no supervisor daemon. The SDK keeps its
 named-session surface (`ava.shell.sessions`, watchers, schedules) unchanged.
 
-Four modules:
+Three modules:
 
 - `host.py` — the per-session host: the `pty.fork()` shell, a reader thread
   feeding a pyte screen model + raw byte ring buffer + byte transcript, and
@@ -28,9 +28,6 @@ Four modules:
   `new` spawns a host; enumeration reads the records — no process to dial.
 - `screen.py` — the pyte wrapper: incremental UTF-8 decode, raw ring buffer,
   screen-parity capture rendering.
-- `retention.py` — the flock-serialized, once-daily retention pass that removes
-  only top-level `*.out.log` transcripts older than seven days. Host logs,
-  other suffixes, directories, and trash subtrees are outside its boundary.
 
 ## Why per-session hosts (the load-bearing shape)
 
@@ -69,9 +66,10 @@ and sharing the dir would force every lister to regex-filter the other
 side's records. A record whose shell is dead is a crashed host's leftover
 and is swept lazily as enumeration discovers it. Transcripts stay at
 `$AVA_HOME/logs/<name>.out.log`; host diagnostics at `<name>.host.log`.
-Each host startup also triggers the daily-throttled retention pass for that
-logs directory, keeping seven days of top-level transcripts without traversing
-trash or any other subtree.
+Host startup never deletes either file. The separately scheduled
+`ava logs retention` command owns local cleanup and skips active open handles;
+its named-PTY allowlist covers `<name>.{out,host}.log` without traversing any
+subtree.
 
 ## Lifecycle
 

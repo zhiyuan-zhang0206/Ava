@@ -120,10 +120,12 @@ discovery churn 50x, the archive lets a returning EOF file reuse its reader
 metadata, and the cap bounds the discovered set. File names become resource
 `service.name`, which Loki exposes as `service_name`; read offsets persist under
 `$AVA_HOME/otel-collector/log-offsets`, so a restart does not replay history.
-The pty-host startup path prunes only top-level local `*.out.log` files older
-than 7 days, at most once per machine per day. It does not recurse into
-`logs-trash-old-*` or `logs-trash-dup-*` directories, which belong to the
-separate cleanup flow. Structured agent logs carry no `log.file.name`, so the
+Local cleanup is explicit: a daily deployment job runs `ava logs retention`,
+whose conservative default is 14 days (`AVA_LOG_RETENTION_DAYS` or
+`--older-than` overrides it). The command admits only agent-main logs, named
+PTY transcript/host logs, and real Loguru rotation names at the top level of
+`$AVA_HOME/logs`; it does not recurse, follow symlinks, or remove files held
+open by a process. Structured agent logs carry no `log.file.name`, so the
 filelog transform leaves them untouched.
 
 ## Environment overrides

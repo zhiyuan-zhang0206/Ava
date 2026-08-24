@@ -266,8 +266,10 @@ output is queried in Loki, not tailed by a CLI: the collector's
 agent main logs; updater/rollout tees use `filelog/orchestration`. Loki's
 `service_name` label is the filename-derived session name. Query via Grafana
 Explore (LogQL), `logcli --addr http://127.0.0.1:3100`, or the Loki HTTP API;
-local `*.out.log` files are pruned after 7 days by a daily-throttled pty-host
-startup scan. See `deploy/lgtm/README.md`.
+local managed logs are pruned only when `ava logs retention` runs (14 days by
+default). The command scans only `$AVA_HOME/logs` itself, admits exact agent,
+named-PTY, and Loguru-rotation filename shapes, rejects symlinks, and skips open
+handles. Register it as a daily per-machine OS job. See `deploy/lgtm/README.md`.
 
 ### Environment forwarding
 

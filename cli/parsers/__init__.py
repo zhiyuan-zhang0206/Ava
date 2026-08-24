@@ -34,6 +34,7 @@ from cli.parsers.host import (
     _add_stop_parser,
     _add_trace_parser,
 )
+from cli.parsers.logs import _add_logs_parser
 from cli.parsers.management import (
     _add_config_parser,
     _add_presets_parser,
@@ -65,6 +66,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_cluster_parser(sub)
     _add_computer_parser(sub)
     _add_trace_parser(sub)
+    _add_logs_parser(sub)
     _add_agents_parser(sub)
     _add_config_parser(sub)
     _add_presets_parser(sub)

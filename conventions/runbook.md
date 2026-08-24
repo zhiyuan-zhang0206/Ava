@@ -1259,7 +1259,36 @@ Where to look when something went wrong on a host:
 | why did a daemon vanish | its log file: every daemon wraps `asyncio.run(main())` and logs the traceback before re-raising |
 | what did milvus say | its log file only — it is a C++ binary with no PG sink |
 | an agent | `$AVA_HOME/logs/agent-{N}.log` (kernel + its exec subprocess, both appending) |
-| raw session stdout (gateway / shells / daemons / schedules) | Loki (the LGTM backend): shell logs → `filelog/sessions`; gateway/daemon/schedule logs → `filelog/services`; updater/rollout tees → `filelog/orchestration`. Banner-only agent main stdout is excluded. All filelog receivers derive Loki `service_name` from the filename and persist offsets; local `*.out.log` and Loki data both retain 7 days. See `deploy/lgtm/README.md`. |
+| raw session stdout (gateway / shells / daemons / schedules) | Loki (the LGTM backend): shell logs → `filelog/sessions`; gateway/daemon/schedule logs → `filelog/services`; updater/rollout tees → `filelog/orchestration`. Banner-only agent main stdout is excluded. All filelog receivers derive Loki `service_name` from the filename and persist offsets. Loki retains 7 days; managed local files use the conservative 14-day policy below. See `deploy/lgtm/README.md`. |
+
+### Local log retention
+
+`ava logs retention` removes expired files from the root of this checkout's
+`$AVA_HOME/logs` only. Its allowlist is deliberately narrow: agent-main
+`ava-agent-<id>.out.log`, named PTY
+`ava-agent-<id>-shell-<n>-<name>.{out,host}.log`, and Loguru rotations named
+`<service>.YYYY-MM-DD_HH-MM-SS_<pid>.log`. It never traverses subdirectories or
+follows symlinks, and it skips every file held open by a visible process.
+
+Preview the exact paths, UTC mtimes, sizes, and total bytes before deleting:
+
+```bash
+ava logs retention --dry-run
+ava logs retention
+AVA_LOG_RETENTION_DAYS=21 ava logs retention --dry-run
+ava logs retention --older-than 21
+```
+
+The age is a positive integer number of days. `--older-than` wins; otherwise
+`AVA_LOG_RETENTION_DAYS` supplies the value, with 14 days as the fallback. A
+file exactly at the cutoff is retained (`mtime < cutoff` is deleted). Delete
+failures are reported per path on stderr, remaining candidates are attempted,
+and the command exits nonzero if any inspection or deletion failed.
+
+Register one low-traffic daily OS job per machine after deployment, using the
+same launchd/crontab scheduling layer as `shared.os_cron`, with that machine's
+anchored `ava` executable as the payload. Registration is deployment work; the
+command intentionally does not add or mutate an OS schedule itself.
 
 Raw session output is queried in Loki, not tailed from a file — Grafana Explore
 (Loki datasource), `logcli`, or the HTTP API:
