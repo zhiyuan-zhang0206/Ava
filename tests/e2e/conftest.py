@@ -186,6 +186,7 @@ def _e2e_process_env(_provisioned_db: str, _provisioned_redis: str) -> Iterator[
         "AVA_CONFIG_FETCH",
         "AVA_EVENTS_CHANNEL",
         "AVA_HOME",
+        "AVA_GATEWAY_CORS_ALLOWED_ORIGINS",
         "AVA_GATEWAY_URL",
         "AVA_GATEWAY_HEALTH_URL",
         "AVA_HIBERNATE_ENABLED",
@@ -290,6 +291,10 @@ def _e2e_process_env(_provisioned_db: str, _provisioned_redis: str) -> Iterator[
         runner_password=runner_pw,
     )
     os.environ["AVA_RUNNER_DB_PASSWORD"] = runner_pw
+    # Cluster-scoped CORS origins must be in the unit .env before gateway boot.
+    os.environ["AVA_GATEWAY_CORS_ALLOWED_ORIGINS"] = (
+        f"http://localhost:{FRONTEND_PORT},http://127.0.0.1:{FRONTEND_PORT}"
+    )
 
     env_lines = [
         f"{key}={os.environ[key]}"
