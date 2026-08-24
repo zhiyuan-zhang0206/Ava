@@ -76,8 +76,14 @@ import queue
 import threading
 import time
 from collections.abc import Sequence
+from functools import cache
 from typing import Any
 
+from shared.observability import (
+    cluster_label,
+    endpoint_override_is_explicit,
+    gateway_observability_home,
+)
 from shared.telemetry import Event
 
 __all__ = [
@@ -156,6 +162,25 @@ _LLM_LATENCY_BUCKETS_MS = (250, 500, 1000, 2000, 4000, 8000, 15000, 30000, 60000
 _NO_EMITTER = "_no_emitter"
 
 
+@cache
+def _observability_export_allowed() -> bool:
+    """Whether this process may arm OTLP export, frozen once per process."""
+    home = gateway_observability_home()
+    if home is None:
+        return True
+    marker = home / "lgtm-host"
+    allowed = marker.exists() or endpoint_override_is_explicit("AVA_TELEMETRY_OTLP_ENDPOINT")
+    if not allowed:
+        from shared.log import logger
+
+        logger.bind(**{_NO_EMITTER: True}).warning(
+            "[otlp-exporter] OTLP export disabled: gateway home has no LGTM "
+            "marker {}; set AVA_TELEMETRY_OTLP_ENDPOINT to use an explicit collector",
+            marker,
+        )
+    return allowed
+
+
 def endpoint_reachable(endpoint: str) -> bool:
     """One quick preflight against an OTLP collector. Any HTTP answer proves a
     listener is up — including 4xx/5xx, which ``urlopen`` raises as
@@ -229,6 +254,8 @@ class _EventDimensionResourceExporter:
             dimensions["event_name"] = attributes["event_name"]
             if "agent_id" in attributes:
                 dimensions["agent_id"] = attributes["agent_id"]
+            if "cluster" in attributes:
+                dimensions["cluster"] = attributes["cluster"]
             resource_tagged.append(
                 ReadableLogRecord(
                     log_record=record.log_record,
@@ -356,7 +383,10 @@ class _OtlpBackend:
         with contextlib.suppress(Exception):
             from shared.config import settings
 
-            return bool(settings.observability.telemetry_otlp_enabled)
+            return (
+                bool(settings.observability.telemetry_otlp_enabled)
+                and _observability_export_allowed()
+            )
         return False
 
     @staticmethod
@@ -478,6 +508,7 @@ class _OtlpBackend:
             "category": event.category,
             "level": event.level,
             "machine": event.machine,
+            "cluster": event.cluster,
             "process": event.process,
             "source": event.source,
         }
@@ -492,6 +523,7 @@ class _OtlpBackend:
                 "span_id": event.span_id,
                 "agent_id": event.agent_id,
                 "machine": event.machine,
+                "cluster": event.cluster,
                 "process": event.process,
                 "category": event.category,
                 "event_name": event.event_name,
@@ -696,6 +728,7 @@ def _metrics_resource() -> Any:
             "service.name": f"ava-{process_name()}",
             "service.instance.id": str(uuid.uuid4()),
             "service.version": version("ava"),
+            "cluster": cluster_label(),
         }
     )
 

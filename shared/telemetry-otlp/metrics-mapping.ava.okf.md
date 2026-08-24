@@ -1,7 +1,7 @@
 ---
 type: doc
 title: "OTLP metrics mapping"
-description: "How telemetry-category events become Prometheus series — the per-field disposition (`_METRIC_DISPOSITION`), instrument naming (unit suffix stripped), the metrics Resource (`service.name=ava-<process>` + instance id), and the Views shaping the LLM latency histograms."
+description: "How telemetry-category events become Prometheus series — the per-field disposition (`_METRIC_DISPOSITION`), instrument naming (unit suffix stripped), the cluster-aware metrics Resource, and the Views shaping the LLM latency histograms."
 tags:
 - shared
 - telemetry
@@ -57,7 +57,8 @@ values are skipped (an absent optional metric is not zero).
 The MeterProvider's Resource carries `service.name=ava-<process>` (the
 bounded process dimension, `shared/telemetry.py:process_name`), a
 per-instance `service.instance.id` (uuid4) and
-`service.version`. Without it every series landed as
+`service.version`, plus the home-derived `cluster` label. Without the service
+identity every series landed as
 job="unknown_service" and two same-named processes exporting the same
 counter collided into ONE series with interleaved cumulative values.
 Metrics only: the logs Resource is deliberately default — Loki

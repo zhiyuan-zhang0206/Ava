@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -580,6 +581,10 @@ class TestBuildLogql:
         assert '| agent_id="42"' in q
         assert "| json" in q
 
+    def test_cluster_filter_follows_json_stage(self) -> None:
+        q = loki_events._build_logql(cluster=".ava-preview")
+        assert q == '{service_name="unknown_service"} | json | cluster=".ava-preview"'
+
     def test_indexed_selector_narrows_before_pipeline_filters(self) -> None:
         q = loki_events._build_logql(
             era=LokiReadEra.INDEXED,
@@ -640,6 +645,45 @@ class TestBuildLogql:
         assert '|= "say \\"hi\\" \\\\n"' in q
         q2 = loki_events._build_logql(grep="line1\nline2")
         assert '|= "line1 line2"' in q2
+
+
+class TestObservabilityReadGate:
+    def test_non_lgtm_gateway_rejects_default_loki_read(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        home = tmp_path / ".ava-preview"
+        home.mkdir()
+        monkeypatch.setattr("shared.machine.machine_role", lambda: frozenset({"gateway"}))
+        monkeypatch.setattr("shared.paths.ava_home", lambda: home)
+        monkeypatch.delitem(os.environ, "AVA_TELEMETRY_LOKI_URL", raising=False)
+
+        with pytest.raises(
+            loki_events.ObservabilityReadUnavailable,
+            match="AVA_TELEMETRY_LOKI_URL",
+        ):
+            loki_events._read_gate()
+
+    @pytest.mark.parametrize("override", ["marker", "environment", "runner"])
+    def test_read_gate_allows_explicit_or_non_gateway_topology(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        override: str,
+    ) -> None:
+        home = tmp_path / ".ava-preview"
+        home.mkdir()
+        monkeypatch.setattr("shared.paths.ava_home", lambda: home)
+        monkeypatch.delitem(os.environ, "AVA_TELEMETRY_LOKI_URL", raising=False)
+        if override == "marker":
+            (home / "lgtm-host").touch()
+            monkeypatch.setattr("shared.machine.machine_role", lambda: frozenset({"gateway"}))
+        elif override == "environment":
+            monkeypatch.setattr("shared.machine.machine_role", lambda: frozenset({"gateway"}))
+            monkeypatch.setitem(os.environ, "AVA_TELEMETRY_LOKI_URL", "http://loki.invalid:3100")
+        else:
+            monkeypatch.setattr("shared.machine.machine_role", lambda: frozenset({"agent-runner"}))
+
+        loki_events._read_gate()
 
 
 # ─── _parse_line ─────────────────────────────────────────────────────────────
@@ -894,6 +938,7 @@ class TestQueryEvents:
             event_names=["spawn", "terminate"],
             level_min="warning",
             grep="boom",
+            cluster=".ava-preview",
             machine="machine-1",
             trace_id="abc",
             limit=50,
@@ -904,6 +949,7 @@ class TestQueryEvents:
         assert '| event_name=~"spawn|terminate"' in q
         assert '| level=~"warning|error|critical"' in q
         assert '|= "boom"' in q
+        assert '| cluster=".ava-preview"' in q
         assert '| machine="machine-1"' in q
         assert '| trace_id="abc"' in q
 
@@ -1091,6 +1137,7 @@ class TestAttributeFilters:
         )
         n = loki_events.count_events(
             event_names=["turn_end"],
+            cluster=".ava-preview",
             agent_id=3,
             attribute_filters={"ok": "true"},
             from_=datetime(2026, 8, 1, tzinfo=UTC),
@@ -1099,6 +1146,7 @@ class TestAttributeFilters:
         assert n == 7
         q = client.calls[0][1]["query"]
         assert '| json ok="attributes.ok" | ok="true"' in q
+        assert '| cluster=".ava-preview"' in q
         assert '| event_name=~"turn_end"' in q
 
 
@@ -1112,6 +1160,7 @@ class TestAttributeAggregate:
             field="duration_seconds",
             agg="sum",
             event_names=["turn_end"],
+            cluster=".ava-preview",
             agent_id=3,
             from_=datetime(2026, 8, 1, tzinfo=UTC),
             to=datetime(2026, 8, 2, tzinfo=UTC),
@@ -1120,6 +1169,7 @@ class TestAttributeAggregate:
         q = self._q(client)
         assert q.startswith("sum(sum_over_time((")
         assert 'agent_id="3"' in q
+        assert 'cluster=".ava-preview"' in q
         assert 'event_name=~"turn_end"' in q
         assert '| json duration_seconds="attributes.duration_seconds"' in q
         assert "| unwrap duration_seconds" in q
@@ -1400,6 +1450,7 @@ class TestCountEventsSeries:
         )
         out = loki_events.count_events_series(
             event_names=["sse_drop"],
+            cluster=".ava-preview",
             group_by="kind",
             from_attributes=True,
             from_=datetime(2026, 8, 1, tzinfo=UTC),
@@ -1412,6 +1463,7 @@ class TestCountEventsSeries:
         q = params["query"]
         assert q.startswith("sum by (kind) (count_over_time((")
         assert '| event_name=~"sse_drop"' in q
+        assert '| cluster=".ava-preview"' in q
         assert '| json kind="attributes.kind"' in q
         assert q.endswith(")[300s]))")
         assert params["step"] == "300s"

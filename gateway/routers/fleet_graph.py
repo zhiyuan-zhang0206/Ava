@@ -45,6 +45,7 @@ from gateway.schemas import (
     window_delta,
 )
 from shared.log import logger
+from shared.observability import cluster_label
 from shared.redis_client import sync_redis
 
 router = APIRouter()
@@ -205,6 +206,7 @@ def _fetch_loki_edges(
     rows, has_more = loki_events.query_events(
         event_names=list(_EDGE_EVENT_NAMES),
         categories=["audit"],
+        cluster=cluster_label(),
         from_=loki_from,
         to=now,
         limit=_LOKI_EDGE_LIMIT,

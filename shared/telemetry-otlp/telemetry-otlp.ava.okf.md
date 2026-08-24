@@ -1,7 +1,7 @@
 ---
 type: doc
 title: "OTLP export backend & trace ship to Tempo"
-description: "The LGTM read+write side of the unified event stream — producers send every signal to a local OTel Collector; a pure runner relays through the gateway's authenticated private-address collector receiver, and the gateway collector writes to loopback Tempo/Loki/Prometheus while each machine keeps its own JSONL trace mirror."
+description: "The OTLP logs, metrics, and traces backend: producer mapping, collector delivery, local trace mirror, and recovery shipping."
 tags:
 - shared
 - telemetry
@@ -14,18 +14,11 @@ tags:
 ## What it is
 
 `shared/telemetry_otlp.py` is the agent-side write half of the OTel + Tempo +
-Loki + Prometheus + Grafana stack (2026-08-11 decision). The OTLP entry on
-every machine is the **local OTel Collector sidecar** (`ava-otel-collector`
-session, task #1266 — user ruling 2026-08-14): agents export to
-127.0.0.1:4318 (OTLP/HTTP) and never dial a backend directly. On the gateway,
-the collector fans out traces → loopback Tempo, logs → loopback Loki and
-metrics → loopback Prometheus. On a pure runner, the same three stable exporter
-components relay each signal to the gateway collector's bearer-authenticated
-receiver bound only to `AVA_MACHINE_HOST:4318`; Tempo/Loki/Prometheus remain
-unexposed. Every collector mirrors its locally produced traces to local JSONL
-(`$AVA_HOME/traces/spans.jsonl`, rotated) via its file exporter — the grep
-surface, and the local recovery record `ava trace ship` replays when the live
-fan-out missed data.
+Loki + Prometheus + Grafana stack (2026-08-11 decision). The local OTel
+Collector sidecar (`ava-otel-collector`, task #1266) delivers the three signals
+and mirrors traces to local JSONL for recovery shipping. Which homes may export
+or collect, and the `cluster` Resource boundary that isolates co-located homes,
+are specified in [[cluster-isolation.ava.okf.md|Telemetry cluster isolation]].
 
 - `shared/telemetry_otlp.py` — events → OTLP logs + metrics when enabled
   (default **on**). Exec children warm and flush the same backend; their
@@ -45,15 +38,15 @@ fan-out missed data.
 
 - **Logs** (`_emit_log`) — every `Event` becomes one OTLP LogRecord (Loki).
   Body = the full event as JSON in the mirror shape; event_name / category /
-  level / machine / process / source (+ agent_id / target_agent_id when set)
-  as attributes; trace_id / span_id ride the LogRecord fields, so Loki
+  level / machine / cluster / process / source (+ agent_id / target_agent_id
+  when set) as attributes; trace_id / span_id ride the LogRecord fields, so Loki
   rows correlate with Tempo spans.
   Severity mapping: debug 5 / info 9 / warning 13 / error 17 / critical 21.
 - **Metrics** (`_record_metrics`) — telemetry-category events only: numeric
   payload fields become Prometheus series via a per-field disposition, a
   per-process Resource, and latency-shaping Views — the full mapping contract
   is its own node: [[shared/telemetry-otlp/metrics-mapping.ava.okf.md]].
-- **Traces** — exported by `shared/trace.py` to the sidecar's `/v1/traces`
+- **Traces** — exported with the cluster Resource by `shared/trace.py` to the sidecar's `/v1/traces`
   (OTLP/JSON, content-stripped before leaving the process); the sidecar's
   file exporter mirrors each batch to `$AVA_HOME/traces/spans.jsonl`
   (rotated `spans-<ISO>.jsonl`). Recovery replay is `ava trace ship`: it
@@ -72,7 +65,9 @@ fan-out missed data.
   network I/O and retry/drop. Entry points suppress errors end to end. Failed
   init retries every five minutes, emitting `otlp_backend_disabled` per failure
   and `otlp_backend_recovered` on recovery. A dead collector cannot cost the
-  JSONL copy; status events land there when OTLP itself is unavailable.
+  JSONL copy; status events land there when OTLP itself is unavailable. The
+  cached home-role gate warns at most once per process when an unmarked gateway
+  declines the default exporter.
 
 ## Read side
 
@@ -81,13 +76,15 @@ The LGTM consumers are documented separately:
 [[gateway/prom-metrics.ava.okf.md|Prometheus telemetry aggregates]].
 
 **Flag semantics** — `AVA_TELEMETRY_OTLP_ENABLED` /
-`AVA_TELEMETRY_OTLP_ENDPOINT` (default `http://127.0.0.1:4318` — the LOCAL
-sidecar on every machine, standard OTLP HTTP port) are startup-applied
+`AVA_TELEMETRY_OTLP_ENDPOINT` (default `http://127.0.0.1:4318`, the standard
+local OTLP HTTP port) are startup-applied
 (`restart_required=all`); `shared/config` has no live-reload — flip +
 restart applies changes. Off leaves only the JSONL event sink: Loki/Prometheus
 and their read surfaces stop advancing, with no Postgres fallback. Converge
-renders a role-specific collector config.
-Gateway-capable units use `AVA_TELEMETRY_TEMPO_ENDPOINT` (default loopback host
+renders a role-specific collector config only for the marked LGTM gateway or a
+pure runner. An explicit `AVA_TELEMETRY_OTLP_ENDPOINT` bypasses the producer
+gate but does not install a collector on an unmarked gateway.
+The LGTM gateway uses `AVA_TELEMETRY_TEMPO_ENDPOINT` (default loopback host
 port 14318), `AVA_TELEMETRY_LOKI_URL` and
 `AVA_TELEMETRY_PROMETHEUS_URL` as gateway-local backend URLs. Pure runners do
 not consume those loopback backend URLs: they derive the gateway collector
@@ -107,8 +104,9 @@ single-box hosts collapse to the local receiver even when their secret is set.
   settings plus gateway-local backend read/write URLs.
 - `cli/commands/_otel_collector.py` + `deploy/otel-collector/otel-collector.yaml`
   — the pinned otelcol-contrib install + generated sidecar config (converge
-  step); `ops/spec.py` (`ava-otel-collector` service) + `services/healthchecks/
-  otel_collector.py` (watchdog supervision).
+  step), including cluster filtering and empty-password Postgres receiver
+  omission; `ops/spec.py` (`ava-otel-collector` service) +
+  `services/healthchecks/otel_collector.py` (watchdog supervision).
 - `shared/trace.py` + `cli/commands/trace.py` + `cli/parsers/host.py` — the
   mirror `ava trace ship` replays, and the ship command.
 
