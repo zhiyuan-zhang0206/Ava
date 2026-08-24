@@ -35,12 +35,13 @@ _PREFLIGHT_FETCH_TIMEOUT_S = 30.0
 class ClusterOpPayload(TypedDict, total=False):
     """The optional parameters a fan-out cluster op carries to an agent-runner's
     ops server: `restart_only` (a restart-only bounce vs a full self-update),
-    `target_sha` (the pinned rollout commit every node checks out) and
-    `force_reap` (the host's updater kills still-live agents — the
+    `target_sha` (the pinned rollout commit every node checks out), `mode`
+    (the updater's agent-drain policy) and `force_reap` (the host's updater kills still-live agents — the
     quiesce-timeout backstop). All absent for a plain stop op."""
 
     restart_only: bool
     target_sha: str
+    mode: str
     force_reap: bool
 
 

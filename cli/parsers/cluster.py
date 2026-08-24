@@ -104,6 +104,7 @@ def _h_cluster_rollback(args: argparse.Namespace) -> int:
     return cmd_rollback(
         to=args.to,
         set_known_good=args.set_known_good,
+        keep_pin=args.keep_pin,
         require_confirmation=not args.yes,
     )
 
@@ -410,6 +411,11 @@ def _add_cluster_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
         "--set-known-good",
         action="store_true",
         help="after rollback, advance last_known_good_sha to the rolled-back-to commit",
+    )
+    cluster_rollback_p.add_argument(
+        "--keep-pin",
+        action="store_true",
+        help="roll back only this gateway; leave the cluster pin and remote agent-runners unchanged",
     )
     cluster_rollback_p.add_argument(
         "-y",

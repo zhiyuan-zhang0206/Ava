@@ -1,4 +1,4 @@
-"""The cluster's pinned commit — `cluster_target_sha` + `last_known_good_sha`.
+"""The cluster's pinned commit plus the pending-known-good observation window.
 
 The standing record of which git commit the whole cluster should be on. The
 gateway writes it (`set_cluster_target_sha`) after a rollout's local update
@@ -6,10 +6,11 @@ reaches its target; any node reads it (`get_cluster_target_sha`) to compare its
 own HEAD and surface drift (`ava status`). A single row in `cluster_pin` (central
 DB).
 
-`last_known_good_sha` is the commit the cluster was on BEFORE the most recent
-update — the automatic rollback anchor for the health-probe / rollback flow.
-It is advanced atomically with `target_sha` on each successful rollout
-(`advance_pin`).
+`last_known_good_sha` is the automatic rollback anchor. A successful backend
+rollout pins its target immediately, but records it as `pending_known_good_sha`
+until the health probe has observed a healthy window. Only then does
+`promote_pending_known_good_if_ready` advance the anchor. `advance_pin` remains
+the immediate-advance primitive for an explicit manual operation.
 
 This is the *persisted* form of the per-rollout `target_sha` (the SHA-pinned
 rollout in `gateway/cluster.py` / `cli/commands/update.py`, which threads the SHA
@@ -20,6 +21,8 @@ step that builds on this standing value.
 """
 
 from __future__ import annotations
+
+from datetime import UTC, datetime
 
 import shared.db
 
@@ -37,6 +40,19 @@ def set_cluster_target_sha(target_sha: str, *, set_by: str | None = None) -> Non
         # The singleton row is seeded by migration 0026 and never deleted, so the
         # UPDATE must hit exactly it — rowcount 0 means the row vanished (operator
         # error), an invariant breach we surface rather than silently no-op.
+        if cur.rowcount != 1:
+            raise RuntimeError(f"cluster_pin singleton row missing (rowcount={cur.rowcount})")
+
+
+def set_target_with_pending_known_good(new_target_sha: str, *, set_by: str | None = None) -> None:
+    """Pin a successful rollout while deferring its LKG promotion to health probes."""
+    with shared.db.connect(autocommit=True) as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE cluster_pin SET target_sha = %s, pending_known_good_sha = %s, "
+            "pending_known_good_at = now(), updated_at = now(), updated_by = %s "
+            "WHERE id = 1",
+            (new_target_sha, new_target_sha, set_by),
+        )
         if cur.rowcount != 1:
             raise RuntimeError(f"cluster_pin singleton row missing (rowcount={cur.rowcount})")
 
@@ -67,6 +83,62 @@ def get_last_known_good_sha() -> str | None:
         if row is None:
             raise RuntimeError("cluster_pin singleton row missing (migration 0026 seeds it)")
         return row[0]
+
+
+def get_pending_known_good() -> tuple[str, datetime] | None:
+    """Return the candidate LKG and its rollout time, or None when none is pending."""
+    with shared.db.connect(autocommit=True) as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT pending_known_good_sha, pending_known_good_at FROM cluster_pin WHERE id = 1"
+        )
+        row = cur.fetchone()
+        if row is None:
+            raise RuntimeError("cluster_pin singleton row missing (migration 0026 seeds it)")
+        if row[0] is None or row[1] is None:
+            return None
+        return row[0], row[1]
+
+
+def clear_pending_known_good() -> None:
+    """Discard the rollout candidate whose observation window no longer applies."""
+    with shared.db.connect(autocommit=True) as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE cluster_pin SET pending_known_good_sha = NULL, pending_known_good_at = NULL "
+            "WHERE id = 1"
+        )
+        if cur.rowcount != 1:
+            raise RuntimeError(f"cluster_pin singleton row missing (rowcount={cur.rowcount})")
+
+
+def promote_pending_known_good_if_ready(*, min_age_s: float) -> bool:
+    """Promote a still-current pending target once it has aged through the window."""
+    with shared.db.connect() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT target_sha, pending_known_good_sha, pending_known_good_at "
+            "FROM cluster_pin WHERE id = 1 FOR UPDATE"
+        )
+        row = cur.fetchone()
+        if row is None:
+            raise RuntimeError("cluster_pin singleton row missing (migration 0026 seeds it)")
+        target_sha, pending_sha, pending_at = row
+        if pending_sha is None or pending_at is None:
+            return False
+        if pending_sha != target_sha:
+            cur.execute(
+                "UPDATE cluster_pin SET pending_known_good_sha = NULL, pending_known_good_at = NULL "
+                "WHERE id = 1"
+            )
+            return False
+        if (datetime.now(UTC) - pending_at).total_seconds() < min_age_s:
+            return False
+        cur.execute(
+            "UPDATE cluster_pin SET last_known_good_sha = pending_known_good_sha, "
+            "last_known_good_at = now(), pending_known_good_sha = NULL, "
+            "pending_known_good_at = NULL WHERE id = 1"
+        )
+        if cur.rowcount != 1:
+            raise RuntimeError(f"cluster_pin singleton row missing (rowcount={cur.rowcount})")
+        return True
 
 
 def set_last_known_good_sha(sha: str, *, set_by: str | None = None) -> None:
@@ -115,14 +187,14 @@ def seed_last_known_good_sha_if_null(sha: str, *, set_by: str | None = None) -> 
 
 
 def advance_pin(new_target_sha: str, *, set_by: str | None = None) -> str | None:
-    """Advance the cluster pin on a successful rollout: the current
+    """Immediately advance the cluster pin on an explicit successful rollout: the current
     `target_sha` becomes `last_known_good_sha`, and `new_target_sha` becomes
     the new `target_sha`. Returns the previous `target_sha` (now the new
     `last_known_good_sha`), or None if there was no prior pin.
 
-    This is the atomic "promote current → known-good, advance → new target"
-    that gates the health-probe rollback: after a rollout, the commit we
-    just left is the fallback if the new one proves unhealthy."""
+    This is the immediate-advance form. Ordinary backend rollouts use
+    `set_target_with_pending_known_good` so the health probe must first observe
+    the new commit before it replaces the rollback anchor."""
     with shared.db.connect(autocommit=True) as conn, conn.cursor() as cur:
         cur.execute("SELECT target_sha FROM cluster_pin WHERE id = 1")
         row = cur.fetchone()

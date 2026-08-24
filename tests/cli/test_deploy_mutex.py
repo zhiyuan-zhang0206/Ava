@@ -41,6 +41,12 @@ def _sent_alerts(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     return sent
 
 
+@pytest.fixture(autouse=True)
+def _healthy_data_plane(monkeypatch: pytest.MonkeyPatch) -> None:
+    """This file exercises deploy suppression, not live Postgres/Redis availability."""
+    monkeypatch.setattr(health, "_data_plane_abnormal", lambda: False)
+
+
 # ─── the human/agent actor: a second deploy is refused, legibly ──────────────
 
 
@@ -162,7 +168,7 @@ def test_deploy_in_flight_does_not_advance_the_rollback_counter(
     against the rollout that is still running."""
     monkeypatch.setattr("ops.deploy_window.deploy_in_flight", lambda **_k: _IN_FLIGHT)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr("shared.paths.ava_home", lambda: tmp_path)
-    monkeypatch.setattr(health, "_gateway_liveness", lambda: False)
+    monkeypatch.setattr(health, "_gateway_liveness_with_retry", lambda: False)
     rollbacks: list[object] = []
     monkeypatch.setattr(alerts.subprocess, "run", lambda *_a, **_k: rollbacks.append(True))  # pyright: ignore[reportUnknownArgumentType]
 
@@ -171,7 +177,9 @@ def test_deploy_in_flight_does_not_advance_the_rollback_counter(
 
     assert rollbacks == []
     counter = tmp_path / health.FAILURE_COUNT_FILE
-    assert not counter.exists() or counter.read_text().strip() == "0", "the counter never advanced"
+    assert not counter.exists() or counter.read_text().splitlines()[0] == "0", (
+        "the counter never advanced"
+    )
 
 
 def test_a_deploy_resets_the_consecutive_counter_rather_than_freezing_it(
@@ -182,7 +190,7 @@ def test_a_deploy_resets_the_consecutive_counter_rather_than_freezing_it(
     commit the deploy has since replaced, and rolling back to "last known good" on their
     strength rolls back code they never observed."""
     monkeypatch.setattr("shared.paths.ava_home", lambda: tmp_path)
-    monkeypatch.setattr(health, "_gateway_liveness", lambda: False)
+    monkeypatch.setattr(health, "_gateway_liveness_with_retry", lambda: False)
     rollbacks: list[object] = []
     monkeypatch.setattr(alerts.subprocess, "run", lambda *_a, **_k: rollbacks.append(True))  # pyright: ignore[reportUnknownArgumentType]
 
@@ -197,7 +205,7 @@ def test_a_deploy_resets_the_consecutive_counter_rather_than_freezing_it(
     monkeypatch.setattr("ops.deploy_window.deploy_in_flight", lambda **_k: _IDLE)  # pyright: ignore[reportUnknownArgumentType]
     assert health.run_health_probe(auto_rollback=True, threshold=3) == 1
     assert rollbacks == [], "the post-deploy failure restarted the count at 1"
-    assert (tmp_path / health.FAILURE_COUNT_FILE).read_text().strip() == "1"
+    assert (tmp_path / health.FAILURE_COUNT_FILE).read_text().splitlines()[0] == "1"
 
 
 def test_deploy_in_flight_suppresses_the_alert_too(
@@ -211,7 +219,7 @@ def test_deploy_in_flight_suppresses_the_alert_too(
     untouched, so a failure after the deploy window closes alerts normally."""
     monkeypatch.setattr("ops.deploy_window.deploy_in_flight", lambda **_k: _IN_FLIGHT)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr("shared.paths.ava_home", lambda: tmp_path)
-    monkeypatch.setattr(health, "_gateway_liveness", lambda: False)
+    monkeypatch.setattr(health, "_gateway_liveness_with_retry", lambda: False)
 
     assert health.run_health_probe(auto_rollback=True, threshold=1) == 1
     assert _sent_alerts == []  # no alert during a deploy
@@ -223,7 +231,7 @@ def test_counter_and_rollback_still_work_with_no_deploy_running(
     """The probe's whole purpose must survive the fix."""
     monkeypatch.setattr("ops.deploy_window.deploy_in_flight", lambda **_k: _IDLE)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr("shared.paths.ava_home", lambda: tmp_path)
-    monkeypatch.setattr(health, "_gateway_liveness", lambda: False)
+    monkeypatch.setattr(health, "_gateway_liveness_with_retry", lambda: False)
     monkeypatch.setattr(health, "_ingest_alert", lambda **_k: None)  # pyright: ignore[reportUnknownArgumentType]
     ran: list[list[str]] = []
 
@@ -251,12 +259,12 @@ def test_an_unreadable_lease_does_not_suppress(
     monkeypatch.setattr("ops.cluster.current_orchestration", lambda: None)
     monkeypatch.setattr("shared.machines.list_all", list)
     monkeypatch.setattr("shared.paths.ava_home", lambda: tmp_path)
-    monkeypatch.setattr(health, "_gateway_liveness", lambda: False)
+    monkeypatch.setattr(health, "_gateway_liveness_with_retry", lambda: False)
     monkeypatch.setattr(health, "_ingest_alert", lambda **_k: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(alerts.subprocess, "run", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType]
 
     assert health.run_health_probe(auto_rollback=True, threshold=3) == 1
-    assert (tmp_path / health.FAILURE_COUNT_FILE).read_text() == "1"
+    assert (tmp_path / health.FAILURE_COUNT_FILE).read_text().splitlines()[0] == "1"
 
 
 # ─── the orchestration converts its lease into a settle hold ─────────────────
