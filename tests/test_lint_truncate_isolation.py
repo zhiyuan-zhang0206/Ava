@@ -132,8 +132,6 @@ _EXEMPT: dict[str, str] = {
     "deployment_state": "R1 singleton (id=1, CHECK) — UPDATE-only consumers "
     "(shared/cluster_lock.py), row seeded by the migration; truncating it would "
     "delete the row mid-session. Tests self-clean via acquire/release pairs",
-    "agent_watchers": "R1 watcher registry — self-cleaning module fixture "
-    "(tests/shared/test_watcher_registry.py)",
 }
 
 
