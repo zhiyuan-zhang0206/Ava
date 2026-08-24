@@ -18,7 +18,7 @@ tags:
 
 Each agent has a default port reserved for itself (derived from agent id), used if `port` is omitted; only one active page is allowed at a time (opening a new one auto-closes the old).
 
-- `serve(dir, name, port=None, title=None) → Page` — One-step: start directory HTTP server + register with UI, poll `/health` until listening. If `port` omitted, use default reserved port.
+- `serve(dir, name, port=None, title=None) → Page` — One-step: start directory HTTP server + register with UI, poll `/health` until listening. If `port` omitted, use default reserved port. A relative `dir` resolves against the agent's working directory (`ava.cwd`), consistent with the `ava.files` API.
 - `serve_markdown(content, name, port=None, title=None) → Page` — Serve-side render Markdown as an HTML page with LaTeX math, code highlighting, GFM tables (port semantics same as serve).
 - `show(name, port=None, title=None) → Page` — Register an already running HTTP server (does not verify port occupation).
 - `close(name)` — Deregister page and kill the server started by `serve()`.
