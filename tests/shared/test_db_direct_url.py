@@ -13,7 +13,13 @@ import pytest
 
 from shared import cluster, config
 from shared import db as db_module
-from shared.cluster import ClusterPorts, ClusterRecord, record_pgbouncer_port, record_postgres_port
+from shared.cluster import (
+    ClusterPorts,
+    ClusterRecord,
+    record_pgbouncer_port,
+    record_postgres_port,
+    record_redis_port,
+)
 from shared.config.data_plane import DataPlaneSettings
 from shared.dotenv_boot import UNANCHORED_DB_SENTINEL
 from shared.port_block import PORT_OFFSETS
@@ -176,7 +182,7 @@ def test_direct_db_url_unknown_port_stays_silent_when_pooling_off(
     assert loguru_records == []
 
 
-# ── record_pgbouncer_port / record_postgres_port: derive for records saved before the slot ──
+# ── data-plane record ports: derive for records saved before a slot ───────────
 
 
 def test_record_pgbouncer_port_present_is_returned_verbatim() -> None:
@@ -208,3 +214,10 @@ def test_record_postgres_port_derived_for_default_home() -> None:
 def test_record_postgres_port_derived_for_allocated_cluster() -> None:
     rec = _rec("/x/.ava-dev", {"gateway": 18000})
     assert record_postgres_port(rec) == 18000 + PORT_OFFSETS["postgres"] == 18011
+
+
+def test_record_redis_port_is_a_registry_fact() -> None:
+    """Redis's port is carried by the record, not inferred from a URL that may
+    use this host's reachable address while Redis remains loopback-only."""
+    rec = _rec("/x/.ava-dev", {"gateway": 18000, "redis": 18042})
+    assert record_redis_port(rec) == 18042
