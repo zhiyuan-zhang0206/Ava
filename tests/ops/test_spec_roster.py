@@ -31,6 +31,7 @@ _GATEWAY_SESSIONS = {
     "frontend",
     "gateway-watchdog",
     "otel-collector",
+    "pg-backup",
 }
 _AGENT_RUNNER_SESSIONS = {
     "restarter",
