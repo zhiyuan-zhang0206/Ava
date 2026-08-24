@@ -697,26 +697,23 @@ def test_inspect_loki_transport_failure_is_retriable_503(
     assert response.headers["retry-after"] == "1"
 
 
-def test_inspect_total_deadline_returns_503_then_cached_loader_can_finish(
+def test_inspect_total_deadline_returns_503_then_retry_reloads(
     db_conn: psycopg.Connection,
     fake_loki: _FakeLoki,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A cold aggregate miss has a response deadline without bricking its cache key.
-
-    The synchronous leader is deliberately allowed to finish after the caller
-    receives 503: cancelling a Python worker thread is unsafe. Single-flight
-    keeps later callers from starting duplicate Loki fan-outs, and the completed
-    value becomes the normal TTL hit.
-    """
+    """An expired aggregate leader releases its key and does not populate the TTL."""
     aid = _insert_agent(db_conn)
     fake_loki.add(event="turn_end", agent_id=aid, payload={"duration_seconds": 1.0, "ok": True})
     db_conn.commit()
     agent_inspect.cache_clear()
     original = agent_inspect._inspect_blocking
     loader_finished = threading.Event()
+    loads = 0
 
     def delayed_loader(*args: Any, **kwargs: Any) -> Any:
+        nonlocal loads
+        loads += 1
         time.sleep(0.05)
         try:
             return original(*args, **kwargs)
@@ -731,10 +728,12 @@ def test_inspect_total_deadline_returns_503_then_cached_loader_can_finish(
         assert timed_out.json()["detail"] == "inspector history query timed out; retry"
         assert timed_out.headers["retry-after"] == "1"
         assert loader_finished.wait(timeout=1)
-        cached = client.get(f"/api/agents/{aid}/inspect")
+        monkeypatch.setattr(agent_inspect, "_INSPECT_RESPONSE_TIMEOUT_S", 15.0)
+        retried = client.get(f"/api/agents/{aid}/inspect")
 
-    assert cached.status_code == 200
-    assert cached.json()["stats"]["turn_total"] == 1
+    assert retried.status_code == 200
+    assert retried.json()["stats"]["turn_total"] == 1
+    assert loads == 2
 
 
 def test_inspect_config_overlay_roundtrips(db_conn: psycopg.Connection) -> None:
@@ -1011,6 +1010,31 @@ def test_inspect_cost_aggregates_share_one_snapshot_instant(
             assert recorded_to[0] is not None
             assert all(to == recorded_to[0] for to in recorded_to)
             recorded_to.clear()
+
+
+def test_inspect_cost_aggregate_timeouts_shrink_with_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Each cost aggregate receives its own remaining inspect deadline budget."""
+    timeout_s: list[float | None] = []
+    clock = iter((100.0, 101.0, 102.0, 103.0, 104.0, 105.0, 106.0))
+
+    def record_timeout(**kwargs: Any) -> list[tuple[str, float]]:
+        timeout_s.append(kwargs["timeout_s"])
+        return []
+
+    monkeypatch.setattr(_agent_cost.time_mod, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(loki_events, "attribute_aggregate", record_timeout)
+
+    _agent_cost._loki_aggs_into(
+        {},
+        7,
+        datetime(2026, 8, 25, tzinfo=UTC),
+        datetime(2026, 8, 26, tzinfo=UTC),
+        deadline=110.0,
+    )
+
+    assert timeout_s == [8.0, 8.0, 8.0, 7.0, 6.0, 5.0, 4.0]
 
 
 def test_inspect_cost_report_clamps_invalid_aggregates() -> None:
@@ -2803,13 +2827,73 @@ def test_inspect_singleflight_coalesces_concurrent_identical_fanout(
 
 
 def test_inspect_fanout_preserves_one_global_loki_slot_for_other_queries() -> None:
-    """One inspector stays parallel without monopolizing Loki's capacity.
+    """Admission and fan-out capacity stay bounded by Loki's query budget."""
+    assert agent_inspect._INSPECT_MAX_CONCURRENT_LOADS <= loki_query_budget.LOKI_QUERY_CONCURRENCY
+    assert agent_inspect._INSPECT_EXECUTOR_WORKERS >= 1
 
-    Three workers execute five independent sections in at most two waves for
-    equal-duration queries, while the fourth Loki slot remains available to a
-    queued stats/ops request.
-    """
-    assert agent_inspect._INSPECT_WORKERS == loki_query_budget.LOKI_QUERY_CONCURRENCY - 1
+
+def test_inspect_cache_admission_bounds_concurrent_loads() -> None:
+    """A distinct-key leader is rejected at capacity, while its follower shares the load."""
+    cache = InspectQueryCache[str, str](
+        max_entries=8,
+        max_inflight=8,
+        max_concurrent_loads=1,
+    )
+    started = threading.Event()
+    release = threading.Event()
+
+    def blocking_load() -> str:
+        started.set()
+        assert release.wait(timeout=2)
+        return "first"
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        leader = executor.submit(
+            cache.get_or_load,
+            "first",
+            blocking_load,
+            ttl_s=10,
+            now=lambda: 0,
+        )
+        assert started.wait(timeout=1)
+        follower = executor.submit(
+            cache.get_or_load,
+            "first",
+            lambda: pytest.fail("a follower must not load"),
+            ttl_s=10,
+            now=lambda: 0,
+        )
+        with pytest.raises(InspectCacheFullError):
+            cache.get_or_load("second", lambda: "second", ttl_s=10, now=lambda: 0)
+        release.set()
+        assert leader.result(timeout=1) == "first"
+        assert follower.result(timeout=1) == "first"
+
+    assert cache.get_or_load("second", lambda: "second", ttl_s=10, now=lambda: 0) == "second"
+
+
+def test_inspect_blocking_expired_deadline_aborts_without_work(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An expired inspect budget rejects the load before it starts any section."""
+    fake_pool: Any = object()
+
+    def unexpected_work(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("expired inspect load must not start a section")
+
+    monkeypatch.setattr(agent_inspect._agent_cost, "agent_cost", unexpected_work)
+    monkeypatch.setattr(agent_inspect._inspect_stats, "inspect_values", unexpected_work)
+    monkeypatch.setattr(agent_inspect, "_heartbeat_last_pause", unexpected_work)
+
+    with pytest.raises(TimeoutError):
+        agent_inspect._inspect_blocking(
+            fake_pool,
+            1,
+            None,
+            since_compact=False,
+            spawned_at=None,
+            deadline=time.monotonic() - 1,
+        )
 
 
 def _track_inspect_cache_followers(
@@ -2976,6 +3060,47 @@ async def test_inspect_async_followers_timeout_without_retaining_executor_worker
             "same", lambda: pytest.fail("late result must be cached"), ttl_s=10, now=lambda: 0
         )
         is expected
+    )
+
+
+@pytest.mark.asyncio
+async def test_inspect_async_leader_deadline_fails_followers_fast() -> None:
+    """A deadline failure reaches all followers and releases the key for a retry."""
+    cache = InspectQueryCache[str, object](max_entries=2, max_inflight=1)
+    started = threading.Event()
+    release = threading.Event()
+    expected = object()
+    calls = 0
+
+    def deadline_expired_load() -> object:
+        nonlocal calls
+        calls += 1
+        started.set()
+        assert release.wait(timeout=2)
+        raise TimeoutError("inspect deadline expired")
+
+    leader = asyncio.create_task(
+        cache.get_or_load_async("same", deadline_expired_load, ttl_s=10, now=lambda: 0)
+    )
+    assert await asyncio.to_thread(started.wait, 1)
+    follower = asyncio.create_task(
+        cache.get_or_load_async(
+            "same",
+            lambda: pytest.fail("a follower must not load"),
+            ttl_s=10,
+            now=lambda: 0,
+        )
+    )
+    await asyncio.sleep(0)
+    release.set()
+
+    with pytest.raises(TimeoutError, match="inspect deadline expired"):
+        await leader
+    with pytest.raises(TimeoutError, match="inspect deadline expired"):
+        await follower
+    assert calls == 1
+    assert (
+        await cache.get_or_load_async("same", lambda: expected, ttl_s=10, now=lambda: 0) is expected
     )
 
 
