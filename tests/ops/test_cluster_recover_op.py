@@ -195,10 +195,20 @@ def test_recover_cas_loses_to_a_new_owner_without_unpausing_or_clearing(
 ) -> None:
     _set_lease(monkeypatch, None)
     marker_clears: list[str] = []
+
+    def _lose_claim(
+        _recovery_holder: str,
+        _observed: DeployLease | None,
+        *,
+        ttl_s: float = 60.0,
+    ) -> RecoveryClaim:
+        del ttl_s
+        return RecoveryClaim(acquired=False)
+
     monkeypatch.setattr(
         _ops,
         "claim_recovery_lock",
-        lambda *_a, **_kw: RecoveryClaim(acquired=False),
+        _lose_claim,
     )
     monkeypatch.setattr(
         _ops.ui_update_state,

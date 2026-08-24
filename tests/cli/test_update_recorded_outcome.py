@@ -25,6 +25,7 @@ import pytest
 from cli import commands as _cli
 from cli.commands import _update_recover as _rec
 from cli.commands import update as _up
+from cli.commands._update_fanout import ClusterOpPayload
 
 
 @pytest.fixture(autouse=True)
@@ -115,9 +116,18 @@ def _record_via_finalize(monkeypatch: pytest.MonkeyPatch, **kw: Any) -> list[Any
 
     written: list[Any] = []
     monkeypatch.setattr(_lu, "finish_update", lambda outcome, **_kw: written.append(outcome))  # pyright: ignore[reportUnknownArgumentType]
+
+    def _fan_out(
+        _hosts: list[tuple[str, str | None]],
+        _path: str,
+        _timeout_s: float,
+        _payload: ClusterOpPayload,
+    ) -> list[tuple[str, str, str]]:
+        return []
+
     _rec.finalize_rollout(
         [],
-        lambda *_a, **_k: [],
+        _fan_out,
         1.0,
         deploy_capability={
             "deploy_holder": "g",
