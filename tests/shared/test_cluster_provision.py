@@ -46,7 +46,8 @@ def test_provision_database_creates_db_and_applies_schema(_provisioned_db: str) 
 
     try:
         assert (
-            provision_database(identity, base_admin_url=admin_url, cluster_secret=_SECRET) is True
+            provision_database(identity, base_admin_url=admin_url, db_admin_password=_SECRET)
+            is True
         )
 
         # Verify the database was created
@@ -85,7 +86,7 @@ def test_drop_database_removes_db_idempotent(_provisioned_db: str) -> None:
     expected_db = identity
     admin_url = _admin_url()
 
-    provision_database(identity, base_admin_url=admin_url, cluster_secret=_SECRET)
+    provision_database(identity, base_admin_url=admin_url, db_admin_password=_SECRET)
     with psycopg.connect(admin_url, autocommit=True) as conn:
         assert (
             conn.execute("SELECT 1 FROM pg_database WHERE datname = %s", (expected_db,)).fetchone()
@@ -111,11 +112,13 @@ def test_provision_database_idempotent(_provisioned_db: str) -> None:
 
     try:
         assert (
-            provision_database(identity, base_admin_url=admin_url, cluster_secret=_SECRET) is True
+            provision_database(identity, base_admin_url=admin_url, db_admin_password=_SECRET)
+            is True
         )
         # Second call: DB already exists — must be a no-op, no exception.
         assert (
-            provision_database(identity, base_admin_url=admin_url, cluster_secret=_SECRET) is False
+            provision_database(identity, base_admin_url=admin_url, db_admin_password=_SECRET)
+            is False
         )
 
         # DB still exists after both calls.
@@ -143,7 +146,7 @@ def test_provisioned_role_is_nosuperuser_and_owns_db(_provisioned_db: str) -> No
     role = expected_db = _fresh_identity()  # db and role share the identifier
     admin_url = _admin_url()
     try:
-        provision_database(role, base_admin_url=admin_url, cluster_secret=_SECRET)
+        provision_database(role, base_admin_url=admin_url, db_admin_password=_SECRET)
         with psycopg.connect(admin_url, autocommit=True) as conn:
             attrs = conn.execute(
                 "SELECT rolsuper, rolcanlogin FROM pg_roles WHERE rolname = %s", (role,)
@@ -167,8 +170,8 @@ def test_role_cannot_read_another_clusters_database(_provisioned_db: str) -> Non
     admin_url = _admin_url()
     db_a, role_b = a, b
     try:
-        provision_database(a, base_admin_url=admin_url, cluster_secret=_SECRET)
-        provision_database(b, base_admin_url=admin_url, cluster_secret=_SECRET)
+        provision_database(a, base_admin_url=admin_url, db_admin_password=_SECRET)
+        provision_database(b, base_admin_url=admin_url, db_admin_password=_SECRET)
         # Connect to A's database AS B's role (loopback trust ignores the password).
         url_a_as_b = url_with_userinfo(_swap_db(admin_url, db_a), role_b, _SECRET)
         with (

@@ -162,10 +162,9 @@ def fetch_bootstrap_config(
     Retries with linear backoff so a gateway that is briefly unreachable as the
     agent boots doesn't strand it.
 
-    `role` is the credential projection requested from the gateway: a runner
-    process passes ``"runner"`` and receives the least-privilege `ava_runner`
-    AVA_DB_URL (Task #1236); `None` (default) requests the main identity — the
-    pre-cutover contract.
+    `role` is the credential projection requested from the gateway: both
+    ``"runner"`` and ``None`` receive the least-privilege `ava_runner`
+    AVA_DB_URL. The main identity is never a bootstrap projection.
 
     Presents `Authorization: Bearer <AVA_CLUSTER_SECRET>` when that env var is set
     (enroll writes it on a split agent-runner); the gateway requires it when

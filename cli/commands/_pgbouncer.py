@@ -14,12 +14,12 @@ directly through the one URL.
 Auth (mirrors the redis requirepass model, avoiding a scram-verifier auth_query):
 
 - **client → pgbouncer**: `auth_type = scram-sha-256` against a `userlist.txt`
-  holding the cluster role `ava_<cluster>` with the cluster secret in plain
-  text (0600, rewritten every start), plus the least-privilege `ava_runner`
+  holding the cluster owner role with its independent DB-admin password in
+  plain text (0600, rewritten every start), plus the least-privilege `ava_runner`
   role with its own password (`AVA_RUNNER_DB_PASSWORD`, Task #1236) once the
   cluster has one — the credential the projected runner `AVA_DB_URL` dials
   with. PgBouncer derives the SCRAM server-side verification from the
-  plaintext, so an external / LAN client still needs the secret; there is no
+  plaintext, so an external / LAN client still needs its role's password; there is no
   passwordless pooled front door. A no-secret cluster (single-box, no auth
   anywhere) sets `auth_type = trust` instead and binds loopback only — the
   pooler never opens a passwordless front door to the LAN.
@@ -86,17 +86,13 @@ _IGNORE_STARTUP_PARAMETERS = "extra_float_digits,options"
 def runner_password_from_env() -> str:
     """This home's AVA_RUNNER_DB_PASSWORD from its .env FILE, or "".
 
-    Read from the file (never settings / os.environ): the runner credential is
-    a gateway-.env secret with no Settings field, and a parent shell that
-    sourced another cluster's env must not leak its value into this cluster's
-    pooler userlist. An absent/empty value means the cluster has no runner
-    credential yet (a legacy cluster pre-`ava cluster ensure-db-role`) —
-    the userlist then simply carries no ava_runner entry."""
-    from dotenv import dotenv_values
+    Kept as a pooler-local seam for callers and tests; the secret ownership is
+    in ``shared.cluster`` so non-CLI consumers never import this CLI module.
+    An absent/empty value means the cluster predates the runner-role cutover.
+    """
+    from shared.cluster import runner_password_from_env as read_runner_password
 
-    from shared.cluster.derive import RUNNER_DB_PASSWORD_ENV
-
-    return (dotenv_values(ava_home() / ".env").get(RUNNER_DB_PASSWORD_ENV) or "").strip()
+    return read_runner_password(ava_home())
 
 
 def _pgbouncer_dir() -> Path:
@@ -138,11 +134,11 @@ def pgbouncer_bin() -> str:
 
 def _render_userlist(
     role: str,
-    cluster_secret: str,
+    db_admin_password: str,
     runner_role: str | None = None,
     runner_password: str | None = None,
 ) -> str:
-    """`"user" "password"` lines — the cluster role with the secret, plus the
+    """`"user" "password"` lines — the cluster role with its DB-admin password, plus the
     `ava_runner` entry with its own password once the cluster has one. PgBouncer
     double-quotes both fields; escape any embedded quote.
 
@@ -151,7 +147,7 @@ def _render_userlist(
     userlist, and a scram entry with an empty password would reject every
     ava_runner dial anyway (nobody dials as ava_runner before the cutover, so
     the entry's absence is silent either way)."""
-    esc = cluster_secret.replace('"', '""')
+    esc = db_admin_password.replace('"', '""')
     lines = [f'"{role}" "{esc}"']
     if runner_role and runner_password:
         esc_runner = runner_password.replace('"', '""')
@@ -167,11 +163,12 @@ def _render_ini(
     transaction pooling, client auth against the userlist, and loopback +
     reachable binds (never all interfaces), matching Postgres's posture.
 
-    Client auth mirrors the cluster secret: `scram-sha-256` when a secret is set
-    (the pooled front door needs it, like pg/redis), `trust` when the cluster has
-    none — a no-secret cluster is fully unauthenticated, so the pooler cannot
-    demand a credential the cluster does not have (and its `listen_addr` is
-    loopback-only, gated by the same secret, so trust never reaches the LAN).
+    Client auth follows the authenticated-cluster posture: `scram-sha-256` when
+    a bearer is set (the pooled front door then requires the independent owner
+    or runner DB password), `trust` when the cluster has none — a no-secret
+    cluster is fully unauthenticated, so the pooler cannot demand a credential
+    the cluster does not have (and its `listen_addr` is loopback-only, gated by
+    the same posture flag, so trust never reaches the LAN).
 
     The backend socket dir is the one the RUNNING pg actually listens on
     (`_live_pg_socket_dir`, same probe the admin dial uses): `_start_pg` skips a
@@ -230,11 +227,13 @@ def _write_config(
     db_name: str,
     role: str,
     cluster_secret: str,
+    db_admin_password: str = "",
     runner_role: str | None = None,
     runner_password: str | None = None,
 ) -> None:
-    """Write pgbouncer.ini + userlist.txt (0600) fresh every start, so a secret
-    rotation or port change is always reflected (a running pooler is then reloaded)."""
+    """Write pgbouncer.ini + userlist.txt (0600) fresh every start, so a
+    DB-admin or runner-password rotation or port change is reflected (a running
+    pooler is then reloaded)."""
     self_ini = _ini_path()
     self_ini.write_text(
         _render_ini(
@@ -246,7 +245,7 @@ def _write_config(
         )
     )
     userlist = _userlist_path()
-    userlist.write_text(_render_userlist(role, cluster_secret, runner_role, runner_password))
+    userlist.write_text(_render_userlist(role, db_admin_password, runner_role, runner_password))
     userlist.chmod(0o600)
 
 
@@ -452,6 +451,7 @@ def ensure_pgbouncer(
     db_name: str,
     role: str,
     cluster_secret: str,
+    db_admin_password: str = "",
     runner_password: str | None = None,
 ) -> int:
     """Bring up (or reload) this cluster's PgBouncer on `listen_port`, pooling in
@@ -483,6 +483,7 @@ def ensure_pgbouncer(
 
     Only called when AVA_PGBOUNCER_ENABLED (gated by the caller in
     `ensure_cluster_instance`)."""
+    db_admin_password = db_admin_password or cluster_secret
     if runner_password is None:
         runner_password = runner_password_from_env()
     binary = pgbouncer_bin()
@@ -502,6 +503,7 @@ def ensure_pgbouncer(
         db_name=db_name,
         role=role,
         cluster_secret=cluster_secret,
+        db_admin_password=db_admin_password,
         runner_role=RUNNER_ROLE if runner_password else None,
         runner_password=runner_password,
     )
@@ -519,7 +521,7 @@ def ensure_pgbouncer(
             # every platform — which is why it goes through `shared.proc` now.
             os.kill(pid, signal.SIGHUP)  # online reload of ini + userlist
             print(f"  ✓ pgbouncer already running (127.0.0.1:{listen_port}), reloaded")
-            _report_backend_verification(listen_port, db_name, role, cluster_secret)
+            _report_backend_verification(listen_port, db_name, role, db_admin_password)
             return 0
         # A running pooler that is not on the reachable address is a degraded one
         # (born in a boot-time address race). Reload cannot fix it — pgbouncer
@@ -581,7 +583,7 @@ def ensure_pgbouncer(
     # -d daemonizes and returns immediately; wait for the listener to authenticate a
     # client (admin console — no backend, since the cluster role is provisioned later).
     for _ in range(60):
-        if _admin_reachable(listen_port, role, cluster_secret):
+        if _admin_reachable(listen_port, role, db_admin_password):
             break
         time.sleep(0.1)
     else:
@@ -605,7 +607,7 @@ def ensure_pgbouncer(
         )
         return 1
     print(f"  ✓ pgbouncer started (127.0.0.1:{listen_port}, transaction pooling)")
-    _report_backend_verification(listen_port, db_name, role, cluster_secret)
+    _report_backend_verification(listen_port, db_name, role, db_admin_password)
     return 0
 
 

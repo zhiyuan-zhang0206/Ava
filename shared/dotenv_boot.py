@@ -369,6 +369,7 @@ def _enforce_cluster_env_authority() -> None:
     # hand-written snapshots. This module keeps its own exemptions (_force_also
     # below, _identity_env_only, the placeholders) and loop logic unchanged.
     from shared.env_registry import (
+        ADMIN_DATA_PLANE_ALIASES,
         agent_runner_cluster_aliases,
         env_authority_drop_set,
         env_keep_set,
@@ -419,6 +420,8 @@ def _enforce_cluster_env_authority() -> None:
     keep = env_keep_set(role) | _force_also
     for key in keep:
         val = file_vals.get(key)
+        if key == "AVA_DB_URL" and os.environ.get("AVA_PROCESS_PROFILE") == "agent":
+            continue
         # The unanchored sentinel outranks the file. AVA_DB_URL is a cluster-scope
         # key, and an unanchored checkout resolves AVA_ENV_PATH to the DEFAULT home
         # — so without this guard the force-assign below reads production's `.env`
@@ -448,6 +451,9 @@ def _enforce_cluster_env_authority() -> None:
     # from os.environ does not affect /api/bootstrap distribution.
     if _is_gateway_process():
         for key in agent_runner_cluster_aliases():
+            os.environ.pop(key, None)
+    if os.environ.get("AVA_PROCESS_PROFILE") == "agent":
+        for key in ADMIN_DATA_PLANE_ALIASES:
             os.environ.pop(key, None)
 
 

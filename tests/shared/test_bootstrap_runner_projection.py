@@ -1,11 +1,10 @@
 """Tests for the bootstrap runner-role projection (Task #1236).
 
-`GET /api/bootstrap?role=runner` must serve the cluster's AVA_DB_URL with the
+`GET /api/bootstrap` always serves the cluster's AVA_DB_URL with the
 least-privilege `ava_runner` identity + its own password (carried INSIDE the
-URL, never served as a standalone key); no role serves the main identity —
-the pre-cutover contract, unchanged. A runner request on a cluster without a
-provisioned runner credential fails loudly with the fix, and an unknown role
-value is refused.
+URL, never served as a standalone key). Owner credentials never leave the
+gateway. A runner request on a cluster without a provisioned runner credential
+fails loudly, and an unknown role value is refused.
 """
 
 from __future__ import annotations
@@ -23,7 +22,12 @@ _DB_URL = "postgresql://ava:mainpw@127.0.0.1:5433/ava"
 
 
 def _write_gateway_env(tmp_path: Path, runner_pw: str | None = None) -> None:
-    lines = [f"AVA_DB_URL={_DB_URL}"]
+    lines = [
+        f"AVA_DB_URL={_DB_URL}",
+        "AVA_DB_ADMIN_PASSWORD=db-admin-only",
+        "AVA_REDIS_ADMIN_PASSWORD=redis-admin-only",
+        "AVA_REDIS_PASSWORD=redis-runtime-only",
+    ]
     if runner_pw is not None:
         lines.append(f"AVA_RUNNER_DB_PASSWORD={runner_pw}")
     (tmp_path / ".env").write_text("\n".join(lines) + "\n")
@@ -35,13 +39,18 @@ def _projected(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> dict[str, str
     return config.bootstrap_config_values(role="runner")
 
 
-def test_no_role_serves_main_identity_unchanged(
+def test_no_role_projects_ava_runner_url_and_never_serves_admin_credentials(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    _write_gateway_env(tmp_path)
+    _write_gateway_env(tmp_path, runner_pw=_RUNNER_PW)
     monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)
     vals = config.bootstrap_config_values()
-    assert vals["AVA_DB_URL"] == _DB_URL
+    parts = urlsplit(vals["AVA_DB_URL"])
+    assert parts.username == "ava_runner"
+    assert parts.password == _RUNNER_PW
+    assert "AVA_DB_ADMIN_PASSWORD" not in vals
+    assert "AVA_REDIS_ADMIN_PASSWORD" not in vals
+    assert "AVA_REDIS_PASSWORD" not in vals
 
 
 def test_runner_role_projects_ava_runner_url(

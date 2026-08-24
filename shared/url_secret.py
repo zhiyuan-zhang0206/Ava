@@ -4,7 +4,7 @@ shared.cluster.
 
 Names-as-data (path-only identity): the username / database a URL carries ARE
 the cluster's data-plane identifiers — they are never derived from a name, so
-Settings only re-applies the PASSWORD (the cluster secret, `url_with_password`)
+Settings may re-apply the main Postgres owner password (`url_with_password`)
 on load. `url_with_userinfo` sets the full identity and is used at birth, when
 the identifier is chosen (`shared.cluster.DATA_PLANE_IDENTITY`).
 """
@@ -39,7 +39,7 @@ def url_with_userinfo(url: str, user: str, password: str) -> str:
 def url_with_password(url: str, password: str) -> str:
     """Return `url` with its userinfo password replaced by `password`, keeping the
     existing username. Thin wrapper over url_with_userinfo for callers that only
-    rotate the secret and leave the username as-is."""
+    rotate a credential and leave the username as-is."""
     if not password:
         return url
     return url_with_userinfo(url, urlsplit(url).username or "", password)

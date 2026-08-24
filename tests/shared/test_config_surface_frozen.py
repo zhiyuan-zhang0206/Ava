@@ -13,6 +13,8 @@ from shared import config
 # the config PUT. Spot-check across domains.
 _FROZEN_ALIASES = {
     "db_url": "AVA_DB_URL",
+    "db_admin_password": "AVA_DB_ADMIN_PASSWORD",
+    "redis_admin_password": "AVA_REDIS_ADMIN_PASSWORD",
     "redis_url": "AVA_REDIS_URL",
     "events_channel": "AVA_EVENTS_CHANNEL",
     "cluster_secret": "AVA_CLUSTER_SECRET",

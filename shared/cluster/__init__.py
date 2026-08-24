@@ -38,6 +38,9 @@ from shared.cluster.derive import (
     DATA_PLANE_IDENTITY as DATA_PLANE_IDENTITY,
 )
 from shared.cluster.derive import (
+    REDIS_PASSWORD_ENV as REDIS_PASSWORD_ENV,
+)
+from shared.cluster.derive import (
     RUNNER_DB_PASSWORD_ENV as RUNNER_DB_PASSWORD_ENV,
 )
 from shared.cluster.derive import (
@@ -84,6 +87,12 @@ from shared.cluster.derive import (
 )
 from shared.cluster.derive import (
     redis_identity as redis_identity,
+)
+from shared.cluster.derive import (
+    redis_password_from_env as redis_password_from_env,
+)
+from shared.cluster.derive import (
+    runner_password_from_env as runner_password_from_env,
 )
 from shared.cluster.derive import (
     session_name as session_name,

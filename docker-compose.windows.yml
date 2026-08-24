@@ -9,15 +9,17 @@
 # Native Windows is NOT that case — a Windows unit carries `agent-runner` only
 # and has no local data plane at all (conventions/windows-setup.md).
 #
-# Usage (AVA_CLUSTER_SECRET must be set — there is no passwordless data plane;
-# `ava start` sets it for you):
-#   $env:AVA_CLUSTER_SECRET = "<secret>"; docker compose -f docker-compose.windows.yml up -d
+# Usage (the gateway-local owner/admin credentials must be set; `ava start`
+# persists them after cluster birth):
+#   $env:AVA_DB_ADMIN_PASSWORD = "<owner-password>"
+#   $env:AVA_REDIS_ADMIN_PASSWORD = "<redis-admin-password>"
+#   docker compose -f docker-compose.windows.yml up -d
 #
-# SINGLE CLUSTER PER BOX. The pg password / redis requirepass are the *cluster*
-# secret (not a box-level admin secret as on POSIX), so this data plane belongs to
-# exactly one cluster. Co-location (a second cluster sharing the box) is unsupported
-# on Windows: a second cluster's bring-up would re-key the shared redis auth and drop
-# the first cluster's ACL users. See shared/cluster.py (redis_admin_secret).
+# SINGLE CLUSTER PER BOX. The pg owner password and Redis requirepass are
+# gateway-local admin credentials, so this data plane belongs to exactly one
+# cluster. Co-location (a second cluster sharing the box) is unsupported on
+# Windows: a second cluster's bring-up would re-key the shared Redis auth and
+# drop the first cluster's ACL users.
 #
 # This is a CONVENIENCE for Windows users. The standard macOS/Linux path
 # (native pg/redis installed via brew/apt) is unchanged; this file is only
@@ -32,10 +34,10 @@ services:
       POSTGRES_USER: ava
       # SEEDS the superuser only at first volume-init — Postgres ignores
       # POSTGRES_PASSWORD once ava-pg-data exists. `ava start` re-keys the superuser
-      # to the *current* cluster secret on every bring-up (over the container's trust
-      # socket; see _docker_rekey_superuser), so a rotated/pre-existing secret
+      # to the current DB-owner password on every bring-up (over the container's trust
+      # socket; see _docker_rekey_superuser), so a rotated/pre-existing credential
       # self-heals instead of locking admin out. Fail loud if unset (no weak default).
-      POSTGRES_PASSWORD: "${AVA_CLUSTER_SECRET:?AVA_CLUSTER_SECRET must be set; run ava start}"
+      POSTGRES_PASSWORD: "${AVA_DB_ADMIN_PASSWORD:?AVA_DB_ADMIN_PASSWORD must be set; run ava start}"
       POSTGRES_DB: ava
     ports:
       - "127.0.0.1:5432:5432"
@@ -58,7 +60,7 @@ services:
     restart: unless-stopped
     command: >
       redis-server
-      --requirepass ${AVA_CLUSTER_SECRET:?AVA_CLUSTER_SECRET must be set; run ava start}
+      --requirepass ${AVA_REDIS_ADMIN_PASSWORD:?AVA_REDIS_ADMIN_PASSWORD must be set; run ava start}
       --save ""
       --appendonly no
     ports:
@@ -66,7 +68,7 @@ services:
     volumes:
       - ava-redis-data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "--no-auth-warning", "-a", "${AVA_CLUSTER_SECRET:?AVA_CLUSTER_SECRET must be set; run ava start}", "ping"]
+      test: ["CMD", "redis-cli", "--no-auth-warning", "-a", "${AVA_REDIS_ADMIN_PASSWORD:?AVA_REDIS_ADMIN_PASSWORD must be set; run ava start}", "ping"]
       interval: 5s
       timeout: 5s
       retries: 5

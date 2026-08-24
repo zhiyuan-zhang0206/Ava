@@ -2253,11 +2253,13 @@ class TestStderrLogsDir:
         must exist (idempotent mkdir). Fake native supervisor + noop confirm."""
         from ops.agent_launch import _launch_agent_process
         from shared.config import settings
+        from shared.envfile import upsert_env
 
         fresh_home = tmp_path / "fresh"
         fresh_logs_dir = fresh_home / "logs"
         assert not fresh_logs_dir.exists()
         monkeypatch.setattr(settings.general, "ava_home", fresh_home)
+        upsert_env(fresh_home / ".env", {"AVA_RUNNER_DB_PASSWORD": "abc"})
 
         # let _wait_for_agent_claim return immediately (avoids needing real agents_meta table)
         monkeypatch.setattr(
@@ -2276,13 +2278,15 @@ class TestStderrLogsDir:
         self,
         monkeypatch: pytest.MonkeyPatch,
         tmp_path: Path,
-        unit_home,  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+        unit_home: Path,
     ) -> None:
         """When LOGS_DIR already exists, does not raise (mkdir exist_ok=True)."""
         from ops.agent_launch import _launch_agent_process
+        from shared.envfile import upsert_env
 
         existing = tmp_path / "logs"
         existing.mkdir()
+        upsert_env(unit_home / ".env", {"AVA_RUNNER_DB_PASSWORD": "abc"})
         monkeypatch.setattr(
             "ops.agent_launch._wait_for_agent_claim",
             lambda _id: None,  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]

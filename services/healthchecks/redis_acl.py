@@ -2,8 +2,9 @@
 
 The cluster's redis runtime identity (the ACL user carried by this cluster's own
 redis_url — names-as-data — re-affirmed via ensure_cluster_redis_acl)
-lives only in redis server memory: the per-cluster redis carries just the admin
-`requirepass` (the cluster secret) — no persisted `user` lines, no aclfile — so a
+lives only in redis server memory: the per-cluster Redis carries just the admin
+`requirepass` (the independent Redis admin password) — no persisted `user` lines,
+no aclfile — so a
 redis-server restart silently drops the ACL user. From then on every component's
 redis reconnect fails with AuthenticationError: agents crash on their next redis
 call and the gateway's SSE stream dies on attach, while the gateway's HTTP health
@@ -12,7 +13,7 @@ only re-affirm point.
 
 The check PINGs redis as the cluster identity. On an auth failure with the
 server otherwise reachable, it re-runs the idempotent provisioning primitive as
-the `default` admin user (requirepass == the cluster secret) and verifies the
+the `default` admin user (authenticated by the Redis admin password) and verifies the
 repair took. On a connection failure it calls the same idempotent Redis bring-up
 that `ava start` uses, then verifies that the cluster identity can PING again.
 
@@ -45,6 +46,7 @@ from shared.cluster import (
     redis_admin_url,
     redis_channel_prefix,
     redis_identity,
+    redis_password_from_env,
 )
 from shared.config import settings
 from shared.log import init_gateway_process
@@ -71,6 +73,8 @@ def check(
     cluster_url: str,
     admin_url: str,
     cluster_secret: str,
+    redis_admin_password: str = "",
+    runtime_password: str = "",
     channel_prefix: str,
     reaffirm_acl: bool,
 ) -> None:
@@ -89,6 +93,8 @@ def check(
     the watchdog logs it as a failing healthcheck rather than this module deciding
     what to swallow.
     """
+    redis_admin_password = redis_admin_password or cluster_secret
+    runtime_password = runtime_password or cluster_secret
     try:
         _ping(cluster_url)
         _log.debug("[redis-acl healthcheck] %s authenticates, no-op", user)
@@ -104,7 +110,7 @@ def check(
         )
         from cli.commands._cluster_instance import _start_redis
 
-        rc = _start_redis(redis_port, cluster_secret, user)
+        rc = _start_redis(redis_port, redis_admin_password, runtime_password, cluster_secret, user)
         if rc != 0:
             raise RuntimeError(f"redis restart did not start :{redis_port} (rc={rc})") from exc
         _ping(cluster_url)
@@ -114,7 +120,7 @@ def check(
     ensure_cluster_redis_acl(
         user,
         redis_admin_url=admin_url,
-        cluster_secret=cluster_secret,
+        runtime_password=runtime_password,
         channel_prefix=channel_prefix,
     )
     _ping(cluster_url)
@@ -158,9 +164,15 @@ def main() -> None:
         cluster_url=cluster_url,
         admin_url=redis_admin_url(),
         cluster_secret=settings.data_plane.cluster_secret,
+        redis_admin_password=(
+            settings.data_plane.redis_admin_password or settings.data_plane.cluster_secret
+        ),
+        runtime_password=redis_password_from_env() or settings.data_plane.cluster_secret,
         channel_prefix=redis_channel_prefix(),
         redis_port=record_redis_port(rec),
-        reaffirm_acl=bool(settings.data_plane.cluster_secret),
+        reaffirm_acl=bool(
+            settings.data_plane.redis_admin_password or settings.data_plane.cluster_secret
+        ),
     )
 
 

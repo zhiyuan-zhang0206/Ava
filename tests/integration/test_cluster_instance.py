@@ -3,7 +3,7 @@
 Exercises cli.commands._cluster_instance end to end: initdb a fresh per-cluster
 Postgres under a temp $AVA_HOME, start it on an ephemeral port with the
 socket-trust / TCP-scram posture, start a per-cluster Redis with requirepass =
-the cluster secret, provision the role+db+schema, then connect over the runtime
+an independent Redis-admin password, provision the role+db+schema, then connect over the runtime
 identities (the `ava_tinst` identifier here, passed as data — names-as-data) and
 run a trivial command. This is the bring-up install-time birth takes for every
 cluster; the rest of the suite mocks it out.
@@ -28,6 +28,11 @@ from cli.commands._pgbouncer import pgbouncer_bin, stop_pgbouncer
 from shared.cluster import provision_database
 from shared.config import settings
 
+_BEARER = "test_bearer_abc123"
+_DB_ADMIN = "test_db_admin_abc123"
+_REDIS_ADMIN = "test_redis_admin_abc123"
+_REDIS_RUNTIME = "test_redis_runtime_abc123"
+
 
 def _pgbouncer_installed() -> bool:
     binary = pgbouncer_bin()
@@ -48,7 +53,9 @@ def isolated_cluster(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterato
     home.mkdir()
     monkeypatch.setattr(settings.general, "ava_home", str(home))
     monkeypatch.setattr(settings.general, "cluster_registry", str(tmp_path / "clusters.json"))
-    monkeypatch.setattr(settings.data_plane, "cluster_secret", "test_secret_abc123")
+    monkeypatch.setattr(settings.data_plane, "cluster_secret", _BEARER)
+    monkeypatch.setattr(settings.data_plane, "db_admin_password", _DB_ADMIN)
+    monkeypatch.setattr(settings.data_plane, "redis_admin_password", _REDIS_ADMIN)
     monkeypatch.setattr(settings.data_plane, "events_channel", "ava:tinst:events")
     pg_port, redis_port = _free_port(), _free_port()
     try:
@@ -69,7 +76,7 @@ def isolated_cluster(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterato
         )
         subprocess.run(  # noqa: S603
             [ci._redis_cli_bin(), "-p", str(redis_port), "shutdown", "nosave"],
-            env=ci._redis_cli_env("test_secret_abc123"),  # never `-a` — argv is public
+            env=ci._redis_cli_env(_REDIS_ADMIN),  # never `-a` — argv is public
             check=False,
             capture_output=True,
         )
@@ -77,12 +84,15 @@ def isolated_cluster(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterato
 
 def test_per_cluster_instance_bringup(isolated_cluster: tuple[int, int]) -> None:
     pg_port, redis_port = isolated_cluster
-    secret = settings.data_plane.cluster_secret
+    bearer = settings.data_plane.cluster_secret
 
     rc = ci.ensure_cluster_instance(
         pg_port=pg_port,
         redis_port=redis_port,
-        cluster_secret=secret,
+        cluster_secret=bearer,
+        db_admin_password=_DB_ADMIN,
+        redis_admin_password=_REDIS_ADMIN,
+        redis_password=_REDIS_RUNTIME,
         pgbouncer_port=pg_port + 1,
         identity="ava_tinst",
     )
@@ -91,11 +101,13 @@ def test_per_cluster_instance_bringup(isolated_cluster: tuple[int, int]) -> None
     # Provision the role + db + schema against the cluster's own instance (over its
     # local socket, trust) — exactly what cluster_lifecycle._provision does. The
     # identifier is passed as data.
-    provision_database("ava_tinst", base_admin_url=ci.pg_admin_url(pg_port), cluster_secret=secret)
+    provision_database(
+        "ava_tinst", base_admin_url=ci.pg_admin_url(pg_port), db_admin_password=_DB_ADMIN
+    )
 
     # Runtime Postgres identity: the ava_tinst role over TCP scram (a co-located
     # cluster could reach the port, so the password is required).
-    runtime_db = f"postgresql://ava_tinst:{secret}@127.0.0.1:{pg_port}/ava_tinst"
+    runtime_db = f"postgresql://ava_tinst:{_DB_ADMIN}@127.0.0.1:{pg_port}/ava_tinst"
     with psycopg.connect(runtime_db) as conn:
         row = conn.execute("SELECT 1").fetchone()
         assert row is not None and row[0] == 1
@@ -116,27 +128,39 @@ def test_per_cluster_instance_bringup(isolated_cluster: tuple[int, int]) -> None
     # A wrong password is rejected over TCP (the lock that keeps other clusters out).
     with pytest.raises(psycopg.OperationalError):
         psycopg.connect(f"postgresql://ava_tinst:wrong@127.0.0.1:{pg_port}/ava_tinst")
+    with pytest.raises(psycopg.OperationalError):
+        psycopg.connect(f"postgresql://ava_tinst:{bearer}@127.0.0.1:{pg_port}/ava_tinst")
 
     # Runtime Redis identity: the ava_tinst ACL user.
     # redis-py's from_url carries **kwargs: Unknown in its stub.
     r = redis.Redis.from_url(  # pyright: ignore[reportUnknownMemberType]
-        f"redis://ava_tinst:{secret}@127.0.0.1:{redis_port}/0"
+        f"redis://ava_tinst:{_REDIS_RUNTIME}@127.0.0.1:{redis_port}/0"
     )
     assert r.ping()  # pyright: ignore[reportUnknownMemberType]
     r.close()
+    with (
+        redis.Redis.from_url(  # pyright: ignore[reportUnknownMemberType]
+            f"redis://ava_tinst:{bearer}@127.0.0.1:{redis_port}/0"
+        ) as wrong_bearer,
+        pytest.raises(redis.AuthenticationError),
+    ):
+        wrong_bearer.ping()  # pyright: ignore[reportUnknownMemberType]
 
 
 def test_bringup_is_idempotent(isolated_cluster: tuple[int, int]) -> None:
     """A second ensure on an already-running instance is a no-op success (the warm
     `ava start` path)."""
     pg_port, redis_port = isolated_cluster
-    secret = settings.data_plane.cluster_secret
+    bearer = settings.data_plane.cluster_secret
     for _ in range(2):
         assert (
             ci.ensure_cluster_instance(
                 pg_port=pg_port,
                 redis_port=redis_port,
-                cluster_secret=secret,
+                cluster_secret=bearer,
+                db_admin_password=_DB_ADMIN,
+                redis_admin_password=_REDIS_ADMIN,
+                redis_password=_REDIS_RUNTIME,
                 pgbouncer_port=pg_port + 1,
                 identity="ava_tinst",
             )
@@ -157,21 +181,26 @@ def test_bringup_with_pgbouncer_enabled(
     is actually taken with pooling on."""
     pg_port, redis_port = isolated_cluster
     dp = settings.data_plane
-    secret = dp.cluster_secret
+    bearer = dp.cluster_secret
     pgb_port = _free_port()
     monkeypatch.setattr(dp, "pgbouncer_enabled", True)
 
     rc = ci.ensure_cluster_instance(
         pg_port=pg_port,
         redis_port=redis_port,
-        cluster_secret=secret,
+        cluster_secret=bearer,
+        db_admin_password=_DB_ADMIN,
+        redis_admin_password=_REDIS_ADMIN,
+        redis_password=_REDIS_RUNTIME,
         pgbouncer_port=pgb_port,
         identity="ava_tinst",
     )
     assert rc == 0
 
     # Provision role+db+schema (direct, socket superuser) — as cluster_lifecycle._provision does.
-    provision_database("ava_tinst", base_admin_url=ci.pg_admin_url(pg_port), cluster_secret=secret)
+    provision_database(
+        "ava_tinst", base_admin_url=ci.pg_admin_url(pg_port), db_admin_password=_DB_ADMIN
+    )
 
     # On macOS, PgBouncer 1.25.x enters a broken state after its first backend
     # connection fails (role does not exist yet). A full restart after provisioning
@@ -187,7 +216,8 @@ def test_bringup_with_pgbouncer_enabled(
         listen_port=pgb_port,
         db_name="ava_tinst",
         role="ava_tinst",
-        cluster_secret=secret,
+        cluster_secret=bearer,
+        db_admin_password=_DB_ADMIN,
     )
 
     # The one URL: AVA_DB_URL itself carries the pooler port (pooling on). The
@@ -196,8 +226,8 @@ def test_bringup_with_pgbouncer_enabled(
     from shared import cluster as _cl
     from shared import paths as _paths
 
-    pooled_db = f"postgresql://ava_tinst:{secret}@127.0.0.1:{pgb_port}/ava_tinst"
-    direct_db = f"postgresql://ava_tinst:{secret}@127.0.0.1:{pg_port}/ava_tinst"
+    pooled_db = f"postgresql://ava_tinst:{_DB_ADMIN}@127.0.0.1:{pgb_port}/ava_tinst"
+    direct_db = f"postgresql://ava_tinst:{_DB_ADMIN}@127.0.0.1:{pg_port}/ava_tinst"
     monkeypatch.setattr(dp, "db_url", pooled_db)
     monkeypatch.setattr(_paths, "ava_home", lambda: Path("/x/.ava-tinst"))
     monkeypatch.setattr(
@@ -336,7 +366,9 @@ def test_fresh_install_migrations_apply_no_secret(
         identity="ava_tinst",
     )
     assert rc == 0
-    provision_database("ava_tinst", base_admin_url=ci.pg_admin_url(pg_port), cluster_secret=secret)
+    provision_database(
+        "ava_tinst", base_admin_url=ci.pg_admin_url(pg_port), db_admin_password=secret
+    )
 
     # first `ava start`: re-bring-up rewrites the (identical, trust) hba and
     # reloads it — still trust, still passwordless-dialable.

@@ -605,8 +605,7 @@ def _rw_pg_url(pw: str, *, host: str, user: str = "ava_main") -> str:
 def _redis_identity_ctx(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, db_url: str, secret: str
 ):
-    """Wire _ensure_redis_url_identity_step's settings deps (db identity source +
-    the secret re-applied as the password)."""
+    """Wire the legacy backfill's db identity and pre-split bearer fallback."""
     monkeypatch.setattr(_converge.settings.data_plane, "db_url", db_url)
     monkeypatch.setattr(_converge.settings.data_plane, "cluster_secret", secret)
     return _ctx(tmp_path / "repo", tmp_path)
@@ -615,8 +614,8 @@ def _redis_identity_ctx(
 def test_redis_url_identity_step_backfills_missing_username(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    """A legacy username-less URL gets the db_url's identity (names-as-data) with
-    the cluster secret re-applied as the password; every other line is untouched."""
+    """A pre-split username-less URL gets the db_url identity and bearer fallback;
+    a split home instead reads its runtime password from the file."""
     (tmp_path / ".env").write_text(
         f"AVA_REDIS_URL={_rw_url('pw', host='redis.lan:6380')}\n"
         f"AVA_DB_URL={_rw_pg_url('pw', host='db.lan:5433')}\n"

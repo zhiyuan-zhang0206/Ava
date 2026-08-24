@@ -32,7 +32,7 @@ import pytest
 
 from services.healthchecks import pgbouncer as hc
 
-_SECRET = "s3cr3t"  # noqa: S105 — test fixture, not a real credential
+_SECRET = "abc"  # noqa: S105 — test fixture, not a real credential
 
 
 class _Calls:
@@ -118,7 +118,8 @@ def test_dead_pooler_is_restarted_with_the_registry_ports(monkeypatch: pytest.Mo
             "listen_port": 16433,
             "db_name": "ava_probe",
             "role": "ava_probe",
-            "cluster_secret": "s3cr3t",
+            "cluster_secret": "abc",
+            "db_admin_password": "abc",
         }
     ]
 

@@ -213,15 +213,13 @@ def bootstrap_config_values(role: str | None = None) -> dict[str, str]:
     gateway), and dropping it would silently revert the recipient to the field
     default — exactly the distinction between "unset" and "set to empty".
 
-    `role` selects the credential projection: `"runner"` rewrites the served
+    `role` selects the credential projection: `None` and `"runner"` both rewrite the served
     `AVA_DB_URL` to the least-privilege `ava_runner` role with its own password
     (the gateway .env AVA_RUNNER_DB_PASSWORD — carried INSIDE the URL, never
-    served as a standalone key), so a runner process dials exactly the surface
-    its role grants and nothing more (Task #1236). `None` (the default) serves
-    the main data-plane identity verbatim — the pre-cutover contract, and what
-    a gateway-less consumer still needs. A runner request on a cluster that has
-    no runner credential yet raises: serving an empty password would fail at
-    first connect with an unexplained auth error, so the operator is told to
+    served as a standalone key), so every bootstrap recipient dials exactly the
+    surface its role grants and nothing more (Task #1236). A request on a cluster
+    that has no runner credential yet raises: serving an empty password would fail
+    at first connect with an unexplained auth error, so the operator is told to
     provision the role instead.
     """
     from pydantic import SecretStr
@@ -233,7 +231,7 @@ def bootstrap_config_values(role: str | None = None) -> dict[str, str]:
     if role not in (None, "runner"):
         raise ValueError(
             f"bootstrap role {role!r} is not a known projection — supported: "
-            f"'runner' (the least-privilege ava_runner URL), None (the main identity)"
+            f"'runner' or None (the least-privilege ava_runner URL)"
         )
     aliases = runtime_config.read_env_aliases()
     out: dict[str, str] = {}
@@ -259,20 +257,18 @@ def bootstrap_config_values(role: str | None = None) -> dict[str, str]:
     for binding in provider_api.REGISTRY.bindings.values():
         if binding.key_env in aliases and binding.key_env not in out:
             out[binding.key_env] = aliases[binding.key_env]
-    if role == "runner":
-        from shared.cluster.derive import RUNNER_DB_PASSWORD_ENV, RUNNER_ROLE
+    from shared.cluster.derive import RUNNER_DB_PASSWORD_ENV, RUNNER_ROLE
 
-        runner_password = aliases.get(RUNNER_DB_PASSWORD_ENV) or ""
-        if not runner_password:
-            raise ValueError(
-                "AVA_RUNNER_DB_PASSWORD is not set in the gateway's .env — run "
-                "`ava cluster ensure-db-role` on the gateway first, then retry."
-            )
-        db_url = out.get("AVA_DB_URL")
-        if not db_url:
-            raise ValueError(
-                "AVA_DB_URL is not served by bootstrap — cannot project the runner "
-                "credential onto it"
-            )
-        out["AVA_DB_URL"] = url_with_userinfo(db_url, RUNNER_ROLE, runner_password)
+    runner_password = aliases.get(RUNNER_DB_PASSWORD_ENV) or ""
+    if not runner_password:
+        raise ValueError(
+            "AVA_RUNNER_DB_PASSWORD is not set in the gateway's .env — run "
+            "`ava cluster ensure-db-role` on the gateway first, then retry."
+        )
+    db_url = out.get("AVA_DB_URL")
+    if not db_url:
+        raise ValueError(
+            "AVA_DB_URL is not served by bootstrap — cannot project the runner credential onto it"
+        )
+    out["AVA_DB_URL"] = url_with_userinfo(db_url, RUNNER_ROLE, runner_password)
     return out

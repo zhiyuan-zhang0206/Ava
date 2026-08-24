@@ -38,7 +38,7 @@ def _schema_applied(admin_url: str, target: str) -> bool:
     return row is not None
 
 
-def ensure_cluster_role(identity: str, *, base_admin_url: str, cluster_secret: str) -> None:
+def ensure_cluster_role(identity: str, *, base_admin_url: str, db_admin_password: str) -> None:
     """Create (or re-affirm) the cluster's data-plane role `identity` and make it
     own the database of the same name. Idempotent — safe on every bring-up.
 
@@ -48,8 +48,8 @@ def ensure_cluster_role(identity: str, *, base_admin_url: str, cluster_secret: s
     prod's historical `ava_main` keeps re-affirming until an ops rename.
 
     The role is `LOGIN NOSUPERUSER` (so it bypasses no grant and can reach only
-    its own database) and its password is (re)set to the current cluster secret
-    every call, so a rotation self-heals. One exception: when the OS user the
+    its own database) and its password is (re)set to the current DB owner password
+    every call, so an owner-password rotation self-heals. One exception: when the OS user the
     install ran as IS the cluster identity (e.g. a host user named `ava`), the
     role is the initdb bootstrap superuser, which Postgres refuses to downgrade
     — it stays SUPERUSER on its own single-tenant instance. The instance is the cluster's own, so
@@ -76,14 +76,14 @@ def ensure_cluster_role(identity: str, *, base_admin_url: str, cluster_secret: s
         is_bootstrap = conn.execute(
             "SELECT 1 FROM pg_roles WHERE rolname = %s AND oid = 10", (identity,)
         ).fetchone()
-        # pgsql.Literal quotes the secret as a string literal (the only safe way to
+        # pgsql.Literal quotes the password as a string literal (the only safe way to
         # put a password in ALTER/CREATE ROLE — it is not a bind-param position).
         conn.execute(
             pgsql.SQL("{} ROLE {} LOGIN {} PASSWORD {}").format(
                 pgsql.SQL("ALTER" if has_role else "CREATE"),
                 pgsql.Identifier(identity),
                 pgsql.SQL("" if is_bootstrap else "NOSUPERUSER"),
-                pgsql.Literal(cluster_secret),
+                pgsql.Literal(db_admin_password),
             )
         )
         db_exists = conn.execute(
@@ -124,7 +124,7 @@ def _adopt_database(base_admin_url: str, target: str, owner: str) -> None:
             conn.execute(pgsql.SQL("REASSIGN OWNED BY ava TO {}").format(pgsql.Identifier(owner)))
 
 
-def provision_database(identity: str, *, base_admin_url: str, cluster_secret: str) -> bool:
+def provision_database(identity: str, *, base_admin_url: str, db_admin_password: str) -> bool:
     """Atomically provision a cluster's Postgres database AND its owning role:
     ensure role `identity`, CREATE DATABASE `identity` OWNED BY it, and apply
     db/schema.sql *as that role* so every object is role-owned. `identity` is the
@@ -149,7 +149,9 @@ def provision_database(identity: str, *, base_admin_url: str, cluster_secret: st
     import psycopg
     from psycopg import sql as pgsql
 
-    ensure_cluster_role(identity, base_admin_url=base_admin_url, cluster_secret=cluster_secret)
+    ensure_cluster_role(
+        identity, base_admin_url=base_admin_url, db_admin_password=db_admin_password
+    )
     with psycopg.connect(base_admin_url, autocommit=True) as conn:
         exists = conn.execute(
             "SELECT 1 FROM pg_database WHERE datname = %s", (identity,)
@@ -179,7 +181,9 @@ def provision_database(identity: str, *, base_admin_url: str, cluster_secret: st
         # with it), so this works both in prod and against a password-auth pg.
         # schema.sql is a trusted multi-statement script read from disk; same
         # pattern as shared/migrations.py applying a body.
-        role_url = url_with_userinfo(_swap_db(base_admin_url, identity), identity, cluster_secret)
+        role_url = url_with_userinfo(
+            _swap_db(base_admin_url, identity), identity, db_admin_password
+        )
         with psycopg.connect(role_url, autocommit=True) as conn:
             conn.execute(schema_sql)  # type: ignore[arg-type]
     except Exception:
@@ -323,7 +327,7 @@ def ensure_checkpoint_schema(
     identity: str,
     *,
     base_admin_url: str,
-    cluster_secret: str,
+    db_admin_password: str,
     database_created: bool = False,
     resume_partial: bool = False,
 ) -> None:
@@ -356,7 +360,7 @@ def ensure_checkpoint_schema(
     # (its own schema objects), over loopback trust or scram with the secret.
     # from_conn_string owns the connection for the setup (the same construction
     # shared/pg_tools.py uses for throwaway test clusters).
-    role_url = url_with_userinfo(_swap_db(base_admin_url, identity), identity, cluster_secret)
+    role_url = url_with_userinfo(_swap_db(base_admin_url, identity), identity, db_admin_password)
     expected = _expected_checkpoint_schema_versions()
     actual = _checkpoint_schema_versions(role_url)
     if actual == expected:
@@ -557,20 +561,20 @@ def ensure_runner_role(identity: str, *, base_admin_url: str, runner_password: s
 
 
 def ensure_cluster_redis_acl(
-    user: str, *, redis_admin_url: str, cluster_secret: str, channel_prefix: str
+    user: str, *, redis_admin_url: str, runtime_password: str, channel_prefix: str
 ) -> None:
     """Create (or re-affirm) the cluster's redis ACL user `user` — the runtime
     redis identity, mirroring the per-cluster Postgres role. Idempotent; safe on
     every bring-up. `user` is names-as-data: read from the cluster's own
     redis_url (`identity_from_url`) for an existing cluster, `DATA_PLANE_IDENTITY`
-    at birth. The user authenticates with the cluster secret and is scoped
+    at birth. The user authenticates with its independent runtime password and is scoped
     to keys (`~*`) + pub/sub channels (`&<channel_prefix>:*`); `-@dangerous` denies
     FLUSHALL / CONFIG / SHUTDOWN. The secret travels over the redis connection, never
     a process argv.
 
-    `resetpass` precedes `>cluster_secret`: Redis ACL passwords are additive by
+    `resetpass` precedes `>runtime_password`: Redis ACL passwords are additive by
     default (`>password` ADDS a valid password rather than replacing the set), so
-    without it a secret rotation would leave the PREVIOUS secret still
+    without it a runtime-password rotation would leave the previous password still
     authenticating this user indefinitely — confirmed empirically while building
     `scripts/rotate_cluster_secret.py`. `resetpass` clears the password list first,
     so re-affirming with an unchanged secret still ends at exactly one valid
@@ -584,9 +588,8 @@ def ensure_cluster_redis_acl(
     would never deliver. `nopass` lets that AUTH succeed while the posture stays
     unauthenticated (requirepass is off and the `default` user is nopass too).
 
-    redis_admin_url connects as the redis `default` (admin) user, whose password is
-    the cluster secret (each cluster's redis is single-tenant, so `requirepass` == the
-    cluster secret)."""
+    redis_admin_url connects as the Redis `default` user with the independent
+    gateway-only Redis admin password."""
     import redis
 
     # redis-py types from_url's **kwargs as Unknown; the call itself is fully typed.
@@ -599,7 +602,7 @@ def ensure_cluster_redis_acl(
             user,
             "on",
             "resetpass",
-            f">{cluster_secret}" if cluster_secret else "nopass",
+            f">{runtime_password}" if runtime_password else "nopass",
             "resetkeys",
             "~*",
             "resetchannels",

@@ -71,7 +71,12 @@ def _ensure_gateway_data_plane() -> int:
     ports come from its registry record (allocated at birth). The pgbouncer port is
     derived for records saved before the slot existed (record_pgbouncer_port)."""
     from cli.commands._cluster_instance import ensure_cluster_instance
-    from shared.cluster import db_identity, get_record, record_pgbouncer_port
+    from shared.cluster import (
+        db_identity,
+        get_record,
+        record_pgbouncer_port,
+        redis_password_from_env,
+    )
     from shared.config import settings
     from shared.paths import ava_home
 
@@ -87,6 +92,13 @@ def _ensure_gateway_data_plane() -> int:
         pg_port=rec.ports["postgres"],
         redis_port=rec.ports["redis"],
         cluster_secret=settings.data_plane.cluster_secret,
+        db_admin_password=(
+            settings.data_plane.db_admin_password or settings.data_plane.cluster_secret
+        ),
+        redis_admin_password=(
+            settings.data_plane.redis_admin_password or settings.data_plane.cluster_secret
+        ),
+        redis_password=redis_password_from_env() or settings.data_plane.cluster_secret,
         pgbouncer_port=record_pgbouncer_port(rec),
         # names-as-data: the db/role/ACL identity is whatever this cluster's own
         # .env URLs carry (prod's historical ava_main until the ops rename; the
@@ -458,6 +470,19 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
         from cli.commands.ensure_db_role import refresh_runner_grants_after_migration
 
         refresh_runner_grants_after_migration()
+
+    # 2.66) Existing authenticated clusters still carry the historical bearer
+    # as every data-plane password. Migrate that state only after migrations,
+    # before any service session can inherit the owner URLs. Fresh installs
+    # already minted the independent values at birth, so this is a no-op there.
+    if "gateway" in roles:
+        from cli.commands._data_plane_admin_secrets import ensure_data_plane_admin_secrets
+
+        try:
+            ensure_data_plane_admin_secrets()
+        except Exception as e:
+            print(f"  ✗ data-plane credential split failed: {e}", file=sys.stderr)
+            return 1
 
     # 2.7) land the cluster's installed extensions on this machine. AFTER the
     # schema check on purpose: converge (step 1) runs before this cluster's
