@@ -29,17 +29,18 @@ Two implementation details worth knowing:
   would fetch verbatim, ignoring the index override; re-resolving against
   `UV_DEFAULT_INDEX` rewrites the *local* lock to mirror URLs (uncommitted). A
   full mirror resolves the same versions.
-- **macOS installs `uv` via Homebrew** under a mirror, so the astral installer's
-  GitHub-release download is skipped (Homebrew is already mirror-routed).
+- **macOS installs `uv` via Homebrew** under a mirror, so the pinned uv release's
+  GitHub download is skipped (Homebrew is already mirror-routed).
 
 **Residual legs with no canonical CN mirror** (set these yourself if they stall):
 
 - uv's managed CPython (`uv python install 3.12`) is one ~30 MB GitHub-release
   download. If it hangs, pre-install Python 3.12 (e.g. `brew install python@3.12`)
   or set `UV_PYTHON_INSTALL_MIRROR` to a GitHub proxy you trust.
-- On **Linux**, the `uv` binary (`UV_INSTALLER_GITHUB_BASE_URL`) and the apt repos
-  for Node/PGDG/GitHub-CLI have no clean CN mirror — point your apt sources and
-  those vars at a proxy you trust. macOS is the clean end-to-end path.
+- On **Linux**, the `uv` binary (`UV_RELEASE_BASE_URL` — toolchain.sh's download
+  base, still sha256-verified) and the apt repos for Node/PGDG/GitHub-CLI have no
+  clean CN mirror — point your apt sources and those vars at a proxy you trust.
+  macOS is the clean end-to-end path.
 
 `--mirror` is refused together with `--worktree`: a worktree cluster runs no
 host-global download step (`uv sync --frozen` follows the committed lock), so
