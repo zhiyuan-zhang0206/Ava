@@ -22,6 +22,7 @@ from ops.rpc_schemas import UploadReceivePayload, UploadReceiveResult
 from shared.config import settings
 from shared.http_dial import get as http_get
 from shared.machine import gateway_api_base
+from shared.private_storage import write_private_bytes
 from shared.uploads import agent_upload_dir, sanitize_upload_name
 
 _log = logging.getLogger(__name__)
@@ -40,7 +41,6 @@ def upload_receive_op(payload: UploadReceivePayload) -> UploadReceiveResult:
 
     name = sanitize_upload_name(payload.name)
     dest = agent_upload_dir(payload.agent_id)
-    dest.mkdir(parents=True, exist_ok=True)
     target = dest / name
 
     url = f"{gateway_api_base().rstrip('/')}/api/agents/{payload.agent_id}/uploads/{name}"
@@ -51,7 +51,7 @@ def upload_receive_op(payload: UploadReceivePayload) -> UploadReceiveResult:
     except Exception as exc:  # httpx.HTTPError + friends
         raise OSError(f"pull upload {url!r} failed: {exc}") from exc
 
-    target.write_bytes(resp.content)
+    write_private_bytes(target, resp.content)
     _log.info(
         "upload_receive: pulled %s -> %s (%d bytes)",
         url,

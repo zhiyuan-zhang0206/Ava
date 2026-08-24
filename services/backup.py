@@ -56,6 +56,7 @@ from psycopg.conninfo import conninfo_to_dict
 from shared.config import settings
 from shared.db import direct_db_url
 from shared.pg_tools import pg_tool
+from shared.private_storage import ensure_private_dir, ensure_private_file
 
 _log = logging.getLogger(__name__)
 
@@ -161,8 +162,7 @@ def run_backup(now: datetime | None = None, *, db_url: str | None = None) -> Pat
     # snapshot across many statements); running it through a transaction pooler is
     # meaningless and breaks. Admin plane bypasses PgBouncer.
     db_url = db_url if db_url is not None else direct_db_url()
-    directory = backup_dir()
-    directory.mkdir(parents=True, exist_ok=True)
+    directory = ensure_private_dir(backup_dir())
     # A run interrupted mid-dump (e.g. the process tree killed during a rollout)
     # leaves `.partial` files behind. The name never matches `_NAME_RE`, so the
     # due/prune logic ignores them and they pile up. Sweep them before writing a
@@ -194,6 +194,7 @@ def run_backup(now: datetime | None = None, *, db_url: str | None = None) -> Pat
         if proc.returncode != 0:
             raise RuntimeError(f"pg_dump exited {proc.returncode}: {proc.stderr.strip()[:500]}")
         partial.rename(target)
+        ensure_private_file(target)
     finally:
         # suppress: a cleanup unlink failure must not mask the dump/rename error.
         with suppress(OSError):

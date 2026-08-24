@@ -61,6 +61,8 @@ class TestUploadFile:
         dest = tmp_path / "Downloads" / f"AvaAgent-{agent_id}" / "hello.txt"
         assert dest.exists()
         assert dest.read_bytes() == b"Hello, world!"
+        assert dest.parent.stat().st_mode & 0o777 == 0o700
+        assert dest.stat().st_mode & 0o777 == 0o600
 
         rows = _inbound_rows(db_conn, agent_id)
         assert len(rows) == 1
