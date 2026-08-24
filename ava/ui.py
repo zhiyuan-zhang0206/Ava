@@ -205,6 +205,10 @@ def serve(dir: str, name: str, port: int | None = None, title: str | None = None
     page and the platform stops the server.
 
     Args:
+        dir: the directory to serve. A relative path is resolved against
+            your working directory (`ava.cwd`), consistent with the
+            `ava.files` API; `~` is expanded and an absolute path is used
+            as-is.
         name: `^[a-zA-Z0-9_-]+$`, 1-64 chars.
         port: omit to use the port reserved for you.
         title: defaults to `name`.
