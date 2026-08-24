@@ -1240,22 +1240,23 @@ Where to look when something went wrong on a host:
 | why did a daemon vanish | its log file: every daemon wraps `asyncio.run(main())` and logs the traceback before re-raising |
 | what did milvus say | its log file only — it is a C++ binary with no PG sink |
 | an agent | `$AVA_HOME/logs/agent-{N}.log` (kernel + its exec subprocess, both appending) |
-| raw session stdout (gateway / agents / shells / schedules) | Loki (the LGTM backend): the collector's filelog receivers tail `$AVA_HOME/logs/*.out.log` except their own `ava-otel-collector.out.log`, plus the updater/rollout tees — resource `service.name` becomes Loki label `service_name` = session name, offsets persist in `file_storage/logoffsets`, 7-day retention; see `deploy/lgtm/README.md` |
+| raw session stdout (gateway / shells / daemons / schedules) | Loki (the LGTM backend): shell logs → `filelog/sessions`; gateway/daemon/schedule logs → `filelog/services`; updater/rollout tees → `filelog/orchestration`. Banner-only agent main stdout is excluded. All filelog receivers derive Loki `service_name` from the filename and persist offsets; local `*.out.log` and Loki data both retain 7 days. See `deploy/lgtm/README.md`. |
 
 Raw session output is queried in Loki, not tailed from a file — Grafana Explore
 (Loki datasource), `logcli`, or the HTTP API:
 
 ```bash
-logcli --addr http://127.0.0.1:3100 query '{service="ava-gateway"}' --since=1h --limit=100
-logcli --addr http://127.0.0.1:3100 query '{service=~"ava-agent-.+"}' --tail
+logcli --addr http://127.0.0.1:3100 query '{service_name="ava-gateway"}' --since=1h --limit=100
+logcli --addr http://127.0.0.1:3100 query '{service_name=~"ava-agent-.+-shell-.+"}' --tail
 curl -G -s http://127.0.0.1:3100/loki/api/v1/query \
-  --data-urlencode 'query={job="ava-sessions"} |= "error"' \
+  --data-urlencode 'query={service_name="ava-gateway"} |= "error"' \
   --data-urlencode 'limit=50'
 ```
 
-Two label namespaces: raw session logs use `service`, the OTLP event stream uses
-`service_name`. Agent loguru JSONL (`agent-{N}.log`) is not scraped — it already
-reaches Loki structured via OTLP.
+Raw filelog streams and the OTLP event stream both use `service_name`; filelog
+values are session names such as `ava-agent-1818-shell-1` or `ava-gateway`.
+Agent loguru JSONL (`agent-{N}.log`) is not scraped — it already reaches Loki
+structured via OTLP.
 
 The emitter wiring behind that stream, the unified `events` schema (and its
 legacy `agent_events` mirror), and the monthly partitioning are in `shared/log.ava.okf.md`.

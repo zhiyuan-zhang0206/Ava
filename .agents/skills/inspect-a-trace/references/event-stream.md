@@ -128,16 +128,21 @@ off a dashboard as an upper-ish estimate, not a median.
 
 ## Raw session logs are a different namespace
 
-Agent stdout, shipped by promtail, uses `service` (not `service_name`) and has
-no JSON structure:
+Raw stdout shipped by the collector's filelog receivers has no JSON structure.
+The receiver split is intentional: `filelog/sessions` admits only agent shell
+transcripts, while `filelog/services` admits gateway/daemon/schedule output and
+excludes every `ava-agent-*` main log. Both set resource `service.name` from the
+file name, which Loki exposes as `service_name`:
 
 ```logql
-{service="ava-agent-1818"}
-{service=~"ava-agent-.+"} |~ "(?i)traceback"
-{job="ava-sessions"} |= "error"
+{service_name="ava-agent-1818-shell-1"}
+{service_name=~"ava-agent-.+-shell-.+"} |~ "(?i)traceback"
+{service_name="ava-gateway"} |= "error"
 ```
 
-Go here for a stack trace the event stream only summarizes.
+The banner-only agent main stdout is not ingested; its structured records
+already arrive through OTLP. Go to the shell or service stream for a stack
+trace the event stream only summarizes.
 
 ## Where things listen
 

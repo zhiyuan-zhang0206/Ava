@@ -32,10 +32,11 @@ and the matching GitHub Releases, cut by `scripts/release_cut.py`.
   bearer-authenticated gateway collector receiver instead of writing to
   nonexistent loopback LGTM backends. Tempo/Loki/Prometheus stay gateway-local;
   collector queue/drop/silence alerts cover delivery failures.
-- Session stdout (`$AVA_HOME/logs/*.out.log` plus updater/rollout tees) is
-  ingested into the local LGTM stack's Loki via promtail (label `service` =
-  session name, ANSI stripped) with 7-day retention in `loki.yaml` — raw
-  session output is queried with LogQL/logcli, not a self-built CLI.
+- Session stdout is ingested into Loki through disjoint collector filelog
+  receivers: agent shells separately from gateway/daemon/schedule output, with
+  banner-only agent main logs excluded. In coordination with #3279, 10-second
+  polling, EOF metadata archival, bounded discovery, and daily-throttled local
+  7-day `*.out.log` retention prevent content-fingerprint re-watch storms.
 - Genericized author/prod identifiers (container registry, host addresses, repo
   slugs) out of code, CI, and tests.
 

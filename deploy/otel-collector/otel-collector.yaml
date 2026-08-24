@@ -106,21 +106,42 @@ $REMOTE_OTLP_RECEIVER
             - targets: [localhost:$SELF_METRICS_PORT]
 
   # ── Session-log tailing (2026-08-23 cutover; replaces promtail) ──────────
-  # Each machine's collector tails the local session stdout the way promtail
-  # did (job/service labels become resource service.name -> Loki's
-  # service_name stream label). start_at: end = no backfill; offsets persist
-  # in file_storage/logoffsets so a restart does not re-read.
+  # Agent shell transcripts and service stdout use separate, disjoint
+  # receivers. Agent main logs are banner-only here and are deliberately
+  # absent: their identical prefixes collide under filelog's content
+  # fingerprinting, while their structured records already arrive over OTLP.
+  # start_at: end = no backfill; offsets persist in file_storage/logoffsets so
+  # a restart does not re-read.
+  #
+  # The 10s poll interval cuts discovery churn 50x. A positive archive count
+  # lets EOF files reuse their metadata instead of creating a reader every
+  # poll, while the concurrent-file cap bounds the discovery set.
   filelog/sessions:
     include:
+      - $AVA_HOME/logs/ava-agent-*-shell-*.out.log
+    start_at: end
+    include_file_name: true
+    include_file_path: false
+    storage: file_storage/logoffsets
+    poll_interval: 10s
+    polls_to_archive: 50
+    max_concurrent_files: 200
+  filelog/services:
+    include:
       - $AVA_HOME/logs/*.out.log
-    # The collector is itself a session named ava-otel-collector. Tailing its
-    # stdout would feed exported log diagnostics back into this receiver.
+    # Exclude all agent output so this receiver cannot overlap the shell-only
+    # receiver. The collector's own stdout is excluded to prevent exported log
+    # diagnostics feeding back into the collector.
     exclude:
+      - $AVA_HOME/logs/ava-agent-*.out.log
       - $AVA_HOME/logs/ava-otel-collector.out.log
     start_at: end
     include_file_name: true
     include_file_path: false
     storage: file_storage/logoffsets
+    poll_interval: 10s
+    polls_to_archive: 50
+    max_concurrent_files: 200
   filelog/orchestration:
     include:
       - $AVA_HOME/logs/updater-*.log
@@ -264,7 +285,7 @@ service:
       processors: [memory_limiter, filter/cluster_allow, batch]
       exporters: [otlphttp/tempo, file/traces]
     logs:
-      receivers: [otlp$REMOTE_OTLP_PIPELINE_RECEIVER, filelog/sessions, filelog/orchestration]
+      receivers: [otlp$REMOTE_OTLP_PIPELINE_RECEIVER, filelog/sessions, filelog/services, filelog/orchestration]
       processors: [memory_limiter, filter/cluster_allow, transform/promote_event_labels, transform/filelog_service, batch]
       exporters: [otlphttp/loki]
     metrics:

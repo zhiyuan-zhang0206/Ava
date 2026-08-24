@@ -47,6 +47,7 @@ import psutil
 
 from shared.log import logger
 from shared.pty_sessions._paths import DEFAULT_COLS, DEFAULT_ROWS, err, ok, write_record
+from shared.pty_sessions.retention import prune_stale_transcripts
 from shared.session_record import SessionRecord, pid_starttime_ticks
 
 # A pid is "the same process we launched" only if its start-time matches to
@@ -76,14 +77,12 @@ _READER_POLL_S = 1.0
 # How many bytes a single master read may return (pty buffers are ~4-64 KB).
 _READ_CHUNK = 65536
 
-# Per-session byte-transcript cap: the log is a best-effort debug aid, and a
-# long-lived interactive shell can otherwise write unboundedly (build output,
-# log tails) — past the cap the host simply stops appending.
+# Per-session byte transcript is a best-effort debug aid; cap it so a long-lived
+# shell cannot grow without bound. Past the cap the host stops appending.
 _TRANSCRIPT_CAP_BYTES = 64 * 1024 * 1024
 
-# Raw ring buffer cap: what a lazily-built screen can be replayed from. The
-# screen is self-healing under truncation (full-screen redraws, scrolling),
-# so the tail bounds fidelity exactly the way finite scrollback always has.
+# Raw ring buffer cap for lazy screen replay. Full-screen redraws and scrolling
+# self-heal after truncation, so the bounded tail matches finite scrollback.
 _RAW_RING_CAP = 2 * 1024 * 1024
 
 # Session names ride argv and the record filename; keep the same conservative
@@ -714,6 +713,7 @@ def main(argv: list[str] | None = None) -> int:
     if not Path(cwd).is_dir():
         sys.stderr.write(f"cwd is not a directory: {cwd}\n")
         return 1
+    prune_stale_transcripts(transcript.parent)
     try:
         env = _load_env_file(envfile)
     except OSError as exc:

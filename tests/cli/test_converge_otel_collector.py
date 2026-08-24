@@ -334,6 +334,7 @@ def test_logs_merge_event_and_filelog_transforms_before_batch(
         "otlp",
         "otlp/remote",
         "filelog/sessions",
+        "filelog/services",
         "filelog/orchestration",
     ]
     assert logs["processors"] == [
@@ -394,18 +395,43 @@ def test_non_lgtm_gateway_converge_skips_collector_install(
     assert "collector skipped" in err
 
 
-def test_session_filelog_excludes_collectors_own_output(
+def test_session_filelog_receivers_are_disjoint_and_bound_discovery(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The collector tails every service session except its own output, which
-    would otherwise be re-ingested recursively through the logs exporter."""
+    """Shell transcripts and service output use disjoint file sets.
+
+    Agent main logs begin with identical telemetry banners, so admitting them
+    to either receiver would restore the fingerprint-collision re-watch storm.
+    """
     cfg = _render_real_template(monkeypatch, frozenset({"gateway", "agent-runner"}))
 
-    receiver = cfg["receivers"]["filelog/sessions"]
-    assert receiver["include"] == ["/home/u/.ava/logs/*.out.log"]
-    assert receiver["exclude"] == [
-        "/home/u/.ava/logs/ava-otel-collector.out.log",
-    ]
+    sessions = cfg["receivers"]["filelog/sessions"]
+    assert sessions == {
+        "include": ["/home/u/.ava/logs/ava-agent-*-shell-*.out.log"],
+        "start_at": "end",
+        "include_file_name": True,
+        "include_file_path": False,
+        "storage": "file_storage/logoffsets",
+        "poll_interval": "10s",
+        "polls_to_archive": 50,
+        "max_concurrent_files": 200,
+    }
+
+    services = cfg["receivers"]["filelog/services"]
+    assert services == {
+        "include": ["/home/u/.ava/logs/*.out.log"],
+        "exclude": [
+            "/home/u/.ava/logs/ava-agent-*.out.log",
+            "/home/u/.ava/logs/ava-otel-collector.out.log",
+        ],
+        "start_at": "end",
+        "include_file_name": True,
+        "include_file_path": False,
+        "storage": "file_storage/logoffsets",
+        "poll_interval": "10s",
+        "polls_to_archive": 50,
+        "max_concurrent_files": 200,
+    }
 
 
 def test_runner_forwards_to_authenticated_gateway_ingress_without_renaming_queues(
