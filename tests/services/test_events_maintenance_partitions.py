@@ -32,6 +32,7 @@ from psycopg_pool import ConnectionPool
 from services.events_maintenance import daemon
 from services.events_maintenance.partitions import ensure_month_partitions
 from shared.config import settings
+from shared.daemon_health import LoopProgress
 
 # Fixed "now" so current month = 2026-07, next month = 2026-08 deterministically.
 _NOW = datetime(2026, 7, 22, 12, 0, tzinfo=UTC)
@@ -294,7 +295,7 @@ def test_daemon_commits_partitions_before_rollup(
             before_legacy = _scalar(cur)
 
         with pytest.raises(RuntimeError, match="rollup blew up"):
-            daemon._run_maintenance(pool)
+            daemon._run_maintenance(pool, LoopProgress("dispatch", timeout_s=60.0))
 
         # Despite the rollup failure, the partition(s) created this pass are committed.
         with pool.connection() as conn, conn.cursor() as cur:

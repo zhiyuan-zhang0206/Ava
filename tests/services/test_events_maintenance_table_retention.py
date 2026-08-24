@@ -27,6 +27,7 @@ from services.events_maintenance.table_retention import (
     apply_table_retention,
 )
 from shared.config import settings
+from shared.daemon_health import LoopProgress
 
 _NOW = datetime(2026, 8, 4, 12, 0, tzinfo=UTC)
 
@@ -247,7 +248,7 @@ def test_daemon_maintenance_runs_table_retention(
     monkeypatch.setattr(daemon, "ensure_month_partitions", _fake_partitions)
     try:
         with pool:
-            daemon._run_maintenance(pool)
+            daemon._run_maintenance(pool, LoopProgress("dispatch", timeout_s=60.0))
     finally:
         pool.close()
     assert len(calls) == 1
