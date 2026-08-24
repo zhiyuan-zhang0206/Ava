@@ -13,18 +13,23 @@ secret-less by default; the gateway then binds loopback only).
 
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
+import time
+
+import psycopg
 import pytest
 from fastapi import Request
 from fastapi.testclient import TestClient
 
+import gateway.app as gateway_app
 from gateway._cors import cors_allowed_origins
 from gateway.app import _cors_headers, app
 from shared import config
 from shared.cluster_auth import (
     bearer_header,
     cookie_name,
-    sign_session,
-    verify_session,
 )
 from shared.config.gateway import GatewaySettings
 
@@ -52,6 +57,23 @@ def _request_with_origin(origin: str) -> Request:
     )
 
 
+def _login(client: TestClient, *, user_agent: str = "test-browser") -> str:
+    response = client.post(
+        "/api/auth/login",
+        json={"password": _SECRET},
+        headers={"User-Agent": user_agent},
+    )
+    assert response.status_code == 200
+    return response.cookies[cookie_name()]
+
+
+def _legacy_hmac_cookie() -> str:
+    """One valid pre-change cookie, built independently of production code."""
+    expiry = str(int(time.time()) + 3600).encode()
+    mac = hmac.new(_SECRET.encode(), expiry, hashlib.sha256).digest()
+    return base64.urlsafe_b64encode(expiry + b"." + mac).rstrip(b"=").decode()
+
+
 @pytest.fixture(autouse=True)
 def _patch_secret(monkeypatch: pytest.MonkeyPatch) -> None:
     """Enable auth with a known secret for every test in this module.
@@ -62,6 +84,7 @@ def _patch_secret(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     monkeypatch.setattr(config.settings.gateway, "auth_middleware_enabled", True)
     monkeypatch.setattr(config.settings.data_plane, "cluster_secret", _SECRET)
+    getattr(gateway_app, "_session_last_touch", {}).clear()
 
 
 # ── Gateway security settings ─────────────────────────────────────────
@@ -170,16 +193,46 @@ def test_login_empty_password_returns_401() -> None:
     assert resp.status_code == 401
 
 
-def test_login_sets_session_cookie() -> None:
+def test_login_creates_current_server_side_session() -> None:
+    with TestClient(app) as client:
+        token = _login(client, user_agent="session-list-test")
+        resp = client.get("/api/auth/sessions")
+
+    assert resp.status_code == 200
+    sessions = resp.json()
+    assert len(sessions) == 1
+    assert sessions[0]["id"] == token
+    assert sessions[0]["revoked_at"] is None
+    assert sessions[0]["user_agent"] == "session-list-test"
+    assert sessions[0]["ip"] == "testclient"
+    assert sessions[0]["current"] is True
+
+
+def test_login_sets_cookie_flags_and_configured_ttl(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(config.settings.gateway, "session_ttl_seconds", 123)
+
     with TestClient(app) as client:
         resp = client.post("/api/auth/login", json={"password": _SECRET})
-    assert resp.status_code == 200
-    assert "Set-Cookie" in resp.headers
+
     set_cookie = resp.headers["Set-Cookie"]
     assert set_cookie.startswith(f"{cookie_name()}=")
     assert "HttpOnly" in set_cookie
-    # Persistence: without Max-Age Chromium drops the cookie on restart (desktop #706).
-    assert "Max-Age=" in set_cookie
+    assert "SameSite=Lax" in set_cookie
+    assert "Path=/" in set_cookie
+    assert "Max-Age=123" in set_cookie
+
+
+def test_login_cookie_secure_derives_from_gateway_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(config.settings.gateway, "gateway_url", "https://gateway.example:8000")
+
+    with TestClient(app) as client:
+        resp = client.post("/api/auth/login", json={"password": _SECRET})
+
+    assert "; Secure" in resp.headers["Set-Cookie"]
 
 
 def test_login_cookie_not_secure_for_http_gateway(
@@ -239,18 +292,22 @@ def test_login_with_wrong_password_but_username_fails() -> None:
     assert resp.status_code == 401
 
 
-def test_logout_clears_cookie() -> None:
+def test_logout_revokes_server_side_and_clears_cookie() -> None:
     with TestClient(app) as client:
+        token = _login(client)
+        assert client.get("/api/agents").status_code == 200
         resp = client.post("/api/auth/logout")
+        replay = client.get("/api/agents", headers=_session_cookie(token))
+
     assert resp.status_code == 200
-    assert "Set-Cookie" in resp.headers
     set_cookie = resp.headers["Set-Cookie"]
     assert "Max-Age=0" in set_cookie or "Expires" in set_cookie
+    assert replay.status_code == 401
 
 
 def test_check_returns_true_with_valid_cookie() -> None:
-    token = sign_session(_SECRET)
     with TestClient(app) as client:
+        token = _login(client)
         resp = client.get("/api/auth/check", headers=_session_cookie(token))
     assert resp.status_code == 200
     assert resp.json()["authenticated"] is True
@@ -279,11 +336,19 @@ def test_check_returns_true_when_auth_middleware_disabled(
     assert resp.json()["authenticated"] is True
 
 
-def test_check_returns_false_with_expired_cookie() -> None:
-    # Create a token that's already expired
-    token = sign_session(_SECRET, ttl=-1)
+def test_check_returns_false_with_expired_cookie(db_conn: psycopg.Connection) -> None:
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO web_sessions (id, expires_at) VALUES (%s, now() - interval '1 second')",
+            ("expired-session",),
+        )
+    db_conn.commit()
+
     with TestClient(app) as client:
-        resp = client.get("/api/auth/check", headers=_session_cookie(token))
+        resp = client.get(
+            "/api/auth/check",
+            headers=_session_cookie("expired-session"),
+        )
     assert resp.status_code == 200
     assert resp.json()["authenticated"] is False
 
@@ -414,8 +479,8 @@ def test_api_agents_accepts_x_cluster_secret() -> None:
 
 
 def test_api_agents_accepts_valid_cookie() -> None:
-    token = sign_session(_SECRET)
     with TestClient(app) as client:
+        token = _login(client)
         resp = client.get("/api/agents", headers=_session_cookie(token))
     assert resp.status_code == 200
 
@@ -434,9 +499,8 @@ def test_cookie_authenticated_post_rejects_disallowed_origin(
         "cors_allowed_origins",
         ["https://allowed.example"],
     )
-    token = sign_session(_SECRET)
-
     with TestClient(app) as client:
+        token = _login(client)
         resp = client.post(
             "/api/frontend-telemetry",
             content=b"{}",
@@ -481,9 +545,8 @@ def test_cookie_authenticated_post_allows_missing_origin(
         "cors_allowed_origins",
         ["https://allowed.example"],
     )
-    token = sign_session(_SECRET)
-
     with TestClient(app) as client:
+        token = _login(client)
         resp = client.post(
             "/api/frontend-telemetry",
             content=b"{}",
@@ -491,6 +554,124 @@ def test_cookie_authenticated_post_allows_missing_origin(
         )
 
     assert resp.status_code == 422
+
+
+def test_legacy_self_contained_hmac_cookie_is_rejected() -> None:
+    with TestClient(app) as client:
+        resp = client.get(
+            "/api/agents",
+            headers=_session_cookie(_legacy_hmac_cookie()),
+        )
+    assert resp.status_code == 401
+
+
+def test_revoke_endpoint_invalidates_another_session() -> None:
+    with TestClient(app) as client:
+        first = _login(client)
+        client.cookies.clear()
+        second = _login(client)
+        client.cookies.clear()
+
+        revoke = client.post(
+            f"/api/auth/sessions/{second}/revoke",
+            headers=_session_cookie(first),
+        )
+        replay = client.get("/api/agents", headers=_session_cookie(second))
+        listed = client.get("/api/auth/sessions", headers=_session_cookie(first))
+
+    assert revoke.status_code == 200
+    assert replay.status_code == 401
+    assert [session["id"] for session in listed.json()] == [first]
+
+
+def test_revoke_endpoint_refuses_current_session() -> None:
+    with TestClient(app) as client:
+        current = _login(client)
+        response = client.post(f"/api/auth/sessions/{current}/revoke")
+
+    assert response.status_code == 409
+    body = response.json()
+    assert body["code"] == "http_409"
+    assert body["status"] == 409
+    assert body["detail"] == "current session must be revoked via logout"
+    assert body["retryable"] is False
+
+
+def test_revoke_endpoint_returns_404_for_missing_or_revoked_session() -> None:
+    with TestClient(app) as client:
+        current = _login(client)
+        client.cookies.clear()
+        target = _login(client)
+        client.cookies.clear()
+        headers = _session_cookie(current)
+
+        first = client.post(f"/api/auth/sessions/{target}/revoke", headers=headers)
+        second = client.post(f"/api/auth/sessions/{target}/revoke", headers=headers)
+        missing = client.post("/api/auth/sessions/missing/revoke", headers=headers)
+
+    assert first.status_code == 200
+    assert second.status_code == 404
+    assert missing.status_code == 404
+
+
+def test_middleware_touches_session_at_most_once_per_minute(
+    db_conn: psycopg.Connection,
+) -> None:
+    with TestClient(app) as client:
+        token = _login(client)
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "UPDATE web_sessions SET last_seen_at = now() - interval '1 day' WHERE id = %s",
+                (token,),
+            )
+        db_conn.commit()
+
+        assert client.get("/api/agents").status_code == 200
+        with db_conn.cursor() as cur:
+            cur.execute("SELECT last_seen_at FROM web_sessions WHERE id = %s", (token,))
+            first_touch_row = cur.fetchone()
+            assert first_touch_row is not None
+            first_touch = first_touch_row[0]
+            cur.execute(
+                "UPDATE web_sessions SET last_seen_at = now() - interval '1 day' WHERE id = %s",
+                (token,),
+            )
+            cur.execute("SELECT last_seen_at FROM web_sessions WHERE id = %s", (token,))
+            reset_touch_row = cur.fetchone()
+            assert reset_touch_row is not None
+            reset_touch = reset_touch_row[0]
+        db_conn.commit()
+
+        assert first_touch > reset_touch
+        assert client.get("/api/agents").status_code == 200
+
+    with db_conn.cursor() as cur:
+        cur.execute("SELECT last_seen_at FROM web_sessions WHERE id = %s", (token,))
+        last_seen_row = cur.fetchone()
+        assert last_seen_row is not None
+        assert last_seen_row[0] == reset_touch
+
+
+def test_middleware_bounds_session_touch_bookkeeping(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = 10_000.0
+    monkeypatch.setattr(config.settings.gateway, "session_ttl_seconds", 3600)
+
+    with TestClient(app) as client:
+        token = _login(client)
+        gateway_app._session_last_touch["stale"] = now - 3601
+        gateway_app._session_last_touch.update(
+            {f"recent-{index}": now - index for index in range(1025)}
+        )
+        monkeypatch.setattr(gateway_app.time, "monotonic", lambda: now)
+
+        response = client.get("/api/agents")
+
+    assert response.status_code == 200
+    assert "stale" not in gateway_app._session_last_touch
+    assert token in gateway_app._session_last_touch
+    assert len(gateway_app._session_last_touch) == 1024
 
 
 # ── Wrong secret gets 401 ─────────────────────────────────────────────
@@ -580,26 +761,3 @@ def test_login_succeeds_without_secret_and_bypasses_limiter(
     assert resp.status_code == 200
     assert resp.json()["ok"] is True
     assert records == [], "no-secret login must not touch the limiter's failure counter"
-
-
-# ── Cookie signing is verifiable ──────────────────────────────────────
-
-
-def test_sign_and_verify_roundtrip() -> None:
-    token = sign_session(_SECRET)
-    assert verify_session(token, _SECRET) is True
-
-
-def test_verify_rejects_wrong_secret() -> None:
-    token = sign_session(_SECRET)
-    assert verify_session(token, "different-secret") is False
-
-
-def test_verify_rejects_expired_token() -> None:
-    token = sign_session(_SECRET, ttl=-1)
-    assert verify_session(token, _SECRET) is False
-
-
-def test_verify_rejects_empty_token() -> None:
-    assert verify_session("", _SECRET) is False
-    assert verify_session(None, _SECRET) is False

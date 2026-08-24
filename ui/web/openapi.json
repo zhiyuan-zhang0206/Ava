@@ -8,7 +8,7 @@
     "/api/auth/login": {
       "post": {
         "summary": "Login",
-        "description": "Authenticate with the cluster secret and receive a session cookie.\n\nRequest body: ``{\"password\": \"<cluster-secret>\"}``\n\nOn success, returns ``{\"ok\": true}`` and sets an HTTP-only session\ncookie valid for 7 days.\n\nOn failure, returns a typed 401 error envelope with detail ``\"invalid password\"``.\n\nA no-secret cluster (single-box no-auth posture) has no credential: login\nis a no-op 200 success, deliberately BEFORE the rate limiter — there is\nnothing to guess, and no-secret requests must never count into the\nlimiter's failure records.\n\nBrute-force guard: an IP that fails ``MAX_FAILURES`` times in a row is\nlocked for ``LOCKOUT_SECONDS`` (policy + rationale in shared/rate_limit.py).\nWhile locked, the endpoint returns 429 + ``Retry-After`` instead of 401 —\n401 would read as \"wrong password\" and invite exactly the retry loop the\nlockout exists to stop. A successful login resets the IP's counter.",
+        "description": "Authenticate with the cluster secret and receive a session cookie.\n\nRequest body: ``{\"password\": \"<cluster-secret>\"}``\n\nOn success, returns ``{\"ok\": true}`` and sets an HTTP-only session\ncookie whose lifetime is controlled by ``session_ttl_seconds``.\n\nOn failure, returns a typed 401 error envelope with detail ``\"invalid password\"``.\n\nA no-secret cluster (single-box no-auth posture) has no credential: login\nis a no-op 200 success, deliberately BEFORE the rate limiter — there is\nnothing to guess, and no-secret requests must never count into the\nlimiter's failure records.\n\nBrute-force guard: an IP that fails ``MAX_FAILURES`` times in a row is\nlocked for ``LOCKOUT_SECONDS`` (policy + rationale in shared/rate_limit.py).\nWhile locked, the endpoint returns 429 + ``Retry-After`` instead of 401 —\n401 would read as \"wrong password\" and invite exactly the retry loop the\nlockout exists to stop. A successful login resets the IP's counter.",
         "operationId": "login_api_auth_login_post",
         "requestBody": {
           "content": {
@@ -45,7 +45,7 @@
     "/api/auth/logout": {
       "post": {
         "summary": "Logout",
-        "description": "Clear the session cookie — no auth required (idempotent).",
+        "description": "Revoke and clear the current session cookie; repeated calls are safe.",
         "operationId": "logout_api_auth_logout_post",
         "responses": {
           "200": {
@@ -70,6 +70,68 @@
             "content": {
               "application/json": {
                 "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/sessions": {
+      "get": {
+        "summary": "Sessions",
+        "description": "List active browser sessions, marking the request's current cookie.",
+        "operationId": "sessions_api_auth_sessions_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "type": "array",
+                  "title": "Response Sessions Api Auth Sessions Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/sessions/{session_id}/revoke": {
+      "post": {
+        "summary": "Revoke Other Session",
+        "description": "Revoke a non-current browser session.",
+        "operationId": "revoke_other_session_api_auth_sessions__session_id__revoke_post",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
               }
             }
           }

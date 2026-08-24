@@ -43,7 +43,8 @@ up-security-trust): the **permissions helper** Unix socket
 handshake — it holds the macOS Screen Recording + Accessibility grants and
 can capture the screen and inject clicks/keys; the **managed Chrome** CDP
 port (`--remote-debugging-port`) is unauthenticated by design and the bridge
-injects a 7-day gateway session cookie into it; the **mcp daemon** socket
+injects a configurable, server-side gateway session cookie into it; the **mcp
+daemon** socket
 shares the machine with the cluster secret. Their real boundary is the OS
 user: only processes running as the same user can reach them, and that user
 is the same trust domain `execute_code` runs in. Same-user isolation for

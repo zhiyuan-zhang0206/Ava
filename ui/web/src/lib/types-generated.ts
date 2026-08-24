@@ -20,7 +20,7 @@ export interface paths {
          *     Request body: ``{"password": "<cluster-secret>"}``
          *
          *     On success, returns ``{"ok": true}`` and sets an HTTP-only session
-         *     cookie valid for 7 days.
+         *     cookie whose lifetime is controlled by ``session_ttl_seconds``.
          *
          *     On failure, returns a typed 401 error envelope with detail ``"invalid password"``.
          *
@@ -53,7 +53,7 @@ export interface paths {
         put?: never;
         /**
          * Logout
-         * @description Clear the session cookie — no auth required (idempotent).
+         * @description Revoke and clear the current session cookie; repeated calls are safe.
          */
         post: operations["logout_api_auth_logout_post"];
         delete?: never;
@@ -79,6 +79,46 @@ export interface paths {
         get: operations["check_api_auth_check_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Sessions
+         * @description List active browser sessions, marking the request's current cookie.
+         */
+        get: operations["sessions_api_auth_sessions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/sessions/{session_id}/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Revoke Other Session
+         * @description Revoke a non-current browser session.
+         */
+        post: operations["revoke_other_session_api_auth_sessions__session_id__revoke_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -7175,6 +7215,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+        };
+    };
+    sessions_api_auth_sessions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    }[];
+                };
+            };
+        };
+    };
+    revoke_other_session_api_auth_sessions__session_id__revoke_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

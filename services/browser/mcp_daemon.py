@@ -142,9 +142,9 @@ _READ_TIMEOUT = timedelta(seconds=180)
 _UPSTREAM_WATCHDOG_INTERVAL_S = 30.0
 _UPSTREAM_WATCHDOG_TIMEOUT_S = 10.0
 
-# Gateway session cookie refresh: the token is valid for 7 days; refreshing
-# every 6h keeps a comfortable margin and self-heals a lost/evicted cookie
-# (fresh profile, secret rotation) within the same window.
+# Gateway session cookie refresh: the default server-side lifetime is 24h;
+# refreshing every 6h leaves a comfortable margin and self-heals a lost,
+# expired, or revoked managed-browser session.
 _SESSION_REFRESH_INTERVAL_S = 6 * 3600
 
 
@@ -480,7 +480,7 @@ def _gateway_session_params() -> tuple[str, str] | None:
 
 
 async def _inject_gateway_session_once() -> None:
-    """Mint + inject the gateway session cookie into Chrome (best effort).
+    """Log in + inject the gateway session cookie into Chrome (best effort).
 
     Never raises: every failure is logged and left for the next tick / the
     next upstream connect to retry.
@@ -500,8 +500,8 @@ async def _inject_gateway_session_once() -> None:
 async def _gateway_session_loop(stop: asyncio.Event) -> None:
     """Refresh the gateway session cookie every _SESSION_REFRESH_INTERVAL_S.
 
-    The token is valid for 7 days; the refresh keeps a wide margin and
-    self-heals a lost/evicted cookie within one interval. The loop never
+    The refresh cadence stays inside the configured session lifetime and
+    self-heals a lost/revoked cookie within one interval. The loop never
     raises — failures are logged and retried on the next tick.
     """
     while not stop.is_set():
@@ -525,11 +525,11 @@ async def _start_session_maintenance() -> tuple[asyncio.Event, asyncio.Task[None
     """SIGTERM/SIGINT stop event + the long-lived session-refresh task.
 
     The refresh loop keeps a valid gateway session cookie in the shared
-    Chrome: inject at startup, then refresh well before the 7-day token
+    Chrome: inject at startup, then refresh before the server-side row
     expires. It is independent of the upstream session — a Chrome restart
     that drops the upstream does not lose the cookie (the profile persists),
     and the periodic tick heals anything that did change (fresh profile,
-    secret rotation, eviction).
+    revocation, expiry).
     """
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()

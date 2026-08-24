@@ -1,6 +1,13 @@
-"""Unit tests for shared/cluster_auth.py — the cluster-secret bearer."""
+"""Unit tests for shared/cluster_auth.py — bearer and cookie primitives."""
 
-from shared.cluster_auth import bearer_header, verify_bearer
+from base64 import urlsafe_b64decode
+
+from shared.cluster_auth import (
+    bearer_header,
+    new_session_id,
+    session_cookie_header,
+    verify_bearer,
+)
 
 
 def test_bearer_header_shape() -> None:
@@ -35,12 +42,28 @@ def test_header_then_verify_roundtrip() -> None:
     assert verify_bearer(h["Authorization"], "round-trip-secret") is True
 
 
-def test_session_cookie_header_persists_max_age() -> None:
-    """The session cookie must carry Max-Age (mirrors token TTL): without it
-    Chromium treats it as a session cookie and drops it on restart (desktop #706)."""
-    from shared.cluster_auth import _SESSION_TTL, session_cookie_header
+def test_new_session_id_is_random_urlsafe_32_bytes() -> None:
+    first = new_session_id()
+    second = new_session_id()
 
-    header = session_cookie_header("tok")
-    set_cookie = header["Set-Cookie"]
-    assert f"Max-Age={_SESSION_TTL}" in set_cookie
+    assert first != second
+    assert "=" not in first
+    padded = first + "=" * (-len(first) % 4)
+    assert len(urlsafe_b64decode(padded)) == 32
+
+
+def test_session_cookie_header_uses_explicit_ttl() -> None:
+    set_cookie = session_cookie_header("tok", ttl_seconds=123)["Set-Cookie"]
+
+    assert "Max-Age=123" in set_cookie
     assert "HttpOnly" in set_cookie
+    assert "SameSite=Lax" in set_cookie
+    assert "Path=/" in set_cookie
+
+
+def test_session_cookie_header_secure_flag_is_explicit() -> None:
+    insecure = session_cookie_header("tok", secure=False)["Set-Cookie"]
+    secure = session_cookie_header("tok", secure=True)["Set-Cookie"]
+
+    assert "; Secure" not in insecure
+    assert "; Secure" in secure

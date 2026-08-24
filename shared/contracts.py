@@ -115,6 +115,10 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("POST", "/api/auth/login"): RouteContract(note="login — repeats just mint a fresh cookie"),
     ("POST", "/api/auth/logout"): RouteContract(note="clear session cookie — idempotent"),
     ("GET", "/api/auth/check"): RouteContract(),
+    ("GET", "/api/auth/sessions"): RouteContract(),
+    ("POST", "/api/auth/sessions/{session_id}/revoke"): RouteContract(
+        note="session revocation — guarded update; repeats cannot revoke twice"
+    ),
     # ── gateway/routers/bootstrap.py ───────────────────────────────────
     ("GET", "/api/bootstrap"): RouteContract(),
     # ── gateway/routers/cluster.py ───────────────────────────────────

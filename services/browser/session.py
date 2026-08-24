@@ -1,10 +1,9 @@
-"""Mint and inject the gateway session cookie into the shared managed Chrome.
+"""Log in and inject a gateway session cookie into the shared managed Chrome.
 
 The gateway reverse-proxies agent-served pages under auth (session cookie or
 Bearer token), so the managed browser needs its own ``ava_session`` cookie to
-open page URLs. The session token is a pure HMAC function of the cluster
-secret (``shared.cluster_auth.sign_session``) — no login round-trip, no rate
-limiter — so this module mints it locally and injects it into Chrome over CDP.
+open page URLs. This module obtains an opaque server-side session through the
+gateway's normal login endpoint, then injects that returned cookie over CDP.
 
 Injection path: ``Network.setCookie`` on a page target's websocket. Chrome
 only exposes the Network domain on page targets (the browser-level target
@@ -20,16 +19,17 @@ Chrome and the cluster secret.
 from __future__ import annotations
 
 import asyncio
-import base64
 import itertools
 import json
+import time
 from contextlib import suppress
+from http.cookies import SimpleCookie
 from typing import Any
 
 import httpx
 import websockets
 
-from shared.cluster_auth import cookie_name, sign_session
+from shared.cluster_auth import cookie_name
 
 # CDP endpoint timeouts: Chrome is local, so these only bound a wedged browser.
 _HTTP_TIMEOUT_S = 5.0
@@ -40,18 +40,29 @@ _WS_TIMEOUT_S = 10.0
 _CDP_IDS = itertools.count(1)
 
 
-def gateway_session_cookie(secret: str) -> tuple[str, str, int]:
-    """(name, value, expires_unix) for the gateway session cookie.
+async def gateway_session_login(gateway_url: str, secret: str) -> tuple[str, str, int]:
+    """Log in and return ``(cookie_name, value, expires_unix)``."""
+    url = f"{gateway_url.rstrip('/')}/api/auth/login"
+    async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT_S) as client:
+        response = await client.post(url, json={"password": secret})
+    if response.status_code != 200:
+        raise RuntimeError(f"gateway login failed with HTTP {response.status_code}")
 
-    ``expires_unix`` is decoded from the freshly signed token itself, so the
-    cookie's expiry always mirrors the token's embedded expiry — they die
-    together even if ``sign_session``'s default TTL ever changes.
-    """
+    parsed = SimpleCookie()
+    set_cookie = response.headers.get("set-cookie")
+    if set_cookie:
+        parsed.load(set_cookie)
     name = cookie_name()
-    value = sign_session(secret)
-    padded = value + "=" * (-len(value) % 4)
-    expiry = int(base64.urlsafe_b64decode(padded).split(b".", 1)[0])
-    return name, value, expiry
+    morsel = parsed.get(name)
+    if morsel is None or not morsel.value:
+        raise RuntimeError("gateway login response has no session cookie")
+    try:
+        max_age = int(morsel["max-age"])
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError("gateway session cookie has invalid Max-Age") from exc
+    if max_age <= 0:
+        raise RuntimeError("gateway session cookie has invalid Max-Age")
+    return name, morsel.value, int(time.time()) + max_age
 
 
 async def _http_json(url: str) -> Any:
@@ -76,14 +87,14 @@ async def _cdp_call(ws: Any, method: str, params: dict[str, Any]) -> dict[str, A
 
 
 async def inject_session_cookie(cdp_port: int, gateway_url: str, secret: str) -> None:
-    """Mint a gateway session cookie and set it in the managed Chrome.
+    """Log in to the gateway and set its session cookie in managed Chrome.
 
     The cookie is host-only for ``gateway_url`` with the same flags the login
-    flow sets (HttpOnly, SameSite=Lax, Path=/, expiry mirrored to the token).
+    flow sets (HttpOnly, SameSite=Lax, Path=/, expiry from Max-Age).
 
     Raises RuntimeError when Chrome is unreachable or rejects the cookie.
     """
-    name, value, expires = gateway_session_cookie(secret)
+    name, value, expires = await gateway_session_login(gateway_url, secret)
     version = await _http_json(f"http://127.0.0.1:{cdp_port}/json/version")
     browser_ws_url = version["webSocketDebuggerUrl"]
 

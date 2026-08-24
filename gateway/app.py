@@ -214,11 +214,11 @@ from gateway.routers import (
     uploads as uploads_router,
 )
 from gateway.schedule_manager import ScheduleManager
+from gateway.session_store import session_is_valid, touch_session
 from shared.agents import AvaAgentError
 from shared.cluster_auth import (
     cookie_name,
     verify_bearer,
-    verify_session,
 )
 from shared.config import settings, warn_deprecated_env_aliases
 from shared.context import AvaContext
@@ -524,6 +524,25 @@ _AUTH_BYPASS_PATHS: frozenset[str] = frozenset(
 )
 _STATE_CHANGING_METHODS: frozenset[str] = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
+_SESSION_TOUCH_INTERVAL_S = 60.0
+_SESSION_TOUCH_MAX_ENTRIES = 1024
+_session_last_touch: dict[str, float] = {}
+
+
+def _prune_session_last_touch(now: float) -> None:
+    """Drop expired bookkeeping and cap the map by oldest touch time."""
+    if len(_session_last_touch) <= _SESSION_TOUCH_MAX_ENTRIES:
+        return
+    stale_before = now - settings.gateway.session_ttl_seconds
+    for session_id, touched_at in tuple(_session_last_touch.items()):
+        if touched_at < stale_before:
+            _session_last_touch.pop(session_id, None)
+    overflow = len(_session_last_touch) - _SESSION_TOUCH_MAX_ENTRIES
+    if overflow > 0:
+        oldest = sorted(_session_last_touch, key=_session_last_touch.__getitem__)[:overflow]
+        for session_id in oldest:
+            _session_last_touch.pop(session_id, None)
+
 
 @app.middleware("http")
 async def _cluster_auth_middleware(
@@ -560,7 +579,11 @@ async def _cluster_auth_middleware(
 
     # 1. Check session cookie
     cookie_token = request.cookies.get(cookie_name())
-    if verify_session(cookie_token, secret):
+    if cookie_token and await asyncio.to_thread(
+        session_is_valid,
+        request.app.state.db_pool,
+        cookie_token,
+    ):
         origin = request.headers.get("Origin")
         # Origin is checked only after valid cookie auth; without it, the request
         # reaches 401 unless another explicit credential authenticates it.
@@ -576,6 +599,18 @@ async def _cluster_auth_middleware(
                 status_code=403,
                 content={"detail": "origin not allowed"},
                 headers={"Vary": "Origin"},
+            )
+        now = time.monotonic()
+        last_touch = _session_last_touch.get(cookie_token)
+        touch_due = last_touch is None or now - last_touch >= _SESSION_TOUCH_INTERVAL_S
+        if touch_due:
+            _session_last_touch[cookie_token] = now
+        _prune_session_last_touch(now)
+        if touch_due:
+            await asyncio.to_thread(
+                touch_session,
+                request.app.state.db_pool,
+                cookie_token,
             )
         return await call_next(request)
 

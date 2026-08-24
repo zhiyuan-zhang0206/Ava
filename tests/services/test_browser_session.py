@@ -9,13 +9,14 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from typing import Any
 
+import httpx
 import pytest
 
 from services.browser import mcp_daemon
 from services.browser import session as sess
-from shared.cluster_auth import verify_session
 
 SECRET = "test-cluster-secret"  # noqa: S105
 GATEWAY = "http://gateway.example:8000"
@@ -41,6 +42,15 @@ class FakeWS:
         return json.dumps(self._responses.pop(0))
 
 
+def _install_fake_gateway_login(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_login(gateway_url: str, secret: str) -> tuple[str, str, int]:
+        assert gateway_url == GATEWAY
+        assert secret == SECRET
+        return "ava_session", "opaque-session", 1_800_000_000
+
+    monkeypatch.setattr(sess, "gateway_session_login", fake_login)
+
+
 def _install_fake_cdp(monkeypatch: pytest.MonkeyPatch) -> dict[str, FakeWS]:
     """Point session's HTTP + websocket surfaces at fakes; return them by role.
 
@@ -59,21 +69,77 @@ def _install_fake_cdp(monkeypatch: pytest.MonkeyPatch) -> dict[str, FakeWS]:
     def fake_connect(url: str, **kwargs: Any) -> FakeWS:
         return browser_ws if "browser" in url else page_ws
 
+    _install_fake_gateway_login(monkeypatch)
     monkeypatch.setattr(sess, "_http_json", fake_http_json)
     monkeypatch.setattr(sess.websockets, "connect", fake_connect)
     return {"browser": browser_ws, "page": page_ws}
 
 
-def test_gateway_session_cookie_mints_valid_token() -> None:
-    name, value, expiry = sess.gateway_session_cookie(SECRET)
-    assert name == "ava_session"
-    assert verify_session(value, SECRET)
-    # expiry mirrors the token's embedded expiry and stays in the 7-day window
-    import time
+def _install_login_response(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    status_code: int = 200,
+    set_cookie: str | None = "ava_session=opaque-session; HttpOnly; Max-Age=86400; Path=/",
+) -> list[tuple[str, dict[str, str]]]:
+    calls: list[tuple[str, dict[str, str]]] = []
 
-    assert time.time() < expiry <= time.time() + 8 * 24 * 3600
-    # a different secret must not verify
-    assert not verify_session(value, "other-secret")
+    class FakeClient:
+        def __init__(self, *, timeout: float) -> None:
+            assert timeout == 5.0
+
+        async def __aenter__(self) -> FakeClient:
+            return self
+
+        async def __aexit__(self, *exc: Any) -> bool:
+            return False
+
+        async def post(self, url: str, *, json: dict[str, str]) -> httpx.Response:
+            calls.append((url, json))
+            headers = {"Set-Cookie": set_cookie} if set_cookie is not None else {}
+            return httpx.Response(status_code, headers=headers)
+
+    monkeypatch.setattr(sess.httpx, "AsyncClient", FakeClient)
+    return calls
+
+
+async def test_gateway_session_login_returns_server_cookie(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _install_login_response(monkeypatch)
+    monkeypatch.setattr(time, "time", lambda: 1_700_000_000.0)
+
+    result = await sess.gateway_session_login(GATEWAY, SECRET)
+
+    assert result == ("ava_session", "opaque-session", 1_700_086_400)
+    assert calls == [(f"{GATEWAY}/api/auth/login", {"password": SECRET})]
+
+
+async def test_gateway_session_login_rejects_non_200(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_login_response(monkeypatch, status_code=401)
+
+    with pytest.raises(RuntimeError, match="HTTP 401"):
+        await sess.gateway_session_login(GATEWAY, SECRET)
+
+
+@pytest.mark.parametrize(
+    "set_cookie",
+    [
+        None,
+        "other=value; Max-Age=86400",
+        "ava_session=opaque-session; Path=/",
+        "ava_session=opaque-session; Max-Age=invalid",
+    ],
+)
+async def test_gateway_session_login_rejects_malformed_cookie(
+    monkeypatch: pytest.MonkeyPatch,
+    set_cookie: str | None,
+) -> None:
+    _install_login_response(monkeypatch, set_cookie=set_cookie)
+
+    with pytest.raises(RuntimeError, match="session cookie"):
+        await sess.gateway_session_login(GATEWAY, SECRET)
 
 
 async def test_inject_sets_cookie_with_login_flags(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -94,8 +160,8 @@ async def test_inject_sets_cookie_with_login_flags(monkeypatch: pytest.MonkeyPat
     assert params["path"] == "/"
     assert params["httpOnly"] is True
     assert params["sameSite"] == "Lax"
-    assert verify_session(params["value"], SECRET)
-    assert params["expires"] == sess.gateway_session_cookie(SECRET)[2]
+    assert params["value"] == "opaque-session"
+    assert params["expires"] == 1_800_000_000
 
 
 async def test_inject_raises_when_browser_rejects_cookie(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -126,11 +192,10 @@ async def test_cdp_call_raises_on_protocol_error() -> None:
 
 
 async def test_inject_raises_when_chrome_unreachable(monkeypatch: pytest.MonkeyPatch) -> None:
-    import httpx
-
     async def boom(url: str) -> dict[str, Any]:
         raise httpx.ConnectError("connection refused")
 
+    _install_fake_gateway_login(monkeypatch)
     monkeypatch.setattr(sess, "_http_json", boom)
     with pytest.raises(httpx.ConnectError):
         await sess.inject_session_cookie(9222, GATEWAY, SECRET)

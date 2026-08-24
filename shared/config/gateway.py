@@ -267,6 +267,19 @@ class GatewaySettings(EnvSettings):
         },
     )
 
+    session_ttl_seconds: int = Field(
+        default=24 * 3600,
+        gt=0,
+        alias="AVA_GATEWAY_SESSION_TTL_SECONDS",
+        description="Lifetime in seconds for opaque, server-side browser sessions.",
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     auth_middleware_enabled: bool = Field(
         default=True,
         validation_alias=AliasChoices("AVA_AUTH_MIDDLEWARE_ENABLED", "AVA_SKIP_AUTH"),

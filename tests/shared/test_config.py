@@ -997,6 +997,12 @@ def test_bootstrap_and_panel_full_under_real_gateway_profile(
 # ─── legacy inverted aliases resolve with correct semantics ───
 
 
+def test_gateway_session_ttl_defaults_to_one_day() -> None:
+    from shared.config.gateway import GatewaySettings
+
+    assert GatewaySettings().session_ttl_seconds == 24 * 3600
+
+
 def test_skip_auth_alias_inverts_value(monkeypatch: pytest.MonkeyPatch) -> None:
     """AVA_SKIP_AUTH means "skip auth" — true must resolve to auth DISABLED.
 
