@@ -7,6 +7,7 @@ carrying the $AVA_HOME/lgtm-host marker.
 
 from __future__ import annotations
 
+import copy
 import os
 import plistlib
 import shutil
@@ -14,6 +15,8 @@ import subprocess
 from pathlib import Path
 
 import pytest
+import yaml
+from pydantic import SecretStr
 
 from cli.commands import _lgtm, _lgtm_native
 from cli.commands._converge_spec import ConvergeCtx
@@ -35,6 +38,10 @@ def _write_executable(path: Path, content: str) -> None:
     path.chmod(0o755)
 
 
+def _empty_native_versions(_repo: Path) -> dict[str, dict[str, str]]:
+    return {}
+
+
 def _native_start_fixture(tmp_path: Path) -> tuple[Path, Path, Path, dict[str, str]]:
     user_home = tmp_path / "user"
     agents_dir = user_home / "Library" / "LaunchAgents"
@@ -42,6 +49,7 @@ def _native_start_fixture(tmp_path: Path) -> tuple[Path, Path, Path, dict[str, s
     ava_home = tmp_path / "ava-home"
     for name in ("loki", "prometheus"):
         _write_executable(ava_home / "lgtm" / "native" / "bin" / name, "#!/bin/sh\nexit 0\n")
+    _write_executable(ava_home / "lgtm" / "native" / "grafana" / "run.sh", "#!/bin/sh\nexit 0\n")
 
     fake_bin = tmp_path / "fake-bin"
     _write_executable(fake_bin / "curl", "#!/bin/sh\nprintf '200'\n")
@@ -163,6 +171,171 @@ def test_native_backend_ports_are_unconditionally_loopback_only() -> None:
     )
 
 
+def test_native_grafana_renders_from_the_repo_and_host_setting(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    repo = Path(__file__).resolve().parents[2]
+    home = tmp_path / "home"
+    native_dir = home / "lgtm/native"
+    monkeypatch.setattr(
+        "shared.config.settings.observability.telemetry_tempo_query_url",
+        "http://tempo.test:3200/",
+    )
+    monkeypatch.setattr(
+        "shared.config.settings.observability.telemetry_tempo_endpoint",
+        "http://tempo.test:14318/",
+    )
+
+    _lgtm_native._render_configs(repo, native_dir, home)
+    plist = plistlib.loads(_lgtm_native._render_plist("grafana", native_dir, home).encode())
+    grafana_ini = (native_dir / "config/grafana.ini").read_text(encoding="utf-8")
+    runtime_env = (native_dir / "config/runtime.env").read_text(encoding="utf-8")
+    run_script = (native_dir / "grafana/run.sh").read_text(encoding="utf-8")
+    prometheus = yaml.safe_load((native_dir / "config/prometheus.yml").read_text(encoding="utf-8"))
+
+    assert plist["Label"] == _lgtm_native.native_label("grafana", home)
+    assert plist["ProgramArguments"] == [str(native_dir.resolve() / "grafana/run.sh")]
+    assert plist["EnvironmentVariables"] == {"AVA_HOME": str(home.resolve())}
+    assert "{{" not in grafana_ini
+    assert "{{" not in runtime_env
+    assert "{{" not in run_script
+    assert (
+        f"GRAFANA_PROVISIONING_PATH={repo}/deploy/lgtm/config/grafana/provisioning/dashboards"
+        in runtime_env
+    )
+    assert "AVA_TELEMETRY_TEMPO_QUERY_URL=http://tempo.test:3200" in runtime_env
+    assert "admin_password" in run_script
+    assert 'export GRAFANA_ROOT_URL="${GRAFANA_ROOT_URL:-http://localhost:3003}"' in run_script
+    assert f"{repo}/deploy/lgtm/.env" in run_script
+    assert f"{native_dir}/config/runtime.env" in run_script
+    assert str(native_dir / "grafana-home/bin/grafana") in run_script
+    assert str(native_dir / "config/grafana.ini") in run_script
+    assert str(native_dir / "grafana-home") in run_script
+    assert {
+        job["job_name"]: job["static_configs"][0]["targets"] for job in prometheus["scrape_configs"]
+    }["tempo"] == ["tempo.test:3200"]
+
+    datasources = (
+        repo / "deploy/lgtm/config/grafana/provisioning/datasources/datasources.yml"
+    ).read_text(encoding="utf-8")
+    assert "100.78.137.46" not in datasources
+    assert "$__env{AVA_TELEMETRY_TEMPO_QUERY_URL}" in datasources
+
+
+def test_native_converge_renders_grafana_password_only_when_configured(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    repo = Path(__file__).resolve().parents[2]
+    home = tmp_path / "home"
+    agents_dir = tmp_path / "LaunchAgents"
+    agents_dir.mkdir()
+    monkeypatch.setattr(_lgtm_native, "platform_tag", lambda: "darwin_arm64")
+    monkeypatch.setattr(_lgtm_native, "_load_versions", _empty_native_versions)
+    monkeypatch.setattr(_lgtm_native, "_agents_dir", lambda: agents_dir)
+    # Non-secret fixture; production reads the credential from settings.alerts.grafana_admin_password.
+    monkeypatch.setattr(
+        "shared.config.settings.alerts.grafana_admin_password",
+        SecretStr("fake-key-for-test"),
+    )
+
+    _lgtm_native.ensure_lgtm_native(repo, home)
+
+    credential_file = home / "lgtm/native/grafana/admin_password"
+    rendered = credential_file.read_text(encoding="utf-8")
+    assert rendered == "fake-key-for-test\n"
+    file_mode = credential_file.stat().st_mode & 0o777
+    assert file_mode == 0o600
+
+
+def test_native_converge_leaves_unconfigured_grafana_password_absent(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    repo = Path(__file__).resolve().parents[2]
+    home = tmp_path / "home"
+    agents_dir = tmp_path / "LaunchAgents"
+    agents_dir.mkdir()
+    monkeypatch.setattr(_lgtm_native, "platform_tag", lambda: "darwin_arm64")
+    monkeypatch.setattr(_lgtm_native, "_load_versions", _empty_native_versions)
+    monkeypatch.setattr(_lgtm_native, "_agents_dir", lambda: agents_dir)
+    monkeypatch.setattr("shared.config.settings.alerts.grafana_admin_password", None)
+
+    _lgtm_native.ensure_lgtm_native(repo, home)
+
+    credential_file = home / "lgtm/native/grafana/admin_password"
+    run_script = (home / "lgtm/native/grafana/run.sh").read_text(encoding="utf-8")
+    assert not credential_file.exists()
+    assert f'if [[ -f "{credential_file}" ]]; then' in run_script
+    assert f'cat "{credential_file}"' not in run_script
+
+
+@pytest.mark.parametrize(
+    ("query_url", "intake_endpoint", "warns"),
+    [
+        ("http://127.0.0.1:3200", "http://tempo.example:14318", True),
+        ("http://127.0.0.1:3200", "http://localhost:14318", False),
+        ("http://tempo.example:3200", "http://collector.example:14318", False),
+    ],
+)
+def test_native_config_warns_only_for_mismatched_tempo_topology(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    query_url: str,
+    intake_endpoint: str,
+    warns: bool,
+) -> None:
+    monkeypatch.setattr("shared.config.settings.observability.telemetry_tempo_query_url", query_url)
+    monkeypatch.setattr(
+        "shared.config.settings.observability.telemetry_tempo_endpoint", intake_endpoint
+    )
+
+    _lgtm_native._render_configs(Path(__file__).resolve().parents[2], tmp_path / "native", tmp_path)
+
+    captured = capsys.readouterr()
+    if warns:
+        assert "AVA_TELEMETRY_TEMPO_QUERY_URL resolves to http://127.0.0.1:3200" in captured.err
+        assert "Tempo intake endpoint is http://tempo.example:14318" in captured.err
+    else:
+        assert captured.err == ""
+
+
+def _without_loki_transport_paths(config: dict[str, object]) -> dict[str, object]:
+    """Drop the explicitly host/container-specific Loki transport paths."""
+    comparable = copy.deepcopy(config)
+    for path in (
+        ("common", "path_prefix"),
+        ("common", "storage", "filesystem", "chunks_directory"),
+        ("common", "storage", "filesystem", "rules_directory"),
+        ("compactor", "working_directory"),
+        ("server", "http_listen_address"),
+        ("server", "grpc_listen_address"),
+        ("common", "ring", "instance_addr"),
+        ("frontend", "address"),
+    ):
+        parent: dict[str, object] = comparable
+        for key in path[:-1]:
+            child = parent.get(key)
+            if child is None:
+                break
+            assert isinstance(child, dict)
+            parent = child
+        else:
+            parent.pop(path[-1], None)
+    if comparable.get("frontend") == {}:
+        comparable.pop("frontend")
+    return comparable
+
+
+def test_native_loki_limits_match_the_container_rollback_config() -> None:
+    repo = Path(__file__).resolve().parents[2]
+    container = yaml.safe_load((repo / "deploy/lgtm/config/loki.yaml").read_text(encoding="utf-8"))
+    native = yaml.safe_load(
+        (repo / "deploy/lgtm/native/config/loki.yaml").read_text(encoding="utf-8")
+    )
+
+    assert _without_loki_transport_paths(native) == _without_loki_transport_paths(container)
+
+
 def test_native_step_runs_only_for_the_marker_home(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -236,7 +409,7 @@ def test_lgtm_start_bootstraps_the_labels_rendered_by_converge(
     assert result.returncode == 0, result.stderr
     launchctl_calls = launchctl_log.read_text(encoding="utf-8").splitlines()
     domain = f"gui/{os.getuid()}"
-    for name in ("loki", "prometheus"):
+    for name in ("loki", "prometheus", "grafana"):
         label = _lgtm_native.native_label(name, ava_home)
         plist = agents_dir / f"{label}.plist"
         assert f"print {domain}/{label}" in launchctl_calls
@@ -244,8 +417,9 @@ def test_lgtm_start_bootstraps_the_labels_rendered_by_converge(
         assert f"kickstart {domain}/{label}" in launchctl_calls
 
 
-def test_native_converge_retires_legacy_and_foreign_jobs(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+@pytest.mark.parametrize("current_loaded", [False, True])
+def test_native_converge_retires_legacy_and_foreign_jobs_only_after_current_job_loads(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, current_loaded: bool
 ) -> None:
     home = tmp_path / "home"
     home.mkdir()
@@ -255,6 +429,10 @@ def test_native_converge_retires_legacy_and_foreign_jobs(
     current = _lgtm_native.native_label("loki", home)
     legacy = "com.ava.loki"
     foreign = "com.ava.loki.other-home"
+    legacy_plist = agents_dir / f"{legacy}.plist"
+    foreign_plist = agents_dir / f"{foreign}.plist"
+    legacy_plist.write_bytes(plistlib.dumps({"Label": legacy}))
+    foreign_plist.write_bytes(plistlib.dumps({"Label": foreign}))
 
     def darwin_arm64() -> str:
         return "darwin_arm64"
@@ -284,20 +462,25 @@ def test_native_converge_retires_legacy_and_foreign_jobs(
                 "",
             )
         label = command[-1].rsplit("/", maxsplit=1)[-1]
-        return subprocess.CompletedProcess(command, 0 if label in {legacy, foreign} else 1, "", "")
+        loaded = {legacy, foreign}
+        if current_loaded:
+            loaded.add(current)
+        return subprocess.CompletedProcess(command, 0 if label in loaded else 1, "", "")
 
     monkeypatch.setattr(_lgtm_native.subprocess, "run", fake_run)
 
     _lgtm_native.ensure_lgtm_native(tmp_path / "repo", home)
 
-    assert not (agents_dir / f"{legacy}.plist").exists()
-    assert not (agents_dir / f"{foreign}.plist").exists()
+    assert legacy_plist.exists() is not current_loaded
+    assert foreign_plist.exists() is not current_loaded
     assert (agents_dir / f"{current}.plist").exists()
-    assert {call[-1] for call in calls if call[1] == "bootout"} == {
+    booted_out = {call[-1] for call in calls if call[1] == "bootout"}
+    expected_bootouts = {
         f"gui/{_lgtm_native.os.getuid()}/{legacy}",
         f"gui/{_lgtm_native.os.getuid()}/{foreign}",
     }
-    assert all(current not in call[-1] for call in calls)
+    assert booted_out == (expected_bootouts if current_loaded else set())
+    assert all(current not in call[-1] for call in calls if call[1] == "bootout")
 
 
 def test_bootout_native_jobs_removes_this_homes_slugged_plists(
@@ -321,4 +504,4 @@ def test_bootout_native_jobs_removes_this_homes_slugged_plists(
     _lgtm_native.bootout_native_jobs(home)
 
     assert not list(agents_dir.glob("*.plist"))
-    assert [call[1] for call in calls] == ["print", "bootout", "print", "bootout"]
+    assert [call[1] for call in calls] == ["print", "bootout"] * 3

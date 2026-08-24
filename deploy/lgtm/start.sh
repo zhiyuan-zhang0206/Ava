@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 #
 # deploy/lgtm/start.sh — bring up the native observability backends on the
-# designated LGTM host. Loki and Prometheus are native launchd jobs; Grafana
-# is managed by its own host launchd job. The compose stack is retained in git
-# as a rollback path only and is not started here.
+# designated LGTM host. Loki, Prometheus, and Grafana are native launchd jobs.
+# The compose stack is retained in git as a rollback path only and is not
+# started here.
 #
 # The gateway watchdog re-runs this script after a connection-level readiness
 # failure. A backend is skipped only when its canonical launchd job is loaded
@@ -23,6 +23,10 @@ for name in loki prometheus; do
         exit 1
     fi
 done
+if [[ ! -x "$NATIVE_DIR/grafana/run.sh" ]]; then
+    log "ERROR: native Grafana launcher is missing; run converge / \`ava lgtm on\` first"
+    exit 1
+fi
 mkdir -p "$NATIVE_DIR/data/loki" "$NATIVE_DIR/data/prom" "$NATIVE_DIR/logs"
 
 _reachable() {
@@ -68,30 +72,49 @@ _start_native() {
     exit 1
 }
 
+_retire_legacy_grafana() {
+    local domain="gui/$(id -u)"
+    local legacy_label="com.ava.grafana-native"
+    local legacy_plist="$HOME/Library/LaunchAgents/$legacy_label.plist"
+    if ! launchctl print "$domain/$legacy_label" >/dev/null 2>&1; then
+        return
+    fi
+    log "retiring legacy Grafana job after native Grafana became reachable"
+    if ! launchctl bootout "$domain/$legacy_label"; then
+        log "WARNING: legacy Grafana job bootout returned non-zero"
+    fi
+    if rm -f "$legacy_plist"; then
+        log "removed legacy Grafana plist $legacy_plist"
+    else
+        log "WARNING: could not remove legacy Grafana plist $legacy_plist"
+    fi
+}
+
 _start_native loki http://127.0.0.1:3100/ready
 _start_native prometheus http://127.0.0.1:9090/-/ready
+_start_native grafana http://127.0.0.1:3003/
+_retire_legacy_grafana
 
-log "waiting for Grafana"
-grafana_up=false
-for _ in $(seq 1 30); do
-    code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3003/ 2>/dev/null || true)
-    if [[ "$code" == "200" ]]; then
-        grafana_up=true
-        break
+grafana_password="$NATIVE_DIR/grafana/admin_password"
+if [[ -f "$grafana_password" ]]; then
+    alert_rules=$(curl -s -u "admin:$(<"$grafana_password")" \
+        http://127.0.0.1:3003/api/v1/provisioning/alert-rules 2>/dev/null || true)
+    if alert_count=$(printf '%s' "$alert_rules" | python3 -c 'import json, sys; print(len(json.load(sys.stdin)))' 2>/dev/null); then
+        if [[ "$alert_count" -lt 18 ]]; then
+            log "WARNING: Grafana provisioned $alert_count alert rules; expected at least 18"
+        fi
+    else
+        log "WARNING: Grafana alert-rule readiness response was not valid JSON"
     fi
-    sleep 2
-done
-if [[ "$grafana_up" == true ]]; then
-    log "Grafana is up (host-managed native launchd)"
 else
-    log "Grafana is not reachable yet; its host launchd job may still be starting"
+    log "WARNING: Grafana admin password is unavailable; skipped alert-rule readiness check"
 fi
 
 log "stack is up:"
 GRAFANA_URL="${GRAFANA_ROOT_URL:-http://localhost:3003}"
 log "  Loki         http://127.0.0.1:3100   (native launchd)"
 log "  Prometheus   http://127.0.0.1:9090   (native launchd)"
-log "  Grafana      $GRAFANA_URL   (native launchd; host-managed)"
-log "  Tempo        remote per cluster config (AVA_TELEMETRY_TEMPO_ENDPOINT / Prometheus targets)"
+log "  Grafana      $GRAFANA_URL   (native launchd)"
+log "  Tempo        remote per cluster config (intake AVA_TELEMETRY_TEMPO_ENDPOINT; query AVA_TELEMETRY_TEMPO_QUERY_URL)"
 log "  sidecar OTLP http://localhost:4318    (native ava-otel-collector)"
 log "  stop with: bash $SCRIPT_DIR/stop.sh"

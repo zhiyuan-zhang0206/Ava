@@ -3,7 +3,7 @@
 The two rule groups moved from the retired Postgres events read path to the
 LGTM read side (Task #1224): R1-R3, R5-R7 query Loki (the events stream as
 OTLP logs under {service_name="unknown_service"}; `| json` flattens each line
-to labels), R4 queries Prometheus (the ava_llm_usage_latency_ms histogram).
+to labels), R4 queries Prometheus (the ava_llm_usage_latency_milliseconds histogram).
 Keeps the rules in sync with the emitter's LogQL/OTLP contract.
 
 R8-R12 (issue #46) are the infrastructure layer and query a DIFFERENT
@@ -77,7 +77,7 @@ _INFRA_RULE_METRICS = {
 }
 
 
-def _load_rules() -> list[dict[str, Any]]:
+def _load_groups() -> list[dict[str, Any]]:
     doc = yaml.safe_load(_RULES.read_text(encoding="utf-8"))
     assert doc is not None
     groups = doc["groups"]
@@ -85,7 +85,12 @@ def _load_rules() -> list[dict[str, Any]]:
     assert [group["name"] for group in groups] == ["ava-ops", "ava-ops-slow"]
     assert [group["folder"] for group in groups] == ["Ava", "Ava"]
     assert [group["interval"] for group in groups] == ["1m", "5m"]
-    assert [len(group["rules"]) for group in groups] == [17, 3]
+    assert [len(group["rules"]) for group in groups] == [15, 5]
+    return groups
+
+
+def _load_rules() -> list[dict[str, Any]]:
+    groups = _load_groups()
     return [rule for group in groups for rule in group["rules"]]
 
 
@@ -111,6 +116,13 @@ def _threshold_params(rule: dict[str, Any]) -> list[list[Any]]:
 def test_rules_have_expected_uids() -> None:
     rules = _load_rules()
     assert {r["uid"] for r in rules} == _EXPECTED_UIDS
+
+
+def test_low_cost_chronic_rules_use_the_slow_group() -> None:
+    groups = _load_groups()
+    group_for_rule = {rule["uid"]: group["name"] for group in groups for rule in group["rules"]}
+    assert group_for_rule["ava-ops-trace-disk-watermark"] == "ava-ops-slow"
+    assert group_for_rule["ava-ops-llm-billing-quota"] == "ava-ops-slow"
 
 
 def test_rules_never_query_postgres() -> None:
@@ -140,9 +152,9 @@ def test_severity_is_critical_warning_error() -> None:
 
 
 def test_loki_rules_pipeline_json_before_filters() -> None:
-    """OTel-detected labels are structured metadata, not stream labels —
-    {…} selectors cannot match them (verified live), so every Loki rule
-    must run `| json` before any event-field filter."""
+    """Legacy chunks lack the promoted event_name/agent_id stream labels,
+    so rules retain the broad selector and parse JSON before field filters
+    until the migration after legacy history expires."""
     for rule in _load_rules():
         if rule["uid"] == "ava-ops-events-freshness":
             continue  # R6 is a whole-stream probe (absent_over_time), no field filters
@@ -412,16 +424,16 @@ def test_every_rule_is_silent_on_no_data_and_datasource_error() -> None:
 
 def test_gateway_latency_rules_scope_to_fast_routes() -> None:
     """R17's two tiers (3s warning / 10s error) alert on UI-facing quick
-    reads only: the LLM-bound message route and the slow-by-design API routes
-    are excluded from the route selector — their latency is intrinsic, not a
-    degradation. Both tiers share the selector, differ only in threshold."""
+    reads only: the emitter classifies LLM-bound and slow-by-design routes,
+    so the query is insulated from route-list drift. Both tiers share the
+    selector, differ only in threshold."""
     rules = {r["uid"]: r for r in _load_rules()}
     for uid in ("ava-ops-gateway-latency-route-warning", "ava-ops-gateway-latency-route-error"):
         rule = rules[uid]
         expr = _exprs(rule, "loki")[0]
         assert 'event_name="gateway_latency"' in expr
-        assert "attributes_route !~" in expr
-        assert "/api/agents/.*/messages" in expr
+        assert '| attributes_route_class="fast"' in expr
+        assert "attributes_route !~" not in expr
         assert "unwrap attributes_p95_ms" in expr
         assert "max by (attributes_route)" in expr
         assert rule["for"] == "5m"

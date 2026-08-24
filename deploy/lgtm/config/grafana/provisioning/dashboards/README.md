@@ -19,13 +19,14 @@ row header. All sections are **expanded by default** (`collapsed: false`,
 
 1. **`core`** — the user's daily first screen: twelve dashboard-window stat tiles
    cover the entire Statistics popover (LLM calls / Warning / Error /
-   Unresolved Warning / Unresolved Error / Live agents / LLM cost /
+   Warning (all) / Error (all) / Live agents / LLM cost /
    Tokens / LLM input tokens / LLM output tokens / Cache hit rate / Avg turn
    duration). It then shows Event health,
    Event rate, Token usage — Input, Token usage — Output + Reasoning, Cache
    hit, Turn success rate, and the three full-width **Events** panels:
    business/anomaly logs, the event-type table, and the parse-clean
-   raw stream for debugging.
+   raw stream for debugging. The two `(all)` tiles remain unfiltered until the
+   `resolved_by` producer ships in task #1468.
 2. **`LLM`** — throughput tokens/s, the three TPS series, calls/bucket,
    cost USD, LLM errors, and per-agent Top 20.
 3. **`Gateway & execution`** — gateway latency p50/p95/max + by route,
@@ -74,8 +75,9 @@ summaries cover the same information.
 Datasources (provisioned in `../datasources/datasources.yml`): **Loki**
 (fixed uid `loki`) for every event panel; **Postgres** (uid `ops`) for the
 `Live agents` stat (`agents_meta` is not in Loki); **Prometheus** (uid
-`prometheus`) for the host & data-plane panels (per-machine OTel Collector
-sidecar scrapes, `job="ava-infra"` + a `host` label = the OS hostname).
+`prometheus`) for the host & data-plane panels and the turn-duration histogram
+(per-machine OTel Collector sidecar scrapes, `job="ava-infra"` + a `host`
+label = the OS hostname).
 
 ## Core metrics (registered, not hand-written)
 
@@ -97,9 +99,10 @@ dashboard is provisioning-managed — titles are edited here, as code).
 `shared/plugin_metrics.py` defines `MetricSpec`, shared by core and plugin
 registrations: `name` / `title` / `description` / `event_name` / `category` /
 `unit` / `panel` (`timeseries` / `stat` / `barchart` / `table`) / `query`
-(Grafana query template — LogQL over the Loki event stream,
-`query_type="logql"`, for every shipped metric; the one SQL holdout is the
-core `Live agents` stat over `agents_meta`), plus the Task #882 fields:
+(Grafana query template — usually LogQL over the Loki event stream with
+`query_type="logql"`; the core `Live agents` stat is SQL over `agents_meta`,
+and turn duration is PromQL over the Prometheus histogram), plus the Task #882
+fields:
 
 - `targets` — extra query templates rendered as refId B/C/... targets on the
   same panel (multi-series panels — e.g. the core TPS panels' max/min-agent
@@ -128,6 +131,11 @@ Range panels use fixed windows selected by metric semantics: count trends use
 window summaries use instant `[$__range]` queries. Stats and tables remain
 instant over `[$__range]`. Every panel follows the dashboard time picker; no
 panel sets a `timeFrom` or fixed `interval` override.
+
+Panels do not set `maxDataPoints`; Grafana derives the `$__interval` step from
+the viewport and selected range. That implicit step is the query-weight knob:
+when a panel needs a long fixed window, set its interval deliberately instead
+of mass-editing targets.
 
 ## Writing a plugin metric
 
@@ -162,7 +170,7 @@ previous block's bottom (no gap row).
 to a 30px title bar at narrow window widths.
 
 `refresh` is `10m` and the default window `now-6h` (2026-08-23, task
-#1399: the 24h window was the main Loki query-weight driver — 87 Loki
+#1399: the 24h window was the main Loki query-weight driver — 88 Loki
 queries × 24h × 5m; 6h/10m keeps the dashboard live while bounding Loki).
 
 ## Syncing to the live Grafana

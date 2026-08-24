@@ -34,28 +34,30 @@ are no-ops unless that worktree home is explicitly marked.
 | Loki | native launchd | 3.7.6 / `GOMEMLIMIT=2GiB` | 3100 | log backend, filesystem storage, 7-day retention |
 | Prometheus | native launchd | 3.13.2 / `GOMEMLIMIT=1GiB` | 9090 | metrics and OTLP receiver |
 | Tempo | remote per cluster config | WSL backend; compose copy is the rollback asset | configured by `AVA_TELEMETRY_TEMPO_ENDPOINT` | trace backend |
-| Grafana | native launchd (host-managed; see the runbook) | host-managed | 3003 | anonymous read-only UI |
+| Grafana | native launchd | 13.1.3 | 3003 | anonymous read-only UI |
 
 The pinned release assets and SHA256 values live in
 [`native/versions.yml`](native/versions.yml). Converge verifies an archive
-before extraction, writes it under `$AVA_HOME/lgtm/native/bin/`, and records a
-per-backend version marker. Unsupported platforms warn and skip: only the
-designated macOS arm64 host has native assets today.
+before extraction, writes each executable or release tree under
+`$AVA_HOME/lgtm/native/`, and records a per-backend version marker. Unsupported
+platforms warn and skip: only the designated macOS arm64 host has native assets
+today.
 
 Native templates in `native/config/` are rendered on every converge into
-`$AVA_HOME/lgtm/native/config/`. Loki's limits and query defenses are copied
-from the rollback configuration and must remain aligned. Native backend
-listeners bind loopback only, and native Grafana dials Loki, Prometheus, and
-Postgres on the host loopback.
+`$AVA_HOME/lgtm/native/config/`, including Grafana's INI, runtime environment,
+and launch script. Loki's limits and query defenses are copied from the rollback
+configuration and must remain aligned. Native backend listeners bind loopback
+only, and native Grafana dials Loki, Prometheus, and Postgres on the host
+loopback.
 
 ## Why this stack
 
 One Grafana UI over Loki, Prometheus, and Tempo gives operators native LogQL,
 metrics, and trace exploration while keeping the rest of the product's OTel
-pipeline unchanged. Loki and Prometheus use verified native release assets on
-the LGTM host, Grafana is host-managed native launchd, and Tempo is selected by
-per-cluster configuration. Grafana and Tempo use the pinned compose services
-only during a manual rollback. The native collector sidecar is still the one
+pipeline unchanged. Loki, Prometheus, and Grafana use verified native release
+assets on the LGTM host, and Tempo is selected by per-cluster configuration.
+Grafana and Tempo compose copies are used only during a manual rollback. The
+native collector sidecar is still the one
 local OTLP entry on port 4318; its filelog receivers also own session-log
 shipping.
 
@@ -78,25 +80,27 @@ anonymous-but-read-only surface.
 ```bash
 ava lgtm on                 # install current native pins, then start native backends
 bash deploy/lgtm/start.sh   # idempotent native-only lifecycle launcher
-bash deploy/lgtm/stop.sh    # stop the native Loki and Prometheus jobs
+bash deploy/lgtm/stop.sh    # stop native backends
 ava lgtm off                # remove marker first, then stop deliberately
 ```
 
 `start.sh` and `stop.sh` are native-only. The launcher rejects a missing native
-binary or a missing/ambiguous home-scoped launchd plist, bootstraps Loki or
-Prometheus unless both its launchd job is loaded and its HTTP listener answers,
-and reports the state of host-managed Grafana without starting it. A newly
-bootstrapped job must answer within 30 seconds or the launcher fails loudly.
-Neither script touches the Docker daemon or compose.
+binary, Grafana launch script, or missing/ambiguous home-scoped launchd plist;
+it bootstraps Loki, Prometheus, or Grafana unless both its launchd job is loaded
+and its HTTP listener answers. It checks that Grafana provisioned at least 18
+alert rules when its admin password file is available. A newly bootstrapped job
+must answer within 30 seconds or the launcher fails loudly. Neither script
+touches the Docker daemon or compose.
 
-For a controlled configuration restart, converge the changed templates and
-then use `ava lgtm off` followed by `ava lgtm on`. This is deliberate: the
-watchdog does not restart a working backend just to apply a configuration
+For a controlled Grafana configuration restart, converge the changed templates
+and run `launchctl kickstart -k gui/$(id -u)/com.ava.grafana.<home-slug>`.
+The watchdog does not restart a working backend just to apply a configuration
 change.
 
-Tempo is remote and selected by `AVA_TELEMETRY_TEMPO_ENDPOINT`; the local
-lifecycle neither probes it nor manages it. The collector's filelog receivers
-ship session and orchestration logs directly to Loki.
+Tempo is remote and selected by `AVA_TELEMETRY_TEMPO_ENDPOINT`; native Grafana
+and Prometheus use `AVA_TELEMETRY_TEMPO_QUERY_URL` for queries and scraping.
+The local lifecycle neither probes nor manages Tempo. The collector's filelog
+receivers ship session and orchestration logs directly to Loki.
 
 ## Session logs in Loki
 
@@ -116,7 +120,13 @@ Copy `.env.example` to `.env` only when an override is needed.
 | Variable | Default | Purpose |
 |---|---|---|
 | `GRAFANA_ROOT_URL` | `http://localhost:3003` | Grafana redirect URL |
-| `GRAFANA_PROVISIONING_PATH` | source checkout's dashboard provisioning directory | Native Grafana file-provider path, set by `config/grafana/runtime.env` |
+| `GRAFANA_PROVISIONING_PATH` | checkout provisioning directory | Rendered by converge for native Grafana; do not set it in `.env` |
+| `AVA_TELEMETRY_TEMPO_ENDPOINT` | `http://127.0.0.1:14318` | Tempo OTLP intake URL for trace export |
+| `AVA_TELEMETRY_TEMPO_QUERY_URL` | `http://127.0.0.1:3200` | Tempo query/metrics URL rendered into native Grafana and Prometheus; when Tempo is remote, this host-scoped setting must name its remote query endpoint (writable through the config API), and converge warns when it conflicts with the intake topology |
+
+`.env` holds live secrets and is gitignored; never commit it. Converge renders
+the native Grafana provisioning path and runtime configuration; `.env` supplies
+only allowed secret and URL overrides.
 
 ## Verify
 

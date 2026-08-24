@@ -4,10 +4,10 @@ datasources:
     uid: tempo
     type: tempo
     access: proxy
-    # The WSL remote Tempo is the cluster's trace backend after the
-    # 2026-08-23 cutover.
-    url: http://100.78.137.46:3200
-    isDefault: true
+    # Query URL is rendered into native Grafana from the host-scoped setting.
+    url: $__env{AVA_TELEMETRY_TEMPO_QUERY_URL}
+    # Explore should open the event stream, not the trace backend.
+    isDefault: false
     jsonData:
       httpMethod: GET
 
