@@ -5,11 +5,12 @@ allowlist automatically on every `ava start` / `ava update`. These verbs give an
 operator the same machinery on demand, without a full converge:
 
 - `ava firewall status` — read-only: verdict, manifest coverage, stale rules,
-  and whether the one-time sudoers grant is installed.
-- `ava firewall sync` — run the repair + prune pass now (needs the grant).
+  and whether the older-macOS sudo fallback grant is installed.
+- `ava firewall sync` — run the rootless-first repair + prune pass now.
 
-The one-time grant itself is installed by `scripts/install-firewall-sudoers.sh`,
-run once per host with `sudo` (see `shared.macos_firewall` for why).
+Root-free mutation was empirically verified on the macmini running macOS 15.3.1.
+Other releases fall back to `sudo -n`, then print manual commands if no
+non-interactive grant is available.
 """
 
 from __future__ import annotations
@@ -27,28 +28,27 @@ def cmd_firewall_status() -> int:
     roles = _ns._roles_or_none()
     audit = audit_this_host(frozenset(roles or ()))
     print("→ firewall status")
-    if audit.verdict not in (fw.FirewallVerdict.ALLOWED, fw.FirewallVerdict.RULES_MISSING):
+    if audit.verdict is fw.FirewallVerdict.NOT_MACOS:
         print(f"  {audit.verdict.value}: {audit.detail}")
         return 0
+    if audit.verdict not in (fw.FirewallVerdict.ALLOWED, fw.FirewallVerdict.RULES_MISSING):
+        print(f"  {audit.verdict.value}: {audit.detail}")
     rules = fw.allowlisted_paths()
     if rules is None:
         print(f"  unreadable: could not read the allow list from {fw.SOCKETFILTERFW}")
         return 1
-    required = fw.manifest_paths()
-    missing = fw.missing_allow_rules(required, rules)
+    print(fw.render_manifest_status(rules))
     stale = fw.stale_manifest_rules(rules)
-    print(f"  manifest: {len(required) - len(missing)} of {len(required)} binaries allow-listed")
-    for path in missing:
-        print(f"    - no allow rule: {path}")
     print(f"  stale rules: {len(stale)}")
     for path in stale:
         print(f"    - {path}")
     if fw.sudo_grant_installed():
-        print("  sudoers grant: installed — converge repairs automatically")
+        print("  sudo fallback grant: installed (used only if direct mutation is rejected)")
     else:
         print(
-            "  sudoers grant: NOT installed — run once: "
-            "`sudo scripts/install-firewall-sudoers.sh`, then `ava firewall sync`"
+            "  sudo fallback grant: not installed (direct mutation was verified on "
+            "the macmini running macOS 15.3.1; "
+            "sync prints manual commands if this host requires elevation)"
         )
     return 0
 
@@ -56,8 +56,8 @@ def cmd_firewall_status() -> int:
 def cmd_firewall_sync() -> int:
     """`ava firewall sync` — apply the manifest now (repair + prune).
 
-    Needs the sudoers grant; without it, prints the exact manual commands and
-    exits 1.
+    Mutates directly first. On older macOS it retries with `sudo -n`; if both
+    paths fail, it prints the exact manual commands and exits 1.
     """
     import cli.commands as _ns
 

@@ -26,7 +26,8 @@ Two kinds of module live here, distinguished by filename:
 - **internal** (`_`-prefixed) — steps `start` / `update` call, never dispatched
   directly: `_cluster_instance` (per-cluster pg+redis bring-up), `_converge` /
   `_converge_spec` (the step contract) / `_converge_os_jobs` (the OS-scheduled
-  jobs) / `_converge_skills` / `_converge_firewall` (idempotent host wiring),
+  jobs) / `_converge_skills` / `_converge_firewall` /
+  `_converge_permission_watcher` (idempotent host wiring),
   `_update_git` /
   `_update_orchestration` / `_update_agent_runner` / `_updater_lease` / `_update_recover` /
   `_gateway_ready` (the staged upgrade), `_probe`, `_setup`, `_session_lifecycle`, `_repo`, `_warmup`,
@@ -87,22 +88,20 @@ schema change catches the DB up on its own.
   second half of the same fix. A lone single box therefore runs an empty Phase B and
   reports CLEAN, but is still put through the readiness gate: nothing else asks whether
   its gateway came back.
-- `_converge_firewall` is the one converge step that **cannot** converge what it
-  checks. macOS's Application Firewall allows incoming connections per binary, and
-  every binary Ava serves an off-box port from sits at a version-stamped path
-  (`.../cpython-3.12.11-.../bin/python3.12`, `~/.ava/runtime/pg/17.4.0/bin/postgres`),
-  so a `uv python` / `_PG_VERSION` bump orphans the rule against the old path while
-  loopback keeps working — issue #949. `socketfilterfw --add` needs root (the tool is
-  not setuid; its own words are `Must be root to change settings.`) and Ava's only
-  permissions helper cannot reach it either — **signed is not root**: it is a *user*-domain
-  LaunchAgent, and its signature buys TCC desktop permissions, not privilege. So the
-  step **audits and reports** rather than repairing: a `sudo` in converge would hang an
-  unattended `ava start` on a password prompt. The queries need no privilege, so the
-  diagnosis is automated even though the repair is not, and the two halves name each
-  other — this step says the gap will present as `OFF_BOX_UNREACHABLE`, and
-  `_gateway_ready`'s `OFF_BOX_UNREACHABLE` calls the same audit to say whether the
-  firewall is the cause, print the repair, and name `ava converge` as the verb that
-  reprints it. See [[shared/shared.ava.okf.md|Shared Libraries]].
+- `_converge_firewall` reconciles the per-binary Application Firewall manifest.
+  Version-stamped Python, Postgres, Homebrew, browser, and observability paths mean
+  an upgrade can orphan the old ALF identity while loopback keeps working — issue
+  #949. The step adds and unblocks resolved manifest paths, then removes stale
+  managed rules. These `socketfilterfw` mutations were empirically verified without
+  elevation on the macmini running macOS 15.3.1; other versions fall back to
+  `sudo -n` and then an exact manual command without blocking `ava start`.
+  `_gateway_ready` uses the same audit when an off-box probe fails. See
+  [[shared/shared.ava.okf.md|Shared Libraries]].
+- `_converge_permission_watcher` installs the gateway host's
+  `com.ava.permission-watcher` LaunchAgent. An unchanged plist is a strict no-op;
+  a changed plist is bootstrapped under the logged-in user domain. The process is
+  outside the `ServiceSpec` roster because launchd owns its keepalive. See
+  [[services/permission_watcher/permission_watcher.ava.okf.md]].
 - `cli/enroll.py` and `cli/preflight.py` are routed **before** settings-gated
   imports in `main()`, so they work on a host with no usable config yet.
 - `cli/mcp_server.py` is the third top-level module a verb routes to

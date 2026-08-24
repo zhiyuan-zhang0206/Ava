@@ -267,8 +267,8 @@ def _add_firewall_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser
     firewall_status_p.set_defaults(func=_h_firewall_status)
     firewall_sync_p = firewall_sub.add_parser(
         "sync",
-        help="apply the allowlist manifest now (repair + prune; needs the one-time "
-        "sudoers grant from scripts/install-firewall-sudoers.sh)",
+        help="apply the allowlist manifest now (rootless-first repair + prune; "
+        "older macOS falls back to sudo -n/manual commands)",
     )
     firewall_sync_p.set_defaults(func=_h_firewall_sync)
 

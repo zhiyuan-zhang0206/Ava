@@ -1,18 +1,36 @@
 ---
 type: doc
-title: macOS Firewall Audit
-description: shared/macos_firewall.py — the read-only per-binary Application Firewall allow-list audit behind the converge report and OFF_BOX_UNREACHABLE attribution (issue #949).
+title: macOS Firewall Manifest
+description: shared/macos_firewall.py — the declarative per-binary Application Firewall allow-list manifest, renderer, and rootless-first reconciliation behind converge and OFF_BOX_UNREACHABLE attribution.
 tags:
 - shared
 - macos
 - firewall
 ---
 
-# macOS Firewall Audit
+# macOS Firewall Manifest
 
-## The audit
+## Manifest and reconciliation
 
-`shared/macos_firewall.py` is a **read-only** audit of the macOS Application Firewall's per-binary allow list, and read-only by necessity rather than by taste: mutating it needs root, which Ava does not have (see the module's own docstring for how that was established). It exists because every binary Ava serves an off-box port from lives at a version-stamped path, so a `uv python` / vendored-Postgres bump orphans its allow rule while loopback keeps answering — issue #949. Membership is read from `--listapps`, never `--getappblocked`: the latter reports "permitted" for a path with no rule at all, so it cannot see the defect. Consumed by `cli/commands/_converge_firewall.py` (proactive report) and `_gateway_ready.py`'s `OFF_BOX_UNREACHABLE` verdict (post-hoc attribution) — see [[cli/commands/commands.ava.okf.md]].
+`shared/macos_firewall.py` owns the declarative macOS Application Firewall
+allow-list manifest. Each entry carries stable identity, purpose, machine scope,
+and globbed paths so versioned Python, Postgres, Homebrew, browser, and
+observability binaries are resolved after upgrades. Redis is absent by design:
+it is loopback-only and its off-box relay uses Apple's system Python.
+
+The audit reads membership from `--listapps`, never `--getappblocked`: the latter
+reports "permitted" for a path with no rule and cannot detect a missing entry.
+The status renderer joins the manifest to that audit and reports every pattern,
+resolved path, and Allow/Block/Missing state.
+
+Reconciliation adds, unblocks, and prunes managed rules. The three
+`socketfilterfw` mutations were empirically verified without elevation on the
+macmini running macOS 15.3.1. A failed direct mutation is retried with bounded,
+non-interactive `sudo -n`; if that also fails, converge reports the exact manual
+command and continues rather than blocking unattended startup.
+`cli/commands/_converge_firewall.py` uses the reconciler proactively, while
+`_gateway_ready.py` uses the same audit to explain an `OFF_BOX_UNREACHABLE`
+verdict — see [[cli/commands/commands.ava.okf.md]].
 
 
 Parent: [[shared/session-backend/session-backend.ava.okf.md|session backend]].

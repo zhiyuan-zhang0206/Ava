@@ -1,4 +1,4 @@
-"""Read-only audit of the macOS Application Firewall's per-binary allow list.
+"""Audit and converge the macOS Application Firewall's per-binary allow list.
 
 ## The defect this observes (issue #949)
 
@@ -24,37 +24,22 @@ filtered, so the gateway keeps answering `127.0.0.1` perfectly while every
 off-box dial is dropped. Nothing in the process notices, because nothing in the
 process is wrong.
 
-## Why the repair is `sudo -n` and not plain `sudo`
+## Why repair is unprivileged-first
 
-Repairing needs root, and Ava has no root channel of its own:
+Empirical verification on macOS 15.3.1 showed that all three manifest mutations
+(`--add`, `--unblockapp`, and `--remove`) succeed as the ordinary Ava user.
+Converge therefore calls `socketfilterfw` directly first. The commands are
+idempotent, so every start can repair a new version-stamped binary before its
+next bind without prompting.
 
-- `/usr/libexec/ApplicationFirewall/socketfilterfw` is `root:wheel`, mode 0755,
-  **not setuid** — it runs with the caller's privileges, and its own diagnostic
-  for a mutation attempt is the string `Must be root to change settings.`
-- Its store, `/usr/libexec/ApplicationFirewall/com.apple.alf.plist`, is
-  `root:wheel` 0644 — not writable by the `ava` user.
-- The permissions helper cannot reach this operation either: **signed is not root.** Check
-  this before anything else, because the obvious design is "reuse the signed helper we
-  already have" and it does not exist for this. `services/permissions_helper/lifecycle.py` installs
-  into `~/Library/LaunchAgents` — a *user*-domain LaunchAgent, not a root LaunchDaemon.
-  Its code signature buys TCC-mediated desktop permissions, not privilege.
-
-A plain `sudo socketfilterfw --add` would block on a password prompt on a
-headless host — the one outcome worse than not trying, because it hangs
-`ava start` instead of failing it. The *queries* need no privilege at all
-(`--getglobalstate` and `--listapps` both answer as an ordinary user), which is
-the whole reason the diagnosis is fully automatable even where the repair is not.
-
-The repair therefore goes through `sudo -n` — non-interactive by construction:
-with the one-time NOPASSWD grant (installed per host by
-`scripts/install-firewall-sudoers.sh`, scoped by a `Cmnd_Alias` to exactly the
-three verbs this module issues) the mutation runs silently; without the grant it
-fails immediately with `a password is required` and the caller falls back to
-printing the exact commands. It can never prompt, so it can never hang an
-unattended `ava start` / `ava update` — the property that makes attempting it in
-converge safe at all. The grant is deliberately narrow: `--add` / `--unblockapp`
-/ `--remove` only, never the global switches (`--setglobalstate`,
-`--setblockall`, ...), which the `Cmnd_Alias` does not name.
+Other macOS releases may still reject an unprivileged mutation. That platform
+difference degrades through two bounded fallbacks: retry the same command with
+`sudo -n`, then report the exact manual `sudo` command when that also fails.
+`sudo -n` never opens a password prompt, so an unattended `ava start` cannot
+hang. An older host can optionally retain the narrow `AVA_FIREWALL` sudoers
+grant; without it, converge reports but does not crash. Queries
+(`--getglobalstate` and `--listapps`) remain unprivileged on every supported
+path.
 
 ## Why `--listapps` and not `--getappblocked`
 
@@ -83,6 +68,8 @@ import subprocess
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
+
+from shared.proc import run_bounded
 
 SOCKETFILTERFW = "/usr/libexec/ApplicationFirewall/socketfilterfw"
 
@@ -297,13 +284,15 @@ class ManifestEntry:
     Ava-managed path is version-stamped (`Cellar/pgbouncer/1.25.1/`,
     `runtime/pg/17.4.0/`, `uv/python/cpython-3.12.12-.../`). ``machine`` filters
     the entry to one machine (``shared.machine.machine_name``, e.g. "my-mac");
-    None applies to every macOS host. The filter exists for user applications an
-    operator decided to allow inbound on a specific machine — Ava's own stack is
-    unfiltered.
+    None applies to every macOS host. ``purpose`` is operator-facing context for
+    why the binary accepts inbound traffic. The filter exists for user
+    applications an operator decided to allow inbound on a specific machine —
+    Ava's own stack is unfiltered.
     """
 
     id: str
     paths: tuple[str, ...]
+    purpose: str
     machine: str | None = None
 
 
@@ -318,22 +307,27 @@ FIREWALL_MANIFEST: tuple[ManifestEntry, ...] = (
     ManifestEntry(
         "uv interpreter",
         ("~/.local/share/uv/python/*/bin/python3.*",),
+        "Runs Ava Python services that accept inbound connections",
     ),
     ManifestEntry(
         "prod venv interpreter",
         ("~/.ava/source/.venv/bin/python3*",),
+        "Covers the production virtualenv's listener entry points",
     ),
     ManifestEntry(
         "dev clone venv interpreter",
         ("~/Ava/.venv/bin/python3*",),
+        "Covers development virtualenv listener entry points",
     ),
     ManifestEntry(
         "vendored postgres",
         ("~/.ava/runtime/pg/*/bin/postgres",),
+        "Accepts Postgres clients on gateway hosts",
     ),
     ManifestEntry(
         "homebrew postgres",
         ("/opt/homebrew/Cellar/postgresql@17/*/bin/postgres",),
+        "Accepts Postgres clients when the Homebrew binary is active",
     ),
     # Redis always binds loopback-only (task #1469), so it serves no off-box port
     # and needs no ALF rule. The private-network :6380 listener is the
@@ -345,6 +339,7 @@ FIREWALL_MANIFEST: tuple[ManifestEntry, ...] = (
             "/opt/homebrew/Cellar/pgbouncer/*/bin/pgbouncer",
             "/opt/homebrew/opt/pgbouncer/bin/pgbouncer",
         ),
+        "Accepts pooled Postgres clients on gateway hosts",
     ),
     ManifestEntry(
         "homebrew python",
@@ -352,16 +347,44 @@ FIREWALL_MANIFEST: tuple[ManifestEntry, ...] = (
             "/opt/homebrew/Cellar/python@3.*/*/Frameworks/Python.framework/"
             "Versions/*/Resources/Python.app/Contents/MacOS/Python",
         ),
+        "Runs Homebrew Python listeners used by local services",
     ),
-    ManifestEntry("node", ("/opt/homebrew/Cellar/node/*/bin/node",)),
+    ManifestEntry(
+        "node",
+        ("/opt/homebrew/Cellar/node/*/bin/node",),
+        "Serves frontend and browser-tooling connections",
+    ),
     ManifestEntry(
         "playwright chromium headless shell",
         (
             "~/Library/Caches/ms-playwright/chromium_headless_shell-*/"
             "chrome-headless-shell-mac-*/chrome-headless-shell",
         ),
+        "Runs Playwright's headless browser endpoint",
     ),
-    ManifestEntry("homebrew adb", ("/opt/homebrew/bin/adb",)),
+    ManifestEntry(
+        "homebrew adb",
+        ("/opt/homebrew/bin/adb",),
+        "Accepts Android Debug Bridge connections",
+    ),
+    ManifestEntry(
+        "grafana",
+        (
+            "~/.ava/lgtm/native/grafana-home/bin/grafana",
+            "/opt/homebrew/Cellar/grafana/*/bin/grafana",
+        ),
+        "Serves Grafana dashboards",
+    ),
+    ManifestEntry(
+        "loki",
+        ("~/.ava/lgtm/native/bin/loki",),
+        "Accepts Loki telemetry",
+    ),
+    ManifestEntry(
+        "otel collector",
+        ("~/.ava/otel-collector/otelcol-contrib",),
+        "Accepts OTLP telemetry",
+    ),
     # (An operator can add machine-scoped entries for their own apps; see the
     # ManifestEntry.machine filter above.)
 )
@@ -457,6 +480,62 @@ def manifest_paths() -> tuple[Path, ...]:
     return tuple(sorted(seen.values(), key=str))
 
 
+def _manifest_rule_state(path: Path, rules: dict[str, bool]) -> str:
+    """Render-facing ALF state for one resolved manifest path."""
+    states = (rules.get(str(path)), rules.get(str(path.resolve())))
+    if True in states:
+        return "Allow"
+    if False in states:
+        return "Block"
+    return "Missing"
+
+
+def render_manifest_status(rules: dict[str, bool]) -> str:
+    """Render every applicable manifest entry, pattern, resolved path, and state."""
+    lines: list[str] = []
+    resolved_states: dict[str, str] = {}
+    unmatched_patterns = 0
+    machine = _machine_name()
+    entries = tuple(
+        entry for entry in FIREWALL_MANIFEST if entry.machine is None or entry.machine == machine
+    )
+    for entry in entries:
+        entry_lines, entry_states, entry_unmatched = _render_manifest_entry(entry, rules)
+        lines.extend(entry_lines)
+        resolved_states.update(entry_states)
+        unmatched_patterns += entry_unmatched
+    counts = {
+        state: tuple(resolved_states.values()).count(state)
+        for state in ("Allow", "Block", "Missing")
+    }
+    lines.append(
+        f"  Summary: {len(entries)} entries; {len(resolved_states)} resolved paths "
+        f"(Allow {counts['Allow']}, Block {counts['Block']}, Missing {counts['Missing']}); "
+        f"{unmatched_patterns} patterns matched no installed binary"
+    )
+    return "\n".join(lines)
+
+
+def _render_manifest_entry(
+    entry: ManifestEntry, rules: dict[str, bool]
+) -> tuple[list[str], dict[str, str], int]:
+    lines = [f"  {entry.id} — {entry.purpose}"]
+    resolved_states: dict[str, str] = {}
+    unmatched_patterns = 0
+    for pattern in entry.paths:
+        lines.append(f"    pattern: {pattern}")
+        hits = tuple(hit for hit in _expand_glob(pattern) if not hit.name.endswith("-config"))
+        if not hits:
+            unmatched_patterns += 1
+            lines.append("      resolved: (no installed binary) [Missing]")
+            continue
+        for hit in hits:
+            state = _manifest_rule_state(hit, rules)
+            resolved_states[str(hit.resolve())] = state
+            lines.append(f"      resolved: {hit} [{state}]")
+    return lines, resolved_states, unmatched_patterns
+
+
 def missing_allow_rules(paths: tuple[Path, ...], rules: dict[str, bool]) -> tuple[Path, ...]:
     """Of ``paths``, which have no Allow rule (or a Block rule) in ``rules``?"""
     return tuple(p for p in paths if not _covered(p, rules))
@@ -488,29 +567,33 @@ _PRUNE_VERB = "--remove"
 
 
 def _sudo_mutate(verb: str, path: str) -> bool:
-    """One privileged ALF mutation, attempted non-interactively.
+    """Apply one ALF mutation directly, then through ``sudo -n`` if refused.
 
-    ``sudo -n`` never prompts: with the one-time NOPASSWD grant (installed by
-    ``scripts/install-firewall-sudoers.sh``) it runs the mutation; without it,
-    it fails immediately with ``a password is required``. Either way it cannot
-    hang an unattended converge — the property that makes attempting it safe at
-    all. Returns whether the mutation command exited 0.
+    The name is retained as the existing mutation seam. Both attempts are
+    non-interactive and bounded; callers report exact manual commands if both
+    platform paths fail.
     """
-    try:
-        proc = subprocess.run(  # noqa: S603 — sudo + fixed tool; verbs/paths are validated literals
-            ["sudo", "-n", SOCKETFILTERFW, verb, path],
-            capture_output=True,
-            text=True,
-            timeout=_QUERY_TIMEOUT_S,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return False
-    return proc.returncode == 0
+    commands = (
+        [SOCKETFILTERFW, verb, path],
+        ["sudo", "-n", SOCKETFILTERFW, verb, path],
+    )
+    for command in commands:
+        try:
+            proc = run_bounded(
+                command,
+                capture_output=True,
+                text=True,
+                timeout=_QUERY_TIMEOUT_S,
+            )
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if proc.returncode == 0:
+            return True
+    return False
 
 
 def sudo_grant_installed() -> bool:
-    """Is the one-time NOPASSWD grant for socketfilterfw installed?
+    """Is an older-macOS NOPASSWD fallback grant installed?
 
     Read-only probe: ``sudo -n -l`` lists the caller's sudoers privileges
     without a password when any NOPASSWD entry exists, and fails immediately
@@ -543,11 +626,12 @@ class FirewallRepair:
 def repair_allowlist(paths: tuple[Path, ...], *, rules: dict[str, bool]) -> FirewallRepair:
     """Add Allow rules for every path in ``paths`` that lacks one.
 
-    Mutating — needs the NOPASSWD grant (see ``scripts/install-firewall-sudoers.sh``).
-    ``--add`` creates the rule; ``--unblockapp`` un-blocks a rule that exists in
-    the Block state, which ``--add`` alone would leave blocking. Both verbs are
-    idempotent, so re-running after a partial failure is safe. A path whose
-    commands did not all succeed lands in ``failed`` for the caller to report.
+    Mutating — direct first, as empirically verified on macOS 15.3.1, with
+    ``sudo -n`` as a fallback on platforms that reject that path. ``--add``
+    creates the rule; ``--unblockapp`` un-blocks a rule that exists in the Block
+    state, which ``--add`` alone would leave blocking. Both verbs are idempotent,
+    so re-running after a partial failure is safe. A path whose commands did not
+    all succeed lands in ``failed`` for the caller to report.
     """
     missing = missing_allow_rules(paths, rules)
     allowed: list[Path] = []

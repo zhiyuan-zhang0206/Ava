@@ -1,20 +1,18 @@
 """Converge's macOS Application Firewall check — converge the allowlist manifest.
 
-The step has two moves. First, the diagnosis that has always been here: decide
-*precisely* whether the host's serving binaries are allow-listed, and name the
-defect when they are not. Second, the repair that used to be a printed pair of
-`sudo` commands: attempt the same commands through `sudo -n`, which is silent
-when the one-time NOPASSWD grant (scripts/install-firewall-sudoers.sh) is
-installed and fails immediately when it is not.
+The step has two moves. First, decide precisely whether the host's serving
+binaries are allow-listed and name the defect when they are not. Second, repair
+the manifest directly with `socketfilterfw`, whose root-free behavior was
+empirically verified on the macmini running macOS 15.3.1, and retry through
+`sudo -n` on releases that still require elevation.
 
 A plain `sudo` would prompt for a password, and converge runs unattended from
 `ava start`, the watchdog, and `ava cluster update`. A prompt in that path does
 not degrade to "unfixed"; it hangs the bring-up, which is strictly worse than the
 defect it was trying to repair, and on a headless host it hangs it invisibly.
-`sudo -n` has none of that: it either runs the mutation or fails in a
-millisecond, and a failure degrades to the historical behavior — print the exact
-commands for the operator. See `shared.macos_firewall` for how the grant is
-scoped and why this is safe to attempt at all.
+`sudo -n` either runs the fallback mutation or fails immediately, and a failure
+degrades to the historical behavior — print the exact manual commands for the
+operator. See `shared.macos_firewall` for the platform compatibility contract.
 
 Because it reports rather than enforces, it warns and returns instead of raising:
 a missing firewall rule does not stop this host serving loopback, `ava start`
@@ -90,12 +88,12 @@ def ensure_firewall_allowlist(ctx: ConvergeCtx) -> None:
 
     Order of work: diagnose (the audit decides whether this host can even have
     the defect — non-macOS, loopback-only and firewall-off hosts are no-ops),
-    then repair every missing allow rule through `sudo -n`, then prune stale
-    manifest-family rules. A healthy host sees nothing; a host that just got
-    repaired sees one line per action; a host whose repair had no grant to use
-    sees the exact commands, as before. `ctx.roles is None` (a fresh install,
-    unit not yet configured) is treated as no capabilities and audits the
-    interpreter alone.
+    then repair every missing allow rule directly (with a `sudo -n` fallback),
+    then prune stale manifest-family rules. A healthy host sees nothing; a host
+    that just got repaired sees one line per action; a host where both mutation
+    paths failed sees the exact commands, as before. `ctx.roles is None` (a fresh
+    install, unit not yet configured) is treated as no capabilities and audits
+    the interpreter alone.
     """
     audit = audit_this_host(frozenset(ctx.roles or ()))
     if audit.verdict is FirewallVerdict.UNREADABLE:
@@ -141,9 +139,9 @@ def ensure_firewall_allowlist(ctx: ConvergeCtx) -> None:
 def _report_missing(missing: tuple[Path, ...], total: int) -> None:
     """The historical fallback: name the binaries and print the exact commands.
 
-    Reached when the `sudo -n` repair had no grant to use (or a command failed).
-    Keeps naming the OFF_BOX_UNREACHABLE verdict so both halves of the diagnosis
-    still point at each other by name.
+    Reached when direct mutation and the older-macOS `sudo -n` fallback both
+    failed. Keeps naming the OFF_BOX_UNREACHABLE verdict so both halves of the
+    diagnosis still point at each other by name.
     """
     print(
         f"  ! firewall: {len(missing)} of {total} managed binaries have no ALF "
@@ -159,9 +157,8 @@ def _report_missing(missing: tuple[Path, ...], total: int) -> None:
         file=sys.stderr,
     )
     print(
-        "    fix (needs root — converge tried via `sudo -n` but has no grant; "
-        "install one once with `sudo scripts/install-firewall-sudoers.sh`, or "
-        "paste the commands below):",
+        "    fix (this host rejected both direct mutation and the older macOS "
+        "`sudo -n` fallback; paste the commands below):",
         file=sys.stderr,
     )
     for path in missing:
