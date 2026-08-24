@@ -380,11 +380,11 @@ def _gateway_ready_or_incomplete(
 
 
 def _phase_b_payload(
-    *, restart_only: bool, target_sha: str | None, force_reap: bool = False
+    *, restart_only: bool, target_sha: str | None, force_reap: bool = False, mode: str = "smooth"
 ) -> ClusterOpPayload | None:
     """The optional params a Phase-B cluster op carries: `restart_only` (a
     restart-only bounce vs a full self-update), `target_sha` (the pinned rollout
-    commit every node checks out) and `force_reap` (the host's updater kills its
+    commit every node checks out), `mode` (the host updater's drain policy) and `force_reap` (the host's updater kills its
     still-live agents — the quiesce-timeout backstop; Phase B itself never
     quiesces, the gateway-side quiesce already drained the fleet). None when all
     are absent."""
@@ -393,6 +393,8 @@ def _phase_b_payload(
         payload["restart_only"] = True
     if target_sha is not None:
         payload["target_sha"] = target_sha
+    if mode != "smooth":
+        payload["mode"] = mode
     if force_reap:
         payload["force_reap"] = True
     return payload or None
@@ -404,6 +406,7 @@ def _phase_b_and_poll(
     target_sha: str | None,
     restart_only: bool,
     force_reap: bool = False,
+    mode: str = "smooth",
 ) -> dict[str, PollVerdict]:
     """Phase B + poll: fan out each agent-runner's self-update (or restart-only
     bounce), then poll each back to healthy; return name -> terminal poll state
@@ -434,7 +437,10 @@ def _phase_b_and_poll(
         "/api/cluster/update",
         _PHASE_B_TIMEOUT_S,
         payload=_phase_b_payload(
-            restart_only=restart_only, target_sha=target_sha, force_reap=force_reap
+            restart_only=restart_only,
+            target_sha=target_sha,
+            force_reap=force_reap,
+            mode=mode,
         ),
     )
     _print_fan_out_results("self-update spawn", results)

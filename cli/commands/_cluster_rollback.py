@@ -20,6 +20,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from cli.commands._health_alerts import _notify_owner
+from cli.commands._update_fanout import _PHASE_A_TIMEOUT_S, _fan_out, _list_agent_runners
 from cli.commands._update_git import (
     GitPullFailed,
     _git,
@@ -28,8 +30,23 @@ from cli.commands._update_git import (
     git_reset_hard,
     rollback_schema_to,
 )
-from shared.cluster_lock import acquire_update_lock, release_update_lock
+from cli.commands._update_orchestration import _phase_b_targets
+from cli.commands._update_pause import _stop_the_world
+from cli.commands._update_phase_b import POLL_OK, _phase_b_and_poll, _still_converging
+from shared.cluster_lock import (
+    SETTLE_TTL_S,
+    acquire_update_lock,
+    release_update_lock,
+    settle_update_lock,
+)
+from shared.cluster_pin import (
+    clear_pending_known_good,
+    set_cluster_target_sha,
+    set_last_known_good_sha,
+)
 from shared.exit_codes import SERVICES_NOT_READY_EXIT_CODE
+from shared.log import logger
+from shared.machine import machine_name
 
 
 def _resolve_rollback_target(to_ref: str | None) -> str:
@@ -157,14 +174,13 @@ def _validate_rollout_target(target_sha: str) -> None:
 def _quiesce_agents() -> None:
     """Signal every live agent to restart and wait until none are left running.
 
-    Reuses `_quiesce_all_agents` from `update.py`."""
+    Retained for callers that use the gateway-only quiesce primitive. Cluster
+    rollback itself uses `_stop_the_world` so remote restarters are paused too.
+    """
     from cli.commands.update import _quiesce_all_agents as _quiesce
     from cli.commands.update import _quiesce_timeout_s
 
     print("\n-> quiesce: signal all agents to restart (source=system:rollback)")
-    # Explicit smooth-mode timeout — the legacy 60 s default was removed with
-    # _QUIESCE_TIMEOUT_S (audit #01-update-sequence #13); a rollback is a
-    # graceful drain, so it waits out a healthy agent's longest execute_code.
     _quiesce(timeout_s=_quiesce_timeout_s("smooth"))
     print("  . all agents quiesced")
 
@@ -320,10 +336,142 @@ def _run_rollback(
     return 0
 
 
+def _clear_pending_after_rollback() -> None:
+    """Discard an LKG candidate for the commit the gateway just left."""
+    try:
+        clear_pending_known_good()
+    except Exception as exc:
+        print(
+            f"  . could not clear pending known-good: {type(exc).__name__}",
+            file=sys.stderr,
+        )
+
+
+def _fanout_runner_rollback(
+    target_sha: str,
+    agent_runners: list[tuple[str, str | None]],
+    *,
+    keep_pin: bool,
+    force_reap: bool,
+) -> tuple[list[str], list[tuple[str, str | None]]]:
+    """Write the rollback pin, then converge remote runners without a second drain."""
+    if keep_pin:
+        return [], list(agent_runners)
+
+    set_cluster_target_sha(target_sha, set_by=f"{machine_name()}:pid{os.getpid()} origin=rollback")
+    print(f"  ✓ cluster pin written back -> {target_sha[:7]}")
+    fanout_targets = _phase_b_targets(agent_runners)
+    if not fanout_targets:
+        print("  . no remote agent-runners; this host was the whole cluster")
+        return [], []
+
+    print("\n-> runner rollback verdict: fan out and poll")
+    polls = _phase_b_and_poll(
+        fanout_targets,
+        target_sha=target_sha,
+        restart_only=False,
+        force_reap=force_reap,
+        mode="none",
+    )
+    mid_transition = _still_converging(polls)
+    runner_urls = dict(agent_runners)
+    hosts_to_resume = [
+        (name, runner_urls.get(name))
+        for name, verdict in polls.items()
+        if verdict.status != POLL_OK
+    ]
+    if mid_transition:
+        names = ", ".join(sorted(mid_transition))
+        print(
+            f"\n✗ ROLLBACK INCOMPLETE: {len(mid_transition)} runner(s) still "
+            f"converging ({names}). The pin now points at {target_sha[:7]}, so their "
+            "watchdogs converge them; the deploy lease is held for a settle window.",
+            file=sys.stderr,
+        )
+    return mid_transition, hosts_to_resume
+
+
+def _record_completed_rollback(
+    from_sha: str,
+    target_sha: str,
+    *,
+    require_confirmation: bool,
+    set_known_good: bool,
+    mid_transition: list[str],
+) -> int:
+    """Notify rollback observers only after the fleet's convergence verdict is known."""
+    _notify_agents_of_rollback(from_sha, target_sha)
+    if set_known_good:
+        set_last_known_good_sha(
+            target_sha, set_by=f"{machine_name()}:pid{os.getpid()} origin=rollback"
+        )
+        print(f"  . last_known_good_sha advanced -> {target_sha[:7]}")
+    _note_rollback_on_last_update(from_sha, target_sha)
+
+    trigger = "manual" if require_confirmation else "auto"
+    owner_text = (
+        f"[cluster-rollback] cluster rolled back {from_sha[:7]} -> {target_sha[:7]} "
+        f"(trigger: {trigger})"
+    )
+    if mid_transition:
+        owner_text += (
+            f"; {len(mid_transition)} runner(s) still converging "
+            f"({', '.join(sorted(mid_transition))})"
+        )
+    try:
+        _notify_owner(owner_text)
+    except Exception as exc:
+        print(f"  . could not notify owner: {type(exc).__name__}", file=sys.stderr)
+    logger.info(
+        "[cluster] rollback: {} -> {} (trigger={}, incomplete={})",
+        from_sha,
+        target_sha,
+        trigger,
+        bool(mid_transition),
+    )
+    print(f"\n. cluster rolled back to {target_sha[:7]}")
+    return 1 if mid_transition else 0
+
+
+def _finish_rollback(
+    holder: str,
+    hosts_to_resume: list[tuple[str, str | None]],
+    mid_transition: list[str],
+) -> None:
+    """Compensate paused runners and retain a settle hold only when needed."""
+    from ops.cluster import unpause_local_cluster
+
+    if hosts_to_resume:
+        try:
+            _fan_out(hosts_to_resume, "/api/cluster/resume", _PHASE_A_TIMEOUT_S)
+        except Exception as exc:
+            print(f"  . could not resume runner(s): {type(exc).__name__}", file=sys.stderr)
+    try:
+        unpause_local_cluster()
+    except Exception as exc:
+        print(f"  . could not unpause local cluster: {exc}", file=sys.stderr)
+    if not mid_transition:
+        release_update_lock(holder)
+        return
+    try:
+        settle_update_lock(holder, hosts=mid_transition)
+    except Exception as exc:
+        print(f"  . could not hold settle lease: {type(exc).__name__}", file=sys.stderr)
+    note = f"waiting for {', '.join(sorted(mid_transition))} to reach the pin"
+    print(
+        f"\n⚠ holding the cluster deploy lease for up to a "
+        f"{SETTLE_TTL_S / 60:.0f}m settle window: {note}. No new deploy can start "
+        f"until those hosts reach the pin or the window lapses; `ava cluster status` "
+        f"to watch, `ava cluster recover` to break the hold.",
+        file=sys.stderr,
+    )
+
+
 def cmd_rollback(
     *,
     to: str | None = None,
     set_known_good: bool = False,
+    keep_pin: bool = False,
     require_confirmation: bool = True,
 ) -> int:
     """CLI entry point for `ava cluster rollback`.
@@ -333,15 +481,14 @@ def cmd_rollback(
         set_known_good: after rollback, advance last_known_good_sha to the
             current target_sha (the commit we just rolled back *to* becomes
             the new known-good anchor).
+        keep_pin: roll back this gateway only, leaving the cluster pin and
+            remote agent-runners on their current commit.
         require_confirmation: prompt for confirmation before rolling back (set False for cron-triggered rollback).
 
     Returns:
         0 on success, non-zero on failure.
     """
     from cli.commands._repo import _repo_root
-    from ops.cluster import pause_local_cluster, unpause_local_cluster
-    from shared.cluster_pin import set_last_known_good_sha
-    from shared.machine import machine_name
 
     repo = _repo_root()
 
@@ -371,6 +518,8 @@ def cmd_rollback(
         _validate_rollout_target(target_sha)
     except ValueError as e:
         print(f"* {e}", file=sys.stderr)
+        if "is the current HEAD -- nothing to roll back to" in str(e):
+            return 0
         return 1
 
     # Acquire update lock
@@ -385,69 +534,41 @@ def cmd_rollback(
         )
         return 1
 
-    # Snapshot pre-rollback state
+    # Snapshot pre-rollback state before the rollout primitive pauses any host.
     from_sha = git_head_sha()
     schema_snapshot = current_schema_state()
     print(
         f"\n-> pre-rollback snapshot: {from_sha[:7]} ({len(schema_snapshot)} migration(s) applied)"
     )
 
+    agent_runners = _list_agent_runners()
+    mid_transition: list[str] = []
+    # Before Phase B every runner may have been paused by stop-the-world, so
+    # every early return must compensate across the original target list.
+    hosts_to_resume: list[tuple[str, str | None]] = list(agent_runners)
     try:
-        # Stop-the-world first — the same first step the rollout's
-        # `_stop_the_world` takes: pause the LOCAL restarter (posture=paused +
-        # kill the restarter session) before quiescing, so no agent exiting
-        # from here on can be respawned while the schema/code transition runs.
-        # Rollback used to quiesce without pausing: the restarter does not read
-        # the paused posture — it only gates on gateway health, which stays up
-        # through the whole rollback — so it respawned every exiting agent
-        # within its 1s poll, on the PRE-reset code, and the quiesce
-        # convergence poll could never converge (2026-08-08 audit finding).
-        pause_local_cluster()
-
-        # Quiesce agents
-        _quiesce_agents()
-
-        # Execute rollback
-        rc = _run_rollback(
-            target_sha,
-            repo=repo,
-            from_sha=from_sha,
-        )
+        paused_names, all_quiesced = _stop_the_world(agent_runners, mode="smooth")
+        if paused_names is None:
+            return 1
+        rc = _run_rollback(target_sha, repo=repo, from_sha=from_sha)
         if rc != 0:
             return rc
-
-        # Notify agents
-        _notify_agents_of_rollback(from_sha, target_sha)
-
-        # Optionally advance last_known_good_sha
-        if set_known_good:
-            set_last_known_good_sha(
-                target_sha, set_by=f"{machine_name()}:pid{os.getpid()} origin=rollback"
-            )
-            print(f"  . last_known_good_sha advanced -> {target_sha[:7]}")
-
-        # Tell the status surfaces what was done about the failed update. The
-        # rollback is an EXTERNAL observer of that failure — the orchestration that
-        # died could file no report, but the process cleaning up after it provably
-        # witnessed the death. Without this the operator sees the pin change and no
-        # statement of why, which is exactly the 2026-07-30 puzzle. Best-effort and
-        # last: a rollback that worked must not report failure because a note could
-        # not be written.
-        _note_rollback_on_last_update(from_sha, target_sha)
-
-        print(f"\n. cluster rolled back to {target_sha[:7]}")
-        return 0
+        _clear_pending_after_rollback()
+        mid_transition, hosts_to_resume = _fanout_runner_rollback(
+            target_sha,
+            agent_runners,
+            keep_pin=keep_pin,
+            force_reap=not all_quiesced,
+        )
+        return _record_completed_rollback(
+            from_sha,
+            target_sha,
+            require_confirmation=require_confirmation,
+            set_known_good=set_known_good,
+            mid_transition=mid_transition,
+        )
     finally:
-        # Bring the local host back on every exit path: a successful rollback's
-        # trailing `ava start` already re-created the restarter, and a failed
-        # one has had its recovery attempted — either way agents must be
-        # respawnable again and the 503 posture must clear. Never masks the
-        # rollback's own outcome.
-        try:
-            unpause_local_cluster()
-        except Exception as exc:
-            print(f"  . could not unpause local cluster: {exc}", file=sys.stderr)
-        release_update_lock(holder)
+        _finish_rollback(holder, hosts_to_resume, mid_transition)
 
 
 def _note_rollback_on_last_update(from_sha: str, target_sha: str) -> None:

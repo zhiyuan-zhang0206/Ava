@@ -22,8 +22,9 @@ from typing import Any, Literal
 import httpx
 
 # Consecutive-failure tracking file. Lives under $AVA_HOME so it is
-# cluster-scoped and survives restarts. A plain counter file (no DB
-# dependency — the probe might be running when the DB is down).
+# cluster-scoped and survives restarts. Its four lines are count, failure
+# class, reason, and timestamp; it deliberately has no DB dependency because
+# the probe might be running when the DB is down.
 FAILURE_COUNT_FILE = "health_probe_failures"
 
 # Edge-trigger state for owner alerts: holds the failure message of the alert
@@ -328,18 +329,21 @@ def _alert_recovery(home: Path) -> None:
 
 def _reset_failure_count(home: Path) -> None:
     """Reset the consecutive-failure counter to 0."""
-    (home / FAILURE_COUNT_FILE).write_text("0")
+    (home / FAILURE_COUNT_FILE).write_text(f"0\ncode\n\n{datetime.now(UTC).isoformat()}")
 
 
-def _increment_failure_count(home: Path) -> int:
-    """Increment the consecutive-failure counter and return the new count."""
+def _increment_failure_count(home: Path, *, failure_class: str = "code", reason: str = "") -> int:
+    """Increment the code-failure counter and retain its last classified reason."""
     counter_path = home / FAILURE_COUNT_FILE
     try:
-        current = int(counter_path.read_text().strip())
+        lines = counter_path.read_text().splitlines()
+        current = int(lines[0]) if len(lines) == 4 else 0
     except (FileNotFoundError, ValueError):
         current = 0
     current += 1
-    counter_path.write_text(str(current))
+    counter_path.write_text(
+        f"{current}\n{failure_class}\n{reason}\n{datetime.now(UTC).isoformat()}"
+    )
     return current
 
 
@@ -382,7 +386,13 @@ def _deploy_suppression() -> str | None:
     return window.detail if window.active else None
 
 
-def _handle_consecutive_failure(home: Path, threshold: int) -> None:
+def _handle_consecutive_failure(
+    home: Path,
+    threshold: int,
+    *,
+    failure_class: str = "code",
+    reason: str = "",
+) -> None:
     """Record a probe failure and trigger rollback once failures reach the threshold.
 
     Bumps the consecutive-failure counter; when it reaches `threshold`, runs
@@ -397,7 +407,9 @@ def _handle_consecutive_failure(home: Path, threshold: int) -> None:
     scheduler launched this probe with — not a bare `ava` on PATH, which would
     not resolve under launchd/cron's minimal PATH (and guarantees the rollback
     targets the same cluster as the probe)."""
-    count = _increment_failure_count(home)
+    if failure_class != "code":
+        return
+    count = _increment_failure_count(home, failure_class=failure_class, reason=reason)
     if count < threshold:
         print(f"  consecutive failure {count}/{threshold}", file=sys.stderr)
         return

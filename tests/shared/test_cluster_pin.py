@@ -12,10 +12,14 @@ import psycopg
 import pytest
 
 from shared.cluster_pin import (
+    clear_pending_known_good,
     get_cluster_target_sha,
     get_last_known_good_sha,
+    get_pending_known_good,
+    promote_pending_known_good_if_ready,
     seed_last_known_good_sha_if_null,
     set_cluster_target_sha,
+    set_target_with_pending_known_good,
 )
 from shared.config import settings
 
@@ -30,7 +34,8 @@ def _clear_pin(db_conn: psycopg.Connection) -> Iterator[None]:
         with db_conn.cursor() as cur:
             cur.execute(
                 "UPDATE cluster_pin SET target_sha=NULL, updated_at=NULL, updated_by=NULL, "
-                "last_known_good_sha=NULL, last_known_good_at=NULL WHERE id=1"
+                "last_known_good_sha=NULL, last_known_good_at=NULL, "
+                "pending_known_good_sha=NULL, pending_known_good_at=NULL WHERE id=1"
             )
         db_conn.commit()
 
@@ -120,3 +125,51 @@ def test_get_raises_when_singleton_row_missing(db_conn: psycopg.Connection) -> N
         with db_conn.cursor() as cur:
             cur.execute("INSERT INTO cluster_pin (id, target_sha) VALUES (1, NULL)")
         db_conn.commit()
+
+
+def test_set_target_with_pending_known_good_preserves_lkg() -> None:
+    """A successful rollout pins immediately but defers LKG promotion."""
+    from shared.cluster_pin import set_last_known_good_sha
+
+    set_last_known_good_sha("old-good")
+    set_target_with_pending_known_good("new-target", set_by="rollout")
+
+    assert get_cluster_target_sha() == "new-target"
+    assert get_last_known_good_sha() == "old-good"
+    pending = get_pending_known_good()
+    assert pending is not None
+    assert pending[0] == "new-target"
+
+
+def test_clear_pending_known_good_removes_both_pending_fields() -> None:
+    set_target_with_pending_known_good("new-target")
+
+    clear_pending_known_good()
+
+    assert get_pending_known_good() is None
+
+
+def test_pending_known_good_promotes_only_after_the_minimum_age() -> None:
+    """The caller owns the observation evidence; this helper owns atomic promotion."""
+    from shared.cluster_pin import set_last_known_good_sha
+
+    set_last_known_good_sha("old-good")
+    set_target_with_pending_known_good("new-target")
+
+    assert promote_pending_known_good_if_ready(min_age_s=86_400.0) is False
+    assert get_last_known_good_sha() == "old-good"
+    assert get_pending_known_good() is not None
+
+    assert promote_pending_known_good_if_ready(min_age_s=0.0) is True
+    assert get_last_known_good_sha() == "new-target"
+    assert get_pending_known_good() is None
+
+
+def test_superseded_pending_known_good_is_cleared_without_promotion() -> None:
+    """A newer pin invalidates the older rollout's pending promotion."""
+    set_target_with_pending_known_good("old-target")
+    set_cluster_target_sha("newer-target")
+
+    assert promote_pending_known_good_if_ready(min_age_s=0.0) is False
+    assert get_cluster_target_sha() == "newer-target"
+    assert get_pending_known_good() is None
