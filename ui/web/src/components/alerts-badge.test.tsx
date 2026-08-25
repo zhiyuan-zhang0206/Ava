@@ -13,7 +13,7 @@ afterEach(cleanup);
 function response(unresolved: number): AlertsResponse {
   return {
     alerts: [],
-    meta: { window: "24h", include_read: false, total: 0, unresolved_count: unresolved },
+    meta: { window: "24h", total: 0, unresolved_count: unresolved },
   };
 }
 

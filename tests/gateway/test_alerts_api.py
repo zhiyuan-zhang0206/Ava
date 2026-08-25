@@ -1,12 +1,12 @@
-"""POST /api/alerts + GET /api/alerts + GET /api/alerts/stream + PATCH /api/alerts/read
-integration tests (Task #1224 — the Alert system, separate from Notice).
+"""POST /api/alerts + GET /api/alerts + GET /api/alerts/stream integration tests
+(Task #1224 — the Alert system, separate from Notice).
 
 Same posture as the old test_ops_alerts_api.py: real SQL on the session DB.
 Locks the contract: Alertmanager-webhook upsert + (fingerprint, starts_at)
 dedup, severity label parsing (critical/warning/error), the fingerprint
 computation when the payload omits it, the unresolved-first list + counts
-(including the badge's unresolved count), mark-as-read, the
-ingest auth split (webhook token / loopback), the SSE publish on every
+(including the badge's unresolved count), the ingest auth split (webhook
+token / loopback), the SSE publish on every
 ingest, and the IM-notify gate (the im_bridge fan-out is mocked — the
 endpoint's side effect is that it POSTs to the daemon, which has its own
 tests).
@@ -667,9 +667,9 @@ def _seed(db: psycopg.Connection, rows: list[dict[str, Any]]) -> None:
             cur.execute(
                 "INSERT INTO alerts"
                 " (status, severity, alertname, labels, annotations, starts_at, ends_at,"
-                "  fingerprint, source, read_at)"
+                "  fingerprint, source)"
                 " VALUES (%(status)s, %(severity)s, %(alertname)s, '{}'::jsonb, '{}'::jsonb,"
-                "         %(starts_at)s, %(ends_at)s, %(fingerprint)s, %(source)s, %(read_at)s)",
+                "         %(starts_at)s, %(ends_at)s, %(fingerprint)s, %(source)s)",
                 {
                     **r,
                     "source": r.get("source", "grafana"),
@@ -680,9 +680,8 @@ def _seed(db: psycopg.Connection, rows: list[dict[str, Any]]) -> None:
     db.commit()
 
 
-def test_list_unread_first_and_filters(db_conn: psycopg.Connection, client: TestClient) -> None:
-    """Default list = unread only, ordered unread-first then recency;
-    include_read brings read rows back and the counts ride meta."""
+def test_list_unresolved_first_and_filters(db_conn: psycopg.Connection, client: TestClient) -> None:
+    """List unresolved rows first, then recency; filters and counts ride meta."""
     now = datetime.now(UTC)
     _seed(
         db_conn,
@@ -694,7 +693,6 @@ def test_list_unread_first_and_filters(db_conn: psycopg.Connection, client: Test
                 "starts_at": now - timedelta(hours=1),
                 "ends_at": None,
                 "fingerprint": "f1",
-                "read_at": None,
             },
             {
                 "status": "resolved",
@@ -703,7 +701,6 @@ def test_list_unread_first_and_filters(db_conn: psycopg.Connection, client: Test
                 "starts_at": now - timedelta(hours=2),
                 "ends_at": now - timedelta(hours=1, minutes=50),
                 "fingerprint": "f2",
-                "read_at": now - timedelta(minutes=30),
             },
             {
                 "status": "unresolved",
@@ -712,7 +709,6 @@ def test_list_unread_first_and_filters(db_conn: psycopg.Connection, client: Test
                 "starts_at": now - timedelta(minutes=5),
                 "ends_at": None,
                 "fingerprint": "f3",
-                "read_at": None,
             },
         ],
     )
@@ -720,24 +716,18 @@ def test_list_unread_first_and_filters(db_conn: psycopg.Connection, client: Test
     resp = client.get("/api/alerts")
     assert resp.status_code == 200
     body = resp.json()
-    assert [a["fingerprint"] for a in body["alerts"]] == ["f3", "f1"]
-    assert set(body["meta"]) == {"window", "include_read", "total", "unresolved_count"}
-    assert body["meta"]["unresolved_count"] == 2
-    assert body["meta"]["total"] == 2
-    assert body["meta"]["include_read"] is False
-
-    resp = client.get("/api/alerts?include_read=true")
-    body = resp.json()
     assert [a["fingerprint"] for a in body["alerts"]] == ["f3", "f1", "f2"]
+    assert set(body["meta"]) == {"window", "total", "unresolved_count"}
+    assert body["meta"]["unresolved_count"] == 2
     assert body["meta"]["total"] == 3
 
-    resp = client.get("/api/alerts?severity=warning&include_read=true")
+    resp = client.get("/api/alerts?severity=warning")
     assert [a["fingerprint"] for a in resp.json()["alerts"]] == ["f2"]
 
     resp = client.get("/api/alerts?status=unresolved")
     assert [a["fingerprint"] for a in resp.json()["alerts"]] == ["f3", "f1"]
 
-    resp = client.get("/api/alerts?status=resolved&include_read=true")
+    resp = client.get("/api/alerts?status=resolved")
     body = resp.json()
     assert [a["fingerprint"] for a in body["alerts"]] == ["f2"]
     assert body["meta"]["unresolved_count"] == 0  # scoped to resolved -> badge count 0
@@ -747,14 +737,11 @@ def test_list_unread_first_and_filters(db_conn: psycopg.Connection, client: Test
 
     resp = client.get("/api/alerts?limit=1")
     assert [a["fingerprint"] for a in resp.json()["alerts"]] == ["f3"]
-    assert resp.json()["meta"]["total"] == 2  # limit does not shrink total
+    assert resp.json()["meta"]["total"] == 3  # limit does not shrink total
 
 
-def test_list_unresolved_before_resolved_unread(
-    db_conn: psycopg.Connection, client: TestClient
-) -> None:
-    """A resolved-but-unread alert must not bury an unresolved one (2026-08-05
-    user ruling): the list is unresolved-first, then unread, then recency."""
+def test_list_unresolved_before_resolved(db_conn: psycopg.Connection, client: TestClient) -> None:
+    """A resolved alert must not bury an unresolved one (2026-08-05 ruling)."""
     now = datetime.now(UTC)
     _seed(
         db_conn,
@@ -766,7 +753,6 @@ def test_list_unresolved_before_resolved_unread(
                 "starts_at": now - timedelta(minutes=5),
                 "ends_at": now,
                 "fingerprint": "f1",
-                "read_at": None,
             },
             {
                 "status": "unresolved",
@@ -775,7 +761,6 @@ def test_list_unresolved_before_resolved_unread(
                 "starts_at": now - timedelta(hours=1),
                 "ends_at": None,
                 "fingerprint": "f2",
-                "read_at": None,
             },
         ],
     )
@@ -783,60 +768,8 @@ def test_list_unresolved_before_resolved_unread(
     resp = client.get("/api/alerts")
     assert resp.status_code == 200
     body = resp.json()
-    # unresolved (older) sorts above resolved (newer, unread)
+    # unresolved (older) sorts above resolved (newer)
     assert [a["fingerprint"] for a in body["alerts"]] == ["f2", "f1"]
-
-
-# -- read --------------------------------------------------------------------
-
-
-def test_mark_read_ids_and_all(db_conn: psycopg.Connection, client: TestClient) -> None:
-    """PATCH /api/alerts/read by ids and by all; idempotent."""
-    now = datetime.now(UTC)
-    _seed(
-        db_conn,
-        [
-            {
-                "status": "unresolved",
-                "severity": "error",
-                "alertname": "a",
-                "starts_at": now - timedelta(minutes=1),
-                "ends_at": None,
-                "fingerprint": "fa",
-                "read_at": None,
-            },
-            {
-                "status": "unresolved",
-                "severity": "error",
-                "alertname": "b",
-                "starts_at": now - timedelta(minutes=2),
-                "ends_at": None,
-                "fingerprint": "fb",
-                "read_at": None,
-            },
-        ],
-    )
-    with db_conn.cursor() as cur:
-        cur.execute("SELECT id FROM alerts WHERE fingerprint = 'fa'")
-        row = cur.fetchone()
-        assert row is not None
-        id_a = row[0]
-
-    resp = client.patch("/api/alerts/read", json={"ids": [id_a]})
-    assert resp.json() == {"updated": 1}
-    # repeat is a no-op (already read)
-    resp = client.patch("/api/alerts/read", json={"ids": [id_a]})
-    assert resp.json() == {"updated": 0}
-
-    resp = client.patch("/api/alerts/read", json={"all": True})
-    assert resp.json() == {"updated": 1}
-    resp = client.patch("/api/alerts/read", json={"all": True})
-    assert resp.json() == {"updated": 0}
-
-
-def test_mark_read_requires_target(client: TestClient) -> None:
-    """Neither ids nor all -> 422."""
-    assert client.patch("/api/alerts/read", json={}).status_code == 422
 
 
 # -- sources -----------------------------------------------------------------
@@ -904,7 +837,6 @@ def test_list_returns_source(db_conn: psycopg.Connection, client: TestClient) ->
                 "starts_at": now - timedelta(minutes=1),
                 "ends_at": None,
                 "fingerprint": "fm",
-                "read_at": None,
                 "source": "machine-probe",
             }
         ],

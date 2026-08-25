@@ -112,7 +112,7 @@ def reconcile_open_grafana_alerts(
             " annotations = annotations || %s, updated_at = %s"
             " WHERE id = ANY(%s) AND status = 'unresolved' AND updated_at <= %s"
             " RETURNING id, status, severity, alertname, labels, annotations, starts_at,"
-            "           ends_at, fingerprint, generator_url, source, read_at, notified_at,"
+            "           ends_at, fingerprint, generator_url, source, notified_at,"
             "           created_at, updated_at",
             (
                 resolved_at,

@@ -7,8 +7,8 @@ carries ``status`` + ``alerts[]``, each alert an instance of a rule
 cluster health probe and the heartbeat liveness pass post the same shape
 with ``source="health-probe"`` / ``source="machine-probe"``, so every
 producer rides one ingest pipeline. The query side is the alert section's
-history list (unresolved-first) + mark-as-read; the SSE stream publishes the
-same row shape the list returns.
+history list (unresolved-first); the SSE stream publishes the same row shape
+the list returns.
 
 Alert is fully separate from Notice — nothing here touches agent_notices.
 """
@@ -18,7 +18,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 # Label parsing helpers live in shared/alerts.py — the ingest core shared
 # with the health probe and the machine liveness pass.
@@ -33,7 +33,6 @@ __all__ = [
     "AlertWebhookPayload",
     "AlertsListMeta",
     "AlertsListResponse",
-    "AlertsReadRequest",
     "parse_alertname",
     "parse_severity",
 ]
@@ -123,7 +122,6 @@ class AlertRow(BaseModel):
     fingerprint: str
     generator_url: str
     source: str
-    read_at: datetime | None
     notified_at: datetime | None
     created_at: datetime
     updated_at: datetime
@@ -135,7 +133,6 @@ class AlertsListMeta(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     window: str
-    include_read: bool
     total: int  # rows matching the filters before the limit
     unresolved_count: int  # unresolved rows matching the filters (the top-bar badge)
 
@@ -147,18 +144,3 @@ class AlertsListResponse(BaseModel):
 
     alerts: list[AlertRow]
     meta: AlertsListMeta
-
-
-class AlertsReadRequest(BaseModel):
-    """PATCH /api/alerts/read body — mark by ids, or everything."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    ids: list[int] | None = None
-    all: bool = False
-
-    @model_validator(mode="after")
-    def _require_target(self) -> AlertsReadRequest:
-        if not self.all and not self.ids:
-            raise ValueError("pass ids[] or all=true")
-        return self
