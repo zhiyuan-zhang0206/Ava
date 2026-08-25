@@ -84,14 +84,18 @@ def _is_running() -> bool:
 async def _dispatch_loop(pool: ConnectionPool, liveness: Liveness) -> None:
     """Main loop: every second run one respawn+reap reconcile pass.
 
-    Three controllers share this loop, all agent-process reconcilers scoped to this
+    Four controllers share this loop, all agent-process reconcilers scoped to this
     host: `RespawnController` (respawn 'restarting' rows + reap orphans),
     `HibernateController` (swap idle agents out to free RAM, swap hibernating ones
     back in on a wake), and `CrashResurrectController` (bring back agents that died
     involuntarily — 'terminated' with termination_source in 'reaper'/'launch-confirm'
     — that still have a pending inbound, so a crash with queued work is reconciled
-    even when no new message arrives to trigger it). All are race-safe internally (a CAS picks the
-    winner) and non-blocking. This loop owns only the schedule and the error policy:
+    even when no new message arrives to trigger it), and `WedgedAgentController`
+    (kill + resurrect live agents that stop consuming pending work). The continuous
+    crash-resurrect scan and wedged controller share a per-agent unconsumed-attempt
+    budget; the one-shot boot revive remains exempt. All are race-safe internally (a
+    CAS picks the winner) and non-blocking. This loop owns only the schedule and the
+    error policy:
     a `psycopg.ProgrammingError` is code<->DB drift that a retry cannot self-heal, so
     exit and let the watchdog restart after the fix; any other exception drops one
     round and is retried next tick.

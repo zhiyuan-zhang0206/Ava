@@ -142,3 +142,5 @@ claim so an outage does not burn the backoff clock; and on `AVA_AUTO_RESURRECT_E
 Forward link (2026-08-22): boot-phase deaths now use the crash-resurrect backoff
 path and the current status model is documented in
 [agent status model](../docs/history/2026-08-22/agent-status-model.md).
+
+Forward link (2026-08-26): the no-cap decision was revisited after the 2026-08-26 adversarial-eval batch storm (5 boot-failing workers, 80 crash-resurrect + 32 wedged events per agent in 3.5h). The controllers now cap at `auto_resurrect_max_attempts` unconsumed attempts, while the delivery path and delivery watchdog remain the fresh-work wake path.

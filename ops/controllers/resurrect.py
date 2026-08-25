@@ -66,16 +66,21 @@ nudge) is not work that justifies reviving a dead agent to run it. A corpse whos
 only pending inbound is a ``terminate`` (the force path inserts one for audit) is
 therefore never revived to process its own kill signal.
 
-**Backoff (churn control).** After each resurrect the controller stamps
+**Backoff and attempt budget (churn control).** After each resurrect the controller stamps
 ``last_resurrect_at`` and will not resurrect that agent again until
 ``auto_resurrect_backoff_seconds`` has passed (a persistent, per-agent clock — the
 pin-heal backoff shape). So a resurrect that keeps failing — an outage that
 re-crashes the agent on boot, a poison message that reliably kills it — is retried
-at most once per window (each a loud WARN) instead of a tight loop, while a transient
-outage still self-heals once it clears (there is deliberately NO hard cap, so nothing
-is permanently stranded). A one-off crash is recovered on the next scan (its
-``last_resurrect_at`` is NULL or long-stale). The claim + backoff stamp is a single
-atomic UPDATE, so under any race only one pass resurrects a given corpse.
+at most once per window (each a loud WARN) instead of a tight loop. The continuous
+crash-resurrect scan stops after ``auto_resurrect_max_attempts`` unconsumed
+``kind='resurrect'`` lifecycle inbounds; a successful boot consumes those rows, so
+the count represents consecutive failed recovery attempts. New post-death work still
+wakes the agent through the delivery path or delivery watchdog, so a permanently
+boot-failing corpse stops storming while a genuinely wanted agent is woken by a fresh
+delivery. The one-shot boot revive remains outside this continuous recovery budget.
+A one-off crash is recovered on the next scan (its ``last_resurrect_at`` is NULL or
+long-stale). The claim + backoff stamp is a single atomic UPDATE, so under any race
+only one pass resurrects a given corpse.
 
 **Gateway-health gated**, like RespawnController: a resurrected agent self-fetches
 its config from the gateway at boot, so resurrecting while the gateway is down would
@@ -153,7 +158,8 @@ def _claim_crash_resurrect_candidates(
     decide to resurrect (so a resurrect that later fails is still spaced), and a
     concurrent pass cannot double-claim the same corpse (the second UPDATE matches 0
     rows for it). Machine-scoped — a resurrect launches a local process, so a foreign
-    row is never touched."""
+    row is never touched. A corpse at ``auto_resurrect_max_attempts`` unconsumed
+    ``kind='resurrect'`` lifecycle inbounds is outside the claim budget."""
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE agents_meta SET last_resurrect_at = now() "
@@ -162,6 +168,9 @@ def _claim_crash_resurrect_candidates(
             "AND machine = %s "
             "AND (last_resurrect_at IS NULL "
             "     OR now() - last_resurrect_at >= make_interval(secs => %s)) "
+            "AND (SELECT count(*) FROM inbound_messages lc "
+            "     WHERE lc.agent_id = agents_meta.id "
+            "       AND lc.kind = 'resurrect' AND lc.status = 'pending') < %s "
             "AND EXISTS ("
             "  SELECT 1 FROM inbound_messages im "
             "  WHERE im.agent_id = agents_meta.id "
@@ -169,7 +178,13 @@ def _claim_crash_resurrect_candidates(
             "    AND im.kind = ANY(%s)"
             ") "
             "RETURNING id, termination_source, status_changed_at, last_resurrect_at",
-            (list(_RESURRECTABLE_SOURCES), local_machine, backoff_s, list(_WORK_INBOUND_KINDS)),
+            (
+                list(_RESURRECTABLE_SOURCES),
+                local_machine,
+                backoff_s,
+                settings.daemon.auto_resurrect_max_attempts,
+                list(_WORK_INBOUND_KINDS),
+            ),
         )
         claims = [
             AutoResurrectClaim(
