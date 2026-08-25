@@ -276,7 +276,7 @@ class MigrationAuthorityMismatch(MigrationError):  # noqa: N818
       central DB it shares with the gateway; its checkout races ahead whenever
       it self-heals past the cluster pin.
     - a **dev worktree** whose process inherited `AVA_HOME=~/.ava` (every agent
-      the prod tmux launches does), pointing its DB URL at prod while
+      prod launches does), pointing its DB URL at prod while
       `MIGRATIONS_DIR` still resolves to the worktree's own files.
     """
 
