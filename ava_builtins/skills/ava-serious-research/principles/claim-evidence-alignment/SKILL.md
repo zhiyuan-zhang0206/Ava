@@ -1,6 +1,6 @@
 ---
 name: claim-evidence-alignment
-description: "Use when writing conclusions, choosing metrics, or reviewing a result — every claim must be backed by evidence that measures exactly what the claim asserts: the metric's warrant must be explicit and every number must trace to a run."
+description: "Aligns every research claim with evidence that measures exactly what it asserts and traces to a run. Use when writing conclusions, choosing metrics, reviewing results, or checking whether a number actually warrants the stated claim."
 ---
 
 # Claim–Evidence Alignment

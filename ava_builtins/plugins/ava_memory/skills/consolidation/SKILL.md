@@ -1,6 +1,6 @@
 ---
 name: consolidation
-description: Consolidate the shared memory pool once a day via the `ava memory` CLI — commit, push, and refresh search over the day's notes. Use when running the daily consolidation, or when spawned as the multi-host arbiter or a per-machine steward.
+description: Consolidates the shared memory pool through commit, push, merge, and search refresh. Use for daily memory maintenance, threshold-triggered cleanup, or whenever spawned as a multi-host arbiter or per-machine steward.
 ---
 
 # Memory pool consolidation

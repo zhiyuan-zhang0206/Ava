@@ -1,6 +1,6 @@
 ---
 name: ubiquitous-language
-description: Use when establishing or auditing the shared vocabulary between code, domain experts, docs, and APIs — the naming contract that connects business intent to implementation.
+description: Establishes one shared vocabulary across domain experts, code, databases, APIs, docs, and tests. Use when naming concepts, auditing terminology, resolving synonyms or overloaded words, or translating business intent into implementation.
 ---
 
 # Ubiquitous Language

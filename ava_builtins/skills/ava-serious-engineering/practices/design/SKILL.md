@@ -1,6 +1,6 @@
 ---
 name: design
-description: Use when designing a new system, component, or significant feature — the design process from understanding the problem through recording the rationale, with explicit user models, constraint identification, and the "design it twice" discipline.
+description: Designs systems, components, and significant features from user model through recorded rationale. Use before committing to a non-trivial design, especially when constraints, alternatives, interfaces, or success criteria remain implicit.
 ---
 
 # Design Practice

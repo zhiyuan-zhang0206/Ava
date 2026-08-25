@@ -1,6 +1,6 @@
 ---
 name: measure-complexity
-description: Measure McCabe cyclomatic complexity and maintainability index across the repo with radon, flag functions over a threshold, and rank them for refactoring. Triggered by complexity analysis, cyclomatic complexity, or /measure-complexity while working in the Ava repo.
+description: Measures McCabe complexity and maintainability with radon, then ranks refactoring candidates. Use when the user mentions complexity analysis, cyclomatic complexity, maintainability index, refactoring hotspots, or `/measure-complexity` in the Ava repo.
 ---
 
 # Measure complexity — McCabe + maintainability (radon)

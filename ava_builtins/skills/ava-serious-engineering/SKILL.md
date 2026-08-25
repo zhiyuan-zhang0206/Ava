@@ -1,6 +1,6 @@
 ---
 name: ava-serious-engineering
-description: The engineering discipline for systems whose complexity comes from the business itself — complexity management, conceptual integrity, domain modeling, and the practices that keep a codebase honest across its lifetime. Use when designing, implementing, reviewing, or evolving a non-trivial system — especially where "what are we actually building" is harder than "how do we code it".
+description: Guides trustworthy design, implementation, review, and evolution of complex software systems. Use when business complexity, domain modeling, conceptual integrity, or long-term changeability matters, even if the user asks only for code.
 ---
 
 # Serious Software Engineering

@@ -1,6 +1,6 @@
 ---
 name: verify
-description: "Use when believing any number, before reporting results, and when auditing any research result, yours or someone else's — run the adversarial pass: leakage audit, re-derivation from trace logs and code, p-hacking path audit, negative-result attribution, and verification-level selection."
+description: "Audits research results through leakage checks, trace re-derivation, p-hacking review, negative-result attribution, and verification levels. Use before believing or reporting any number, or when reviewing someone else's result."
 ---
 
 # Verification & Self-Audit

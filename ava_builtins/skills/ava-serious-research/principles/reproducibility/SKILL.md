@@ -1,6 +1,6 @@
 ---
 name: reproducibility
-description: Use when starting any experiment, and whenever a number is about to be trusted — a result you cannot reproduce (including future you) is not a result yet; the record starts on day one, not at write-up time.
+description: Makes every experimental result reproducible from seeds, configs, environments, logs, and artifacts. Use when starting any experiment and before trusting any number, even if nobody explicitly requested a reproducibility record.
 ---
 
 # Reproducibility

@@ -1,6 +1,6 @@
 ---
 name: ava-guide
-description: Operate Ava through the `ava` CLI — ops, MCP, packages, and agent concepts. Read this when a task is about Ava's own operational surface.
+description: Explains Ava's CLI, runtime, packages, MCP servers, presets, schedules, and agent concepts. Use whenever the task mentions operating Ava itself or any `ava` command, even if the requested action sounds routine.
 ---
 
 # Operating Ava (the `ava` CLI)

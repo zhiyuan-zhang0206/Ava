@@ -1,6 +1,6 @@
 ---
 name: pr
-description: Push self-check, PR creation + verification, dependency declaration, commit-trailer mechanics, repo hygiene — read before committing, pushing, or opening a PR.
+description: Checks commits, pushes, PR creation, dependencies, trailers, and repository hygiene. Use before committing, pushing, or opening any PR, even when another workflow already covers part of the release path.
 ---
 
 # Ava Code — committing, pushing & PRs

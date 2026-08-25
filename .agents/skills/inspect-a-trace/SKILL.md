@@ -1,6 +1,6 @@
 ---
 name: inspect-a-trace
-description: Read one real agent run end to end — its messages in the checkpoints table, its events in Loki, its spans in Tempo — and hand the user a Grafana link. Use when investigating what an agent actually did.
+description: Reconstructs one real agent run across checkpoints, Loki, Tempo, and Grafana. Use when investigating what an agent actually did, tracing a failure, correlating run IDs, or giving the user a live trace link.
 ---
 
 # Inspect a trace

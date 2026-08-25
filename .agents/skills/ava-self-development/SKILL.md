@@ -1,6 +1,6 @@
 ---
 name: ava-self-development
-description: L4 kernel-contributor discipline — how a change to Ava's own code takes effect (worktree → PR → CI → merge, then `ava cluster update`). Read before touching kernel source; install/skill/plugin changes (L1–L3) never need this pipeline — see ava-modification-layers.
+description: Guides Ava kernel changes from worktree through rollout and recovery. Use before touching Ava core source, previewing a kernel change, cutting an SDK changelog, or running `ava cluster update`; skill and plugin edits use lower layers.
 ---
 
 # Ava Self-Development (L4 — changing the kernel)

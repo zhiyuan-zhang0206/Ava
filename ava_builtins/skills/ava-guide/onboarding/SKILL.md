@@ -1,6 +1,6 @@
 ---
 name: onboarding
-description: First-use onboarding for a new cluster user — interview preferences (language, notification channel, timezone, update rhythm, confirmation gates, reporting style), discover intent, record it all to memory, and start the first piece of work. Use when the pool has no type/user note for the person, they say they just installed Ava or ask "what can you do", someone new joins, or they ask how to migrate from Claude Code, Codex, OpenClaw or Hermes.
+description: Onboards new Ava users by learning preferences and intent, recording them to memory, and starting useful work. Use when someone just installed Ava, asks "what can you do," lacks a user note, joins a cluster, or migrates from another agent tool.
 ---
 
 # Onboarding — First Use of a Cluster

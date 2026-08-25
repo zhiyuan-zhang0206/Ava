@@ -1,6 +1,6 @@
 ---
 name: sms
-description: Read SMS/iMessage verification codes and recent messages from Messages.app on macOS. Use when an agent needs a 2FA code sent to the user's phone.
+description: Reads recent SMS and iMessage verification codes from macOS Messages. Use when a login asks for a texted 2FA, OTP, or verification code, or when the user asks to inspect recent phone messages.
 ---
 
 # sms

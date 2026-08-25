@@ -1,6 +1,6 @@
 ---
 name: measure
-description: Use when defining an evaluation metric, comparing models or algorithms, interpreting a difference between two numbers, or deciding what to measure next — choose metrics whose warrant matches the claim, report uncertainty honestly, and run the statistical test that matches the comparison type.
+description: Chooses claim-matched metrics, uncertainty reporting, and statistical tests for research comparisons. Use when defining an evaluation metric, comparing models or algorithms, interpreting a numeric difference, or deciding what to measure next.
 ---
 
 # Measure and Statistics

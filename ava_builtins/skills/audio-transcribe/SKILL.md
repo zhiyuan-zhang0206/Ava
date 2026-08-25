@@ -1,6 +1,6 @@
 ---
 name: audio-transcribe
-description: Transcribe local audio/video files, YouTube videos, or media URLs to plain text via OpenAI. Requires ffmpeg and OPENAI_API_KEY. Use when asked to transcribe audio/video/podcasts, or when a feed item has no subtitles/transcript.
+description: Transcribes local audio, video, YouTube, and media URLs to text through OpenAI. Use when the user mentions transcription, podcasts, recordings, subtitles, or speech extraction, or when a feed item lacks a transcript.
 ---
 
 # audio-transcribe

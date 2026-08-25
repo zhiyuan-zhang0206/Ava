@@ -1,6 +1,6 @@
 ---
 name: plan
-description: "Planning phase — turn the aligned intent into an executable specification: decompose tasks, mark dependencies for concurrency, define checkpoints. Only for very large or parallel tasks — after Align, most work goes straight to execution. Can be used standalone. Load when the task is clear but large enough (or parallel enough) to need systematic decomposition."
+description: "Turns aligned intent into an executable task graph with dependencies, concurrency, checkpoints, and done criteria. Use when work is clear but too large or parallel for one continuous session; smaller aligned tasks should proceed directly."
 ---
 
 # Plan — Turn Aligned Intent into an Executable Specification

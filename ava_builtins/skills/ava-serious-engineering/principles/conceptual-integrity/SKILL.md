@@ -1,6 +1,6 @@
 ---
 name: conceptual-integrity
-description: "Use when a system feels like it was designed by committee — inconsistent APIs, conflicting concepts, different parts using the same word differently, or features that don't feel like they belong together. Conceptual integrity is the unity that makes a system feel like one mind designed it."
+description: "Restores a coherent design concept across APIs, terminology, and features. Use when a system feels designed by committee, exposes inconsistent interfaces, uses one word differently across modules, or accumulates features that do not belong together."
 ---
 
 # Conceptual Integrity

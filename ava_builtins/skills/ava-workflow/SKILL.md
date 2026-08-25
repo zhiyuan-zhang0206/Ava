@@ -1,6 +1,6 @@
 ---
 name: ava-workflow
-description: "Unified workflow around three actors (agents, human, reality) — Calibrate, Align, Plan threaded through by Evaluation, a network not a pipeline. Calibrate is optional: recommend when the user is unfamiliar, skip when known. Load for any non-trivial task. Large tasks require an independent adversarial review by a fresh agent."
+description: "Coordinates agents, the human, and reality through calibration, alignment, planning, and continuous evaluation. Use for any non-trivial task, even when the user does not explicitly ask for a workflow; large tasks need an independent adversarial review by a fresh agent."
 ---
 
 # Ava Workflow — Three Actors, Three Phases, One Evaluation Thread

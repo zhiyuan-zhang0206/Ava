@@ -1,6 +1,6 @@
 ---
 name: worktree
-description: Why coding changes go in a git worktree named with your agent id, and when not to bother — read before starting repo changes.
+description: Creates correctly named git worktrees for isolated coding changes and explains the narrow exceptions. Use before editing any repository, even for a one-file fix, unless the work is genuinely read-only.
 ---
 
 # Ava Code — worktrees

@@ -1,6 +1,6 @@
 ---
 name: web-sources
-description: Fetch content from any internet source — follow a creator/site/feed for updates, or grab a single URL — through per-platform adapter sub-skills. Use to pull a source's recent updates or fetch one page, video, or post; pick the adapter first, then read its own skill.
+description: Fetches internet pages, posts, videos, feeds, and creator updates through source-specific adapters. Use when following a source, checking recent updates, ingesting web content, or retrieving a URL; always choose and load the matching adapter.
 ---
 
 # web-sources —— Internet Content Fetching

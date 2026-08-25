@@ -1,6 +1,6 @@
 ---
 name: parsimony
-description: "Use when adding a component, choosing a model, or writing a claim — complexity must earn its place: every component, parameter, and claim element justified by evidence; prefer the simplest explanation that fits the data."
+description: "Requires every component, parameter, model choice, and claim embellishment to earn its complexity through evidence. Use when adding architecture, choosing a model, interpreting ablations, or writing an explanation that may be more elaborate than the data supports."
 ---
 
 # Parsimony

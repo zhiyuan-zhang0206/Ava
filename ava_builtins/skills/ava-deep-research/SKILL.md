@@ -1,6 +1,6 @@
 ---
 name: ava-deep-research
-description: Plan, search, iterate, verify and deliver a cited multi-source research report with Ava's own tools — parallel web collection, one auditable research state, deterministic citation audit. Use when a question deserves a long, evidence-backed, cited report instead of a quick answer.
+description: Produces auditable, cited, multi-source research with Ava's own search and verification tools. Use when the user asks for deep research, a literature-backed report, competitive landscape, evidence synthesis, or any question too consequential for a quick answer.
 ---
 
 # Ava Deep Research

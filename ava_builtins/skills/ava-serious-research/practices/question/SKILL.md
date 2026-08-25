@@ -1,6 +1,6 @@
 ---
 name: question
-description: Use when starting a research project, before writing code or running experiments — turn a vague interest into a research question worth answering (three-part formula, So-what test, falsifiable hypotheses, auditable question certificate).
+description: Converts vague research interests into consequential questions, falsifiable hypotheses, and an auditable question certificate. Use before writing code or running experiments for any new research project, even when the topic already sounds specific.
 ---
 
 # Question Formation & Hypotheses

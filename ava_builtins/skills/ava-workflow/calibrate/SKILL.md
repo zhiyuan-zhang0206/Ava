@@ -1,6 +1,6 @@
 ---
 name: calibrate
-description: "Interactive exploration + calibration loop that syncs agents' and the human's mental models with reality — codebase, system, workflow, process, tool, domain — Matt Pocock grill-me style. Use when the user wants to understand how something works or asks an open-ended learning question; optional first phase of ava-workflow."
+description: "Synchronizes agent and human mental models with a codebase, system, workflow, tool, or domain through interactive exploration. Use when the user asks how something works, wants to learn, or begins with an open-ended understanding question."
 ---
 
 # Calibrate — Syncing Models with Reality

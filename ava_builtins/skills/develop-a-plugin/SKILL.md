@@ -1,6 +1,6 @@
 ---
 name: develop-a-plugin
-description: The L3 ladder for developing an Ava plugin — write it locally under ~/.ava/plugins, test it across your own `self.restart`, promote it to its own git repo when stable. Plugin lifecycle is decoupled from `ava cluster update`; no PR to the kernel repo is involved.
+description: Develops Ava plugins locally, verifies them across restart, and promotes stable plugins to independent git repositories. Use when creating or changing an Ava plugin, even if the user initially calls it a feature or integration.
 ---
 
 # Develop a plugin (L3)

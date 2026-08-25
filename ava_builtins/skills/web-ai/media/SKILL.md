@@ -1,6 +1,6 @@
 ---
 name: media
-description: "Generate an image (ChatGPT or Gemini) or video (Gemini) over the logged-in browser and download the resulting file — no API credits. Use when the user asks for a generated image, picture, or video. Videos are slow: submit, then poll back later."
+description: "Generates and downloads images through ChatGPT or Gemini and videos through Gemini in a logged-in browser. Use whenever the user asks for an image, picture, illustration, visual, animation, or video, even without mentioning AI generation."
 ---
 
 # media — generate images and videos through the logged-in browser

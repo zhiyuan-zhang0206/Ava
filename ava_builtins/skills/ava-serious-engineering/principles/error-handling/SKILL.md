@@ -1,6 +1,6 @@
 ---
 name: error-handling
-description: "Use when error handling is done by vibes — scattered try-catch blocks, inconsistent error recovery, defensive null checks everywhere, or errors that propagate too far and crash the wrong layer. Error handling is one of the worst sources of complexity; the best error is the one you never need to handle."
+description: "Designs errors out of APIs and centralizes unavoidable failure handling at the right layer. Use when try-catch blocks scatter, recovery is inconsistent, null checks spread, exceptions cross boundaries, or the wrong layer crashes."
 ---
 
 # Error Handling

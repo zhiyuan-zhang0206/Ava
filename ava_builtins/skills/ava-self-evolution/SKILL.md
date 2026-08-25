@@ -1,6 +1,6 @@
 ---
 name: ava-self-evolution
-description: Weekly, harvest real agent runs into a trace dataset, mine the failed/fumbled runs for skill and plugin regressions, and deliver a report with concrete fixes. Use when you are spawned by the self_evolution weekly cron job, or when the user asks to review how Ava's real-task quality is trending.
+description: Mines real Ava runs for skill and plugin regressions and produces concrete quality fixes. Use when spawned by the weekly self-evolution schedule, when reviewing real-task quality trends, or when asked to evaluate behavior from trace datasets.
 ---
 
 # Self-Evolution

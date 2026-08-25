@@ -1,6 +1,6 @@
 ---
 name: bounded-context
-description: Use when partitioning a large system into independent models, deciding where to draw service boundaries, or integrating with external systems whose models must not leak into your core domain.
+description: Partitions large systems into independent language and model boundaries. Use when drawing service boundaries, separating domains, integrating external models, resolving overloaded terms, or preventing one context's concepts from leaking into another.
 ---
 
 # Bounded Context

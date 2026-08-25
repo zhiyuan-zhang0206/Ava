@@ -1,6 +1,6 @@
 ---
 name: ava-ui
-description: Spin up a web page to show the user content or collect a reply — markdown+LaTeX and synced-transcript display widgets, plus interactive choice/confirm/form/compare panels that send the result back to the agent. Use to render rich content, or to ask the user via a page.
+description: Serves web pages that display rich content or collect user choices, confirmations, forms, and comparisons. Use when markdown, LaTeX, transcripts, visual comparisons, or interactive input would be clearer in a browser page.
 ---
 
 # ui

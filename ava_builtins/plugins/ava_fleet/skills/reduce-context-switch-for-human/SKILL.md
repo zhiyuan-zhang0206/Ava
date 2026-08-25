@@ -1,6 +1,6 @@
 ---
 name: reduce-context-switch-for-human
-description: Interruption discipline while the human's attention is elsewhere — queue instead of push, roll progress up the manager tree at the cadence agreed per delegation, push only for a true emergency.
+description: Rolls delegated progress up the manager tree and reserves user interruptions for real emergencies. Use when the human's attention is elsewhere, when choosing queue versus push, or when setting a delegation reporting cadence.
 ---
 
 # Reduce Context Switch for the Human

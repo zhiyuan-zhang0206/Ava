@@ -1,6 +1,6 @@
 ---
 name: ava-sweeper
-description: Tech-debt sweep for THIS repo (Ava) — the debt classes + tracker path that drive the general sweeper engine. Triggered by sweep, tech-debt sweep, debt sweeper, debt audit, or /sweep while working in the Ava repo.
+description: Defines Ava-specific debt classes and tracker rules for the sweeper engine. Use when the user says sweep, tech-debt sweep, debt audit, `/sweep`, or asks what debt to inspect in the Ava repo.
 ---
 
 # Sweeper — Ava repo classes

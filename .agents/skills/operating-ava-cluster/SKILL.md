@@ -1,6 +1,6 @@
 ---
 name: operating-ava-cluster
-description: Day-to-day production operations for the Ava cluster — alert triage, diagnosis playbooks for the recurring failure classes (disk, memory, connectivity, processes, schedules, message delivery), and incident discipline (stop the bleed first, root-cause after). Use when reviewing alerts, diagnosing a production symptom, or deciding how to respond to an incident.
+description: Triages Ava production alerts and diagnoses disk, memory, connectivity, process, schedule, and delivery failures. Use when reviewing cluster health, investigating a production symptom, responding to an incident, or verifying a rollout.
 ---
 
 # Operating the Ava cluster — production diagnosis playbook

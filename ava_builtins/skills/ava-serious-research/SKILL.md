@@ -1,6 +1,6 @@
 ---
 name: ava-serious-research
-description: The discipline of doing research that deserves trust — asking questions worth answering, grounding every claim in evidence that measures what it claims to measure, and presenting the process so a human collaborator can verify and steer. Use when starting, running, reviewing, or presenting a research project in ML (LLMs, algorithms, architectures, agents, interpretability).
+description: Guides trustworthy ML research from question through evidence, verification, and presentation. Use when starting, running, reviewing, or presenting research on LLMs, algorithms, architectures, agents, or interpretability, even if the request begins as a coding task.
 ---
 
 # Serious Research

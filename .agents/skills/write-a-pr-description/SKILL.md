@@ -1,6 +1,6 @@
 ---
 name: write-a-pr-description
-description: Use when writing or reviewing a PR description. The required shape is a file-tree diff with ★ critical paths, a prose data-flow supplement, and an explicit not-tested section.
+description: Writes and reviews Ava PR descriptions with a file-tree diff, critical paths, data flow, and test gaps. Use whenever creating or editing a PR body, even if the code change is small.
 ---
 
 # PR description: the intermediate state

@@ -1,6 +1,6 @@
 ---
 name: ava-ultra-speed
-description: Speed discipline for a worker optimized for extreme turnaround — report early instead of batching, never wait silently. Use for agents running the ultra-speed-worker preset.
+description: Keeps ultra-speed workers reporting early, avoiding silent waits, and terminating cleanly. Use whenever the agent runs the `ultra-speed-worker` preset, even if the assigned task is brief.
 ---
 
 # Ultra Speed

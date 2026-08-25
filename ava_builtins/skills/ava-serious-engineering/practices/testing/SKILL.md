@@ -1,6 +1,6 @@
 ---
 name: testing
-description: Use when writing, reviewing, or improving tests — or when code is hard to test and the design needs a diagnostic. Covers testing as a design tool, abstraction-level testing, property-based testing, the test pyramid, and the coverage trap.
+description: Designs meaningful contract, property, regression, and integration tests while avoiding coverage traps. Use when writing, reviewing, or improving tests, or whenever code is hard to test and its design needs diagnosis.
 ---
 
 # Testing

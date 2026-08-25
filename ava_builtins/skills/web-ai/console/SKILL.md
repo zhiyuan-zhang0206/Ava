@@ -1,6 +1,6 @@
 ---
 name: console
-description: Ask the same question to ChatGPT, Gemini, and Claude at once over the logged-in browser and collect every answer — no API credits spent. Perplexity (web-search-grounded, best for current facts / cited sources) is available too via --models. Use for a hard or uncertain question (tricky math, edge-case reasoning) where a second/third opinion is worth it, or when the answer needs live web search.
+description: Asks ChatGPT, Gemini, Claude, and optionally Perplexity the same question and collects their answers. Use for hard or uncertain reasoning, tricky math, edge cases, second opinions, or current questions needing live web search.
 ---
 
 # console — a panel of frontier models for one question

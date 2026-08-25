@@ -1,6 +1,6 @@
 ---
 name: evaluation-paradigm-shift
-description: Use when choosing how to evaluate an AI-produced result, or when a benchmark number is about to be trusted — this covers the end-of-evals debate, benchmark contamination, the verification gap, and the turn toward process evaluation with an explicit verification hierarchy.
+description: Evaluates AI-produced results beyond static benchmark scores through process evidence and a verification hierarchy. Use when trusting a benchmark number, comparing eval methods, checking contamination, or confronting the AI verification gap.
 ---
 
 # Evaluation Paradigm Shift

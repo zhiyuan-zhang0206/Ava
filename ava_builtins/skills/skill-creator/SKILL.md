@@ -1,6 +1,6 @@
 ---
 name: skill-creator
-description: Create, improve, and review Ava skills. Use when creating a new skill, optimizing or auditing an existing one, or for guidance on skill design.
+description: Creates, improves, tests, and reviews Ava skills with strong trigger descriptions and concise instructions. Use when creating a skill, editing any `SKILL.md`, auditing descriptions, or deciding how reusable agent guidance should be packaged.
 ---
 
 # Skill Creator

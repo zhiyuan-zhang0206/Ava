@@ -1,6 +1,6 @@
 ---
 name: presets
-description: Create, update, and manage agent config presets — named, reusable config-overlay templates. Use when the user wants a new agent type (a new role), to add a preset, or to adjust an existing preset's config.
+description: Creates and manages reusable Ava agent config presets. Use when the user wants a new agent type or role, asks to add or adjust a preset, or needs a named model and plugin configuration template.
 ---
 
 # Presets — Managing Agent Config Templates
