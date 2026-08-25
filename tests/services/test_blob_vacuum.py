@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from typing import Any, cast
 from zoneinfo import ZoneInfo
 
@@ -21,6 +22,7 @@ import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
+from services.events_maintenance import blob_vacuum
 from services.events_maintenance.blob_vacuum import (
     in_low_traffic_window,
     run_blob_vacuum,
@@ -166,6 +168,27 @@ def test_run_vacuums_in_window(pool: ConnectionPool[Any]) -> None:
     assert result.ran is True
     assert result.total_bytes > 0
     assert result.dead_tuples >= 0
+
+
+def test_vacuum_emits_checkpoint_table_physical_sizes(
+    monkeypatch: pytest.MonkeyPatch, pool: ConnectionPool[Any]
+) -> None:
+    """A completed pass reports absolute sizes for all checkpoint tables."""
+    emitted: list[tuple[str, str, dict[str, int]]] = []
+
+    def _capture(category: str, event_name: str, *, attributes: dict[str, int]) -> None:
+        emitted.append((category, event_name, attributes))
+
+    monkeypatch.setattr(blob_vacuum, "telemetry", SimpleNamespace(emit=_capture), raising=False)
+
+    with pool.connection() as conn:
+        blob_vacuum.vacuum_checkpoint_tables(conn)
+
+    assert len(emitted) == 1
+    category, event_name, attributes = emitted[0]
+    assert (category, event_name) == ("telemetry", "checkpoint_table_sizes")
+    assert set(attributes) == {"blobs_bytes", "checkpoints_bytes", "writes_bytes"}
+    assert all(isinstance(value, int) for value in attributes.values())
 
 
 def test_run_skips_missing_tables_fresh_cluster(
