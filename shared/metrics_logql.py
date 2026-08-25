@@ -8,8 +8,12 @@ here instead — a lightweight contract rather than a grammar whitelist:
 - every template must select the event stream
   (``{service_name="unknown_service"}`` — the unified emitter's OTLP
   resource, see gateway/loki_events.py) and pipeline ``| json``: event
-  fields (event_name / level / attributes.*) are structured metadata, NOT
-  stream labels, so label filters before the json stage match nothing;
+  fields (level / attributes.*) are structured metadata, NOT stream labels,
+  so their label filters before the json stage match nothing. ``event_name``
+  (and ``agent_id``) became index labels at the 2026-08-23 cutover
+  (shared/loki_index_labels.py); a template may additionally match them
+  inside the selector, but the base ``service_name`` selector and the
+  ``| json`` stage stay mandatory either way;
 - event_name/category filters must go through the {event_name}/{category}
   placeholders (registry metadata is the single source of truth) unless the
   query filters on neither (whole-stream queries are legitimate).
@@ -34,9 +38,10 @@ resource the unified emitter ships to (gateway/loki_events.py: _SELECTOR)."""
 
 def _validate_logql_template(template: str, name: str) -> None:
     """Lightweight LogQL template checks (task #1280): the query must select
-    the event stream and pipeline ``| json`` (the event fields — event_name /
-    level / attributes.* — are structured metadata, NOT stream labels, so
-    label filters before the json stage match nothing). Event_name/category
+    the event stream and pipeline ``| json`` (event fields are structured
+    metadata, NOT stream labels — agent_id/event_name are promoted index
+    labels since the 2026-08-23 cutover, but the base ``service_name``
+    selector and the ``| json`` stage stay mandatory). Event_name/category
     filters must go through the {event_name}/{category} placeholders (registry
     metadata is the single source of truth) unless the query has no
     event_name/category filter at all — whole-stream queries (e.g. the event

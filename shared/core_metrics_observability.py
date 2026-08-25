@@ -21,7 +21,10 @@ use the {event_name}/{category} placeholders and, on inspector-only metrics, the
 Query dialect (Task #1280): every query reads the event stream from Loki —
 ``{service_name="unknown_service"} | json`` then label filters on the
 flattened event fields (the same read the alert rules and the core panels
-use). Event attributes unwrap via ``attributes_<key>``; the numeric payload
+use; agent_id/event_name are promoted index labels since the 2026-08-23
+cutover, see shared/loki_index_labels.py — per-agent queries may match them
+in the selector, the fleet-wide queries here keep the base form). Event
+attributes unwrap via ``attributes_<key>``; the numeric payload
 fields (in_total/out_total/cost_usd/...) come straight from the event JSON —
 cost_usd has ridden in every llm_usage payload since #2626, so the cost
 panels unwrap it instead of mirroring MODEL_PRICING into SQL (405 ruling,
