@@ -20,7 +20,6 @@ function response(overrides: Partial<AlertsResponse> = {}): AlertsResponse {
     alerts: [],
     meta: {
       window: "24h",
-      include_read: true,
       total: 0,
       unresolved_count: 0,
     },
@@ -40,7 +39,6 @@ const ROW = {
   fingerprint: "f1",
   generator_url: "",
   source: "health-probe",
-  read_at: null,
   notified_at: null,
   created_at: "2026-08-12T20:00:00Z",
   updated_at: "2026-08-12T20:00:00Z",
@@ -66,12 +64,10 @@ describe("AlertsSection", () => {
             annotations: { summary: "wsl back online" },
             status: "resolved",
             source: "machine-probe",
-            read_at: "2026-08-12T21:00:00Z",
           },
         ],
         meta: {
           window: "24h",
-          include_read: true,
           total: 2,
           unresolved_count: 1,
         },

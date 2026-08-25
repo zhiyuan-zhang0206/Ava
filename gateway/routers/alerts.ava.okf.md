@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Alerts Router
-description: "POST /api/alerts + GET /api/alerts + GET /api/alerts/stream + PATCH /api/alerts/read — the system→human alert store (alerts), Grafana-truth resolution reconciliation, the alert-section history list, the SSE live tail, mark-as-read, and the IM notification fan-out (Task #1224)."
+description: "POST /api/alerts + GET /api/alerts + GET /api/alerts/stream — the system→human alert store (alerts), Grafana-truth resolution reconciliation, the alert-section history list, the SSE live tail, and the IM notification fan-out (Task #1224)."
 tags:
 - gateway
 - alerts
@@ -21,7 +21,7 @@ its edge-triggered health alerts through the same endpoint with
 straight to the table (`source="machine-probe"`) — every producer rides one
 store/IM pipeline: one row + one IM notification per delivered transition. The
 store/IM core lives in `shared/alerts.py` (this router is one caller; the
-probes run the same functions locally). Four HTTP surfaces plus one background
+probes run the same functions locally). Three HTTP surfaces plus one background
 reconciler:
 
 - `POST /api/alerts` — the webhook (Grafana embedded-Alertmanager contact
@@ -30,12 +30,10 @@ reconciler:
   IM notifications out via the im_bridge daemon — every severity pushes
   (critical/warning/error, no gate).
 - `GET /api/alerts` — the alert section's unresolved-first history list +
-  counts (unresolved for the floating bar, unread for the top-bar badge).
+  unresolved count for the top-bar badge.
 - `GET /api/alerts/stream` — SSE tail (channel `ava:alerts`, broadcast) of
   every ingest; the UI's initial fetch covers rows ingested before the
   subscription opened.
-- `PATCH /api/alerts/read` — mark-as-read (ids or all); read rows drop out
-  of the default list (`include_read=true` brings them back).
 - Grafana reconciliation — on gateway startup and every five minutes, fetch
   Grafana's current Alertmanager instances and resolve stored Grafana rows
   absent from that truth set. This closes the lost-RESOLVE-webhook gap.
@@ -52,9 +50,8 @@ normalized — anything else defaults to warning) / `alertname` / `labels` /
 `annotations` (jsonb, the Alertmanager shape) / `starts_at` / `ends_at` /
 `fingerprint` (Alertmanager-standard fnv-1a over sorted labels, computed
 when a direct writer omits it) / `generator_url` / `source`
-(`grafana` | `health-probe` | `machine-probe`) / `read_at` / `notified_at`
-/ timestamps. Indexes: `(status, starts_at DESC)` + partial
-`(starts_at DESC) WHERE read_at IS NULL` — both serve the default list path.
+(`grafana` | `health-probe` | `machine-probe`) / `notified_at` / timestamps.
+Index: `(status, starts_at DESC)` serves the list path.
 
 ## Contract
 
@@ -115,14 +112,8 @@ an IM recovery without Grafana's resolved notification payload.
 
 ### List
 
-`GET /api/alerts?window=1h|6h|24h|7d&status=&severity=&limit=&include_read=`
-→ `{alerts: [row...], meta: {window, include_read, total, unresolved_count}}`,
-ordered `(status = 'unresolved') DESC, (read_at IS NULL) DESC, starts_at DESC`.
-Default excludes read rows; `unresolved_count` backs the top-bar badge (same
-window/severity scope, read ignored, 0 when scoped to resolved).
-
-### Mark read
-
-`PATCH /api/alerts/read` `{ids: [int]}` or `{all: true}` (all wins;
-idempotent — already-read rows untouched) → `{updated: n}`. GET/PATCH/
+`GET /api/alerts?window=1h|6h|24h|7d&status=&severity=&limit=`
+→ `{alerts: [row...], meta: {window, total, unresolved_count}}`, ordered
+`(status = 'unresolved') DESC, starts_at DESC`. `unresolved_count` backs the
+top-bar badge (same window/severity scope, 0 when scoped to resolved). GET and
 stream sit behind the normal session/Bearer middleware (the UI + SDK).
