@@ -3137,9 +3137,8 @@ export interface paths {
          *     filter ORDER is liveness first: the node set is live-only (`status !=
          *     'terminated'`, so hibernating/restarting etc. stay), and edges only ever
          *     connect two live endpoints — a live node whose lineage partner has since
-         *     terminated simply renders without that edge. Filtering at the SQL layer
-         *     saves ~90% of the payload; pass `?include_terminated=true` for the full
-         *     archive.
+         *     terminated simply renders without that edge. Raw source rows are filtered
+         *     during the merge; pass `?include_terminated=true` for the full graph.
          *
          *     `?hours=` (0 = last 5m; 1/6/24/72/168 = hours; omitted = all-time) windows
          *     both the node score and the edge events. `?decay_lambda=` (range [0, 10],

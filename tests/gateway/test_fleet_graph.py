@@ -7,10 +7,9 @@ live, so it is exercised against a real DB here. Covers:
   read from Prometheus via gateway/prom_metrics (mocked here; its own unit
   tests lock the PromQL text).
 - `node_score` — windowed SUM(in)*0.1 + SUM(out)*1.0 (drives node size).
-- edge weight — lineage (spawn/fork/resurrect) permanent COUNT*2.0 (no decay,
+- edge weight — lineage (spawn/fork/resurrect) permanent count*2.0 (no decay,
   always shown); message (send_message) recency-decayed, dropped below 0.01.
-  Edges stitch the frozen PG archive (pre-cutover rows) with the Loki fake
-  (live tail) — task #1280 interim, collapses to Loki-only after #1281.
+  Edges stitch raw frozen-PG archive rows with the Loki fake.
 - category negative samples — telemetry message rows never become edges; a
   NULL agent_id audit row never 500s the endpoint.
 """
@@ -180,19 +179,27 @@ def _event_loki(
 
 def test_loki_edge_tail_is_scoped_to_this_cluster(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[dict[str, object]] = []
+    now = datetime(2026, 8, 24, tzinfo=UTC)
 
     def query_events(**kwargs: object) -> tuple[list[dict[str, object]], bool]:
         calls.append(kwargs)
         return [], False
 
+    def unexpected_cache_read(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("boundary-free Loki reads must not use the frozen cache")
+
     monkeypatch.setattr(loki_events, "query_events", query_events)
+    monkeypatch.setattr(fleet_graph, "sync_redis", unexpected_cache_read)
 
     fleet_graph._fetch_loki_edges(
         boundary=None,
-        now=datetime(2026, 8, 24, tzinfo=UTC),
+        now=now,
     )
 
+    assert len(calls) == 1
     assert calls[0]["cluster"] == home_label(ava_home())
+    assert calls[0]["from_"] == now - timedelta(days=30)
+    assert calls[0]["to"] == now
 
 
 def test_loki_edge_tail_keeps_unlabeled_history_and_excludes_other_cluster(
@@ -511,6 +518,63 @@ def test_edge_weight_sums_per_event_with_decay(
     assert edges["send_message"]["event_count"] == 2
 
 
+def test_merge_applies_identical_semantics_to_archive_and_loki_rows() -> None:
+    """Raw archive rows must use the same filters and weights as Loki rows."""
+    now = datetime(2026, 8, 25, 12, tzinfo=UTC)
+    two_days_ago = now - timedelta(days=2)
+    archive_rows = [
+        {
+            "agent_id": 1,
+            "target_agent_id": 2,
+            "event_name": "spawn",
+            "ts": now - timedelta(days=30),
+        },
+        {
+            "agent_id": 1,
+            "target_agent_id": 2,
+            "event_name": "send_message",
+            "ts": two_days_ago,
+        },
+        {
+            "agent_id": 1,
+            "target_agent_id": 2,
+            "event_name": "send_message",
+            "ts": now - timedelta(days=4),
+        },
+        {
+            "agent_id": 1,
+            "target_agent_id": 9,
+            "event_name": "fork",
+            "ts": now,
+        },
+    ]
+    loki_rows = [
+        {
+            "agent_id": 1,
+            "target_agent_id": 2,
+            "event_name": "send_message",
+            "ts": now,
+        }
+    ]
+
+    edges = fleet_graph._merge_edge_rows(
+        archive_rows,
+        loki_rows,
+        live_ids={1, 2},
+        win_start=now - timedelta(days=3),
+        now=now,
+        decay_lambda=0.5,
+    )
+
+    by_type = {edge.event_type: edge for edge in edges}
+    assert by_type["spawn"].weight == 2.0
+    assert by_type["spawn"].event_count == 1
+    assert by_type["send_message"].weight == pytest.approx(1.0 + math.exp(-1.0), abs=1e-4)  # pyright: ignore[reportUnknownMemberType]
+    assert by_type["send_message"].event_count == 2
+    assert by_type["send_message"].last_seen_at == now.isoformat()
+    assert "fork" not in by_type
+
+
 def test_edge_window_excludes_old_events(db_conn: psycopg.Connection) -> None:
     s = _seed_agent(db_conn)
     c = _seed_agent(db_conn)
@@ -577,15 +641,15 @@ def test_decay_lambda_above_maximum_is_rejected() -> None:
     assert response.status_code == 422
 
 
-# ── terminated endpoint filtering (SQL layer) ──────────────────────────
+# ── terminated endpoint filtering (merge layer) ────────────────────────
 
 
 def test_edges_touching_terminated_agent_excluded_by_default(
     db_conn: psycopg.Connection, fake_loki: FakeLoki
 ) -> None:
     """The default graph excludes terminated agents; an edge that touches one
-    can never be drawn (its endpoint is not in the node set). The SQL layer
-    filters it so the payload only carries drawable edges."""
+    can never be drawn (its endpoint is not in the node set). The shared merge
+    loop drops it for both archive and Loki rows."""
     live = _seed_agent(db_conn)
     dead = _seed_agent(db_conn, status="terminated")
     _event_loki(fake_loki, source_agent=live, target_agent=dead, event_type="spawn")
@@ -766,12 +830,26 @@ def test_cache_key_separates_params(
 
 
 def test_cache_fail_open_when_redis_down(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection,
+    fake_loki: FakeLoki,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A Redis outage (sync_redis raising) degrades to a direct DB query —
     never a 500."""
-    a = _seed_agent(db_conn)
-    _install_prom(monkeypatch, retained={_IN_METRIC: {str(a): 100.0}, _OUT_METRIC: {str(a): 50.0}})
+    source = _seed_agent(db_conn)
+    target = _seed_agent(db_conn)
+    _event(db_conn, source_agent=source, target_agent=target, event_type="spawn", age_hours=48)
+    _archive_boundary_anchor(db_conn)
+    _event_loki(
+        fake_loki,
+        source_agent=source,
+        target_agent=target,
+        event_type="send_message",
+    )
+    _install_prom(
+        monkeypatch,
+        retained={_IN_METRIC: {str(source): 100.0}, _OUT_METRIC: {str(source): 50.0}},
+    )
 
     import gateway.routers.fleet_graph as fg
 
@@ -780,8 +858,15 @@ def test_cache_fail_open_when_redis_down(
 
     monkeypatch.setattr(fg, "sync_redis", boom)
     with TestClient(app) as client:
-        nodes = _nodes_by_id(client)  # pyright: ignore[reportUnknownVariableType]
-    assert nodes[a]["total_tokens"] == 150
+        response = client.get("/api/fleet/graph")
+
+    assert response.status_code == 200
+    body = response.json()
+    nodes = {node["agent_id"]: node for node in body["nodes"]}
+    edges = {edge["event_type"]: edge for edge in body["edges"]}
+    assert nodes[source]["total_tokens"] == 150
+    assert edges["spawn"]["weight"] == 2.0
+    assert edges["send_message"]["weight"] == 1.0
 
 
 def test_query_canceled_degrades_to_empty_graph(
