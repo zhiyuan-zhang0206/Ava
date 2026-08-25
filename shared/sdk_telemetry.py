@@ -2,10 +2,11 @@
 page's SDK Usage panel, kept in ``shared`` so an SDK function body (``ava`` layer) can
 enrich its own call while the wrapping machinery lives in ``agent/sdk_metering.py``.
 
-One ``sdk_call`` event is written to the unified ``events`` stream (via the emitter) per
-top-level ``ava.*`` invocation. Payload shape:
+One in every ten top-level ``ava.*`` invocations writes an ``sdk_call`` event to the
+unified ``events`` stream (via the emitter). Payload shape:
 
-    {"event": "sdk_call", "fn": "<ns>.<fn>", "detail": {<semantic k/v>}, "duration": <s>}
+    {"event": "sdk_call", "fn": "<ns>.<fn>", "detail": {<semantic k/v>},
+     "duration": <s>, "sample_rate": 10}
 
 ``duration`` is the wall-clock seconds of the whole top-level call, measured by
 ``run_metered`` (declared by the registry's ``SdkCall`` TypedDict).
@@ -30,6 +31,7 @@ still propagates) and never changes an SDK call's arguments, result, or exceptio
 from __future__ import annotations
 
 import contextlib
+import itertools
 import threading
 import time
 from collections.abc import Callable, Generator, Mapping
@@ -39,6 +41,8 @@ from shared.log import logger
 
 # Event name written to events for one top-level SDK call.
 SDK_CALL_EVENT = "sdk_call"
+SDK_CALL_SAMPLE_EVERY = 10
+_sdk_call_counter = itertools.count()
 
 # Thread-local state, all per exec child (single-threaded, one exec at a time):
 #   .active — inside agent-authored code (armed by `recording()`); metering is off
@@ -87,7 +91,9 @@ def emit(fn: str, detail: Mapping[str, Any] | None = None, duration: float | Non
     ``run_metered``) rides as a top-level payload key — the registry declares it
     (``contract.SdkCall``), so a reader may reference ``attributes->>'duration'``."""
     with contextlib.suppress(Exception):
-        extra: dict[str, Any] = {"fn": fn}
+        if next(_sdk_call_counter) % SDK_CALL_SAMPLE_EVERY != 0:
+            return
+        extra: dict[str, Any] = {"fn": fn, "sample_rate": SDK_CALL_SAMPLE_EVERY}
         if detail:
             extra["detail"] = dict(detail)
         if duration is not None:

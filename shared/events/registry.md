@@ -158,7 +158,7 @@ consumers: see the comments at each emit point.
 | `launch_force_terminated` | launch force-terminated | anomaly | — | — | 90d | events |
 | `launch_force_terminated_skipped` | launch force-terminate skipped | noise | — | — | 90d | events |
 | `launch_retry` | launch retried | observation | — | — | 90d | events |
-| `sdk_call` | SDK call metering | noise | fn, duration | — | 90d | events |
+| `sdk_call` | SDK call metering | noise | fn, duration, sample_rate | — | 90d | events |
 | `plugin_activation` | a plugin injection surface fired (hook / wrap / prompt section) | noise | plugin, surface, identifier, detail, model | — | 90d | events |
 | `sse_drop` | SSE event dropped | anomaly | kind, n | — | 90d | events |
 | `event_log_drop` | event-pipeline row shed | anomaly | n | — | 90d | events |

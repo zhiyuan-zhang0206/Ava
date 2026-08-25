@@ -48,6 +48,7 @@ from shared.metrics import (
     pctiles,
     third_of,
 )
+from shared.sdk_telemetry import SDK_CALL_SAMPLE_EVERY
 
 
 @dataclass(frozen=True)
@@ -292,9 +293,16 @@ def _aggregate_tasks(loki: LokiBackend) -> dict[str, Callable[[dict[str, Any]], 
         "spawners": lambda p: loki.query_projected_lines(
             fields=["spawner"], template=_T_SPAWNER, event_names=["agent_spawned"], **p
         ),
-        "sdk_fns": lambda p: loki.count_grouped(
-            group_by="fn", from_attributes=True, exclude_empty=True, event_names=["sdk_call"], **p
-        ),
+        "sdk_fns": lambda p: {
+            key: count * SDK_CALL_SAMPLE_EVERY
+            for key, count in loki.count_grouped(
+                group_by="fn",
+                from_attributes=True,
+                exclude_empty=True,
+                event_names=["sdk_call"],
+                **p,
+            ).items()
+        },
         "fix": lambda p: loki.query_projected_lines(
             fields=["fixes"],
             template=_T_EVENT_FIXES,

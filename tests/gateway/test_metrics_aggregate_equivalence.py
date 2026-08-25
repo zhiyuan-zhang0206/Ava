@@ -99,7 +99,7 @@ def test_equivalence_full_thread() -> None:
     assert "cache hit overall: 80.0%   cost: $0.0003" in text
     assert "turn duration (s):" in text
     assert "agents: 1 distinct  1 spawns (1 subagents)  1 idle halts" in text
-    assert "sdk calls: 1 in 1 code blocks  (1 distinct functions)" in text
+    assert "sdk calls: 10 in 1 code blocks  (1 distinct functions)" in text
     # ── data fragment ──
     sx = data["metrics"]["syntax_fix"]
     assert sx["trigger_counts"] == {"ruff": 1, "ruff_format": 1}
@@ -110,7 +110,7 @@ def test_equivalence_full_thread() -> None:
     assert llm["llm_calls"] == 1 and llm["tokens_in"] == 1000 and llm["tokens_out"] == 200
     assert llm["cache_hit_pct"] == 80.0
     assert data["metrics"]["agent_activity"]["spawns_total"] == 1
-    assert data["metrics"]["sdk_usage"]["total_calls"] == 1
+    assert data["metrics"]["sdk_usage"]["total_calls"] == 10
     # ── per-agent rollups ──
     assert roll[aid]["events"] == 8
     assert roll[aid]["llm_calls"] == 1
