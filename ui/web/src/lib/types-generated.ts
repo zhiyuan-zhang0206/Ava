@@ -95,6 +95,12 @@ export interface paths {
         /**
          * Sessions
          * @description List active browser sessions, marking the request's current cookie.
+         *
+         *     Only the request's current session keeps its full id; every other row's id
+         *     is masked to its final 8 characters — enough to tell rows apart and to
+         *     revoke (the revoke endpoint accepts the suffix), without exposing the full
+         *     credential of sessions the caller does not hold. Managed-browser sessions
+         *     are labeled with ``managed`` so they are not mistaken for the caller's own.
          */
         get: operations["sessions_api_auth_sessions_get"];
         put?: never;
@@ -117,6 +123,10 @@ export interface paths {
         /**
          * Revoke Other Session
          * @description Revoke a non-current browser session.
+         *
+         *     Accepts either the full session id or the 8-character masked suffix shown
+         *     in the sessions list. An ambiguous suffix (more than one active session
+         *     ends with it) is refused rather than revoked wholesale.
          */
         post: operations["revoke_other_session_api_auth_sessions__session_id__revoke_post"];
         delete?: never;

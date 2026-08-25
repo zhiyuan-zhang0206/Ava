@@ -13,6 +13,11 @@ and the matching GitHub Releases, cut by `scripts/release_cut.py`.
   server-side session over CDP (`Network.setCookie`), and refreshes every 6h.
   The managed browser can open auth-gated gateway URLs (agent-served pages
   behind the gateway reverse proxy) on any machine, fresh profile or not.
+- The browser-session list masks non-current session ids to their final 8
+  characters (the revoke endpoint accepts the suffix) and labels
+  managed-browser sessions; the managed browser re-checks its gateway session
+  after gateway-URL navigations and refreshes early when it no longer
+  authenticates.
 - Delivery observability: `inbound_messages.claimed_at` (set on claim; pickup
   latency = claimed_at - created_at), degraded idle-wake logged at WARNING when
   the pub/sub fast path is lost, and a gateway delivery watchdog that alerts on

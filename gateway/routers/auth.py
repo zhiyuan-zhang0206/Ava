@@ -21,11 +21,13 @@ from gateway.session_store import (
     create_session,
     list_sessions,
     revoke_session,
+    session_ids_with_suffix,
     session_is_valid,
 )
 from shared.cluster_auth import (
     clear_cookie_header,
     cookie_name,
+    is_managed_browser_user_agent,
     new_session_id,
     session_cookie_header,
 )
@@ -164,25 +166,56 @@ async def check(request: Request) -> JSONResponse:
 
 @router.get("/api/auth/sessions")
 async def sessions(request: Request) -> list[dict[str, Any]]:
-    """List active browser sessions, marking the request's current cookie."""
+    """List active browser sessions, marking the request's current cookie.
+
+    Only the request's current session keeps its full id; every other row's id
+    is masked to its final 8 characters — enough to tell rows apart and to
+    revoke (the revoke endpoint accepts the suffix), without exposing the full
+    credential of sessions the caller does not hold. Managed-browser sessions
+    are labeled with ``managed`` so they are not mistaken for the caller's own.
+    """
     current_session_id = request.cookies.get(cookie_name())
     rows = await asyncio.to_thread(list_sessions, request.app.state.db_pool)
-    return [{**row, "current": row["id"] == current_session_id} for row in rows]
+    result: list[dict[str, Any]] = []
+    for row in rows:
+        is_current = row["id"] == current_session_id
+        result.append(
+            {
+                **row,
+                "id": row["id"] if is_current else row["id"][-8:],
+                "current": is_current,
+                "managed": is_managed_browser_user_agent(row["user_agent"]),
+            }
+        )
+    return result
 
 
 @router.post("/api/auth/sessions/{session_id}/revoke")
 async def revoke_other_session(session_id: str, request: Request) -> JSONResponse:
-    """Revoke a non-current browser session."""
-    if session_id == request.cookies.get(cookie_name()):
+    """Revoke a non-current browser session.
+
+    Accepts either the full session id or the 8-character masked suffix shown
+    in the sessions list. An ambiguous suffix (more than one active session
+    ends with it) is refused rather than revoked wholesale.
+    """
+    current_session_id = request.cookies.get(cookie_name())
+    if session_id == current_session_id:
         raise HTTPException(
             status_code=409,
             detail="current session must be revoked via logout",
         )
-    revoked = await asyncio.to_thread(
-        revoke_session,
-        request.app.state.db_pool,
-        session_id,
-    )
+    pool = request.app.state.db_pool
+    revoked = await asyncio.to_thread(revoke_session, pool, session_id)
+    if not revoked and len(session_id) >= 8:
+        # Not a full id (or already gone): the masked suffix from the list.
+        matches = await asyncio.to_thread(session_ids_with_suffix, pool, session_id)
+        if len(matches) > 1:
+            raise HTTPException(
+                status_code=409,
+                detail="session suffix is ambiguous",
+            )
+        if len(matches) == 1:
+            revoked = await asyncio.to_thread(revoke_session, pool, matches[0])
     if not revoked:
         raise HTTPException(status_code=404, detail="session not found")
     return JSONResponse(content={"ok": True})

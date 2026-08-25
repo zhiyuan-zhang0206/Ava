@@ -79,7 +79,7 @@
     "/api/auth/sessions": {
       "get": {
         "summary": "Sessions",
-        "description": "List active browser sessions, marking the request's current cookie.",
+        "description": "List active browser sessions, marking the request's current cookie.\n\nOnly the request's current session keeps its full id; every other row's id\nis masked to its final 8 characters — enough to tell rows apart and to\nrevoke (the revoke endpoint accepts the suffix), without exposing the full\ncredential of sessions the caller does not hold. Managed-browser sessions\nare labeled with ``managed`` so they are not mistaken for the caller's own.",
         "operationId": "sessions_api_auth_sessions_get",
         "responses": {
           "200": {
@@ -103,7 +103,7 @@
     "/api/auth/sessions/{session_id}/revoke": {
       "post": {
         "summary": "Revoke Other Session",
-        "description": "Revoke a non-current browser session.",
+        "description": "Revoke a non-current browser session.\n\nAccepts either the full session id or the 8-character masked suffix shown\nin the sessions list. An ambiguous suffix (more than one active session\nends with it) is refused rather than revoked wholesale.",
         "operationId": "revoke_other_session_api_auth_sessions__session_id__revoke_post",
         "parameters": [
           {
