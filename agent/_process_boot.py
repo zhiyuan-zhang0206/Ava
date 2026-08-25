@@ -135,10 +135,11 @@ def _apply_per_agent_eval_isolation() -> None:
     agent_id = int(os.environ["AVA_AGENT_ID"])
     isolated_pool = workspace_dir(agent_id) / "memory-pool"
     isolated_pool.mkdir(parents=True, exist_ok=True)
-    memory = ava.memory
-    memory.PATH = ava.const(isolated_pool, doc=memory.PATH.__doc__)
-    memory.search = _isolated_memory_search
-    memory.search_detailed = _isolated_memory_search
+    memory = getattr(ava, "memory", None)
+    if memory is not None:
+        memory.PATH = ava.const(isolated_pool, doc=memory.PATH.__doc__)
+        memory.search = _isolated_memory_search
+        memory.search_detailed = _isolated_memory_search
 
 
 def _isolated_memory_search(_query: str, _k: int = 5) -> list[tuple[Path, str, list[str]]]:
@@ -348,7 +349,6 @@ async def _boot_agent_process(
     # Plugin-scope is deferred until after build_graph's bind_from_disk has
     # populated _PLUGIN_CONFIGS — see the second apply_config_overlay call below.
     _apply_per_agent_framework_config(config_overlay, birth_config)
-    _apply_per_agent_eval_isolation()
 
     llm = await boot_agent_scope(agent_id)
     _boot_timing.mark("sdk_mcp_model")
@@ -412,8 +412,8 @@ async def _build_graph(
     config_overlay: dict[str, object] | None,
     agent_id: int,
 ) -> CompiledStateGraph[BaseAgentState, AvaContext, BaseAgentState, BaseAgentState]:
-    """Build the graph, repair a dangling tool_use, apply the plugin-scope
-    config overlay, and write the effective-config snapshot.
+    """Build the graph, apply eval isolation, repair a dangling tool_use,
+    apply the plugin-scope config overlay, and write the effective-config snapshot.
 
     A hard cancel (SIGTERM / restart / stop kill -> asyncio.CancelledError)
     can leave a tool_use committed without its paired tool_result; repair it
@@ -423,8 +423,13 @@ async def _build_graph(
     _PLUGIN_CONFIGS; framework-scope already ran in `_boot_agent_process`
     before build_chat_model. The effective_config snapshot is written after
     both halves, so it reflects the actually effective config.
+
+    Eval isolation runs immediately after build_graph registers plugin
+    namespaces. Its framework-scope settings are already resolved by
+    `_boot_agent_process`, so it can rebind the live plugin SDK surface here.
     """
     graph = build_graph(checkpointer)
+    _apply_per_agent_eval_isolation()
     await _repair_dangling_tool_use_at_startup(graph, agent_id)
     if config_overlay:
         from shared.plugin_config_registry import apply_config_overlay
