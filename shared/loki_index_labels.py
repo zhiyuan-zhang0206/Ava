@@ -29,6 +29,15 @@ LOKI_QUERY_CONCURRENCY = 4
 # against loki 3.7.6 `-verify-config`): 0.95 tolerates the data volume's
 # 89-91% oscillation while keeping a real disk-full guard.
 WAL_DISK_FULL_THRESHOLD = 0.95
+# Output series cap per query (limits_config.max_query_series). Sized for the
+# events-maintenance rollup's daily turn-duration histogram, whose merged
+# `sum by (agent_id, bucket)` shape legitimately returns one series per
+# distinct (agent, integer-second bucket) — 3061 series for the busiest
+# measured day (2026-08-24, 133 agents), so 2000 rejected the query and the
+# whole rollup pass with it (2026-08-25). 20000 keeps ~6.5x headroom for
+# fleet growth while still blocking pathological ad-hoc fan-outs (the
+# upstream default is 500).
+LOKI_MAX_QUERY_SERIES = 20000
 LEGACY_READ_MARGIN = timedelta(minutes=10)
 LEGACY_READ_EXPIRES_AT = INDEX_LABEL_CUTOVER_AT + EVENT_STREAM_RETENTION + LEGACY_READ_MARGIN
 _LOGQL_REGEX_META = frozenset(".\\*+?()|[]{}^$")
@@ -107,6 +116,12 @@ def validate_loki_deploy_config(config: Mapping[str, object]) -> None:
     if retention_period != _retention_period_str():
         raise ValueError(
             f"Loki retention_period must be {_retention_period_str()!r}, got {retention_period!r}"
+        )
+    max_query_series = limits_config["max_query_series"]
+    if max_query_series != LOKI_MAX_QUERY_SERIES:
+        raise ValueError(
+            "Loki limits_config.max_query_series must be "
+            f"{LOKI_MAX_QUERY_SERIES}, got {max_query_series!r}"
         )
     max_concurrent = querier["max_concurrent"]
     if max_concurrent != LOKI_QUERY_CONCURRENCY:

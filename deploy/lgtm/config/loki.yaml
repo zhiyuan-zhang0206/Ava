@@ -114,7 +114,12 @@ limits_config:
   # aggregations to defensively topk(500) their results (see the
   # _bucketed_distribution_logql note in gateway/loki_events.py) — the
   # events stream's aggregation shapes legitimately exceed 500 series.
-  max_query_series: 2000
+  # 20000 is sized for the events-maintenance rollup's merged daily
+  # turn-duration histogram (`sum by (agent_id, bucket)`: 3061 series on the
+  # busiest measured day, 2026-08-24), which the previous 2000 rejected and
+  # took the whole hourly rollup pass down with it. Pinned by
+  # shared/loki_index_labels.py validate_loki_deploy_config.
+  max_query_series: 20000
   # Line cap per query. The default (5000) truncates the raw-line range
   # queries the 100MiB gRPC cap (server.grpc_server_max_recv_msg_size) was
   # raised for; 20k lines is a few MB, well inside it. fleet_graph needs
