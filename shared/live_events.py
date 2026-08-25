@@ -162,6 +162,10 @@ class ExecOutputChunk(_Base):
     ExecOutput upserts the same id and replaces it with the
     commit-version with envelope header.
 
+    A keepalive frame has no content and is emitted at ~2Hz while the
+    subprocess runs without producing output, so the frontend can show the
+    exec is alive without appending text.
+
     `content` is text already incrementally UTF-8 decoded (subprocess
     output is bytes, multi-byte characters may cross chunk
     boundaries; `codecs.IncrementalDecoder` buffers at boundaries)."""
@@ -169,6 +173,7 @@ class ExecOutputChunk(_Base):
     role: Literal["exec_output_chunk"] = "exec_output_chunk"
     item_id: str
     content: str
+    keepalive: bool = False
 
 
 class ExecOutput(_Base):

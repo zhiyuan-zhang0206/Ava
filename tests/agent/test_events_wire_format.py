@@ -67,7 +67,11 @@ FROZEN_WIRE: list[tuple[type, str, dict[str, Any]]] = [
     (InboundCommitted, "inbound_committed", {"inbound_id": 42}),
     (TokenUsage, "token_usage", {"input_tokens": 1234, "output_tokens": 56, "reasoning_tokens": 0}),
     (LLMDone, "llm_done", {}),
-    (ExecOutputChunk, "exec_output_chunk", {"item_id": "6.0", "content": "partial stdout"}),
+    (
+        ExecOutputChunk,
+        "exec_output_chunk",
+        {"item_id": "6.0", "content": "partial stdout", "keepalive": False},
+    ),
     (LabelUpdated, "label_updated", {"label": "my label"}),
     (
         NoticePosted,

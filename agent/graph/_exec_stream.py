@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import io
 import threading
+import time
 from collections import deque
 from dataclasses import dataclass
 
@@ -42,6 +43,9 @@ _LIVE_CAP_NOTICE = (
     "\n[... output budget reached — the rest is truncated during execution; "
     "the completed result shows the head + tail ...]\n"
 )
+
+# Keep silent execs visibly alive in the frontend at roughly 2Hz.
+KEEPALIVE_INTERVAL_S = 0.5
 
 
 @dataclass(frozen=True)
@@ -196,14 +200,30 @@ class ExecOutputChunkPublisher:
         self._publisher = event_publisher
         self._agent_id = agent_id
         self._item_id = item_id
+        self._last_activity = time.monotonic()
 
     def publish(self, text: str) -> None:
         if not text:
             return
+        self._last_activity = time.monotonic()
         self._publisher.emit(
             ExecOutputChunk(
                 agent_id=self._agent_id,
                 item_id=self._item_id,
                 content=text,
+            ).model_dump_json()
+        )
+
+    def maybe_keepalive(self) -> None:
+        now = time.monotonic()
+        if now - self._last_activity < KEEPALIVE_INTERVAL_S:
+            return
+        self._last_activity = now
+        self._publisher.emit(
+            ExecOutputChunk(
+                agent_id=self._agent_id,
+                item_id=self._item_id,
+                content="",
+                keepalive=True,
             ).model_dump_json()
         )
