@@ -69,9 +69,12 @@ export function radiusOf(score: number, maxScore: number, minR: number, maxR: nu
   return minR + (maxR - minR) * Math.sqrt(ratio);
 }
 
-// Zoom bounds (scale factor on the content <g>) — shared by both graphs.
-const ZOOM_MIN = 0.15;
-const ZOOM_MAX = 4;
+// Zoom floor only — scale factor on the content <g>, shared by both graphs.
+// No upper bound (user ruling 2026-08-25: zoom must never be capped); d3
+// clamps wheel zoom to this extent, so the non-functional floor keeps k
+// strictly positive and prevents a degenerate zero-area transform.
+const ZOOM_MIN = 0.001;
+const ZOOM_MAX = Infinity;
 
 // Label wrapping: each 6px mono glyph is ~3.6px wide. Horizontal and vertical
 // padding keep every rendered line inside the node; the id occupies line one.
@@ -289,9 +292,9 @@ export const ForceGraph = memo(function ForceGraph({
       const boxCx = (minX + maxX) / 2;
       const boxCy = (minY + maxY) / 2;
 
-      // Scale to fit the bounding box within the viewBox (clamped to zoom bounds).
+      // Scale to fit without an upper cap; retain only the positive zoom floor.
       const { cx, cy, w, h } = layoutRef.current;
-      const fitScale = Math.min(w / boxW, h / boxH, ZOOM_MAX) * params.zoomFitRatio;
+      const fitScale = Math.min(w / boxW, h / boxH) * params.zoomFitRatio;
       const scale = Math.max(ZOOM_MIN, fitScale);
 
       // Transform: center the bounding-box midpoint at the viewBox center.

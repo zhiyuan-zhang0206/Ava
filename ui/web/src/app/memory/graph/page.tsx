@@ -71,8 +71,12 @@ function colorForTag(tag: string): string {
   return TAG_COLORS[tag] ?? TAG_COLORS.untagged;
 }
 
-const ZOOM_MIN = 0.3;
-const ZOOM_MAX = 4;
+// Zoom floor only — scale factor on the memory-graph content <g>.
+// No upper bound (user ruling 2026-08-25: zoom must never be capped); d3
+// clamps wheel zoom to this extent, so the non-functional floor keeps k
+// strictly positive and prevents a degenerate zero-area transform.
+const ZOOM_MIN = 0.001;
+const ZOOM_MAX = Infinity;
 
 const MEMORY_GRAPH_QUERY_KEY = ["memory-graph"] as const;
 
@@ -369,8 +373,9 @@ const MemoryForceGraph = memo(function MemoryForceGraph({
       const boxH = maxY - minY || 1;
       const boxCx = (minX + maxX) / 2;
       const boxCy = (minY + maxY) / 2;
+      // Scale to fit without an upper cap; retain only the positive zoom floor.
       const fitScale =
-        Math.min(layout.w / boxW, layout.h / boxH, ZOOM_MAX) *
+        Math.min(layout.w / boxW, layout.h / boxH) *
         params.zoomFitRatio;
       const scale = Math.max(ZOOM_MIN, fitScale);
       const tx = layout.minX + layout.w / 2 - boxCx * scale;

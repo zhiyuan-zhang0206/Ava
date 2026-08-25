@@ -2,7 +2,7 @@
 // renders the graph counts, legend, and basic SVG nodes from seeded data.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { MemoryGraphResponse } from "@/lib/types";
@@ -73,6 +73,28 @@ describe("Memory graph page", () => {
     expect(screen.getByText("tech-ops")).toBeTruthy();
     expect(screen.getByTestId("memory-node-alpha.md")).toBeTruthy();
     expect(screen.getByTestId("memory-node-beta.md")).toBeTruthy();
+  });
+
+  it("wheel zoom is not capped (scale can exceed the old 4x limit)", async () => {
+    mockGetMemoryGraph.mockResolvedValue(seed());
+    const { container } = wrap();
+    await waitFor(() => screen.getByText("Alpha"), { timeout: 4000 });
+
+    const svg = container.querySelector('svg[aria-label="Memory note graph"]')!;
+    const zoomLayer = container.querySelector("svg > g")!;
+    // happy-dom drops WheelEvent client coordinates and its SVGPoint lacks
+    // matrixTransform, so supply the cursor location requested by the event.
+    Object.defineProperty(svg, "createSVGPoint", {
+      value: () => ({ x: 0, y: 0, matrixTransform: () => ({ x: 200, y: 200 }) }),
+    });
+    for (let i = 0; i < 12; i += 1) {
+      fireEvent.wheel(svg, { deltaY: -100, clientX: 200, clientY: 200 });
+    }
+
+    await waitFor(() => {
+      const scale = Number(zoomLayer.getAttribute("transform")?.match(/scale\(([^)]+)\)/)?.[1]);
+      expect(scale).toBeGreaterThan(4);
+    });
   });
 
   it("error renders a quiet failure state", async () => {
