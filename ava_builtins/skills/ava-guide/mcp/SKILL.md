@@ -1,6 +1,6 @@
 ---
 name: mcp
-description: Manage MCP servers — add, list, remove, enable, disable, and the wrapper pattern for fixing server behavior.
+description: Adds, lists, enables, disables, removes, and wraps MCP servers in Ava. Use when the user mentions MCP, external tool servers, browser or vendor integrations, server configuration, or fixing MCP behavior.
 ---
 
 # MCP — External Tool Integration

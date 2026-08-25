@@ -1,6 +1,6 @@
 ---
 name: review
-description: Use when reviewing a PR, a design document, or a code change — to judge whether it preserves conceptual integrity, catches red-flag design defects, and meets the five-axis quality standard (architecture, semantics, security, test coverage, documentation).
+description: Reviews code and designs for architecture, semantics, security, tests, documentation, and conceptual integrity. Use whenever judging a PR, design document, or code change, even if the request says only "take a quick look."
 ---
 
 # Review

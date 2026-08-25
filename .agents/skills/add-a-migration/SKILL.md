@@ -1,6 +1,6 @@
 ---
 name: add-a-migration
-description: Use when adding, changing, or rolling back a database migration — the timestamp filename, the mandatory paired .down.sql, keeping db/schema.sql current, and the trigger-body smoke test.
+description: Adds, changes, and rolls back Ava database migrations safely. Use when the task mentions migrations, schema changes, down migrations, expand-contract, or `db/schema.sql`, even if it sounds like a small SQL edit.
 ---
 
 # Add a migration

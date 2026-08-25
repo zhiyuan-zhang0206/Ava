@@ -1,6 +1,6 @@
 ---
 name: verification-discipline
-description: Use when working with AI-generated code, designing test strategies for AI-augmented workflows, reviewing AI-produced PRs, or setting up verification guardrails for agentic development — the discipline of making code provably correct when a machine writes most of it.
+description: Builds independent verification guardrails for AI-generated code and agentic development. Use when designing tests, reviewing AI-produced PRs, preventing fake-green changes, or deciding how to prove machine-written code correct.
 ---
 
 # Verification Discipline

@@ -1,6 +1,6 @@
 ---
 name: web-ai
-description: "Drive the AI web apps the user already pays for (ChatGPT/Gemini/Claude, plus Perplexity for web-search-grounded answers) through the logged-in browser. Children: console (multi-model Q&A), deep-research, media (image/video). Use for a hard question worth a second model, a question needing live web search, or a web-only capability, with no API credits spent."
+description: "Drives logged-in ChatGPT, Gemini, Claude, and Perplexity web apps without API credits. Use when a hard question needs another model, current facts need web-grounded answers, or the user asks for web-only deep research, image, or video generation."
 ---
 
 # web-ai — drive the frontier-model web apps through the logged-in browser

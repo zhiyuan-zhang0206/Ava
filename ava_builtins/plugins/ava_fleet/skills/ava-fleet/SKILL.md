@@ -1,13 +1,13 @@
 ---
 name: ava-fleet
-description: A disposable orchestrator decomposes a large goal, forks workers, gathers them by being woken, and judges the result; decisions reach the user directly, progress rolls up the delegation tree. Use when a goal is too big for one run, when you spawn workers to parallelize, or when spawned as a worker.
+description: Coordinates disposable orchestrators and workers with explicit missions, skill names, reporting, and evaluation. Use when a goal exceeds one run, when spawning or supervising workers, or whenever the agent was spawned as part of a fleet.
 ---
 
 # Working in a Fleet
 
 A **fleet** is a graph of agents working toward a human's goals, supervised from one **fleet view** — a live picture of who is responsible for what, and what each is doing right now. The human steers *decomposition* (how the work is split) and judges *results* (what came back), without opening any agent's conversation. You are one node in that graph: you may direct other agents and be directed by them at any moment, and the relationships that matter are who is talking to whom right now, not any fixed rank.
 
-Agents are general-purpose. Every worker already indexes every skill on its machine, so division of labor comes from what each agent is asked to do — name the skill you expect it to use in the spawn prompt. (`config_overlay` can still set `skills_to_inject_into_system_prompt`, but under a universal index that only *narrows* a worker's view; it grants nothing.)
+Agents are general-purpose. Every worker already indexes every skill on its machine, so division of labor comes from what each agent is asked to do. A spawn brief that does not name the skill(s) the worker must use is incomplete; the worker loads each named skill first. (`config_overlay` can still set `skills_to_inject_into_system_prompt`, but under a universal index that only *narrows* a worker's view; it grants nothing.)
 
 ## Before taking on work: observe, ask, then spawn
 
@@ -15,7 +15,7 @@ New work arrives at an agent all the time — a task assigned, a message, a noti
 
 1. **Observe** — look at the agents around you and their labels. A label names a domain ("health steward", "memory maintenance"); if one already names this work, that agent is the owner. Hand it over instead of taking over.
 2. **Ask** — if no label clearly covers the work, message the closest peers and ask who owns it, or who has the context for it. Labels are one-line summaries; the real division of labor lives in what agents know. A quick question beats a duplicate effort.
-3. **Spawn** — only when observing and asking place it nowhere: spawn a worker for it (name the skill it should use in the spawn prompt). Spawning is the fallback, not the default — every spawn you avoid is context and memory you did not duplicate.
+3. **Spawn** — only when observing and asking place it nowhere: spawn a worker for it. The spawn brief must name the skill(s) it must use, and the worker loads them first; a brief without a skill name is incomplete. Spawning is the fallback, not the default — every spawn you avoid is context and memory you did not duplicate.
 
 If you were spawned for a specific sub-task, skip the check and finish that sub-task — do not expand into adjacent domains.
 

@@ -1,6 +1,6 @@
 ---
 name: security
-description: "Use when designing, reviewing, or changing anything that touches a trust boundary — authentication, proxies, input handling, secrets, dependencies, deployment configuration. Covers the minimum security discipline every engineer owes a system, not the security-engineer's manual."
+description: "Secures trust boundaries, inputs, secrets, dependencies, and deployment configuration. Use when designing, reviewing, or changing authentication, proxies, external data, credentials, permissions, or supply-chain behavior, even if security was not explicitly requested."
 ---
 
 # Security

@@ -1,6 +1,6 @@
 ---
 name: dependency-management
-description: Use when auditing a module's coupling, designing an API boundary, deciding which direction a dependency should point, or untangling a codebase where "change A and B breaks" has become the norm.
+description: Audits coupling and points dependencies toward stable, explicit boundaries. Use when designing an API, choosing dependency direction, untangling modules that break together, or deciding whether infrastructure is leaking into domain logic.
 ---
 
 # Dependency Management

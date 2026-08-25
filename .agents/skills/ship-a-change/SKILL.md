@@ -1,6 +1,6 @@
 ---
 name: ship-a-change
-description: Use when making any code change in this repo — creating the worktree, committing, rebasing, opening the PR, polling CI, merging, and cleaning up. Covers the rebase-only policy and when to use SKIP= instead of --no-verify.
+description: Ships Ava repo changes through worktree, commit, rebase, PR, CI, merge queue, and cleanup. Use for every code change in this repo, even when the edit looks trivial or the user asks only to commit.
 ---
 
 # Ship a change

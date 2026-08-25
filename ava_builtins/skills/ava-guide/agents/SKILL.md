@@ -1,6 +1,6 @@
 ---
 name: agents
-description: Agent lifecycle, commands, presets, and schedules — the agent-level concepts every agent needs to know.
+description: Explains Ava agent lifecycle, commands, presets, schedules, and config overlays. Use when creating or managing agents, defining user commands, scheduling work, changing agent configuration, or clarifying how these concepts differ.
 ---
 
 # Agent-Level Concepts

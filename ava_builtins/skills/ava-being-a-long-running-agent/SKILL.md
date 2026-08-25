@@ -1,6 +1,6 @@
 ---
 name: ava-being-a-long-running-agent
-description: Operate as a long-running process — manage your own lifecycle, wait for external events without burning turns, persist state before compaction, and maintain a stable identity. Triggered when you are responsible for a long task or an ongoing domain, not for one-shot work.
+description: Manages lifecycle, waiting, persistence, reporting, and recovery for long-running agents. Use when owning a long task, ongoing domain, service, queue, monitor, or peer coordination, even if the user did not explicitly ask for a persistent agent.
 ---
 
 # Being a Long-Running Agent

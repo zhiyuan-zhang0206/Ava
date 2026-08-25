@@ -1,6 +1,6 @@
 ---
 name: design
-description: Use when designing an experiment, before writing training or evaluation code — design experiments that can support their claims (split before processing, sealed test set, one axis at a time, strong baselines, leakage audit, protocol from the decision card).
+description: Designs leakage-resistant experiments with sealed test sets, strong baselines, controlled axes, and claim-matched protocols. Use before writing training or evaluation code, choosing data splits, or accepting an experimental setup.
 ---
 
 # Experimental Design

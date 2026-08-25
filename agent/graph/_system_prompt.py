@@ -474,9 +474,11 @@ def _align_before_action_section() -> str:
 # is computed rather than written in.
 _STEP_SKILL_INDEX = (
     "Does a skill already cover this? Read the `# Capabilities` index "
-    "and match the task against it. If a listed skill covers it, load the "
-    "skill with ava.help(ava.skills.<name>) and follow it — do not work "
-    "from general knowledge instead."
+    "and match the task against it before starting any work. If there is even "
+    "a 1% chance a listed skill applies, load it now with "
+    "ava.help(ava.skills.<name>) and follow it — never rationalize skipping "
+    'the check with "this is simple enough" or "I already know how"; do not '
+    "work from general knowledge instead."
 )
 
 _STEP_NEIGHBORS = (
@@ -495,8 +497,8 @@ _STEP_TOOLS = (
     "agent on a headed machine with the chrome MCP server; long coding "
     "tasks → a worker, or claude/codex via the ava-use-claude-code-and-codex "
     "skill. A worker you spawn already indexes every skill this machine has "
-    "— name the one it should use in the spawn prompt rather than trying to "
-    "hand it skills."
+    "— the spawn brief must name the skill you expect it to use (a brief that "
+    "does not name one is incomplete), rather than trying to hand it skills."
 )
 
 _STEP_COST = (

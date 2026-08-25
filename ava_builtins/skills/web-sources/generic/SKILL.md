@@ -1,6 +1,6 @@
 ---
 name: generic
-description: Extract any web page's main text (boilerplate stripped, to markdown plus metadata), or enumerate article links from an index page by URL regex. The fallback for sources with no platform adapter and no RSS — official sites, forums, newsletters.
+description: Extracts a web page's main text and metadata or enumerates article links by URL pattern. Use for official sites, forums, newsletters, and other sources with no dedicated adapter or RSS feed.
 ---
 
 # generic

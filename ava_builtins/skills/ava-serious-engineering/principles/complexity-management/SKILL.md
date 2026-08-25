@@ -1,6 +1,6 @@
 ---
 name: complexity-management
-description: "Use when a system is becoming hard to understand or modify — symptoms like one change touching many files, high cognitive load to complete a task, or bugs that surprise everyone. This is the foundational principle: every other design rule is a corollary of reducing complexity."
+description: "Diagnoses and reduces change amplification, cognitive load, and unknown unknowns in software. Use when a system is hard to understand or modify, one change touches many files, or bugs repeatedly surprise the team."
 ---
 
 # Complexity Management

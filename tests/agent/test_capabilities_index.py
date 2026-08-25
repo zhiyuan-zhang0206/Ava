@@ -165,6 +165,20 @@ def test_delegation_check_makes_consulting_the_index_mandatory(
     assert "steps 2-3 named no better agent" in text
 
 
+def test_delegation_check_skill_step_carries_the_one_percent_rule(
+    fake_skills_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(settings.agent, "prompt_delegation_check_enabled", True)
+    monkeypatch.setattr(settings.agent, "skills_to_inject_into_system_prompt", ["*"])
+    _write_skill(fake_skills_dir, "alpha", "alpha", "Alpha desc")
+
+    text = _delegation_check_section()
+    assert "1% chance" in text
+    assert '"this is simple enough"' in text
+    assert "Does a skill already cover this?" in text
+    assert "ava.help(ava.skills.<name>)" in text
+
+
 def test_delegation_check_drops_the_index_step_when_there_is_no_index(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

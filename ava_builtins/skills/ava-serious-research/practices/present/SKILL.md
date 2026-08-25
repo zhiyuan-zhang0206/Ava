@@ -1,6 +1,6 @@
 ---
 name: present
-description: Use when reporting progress, presenting results, or asking a human to make a research decision — hand over the process (question → hypotheses → experiments → decisions), separate rendering from deciding, and state each claim's verification level.
+description: Presents research as a verifiable process with hypotheses, experiments, failures, decisions, and claim verification levels. Use when reporting progress or results, writing a research handoff, or asking a human to make a research decision.
 ---
 
 # Presenting Research to a Human

@@ -1,6 +1,6 @@
 ---
 name: adversarial-review
-description: Adversarial pre-merge review of Ava repo PRs — actively hunt for defects (polarity errors, silent failure, fake-green verification, contract drift, unbounded growth, test-quality traps, security) instead of walking a compliance checklist. Use before enqueuing ANY PR into the merge queue; the reviewer is the repo steward or a dedicated reviewer agent.
+description: Hunts for correctness, security, contract, growth, and fake-green defects in Ava PRs. Use before any PR enters the merge queue, even when ordinary review and CI are already clean.
 ---
 
 # Adversarial Review

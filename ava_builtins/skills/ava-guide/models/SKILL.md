@@ -1,6 +1,6 @@
 ---
 name: models
-description: Choose which LLM a spawned agent runs on — tier judgment, the current cost policy (DeepSeek V4 pro/flash), and `config_overlay` spawn examples. Read before spawning workers in a dynamic workflow.
+description: Chooses the LLM tier and config overlay for spawned Ava workers under the current cost policy. Use before every worker spawn or dynamic workflow, even when the model choice seems obvious.
 ---
 
 # Model Selection — the Right Model for Each Sub-task

@@ -1,6 +1,6 @@
 ---
 name: align
-description: "Alignment phase — sync intent between agents and human: clarify the real goal, constraints, priorities through active questioning, grill-me style. Load when the task states 'what' but not 'why' or what done looks like, or when the user asks to be grilled."
+description: "Aligns agents and humans on the real goal, constraints, priorities, decisions, and definition of done. Use when a task states what but not why, leaves meaningful choices open, or the user asks to be questioned or grilled."
 ---
 
 # Align — Sync Intent Between Agents and Human

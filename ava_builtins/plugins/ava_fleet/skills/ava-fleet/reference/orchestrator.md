@@ -40,6 +40,9 @@ logic, reinforced here, so the spawn path itself reminds you to look first.
 An agent's context — the files it has read, the analysis it has run, the design decisions it holds — is an asset. Don't throw it away.
 
 - **Give missions, not micro-tasks.** A spawn prompt should be a complete mission the agent owns end to end: "Design the Task Registry, serve it to the user, then wait for my review" — not "Design the Task Registry." The agent carries its context through every step; no rediscovery, no wasted tokens.
+
+Every spawn brief carries three fields: (1) the **mission** — the outcome and what done looks like; (2) the **skill(s)** the worker must use, named explicitly — its index lists every skill, but naming makes it load the right one first; and (3) the **report-back contract** — when and how to report. A brief missing the skill name is incomplete.
+
 - **After a mission, reuse before you replace.** If the agent has deep domain context and more work in that domain is coming, send it the next task. A terminated agent can be resurrected — its context is preserved — but a fresh spawn starts blank.
 
 **Spawn a fresh agent only when** (a) the next task is unrelated to anything the agent knows, (b) you need parallel execution, or (c) the agent has said it cannot continue. The default is reuse; spawn is the fallback.

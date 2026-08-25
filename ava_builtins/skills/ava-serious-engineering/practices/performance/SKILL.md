@@ -1,6 +1,6 @@
 ---
 name: performance
-description: "Use when designing or reviewing anything with a load, latency, or resource budget — queries, endpoints, event loops, batch jobs. Covers measurement-first discipline, critical-path design, and the capacity mistakes that turn into production incidents."
+description: "Designs and reviews performance from measurements, critical paths, load, latency, and capacity budgets. Use when working on queries, endpoints, event loops, batch jobs, throughput, memory, or resource limits, even before users report slowness."
 ---
 
 # Performance

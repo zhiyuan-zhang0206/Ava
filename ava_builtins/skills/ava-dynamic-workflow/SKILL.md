@@ -1,6 +1,6 @@
 ---
 name: ava-dynamic-workflow
-description: Write orchestrator scripts that spawn parallel workers, gather results, and reduce — the explore→fork→join→reduce pattern. Use when a task is too large for one agent, splits into independent sub-tasks, or needs parallel execution with result aggregation.
+description: Builds orchestrator scripts that explore, fork parallel workers, join results, and reduce them. Use when work is too large for one agent, has independent subtasks, needs result aggregation, or would benefit from concurrent execution.
 ---
 
 # Dynamic Workflow

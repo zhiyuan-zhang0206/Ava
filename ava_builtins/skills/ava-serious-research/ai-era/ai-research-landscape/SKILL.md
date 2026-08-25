@@ -1,6 +1,6 @@
 ---
 name: ai-research-landscape
-description: Use when choosing whether and how to use an AI research tool, or when reviewing work produced by one — this maps the 2023–2026 tool landscape (fully-automatic / semi-automatic / assistive), each class's boundaries and verification obligations, the value-repositioning from writing papers to closing the experiment loop, and the optimal agent-count question.
+description: Maps AI research tools by automation level, limits, and verification obligations. Use when choosing an AI research tool, reviewing tool-produced work, deciding how many agents to use, or comparing automated, semi-automated, and assistive research systems.
 ---
 
 # AI Research Tools: Landscape and Boundaries

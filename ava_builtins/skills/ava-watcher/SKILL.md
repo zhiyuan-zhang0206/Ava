@@ -1,6 +1,6 @@
 ---
 name: ava-watcher
-description: Launch a background watcher that wakes you when something happens — a condition you write, or a time you pick. Use when you want to stop polling in-turn and instead be pinged the moment an event fires (a file appears, a process finishes, a deadline arrives).
+description: Launches background watchers that wake the agent on a condition or deadline. Use when waiting for files, processes, CI, messages, time, or external state, even if polling seems easy.
 ---
 
 # Watcher

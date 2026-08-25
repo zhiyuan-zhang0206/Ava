@@ -1,6 +1,6 @@
 ---
 name: gmail
-description: "Full Gmail client — read, search, send, reply, forward, draft management + newsletter feed ingestion via IMAP/SMTP. Self-contained CLI (pure stdlib imaplib+smtplib+email), macOS Keychain auth. Trigger: check/read/send/reply/forward email, save/delete drafts, discover/enumerate/sync newsletter subscriptions."
+description: "Reads, searches, sends, replies to, forwards, and drafts Gmail messages, and ingests newsletters over IMAP and SMTP. Use whenever the user mentions email, inbox, Gmail, drafts, attachments, replies, forwarding, or newsletter subscriptions."
 ---
 
 # gmail

@@ -1,6 +1,6 @@
 ---
 name: supple-design
-description: Use when refining a domain model that works but feels rigid — when adding a feature requires surgery across too many classes, when method names hide intent behind implementation jargon, or when the model resists change because its parts are too tightly tangled.
+description: Refines rigid domain models into intention-revealing, change-friendly designs. Use when adding a feature requires surgery across many classes, method names expose implementation jargon, operations escape their domain, or tightly tangled parts resist change.
 ---
 
 # Supple Design

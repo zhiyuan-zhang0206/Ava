@@ -1,6 +1,6 @@
 ---
 name: literature
-description: Use when reviewing related work, or whenever a citation or an impressive number is about to be trusted — search and synthesize the literature with discipline (three-pass reading, primary-source verification including retraction status, citation tracing, grounding every claim).
+description: Searches, verifies, and synthesizes literature through primary sources, citation tracing, and retraction checks. Use when reviewing related work or whenever a citation, paper claim, or impressive number is about to be trusted.
 ---
 
 # Literature Search & Synthesis

@@ -1,6 +1,6 @@
 ---
 name: ava-qa-inspection
-description: Sweep the rendered frontend over ava.mcps.chrome for visual/structural defects that source lint and jsdom tests miss — misalignment, stray scrollbars, empty blocks, duplicate controls, off-canvas bleed. Read-only, never clicks a mutating control. Emits a deduped severity-ranked report; confirmed findings graduate into a lint rule or Playwright assertion.
+description: Inspects rendered Ava frontend pages for visual and structural defects that source tests miss. Use when asked for UI QA, visual regression checks, stray scrollbars, misalignment, empty blocks, duplicate controls, or off-canvas bleed; inspection remains read-only.
 ---
 
 # qa_inspection

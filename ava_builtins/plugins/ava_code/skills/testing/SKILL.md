@@ -1,6 +1,6 @@
 ---
 name: testing
-description: The full check set (pytest/ruff/pyright, vitest/eslint/tsc) + judging whether new tests are needed — read after code changes, before calling work done.
+description: Selects and runs pytest, ruff, pyright, vitest, eslint, and tsc checks, and judges whether tests are needed. Use after any code change and before calling coding work complete.
 ---
 
 # Ava Code — testing & quality gates

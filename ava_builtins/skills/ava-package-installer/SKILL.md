@@ -1,6 +1,6 @@
 ---
 name: ava-package-installer
-description: Turn "I want a capability like X" into an installed, verified skill / plugin / MCP server — find candidates, confirm before running anyone's code, install, prove it works with a test agent, and judge whether it is actually any good.
+description: Finds, installs, verifies, and judges skills, plugins, or MCP servers for a requested capability. Use when the user says "I want a capability like X," asks to install an integration, or wants candidate packages compared.
 ---
 
 # Package Installer

@@ -1,6 +1,6 @@
 ---
 name: maintenance
-description: Use when evolving an existing codebase — fixing rot, paying down technical debt, modernizing legacy code, or establishing a maintenance discipline. Covers broken-window repair, technical-debt classification and tracking, legacy-code strategies (seams, characterization tests, feature flags), and the delete discipline.
+description: Evolves existing codebases through broken-window repair, debt tracking, characterization tests, seams, flags, and deletion. Use when fixing rot, modernizing legacy code, paying technical debt, or changing poorly tested existing behavior.
 ---
 
 # Maintenance

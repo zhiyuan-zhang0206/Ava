@@ -1,6 +1,6 @@
 ---
 name: ava-modification-layers
-description: Pick the right layer before changing an Ava deployment — L1 install extensions, L2 edit skills, L3 develop plugins, L4 change the kernel. Each layer has its own apply mechanism; only L4 goes through `ava cluster update`. Never treat the prod checkout as a workspace.
+description: Routes Ava deployment changes to install extensions, skill edits, plugin development, or kernel development. Use before modifying Ava itself, especially when deciding where files belong, how changes take effect, or whether `ava cluster update` is required.
 ---
 
 # Modification layers

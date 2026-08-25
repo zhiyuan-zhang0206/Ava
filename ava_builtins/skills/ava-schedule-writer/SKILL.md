@@ -1,6 +1,6 @@
 ---
 name: ava-schedule-writer
-description: Turn a natural-language scheduling need into a gateway-hosted schedule — clarify the trigger, write a resumable script, and create it via /api/schedules.
+description: Converts natural-language timing needs into resumable gateway-hosted Ava schedules. Use when the user says schedule, cron, nightly, every hour, when a threshold is reached, or asks for recurring or condition-triggered work.
 ---
 
 # Schedule Writer

@@ -1,6 +1,6 @@
 ---
 name: ava-memory
-description: "Memory pool maintenance and stewardship — daily consolidation (commit, push, PR merge), health checks (OKF compliance, dedup, size limits), agent note merging, query service for other agents, and user-dimension maintenance (keeping user preferences, habits, and corrections durably captured so the user never repeats himself). Use when running the daily memory consolidation cron, when another agent asks for memory help, or when standing up the Memory Arbiter role."
+description: "Maintains Ava's shared memory pool, agent notes, user preferences, health, and cross-machine consolidation. Use when running memory cron work, merging or querying memories, preserving user corrections, or acting as the Memory Arbiter or a machine steward."
 ---
 
 # Memory Arbiter

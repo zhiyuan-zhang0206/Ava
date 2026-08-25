@@ -1,6 +1,6 @@
 ---
 name: ops
-description: Cluster lifecycle, update/converge, channel management, release cut, and sessions — the operator's view of Ava's runtime.
+description: Operates Ava cluster lifecycle, updates, converge, channels, releases, resources, and sessions. Use when starting, stopping, inspecting, enrolling, updating, or releasing a cluster, or when diagnosing session and runtime layout behavior.
 ---
 
 # Ava Ops — Cluster Lifecycle & Maintenance

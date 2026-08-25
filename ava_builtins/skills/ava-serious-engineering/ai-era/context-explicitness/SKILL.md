@@ -1,6 +1,6 @@
 ---
 name: context-explicitness
-description: Use when setting up a repository for AI agents, writing or updating AGENTS.md / CLAUDE.md, designing module boundaries, establishing context infrastructure, or diagnosing why agents make recurring mistakes — the discipline of making every assumption explicit, machine-readable, and self-verifying.
+description: Makes repository assumptions, constraints, boundaries, and agent context explicit and self-verifying. Use when setting up AI-agent repos, editing `AGENTS.md` or `CLAUDE.md`, designing module boundaries, or diagnosing recurring agent mistakes.
 ---
 
 # Context Explicitness

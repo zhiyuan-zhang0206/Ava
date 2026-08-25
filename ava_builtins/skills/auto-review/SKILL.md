@@ -1,6 +1,6 @@
 ---
 name: auto-review
-description: Automated semantic code review for PRs — checks AGENTS.md compliance, PR description quality, doc sync, security patterns, test coverage judgment, and architecture consistency.
+description: Reviews one Ava PR for instruction compliance, documentation, security, tests, and architecture, then posts a semantic review. Use when asked for automated review or before trusting CI alone to approve a PR.
 ---
 
 # Auto-Review

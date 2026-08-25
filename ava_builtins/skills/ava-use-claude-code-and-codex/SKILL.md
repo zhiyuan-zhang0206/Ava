@@ -1,6 +1,6 @@
 ---
 name: ava-use-claude-code-and-codex
-description: Drive the Claude Code (`claude`) or OpenAI Codex (`codex`) CLI as a long-running coding agent. Use when outsourcing a multi-step coding or review task, or choosing between the two.
+description: Drives Claude Code or Codex CLI as supervised long-running coding agents. Use when outsourcing multi-step implementation or review, choosing between the two CLIs, resuming a coding session, or monitoring delegated coding work.
 ---
 
 # Use Claude Code and Codex

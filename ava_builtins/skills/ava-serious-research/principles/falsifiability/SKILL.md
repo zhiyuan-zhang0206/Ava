@@ -1,6 +1,6 @@
 ---
 name: falsifiability
-description: "Use when formulating a research question or hypothesis, before designing experiments — a claim only counts as research if it can be wrong: every claim must carry the observation that would refute it and the experiment that could produce that observation."
+description: "Makes research claims falsifiable by naming the observation and experiment that could refute them. Use when formulating a question or hypothesis and before designing experiments, even when the claim already sounds testable."
 ---
 
 # Falsifiability

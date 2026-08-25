@@ -1,6 +1,6 @@
 ---
 name: ai-failure-modes
-description: Use when consuming, producing, or reviewing AI-assisted research — this catalogues the documented failure modes of the AI era (paper mills, hallucinated citations, template-tuning, automated p-hacking, AI-ified reviewing, benchmark gaming), each with its evidence and the discipline it imposes.
+description: Identifies paper mills, hallucinated citations, template-tuning, automated p-hacking, AI reviewing, and benchmark gaming. Use when producing, consuming, or reviewing AI-assisted research, even if the result looks polished and cites sources.
 ---
 
 # AI Research Failure Modes

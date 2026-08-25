@@ -1,6 +1,6 @@
 ---
 name: deploy-ava-cluster
-description: Use when installing Ava on a fresh machine or joining one to an existing cluster — single-box install, the gateway/agent-runner split, ava enroll, and the --mirror cn path for restricted networks.
+description: Installs Ava clusters and enrolls gateway or agent-runner machines. Use when the user mentions fresh-machine setup, single-box or split deployment, `ava enroll`, WSL, China mirrors, or joining an existing cluster.
 ---
 
 # Deploy an Ava cluster

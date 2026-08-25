@@ -1,6 +1,6 @@
 ---
 name: conventions
-description: Depth on AGENTS.md auto-injection + the shell-vs-files tool choice — read when AGENTS.md isn't surfacing or you're unsure which tool to use.
+description: Explains Ava coding context injection and when to use shell versus file tools. Use when `AGENTS.md` is missing, context rules are not surfacing, or the agent is unsure whether to use grep, ripgrep, shell, or file APIs.
 ---
 
 # Ava Code — conventions & context files

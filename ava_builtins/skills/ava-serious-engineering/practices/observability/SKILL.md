@@ -1,6 +1,6 @@
 ---
 name: observability
-description: "Use when designing or reviewing any system that can fail silently in production — event emitters, batch writers, queues, background watchers, remote services, unattended jobs. Covers silent-failure detection, correlated structured logging, metrics as contracts, critical-path visibility, and watchdog alerting: the discipline of knowing, minutes after a failure, exactly what happened and where."
+description: "Makes production failures visible through correlated logs, metrics, critical-path events, and watchdogs. Use when designing or reviewing queues, batch writers, background jobs, remote services, watchers, or any system that could fail silently."
 ---
 
 # Observability

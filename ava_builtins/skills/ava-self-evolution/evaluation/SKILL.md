@@ -1,6 +1,6 @@
 ---
 name: evaluation
-description: "Why evaluation is hard — the discipline behind the self-evolution evaluation loop: real traces carry no ground truth, eval cases are first-class citizens (strong / diverse / representative), and the trace audit is anti-cheat by structure (cluster memory / web search / completed-task results). Read when running or designing an evaluation."
+description: "Designs trustworthy self-evolution evaluations from real traces without ground truth. Use when creating eval cases, running evaluation batches, auditing agent traces for cheating, or judging whether an evaluation set is strong, diverse, and representative."
 ---
 
 # Why evaluation is hard

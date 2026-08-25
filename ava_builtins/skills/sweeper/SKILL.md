@@ -1,6 +1,6 @@
 ---
 name: sweeper
-description: "Tech-debt sweeper engine — the repo-agnostic reconcile pass over a repo's living debt tracker: re-verify open items, discover new debt, land as a PR. Use when asked to sweep a repo for debt; the repo's project-local sweeper skill supplies the debt classes and tracker path."
+description: "Reconciles a repository's living technical-debt tracker by re-verifying open items, discovering debt, and landing updates as a PR. Use when asked to sweep, audit, or inventory repo debt; load the project-local sweeper skill too."
 ---
 
 # Sweeper (engine)

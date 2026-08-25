@@ -1,6 +1,6 @@
 ---
 name: judgment-and-trust
-description: Use when evaluating the role of human judgment, trust, and the gatekeeper function in AI-assisted software engineering — the shift from "writing code" to "deciding what code to trust."
+description: Frames human judgment and trust as the gate for AI-assisted software engineering. Use when reviewing generated code, deciding what evidence earns trust, defining approval responsibility, or assessing architecture drift hidden by passing tests.
 ---
 
 # Judgment and Trust in the AI Era

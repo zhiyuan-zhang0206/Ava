@@ -1,6 +1,6 @@
 ---
 name: work-eval
-description: The evaluation thread made explicit — execute and verify through Calibrate / Align / Plan, not a final phase. Small tasks self-challenge; large tasks end with an independent adversarial review by a fresh agent. Load for multi-step execution or review needs.
+description: Executes multi-step work with adversarial self-review and verification woven through every step; large tasks end with an independent adversarial review by a fresh agent. Use when implementation, research, or operations require continuous evaluation rather than a single final check.
 ---
 
 # Work & Evaluate — The Evaluation Thread, Made Explicit

@@ -1,6 +1,6 @@
 ---
 name: concurrency
-description: "Use when a system has multiple execution flows — threads, async tasks, processes, agents — sharing state or resources. Covers shared-state discipline, async boundaries, connection lifecycles, and backpressure."
+description: "Designs safe shared state, async boundaries, connection lifecycles, and backpressure across concurrent flows. Use when threads, async tasks, processes, agents, queues, or callbacks share state or resources, even if no race has appeared yet."
 ---
 
 # Concurrency

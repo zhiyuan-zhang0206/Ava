@@ -1,6 +1,6 @@
 ---
 name: ava-goal
-description: Supervise another agent toward a goal across many turns — a watcher wakes each time the target idles and judges its work against the goal until done. Use to drive a terminal task to completion, or any task that benefits from evaluation when the target stops. Not for perpetual, trigger-driven agents.
+description: Supervises another agent across turns until a terminal goal is achieved. Use when driving a worker to completion, evaluating each idle point, or babysitting a finite task; do not use for perpetual trigger-driven roles.
 ---
 
 # Goal Mode

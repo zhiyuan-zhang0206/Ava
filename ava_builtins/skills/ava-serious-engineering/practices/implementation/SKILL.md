@@ -1,6 +1,6 @@
 ---
 name: implementation
-description: Use when writing or refactoring implementation code — naming, small-step refactoring, bad-smell recognition, domain proximity, comment discipline, and avoiding coincidence programming.
+description: Produces obvious, domain-aligned implementation code through precise naming, safe refactoring, and intentional comments. Use when writing or refactoring code, even if tests pass and the requested change appears mechanical.
 ---
 
 # Implementation Practice

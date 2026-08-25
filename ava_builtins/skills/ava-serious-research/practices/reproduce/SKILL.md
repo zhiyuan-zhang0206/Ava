@@ -1,6 +1,6 @@
 ---
 name: reproduce
-description: "Use when starting any experiment, setting up a new environment, or handing a result to a human collaborator — build the reproducibility record from day one: directory template, locked environment, sealed test set, and full trace archive so anyone (including future you) can re-derive every number."
+description: "Builds experiment directories, locked environments, sealed test sets, and trace archives that re-derive every number. Use when starting an experiment, setting up its environment, or handing results to a collaborator, never only at write-up time."
 ---
 
 # Reproduce: The Record

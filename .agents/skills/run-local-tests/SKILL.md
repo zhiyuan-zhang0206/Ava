@@ -1,6 +1,6 @@
 ---
 name: run-local-tests
-description: Use before pushing, to run the Python, frontend, and e2e suites for the areas you touched — and when the local test infrastructure will not start, such as leaked throwaway Postgres wedging initdb.
+description: Runs the Ava repo's Python, frontend, and end-to-end checks and diagnoses wedged local test infrastructure. Use before pushing any code change, or when pytest, initdb, Postgres, or cleanup processes will not start normally.
 ---
 
 # Run local tests
