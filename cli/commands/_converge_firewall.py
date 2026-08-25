@@ -1,10 +1,14 @@
 """Converge's macOS Application Firewall check — converge the allowlist manifest.
 
-The step has two moves. First, decide precisely whether the host's serving
-binaries are allow-listed and name the defect when they are not. Second, repair
-the manifest directly with `socketfilterfw`, whose root-free behavior was
-empirically verified on the macmini running macOS 15.3.1, and retry through
-`sudo -n` on releases that still require elevation.
+The step has three moves. First, decide precisely whether the host's serving
+binaries are allow-listed and name the defect when they are not. Second, prune
+stale manifest-family rules so their bundle identifiers are free for re-add.
+Third, repair the manifest directly with `socketfilterfw` (exit 0 as the
+ordinary user on macOS 15.3.1) and *verify* each rule persisted by re-reading
+`--listapps` — the 15.3.1 daemon silently drops an add whose identifier
+already has a rule, so an exit-code check would report success for rules that
+never existed — and retry through `sudo -n` on releases that still require
+elevation.
 
 A plain `sudo` would prompt for a password, and converge runs unattended from
 `ava start`, the watchdog, and `ava cluster update`. A prompt in that path does
@@ -88,10 +92,13 @@ def ensure_firewall_allowlist(ctx: ConvergeCtx) -> None:
 
     Order of work: diagnose (the audit decides whether this host can even have
     the defect — non-macOS, loopback-only and firewall-off hosts are no-ops),
+    then prune stale manifest-family rules (a stale rule still holds its bundle
+    identifier, and macOS 15's daemon silently drops an add whose identifier
+    already has a rule — removing it first lets the replacement rule persist),
     then repair every missing allow rule directly (with a `sudo -n` fallback),
-    then prune stale manifest-family rules. A healthy host sees nothing; a host
-    that just got repaired sees one line per action; a host where both mutation
-    paths failed sees the exact commands, as before. `ctx.roles is None` (a fresh
+    verifying each one persisted. A healthy host sees nothing; a host that just
+    got repaired sees one line per action; a host where both mutation paths
+    failed sees the exact commands, as before. `ctx.roles is None` (a fresh
     install, unit not yet configured) is treated as no capabilities and audits
     the interpreter alone.
     """
@@ -119,17 +126,25 @@ def ensure_firewall_allowlist(ctx: ConvergeCtx) -> None:
     required.update(fw.manifest_paths())
     required = tuple(sorted(required, key=str))
 
-    repair = fw.repair_allowlist(required, rules=rules)
+    # Prune before adding: a stale rule still holds its bundle identifier, and
+    # macOS 15's ALF daemon silently ignores an --add whose identifier already
+    # has a rule (see shared.macos_firewall). Removing the stale rule first lets
+    # the replacement version's rule persist in the same pass.
     pruned = fw.prune_stale_rules(rules)
+    if pruned.removed:
+        refreshed = fw.allowlisted_paths()
+        if refreshed is not None:
+            rules = refreshed
+        print(
+            f"  · firewall: removed {len(pruned.removed)} stale allow rules",
+            file=sys.stderr,
+        )
+
+    repair = fw.repair_allowlist(required, rules=rules)
 
     if repair.allowed:
         print(
             f"  · firewall: allowed {len(repair.allowed)} binaries (no popup on their next bind)",
-            file=sys.stderr,
-        )
-    if pruned.removed:
-        print(
-            f"  · firewall: removed {len(pruned.removed)} stale allow rules",
             file=sys.stderr,
         )
     if repair.failed:
@@ -159,6 +174,14 @@ def _report_missing(missing: tuple[Path, ...], total: int) -> None:
     print(
         "    fix (this host rejected both direct mutation and the older macOS "
         "`sudo -n` fallback; paste the commands below):",
+        file=sys.stderr,
+    )
+    print(
+        "    note: if the binary shares its bundle identifier with an already "
+        "allow-listed app (every uv interpreter is identifier `-`, adb is `adb`), "
+        "macOS 15's daemon accepts `sudo socketfilterfw --add` and persists "
+        "nothing — allow the popup on the app's first bind instead, or remove "
+        "the older rule for the same identifier first.",
         file=sys.stderr,
     )
     for path in missing:

@@ -168,14 +168,27 @@ def test_grant_installed_repairs_silently(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
 ) -> None:
     """With the one-time grant, the missing rule is fixed in place: one line, no
-    error block, no commands to paste."""
+    error block, no commands to paste. The claim is only made after a re-read of
+    `--listapps` confirms the rule persisted."""
     missing = Path("/uv/cpython-3.12.11/bin/python3.12")
     _stub_audit(
         monkeypatch,
         FirewallAudit(FirewallVerdict.RULES_MISSING, "1 of 1 have no rule", missing=(missing,)),
     )
-    _stub_rules(monkeypatch, {})
-    _stub_sudo_mutate(monkeypatch, True)
+    persisted = False
+
+    def rules() -> dict[str, bool]:
+        return {str(missing): True} if persisted else {}
+
+    monkeypatch.setattr(fw, "allowlisted_paths", rules)  # pyright: ignore[reportUnknownArgumentType]
+
+    def mutate(verb: str, _path: str) -> bool:
+        nonlocal persisted
+        persisted = True  # the fake daemon accepts the mutation
+        return True
+
+    monkeypatch.setattr(fw, "_sudo_mutate", mutate)
+    monkeypatch.setattr(fw, "_VERIFY_RETRY_S", 0.0)
     monkeypatch.setattr(fw, "manifest_paths", lambda: ())
     cfw.ensure_firewall_allowlist(_ctx(tmp_path, frozenset({"gateway"})))
     err = capsys.readouterr().err
@@ -198,6 +211,50 @@ def test_stale_rules_are_pruned_when_grant_installed(
     _stub_sudo_mutate(monkeypatch, True)
     cfw.ensure_firewall_allowlist(_ctx(tmp_path, cv.ALL_ROLES))
     err = capsys.readouterr().err
+    assert "removed 1 stale allow rules" in err
+
+
+def test_prune_runs_before_repair_so_replacement_rules_persist(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    """macOS 15's daemon drops an add whose bundle identifier already has a
+    rule, so a stale rule must be pruned before the replacement version is
+    added — in the same pass, not on the next converge.
+
+    The fake daemon models the dedup: an `--add` is a silent no-op while the
+    stale rule for the same identifier exists, and only persists after that
+    rule is removed. The repair succeeding at all therefore proves prune ran
+    first; if the step repaired before pruning, the add would be dropped and
+    the run would report the failure instead.
+    """
+    missing = Path("/uv/cpython-3.13.0/bin/python3.13")
+    stale = Path("/uv/cpython-3.12.12/bin/python3.12")
+    _stub_audit(
+        monkeypatch,
+        FirewallAudit(FirewallVerdict.RULES_MISSING, "1 of 1 have no rule", missing=(missing,)),
+    )
+    state = {str(stale): True}
+    monkeypatch.setattr(fw, "allowlisted_paths", lambda: dict(state))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(fw, "manifest_paths", lambda: (missing,))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(fw, "stale_manifest_rules", lambda _rules: (stale,))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(fw, "_VERIFY_RETRY_S", 0.0)
+    order: list[tuple[str, str]] = []
+
+    def mutate(verb: str, path: str) -> bool:
+        order.append((verb, path))
+        if verb == "--remove":
+            state.pop(path, None)
+        elif str(stale) in state:
+            pass  # identifier collision: daemon accepts the add, persists nothing
+        else:
+            state[path] = True
+        return True
+
+    monkeypatch.setattr(fw, "_sudo_mutate", mutate)
+    cfw.ensure_firewall_allowlist(_ctx(tmp_path, cv.ALL_ROLES))
+    assert order[0] == ("--remove", str(stale))  # prune frees the identifier first
+    err = capsys.readouterr().err
+    assert "allowed 1 binaries" in err  # the add persisted only because prune ran first
     assert "removed 1 stale allow rules" in err
 
 
