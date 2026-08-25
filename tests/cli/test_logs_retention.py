@@ -27,6 +27,147 @@ def _file_at(logs: Path, name: str, mtime: datetime) -> Path:
     return path
 
 
+def test_family_days_apply_tier_defaults_and_report_each_candidate_family(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from cli.commands.logs import cmd_logs_retention
+
+    expired = [
+        _file_at(tmp_path, "ava-agent-12.out.log", _NOW - timedelta(days=16)),
+        _file_at(
+            tmp_path,
+            "ava-agent-12-shell-3-review.out.log",
+            _NOW - timedelta(days=8),
+        ),
+        _file_at(
+            tmp_path,
+            "gateway.2026-08-01_00-00-00_12345.log",
+            _NOW - timedelta(days=31),
+        ),
+        _file_at(
+            tmp_path,
+            "ops.2026-08-01_00-00-00_12345.log",
+            _NOW - timedelta(days=31),
+        ),
+        _file_at(
+            tmp_path,
+            "delivery_watchdog.2026-08-01_00-00-00_12345.log",
+            _NOW - timedelta(days=31),
+        ),
+        _file_at(
+            tmp_path,
+            "restarter.2026-08-01_00-00-00_12345.log",
+            _NOW - timedelta(days=4),
+        ),
+    ]
+    retained = [
+        _file_at(tmp_path, "ava-agent-13.out.log", _NOW - timedelta(days=15)),
+        _file_at(
+            tmp_path,
+            "ava-agent-13-shell-3-review.out.log",
+            _NOW - timedelta(days=7),
+        ),
+        _file_at(
+            tmp_path,
+            "gateway.2026-08-01_00-00-00_54321.log",
+            _NOW - timedelta(days=30),
+        ),
+        _file_at(
+            tmp_path,
+            "restarter.2026-08-01_00-00-00_54321.log",
+            _NOW - timedelta(days=3),
+        ),
+    ]
+
+    rc = cmd_logs_retention(
+        older_than_days=None,
+        family_days={},
+        dry_run=True,
+        logs_path=tmp_path,
+        now=_NOW,
+    )
+
+    assert rc == 0
+    assert all(path.exists() for path in expired + retained)
+    out = capsys.readouterr().out
+    for family, days in {
+        "agent": 15,
+        "shell": 7,
+        "gateway": 30,
+        "ops": 30,
+        "watchdog": 30,
+        "other": 3,
+    }.items():
+        assert f"retention_family\tfamily={family}\tdays={days}\tfiles=1\tbytes=" in out
+    assert "retention_summary\tmode=dry-run\tfiles=6\tbytes=" in out
+
+
+def test_family_days_override_a_specific_family(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from cli.commands.logs import cmd_logs_retention
+
+    gateway = _file_at(
+        tmp_path,
+        "gateway.2026-08-01_00-00-00_12345.log",
+        _NOW - timedelta(days=16),
+    )
+
+    rc = cmd_logs_retention(
+        older_than_days=None,
+        family_days={"gateway": 15},
+        dry_run=True,
+        logs_path=tmp_path,
+        now=_NOW,
+    )
+
+    assert rc == 0
+    assert gateway.exists()
+    out = capsys.readouterr().out
+    assert "retention_candidate\tfamily=gateway\tdays=15" in out
+    assert f"\tpath={gateway}" in out
+    assert "retention_family\tfamily=gateway\tdays=15\tfiles=1\tbytes=" in out
+
+
+def test_family_days_dry_run_reports_empty_policy_families(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from cli.commands.logs import cmd_logs_retention
+
+    rc = cmd_logs_retention(
+        older_than_days=None,
+        family_days={},
+        dry_run=True,
+        logs_path=tmp_path,
+        now=_NOW,
+    )
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    for family, days in {
+        "agent": 15,
+        "shell": 7,
+        "gateway": 30,
+        "ops": 30,
+        "watchdog": 30,
+        "other": 3,
+    }.items():
+        assert f"retention_family\tfamily={family}\tdays={days}\tfiles=0\tbytes=0" in out
+
+
+def test_older_than_and_family_days_cannot_be_combined(tmp_path: Path) -> None:
+    from cli.commands.logs import cmd_logs_retention
+
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        cmd_logs_retention(
+            older_than_days=14,
+            family_days={"agent": 15},
+            dry_run=True,
+            logs_path=tmp_path,
+            now=_NOW,
+        )
+
+
 def test_dry_run_reports_all_managed_families_without_deleting(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -70,7 +211,8 @@ def test_active_open_file_is_excluded_from_retention(
 
     with active.open("rb"):
         rc = cmd_logs_retention(
-            older_than_days=14,
+            older_than_days=None,
+            family_days={},
             dry_run=False,
             logs_path=tmp_path,
             now=_NOW,
@@ -256,6 +398,7 @@ def test_configured_days_apply_when_the_flag_is_omitted(
 
     rc = cmd_logs_retention(
         older_than_days=None,
+        family_days=None,
         dry_run=False,
         logs_path=tmp_path,
         now=_NOW,
