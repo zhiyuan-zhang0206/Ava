@@ -1047,8 +1047,11 @@ def test_timeline_compact_history_config_contract() -> None:
     assert extra["writable"] is True
     assert extra["scope"] == "cluster-pinned"
     assert extra["per_agent"] is False
-    assert field.description is not None
-    assert any("\u4e00" <= char <= "\u9fff" for char in field.description)
+    assert field.description == (
+        "Number of compact-history segments the timeline may load backward: "
+        "0 disables compact history, -1 allows all retained segments, and N "
+        "allows the newest N segments."
+    )
 
 
 def test_skip_auth_alias_inverts_value(monkeypatch: pytest.MonkeyPatch) -> None:
