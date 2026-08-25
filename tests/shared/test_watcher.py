@@ -342,11 +342,63 @@ def test_cron_script_stamps_template_version() -> None:
     from — the registry records it at spawn so the boot reconcile can rebuild
     live watchers whose script predates a template fix (issue #1330)."""
     script = build_cron_script(expr="0 * * * *", message="tick", timezone="UTC", end_time_iso=None)
-    assert "_TEMPLATE_VERSION = 2" in script
+    assert "_TEMPLATE_VERSION = 3" in script
     assert "TEMPLATE_VERSION" in __import__("shared.watcher", fromlist=["TEMPLATE_VERSION"]).__all__
 
 
 def test_at_script_stamps_template_version() -> None:
     when = dt.datetime(2030, 1, 1, 0, 0, tzinfo=dt.UTC)
     script = build_at_script(when_iso=when.isoformat(), message="wake")
-    assert "_TEMPLATE_VERSION = 2" in script
+    assert "_TEMPLATE_VERSION = 3" in script
+
+
+# -- schedule-state announcement (v3, task #1620) -----------------------------
+
+
+def test_cron_script_announces_schedule_state(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A running cron watcher must say on stdout what it is doing: its next
+    fire at startup and, after each fire, the fired instant plus the next fire.
+    A healthy watcher sleeping toward a far boundary (a weekly cron a few
+    minutes after its Monday fire) is otherwise indistinguishable from a stuck
+    one — the 2026-08-25 false alarm that sent a working watcher to the
+    chopping block."""
+    wall = _FakeWall(
+        dt.datetime(2026, 8, 20, 23, 57, 58, tzinfo=dt.UTC),
+        corrections=[-4.0, -5.0],
+    )
+    script = build_cron_script(
+        expr="*/2 * * * *",
+        message="tick",
+        timezone="UTC",
+        end_time_iso="2026-08-20T16:02:00-08:00",  # 00:02:00 UTC
+    )
+    sent = _exec_watcher(script, wall, monkeypatch)
+    out = capsys.readouterr().out
+
+    assert len(sent) == 3  # fire semantics unchanged by the prints
+    lines = [ln for ln in out.splitlines() if "[watcher]" in ln]
+    # One announcement per upcoming fire: a startup line for the first fire,
+    # then one line per fire naming the fired instant and the next fire. The
+    # loop breaks at the end_time check BEFORE printing after the last fire,
+    # so the final line's `next fire at` is the fire just executed.
+    assert len(lines) == 3
+    assert "cron */2 * * * * in UTC — next fire at 2026-08-20T23:58:00+00:00" in lines[0]
+    assert "fired 2026-08-20T23:58:00+00:00 — next fire at 2026-08-21T00:00:00+00:00" in lines[1]
+    assert "fired 2026-08-21T00:00:00+00:00 — next fire at 2026-08-21T00:02:00+00:00" in lines[2]
+
+
+def test_at_script_announces_when(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A one-shot watcher announces its target time at startup, so a session
+    capture shows at a glance when it will fire."""
+    when = dt.datetime(2026, 8, 20, 16, 0, 0, tzinfo=dt.UTC)
+    wall = _FakeWall(dt.datetime(2026, 8, 20, 15, 59, 30, tzinfo=dt.UTC), corrections=[])
+    script = build_at_script(when_iso=when.isoformat(), message="wake")
+    sent = _exec_watcher(script, wall, monkeypatch)
+    out = capsys.readouterr().out
+
+    assert len(sent) == 1  # fire semantics unchanged
+    assert f"[watcher] one-shot — fires at {when.isoformat()}" in out
