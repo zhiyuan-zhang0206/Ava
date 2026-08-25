@@ -14,6 +14,7 @@ from gateway.app import app
 from gateway.schemas import FleetGraphNode, FleetGraphResponse
 from shared import telemetry
 from shared.agents import AgentStatus
+from shared.loki_index_labels import INDEX_LABEL_CUTOVER_AT
 
 
 def _fresh_heartbeat_age(*, timeout_s: float | None = None) -> float:
@@ -50,6 +51,11 @@ class _RedisFactory:
 
     def __call__(self, **_kwargs: object) -> _FakeRedis:
         return self._redis
+
+
+def _response_cache_writes(redis: _FakeRedis) -> list[tuple[str, str, int | None]]:
+    """Exclude the independent frozen-source caches from response-cache assertions."""
+    return [write for write in redis.writes if not write[0].startswith("fleet_graph:frozen:")]
 
 
 @pytest.fixture(autouse=True)
@@ -108,6 +114,234 @@ def _seed_agent(db_conn: psycopg.Connection) -> int:
     return agent_id
 
 
+def _seed_archive_edge(
+    db_conn: psycopg.Connection, *, source_agent: int, target_agent: int
+) -> tuple[datetime, datetime]:
+    edge_ts = datetime(2026, 8, 12, 10, tzinfo=UTC)
+    boundary = datetime(2026, 8, 13, 10, tzinfo=UTC)
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO events "
+            "(ts, agent_id, event_name, source, target_agent_id, machine, process, category, level) "
+            "VALUES (%s, %s, 'spawn', 'test', %s, 'test', 'test', 'audit', 'info')",
+            (edge_ts, source_agent, target_agent),
+        )
+        cur.execute(
+            "INSERT INTO events "
+            "(ts, agent_id, event_name, source, machine, process, category, level) "
+            "VALUES (%s, NULL, 'turn_end', 'test', 'test', 'test', 'telemetry', 'info')",
+            (boundary,),
+        )
+    db_conn.commit()
+    return edge_ts, boundary
+
+
+def test_pg_frozen_archive_cache_miss_populates_and_hit_skips_queries(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = _seed_agent(db_conn)
+    target = _seed_agent(db_conn)
+    edge_ts, boundary = _seed_archive_edge(db_conn, source_agent=source, target_agent=target)
+    redis = _FakeRedis()
+
+    import gateway.routers.fleet_graph as fg
+
+    monkeypatch.setattr(fg, "sync_redis", _RedisFactory(redis))
+    with TestClient(app):
+        first = fg._fetch_pg_graph(app.state.db_pool, not_terminated="")
+
+        payload = json.loads(redis.values["fleet_graph:frozen:archive:v1"])
+        assert payload == {
+            "boundary": boundary.isoformat(),
+            "rows": [[target, source, "spawn", edge_ts.isoformat()]],
+        }
+        assert redis.writes == [
+            (
+                "fleet_graph:frozen:archive:v1",
+                redis.values["fleet_graph:frozen:archive:v1"],
+                86_400,
+            )
+        ]
+
+        def unexpected_source_read(*_args: object, **_kwargs: object) -> object:
+            raise AssertionError("frozen archive source queried on cache hit")
+
+        monkeypatch.setattr(fg, "_archive_boundary", unexpected_source_read)
+        monkeypatch.setattr(fg, "_fetch_archive_edges", unexpected_source_read)
+        second = fg._fetch_pg_graph(app.state.db_pool, not_terminated="")
+
+    expected_row = {
+        "agent_id": source,
+        "target_agent_id": target,
+        "event_name": "spawn",
+        "ts": edge_ts,
+    }
+    assert first.boundary == boundary
+    assert first.archive_rows == [expected_row]
+    assert second.boundary == boundary
+    assert second.archive_rows == [expected_row]
+
+
+def test_loki_legacy_cache_miss_populates_and_hit_skips_legacy_query(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    redis = _FakeRedis()
+    boundary = INDEX_LABEL_CUTOVER_AT - timedelta(days=2)
+    now = INDEX_LABEL_CUTOVER_AT + timedelta(days=1)
+    legacy_ts = boundary + timedelta(hours=1)
+    indexed_ts = INDEX_LABEL_CUTOVER_AT + timedelta(hours=1)
+    calls: list[dict[str, object]] = []
+
+    import gateway.routers.fleet_graph as fg
+
+    def query_events(**kwargs: object) -> tuple[list[dict[str, object]], bool]:
+        calls.append(kwargs)
+        if kwargs["from_"] == boundary:
+            return [
+                {
+                    "agent_id": 1,
+                    "target_agent_id": 2,
+                    "event_name": "spawn",
+                    "ts": legacy_ts,
+                }
+            ], False
+        assert kwargs["from_"] == INDEX_LABEL_CUTOVER_AT
+        return [
+            {
+                "agent_id": 3,
+                "target_agent_id": 4,
+                "event_name": "send_message",
+                "ts": indexed_ts,
+            }
+        ], False
+
+    monkeypatch.setattr(fg, "sync_redis", _RedisFactory(redis))
+    monkeypatch.setattr(loki_events, "query_events", query_events)
+
+    first_rows, first_truncated = fg._fetch_loki_edges(boundary=boundary, now=now)
+    assert len(calls) == 2
+    assert calls[0]["from_"] == boundary
+    assert calls[0]["to"] == INDEX_LABEL_CUTOVER_AT
+    assert calls[1]["from_"] == INDEX_LABEL_CUTOVER_AT
+    assert calls[1]["to"] == now
+    for call in calls:
+        assert call["event_names"] == ["send_message", "spawn", "fork", "resurrect"]
+        assert call["categories"] == ["audit"]
+        assert call["limit"] == 50_000
+        assert call["direction"] == "forward"
+        assert call["timeout_s"] == 8.0
+    assert json.loads(redis.values["fleet_graph:frozen:legacy:v1"]) == [
+        [1, 2, "spawn", legacy_ts.isoformat()]
+    ]
+    assert redis.writes == [
+        (
+            "fleet_graph:frozen:legacy:v1",
+            redis.values["fleet_graph:frozen:legacy:v1"],
+            86_400,
+        )
+    ]
+
+    calls.clear()
+    second_rows, second_truncated = fg._fetch_loki_edges(boundary=boundary, now=now)
+
+    assert len(calls) == 1
+    assert calls[0]["from_"] == INDEX_LABEL_CUTOVER_AT
+    assert first_rows == second_rows
+    assert first_truncated is False
+    assert second_truncated is False
+
+
+def test_loki_split_counts_an_exact_cutover_row_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    redis = _FakeRedis()
+    boundary = INDEX_LABEL_CUTOVER_AT - timedelta(days=2)
+    now = INDEX_LABEL_CUTOVER_AT + timedelta(days=1)
+    cutover_row: dict[str, object] = {
+        "agent_id": 1,
+        "target_agent_id": 2,
+        "event_name": "spawn",
+        "ts": INDEX_LABEL_CUTOVER_AT,
+    }
+
+    import gateway.routers.fleet_graph as fg
+
+    def query_events(**_kwargs: object) -> tuple[list[dict[str, object]], bool]:
+        # Loki range endpoints are inclusive, so the same line can be returned
+        # by both independently-issued slices at the exact cutover timestamp.
+        return [cutover_row], False
+
+    monkeypatch.setattr(fg, "sync_redis", _RedisFactory(redis))
+    monkeypatch.setattr(loki_events, "query_events", query_events)
+
+    rows, truncated = fg._fetch_loki_edges(boundary=boundary, now=now)
+
+    assert rows == [cutover_row]
+    assert truncated is False
+
+
+def test_loki_legacy_cache_failure_queries_sources_and_returns_rows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    boundary = INDEX_LABEL_CUTOVER_AT - timedelta(days=2)
+    now = INDEX_LABEL_CUTOVER_AT + timedelta(days=1)
+    calls: list[tuple[datetime, datetime]] = []
+
+    import gateway.routers.fleet_graph as fg
+
+    def redis_down(*_args: object, **_kwargs: object) -> object:
+        raise ConnectionError("redis down")
+
+    def query_events(**kwargs: object) -> tuple[list[dict[str, object]], bool]:
+        from_ = kwargs["from_"]
+        to = kwargs["to"]
+        assert isinstance(from_, datetime)
+        assert isinstance(to, datetime)
+        calls.append((from_, to))
+        return [
+            {
+                "agent_id": len(calls),
+                "target_agent_id": len(calls) + 10,
+                "event_name": "spawn",
+                "ts": from_ + timedelta(hours=1),
+            }
+        ], False
+
+    monkeypatch.setattr(fg, "sync_redis", redis_down)
+    monkeypatch.setattr(loki_events, "query_events", query_events)
+
+    rows, truncated = fg._fetch_loki_edges(boundary=boundary, now=now)
+
+    assert calls == [
+        (boundary, INDEX_LABEL_CUTOVER_AT),
+        (INDEX_LABEL_CUTOVER_AT, now),
+    ]
+    assert [row["agent_id"] for row in rows] == [1, 2]
+    assert truncated is False
+
+
+@pytest.mark.parametrize("truncated_slice", ["legacy", "indexed"])
+def test_loki_split_reports_truncation_from_either_slice(
+    truncated_slice: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    redis = _FakeRedis()
+    boundary = INDEX_LABEL_CUTOVER_AT - timedelta(days=2)
+    now = INDEX_LABEL_CUTOVER_AT + timedelta(days=1)
+
+    import gateway.routers.fleet_graph as fg
+
+    def query_events(**kwargs: object) -> tuple[list[dict[str, object]], bool]:
+        era = "legacy" if kwargs["from_"] == boundary else "indexed"
+        return [], era == truncated_slice
+
+    monkeypatch.setattr(fg, "sync_redis", _RedisFactory(redis))
+    monkeypatch.setattr(loki_events, "query_events", query_events)
+
+    _rows, truncated = fg._fetch_loki_edges(boundary=boundary, now=now)
+
+    assert truncated is True
+
+
 def _empty_prom(
     _metric: str,
     _by: str,
@@ -157,9 +391,10 @@ def test_success_writes_short_cache_and_last_good_graph(
 
     assert resp.status_code == 200
     key = fg._cache_key(include_terminated=False, hours=None, decay_lambda=0.5)
-    assert {write[0] for write in redis.writes} == {key, f"fleet_graph:last_good:{key}"}
+    response_writes = _response_cache_writes(redis)
+    assert {write[0] for write in response_writes} == {key, f"fleet_graph:last_good:{key}"}
     assert redis.values[key] == redis.values[f"fleet_graph:last_good:{key}"]
-    assert {write[0]: write[2] for write in redis.writes} == {
+    assert {write[0]: write[2] for write in response_writes} == {
         key: 60,
         f"fleet_graph:last_good:{key}": fg._LAST_GOOD_CACHE_TTL_SECONDS,
     }
@@ -205,7 +440,10 @@ def test_stale_heartbeat_marks_telemetry_and_keeps_fresh_graph_cached(
     assert body["telemetry_stale"] is True
     assert body["snapshot_at"] is not None
     key = fg._cache_key(include_terminated=False, hours=None, decay_lambda=0.5)
-    assert {write[0] for write in redis.writes} == {key, f"fleet_graph:last_good:{key}"}
+    assert {write[0] for write in _response_cache_writes(redis)} == {
+        key,
+        f"fleet_graph:last_good:{key}",
+    }
     assert redis.values[key] == redis.values[f"fleet_graph:last_good:{key}"]
     assert emitted[0][0] == "telemetry_read_stale"
     assert emitted[0][1]["source"] == "prometheus"
@@ -245,7 +483,7 @@ def test_loki_failure_serves_last_good_graph_without_writing_short_cache(
     assert resp.status_code == 200
     assert resp.json() == expected
     assert query_args["timeout_s"] == 8.0
-    assert redis.writes == []
+    assert _response_cache_writes(redis) == []
 
 
 def test_loki_edge_cap_marks_a_fresh_graph_truncated(
@@ -270,7 +508,7 @@ def test_loki_edge_cap_marks_a_fresh_graph_truncated(
     assert response.json()["stale"] is True
     assert response.json()["truncated"] is True
     key = fg._cache_key(include_terminated=False, hours=None, decay_lambda=0.5)
-    assert {write[0] for write in redis.writes} == {key}
+    assert {write[0] for write in _response_cache_writes(redis)} == {key}
     assert redis.values[key]
 
 
@@ -327,7 +565,7 @@ def test_loki_failure_without_last_good_keeps_fetched_nodes_out_of_short_cache(
     assert {node["agent_id"] for node in body["nodes"]} == {agent_id}
     assert body["edges"] == []
     assert body["stale"] is True
-    assert redis.writes == []
+    assert _response_cache_writes(redis) == []
 
 
 def test_prom_failure_serves_last_good_graph_without_writing_short_cache(
@@ -364,7 +602,7 @@ def test_prom_failure_serves_last_good_graph_without_writing_short_cache(
     assert resp.status_code == 200
     assert resp.json() == expected
     assert prom_timeouts == [8.0] * 4
-    assert redis.writes == []
+    assert _response_cache_writes(redis) == []
 
 
 def test_prom_failure_without_last_good_keeps_pg_nodes_out_of_short_cache(
@@ -396,7 +634,7 @@ def test_prom_failure_without_last_good_keeps_pg_nodes_out_of_short_cache(
     assert {node["agent_id"] for node in body["nodes"]} == {agent_id}
     assert body["edges"] == []
     assert body["stale"] is True
-    assert redis.writes == []
+    assert _response_cache_writes(redis) == []
 
 
 def test_pg_cancellation_serves_last_good_graph(
