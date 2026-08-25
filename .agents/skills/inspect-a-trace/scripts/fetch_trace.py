@@ -9,10 +9,9 @@ Two modes:
   `trace_raw.json` for `read_trace.py`. Sources:
     - `mirror` (default): scan `$AVA_HOME/traces/spans*.jsonl` (active `spans.jsonl` + rotated `spans-<ISO>.jsonl`) — the durable
       record, complete, no size cap, no network. Needs filesystem access to
-      the machine that recorded the trace. Stops at the first file that
-      yields spans (one trace lives in one file — the recording process's
-      daily file; a trace straddling a rotation boundary is merged across
-      files). Ids are hex in the mirror (the collector's file exporter
+      the machine that recorded the trace. Every file in range is scanned
+      and spans are merged (a trace can straddle the sidecar's rotation
+      boundary). Ids are hex in the mirror (the collector's file exporter
       writes 32/16-char hex, not OTLP-JSON base64); legacy pre-#1266
       agent-side mirror files carry base64 and are handled too.
     - `tempo`: `GET /api/traces/{id}` — refused above Tempo's 5 MB cap
@@ -77,11 +76,21 @@ def _id_to_hex(value: str) -> str:
     The mirror (collector file exporter, task #1266) and Tempo both carry ids
     as hex strings today; legacy OTLP/JSON envelopes (pre-#1266 agent-side
     mirror) carry base64 per the OTLP JSON spec. Detect by shape: hex ids are
-    32 (trace) or 16 (span) chars; base64 ids are 24 or 12.
+    32 (trace) or 16 (span) chars; base64 ids are 24 or 12. Anything else is
+    malformed and refused rather than decoded into garbage.
     """
     if len(value) in (32, 16) and re.fullmatch(r"[0-9a-fA-F]+", value):
         return value.lower()
-    return base64.b64decode(value).hex()
+    try:
+        decoded = base64.b64decode(value, validate=True)
+    except Exception as exc:  # binascii.Error / ValueError
+        raise ValueError(f"malformed span id {value[:24]!r} (neither hex nor base64)") from exc
+    if len(decoded) not in (16, 8):
+        raise ValueError(
+            f"malformed span id {value[:24]!r}: decoded to {len(decoded)} bytes, "
+            "expected 16 (trace) or 8 (span)"
+        )
+    return decoded.hex()
 
 
 def _normalize_span(sp: dict) -> dict:
@@ -260,7 +269,10 @@ def fetch_from_tempo(args, hex_trace_id: str) -> list[dict]:
 
 
 def cmd_fetch(args) -> int:
-    trace_id = (args.trace_id or "").zfill(32)
+    if not args.trace_id:
+        print("--trace-id is required in fetch mode")
+        return 2
+    trace_id = args.trace_id.zfill(32)
     if not re.fullmatch(r"[0-9a-f]{32}", trace_id):
         print("--trace-id must be a 31- or 32-char hex id")
         return 2
