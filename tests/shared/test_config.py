@@ -510,6 +510,20 @@ def test_sdk_code_reminder_cadence_config_contract() -> None:
     assert meta.choices == ["once_per_compaction", "every_time"]
 
 
+def test_sdk_nameerror_hint_enabled_config_contract() -> None:
+    """The assumed-persistence NameError hint is enabled by default and can be
+    adjusted per agent without changing the `.env` naming surface."""
+    from shared.config import FIELD_INFOS
+
+    field = FIELD_INFOS["sdk_nameerror_hint_enabled"]
+    extra = field.json_schema_extra
+    assert isinstance(extra, dict)
+    assert field.default is True
+    assert field.alias == "AVA_SDK_NAMEERROR_HINT_ENABLED"
+    assert extra["per_agent"] is True
+    assert extra["lifecycle"] == "live"
+
+
 # --- agent_communication_style: enum + legacy-boolean alias ---
 
 _STYLE_ENV = (
