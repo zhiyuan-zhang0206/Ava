@@ -11,7 +11,7 @@ from datetime import datetime
 from pathlib import Path
 
 from shared.platform import file_lock
-from shared.private_storage import ensure_private_dir, ensure_private_file
+from shared.private_storage import ensure_private_dir, ensure_private_file, write_private_bytes
 
 _log = logging.getLogger(__name__)
 
@@ -97,8 +97,7 @@ def upsert_env(path: Path, updates: dict[str, str]) -> None:
                 out.append(line)
         for k, v in remaining.items():
             out.append(f"{k}={v}")
-        path.write_text("\n".join(out) + "\n")
-        _chmod_private(path)
+        write_private_bytes(path, ("\n".join(out) + "\n").encode())
 
 
 def _chmod_private(path: Path) -> None:
@@ -126,5 +125,4 @@ def remove_env(path: Path, keys: set[str]) -> None:
         if len(out) == len(lines):
             return  # nothing to remove — no snapshot churn
         snapshot_env(path)
-        path.write_text("\n".join(out) + "\n")
-        _chmod_private(path)
+        write_private_bytes(path, ("\n".join(out) + "\n").encode())

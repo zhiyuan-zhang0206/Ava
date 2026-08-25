@@ -1,5 +1,8 @@
 from pathlib import Path
 
+import pytest
+
+import shared.private_storage
 from shared.envfile import ENV_BACKUP_KEEP, remove_env, snapshot_env, upsert_env
 
 
@@ -129,3 +132,25 @@ def test_upsert_env_snapshots_before_write(tmp_path: Path):
     backups = _backups(env)
     assert len(backups) == 1
     assert backups[0].read_text() == "SECRET=orig\n"  # pre-write state recoverable
+
+
+def test_upsert_atomically_replaces_the_complete_env(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    env = tmp_path / ".env"
+    env.write_text("SECRET=old\nKEEP=1\n")
+    real_replace = shared.private_storage.os.replace
+    replaced: list[Path] = []
+
+    def _replace(source: str | Path, destination: str | Path) -> None:
+        assert Path(destination) == env
+        assert env.read_text() == "SECRET=old\nKEEP=1\n"
+        assert Path(source).read_text() == "SECRET=new\nKEEP=1\n"
+        real_replace(source, destination)
+        replaced.append(Path(destination))
+
+    monkeypatch.setattr(shared.private_storage.os, "replace", _replace)
+
+    upsert_env(env, {"SECRET": "new"})
+
+    assert replaced == [env]
