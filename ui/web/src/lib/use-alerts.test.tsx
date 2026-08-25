@@ -2,17 +2,18 @@
 // badge's unresolved count exact.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { foldAlert, useAlertsSection } from "@/lib/use-alerts";
+import { AuthProvider, useAuth } from "@/lib/auth-context";
+import { AlertsProvider, foldAlert, useAlertsSection } from "@/lib/use-alerts";
 import type { Alert, AlertsResponse } from "@/lib/types";
 
-const mocks = vi.hoisted(() => ({ getAlerts: vi.fn() }));
+const mocks = vi.hoisted(() => ({ getAlerts: vi.fn(), checkAuth: vi.fn() }));
 vi.mock("@/lib/api", () => ({
   API_BASE: "",
-  api: { getAlerts: mocks.getAlerts },
+  api: { getAlerts: mocks.getAlerts, checkAuth: mocks.checkAuth },
 }));
 
 function row(overrides: Partial<Alert> = {}): Alert {
@@ -83,5 +84,224 @@ describe("useAlertsSection", () => {
       limit: 200,
     });
     queryClient.clear();
+  });
+});
+
+class MockEventSource {
+  static readonly CONNECTING = 0;
+  static readonly OPEN = 1;
+  static readonly CLOSED = 2;
+
+  url: string;
+  init?: EventSourceInit;
+  readyState = MockEventSource.CONNECTING;
+  onopen: ((e: Event) => void) | null = null;
+  onmessage: ((e: MessageEvent) => void) | null = null;
+  onerror: ((e: Event) => void) | null = null;
+
+  constructor(url: string, init?: EventSourceInit) {
+    this.url = url;
+    this.init = init;
+    // eslint-disable-next-line @typescript-eslint/no-this-alias -- mock must track the latest constructed instance
+    lastInstance = this;
+  }
+
+  close(): void {
+    this.readyState = MockEventSource.CLOSED;
+  }
+
+  fireErrorWithReadyState(state: number): void {
+    this.readyState = state;
+    this.onerror?.(new Event("error"));
+  }
+}
+
+let lastInstance: MockEventSource | null = null;
+let queryClients: QueryClient[] = [];
+
+function deferredAuthResult() {
+  let resolve!: (result: { authenticated: boolean }) => void;
+  const promise = new Promise<{ authenticated: boolean }>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+function alertsWrapper() {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  queryClients.push(queryClient);
+  return function Wrapper({ children }: { children: ReactNode }) {
+    return (
+      <QueryClientProvider client={queryClient}>
+        <AuthProvider>
+          <AlertsProvider>{children}</AlertsProvider>
+        </AuthProvider>
+      </QueryClientProvider>
+    );
+  };
+}
+
+function expectInstance(): MockEventSource {
+  if (!lastInstance) throw new Error("EventSource was not constructed");
+  return lastInstance;
+}
+
+async function waitForInstance(): Promise<void> {
+  await waitFor(() => expect(lastInstance).not.toBeNull());
+}
+
+describe("AlertsProvider connection auth gating", () => {
+  beforeEach(() => {
+    lastInstance = null;
+    queryClients = [];
+    mocks.getAlerts.mockReset();
+    mocks.getAlerts.mockResolvedValue(resp([], 0));
+    mocks.checkAuth.mockReset();
+    mocks.checkAuth.mockResolvedValue({ authenticated: true });
+    vi.stubGlobal("EventSource", MockEventSource);
+  });
+
+  afterEach(() => {
+    cleanup();
+    for (const queryClient of queryClients) queryClient.clear();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("unauthenticated → no EventSource is constructed for /api/alerts/stream", async () => {
+    mocks.checkAuth.mockResolvedValue({ authenticated: false });
+
+    const { result } = renderHook(() => useAuth().status, { wrapper: alertsWrapper() });
+
+    await waitFor(() => expect(result.current).toBe("unauthenticated"));
+    expect(lastInstance).toBeNull();
+  });
+
+  it("CLOSED with an invalid session → auth becomes unauthenticated and never reopens", async () => {
+    const { result } = renderHook(() => useAuth().status, { wrapper: alertsWrapper() });
+
+    await waitFor(() => expect(result.current).toBe("authenticated"));
+    await waitForInstance();
+    const first = expectInstance();
+    vi.useFakeTimers();
+    mocks.checkAuth.mockResolvedValue({ authenticated: false });
+    act(() => first.fireErrorWithReadyState(MockEventSource.CLOSED));
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    vi.useRealTimers();
+    await waitFor(() => expect(result.current).toBe("unauthenticated"));
+    vi.useFakeTimers();
+    act(() => {
+      vi.advanceTimersByTime(60_000);
+    });
+    expect(expectInstance()).toBe(first);
+  });
+
+  it("CLOSED with a valid session → reopens at the base delay", async () => {
+    const { result } = renderHook(() => useAuth().status, { wrapper: alertsWrapper() });
+
+    await waitFor(() => expect(result.current).toBe("authenticated"));
+    await waitForInstance();
+    const first = expectInstance();
+    vi.useFakeTimers();
+    act(() => first.fireErrorWithReadyState(MockEventSource.CLOSED));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    act(() => {
+      vi.advanceTimersByTime(999);
+    });
+    expect(expectInstance()).toBe(first);
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+    expect(expectInstance()).not.toBe(first);
+  });
+
+  it("CLOSED when the session probe rejects → reopens at the base delay", async () => {
+    const { result } = renderHook(() => useAuth().status, { wrapper: alertsWrapper() });
+
+    await waitFor(() => expect(result.current).toBe("authenticated"));
+    await waitForInstance();
+    const first = expectInstance();
+    vi.useFakeTimers();
+    mocks.checkAuth.mockRejectedValue(new Error("gateway unreachable"));
+    act(() => first.fireErrorWithReadyState(MockEventSource.CLOSED));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    act(() => {
+      vi.advanceTimersByTime(999);
+    });
+    expect(expectInstance()).toBe(first);
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+    expect(expectInstance()).not.toBe(first);
+  });
+
+  it("a late invalid CLOSED probe cannot invalidate a replacement provider", async () => {
+    const staleProbe = deferredAuthResult();
+    mocks.checkAuth
+      .mockResolvedValueOnce({ authenticated: true })
+      .mockReturnValueOnce(staleProbe.promise)
+      .mockResolvedValueOnce({ authenticated: true });
+
+    const firstMount = renderHook(() => useAuth().status, { wrapper: alertsWrapper() });
+    await waitFor(() => expect(firstMount.result.current).toBe("authenticated"));
+    await waitForInstance();
+    act(() => expectInstance().fireErrorWithReadyState(MockEventSource.CLOSED));
+    firstMount.unmount();
+
+    lastInstance = null;
+    const replacement = renderHook(() => useAuth().status, { wrapper: alertsWrapper() });
+    await waitFor(() => expect(replacement.result.current).toBe("authenticated"));
+    await waitForInstance();
+    const replacementSource = expectInstance();
+
+    await act(async () => {
+      staleProbe.resolve({ authenticated: false });
+      await staleProbe.promise;
+    });
+
+    expect(replacement.result.current).toBe("authenticated");
+    expect(expectInstance()).toBe(replacementSource);
+    expect(replacementSource.readyState).not.toBe(MockEventSource.CLOSED);
+  });
+
+  it("consecutive valid-session CLOSED failures use 1s then 2s backoff", async () => {
+    const { result } = renderHook(() => useAuth().status, { wrapper: alertsWrapper() });
+
+    await waitFor(() => expect(result.current).toBe("authenticated"));
+    await waitForInstance();
+    vi.useFakeTimers();
+    const first = expectInstance();
+
+    act(() => first.fireErrorWithReadyState(MockEventSource.CLOSED));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    act(() => {
+      vi.advanceTimersByTime(1_000);
+    });
+    const second = expectInstance();
+    expect(second).not.toBe(first);
+
+    act(() => second.fireErrorWithReadyState(MockEventSource.CLOSED));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    act(() => {
+      vi.advanceTimersByTime(1_999);
+    });
+    expect(expectInstance()).toBe(second);
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+    expect(expectInstance()).not.toBe(second);
   });
 });

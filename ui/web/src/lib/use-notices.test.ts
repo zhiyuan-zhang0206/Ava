@@ -15,6 +15,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api } from "./api";
+import { AuthProvider } from "./auth-context";
 import type { NoticesFeed } from "./types";
 import {
   NOTICES_QUERY_KEY,
@@ -25,7 +26,7 @@ import { EventStreamProvider } from "./useEventStream";
 
 vi.mock("./api", () => ({
   API_BASE: "http://api.test",
-  api: { getNotices: vi.fn() },
+  api: { getNotices: vi.fn(), checkAuth: vi.fn() },
 }));
 
 // EventSource is unavailable in happy-dom; stub a minimal one so the real
@@ -100,6 +101,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   lastEventSource = null;
   vi.mocked(api.getNotices).mockResolvedValue(feed());
+  vi.mocked(api.checkAuth).mockResolvedValue({ authenticated: true });
   queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 });
 afterEach(() => {
@@ -111,12 +113,20 @@ vi.stubGlobal("EventSource", StubEventSource);
 
 function wrapper({ children }: { children: React.ReactNode }) {
   // The R4 fold lives inside the real EventStreamProvider — the wrapper
-  // mirrors the app root (QueryClientProvider ⊃ EventStreamProvider).
+  // mirrors the app root (AuthProvider ⊃ QueryClientProvider ⊃ EventStreamProvider).
   return React.createElement(
-    QueryClientProvider,
-    { client: queryClient },
-    React.createElement(EventStreamProvider, null, children),
+    AuthProvider,
+    null,
+    React.createElement(
+      QueryClientProvider,
+      { client: queryClient },
+      React.createElement(EventStreamProvider, null, children),
+    ),
   );
+}
+
+async function waitForEventSource(): Promise<void> {
+  await waitFor(() => expect(lastEventSource).not.toBeNull());
 }
 
 describe("useNotices", () => {
@@ -137,6 +147,7 @@ describe("useNotices", () => {
   it("notice_resolved invalidates BOTH the open queue and the resolved history", async () => {
     renderHook(() => useNotices(), { wrapper });
     await waitFor(() => expect(api.getNotices).toHaveBeenCalled());
+    await waitForEventSource();
     const spy = vi.spyOn(queryClient, "invalidateQueries");
 
     // The fold owner debounces invalidations by key family (2s) — advance
@@ -159,6 +170,7 @@ describe("useNotices", () => {
   it("notice_posted invalidates only the open queue, not the resolved history", async () => {
     renderHook(() => useNotices(), { wrapper });
     await waitFor(() => expect(api.getNotices).toHaveBeenCalled());
+    await waitForEventSource();
     const spy = vi.spyOn(queryClient, "invalidateQueries");
 
     vi.useFakeTimers();
@@ -179,6 +191,7 @@ describe("useNotices", () => {
   it("reconnect (open) refetches both the open queue and the resolved history", async () => {
     renderHook(() => useNotices(), { wrapper });
     await waitFor(() => expect(api.getNotices).toHaveBeenCalled());
+    await waitForEventSource();
     const callsBefore = vi.mocked(api.getNotices).mock.calls.length;
     const spy = vi.spyOn(queryClient, "invalidateQueries");
 
