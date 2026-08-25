@@ -90,7 +90,12 @@ def _restart_stack() -> bool:
         timeout=300,
     )
     if result.returncode != 0:
-        sys.stderr.write(f"lgtm start.sh failed (exit {result.returncode}): {result.stderr}\n")
+        # start.sh reports gate failures (e.g. loki -verify-config rejection)
+        # through its stdout log lines; keep both streams so the watchdog path
+        # surfaces the reason instead of swallowing it.
+        sys.stderr.write(
+            f"lgtm start.sh failed (exit {result.returncode}): {result.stdout} {result.stderr}\n"
+        )
     return result.returncode == 0
 
 
