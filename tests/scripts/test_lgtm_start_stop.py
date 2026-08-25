@@ -88,8 +88,20 @@ def _toolset(tmp_path: Path) -> tuple[dict[str, str], Path]:
     native.mkdir(parents=True)
     for name in ("loki", "prometheus"):
         binary = native / name
-        binary.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+        if name == "loki":
+            binary.write_text(
+                "#!/usr/bin/env bash\n"
+                'if [[ -n "${FAKE_LOKI_VERIFY_FAIL:-}" && "$*" == *-verify-config* ]]; then\n'
+                "  echo 'invalid loki config' >&2\n"
+                "  exit 1\n"
+                "fi\n",
+                encoding="utf-8",
+            )
+        else:
+            binary.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
         binary.chmod(0o755)
+    (home / "lgtm/native/config").mkdir(parents=True)
+    (home / "lgtm/native/config/loki.yaml").write_text("auth_enabled: false\n", encoding="utf-8")
     (home / "lgtm/native/grafana").mkdir(parents=True)
     _executable(
         home / "lgtm/native/grafana/run.sh",
@@ -199,3 +211,38 @@ def test_start_preserves_legacy_grafana_when_replacement_never_becomes_reachable
     assert result.returncode == 1
     assert "com.ava.grafana-native" not in log.read_text(encoding="utf-8")
     assert legacy_plist.exists()
+
+
+def test_start_refuses_loki_bootstrap_when_verify_config_fails(tmp_path: Path) -> None:
+    env, log = _toolset(tmp_path)
+    env["FAKE_LOKI_VERIFY_FAIL"] = "1"
+
+    result = _run(START, env)
+
+    assert result.returncode == 1
+    assert "loki -verify-config" in result.stdout
+    assert "refusing to start Loki" in result.stdout
+    # Verify failed before any launchctl call, so no job was bootstrapped and
+    # the fake tool log was never even created.
+    assert not log.exists()
+    assert not (Path(env["FAKE_UP"]) / "loki").exists()
+
+
+def test_start_logs_loki_verify_config_pass(tmp_path: Path) -> None:
+    env, _log = _toolset(tmp_path)
+
+    result = _run(START, env)
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert "loki config verified" in result.stdout
+
+
+def test_start_refuses_loki_bootstrap_when_config_missing(tmp_path: Path) -> None:
+    env, _log = _toolset(tmp_path)
+    (Path(env["AVA_HOME"]) / "lgtm/native/config/loki.yaml").unlink()
+
+    result = _run(START, env)
+
+    assert result.returncode == 1
+    assert "loki" in result.stdout and "is missing" in result.stdout
+    assert not (Path(env["FAKE_UP"]) / "loki").exists()
