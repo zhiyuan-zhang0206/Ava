@@ -1,7 +1,7 @@
-"""SDK reminder plugin — gently surface the matching SDK primitive the first time
-the agent reaches for a native-Python equivalent.
+"""SDK reminder plugin — gently surface the matching SDK primitive when the
+agent reaches for a native-Python equivalent.
 
-Five one-time hints, one shared `reminded` set. Each hint surfaces as its own
+Three reminder families share one `reminded` set. Each hint surfaces as its own
 system-styled note (`system_note_message`) injected into the conversation, not
 spliced onto the agent's own output — so the agent reads it as a framework
 aside rather than mistaking it for the code cell's stdout:
@@ -11,20 +11,27 @@ aside rather than mistaking it for the code cell's stdout:
   requests/httpx/urllib), the after_exec hook injects a one-line note pointing
   at the primitive (`ava.shell.run` / `ava.watcher` / `ava.files` / `ava.web`)
   after the cell's output, leaving that output untouched.
+- Assumed-persistence NameErrors: when an undefined non-builtin identifier
+  appeared in an earlier execute_code cell, the after_exec hook explains that
+  each cell uses a fresh interpreter. Each name fires at most once per context
+  window, and `sdk_nameerror_hint_enabled` can disable the family.
 - One inbound category (agent_reply): when a message from another agent
   arrives, the agent tends to answer in plain text, which the other agent
   never sees. The before_llm hook injects a note pointing at
   `ava.agents.send_message` before the agent produces its reply (a text reply
   runs no code, so after_exec would never see it).
 
-The four code categories each fire at most once per context window; a
-compaction re-arms them. The agent_reply category's cadence is config-driven
-(`turn_settings.agent.agent_reply_reminder_cadence`): `once_per_compaction` (the same
-once-per-window re-arm, default) or `every_time` (every agent inbound).
+The four code categories' shared cadence is config-driven
+(`turn_settings.agent.sdk_code_reminder_cadence`): `once_per_compaction` (at
+most once per category per context window, re-armed on compaction, default) or
+`every_time` (every matching code cell). The agent_reply category has its own
+cadence (`turn_settings.agent.agent_reply_reminder_cadence`) with the same two
+values.
 
 Mechanics:
-- Detection + hint tables + the state schema live in `_state.py`
-  (side-effect-free, independently importable for tests).
+- Native-idiom detection + hint tables + the state schema live in `_state.py`
+  (side-effect-free, independently importable for tests). The stateful
+  cross-cell NameError scan lives beside the after_exec hook in this module.
 - Both hooks are graph-edge nodes that run outside the exec turn, so they read
   their own plugin fields directly off `state` (the prefixed attrs
   `ava_sdk_reminder__reminded` / `__last_seen_compact`) and return deltas as a
@@ -40,19 +47,22 @@ Mechanics:
   REMOVE_ALL replacement is order-sensitive and would drop a note appended in
   the same pass. So the agent_reply hook defers (returns None, does not mark) on
   any turn where auto-compact would fire, skipping this inbound rather than
-  racing the replacement. The 4 code categories ride on after_exec, which never
-  collides with compaction.
+  racing the replacement. The after_exec reminder families never collide with
+  compaction.
 """
 
 from __future__ import annotations
 
+import builtins
+import keyword
+import re
 from typing import Literal
 
-__description__ = "Surface the matching ava SDK primitive the first time the agent uses a native-Python equivalent (subprocess / time.sleep / file ops / http) or replies to another agent in plain text"
+__description__ = "Surface matching ava SDK primitives, explain cross-cell NameErrors caused by fresh interpreters, and point plain-text agent replies at ava.agents.send_message"
 
 from datetime import UTC, datetime
 
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
@@ -64,6 +74,7 @@ from agent.messages import NoteTag, system_note_message, tail_has_agent_inbound
 from agent.state import AgentState, register_plugin_state
 from shared.config.turn_view import turn_settings
 from shared.log import logger
+from shared.message_kwargs import message_content
 
 from ._state import (
     AGENT_REPLY_CATEGORY,
@@ -81,6 +92,43 @@ register_plugin_state(AvaSdkReminderState)
 # because the in-turn handle (state_handle.read/update) is not wired up here.
 _REMINDED_FIELD = "ava_sdk_reminder__reminded"
 _BOOKMARK_FIELD = "ava_sdk_reminder__last_seen_compact"
+_NAMEERROR_CATEGORY_PREFIX = "nameerror:"
+_NAMEERROR_RE = re.compile(r"(?:^|\n)NameError: name '([^'\n]+)' is not defined\b")
+
+
+def _assumed_persistence_name(
+    previous_messages: list[AnyMessage], out_msg: ToolMessage
+) -> str | None:
+    """Return the undefined name only when it appeared in an earlier code cell."""
+    output = message_content(out_msg)
+    if not isinstance(output, str):
+        return None
+    match = _NAMEERROR_RE.search(output)
+    if match is None:
+        return None
+
+    name = match.group(1)
+    if not name.isidentifier() or keyword.iskeyword(name) or name in vars(builtins):
+        return None
+
+    whole_name = re.compile(rf"(?<!\w){re.escape(name)}(?!\w)")
+    for message in reversed(previous_messages):
+        if not isinstance(message, AIMessage) or not message.tool_calls:
+            continue
+        if message.tool_calls[0]["name"] != "execute_code":
+            continue
+        previous_code = first_tool_call_code(message.tool_calls)
+        if whole_name.search(previous_code):
+            return name
+    return None
+
+
+def _nameerror_persistence_hint(name: str) -> str:
+    return (
+        f"NameError: '{name}' was defined in an earlier execute_code call, "
+        "but each call runs in a fresh interpreter — variables do not persist "
+        "between calls. Re-define it here, or carry state via files or shell sessions."
+    )
 
 
 def _rearmed_reminded(state: AgentState) -> tuple[set[str], int]:
@@ -107,8 +155,8 @@ def _rearmed_reminded(state: AgentState) -> tuple[set[str], int]:
 
 
 class _SdkReminderAfterExecHook(Hook):
-    """Inject a one-time SDK-primitive note as its own system-styled message
-    when the cell used a native-Python equivalent.
+    """Inject an SDK-primitive or interpreter-persistence note as its own
+    system-styled message after the matching execution output.
 
     The note is a separate `system_note_message`, not text appended to the
     execution output: an appended line reads as the cell's own stdout, which
@@ -120,9 +168,9 @@ class _SdkReminderAfterExecHook(Hook):
     wait hint is suppressed (marked seen without emitting) rather than nagging.
 
     No-op (returns None) when the message tail does not match the
-    assistant-call + execution-output shape, when the code matched nothing,
-    or when every matched category has already been hinted (or silently
-    suppressed and marked) this context window.
+    assistant-call + execution-output shape, when neither a native idiom nor a
+    qualifying NameError matches, or when every match is suppressed or already
+    recorded under its once-per-compaction cadence.
     """
 
     async def __call__(
@@ -147,7 +195,12 @@ class _SdkReminderAfterExecHook(Hook):
             return None
 
         matched = detect_categories(code)
-        if not matched:
+        nameerror_name = (
+            _assumed_persistence_name(state.messages[:-2], out_msg)
+            if turn_settings.agent.sdk_nameerror_hint_enabled
+            else None
+        )
+        if not matched and nameerror_name is None:
             return None
 
         reminded, new_bookmark = _rearmed_reminded(state)
@@ -158,13 +211,22 @@ class _SdkReminderAfterExecHook(Hook):
         # later this context window.
         silent = {"wait"} if "wait" in matched and mentions_watcher(code) else set()
 
-        hinted = [cat for cat in matched if cat not in reminded and cat not in silent]
+        if turn_settings.agent.sdk_code_reminder_cadence == "every_time":
+            hinted = [cat for cat in matched if cat not in silent]
+        else:
+            hinted = [cat for cat in matched if cat not in reminded and cat not in silent]
         newly_seen = set(hinted) | (silent - reminded)
+        nameerror_hint = None
+        if nameerror_name is not None:
+            nameerror_category = f"{_NAMEERROR_CATEGORY_PREFIX}{nameerror_name}"
+            if nameerror_category not in reminded:
+                newly_seen.add(nameerror_category)
+                nameerror_hint = _nameerror_persistence_hint(nameerror_name)
         if not newly_seen:
-            # Every matched category is already seen this window (or silently
+            # Every once-scoped match is already seen this window (or silently
             # suppressed and already marked). The bookmark only advances on a path
-            # that records a fresh category, and a re-arm clears `reminded` (making
-            # every match fresh again) — so this no-op never strands a pending
+            # that records a fresh key, and a re-arm clears `reminded` (making every
+            # once-scoped match fresh again) — so this no-op never strands a pending
             # bookmark advance.
             return None
 
@@ -172,8 +234,11 @@ class _SdkReminderAfterExecHook(Hook):
             _REMINDED_FIELD: reminded | newly_seen,
             _BOOKMARK_FIELD: new_bookmark,
         }
-        if hinted:
-            hints = "\n".join(hint_for(cat) for cat in hinted)
+        if hinted or nameerror_hint is not None:
+            hint_lines = [hint_for(cat) for cat in hinted]
+            if nameerror_hint is not None:
+                hint_lines.append(nameerror_hint)
+            hints = "\n".join(hint_lines)
             # Emit the hint as its own system-styled note appended after the
             # exec-output message (a fresh message with no id, so the reducer adds
             # rather than replaces). Splicing it onto out_msg.content would read as

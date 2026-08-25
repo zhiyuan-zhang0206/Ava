@@ -1,6 +1,6 @@
 """Agent compaction policy — AgentCompactionSettings.
 
-Force-compact ceiling (fraction + absolute token cap), the soft wind-down reminder, and the reply-reminder cadence — the knobs that bound a growing context window. Split out of the former flat AgentSettings schema; each field keeps its exact env alias so the .env surface is unchanged."""
+Force-compact ceiling (fraction + absolute token cap), the soft wind-down reminder, and reminder controls — the knobs that bound a growing context window. Split out of the former flat AgentSettings schema; each field keeps its exact env alias so the .env surface is unchanged."""
 
 from __future__ import annotations
 
@@ -85,6 +85,43 @@ class AgentCompactionSettings(EnvSettings):
             "`ava.agents.send_message` when another agent's message arrives (a plain "
             "text reply is never delivered). 'once_per_compaction': at most once per "
             "context window (default). 'every_time': on every agent inbound."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-default",
+            "per_agent": True,
+            "lifecycle": "live",
+        },
+    )
+
+    sdk_code_reminder_cadence: Literal["once_per_compaction", "every_time"] = Field(
+        default="once_per_compaction",
+        alias="AVA_SDK_CODE_REMINDER_CADENCE",
+        description=(
+            "How often SDK code-category reminders fire — the notes pointing at "
+            "the matching `ava` primitive after a native Python equivalent is "
+            "detected. 'once_per_compaction': at most once per category per context "
+            "window (default). 'every_time': on every matching code cell."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-default",
+            "per_agent": True,
+            "lifecycle": "live",
+        },
+    )
+
+    sdk_nameerror_hint_enabled: bool = Field(
+        default=True,
+        alias="AVA_SDK_NAMEERROR_HINT_ENABLED",
+        description=(
+            "Whether to surface an interpreter-persistence hint when an "
+            "execute_code NameError references a name used in an earlier code "
+            "cell. Enabled by default; disable to suppress the hint."
         ),
         json_schema_extra={
             "restart_required": "agent",

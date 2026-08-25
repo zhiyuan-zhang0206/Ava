@@ -16,6 +16,10 @@ Covered:
   the wait category seen WITHOUT emitting (the agent is using the watcher
   primitive itself) while any other matched category still hints; the pure
   mentions_watcher matcher.
+- after_exec (assumed-persistence NameError): an undefined identifier hints
+  only when its whole name appeared in an earlier execute_code cell; the
+  current cell, builtins, keywords, disabled config, and repeated same-name
+  failures stay silent.
 - before_llm (agent_reply): first inbound from another agent injects a
   system-note + marks; second no-ops; a compaction re-arms; user/ui inbound
   no-ops; the note defers when auto-compact would fire the same turn (it would
@@ -129,15 +133,23 @@ def _config() -> RunnableConfig:
     return {"configurable": {"thread_id": "1"}}
 
 
-def _cell(code: str, output: str = "stdout text") -> list[AnyMessage]:
+def _cell(code: str, output: str = "stdout text", *, id_suffix: str = "1") -> list[AnyMessage]:
     """A minimal post-exec message tail: an assistant execute_code call
     followed by its execution-output message."""
+    tool_call_id = f"c{id_suffix}"
     ai = AIMessage(
         content="",
-        tool_calls=[{"name": "execute_code", "args": {"code": code}, "id": "c1"}],
+        tool_calls=[{"name": "execute_code", "args": {"code": code}, "id": tool_call_id}],
     )
-    out = ToolMessage(content=output, tool_call_id="c1", id="out-1")
-    return [HumanMessage(content="do it", id="h1"), ai, out]
+    out = ToolMessage(content=output, tool_call_id=tool_call_id, id=f"out-{id_suffix}")
+    return [HumanMessage(content="do it", id=f"h{id_suffix}"), ai, out]
+
+
+def _nameerror_output(name: str) -> str:
+    return (
+        'Traceback (most recent call last):\n  File "<ava-exec>", line 1, in <module>\n'
+        f"NameError: name '{name}' is not defined"
+    )
 
 
 def _agent_inbound(content: str = "ping", source: str = "agent:7") -> AnyMessage:
@@ -225,6 +237,52 @@ async def test_second_hit_same_category_no_append(_loaded: Any):
     state = _state(_cell("subprocess.run(['ls'])"), ava_sdk_reminder__reminded={"shell"})
     result = await hook(state, _runtime(), _config())
     assert result is None
+
+
+async def test_code_every_time_cadence_hints_two_consecutive_matching_cells(
+    _loaded: Any, monkeypatch: pytest.MonkeyPatch
+):
+    """`every_time` bypasses the reminded gate for code categories, so two
+    consecutive shell cells each receive the shell hint."""
+    from shared.config import settings
+
+    monkeypatch.setattr(settings.agent, "sdk_code_reminder_cadence", "every_time")
+    hook = _loaded.sdk_reminder_after_exec
+
+    first = await hook(_state(_cell("subprocess.run(['first'])")), _runtime(), _config())
+    assert first is not None
+    second_state = _state(
+        _cell("subprocess.run(['second'])"),
+        ava_sdk_reminder__reminded=first["ava_sdk_reminder__reminded"],
+        ava_sdk_reminder__last_seen_compact=first["ava_sdk_reminder__last_seen_compact"],
+    )
+    second = await hook(second_state, _runtime(), _config())
+
+    assert second is not None
+    for result in (first, second):
+        [note] = result["messages"]
+        assert "ava.shell.run" in note.content
+
+
+async def test_code_once_cadence_hints_only_first_consecutive_matching_cell(
+    _loaded: Any, monkeypatch: pytest.MonkeyPatch
+):
+    """`once_per_compaction` (the default) preserves the existing behavior:
+    the first shell cell hints and the next shell cell in the window no-ops."""
+    from shared.config import settings
+
+    monkeypatch.setattr(settings.agent, "sdk_code_reminder_cadence", "once_per_compaction")
+    hook = _loaded.sdk_reminder_after_exec
+
+    first = await hook(_state(_cell("subprocess.run(['first'])")), _runtime(), _config())
+    assert first is not None
+    second_state = _state(
+        _cell("subprocess.run(['second'])"),
+        ava_sdk_reminder__reminded=first["ava_sdk_reminder__reminded"],
+        ava_sdk_reminder__last_seen_compact=first["ava_sdk_reminder__last_seen_compact"],
+    )
+
+    assert await hook(second_state, _runtime(), _config()) is None
 
 
 async def test_different_categories_each_fire_once(_loaded: Any):
@@ -419,6 +477,89 @@ async def test_short_history_is_noop(_loaded: Any):
     state = _state([ToolMessage(content="x", tool_call_id="c1", id="o1")])
     result = await hook(state, _runtime(), _config())
     assert result is None
+
+
+# ── assumed-persistence NameError hint ─────────────────────────────────────
+
+
+async def test_nameerror_for_name_used_in_earlier_cell_hints(_loaded: Any):
+    hook = _loaded.sdk_reminder_after_exec
+    messages = _cell("cache = {'ready': True}", id_suffix="1") + _cell(
+        "print(cache)", _nameerror_output("cache"), id_suffix="2"
+    )
+    result = await hook(_state(messages), _runtime(), _config())
+
+    assert result is not None
+    [note] = result["messages"]
+    assert note.content == (
+        "[system] NameError: 'cache' was defined in an earlier execute_code call, "
+        "but each call runs in a fresh interpreter — variables do not persist "
+        "between calls. Re-define it here, or carry state via files or shell sessions."
+    )
+    assert result["ava_sdk_reminder__reminded"] == {"nameerror:cache"}
+
+
+async def test_nameerror_with_python_suggestion_suffix_hints(_loaded: Any):
+    """Python may append a `Did you mean` clause to the NameError line; the
+    stable `name 'X' is not defined` prefix still identifies the failure."""
+    hook = _loaded.sdk_reminder_after_exec
+    output = _nameerror_output("listt") + ". Did you mean: 'list'?"
+    messages = _cell("listt = [1]", id_suffix="1") + _cell("print(listt)", output, id_suffix="2")
+
+    assert await hook(_state(messages), _runtime(), _config()) is not None
+
+
+async def test_nameerror_without_prior_whole_name_is_noop(_loaded: Any):
+    """A substring in an earlier cell does not count, and the current cell is
+    excluded from the search even though it necessarily contains the name."""
+    hook = _loaded.sdk_reminder_after_exec
+    messages = _cell("cached_value = 1", id_suffix="1") + _cell(
+        "print(cache)", _nameerror_output("cache"), id_suffix="2"
+    )
+
+    assert await hook(_state(messages), _runtime(), _config()) is None
+
+
+async def test_nameerror_hint_disabled_is_noop(_loaded: Any, monkeypatch: pytest.MonkeyPatch):
+    from shared.config import settings
+
+    monkeypatch.setattr(settings.agent, "sdk_nameerror_hint_enabled", False)
+    hook = _loaded.sdk_reminder_after_exec
+    messages = _cell("cache = 1", id_suffix="1") + _cell(
+        "print(cache)", _nameerror_output("cache"), id_suffix="2"
+    )
+
+    assert await hook(_state(messages), _runtime(), _config()) is None
+
+
+async def test_repeated_nameerror_for_same_name_hints_once_per_window(_loaded: Any):
+    hook = _loaded.sdk_reminder_after_exec
+    first_messages = _cell("cache = 1", id_suffix="1") + _cell(
+        "print(cache)", _nameerror_output("cache"), id_suffix="2"
+    )
+    first = await hook(_state(first_messages), _runtime(), _config())
+    assert first is not None
+
+    second_messages = first_messages + _cell(
+        "print(cache)", _nameerror_output("cache"), id_suffix="3"
+    )
+    second_state = _state(
+        second_messages,
+        ava_sdk_reminder__reminded=first["ava_sdk_reminder__reminded"],
+        ava_sdk_reminder__last_seen_compact=first["ava_sdk_reminder__last_seen_compact"],
+    )
+
+    assert await hook(second_state, _runtime(), _config()) is None
+
+
+@pytest.mark.parametrize("name", ["len", "for"])
+async def test_nameerror_hint_skips_builtins_and_keywords(_loaded: Any, name: str):
+    hook = _loaded.sdk_reminder_after_exec
+    messages = _cell(f"{name} = 1", id_suffix="1") + _cell(
+        f"print({name})", _nameerror_output(name), id_suffix="2"
+    )
+
+    assert await hook(_state(messages), _runtime(), _config()) is None
 
 
 # ── the agent_reply matcher (inbound tail scan) ─────────────────────────────
