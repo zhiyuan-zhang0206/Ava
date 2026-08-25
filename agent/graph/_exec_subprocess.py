@@ -202,6 +202,7 @@ async def _poll_child(
             pending = stream.take_pending()
             if pending:
                 chunk_publisher.publish(pending)
+            chunk_publisher.maybe_keepalive()
 
         if cancel_event.is_set():
             _exec_process.signal_child(proc, signal.SIGINT, domain_close)

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import os
 import threading
 import time
@@ -423,6 +424,53 @@ async def test_subprocess_streaming_chunks_published_incrementally(tmp_path: Pat
     assert isinstance(result, _ExecDone)
     # Chunks arrived before the final result (≥2 publishes = live streaming).
     assert emitter.emit.call_count >= 2
+
+
+async def test_subprocess_silent_child_publishes_keepalive(tmp_path: Path) -> None:
+    """A silent live child still publishes an empty keepalive frame."""
+    emitter = MagicMock()
+    publisher = ExecOutputChunkPublisher(emitter, agent_id=_AGENT_ID, item_id="7.0")
+
+    result = await _run(
+        tmp_path,
+        "import time; time.sleep(1.3)",
+        timeout=30.0,
+        chunk_publisher=publisher,
+    )
+
+    assert isinstance(result, _ExecDone)
+    assert result.output == ""
+    events = [json.loads(call.args[0]) for call in emitter.emit.call_args_list]
+    keepalives = [event for event in events if event["keepalive"] is True]
+    assert keepalives
+    assert all(event["content"] == "" for event in keepalives)
+
+
+def test_chunk_publisher_real_output_resets_keepalive_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Real output is activity, so it postpones the next keepalive."""
+    now = 0.0
+    monkeypatch.setattr(time, "monotonic", lambda: now)
+    emitter = MagicMock()
+    publisher = ExecOutputChunkPublisher(emitter, agent_id=_AGENT_ID, item_id="7.0")
+
+    now = 0.5
+    publisher.maybe_keepalive()
+    now = 0.75
+    publisher.publish("output")
+    now = 1.24
+    publisher.maybe_keepalive()
+    assert emitter.emit.call_count == 2
+
+    now = 1.25
+    publisher.maybe_keepalive()
+    events = [json.loads(call.args[0]) for call in emitter.emit.call_args_list]
+    assert [(event["content"], event["keepalive"]) for event in events] == [
+        ("", True),
+        ("output", False),
+        ("", True),
+    ]
 
 
 async def test_subprocess_state_snapshot_reaches_child(tmp_path: Path) -> None:

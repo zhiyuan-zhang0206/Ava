@@ -287,6 +287,7 @@ export interface ExecOutputChunkEvent extends BaseEvent {
   readonly role: "exec_output_chunk";
   readonly item_id: string;
   readonly content: string;
+  readonly keepalive?: boolean;
 }
 export interface ExecOutputEvent extends BaseEvent {
   readonly role: "exec_output";
