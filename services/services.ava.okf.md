@@ -26,7 +26,8 @@ Each service declares which machine capabilities it runs on (`ServiceSpec.capabi
 - **Host-global gateway exception**:
   [[permission_watcher/permission_watcher.ava.okf.md|permission-watcher]] runs
   under launchd rather than `ServiceSpec`, because it observes machine-wide macOS
-  permission prompts and records their lifecycle in local state and logs.
+  permission prompts, records their lifecycle/cooldown in local state, and
+  delivers system alerts through the gateway ingest.
 
 ## Core Responsibilities
 - **Independent deployment**: each daemon starts via `.venv/bin/python -m services.<name>.daemon`, fully decoupled

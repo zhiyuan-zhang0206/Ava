@@ -25,12 +25,22 @@ fallback or the manual command printed by converge.
 
 ## Permission watcher boundary
 
-The gateway host's launchd permission watcher is a pure detector: it correlates
-TCC and ALF log records, keeps pending incidents in local JSON state, and records
-new, resolved, and 30-minute-pending transitions in its log. It does not write
-`agent_notices` or send IM messages. The 2026-08-25 user ruling classifies
-permission popups as system events that must not bind to an agent's notice slot;
-delivery through the alerts channel remains pending separate integration.
+The gateway host's launchd permission watcher correlates TCC and ALF log
+records, keeps pending/cooldown state in local JSON, and posts firing/resolved
+instances to the loopback `/api/alerts` ingest. Alerts use
+`source=permission-watcher`, `alertname=permission-prompt`, and warning severity;
+the responsible application is the identity label while a varying triggering
+tool is display-only summary text. The alerts channel owns the persistent UI
+row, bell count, and IM fan-out.
+
+While an incident is pending, repeat prompt records are silent. After resolution,
+recurrences remain silent for 12 hours and are still tracked locally so their
+resolution does not produce an unmatched IM. There is no 30-minute escalation:
+an unresolved alerts row remains visible until it flips to resolved. HTTP
+delivery retries once and then logs and drops the event, with no direct-database
+fallback. In particular, the watcher never writes `agent_notices`; the
+2026-08-25 user ruling classifies permission popups as system events that must
+not bind to an agent's notice slot.
 
 ## Optional immediate containment: authorize uv Python
 

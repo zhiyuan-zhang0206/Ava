@@ -1,7 +1,7 @@
 ---
 type: doc
 title: macOS Permission Watcher
-description: Host-global launchd service that correlates TCC and Application Firewall prompt logs, persists pending incidents, and records their lifecycle in its local log.
+description: Host-global launchd service that correlates TCC and Application Firewall prompt logs, persists incident cooldown state, and delivers firing/resolved system alerts through the gateway.
 tags:
 - service
 - gateway
@@ -20,19 +20,37 @@ thread; reader threads only parse their stream and enqueue events. TCC records
 retain the responsible application as the subject and, when different, the
 requesting binary as the tool.
 
-A new incident is persisted and logged at INFO. Repeated observations refresh its
-last-seen time and correlation ID but log only at DEBUG. A matching result removes
-the incident and logs at INFO, while an incident still pending after 30 minutes
-logs one WARNING. Pending state, including whether that warning has fired, is
-atomically persisted in an owner-readable JSON file so launchd restarts preserve
-the incident lifecycle.
+A new incident is persisted in `full` mode, logged at INFO, and posted as a
+firing alert. Repeated observations while it remains pending refresh its
+last-seen time and correlation ID but never post another successful firing;
+they log only at DEBUG. If the initial post failed, a later observation retries
+the same instance using its original `first_seen` as `startsAt`.
+
+A matching result posts `resolved` only when the firing was delivered, replaying
+the same labels and `startsAt` and setting `endsAt` from the result event. The
+pending entry is then removed and its resolution time is recorded. A recurrence
+within 12 hours is tracked as a `silent` pending incident: neither its firing nor
+its resolution is posted. After 12 hours, the next recurrence starts a new full
+instance. Pending mode, delivery state, and per-key resolution times are
+atomically persisted in an owner-readable version-1 JSON file; resolution times
+older than 48 hours are pruned on save. There is no timeout or escalation tick.
 
 ## Delivery and lifecycle
 
-The watcher is a pure detector. It does not write `agent_notices` or call any
-delivery channel. The 2026-08-25 user ruling established that macOS permission
-popups are system events and must not consume an agent's notice slot. Delivery
-through the alerts channel is pending a separate integration.
+The watcher posts Alertmanager-webhook-shaped payloads to the loopback gateway
+at `http://127.0.0.1:8000/api/alerts`, with
+`source=permission-watcher`, `alertname=permission-prompt`, and
+`severity=warning`. Labels use permission kind plus the responsible application
+subject; the variable triggering tool appears only in the Chinese summary so it
+cannot fragment alert identity. The alerts ingest owns persistence, UI/SSE
+visibility, and IM fan-out.
+
+The poster reads `AVA_OPS_ALERTS_WEBHOOK_TOKEN` from the prod home's `.env`
+(with the process settings as fallback), sends it in `X-Alerts-Token`, and
+retries one failed HTTP attempt after a short backoff. A second failure is
+logged and dropped. There is no direct-database fallback and no
+`agent_notices` write: the 2026-08-25 user ruling classifies permission popups
+as system events, not agent-owned notices.
 
 `cli/commands/_converge_permission_watcher.py` installs
 `com.ava.permission-watcher` as a gateway-scoped, host-global LaunchAgent with
@@ -43,3 +61,4 @@ plist is a strict converge no-op.
 ## Dependencies
 
 - [[cli/commands/commands.ava.okf.md]] — launchd convergence
+- [[gateway/routers/alerts.ava.okf.md]] — alert ingest, storage, SSE, and IM fan-out

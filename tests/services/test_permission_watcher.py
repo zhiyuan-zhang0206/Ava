@@ -8,7 +8,9 @@ import plistlib
 import subprocess
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import cast
 
+import httpx
 import pytest
 
 import cli.commands._converge as cv
@@ -147,11 +149,16 @@ def _event(
     return watcher.PermissionEvent(kind, phase, subject, when, correlation_id, tool)
 
 
-def test_new_prompt_logs_info_once_and_repeats_only_refresh_pending(
+def _only_alert(payload: dict[str, object]) -> dict[str, object]:
+    return cast(list[dict[str, object]], payload["alerts"])[0]
+
+
+def test_new_prompt_posts_one_firing_alert_and_repeats_only_refresh_pending(
     caplog: pytest.LogCaptureFixture, tmp_path: Path
 ) -> None:
     caplog.set_level(logging.DEBUG, logger="ava.permission_watcher")
-    service = watcher.PermissionWatcher(tmp_path / "state.json")
+    posts: list[dict[str, object]] = []
+    service = watcher.PermissionWatcher(tmp_path / "state.json", posts.append)
     service.observe(
         _event(
             watcher.PermissionKind.TCC,
@@ -177,55 +184,187 @@ def test_new_prompt_logs_info_once_and_repeats_only_refresh_pending(
     assert pending.last_seen == repeated_at
     assert pending.correlation_id == "request-2"
     assert pending.tool == "/usr/bin/find"
+    assert pending.mode == "full"
+    assert pending.alert_posted is True
+    assert len(posts) == 1
+    assert posts[0]["source"] == "permission-watcher"
+    assert posts[0]["status"] == "firing"
+    alert = _only_alert(posts[0])
+    assert alert["status"] == "firing"
+    assert alert["labels"] == {
+        "alertname": "permission-prompt",
+        "severity": "warning",
+        "kind": "TCC",
+        "subject": _UV_PYTHON,
+    }
+    assert alert["startsAt"] == _T0.isoformat()
+    assert alert["endsAt"] == ""
+    summary = cast(dict[str, str], alert["annotations"])["summary"]
+    assert _UV_PYTHON in summary
+    assert "/usr/bin/find" in summary
     info_messages = [
         record.getMessage() for record in caplog.records if record.levelno == logging.INFO
     ]
     assert info_messages == [f"permission prompt: kind=TCC subject={_UV_PYTHON} tool=/usr/bin/find"]
 
 
-def test_resolution_pops_pending_and_logs_info(
+def test_resolution_posts_same_alert_instance_and_records_resolution(
     caplog: pytest.LogCaptureFixture, tmp_path: Path
 ) -> None:
     caplog.set_level(logging.DEBUG, logger="ava.permission_watcher")
-    service = watcher.PermissionWatcher(tmp_path / "state.json")
+    posts: list[dict[str, object]] = []
+    service = watcher.PermissionWatcher(tmp_path / "state.json", posts.append)
     service.observe(_event(watcher.PermissionKind.ALF, watcher.EventPhase.PROMPTING, _T0))
     caplog.clear()
-    service.observe(
-        _event(watcher.PermissionKind.ALF, watcher.EventPhase.RESOLVED, _T0 + timedelta(seconds=10))
-    )
+    resolved_at = _T0 + timedelta(seconds=10)
+    service.observe(_event(watcher.PermissionKind.ALF, watcher.EventPhase.RESOLVED, resolved_at))
 
     assert service.pending == {}
+    assert service.resolved == {f"ALF:{_UV_PYTHON}": resolved_at}
+    assert len(posts) == 2
+    firing = _only_alert(posts[0])
+    resolved = _only_alert(posts[1])
+    assert posts[1]["status"] == "resolved"
+    assert resolved["status"] == "resolved"
+    assert resolved["labels"] == firing["labels"]
+    assert resolved["startsAt"] == firing["startsAt"] == _T0.isoformat()
+    assert resolved["endsAt"] == resolved_at.isoformat()
     assert [record.getMessage() for record in caplog.records if record.levelno == logging.INFO] == [
         f"permission prompt resolved: kind=ALF subject={_UV_PYTHON}"
     ]
 
 
-def test_escalation_logs_warning_once_per_incident(
+def test_resolved_cooldown_tracks_silent_recurrence_then_allows_new_alert(
     caplog: pytest.LogCaptureFixture, tmp_path: Path
 ) -> None:
     caplog.set_level(logging.DEBUG, logger="ava.permission_watcher")
-    service = watcher.PermissionWatcher(tmp_path / "state.json")
-    service.observe(_event(watcher.PermissionKind.TCC, watcher.EventPhase.PROMPTING, _T0))
+    posts: list[dict[str, object]] = []
+    service = watcher.PermissionWatcher(tmp_path / "state.json", posts.append)
+    key = f"TCC:{_UV_PYTHON}"
+
+    service.observe(
+        _event(
+            watcher.PermissionKind.TCC,
+            watcher.EventPhase.PROMPTING,
+            _T0,
+            tool="/usr/bin/find",
+        )
+    )
+    first_resolved_at = _T0 + timedelta(minutes=1)
+    service.observe(
+        _event(watcher.PermissionKind.TCC, watcher.EventPhase.RESOLVED, first_resolved_at)
+    )
     caplog.clear()
 
-    service.check_timeouts(_T0 + timedelta(minutes=29, seconds=59))
-    service.check_timeouts(_T0 + timedelta(minutes=30))
-    service.check_timeouts(_T0 + timedelta(hours=1))
+    silent_started_at = first_resolved_at + timedelta(hours=11)
+    service.observe(
+        _event(
+            watcher.PermissionKind.TCC,
+            watcher.EventPhase.PROMPTING,
+            silent_started_at,
+            correlation_id="request-2",
+            tool="/usr/bin/du",
+        )
+    )
+    silent = service.pending[key]
+    assert silent.mode == "silent"
+    assert silent.alert_posted is False
+    assert len(posts) == 2
+    assert any(
+        f"suppressing repeat alert for {key} (resolved {first_resolved_at.isoformat()})"
+        in record.getMessage()
+        for record in caplog.records
+        if record.levelno == logging.INFO
+    )
 
-    warning_messages = [
-        record.getMessage() for record in caplog.records if record.levelno == logging.WARNING
-    ]
-    assert warning_messages == [
-        f"permission prompt still pending 30min: kind=TCC subject={_UV_PYTHON}"
-    ]
-    assert next(iter(service.pending.values())).escalated is True
+    silent_resolved_at = silent_started_at + timedelta(minutes=1)
+    service.observe(
+        _event(
+            watcher.PermissionKind.TCC,
+            watcher.EventPhase.RESOLVED,
+            silent_resolved_at,
+            correlation_id="request-2",
+        )
+    )
+    assert service.pending == {}
+    assert service.resolved[key] == silent_resolved_at
+    assert len(posts) == 2
+
+    next_started_at = silent_resolved_at + watcher.RECUR_SILENCE + timedelta(seconds=1)
+    service.observe(
+        _event(
+            watcher.PermissionKind.TCC,
+            watcher.EventPhase.PROMPTING,
+            next_started_at,
+            correlation_id="request-3",
+            tool="/usr/bin/rg",
+        )
+    )
+    assert service.pending[key].mode == "full"
+    assert service.pending[key].alert_posted is True
+    assert len(posts) == 3
+    assert _only_alert(posts[-1])["startsAt"] == next_started_at.isoformat()
 
 
-def test_pending_state_round_trip_omits_notified_and_loads_legacy_shape(
+def test_failed_firing_post_retries_on_repeat_with_same_starts_at(
+    caplog: pytest.LogCaptureFixture, tmp_path: Path
+) -> None:
+    attempts: list[dict[str, object]] = []
+
+    def fail_once(payload: dict[str, object]) -> None:
+        attempts.append(payload)
+        if len(attempts) == 1:
+            raise RuntimeError("gateway unavailable")
+
+    caplog.set_level(logging.DEBUG, logger="ava.permission_watcher")
+    service = watcher.PermissionWatcher(tmp_path / "state.json", fail_once)
+    service.observe(_event(watcher.PermissionKind.TCC, watcher.EventPhase.PROMPTING, _T0))
+    pending = next(iter(service.pending.values()))
+    assert pending.alert_posted is False
+    assert any(record.levelno == logging.WARNING for record in caplog.records)
+
+    service.observe(
+        _event(
+            watcher.PermissionKind.TCC,
+            watcher.EventPhase.PROMPTING,
+            _T0 + timedelta(hours=6),
+            correlation_id="request-2",
+        )
+    )
+    assert len(attempts) == 2
+    assert _only_alert(attempts[0])["startsAt"] == _T0.isoformat()
+    assert _only_alert(attempts[1])["startsAt"] == _T0.isoformat()
+    assert next(iter(service.pending.values())).alert_posted is True
+
+
+def test_failed_resolved_post_still_closes_pending(
+    caplog: pytest.LogCaptureFixture, tmp_path: Path
+) -> None:
+    calls = 0
+
+    def fail_resolution(_payload: dict[str, object]) -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise RuntimeError("gateway unavailable")
+
+    caplog.set_level(logging.DEBUG, logger="ava.permission_watcher")
+    service = watcher.PermissionWatcher(tmp_path / "state.json", fail_resolution)
+    service.observe(_event(watcher.PermissionKind.TCC, watcher.EventPhase.PROMPTING, _T0))
+    resolved_at = _T0 + timedelta(minutes=1)
+    service.observe(_event(watcher.PermissionKind.TCC, watcher.EventPhase.RESOLVED, resolved_at))
+
+    assert service.pending == {}
+    assert service.resolved == {f"TCC:{_UV_PYTHON}": resolved_at}
+    assert any(record.levelno == logging.WARNING for record in caplog.records)
+
+
+def test_state_round_trip_persists_modes_delivery_and_resolutions_and_loads_old_shape(
     tmp_path: Path,
 ) -> None:
     state_path = tmp_path / "permission-watcher.json"
-    first = watcher.PermissionWatcher(state_path)
+    posts: list[dict[str, object]] = []
+    first = watcher.PermissionWatcher(state_path, posts.append)
     first.observe(
         _event(
             watcher.PermissionKind.TCC,
@@ -234,29 +373,143 @@ def test_pending_state_round_trip_omits_notified_and_loads_legacy_shape(
             tool="/usr/bin/find",
         )
     )
-    first.check_timeouts(_T0 + timedelta(minutes=30))
+    first.observe(
+        _event(
+            watcher.PermissionKind.TCC,
+            watcher.EventPhase.RESOLVED,
+            _T0 + timedelta(minutes=1),
+        )
+    )
+    first.observe(
+        _event(
+            watcher.PermissionKind.TCC,
+            watcher.EventPhase.PROMPTING,
+            _T0 + timedelta(hours=1),
+            correlation_id="request-2",
+        )
+    )
+    first.observe(
+        _event(
+            watcher.PermissionKind.ALF,
+            watcher.EventPhase.PROMPTING,
+            _T0 + timedelta(hours=1),
+            subject="/Applications/Firewall.app",
+        )
+    )
 
     state = json.loads(state_path.read_text())
-    persisted = next(iter(state["pending"].values()))
-    assert "notified" not in persisted
+    silent_persisted = state["pending"][f"TCC:{_UV_PYTHON}"]
+    full_persisted = state["pending"]["ALF:/Applications/Firewall.app"]
+    assert "notified" not in silent_persisted
+    assert "escalated" not in silent_persisted
+    assert silent_persisted["mode"] == "silent"
+    assert silent_persisted["alert_posted"] is False
+    assert full_persisted["mode"] == "full"
+    assert full_persisted["alert_posted"] is True
+    assert state["resolved"] == {f"TCC:{_UV_PYTHON}": (_T0 + timedelta(minutes=1)).isoformat()}
 
-    restarted = watcher.PermissionWatcher(state_path)
-    pending = next(iter(restarted.pending.values()))
-    assert pending.first_seen == _T0
-    assert pending.last_seen == _T0
-    assert pending.correlation_id == "request-1"
-    assert pending.tool == "/usr/bin/find"
-    assert pending.escalated is True
+    restarted = watcher.PermissionWatcher(state_path, posts.append)
+    assert restarted.pending[f"TCC:{_UV_PYTHON}"].mode == "silent"
+    assert restarted.pending[f"TCC:{_UV_PYTHON}"].alert_posted is False
+    assert restarted.pending["ALF:/Applications/Firewall.app"].mode == "full"
+    assert restarted.pending["ALF:/Applications/Firewall.app"].alert_posted is True
+    assert restarted.resolved == {f"TCC:{_UV_PYTHON}": _T0 + timedelta(minutes=1)}
 
-    persisted["notified"] = True
-    persisted.pop("tool")
+    legacy = state["pending"][f"TCC:{_UV_PYTHON}"]
+    legacy.pop("mode")
+    legacy.pop("alert_posted")
+    legacy.pop("tool")
+    state.pop("resolved")
     state_path.write_text(json.dumps(state))
 
-    legacy_restarted = watcher.PermissionWatcher(state_path)
-    legacy_pending = next(iter(legacy_restarted.pending.values()))
-    assert legacy_pending.first_seen == _T0
-    assert legacy_pending.escalated is True
+    legacy_restarted = watcher.PermissionWatcher(state_path, posts.append)
+    legacy_pending = legacy_restarted.pending[f"TCC:{_UV_PYTHON}"]
+    assert legacy_pending.mode == "full"
+    assert legacy_pending.alert_posted is False
     assert legacy_pending.tool is None
+    assert legacy_restarted.resolved == {}
+
+
+def test_state_save_prunes_resolutions_older_than_48_hours(tmp_path: Path) -> None:
+    state_path = tmp_path / "permission-watcher.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "pending": {},
+                "resolved": {
+                    "TCC:/old": (_T0 - timedelta(hours=49)).isoformat(),
+                    "TCC:/recent": (_T0 - timedelta(hours=47)).isoformat(),
+                },
+            }
+        )
+    )
+    service = watcher.PermissionWatcher(state_path, lambda _payload: None)
+    service.observe(
+        _event(
+            watcher.PermissionKind.ALF,
+            watcher.EventPhase.PROMPTING,
+            _T0,
+            subject="/Applications/New.app",
+        )
+    )
+
+    assert json.loads(state_path.read_text())["resolved"] == {
+        "TCC:/recent": (_T0 - timedelta(hours=47)).isoformat()
+    }
+
+
+def test_default_poster_reads_token_posts_to_loopback_and_retries_once(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    env_path = tmp_path / ".env"
+    env_path.write_text('AVA_OPS_ALERTS_WEBHOOK_TOKEN="secret-token"\n')
+    calls: list[tuple[str, dict[str, object]]] = []
+    sleeps: list[float] = []
+
+    def fake_post(url: str, **kwargs: object) -> httpx.Response:
+        calls.append((url, kwargs))
+        if len(calls) == 1:
+            return httpx.Response(503, request=httpx.Request("POST", url))
+        return httpx.Response(200, request=httpx.Request("POST", url))
+
+    monkeypatch.setattr(watcher.httpx, "post", fake_post)
+    monkeypatch.setattr(watcher.time, "sleep", sleeps.append)
+    payload: dict[str, object] = {"source": "permission-watcher", "alerts": []}
+    watcher.post_alert(payload, env_path=env_path)
+
+    assert len(calls) == 2
+    assert calls[0][0] == calls[1][0] == "http://127.0.0.1:8000/api/alerts"
+    assert calls[1][1] == {
+        "json": payload,
+        "headers": {"X-Alerts-Token": "secret-token"},
+        "timeout": 10.0,
+    }
+    assert sleeps == [2.0]
+
+
+def test_default_poster_warns_and_raises_after_second_failure(
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    env_path = tmp_path / ".env"
+    env_path.write_text("AVA_OPS_ALERTS_WEBHOOK_TOKEN=secret-token\n")
+    attempts = 0
+
+    def fail_post(_url: str, **_kwargs: object) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        raise httpx.ConnectError("gateway unavailable")
+
+    caplog.set_level(logging.WARNING, logger="ava.permission_watcher")
+    monkeypatch.setattr(watcher.httpx, "post", fail_post)
+    monkeypatch.setattr(watcher.time, "sleep", lambda _seconds: None)
+    with pytest.raises(httpx.ConnectError):
+        watcher.post_alert({"source": "permission-watcher", "alerts": []}, env_path=env_path)
+
+    assert attempts == 2
+    assert any(
+        "permission alert delivery failed after retry" in r.getMessage() for r in caplog.records
+    )
 
 
 def _ctx(repo: Path, home: Path) -> cv.ConvergeCtx:

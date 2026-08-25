@@ -456,7 +456,8 @@ CREATE TABLE alerts (
     ends_at      TIMESTAMPTZ,
     fingerprint  TEXT NOT NULL,
     generator_url TEXT NOT NULL DEFAULT '',
-    -- Provenance: 'grafana' (webhook default), 'health-probe', 'machine-probe'.
+    -- Provenance: 'grafana' (webhook default), 'health-probe', 'machine-probe',
+    -- 'permission-watcher'.
     source       TEXT NOT NULL DEFAULT 'grafana',
     read_at      TIMESTAMPTZ,
     notified_at  TIMESTAMPTZ,
@@ -466,6 +467,9 @@ CREATE TABLE alerts (
     CONSTRAINT alerts_status_check CHECK (status IN ('unresolved', 'resolved')),
     CONSTRAINT alerts_severity_check CHECK (severity IN ('critical', 'warning', 'error'))
 );
+
+COMMENT ON COLUMN alerts.source IS
+    'Provenance: ''grafana'' (webhook default), ''health-probe'', ''machine-probe'', ''permission-watcher''.';
 
 CREATE INDEX alerts_status_starts_idx ON alerts (status, starts_at DESC);
 CREATE INDEX alerts_unread_idx ON alerts (starts_at DESC) WHERE read_at IS NULL;
