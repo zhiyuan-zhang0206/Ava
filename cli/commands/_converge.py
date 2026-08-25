@@ -108,6 +108,26 @@ def _ensure_ava_home_dirs(ctx: ConvergeCtx) -> None:
     (ctx.ava_home / "logs" / ".metadata_never_index").touch(exist_ok=True)
 
 
+def _ensure_prod_editable_pth(ctx: ConvergeCtx) -> None:  # noqa: ARG001
+    """Keep the prod virtualenv anchored to stable, allowlisted source."""
+    import shared.cluster_drift
+    import shared.editable_install
+
+    source_root = shared.cluster_drift._prod_source_dir()
+    if source_root is None:
+        return
+    repairs = shared.editable_install.repair_editable_ava_pth(
+        source_root,
+        allowed_roots=(Path.home() / "Ava",),
+    )
+    for repair in repairs:
+        print(
+            f"  ! poisoned editable install: {repair.pth_path} pointed at "
+            f"{repair.poisoned_target!r}; repaired to {repair.source_root}",
+            file=sys.stderr,
+        )
+
+
 def _ensure_pg_binaries_step(ctx: ConvergeCtx) -> None:  # noqa: ARG001
     """Fetch the vendored relocatable Postgres (idempotent — a no-op once the
     host-level `~/.ava/runtime/` tree exists), so a gateway host needs no
@@ -471,6 +491,7 @@ def _warn_untracked_migrations(ctx: ConvergeCtx) -> None:  # noqa: ARG001
 
 
 CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
+    ConvergeStep("prod editable .pth target", _ensure_prod_editable_pth, host_global=True),
     ConvergeStep("ava symlink on PATH", _ensure_ava_symlink, host_global=True),
     ConvergeStep("~/.local/bin on PATH", _ensure_local_bin_on_path, host_global=True),
     ConvergeStep("$AVA_HOME dir skeleton", _ensure_ava_home_dirs),

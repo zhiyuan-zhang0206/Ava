@@ -19,6 +19,7 @@ from pathlib import Path
 
 from cli.commands._update_fanout import ClusterOpPayload
 from cli.commands._update_git import GitPullFailed, git_reset_hard, rollback_schema_to
+from cli.commands._update_uv_sync import run_uv_sync
 from shared.exit_codes import SERVICES_NOT_READY_EXIT_CODE
 
 # The `_fan_out` the orchestration injects into `finalize_rollout`: POST a
@@ -148,7 +149,7 @@ def _recover_gateway_local(
         _print_pre_update_data_snapshot_restore(data_snapshot)
         return 1
     print(f"  · git reset --hard {from_sha[:7]}", file=sys.stderr)
-    sync = subprocess.run(["uv", "sync"], cwd=repo, capture_output=False, check=False)
+    sync = run_uv_sync(repo, runner=subprocess.run)
     if sync.returncode != 0:
         print(
             "  ✗✗ MANUAL INTERVENTION: recovery `uv sync` failed; gateway DOWN",

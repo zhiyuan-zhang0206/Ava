@@ -46,6 +46,7 @@ _SQL_OR_DYNAMIC_KINDS = frozenset(
         "heartbeat_paused",  # ava/self.py:258 telemetry.emit("telemetry", ...)
         "frontend_interaction",  # gateway/routers/frontend_telemetry.py telemetry.emit("telemetry", ...)
         "pgbouncer_repaired",  # services/healthchecks/pgbouncer.py:_emit_repaired
+        "editable_pth_repaired",  # shared/editable_install.py:repair_editable_ava_pth
         "sdk_call",  # agent/sdk_metering.py recorder（经 shared/sdk_telemetry）
         # shared/plugin_activation.py:emit binds event=PLUGIN_ACTIVATION_EVENT (a
         # module constant, like sdk_call), so the literal scan cannot see it.
