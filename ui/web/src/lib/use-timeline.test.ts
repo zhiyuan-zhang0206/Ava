@@ -372,6 +372,44 @@ describe("useTimeline mount + initial fetch", () => {
     });
   });
 
+  it("uses a historical compact summary as a bounded continuation cursor", async () => {
+    const showError = vi.fn();
+    const summaryId = "s1.1f0b9b12-0000-6000-8000-000000000000.0.0";
+    vi.mocked(api.getTimeline)
+      .mockResolvedValueOnce(
+        tlResp(
+          [
+            snapshotItem({ item_id: "0.0", kind: "system_prompt", payload: "PROMPT" }),
+            snapshotItem({
+              item_id: "1.0",
+              kind: "inbound_compact_summary",
+              payload: "CURRENT SUMMARY",
+            }),
+            snapshotItem({ item_id: "2.0", kind: "agent_chat", payload: "current" }),
+            snapshotItem({
+              item_id: summaryId,
+              kind: "inbound_compact_summary",
+              payload: "HISTORICAL SUMMARY ONLY",
+            }),
+          ],
+          true,
+        ),
+      )
+      .mockResolvedValueOnce(tlResp([], false));
+
+    const { result } = renderHook(() => useTimeline(42, showError), { wrapper });
+    await waitFor(() => expect(result.current.hasMoreOlder).toBe(true));
+    vi.mocked(api.getTimeline).mockClear();
+
+    act(() => result.current.loadOlder());
+
+    await waitFor(() => expect(result.current.hasMoreOlder).toBe(false));
+    expect(api.getTimeline).toHaveBeenCalledWith(42, {
+      before: summaryId,
+      limit: 50,
+    });
+  });
+
   it("agentId=null sends no request and does not invoke switchThread (early return)", () => {
     // cover use-timeline.ts `if (agentId == null) return;` early-return guard.
     // Asserting that api is not called is not enough (enabled=false

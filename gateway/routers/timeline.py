@@ -149,14 +149,16 @@ def _window_or_cross(
     """Return a segment-local page or signal that the cursor is at its head.
 
     The frontend never uses re-attached context as a cursor. When every item
-    before its oldest real item is re-attached context, that context is already
-    held and the next useful page is the tail of the next older segment.
+    before its oldest real item is re-attached context, return that small head
+    once more while signaling the caller to append the next older segment.
+    Frontend de-duplication converges repeated standing context, and returning
+    it here guarantees a compact summary cannot fall between page boundaries.
     """
     idx = next((i for i, item in enumerate(items) if item.item_id == before), None)
     if idx is None:
         return [], False, False
     if all(item.kind in _REATTACHED_KINDS for item in items[:idx]):
-        return [], older_segment_available, True
+        return items[:idx], older_segment_available, True
     start = max(0, idx - limit) if limit > 0 else 0
     return items[start:idx], start > 0 or older_segment_available, False
 
@@ -181,18 +183,19 @@ def _item_sort_key(item_id: str) -> tuple[int, int]:
 
 def _load_history_tail(
     agent_id: int,
-    checkpoint_id: str,
+    boundary_ids: list[str],
     rank: int,
     limit: int,
-    boundary_count: int,
     depth: int,
 ) -> tuple[list[TimelineItem], bool]:
-    """Load and window one exact compact boundary, tolerating bad blobs."""
-    items = _load_history_segment(agent_id, checkpoint_id, rank)
+    """Load and window one exact older segment, tolerating bad blobs."""
+    if rank > len(boundary_ids) or not _depth_allows(rank, depth):
+        return [], False
+    items = _load_history_segment(agent_id, boundary_ids[rank - 1], rank)
     if not items:
         return [], False
     window, segment_has_more = tail_window(items, limit)
-    return window, segment_has_more or _older_segment_available(rank, boundary_count, depth)
+    return window, segment_has_more or _older_segment_available(rank, len(boundary_ids), depth)
 
 
 def _load_history_segment(
@@ -229,7 +232,10 @@ def _load_boundary_ids(agent_id: int, depth: int) -> list[str]:
     if depth == 0:
         return []
     try:
-        return list_compact_boundary_checkpoint_ids(agent_id)
+        return list_compact_boundary_checkpoint_ids(
+            agent_id,
+            limit=depth + 1 if depth > 0 else None,
+        )
     except CheckpointReadError as exc:
         _log.warning(
             "timeline compact history: boundary index read failed for agent %s: %r",
@@ -281,21 +287,22 @@ def _historical_window(
     )
     if not cross:
         return window, has_more
+    head = window
     if not older_available:
-        return [], False
+        return head, False
 
     # Release the requested segment before materializing the cross-segment
     # target. At most one checkpoint segment is resident during a request.
     del segment_items
     older_rank = rank + 1
-    return _load_history_tail(
+    older_window, older_has_more = _load_history_tail(
         agent_id,
-        boundary_ids[older_rank - 1],
+        boundary_ids,
         older_rank,
         limit,
-        len(boundary_ids),
         depth,
     )
+    return [*head, *older_window], older_has_more
 
 
 def _initial_window(
@@ -415,15 +422,16 @@ def get_timeline(
             older_segment_available=older_available,
         )
         if cross:
+            head = window
             if not older_available:
-                return TimelineResponse(items=[], msg_count=msg_count, has_more=False)
+                return TimelineResponse(items=head, msg_count=msg_count, has_more=False)
             del messages, items
-            window, has_more = _load_history_tail(
+            older_window, has_more = _load_history_tail(
                 agent_id,
-                boundary_ids[0],
+                boundary_ids,
                 1,
                 limit,
-                len(boundary_ids),
                 depth,
             )
+            window = [*head, *older_window]
     return TimelineResponse(items=window, msg_count=msg_count, has_more=has_more)

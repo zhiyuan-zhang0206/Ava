@@ -215,6 +215,25 @@ export interface TimelineState {
 const MAX_PARKED_THREADS = 32;
 export const MAX_TIMELINE_ITEMS = 6_000;
 
+/** Retain the chronological list's newest end while preserving its reference
+ *  when already within budget. Every production item writer routes through
+ *  this helper, so active and parked timelines share one hard invariant. */
+function capItems(items: BackendTimelineItem[]): BackendTimelineItem[] {
+  return items.length > MAX_TIMELINE_ITEMS
+    ? items.slice(items.length - MAX_TIMELINE_ITEMS)
+    : items;
+}
+
+function capThreadItems(state: ThreadTimelineState): ThreadTimelineState {
+  const items = capItems(state.items);
+  const hasMoreOlder = state.items.length >= MAX_TIMELINE_ITEMS
+    ? false
+    : state.hasMoreOlder;
+  return items === state.items && hasMoreOlder === state.hasMoreOlder
+    ? state
+    : { ...state, items, hasMoreOlder };
+}
+
 /** Evict least-recently-parked buckets until the map is within the cap. A Map
  *  preserves insertion order, and `switchThread` re-`set`s the just-parked
  *  thread last (most recent), so the oldest live at the front. Mutates in place
@@ -281,9 +300,10 @@ function applySseEvent(state: TimelineState, ev: SystemEvent): Partial<TimelineS
       const snapItems = ev.items as unknown as BackendTimelineItem[];
       if (snapItems.length === 0) return {};
       return {
-        items: snapItems,
+        items: capItems(snapItems),
         streamingIds: new Set(),
         resetPending: false,
+        hasMoreOlder: snapItems.length >= MAX_TIMELINE_ITEMS ? false : state.hasMoreOlder,
       };
     }
     const next = foldEvent(
@@ -302,11 +322,13 @@ function applySseEvent(state: TimelineState, ev: SystemEvent): Partial<TimelineS
     );
     // Unchanged fields keep their references (foldEvent carries them via
     // ...t / no-op reducers), so per-field Zustand selectors short-circuit.
+    const capped = capThreadItems(next);
     return {
-      items: next.items,
-      streamingIds: next.streamingIds,
-      streamingCode: next.streamingCode,
-      turnActive: next.turnActive,
+      items: capped.items,
+      streamingIds: capped.streamingIds,
+      streamingCode: capped.streamingCode,
+      turnActive: capped.turnActive,
+      hasMoreOlder: capped.hasMoreOlder,
     };
   }
 
@@ -347,13 +369,14 @@ function applySseEvent(state: TimelineState, ev: SystemEvent): Partial<TimelineS
       compactedThreadIds.delete(ev.agent_id);
       threads.set(ev.agent_id, {
         ...parked,
-        items: snapItems,
+        items: capItems(snapItems),
         streamingIds: new Set(),
         resetPending: false,
+        hasMoreOlder: snapItems.length >= MAX_TIMELINE_ITEMS ? false : parked.hasMoreOlder,
       });
       return { threads, compactedThreadIds };
     }
-    threads.set(ev.agent_id, foldEvent(parked, ev));
+    threads.set(ev.agent_id, capThreadItems(foldEvent(parked, ev)));
   }
   // Bucketless compact marker: compact_done arms the reset window for a
   // thread with NO parked bucket via `compactedThreadIds` (a later
@@ -441,20 +464,24 @@ export const useTimelineStore = create<TimelineState>()((set, get) => ({
       set((s) => ({
         streamingCode: false,
         turnActive: false,
-        items: s.items.some((it) => it.partial)
-          ? s.items.map((it) =>
-              it.partial && !it.interrupted ? { ...it, interrupted: true } : it,
-            )
-          : s.items,
+        items: capItems(
+          s.items.some((it) => it.partial)
+            ? s.items.map((it) =>
+                it.partial && !it.interrupted ? { ...it, interrupted: true } : it,
+              )
+            : s.items,
+        ),
       }));
     } else if (ev.type === "open") {
       // Reconnected; clear the interrupted flag — the previously
       // partial items will keep appending via deltas, so the "interrupted"
       // hint no longer applies.
       set((s) => ({
-        items: s.items.some((it) => it.interrupted)
-          ? s.items.map((it) => (it.interrupted ? { ...it, interrupted: false } : it))
-          : s.items,
+        items: capItems(
+          s.items.some((it) => it.interrupted)
+            ? s.items.map((it) => (it.interrupted ? { ...it, interrupted: false } : it))
+            : s.items,
+        ),
         // The SSE stream is the trusted source again — and the reconnect
         // invalidates the timeline query, whose GET must now be allowed to
         // apply (a compact that happened while disconnected has long since
@@ -477,11 +504,12 @@ export const useTimelineStore = create<TimelineState>()((set, get) => ({
         return { hasMoreOlder };
       }
       const snapshotIds = new Set(snapshot.map((it) => it.item_id));
+      const merged = mergeSnapshotWithStreaming(s.items, snapshot, msg_count, s.streamingIds);
       return {
         // committed ids drop out of streamingIds; still-streaming ones stay
         streamingIds: new Set([...s.streamingIds].filter((id) => !snapshotIds.has(id))),
-        items: mergeSnapshotWithStreaming(s.items, snapshot, msg_count, s.streamingIds),
-        hasMoreOlder,
+        items: capItems(merged),
+        hasMoreOlder: merged.length >= MAX_TIMELINE_ITEMS ? false : hasMoreOlder,
       };
     });
   },
@@ -503,18 +531,21 @@ export const useTimelineStore = create<TimelineState>()((set, get) => ({
       const threads = new Map(s.threads);
       // Park the outgoing active thread (its live top-level state).
       if (s.activeThreadId != null) {
-        threads.set(s.activeThreadId, {
-          items: s.items,
-          streamingIds: s.streamingIds,
-          streamingCode: s.streamingCode,
-          turnActive: s.turnActive,
-          hasMoreOlder: s.hasMoreOlder,
-          olderFetchCount: s.olderFetchCount,
-          // Carry the reset window into the parked bucket: a compact that
-          // started while the thread was active keeps its flag so the first
-          // post-compact snapshot replaces wholesale after switch-back too.
-          resetPending: s.resetPending,
-        });
+        threads.set(
+          s.activeThreadId,
+          capThreadItems({
+            items: s.items,
+            streamingIds: s.streamingIds,
+            streamingCode: s.streamingCode,
+            turnActive: s.turnActive,
+            hasMoreOlder: s.hasMoreOlder,
+            olderFetchCount: s.olderFetchCount,
+            // Carry the reset window into the parked bucket: a compact that
+            // started while the thread was active keeps its flag so the first
+            // post-compact snapshot replaces wholesale after switch-back too.
+            resetPending: s.resetPending,
+          }),
+        );
       }
       // The active thread lives in the top-level fields, never in the map.
       const parked = threads.get(agentId);
@@ -532,15 +563,17 @@ export const useTimelineStore = create<TimelineState>()((set, get) => ({
       // the least-recently-parked beyond the cap (the just-loaded thread is
       // already removed, so it can't be evicted).
       evictLruThreads(threads);
-      const loaded: ThreadTimelineState = parked ?? {
-        items: cached ?? [],
-        streamingIds: new Set(),
-        streamingCode: false,
-        turnActive: false,
-        hasMoreOlder: cached ? hasMoreOlder : false,
-        olderFetchCount: 0,
-        resetPending: wasCompacted,
-      };
+      const loaded = capThreadItems(
+        parked ?? {
+          items: cached ?? [],
+          streamingIds: new Set(),
+          streamingCode: false,
+          turnActive: false,
+          hasMoreOlder: cached ? hasMoreOlder : false,
+          olderFetchCount: 0,
+          resetPending: wasCompacted,
+        },
+      );
       return {
         threads,
         activeThreadId: agentId,
@@ -589,10 +622,7 @@ export const useTimelineStore = create<TimelineState>()((set, get) => ({
         // Retain the newest end of the chronological list. If a fetched page
         // crosses the cap, its farthest-back items are the ones discarded;
         // current conversation content is never evicted by history loading.
-        items:
-          merged.length > MAX_TIMELINE_ITEMS
-            ? merged.slice(merged.length - MAX_TIMELINE_ITEMS)
-            : merged,
+        items: capItems(merged),
         hasMoreOlder: reachedItemLimit ? false : hasMoreOlder,
         loadingOlder: false,
       };
@@ -603,9 +633,11 @@ export const useTimelineStore = create<TimelineState>()((set, get) => ({
 
   clearPartialFlags: () => {
     set((s) => ({
-      items: s.items.some((it) => it.partial)
-        ? s.items.map((it) => (it.partial ? { ...it, partial: false } : it))
-        : s.items,
+      items: capItems(
+        s.items.some((it) => it.partial)
+          ? s.items.map((it) => (it.partial ? { ...it, partial: false } : it))
+          : s.items,
+      ),
     }));
   },
 }));
