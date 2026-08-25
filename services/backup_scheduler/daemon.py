@@ -199,3 +199,7 @@ def main() -> None:
         raise
     finally:
         _remove_pidfile()
+
+
+if __name__ == "__main__":
+    main()

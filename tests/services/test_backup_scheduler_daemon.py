@@ -4,13 +4,15 @@ from __future__ import annotations
 
 import asyncio
 import json
+import runpy
 import socket
 from datetime import UTC, datetime
 
 import pytest
 
+from services import _pidfile
 from services.backup_scheduler import daemon
-from shared import daemon_health
+from shared import daemon_health, daemon_shutdown, log, migrations
 
 
 def _at(hour: int = 3, minute: int = 0) -> datetime:
@@ -25,6 +27,37 @@ def _find_free_port() -> int:
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
         return int(sock.getsockname()[1])
+
+
+def test_module_entrypoint_runs_the_scheduler(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The ServiceSpec launches this daemon with ``python -m``."""
+    ran: list[object] = []
+
+    def _run(coro: object) -> None:
+        ran.append(coro)
+        coro.close()  # type: ignore[attr-defined]
+
+    def _assert_schema_current(_url: str) -> None:
+        return None
+
+    def _init_gateway_process(**_kwargs: object) -> None:
+        return None
+
+    def _install_graceful_shutdown(_name: str) -> None:
+        return None
+
+    def _remove_pidfile(_path: object) -> None:
+        return None
+
+    monkeypatch.setattr(asyncio, "run", _run)
+    monkeypatch.setattr(migrations, "assert_schema_current", _assert_schema_current)
+    monkeypatch.setattr(log, "init_gateway_process", _init_gateway_process)
+    monkeypatch.setattr(daemon_shutdown, "install_graceful_shutdown", _install_graceful_shutdown)
+    monkeypatch.setattr(_pidfile, "remove_pidfile", _remove_pidfile)
+
+    runpy.run_path(str(daemon.__file__), run_name="__main__")
+
+    assert len(ran) == 1
 
 
 async def _http_get(port: int) -> tuple[int, bytes]:
