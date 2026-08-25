@@ -29,6 +29,23 @@ if [[ ! -x "$NATIVE_DIR/grafana/run.sh" ]]; then
 fi
 mkdir -p "$NATIVE_DIR/data/loki" "$NATIVE_DIR/data/prom" "$NATIVE_DIR/logs"
 
+# Hard gate (Task #1634): a loki.yaml change must pass the binary's own config
+# validation before any start or restart. launchd restart loops a bad config
+# (the 2026-08-25 wrong-field crash-loop); -verify-config catches it in
+# milliseconds, so refuse to start instead of letting the job flap.
+_verify_loki_config() {
+    local config="$NATIVE_DIR/config/loki.yaml"
+    if [[ ! -f "$config" ]]; then
+        log "ERROR: native Loki config $config is missing; run converge / \`ava lgtm on\` first"
+        exit 1
+    fi
+    if ! "$NATIVE_DIR/bin/loki" -config.file="$config" -verify-config; then
+        log "ERROR: \`loki -verify-config\` rejected $config; refusing to start Loki (a bad config crash-loops the launchd job)"
+        exit 1
+    fi
+    log "loki config verified: $config"
+}
+
 _reachable() {
     local code
     code=$(curl -s -o /dev/null -w '%{http_code}' "$1" 2>/dev/null || true)
@@ -90,6 +107,7 @@ _retire_legacy_grafana() {
     fi
 }
 
+_verify_loki_config
 _start_native loki http://127.0.0.1:3100/ready
 _start_native prometheus http://127.0.0.1:9090/-/ready
 _start_native grafana http://127.0.0.1:3003/

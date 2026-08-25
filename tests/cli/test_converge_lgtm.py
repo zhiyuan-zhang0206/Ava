@@ -49,6 +49,10 @@ def _native_start_fixture(tmp_path: Path) -> tuple[Path, Path, Path, dict[str, s
     ava_home = tmp_path / "ava-home"
     for name in ("loki", "prometheus"):
         _write_executable(ava_home / "lgtm" / "native" / "bin" / name, "#!/bin/sh\nexit 0\n")
+    (ava_home / "lgtm" / "native" / "config").mkdir(parents=True)
+    (ava_home / "lgtm" / "native" / "config" / "loki.yaml").write_text(
+        "auth_enabled: false\n", encoding="utf-8"
+    )
     _write_executable(ava_home / "lgtm" / "native" / "grafana" / "run.sh", "#!/bin/sh\nexit 0\n")
 
     fake_bin = tmp_path / "fake-bin"
