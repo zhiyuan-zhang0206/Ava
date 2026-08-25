@@ -170,3 +170,15 @@ query_range:
         enabled: true
         max_size_mb: 100
         ttl: 1h
+
+
+ingester:
+  # WAL disk-full write throttle (2026-08-25, Task #1626): the data volume
+  # hovers at ~90% and the upstream default threshold (0.9) made Loki refuse
+  # every push whenever usage crossed it — the fleet-graph missing-edge root
+  # cause (collector retries then drops the audit events). 0.95 keeps a real
+  # disk-full guard (~11GiB cushion on the 228GiB volume) while tolerating the
+  # current 89-91% oscillation. The durable fix is freeing disk space; this is
+  # the ingestion-stability stopgap. verify-config checked (loki 3.7.6).
+  wal:
+    disk_full_threshold: 0.95

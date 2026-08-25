@@ -184,6 +184,7 @@ def test_ensure_renders_configs_with_native_paths_and_loopback(
     assert "grpc_listen_address: 127.0.0.1" in loki
     assert "instance_addr: 127.0.0.1" in loki
     assert "retention_period: 168h" in loki
+    assert "disk_full_threshold: 0.95" in loki
     validate_loki_deploy_config(loki_config)
     assert "query_timeout: 50s" in loki
     assert "max_entries_limit_per_query: 50001" in loki

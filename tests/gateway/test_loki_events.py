@@ -30,6 +30,7 @@ from gateway import loki_events, loki_events_cache, loki_query_budget
 from shared.loki_index_labels import (
     EVENT_STREAM_RETENTION,
     LOKI_QUERY_CONCURRENCY,
+    WAL_DISK_FULL_THRESHOLD,
     LokiReadEra,
     LokiReadSlice,
     event_stream_selector,
@@ -300,6 +301,7 @@ class TestGlobalQueryBudget:
         for config in configs:
             assert config["querier"]["max_concurrent"] == LOKI_QUERY_CONCURRENCY
             assert config["limits_config"]["retention_period"] == retention
+            assert config["ingester"]["wal"]["disk_full_threshold"] == WAL_DISK_FULL_THRESHOLD
             validate_loki_deploy_config(config)
         assert loki_query_budget.LOKI_QUERY_CONCURRENCY == LOKI_QUERY_CONCURRENCY
 
@@ -311,6 +313,14 @@ class TestGlobalQueryBudget:
         with pytest.raises(ValueError, match="max_concurrent"):
             validate_loki_deploy_config(
                 {"limits_config": {"retention_period": "168h"}, "querier": {"max_concurrent": 8}}
+            )
+        with pytest.raises(ValueError, match="disk_full_threshold"):
+            validate_loki_deploy_config(
+                {
+                    "limits_config": {"retention_period": "168h"},
+                    "querier": {"max_concurrent": 4},
+                    "ingester": {"wal": {"disk_full_threshold": 0.9}},
+                }
             )
 
     def test_loki_preserves_default_resource_labels_and_indexes_event_dimensions(self) -> None:
