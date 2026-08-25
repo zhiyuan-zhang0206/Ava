@@ -158,6 +158,11 @@ _METRIC_DISPOSITION: dict[tuple[str, str], str | None] = {
     # the last value rather than adding each five-minute sample forever.
     ("resolution_status", "unresolved_warnings"): "gauge",
     ("resolution_status", "unresolved_errors"): "gauge",
+    # A vacuum run refreshes these table high-water marks once daily; a gauge
+    # preserves the latest physical-size measurement between runs.
+    ("checkpoint_table_sizes", "blobs_bytes"): "gauge",
+    ("checkpoint_table_sizes", "checkpoints_bytes"): "gauge",
+    ("checkpoint_table_sizes", "writes_bytes"): "gauge",
 }
 
 # Histogram bucket boundaries for LLM-scale latencies (ms). The OTel defaults

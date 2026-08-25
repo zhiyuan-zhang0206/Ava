@@ -32,6 +32,7 @@ from zoneinfo import ZoneInfo
 import psycopg
 
 import shared.db
+from shared import telemetry
 from shared.config import settings
 from shared.log import logger
 
@@ -75,8 +76,8 @@ def in_low_traffic_window(now: datetime | None = None) -> bool:
     return _WINDOW_START_HOUR <= local.hour < _WINDOW_END_HOUR
 
 
-def _physical_state(cur: Any) -> tuple[int, int]:
-    """(pg_total_relation_size(checkpoint_blobs), n_dead_tup) in one query.
+def _physical_state(cur: Any) -> tuple[int, int, int, int]:
+    """Checkpoint-table physical sizes and ``checkpoint_blobs`` dead tuples.
 
     Both references pin the `public` schema explicitly: pg_stat_user_tables
     reports every schema, and a same-named table in another schema (e.g. the
@@ -87,6 +88,8 @@ def _physical_state(cur: Any) -> tuple[int, int]:
     cur.execute(
         """
         SELECT pg_total_relation_size('public.checkpoint_blobs'::regclass),
+               pg_total_relation_size('public.checkpoints'::regclass),
+               pg_total_relation_size('public.checkpoint_writes'::regclass),
                COALESCE((SELECT n_dead_tup FROM pg_stat_user_tables
                          WHERE schemaname = 'public'
                            AND relname = 'checkpoint_blobs'), 0)
@@ -94,7 +97,7 @@ def _physical_state(cur: Any) -> tuple[int, int]:
     )
     row = cur.fetchone()
     assert row is not None  # noqa: S101 — aggregate over a fixed table always returns one row
-    return int(row[0]), int(row[1])
+    return int(row[0]), int(row[1]), int(row[2]), int(row[3])
 
 
 def vacuum_checkpoint_tables(conn: Any) -> VacuumResult:
@@ -114,12 +117,21 @@ def vacuum_checkpoint_tables(conn: Any) -> VacuumResult:
         for table in _TABLES:
             cur.execute(f"VACUUM (ANALYZE) {table}")  # table names are module constants
         after = _physical_state(cur)
-    result = VacuumResult(ran=True, total_bytes=after[0], dead_tuples=after[1])
+    result = VacuumResult(ran=True, total_bytes=after[0], dead_tuples=after[3])
+    telemetry.emit(
+        "telemetry",
+        "checkpoint_table_sizes",
+        attributes={
+            "blobs_bytes": after[0],
+            "checkpoints_bytes": after[1],
+            "writes_bytes": after[2],
+        },
+    )
     logger.info(
         "[events-maintenance] blob vacuum: {} (before={}MB dead={})",
         result.summary(),
         _mb(before[0]),
-        before[1],
+        before[3],
     )
     return result
 

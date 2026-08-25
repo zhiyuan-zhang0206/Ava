@@ -65,6 +65,7 @@ _SQL_OR_DYNAMIC_KINDS = frozenset(
         "warning_reopened",
         "error_reopened",
         "resolution_status",
+        "checkpoint_table_sizes",  # services/events_maintenance/blob_vacuum.py telemetry.emit (positional)
         # 历史括号名：W8 改名前的旧值，仍是 migrate_events.py 的映射目标且
         # DB 有存量行。新代码禁止产生，保留注册只为回填口径。
         "exec(cancelled)",
