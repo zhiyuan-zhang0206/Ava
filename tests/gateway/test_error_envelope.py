@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from collections.abc import Iterator
 
 import httpx
@@ -187,18 +188,23 @@ def test_active_otel_trace_id_wins_over_request_fallback(
     assert response.json()["trace_id"] == "a" * 32
 
 
-def _request() -> Request:
+def _request(
+    *,
+    method: str = "GET",
+    path: str = "/api/agents",
+    headers: list[tuple[bytes, bytes]] | None = None,
+) -> Request:
     """Build the smallest request shape accepted by the direct middleware calls."""
     return Request(
         {
             "type": "http",
             "http_version": "1.1",
-            "method": "GET",
+            "method": method,
             "scheme": "http",
-            "path": "/api/agents",
-            "raw_path": b"/api/agents",
+            "path": path,
+            "raw_path": path.encode(),
             "query_string": b"",
-            "headers": [],
+            "headers": headers or [],
             "client": ("127.0.0.1", 1),
             "server": ("testserver", 80),
             "state": {},
@@ -216,6 +222,94 @@ def test_auth_middleware_uses_envelope(monkeypatch: pytest.MonkeyPatch) -> None:
 
     response = asyncio.run(_cluster_auth_middleware(_request(), call_next))
     _assert_envelope(response, status=401, code="authentication_required", retryable=False)
+
+
+def test_auth_middleware_requires_cluster_auth_for_alert_reads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The webhook exemption must not expose the alerts read API."""
+    monkeypatch.setattr(config.settings.gateway, "auth_middleware_enabled", True)
+    monkeypatch.setattr(config.settings.data_plane, "cluster_secret", "test-secret")
+
+    async def call_next(_request: Request) -> Response:
+        raise AssertionError("unauthenticated alert reads must short-circuit")
+
+    response = asyncio.run(_cluster_auth_middleware(_request(path="/api/alerts"), call_next))
+    _assert_envelope(response, status=401, code="authentication_required", retryable=False)
+
+
+def test_auth_middleware_leaves_alert_webhook_auth_to_router(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only the POST alert webhook reaches its router without cluster auth."""
+    monkeypatch.setattr(config.settings.gateway, "auth_middleware_enabled", True)
+    monkeypatch.setattr(config.settings.data_plane, "cluster_secret", "test-secret")
+
+    async def call_next(_request: Request) -> Response:
+        return Response(status_code=204)
+
+    response = asyncio.run(
+        _cluster_auth_middleware(
+            _request(method="POST", path="/api/alerts"),
+            call_next,
+        )
+    )
+    assert response.status_code == 204
+
+
+def test_auth_middleware_accepts_bearer_for_alert_reads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Authenticated alert reads continue through ordinary cluster auth."""
+    monkeypatch.setattr(config.settings.gateway, "auth_middleware_enabled", True)
+    monkeypatch.setattr(config.settings.data_plane, "cluster_secret", "test-secret")
+
+    async def call_next(_request: Request) -> Response:
+        return Response(status_code=204)
+
+    response = asyncio.run(
+        _cluster_auth_middleware(
+            _request(
+                path="/api/alerts",
+                headers=[(b"authorization", b"Bearer test-secret")],
+            ),
+            call_next,
+        )
+    )
+    assert response.status_code == 204
+
+
+def test_auth_middleware_logs_unauthorized_request(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Unauthorized requests expose enough client context to diagnose residual retries."""
+    monkeypatch.setattr(config.settings.gateway, "auth_middleware_enabled", True)
+    monkeypatch.setattr(config.settings.data_plane, "cluster_secret", "test-secret")
+    request = Request(
+        {
+            "type": "http",
+            "http_version": "1.1",
+            "method": "GET",
+            "scheme": "http",
+            "path": "/api/agents",
+            "raw_path": b"/api/agents",
+            "query_string": b"",
+            "headers": [(b"user-agent", b"curl/8.1")],
+            "client": ("127.0.0.1", 1),
+            "server": ("testserver", 80),
+            "state": {},
+        }
+    )
+
+    async def call_next(_request: Request) -> Response:
+        raise AssertionError("authentication middleware must short-circuit")
+
+    with caplog.at_level(logging.WARNING, logger="gateway.app"):
+        asyncio.run(_cluster_auth_middleware(request, call_next))
+
+    assert "path=/api/agents" in caplog.text
+    assert "client=127.0.0.1" in caplog.text
+    assert "ua=curl/8.1" in caplog.text
 
 
 def test_cluster_pause_middleware_uses_envelope(monkeypatch: pytest.MonkeyPatch) -> None:

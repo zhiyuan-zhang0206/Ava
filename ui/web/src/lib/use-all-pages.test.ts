@@ -9,13 +9,14 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api } from "./api";
+import { AuthProvider } from "./auth-context";
 import type { PageRow, SystemEvent } from "./types";
 import { useAllPages } from "./use-all-pages";
 import { EventStreamProvider } from "./useEventStream";
 
 vi.mock("./api", () => ({
   API_BASE: "http://api.test",
-  api: { listAllPages: vi.fn() },
+  api: { listAllPages: vi.fn(), checkAuth: vi.fn() },
 }));
 
 // The R4 fold (layer 1) lives inside the real <EventStreamProvider>; tests
@@ -103,6 +104,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   lastEventSource = null;
   vi.mocked(api.listAllPages).mockResolvedValue([]);
+  vi.mocked(api.checkAuth).mockResolvedValue({ authenticated: true });
   queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 });
 afterEach(() => {
@@ -114,12 +116,20 @@ vi.stubGlobal("EventSource", StubEventSource);
 
 function wrapper({ children }: { children: React.ReactNode }) {
   // The R4 fold lives inside the real EventStreamProvider — the wrapper
-  // mirrors the app root (QueryClientProvider ⊃ EventStreamProvider).
+  // mirrors the app root (AuthProvider ⊃ QueryClientProvider ⊃ EventStreamProvider).
   return React.createElement(
-    QueryClientProvider,
-    { client: queryClient },
-    React.createElement(EventStreamProvider, null, children),
+    AuthProvider,
+    null,
+    React.createElement(
+      QueryClientProvider,
+      { client: queryClient },
+      React.createElement(EventStreamProvider, null, children),
+    ),
   );
+}
+
+async function waitForEventSource(): Promise<void> {
+  await waitFor(() => expect(lastEventSource).not.toBeNull());
 }
 
 async function waitForFetch(): Promise<void> {
@@ -143,6 +153,7 @@ describe("useAllPages", () => {
     vi.mocked(api.listAllPages).mockResolvedValue([pageRow({ name: "a", agent_id: 1 })]);
     const { result } = renderHook(() => useAllPages(), { wrapper });
     await waitFor(() => expect(result.current).toHaveLength(1));
+    await waitForEventSource();
 
     deliverSseMessage(pageOpened({ name: "b", agent_id: 2 }));
     await waitFor(() =>
@@ -157,6 +168,7 @@ describe("useAllPages", () => {
     ]);
     const { result } = renderHook(() => useAllPages(), { wrapper });
     await waitFor(() => expect(result.current).toHaveLength(1));
+    await waitForEventSource();
 
     deliverSseMessage(pageOpened({ name: "dash", agent_id: 1, port: 9999, url: "http://host/dash-new" }));
     await waitFor(() => expect(result.current[0].port).toBe(9999));
@@ -168,6 +180,7 @@ describe("useAllPages", () => {
     vi.mocked(api.listAllPages).mockResolvedValue([pageRow({ name: "dash", agent_id: 1 })]);
     const { result } = renderHook(() => useAllPages(), { wrapper });
     await waitFor(() => expect(result.current).toHaveLength(1));
+    await waitForEventSource();
 
     deliverSseMessage(pageOpened({ name: "dash", agent_id: 2 }));
     await waitFor(() => expect(result.current).toHaveLength(2));
@@ -181,6 +194,7 @@ describe("useAllPages", () => {
     ]);
     const { result } = renderHook(() => useAllPages(), { wrapper });
     await waitFor(() => expect(result.current).toHaveLength(2));
+    await waitForEventSource();
 
     deliverSseMessage({ role: "page_closed", agent_id: 1, name: "dash" });
     await waitFor(() => expect(result.current.map((p) => p.agent_id)).toEqual([2]));
@@ -192,6 +206,7 @@ describe("useAllPages", () => {
       () => new Promise((r) => { resolveFetch = r; }),
     );
     const { result } = renderHook(() => useAllPages(), { wrapper });
+    await waitForEventSource();
 
     deliverSseMessage(pageOpened({ name: "early", agent_id: 1 }));
     expect(queryClient.getQueryData(["all-pages"])).toBeUndefined();
@@ -205,6 +220,7 @@ describe("useAllPages", () => {
     vi.mocked(api.listAllPages).mockResolvedValueOnce([]);
     const { result } = renderHook(() => useAllPages(), { wrapper });
     await waitForFetch();
+    await waitForEventSource();
     expect(api.listAllPages).toHaveBeenCalledTimes(1);
 
     vi.mocked(api.listAllPages).mockResolvedValueOnce([pageRow({ name: "missed", agent_id: 3 })]);

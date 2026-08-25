@@ -10,13 +10,14 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api } from "./api";
+import { AuthProvider } from "./auth-context";
 import type { PageRow, SystemEvent } from "./types";
 import { useAgentPages } from "./use-agent-pages";
 import { EventStreamProvider } from "./useEventStream";
 
 vi.mock("./api", () => ({
   API_BASE: "http://api.test",
-  api: { listPages: vi.fn() },
+  api: { listPages: vi.fn(), checkAuth: vi.fn() },
 }));
 
 // The R4 fold (layer 1) lives inside the real <EventStreamProvider>; tests
@@ -106,6 +107,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   lastEventSource = null;
   vi.mocked(api.listPages).mockResolvedValue([]);
+  vi.mocked(api.checkAuth).mockResolvedValue({ authenticated: true });
   queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 });
 afterEach(() => {
@@ -117,12 +119,20 @@ vi.stubGlobal("EventSource", StubEventSource);
 
 function wrapper({ children }: { children: React.ReactNode }) {
   // The R4 fold lives inside the real EventStreamProvider — the wrapper
-  // mirrors the app root (QueryClientProvider ⊃ EventStreamProvider).
+  // mirrors the app root (AuthProvider ⊃ QueryClientProvider ⊃ EventStreamProvider).
   return React.createElement(
-    QueryClientProvider,
-    { client: queryClient },
-    React.createElement(EventStreamProvider, null, children),
+    AuthProvider,
+    null,
+    React.createElement(
+      QueryClientProvider,
+      { client: queryClient },
+      React.createElement(EventStreamProvider, null, children),
+    ),
   );
+}
+
+async function waitForEventSource(): Promise<void> {
+  await waitFor(() => expect(lastEventSource).not.toBeNull());
 }
 
 /** Wait until the initial fetch has landed in the cache (distinguishes a
@@ -146,6 +156,7 @@ describe("useAgentPages", () => {
     vi.mocked(api.listPages).mockResolvedValue([]);
     const { result } = renderHook(() => useAgentPages(1), { wrapper });
     await waitForFetch();
+    await waitForEventSource();
 
     deliverSseMessage(pageOpened({ name: "panel-a" }));
     await waitFor(() => expect(result.current.map((p) => p.name)).toEqual(["panel-a"]));
@@ -156,6 +167,7 @@ describe("useAgentPages", () => {
     vi.mocked(api.listPages).mockResolvedValue([pageRow({ name: "panel-a", port: 9000 })]);
     const { result } = renderHook(() => useAgentPages(1), { wrapper });
     await waitFor(() => expect(result.current).toHaveLength(1));
+    await waitForEventSource();
 
     deliverSseMessage(pageOpened({ name: "panel-a", port: 9999, url: "http://host/panel-a-new" }));
     await waitFor(() => expect(result.current[0].port).toBe(9999));
@@ -170,6 +182,7 @@ describe("useAgentPages", () => {
     ]);
     const { result } = renderHook(() => useAgentPages(1), { wrapper });
     await waitFor(() => expect(result.current).toHaveLength(2));
+    await waitForEventSource();
 
     deliverSseMessage({ role: "page_closed", agent_id: 1, name: "panel-a" });
     await waitFor(() => expect(result.current.map((p) => p.name)).toEqual(["panel-b"]));
@@ -182,6 +195,7 @@ describe("useAgentPages", () => {
       () => new Promise((r) => { resolveFetch = r; }),
     );
     const { result } = renderHook(() => useAgentPages(1), { wrapper });
+    await waitForEventSource();
 
     deliverSseMessage(pageOpened({ name: "early" }));
     // Cache is still undefined (fetch pending) → the guard drops the partial.
@@ -197,6 +211,7 @@ describe("useAgentPages", () => {
     vi.mocked(api.listPages).mockResolvedValue([]);
     const { result } = renderHook(() => useAgentPages(1), { wrapper });
     await waitForFetch(); // fetched, empty ([])
+    await waitForEventSource();
 
     deliverSseMessage(pageOpened({ name: "first" }));
     await waitFor(() => expect(result.current.map((p) => p.name)).toEqual(["first"]));
@@ -206,6 +221,7 @@ describe("useAgentPages", () => {
     vi.mocked(api.listPages).mockResolvedValue([]);
     const { result } = renderHook(() => useAgentPages(1), { wrapper });
     await waitForFetch();
+    await waitForEventSource();
 
     deliverSseMessage(pageOpened({ name: "other", agent_id: 2 }));
     // agent 2's page must not appear in agent 1's list.
@@ -217,6 +233,7 @@ describe("useAgentPages", () => {
     vi.mocked(api.listPages).mockResolvedValueOnce([]);
     const { result } = renderHook(() => useAgentPages(1), { wrapper });
     await waitForFetch();
+    await waitForEventSource();
     expect(api.listPages).toHaveBeenCalledTimes(1);
 
     // A page opened while the socket was down; the reconnect refetch returns it.

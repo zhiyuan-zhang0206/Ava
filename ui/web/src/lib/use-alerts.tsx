@@ -14,7 +14,8 @@
 // Machinery mirrors the useEventStream provider (watchdog + closed-backoff
 // reopen + heartbeat skip), scoped down to the one alert shape: frames that
 // fail to parse are dropped, a wedged socket reopens, a CLOSED stream
-// reconnects with capped backoff.
+// with a valid session reconnects with capped backoff, and an expired session
+// stays closed.
 //
 // Cache shape: AlertsResponse (alerts + meta.unresolved_count). Frames upsert
 // by row id and apply unresolved-count deltas.
@@ -22,6 +23,7 @@
 import {
   useCallback,
   useEffect,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -29,14 +31,15 @@ import {
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { API_BASE, api } from "./api";
+import { notifySessionInvalid, useAuth } from "./auth-context";
 import type { Alert, AlertsResponse } from "./types";
 
 // Half-dead-connection watchdog window (same value as useEventStream: the
 // server emits a heartbeat data frame after ~15s of silence).
 const WATCHDOG_MS = 45_000;
 // SSE-connect-failure retry: EventSource auto-retries transient drops, but a
-// non-2xx response leaves it CLOSED permanently — schedule our own reopen
-// with capped exponential backoff.
+// non-2xx response leaves it CLOSED permanently. The session probe stops
+// retries for 401/403; valid sessions reopen with capped exponential backoff.
 const RECONNECT_BASE_MS = 1_000;
 const RECONNECT_MAX_MS = 30_000;
 
@@ -98,6 +101,7 @@ export function foldAlert(prev: AlertsResponse | undefined, row: Alert): AlertsR
 
 export function AlertsProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
+  const { status: authStatus } = useAuth();
   // The badge count stays warm for the whole app via this always-on
   // default-params query (the initial fetch fallback).
   useQuery<AlertsResponse>({
@@ -109,13 +113,21 @@ export function AlertsProvider({ children }: { children: ReactNode }) {
 
   const [reconnectNonce, setReconnectNonce] = useState(0);
   const [retryNonce, setRetryNonce] = useState(0);
+  const failCountRef = useRef(0);
 
   // Stable reconnect callback (mirrors useEventStream's bumpReconnect).
   const bumpReconnect = useCallback(() => setReconnectNonce((n) => n + 1), []);
 
   useEffect(() => {
-    let failCount = 0;
+    if (authStatus !== "authenticated") {
+      // Session not authenticated: keep the stream closed (Task #1635 — an
+      // unauthenticated SSE GET 401s and blind retries produced the 43k/24h
+      // /api/alerts/stream storm). Login flips the status → effect re-runs → opens.
+      return;
+    }
+
     let parseFailures = 0;
+    let disposed = false;
     let watchdog: ReturnType<typeof setTimeout> | null = null;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -128,8 +140,8 @@ export function AlertsProvider({ children }: { children: ReactNode }) {
 
     const scheduleReopen = () => {
       if (retryTimer !== null) return;
-      const delay = Math.min(RECONNECT_BASE_MS * 2 ** failCount, RECONNECT_MAX_MS);
-      failCount += 1;
+      const delay = Math.min(RECONNECT_BASE_MS * 2 ** failCountRef.current, RECONNECT_MAX_MS);
+      failCountRef.current += 1;
       retryTimer = setTimeout(() => {
         retryTimer = null;
         setRetryNonce((n) => n + 1);
@@ -159,7 +171,7 @@ export function AlertsProvider({ children }: { children: ReactNode }) {
 
     const es = new EventSource(`${API_BASE}/api/alerts/stream`, { withCredentials: true });
     es.onopen = () => {
-      failCount = 0;
+      failCountRef.current = 0;
       armWatchdog();
     };
     es.onmessage = (e) => {
@@ -171,7 +183,23 @@ export function AlertsProvider({ children }: { children: ReactNode }) {
     es.onerror = () => {
       switch (es.readyState) {
         case EventSource.CLOSED:
-          scheduleReopen();
+          // CLOSED hides the HTTP status; probe the session instead of blind-retrying
+          // (Task #1635): an expired session must stop retrying, flip the auth context
+          // (AuthGuard → /login) and stay closed until login re-runs this effect.
+          void api
+            .checkAuth()
+            .then((res) => {
+              if (disposed) return;
+              if (!res.authenticated) {
+                notifySessionInvalid();
+                return;
+              }
+              scheduleReopen();
+            })
+            .catch(() => {
+              if (disposed) return;
+              scheduleReopen(); // probe failed = gateway unreachable = transient
+            });
           return;
         case EventSource.CONNECTING:
           // The browser is already auto-retrying — don't double up.
@@ -184,13 +212,14 @@ export function AlertsProvider({ children }: { children: ReactNode }) {
     };
 
     return () => {
+      disposed = true;
       if (watchdog !== null) clearTimeout(watchdog);
       if (retryTimer !== null) clearTimeout(retryTimer);
       es.close();
     };
     // reconnectNonce + retryNonce are the reopen levers; the cache folders are
     // stable identities included only to satisfy the lint.
-  }, [queryClient, reconnectNonce, retryNonce, bumpReconnect]);
+  }, [queryClient, reconnectNonce, retryNonce, bumpReconnect, authStatus]);
 
   return children;
 }
