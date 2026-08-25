@@ -13,9 +13,14 @@ survived as local residue on disk.
   it (covered by the root `.gitignore` `node_modules/` rule, line 65).
 - `du -sh desktop/node_modules` → 396 MB (222 packages), no hidden files, no
   running process holding a cwd or open file under `desktop/`.
-- No tracked file references the `desktop/` path as a location (the only hits
-  for the word "desktop" are about the unrelated `ui/app` Tauri shell and
-  responsive-viewport breakpoints).
+- The `desktop/` path form appears in exactly one tracked file —
+  `assets/agent-landscape-2026.html`, a third-party product-landscape research
+  snapshot — and only as prose about other projects (`desktop/web`,
+  `desktop/package.json`, `desktop/IDE`), never as a location in this repo.
+  The bare word "desktop" appears widely (~100 tracked files) for the
+  `ui/app` Tauri shell, desktop viewport breakpoints, and the
+  computer-MCP / permissions-helper surface; none references a `desktop/`
+  directory in this repo.
 - The former Electron sources live on in the private history archive at the
   `archive` remote (`public-main`, commit `71ebd7d4e` "Initial public
   release"): `desktop/README.md`, `desktop.ava.okf.md`, `electron-builder.yml`,
