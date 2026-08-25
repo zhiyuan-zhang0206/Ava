@@ -382,14 +382,18 @@ export function useTimeline(
     if (agentId == null) return;
     const st = useTimelineStore.getState();
     if (!st.hasMoreOlder || st.loadingOlder) return;
-    // The cursor is the oldest real timeline item with a stable backend id.
-    // Ephemeral `_marker.*` items are unparseable, and GET /timeline re-attaches
-    // standing context (the prompt and compact summary) ahead of every window;
-    // using either context item as `before` can return no historical tail and
-    // permanently set hasMoreOlder=false.
-    const oldest = st.items.find(
-      (it) => !isReattachedTimelineContext(it) && parseItemIdParts(it.item_id) !== null,
-    );
+    // Current standing context is never a cursor. A segment-prefixed historical
+    // summary is the bounded continuation for a summary-only checkpoint,
+    // however: its exact checkpoint id lets the server advance one segment
+    // without scanning an unbounded chain in one request.
+    const oldest = st.items.find((it) => {
+      const parts = parseItemIdParts(it.item_id);
+      if (parts === null) return false;
+      return (
+        !isReattachedTimelineContext(it) ||
+        (parts.rank > 0 && it.kind === "inbound_compact_summary")
+      );
+    });
     if (!oldest) return;
     // Exponential growth: first fetch N, second 2N, third 4N, … capped at 1000.
     const limit = Math.min(

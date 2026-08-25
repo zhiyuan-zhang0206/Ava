@@ -208,6 +208,7 @@ def test_load_checkpoint_messages_segment_resolves_exact_boundary_id(
     )
 
     assert list_compact_boundary_checkpoint_ids(7) == [newer_id, older_id]
+    assert list_compact_boundary_checkpoint_ids(7, limit=1) == [newer_id]
     assert _contents(load_checkpoint_messages_segment(7, newer_id)) == [
         "newer summary",
         "newer segment",

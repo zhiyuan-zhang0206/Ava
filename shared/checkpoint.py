@@ -108,27 +108,34 @@ def load_checkpoint_messages(agent_id: int) -> list[BaseMessage]:
     return ckpt["channel_values"].get("messages", [])
 
 
-def list_compact_boundary_checkpoint_ids(agent_id: int) -> list[str]:
+def list_compact_boundary_checkpoint_ids(agent_id: int, *, limit: int | None = None) -> list[str]:
     """Return this agent's retained compact boundaries, newest first.
 
     The descending position is the history segment's current display rank;
     callers must still use the checkpoint id as the durable cursor identity.
+    ``limit`` bounds the ordered prefix read for finite history-depth views.
 
     Raises:
         CheckpointReadError: the boundary index could not be read.
     """
+    if limit is not None and limit < 1:
+        raise ValueError(f"compact boundary limit must be positive, got {limit}")
+    query = (
+        "SELECT checkpoint_id FROM checkpoints"
+        " WHERE thread_id = %s AND metadata->>'compact_boundary' = 'true'"
+        " ORDER BY checkpoint_id DESC"
+    )
     try:
         with connect(
             settings.data_plane.db_url,
             autocommit=True,
             prepare_threshold=None,
         ) as conn:
-            rows = conn.execute(
-                "SELECT checkpoint_id FROM checkpoints"
-                " WHERE thread_id = %s AND metadata->>'compact_boundary' = 'true'"
-                " ORDER BY checkpoint_id DESC",
-                (str(agent_id),),
-            ).fetchall()
+            rows = (
+                conn.execute(query, (str(agent_id),)).fetchall()
+                if limit is None
+                else conn.execute(f"{query} LIMIT %s", (str(agent_id), limit)).fetchall()
+            )
     except Exception as exc:
         raise CheckpointReadError(
             f"compaction boundary index read failed for agent {agent_id}"

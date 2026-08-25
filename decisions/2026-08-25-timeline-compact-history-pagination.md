@@ -65,3 +65,28 @@ anchoring. A hard oldest-history cutoff is predictable and terminal.
 - A tab that misses the compact reset may briefly display the same checkpoint
   under an old and recomputed rank. The exact checkpoint id prevents wrong
   content; reconnect/reset removes the display duplicate.
+
+## Acceptance update — segment heads and hard budgets
+
+Segment-head paging returns the segment's small re-attached head in the same
+response as the next older tail. The frontend de-duplicates already-held
+context; the repeated head guarantees a compact summary that falls exactly
+outside a tail window is still delivered before paging crosses or terminates.
+Consecutive re-attached-only boundaries are accumulated one small rendered
+head at a time until a raw tail or depth boundary is reached, so the frontend's
+intentional refusal to cursor on summaries cannot repeat one request forever.
+
+**Bounded-continuation correction:** a request materializes at most one full
+checkpoint segment at a time. A historical crossover can read its source and
+target sequentially, but releases the source before loading the target. A
+segment-prefixed historical compact summary may act as the next cursor when no
+older real item is held; current-segment standing context remains ineligible.
+This supersedes accumulating consecutive heads in one response, which would
+make unlimited-depth request work scale with lifetime boundaries.
+
+The 6000-item bound applies to every active and parked timeline writer, not
+only history prepend. Snapshot reloads, live SSE folds, compact-reset snapshots,
+thread seeds, and each of the at most 32 parked buckets retain their newest
+6000 items and disable older paging at the bound. Positive backend depth reads
+only the newest `N + 1` boundary ids; unlimited depth remains the explicit
+full-index mode.

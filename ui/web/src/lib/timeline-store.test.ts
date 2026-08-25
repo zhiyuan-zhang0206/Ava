@@ -11,7 +11,7 @@
 import { act } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { useTimelineStore } from "./timeline-store";
+import { MAX_TIMELINE_ITEMS, useTimelineStore } from "./timeline-store";
 import type { AgentRow, BackendTimelineItem, SystemEvent } from "./types";
 
 // -- helpers ───────────────────────────────────────────────────────────────
@@ -719,6 +719,22 @@ describe("scrollToBottomRequest force-scroll signal", () => {
 // -- reloadSnapshot ─────────────────────────────────────────────────────────
 
 describe("reloadSnapshot", () => {
+  it("retains only the newest 6000 items from an oversized snapshot", () => {
+    const snapshot = Array.from({ length: MAX_TIMELINE_ITEMS + 1 }, (_, index) =>
+      item({ item_id: `${index + 1}.0`, payload: `snapshot ${index + 1}` }),
+    );
+
+    act(() => {
+      useTimelineStore.getState().reloadSnapshot(snapshot, snapshot.length, true);
+    });
+
+    const state = useTimelineStore.getState();
+    expect(state.items).toHaveLength(MAX_TIMELINE_ITEMS);
+    expect(state.items[0].item_id).toBe("2.0");
+    expect(state.items.at(-1)?.item_id).toBe(`${MAX_TIMELINE_ITEMS + 1}.0`);
+    expect(state.hasMoreOlder).toBe(false);
+  });
+
   it("hard reset: stable-id partial discarded when not in snapshot, replaced by snapshot", () => {
     // New hard-reset semantics: snapshot is the only truth. Old partial item_id="9.9" not in
     // snapshot → discard (instead of keeping as streaming). Each node enter triggers a new
@@ -1230,6 +1246,65 @@ describe("prependOlder / load-older flags", () => {
     const s = useTimelineStore.getState();
     expect(s.hasMoreOlder).toBe(false);
     expect(s.loadingOlder).toBe(false);
+  });
+});
+
+describe("timeline item budget across live writers", () => {
+  const fullTimeline = () =>
+    Array.from({ length: MAX_TIMELINE_ITEMS }, (_, index) =>
+      item({ item_id: `${index + 1}.0`, payload: `item ${index + 1}` }),
+    );
+
+  it("caps active SSE growth at 6000 newest items", () => {
+    act(() => {
+      useTimelineStore.setState({ items: fullTimeline(), hasMoreOlder: true });
+      useTimelineStore.getState().processSseEvent({
+        role: "chat_start",
+        agent_id: 42,
+        item_id: `${MAX_TIMELINE_ITEMS + 1}.0`,
+      });
+    });
+
+    const state = useTimelineStore.getState();
+    expect(state.items).toHaveLength(MAX_TIMELINE_ITEMS);
+    expect(state.items[0].item_id).toBe("2.0");
+    expect(state.items.at(-1)?.item_id).toBe(`${MAX_TIMELINE_ITEMS + 1}.0`);
+    expect(state.hasMoreOlder).toBe(false);
+  });
+
+  it("caps SSE growth in a parked thread bucket", () => {
+    act(() => {
+      useTimelineStore.getState().switchThread(1, fullTimeline(), true);
+      useTimelineStore.getState().switchThread(2, null, false);
+      useTimelineStore.getState().processSseEvent({
+        role: "chat_start",
+        agent_id: 1,
+        item_id: `${MAX_TIMELINE_ITEMS + 1}.0`,
+      });
+    });
+
+    const parked = useTimelineStore.getState().threads.get(1);
+    expect(parked?.items).toHaveLength(MAX_TIMELINE_ITEMS);
+    expect(parked?.items[0].item_id).toBe("2.0");
+    expect(parked?.items.at(-1)?.item_id).toBe(`${MAX_TIMELINE_ITEMS + 1}.0`);
+    expect(parked?.hasMoreOlder).toBe(false);
+  });
+
+  it("caps an oversized switchThread seed", () => {
+    const oversized = [
+      item({ item_id: "0.0", payload: "oldest" }),
+      ...fullTimeline(),
+    ];
+
+    act(() => {
+      useTimelineStore.getState().switchThread(1, oversized, true);
+    });
+
+    const state = useTimelineStore.getState();
+    expect(state.items).toHaveLength(MAX_TIMELINE_ITEMS);
+    expect(state.items[0].item_id).toBe("1.0");
+    expect(state.items.at(-1)?.item_id).toBe(`${MAX_TIMELINE_ITEMS}.0`);
+    expect(state.hasMoreOlder).toBe(false);
   });
 });
 
