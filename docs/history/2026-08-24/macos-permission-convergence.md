@@ -40,3 +40,6 @@ If V1 succeeds and the user confirms the security trade-off, a later change may
 provision a dedicated file-based keychain reusable by the update pipeline. That
 design limits the key to owner-readable (`0400`) signing use, but deliberately
 leaves key exposure, rotation, and recovery for review before implementation.
+
+Update: the watcher delivery decision is superseded by the
+[permission watcher delivery boundary](../2026-08-25/permission-watcher-delivery-boundary.md).
