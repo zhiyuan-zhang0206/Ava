@@ -1,9 +1,28 @@
 ---
 name: workspace-cleanup
-description: Dispose of dead agents' workspaces when disk pressure or monthly inspection demands it — dead-agent criteria, disposal criteria, tombstone, ledger.
+description: Dispose of dead agents' workspaces when disk pressure or monthly inspection demands it — zero-loss first, dead-agent criteria, disposal criteria, tombstone, ledger.
 ---
 
 # Ava Ops — Workspace Cold-Data Disposal
+
+## Zero-loss principle
+
+The core principle (user ruling 2026-08-25): **preserve all information — no
+data loss, ever.** The memory system is not mature enough yet; anything
+deleted may be unrecoverable. Disposal is classification-and-preservation,
+not deletion:
+
+- **Duplicate PDFs** — organize shared PDFs and store them in one place on
+  Google Drive.
+- **Public repo clones** — convert to shallow clones, or delete the local
+  copy keeping only the URL.
+- **Hardware fallback** — when disk is still insufficient after the above,
+  buy a larger-storage Mac mini (pre-approved by the user) instead of
+  over-optimizing deletions.
+
+Periodically run a dynamic workflow to sweep workspaces: classify how much
+content belongs in the Vault and how much belongs in memory (apply the shared
+memory-vault rule).
 
 ## Trigger & Ownership
 
