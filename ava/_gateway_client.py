@@ -181,8 +181,9 @@ def _raise_from_response(resp: httpx.Response) -> None:  # noqa: F821  # pyright
     1. body JSON parse failure (FastAPI default 500 plain text, etc.) →
        call `resp.raise_for_status()` raising `httpx.HTTPStatusError`,
        full status + body preview shown to caller
-    2. JSON OK but `reason` field missing / `ErrorReason(...)` unrecognized
-       → same as above; signal of wire protocol broken should not be silently swallowed
+    2. JSON OK but `reason` field missing / `ErrorReason(...)` unrecognized /
+       `detail` missing or not a string → same as above; signal of wire
+       protocol broken should not be silently swallowed
     3. JSON has valid reason → reverse-lookup EXCEPTION_BY_REASON to rebuild the corresponding exception
 
     Steps 1-2 run `raise_for_status` OUTSIDE any except handler: an
@@ -212,11 +213,11 @@ def _wire_reason(resp: httpx.Response) -> tuple[ErrorReason, dict] | None:  # no
     """Parse the wire `reason` from a non-2xx response body, or None.
 
     None means the body does not carry a valid wire-contract reason (not
-    JSON, not an object, `reason` field missing, or value not in
-    `ErrorReason`) — the caller then surfaces the raw HTTP error. Never
-    raises: a protocol mismatch must fall through to `raise_for_status`
-    (HTTPStatusError with the original status code), not escape as a
-    KeyError/JSONDecodeError that masks it.
+    JSON, not an object, `reason` field missing, value not in
+    `ErrorReason`, or `detail` missing / not a string) — the caller then
+    surfaces the raw HTTP error. Never raises: a protocol mismatch must
+    fall through to `raise_for_status` (HTTPStatusError with the original
+    status code), not escape as a KeyError/JSONDecodeError that masks it.
     """
     try:
         body = resp.json()
@@ -225,9 +226,16 @@ def _wire_reason(resp: httpx.Response) -> tuple[ErrorReason, dict] | None:  # no
     if not isinstance(body, dict):
         return None
     try:
-        return ErrorReason(body["reason"]), body
+        reason = ErrorReason(body["reason"])
     except (KeyError, ValueError):
         return None
+    if not isinstance(body.get("detail"), str):
+        # Valid reason but no string `detail` — the same protocol mismatch
+        # class: the reverse-lookup raise would KeyError on `body["detail"]`
+        # and mask the status code exactly like the old missing-`reason`
+        # path did (task #1205). Fall through to the clean HTTP error.
+        return None
+    return reason, body
 
 
 def _post(

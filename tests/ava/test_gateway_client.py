@@ -82,6 +82,40 @@ class TestRaiseFromResponse:
         with pytest.raises(httpx.HTTPStatusError):
             _raise_from_response(resp)
 
+    def test_valid_reason_missing_detail_falls_through(self):
+        """Valid `reason` but `detail` field missing → HTTPStatusError, not
+        KeyError: 'detail' masking the status code (same class as task #1205).
+
+        Regression: the reverse-lookup raise indexed `body["detail"]` without
+        a guard, so a reason-bearing body with no detail leaked a raw KeyError
+        and the HTTP status code never reached the caller.
+        """
+        from ava._gateway_client import _raise_from_response
+
+        request = httpx.Request("POST", "http://gw/api/agents/42/messages")
+        resp = httpx.Response(404, json={"reason": "agent_not_found"}, request=request)
+
+        with pytest.raises(httpx.HTTPStatusError) as excinfo:
+            _raise_from_response(resp)
+        assert excinfo.value.response.status_code == 404
+        assert not isinstance(excinfo.value.__context__, KeyError)
+
+    def test_valid_reason_non_string_detail_falls_through(self):
+        """Valid `reason` but non-string `detail` → HTTPStatusError with the
+        status code; a malformed detail is a protocol mismatch, not an
+        application error to reconstruct."""
+        from ava._gateway_client import _raise_from_response
+
+        request = httpx.Request("GET", "http://gw/api/agents/7")
+        resp = httpx.Response(
+            404, json={"reason": "agent_not_found", "detail": {"nested": True}}, request=request
+        )
+
+        with pytest.raises(httpx.HTTPStatusError) as excinfo:
+            _raise_from_response(resp)
+        assert excinfo.value.response.status_code == 404
+        assert not isinstance(excinfo.value.__context__, KeyError)
+
     def test_503_without_reason_raises_http_error_with_status(self):
         """A real 503 with a JSON body lacking `reason` raises HTTPStatusError
         carrying the status code — not a KeyError chained over it (task #1205).
