@@ -104,11 +104,38 @@ def test_migrations_subcommand_removed() -> None:
 def test_logs_retention_parser_accepts_the_public_flags() -> None:
     """The local-log cleanup contract is reachable at `ava logs retention`."""
     args = _main._build_parser().parse_args(
-        ["logs", "retention", "--older-than", "21", "--dry-run"]
+        ["logs", "retention", "--family-days", "gateway=31,ops=30", "--dry-run"]
     )
 
-    assert args.older_than == 21
+    assert args.family_days == {"gateway": 31, "ops": 30}
     assert args.dry_run is True
+
+
+def test_logs_retention_parser_accepts_default_as_the_other_family() -> None:
+    args = _main._build_parser().parse_args(
+        ["logs", "retention", "--family-days", "agent=15,default=14"]
+    )
+
+    assert args.family_days == {"agent": 15, "other": 14}
+
+
+def test_logs_retention_parser_rejects_combined_age_modes() -> None:
+    with pytest.raises(SystemExit):
+        _main._build_parser().parse_args(
+            [
+                "logs",
+                "retention",
+                "--older-than",
+                "21",
+                "--family-days",
+                "agent=15",
+            ]
+        )
+
+
+def test_logs_retention_parser_rejects_unknown_family() -> None:
+    with pytest.raises(SystemExit):
+        _main._build_parser().parse_args(["logs", "retention", "--family-days", "restarter=4"])
 
 
 def test_logs_retention_default_comes_from_observability_settings() -> None:
@@ -145,7 +172,9 @@ def test_logs_retention_help_explains_defaults_and_dry_run(
     help_text = capsys.readouterr().out
     assert "14 days" in help_text
     assert "AVA_LOG_RETENTION_DAYS" in help_text
-    assert "without deleting" in help_text
+    assert "agent=15" in help_text
+    assert "--older-than DAYS | --family-days" in help_text
+    assert "without\n                        deleting" in help_text
 
 
 def test_start_subcommand_forwards_argparse_flags(monkeypatch: pytest.MonkeyPatch) -> None:

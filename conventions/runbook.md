@@ -1250,7 +1250,7 @@ Where to look when something went wrong on a host:
 | why did a daemon vanish | its log file: every daemon wraps `asyncio.run(main())` and logs the traceback before re-raising |
 | what did milvus say | its log file only — it is a C++ binary with no PG sink |
 | an agent | `$AVA_HOME/logs/agent-{N}.log` (kernel + its exec subprocess, both appending) |
-| raw session stdout (gateway / shells / daemons / schedules) | Loki (the LGTM backend): shell logs → `filelog/sessions`; gateway/daemon/schedule logs → `filelog/services`; updater/rollout tees → `filelog/orchestration`. Banner-only agent main stdout is excluded. All filelog receivers derive Loki `service_name` from the filename and persist offsets. Loki retains 7 days; managed local files use the conservative 14-day policy below. See `deploy/lgtm/README.md`. |
+| raw session stdout (gateway / shells / daemons / schedules) | Loki (the LGTM backend): shell logs → `filelog/sessions`; gateway/daemon/schedule logs → `filelog/services`; updater/rollout tees → `filelog/orchestration`. Banner-only agent main stdout is excluded. All filelog receivers derive Loki `service_name` from the filename and persist offsets. Loki retains 7 days; scheduled local cleanup uses the family tiers below. See `deploy/lgtm/README.md`. |
 
 ### Local log retention
 
@@ -1268,18 +1268,48 @@ ava logs retention --dry-run
 ava logs retention
 AVA_LOG_RETENTION_DAYS=21 ava logs retention --dry-run
 ava logs retention --older-than 21
+ava logs retention --family-days agent=15,shell=7,gateway=30,ops=30,watchdog=30,other=3 --dry-run
 ```
 
-The age is a positive integer number of days. `--older-than` wins; otherwise
-`AVA_LOG_RETENTION_DAYS` supplies the value, with 14 days as the fallback. A
-file exactly at the cutoff is retained (`mtime < cutoff` is deleted). Delete
-failures are reported per path on stderr, remaining candidates are attempted,
-and the command exits nonzero if any inspection or deletion failed.
+The age is a positive integer number of days. `--older-than` and
+`--family-days` are mutually exclusive. Without either flag, the legacy global
+threshold remains: `AVA_LOG_RETENTION_DAYS`, otherwise 14 days. `--older-than`
+is the explicit global override. `--family-days` activates the C baseline:
+agent-main and rotated `agent-*` files 15 days; named PTY shell transcript/host
+files 7 days; `gateway*`, `ops*`, and `*-watchdog` / `*_watchdog` rotations 30
+days; all other allowlisted service rotations 3 days. The rotation shape also
+admits underscores, so `delivery_watchdog` is in the watchdog family. Supply
+only the family values that differ; omitted values retain that baseline. In a
+mapping, `default=N` aliases `other=N` for the catch-all service family.
+
+Dry-run candidates include their family and selected days, followed by one
+`retention_family` line per policy family (including zero-candidate families)
+with its candidate count, days, and bytes. A file exactly at its cutoff is
+retained (`mtime < cutoff` is deleted). Delete failures are reported per path on
+stderr, remaining candidates are attempted, and the command exits nonzero if any
+inspection or deletion failed.
 
 Register one low-traffic daily OS job per machine after deployment, using the
 same launchd/crontab scheduling layer as `shared.os_cron`, with that machine's
 anchored `ava` executable as the payload. Registration is deployment work; the
 command intentionally does not add or mutate an OS schedule itself.
+
+Use the following payload in the deployment-owned jobs; these are templates,
+not instructions to register a job from the CLI:
+
+```text
+# macmini launchd — StartCalendarInterval: Hour=4, Minute=35
+/Users/<user>/.local/bin/ava logs retention --family-days agent=15,shell=7,gateway=30,ops=30,watchdog=30,other=3
+
+# mba launchd — StartCalendarInterval: Hour=4, Minute=40
+/Users/<user>/.local/bin/ava logs retention --family-days agent=15,shell=7,gateway=30,ops=30,watchdog=30,other=3
+
+# WSL crontab — 04:40 daily
+40 4 * * * /home/<user>/.local/bin/ava logs retention --family-days agent=15,shell=7,gateway=30,ops=30,watchdog=30,other=3
+
+# Windows schtasks — 04:45 daily; use the worktree's own executable
+schtasks /Create /TN "\\Ava\\<home-slug>\\log-retention" /SC DAILY /ST 04:45 /TR "\"C:\\path\\to\\Ava\\.venv\\Scripts\\ava\" logs retention --family-days agent=15,shell=7,gateway=30,ops=30,watchdog=30,other=3"
+```
 
 Raw session output is queried in Loki, not tailed from a file — Grafana Explore
 (Loki datasource), `logcli`, or the HTTP API:
