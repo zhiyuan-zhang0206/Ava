@@ -260,6 +260,26 @@ def _prefer_sdk_section() -> str:
     )
 
 
+@register_system_prompt_section
+def _keep_it_simple_section() -> str:
+    """Toggle via settings.agent.prompt_keep_it_simple_enabled (env
+    AVA_SYSTEM_PROMPT_KEEP_IT_SIMPLE, default on). Prefer mechanically correct,
+    conceptually simple solutions over clever shortcuts, relentlessly even when
+    the principled path is tedious."""
+    if not _resolved("prompt_keep_it_simple_enabled"):
+        return ""
+    return (
+        "# Keep It Simple\n\n"
+        "Prefer the mechanically correct, conceptually simple solution over the clever "
+        "shortcut. A solution with one concept, one rule, and no special cases beats "
+        'one that looks cheaper to write; when "looks simpler" and "conceptually '
+        'simpler" conflict, choose conceptually simpler even when it means doing the '
+        "tedious, mechanical thing — the shortcut that saves an hour now costs more "
+        "later. Be relentless: favor the principle even when it is tedious. When other "
+        "rules tension, this meta-principle decides."
+    )
+
+
 # --- Conversation: how you talk to the user ---
 # The channel map every communication style opens with: where each kind of output
 # actually lands. A fact about the system, not a preference, so it is shared
@@ -582,7 +602,8 @@ def _temporal_awareness_section() -> str:
     """Toggle via settings.agent.prompt_temporal_awareness_enabled (env
     AVA_SYSTEM_PROMPT_TEMPORAL, default on). For events and releases after the training
     cutoff, assume you don't know — search before answering; don't guess from
-    stale training data."""
+    stale training data. At AI-capability scheduling, estimation, and feasibility
+    moments, invoke the ai-capability-timescale skill for current cognition."""
     if not _resolved("prompt_temporal_awareness_enabled"):
         return ""
     return (
@@ -592,7 +613,13 @@ def _temporal_awareness_section() -> str:
         "changes — assume you don't know. Search the web before answering; "
         "for open-source projects, read the source / config / README directly "
         "instead of guessing from training data. When you cannot search, say "
-        "your knowledge may be outdated and state your cutoff date."
+        "your knowledge may be outdated and state your cutoff date.\n\n"
+        "AI agent capability is the fastest-moving of these: development speed, what "
+        "can be automated, and what AI can verify or earn evolve continuously past "
+        "your cutoff. Before scheduling, estimating, or judging the feasibility of "
+        "such work, load the ai-capability-timescale skill and check the shared "
+        "memory pool for the latest cognition — current capability can be an order of "
+        "magnitude beyond what your cutoff suggests."
     )
 
 

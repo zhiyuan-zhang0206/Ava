@@ -28,6 +28,7 @@ The system prompt carried in every LLM call, built **once per context window** �
 
 **Conduct group**:
 - `_prefer_sdk_section` — "Prefer SDK"
+- `_keep_it_simple_section` — "Keep It Simple"
 - `_communication_style_section` — How verbose to be while working; `AVA_AGENT_COMMUNICATION_STYLE` selects `off` (default; section omitted entirely) / `oriented` (short progress reports while working) / `concise` (only speak at milestones) / `silent` (work silently, provide a complete summary at the end)
 - `_output_conciseness_section` — Output conciseness
 - `_outcome_reporting_section` — Honest reporting
@@ -36,7 +37,7 @@ The system prompt carried in every LLM call, built **once per context window** �
 - `_cross_machine_delegation_section` — One sentence (user-finalized wording, verbatim): when work spans machines, let an agent on the target machine do it rather than reaching across. Toggle `AVA_SYSTEM_PROMPT_CROSS_MACHINE_DELEGATION` (default on); semantic steer only — no API detail, so it cannot go stale.
 - `_delegation_check_section` — The 30-second check before taking on work; the prompt's only mandatory-flagged process. The skill-index step (match the task against `# Capabilities`, load the covering skill) sits here rather than in the index itself, because an agent that never reads the index cannot know it is rebuilding one of its own skills. It is dropped and the remaining steps renumbered when this agent renders no Capabilities section at all (`capability_index_is_empty`). The other four steps are the delegation half
 - `_file_driven_work_section` — File-driven workflow
-- `_temporal_awareness_section` — Time awareness
+- `_temporal_awareness_section` — Time awareness, including the `ai-capability-timescale` skill invoke at scheduling, estimation, and feasibility-judgment moments
 - `_memory_behavior_section` — Cross-session memory
 - `_beyond_task_section` — Candidate next steps after task completion; with fleet context, worthwhile follow-ups are also created as open tasks via `ava.tasks.create()` (with description carrying provenance evidence pointers), while standalone stays as offers to the user
 - `_workspace_section` — Workspace description

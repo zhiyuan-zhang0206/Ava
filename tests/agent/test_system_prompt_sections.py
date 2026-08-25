@@ -76,6 +76,52 @@ def test_temporal_awareness_section_gating(
         (False, False),
     ],
 )
+def test_keep_it_simple_section_gating(monkeypatch: pytest.MonkeyPatch, enabled, expect_section):
+    monkeypatch.setattr(settings.agent, "prompt_keep_it_simple_enabled", enabled)  # pyright: ignore[reportUnknownArgumentType]
+
+    from agent.graph._system_prompt import _keep_it_simple_section
+
+    rendered = _keep_it_simple_section()
+
+    if expect_section:
+        assert "Keep It Simple" in rendered
+    else:
+        assert rendered == ""
+
+
+def test_keep_it_simple_section_carries_meta_principle(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(settings.agent, "prompt_keep_it_simple_enabled", True)
+
+    from agent.graph._system_prompt import _keep_it_simple_section
+
+    rendered = _keep_it_simple_section()
+
+    assert "Keep It Simple" in rendered
+    assert "looks cheaper" in rendered and "conceptually simpler" in rendered
+    assert "favor the principle even when it is tedious" in rendered
+    assert "this meta-principle decides" in rendered
+
+
+def test_temporal_awareness_invokes_ai_capability_timescale(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(settings.agent, "prompt_temporal_awareness_enabled", True)
+
+    from agent.graph._system_prompt import _temporal_awareness_section
+
+    rendered = _temporal_awareness_section()
+
+    assert "ai-capability-timescale" in rendered
+    assert "scheduling, estimating, or judging the feasibility" in rendered
+
+
+@pytest.mark.parametrize(
+    ("enabled", "expect_section"),
+    [
+        (True, True),
+        (False, False),
+    ],
+)
 def test_ui_delivery_section_gating(monkeypatch: pytest.MonkeyPatch, enabled, expect_section):
     monkeypatch.setattr(settings.agent, "prompt_ui_delivery_enabled", enabled)  # pyright: ignore[reportUnknownArgumentType]
 
