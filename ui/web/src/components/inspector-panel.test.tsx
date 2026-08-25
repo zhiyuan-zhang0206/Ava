@@ -528,6 +528,7 @@ describe("InspectorPanel", () => {
   });
 
   it("renders the notice section when agent has an open notice", async () => {
+    const createdAt = "2026-06-15T13:30:00Z";
     getAgentInspectLive.mockResolvedValue(
       liveFixture({
         notice: {
@@ -537,7 +538,7 @@ describe("InspectorPanel", () => {
           priority: "P0",
           require_response: true,
           blocking: true,
-          created_at: "2026-06-14T12:00:00Z",
+          created_at: createdAt,
         },
       }),
     );
@@ -550,6 +551,10 @@ describe("InspectorPanel", () => {
     expect(screen.getByText("Blocking")).toBeTruthy();
     // Type label
     expect(screen.getByText("Decision")).toBeTruthy();
+    // Created time
+    expect(
+      screen.getByText(`${formatRelative(createdAt)}, ${formatAbsolute(createdAt)}`),
+    ).toBeTruthy();
     // Title
     expect(screen.getByText("Approve deploy?")).toBeTruthy();
     // Content preview

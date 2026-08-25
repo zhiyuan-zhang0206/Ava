@@ -9,6 +9,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { OpenNoticeDetail } from "./open-notice-detail";
+import { formatAbsolute, formatRelative } from "@/lib/time";
 import type { OpenNotice } from "@/lib/types";
 
 // vi.hoisted so the fn exists before the hoisted vi.mock factory runs.
@@ -34,6 +35,29 @@ function ntc(overrides: Partial<OpenNotice> = {}): OpenNotice {
 afterEach(() => {
   cleanup();
   resolveNotice.mockReset();
+});
+
+describe("OpenNoticeDetail — timestamp", () => {
+  const createdAt = "2026-06-14T12:00:00Z";
+  const timestamp = `${formatRelative(createdAt)}, ${formatAbsolute(createdAt)}`;
+
+  it("hides the created time by default", () => {
+    render(<OpenNoticeDetail agentId={7} notice={ntc({ created_at: createdAt })} />);
+
+    expect(screen.queryByText(timestamp)).toBeNull();
+  });
+
+  it("shows the created time when requested", () => {
+    render(
+      <OpenNoticeDetail
+        agentId={7}
+        notice={ntc({ created_at: createdAt })}
+        showTimestamp
+      />,
+    );
+
+    expect(screen.getByText(timestamp)).toBeTruthy();
+  });
 });
 
 describe("OpenNoticeDetail — require_response", () => {
