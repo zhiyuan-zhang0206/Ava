@@ -285,6 +285,79 @@ def test_adoption_failure_attempts_recovery(
     assert order == ["child", "adopt", "recover"]
 
 
+def test_postgres_password_mutation_cannot_block_adoption_failure_recovery(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Inject the split failure at its dangerous boundary: Postgres already has
+    the new owner password, while the surviving parent still has the old one.
+    Recovery must roll back through local admin, reset, sync, and restart."""
+    from cli.commands import _update_recover as _recover
+
+    order: list[str] = []
+    actual_pg_password = _OLD_PASSWORD
+
+    monkeypatch.setattr(
+        _local,
+        "_snapshot_known_good",
+        lambda **_kwargs: ("old-sha", set(), None),  # pyright: ignore[reportUnknownArgumentType]
+    )
+    monkeypatch.setattr(
+        _local,
+        "_checkout_and_sync",
+        lambda *_args, **_kwargs: None,  # pyright: ignore[reportUnknownArgumentType]
+    )
+    monkeypatch.setattr(_local, "_refresh_builtin_skills", lambda _repo: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_update, "_do_stop", lambda *_args, **_kwargs: None)  # pyright: ignore[reportUnknownArgumentType]
+
+    def _boot(*_args: object) -> int:
+        nonlocal actual_pg_password
+        actual_pg_password = _NEW_DB_PASSWORD
+        order.append("child:postgres-password-mutated")
+        return 0
+
+    def _fail_adoption() -> None:
+        assert actual_pg_password == _NEW_DB_PASSWORD
+        order.append("adopt:redis-rewrite-failed")
+        raise RuntimeError("redis CONFIG REWRITE failed after Postgres mutation")
+
+    def _rollback(_target: set[str], *, local_admin: bool = False) -> list[str]:
+        assert actual_pg_password != _OLD_PASSWORD
+        assert local_admin is True
+        order.append("rollback:local-admin")
+        return []
+
+    def _reset(sha: str) -> None:
+        order.append(f"reset:{sha}")
+
+    class _Result:
+        returncode = 0
+
+    class _RecoverySubprocess:
+        @staticmethod
+        def run(argv: list[str], **_kwargs: object) -> _Result:
+            if argv[:2] == ["uv", "sync"]:
+                order.append("uv-sync")
+            elif len(argv) >= 2 and argv[0].endswith("ava") and argv[1] == "start":
+                order.append("ava-start")
+            return _Result()
+
+    monkeypatch.setattr(_local, "_boot_gateway_fresh", _boot)
+    monkeypatch.setattr(_local, "_adopt_child_data_plane_credentials", _fail_adoption)
+    monkeypatch.setattr(_recover, "rollback_schema_to", _rollback)
+    monkeypatch.setattr(_recover, "git_reset_hard", _reset)
+    monkeypatch.setattr(_recover, "subprocess", _RecoverySubprocess)
+
+    assert _local._run_gateway_local_update(tmp_path, target_sha="new-sha", pull=True) == 1
+    assert order == [
+        "child:postgres-password-mutated",
+        "adopt:redis-rewrite-failed",
+        "rollback:local-admin",
+        "reset:old-sha",
+        "uv-sync",
+        "ava-start",
+    ]
+
+
 def test_real_sigint_kills_child_and_replays_journal_before_recovery(tmp_path: Path) -> None:
     """Exercise the real subprocess/SIGINT boundary after the child journals secrets."""
     repo_root = Path(__file__).resolve().parents[2]

@@ -47,3 +47,42 @@ compatibility stage: its first child detects the old parent's executing lease,
 keeps the restarter down, and defers the credential transition. Once that
 revision is the installed parent, later rollouts carry the explicit v1 handoff
 and both their forward and recovery paths use these rules.
+
+## Update: the boundary belongs to the gateway child
+
+The cluster-wide executing lease is also visible to pure agent-runners during
+Phase B. Treating every internal start under that lease as the gateway's child
+left each runner `converging` with its restarter down, exactly the state Phase B
+polls to completion. The classification is therefore capability-aware:
+operator starts are still refused before migrations on every role, but only a
+gateway-capable internal child inherits the parent's delayed-resume boundary.
+A pure runner finishes its local update with posture `idle` and its restarter
+running.
+
+## Update: predecessor recovery remains a deployment boundary
+
+The compatibility target can control its fresh child, but it cannot replace
+functions already imported in the predecessor parent that is conducting that
+first rollout. If the compatibility rollout itself fails or receives SIGINT
+after stopping services, the predecessor's recovery start still predates the
+restarter skip, its unpause still starts the restarter unconditionally, and its
+restarter has no durable-disable self-check. Agents can therefore relaunch
+before the recovered gateway is ready, and operator restarter intent can be
+lost.
+
+This is not presented as fixed retroactively. The boundary revision must be
+deployed alone as a monitored compatibility stage; only after it is the
+installed parent may a later rollout rely on the versioned handoff and durable
+recovery rules. The first stage defers the credential split, limiting its work
+to installing that parent, but interruption of the predecessor itself remains
+an operator-supervised risk.
+
+## Update: recovery does not trust the partially changed owner password
+
+The credential transition mutates Postgres before Redis and the unit env. If a
+later phase fails, the surviving parent may still hold the old owner password.
+Failed-update schema rollback now uses the gateway's passwordless local
+Postgres admin socket and targets the cluster database explicitly; normal
+operator rollback continues to use the runtime owner connection. A fault test
+injects failure after the Postgres mutation and requires local-admin rollback,
+git reset, dependency sync, and last-known-good start to complete in order.

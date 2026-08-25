@@ -31,6 +31,15 @@ transition. A later ordinary `ava start` or rollout may then perform the split.
 This predecessor gate prevents a surviving old rollout process from attempting
 pin/recovery writes with credentials only its child knows.
 
+Deploy that compatibility revision by itself and monitor the rollout through
+completion before relying on the handoff for a later transition. The already
+running predecessor owns its imported recovery implementation: if this first
+compatibility rollout itself fails or is interrupted after service stop, the
+target revision cannot retrofit the predecessor's recovery ordering, and that
+old recovery may relaunch the restarter before the gateway is ready. Keep the
+rollout under operator supervision; after the compatibility revision completes,
+subsequent rollouts use the versioned handoff and the new recovery boundary.
+
 Before the first external mutation, the complete five-field target is atomically
 journaled at `$AVA_HOME/run/data-plane-credential-split.json`. Every phase is
 idempotent. A later start retries native data-plane bring-up with the journaled
@@ -39,6 +48,12 @@ journal before migrations. The journal is removed only after Postgres, Redis,
 PgBouncer, `.env`, process environment, and in-memory settings agree. No manual
 Redis restart or password rollback is required after an interruption; re-run
 `ava start` and let the journal finish forward.
+
+Failed-update schema recovery does not depend on the runtime owner password.
+It connects to the target database through this gateway's local Postgres trust
+socket as the instance administrator, so a failure after Postgres accepts the
+journaled password but before the parent adopts it can still roll migrations
+back, restore last-known-good code, and restart the gateway.
 
 Fresh authenticated installs mint all three values at birth. Empty-bearer
 single-box clusters are intentionally a no-op: all data-plane credentials remain

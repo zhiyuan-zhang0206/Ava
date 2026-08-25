@@ -100,7 +100,10 @@ def _recover_gateway_local(
 
     print(f"\n→ recover: roll gateway back to last-known-good {from_sha[:7]}", file=sys.stderr)
     try:
-        rolled = rollback_schema_to(schema_snapshot)
+        # Recovery must not authenticate as the runtime owner role: a failed
+        # credential-journal replay can leave this surviving parent holding the
+        # old password after Postgres already accepted the new one.
+        rolled = rollback_schema_to(schema_snapshot, local_admin=True)
     except RollbackBelowFloor:
         # Nothing was rolled back (the floor guard fires before any down runs): the
         # schema is untouched on the new revision, so code + schema stay consistent.
@@ -127,6 +130,20 @@ def _recover_gateway_local(
             "for fix-forward: re-run `ava cluster update` or `ava start` on the new "
             "revision to apply pending migrations. Do NOT reset code; the gateway is "
             "DOWN and requires a human decision.",
+            file=sys.stderr,
+        )
+        _print_pre_update_data_snapshot_restore(data_snapshot)
+        return 1
+    except Exception as exc:  # fail-fast-ok: this boundary must preserve code/schema ordering
+        # Connection/registry failures happen before rollback_to can mutate the
+        # schema.  Never reset old code underneath the newer schema; report a
+        # determinate DOWN state instead of losing the recovery verdict to a
+        # traceback.  Name only the exception type because connection failures
+        # may embed a URL in their text.
+        print(
+            "  ✗✗ MANUAL INTERVENTION: local-admin schema recovery could not start "
+            f"({type(exc).__name__}); schema is unchanged and code was NOT reset. "
+            "The gateway is DOWN.",
             file=sys.stderr,
         )
         _print_pre_update_data_snapshot_restore(data_snapshot)

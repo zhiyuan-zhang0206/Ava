@@ -130,7 +130,9 @@ def _ensure_gateway_data_plane() -> int:
     return _ensure(pending)
 
 
-def _rollout_child_window(*, parent_handoff: bool, persist_services: bool) -> bool:
+def _rollout_child_window(
+    *, parent_handoff: bool, persist_services: bool, gateway_capable: bool
+) -> bool:
     """Identify a fresh rollout child, or refuse a concurrent operator start.
 
     A v1 marker is proof from the surviving parent. An executing DB lease is the
@@ -138,7 +140,12 @@ def _rollout_child_window(*, parent_handoff: bool, persist_services: bool) -> bo
     converge but must defer credential mutation; operator starts are refused.
     Settle holds carry a note and have no active orchestrator.
     """
-    if parent_handoff:
+    # Only the gateway local leg survives a checkout in a parent and owns the
+    # credential/restarter boundary.  A pure agent-runner's Phase-B updater
+    # also starts internally under the cluster-wide executing lease, but that
+    # child must finish by restoring posture=idle and its local restarter so the
+    # gateway's Phase-B poll can observe convergence.
+    if parent_handoff and gateway_capable:
         return True
 
     from shared.cluster_lock import read_update_lease
@@ -148,7 +155,7 @@ def _rollout_child_window(*, parent_handoff: bool, persist_services: bool) -> bo
         return False
     if persist_services:
         raise RuntimeError(lease.refusal("ava start"))
-    return True
+    return gateway_capable
 
 
 def _verify_source_integrity(repo: Path) -> int:
@@ -502,6 +509,7 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
         rollout_child = _rollout_child_window(
             parent_handoff=parent_handoff,
             persist_services=persist_services,
+            gateway_capable="gateway" in roles,
         )
     except Exception as e:
         print(f"  ✗ cannot start while checking the rollout boundary: {e}", file=sys.stderr)
