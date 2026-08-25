@@ -64,6 +64,27 @@ def _park_wedged(db_conn: psycopg.Connection, *, pid: int = 1234) -> int:
     return aid
 
 
+def _add_stale_pending_chat(db_conn: psycopg.Connection, aid: int, *, age_s: float) -> None:
+    with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
+        cur.execute(
+            "INSERT INTO inbound_messages (agent_id, content, kind, source, created_at) "
+            "VALUES (%s, 'stale work', 'chat', 'user', "
+            "now() - make_interval(secs => %s))",
+            (aid, age_s),
+        )
+    db_conn.commit()  # pyright: ignore[reportUnknownMemberType]
+
+
+def _add_pending_resurrect_inbound(db_conn: psycopg.Connection, aid: int) -> None:
+    with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
+        cur.execute(
+            "INSERT INTO inbound_messages (agent_id, content, kind, source) "
+            "VALUES (%s, '', 'resurrect', 'system')",
+            (aid,),
+        )
+    db_conn.commit()  # pyright: ignore[reportUnknownMemberType]
+
+
 def _open_recovery(
     monkeypatch: pytest.MonkeyPatch,
     aid: int,
@@ -88,6 +109,29 @@ def _open_recovery(
         resurrected.append({"agent_id": agent_id, **kwargs})
 
     monkeypatch.setattr(wedged_mod, "resurrect_agent", _resurrect)
+    return killed, resurrected
+
+
+def _capture_recovery_with_real_claim(
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[list[int], list[int]]:
+    """Capture recovery side effects without replacing the candidate claim SQL."""
+    monkeypatch.setattr(settings.daemon, "wedged_agent_enabled", True)
+    monkeypatch.setattr(settings.daemon, "wedged_agent_inbound_age_seconds", 60.0)
+    monkeypatch.setattr(wedged_mod, "_gateway_healthy", lambda: True)
+
+    def _owned_process(_pid: int, _agent_id: int) -> AgentProcessIdentity:
+        return AgentProcessIdentity.OWNED
+
+    monkeypatch.setattr(wedged_mod, "probe_agent_process", _owned_process)
+    killed: list[int] = []
+    resurrected: list[int] = []
+    monkeypatch.setattr(wedged_mod, "force_kill", killed.append)
+
+    def _capture_resurrect(agent_id: int, **_kwargs: object) -> None:
+        resurrected.append(agent_id)
+
+    monkeypatch.setattr(wedged_mod, "resurrect_agent", _capture_resurrect)
     return killed, resurrected
 
 
@@ -145,6 +189,47 @@ class TestGuards:
 
 
 class TestRecovery:
+    def test_attempt_budget_stops_wedged_recovery_at_limit(
+        self,
+        db_conn: psycopg.Connection,
+        sync_pool: ConnectionPool,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A stale chat cannot feed the wedged kill/resurrect loop after three
+        earlier recovery boots all failed before consuming their lifecycle row."""
+        killed, resurrected = _capture_recovery_with_real_claim(monkeypatch)
+        aid = _park_wedged(db_conn)
+        _add_stale_pending_chat(db_conn, aid, age_s=120.0)
+        for _ in range(3):
+            _add_pending_resurrect_inbound(db_conn, aid)
+
+        result = _fresh_controller(sync_pool).reconcile("agent-runner")
+
+        assert killed == []
+        assert resurrected == []
+        assert result.acted is False
+        with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
+            cur.execute("SELECT status, termination_source FROM agents_meta WHERE id=%s", (aid,))
+            assert cur.fetchone() == ("running", None)
+
+    def test_attempt_budget_allows_wedged_recovery_with_no_failed_attempts(
+        self,
+        db_conn: psycopg.Connection,
+        sync_pool: ConnectionPool,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A stale-chat candidate with no failed recovery lifecycle rows passes
+        the real claim query and completes the wedged recovery path."""
+        killed, resurrected = _capture_recovery_with_real_claim(monkeypatch)
+        aid = _park_wedged(db_conn)
+        _add_stale_pending_chat(db_conn, aid, age_s=120.0)
+
+        result = _fresh_controller(sync_pool).reconcile("agent-runner")
+
+        assert killed == [1234]
+        assert resurrected == [aid]
+        assert result.acted is True
+
     @pytest.mark.parametrize(
         ("identity", "expected_kill"),
         [
@@ -286,3 +371,5 @@ class TestClaimSQL:
         # concurrent pass cannot double-claim the same agent.
         assert "last_wedged_check_at = now()" in src
         assert "now() - last_wedged_check_at" in src
+        assert "lc.kind = 'resurrect'" in src
+        assert "lc.status = 'pending'" in src

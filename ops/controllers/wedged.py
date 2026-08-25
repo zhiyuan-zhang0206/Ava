@@ -27,7 +27,8 @@ is usually just a ``heartbeat`` which is not in ``_WORK_INBOUND_KINDS``).
 
 **Gating**: ``wedged_agent_enabled`` (default True), scan throttle (30s, same
 as the reaper), per-agent backoff (``last_wedged_check_at``, same clock shape
-as ``last_resurrect_at``). Gateway-health gated like the other controllers:
+as ``last_resurrect_at``), and the shared ``auto_resurrect_max_attempts`` budget
+of unconsumed lifecycle rows. Gateway-health gated like the other controllers:
 a resurrect while the gateway is down would crash-loop.
 
 Extracted as a Controller so the restarter daemon runs it alongside
@@ -88,7 +89,9 @@ def _claim_wedged_candidates(
     unconsumed ``pending`` inbound older than ``age_s``, and either never checked
     or past the per-agent backoff. The UPDATE's RETURNING is the atomic claim —
     the caller processes every returned row through the OWNED/FOREIGN/GONE/
-    UNREADABLE identity matrix under the agent row lock.
+    UNREADABLE identity matrix under the agent row lock. Each wedged recovery
+    inserts its own ``kind='resurrect'`` inbound, so the shared unconsumed-attempt
+    budget caps the kill + prompt + resurrect loop too.
     """
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
@@ -98,6 +101,9 @@ def _claim_wedged_candidates(
             "AND pid IS NOT NULL "
             "AND (last_wedged_check_at IS NULL "
             "     OR now() - last_wedged_check_at >= make_interval(secs => %s)) "
+            "AND (SELECT count(*) FROM inbound_messages lc "
+            "     WHERE lc.agent_id = agents_meta.id "
+            "       AND lc.kind = 'resurrect' AND lc.status = 'pending') < %s "
             "AND EXISTS ("
             "  SELECT 1 FROM inbound_messages im "
             "  WHERE im.agent_id = agents_meta.id "
@@ -105,7 +111,12 @@ def _claim_wedged_candidates(
             "    AND im.created_at < now() - make_interval(secs => %s)"
             ") "
             "RETURNING id, pid, last_wedged_check_at",
-            (local_machine, backoff_s, age_s),
+            (
+                local_machine,
+                backoff_s,
+                settings.daemon.auto_resurrect_max_attempts,
+                age_s,
+            ),
         )
         return [(r[0], r[1], r[2]) for r in cur.fetchall()]
 
