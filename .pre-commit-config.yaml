@@ -60,6 +60,17 @@ repos:
         types: [python]
         pass_filenames: false
 
+      # PYTHONSAFEPATH=1 (2026-08-22 hardening) keeps a script's own directory
+      # off sys.path, so a script-mode file importing a same-dir sibling without
+      # restoring its directory first breaks (daily_scan.py 2026-08-23 crash).
+      # The lint enforces the restore-before-import guard; see the script header.
+      - id: lint-no-script-sibling-imports
+        name: lint script sibling imports (PYTHONSAFEPATH guard)
+        entry: .venv/bin/python scripts/lint_no_script_sibling_imports.py
+        language: system
+        types: [python]
+        pass_filenames: false
+
       # per_agent config fields read through the bare settings singleton in
       # turn-scoped code silently ignore the agent's overlay in hosted-runner
       # mode — force the per-turn view (shared/config/turn_view.py).
