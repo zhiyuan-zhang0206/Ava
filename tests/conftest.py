@@ -211,6 +211,36 @@ os.environ["AVA_PGBOUNCER_ENABLED"] = "false"
 # in-memory providers where the path is under test.
 os.environ["AVA_TELEMETRY_OTLP_ENABLED"] = "false"
 
+# ── Host-scope identity and telemetry URLs: loopback, like CI ──
+#
+# The native LGTM installer renders Tempo targets from the host-scope
+# telemetry settings (`settings.observability.telemetry_tempo_query_url` /
+# `telemetry_tempo_endpoint`), and `_self_machine_host()` prefers the
+# AVA_MACHINE_HOST env var over the home's `machine_host` file. The login
+# shell exports the operator's real ~/.ava/.env into every child process (the
+# 2026-08-04 shell-env leak class), and host-scope keys survive the
+# cluster-scope drop in `_enforce_cluster_env_authority` — so on a dev box a
+# Tailscale host override reached the suite and
+# `test_ensure_renders_configs_with_native_paths_and_loopback` rendered
+# `http://100.x.y.z:3200` instead of loopback while CI (no .env) stayed green.
+# Pinned unconditionally, like the gateway/telegram sentinels: local runs
+# resolve the same loopback host everywhere, and a test that needs a remote
+# Tempo URL or host address monkeypatches the settings explicitly
+# (tests/shared/test_machine.py does for machine_host).
+os.environ["AVA_TELEMETRY_TEMPO_QUERY_URL"] = "http://127.0.0.1:3200"
+os.environ["AVA_TELEMETRY_TEMPO_ENDPOINT"] = "http://127.0.0.1:14318"
+os.environ["AVA_MACHINE_HOST"] = "localhost"
+
+# ── Grafana admin credential: the suite never carries a live one ──
+#
+# Same leak class: the login shell exports the real GRAFANA_ADMIN_PASSWORD,
+# and the native LGTM render writes `settings.alerts.grafana_admin_password`
+# into the rendered native dir — a production credential flowing through test
+# output. Pinned empty like the telegram token; a test that needs a credential
+# monkeypatches `settings.alerts.grafana_admin_password`
+# (tests/cli/test_converge_lgtm.py does).
+os.environ["GRAFANA_ADMIN_PASSWORD"] = ""
+
 # The gateway address every client-side caller resolves (`gateway_api_base()` ->
 # `_resolve_gateway_url()` -> `settings.gateway.gateway_url`, whose field default
 # is ""). It is read off the Settings singleton, so it has to be in the
@@ -269,6 +299,10 @@ os.environ["AVA_TELEGRAM_OWNER_ID"] = "0"
             f"AVA_TELEGRAM_BOT_TOKEN={os.environ['AVA_TELEGRAM_BOT_TOKEN']}",
             f"AVA_TELEGRAM_OWNER_ID={os.environ['AVA_TELEGRAM_OWNER_ID']}",
             f"AVA_TELEMETRY_OTLP_ENABLED={os.environ['AVA_TELEMETRY_OTLP_ENABLED']}",
+            f"AVA_TELEMETRY_TEMPO_QUERY_URL={os.environ['AVA_TELEMETRY_TEMPO_QUERY_URL']}",
+            f"AVA_TELEMETRY_TEMPO_ENDPOINT={os.environ['AVA_TELEMETRY_TEMPO_ENDPOINT']}",
+            f"AVA_MACHINE_HOST={os.environ['AVA_MACHINE_HOST']}",
+            f"GRAFANA_ADMIN_PASSWORD={os.environ['GRAFANA_ADMIN_PASSWORD']}",
             # Same force-branch reasoning: exec timeout is cluster-scoped; without a
             # declaration the drop deletes the pinned 60s and the D5 fallback reads the
             # field default (300s) — test_config bootstrap/panel tests assert equality.
@@ -317,6 +351,26 @@ import ava
 import shared.service_respawn
 from shared.config import set_field, settings
 from shared.daemon_health import _HEALTH_PORT_OVERRIDES
+
+# The host-scope isolation pins (env block above) must have taken effect before
+# Settings construction: the native LGTM render reads the Tempo URLs at use
+# time, `_self_machine_host()` prefers the env var, and the render writes the
+# Grafana credential into its output — the login-shell .env leak class would
+# otherwise put the operator's real host address and credentials into the
+# suite. Assert both the environment and the constructed settings, so a later
+# edit that weakens a pin (e.g. `setdefault`) fails loudly on every box, even
+# where CI cannot see the leak (a clean CI env has no ambient value to
+# override, so the LGTM test alone would stay green).
+assert os.environ.get("AVA_TELEMETRY_TEMPO_QUERY_URL") == "http://127.0.0.1:3200"
+assert os.environ.get("AVA_TELEMETRY_TEMPO_ENDPOINT") == "http://127.0.0.1:14318"
+assert os.environ.get("AVA_MACHINE_HOST") == "localhost"
+assert os.environ.get("GRAFANA_ADMIN_PASSWORD") == ""
+assert settings.observability.telemetry_tempo_query_url == "http://127.0.0.1:3200"
+assert settings.observability.telemetry_tempo_endpoint == "http://127.0.0.1:14318"
+assert settings.general.machine_host == "localhost"
+assert settings.alerts.grafana_admin_password is None or (
+    settings.alerts.grafana_admin_password.get_secret_value() == ""
+)
 from shared.platform import raise_fd_limit
 from shared.test_db_guard import assert_test_db_url
 from tests._containers import postgres, redis_server
