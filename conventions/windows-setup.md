@@ -55,11 +55,42 @@ collision this default does not preempt (see Troubleshooting).
 | Component | How to install |
 |---|---|
 | **Python 3.12** | `winget install python-3.12`, or `uv python install 3.12` |
-| **uv** | `powershell -c "irm https://astral.sh/uv/install.ps1 \| iex"` |
+| **uv** | pinned 0.10.2 release asset with sha256 verify — see [Pinned uv install](#pinned-uv-install) below |
 | **Git** | `winget install Git.Git` |
 
 The session layer is `shared/winproc.py`, no Docker (no local data
 plane), no Node (the frontend is a gateway service).
+
+## Pinned uv install
+
+uv is installed from a pinned GitHub release asset — fixed version + sha256,
+the same operator-approved version `scripts/provision/toolchain.sh` and CI
+run — instead of the astral installer's rolling latest. PowerShell (x86_64):
+
+```powershell
+if (Get-Command uv -ErrorAction SilentlyContinue) {
+  Write-Host "uv already present ($(uv --version))"
+} else {
+  $v = "0.10.2"
+  $expected = "493ebbe0e06128d6ee4905e1ed5e2a433fb0f7cfc08b0eaca9fab4ca76778ae1"  # x86_64-pc-windows-msvc
+  $tmp = Join-Path $env:TEMP "uv-$v"
+  New-Item -ItemType Directory -Force $tmp | Out-Null
+  $zip = Join-Path $tmp "uv.zip"
+  Invoke-WebRequest -Uri "https://github.com/astral-sh/uv/releases/download/$v/uv-x86_64-pc-windows-msvc.zip" -OutFile $zip
+  $actual = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLower()
+  if ($actual -ne $expected) { throw "uv $v sha256 mismatch: got $actual, expected $expected" }
+  Expand-Archive -Path $zip -DestinationPath $tmp
+  $dest = Join-Path $env:USERPROFILE ".local\bin"
+  New-Item -ItemType Directory -Force $dest | Out-Null
+  Copy-Item (Join-Path $tmp "uv-x86_64-pc-windows-msvc\uv.exe") $dest -Force
+}
+```
+
+ARM64 hosts swap the asset and hash for `uv-aarch64-pc-windows-msvc.zip`
+(`826e4ee3a03ec245e54c449e272fdf8aab749e039cc49c950ad43cc13702221f`). Both
+values live in `shared/brew_pin.py` (`UV_WINDOWS_ASSET_SHA256`); the contract
+test `tests/scripts/test_toolchain_uv_pin.py` asserts this guide never drifts
+from them.
 
 ## Setup
 
