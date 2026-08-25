@@ -1006,6 +1006,10 @@ CREATE TABLE schedule_versions (
 );
 CREATE INDEX ON schedule_versions (schedule_id, created_at DESC);
 
+-- Run history: append-only log of a schedule's runs, for the UI's "last run" +
+-- history drawer. The schedule runner appends one row per process execution —
+-- ok = NULL while in-progress, closed with the outcome on exit. Severable
+-- observability: a write failure never affects the schedule itself.
 CREATE TABLE schedule_runs (
     id          BIGSERIAL PRIMARY KEY,
     schedule_id BIGINT NOT NULL REFERENCES schedules(id) ON DELETE CASCADE,
