@@ -8,12 +8,19 @@ its emitted `sdk_call` event `detail`.
 
 from __future__ import annotations
 
+import itertools
 from typing import Any
 
 import pytest
 from loguru import logger
 
 from shared import sdk_telemetry
+
+
+@pytest.fixture(autouse=True)
+def _reset_sdk_call_sampler() -> None:
+    """Make each test's first real SDK event the sampled-in record."""
+    sdk_telemetry._sdk_call_counter = itertools.count()
 
 
 def _spy_emit(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, Any]]]:
@@ -146,6 +153,7 @@ def test_annotate_end_to_end_detail_in_event() -> None:
     assert captured[0]["fn"] == "shell.run"
     assert captured[0]["detail"] == {"subcommand": "cd", "target": "workspace"}
     assert isinstance(captured[0]["duration"], float)  # run_metered measures the call
+    assert captured[0]["sample_rate"] == 10
 
 
 def test_emit_carries_top_level_duration(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -165,6 +173,26 @@ def test_emit_carries_top_level_duration(monkeypatch: pytest.MonkeyPatch) -> Non
     assert captured[0]["fn"] == "shell.run"
     assert captured[0]["duration"] == 0.42
     assert captured[0]["detail"] == {"k": 1}
+    assert captured[0]["sample_rate"] == 10
+
+
+def test_emit_samples_one_in_ten_calls() -> None:
+    """The real event path keeps exactly the first call in each ten-call block."""
+    captured: list[dict[str, Any]] = []
+    sink_id = logger.add(
+        lambda m: captured.append(dict(m.record["extra"])),
+        level="INFO",
+        filter=lambda r: r["extra"].get("event") == sdk_telemetry.SDK_CALL_EVENT,
+    )
+    try:
+        for _ in range(10):
+            sdk_telemetry.emit("files.read")
+    finally:
+        logger.remove(sink_id)
+
+    assert len(captured) == 1
+    assert captured[0]["fn"] == "files.read"
+    assert captured[0]["sample_rate"] == 10
 
 
 def test_emit_omits_detail_when_empty() -> None:

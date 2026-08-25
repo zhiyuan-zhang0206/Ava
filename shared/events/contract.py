@@ -199,6 +199,7 @@ class SdkCall(TypedDict):
 
     fn: str
     duration: float
+    sample_rate: int
 
 
 class PluginActivation(TypedDict):
