@@ -421,10 +421,14 @@ def test_dashboard_72h_uses_ledger_and_tail_seam(
         tokens_cached=200,
         cost_usd=5.0,
     )
+    # A live event inside the newest retained ledger day's tail span
+    # ([yesterday 00:00Z, now]). Any offset in (0, 24h] stays inside that
+    # span at every wall-clock time; 30h crossed the UTC-day boundary
+    # during 00:00-06:00Z and the event fell out of the tail (time-flaky).
     fake_loki.add(
         event="llm_usage",
         payload={"in_total": 150, "out_total": 15, "cache_read": 60, "cost_usd": 1.5},
-        ts_offset_hours=30,
+        ts_offset_hours=12,
     )
     db_conn.commit()
 
