@@ -1,8 +1,9 @@
-"""macOS permission watcher: log correlation, notice lifecycle, and launchd wiring."""
+"""macOS permission watcher: log correlation, local lifecycle, and launchd wiring."""
 
 from __future__ import annotations
 
 import json
+import logging
 import plistlib
 import subprocess
 from datetime import UTC, datetime, timedelta
@@ -53,6 +54,24 @@ def test_tcc_parser_correlates_attribution_prompt_and_result() -> None:
     assert result is not None
     assert result.phase is watcher.EventPhase.RESOLVED
     assert result.subject == _UV_PYTHON
+
+
+def test_tcc_parser_prefers_responsible_subject_and_retains_binary_as_tool() -> None:
+    parser = watcher.LogEventParser()
+    event = parser.parse(
+        watcher.PermissionKind.TCC,
+        _log_line(
+            "AUTHREQ_PROMPTING: msgID=66077.24, "
+            "service=kTCCServiceSystemPolicyAppData, "
+            f"subject=Sub:{{{_UV_PYTHON}}}Resp:{{TCCDProcess: identifier=-, pid=84991, "
+            f"auid=501, euid=501, responsible_path={_UV_PYTHON}, "
+            "binary_path=/usr/bin/find}"
+        ),
+    )
+
+    assert event is not None
+    assert event.subject == _UV_PYTHON
+    assert event.tool == "/usr/bin/find"
 
 
 def test_alf_parser_resolves_prompt_pid_and_correlates_verdict() -> None:
@@ -121,171 +140,123 @@ def _event(
     phase: watcher.EventPhase,
     when: datetime,
     subject: str = _UV_PYTHON,
+    *,
+    correlation_id: str = "request-1",
+    tool: str | None = None,
 ) -> watcher.PermissionEvent:
-    return watcher.PermissionEvent(kind, phase, subject, when, "request-1")
+    return watcher.PermissionEvent(kind, phase, subject, when, correlation_id, tool)
 
 
-def _record_notices(notices: list[tuple[str, str]]) -> watcher.NoticeSender:
-    def record(title: str, content: str) -> None:
-        notices.append((title, content))
-
-    return record
-
-
-def test_pending_prompt_is_deduplicated_for_same_subject_within_five_minutes(
-    tmp_path: Path,
+def test_new_prompt_logs_info_once_and_repeats_only_refresh_pending(
+    caplog: pytest.LogCaptureFixture, tmp_path: Path
 ) -> None:
-    notices: list[tuple[str, str]] = []
-    service = watcher.PermissionWatcher(tmp_path / "state.json", _record_notices(notices))
-    service.observe(_event(watcher.PermissionKind.TCC, watcher.EventPhase.PROMPTING, _T0))
+    caplog.set_level(logging.DEBUG, logger="ava.permission_watcher")
+    service = watcher.PermissionWatcher(tmp_path / "state.json")
     service.observe(
         _event(
             watcher.PermissionKind.TCC,
             watcher.EventPhase.PROMPTING,
-            _T0 + timedelta(minutes=4, seconds=59),
+            _T0,
+            tool="/usr/bin/find",
         )
     )
-    assert [title for title, _content in notices] == ["macOS 权限弹窗待处理"]
-    assert _UV_PYTHON in notices[0][1]
-    assert "TCC 完全磁盘访问" in notices[0][1]
-
-
-def test_prompt_after_five_minutes_of_silence_starts_a_new_dedupe_window(
-    tmp_path: Path,
-) -> None:
-    notices: list[tuple[str, str]] = []
-    service = watcher.PermissionWatcher(tmp_path / "state.json", _record_notices(notices))
-    service.observe(_event(watcher.PermissionKind.TCC, watcher.EventPhase.PROMPTING, _T0))
+    repeated_at = _T0 + timedelta(hours=6)
     service.observe(
         _event(
             watcher.PermissionKind.TCC,
             watcher.EventPhase.PROMPTING,
-            _T0 + timedelta(minutes=5, seconds=1),
+            repeated_at,
+            correlation_id="request-2",
+            tool="/usr/bin/du",
         )
     )
-    assert [title for title, _content in notices] == [
-        "macOS 权限弹窗待处理",
-        "macOS 权限弹窗待处理",
+
+    assert len(service.pending) == 1
+    pending = next(iter(service.pending.values()))
+    assert pending.first_seen == _T0
+    assert pending.last_seen == repeated_at
+    assert pending.correlation_id == "request-2"
+    assert pending.tool == "/usr/bin/find"
+    info_messages = [
+        record.getMessage() for record in caplog.records if record.levelno == logging.INFO
+    ]
+    assert info_messages == [f"permission prompt: kind=TCC subject={_UV_PYTHON} tool=/usr/bin/find"]
+
+
+def test_resolution_pops_pending_and_logs_info(
+    caplog: pytest.LogCaptureFixture, tmp_path: Path
+) -> None:
+    caplog.set_level(logging.DEBUG, logger="ava.permission_watcher")
+    service = watcher.PermissionWatcher(tmp_path / "state.json")
+    service.observe(_event(watcher.PermissionKind.ALF, watcher.EventPhase.PROMPTING, _T0))
+    caplog.clear()
+    service.observe(
+        _event(watcher.PermissionKind.ALF, watcher.EventPhase.RESOLVED, _T0 + timedelta(seconds=10))
+    )
+
+    assert service.pending == {}
+    assert [record.getMessage() for record in caplog.records if record.levelno == logging.INFO] == [
+        f"permission prompt resolved: kind=ALF subject={_UV_PYTHON}"
     ]
 
 
-def test_resolution_and_thirty_minute_escalation_close_the_loop(tmp_path: Path) -> None:
-    notices: list[tuple[str, str]] = []
-    service = watcher.PermissionWatcher(tmp_path / "state.json", _record_notices(notices))
-    service.observe(_event(watcher.PermissionKind.ALF, watcher.EventPhase.PROMPTING, _T0))
+def test_escalation_logs_warning_once_per_incident(
+    caplog: pytest.LogCaptureFixture, tmp_path: Path
+) -> None:
+    caplog.set_level(logging.DEBUG, logger="ava.permission_watcher")
+    service = watcher.PermissionWatcher(tmp_path / "state.json")
+    service.observe(_event(watcher.PermissionKind.TCC, watcher.EventPhase.PROMPTING, _T0))
+    caplog.clear()
+
     service.check_timeouts(_T0 + timedelta(minutes=29, seconds=59))
-    assert len(notices) == 1
     service.check_timeouts(_T0 + timedelta(minutes=30))
-    assert notices[-1][0] == "macOS 权限弹窗仍未处理"
-    assert "已挂起 30 分钟" in notices[-1][1]
-    service.observe(
-        _event(watcher.PermissionKind.ALF, watcher.EventPhase.RESOLVED, _T0 + timedelta(minutes=31))
-    )
-    assert notices[-1][0] == "macOS 权限弹窗已处理"
-    assert "权限弹窗已处理" in notices[-1][1]
-    assert service.pending == {}
+    service.check_timeouts(_T0 + timedelta(hours=1))
+
+    warning_messages = [
+        record.getMessage() for record in caplog.records if record.levelno == logging.WARNING
+    ]
+    assert warning_messages == [
+        f"permission prompt still pending 30min: kind=TCC subject={_UV_PYTHON}"
+    ]
+    assert next(iter(service.pending.values())).escalated is True
 
 
-def test_pending_state_survives_restart_and_escalates(tmp_path: Path) -> None:
+def test_pending_state_round_trip_omits_notified_and_loads_legacy_shape(
+    tmp_path: Path,
+) -> None:
     state_path = tmp_path / "permission-watcher.json"
-    first_notices: list[tuple[str, str]] = []
-    first = watcher.PermissionWatcher(state_path, _record_notices(first_notices))
-    first.observe(_event(watcher.PermissionKind.TCC, watcher.EventPhase.PROMPTING, _T0))
-
-    restarted_notices: list[tuple[str, str]] = []
-    restarted = watcher.PermissionWatcher(state_path, _record_notices(restarted_notices))
-    assert next(iter(restarted.pending.values())).first_seen == _T0
-    restarted.check_timeouts(_T0 + timedelta(minutes=30))
-    assert restarted_notices[0][0] == "macOS 权限弹窗仍未处理"
-
-
-def test_pending_notice_retries_after_database_failure_and_restart(tmp_path: Path) -> None:
-    state_path = tmp_path / "permission-watcher.json"
-
-    def fail_notice(_title: str, _content: str) -> None:
-        raise RuntimeError("database unavailable")
-
-    first = watcher.PermissionWatcher(state_path, fail_notice)
-    with pytest.raises(RuntimeError, match="database unavailable"):
-        first.observe(_event(watcher.PermissionKind.TCC, watcher.EventPhase.PROMPTING, _T0))
-
-    notices: list[tuple[str, str]] = []
-    restarted = watcher.PermissionWatcher(state_path, _record_notices(notices))
-    restarted.check_timeouts(_T0 + timedelta(seconds=1))
-    assert [title for title, _content in notices] == ["macOS 权限弹窗待处理"]
-    assert next(iter(restarted.pending.values())).notified is True
-
-
-class _FakeCursor:
-    def __init__(self) -> None:
-        self.sql = ""
-        self.params: tuple[object, ...] = ()
-
-    def __enter__(self) -> _FakeCursor:
-        return self
-
-    def __exit__(self, *_args: object) -> None:
-        return None
-
-    def execute(self, sql: str, params: tuple[object, ...]) -> None:
-        self.sql = sql
-        self.params = params
-
-    def fetchone(self) -> tuple[int, int]:
-        return (41, 7)
-
-
-class _FakeConnection:
-    def __init__(self, cursor: _FakeCursor) -> None:
-        self._cursor = cursor
-
-    def __enter__(self) -> _FakeConnection:
-        return self
-
-    def __exit__(self, *_args: object) -> None:
-        return None
-
-    def cursor(self) -> _FakeCursor:
-        return self._cursor
-
-
-def test_notice_insert_uses_bridge_sql_and_fyi_parameters() -> None:
-    cursor = _FakeCursor()
-    connects: list[tuple[str, dict[str, object]]] = []
-
-    def connect(url: str, **kwargs: object) -> _FakeConnection:
-        connects.append((url, kwargs))
-        return _FakeConnection(cursor)
-
-    row = watcher.insert_notice(
-        "postgresql://ava@127.0.0.1:6433/ava",
-        "macOS 权限弹窗待处理",
-        "内容",
-        connect=connect,
+    first = watcher.PermissionWatcher(state_path)
+    first.observe(
+        _event(
+            watcher.PermissionKind.TCC,
+            watcher.EventPhase.PROMPTING,
+            _T0,
+            tool="/usr/bin/find",
+        )
     )
-    assert row == (41, 7)
-    assert connects == [("postgresql://ava@127.0.0.1:6433/ava", {"connect_timeout": 5})]
-    assert "INSERT INTO agent_notices" in cursor.sql
-    assert "COALESCE((SELECT MAX(local_id) FROM agent_notices" in cursor.sql
-    assert cursor.params == (
-        312,
-        312,
-        "macOS 权限弹窗待处理",
-        "内容",
-        "P1",
-        False,
-        False,
-        None,
-    )
+    first.check_timeouts(_T0 + timedelta(minutes=30))
 
+    state = json.loads(state_path.read_text())
+    persisted = next(iter(state["pending"].values()))
+    assert "notified" not in persisted
 
-def test_db_url_is_read_from_explicit_prod_env_file(tmp_path: Path) -> None:
-    env = tmp_path / ".env"
-    env.write_text('OTHER=1\nAVA_DB_URL="postgresql://ava@127.0.0.1:6433/ava"\n')
-    assert watcher.read_db_url(env) == "postgresql://ava@127.0.0.1:6433/ava"
-    env.write_text("OTHER=1\n")
-    with pytest.raises(RuntimeError, match="AVA_DB_URL"):
-        watcher.read_db_url(env)
+    restarted = watcher.PermissionWatcher(state_path)
+    pending = next(iter(restarted.pending.values()))
+    assert pending.first_seen == _T0
+    assert pending.last_seen == _T0
+    assert pending.correlation_id == "request-1"
+    assert pending.tool == "/usr/bin/find"
+    assert pending.escalated is True
+
+    persisted["notified"] = True
+    persisted.pop("tool")
+    state_path.write_text(json.dumps(state))
+
+    legacy_restarted = watcher.PermissionWatcher(state_path)
+    legacy_pending = next(iter(legacy_restarted.pending.values()))
+    assert legacy_pending.first_seen == _T0
+    assert legacy_pending.escalated is True
+    assert legacy_pending.tool is None
 
 
 def _ctx(repo: Path, home: Path) -> cv.ConvergeCtx:

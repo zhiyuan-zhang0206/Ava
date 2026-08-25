@@ -1,8 +1,8 @@
-"""Watch macOS TCC/ALF prompts and deliver their lifecycle through IM notices.
+"""Watch macOS TCC/ALF prompts and record their lifecycle locally.
 
 Two unified-log streams feed one queue. Reader threads own only their stream
-parser; the main thread exclusively owns persistent pending state and database
-delivery, so no permission incident is mutated concurrently.
+parser; the main thread exclusively owns persistent pending state and logging,
+so no permission incident is mutated concurrently.
 """
 
 from __future__ import annotations
@@ -14,7 +14,6 @@ import signal
 import subprocess
 import sys
 import threading
-from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -31,11 +30,9 @@ from services.permission_watcher.events import (
     _parse_timestamp,
     log_stream_commands,
 )
-from services.permission_watcher.notices import insert_notice, read_db_url
 
 _LOGGER = logging.getLogger("ava.permission_watcher")
 
-DEDUPE_WINDOW = timedelta(minutes=5)
 ESCALATION_AFTER = timedelta(minutes=30)
 STATE_PATH = Path.home() / ".ava" / "state" / "permission-watcher.json"
 
@@ -44,10 +41,10 @@ STATE_PATH = Path.home() / ".ava" / "state" / "permission-watcher.json"
 class PendingPermission:
     kind: PermissionKind
     subject: str
+    tool: str | None
     first_seen: datetime
     last_seen: datetime
     correlation_id: str | None
-    notified: bool = False
     escalated: bool = False
 
     def to_json(self) -> dict[str, object]:
@@ -62,6 +59,7 @@ class PendingPermission:
         return cls(
             kind=PermissionKind(str(payload["kind"])),
             subject=str(payload["subject"]),
+            tool=str(payload["tool"]) if payload.get("tool") is not None else None,
             first_seen=_parse_timestamp(payload["first_seen"]),
             last_seen=_parse_timestamp(payload["last_seen"]),
             correlation_id=(
@@ -69,20 +67,15 @@ class PendingPermission:
                 if payload.get("correlation_id") is not None
                 else None
             ),
-            notified=bool(payload["notified"]),
             escalated=bool(payload["escalated"]),
         )
 
 
-NoticeSender = Callable[[str, str], None]
-
-
 class PermissionWatcher:
-    """Own persistent pending incidents and emit each lifecycle transition once."""
+    """Own persistent pending incidents and log each lifecycle transition once."""
 
-    def __init__(self, state_path: Path, send_notice: NoticeSender) -> None:
+    def __init__(self, state_path: Path) -> None:
         self._state_path = state_path
-        self._send_notice = send_notice
         self.pending = self._load()
 
     @staticmethod
@@ -131,36 +124,46 @@ class PermissionWatcher:
         if event.phase is EventPhase.PROMPTING:
             existing = self.pending.get(key)
             if existing is not None:
-                since_last_event = event.occurred_at - existing.last_seen
                 existing.last_seen = event.occurred_at
                 existing.correlation_id = event.correlation_id or existing.correlation_id
                 self._save()
-                if not existing.notified:
-                    self._notify_pending(existing)
-                    return
-                if since_last_event <= DEDUPE_WINDOW:
-                    return
-                self._send_notice("macOS 权限弹窗待处理", self._pending_content(existing))
+                _LOGGER.debug(
+                    "permission prompt repeated: kind=%s subject=%s tool=%s",
+                    existing.kind.value,
+                    existing.subject,
+                    existing.tool,
+                )
                 return
             pending = PendingPermission(
-                event.kind,
-                event.subject,
-                event.occurred_at,
-                event.occurred_at,
-                event.correlation_id,
+                kind=event.kind,
+                subject=event.subject,
+                tool=event.tool,
+                first_seen=event.occurred_at,
+                last_seen=event.occurred_at,
+                correlation_id=event.correlation_id,
             )
             self.pending[key] = pending
             self._save()
-            self._notify_pending(pending)
+            _LOGGER.info(
+                "permission prompt: kind=%s subject=%s tool=%s",
+                pending.kind.value,
+                pending.subject,
+                pending.tool,
+            )
             return
         pending = self._find_pending(event)
         if pending is None:
-            return
-        if pending.notified:
-            self._send_notice(
-                "macOS 权限弹窗已处理",
-                f"权限弹窗已处理: {pending.subject}\n弹窗类型: {pending.kind.display_name}",
+            _LOGGER.debug(
+                "permission prompt resolution without pending incident: kind=%s subject=%s",
+                event.kind.value,
+                event.subject,
             )
+            return
+        _LOGGER.info(
+            "permission prompt resolved: kind=%s subject=%s",
+            pending.kind.value,
+            pending.subject,
+        )
         self.pending.pop(self._key(pending.kind, pending.subject), None)
         self._save()
 
@@ -182,33 +185,15 @@ class PermissionWatcher:
         same_kind = [pending for pending in self.pending.values() if pending.kind is event.kind]
         return same_kind[0] if len(same_kind) == 1 else None
 
-    @staticmethod
-    def _pending_content(pending: PendingPermission) -> str:
-        appeared = pending.last_seen.astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
-        return (
-            f"弹窗类型: {pending.kind.display_name}\n"
-            f"进程: {pending.subject}\n"
-            f"出现时间: {appeared}\n"
-            "建议动作: 请在 Mac 上点击允许/拒绝。"
-        )
-
-    def _notify_pending(self, pending: PendingPermission) -> None:
-        self._send_notice("macOS 权限弹窗待处理", self._pending_content(pending))
-        pending.notified = True
-        self._save()
-
     def check_timeouts(self, now: datetime) -> None:
         changed = False
         for pending in self.pending.values():
-            if not pending.notified:
-                self._notify_pending(pending)
-                continue
             if pending.escalated or now - pending.first_seen < ESCALATION_AFTER:
                 continue
-            self._send_notice(
-                "macOS 权限弹窗仍未处理",
-                f"权限弹窗仍未处理 (已挂起 30 分钟): {pending.subject}\n"
-                f"弹窗类型: {pending.kind.display_name}\n请在 Mac 上操作。",
+            _LOGGER.warning(
+                "permission prompt still pending 30min: kind=%s subject=%s",
+                pending.kind.value,
+                pending.subject,
             )
             pending.escalated = True
             changed = True
@@ -308,13 +293,7 @@ def main() -> int:
         raise KeyboardInterrupt
 
     signal.signal(signal.SIGTERM, stop)
-    db_url = read_db_url()
-
-    def send_notice(title: str, content: str) -> None:
-        insert_notice(db_url, title, content)
-
-    service = PermissionWatcher(STATE_PATH, send_notice)
-    service.check_timeouts(datetime.now(UTC))
+    service = PermissionWatcher(STATE_PATH)
     _LOGGER.info(
         "permission watcher started with %d persisted pending incidents", len(service.pending)
     )

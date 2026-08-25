@@ -23,6 +23,15 @@ repairs and prunes the manifest. Direct mutation was empirically verified withou
 elevation on macOS 15.3.1; other releases may require the bounded `sudo -n`
 fallback or the manual command printed by converge.
 
+## Permission watcher boundary
+
+The gateway host's launchd permission watcher is a pure detector: it correlates
+TCC and ALF log records, keeps pending incidents in local JSON state, and records
+new, resolved, and 30-minute-pending transitions in its log. It does not write
+`agent_notices` or send IM messages. The 2026-08-25 user ruling classifies
+permission popups as system events that must not bind to an agent's notice slot;
+delivery through the alerts channel remains pending separate integration.
+
 ## Optional immediate containment: authorize uv Python
 
 This is an **optional stopgap only** when an operator needs to stop current TCC

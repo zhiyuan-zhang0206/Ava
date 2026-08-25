@@ -26,6 +26,7 @@ ALF_PREDICATE = (
 )
 
 _BINARY_PATH = re.compile(r'binary_path\s*[:=]\s*(?:"(?P<quoted>[^"]+)"|(?P<bare>[^,}\n]+))')
+_SUBJECT = re.compile(r"Sub:\{([^}]+)\}")
 _IDENTIFIER = re.compile(r"identifier\s*[:=]\s*([^,}\s]+)")
 _REQUEST_ID = re.compile(r"(?:auth_req|request_id|requestID)\s*[:=]\s*([^,}\s\]]+)")
 _PROCESS_PID = re.compile(r"(?:processPID|pid)\s*[:=]\s*(\d+)")
@@ -60,6 +61,7 @@ class PermissionEvent:
     subject: str
     occurred_at: datetime
     correlation_id: str | None = None
+    tool: str | None = None
 
 
 def _parse_timestamp(value: object, *, fallback_to_now: bool = False) -> datetime:
@@ -160,13 +162,17 @@ class LogEventParser:
         if phase is None:
             return None
         request_id = _match_value(_REQUEST_ID, message)
-        subject = _binary_path(message) or _match_value(_IDENTIFIER, message)
+        binary_path = _binary_path(message)
+        subject = (
+            _match_value(_SUBJECT, message) or binary_path or _match_value(_IDENTIFIER, message)
+        )
         if subject is not None:
             self._remember_tcc_subject(subject, request_id)
         else:
             subject = self._tcc_subjects.get(request_id or "") or self._latest_tcc_subject
         subject = subject or (f"TCC request {request_id}" if request_id else "unknown TCC process")
-        return PermissionEvent(PermissionKind.TCC, phase, subject, when, request_id)
+        tool = binary_path if binary_path is not None and binary_path != subject else None
+        return PermissionEvent(PermissionKind.TCC, phase, subject, when, request_id, tool)
 
     def _remember_tcc_subject(self, subject: str, request_id: str | None) -> None:
         self._latest_tcc_subject = subject
