@@ -157,6 +157,9 @@ from gateway.routers import (
     inventory as inventory_router,
 )
 from gateway.routers import (
+    mcp_clients as mcp_clients_router,
+)
+from gateway.routers import (
     memory as memory_router,
 )
 from gateway.routers import (
@@ -520,6 +523,11 @@ _AUTH_BYPASS_PATHS: frozenset[str] = frozenset(
         # Bearer / loopback trust) inside the router, not by the
         # session/bearer middleware.
         "/api/alerts",
+        # /mcp authenticates revocable, scoped clients in its ASGI wrapper.
+        # Starlette redirects the mount root to /mcp/, so both spellings must
+        # bypass cluster auth. Cluster credentials are not MCP identities.
+        "/mcp",
+        "/mcp/",
     }
 )
 _STATE_CHANGING_METHODS: frozenset[str] = frozenset({"POST", "PUT", "PATCH", "DELETE"})
@@ -724,6 +732,7 @@ app.include_router(ops_monitor_router.router)
 app.include_router(alerts_router.router)
 app.include_router(status_router.router)
 app.include_router(memory_router.router)
+app.include_router(mcp_clients_router.router)
 app.include_router(fleet_graph_router.router)
 app.include_router(frontend_telemetry_router.router)
 app.include_router(grafana_router.router)
@@ -736,7 +745,8 @@ app.include_router(uploads_router.router)
 # /mcp — MCP control plane (design task #1212 step 1). Mounted always; the
 # wrapper answers 404 while settings.gateway.mcp_endpoint_enabled is off, so
 # the route surface is stable and the flag is a pure on/off switch. Auth is
-# the cluster middleware (cookie / Bearer) like every other route.
+# the mounted wrapper requires its own revocable client token, including on
+# no-secret clusters; cluster cookies and Bearer secrets are not MCP identities.
 app.mount("/mcp", _mcp_endpoint.mcp_gateway(app))
 
 

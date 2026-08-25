@@ -10,13 +10,16 @@ import for co-located calls, HTTP only to cross a machine).
 Flag-gated and additive: `settings.gateway.mcp_endpoint_enabled`
 (AVA_MCP_ENDPOINT_ENABLED), default off. While off, /mcp answers 404 and
 nothing else changes — the existing mcp-daemon path and `ava mcp serve`
-(stdio) are untouched either way. Auth is the cluster middleware like every
-route (session cookie or Bearer cluster secret).
+(stdio) are untouched either way. While on, /mcp always requires its own
+revocable client token, including on a no-secret cluster; cluster cookies and
+the cluster-secret Bearer are deliberately not MCP credentials.
 
 Transport: stateless Streamable HTTP (2026-07-28 protocol revision) — one
 fresh transport per POST, no server-side session state, no idle reaping.
-Every `tools/call` is recorded as a `mcp_tool_call` audit event (agent_id
-NULL — service-level event, an external client has no agent identity yet).
+Every `tools/call` is recorded as a `mcp_tool_call` audit event with the MCP
+client identity and argument schema / character size / SHA-256 only. Raw
+argument values never enter the audit stream; agent_id remains NULL because
+the client is a service-level identity rather than an Ava agent.
 
 Mounting: `mcp_gateway(app)` is mounted at /mcp (an ASGI wrapper, so the
 manager can be swapped per app lifespan); `build_manager(pool)` creates the
@@ -28,7 +31,10 @@ built fresh per lifespan entry.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 from collections.abc import Awaitable, Callable
+from contextvars import ContextVar
 from typing import Any, cast
 
 from fastapi import FastAPI, Request
@@ -36,7 +42,9 @@ from mcp.server.context import CallNext, HandlerResult, ServerRequestContext
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
+from starlette.responses import JSONResponse
 
+from gateway import mcp_clients
 from gateway.error_envelope import error_response
 from gateway.routers import agents as _agents_router
 from gateway.routers._delivery import deliver_chat_inbound
@@ -59,6 +67,10 @@ _MESSAGE_SOURCE = "user"
 
 # How many of an agent's most recent messages `get_messages` returns by default.
 _DEFAULT_MESSAGE_LIMIT = 20
+
+_CURRENT_MCP_CLIENT: ContextVar[dict[str, Any] | None] = ContextVar(
+    "current_mcp_client", default=None
+)
 
 _INSTRUCTIONS = """
 Ava runs a fleet of long-lived autonomous agents. An agent is a persistent
@@ -139,15 +151,43 @@ def _validate_status(status: str) -> None:
         raise ToolError(f"unknown agent status {status!r}; the states are: {legal}")
 
 
-class _AuditMiddleware:
-    """Record every tools/call on this endpoint as an audit event.
+def _json_type(value: Any) -> str:
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "bool"
+    if isinstance(value, (int, float)):
+        return "number"
+    if isinstance(value, str):
+        return "string"
+    if isinstance(value, dict):
+        return "object"
+    if isinstance(value, list):
+        return "array"
+    raise TypeError(f"MCP argument has non-JSON type {type(value).__name__}")
 
-    Registered on the MCPServer so auditing is one place, not seven
-    try/excepts: outcome ok/error and the error text ride in the payload.
-    `agent_id` is None — an external MCP client has no agent identity (the
-    client_key model from design task #1212 lands with the machine-routing
-    step); the events table takes NULL agent_id for service-level events.
-    """
+
+def _redact_args(args: dict[str, Any]) -> dict[str, dict[str, str | int]]:
+    schema: dict[str, str | int] = {}
+    size: dict[str, str | int] = {}
+    hashes: dict[str, str | int] = {}
+    for name, value in args.items():
+        serialized = json.dumps(value, ensure_ascii=False)
+        schema[name] = _json_type(value)
+        size[name] = len(serialized)
+        hashes[name] = hashlib.sha256(serialized.encode()).hexdigest()
+    return {"schema": schema, "size": size, "sha256": hashes}
+
+
+def _tool_result_is_error(result: HandlerResult) -> bool:
+    is_error = getattr(result, "is_error", False)
+    if isinstance(result, dict):
+        is_error = result.get("isError", result.get("is_error", False))
+    return bool(is_error)
+
+
+class _AuditMiddleware:
+    """Record client identity, outcome, and redacted args for every tools/call."""
 
     async def __call__(
         self, ctx: ServerRequestContext[Any, Any], call_next: CallNext
@@ -158,6 +198,15 @@ class _AuditMiddleware:
         tool = str(params.get("name", "?"))
         raw_args = params.get("arguments")
         args = cast(dict[str, Any], raw_args) if isinstance(raw_args, dict) else {}
+        client = _CURRENT_MCP_CLIENT.get()
+        if client is None:
+            raise RuntimeError("authenticated MCP client context is missing")
+        payload: dict[str, Any] = {
+            "tool": tool,
+            "client_id": client["id"],
+            "client_name": client["name"],
+            "args": _redact_args(args),
+        }
         try:
             result = await call_next(ctx)
         except Exception as exc:
@@ -165,19 +214,24 @@ class _AuditMiddleware:
                 event_type="mcp_tool_call",
                 agent_id=None,
                 source="mcp",
-                payload={
-                    "tool": tool,
-                    "args": args,
+                payload=payload
+                | {
                     "outcome": "error",
-                    "error": f"{type(exc).__name__}: {exc}",
+                    "error": type(exc).__name__,
                 },
             )
             raise
+        is_error = _tool_result_is_error(result)
         insert_event_log(
             event_type="mcp_tool_call",
             agent_id=None,
             source="mcp",
-            payload={"tool": tool, "args": args, "outcome": "ok"},
+            payload=payload
+            | (
+                {"outcome": "error", "error": "tool call returned an error"}
+                if is_error
+                else {"outcome": "ok"}
+            ),
         )
         return result
 
@@ -192,6 +246,15 @@ def _select_all_blocking(pool: Any) -> list[Any]:
 def _select_one_blocking(pool: Any, agent_id: int) -> Any:
     with pool.connection() as conn:
         return agent_snapshot.select_one(conn, agent_id)
+
+
+def _require_write_scope(tool: str) -> None:
+    """Fail a mutating tool before it reaches any fleet side effect."""
+    client = _CURRENT_MCP_CLIENT.get()
+    if client is None:
+        raise ToolError("authenticated MCP client context is missing")
+    if client["scope"] != "write":
+        raise ToolError(f"tool {tool!r} requires write scope")
 
 
 def _register_read_tools(server: MCPServer, pool: Any) -> None:
@@ -272,6 +335,7 @@ def _register_fleet_tools(server: MCPServer, pool: Any) -> None:
         `config_overlay` overrides per-agent settings, currently
         `{"llm_model": "<model id>"}`.
         """
+        _require_write_scope("spawn_agent")
         body = SpawnAgentRequest(
             prompt=prompt,
             prompt_source=_MESSAGE_SOURCE,
@@ -305,6 +369,7 @@ def _register_fleet_tools(server: MCPServer, pool: Any) -> None:
         Messaging an agent that has already terminated brings it back with its
         history intact.
         """
+        _require_write_scope("send_message")
         # Existence check first (raises AgentNotFound, like the REST route);
         # deliver_chat_inbound then auto-resurrects a terminated target.
         try:
@@ -362,6 +427,7 @@ def _register_fleet_tools(server: MCPServer, pool: Any) -> None:
         it, so this is reversible; it is destructive in that it stops running
         work.
         """
+        _require_write_scope("terminate_agent")
         try:
             result = await post_agent_terminate(agent_id, TerminateAgentRequest(force=force))
         except AvaAgentError as exc:
@@ -395,12 +461,26 @@ def build_manager(pool: Any) -> StreamableHTTPSessionManager:
     # Starlette sub-app it returns is discarded — the gateway mounts the bare
     # ASGI handler instead (see mcp_gateway).
     # host="" skips the SDK's auto DNS-rebinding guard, which is for standalone
-    # loopback servers: this endpoint is embedded in the gateway and sits
-    # behind the cluster auth middleware, and real clients dial it at the
-    # machine's reachable hostname (Host: <private-network ip>), which the loopback
+    # loopback servers: this endpoint is embedded in the gateway, its wrapper
+    # enforces MCP client auth, and real clients dial it at the machine's
+    # reachable hostname (Host: <private-network ip>), which the loopback
     # allowlist would reject with 421.
     server.streamable_http_app(streamable_http_path="/mcp", stateless_http=True, host="")
     return server.session_manager
+
+
+def _bearer_token(scope: dict[str, Any]) -> str | None:
+    """Extract the exact Bearer credential from an ASGI HTTP scope."""
+    authorization = None
+    for name, value in scope.get("headers", []):
+        if name.lower() == b"authorization":
+            authorization = value.decode("latin-1")
+            break
+    prefix = "Bearer "
+    if authorization is None or not authorization.startswith(prefix):
+        return None
+    token = authorization[len(prefix) :]
+    return token or None
 
 
 def mcp_gateway(app: FastAPI) -> Callable[..., Awaitable[None]]:
@@ -426,6 +506,26 @@ def mcp_gateway(app: FastAPI) -> Callable[..., Awaitable[None]]:
             )
             await response(scope, receive, send)
             return
-        await manager.asgi_app(scope, receive, send)
+        token = _bearer_token(scope)
+        client = (
+            await asyncio.to_thread(
+                mcp_clients.lookup_client_by_token,
+                app.state.db_pool,
+                token,
+            )
+            if token is not None
+            else None
+        )
+        if client is None:
+            response = JSONResponse(
+                {"detail": "invalid or revoked MCP client token"}, status_code=401
+            )
+            await response(scope, receive, send)
+            return
+        context_token = _CURRENT_MCP_CLIENT.set(client)
+        try:
+            await manager.asgi_app(scope, receive, send)
+        finally:
+            _CURRENT_MCP_CLIENT.reset(context_token)
 
     return _gateway
