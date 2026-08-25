@@ -1,4 +1,4 @@
-"""`node_lifecycle` helper unit tests — three exit paths emitting node_enter / node_exit.
+"""`node_lifecycle` helper unit tests — node enter and aggregated exit events.
 
 Death observability: 159/160 silent death and 167/168 BadRequestError were both tracked
 down from a single turn_end signal. turn_end is the LLM node boundary — you can't see
@@ -21,6 +21,7 @@ from unittest.mock import MagicMock
 import pytest
 from langchain_core.messages import SystemMessage
 
+from agent.graph import _node_log
 from agent.graph._node_log import node_lifecycle
 from shared.config import settings
 
@@ -46,27 +47,45 @@ def _wrap(node: str, msg_count: int, pub=None):
     )
 
 
-async def test_node_lifecycle_emits_enter_and_ok_exit(loguru_records) -> None:
-    """Normal yield completes → enter + exit(outcome=ok), exit record has no exception."""
+@pytest.fixture(autouse=True)
+def _clear_node_exit_aggregate():
+    """Keep the process-global exit buffer isolated across lifecycle tests."""
+    aggregate = getattr(_node_log, "_NODE_EXIT_AGGREGATE", {})
+    aggregate.clear()
+    yield
+    aggregate.clear()
 
-    async with _wrap("claim", 3):
+
+async def test_node_lifecycle_aggregates_ok_exit_until_flush(loguru_records) -> None:
+    """Normal exits stay buffered until the turn-boundary flush."""
+
+    async with _wrap("llm", 5):
         pass
 
     enters = _enter_records(loguru_records)  # pyright: ignore[reportUnknownArgumentType]
     exits = _exit_records(loguru_records)  # pyright: ignore[reportUnknownArgumentType]
     assert len(enters) == 1  # pyright: ignore[reportUnknownArgumentType]
-    assert enters[0]["extra"]["node"] == "claim"
-    assert enters[0]["extra"]["msg_count"] == 3
+    assert enters[0]["extra"]["node"] == "llm"
+    assert enters[0]["extra"]["msg_count"] == 5
+    assert exits == []
+
+    flush = getattr(_node_log, "flush_node_exit_aggregate", None)
+    assert flush is not None, "node exits need a public turn-boundary flush"
+    flush(1)
+
+    exits = _exit_records(loguru_records)  # pyright: ignore[reportUnknownArgumentType]
     assert len(exits) == 1  # pyright: ignore[reportUnknownArgumentType]
-    assert exits[0]["extra"]["outcome"] == "ok"
-    assert exits[0]["extra"]["node"] == "claim"
+    assert exits[0]["extra"]["count"] == 1
+    nodes = exits[0]["extra"]["nodes"]
+    assert len(nodes) == 1  # pyright: ignore[reportUnknownArgumentType]
+    assert nodes[0]["node"] == "llm"
+    assert nodes[0]["outcome"] == "ok"
+    assert nodes[0]["duration_seconds"] >= 0
     assert exits[0]["exception"] is None
 
 
-async def test_node_lifecycle_emits_cancelled_on_cancellederror(loguru_records) -> None:
-    """asyncio.CancelledError → outcome=cancelled, not treated as exception with traceback;
-    cancel is an expected lifecycle signal (cancel turn / agent restart path), it must
-    not pollute the sidebar exception count."""
+async def test_node_lifecycle_aggregates_cancelled_exit_until_flush(loguru_records) -> None:
+    """Cancellation is buffered as normal flow rather than an exception record."""
 
     async def _body():
         async with _wrap("llm", 5):
@@ -75,12 +94,32 @@ async def test_node_lifecycle_emits_cancelled_on_cancellederror(loguru_records) 
     with pytest.raises(asyncio.CancelledError):
         await _body()
 
+    assert _exit_records(loguru_records) == []  # pyright: ignore[reportUnknownArgumentType]
+
+    flush = getattr(_node_log, "flush_node_exit_aggregate", None)
+    assert flush is not None, "node exits need a public turn-boundary flush"
+    flush(1)
+
     exits = _exit_records(loguru_records)  # pyright: ignore[reportUnknownArgumentType]
     assert len(exits) == 1  # pyright: ignore[reportUnknownArgumentType]
-    assert exits[0]["extra"]["outcome"] == "cancelled"
+    assert exits[0]["extra"]["count"] == 1
+    assert exits[0]["extra"]["nodes"][0]["node"] == "llm"
+    assert exits[0]["extra"]["nodes"][0]["outcome"] == "cancelled"
     assert (
         exits[0]["level"].name == "INFO"  # pyright: ignore[reportUnknownMemberType]
     )  # cancelled is not WARNING  # pyright: ignore[reportUnknownMemberType]
+
+
+async def test_node_lifecycle_flushes_aggregate_at_safety_cap(loguru_records) -> None:
+    """The 32-entry cap bounds loss when a turn never reaches claim."""
+    for _ in range(32):
+        async with _wrap("llm", 1):
+            pass
+
+    exits = _exit_records(loguru_records)  # pyright: ignore[reportUnknownArgumentType]
+    assert len(exits) == 1  # pyright: ignore[reportUnknownArgumentType]
+    assert exits[0]["extra"]["count"] == 32
+    assert len(exits[0]["extra"]["nodes"]) == 32  # pyright: ignore[reportUnknownArgumentType]
 
 
 async def test_node_lifecycle_emits_exception_with_traceback(loguru_records) -> None:

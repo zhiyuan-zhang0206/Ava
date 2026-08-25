@@ -62,7 +62,7 @@ from agent.graph._claim_present import (
 )
 from agent.graph._claim_routing import ClaimGoto, resolve_routing
 from agent.graph._context import AvaContext, agent_id_from_config
-from agent.graph._node_log import node_lifecycle
+from agent.graph._node_log import flush_node_exit_aggregate, node_lifecycle
 from agent.graph._nodes import BEFORE_LLM, CLAIM, END
 from agent.messages import has_conversation
 from shared.log import logger
@@ -189,6 +189,8 @@ async def claim_node(
     This is the node registered in the LangGraph state graph.  Its signature
     and return type are part of the public graph contract and MUST NOT change.
     """
+    agent_id = agent_id_from_config(config)
+    flush_node_exit_aggregate(agent_id)
     event_publisher = runtime.context.event_publisher
     assert event_publisher is not None, "claim_node requires ctx.event_publisher"  # noqa: S101
     # Turn-end fallback: when claim is about to block in _wait_for_batch
@@ -207,7 +209,7 @@ async def claim_node(
         messages=state.messages,
         ops_pool=runtime.context.ops_pool,
         event_publisher=event_publisher,
-        agent_id=agent_id_from_config(config),
+        agent_id=agent_id,
         full_window=will_idle,
     ):
         return await _claim_node_impl(state, runtime, config)

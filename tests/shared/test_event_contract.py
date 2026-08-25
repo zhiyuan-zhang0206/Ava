@@ -174,7 +174,7 @@ def test_payload_keys_are_the_declared_attribute_contract() -> None:
     assert payload_keys("sse_drop") == ("kind", "n")
     assert payload_keys("spawn") == ("machine", "fork_from", "fork_checkpoint")
     assert payload_keys("agent_spawned") == ("spawner", "forked_from")
-    assert payload_keys("node_exit") == ("node", "outcome", "duration_seconds", "exc_name")
+    assert payload_keys("node_exit") == ("count", "nodes")
     assert payload_keys("heartbeat_paused") == ("duration_s",)
     assert payload_keys("task_update") == ("status",)
     assert payload_keys("process_exit") == ("reason", "pid")
