@@ -28,7 +28,6 @@ function row(overrides: Partial<Alert> = {}): Alert {
     fingerprint: "f",
     generator_url: "",
     source: "grafana",
-    read_at: null,
     notified_at: null,
     created_at: "2026-08-12T20:00:00Z",
     updated_at: "2026-08-12T20:00:00Z",
@@ -39,13 +38,13 @@ function row(overrides: Partial<Alert> = {}): Alert {
 function resp(alerts: Alert[], unresolved: number): AlertsResponse {
   return {
     alerts,
-    meta: { window: "24h", include_read: true, total: alerts.length, unresolved_count: unresolved },
+    meta: { window: "24h", total: alerts.length, unresolved_count: unresolved },
   };
 }
 
 describe("foldAlert", () => {
   it("prepends a new firing row and bumps the unresolved count", () => {
-    const prev = resp([row({ id: 2, read_at: "2026-08-12T21:00:00Z", status: "resolved" })], 0);
+    const prev = resp([row({ id: 2, status: "resolved" })], 0);
     const next = foldAlert(prev, row({ id: 1 }));
     expect(next.alerts.map((a) => a.id)).toEqual([1, 2]);
     expect(next.meta.unresolved_count).toBe(1);
@@ -60,7 +59,7 @@ describe("foldAlert", () => {
   });
 
   it("seeds a cache from a single frame when nothing is cached yet", () => {
-    const next = foldAlert(undefined, row({ id: 5, status: "resolved", read_at: "x" }));
+    const next = foldAlert(undefined, row({ id: 5, status: "resolved" }));
     expect(next.alerts.map((a) => a.id)).toEqual([5]);
     expect(next.meta.unresolved_count).toBe(0);
   });
@@ -81,7 +80,6 @@ describe("useAlertsSection", () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(mocks.getAlerts).toHaveBeenCalledWith({
       window: "24h",
-      includeRead: true,
       limit: 200,
     });
     queryClient.clear();

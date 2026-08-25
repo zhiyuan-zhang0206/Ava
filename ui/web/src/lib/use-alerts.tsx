@@ -7,8 +7,8 @@
 // One EventSource to /api/alerts/stream feeds the TanStack Query ["alerts"]
 // prefix: every frame (one AlertRow JSON per ingest) folds into every
 // matching cache (the badge query with default params, the section query
-// with includeRead=true) — no polling for SSE-backed data (frontend AGENTS.md
-// state rule). The initial GET /api/alerts is the fetch fallback for rows
+// cache) — no polling for SSE-backed data (frontend AGENTS.md state rule).
+// The initial GET /api/alerts is the fetch fallback for rows
 // ingested before the subscription opened.
 //
 // Machinery mirrors the useEventStream provider (watchdog + closed-backoff
@@ -43,7 +43,7 @@ const RECONNECT_MAX_MS = 30_000;
 /** The default-params cache key (badge / provider warm-up). */
 export const ALERTS_QUERY_KEY = ["alerts"] as const;
 
-/** The section's cache key (includeRead=true — the history list). */
+/** The section's history-list cache key. */
 export const ALERTS_SECTION_QUERY_KEY = ["alerts", "section"] as const;
 
 /** A heartbeat frame from the stream — liveness only, never business data. */
@@ -74,7 +74,6 @@ export function foldAlert(prev: AlertsResponse | undefined, row: Alert): AlertsR
       alerts: [row],
       meta: {
         window: "24h",
-        include_read: true,
         total: 1,
         unresolved_count: row.status === "unresolved" ? 1 : 0,
       },
@@ -201,11 +200,11 @@ export function useAlerts() {
   return useQuery<AlertsResponse>({ queryKey: ALERTS_QUERY_KEY, staleTime: Infinity });
 }
 
-/** The alert section's history (includeRead=true — the full list). */
+/** The alert section's history. */
 export function useAlertsSection() {
   return useQuery({
     queryKey: ALERTS_SECTION_QUERY_KEY,
-    queryFn: () => api.getAlerts({ window: "24h", includeRead: true, limit: 200 }),
+    queryFn: () => api.getAlerts({ window: "24h", limit: 200 }),
     staleTime: 30_000,
     refetchOnWindowFocus: false,
   });

@@ -446,8 +446,7 @@ CREATE TABLE rollup_day_state (
 -- Dedup key (fingerprint, starts_at): Alertmanager re-sends the same instance
 -- while firing according to notification policy, and once more on resolution. fingerprint
 -- is the Alertmanager-standard fnv-1a hash over sorted labels; the ingest
--- computes it when a direct writer omits it. read_at carries the top-bar
--- unread badge; notified_at stamps a landed IM send.
+-- computes it when a direct writer omits it. notified_at stamps a landed IM send.
 CREATE TABLE alerts (
     id           BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     status       TEXT NOT NULL DEFAULT 'unresolved',
@@ -462,7 +461,6 @@ CREATE TABLE alerts (
     -- Provenance: 'grafana' (webhook default), 'health-probe', 'machine-probe',
     -- 'permission-watcher'.
     source       TEXT NOT NULL DEFAULT 'grafana',
-    read_at      TIMESTAMPTZ,
     notified_at  TIMESTAMPTZ,
     created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -475,7 +473,6 @@ COMMENT ON COLUMN alerts.source IS
     'Provenance: ''grafana'' (webhook default), ''health-probe'', ''machine-probe'', ''permission-watcher''.';
 
 CREATE INDEX alerts_status_starts_idx ON alerts (status, starts_at DESC);
-CREATE INDEX alerts_unread_idx ON alerts (starts_at DESC) WHERE read_at IS NULL;
 
 -- ─────────────── event_dismissals (Loki event-class resolution, task #1468) ───────────────
 -- Loki log lines are immutable, so a resolution is state about an event class,
