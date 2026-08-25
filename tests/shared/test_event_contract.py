@@ -92,16 +92,18 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     gateway-to-Prometheus admission state/counters) + telemetry_read_stale /
     telemetry_read_recovered / otlp_backend_disabled / otlp_backend_recovered
     (runner-observability staleness and OTLP recovery state) + exec_envelope
-    (2026-08-24 runner batch R-4 — exec envelope transfer size/time cost).
+    (2026-08-24 runner batch R-4 — exec envelope transfer size/time cost) +
+    editable_pth_repaired (Task #1572's prod editable-install repair audit) +
+    checkpoint_table_sizes (Task #1545a's post-vacuum absolute gauges).
     Bump deliberately when adding a telemetry event, never to silence a
     drift."""
     from shared.telemetry import _TELEMETRY_KINDS
 
     assert telemetry_events() == frozenset(_TELEMETRY_KINDS)
     # Main's exec_envelope raised this to 107; the resolution change moves two
-    # legacy markers to telemetry and adds three new resolution events +
-    # checkpoint_table_sizes (Task #1545a).
-    assert len(_TELEMETRY_KINDS) == 113
+    # legacy markers to telemetry and adds three new resolution events;
+    # checkpoint_table_sizes and Task #1572's repair audit raise it to 114.
+    assert len(_TELEMETRY_KINDS) == 114
 
 
 def test_checkpoint_table_sizes_payload_and_metric_disposition() -> None:

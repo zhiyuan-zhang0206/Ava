@@ -128,6 +128,67 @@ def test_converge_host_runs_host_global_for_default_cluster(
     assert calls == ["hostwide", "percluster"]
 
 
+def test_prod_editable_pth_guard_is_registered_as_host_global() -> None:
+    """Without host-global scoping, a dev worktree converge could rewrite its legal venv."""
+    step = next(
+        (step for step in _converge.CONVERGE_STEPS if step.name == "prod editable .pth target"),
+        None,
+    )
+
+    assert step is not None
+    assert step.host_global
+
+
+def test_prod_editable_pth_converge_step_repairs_and_warns(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A registered but silent or non-repairing step would leave the incident invisible."""
+    source_root = tmp_path / "prod" / "source"
+    pth = source_root / ".venv" / "Lib" / "site-packages" / "_editable_impl_ava.pth"
+    pth.parent.mkdir(parents=True)
+    pth.write_text(str(tmp_path / "deleted-worktree"))
+    monkeypatch.setattr("shared.cluster_drift._prod_source_dir", lambda: source_root)
+    step = next(
+        (step for step in _converge.CONVERGE_STEPS if step.name == "prod editable .pth target"),
+        None,
+    )
+
+    if step is not None:
+        step.apply(_ctx(source_root, tmp_path / ".ava"))
+
+    assert pth.read_text() == str(source_root)
+    assert "poisoned editable install" in capsys.readouterr().err
+
+
+def test_worktree_converge_does_not_touch_its_editable_pth(
+    home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A worktree's own pointer is legal and must stay outside the prod-only guard."""
+
+    def default_home(_home: Path) -> bool:
+        return True
+
+    monkeypatch.setattr(_converge, "is_default_home", default_home)
+    repo = tmp_path / ".worktrees" / "feature"
+    pth = repo / ".venv" / "lib" / "python3.12" / "site-packages" / "_editable_impl_ava.pth"
+    pth.parent.mkdir(parents=True)
+    pth.write_text(str(repo))
+    step = next(
+        (step for step in _converge.CONVERGE_STEPS if step.name == "prod editable .pth target"),
+        None,
+    )
+
+    if step is not None:
+        _converge.converge_host(
+            repo,
+            frozenset({"gateway"}),
+            ava_home=home,
+            steps=(step,),
+        )
+
+    assert pth.read_text() == str(repo)
+
+
 @pytest.mark.parametrize("worktree_parent", [".claude/worktrees", ".worktrees"])
 def test_converge_host_skips_host_global_in_worktree_even_if_cluster_default(
     home, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, worktree_parent

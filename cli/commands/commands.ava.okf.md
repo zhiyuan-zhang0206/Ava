@@ -29,7 +29,8 @@ Two kinds of module live here, distinguished by filename:
   jobs) / `_converge_skills` / `_converge_firewall` /
   `_converge_permission_watcher` (idempotent host wiring),
   `_update_git` /
-  `_update_orchestration` / `_update_agent_runner` / `_updater_lease` / `_update_recover` /
+  `_update_orchestration` / `_update_agent_runner` / `_update_uv_sync` /
+  `_updater_lease` / `_update_recover` /
   `_gateway_ready` (the staged upgrade), `_probe`, `_setup`, `_session_lifecycle`, `_repo`, `_warmup`,
   `_pkg_source`, `_pgbouncer`, `_lgtm`,
   `_claude_code_plugin`, `_cluster_health` /
@@ -97,6 +98,8 @@ schema change catches the DB up on its own.
   `sudo -n` and then an exact manual command without blocking `ava start`.
   `_gateway_ready` uses the same audit when an off-box probe fails. See
   [[shared/shared.ava.okf.md|Shared Libraries]].
+- The prod editable-install assertion and update write window are one lifecycle
+  guard: [[editable-install-guard.ava.okf.md]].
 - `_converge_permission_watcher` installs the gateway host's
   `com.ava.permission-watcher` LaunchAgent. An unchanged plist is a strict no-op;
   a changed plist is bootstrapped under the logged-in user domain. The process is

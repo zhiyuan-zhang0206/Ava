@@ -52,6 +52,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import shared.editable_install
 from cli.commands._probe import _probe_judges_a_fresh_launch
 from cli.commands._repo import ServiceSpec, _repo_root, session_name
 from cli.commands._session_lifecycle import _launch_roster, _launch_sessions
@@ -175,12 +176,13 @@ def _verify_source_integrity(repo: Path) -> int:
         f"   stale. Auto-healing: running `uv sync` now.\n",
         file=sys.stderr,
     )
-    sync_result = subprocess.run(
-        ["uv", "sync"],
-        cwd=repo,
-        capture_output=False,
-        check=False,
-    )
+    with shared.editable_install.editable_pth_write_window(repo):
+        sync_result = subprocess.run(
+            ["uv", "sync"],
+            cwd=repo,
+            capture_output=False,
+            check=False,
+        )
     if sync_result.returncode != 0:
         print(
             "  ✗ uv sync failed — refusing to start with a mismatched venv.\n"
