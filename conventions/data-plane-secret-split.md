@@ -16,17 +16,29 @@ the `ava_runner` URL; its Redis URL carries the runtime ACL password.
 
 ## Upgrade a legacy cluster
 
-On the first gateway `ava start` after this version is installed, Ava brings up
-the legacy bearer-backed data plane, applies migrations, then mints missing DB
-owner, Redis admin, and Redis runtime passwords. It re-affirms the owner role,
-changes Redis `requirepass`, re-creates the Redis ACL password, refreshes the
-PgBouncer owner entry, writes the split values and URLs to the gateway `.env`,
-and updates the running process before service sessions start.
+On the first eligible gateway `ava start` after this version is installed, Ava
+brings up the legacy bearer-backed data plane, applies migrations, then mints
+missing DB owner, Redis admin, and Redis runtime passwords. It re-affirms the
+owner role, changes and rewrites Redis `requirepass`, re-creates the Redis ACL
+password, refreshes the PgBouncer owner entry, writes the split values and URLs
+to the gateway `.env`, and updates the running process before service sessions
+start.
 
-If the split step is interrupted after Redis `requirepass` changes but before
-the `.env` write, restart Redis so `redis-server` reloads its configuration and
-restores the previous `requirepass`, then re-run `ava start`. The step is
-idempotent and self-heals.
+An update launched by a predecessor that does not advertise the versioned
+credential-handoff protocol is a compatibility install: its child leaves the
+legacy credentials unchanged. That installs a parent capable of adopting the
+transition. A later ordinary `ava start` or rollout may then perform the split.
+This predecessor gate prevents a surviving old rollout process from attempting
+pin/recovery writes with credentials only its child knows.
+
+Before the first external mutation, the complete five-field target is atomically
+journaled at `$AVA_HOME/run/data-plane-credential-split.json`. Every phase is
+idempotent. A later start retries native data-plane bring-up with the journaled
+passwords when the current `.env` credentials no longer work, then replays the
+journal before migrations. The journal is removed only after Postgres, Redis,
+PgBouncer, `.env`, process environment, and in-memory settings agree. No manual
+Redis restart or password rollback is required after an interruption; re-run
+`ava start` and let the journal finish forward.
 
 Fresh authenticated installs mint all three values at birth. Empty-bearer
 single-box clusters are intentionally a no-op: all data-plane credentials remain

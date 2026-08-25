@@ -99,3 +99,35 @@ def test_pause_twice_then_unpause_once_clears(posture: list[str]) -> None:
     cluster_pause.pause_local_cluster()
     cluster_pause.unpause_local_cluster()
     assert posture == ["paused", "paused", "idle"]
+
+
+def test_unpause_leaves_durably_disabled_restarter_down(
+    posture: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    backend = _StubBackend()
+    backend.has_answer = False
+    monkeypatch.setattr("shared.session_backend.get_backend", lambda: backend)
+    monkeypatch.setattr("shared.disabled_services.read_skipped", lambda: {"restarter"})
+
+    cluster_pause.unpause_local_cluster()
+
+    assert posture == ["idle"]
+    assert backend.spawned == []
+
+
+def test_unpause_fails_closed_when_disabled_marker_is_unreadable(
+    posture: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    backend = _StubBackend()
+    backend.has_answer = False
+    monkeypatch.setattr("shared.session_backend.get_backend", lambda: backend)
+
+    def _unreadable() -> set[str]:
+        raise OSError("marker unavailable")
+
+    monkeypatch.setattr("shared.disabled_services.read_skipped", _unreadable)
+
+    cluster_pause.unpause_local_cluster()
+
+    assert posture == ["idle"]
+    assert backend.spawned == []

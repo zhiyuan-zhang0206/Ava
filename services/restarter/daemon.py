@@ -35,6 +35,7 @@ from shared.config import settings
 from shared.daemon_health import Liveness, health_port, start_health_server, stop_health_server
 from shared.daemon_shutdown import install_graceful_shutdown
 from shared.deploy_timing import AGENT_LEASE_SUSPEND_GAP_S, AGENT_LEASE_ZOMBIE_GRACE_S
+from shared.disabled_services import is_skipped, read_skipped
 from shared.log import init_gateway_process
 from shared.machine import machine_name
 from shared.paths import legacy_pid_path
@@ -182,6 +183,22 @@ def main() -> None:
     the same `KeyboardInterrupt` unwind — see `shared.daemon_shutdown`. `ava stop`
     default force-kill does not reach this.
     """
+    # Belt-and-suspenders with the launchers: a stale watchdog/session launch
+    # must not bypass the operator's durable disable and begin claiming agents.
+    # Check before schema/DB startup so this process remains inert throughout a
+    # rollout boundary even if it was spawned concurrently.
+    try:
+        disabled = is_skipped("restarter", read_skipped())
+    except Exception:
+        _log.error(
+            "[restarter] disabled-services marker unreadable; refusing to start",
+            exc_info=True,
+        )
+        return
+    if disabled:
+        _log.info("[restarter] durably disabled; refusing to start")
+        return
+
     from shared.migrations import assert_schema_current
     from shared.platform import raise_fd_limit
     from shared.timing import assert_clock_lattice

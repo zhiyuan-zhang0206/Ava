@@ -12,6 +12,7 @@ cron — so tests no longer mock crontab commands.
 from __future__ import annotations
 
 import asyncio
+import os
 import re
 import subprocess as _subprocess
 from pathlib import Path
@@ -1965,6 +1966,185 @@ def test_cmd_start_returns_this_host_to_idle_posture(
     rc = _cli.cmd_start()
     assert rc == 0
     assert calls and calls[-1] == "idle"
+
+
+def test_rollout_child_keeps_converging_and_restarter_down(
+    monkeypatch: pytest.MonkeyPatch,
+    _fake_session_backends: tuple[_FakeSessionBackend, _FakeSessionBackend],
+) -> None:
+    """An old parent has no handoff marker, so its executing lease is the
+    compatibility proof: the fresh internal start must not revive agents."""
+    from cli.commands import _data_plane_admin_secrets as secrets_mod
+    from cli.commands import start as start_mod
+    from shared.cluster_lock import DeployLease
+    from shared.rollout_handoff import ROLLOUT_PARENT_CREDENTIAL_HANDOFF_ENV
+
+    service, _shell = _fake_session_backends
+    postures: list[str] = []
+    legacy_upgrade: list[bool] = []
+
+    def _record_legacy_upgrade(*, allow_legacy_upgrade: bool) -> bool:
+        legacy_upgrade.append(allow_legacy_upgrade)
+        return False
+
+    monkeypatch.delenv(ROLLOUT_PARENT_CREDENTIAL_HANDOFF_ENV, raising=False)
+    monkeypatch.setattr(
+        "shared.cluster_lock.read_update_lease",
+        lambda: DeployLease(
+            holder="old-parent:42",
+            held_for_s=10,
+            expires_in_s=900,
+            note=None,
+            kind="rollout",
+        ),
+    )
+    monkeypatch.setattr("shared.host_deploy_state.set_posture", postures.append)
+    monkeypatch.setattr(
+        secrets_mod,
+        "ensure_data_plane_admin_secrets",
+        _record_legacy_upgrade,
+    )
+    monkeypatch.setattr(start_mod, "cmd_status", lambda: 0)
+    monkeypatch.setattr(
+        _cli.subprocess,
+        "run",
+        _git_aware(lambda *_a, **_kw: _FakeResult(returncode=0)),  # pyright: ignore[reportUnknownArgumentType]
+    )
+
+    rc = _cli.cmd_start(persist_services=False)
+
+    assert rc == 0
+    assert postures[-1] == "converging"
+    assert _sess("restarter") not in service.created
+    assert legacy_upgrade == [False]
+
+
+def test_handoff_capable_rollout_child_may_commit_credential_transition(
+    monkeypatch: pytest.MonkeyPatch,
+    _fake_session_backends: tuple[_FakeSessionBackend, _FakeSessionBackend],
+) -> None:
+    """The follow-up rollout carries v1 proof: credential mutation becomes
+    legal while the restarter remains behind the same resume boundary."""
+    from cli.commands import _data_plane_admin_secrets as secrets_mod
+    from cli.commands import start as start_mod
+    from shared.rollout_handoff import (
+        ROLLOUT_PARENT_CREDENTIAL_HANDOFF_ENV,
+        ROLLOUT_PARENT_CREDENTIAL_HANDOFF_VERSION,
+    )
+
+    service, _shell = _fake_session_backends
+    legacy_upgrade: list[bool] = []
+
+    def _record_legacy_upgrade(*, allow_legacy_upgrade: bool) -> bool:
+        legacy_upgrade.append(allow_legacy_upgrade)
+        return False
+
+    monkeypatch.setenv(
+        ROLLOUT_PARENT_CREDENTIAL_HANDOFF_ENV,
+        ROLLOUT_PARENT_CREDENTIAL_HANDOFF_VERSION,
+    )
+    monkeypatch.setattr(
+        "shared.cluster_lock.read_update_lease",
+        lambda: pytest.fail("the versioned parent marker is authoritative"),
+    )
+    monkeypatch.setattr(
+        secrets_mod,
+        "ensure_data_plane_admin_secrets",
+        _record_legacy_upgrade,
+    )
+    monkeypatch.setattr(start_mod, "cmd_status", lambda: 0)
+    monkeypatch.setattr(
+        _cli.subprocess,
+        "run",
+        _git_aware(lambda *_a, **_kw: _FakeResult(returncode=0)),  # pyright: ignore[reportUnknownArgumentType]
+    )
+
+    assert _cli.cmd_start(persist_services=False) == 0
+    assert legacy_upgrade == [True]
+    assert _sess("restarter") not in service.created
+    assert ROLLOUT_PARENT_CREDENTIAL_HANDOFF_ENV not in os.environ
+
+
+def test_operator_start_refuses_executing_rollout_before_migrations(
+    monkeypatch: pytest.MonkeyPatch,
+    _fake_session_backends: tuple[_FakeSessionBackend, _FakeSessionBackend],
+) -> None:
+    """A concurrent operator cannot become a second schema writer."""
+    from cli.commands import start as start_mod
+    from shared.cluster_lock import DeployLease
+
+    service, _shell = _fake_session_backends
+    monkeypatch.setattr(
+        "shared.cluster_lock.read_update_lease",
+        lambda: DeployLease(
+            holder="rollout:42",
+            held_for_s=10,
+            expires_in_s=900,
+            note=None,
+            kind="rollout",
+        ),
+    )
+    monkeypatch.setattr(
+        start_mod,
+        "cmd_migrations_apply",
+        lambda: pytest.fail("migration ran before rollout refusal"),
+    )
+
+    assert _cli.cmd_start() == 1
+    assert service.created == []
+
+
+def test_rollout_lease_read_failure_is_before_migrations(
+    monkeypatch: pytest.MonkeyPatch,
+    _fake_session_backends: tuple[_FakeSessionBackend, _FakeSessionBackend],
+) -> None:
+    """An unreadable rollout authority fails closed before schema mutation."""
+    from cli.commands import start as start_mod
+
+    service, _shell = _fake_session_backends
+
+    def _unreadable() -> None:
+        raise RuntimeError("lease unavailable")
+
+    monkeypatch.setattr("shared.cluster_lock.read_update_lease", _unreadable)
+    monkeypatch.setattr(
+        start_mod,
+        "cmd_migrations_apply",
+        lambda: pytest.fail("migration ran with unreadable rollout authority"),
+    )
+
+    assert _cli.cmd_start() == 1
+    assert service.created == []
+
+
+def test_pending_credential_transition_replays_before_migrations(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A crash journal is adopted before the first schema client is opened."""
+    from cli.commands import _data_plane_admin_secrets as secrets_mod
+    from cli.commands import start as start_mod
+
+    order: list[str] = []
+    monkeypatch.setattr(
+        secrets_mod,
+        "resume_pending_data_plane_admin_secrets",
+        lambda: order.append("resume"),
+    )
+    monkeypatch.setattr(
+        start_mod,
+        "cmd_migrations_apply",
+        lambda: order.append("migrate") or 0,
+    )
+    monkeypatch.setattr(start_mod, "cmd_status", lambda: 0)
+    monkeypatch.setattr("shared.cluster_lock.read_update_lease", lambda: None)
+    monkeypatch.setattr(
+        _cli.subprocess,
+        "run",
+        _git_aware(lambda *_a, **_kw: _FakeResult(returncode=0)),  # pyright: ignore[reportUnknownArgumentType]
+    )
+
+    assert _cli.cmd_start() == 0
+    assert order[:2] == ["resume", "migrate"]
 
 
 def test_machine_description_setup_field_writes_file(

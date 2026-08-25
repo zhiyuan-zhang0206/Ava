@@ -139,8 +139,28 @@ def unpause_local_cluster() -> None:
     # shape per session kind means a start-spawned restarter and an
     # unpause-spawned one can never diverge into double-running the same
     # agents.
+    # `--disable-service restarter` is operator intent, not a hint local
+    # recovery may override.  The watchdog already honors the same marker; the
+    # direct unpause path must do so as well because it is the rollout's final
+    # resume boundary and otherwise bypasses the watchdog entirely.
+    from shared.disabled_services import is_skipped, read_skipped
     from shared.session_backend import get_backend
     from shared.session_env import forward_env_dict
+
+    try:
+        restarter_disabled = is_skipped(_RESTARTER_SERVICE, read_skipped())
+    except Exception:
+        # Unpause is routinely called from a compensating ``finally``.  Do not
+        # replace the original rollout outcome with a marker read exception,
+        # and do not guess that agent relaunch is permitted.
+        _log.error(
+            "[cluster] disabled-services marker unreadable; leaving restarter down",
+            exc_info=True,
+        )
+        return
+    if restarter_disabled:
+        _log.info("[cluster] restarter is durably disabled; leaving it down")
+        return
 
     if get_backend().has_session(restarter_sess):
         _log.info("[cluster] %s already alive; not respawning", restarter_sess)

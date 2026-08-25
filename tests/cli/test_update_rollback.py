@@ -151,9 +151,10 @@ def test_recover_happy_path_orders_rollback_before_reset(
     rc = _rec._recover_gateway_local(Path("/repo"), "FROMSHA", _SNAP, preserve_sessions=frozenset())
     assert rc == 0
     assert order == ["rollback", "reset:FROMSHA", "uv-sync", "ava-start"]
-    # ava start has no --disable-service when nothing is skipped
+    # Recovery is inside the rollout pause window: gateway comes back, while
+    # restarter remains down until the orchestration's final unpause.
     start = next(c for c in fake.calls if _is_ava_start(c))
-    assert "--disable-service" not in start
+    assert start[-2:] == ["--disable-service", "restarter"]
 
 
 def test_recover_forwards_preserve_sessions(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -165,8 +166,12 @@ def test_recover_forwards_preserve_sessions(monkeypatch: pytest.MonkeyPatch) -> 
     )
     assert rc == 0
     start = next(c for c in fake.calls if _is_ava_start(c))
-    assert "--disable-service" in start
-    assert "frontend" in start
+    assert start[-4:] == [
+        "--disable-service",
+        "frontend",
+        "--disable-service",
+        "restarter",
+    ]
 
 
 def test_recover_below_floor_does_not_reset(monkeypatch: pytest.MonkeyPatch) -> None:
