@@ -146,6 +146,40 @@ def test_incremental_ship_posts_and_advances_watermark(
     assert posts == []
 
 
+def test_ship_client_bypasses_environment_proxy(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """The ship client must never route through a host system proxy: the macOS
+    system-config branch httpx reads with trust_env=True sends protobuf POSTs to
+    the VPN/clash proxy (127.0.0.1:7897), which mangles binary bodies and answers
+    502 — a two-day real outage of the trace replay pipeline (2026-08-25)."""
+    _enable_tempo_config(monkeypatch)
+    monkeypatch.setattr("cli.commands.trace.traces_dir", lambda: tmp_path)
+    (tmp_path / "spans.jsonl").write_text(_otlp_line("a") + "\n", encoding="utf-8")
+
+    seen: dict[str, object] = {}
+
+    class _Resp:
+        def raise_for_status(self):
+            pass
+
+    class _Client:
+        def __init__(self, *a: object, **k: object):
+            seen.update(k)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a: object):
+            pass
+
+        def post(self, endpoint, *, content, headers):
+            return _Resp()
+
+    monkeypatch.setattr("httpx.Client", _Client)
+
+    assert cmd_trace_ship(since=None, until=None, dry_run=False) == 0
+    assert seen.get("trust_env") is False
+
+
 def test_windowed_ship_filters_by_file_day_and_ignores_watermark(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ):
