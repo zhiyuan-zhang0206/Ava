@@ -110,12 +110,7 @@ from services.agent_ops._boot import (
 )
 from shared.agents import AvaAgentError
 from shared.config import settings
-from shared.daemon_health import (
-    Liveness,
-    health_port,
-    start_health_server,
-    stop_health_server,
-)
+from shared.daemon_health import health_port, start_health_server, stop_health_server
 from shared.daemon_shutdown import install_graceful_shutdown
 from shared.log import init_gateway_process
 from shared.machine import machine_name
@@ -248,67 +243,6 @@ _state_write_lock = threading.Lock()
 # `thread_name_prefix` makes a stuck thread findable in a dump, which the refusal
 # runbook above tells an operator to look for.
 _op_executor: ThreadPoolExecutor | None = None
-
-
-# ── health: op-progress liveness (the half-dead signal) ─────────────────────────
-# A wedged op arm (the 2026-08-12 shape, see `_dispatch_sync`) leaves this
-# process serving /ops and /healthz perfectly normally — the event loop keeps
-# answering, refusing duplicate cluster_updates, and beating any loop-based
-# heartbeat — while one worker thread never finishes the op it holds. A
-# beat-based Liveness therefore stays green on exactly the failure it exists
-# to report. Health must reflect OP progress, not process responsiveness:
-# /healthz flips to 503 once the oldest in-flight op has run past the cap, and
-# the watchdog's respawn (kill session + restart) is the recovery — the same
-# cure a wedged loop gets, and the only one that releases a stuck thread.
-#
-# The cap is sized above the longest legitimate op: `cluster_update` is
-# bounded by NO_PROGRESS_TIMEOUT_S (900s, shared/deploy_timing.py), so 1200s
-# leaves a five-minute margin while still detecting a wedge in ~20 minutes
-# (the watchdog's 60s poll bounds detection latency from there).
-_OP_HEALTH_CAP_S = 1200.0
-
-# (oldest in-flight op start in monotonic seconds, number of ops in flight).
-# Written from worker threads and read from the event loop; guarded by
-# `_op_health_lock` (the GIL would make plain attribute writes atomic, but the
-# two-field tuple swap is a read-modify-write that needs the lock).
-_op_in_flight: tuple[float, int] | None = None
-_op_health_lock = threading.Lock()
-
-
-def _op_started() -> None:
-    """Record that an op dispatch began (event-loop + worker threads)."""
-    global _op_in_flight  # noqa: PLW0603 — guarded by _op_health_lock
-    with _op_health_lock:
-        if _op_in_flight is None:
-            _op_in_flight = (time.monotonic(), 1)
-        else:
-            _op_in_flight = (_op_in_flight[0], _op_in_flight[1] + 1)
-
-
-def _op_finished() -> None:
-    """Record that an op dispatch ended (event-loop + worker threads)."""
-    global _op_in_flight  # noqa: PLW0603 — guarded by _op_health_lock
-    with _op_health_lock:
-        if _op_in_flight is None:
-            return  # unbalanced finish (defensive) — nothing to clear
-        _op_in_flight = None if _op_in_flight[1] <= 1 else (_op_in_flight[0], _op_in_flight[1] - 1)
-
-
-class _OpLiveness(Liveness):
-    """Healthz liveness reporting the oldest in-flight op's age.
-
-    A plain beat-based Liveness cannot work here: the event loop keeps running
-    while a worker wedges, so any beat the loop performs reads as health. This
-    one reports ``stale_for`` = 0 when no op is in flight (idle is healthy) and
-    the oldest op's age while one is, so ``is_alive()`` (the base class's
-    timeout comparison) flips to 503 exactly when an op has run past the cap.
-    """
-
-    def stale_for(self) -> float:
-        with _op_health_lock:
-            if _op_in_flight is None:
-                return 0.0
-            return time.monotonic() - _op_in_flight[0]
 
 
 def _op_thread_pool() -> ThreadPoolExecutor:
@@ -701,14 +635,6 @@ async def _ops_route(body: bytes) -> tuple[int, bytes, str]:
         )
 
     async with sem:
-        # Op-progress liveness bookkeeping: every /ops dispatch — the idempotent
-        # path and the direct path alike, including fast refusals — is one
-        # in-flight unit of work for `_OpLiveness`. The finally clears it on
-        # every outcome, so a wedged worker thread is exactly an op whose start
-        # never gets its matching finish, and /healthz flips to 503 once the
-        # oldest such op exceeds `_OP_HEALTH_CAP_S` (the watchdog respawns the
-        # daemon — the only cure for a stuck thread).
-        _op_started()
         try:
             if envelope.idempotency_key is not None:
                 # Non-idempotent ops retried by the gateway carry a dedup key:
@@ -722,8 +648,6 @@ async def _ops_route(body: bytes) -> tuple[int, bytes, str]:
         except Exception as exc:
             _log.exception("dispatch crashed for kind=%s", envelope.kind)
             status, result = "failed", {"error": f"{type(exc).__name__}: {exc}"}
-        finally:
-            _op_finished()
     # default=str is a last-resort fallback: op results should already be
     # JSON-native (Pydantic returns go through model_dump(mode="json")), but a
     # stray non-JSON value (datetime, Path, ...) in a hand-built dict must
@@ -783,7 +707,6 @@ async def _main() -> None:
                 )
             },
             auth_token=auth_token,
-            liveness=_OpLiveness(_OP_HEALTH_CAP_S),
         )
         _log.info(
             "ava-ops up, machine=%s serving POST /ops on %s:%d",
