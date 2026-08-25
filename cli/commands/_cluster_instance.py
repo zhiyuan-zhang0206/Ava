@@ -45,7 +45,6 @@ pg_ctl/redis-server on PATH — a Windows per-cluster data plane is a follow-up;
 from __future__ import annotations
 
 import getpass
-import os
 import shutil
 import socket
 import subprocess
@@ -60,7 +59,8 @@ from shared.machine import reachable_host
 from shared.paths import ava_home
 from shared.pg_tools import PG_BIN_LINUX, brew_prefix, is_macos, pg_shm_args, pg_tool, pg_tz_args
 from shared.platform_backend import get_backend
-from shared.private_storage import ensure_private_dir
+from shared.private_storage import ensure_private_dir, write_private_bytes
+from shared.process_env import inherited_process_env
 
 _LOOPBACK_ALIASES = frozenset({"127.0.0.1", "::1", "localhost", "ip6-localhost"})
 
@@ -368,8 +368,8 @@ def _redis_cli_env(redis_admin_password: str) -> dict[str, str]:
     sets nothing — `REDISCLI_AUTH=""` would make redis-cli send an AUTH the
     server has no password for."""
     if not redis_admin_password:
-        return dict(os.environ)
-    return {**os.environ, "REDISCLI_AUTH": redis_admin_password}
+        return inherited_process_env()
+    return inherited_process_env({"REDISCLI_AUTH": redis_admin_password})
 
 
 def _redis_running(redis_port: int, redis_admin_password: str) -> bool:
@@ -396,13 +396,11 @@ def _write_redis_conf(data: Path, redis_admin_password: str) -> Path:
     A no-secret cluster writes NO requirepass line — redis then serves without
     auth on the unconditional loopback-only bind."""
     conf = data / "redis.conf"
-    fd = os.open(conf, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as handle:
-        # Escape the only Redis config-string metacharacters before writing the
-        # gateway-local admin password. This is a config file, never argv.
-        if redis_admin_password:
-            escaped = redis_admin_password.replace("\\", "\\\\").replace('"', '\\"')
-            handle.write(f'requirepass "{escaped}"\n')
+    content = b""
+    if redis_admin_password:
+        escaped = redis_admin_password.replace("\\", "\\\\").replace('"', '\\"')
+        content = f'requirepass "{escaped}"\n'.encode()
+    write_private_bytes(conf, content)
     return conf
 
 
@@ -419,6 +417,7 @@ def _start_redis(
     del cluster_secret
     if _redis_running(redis_port, redis_admin_password):
         print(f"  ✓ redis already running (127.0.0.1:{redis_port})")
+        _write_redis_conf(_redis_data_dir(), redis_admin_password)
         # Re-affirm the ACL user on every start (survives a restart that drops
         # the in-memory ACL) — including no-secret clusters, whose identity
         # user is created with `nopass` (see _ensure_redis_acl).

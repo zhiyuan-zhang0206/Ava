@@ -22,6 +22,8 @@ from cli.commands._update_git import GitPullFailed, git_reset_hard, rollback_sch
 from cli.commands._update_uv_sync import run_uv_sync
 from shared.exit_codes import SERVICES_NOT_READY_EXIT_CODE
 
+_RESTARTER_SESSION = "restarter"
+
 # The `_fan_out` the orchestration injects into `finalize_rollout`: POST a
 # path-addressed op to each (name, ops_url) host, return (name, status, detail).
 _FanOut = Callable[
@@ -162,7 +164,10 @@ def _recover_gateway_local(
     # --persist-services: this restart's skips are transient, not a durable
     # operator disable — preserve the watchdog's --disable-service marker.
     start_cmd = [str(repo / ".venv" / "bin" / "ava"), "start", "--persist-services"]
-    for session in preserve_sessions:
+    # Recovery is still inside the orchestration's pause/resume window.  Keep
+    # the agent restarter down with the recovered gateway, then let the one
+    # orchestration ``finally`` unpause it after the recovery outcome is known.
+    for session in sorted(preserve_sessions | {_RESTARTER_SESSION}):
         start_cmd += ["--disable-service", session]
     start_rc = subprocess.run(start_cmd, cwd=repo, check=False).returncode
     if start_rc == SERVICES_NOT_READY_EXIT_CODE:

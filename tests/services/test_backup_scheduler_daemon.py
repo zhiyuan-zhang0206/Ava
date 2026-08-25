@@ -4,15 +4,17 @@ from __future__ import annotations
 
 import asyncio
 import json
-import runpy
+import os
 import socket
+import subprocess
+import sys
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 
-from services import _pidfile
 from services.backup_scheduler import daemon
-from shared import daemon_health, daemon_shutdown, log, migrations
+from shared import daemon_health
 
 
 def _at(hour: int = 3, minute: int = 0) -> datetime:
@@ -29,35 +31,38 @@ def _find_free_port() -> int:
         return int(sock.getsockname()[1])
 
 
-def test_module_entrypoint_runs_the_scheduler(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The ServiceSpec launches this daemon with ``python -m``."""
-    ran: list[object] = []
+def test_module_entrypoint_runs_the_scheduler(tmp_path: Path) -> None:
+    """The exact ``python -m`` ServiceSpec path must enter ``main``.
 
-    def _run(coro: object) -> None:
-        ran.append(coro)
-        coro.close()  # type: ignore[attr-defined]
+    Point schema startup at a deliberate connection refusal: a missing module
+    guard would silently exit 0, while a real entrypoint reaches the schema
+    assertion and reports its traceback.
+    """
+    (tmp_path / ".env").write_text(
+        "AVA_DB_URL=postgresql://ava:test@127.0.0.1:1/ava\n"
+        "AVA_REDIS_URL=redis://ava:test@127.0.0.1:1/0\n"
+    )
+    env = dict(os.environ)
+    env.update(
+        {
+            "AVA_HOME": str(tmp_path),
+            "AVA_HOME_OVERRIDE": "1",
+            "AVA_CONFIG_FETCH": "skip",
+        }
+    )
+    result = subprocess.run(
+        [sys.executable, "-m", "services.backup_scheduler.daemon"],
+        cwd=Path(__file__).parents[2],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
 
-    def _assert_schema_current(_url: str) -> None:
-        return None
-
-    def _init_gateway_process(**_kwargs: object) -> None:
-        return None
-
-    def _install_graceful_shutdown(_name: str) -> None:
-        return None
-
-    def _remove_pidfile(_path: object) -> None:
-        return None
-
-    monkeypatch.setattr(asyncio, "run", _run)
-    monkeypatch.setattr(migrations, "assert_schema_current", _assert_schema_current)
-    monkeypatch.setattr(log, "init_gateway_process", _init_gateway_process)
-    monkeypatch.setattr(daemon_shutdown, "install_graceful_shutdown", _install_graceful_shutdown)
-    monkeypatch.setattr(_pidfile, "remove_pidfile", _remove_pidfile)
-
-    runpy.run_path(str(daemon.__file__), run_name="__main__")
-
-    assert len(ran) == 1
+    assert result.returncode != 0
+    assert "Traceback" in result.stderr
+    assert "assert_schema_current" in result.stderr
 
 
 async def _http_get(port: int) -> tuple[int, bytes]:

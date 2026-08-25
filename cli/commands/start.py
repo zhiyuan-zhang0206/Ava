@@ -65,6 +65,13 @@ from shared.machine import MachineRoles
 from shared.paths import prod_service_checkout_error
 
 
+def _consume_rollout_parent_handoff() -> bool:
+    """Consume the fresh-child marker before any service environment is built."""
+    from shared.rollout_handoff import consume_parent_credential_handoff
+
+    return consume_parent_credential_handoff()
+
+
 def _ensure_gateway_data_plane() -> int:
     """Bring up this cluster's own Postgres+Redis instance (+ PgBouncer when enabled)
     on a gateway-capable host (skip-if-running, so a (re)start never disrupts the data
@@ -89,23 +96,59 @@ def _ensure_gateway_data_plane() -> int:
             file=sys.stderr,
         )
         return 1
-    return ensure_cluster_instance(
-        pg_port=rec.ports["postgres"],
-        redis_port=rec.ports["redis"],
-        cluster_secret=settings.data_plane.cluster_secret,
-        db_admin_password=(
-            settings.data_plane.db_admin_password or settings.data_plane.cluster_secret
-        ),
-        redis_admin_password=(
-            settings.data_plane.redis_admin_password or settings.data_plane.cluster_secret
-        ),
-        redis_password=redis_password_from_env() or settings.data_plane.cluster_secret,
-        pgbouncer_port=record_pgbouncer_port(rec),
-        # names-as-data: the db/role/ACL identity is whatever this cluster's own
-        # .env URLs carry (prod's historical ava_main until the ops rename; the
-        # fixed `ava` for a fresh cluster).
-        identity=db_identity(),
+
+    def _ensure(credentials: tuple[str, str, str]) -> int:
+        db_admin_password, redis_admin_password, redis_password = credentials
+        return ensure_cluster_instance(
+            pg_port=rec.ports["postgres"],
+            redis_port=rec.ports["redis"],
+            cluster_secret=settings.data_plane.cluster_secret,
+            db_admin_password=db_admin_password,
+            redis_admin_password=redis_admin_password,
+            redis_password=redis_password,
+            pgbouncer_port=record_pgbouncer_port(rec),
+            identity=db_identity(),
+        )
+
+    current = (
+        settings.data_plane.db_admin_password or settings.data_plane.cluster_secret,
+        settings.data_plane.redis_admin_password or settings.data_plane.cluster_secret,
+        redis_password_from_env() or settings.data_plane.cluster_secret,
     )
+    rc = _ensure(current)
+    if rc == 0:
+        return 0
+
+    from cli.commands._data_plane_admin_secrets import (
+        pending_data_plane_bootstrap_credentials,
+    )
+
+    pending = pending_data_plane_bootstrap_credentials()
+    if pending is None:
+        return rc
+    print("  · retrying data-plane bring-up with journaled transition credentials")
+    return _ensure(pending)
+
+
+def _rollout_child_window(*, parent_handoff: bool, persist_services: bool) -> bool:
+    """Identify a fresh rollout child, or refuse a concurrent operator start.
+
+    A v1 marker is proof from the surviving parent. An executing DB lease is the
+    compatibility signal for a child launched by older code: internal starts
+    converge but must defer credential mutation; operator starts are refused.
+    Settle holds carry a note and have no active orchestrator.
+    """
+    if parent_handoff:
+        return True
+
+    from shared.cluster_lock import read_update_lease
+
+    lease = read_update_lease()
+    if lease is None or lease.note is not None:
+        return False
+    if persist_services:
+        raise RuntimeError(lease.refusal("ava start"))
+    return True
 
 
 def _verify_source_integrity(repo: Path) -> int:
@@ -367,6 +410,7 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
 
     repo = _repo_root()
     print(f"[ava start] cwd = {repo}")
+    parent_handoff = _consume_rollout_parent_handoff()
 
     # 0) checkout guard — the prod home may only be launched from its own
     #    anchored checkout (~/.ava/source). A dev clone or worktree with no
@@ -438,6 +482,31 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
     else:
         print("\n→ local services: skipped (agent-runner uses central node's DB/Redis/Milvus)")
 
+    # A killed credential split can leave native services accepting only the
+    # journaled target. Bring-up above recognizes that target; finish its env +
+    # in-process adoption before the first migration or lease dial.
+    if "gateway" in roles:
+        from cli.commands._data_plane_admin_secrets import (
+            resume_pending_data_plane_admin_secrets,
+        )
+
+        try:
+            resume_pending_data_plane_admin_secrets()
+        except Exception as e:
+            print(f"  ✗ data-plane credential transition replay failed: {e}", file=sys.stderr)
+            return 1
+
+    # Detect the process boundary before migrations, grant refresh, or service
+    # intent can mutate rollout state. An unreadable lease fails closed.
+    try:
+        rollout_child = _rollout_child_window(
+            parent_handoff=parent_handoff,
+            persist_services=persist_services,
+        )
+    except Exception as e:
+        print(f"  ✗ cannot start while checking the rollout boundary: {e}", file=sys.stderr)
+        return 1
+
     # 2.5) migrations apply (idempotent) — pg is ready; schema must be in place
     # before the service sessions start (gateway connects to agents_meta / register_self
     # writes machines / etc.). On prod restart schema is already applied ->
@@ -481,7 +550,9 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
         from cli.commands._data_plane_admin_secrets import ensure_data_plane_admin_secrets
 
         try:
-            ensure_data_plane_admin_secrets()
+            ensure_data_plane_admin_secrets(
+                allow_legacy_upgrade=not rollout_child or parent_handoff
+            )
         except Exception as e:
             print(f"  ✗ data-plane credential split failed: {e}", file=sys.stderr)
             return 1
@@ -533,6 +604,8 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
     # internal restart reads that marker and unions its transient skips.
     from shared.disabled_services import resolve_launch_skip
 
+    if rollout_child:
+        disabled_services = (*disabled_services, "restarter")
     launch_skip = resolve_launch_skip(set(disabled_services), persist=persist_services)
 
     # 4a) probe before binding: refuse to launch a daemon onto a health port
@@ -570,7 +643,7 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
     # local start must never clear or reclassify that maintenance owner.
     from shared.host_deploy_state import set_posture
 
-    set_posture("idle")
+    set_posture("converging" if rollout_child else "idle")
 
     # 5.5) wait for the just-launched services to pass their probes before the
     # status snapshot. The spawn returns the instant the session starts, but a uvicorn

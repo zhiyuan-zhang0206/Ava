@@ -30,23 +30,19 @@ so `cli.commands(.update)._run_gateway_local_update` / `._run_frontend_only_upda
 
 from __future__ import annotations
 
-import os
 import shlex
 import sys
 from pathlib import Path
 
-from dotenv import dotenv_values
-
 from cli.commands import _update_git as _git_mod
 from cli.commands import _update_uv_sync
+from cli.commands._data_plane_admin_secrets import resume_pending_data_plane_admin_secrets
 from cli.commands._repo import session_name
 from cli.commands._update_git import GitPullFailed, GitPullResult
 from cli.commands._update_recover import _recover_rc
 from cli.commands._update_report import _print_local_launch_failure_block
-from shared.cluster.derive import REDIS_PASSWORD_ENV
-from shared.config import settings
-from shared.config.data_plane import DataPlaneSettings
-from shared.paths import ava_home
+from shared.config import refresh_data_plane_settings
+from shared.rollout_handoff import child_process_env
 
 # `ava cluster update` restarts only the side that actually changed. A frontend-only
 # pull just rebuilds the ava-frontend session — no agent quiesce, no migration,
@@ -61,20 +57,6 @@ from shared.paths import ava_home
 _FRONTEND_SESSION = "frontend"
 _RESTARTER_SESSION = "restarter"
 
-_DATA_PLANE_CREDENTIAL_ENV_KEYS = (
-    "AVA_DB_URL",
-    "AVA_REDIS_URL",
-    "AVA_DB_ADMIN_PASSWORD",
-    "AVA_REDIS_ADMIN_PASSWORD",
-    REDIS_PASSWORD_ENV,
-)
-_DATA_PLANE_CREDENTIAL_FIELDS = (
-    "db_url",
-    "redis_url",
-    "db_admin_password",
-    "redis_admin_password",
-)
-
 
 def _adopt_child_data_plane_credentials() -> None:
     """Adopt credentials a fresh ``ava start`` materialized in the unit env.
@@ -86,18 +68,11 @@ def _adopt_child_data_plane_credentials() -> None:
     the shared Settings singleton before the parent writes the cluster pin or
     enters recovery, both of which open new data-plane connections.
 
-    Only credential fields cross this boundary. General config has no live
-    reload contract and is consumed by the fresh service processes instead.
+    Only the data-plane sub-model crosses this boundary. General config has no
+    live reload contract and is consumed by the fresh service processes instead.
     """
-    values = dotenv_values(ava_home() / ".env")
-    for key in _DATA_PLANE_CREDENTIAL_ENV_KEYS:
-        value = values.get(key)
-        if value is not None:
-            os.environ[key] = value
-
-    refreshed = DataPlaneSettings()  # pyright: ignore[reportCallIssue] — required aliases come from the refreshed process env
-    for field in _DATA_PLANE_CREDENTIAL_FIELDS:
-        setattr(settings.data_plane, field, getattr(refreshed, field))
+    resume_pending_data_plane_admin_secrets()
+    refresh_data_plane_settings()
 
 
 def _refresh_builtin_skills(repo: Path) -> None:
@@ -313,9 +288,25 @@ def _boot_gateway_fresh(repo: Path, preserve_frontend: frozenset[str]) -> int:
     for session in sorted(preserve_frontend | {_RESTARTER_SESSION}):
         start_args += f" --disable-service {session}"
     ava_bin = str(repo / ".venv" / "bin" / "ava")
+    child_env = child_process_env()
     return _up_mod.subprocess.run(
-        [ava_bin, *shlex.split(start_args)], cwd=repo, check=False
+        [ava_bin, *shlex.split(start_args)], cwd=repo, env=child_env, check=False
     ).returncode
+
+
+def _recover_interrupted_update(
+    repo: Path,
+    pull_recover: tuple[str, set[str], Path | None] | None,
+    preserve_frontend: frozenset[str],
+) -> int:
+    """Route an interrupt through rollback when a pull snapshot exists."""
+    if pull_recover is None:
+        raise KeyboardInterrupt
+    print(
+        "\n  ✗ interrupted mid-transition; recovering to last-known-good",
+        file=sys.stderr,
+    )
+    return _recover_rc(repo, pull_recover, preserve_frontend)
 
 
 def _run_gateway_local_update(
@@ -414,13 +405,40 @@ def _run_gateway_local_update(
 
         # 4) gateway boots with new code in a FRESH process so start loads the
         #    synced revision rather than this stale interpreter.
-        # The child may rewrite data-plane credentials during start. A finally
-        # makes the parent adopt them even when SIGINT interrupts the wait and
-        # this function immediately enters the database-backed recovery path.
+        # Capture the fresh child's outcome, then adopt before acting on it:
+        # every recovery DB dial must see any transition the child journaled.
+        # Adoption itself has a controlled rollback branch so it cannot mask
+        # the child failure and accidentally bypass recovery.
+        start_interrupted = False
+        start_failure: Exception | None = None
+        start_rc: int | None = None
         try:
             start_rc = _boot_gateway_fresh(repo, preserve_frontend)
-        finally:
+        except KeyboardInterrupt:
+            start_interrupted = True
+        except Exception as exc:
+            start_failure = exc
+        try:
             _adopt_child_data_plane_credentials()
+        except Exception as exc:
+            if pull_recover is None:
+                raise
+            print(
+                f"\n  ✗ failed to adopt child data-plane credentials ({exc}); "
+                "recovering to last-known-good",
+                file=sys.stderr,
+            )
+            return _recover_rc(repo, pull_recover, preserve_frontend)
+        if start_interrupted:
+            return _recover_interrupted_update(repo, pull_recover, preserve_frontend)
+        if start_failure is not None:
+            if pull_recover is None:
+                raise start_failure
+            print(
+                f"\n  ✗ ava start raised {start_failure!r}; recovering to last-known-good",
+                file=sys.stderr,
+            )
+            return _recover_rc(repo, pull_recover, preserve_frontend)
     except KeyboardInterrupt:
         # An interrupt IS one of the "ANY failure below" the block comment above
         # covers, and it is the one that arrives without a return value to carry the
@@ -438,10 +456,9 @@ def _run_gateway_local_update(
         # Deliberately swallowed rather than re-raised: the caller's `rc != 0` branch is
         # what records the outcome and resumes the fleet, and re-raising would report a
         # completed rollback as an unhandled abort.
-        if pull_recover is None:
-            raise  # restart-only: no snapshot, nothing to roll back to
-        print("\n  ✗ interrupted mid-transition; recovering to last-known-good", file=sys.stderr)
-        return _recover_rc(repo, pull_recover, preserve_frontend)
+        return _recover_interrupted_update(repo, pull_recover, preserve_frontend)
+    if start_rc is None:
+        raise RuntimeError("ava start completed without an outcome")
     if pull_recover is not None and start_rc != 0:
         print("  ✗ ava start failed", file=sys.stderr)
         return _recover_rc(repo, pull_recover, preserve_frontend)

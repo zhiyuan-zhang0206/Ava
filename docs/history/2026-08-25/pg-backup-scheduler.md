@@ -27,5 +27,6 @@ before creating its pidfile, health listener, or first log record; the watchdog
 could only repeat the same empty launch.
 
 The module now calls `main()` under its `__main__` guard. A regression test runs
-the file with module semantics and observes the scheduler entrypoint, matching
-the service roster's real launch boundary rather than testing `run()` alone.
+the exact `python -m services.backup_scheduler.daemon` command and proves it
+reaches schema startup, matching the service roster's real launch boundary
+rather than testing `run()` alone.

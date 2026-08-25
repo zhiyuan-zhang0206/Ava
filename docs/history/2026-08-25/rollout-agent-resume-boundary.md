@@ -25,3 +25,25 @@ Keeping the whole host paused was rejected because the same pause makes gateway
 middleware return 503, preventing the parent's readiness proof from ever
 passing. Deferring only the restarter keeps the gateway observable while agents
 remain quiesced.
+
+## Update: every launch path enforces the boundary
+
+The fresh start now also classifies itself from a one-shot parent marker or the
+executing deploy lease. It leaves host posture `converging` and omits the
+restarter; a concurrent operator start fails before migrations. Recovery starts
+use the same transient restarter skip, so rollback cannot relaunch agents while
+the gateway is still returning.
+
+The boundary is enforced again at the durable-intent seams. Local unpause does
+not respawn a restarter listed in `$AVA_HOME/disabled_services`, and an already
+spawned restarter checks that marker before schema or DB startup. If the marker
+cannot be read, both paths leave the restarter down. The watchdog's
+`PauseController` already blocks the complete roster for both `paused` and
+`converging`, so no healthcheck path is allowed to race the orchestrator.
+
+A target revision cannot rewrite the rollback implementation already executing
+inside an older parent. The version carrying this boundary is therefore the
+compatibility stage: its first child detects the old parent's executing lease,
+keeps the restarter down, and defers the credential transition. Once that
+revision is the installed parent, later rollouts carry the explicit v1 handoff
+and both their forward and recovery paths use these rules.

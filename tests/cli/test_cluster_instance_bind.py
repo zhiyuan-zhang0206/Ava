@@ -237,6 +237,38 @@ def test_start_redis_does_not_use_shared_pg_bind_addrs(
     assert _redis_bind_arg(started[0]) == ["--bind", "127.0.0.1"]
 
 
+def test_running_redis_persists_the_authenticated_password_to_its_config(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A journal retry repairs config after an old-password false-down probe."""
+    monkeypatch.setattr(_ci, "_redis_data_dir", lambda: tmp_path)
+    monkeypatch.setattr(_ci, "_redis_running", lambda *_args: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_ci, "_ensure_redis_acl", lambda *_args: 0)  # pyright: ignore[reportUnknownArgumentType]
+    (tmp_path / "redis.conf").write_text('requirepass "stale-old-password"\n')
+
+    assert _ci._start_redis(6380, "journal-password", "runtime", "bearer", "ava") == 0
+    assert (tmp_path / "redis.conf").read_text() == 'requirepass "journal-password"\n'
+
+
+def test_redis_config_keeps_previous_complete_value_when_replace_fails(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from shared import private_storage
+
+    conf = tmp_path / "redis.conf"
+    conf.write_text('requirepass "old-complete"\n')
+
+    def _fail_replace(_source: object, _destination: object) -> None:
+        raise OSError("injected replace failure")
+
+    monkeypatch.setattr(private_storage.os, "replace", _fail_replace)
+
+    with pytest.raises(OSError, match="injected replace failure"):
+        _ci._write_redis_conf(tmp_path, "new-complete")
+
+    assert conf.read_text() == 'requirepass "old-complete"\n'
+
+
 # ─── task #1303: postgres gets the same secret-gated reachable-bind wait ──────
 
 

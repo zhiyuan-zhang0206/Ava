@@ -1,18 +1,18 @@
 """One-time, post-migration upgrade from bearer-backed data-plane credentials.
 
-`AVA_CLUSTER_SECRET` used to authenticate the owner Postgres role, Redis
-``default`` user, and runtime Redis ACL user. A gateway start can safely split
-an existing authenticated cluster only after migrations: the data plane is up,
-the schema is current, and no service session has been launched with the old
-URLs yet. Fresh installs mint these values at birth and therefore skip this
-module entirely.
+``AVA_CLUSTER_SECRET`` historically authenticated the owner Postgres role,
+Redis ``default`` user, and runtime Redis ACL user. The split is an external
+multi-system transition, so its generated target is journaled before the first
+mutation and replayed until the unit env is committed.
 """
 
 from __future__ import annotations
 
-import os
+import json
 import secrets
+from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import cast
 
 from dotenv import dotenv_values
 
@@ -28,11 +28,104 @@ from shared.cluster import (
 )
 from shared.cluster.derive import REDIS_PASSWORD_ENV
 from shared.config import settings
+from shared.config.data_plane import DataPlaneSettings
 from shared.envfile import upsert_env
 from shared.paths import ava_home
+from shared.platform import file_lock
+from shared.private_storage import write_private_bytes
+from shared.rollout_handoff import update_process_env
 from shared.url_secret import url_with_password
 
 _TOKEN_BYTES = 32
+_TRANSITION_FILE = "data-plane-credential-split.json"
+_TRANSITION_LOCK_TIMEOUT_S = 120.0
+
+
+@dataclass(frozen=True)
+class _Transition:
+    """Frozen v1 handoff payload; changing fields requires a new marker version."""
+
+    db_admin_password: str
+    redis_admin_password: str
+    redis_password: str
+    db_url: str
+    redis_url: str
+
+
+def _transition_path() -> Path:
+    return Path(ava_home()) / "run" / _TRANSITION_FILE
+
+
+def _transition_lock_path() -> Path:
+    return _transition_path().with_suffix(".lock")
+
+
+def _read_transition() -> _Transition | None:
+    path = _transition_path()
+    try:
+        raw: object = json.loads(path.read_text())
+    except FileNotFoundError:
+        return None
+    if not isinstance(raw, dict):
+        raise TypeError(f"malformed data-plane credential transition: {path}")
+    payload = cast("dict[object, object]", raw)
+    expected = {
+        "db_admin_password",
+        "redis_admin_password",
+        "redis_password",
+        "db_url",
+        "redis_url",
+    }
+    if set(payload) != expected:
+        raise ValueError(f"malformed data-plane credential transition: {path}")
+
+    def _required_string(key: str) -> str:
+        value = payload[key]
+        if not isinstance(value, str) or not value:
+            raise ValueError(f"malformed data-plane credential transition: {path}")
+        return value
+
+    return _Transition(
+        db_admin_password=_required_string("db_admin_password"),
+        redis_admin_password=_required_string("redis_admin_password"),
+        redis_password=_required_string("redis_password"),
+        db_url=_required_string("db_url"),
+        redis_url=_required_string("redis_url"),
+    )
+
+
+def _write_transition(transition: _Transition) -> None:
+    payload = json.dumps(asdict(transition), separators=(",", ":"), sort_keys=True)
+    write_private_bytes(_transition_path(), payload.encode())
+
+
+def pending_data_plane_bootstrap_credentials() -> tuple[str, str, str] | None:
+    """Journaled DB-admin, Redis-admin, and Redis-runtime values for native bring-up."""
+    transition = _read_transition()
+    if transition is None:
+        return None
+    return (
+        transition.db_admin_password,
+        transition.redis_admin_password,
+        transition.redis_password,
+    )
+
+
+def _apply_transition_to_process(transition: _Transition) -> None:
+    update_process_env(
+        {
+            "AVA_DB_ADMIN_PASSWORD": transition.db_admin_password,
+            "AVA_REDIS_ADMIN_PASSWORD": transition.redis_admin_password,
+            REDIS_PASSWORD_ENV: transition.redis_password,
+            "AVA_DB_URL": transition.db_url,
+            "AVA_REDIS_URL": transition.redis_url,
+        }
+    )
+    refreshed = DataPlaneSettings()  # pyright: ignore[reportCallIssue] — transition supplies aliases
+    settings.data_plane.db_admin_password = refreshed.db_admin_password
+    settings.data_plane.redis_admin_password = refreshed.redis_admin_password
+    settings.data_plane.db_url = refreshed.db_url
+    settings.data_plane.redis_url = refreshed.redis_url
 
 
 def _mint_or_existing(values: dict[str, str | None], key: str) -> str:
@@ -40,14 +133,7 @@ def _mint_or_existing(values: dict[str, str | None], key: str) -> str:
 
 
 def _working_redis_admin_password(redis_port: int, candidates: tuple[str, ...]) -> str:
-    """Return the password Redis currently accepts for its ``default`` user.
-
-    The probe recognizes only passwords known to this process: gateway ``.env``
-    values, in-memory settings, the bearer, and the freshly minted value. A
-    crash after ``CONFIG SET requirepass`` but before the ``.env`` write requires
-    restarting Redis, whose configuration still carries the previous
-    ``requirepass``, then re-running ``ava start``.
-    """
+    """Return the first known password Redis currently accepts for ``default``."""
     import redis
 
     def _works(password: str) -> bool:
@@ -73,39 +159,57 @@ def _working_redis_admin_password(redis_port: int, candidates: tuple[str, ...]) 
     )
 
 
-def ensure_data_plane_admin_secrets() -> bool:
-    """Mint and activate missing split data-plane credentials.
-
-    Returns whether an upgrade was applied. It is deliberately a gateway-only
-    call site: only the gateway home holds owner and Redis-admin credentials.
-    Empty-bearer clusters remain unauthenticated by contract and are a no-op.
-    """
+def _ensure_data_plane_admin_secrets_unlocked(*, allow_legacy_upgrade: bool) -> bool:
+    """Mint or replay split credentials while the transition lock is held."""
     secret = settings.data_plane.cluster_secret
     if not secret:
         return False
 
     env_path = Path(ava_home()) / ".env"
     values = dotenv_values(env_path)
+    transition = _read_transition()
     missing = (
         not (values.get("AVA_DB_ADMIN_PASSWORD") or "").strip()
         or not (values.get("AVA_REDIS_ADMIN_PASSWORD") or "").strip()
         or not (values.get(REDIS_PASSWORD_ENV) or "").strip()
     )
-    if not missing:
+    if not missing and transition is None:
+        return False
+    if transition is None and not allow_legacy_upgrade:
+        print(
+            "  · deferred legacy data-plane credential split until a handoff-capable "
+            "rollout parent is installed"
+        )
         return False
 
     record = get_record(ava_home())
     if record is None:
         raise RuntimeError("no cluster registry record — cannot split data-plane credentials")
     identity = identity_from_url(settings.data_plane.db_url)
-    db_admin_password = _mint_or_existing(values, "AVA_DB_ADMIN_PASSWORD")
-    redis_admin_password = _mint_or_existing(values, "AVA_REDIS_ADMIN_PASSWORD")
-    redis_password = _mint_or_existing(values, REDIS_PASSWORD_ENV)
     pg_port = record_postgres_port(record)
     redis_port = record_redis_port(record)
 
-    # Postgres provisioning uses the local trust socket. No network client is
-    # left holding the old password before service sessions exist.
+    if transition is None:
+        db_admin_password = _mint_or_existing(values, "AVA_DB_ADMIN_PASSWORD")
+        redis_admin_password = _mint_or_existing(values, "AVA_REDIS_ADMIN_PASSWORD")
+        redis_password = _mint_or_existing(values, REDIS_PASSWORD_ENV)
+        raw_db_url = (values.get("AVA_DB_URL") or settings.data_plane.db_url).strip()
+        raw_redis_url = (values.get("AVA_REDIS_URL") or settings.data_plane.redis_url).strip()
+        transition = _Transition(
+            db_admin_password=db_admin_password,
+            redis_admin_password=redis_admin_password,
+            redis_password=redis_password,
+            db_url=url_with_password(raw_db_url, db_admin_password),
+            redis_url=url_with_password(raw_redis_url, redis_password),
+        )
+        # Commit the complete target before the first external mutation. A hard
+        # kill below leaves one secret set for this parent or the next start.
+        _write_transition(transition)
+
+    db_admin_password = transition.db_admin_password
+    redis_admin_password = transition.redis_admin_password
+    redis_password = transition.redis_password
+
     ensure_cluster_role(
         identity,
         base_admin_url=pg_admin_url(pg_port),
@@ -134,6 +238,7 @@ def ensure_data_plane_admin_secrets() -> bool:
         client.execute_command(  # pyright: ignore[reportUnknownMemberType]
             "CONFIG", "SET", "requirepass", redis_admin_password
         )
+        client.execute_command("CONFIG", "REWRITE")  # pyright: ignore[reportUnknownMemberType]
 
     ensure_cluster_redis_acl(
         identity,
@@ -157,35 +262,30 @@ def ensure_data_plane_admin_secrets() -> bool:
         if rc != 0:
             raise RuntimeError("PgBouncer userlist refresh failed while splitting credentials")
 
-    raw_db_url = (values.get("AVA_DB_URL") or settings.data_plane.db_url).strip()
-    raw_redis_url = (values.get("AVA_REDIS_URL") or settings.data_plane.redis_url).strip()
-    new_db_url = url_with_password(raw_db_url, db_admin_password)
-    new_redis_url = url_with_password(raw_redis_url, redis_password)
     upsert_env(
         env_path,
         {
             "AVA_DB_ADMIN_PASSWORD": db_admin_password,
             "AVA_REDIS_ADMIN_PASSWORD": redis_admin_password,
             REDIS_PASSWORD_ENV: redis_password,
-            "AVA_DB_URL": new_db_url,
-            "AVA_REDIS_URL": new_redis_url,
+            "AVA_DB_URL": transition.db_url,
+            "AVA_REDIS_URL": transition.redis_url,
         },
     )
-
-    # The current start must use the split values too; child sessions inherit
-    # this process environment and ordinary in-process callers use settings.
-    os.environ.update(
-        {
-            "AVA_DB_ADMIN_PASSWORD": db_admin_password,
-            "AVA_REDIS_ADMIN_PASSWORD": redis_admin_password,
-            REDIS_PASSWORD_ENV: redis_password,
-            "AVA_DB_URL": new_db_url,
-            "AVA_REDIS_URL": new_redis_url,
-        }
-    )
-    settings.data_plane.db_admin_password = db_admin_password
-    settings.data_plane.redis_admin_password = redis_admin_password
-    settings.data_plane.db_url = url_with_password(settings.data_plane.db_url, db_admin_password)
-    settings.data_plane.redis_url = url_with_password(settings.data_plane.redis_url, redis_password)
+    _apply_transition_to_process(transition)
+    _transition_path().unlink()
     print("  ✓ split legacy data-plane credentials into owner, Redis-admin, and Redis-runtime")
     return True
+
+
+def ensure_data_plane_admin_secrets(*, allow_legacy_upgrade: bool = True) -> bool:
+    """Mint, activate, and persist split credentials as one replayable transition."""
+    with file_lock(_transition_lock_path(), timeout_s=_TRANSITION_LOCK_TIMEOUT_S):
+        return _ensure_data_plane_admin_secrets_unlocked(allow_legacy_upgrade=allow_legacy_upgrade)
+
+
+def resume_pending_data_plane_admin_secrets() -> bool:
+    """Finish a journaled split without initiating a new transition."""
+    if _read_transition() is None:
+        return False
+    return ensure_data_plane_admin_secrets(allow_legacy_upgrade=True)
