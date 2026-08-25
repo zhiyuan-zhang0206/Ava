@@ -179,7 +179,11 @@ def _gateway_get(gateway: str, path: str) -> dict:
     if secret:
         headers["Authorization"] = f"Bearer {secret}"
     req = urllib.request.Request(url, headers=headers)
-    with urllib.request.urlopen(req, timeout=60) as resp:
+    # Bypass the system HTTP proxy: the gateway may be a private-cluster
+    # address, and the macOS system proxy (127.0.0.1:7897) answers 502 for
+    # it. Same rationale as fetch_trace.py and cli/commands/trace.py.
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    with opener.open(req, timeout=60) as resp:
         return json.loads(resp.read().decode())
 
 

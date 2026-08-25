@@ -11,7 +11,10 @@ Two modes:
       record, complete, no size cap, no network. Needs filesystem access to
       the machine that recorded the trace. Stops at the first file that
       yields spans (one trace lives in one file — the recording process's
-      daily file). The trace id is base64 in the mirror; convert inside.
+      daily file; a trace straddling a rotation boundary is merged across
+      files). Ids are hex in the mirror (the collector's file exporter
+      writes 32/16-char hex, not OTLP-JSON base64); legacy pre-#1266
+      agent-side mirror files carry base64 and are handled too.
     - `tempo`: `GET /api/traces/{id}` — refused above Tempo's 5 MB cap
       ("trace exceeds max size"); the error message points back to `mirror`.
 
@@ -44,7 +47,7 @@ import base64
 import json
 import os
 import re
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 _KIND_STRIP = "SPAN_KIND_"
@@ -68,8 +71,21 @@ def _anyvalue(value: dict) -> object:
     return None
 
 
+def _id_to_hex(value: str) -> str:
+    """Normalize a trace/span id field to lowercase hex.
+
+    The mirror (collector file exporter, task #1266) and Tempo both carry ids
+    as hex strings today; legacy OTLP/JSON envelopes (pre-#1266 agent-side
+    mirror) carry base64 per the OTLP JSON spec. Detect by shape: hex ids are
+    32 (trace) or 16 (span) chars; base64 ids are 24 or 12.
+    """
+    if len(value) in (32, 16) and re.fullmatch(r"[0-9a-fA-F]+", value):
+        return value.lower()
+    return base64.b64decode(value).hex()
+
+
 def _normalize_span(sp: dict) -> dict:
-    """One OTLP span dict (proto3 JSON, base64 ids) -> normalized dict."""
+    """One OTLP span dict (proto3 JSON, hex or base64 ids) -> normalized dict."""
     attributes = {a["key"]: _anyvalue(a["value"]) for a in sp.get("attributes", [])}
     kind = sp.get("kind")
     if isinstance(kind, str):
@@ -83,10 +99,8 @@ def _normalize_span(sp: dict) -> dict:
     else:
         status_out = None
     return {
-        "span_id": base64.b64decode(sp["spanId"]).hex(),
-        "parent_span_id": (
-            base64.b64decode(sp["parentSpanId"]).hex() if sp.get("parentSpanId") else None
-        ),
+        "span_id": _id_to_hex(sp["spanId"]),
+        "parent_span_id": _id_to_hex(sp["parentSpanId"]) if sp.get("parentSpanId") else None,
         "name": sp.get("name", ""),
         "kind": kind,
         "start_ns": int(sp["startTimeUnixNano"]),
@@ -104,9 +118,7 @@ def _spans_from_envelope(data: dict, hex_trace_id: str | None) -> list[dict]:
     for group in groups:
         for ss in group.get("scopeSpans", []):
             for sp in ss.get("spans", []):
-                if hex_trace_id is not None and (
-                    base64.b64decode(sp["traceId"]).hex() != hex_trace_id
-                ):
+                if hex_trace_id is not None and _id_to_hex(sp["traceId"]) != hex_trace_id:
                     continue
                 out.append(_normalize_span(sp))
     return out
@@ -120,7 +132,12 @@ def _http_get_json(url: str) -> dict:
 
     if not url.startswith(("http://", "https://")):
         raise ValueError(f"refusing non-http(s) URL: {url[:60]!r}")
-    with urllib.request.urlopen(url, timeout=60) as resp:
+    # Bypass the system HTTP proxy: cluster endpoints are loopback or on the
+    # private cluster network, and the macOS system proxy (Clash/VPN on
+    # 127.0.0.1:7897) answers 502 for them. Same rationale as the
+    # `trust_env=False` in cli/commands/trace.py's ship path.
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    with opener.open(url, timeout=60) as resp:
         return json.loads(resp.read().decode())
 
 
@@ -137,8 +154,11 @@ def cmd_search(args) -> int:
     for t in traces:
         start_ns = int(t.get("startTimeUnixNano", 0))
         started = datetime.fromtimestamp(start_ns / 1e9, tz=UTC).isoformat()
+        # Tempo search trims leading zero nibbles; pad back so the id pastes
+        # straight into --trace-id.
+        trace_id = t["traceID"].zfill(32)
         print(
-            f"  {t['traceID']}  dur={t.get('durationMs')}ms  "
+            f"  {trace_id}  dur={t.get('durationMs')}ms  "
             f"spans={t.get('spanSet', {}).get('matched')}  root={t.get('rootServiceName')}  "
             f"start={started}"
         )
@@ -171,7 +191,7 @@ def _mirror_day(fp: Path) -> datetime.date | None:
             return None
     m = re.match(r"spans-(\d{4})-(\d{2})-(\d{2})T", fp.name)
     if m:
-        return datetime.date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+        return date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
     return None
 
 
@@ -194,24 +214,29 @@ def _mirror_files(directory: Path, days: int) -> list[Path]:
 
 def fetch_from_mirror(args, hex_trace_id: str) -> list[dict]:
     directory = _mirror_dir(args)
-    needle = _trace_id_b64(hex_trace_id)
+    # Current mirror lines carry hex ids; legacy pre-#1266 lines carry base64.
+    needles = {hex_trace_id, _trace_id_b64(hex_trace_id)}
     files = _mirror_files(directory, args.days)
     print(f"scanning {len(files)} mirror file(s) in {directory} (days={args.days})")
+    # A trace can straddle a rotation boundary (the sidecar rotates on size),
+    # so scan every file in range and merge — never stop at the first hit.
+    by_span: dict[str, dict] = {}
     for fp in files:
-        hits: list[dict] = []
+        found = 0
         with fp.open(encoding="utf-8") as f:
             for line in f:
-                if needle not in line:
+                if not any(needle in line for needle in needles):
                     continue
                 try:
                     req = json.loads(line)
                 except json.JSONDecodeError:
                     continue
-                hits.extend(_spans_from_envelope(req, hex_trace_id))
-        if hits:
-            print(f"found {len(hits)} spans in {fp.name}")
-            return hits
-    return []
+                for span in _spans_from_envelope(req, hex_trace_id):
+                    by_span[span["span_id"]] = span
+                    found += 1
+        if found:
+            print(f"found {found} span(s) in {fp.name}")
+    return list(by_span.values())
 
 
 def fetch_from_tempo(args, hex_trace_id: str) -> list[dict]:
@@ -235,13 +260,14 @@ def fetch_from_tempo(args, hex_trace_id: str) -> list[dict]:
 
 
 def cmd_fetch(args) -> int:
-    if not re.fullmatch(r"[0-9a-f]{32}", args.trace_id or ""):
-        print("--trace-id must be a 32-char hex id")
+    trace_id = (args.trace_id or "").zfill(32)
+    if not re.fullmatch(r"[0-9a-f]{32}", trace_id):
+        print("--trace-id must be a 31- or 32-char hex id")
         return 2
     spans = (
-        fetch_from_mirror(args, args.trace_id)
+        fetch_from_mirror(args, trace_id)
         if args.source == "mirror"
-        else fetch_from_tempo(args, args.trace_id)
+        else fetch_from_tempo(args, trace_id)
     )
     if not spans:
         print(
@@ -252,7 +278,7 @@ def cmd_fetch(args) -> int:
         return 1
     spans.sort(key=lambda s: s["start_ns"])
     out = {
-        "trace_id": args.trace_id,
+        "trace_id": trace_id,
         "source": args.source,
         "fetched_at": datetime.now(UTC).isoformat(),
         "spans": spans,
@@ -266,8 +292,16 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[1])
     ap.add_argument(
         "--tempo-url",
-        default=os.environ.get("AVA_TRACE_TEMPO_URL", "http://localhost:3200"),
-        help="Tempo query API base (or the Grafana datasource proxy path). Default localhost:3200.",
+        default=os.environ.get(
+            "AVA_TRACE_TEMPO_URL",
+            os.environ.get("AVA_TELEMETRY_TEMPO_QUERY_URL", "http://localhost:3200"),
+        ),
+        help=(
+            "Tempo query API base (or the Grafana datasource proxy path). "
+            "Default: AVA_TRACE_TEMPO_URL, else AVA_TELEMETRY_TEMPO_QUERY_URL "
+            "(the per-cluster Tempo query URL; remote when Tempo is not on "
+            "this host), else http://localhost:3200."
+        ),
     )
     ap.add_argument("--out", default="trace_raw.json")
     mode = ap.add_mutually_exclusive_group(required=True)
