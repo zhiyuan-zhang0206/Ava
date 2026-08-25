@@ -9,7 +9,11 @@ to the host's timezone would pass or fail by which machine ran it.
 from __future__ import annotations
 
 import hashlib
+import os
 import subprocess
+import sys
+import textwrap
+import time
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -21,8 +25,10 @@ from psycopg.conninfo import conninfo_to_dict
 
 from services import backup
 from shared.config import settings
+from shared.platform import LockTimeoutError
 
 _CLUSTER_TZ = "America/Los_Angeles"
+_REPO = Path(__file__).resolve().parents[2]
 
 
 @pytest.fixture
@@ -41,6 +47,43 @@ def _touch(directory: Path, name: str) -> Path:
     p = directory / name
     p.write_bytes(b"x")
     return p
+
+
+def _spawn_backup_lock_holder(
+    ava_home: Path, ready: Path, hold_s: float
+) -> subprocess.Popen[bytes]:
+    """A separate interpreter that takes `backup_lock`, signals, and holds it."""
+    code = textwrap.dedent(f"""
+        import sys
+        import time
+        from pathlib import Path
+
+        sys.path.insert(0, {str(_REPO)!r})
+        from services.backup import backup_lock
+        from shared.config import settings
+
+        settings.general.ava_home = Path({str(ava_home)!r})
+        with backup_lock(timeout_s=60):
+            Path({str(ready)!r}).write_text("1", encoding="utf-8")
+            time.sleep({hold_s})
+    """)
+    env = dict(os.environ)
+    env["AVA_HOME"] = str(ava_home)
+    return subprocess.Popen(  # noqa: S603
+        [sys.executable, "-c", code],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        env=env,
+    )
+
+
+def _await_backup_lock_holder(ready: Path, proc: subprocess.Popen[bytes]) -> None:
+    deadline = time.monotonic() + 30
+    while not ready.exists():
+        assert proc.poll() is None, "the holder exited before taking the backup lock"
+        assert time.monotonic() < deadline, "the holder never took the backup lock"
+        time.sleep(0.02)
 
 
 def test_not_due_before_backup_hour(bdir: Path) -> None:
@@ -511,6 +554,61 @@ def test_run_backup_forwards_requested_timeout(bdir: Path, monkeypatch: pytest.M
     backup.run_backup(_dt(2026, 8, 8, 3, 0), db_url="dbname=whatever", timeout_s=123.0)
 
     assert timeouts == [123.0, 123.0, 123.0]
+
+
+def test_backup_lock_reentrant_same_thread(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A snapshot may take the lock before `run_backup` takes it again."""
+    ava_home = tmp_path / "ava-home"
+    monkeypatch.setattr(settings.general, "ava_home", ava_home)
+
+    with backup.backup_lock(), backup.backup_lock(timeout_s=0.5):
+        pass
+
+    with backup.backup_lock(timeout_s=0.5):
+        pass
+
+
+def test_backup_lock_cross_process_excludes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A scheduler dump waits for a rollout snapshot already holding the lock."""
+    ava_home = tmp_path / "ava-home"
+    monkeypatch.setattr(settings.general, "ava_home", ava_home)
+    ready = tmp_path / "ready"
+    holder = _spawn_backup_lock_holder(ava_home, ready, hold_s=2.0)
+    try:
+        _await_backup_lock_holder(ready, holder)
+
+        started = time.monotonic()
+        with backup.backup_lock(timeout_s=30):
+            waited = time.monotonic() - started
+        assert waited >= 0.4, (
+            f"took the backup lock while another process held it (waited {waited:.2f}s)"
+        )
+    finally:
+        if holder.poll() is None:
+            holder.kill()
+        holder.wait(timeout=10)
+
+
+def test_backup_lock_timeout_expires(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A wedged snapshot produces a bounded failure rather than an unbounded wait."""
+    ava_home = tmp_path / "ava-home"
+    monkeypatch.setattr(settings.general, "ava_home", ava_home)
+    ready = tmp_path / "ready"
+    holder = _spawn_backup_lock_holder(ava_home, ready, hold_s=30.0)
+    try:
+        _await_backup_lock_holder(ready, holder)
+
+        started = time.monotonic()
+        with pytest.raises(LockTimeoutError), backup.backup_lock(timeout_s=0.5):
+            pytest.fail("took a backup lock another process was holding")
+        waited = time.monotonic() - started
+        assert 0.3 <= waited < 5
+    finally:
+        if holder.poll() is None:
+            holder.kill()
+        holder.wait(timeout=10)
 
 
 def test_run_backup_serializes_dump_creation(bdir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
