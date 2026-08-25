@@ -11,6 +11,7 @@ pass wrapper `agent/startup.py:_repair_dangling_tool_use_at_startup`.
 """
 
 from typing import Any, cast
+from unittest.mock import AsyncMock
 
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, ToolMessage
 from langchain_core.messages.modifier import RemoveMessage
@@ -211,6 +212,7 @@ class _FakeGraph:
     def __init__(self, messages: list[Any]) -> None:
         self._messages = messages
         self.updates: list[dict[str, Any]] = []
+        self.checkpointer = object()
 
     async def aget_state(self, _config: Any) -> _FakeSnapshot:
         return _FakeSnapshot(self._messages)
@@ -234,6 +236,16 @@ async def test_startup_repair_rebuilds_for_buried_dangling() -> None:
     repaired = graph.updates[0]["messages"]
     assert isinstance(repaired[0], RemoveMessage)
     assert repaired[0].id == REMOVE_ALL_MESSAGES
+
+
+async def test_startup_repair_flushes_a_skipped_checkpoint_update() -> None:
+    graph = _FakeGraph([_ai_tool_use("call_x")])
+    flush = AsyncMock()
+    graph.checkpointer = type("_NstepSaver", (), {"_ava_nstep_flush": flush})()
+
+    await _repair_dangling_tool_use_at_startup(graph, agent_id=167)  # type: ignore[arg-type]
+
+    flush.assert_awaited_once()
 
 
 async def test_startup_repair_is_noop_when_history_valid() -> None:

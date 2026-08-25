@@ -29,6 +29,14 @@ applying Ava's tracked SQL files, every capability reads the complete
 `checkpoint_migrations` set and requires the explicitly approved version.
 Checkpoint readers and agent boot therefore need CRUD but no schema CREATE.
 
+`AVA_CHECKPOINT_INTERVAL` defaults to `1`, which writes every super-step; an
+interval of N writes every Nth super-step (`N=4` cuts checkpoint write volume by
+75%). A crash can replay up to `N-1` super-steps (re-spending LLM tokens and
+possibly replaying tool side effects); claimed/pending reconciliation re-delivers
+inbounds, and checkpoint parent chains span N steps. Canary one agent with a
+`{"checkpoint_interval": 4}` config overlay plus an agent restart, or set
+`AVA_CHECKPOINT_INTERVAL=4` in the cluster `.env`; there is no auto-rollout.
+
 An upstream dependency bump that adds checkpoint migration version N must ship
 that DDL as a paired Ava timestamp migration and advance
 `CHECKPOINT_SCHEMA_AVA_MIGRATIONS` (the upstream baseline stays frozen at 9).

@@ -464,6 +464,16 @@ class TestInvokeGraphLifecycleLogging:
         error_records = [r for r in loguru_records if r["level"].name == "ERROR"]  # pyright: ignore[reportUnknownMemberType]
         assert not error_records, f"Normal path should not log ERROR; got {error_records}"
 
+    async def test_normal_completion_flushes_nstep_checkpoint_tail(self) -> None:
+        graph = MagicMock()
+        graph.ainvoke = AsyncMock(return_value={"exit_requested": True})
+        flush = AsyncMock()
+        graph.checkpointer._ava_nstep_flush = flush
+
+        await _invoke_graph_with_lifecycle_logging(graph, agent_id=42, ctx=_fake_ctx())
+
+        flush.assert_awaited_once()
+
     async def test_ainvoke_input_is_empty_state_update(self) -> None:
         """ainvoke's input is a state update (semantically same as a Command update
         returned by a node: merges keys into channels, messages use add_messages reducer, regular
