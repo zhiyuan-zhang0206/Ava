@@ -62,6 +62,7 @@ from __future__ import annotations
 
 import contextlib
 import datetime
+import itertools
 import logging
 import os
 import sys
@@ -584,11 +585,17 @@ def _postgres_sink(message: loguru.Message) -> None:
     )
 
 
+# Level-graded sampling for bare INFO `log` records (task #1637): ~30% of the
+# stream, ~91% INFO; WARNING+ and named events pass. Stderr/file sinks untouched.
+_LOG_INFO_SAMPLE_EVERY = 10
+_log_info_sample_counter = itertools.count()
+
+
 def _event_pipeline_filter(record: loguru.Record) -> bool:
     """Which loguru records may enter the unified event pipeline.
 
-    Two families are dropped — they still reach the stderr / JSONL file sinks,
-    but never become `events` rows:
+    Three families are dropped or thinned (they still reach the stderr /
+    JSONL file sinks, but never or rarely become `events` rows):
 
       - the emitter's own failure reports (records carrying the `_no_emitter`
         marker, see `shared/telemetry.py`): a DB-down process would otherwise
@@ -598,9 +605,16 @@ def _event_pipeline_filter(record: loguru.Record) -> bool:
         `node_exit` only; death analysis reads the node_enter trail from the
         log files), yet ~15% of the stream's rows. Kept in the log files, out
         of the table.
+      - bare INFO `log` records: one in `_LOG_INFO_SAMPLE_EVERY` passes;
+        WARNING+ and named events pass unchanged.
     """
     extra = record["extra"]
-    return not extra.get("_no_emitter") and extra.get("event") != "node_enter"
+    if extra.get("_no_emitter") or extra.get("event") == "node_enter":
+        return False
+    level = getattr(record.get("level"), "name", "")  # missing level -> "" (unsampled)
+    if level == "INFO" and (extra.get("event") or extra.get("label") or "log") == "log":
+        return next(_log_info_sample_counter) % _LOG_INFO_SAMPLE_EVERY == 0
+    return True
 
 
 def _add_postgres_sink(process: str = "unknown", *, agent_id: int | None = None) -> int:

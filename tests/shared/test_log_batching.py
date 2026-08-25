@@ -15,10 +15,12 @@ rename would break and a deletion would not.
 
 from __future__ import annotations
 
+import itertools
 import json
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -305,6 +307,37 @@ def test_event_pipeline_filter_drops_no_emitter_and_node_enter() -> None:
     # The node_enter drop is by event name only, not by message — a record
     # that merely *mentions* node_enter in its message still passes.
     assert f(_rec({"msg": "node_enter handling"}))
+
+
+def _rec_level(extra: dict[str, Any], level: str = "INFO") -> Any:
+    """A loguru-Record-shaped dict with a level — the sampling branch reads it."""
+    return {"extra": extra, "level": SimpleNamespace(name=level)}
+
+
+def test_event_pipeline_filter_samples_info_log_one_in_ten() -> None:
+    """Bare INFO `log` records are level-graded-sampled: exactly one in ten
+    passes; the counter is per-process and resettable for tests."""
+    f = slog._event_pipeline_filter
+    slog._log_info_sample_counter = itertools.count()
+    kept = [f(_rec_level({"event": "log"})) for _ in range(10)]
+    assert kept.count(True) == 1
+    assert kept[0] is True  # the first record of each block is the survivor
+
+
+def test_event_pipeline_filter_keeps_warning_and_named_events() -> None:
+    """WARNING+ bare logs and every named event pass unchanged — the alerts /
+    unresolved surfaces depend on them; only bare INFO logs are sampled."""
+    f = slog._event_pipeline_filter
+    slog._log_info_sample_counter = itertools.count()
+    assert f(_rec_level({"event": "log"}, "WARNING"))
+    assert f(_rec_level({"event": "log"}, "ERROR"))
+    assert f(_rec_level({"event": "log"}, "CRITICAL"))
+    # named events (node_exit, llm_usage) and label-alias events are not bare logs
+    assert f(_rec_level({"event": "node_exit"}))
+    assert f(_rec_level({"event": "llm_usage"}))
+    assert f(_rec_level({"label": "exec"}))
+    # a record without a level passes unsampled (test-records / tolerant path)
+    assert f(_rec({}))
 
 
 # --- the drop report (ops monitor collection point) ---
