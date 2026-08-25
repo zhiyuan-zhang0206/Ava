@@ -85,6 +85,7 @@ class ModelTuning:
     # -- prompt behavior --
     agent_communication_style: str | None = None
     prompt_prefer_sdk_enabled: bool | None = None
+    prompt_keep_it_simple_enabled: bool | None = None
     prompt_output_conciseness_enabled: bool | None = None
     prompt_ui_delivery_enabled: bool | None = None
     prompt_outcome_reporting_enabled: bool | None = None
@@ -132,6 +133,7 @@ DEFAULT_TUNING = ModelTuning(
     # model; the section is omitted unless an explicit value opts in.
     agent_communication_style="off",
     prompt_prefer_sdk_enabled=True,
+    prompt_keep_it_simple_enabled=True,
     prompt_output_conciseness_enabled=True,
     prompt_ui_delivery_enabled=True,
     prompt_outcome_reporting_enabled=True,

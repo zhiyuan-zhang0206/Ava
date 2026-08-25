@@ -230,6 +230,26 @@ class AgentPromptSettings(EnvSettings):
         },
     )
 
+    prompt_keep_it_simple_enabled: bool | None = Field(
+        default=None,
+        alias="AVA_SYSTEM_PROMPT_KEEP_IT_SIMPLE",
+        validation_alias=AliasChoices(
+            "AVA_SYSTEM_PROMPT_KEEP_IT_SIMPLE", "AVA_PROMPT_KEEP_IT_SIMPLE"
+        ),
+        description=(
+            "Inject a 'Keep It Simple' section — prefer the mechanically correct, "
+            "conceptually simple solution over clever shortcuts; relentless: favor "
+            "the principle even when tedious. Unset resolves the per-model default "
+            "(shared floor: on)."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     agent_communication_style: Literal["oriented", "silent", "concise", "off"] | None = Field(
         default=None,
         alias="AVA_AGENT_COMMUNICATION_STYLE",
