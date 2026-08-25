@@ -157,6 +157,7 @@ def _render_real_template(
     machine_host: str = "100.64.0.10",
     cluster_secret: str = "cluster-token",  # noqa: S107 — fixture token
     self_metrics_port: int = 8888,
+    otlp_enabled: bool = True,
 ) -> dict[str, Any]:
     """Render the shipped template for `roles` and parse it as YAML."""
     monkeypatch.setattr("shared.db.direct_db_url", lambda: "postgresql://ava:abc@10.0.0.2:5433/ava")
@@ -169,6 +170,7 @@ def _render_real_template(
     monkeypatch.setattr(
         "shared.config.settings.observability.otel_collector_metrics_port", self_metrics_port
     )
+    monkeypatch.setattr("shared.config.settings.observability.telemetry_otlp_enabled", otlp_enabled)
     monkeypatch.setattr("shared.machine.reachable_host", lambda: machine_host)
     monkeypatch.setattr("shared.machine.machine_name", lambda: "test-machine")
     repo = Path(__file__).resolve().parents[2]
@@ -204,6 +206,21 @@ def test_gateway_config_scrapes_this_clusters_own_data_plane(
         "postgresql",
         "redis",
     ]
+
+
+def test_gateway_config_skips_postgres_receiver_when_otlp_export_is_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Disabling OTLP export keeps Redis metrics but prevents PostgreSQL receiver startup."""
+    cfg = _render_real_template(
+        monkeypatch,
+        frozenset({"gateway", "agent-runner"}),
+        otlp_enabled=False,
+    )
+
+    assert "postgresql" not in cfg["receivers"]
+    assert "redis" in cfg["receivers"]
+    assert "postgresql" not in cfg["service"]["pipelines"]["metrics/infra"]["receivers"]
 
 
 def test_gateway_config_skips_postgres_receiver_without_password(

@@ -198,7 +198,7 @@ def _data_plane_receivers(roles: MachineRoles | None) -> tuple[str, str]:
     redis_admin = redis_admin_url()
     blocks: list[str] = []
     receivers: list[str] = []
-    if pg.password:
+    if pg.password and settings.observability.telemetry_otlp_enabled:
         blocks.append(
             _POSTGRES_RECEIVER_BLOCK.format(
                 pg_endpoint=_endpoint(db_url, "postgres"),
