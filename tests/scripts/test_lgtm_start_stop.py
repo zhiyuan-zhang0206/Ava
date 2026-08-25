@@ -235,3 +235,14 @@ def test_start_logs_loki_verify_config_pass(tmp_path: Path) -> None:
 
     assert result.returncode == 0, result.stderr + result.stdout
     assert "loki config verified" in result.stdout
+
+
+def test_start_refuses_loki_bootstrap_when_config_missing(tmp_path: Path) -> None:
+    env, _log = _toolset(tmp_path)
+    (Path(env["AVA_HOME"]) / "lgtm/native/config/loki.yaml").unlink()
+
+    result = _run(START, env)
+
+    assert result.returncode == 1
+    assert "loki" in result.stdout and "is missing" in result.stdout
+    assert not (Path(env["FAKE_UP"]) / "loki").exists()

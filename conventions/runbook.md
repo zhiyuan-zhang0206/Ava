@@ -1168,15 +1168,18 @@ update`. The gateway watchdog re-runs it when Loki/Prometheus/Grafana readiness
 probes hit connection failures; its probe-first path skips only a reachable
 backend whose matching launchd job is still loaded. `ava status` shows native
 jobs and readiness probes.
-**Loki config hard gate** — any `loki.yaml` change (template, rendered
-`$AVA_HOME/lgtm/native/config/loki.yaml`, or container rollback asset) must
-pass `loki -config.file=<cfg> -verify-config` before the job is (re)started.
+**Loki config hard gate** — any change to the native Loki config (the
+`deploy/lgtm/native/config/loki.yaml` template, which converge renders into
+`$AVA_HOME/lgtm/native/config/loki.yaml`) must pass
+`loki -config.file=<cfg> -verify-config` before the job is (re)started.
 The launcher (`deploy/lgtm/start.sh`) runs that verification against the
 rendered config on every invocation and **refuses to start Loki when it
 fails** — a bad field name otherwise crash-loops the launchd job (the
 2026-08-25 `ingester.wal_disk_full_threshold` incident, ~3min of Loki-backed
-read downtime). The Python-side pin
-(`shared/loki_index_labels.validate_loki_deploy_config`) still guards
+read downtime). The compose rollback asset (`deploy/lgtm/config/loki.yaml`)
+is a manual operator path — the launcher never starts it, so verifying it is
+the operator's own `-verify-config` step, not the gate's. The Python-side
+pin (`shared/loki_index_labels.validate_loki_deploy_config`) still guards
 converge-time re-renders; the binary verify is the zero-cost last line
 before any restart, including the gateway watchdog's.
 Unmarked homes (dev worktree clusters) never touch these backends or install a

@@ -104,3 +104,23 @@ def test_main_restarts_on_down_probe(monkeypatch: pytest.MonkeyPatch) -> None:
     with pytest.raises(SystemExit) as exc:
         hc.main()
     assert exc.value.code == 1
+
+
+def test_restart_stack_failure_reports_stdout_and_stderr(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A failed start.sh re-run surfaces both streams — start.sh gate failures
+    (e.g. loki -verify-config rejection) are stdout log lines, and the watchdog
+    must not swallow the reason."""
+
+    class _Result:
+        returncode = 1
+        stdout = "loki config verify failed\n"
+        stderr = "boom\n"
+
+    monkeypatch.setattr(hc.subprocess, "run", lambda *_a, **_kw: _Result())  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+
+    assert hc._restart_stack() is False
+    captured = capsys.readouterr()
+    assert "loki config verify failed" in captured.err
+    assert "boom" in captured.err
