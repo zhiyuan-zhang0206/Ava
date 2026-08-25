@@ -35,6 +35,7 @@ from urllib.parse import unquote, urlsplit
 
 from cli.commands._converge_spec import ConvergeCtx
 from shared.machine import MachineRoles
+from shared.observability import collector_allowed_for_home
 
 # Pinned contrib version — re-validate against the deploy/lgtm backends
 # (Tempo/Loki/Prometheus OTLP intake) when bumping.
@@ -644,12 +645,22 @@ def _reap_orphan_collector_session() -> None:
 
 
 def ensure_otel_collector_step(ctx: ConvergeCtx) -> None:
-    """Install a pure-runner relay or the designated LGTM host's collector."""
-    marker = ctx.ava_home / "lgtm-host"
-    if ctx.roles is not None and "gateway" in ctx.roles and not marker.exists():
+    """Install a pure-runner relay or the designated LGTM host's collector.
+
+    A gateway home is skipped only when it is neither the LGTM host nor opted
+    into an explicit ``AVA_TELEMETRY_OTLP_ENDPOINT`` override — same rule as
+    the roster gate (``ops.spec``) and the sidecar healthcheck.
+    """
+    if (
+        ctx.roles is not None
+        and "gateway" in ctx.roles
+        and not collector_allowed_for_home(ctx.ava_home)
+    ):
         print(
             "  ! otel-collector: collector skipped — this gateway home is not "
-            f"the LGTM host ({marker} is absent); telemetry export is unavailable",
+            f"the LGTM host ({ctx.ava_home / 'lgtm-host'} is absent); telemetry "
+            "export is unavailable; set AVA_TELEMETRY_OTLP_ENDPOINT to use an "
+            "explicit collector",
             file=sys.stderr,
         )
         residual = ctx.ava_home / "otel-collector/config.yaml"
