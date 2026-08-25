@@ -24,3 +24,6 @@ The watcher no longer depends on the database or IM bridge, and a permission
 incident cannot occupy or spam an agent notice slot. Until alerts integration is
 implemented, operators inspect the unchanged launchd log path and local state
 JSON for permission activity.
+
+Update: alert delivery was added later the same day; see
+[`permission-watcher-alert-delivery.md`](permission-watcher-alert-delivery.md).

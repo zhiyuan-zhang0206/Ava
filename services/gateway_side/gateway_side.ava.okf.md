@@ -36,8 +36,9 @@ The following services also run on the gateway capability (core `_GATEWAY` entri
 - **gateway-watchdog** — the watchdog instance for the gateway capability (`--role gateway`; see [[watchdog.ava.okf.md]], one per side)
 - **permission-watcher** — the macOS host-global TCC/ALF prompt observer. It is
   deliberately outside `ServiceSpec`: converge installs a launchd KeepAlive job,
-  and the watcher records correlated incidents in local state and logs without
-  delivering them through an agent notice slot. See
+  and the watcher records correlated incidents/cooldowns in local state and
+  delivers their lifecycle through the gateway alerts ingest, never through an
+  agent notice slot. See
   [[services/permission_watcher/permission_watcher.ava.okf.md]].
 - **gate** — the always-up fleet UI entry (`services/gate/daemon.py`). Deliberately **not a `ServiceSpec`** and therefore not in the table above: it is a launchd KeepAlive job (a detached pidfile-backed process off macOS) registered by `cli/commands/_converge_gate.py`, sitting OUTSIDE the update lifecycle so the entry port never blacks out during a rollout. It owns :3000, proxies the Next.js app on :3001, and reads one immutable `$AVA_HOME/deploy-state.json` UI-generation snapshot per request. A valid active generation wins before any dependency probe and renders System Updating from its stable `started_at`; with no active generation, gateway/app transport failure renders Service Unavailable; corrupt/unknown state fails to that same Not Working projection. The request snapshot is reused through auth and app proxy failure, so service recovery cannot alternate the two pages. `GET /__ava/deploy-state` exposes only `{status,generation}` with `no-store` as an already-open SPA reload hint, before any gateway/app probe; React never owns or times a competing maintenance page. The static login/updating/down pages copy the app design tokens and remain dependency-free. The plist carries a content hash of `services/gate/`, so converge replaces the supervisor job when these assets move. Being outside the roster means no session row and no watchdog keepalive covers it, so entry/supervisor observations are shown by `ava status` and health-probe check 5.
 

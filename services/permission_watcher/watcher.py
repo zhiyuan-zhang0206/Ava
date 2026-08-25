@@ -1,8 +1,8 @@
-"""Watch macOS TCC/ALF prompts and record their lifecycle locally.
+"""Watch macOS TCC/ALF prompts and deliver their lifecycle through alerts.
 
 Two unified-log streams feed one queue. Reader threads own only their stream
-parser; the main thread exclusively owns persistent pending state and logging,
-so no permission incident is mutated concurrently.
+parser; the main thread exclusively owns persistent incident state and alert
+delivery, so no permission incident is mutated concurrently.
 """
 
 from __future__ import annotations
@@ -14,10 +14,15 @@ import signal
 import subprocess
 import sys
 import threading
+import time
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
-from typing import cast
+from typing import Literal, cast
+
+import httpx
+from dotenv import dotenv_values
 
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -33,8 +38,54 @@ from services.permission_watcher.events import (
 
 _LOGGER = logging.getLogger("ava.permission_watcher")
 
-ESCALATION_AFTER = timedelta(minutes=30)
+RECUR_SILENCE = timedelta(hours=12)
+_RESOLVED_RETENTION = timedelta(hours=48)
+_ALERTS_URL = "http://127.0.0.1:8000/api/alerts"
+_ALERTS_TOKEN_ENV = "AVA_OPS_ALERTS_WEBHOOK_TOKEN"  # noqa: S105 — env key, not a token value
+_RETRY_BACKOFF_SECONDS = 2.0
+ENV_PATH = Path.home() / ".ava" / ".env"
 STATE_PATH = Path.home() / ".ava" / "state" / "permission-watcher.json"
+
+AlertPoster = Callable[[dict[str, object]], None]
+PendingMode = Literal["full", "silent"]
+
+
+def _alerts_token(env_path: Path) -> str:
+    value = dotenv_values(env_path).get(_ALERTS_TOKEN_ENV)
+    if value:
+        return value
+
+    # The standalone launchd service reads the explicit prod env file first;
+    # Settings preserves the process-environment fallback without creating a
+    # second raw-environment access pattern in services code.
+    from shared.config import settings
+
+    token = settings.alerts.webhook_token
+    return token.get_secret_value() if token is not None else ""
+
+
+def post_alert(payload: dict[str, object], *, env_path: Path = ENV_PATH) -> None:
+    """POST one alert payload to the loopback gateway, retrying once."""
+    headers = {"X-Alerts-Token": _alerts_token(env_path)}
+    for attempt in range(2):
+        try:
+            response = httpx.post(
+                _ALERTS_URL,
+                json=payload,
+                headers=headers,
+                timeout=10.0,
+            )
+            response.raise_for_status()
+            return
+        except Exception as exc:
+            if attempt == 0:
+                time.sleep(_RETRY_BACKOFF_SECONDS)
+                continue
+            _LOGGER.warning(
+                "permission alert delivery failed after retry: %s",
+                type(exc).__name__,
+            )
+            raise
 
 
 @dataclass
@@ -45,7 +96,8 @@ class PendingPermission:
     first_seen: datetime
     last_seen: datetime
     correlation_id: str | None
-    escalated: bool = False
+    mode: PendingMode = "full"
+    alert_posted: bool = False
 
     def to_json(self) -> dict[str, object]:
         payload = asdict(self)
@@ -56,6 +108,9 @@ class PendingPermission:
 
     @classmethod
     def from_json(cls, payload: dict[str, object]) -> PendingPermission:
+        mode = str(payload.get("mode", "full"))
+        if mode not in ("full", "silent"):
+            raise ValueError(f"unknown permission watcher pending mode: {mode}")
         return cls(
             kind=PermissionKind(str(payload["kind"])),
             subject=str(payload["subject"]),
@@ -67,24 +122,26 @@ class PendingPermission:
                 if payload.get("correlation_id") is not None
                 else None
             ),
-            escalated=bool(payload["escalated"]),
+            mode=mode,
+            alert_posted=bool(payload.get("alert_posted", False)),
         )
 
 
 class PermissionWatcher:
-    """Own persistent pending incidents and log each lifecycle transition once."""
+    """Own pending incidents and emit each alert lifecycle transition once."""
 
-    def __init__(self, state_path: Path) -> None:
+    def __init__(self, state_path: Path, post_alert: AlertPoster) -> None:
         self._state_path = state_path
-        self.pending = self._load()
+        self._post_alert = post_alert
+        self.pending, self.resolved = self._load()
 
     @staticmethod
     def _key(kind: PermissionKind, subject: str) -> str:
         return f"{kind.value}:{subject}"
 
-    def _load(self) -> dict[str, PendingPermission]:
+    def _load(self) -> tuple[dict[str, PendingPermission], dict[str, datetime]]:
         if not self._state_path.exists():
-            return {}
+            return {}, {}
         raw_payload = json.loads(self._state_path.read_text())
         if not isinstance(raw_payload, dict):
             raise TypeError("permission watcher state is not an object")
@@ -97,9 +154,21 @@ class PermissionWatcher:
             if not isinstance(key, str) or not isinstance(value, dict):
                 raise TypeError("permission watcher pending entry is malformed")
             result[key] = PendingPermission.from_json(cast(dict[str, object], value))
-        return result
+        resolved = payload.get("resolved", {})
+        if not isinstance(resolved, dict):
+            raise TypeError("permission watcher state resolved field is not an object")
+        resolved_result: dict[str, datetime] = {}
+        for key, value in cast(dict[object, object], resolved).items():
+            if not isinstance(key, str) or not isinstance(value, str):
+                raise TypeError("permission watcher resolved entry is malformed")
+            resolved_result[key] = _parse_timestamp(value)
+        return result, resolved_result
 
-    def _save(self) -> None:
+    def _save(self, *, now: datetime) -> None:
+        cutoff = now - _RESOLVED_RETENTION
+        self.resolved = {
+            key: resolved_at for key, resolved_at in self.resolved.items() if resolved_at >= cutoff
+        }
         self._state_path.parent.mkdir(parents=True, exist_ok=True)
         temp = self._state_path.with_suffix(".tmp")
         temp.write_text(
@@ -107,6 +176,7 @@ class PermissionWatcher:
                 {
                     "version": 1,
                     "pending": {key: value.to_json() for key, value in self.pending.items()},
+                    "resolved": {key: value.isoformat() for key, value in self.resolved.items()},
                 },
                 ensure_ascii=False,
                 indent=2,
@@ -126,14 +196,23 @@ class PermissionWatcher:
             if existing is not None:
                 existing.last_seen = event.occurred_at
                 existing.correlation_id = event.correlation_id or existing.correlation_id
-                self._save()
+                self._save(now=event.occurred_at)
                 _LOGGER.debug(
                     "permission prompt repeated: kind=%s subject=%s tool=%s",
                     existing.kind.value,
                     existing.subject,
                     existing.tool,
                 )
+                if existing.mode == "full" and not existing.alert_posted:
+                    self._post_firing(existing)
                 return
+            last_resolved_at = self.resolved.get(key)
+            mode: PendingMode = "full"
+            if (
+                last_resolved_at is not None
+                and event.occurred_at - last_resolved_at < RECUR_SILENCE
+            ):
+                mode = "silent"
             pending = PendingPermission(
                 kind=event.kind,
                 subject=event.subject,
@@ -141,15 +220,26 @@ class PermissionWatcher:
                 first_seen=event.occurred_at,
                 last_seen=event.occurred_at,
                 correlation_id=event.correlation_id,
+                mode=mode,
             )
             self.pending[key] = pending
-            self._save()
+            self._save(now=event.occurred_at)
+            if mode == "silent":
+                if last_resolved_at is None:
+                    raise RuntimeError("silent permission incident has no resolution timestamp")
+                _LOGGER.info(
+                    "suppressing repeat alert for %s (resolved %s)",
+                    key,
+                    last_resolved_at.isoformat(),
+                )
+                return
             _LOGGER.info(
                 "permission prompt: kind=%s subject=%s tool=%s",
                 pending.kind.value,
                 pending.subject,
                 pending.tool,
             )
+            self._post_firing(pending)
             return
         pending = self._find_pending(event)
         if pending is None:
@@ -159,13 +249,73 @@ class PermissionWatcher:
                 event.subject,
             )
             return
+        if pending.mode == "full" and pending.alert_posted:
+            try:
+                self._post_alert(self._alert_payload("resolved", pending, event.occurred_at))
+            except Exception as exc:
+                _LOGGER.warning(
+                    "permission resolved alert post failed: kind=%s subject=%s error=%s",
+                    pending.kind.value,
+                    pending.subject,
+                    type(exc).__name__,
+                )
+        pending_key = self._key(pending.kind, pending.subject)
+        self.resolved[pending_key] = event.occurred_at
+        self.pending.pop(pending_key, None)
+        self._save(now=event.occurred_at)
         _LOGGER.info(
             "permission prompt resolved: kind=%s subject=%s",
             pending.kind.value,
             pending.subject,
         )
-        self.pending.pop(self._key(pending.kind, pending.subject), None)
-        self._save()
+
+    def _post_firing(self, pending: PendingPermission) -> None:
+        try:
+            self._post_alert(self._alert_payload("firing", pending))
+        except Exception as exc:
+            _LOGGER.warning(
+                "permission firing alert post failed: kind=%s subject=%s error=%s",
+                pending.kind.value,
+                pending.subject,
+                type(exc).__name__,
+            )
+            return
+        pending.alert_posted = True
+        self._save(now=pending.last_seen)
+
+    @staticmethod
+    def _alert_payload(
+        status: Literal["firing", "resolved"],
+        pending: PendingPermission,
+        ends_at: datetime | None = None,
+    ) -> dict[str, object]:
+        appeared = pending.first_seen.astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
+        tool = pending.tool or "未知"
+        summary = (
+            f"弹窗类型: {pending.kind.display_name}\n"
+            f"进程: {pending.subject}\n"
+            f"触发工具: {tool}\n"
+            f"出现时间: {appeared}\n"
+            "建议动作: 请在 Mac 上点击允许/拒绝。"
+        )
+        return {
+            "source": "permission-watcher",
+            "status": status,
+            "alerts": [
+                {
+                    "status": status,
+                    "labels": {
+                        "alertname": "permission-prompt",
+                        "severity": "warning",
+                        "kind": pending.kind.value,
+                        "subject": pending.subject,
+                    },
+                    "annotations": {"summary": summary},
+                    "startsAt": pending.first_seen.isoformat(),
+                    "endsAt": ends_at.isoformat() if ends_at is not None else "",
+                }
+            ],
+        }
 
     def _find_pending(self, event: PermissionEvent) -> PendingPermission | None:
         exact = self.pending.get(self._key(event.kind, event.subject))
@@ -184,21 +334,6 @@ class PermissionWatcher:
                 return correlated
         same_kind = [pending for pending in self.pending.values() if pending.kind is event.kind]
         return same_kind[0] if len(same_kind) == 1 else None
-
-    def check_timeouts(self, now: datetime) -> None:
-        changed = False
-        for pending in self.pending.values():
-            if pending.escalated or now - pending.first_seen < ESCALATION_AFTER:
-                continue
-            _LOGGER.warning(
-                "permission prompt still pending 30min: kind=%s subject=%s",
-                pending.kind.value,
-                pending.subject,
-            )
-            pending.escalated = True
-            changed = True
-        if changed:
-            self._save()
 
 
 @dataclass(frozen=True)
@@ -264,17 +399,12 @@ def run_forever(service: PermissionWatcher) -> None:
             thread.start()
             threads.append(thread)
         while True:
-            try:
-                item = items.get(timeout=1)
-            except queue.Empty:
-                service.check_timeouts(datetime.now(UTC))
-                continue
+            item = items.get()
             if isinstance(item, _StreamFailure):
                 raise ChildProcessError(
                     f"{item.kind.value} log stream exited with status {item.returncode}"
                 )
             service.observe(item)
-            service.check_timeouts(datetime.now(UTC))
     finally:
         stopping.set()
         for process in processes:
@@ -293,7 +423,7 @@ def main() -> int:
         raise KeyboardInterrupt
 
     signal.signal(signal.SIGTERM, stop)
-    service = PermissionWatcher(STATE_PATH)
+    service = PermissionWatcher(STATE_PATH, post_alert)
     _LOGGER.info(
         "permission watcher started with %d persisted pending incidents", len(service.pending)
     )
