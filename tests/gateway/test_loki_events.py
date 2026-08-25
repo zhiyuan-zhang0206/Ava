@@ -448,6 +448,33 @@ class TestGlobalQueryBudget:
         assert observations[-1].outcome == "released"
         assert observations[-1].active == 0
 
+    def test_gateway_telemetry_emits_only_budget_pressure(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Routine acquire/release transitions stay out of the event stream."""
+        emitted: list[dict[str, Any]] = []
+
+        def capture(*_args: Any, **kwargs: Any) -> None:
+            emitted.append(kwargs["attributes"])
+
+        monkeypatch.setattr(loki_query_budget.telemetry, "emit", capture)
+        budget = loki_query_budget.FairQueryBudget(
+            capacity=1,
+            max_waiters=0,
+            wait_timeout_s=1.0,
+            observer=loki_query_budget._emit_observation,
+        )
+
+        with (
+            budget.slot(),
+            pytest.raises(loki_query_budget.LokiQueryBudgetError) as rejected,
+            budget.slot(),
+        ):
+            pass
+
+        assert rejected.value.reason == "queue_full"
+        assert [item["outcome"] for item in emitted] == ["queue_full"]
+
     def test_local_budget_rejection_is_not_logged_as_loki_failure(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:

@@ -24,6 +24,11 @@ LOKI_QUERY_WAIT_TIMEOUT_S = 10.0
 
 def _emit_observation(observation: BudgetObservation) -> None:
     """Enqueue one observation without DB or Loki I/O on this caller."""
+    # Routine acquire/release adds about two events per Loki query and was
+    # 8.5% of the stream in the 2026-08-25 report. Keep only transitions that
+    # signal queue pressure, rejection, timeout, or cancellation.
+    if observation.outcome in {"acquired", "released"}:
+        return
     telemetry.emit(
         "telemetry",
         "loki_query_budget",
