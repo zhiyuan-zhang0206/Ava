@@ -61,8 +61,16 @@ def write_private_bytes(path: Path, data: bytes) -> None:
         with os.fdopen(fd, "wb") as file:
             fd = -1
             file.write(data)
+            file.flush()
+            os.fsync(file.fileno())
         os.replace(temporary, path)  # noqa: PTH105 — explicit atomic replacement primitive
         ensure_private_file(path)
+        if os.name != "nt":
+            directory_fd = os.open(path.parent, os.O_RDONLY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
     finally:
         if fd != -1:
             os.close(fd)

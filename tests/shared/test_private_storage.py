@@ -87,3 +87,38 @@ def test_private_write_replaces_existing_content_without_permissive_intermediate
     assert seen["temporary"] != target
     assert target.read_bytes() == b"new"
     assert _mode(target) == 0o600
+
+
+def test_private_write_keeps_previous_complete_value_when_replace_fails(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    target = tmp_path / "secret"
+    target.write_bytes(b"old-complete")
+
+    def _fail_replace(_source: object, _destination: object) -> None:
+        raise OSError("injected replace failure")
+
+    monkeypatch.setattr(private_storage.os, "replace", _fail_replace)
+
+    with pytest.raises(OSError, match="injected replace failure"):
+        private_storage.write_private_bytes(target, b"new-complete")
+
+    assert target.read_bytes() == b"old-complete"
+    assert list(tmp_path.glob(".*.tmp")) == []
+
+
+@pytest.mark.skipif(os.name == "nt", reason="directory fsync is POSIX-only")
+def test_private_write_fsyncs_payload_and_parent_directory(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    calls: list[int] = []
+    real_fsync = private_storage.os.fsync
+
+    def _fsync(fd: int) -> None:
+        calls.append(fd)
+        real_fsync(fd)
+
+    monkeypatch.setattr(private_storage.os, "fsync", _fsync)
+    private_storage.write_private_bytes(tmp_path / "secret", b"durable")
+
+    assert len(calls) == 2
