@@ -533,6 +533,82 @@ def _provisioned_redis() -> Iterator[str]:
         yield url
 
 
+# Options whose value is a separate token: `pytest --ignore tests/x.py` must not
+# let that value count as a positional file arg. argparse normally consumes such
+# values before they reach `config.args`, but the guard must not depend on that
+# (--deselect's value even looks like a file path with a `::nodeid` suffix).
+_VALUE_OPTIONS = frozenset(
+    {
+        "--ignore",
+        "--deselect",
+        "--ignore-glob",
+        "--rootdir",
+        "--basetemp",
+        "--confcutdir",
+        "--cov",
+        "--junitxml",
+    }
+)
+
+
+def _full_run_guard_message(
+    rootpath: Path, args: list[str], env: Mapping[str, str], cwd: Path
+) -> str | None:
+    if env.get("GITHUB_ACTIONS") == "true":
+        return None
+    if env.get("AVA_ALLOW_FULL_PYTEST") == "1":
+        return None
+
+    shared_roots = {
+        (Path.home() / "Ava").resolve(),
+        (Path.home() / ".ava" / "source").resolve(),
+    }
+    resolved_rootpath = rootpath.resolve()
+    if resolved_rootpath not in shared_roots:
+        return None
+
+    skip_next = False
+    for arg in args:
+        if skip_next:
+            skip_next = False
+            continue
+        if arg in _VALUE_OPTIONS:
+            skip_next = True
+            continue
+        if arg.startswith("-"):
+            continue
+        selected_path = Path(arg.split("::", maxsplit=1)[0])
+        # pytest resolves positional args against the invocation dir, not the
+        # rootdir — `cd tests && pytest ava/test_x.py` is a legit targeted run
+        # whose arg only exists under cwd. Fall back to the rootdir for args
+        # given from the checkout root (the common case).
+        if selected_path.is_absolute():
+            candidates = [selected_path]
+        else:
+            candidates = [cwd / selected_path, resolved_rootpath / selected_path]
+        if any(candidate.is_file() for candidate in candidates):
+            return None
+
+    return """\
+Full local pytest runs are blocked on this shared Ava checkout.
+User ruling (2026-08-24): do not run the full suite on the shared production host.
+Run a targeted test instead:
+  pytest tests/<path>::<func>
+Directory-only selections are blocked because they still collect too much.
+Full-suite verification runs in GitHub CI when you push.
+For an explicitly user-approved local full run, use:
+  AVA_ALLOW_FULL_PYTEST=1 pytest ...
+Do not use this override without user approval."""
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    message = _full_run_guard_message(
+        config.rootpath, config.args, os.environ, config.invocation_params.dir
+    )
+    if message is not None:
+        pytest.exit(message, returncode=1)
+
+
 def pytest_sessionstart(session: pytest.Session) -> None:
     """Fail fast when this pytest process resolved a non-test DB URL.
 
