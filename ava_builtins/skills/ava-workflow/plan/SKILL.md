@@ -54,6 +54,8 @@ Use MECE (Mutually Exclusive, Collectively Exhaustive) decomposition:
 
 Set checkpoints at key milestones — stop at these points to verify the direction is correct, rather than pushing to the end only to discover you've drifted. **Checkpoints are the evaluation schedule**: they decide *when and how* the work gets evaluated, which is one of the three evaluation questions (the other two live in Align and Calibrate — see the connection below).
 
+- For every large task, include independent adversarial review as a checkpoint or step in the plan itself. It is part of the plan, not optional QA bolted on at the end.
+
 ### 5. Produce the plan document
 
 ```markdown
@@ -76,6 +78,7 @@ Set checkpoints at key milestones — stop at these points to verify the directi
 ## Checkpoints
 1. [After step N]: [what to verify]
 2. [After step M]: [what to verify]
+- [ ] Independent adversarial review: [reviewer, when, against which criteria]
 
 ## Risks & Mitigations
 - Risk A (high probability / high impact): [mitigation]
