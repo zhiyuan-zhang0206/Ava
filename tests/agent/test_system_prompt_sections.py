@@ -99,6 +99,7 @@ def test_keep_it_simple_section_carries_meta_principle(monkeypatch: pytest.Monke
     assert "Keep It Simple" in rendered
     assert "looks cheaper" in rendered and "conceptually simpler" in rendered
     assert "favor the principle even when it is tedious" in rendered
+    assert "this meta-principle decides" in rendered
 
 
 def test_temporal_awareness_invokes_ai_capability_timescale(
