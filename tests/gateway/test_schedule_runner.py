@@ -316,9 +316,13 @@ def test_stall_guard_fires_on_a_stalled_main_thread(
     monkeypatch.setattr(sr, "_STALL_CHECK_INTERVAL_S", 0.02)
     monkeypatch.setattr(sr, "_STALL_TIMEOUT_S", 0.1)
     fired: list[str] = []
-    monkeypatch.setattr(sr, "_stall_action", lambda _sid, msg: fired.append(msg))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(
+        sr,
+        "_stall_action",
+        lambda _sid, msg, _rid: fired.append(msg),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    )
 
-    stop = sr._start_stall_guard(1)
+    stop = sr._start_stall_guard(1, None)
     try:
         deadline = time.monotonic() + 2.0
         while not fired and time.monotonic() < deadline:
@@ -342,14 +346,18 @@ def test_stall_guard_ignores_a_legitimately_sleeping_main_thread(
     monkeypatch.setattr(sr, "_STALL_CHECK_INTERVAL_S", 0.02)
     monkeypatch.setattr(sr, "_STALL_TIMEOUT_S", 0.05)
     fired: list[str] = []
-    monkeypatch.setattr(sr, "_stall_action", lambda _sid, msg: fired.append(msg))  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(
+        sr,
+        "_stall_action",
+        lambda _sid, msg, _rid: fired.append(msg),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    )
 
     # The runner wraps time.sleep before running a script; without the wrapper
     # the deepest Python frame of a sleeping main thread is sleep's *caller*,
     # which is indistinguishable from a stall.
     _real_sleep = time.sleep
     sr._patch_park_detection()
-    stop = sr._start_stall_guard(1)
+    stop = sr._start_stall_guard(1, None)
     try:
         time.sleep(0.4)  # main thread parked in time.sleep the whole time
         assert fired == []
@@ -380,6 +388,25 @@ def test_run_hung_subprocess_times_out_and_records_error(
     status, last_error = _status_and_error(db_conn, sid)
     assert status != "completed"
     assert last_error is not None and "did not finish within 2s" in last_error
+
+
+def test_stall_verdict_closes_run_row(
+    db_conn: psycopg.Connection, unit_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # QA P2-1: a stall-guard hard exit closes its run-history row ok=false
+    # (like a crash / command stall), so the run drawer shows the failure
+    # instead of a forever-in-progress row.
+    import gateway.schedule_runner as sr
+
+    sid = _insert_schedule(db_conn, script="x = 1\n")
+    run_id = sr._record_run_start(sid)
+    exited: list[int] = []
+    monkeypatch.setattr(sr.os, "_exit", exited.append)  # pyright: ignore[reportUnknownArgumentType]
+
+    sr._stall_action(sid, "stalled in foo", run_id)
+
+    assert exited == [1]
+    assert _runs(db_conn, sid) == [(False, f"stalled ({sr._STALL_TIMEOUT_S:.0f}s)")]
 
 
 def test_main_refuses_on_foreign_checkout(monkeypatch: pytest.MonkeyPatch) -> None:

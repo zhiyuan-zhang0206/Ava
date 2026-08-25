@@ -15,8 +15,9 @@ drawer's data source): opened with ``ok = NULL`` (in-progress) when the runner
 starts, closed with the outcome when it exits. This is process-level history —
 one row per process lifetime, not per fire — and it is severable observability:
 a run-record write failure never affects the schedule itself. A run the runner
-cannot close (SIGTERM/SIGHUP kill, stall-guard hard exit) stays ``ok = NULL``,
-which the UI renders as in-progress/interrupted.
+cannot close (a SIGTERM/SIGHUP kill) stays ``ok = NULL``, which the UI renders
+as in-progress/interrupted; a stall-guard hard exit closes it ``ok = false``
+before dying.
 
 The ScheduleManager launches this inside a session named
 ``ava-schedule-<id>`` and keeps it up (with a circuit breaker) if it
@@ -187,16 +188,19 @@ def _restore_park_detection() -> None:
     time.sleep = _ORIGINAL_SLEEP
 
 
-def _stall_action(schedule_id: int, message: str) -> None:
-    """The stall verdict: record ``last_error``, then hard-exit so the
-    ScheduleManager's crash path (backoff + breaker) relaunches the schedule."""
+def _stall_action(schedule_id: int, message: str, run_id: int | None) -> None:
+    """The stall verdict: record ``last_error``, close the run-history row as
+    failed (a hard-exit is an abnormal end, like a crash), then hard-exit so
+    the ScheduleManager's crash path (backoff + breaker) relaunches the
+    schedule."""
     with suppress(Exception):
         _record_error(schedule_id, message)
     logger.error("Schedule {} {}", schedule_id, message)
+    _record_run_end(run_id, ok=False, note=f"stalled ({_STALL_TIMEOUT_S:.0f}s)")
     os._exit(1)  # hard exit — the schedule manager owns the restart
 
 
-def _start_stall_guard(schedule_id: int) -> threading.Event:
+def _start_stall_guard(schedule_id: int, run_id: int | None) -> threading.Event:
     """Watch the main thread for a stall and hard-exit when one is found.
 
     Returns a stop event; the caller sets it once the script returns so the
@@ -242,7 +246,7 @@ def _start_stall_guard(schedule_id: int) -> threading.Event:
                         f"{sig[2]} ({sig[0]}:{sig[1]}) — hard-exiting; check the "
                         "gateway / DB / network the script calls into"
                     )
-                    _stall_action(schedule_id, message)
+                    _stall_action(schedule_id, message, run_id)
             elif sig != last_sig:
                 last_sig = sig
                 stalled_since = now
@@ -272,10 +276,10 @@ def run(schedule_id: int) -> int:
     ava._boot.establish_actor(f"schedule:{schedule_id}")
 
     # Run history: one row per process execution, opened in-progress (ok=NULL)
-    # here and closed with the outcome on every exit path below. A path the
-    # runner cannot close (SIGTERM/SIGHUP kill, stall-guard hard exit) leaves
-    # the row in-progress — honest, the run was interrupted, and the UI renders
-    # it as such.
+    # here and closed with the outcome on every exit path below — including the
+    # stall guard, which receives run_id and closes the row ok=false before its
+    # hard exit. Only a SIGTERM/SIGHUP kill leaves the row in-progress (the run
+    # was interrupted mid-flight; there is no code path to close it).
     run_id = _record_run_start(schedule_id)
 
     try:
@@ -296,7 +300,7 @@ def run(schedule_id: int) -> int:
             # so an import hang is covered too. Stopped before _mark_completed
             # so a clean return cannot be overtaken by a spurious kill.
             _patch_park_detection()
-            stop_guard = _start_stall_guard(schedule_id)
+            stop_guard = _start_stall_guard(schedule_id, run_id)
             try:
                 ava._ensure_plugins_loaded()
                 runpy.run_path(str(script_path), run_name="__main__")
