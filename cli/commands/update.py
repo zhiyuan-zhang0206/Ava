@@ -281,6 +281,9 @@ from shared.cluster_lock import (
     settle_update_lock,
     update_lock_holder,
 )
+from shared.config import (
+    refresh_data_plane_settings as refresh_data_plane_settings,
+)
 from shared.paths import ava_home as ava_home
 
 # Re-exported as `cli.commands._classify_change` (cli/commands/__init__.py). The
@@ -464,7 +467,7 @@ def _begin_update_record(
         )
 
 
-def _run_gateway_orchestration_inner(
+def _run_gateway_orchestration_inner(  # noqa: PLR0915 (three-phase orchestration; each step is one statement)
     repo: Path,
     *,
     restart_only: bool = False,
@@ -611,6 +614,16 @@ def _run_gateway_orchestration_inner(
         local_launch_failures = launch_failures.take()
         failing_step = _local_leg_defect(local_launch_failures) or failing_step
 
+        # The local leg's child `ava start` may have rewritten $AVA_HOME/.env —
+        # a data-plane credential rotation migration (the 2026-08-25 secret
+        # split) does exactly that. THIS process's Settings singleton was built
+        # at startup, so without a refresh every later data-plane write — the
+        # pin advance below, and the compensating unpause / lock release in the
+        # finally — dials with the pre-rotation password and dies with SASL
+        # authentication failures, stranding the cluster paused with a stale
+        # pin (2026-08-25 incident). Refresh before the first post-leg write.
+        refresh_data_plane_settings()
+
         # Persist the cluster's pinned commit now that the gateway is on it:
         # the standing `cluster_target_sha` agent-runners converge to in Phase B and
         # `ava status` compares each node's HEAD against. restart_only bounces the
@@ -664,6 +677,14 @@ def _run_gateway_orchestration_inner(
         return rc
     finally:
         from ops.cluster import unpause_local_cluster
+
+        # The local leg ran (or failed) above and may have rotated data-plane
+        # credentials on disk; this process's in-memory Settings still holds
+        # the pre-leg values. Refresh before the compensating writes so the
+        # unpause and the update-lock release never die on SASL auth —
+        # 2026-08-25: both failed that way, leaving every host paused and the
+        # update lock held past the rollout.
+        refresh_data_plane_settings()
 
         # Always unpause the local host — ava start clears the flag
         # on the success path (idempotent no-op), but if the local update

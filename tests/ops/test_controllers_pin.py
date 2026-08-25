@@ -28,6 +28,16 @@ from shared.cluster_lock import DeployLease, settle_note
 _THIS_HOST = "laptop-host"
 
 
+def _relation(value: str):
+    """A typed prod_source_pin_relation stand-in (the fixture shas are fake, so
+    real git ancestry cannot decide them)."""
+
+    def _r(_pin: str, _head: str) -> str:
+        return value
+
+    return _r
+
+
 def _lease(*, note: str | None) -> DeployLease:
     """A live lease as `read_update_lease` returns it. `note=None` is a rollout
     executing right now; a settle note is a stated waiting period with nobody
@@ -52,6 +62,9 @@ def pin_drift_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> list[str |
     # No recorded update by default: the recent-update guard passes through.
     monkeypatch.setattr("shared.last_update.read_last_update", lambda: None)
     monkeypatch.setattr(pin, "_pin_heal_attempt_path", lambda: tmp_path / "pin_heal_attempt")
+    # A strictly-behind HEAD: the heal is a catch-up, not a downgrade. Tests
+    # for the ahead / unknown relations override this per-case.
+    monkeypatch.setattr(pin, "prod_source_pin_relation", _relation("behind"))
     spawned: list[str | None] = []
 
     def _spy(target_sha: str | None = None) -> bool:
@@ -83,6 +96,58 @@ def test_defers_while_update_lock_held(
     monkeypatch.setattr(pin, "prod_source_head_sha", lambda: "def5678")
     assert pin.check_pin_drift() is False
     assert pin_drift_env == []
+
+
+def test_does_not_downgrade_when_head_ahead_of_pin(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, pin_drift_env: list
+) -> None:
+    """HEAD contains the pin (a failed rollout landed the code but never advanced
+    the pin — the 2026-08-25 shape) is converged at-or-above the pin: the heal
+    must NOT force-checkout the stale pin underneath the landed gateway."""
+    monkeypatch.setattr(pin, "get_cluster_target_sha", lambda: "abc1234")
+    monkeypatch.setattr(pin, "prod_source_head_sha", lambda: "def5678")
+    monkeypatch.setattr(pin, "prod_source_pin_relation", _relation("ahead"))
+    with caplog.at_level("WARNING"):
+        assert pin.check_pin_drift() is False
+    assert pin_drift_env == []  # no spawn, no downgrade
+    assert any("AHEAD of pin" in r.message for r in caplog.records)
+
+
+def test_defers_when_pin_ancestry_unknown(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, pin_drift_env: list
+) -> None:
+    """The pin commit is not present in this checkout — git cannot tell behind
+    from ahead, so the heal defers instead of force-checking-out blind (a
+    checkout is the wrong default when the pin may be older than HEAD)."""
+    monkeypatch.setattr(pin, "get_cluster_target_sha", lambda: "abc1234")
+    monkeypatch.setattr(pin, "prod_source_head_sha", lambda: "def5678")
+    monkeypatch.setattr(pin, "prod_source_pin_relation", _relation("unknown"))
+    with caplog.at_level("WARNING"):
+        assert pin.check_pin_drift() is False
+    assert pin_drift_env == []
+    assert any("ancestry unknown" in r.message for r in caplog.records)
+
+
+def test_heals_when_head_behind_pin(monkeypatch: pytest.MonkeyPatch, pin_drift_env: list) -> None:
+    """A HEAD strictly behind the pin (this host missed a rollout) still heals —
+    that is a catch-up, not a downgrade."""
+    monkeypatch.setattr(pin, "get_cluster_target_sha", lambda: "abc1234")
+    monkeypatch.setattr(pin, "prod_source_head_sha", lambda: "def5678")
+    monkeypatch.setattr(pin, "prod_source_pin_relation", _relation("behind"))
+    assert pin.check_pin_drift() is True
+    assert pin_drift_env == ["abc1234"]
+
+
+def test_heals_when_head_diverged_from_pin(
+    monkeypatch: pytest.MonkeyPatch, pin_drift_env: list
+) -> None:
+    """A diverged HEAD (rebase / force-push) is not on the pinned line at all —
+    force-checkout to the pin is the correct heal."""
+    monkeypatch.setattr(pin, "get_cluster_target_sha", lambda: "abc1234")
+    monkeypatch.setattr(pin, "prod_source_head_sha", lambda: "def5678")
+    monkeypatch.setattr(pin, "prod_source_pin_relation", _relation("diverged"))
+    assert pin.check_pin_drift() is True
+    assert pin_drift_env == ["abc1234"]
 
 
 def test_backoff_blocks_repeat_to_same_pin(

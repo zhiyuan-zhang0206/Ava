@@ -43,6 +43,16 @@ class _FakeConn:
         return False
 
 
+def _relation(value: str):
+    """A typed prod_source_pin_relation stand-in (the fixture shas are fake, so
+    real git ancestry cannot decide them)."""
+
+    def _r(_pin: str, _head: str) -> str:
+        return value
+
+    return _r
+
+
 @pytest.fixture
 def db_ahead_of_the_pin(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> dict[str, list]:
     """Prod's 2026-07-31 state: HEAD is the cluster pin, and the DB has migrations
@@ -83,6 +93,10 @@ def db_ahead_of_the_pin(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> dict
     # is faked, so an unpatched read would defer on an unreadable record).
     monkeypatch.setattr("shared.last_update.read_last_update", lambda: None)
     monkeypatch.setattr(pin, "_pin_heal_attempt_path", lambda: tmp_path / "pin_heal")
+    # The fixture's shas are fake, so real git ancestry cannot decide them; the
+    # tests below intend a strictly-behind host (the incident's mid-checkout
+    # state), which is the heal-eligible relation.
+    monkeypatch.setattr(pin, "prod_source_pin_relation", _relation("behind"))
     monkeypatch.setattr(
         pin,
         "trigger_update",
