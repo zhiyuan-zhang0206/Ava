@@ -944,25 +944,38 @@ def test_reconcile_leaves_current_template_watcher_alone(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A live cron watcher spawned with the current template version must not
-    be rebuilt on every boot."""
+    be rebuilt on every boot.
+
+    The row must reference the live TEMPLATE_VERSION constant — a hardcoded
+    version goes stale on the next template bump, the stale-rebuild branch
+    starts firing, and a fake cron whose signature does not match the real
+    call raises inside _rebuild_stale_cron_watcher's bare except, swallowing
+    the failure and passing the assertions vacuously (2026-08-26 adversarial
+    review of the v2 -> v3 bump)."""
     from shared import watcher_registry
+    from shared.watcher import TEMPLATE_VERSION
 
     monkeypatch.setattr(
         watcher_registry,
         "watcher_rows",
-        lambda _agent_id: [_cron_row(template_version=2)],  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda _agent_id: [_cron_row(template_version=TEMPLATE_VERSION)],  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     )
     monkeypatch.setattr(ava.shell.sessions, "list", lambda: {68: "watcher:68"})
     killed: list[int] = []
     monkeypatch.setattr(ava.shell.sessions, "kill", killed.append)  # pyright: ignore[reportUnknownArgumentType]
-    spawned: list[object] = []
-    monkeypatch.setattr(watcher, "cron", spawned.append)  # pyright: ignore[reportUnknownArgumentType]
+    spawned: dict[str, object] = {}
+
+    def fake_cron(expr: str, message: str, *, timezone: str, end_time: object, name: str) -> int:
+        spawned.update(expr=expr, message=message, timezone=timezone, end_time=end_time, name=name)
+        return 999
+
+    monkeypatch.setattr(watcher, "cron", fake_cron)
 
     actions = watcher.reconcile()
 
     assert actions == []
     assert killed == []
-    assert spawned == []
+    assert spawned == {}
 
 
 def test_reconcile_missing_session_still_rebuilds_cron(
@@ -972,11 +985,12 @@ def test_reconcile_missing_session_still_rebuilds_cron(
     the version column: a dead cron watcher is rebuilt regardless of its spawn
     version."""
     from shared import watcher_registry
+    from shared.watcher import TEMPLATE_VERSION
 
     monkeypatch.setattr(
         watcher_registry,
         "watcher_rows",
-        lambda _agent_id: [_cron_row(template_version=2)],  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+        lambda _agent_id: [_cron_row(template_version=TEMPLATE_VERSION)],  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     )
     monkeypatch.setattr(ava.shell.sessions, "list", set)
     statuses: list[tuple[object, object, object]] = []

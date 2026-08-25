@@ -52,10 +52,11 @@ def allocate_output_path(session_id: int, name: str) -> Path:
 
     A log whose session is still alive is never evicted, even past the ring
     size: a long-lived watcher's log keeps its spawn-time mtime for its whole
-    lifetime (a time watcher delivers its fires directly, writing nothing to
-    stdout), so mtime-LRU alone would evict it while its process still holds
-    the fd — orphaning the output and breaking the exit notice's tail. Live
-    sessions outrank the ring cap; the cap re-applies once they end.
+    lifetime (a time watcher sleeps between fires and only writes its
+    schedule-state announcement lines — template v3, see shared/watcher.py),
+    so mtime-LRU alone would evict it while its process still holds the fd —
+    orphaning the output and breaking the exit notice's tail. Live sessions
+    outrank the ring cap; the cap re-applies once they end.
     """
     from ava.shell import sessions as _sessions
 
