@@ -11,8 +11,11 @@ Query dialect (Task #1280): event panels read the stream from Loki instead of
 the retired PG ``events`` table — the same read the alert rules (R1-R7) use.
 Each LogQL template selects ``{service_name="unknown_service"}`` (the unified
 emitter's OTLP resource), pipelines ``| json`` (event fields are structured
-metadata, NOT stream labels), and filters on the flattened labels
-(``attributes.in_total`` -> ``attributes_in_total``). The two unresolved tiles
+metadata, NOT stream labels — agent_id/event_name are promoted index labels
+since the 2026-08-23 cutover, see shared/loki_index_labels.py; these
+fleet-wide panels read every agent, so they keep the base selector), and
+filters on the flattened labels (``attributes.in_total`` ->
+``attributes_in_total``). The two unresolved tiles
 are the exception: their resolution count is computed by the events-maintenance
 daemon (task #1468) over a fixed six-hour window and published as a Prometheus
 gauge every five minutes. ``core_live_agents`` stays SQL because ``agents_meta``

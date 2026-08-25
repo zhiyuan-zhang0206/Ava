@@ -61,11 +61,16 @@ structured metadata.
   pure runners and role-less maintenance processes retain their existing
   behavior.
 
-## Loki quirks (verified 2026-08-12)
+## Loki quirks (verified 2026-08-12; label exceptions 2026-08-23)
 
 - Structured metadata is NOT index-label matched by `{...}` selectors, but
   **pipeline filters match it directly** — no `| json` stage needed for
-  agent_id / event_name / level / category / machine / trace_id filters.
+  level / category / machine / trace_id filters. `agent_id` and `event_name`
+  are the exceptions since the 2026-08-23 index-label cutover (Task #1407
+  B2): the collector promotes them to stream labels, so indexed-era slices
+  match them inside `{...}` (see `shared/loki_index_labels.py`); pre-cutover
+  rows keep the pipeline-filter form until legacy retention expires
+  2026-08-30.
 - A plain `| json` flattens the nested `attributes` object into per-line
   labels (`attributes_msg`, ...), and `trace_id`/`span_id` differ per line —
   together they make every event its own series, so per-series range

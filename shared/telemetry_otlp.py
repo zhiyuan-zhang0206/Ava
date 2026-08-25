@@ -753,8 +753,12 @@ def _metrics_resource() -> Any:
     interleaved cumulative values (increase() reads garbage). Metrics only:
     the logs Resource is deliberately untouched — Loki default-promotes
     resource attributes to index labels, so a per-process-unique instance id
-    there would mint a new stream per process start, and the service_name
-    selector rewrite has its own coordinated change."""
+    there would mint a new stream per process start. Per-agent event indexing
+    (Task #1327) keeps this resource as-is: the collector promotes the
+    per-record agent_id/event_name resource attributes (set in
+    _EventDimensionResourceExporter) to Loki index labels, and the read side
+    era-slices its selector around the cutover (shared/loki_index_labels.py)
+    — no service_name rewrite needed."""
     import uuid
     from importlib.metadata import version
 

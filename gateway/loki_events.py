@@ -8,8 +8,13 @@ therefore LogQL: stream selector + `| json` + label filters; each matching
 line parses straight back to the EventRow shape.
 
 Notes:
-- Structured metadata is NOT index-label matched by `{...}` selectors — the
-  `| json` stage is required before any event-field filter.
+- Event fields ride as structured metadata; since the 2026-08-23 index-label
+  cutover (Task #1407 B2) the collector promotes `agent_id` and `event_name`
+  to stream labels, so `shared.loki_index_labels.event_stream_selector`
+  matches them inside `{...}` for indexed-era slices — the fast per-agent
+  read this module's callers rely on. Every other field still needs the
+  `| json` stage before its filter, and pre-cutover (legacy) slices keep the
+  pipeline-filter form until their retention expires 2026-08-30.
 - Loki has no numeric row id and no offset paging: `query_events` pages in
   memory (`limit + offset + 1` rows fetched, offset slice taken) and derives
   a stable surrogate id per line (blake2b over ts+line). The JSONL mirror

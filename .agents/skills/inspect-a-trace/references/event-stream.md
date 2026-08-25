@@ -9,18 +9,29 @@ rows), `logcli`/`curl` against `http://127.0.0.1:3100`, or Grafana Explore.
 
 ## The dialect
 
-There is exactly one stream selector, and it is not negotiable:
+The base stream selector, shared by every reader:
 
 ```logql
 {service_name="unknown_service"} | json
 ```
 
+Since the 2026-08-23 index-label cutover (`INDEX_LABEL_CUTOVER_AT` in
+`shared/loki_index_labels.py`, Task #1407 B2) the collector promotes
+`agent_id` and `event_name` to real Loki index labels, so a query over the
+indexed era narrows the stream itself instead of scanning the whole
+`unknown_service` family — the fast per-agent form is:
+
+```logql
+{service_name="unknown_service", agent_id="3048"} | json
+```
+
 Two rules the whole tree obeys, both learned the hard way:
 
-- **`| json` comes first, always.** Event fields (`event_name`, `level`,
-  `category`, `agent_id`, `trace_id`, …) are OTel *structured metadata*, not
-  stream labels — a `{...}` selector cannot match them. Every alert rule and
-  every core metric pipelines `| json` before any field filter.
+- **`| json` comes first for everything else.** `level`, `category`,
+  `machine`, `trace_id`, … remain OTel *structured metadata*, not stream
+  labels — a `{...}` selector cannot match them (`agent_id` / `event_name`
+  are the only promoted exceptions). Every alert rule and every core metric
+  pipelines `| json` before any field filter.
 - **Wrap every count in `sum(...)`.** The `unknown_service` family runs to
   hundreds of streams a day; an unaggregated `count_over_time` hits Loki's
   per-query series cap.
@@ -49,6 +60,18 @@ rather than guessing a name.
 needs its own stage: `| json model="attributes.model" | json cost_usd="attributes.cost_usd"`.
 
 ## Narrowing to one run
+
+Over the indexed era (post-2026-08-23 cutover), put the agent in the
+selector — this is what `GET /api/events?agent_id=` and the inspector do:
+
+```logql
+{service_name="unknown_service", agent_id="3048"} | json
+```
+
+Pre-cutover rows within retention (until 2026-08-30) carry no `agent_id`
+label. The gateway's read path era-slices straddling windows automatically;
+a raw hand-written query must fall back to the pipeline filter for that
+slice:
 
 ```logql
 {service_name="unknown_service"} | json | agent_id="3048"
