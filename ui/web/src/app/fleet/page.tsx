@@ -11,14 +11,14 @@
 
 import { ErrorBoundary } from "@/components/error-boundary";
 import { FleetView } from "@/components/fleet/fleet-view";
-import { FLEX, FLEX_1, MIN_H_0 } from "@/lib/layout";
+import { FLEX, FLEX_1, MIN_H_0, MIN_W_0 } from "@/lib/layout";
 import { cn } from "@/lib/utils";
 
 export default function FleetPage() {
   return (
     // <main> landmark (Task #1051 a11y) — the fleet page is a primary
     // surface; same pattern as app/page.tsx.
-    <main id="main-content" className={cn(FLEX, FLEX_1, MIN_H_0)}>
+    <main id="main-content" className={cn(FLEX, FLEX_1, MIN_H_0, MIN_W_0)}>
       <ErrorBoundary>
         <FleetView />
       </ErrorBoundary>
