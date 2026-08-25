@@ -108,7 +108,7 @@ export function QueueList({
   historyFailed: boolean;
 }) {
   return (
-    <ul className={cn("overflow-y-auto", FLEX_1)} aria-label="Inbox queue">
+    <ul className={cn("overflow-y-auto", FLEX_1, MIN_W_0)} aria-label="Inbox queue">
       <OpenUnits
         units={units}
         agentStatus={agentStatus}
