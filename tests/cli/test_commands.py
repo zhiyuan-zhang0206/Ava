@@ -2065,6 +2065,45 @@ def test_handoff_capable_rollout_child_may_commit_credential_transition(
     assert ROLLOUT_PARENT_CREDENTIAL_HANDOFF_ENV not in os.environ
 
 
+def test_phase_b_pure_runner_restores_idle_posture_and_restarter(
+    monkeypatch: pytest.MonkeyPatch,
+    _fake_session_backends: tuple[_FakeSessionBackend, _FakeSessionBackend],
+) -> None:
+    """Phase B uses the same internal ``ava start --persist-services`` shape
+    under the executing cluster lease, but a pure runner must finish its local
+    transition instead of inheriting the gateway parent's resume boundary."""
+    from cli.commands import start as start_mod
+    from shared.cluster_lock import DeployLease
+
+    service, _shell = _fake_session_backends
+    postures: list[str] = []
+    monkeypatch.setattr(
+        "shared.machine.machine_role",
+        lambda: frozenset({"agent-runner"}),
+    )
+    monkeypatch.setattr(
+        "shared.cluster_lock.read_update_lease",
+        lambda: DeployLease(
+            holder="gateway-rollout:42",
+            held_for_s=10,
+            expires_in_s=900,
+            note=None,
+            kind="rollout",
+        ),
+    )
+    monkeypatch.setattr("shared.host_deploy_state.set_posture", postures.append)
+    monkeypatch.setattr(start_mod, "cmd_status", lambda: 0)
+    monkeypatch.setattr(
+        _cli.subprocess,
+        "run",
+        _git_aware(lambda *_a, **_kw: _FakeResult(returncode=0)),  # pyright: ignore[reportUnknownArgumentType]
+    )
+
+    assert _cli.cmd_start(persist_services=False) == 0
+    assert postures[-1] == "idle"
+    assert _sess("restarter") in service.created
+
+
 def test_operator_start_refuses_executing_rollout_before_migrations(
     monkeypatch: pytest.MonkeyPatch,
     _fake_session_backends: tuple[_FakeSessionBackend, _FakeSessionBackend],

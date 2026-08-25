@@ -17,6 +17,7 @@ import tempfile
 import time
 from pathlib import Path
 from typing import NamedTuple
+from urllib.parse import urlsplit
 
 import shared.pg_tools
 from cli.commands._repo import _repo_root
@@ -597,12 +598,18 @@ def snapshot_pre_update_data(target_sha: str) -> Path | None:
         return dump_path
 
 
-def rollback_schema_to(keep: set[str]) -> list[str]:
+def rollback_schema_to(keep: set[str], *, local_admin: bool = False) -> list[str]:
     """Roll the DB schema back to the applied set `keep` (the snapshot from
     current_schema_state); return the migration names rolled back (empty when the
     schema never advanced past `keep`). Fresh non-autocommit connection, same
     isolation rationale as apply_pending_migrations; the whole rollback runs in
     one transaction, so a failing down leaves the schema unchanged.
+
+    `local_admin=True` is reserved for failed-update recovery on the gateway. A
+    credential split may have changed the Postgres role password before its
+    journal could be replayed into this surviving parent; recovery therefore
+    dials this cluster's target database through the passwordless local admin
+    socket instead of consulting the possibly-stale runtime URL credentials.
 
     Raises:
         RollbackBelowFloor: `keep` is below the squashed baseline — no down to
@@ -611,6 +618,32 @@ def rollback_schema_to(keep: set[str]) -> list[str]:
     """
     import shared.db
     from shared import migrations as _mig
+
+    if local_admin:
+        import psycopg
+
+        from cli.commands._cluster_instance import pg_admin_url
+        from shared.cluster import _swap_db, get_record, record_postgres_port
+        from shared.paths import ava_home
+
+        record = get_record(ava_home())
+        if record is None:
+            raise RuntimeError(
+                "no cluster registry record — cannot open the local admin "
+                "connection for schema recovery"
+            )
+        db_name = urlsplit(settings.data_plane.db_url).path.lstrip("/")
+        if not db_name:
+            raise RuntimeError(
+                "AVA_DB_URL carries no database name — cannot target schema recovery"
+            )
+        admin_url = _swap_db(pg_admin_url(record_postgres_port(record)), db_name)
+        with psycopg.connect(
+            admin_url,
+            prepare_threshold=None,
+            **shared.db.PG_KEEPALIVE_KWARGS,
+        ) as conn:
+            return _mig.rollback_to(conn, keep)
 
     # direct=True + unbounded=True: rollback_to holds the same SESSION advisory
     # lock as the applier, and its down migrations are DDL that may exceed the

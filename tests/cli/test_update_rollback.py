@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
 
@@ -106,6 +107,75 @@ def test_rollback_schema_to_delegates(monkeypatch: pytest.MonkeyPatch) -> None:
     assert seen["conn_truthy"] is True
 
 
+def test_rollback_schema_to_local_admin_bypasses_stale_runtime_password(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Failed credential adoption must not strand schema recovery on the old
+    runtime password.  The recovery-only path dials the target database through
+    this cluster's passwordless local Postgres admin socket."""
+    import psycopg
+
+    from cli.commands import _cluster_instance
+    from shared import cluster
+    from shared import migrations as _mig
+    from shared.config import settings
+
+    record = cluster.ClusterRecord(
+        ports=cast("cluster.ClusterPorts", {"gateway": 16420, "postgres": 16433}),
+        gateway_home=str(tmp_path),
+        created_at="now",
+    )
+    seen: dict[str, object] = {}
+
+    class _Connection:
+        def __enter__(self) -> _Connection:
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+    def _connect(url: str, **kwargs: object) -> _Connection:
+        seen["url"] = url
+        seen["kwargs"] = kwargs
+        return _Connection()
+
+    def _rollback_to(conn: object, keep: set[str]) -> list[str]:
+        seen["conn"] = conn
+        seen["keep"] = keep
+        return ["29991231T235959_x"]
+
+    def _record(_home: Path) -> cluster.ClusterRecord:
+        return record
+
+    def _admin_url(port: int) -> str:
+        return f"postgresql://local-admin@/postgres?host=/socket&port={port}"
+
+    monkeypatch.setattr(settings.general, "ava_home", tmp_path)
+    monkeypatch.setattr(
+        settings.data_plane,
+        "db_url",
+        "postgresql://ava:stale-password@127.0.0.1:16432/ava_history",
+    )
+    monkeypatch.setattr(cluster, "get_record", _record)
+    monkeypatch.setattr(_cluster_instance, "pg_admin_url", _admin_url)
+    monkeypatch.setattr(psycopg, "connect", _connect)
+    monkeypatch.setattr(_mig, "rollback_to", _rollback_to)
+
+    keep = {"00000000T000000_baseline"}
+    assert _git_mod.rollback_schema_to(keep, local_admin=True) == ["29991231T235959_x"]
+    assert seen["url"] == ("postgresql://local-admin@/ava_history?host=/socket&port=16433")
+    assert seen["keep"] == keep
+    assert seen["conn"] is not None
+    assert seen["kwargs"] == {
+        "prepare_threshold": None,
+        "keepalives": 1,
+        "keepalives_idle": 30,
+        "keepalives_interval": 10,
+        "keepalives_count": 3,
+        "connect_timeout": 5,
+    }
+
+
 # --- _recover_gateway_local --------------------------------------------
 
 
@@ -118,7 +188,8 @@ def _patch_recover(monkeypatch: pytest.MonkeyPatch, *, rollback, sync_rc=0, star
     """
     order: list[str] = []
 
-    def _rollback_schema_to(target):  # type: ignore[no-untyped-def]
+    def _rollback_schema_to(target, *, local_admin=False):  # type: ignore[no-untyped-def]
+        assert local_admin is True
         order.append("rollback")
         if isinstance(rollback, Exception):
             raise rollback
@@ -227,6 +298,22 @@ def test_recover_migration_failed_mid_rollback_does_not_reset(
     assert fake.calls == []
 
 
+def test_recover_local_admin_connection_failure_does_not_reset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If the recovery-only admin socket itself is unavailable, report the
+    gateway as down without resetting old code underneath the newer schema."""
+    order, fake = _patch_recover(
+        monkeypatch, rollback=RuntimeError("local Postgres admin socket unavailable")
+    )
+
+    rc = _rec._recover_gateway_local(Path("/repo"), "FROMSHA", _SNAP, preserve_sessions=frozenset())
+
+    assert rc == 1
+    assert order == ["rollback"]
+    assert fake.calls == []
+
+
 def test_recover_git_reset_failure_returns_1(monkeypatch: pytest.MonkeyPatch) -> None:
     """A `git reset --hard` that does not land (index-lock timeout / wedged tree /
     mixed tree) is a recovery failure like any other: it used to escape as a bare
@@ -235,7 +322,8 @@ def test_recover_git_reset_failure_returns_1(monkeypatch: pytest.MonkeyPatch) ->
     no start on a tree that is not last-known-good."""
     order: list[str] = []
 
-    def _rollback_schema_to(target):  # type: ignore[no-untyped-def]
+    def _rollback_schema_to(target, *, local_admin=False):  # type: ignore[no-untyped-def]
+        assert local_admin is True
         order.append("rollback")
         return [23]
 
