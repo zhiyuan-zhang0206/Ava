@@ -1,7 +1,7 @@
-"""SDK reminder plugin — gently surface the matching SDK primitive the first time
-the agent reaches for a native-Python equivalent.
+"""SDK reminder plugin — gently surface the matching SDK primitive when the
+agent reaches for a native-Python equivalent.
 
-Five one-time hints, one shared `reminded` set. Each hint surfaces as its own
+Five hints, one shared `reminded` set. Each hint surfaces as its own
 system-styled note (`system_note_message`) injected into the conversation, not
 spliced onto the agent's own output — so the agent reads it as a framework
 aside rather than mistaking it for the code cell's stdout:
@@ -17,10 +17,12 @@ aside rather than mistaking it for the code cell's stdout:
   `ava.agents.send_message` before the agent produces its reply (a text reply
   runs no code, so after_exec would never see it).
 
-The four code categories each fire at most once per context window; a
-compaction re-arms them. The agent_reply category's cadence is config-driven
-(`turn_settings.agent.agent_reply_reminder_cadence`): `once_per_compaction` (the same
-once-per-window re-arm, default) or `every_time` (every agent inbound).
+The four code categories' shared cadence is config-driven
+(`turn_settings.agent.sdk_code_reminder_cadence`): `once_per_compaction` (at
+most once per category per context window, re-armed on compaction, default) or
+`every_time` (every matching code cell). The agent_reply category has its own
+cadence (`turn_settings.agent.agent_reply_reminder_cadence`) with the same two
+values.
 
 Mechanics:
 - Detection + hint tables + the state schema live in `_state.py`
@@ -48,7 +50,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-__description__ = "Surface the matching ava SDK primitive the first time the agent uses a native-Python equivalent (subprocess / time.sleep / file ops / http) or replies to another agent in plain text"
+__description__ = "Surface the matching ava SDK primitive when the agent uses a native-Python equivalent (subprocess / time.sleep / file ops / http) or replies to another agent in plain text"
 
 from datetime import UTC, datetime
 
@@ -107,7 +109,7 @@ def _rearmed_reminded(state: AgentState) -> tuple[set[str], int]:
 
 
 class _SdkReminderAfterExecHook(Hook):
-    """Inject a one-time SDK-primitive note as its own system-styled message
+    """Inject an SDK-primitive note as its own system-styled message
     when the cell used a native-Python equivalent.
 
     The note is a separate `system_note_message`, not text appended to the
@@ -121,8 +123,8 @@ class _SdkReminderAfterExecHook(Hook):
 
     No-op (returns None) when the message tail does not match the
     assistant-call + execution-output shape, when the code matched nothing,
-    or when every matched category has already been hinted (or silently
-    suppressed and marked) this context window.
+    or when every matched category is silently suppressed or has already been
+    hinted under the once-per-compaction cadence.
     """
 
     async def __call__(
@@ -158,7 +160,10 @@ class _SdkReminderAfterExecHook(Hook):
         # later this context window.
         silent = {"wait"} if "wait" in matched and mentions_watcher(code) else set()
 
-        hinted = [cat for cat in matched if cat not in reminded and cat not in silent]
+        if turn_settings.agent.sdk_code_reminder_cadence == "every_time":
+            hinted = [cat for cat in matched if cat not in silent]
+        else:
+            hinted = [cat for cat in matched if cat not in reminded and cat not in silent]
         newly_seen = set(hinted) | (silent - reminded)
         if not newly_seen:
             # Every matched category is already seen this window (or silently

@@ -502,6 +502,22 @@ def test_cluster_secret_validator_rejects_unsafe_chars() -> None:
             config.DataPlaneSettings._validate_cluster_secret(bad)
 
 
+def test_sdk_code_reminder_cadence_config_contract() -> None:
+    """The code-category reminder cadence is a live per-agent enum whose
+    default preserves the existing once-per-context-window behavior."""
+    from shared.config import FIELD_INFOS, get_config_metadata
+
+    field = FIELD_INFOS["sdk_code_reminder_cadence"]
+    extra = field.json_schema_extra
+    assert isinstance(extra, dict)
+    assert field.default == "once_per_compaction"
+    assert field.alias == "AVA_SDK_CODE_REMINDER_CADENCE"
+    assert extra["per_agent"] is True
+    assert extra["lifecycle"] == "live"
+    meta = next(m for m in get_config_metadata() if m.name == "sdk_code_reminder_cadence")
+    assert meta.choices == ["once_per_compaction", "every_time"]
+
+
 # --- agent_communication_style: enum + legacy-boolean alias ---
 
 _STYLE_ENV = (

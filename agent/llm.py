@@ -24,6 +24,8 @@ from langchain_core.tools import tool
 def execute_code(code: str) -> str:
     """Run a Python snippet in your sandbox.
 
+    Each call runs in an ephemeral interpreter. Variables do not persist between calls.
+
     Merged stdout/stderr comes back as the tool result. A hard wall-clock
     timeout raises TimeoutError if the snippet runs too long; long output
     keeps its head and tail (the middle is elided) and the full text is
