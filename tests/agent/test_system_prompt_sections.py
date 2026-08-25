@@ -77,7 +77,7 @@ def test_temporal_awareness_section_gating(
     ],
 )
 def test_keep_it_simple_section_gating(monkeypatch: pytest.MonkeyPatch, enabled, expect_section):
-    monkeypatch.setattr(settings.agent, "prompt_keep_it_simple_enabled", enabled)
+    monkeypatch.setattr(settings.agent, "prompt_keep_it_simple_enabled", enabled)  # pyright: ignore[reportUnknownArgumentType]
 
     from agent.graph._system_prompt import _keep_it_simple_section
 
