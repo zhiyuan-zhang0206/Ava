@@ -155,7 +155,10 @@ def signal_child(proc: subprocess.Popen[bytes], sig: int, domain_close: DomainCl
 
 
 def start_root_exit_observer(proc: subprocess.Popen[bytes]) -> asyncio.Task[None]:
-    """Observe root exit without reaping/releasing its POSIX pid or pgid."""
+    """Observe root exit without reaping/releasing its POSIX pid or pgid.
+
+    A gone POSIX process (``NoSuchProcess``) counts as exited.
+    """
     identity = None if IS_WINDOWS else psutil.Process(proc.pid)
 
     def _observe() -> None:
@@ -164,7 +167,13 @@ def start_root_exit_observer(proc: subprocess.Popen[bytes]) -> asyncio.Task[None
                 time.sleep(_ROOT_EXIT_POLL_S)
             return
         assert identity is not None  # noqa: S101 — established by platform branch
-        while identity.status() not in {psutil.STATUS_DEAD, psutil.STATUS_ZOMBIE}:
+        while True:
+            try:
+                status = identity.status()
+            except psutil.NoSuchProcess:
+                return
+            if status in {psutil.STATUS_DEAD, psutil.STATUS_ZOMBIE}:
+                return
             time.sleep(_ROOT_EXIT_POLL_S)
 
     return asyncio.create_task(asyncio.to_thread(_observe), name=f"exec-root-exit-{proc.pid}")
