@@ -30,15 +30,15 @@ from cli.commands._repo import (
 )
 from shared.cluster_drift import prod_source_pin_relation
 
-# Cluster-pin line marks, keyed by `prod_source_pin_relation`. "ahead" is the stray
-# `git pull` case: the working tree moved past the pin but the running processes
-# stay on the pinned code, and a restart resets the tree back — `ava cluster update` is what
-# actually advances the whole cluster.
+# Cluster-pin line marks, keyed by `prod_source_pin_relation`. "ahead" means HEAD
+# moved past the pin: a stray `git pull`, or a rollout that landed while the pin
+# was not advanced. The pin is a floor, not a ceiling — nothing resets the tree
+# back to it; `ava cluster update` advances the pin to the live HEAD.
 _PIN_MARKS = {
     "aligned": "✓ aligned",
     "behind": "⚠ behind pin (run `ava cluster update`)",
-    "ahead": "⚠ ahead of pin — checkout moved past it (stray `git pull`?); "
-    "a restart resets to the pin, `ava cluster update` advances the cluster",
+    "ahead": "⚠ ahead of pin — HEAD moved past it (stray `git pull`, or a rollout "
+    "that landed without advancing the pin); `ava cluster update` brings the pin up",
     "diverged": "⚠ diverged from pin (run `ava cluster update`)",
     "unknown": "⚠ off pin (run `ava cluster update`)",
 }
