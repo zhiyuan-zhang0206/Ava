@@ -61,7 +61,7 @@ from ops.controllers._deploy_state import (
 )
 from ops.controllers.base import BlockScope, ReconcileResult
 from ops.controllers.update_trigger import in_cooldown, trigger_update
-from shared.cluster_drift import prod_source_head_sha
+from shared.cluster_drift import prod_source_head_sha, prod_source_pin_relation
 from shared.cluster_pin import get_cluster_target_sha
 from shared.machine import MachineRole
 
@@ -343,7 +343,11 @@ def check_pin_drift() -> bool:
 
     Returns True **only when it actually spawned** a self-heal (the update restarts
     services, so the tick skips its healthchecks); every other case returns False so
-    healthchecks still run. Guards (each matters — this auto-triggers an update on
+    healthchecks still run. The pin is a floor, not a ceiling: a HEAD at-or-above
+    the pin (the pin is an ancestor of HEAD — a failed rollout landed the code but
+    never advanced the pin) is converged and is NEVER force-checked-out back to
+    the stale pin; only a strictly-behind or diverged HEAD heals (2026-08-25
+    downgrade incident). Guards (each matters — this auto-triggers an update on
     the live cluster): agent-runner only (the gateway half warns instead); defers
     while the last update is mid-flight or just failed/recovered (the aftermath
     window where a self-heal checkout races the operator's retry — 2026-08-02);
@@ -358,7 +362,37 @@ def check_pin_drift() -> bool:
     if head == pin:
         _clear_pin_heal_attempt()  # back on-pin → reset backoff
         return False
-    # ── off-pin from here ──
+    # The pin is a floor, not a ceiling: a HEAD that already contains the pin
+    # is converged, and force-checking it back to the pin is a DOWNGRADE — the
+    # exact shape of the 2026-08-25 incident, where a rollout landed the code
+    # but died before advancing the pin (stale in-memory credentials after a
+    # data-plane rotation), and the self-heal force-checked-out the stale pin
+    # underneath the landed gateway, mixing versions while the operator
+    # recovered. "ahead" is also what a stray `git pull` produces; the next
+    # rollout's force-checkout corrects it, and the warning below keeps it
+    # visible. "unknown" (pin commit not present in this checkout) is the one
+    # case git cannot decide — never force-checkout blind there either.
+    relation = prod_source_pin_relation(pin, head)
+    if relation in ("aligned", "ahead"):
+        _clear_pin_heal_attempt()
+        if relation == "ahead":
+            _log.warning(
+                "[ops.pin] HEAD %s is AHEAD of pin %s (a failed rollout or a "
+                "stray pull) — converged at-or-above the pin; needs a rollout, "
+                "not a single-host downgrade; not auto-healing",
+                head,
+                pin,
+            )
+        return False
+    if relation == "unknown":
+        _log.warning(
+            "[ops.pin] off-pin (HEAD %s != pin %s) but pin ancestry unknown "
+            "(commit not present locally); deferring self-heal",
+            head,
+            pin,
+        )
+        return False
+    # ── behind / diverged from here: a real checkout heal, not a downgrade ──
     if run_guards(_PIN_HEAL_GUARDS, GuardCtx(head, pin)) is Defer:
         return False
     _log.warning(
