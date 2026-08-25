@@ -30,10 +30,10 @@ Server data is not mirrored into Zustand — the sidebar reads `useAgents → us
 
 ## `timeline-store.ts` + Per-Thread Timeline Cache (R1/R2/R3)
 
-`/api/system/all` carries events for **every** agent. Active thread state lives in top-level fields; each **parked** inactive thread goes into `threads: Map<agentId, ThreadTimelineState>`.
+`/api/system/all?agents=<activeId>` carries the active agent's events plus system-level `agent_id=0` signals. Active thread state lives in top-level fields; each **parked** inactive thread goes into `threads: Map<agentId, ThreadTimelineState>`.
 
 - `switchThread` is the **sole mover**: one `set()` parks the outgoing thread, restores the incoming one, flips `activeThreadId`, bumps scroll signals — SSE gate and items never desync.
-- Background events fold into their parked bucket (R3); switching back restores live state (R2), not stale snapshots.
+- A buffered/in-flight event for a just-parked thread still folds into its bucket (R3), but inactive agents are not continuously streamed. Switching back restores the parked state immediately (R2), then fetch-on-enter reconciles events missed while that agent was not selected.
 - Memory bound: the `system_prompt` item (item 0.0, ~128KB) is dropped from parked buckets (park + snapshot fold) — it is re-sent in every `timeline_snapshot` and was the largest retained object in the page heap (~40MB of copies with the fleet active); `switchThread` restores the full item from the React Query snapshot on switch-back, and the active thread keeps its own copy for the expandable card.
 - Load priority: parked bucket > React Query snapshot (hot restore, no flash) > cold (empty until fetch lands).
 - Aw-Snap memory bound: there is NO fleet-wide timeline prefetch — it was removed because it retained one full timeline per fleet agent (the ~128KB `system_prompt` item plus historical items) in the React Query cache for gcTime=30min, the dominant renderer-heap source (heap measurement: ~445 agents × 2-3 prompt copies ≈ 88MB). The `["timeline", agentId]` query (full, WITH the prompt) fires only for agents actually opened, so live prompt copies ≈ visited agents + the active thread, never the fleet size. Snapshots carry no system-prompt special-casing: incremental snapshots never include 0.0 (message 0 is below the publish cursor); full-window snapshots (spawn / compact / claim fallback) include it when the tail window holds it. The merge keeps one copy per thread (id-replace); parked buckets keep theirs under the LRU cap (MAX_PARKED_THREADS=32).

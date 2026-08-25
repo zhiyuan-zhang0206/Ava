@@ -6,15 +6,15 @@ Three channels:
   low-frequency lifecycle the sidebar / pages popover need).
 - /api/agents/{id}/system forwards the full SYSTEM_ROLES for one agent (the
   high-frequency per-turn stream the timeline of the observed agent needs).
-- /api/system/all forwards EVERY event for EVERY agent in a throttled,
-  batched stream (push cadence set by settings.gateway.sse_throttle_rate, each push
-  a JSON array of events). No agent_id or role filtering — the frontend
-  filters internally.
+- /api/system/all forwards a throttled, batched stream (push cadence set by
+  settings.gateway.sse_throttle_rate, each push a JSON array of events).
+  An optional agents query filters by agent_id while retaining system-level
+  agent_id=0 events; there is no role filtering.
 """
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from gateway.sse import event_stream, throttled_event_stream
@@ -75,23 +75,34 @@ async def get_system_events(agent_id: int, request: Request) -> StreamingRespons
 
 
 @router.get("/api/system/all")
-async def get_all_events(request: Request) -> StreamingResponse:
-    """Throttled all-events SSE broadcast — pushes EVERY event for EVERY agent,
-    no agent_id or role filtering.  Events are batched and flushed at the
-    cadence set by settings.gateway.sse_throttle_rate, each flush carrying a JSON array
+async def get_all_events(request: Request, agents: str | None = None) -> StreamingResponse:
+    """Throttled SSE stream with optional comma-separated agent filtering.
+
+    With no ``agents`` query, every event for every agent passes. With a query,
+    only the selected agents plus system-level ``agent_id == 0`` events pass.
+    There is no role filtering. Events are batched and flushed at the cadence
+    set by settings.gateway.sse_throttle_rate, each flush carrying a JSON array
     of raw event payloads.
 
     Wire format: `data: [event_json, ...]\n\n`
 
-    This is the "push everything once" stream — the frontend subscribes to
-    this single connection and filters internally by agent_id / role.
+    The frontend subscribes once for the active agent and still filters by
+    agent_id / role defensively.
     """
+    try:
+        agent_filter = None if agents is None else {int(token) for token in agents.split(",")}
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422, detail="agents must be comma-separated integers"
+        ) from exc
+
     return StreamingResponse(
         throttled_event_stream(
             settings.data_plane.redis_url,
             request,
             channel=settings.data_plane.events_channel,
             throttle_rate=settings.gateway.sse_throttle_rate,
+            agent_filter=agent_filter,
         ),
         media_type="text/event-stream",
         headers={

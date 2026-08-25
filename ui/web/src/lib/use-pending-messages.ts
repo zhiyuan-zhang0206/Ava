@@ -99,15 +99,28 @@ export function usePendingMessages(
   const onConnectionEvent = useCallback(
     (ev: ConnectionEvent) => {
       // Banner/closed states are owned by useTimeline on the same shared
-      // connection; only surface parse failures (deduped) so schema drift
-      // on these events doesn't fail silently.
-      if (ev.type !== "parse-failed") return;
-      const key = String(ev.error);
-      if (seenParseErrors.current.has(key)) return;
-      seenParseErrors.current.add(key);
-      showError(`Pending SSE parse failed: ${key}`);
+      // connection; poll refreshes the REST snapshot, and parse failures are
+      // surfaced (deduped) so schema drift doesn't fail silently.
+      switch (ev.type) {
+        case "poll":
+          if (agentId != null) {
+            void queryClient.invalidateQueries({ queryKey: ["pending", agentId] });
+          }
+          return;
+        case "parse-failed": {
+          const key = String(ev.error);
+          if (seenParseErrors.current.has(key)) return;
+          seenParseErrors.current.add(key);
+          showError(`Pending SSE parse failed: ${key}`);
+          return;
+        }
+        case "open":
+        case "reconnecting":
+        case "closed":
+          return;
+      }
     },
-    [showError],
+    [agentId, queryClient, showError],
   );
 
   useAgentEventStream(onEvent, onConnectionEvent);

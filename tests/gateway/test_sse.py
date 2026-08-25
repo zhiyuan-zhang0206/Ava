@@ -395,6 +395,7 @@ async def _collect_throttled_frames(
     throttle_rate: float = 10.0,
     overall_timeout: float = 90.0,
     min_events: int | None = None,
+    agent_filter: set[int] | None = None,
 ) -> list[bytes]:
     """Run throttled_event_stream + async publish + collect frames.
 
@@ -410,6 +411,7 @@ async def _collect_throttled_frames(
         req,  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]
         channel=channel,
         throttle_rate=throttle_rate,
+        agent_filter=agent_filter,
     )
 
     # Pull the opening frame
@@ -550,6 +552,35 @@ def test_throttled_no_agent_filter(
     assert tid_b in agent_ids
 
 
+def test_throttled_agent_filter(
+    db_conn: psycopg.Connection,
+    redis_client: sync_redis.Redis,
+) -> None:
+    """A filter keeps the selected agent plus system-level agent_id=0 events."""
+    tid_a = create_agent(db_conn)
+    tid_b = create_agent(db_conn)
+    payloads = [
+        ChatDelta(agent_id=tid_a, item_id="5.0", content="A").model_dump_json(),
+        ChatDelta(agent_id=tid_b, item_id="5.0", content="B").model_dump_json(),
+        LabelUpdated(agent_id=0, label="system").model_dump_json(),
+    ]
+    frames = asyncio.run(
+        _collect_throttled_frames(
+            redis_client,
+            payloads,
+            n_data_frames=1,
+            throttle_rate=1000.0,
+            min_events=2,
+            agent_filter={tid_a},
+        )
+    )
+    decoded = _decode_throttled_frames(frames)  # pyright: ignore[reportUnknownVariableType]
+    all_events = [e for batch in decoded for e in batch]  # pyright: ignore[reportUnknownVariableType]
+    assert [e["agent_id"] for e in all_events] == [tid_a, 0]  # pyright: ignore[reportUnknownVariableType]
+    assert all_events[0]["content"] == "A"
+    assert all_events[1]["label"] == "system"
+
+
 def test_throttled_no_role_filter(
     db_conn: psycopg.Connection,
     redis_client: sync_redis.Redis,
@@ -615,6 +646,31 @@ def test_throttled_endpoint_response_headers(
         assert resp.headers["content-type"].startswith("text/event-stream")
         assert resp.headers["cache-control"] == "no-cache"
         assert resp.headers["x-accel-buffering"] == "no"
+
+
+def test_throttled_agent_filter_endpoint_query(
+    db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The query is parsed once and forwarded; malformed ids fail with 422."""
+    tid = create_agent(db_conn)
+    captured_kwargs: dict[str, object] = {}
+
+    async def fake_stream(*_args: object, **kwargs: object) -> AsyncIterator[bytes]:
+        captured_kwargs.update(kwargs)
+        yield b": stream open\n\n"
+
+    from gateway.routers import system as system_router
+
+    monkeypatch.setattr(system_router, "throttled_event_stream", fake_stream)
+
+    with TestClient(app) as client:
+        with client.stream("GET", f"/api/system/all?agents={tid}") as resp:
+            assert resp.status_code == 200
+        assert captured_kwargs["agent_filter"] == {tid}
+
+        invalid = client.get("/api/system/all?agents=abc")
+        assert invalid.status_code == 422
 
 
 def test_throttled_drops_invalid_payload(

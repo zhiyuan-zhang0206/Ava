@@ -13,9 +13,10 @@
 // usage_metadata are both returned at stream end), so SSE rate = one
 // per LLM call.
 //
-// SSE subscription uses the AgentEventStreamProvider shared all-events
-// connection (/api/system/all — the same always-connected, throttled stream
-// as useTimeline, not two separate connections).
+// SSE subscription uses the AgentEventStreamProvider shared active-agent
+// connection (/api/system/all?agents=… while visible, the same throttled
+// stream as useTimeline, not two separate connections). Hidden tabs receive
+// a 7s poll signal that invalidates this REST snapshot.
 //
 // Token count has migrated from local useState to Zustand store.tokenUsage.
 
@@ -135,13 +136,26 @@ export function useTokenUsage(
   // hunter F7.
   const onConnectionEvent = useCallback(
     (ev: ConnectionEvent) => {
-      if (ev.type !== "parse-failed") return;
-      const key = String(ev.error);
-      if (seenParseErrors.current.has(key)) return;
-      seenParseErrors.current.add(key);
-      showError(`Token usage SSE parse failed: ${key}`);
+      switch (ev.type) {
+        case "poll":
+          if (agentId != null) {
+            void queryClient.invalidateQueries({ queryKey: ["token-usage", agentId] });
+          }
+          return;
+        case "parse-failed": {
+          const key = String(ev.error);
+          if (seenParseErrors.current.has(key)) return;
+          seenParseErrors.current.add(key);
+          showError(`Token usage SSE parse failed: ${key}`);
+          return;
+        }
+        case "open":
+        case "reconnecting":
+        case "closed":
+          return;
+      }
     },
-    [showError],
+    [agentId, queryClient, showError],
   );
 
   useAgentEventStream(onEvent, onConnectionEvent);

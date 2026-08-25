@@ -13,14 +13,14 @@
 //   (useInboxFeed, invalidate-refetch on notice_posted/notice_resolved)
 //   subscribe here.
 //
-// - AgentEventStreamProvider / useAgentEventStream: the ALL-EVENTS
-//   throttled broadcast (`/api/system/all`). The server pushes EVERY
-//   event for EVERY agent in a batched, throttled stream (max 25
-//   pushes/sec, each push a JSON array of events). No agent_id or role
-//   filtering server-side — the frontend filters internally via
-//   isEventForThread. The timeline (useTimeline), token usage
-//   (useTokenUsage), and pending strip (usePendingMessages) subscribe
-//   here. Always connected while authenticated (not tied to activeId).
+// - AgentEventStreamProvider / useAgentEventStream: the active agent's
+//   throttled all-events stream (`/api/system/all?agents=<activeId>`). The
+//   server pushes that agent's events plus agent_id=0 system signals in a
+//   batched stream (max 10 pushes/sec, each push a JSON array of events).
+//   The frontend still filters internally via isEventForThread / role checks.
+//   The timeline (useTimeline), token usage (useTokenUsage), and pending strip
+//   (usePendingMessages) subscribe here. Hidden tabs close SSE and receive a
+//   synthetic poll signal every 7s so their REST snapshots stay current.
 //
 // The batched format (`data: [{...}, {...}]`) is handled transparently:
 // the onmessage handler detects arrays and fans out each element as an
@@ -70,6 +70,7 @@ const RECONNECT_MAX_MS = 30_000;
  *  reconnect banner / report schema drift / show a refresh hint, etc. */
 export type ConnectionEvent =
   | { type: "open" }
+  | { type: "poll" }
   | { type: "reconnecting" } // readyState=CONNECTING — UA reconnecting per spec
   | { type: "closed" } // server closed (404/500 etc), EventSource no longer retries
   | { type: "parse-failed"; raw: string; error: unknown };
@@ -79,8 +80,8 @@ interface Subscriber {
   conn: (ev: ConnectionEvent) => void;
   /** Frame-batch delivery (optional): when present, ONE SSE frame's events
    * arrive in a single call instead of one `system` call per event. The
-   * high-rate all-events broadcast carries every agent's deltas batched at
-   * up to 25 frames/s; a batch subscriber folds a whole frame inside one
+   * high-rate all-events stream carries the active agent's deltas batched at
+   * up to 10 frames/s; a batch subscriber folds a whole frame inside one
    * store update — one notification + one render per frame instead of one
    * per event (the storm that janked the home page while busy agents
    * streamed). Subscribers without it keep the per-event contract. When
@@ -441,7 +442,7 @@ export function useEventStream(
 }
 
 // ---------------------------------------------------------------------------
-// All-events — full SYSTEM_ROLES for EVERY agent, throttled + authenticated-only.
+// Active-agent events — full roles, throttled + authenticated-only.
 // ---------------------------------------------------------------------------
 
 const AgentEventStreamContext = createContext<EventStreamContextValue | null>(null);
@@ -449,13 +450,13 @@ const AgentEventStreamContext = createContext<EventStreamContextValue | null>(nu
 // The all-events connection has no e2e-ready marker (the global Provider's
 // sse-ready already gates page interactivity); its OPEN state drives no UI.
 const NOOP_OPEN_CHANGE = (_open: boolean): void => undefined;
+const HIDDEN_POLL_MS = 7_000;
 
 /**
- * Provider for the all-events throttled broadcast (`/api/system/all`).
- * Always connected while authenticated — not tied to `activeId`. The server pushes EVERY
- * event for EVERY agent in a batched, throttled stream (max 25
- * pushes/sec). No server-side filtering — the frontend's per-consumer
- * `isEventForThread` guard handles agent routing.
+ * Provider for the active agent's throttled stream (`/api/system/all?agents=…`).
+ * Agent switches re-key the EventSource. Hidden tabs close it and fan out a
+ * synthetic poll event every 7s; becoming visible reopens the stream. The
+ * frontend's per-consumer guards remain as a defensive routing layer.
  */
 export function AgentEventStreamProvider({
   children,
@@ -463,9 +464,31 @@ export function AgentEventStreamProvider({
   children: React.ReactNode;
 }) {
   const subscribersRef = useRef<Set<Subscriber>>(new Set());
+  const activeId = useStore((s) => s.activeId);
+  const [isVisible, setIsVisible] = useState(
+    () => typeof document === "undefined" || document.visibilityState === "visible",
+  );
 
-  // Always connected while authenticated — no dependency on activeId.
-  useSseConnection(`${API_BASE}/api/system/all`, subscribersRef, NOOP_OPEN_CHANGE);
+  useEffect(() => {
+    const syncVisibility = () => setIsVisible(document.visibilityState === "visible");
+    document.addEventListener("visibilitychange", syncVisibility);
+    syncVisibility();
+    return () => document.removeEventListener("visibilitychange", syncVisibility);
+  }, []);
+
+  useEffect(() => {
+    if (isVisible) return;
+    const interval = setInterval(() => {
+      for (const sub of subscribersRef.current) {
+        sub.conn({ type: "poll" });
+      }
+    }, HIDDEN_POLL_MS);
+    return () => clearInterval(interval);
+  }, [isVisible]);
+
+  const allEventsUrl =
+    `${API_BASE}/api/system/all` + (activeId != null ? `?agents=${activeId}` : "");
+  useSseConnection(isVisible ? allEventsUrl : null, subscribersRef, NOOP_OPEN_CHANGE);
   const subscribe = useSubscribe(subscribersRef);
 
   return (
@@ -478,8 +501,8 @@ export function AgentEventStreamProvider({
 /**
  * Subscribe to the all-events throttled broadcast. Must be called inside
  * `<AgentEventStreamProvider>`. Same `onConnectionEvent`-required contract
- * as useEventStream. The stream carries EVERY event for EVERY agent —
- * consumers filter internally via isEventForThread / role checks.
+ * as useEventStream. The stream carries the active agent plus system-level
+ * events; consumers still filter internally via isEventForThread / role checks.
  */
 export function useAgentEventStream(
   onSystemEvent: (event: SystemEvent) => void,
