@@ -416,6 +416,75 @@ def test_non_lgtm_gateway_converge_skips_collector_install(
     assert "collector skipped" in err
 
 
+def test_non_lgtm_gateway_reaps_orphan_collector_session(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    home = tmp_path / ".ava-preview"
+    home.mkdir()
+    ctx = oc.ConvergeCtx(
+        repo=Path(__file__).resolve().parents[2],
+        ava_home=home,
+        roles=frozenset({"gateway"}),
+    )
+    killed: list[str] = []
+    expected_flags: list[bool] = []
+
+    monkeypatch.setattr(oc, "ensure_otel_collector", _fail_ensure_otel_collector)
+
+    def _collector_session_exists(session: str) -> bool:
+        return session == "ava-otel-collector"
+
+    monkeypatch.setattr("cli.commands._has_session", _collector_session_exists)
+
+    def _record_kill(session: str, *, expected: bool = False) -> tuple[bool, str]:
+        killed.append(session)
+        expected_flags.append(expected)
+        return True, "graceful"
+
+    monkeypatch.setattr("cli.commands._session_lifecycle._graceful_kill_session", _record_kill)
+
+    oc.ensure_otel_collector_step(ctx)
+
+    assert killed == ["ava-otel-collector"]
+    assert expected_flags == [True]
+    assert "reaped orphan session ava-otel-collector" in capsys.readouterr().err
+
+
+def test_non_lgtm_gateway_without_session_skips_reap(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    home = tmp_path / ".ava-preview"
+    home.mkdir()
+    ctx = oc.ConvergeCtx(
+        repo=Path(__file__).resolve().parents[2],
+        ava_home=home,
+        roles=frozenset({"gateway"}),
+    )
+    killed: list[str] = []
+
+    monkeypatch.setattr(oc, "ensure_otel_collector", _fail_ensure_otel_collector)
+
+    def _no_session(_session: str) -> bool:
+        return False
+
+    monkeypatch.setattr("cli.commands._has_session", _no_session)
+
+    def _record_kill(session: str, *, expected: bool = False) -> tuple[bool, str]:
+        killed.append(session)
+        return True, "graceful"
+
+    monkeypatch.setattr("cli.commands._session_lifecycle._graceful_kill_session", _record_kill)
+
+    oc.ensure_otel_collector_step(ctx)
+
+    assert killed == []
+    assert "reaped orphan session" not in capsys.readouterr().err
+
+
 def test_non_lgtm_gateway_reports_and_preserves_residual_config(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

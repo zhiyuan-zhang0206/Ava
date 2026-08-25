@@ -598,6 +598,51 @@ def test_service_probes_skips_gated_and_probeless_specs(
     assert _cluster_health._service_probes() == ["frontend"]
 
 
+def test_service_probes_skips_gated_otel_collector_on_non_lgtm_gateway(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import cli.commands as _ns
+
+    tmp_home = tmp_path / "gateway"
+    tmp_home.mkdir()
+    recorded_sessions: list[str] = []
+
+    monkeypatch.setattr(_ns, "_roles_or_none", lambda: frozenset({"gateway"}))
+    monkeypatch.setattr("ops.spec.gateway_observability_home", lambda: tmp_home)
+
+    def _record_probe(spec: _ns.ServiceSpec) -> _ns.ServiceProbe:
+        recorded_sessions.append(spec.session)
+        return _ns.ServiceProbe(True, "probe", "")
+
+    monkeypatch.setattr(_ns, "_probe_service", _record_probe)
+
+    assert _cluster_health._service_probes() == []
+    assert "otel-collector" not in recorded_sessions
+
+
+def test_service_probes_checks_otel_collector_on_lgtm_gateway(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import cli.commands as _ns
+
+    tmp_home = tmp_path / "gateway"
+    tmp_home.mkdir()
+    (tmp_home / "lgtm-host").touch()
+    recorded_sessions: list[str] = []
+
+    monkeypatch.setattr(_ns, "_roles_or_none", lambda: frozenset({"gateway"}))
+    monkeypatch.setattr("ops.spec.gateway_observability_home", lambda: tmp_home)
+
+    def _record_probe(spec: _ns.ServiceSpec) -> _ns.ServiceProbe:
+        recorded_sessions.append(spec.session)
+        return _ns.ServiceProbe(True, "probe", "")
+
+    monkeypatch.setattr(_ns, "_probe_service", _record_probe)
+
+    assert _cluster_health._service_probes() == []
+    assert "otel-collector" in recorded_sessions
+
+
 def test_service_probes_carry_the_failing_fact(monkeypatch: pytest.MonkeyPatch) -> None:
     """The owner's alert is the only thing a human sees, so it has to say WHICH
     fact failed: "answering, but its home is /home/ava/.ava" is another unit on

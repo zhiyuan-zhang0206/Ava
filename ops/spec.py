@@ -47,6 +47,7 @@ from shared.config import settings
 from shared.daemon_health import DaemonProbe, health_port, probe_daemon, probe_home
 from shared.log import logger
 from shared.machine import MachineRole, MachineRoles
+from shared.observability import gateway_observability_home
 from shared.paths import otel_collector_binary, otel_collector_config
 from shared.platform import IS_WINDOWS
 from shared.platform_probes import (
@@ -647,6 +648,25 @@ def _computer_mcp_gate_reason() -> str | None:
     return None
 
 
+def _otel_collector_gate_reason() -> str | None:
+    """Why otel-collector is gated out, or None when it should run.
+
+    This is the roster sibling of ``ensure_otel_collector_step`` in
+    ``cli/commands/_otel_collector.py`` and ``_collector_serves_this_home`` in
+    ``services/healthchecks/otel_collector.py``. All three use the gateway
+    home's ``lgtm-host`` marker so the roster, ``ava start``, ``ava status``,
+    watchdog, rollout readiness, and cluster health probe agree about which
+    gateway owns the collector. Pure agent-runners retain their relay collector.
+    """
+    home = gateway_observability_home()
+    if home is not None and not (home / "lgtm-host").exists():
+        return (
+            "this gateway home is not the LGTM host (lgtm-host marker absent); "
+            "telemetry export is unavailable"
+        )
+    return None
+
+
 def _gate_reason(spec: ServiceSpec) -> str | None:
     """Why a service is config/capability-gated OUT of the start roster, or None if
     it will run. The single place the gate's *reason* is computed, so the start
@@ -691,6 +711,8 @@ def _gate_reason(spec: ServiceSpec) -> str | None:
         return "no AF_UNIX sockets (mcp-daemon's transport is POSIX-only)"
     if session == "computer-mcp":
         return _computer_mcp_gate_reason()
+    if session == "otel-collector":
+        return _otel_collector_gate_reason()
     if session == "heartbeat" and not settings.daemon.heartbeat_enabled:
         return "disabled (AVA_HEARTBEAT_ENABLED off)"
     if session == "idle-shell-reminder" and not settings.daemon.idle_shell_reminder_enabled:
