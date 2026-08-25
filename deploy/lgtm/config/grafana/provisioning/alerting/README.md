@@ -56,8 +56,8 @@ Application layer — the Loki event stream plus the LLM latency histogram:
 | `ava-ops-gateway-latency-route-warning` | `ava-ops-slow` | Gateway latency: fast route p95 | p95 > 3s for 5m (Loki, LLM-bound + inherently-slow routes excluded) | 5m | warning |
 | `ava-ops-gateway-latency-route-error` | `ava-ops-slow` | Gateway latency: fast route p95 | p95 > 10s for 5m (same route filter) | 5m | error |
 | `ava-ops-turn-duration-p95` | `ava-ops-slow` | Turn duration p95 (collective slowdown) | histogram p95 > 75s for 10m (Prometheus, 24h baseline 37.6s × 2) | 10m | warning |
-| `ava-ops-gateway-latency-route-slow-warning` | `ava-ops-slow` | Gateway latency: slow route p95 | p95 > 5s for 5m (Loki, slow route class) | 5m | warning |
-| `ava-ops-gateway-latency-route-slow-error` | `ava-ops-slow` | Gateway latency: slow route p95 | p95 > 10s for 5m (same route class) | 5m | error |
+| `ava-ops-gw-latency-slow-warning` | `ava-ops-slow` | Gateway latency: slow route p95 | p95 > 5s for 5m (Loki, slow route class) | 5m | warning |
+| `ava-ops-gw-latency-slow-error` | `ava-ops-slow` | Gateway latency: slow route p95 | p95 > 10s for 5m (same route class) | 5m | error |
 
 Infrastructure layer (issue #46) — the per-machine OTel Collector sidecar's
 own scrapes, labelled `host` (OS hostname / physical identity) and

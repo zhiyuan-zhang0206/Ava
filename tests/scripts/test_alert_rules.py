@@ -53,8 +53,8 @@ _EXPECTED_UIDS = {
     "ava-ops-gateway-latency-route-warning",
     "ava-ops-gateway-latency-route-error",
     "ava-ops-turn-duration-p95",
-    "ava-ops-gateway-latency-route-slow-warning",
-    "ava-ops-gateway-latency-route-slow-error",
+    "ava-ops-gw-latency-slow-warning",
+    "ava-ops-gw-latency-slow-error",
     # infrastructure layer (issue #46) — the sidecar's own scrapes
     "ava-ops-host-cpu-saturated",
     "ava-ops-host-memory-pressure",
@@ -121,6 +121,20 @@ def test_rules_have_expected_uids() -> None:
     assert {r["uid"] for r in rules} == _EXPECTED_UIDS
 
 
+def test_rule_uids_fit_grafana_40_char_limit() -> None:
+    """Grafana 13.1.3 rejects alert-rule UIDs longer than 40 chars and the
+    whole provisioning file fails to load — every rule disappears on the next
+    restart. 2026-08-25 incident: `ava-ops-gateway-latency-route-slow-warning`
+    (42 chars) broke Grafana startup after a rollout; the two slow-route UIDs
+    were renamed to `ava-ops-gw-latency-slow-*`. This lock keeps future
+    additions under the limit at review time instead of at deploy time."""
+    for rule in _load_rules():
+        assert len(rule["uid"]) <= 40, (
+            f"uid {rule['uid']!r} is {len(rule['uid'])} chars — Grafana caps "
+            "alert-rule UIDs at 40 and fails the whole provisioning file"
+        )
+
+
 def test_low_cost_rules_use_the_slow_group() -> None:
     groups = _load_groups()
     group_for_rule = {rule["uid"]: group["name"] for group in groups for rule in group["rules"]}
@@ -130,8 +144,8 @@ def test_low_cost_rules_use_the_slow_group() -> None:
         "ava-ops-gateway-latency-route-warning",
         "ava-ops-gateway-latency-route-error",
         "ava-ops-turn-duration-p95",
-        "ava-ops-gateway-latency-route-slow-warning",
-        "ava-ops-gateway-latency-route-slow-error",
+        "ava-ops-gw-latency-slow-warning",
+        "ava-ops-gw-latency-slow-error",
     ):
         assert group_for_rule[uid] == "ava-ops-slow"
 
@@ -448,13 +462,13 @@ def test_every_rule_is_silent_on_no_data_and_datasource_error() -> None:
         ("ava-ops-gateway-latency-route-warning", "fast", 3000, "gateway_latency_route_p95"),
         ("ava-ops-gateway-latency-route-error", "fast", 10000, "gateway_latency_route_p95"),
         (
-            "ava-ops-gateway-latency-route-slow-warning",
+            "ava-ops-gw-latency-slow-warning",
             "slow",
             5000,
             "gateway_latency_route_slow_p95",
         ),
         (
-            "ava-ops-gateway-latency-route-slow-error",
+            "ava-ops-gw-latency-slow-error",
             "slow",
             10000,
             "gateway_latency_route_slow_p95",
