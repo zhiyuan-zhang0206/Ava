@@ -35,6 +35,7 @@ and the design intent.
 | If you need to… | Read |
 |---|---|
 | Start/stop/update the cluster, understand cluster/unit/machine model, manage channels, cut releases | [ops](ops/SKILL.md) |
+| Dispose of dead agents' workspaces — cold-data disposal, tombstone, ledger | [workspace-cleanup](workspace-cleanup/SKILL.md) |
 | Add, list, remove, enable/disable MCP servers | [mcp](mcp/SKILL.md) |
 | Install, upgrade, remove skills & plugins; understand the difference | [packages](packages/SKILL.md) |
 | Understand agents, commands, presets, schedules — the agent-level concepts | [agents](agents/SKILL.md) |

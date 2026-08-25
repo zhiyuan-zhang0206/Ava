@@ -238,6 +238,9 @@ framework code.
 carries one live CPU / memory / disk reading. That is a current value, not a
 history — the history is Prometheus's, and there is exactly one of it.
 
+When disk pressure comes from dead agents' workspaces, the disposal playbook is
+[workspace-cleanup](../workspace-cleanup/SKILL.md).
+
 ## Sessions
 
 Ava's long-running processes (gateway, agent-runners, services, agent shells)
