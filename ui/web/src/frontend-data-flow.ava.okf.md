@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Frontend Data Flow (SSE + hooks)
-description: Two SSE Providers — global /api/system broadcast + active-agent /api/system/all throttled stream with hidden-tab polling; #648 connection resilience (half-dead watchdog + CLOSED exponential backoff reconnect + cluster update reconnect); React Query hook directory.
+description: Two SSE Providers — global /api/system broadcast + active-agent /api/system/all stream with hidden-tab polling; #648 connection resilience; React Query hook directory.
 tags:
 - frontend
 - sse
@@ -9,7 +9,7 @@ tags:
 
 # Frontend Data Flow (SSE + hooks)
 
-Server data enters UI via React Query cache, kept live by SSE **folded into cache** while visible. Hidden conversation tabs close their high-frequency SSE connection and invalidate the active agent's REST snapshots every 7s. SSE connects directly to FastAPI (not through Next rewrites — Turbopack dev proxy buffers SSE).
+Server data enters UI via React Query cache, kept live by SSE while visible; hidden tabs close the connection and invalidate the active agent's REST snapshots every 7s. SSE connects directly to FastAPI (not through Next rewrites — Turbopack dev proxy buffers SSE).
 
 ## Two SSE Providers (`lib/useEventStream.tsx`)
 
@@ -18,7 +18,7 @@ Server data enters UI via React Query cache, kept live by SSE **folded into cach
 | `EventStreamProvider` / `useEventStream` | `/api/system` | **Global broadcast**: cross-agent low-frequency lifecycle (spawn/update/label, page open/close, notice_posted/notice_resolved, **#663** task_created/task_updated, `cluster_update_started`; `GLOBAL_ROLES` total **10** roles, `shared/live_events.py`) | **Fold owner** (`useFoldOwner` — sole root writer; folds into `["agents"]`/`["notices"]`/`["agent-pages"]`/`["tasks"]`/`["fleet-graph"]` families, debounced 2s per family; central reconnect reconcile throttled to 1/30s), readers: `useAgents`, `useAgentPages`, `useAllPages`, `useNotices`, `useTasks`, `useFleetGraph` |
 | `AgentEventStreamProvider` / `useAgentEventStream` | `/api/system/all?agents=<activeId>` | **Active-agent throttled stream**: selected agent plus `agent_id=0` system events, batched (`data: [{...}]`), throttled ≤10 push/s | `useTimeline`, `useTokenUsage`, `usePendingMessages` |
 
-The agent stream is connected while authenticated and visible. `activeId` changes re-key its URL; a null active id uses the unfiltered endpoint. The frontend still uses `isEventForThread` defensively. While the tab is hidden, the provider passes `null` to `useSseConnection`, closes EventSource, and emits `ConnectionEvent {type: "poll"}` every 7s; the three subscribers invalidate `timeline`, `token-usage`, and `pending` for the active agent. Becoming visible clears the interval and reopens SSE, whose `open` event reconciles REST state again. Multiple hooks share this one EventSource. EventSource uses `withCredentials` to carry the session cookie through gateway auth.
+The agent stream is connected while authenticated and visible; `activeId` re-keys its URL (null → unfiltered endpoint). Hidden tabs: the provider passes `null` to `useSseConnection` (closes EventSource) and emits `ConnectionEvent {type: "poll"}` every 7s; the three subscribers invalidate `timeline`/`token-usage`/`pending` for the active agent. Visible again: interval cleared, SSE reopens, the `open` event reconciles REST state. `isEventForThread` remains a defensive gate. Multiple hooks share one EventSource; `withCredentials` carries the session cookie through gateway auth.
 
 ## Connection resilience (#648)
 
