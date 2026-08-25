@@ -56,7 +56,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     && locale-gen en_US.UTF-8
 
 # ── Layer 2: CLI tools (shared with Dockerfile.eval-bench via install-cli-tools.sh) ──
-# git / ripgrep / jq / fd-find / bat / tree / fzf / tmux / htop / gh
+# git / ripgrep / jq / fd-find / bat / tree / fzf / htop / gh
 # + GitHub CLI keyring. To change the CLI list, only edit install-cli-tools.sh.
 COPY scripts/install-cli-tools.sh /tmp/install-cli-tools.sh
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
