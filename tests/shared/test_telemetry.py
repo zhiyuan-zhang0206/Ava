@@ -19,7 +19,7 @@ import json
 import queue
 import socket
 import threading
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -332,6 +332,32 @@ def test_jsonl_mirror_true_duplicate_rows_have_equal_ids() -> None:
     assert rows[0]["id"] == rows[1]["id"]
 
 
+def test_emit_normalizes_explicit_local_ts_to_utc_in_mirror() -> None:
+    """An explicit local-offset ts (the loguru adapter's record time) must
+    land in the mirror as UTC — one offset for the whole stream, or any
+    local-wall-clock filter of the mirror misreads telemetry as missing
+    from the UTC-day rollover (2026-08-25 mirror audit, task #1638)."""
+    marker = uuid4().hex
+    local = datetime(2026, 8, 25, 12, 0, tzinfo=timezone(timedelta(hours=8)))
+    telemetry.emit(
+        "telemetry",
+        "exec",
+        agent_id=_AGENT,
+        attributes={"ts_normalize_test": marker},
+        ts=local,
+    )
+
+    rows = [
+        row
+        for row in _mirror_rows("exec", _AGENT)
+        if row["attributes"].get("ts_normalize_test") == marker
+    ]
+    assert len(rows) == 1
+    row_ts = datetime.fromisoformat(rows[0]["ts"])
+    assert row_ts.utcoffset() == timedelta(0)  # stored offset is UTC, not +08:00
+    assert row_ts == local.astimezone(UTC)  # same absolute instant
+
+
 # ── resilience ────────────────────────────────────────────────────────────────
 
 
@@ -368,6 +394,9 @@ def test_loguru_adapter_sets_source_from_extra(
     obj = _mirror_last("label_change", _AGENT)
     assert obj["source"] == "user"
     assert obj["attributes"] == {"msg": "a line from the user path"}
+    # loguru stamps record time in the machine's local zone; the emitter must
+    # normalize it to UTC so the mirror carries one offset (task #1638).
+    assert datetime.fromisoformat(obj["ts"]).utcoffset() == timedelta(0)
 
 
 def test_drain_on_exit_lands_queued_events() -> None:
