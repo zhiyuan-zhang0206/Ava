@@ -118,9 +118,7 @@ def test_defers_when_pin_ancestry_unknown(
     assert any("ancestry unknown" in r.message for r in caplog.records)
 
 
-def test_heals_when_head_behind_pin(
-    monkeypatch: pytest.MonkeyPatch, pin_drift_env: list
-) -> None:
+def test_heals_when_head_behind_pin(monkeypatch: pytest.MonkeyPatch, pin_drift_env: list) -> None:
     """A HEAD strictly behind the pin (this host missed a rollout) still heals —
     that is a catch-up, not a downgrade."""
     monkeypatch.setattr(pin, "get_cluster_target_sha", lambda: "abc1234")

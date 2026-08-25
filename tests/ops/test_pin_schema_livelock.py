@@ -83,6 +83,10 @@ def db_ahead_of_the_pin(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> dict
     # is faked, so an unpatched read would defer on an unreadable record).
     monkeypatch.setattr("shared.last_update.read_last_update", lambda: None)
     monkeypatch.setattr(pin, "_pin_heal_attempt_path", lambda: tmp_path / "pin_heal")
+    # The fixture's shas are fake, so real git ancestry cannot decide them; the
+    # tests below intend a strictly-behind host (the incident's mid-checkout
+    # state), which is the heal-eligible relation.
+    monkeypatch.setattr(pin, "prod_source_pin_relation", lambda _pin, _head: "behind")
     monkeypatch.setattr(
         pin,
         "trigger_update",
