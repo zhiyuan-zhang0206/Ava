@@ -362,6 +362,7 @@ def test_failed_resolved_post_still_closes_pending(
 def test_state_round_trip_persists_modes_delivery_and_resolutions_and_loads_old_shape(
     tmp_path: Path,
 ) -> None:
+    started_at = datetime.now(UTC) - timedelta(hours=2)
     state_path = tmp_path / "permission-watcher.json"
     posts: list[dict[str, object]] = []
     first = watcher.PermissionWatcher(state_path, posts.append)
@@ -369,7 +370,7 @@ def test_state_round_trip_persists_modes_delivery_and_resolutions_and_loads_old_
         _event(
             watcher.PermissionKind.TCC,
             watcher.EventPhase.PROMPTING,
-            _T0,
+            started_at,
             tool="/usr/bin/find",
         )
     )
@@ -377,14 +378,14 @@ def test_state_round_trip_persists_modes_delivery_and_resolutions_and_loads_old_
         _event(
             watcher.PermissionKind.TCC,
             watcher.EventPhase.RESOLVED,
-            _T0 + timedelta(minutes=1),
+            started_at + timedelta(minutes=1),
         )
     )
     first.observe(
         _event(
             watcher.PermissionKind.TCC,
             watcher.EventPhase.PROMPTING,
-            _T0 + timedelta(hours=1),
+            started_at + timedelta(hours=1),
             correlation_id="request-2",
         )
     )
@@ -392,7 +393,7 @@ def test_state_round_trip_persists_modes_delivery_and_resolutions_and_loads_old_
         _event(
             watcher.PermissionKind.ALF,
             watcher.EventPhase.PROMPTING,
-            _T0 + timedelta(hours=1),
+            started_at + timedelta(hours=1),
             subject="/Applications/Firewall.app",
         )
     )
@@ -406,14 +407,16 @@ def test_state_round_trip_persists_modes_delivery_and_resolutions_and_loads_old_
     assert silent_persisted["alert_posted"] is False
     assert full_persisted["mode"] == "full"
     assert full_persisted["alert_posted"] is True
-    assert state["resolved"] == {f"TCC:{_UV_PYTHON}": (_T0 + timedelta(minutes=1)).isoformat()}
+    assert state["resolved"] == {
+        f"TCC:{_UV_PYTHON}": (started_at + timedelta(minutes=1)).isoformat()
+    }
 
     restarted = watcher.PermissionWatcher(state_path, posts.append)
     assert restarted.pending[f"TCC:{_UV_PYTHON}"].mode == "silent"
     assert restarted.pending[f"TCC:{_UV_PYTHON}"].alert_posted is False
     assert restarted.pending["ALF:/Applications/Firewall.app"].mode == "full"
     assert restarted.pending["ALF:/Applications/Firewall.app"].alert_posted is True
-    assert restarted.resolved == {f"TCC:{_UV_PYTHON}": _T0 + timedelta(minutes=1)}
+    assert restarted.resolved == {f"TCC:{_UV_PYTHON}": started_at + timedelta(minutes=1)}
 
     legacy = state["pending"][f"TCC:{_UV_PYTHON}"]
     legacy.pop("mode")
@@ -459,9 +462,55 @@ def test_state_save_prunes_resolutions_older_than_48_hours(tmp_path: Path) -> No
     }
 
 
+def test_state_load_drops_stale_pending_and_keeps_fresh_pending(
+    caplog: pytest.LogCaptureFixture, tmp_path: Path
+) -> None:
+    now = datetime.now(UTC)
+    stale_first_seen = now - timedelta(hours=30)
+    fresh_first_seen = now - timedelta(hours=1)
+    stale_key = "TCC:/usr/bin/find"
+    fresh_key = f"TCC:{_UV_PYTHON}"
+    state_path = tmp_path / "permission-watcher.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "pending": {
+                    stale_key: {
+                        "kind": "TCC",
+                        "subject": "/usr/bin/find",
+                        "first_seen": stale_first_seen.isoformat(),
+                        "last_seen": stale_first_seen.isoformat(),
+                        "correlation_id": None,
+                    },
+                    fresh_key: {
+                        "kind": "TCC",
+                        "subject": _UV_PYTHON,
+                        "first_seen": fresh_first_seen.isoformat(),
+                        "last_seen": fresh_first_seen.isoformat(),
+                        "correlation_id": None,
+                    },
+                },
+                "resolved": {},
+            }
+        )
+    )
+    caplog.set_level(logging.INFO, logger="ava.permission_watcher")
+    posts: list[dict[str, object]] = []
+
+    service = watcher.PermissionWatcher(state_path, posts.append)
+
+    assert set(service.pending) == {fresh_key}
+    assert [record.getMessage() for record in caplog.records if record.levelno == logging.INFO] == [
+        f"dropping stale pending incident: {stale_key} (first_seen {stale_first_seen.isoformat()})"
+    ]
+
+
 def test_default_poster_reads_token_posts_to_loopback_and_retries_once(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    from shared.config import settings
+
     env_path = tmp_path / ".env"
     env_path.write_text('AVA_OPS_ALERTS_WEBHOOK_TOKEN="secret-token"\n')
     calls: list[tuple[str, dict[str, object]]] = []
@@ -475,11 +524,12 @@ def test_default_poster_reads_token_posts_to_loopback_and_retries_once(
 
     monkeypatch.setattr(watcher.httpx, "post", fake_post)
     monkeypatch.setattr(watcher.time, "sleep", sleeps.append)
+    monkeypatch.setattr(settings.gateway, "gateway_port", 8123)
     payload: dict[str, object] = {"source": "permission-watcher", "alerts": []}
     watcher.post_alert(payload, env_path=env_path)
 
     assert len(calls) == 2
-    assert calls[0][0] == calls[1][0] == "http://127.0.0.1:8000/api/alerts"
+    assert calls[0][0] == calls[1][0] == "http://127.0.0.1:8123/api/alerts"
     assert calls[1][1] == {
         "json": payload,
         "headers": {"X-Alerts-Token": "secret-token"},
@@ -502,7 +552,11 @@ def test_default_poster_warns_and_raises_after_second_failure(
 
     caplog.set_level(logging.WARNING, logger="ava.permission_watcher")
     monkeypatch.setattr(watcher.httpx, "post", fail_post)
-    monkeypatch.setattr(watcher.time, "sleep", lambda _seconds: None)
+
+    def _no_sleep(_seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr(watcher.time, "sleep", _no_sleep)
     with pytest.raises(httpx.ConnectError):
         watcher.post_alert({"source": "permission-watcher", "alerts": []}, env_path=env_path)
 

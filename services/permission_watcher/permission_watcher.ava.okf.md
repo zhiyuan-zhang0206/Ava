@@ -33,12 +33,14 @@ within 12 hours is tracked as a `silent` pending incident: neither its firing no
 its resolution is posted. After 12 hours, the next recurrence starts a new full
 instance. Pending mode, delivery state, and per-key resolution times are
 atomically persisted in an owner-readable version-1 JSON file; resolution times
-older than 48 hours are pruned on save. There is no timeout or escalation tick.
+older than 48 hours are pruned on save, while pending incidents older than 24
+hours are dropped on load. There is no timeout or escalation tick.
 
 ## Delivery and lifecycle
 
 The watcher posts Alertmanager-webhook-shaped payloads to the loopback gateway
-at `http://127.0.0.1:8000/api/alerts`, with
+at `/api/alerts` on `settings.gateway.gateway_port` (falling back to port 8000
+when settings are unavailable), with
 `source=permission-watcher`, `alertname=permission-prompt`, and
 `severity=warning`. Labels use permission kind plus the responsible application
 subject; the variable triggering tool appears only in the Chinese summary so it
