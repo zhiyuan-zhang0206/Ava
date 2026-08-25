@@ -157,9 +157,12 @@ def prod_source_pin_relation(pin: str, head: str, *, repo: Path | None = None) -
     - "behind"   — HEAD is an ancestor of the pin: this host missed a rollout, and
                    `ava cluster update` fast-forwards it onto the pin.
     - "ahead"    — the pin is an ancestor of HEAD: the checkout moved past the pin
-                   on its own (a stray `git pull` instead of a rollout). The running
-                   processes still hold the pinned code until the next restart, which
-                   resets the tree back to the pin.
+                   — a stray `git pull`, or a rollout that landed while the pin was
+                   not advanced (the convergent end-state of a mid-rollout failure).
+                   The pin is a floor, not a ceiling: nothing resets the tree back
+                   to it. `ava cluster update` force-checks-out the reviewed target
+                   (origin/main, resolved once) and advances the pin to it — a
+                   stray HEAD is discarded, not promoted.
     - "diverged" — neither is an ancestor of the other (a rebase / force-push).
     - "unknown"  — the relationship can't be computed: the pin commit is not present
                    in this checkout (never fetched), or git can't be read.
