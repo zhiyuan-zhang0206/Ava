@@ -227,6 +227,52 @@ async def test_second_hit_same_category_no_append(_loaded: Any):
     assert result is None
 
 
+async def test_code_every_time_cadence_hints_two_consecutive_matching_cells(
+    _loaded: Any, monkeypatch: pytest.MonkeyPatch
+):
+    """`every_time` bypasses the reminded gate for code categories, so two
+    consecutive shell cells each receive the shell hint."""
+    from shared.config import settings
+
+    monkeypatch.setattr(settings.agent, "sdk_code_reminder_cadence", "every_time")
+    hook = _loaded.sdk_reminder_after_exec
+
+    first = await hook(_state(_cell("subprocess.run(['first'])")), _runtime(), _config())
+    assert first is not None
+    second_state = _state(
+        _cell("subprocess.run(['second'])"),
+        ava_sdk_reminder__reminded=first["ava_sdk_reminder__reminded"],
+        ava_sdk_reminder__last_seen_compact=first["ava_sdk_reminder__last_seen_compact"],
+    )
+    second = await hook(second_state, _runtime(), _config())
+
+    assert second is not None
+    for result in (first, second):
+        [note] = result["messages"]
+        assert "ava.shell.run" in note.content
+
+
+async def test_code_once_cadence_hints_only_first_consecutive_matching_cell(
+    _loaded: Any, monkeypatch: pytest.MonkeyPatch
+):
+    """`once_per_compaction` (the default) preserves the existing behavior:
+    the first shell cell hints and the next shell cell in the window no-ops."""
+    from shared.config import settings
+
+    monkeypatch.setattr(settings.agent, "sdk_code_reminder_cadence", "once_per_compaction")
+    hook = _loaded.sdk_reminder_after_exec
+
+    first = await hook(_state(_cell("subprocess.run(['first'])")), _runtime(), _config())
+    assert first is not None
+    second_state = _state(
+        _cell("subprocess.run(['second'])"),
+        ava_sdk_reminder__reminded=first["ava_sdk_reminder__reminded"],
+        ava_sdk_reminder__last_seen_compact=first["ava_sdk_reminder__last_seen_compact"],
+    )
+
+    assert await hook(second_state, _runtime(), _config()) is None
+
+
 async def test_different_categories_each_fire_once(_loaded: Any):
     hook = _loaded.sdk_reminder_after_exec
     # shell already reminded; this cell hits shell + wait -> only wait is fresh.
