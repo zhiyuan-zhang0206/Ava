@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from typing import Any
 
 import psycopg
 import pytest
@@ -119,6 +120,52 @@ def test_run_nonzero_subprocess_is_not_completed(
     assert last_error is not None and "exited 3" in last_error
 
 
+def _runs(conn: psycopg.Connection, sid: int) -> list[tuple[bool | None, str | None]]:
+    """(ok, note) rows for a schedule, oldest first."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT ok, note FROM schedule_runs WHERE schedule_id = %s ORDER BY id",
+            (sid,),
+        )
+        return [(r[0], r[1]) for r in cur.fetchall()]
+
+
+def test_run_records_clean_py_exit(db_conn: psycopg.Connection, unit_home: Path) -> None:
+    # A clean .py exit closes its run-history row with ok=true.
+    sid = _insert_schedule(db_conn, script="x = 1 + 1\n")
+
+    assert run(sid) == 0
+    assert _runs(db_conn, sid) == [(True, None)]
+
+
+def test_run_records_crash(db_conn: psycopg.Connection, unit_home: Path) -> None:
+    # A crash closes its run row with ok=false and a short note; the traceback
+    # itself goes to schedules.last_error (asserted in the existing crash test).
+    sid = _insert_schedule(db_conn, script="raise RuntimeError('boom-42')\n")
+
+    assert run(sid) == 1
+    assert _runs(db_conn, sid) == [(False, "crashed: RuntimeError")]
+
+
+def test_run_records_nonzero_command(db_conn: psycopg.Connection, unit_home: Path) -> None:
+    sid = _insert_schedule(db_conn, script="exit 3\n", command="bash run.sh")
+
+    assert run(sid) == 3
+    assert _runs(db_conn, sid) == [(False, "command exited 3")]
+
+
+def test_run_records_stall_timeout(
+    db_conn: psycopg.Connection, unit_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import gateway.schedule_runner as sr
+
+    monkeypatch.setattr(sr, "_STALL_TIMEOUT_S", 2.0)
+    sid = _insert_schedule(db_conn, script="sleep 60\n", command="bash run.sh")
+
+    assert run(sid) == 1
+    assert _runs(db_conn, sid) == [(False, "stall timeout (2s)")]
+
+
 def test_run_skips_disabled_schedule(db_conn: psycopg.Connection, unit_home: Path) -> None:
     sid = _insert_schedule(db_conn, script="raise RuntimeError('should not run')\n", enabled=False)
     assert run(sid) == 0
@@ -128,6 +175,8 @@ def test_run_skips_disabled_schedule(db_conn: psycopg.Connection, unit_home: Pat
         cur.execute("SELECT last_error FROM schedules WHERE id = %s", (sid,))
         row = cur.fetchone()
     assert row is not None and row[0] is None
+    # A schedule that never ran has no run-history rows either.
+    assert _runs(db_conn, sid) == []
 
 
 def test_run_loads_plugins_for_py_script(
@@ -159,6 +208,75 @@ def test_run_skips_plugin_load_for_non_py_command(
 
     assert run(sid) == 0
     assert calls == []
+
+
+def test_run_record_failure_does_not_break_the_run(
+    db_conn: psycopg.Connection, unit_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Run history is severable observability: a DB failure on the run-record
+    # writes must not affect the schedule itself (clean exit still marks
+    # completed, rc still 0). Only the schedule_runs statements fail — the
+    # schedules-row writes (status/last_error) keep working.
+    import gateway.schedule_runner as sr
+
+    real_connect = sr.shared.db.connect
+
+    class _FlakyCursor:
+        """Cursor proxy that fails every schedule_runs statement."""
+
+        def __init__(self, cur: Any) -> None:
+            self._cur = cur
+
+        def __getattr__(self, name: str) -> Any:
+            return getattr(self._cur, name)
+
+        def __enter__(self) -> _FlakyCursor:
+            self._cur.__enter__()
+            return self
+
+        def __exit__(
+            self,
+            exc_type: type[BaseException] | None,
+            exc_val: BaseException | None,
+            exc_tb: Any,
+        ) -> None:
+            self._cur.__exit__(exc_type, exc_val, exc_tb)
+
+        def execute(self, sql: str, params: Any = None) -> Any:
+            if "schedule_runs" in sql:
+                raise RuntimeError("db down on schedule_runs")
+            return self._cur.execute(sql, params)
+
+    class _Flaky:
+        """Connection proxy whose cursor fails every schedule_runs statement."""
+
+        def __init__(self, conn: psycopg.Connection) -> None:
+            self._conn = conn
+
+        def __enter__(self) -> _Flaky:
+            self._inner = self._conn.__enter__()
+            return self
+
+        def __exit__(
+            self,
+            exc_type: type[BaseException] | None,
+            exc_val: BaseException | None,
+            exc_tb: Any,
+        ) -> None:
+            self._conn.__exit__(exc_type, exc_val, exc_tb)
+
+        def cursor(self) -> _FlakyCursor:
+            return _FlakyCursor(self._inner.cursor())
+
+    def _flaky_connect(*args: object, **kwargs: object) -> _Flaky:
+        return _Flaky(real_connect(*args, **kwargs))  # pyright: ignore[reportArgumentType]
+
+    monkeypatch.setattr(sr.shared.db, "connect", _flaky_connect)
+    sid = _insert_schedule(db_conn, script="x = 1\n")
+
+    assert run(sid) == 0
+    status, _ = _status_and_error(db_conn, sid)
+    assert status == "completed"
 
 
 @pytest.mark.parametrize(

@@ -10,6 +10,14 @@ crash's traceback is written to ``schedules.last_error``.
 Version-controlled schedule templates (manifest + scripts) live in
 ``schedules/`` — provisioned via ``shared.builtin_schedules.py``.
 
+Every process execution appends one row to ``schedule_runs`` (the run-history
+drawer's data source): opened with ``ok = NULL`` (in-progress) when the runner
+starts, closed with the outcome when it exits. This is process-level history —
+one row per process lifetime, not per fire — and it is severable observability:
+a run-record write failure never affects the schedule itself. A run the runner
+cannot close (SIGTERM/SIGHUP kill, stall-guard hard exit) stays ``ok = NULL``,
+which the UI renders as in-progress/interrupted.
+
 The ScheduleManager launches this inside a session named
 ``ava-schedule-<id>`` and keeps it up (with a circuit breaker) if it
 crashes. A schedule is a supervised resident process, so an exit-0 is treated as
@@ -110,6 +118,40 @@ def _mark_completed(schedule_id: int) -> None:
             "UPDATE schedules SET status = 'completed', updated_at = now() WHERE id = %s",
             (schedule_id,),
         )
+
+
+def _record_run_start(schedule_id: int) -> int | None:
+    """Open a run-history row for this process execution (ok = NULL, in-progress).
+
+    Returns the run id, or None when the write fails — run history is severable
+    observability, so a DB hiccup must never break the schedule itself (the
+    caller then skips the closing write)."""
+    try:
+        with shared.db.connect(autocommit=True) as conn, conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO schedule_runs (schedule_id) VALUES (%s) RETURNING id",
+                (schedule_id,),
+            )
+            row = cur.fetchone()
+            return row[0] if row is not None else None
+    except Exception:
+        logger.exception("schedule {} run-record start failed", schedule_id)
+        return None
+
+
+def _record_run_end(run_id: int | None, *, ok: bool, note: str | None) -> None:
+    """Close a run-history row with its outcome. No-op when the start write
+    failed (run_id is None); a failure here is likewise never fatal."""
+    if run_id is None:
+        return
+    try:
+        with shared.db.connect(autocommit=True) as conn, conn.cursor() as cur:
+            cur.execute(
+                "UPDATE schedule_runs SET ok = %s, note = %s WHERE id = %s",
+                (ok, note, run_id),
+            )
+    except Exception:
+        logger.exception("schedule run-record end failed (run {})", run_id)
 
 
 _ORIGINAL_SLEEP = time.sleep
@@ -229,6 +271,13 @@ def run(schedule_id: int) -> int:
 
     ava._boot.establish_actor(f"schedule:{schedule_id}")
 
+    # Run history: one row per process execution, opened in-progress (ok=NULL)
+    # here and closed with the outcome on every exit path below. A path the
+    # runner cannot close (SIGTERM/SIGHUP kill, stall-guard hard exit) leaves
+    # the row in-progress — honest, the run was interrupted, and the UI renders
+    # it as such.
+    run_id = _record_run_start(schedule_id)
+
     try:
         if script_name.endswith(".py"):
             import runpy
@@ -258,6 +307,7 @@ def run(schedule_id: int) -> int:
                 # the rest of this process.
                 _restore_park_detection()
             _mark_completed(schedule_id)  # returned cleanly => finished, not crashed
+            _record_run_end(run_id, ok=True, note=None)
             return 0
         # A non-.py command runs as a child process — the stall guard's main-
         # thread frame watch cannot see inside it, and the runner parked in
@@ -284,16 +334,20 @@ def run(schedule_id: int) -> int:
             )
             _record_error(schedule_id, message)
             logger.error("Schedule {} {}", schedule_id, message)
+            _record_run_end(run_id, ok=False, note=f"stall timeout ({_STALL_TIMEOUT_S:.0f}s)")
             return 1
         if result.returncode != 0:
             _record_error(schedule_id, f"command exited {result.returncode}: {command!r}")
+            _record_run_end(run_id, ok=False, note=f"command exited {result.returncode}")
         else:
             _mark_completed(schedule_id)
+            _record_run_end(run_id, ok=True, note=None)
         return result.returncode
-    except Exception:
+    except Exception as exc:
         tb = traceback.format_exc()
         _record_error(schedule_id, tb)
         logger.error("Schedule runner execution failed: {}", tb)
+        _record_run_end(run_id, ok=False, note=f"crashed: {type(exc).__name__}")
         return 1
 
 
