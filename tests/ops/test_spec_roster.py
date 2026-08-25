@@ -8,6 +8,7 @@ re-export façade so the "single source" property can't silently regress.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import cast
 
@@ -141,6 +142,7 @@ def test_otel_collector_gated_on_gateway_without_lgtm_marker(
 ) -> None:
     home = tmp_path / "gateway"
     home.mkdir()
+    monkeypatch.delitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
     monkeypatch.setattr(spec, "gateway_observability_home", lambda: home)
 
     annotated = {
@@ -161,6 +163,26 @@ def test_otel_collector_runs_on_gateway_with_lgtm_marker(
     home = tmp_path / "gateway"
     home.mkdir()
     (home / "lgtm-host").touch()
+    monkeypatch.setattr(spec, "gateway_observability_home", lambda: home)
+
+    annotated = {
+        service.session: reason
+        for service, reason in spec.services_for_capabilities_annotated(frozenset({"gateway"}))
+    }
+    assert annotated["otel-collector"] is None
+    start = {service.session for service in spec.services_for_capabilities(frozenset({"gateway"}))}
+    assert "otel-collector" in start
+
+
+def test_otel_collector_runs_on_gateway_without_marker_when_endpoint_override_explicit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An explicit AVA_TELEMETRY_OTLP_ENDPOINT opens the collector gate on a
+    non-LGTM gateway — the same escape hatch the exporter side honors, so the
+    roster keeps the collector for an operator who opted into explicit export."""
+    home = tmp_path / "gateway"
+    home.mkdir()
+    monkeypatch.setitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", "http://collector.invalid:4318")
     monkeypatch.setattr(spec, "gateway_observability_home", lambda: home)
 
     annotated = {

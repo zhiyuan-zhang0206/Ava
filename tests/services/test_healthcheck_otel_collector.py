@@ -8,6 +8,7 @@ invocation without running a collector.
 
 from __future__ import annotations
 
+import os
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -68,8 +69,21 @@ def test_collector_serves_this_home_requires_gateway_lgtm_marker(
 ) -> None:
     monkeypatch.setattr(hc, "machine_role", lambda: frozenset({"gateway", "agent-runner"}))
     monkeypatch.setattr(hc, "gateway_observability_home", lambda: tmp_path)
+    monkeypatch.delitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
     assert hc._collector_serves_this_home() is False
     (tmp_path / "lgtm-host").touch()
+    assert hc._collector_serves_this_home() is True
+
+
+def test_collector_serves_this_home_with_explicit_endpoint_skips_marker(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """An explicit AVA_TELEMETRY_OTLP_ENDPOINT opens the healthcheck's
+    collector responsibility on a non-LGTM gateway (marker OR override)."""
+    monkeypatch.setattr(hc, "machine_role", lambda: frozenset({"gateway", "agent-runner"}))
+    monkeypatch.setattr(hc, "gateway_observability_home", lambda: tmp_path)
+    monkeypatch.setitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", "http://collector.invalid:4318")
     assert hc._collector_serves_this_home() is True
 
 

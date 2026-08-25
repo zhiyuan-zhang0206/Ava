@@ -10,7 +10,8 @@ collector config exports the same queue/drop metrics to central Prometheus for
 alerting.
 
 The sidecar is the local OTLP entry for every agent on this machine — except
-that a gateway without its home's ``lgtm-host`` marker has no local collector
+that a gateway without its home's ``lgtm-host`` marker (and without an
+explicit ``AVA_TELEMETRY_OTLP_ENDPOINT`` override) has no local collector
 responsibility and its healthcheck warns/returns; pure runners retain relay
 collector behavior. When responsible and down, trace/event/metric export
 drops (agents retry briefly, then shed) until the watchdog revives it within a
@@ -28,7 +29,7 @@ from shared.config import settings
 from shared.daemon_health import DaemonProbe
 from shared.log import init_gateway_process, logger
 from shared.machine import MachineRoleInvalid, MachineRoleMissing, machine_role
-from shared.observability import gateway_observability_home
+from shared.observability import collector_allowed_for_home, gateway_observability_home
 from shared.paths import otel_collector_binary, otel_collector_config
 from shared.service_respawn import respawn_and_verify, run_keepalive
 from shared.supervised_listener import (
@@ -55,8 +56,7 @@ def _collector_serves_this_home() -> bool:
         return False
     if "gateway" not in roles:
         return True
-    home = gateway_observability_home()
-    return home is None or (home / "lgtm-host").exists()
+    return collector_allowed_for_home(gateway_observability_home())
 
 
 @dataclass(frozen=True)

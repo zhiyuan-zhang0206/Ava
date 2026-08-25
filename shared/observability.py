@@ -74,3 +74,28 @@ def gateway_observability_home() -> Path | None:
     except (MachineRoleMissing, MachineRoleInvalid):
         return None
     return ava_home() if "gateway" in roles else None
+
+
+def collector_allowed_for_home(home: Path | None) -> bool:
+    """Whether the gateway home at ``home`` may run the local otel-collector.
+
+    The designated LGTM host (``lgtm-host`` marker) always runs the sidecar. A
+    non-LGTM gateway runs it only when the operator explicitly overrode
+    ``AVA_TELEMETRY_OTLP_ENDPOINT`` — the same escape hatch the exporter side
+    honors (``shared.telemetry_otlp._observability_export_allowed``) — so an
+    explicit collector export is not silently starved of its local sidecar.
+    ``None`` (no gateway home: pure runner, unconfigured unit, bootstrap)
+    keeps historical behavior — relay collectors are not gated.
+
+    One decision shared by the three collector-lifecycle paths — the roster
+    gate (``ops.spec._otel_collector_gate_reason``), the converge step
+    (``cli.commands._otel_collector.ensure_otel_collector_step``), and the
+    sidecar healthcheck (``services.healthchecks.otel_collector.
+    _collector_serves_this_home``) — so they cannot drift apart again
+    (issue #622).
+    """
+    if home is None:
+        return True
+    return (home / "lgtm-host").exists() or endpoint_override_is_explicit(
+        "AVA_TELEMETRY_OTLP_ENDPOINT"
+    )

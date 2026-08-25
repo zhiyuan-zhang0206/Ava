@@ -47,7 +47,7 @@ from shared.config import settings
 from shared.daemon_health import DaemonProbe, health_port, probe_daemon, probe_home
 from shared.log import logger
 from shared.machine import MachineRole, MachineRoles
-from shared.observability import gateway_observability_home
+from shared.observability import collector_allowed_for_home, gateway_observability_home
 from shared.paths import otel_collector_binary, otel_collector_config
 from shared.platform import IS_WINDOWS
 from shared.platform_probes import (
@@ -653,16 +653,18 @@ def _otel_collector_gate_reason() -> str | None:
 
     This is the roster sibling of ``ensure_otel_collector_step`` in
     ``cli/commands/_otel_collector.py`` and ``_collector_serves_this_home`` in
-    ``services/healthchecks/otel_collector.py``. All three use the gateway
-    home's ``lgtm-host`` marker so the roster, ``ava start``, ``ava status``,
-    watchdog, rollout readiness, and cluster health probe agree about which
-    gateway owns the collector. Pure agent-runners retain their relay collector.
+    ``services/healthchecks/otel_collector.py``. All three share
+    ``collector_allowed_for_home`` (``lgtm-host`` marker OR an explicit
+    ``AVA_TELEMETRY_OTLP_ENDPOINT`` override) so the roster, ``ava start``,
+    ``ava status``, watchdog, rollout readiness, and cluster health probe agree
+    about which gateway owns the collector. Pure agent-runners retain their
+    relay collector.
     """
-    home = gateway_observability_home()
-    if home is not None and not (home / "lgtm-host").exists():
+    if not collector_allowed_for_home(gateway_observability_home()):
         return (
             "this gateway home is not the LGTM host (lgtm-host marker absent); "
-            "telemetry export is unavailable"
+            "telemetry export is unavailable; set AVA_TELEMETRY_OTLP_ENDPOINT "
+            "to use an explicit collector"
         )
     return None
 
