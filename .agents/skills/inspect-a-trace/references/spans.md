@@ -18,7 +18,7 @@ Three sources, in the order you should reach for them:
 
 | Source | Where | Good for |
 |---|---|---|
-| **Tempo** | `http://localhost:3200` | finding traces (indexed, cross-agent) |
+| **Tempo** | the cluster's Tempo query URL — `AVA_TELEMETRY_TEMPO_QUERY_URL` when Tempo is remote (see below), else `http://localhost:3200` | finding traces (indexed, cross-agent) |
 | **Local mirror** | `$AVA_HOME/traces/spans*.jsonl` | fetching one whole trace (complete, no size cap, no network) |
 | **Grafana** | `http://localhost:3003`, datasource uid `tempo` | letting a human browse |
 
@@ -26,6 +26,15 @@ Spans are **metadata-only**. Prompts, completions, tool arguments and results
 are stripped at record time (`shared/trace.py`) — nothing you do to Tempo will
 produce them. Content comes from the checkpoint
 ([find-the-run](find-the-run.md)).
+
+**Tempo may not be on this host.** The LGTM host runs Loki, Prometheus, and
+Grafana natively; Tempo is per-cluster config (`AVA_TELEMETRY_TEMPO_ENDPOINT`
+for intake, `AVA_TELEMETRY_TEMPO_QUERY_URL` for queries — see
+`deploy/lgtm/README.md`), so on a split deployment the query URL is the remote
+Tempo and nothing listens on the local 3200. The scripts inherit
+`AVA_TELEMETRY_TEMPO_QUERY_URL`; `AVA_TRACE_TEMPO_URL` overrides. To find the
+URL by hand, read it from the running Grafana
+(`GET /api/datasources` — the `tempo` datasource's `url` field).
 
 ## Find: TraceQL
 
@@ -125,8 +134,11 @@ link unless the annotation is the point.
 - **Regex `=~` on the `name` intrinsic misbehaves** — anchored patterns
   (`"^goto"`) match nothing, and `name =~ ... && <anything>` returns empty.
   Use exact `=` on names; `=~` on span attributes is fine.
-- **Ids are base64 in the mirror, hex in Tempo** — the scripts convert; by hand
-  it is `base64.b64decode(s).hex()`. Never paste one form into the other.
+- **Ids are hex everywhere in this stack** — the mirror (collector file
+  exporter) and Tempo both carry 32/16-char hex. The base64 form only appears
+  in legacy pre-#1266 agent-side mirror files; the scripts handle both, by
+  hand it is `bytes.fromhex(s)` (or `base64.b64decode(s).hex()` for a legacy
+  line). Never paste one form into the other.
 - **`/api/v2/search/tag/*` only enumerates intrinsics** (name/kind/status), not
   attributes — it is not a schema explorer.
 - **`search` returns only the attributes you queried** on its spans; the full
