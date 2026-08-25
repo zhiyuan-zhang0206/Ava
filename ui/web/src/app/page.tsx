@@ -20,11 +20,12 @@
 //   the root fold keeps live), owns activeId and the lifecycle
 //   action wrappers, owns the inspector panel open state + preload queries,
 //   threads agents/pendingActions/pendingSpawnCount/forkPending down as props.
-//   Wraps HomeContent in AgentEventStreamProvider — the always-connected
-//   all-events /api/system/all stream (throttled, batched, every agent).
+//   Wraps HomeContent in AgentEventStreamProvider — the active-agent
+//   /api/system/all stream (throttled/batched while visible, 7s REST polling
+//   while hidden).
 // - HomeContent: receives activeId + agents from HomeShell; calls
 //   useTimeline + useTokenUsage + usePendingMessages which share that one
-//   all-events SSE connection (isEventForThread routes events per agent).
+//   active-agent SSE connection (isEventForThread remains a defensive gate).
 
 import { useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";

@@ -1759,14 +1759,42 @@
     "/api/system/all": {
       "get": {
         "summary": "Get All Events",
-        "description": "Throttled all-events SSE broadcast — pushes EVERY event for EVERY agent,\n    no agent_id or role filtering.  Events are batched and flushed at the\n    cadence set by settings.gateway.sse_throttle_rate, each flush carrying a JSON array\n    of raw event payloads.\n\n    Wire format: `data: [event_json, ...]\n\n`\n\n    This is the \"push everything once\" stream — the frontend subscribes to\n    this single connection and filters internally by agent_id / role.",
+        "description": "Throttled SSE stream with optional comma-separated agent filtering.\n\n    With no ``agents`` query, every event for every agent passes. With a query,\n    only the selected agents plus system-level ``agent_id == 0`` events pass.\n    There is no role filtering. Events are batched and flushed at the cadence\n    set by settings.gateway.sse_throttle_rate, each flush carrying a JSON array\n    of raw event payloads.\n\n    Wire format: `data: [event_json, ...]\n\n`\n\n    The frontend subscribes once for the active agent and still filters by\n    agent_id / role defensively.",
         "operationId": "get_all_events_api_system_all_get",
+        "parameters": [
+          {
+            "name": "agents",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Agents"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
               }
             }
           }

@@ -100,7 +100,7 @@ class GatewaySettings(EnvSettings):
     )
 
     sse_throttle_rate: float = Field(
-        default=25.0,
+        default=10.0,
         alias="AVA_SSE_THROTTLE_RATE",
         description=(
             "Gateway SSE broadcast max pushes per second; each push batches "

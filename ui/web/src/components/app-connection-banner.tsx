@@ -73,7 +73,7 @@ function ConnectionHealthProvider() {
   }, []);
   const onConnectionEvent = useCallback(
     (ev: ConnectionEvent) => {
-      if (ev.type === "parse-failed") return;
+      if (ev.type === "parse-failed" || ev.type === "poll") return;
       setConnState(ev.type);
     },
     [setConnState],

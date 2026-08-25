@@ -14,17 +14,17 @@
 // TanStack Query. This store holds the LIVE render state the SSE stream folds
 // into on top of that snapshot.
 //
-// Per-thread timeline caching (R1/R2/R3): the all-events SSE stream
-// (`/api/system/all`) carries EVERY agent's events. The ACTIVE thread's
+// Per-thread timeline caching (R1/R2/R3): the filtered SSE stream
+// (`/api/system/all?agents=<activeId>`) carries the active agent's events. The ACTIVE thread's
 // timeline state lives in the top-level fields (items / turnActive /
 // streamingCode / streamingIds / hasMoreOlder); every INACTIVE (parked)
 // thread's state lives in `threads: Map<agentId, ThreadTimelineState>`.
 // A thread is in exactly one place — top-level while active, the map while
 // parked — and `switchThread` is the single mover (park the outgoing thread,
 // unpark the incoming one, delete the active id from the map). So background
-// events for a switched-away thread fold into its parked bucket instead of
-// being dropped (R3), and switching back restores the live-folded state
-// instantly (R2) rather than a stale HTTP snapshot. Token fields are NOT
+// buffered/in-flight events for a just-switched-away thread still fold into its
+// parked bucket instead of being dropped (R3), and switching back restores the
+// parked state instantly (R2) before REST reconciliation. Token fields are NOT
 // per-thread here — they keep their own per-thread cache in React Query
 // (`["token-usage", agentId]`) via useTokenUsage; duplicating them into the
 // bucket would be a second per-thread token source.
@@ -141,10 +141,9 @@ export interface TimelineState {
 
   /** SSE frame-batch entry point. Folds every event of ONE SSE frame inside a
    * single set() — one store notification + one render per frame instead of
-   * one per event. The all-events broadcast (`/api/system/all`) delivers every
-   * agent's events batched at up to 25 frames/s; when the fleet is busy (the
-   * moment a user opens a live shell view of an active agent) the per-event
-   * path turned each burst into a render/layout storm. Same reducer as
+   * one per event. The active-agent stream (`/api/system/all?agents=…`)
+   * delivers batches at up to 10 frames/s; a busy agent's per-event path
+   * otherwise turns each burst into a render/layout storm. Same reducer as
    * `processSseEvent` — batch and per-event paths can never diverge. */
   processSseEventBatch: (events: SystemEvent[]) => void;
 

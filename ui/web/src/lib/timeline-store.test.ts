@@ -1310,10 +1310,10 @@ describe("timeline item budget across live writers", () => {
 
 // -- per-thread routing: background folding + hot switch-back + LRU (PR3) ────
 //
-// The all-events SSE stream carries every agent's events. The ACTIVE thread
-// folds into the top-level fields; a switched-away (parked) thread folds into
-// its `threads` bucket so switch-back is instant (R2/R3); an unvisited thread
-// is dropped (bounded). Parked buckets are LRU-capped at MAX_PARKED_THREADS(32).
+// The store routes active-agent events into top-level fields. A buffered event
+// for a switched-away (parked) thread folds into its `threads` bucket so
+// switch-back is instant (R2/R3); an unvisited thread is dropped (bounded).
+// Parked buckets are LRU-capped at MAX_PARKED_THREADS(32).
 
 describe("processSseEvent per-thread routing (R2/R3)", () => {
   it("background SSE for a switched-away thread folds into its parked bucket; switch-back restores it instantly", () => {

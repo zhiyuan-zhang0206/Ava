@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Frontend Data Flow (SSE + hooks)
-description: Two SSE Providers — global /api/system broadcast + full /api/system/all throttled broadcast; #648 connection resilience (half-dead watchdog + CLOSED exponential backoff reconnect + cluster update reconnect); React Query hook directory.
+description: Two SSE Providers — global /api/system broadcast + active-agent /api/system/all throttled stream with hidden-tab polling; #648 connection resilience (half-dead watchdog + CLOSED exponential backoff reconnect + cluster update reconnect); React Query hook directory.
 tags:
 - frontend
 - sse
@@ -9,21 +9,21 @@ tags:
 
 # Frontend Data Flow (SSE + hooks)
 
-Server data enters UI via React Query cache, kept live by SSE **folded into cache** (no polling). SSE connects directly to FastAPI (not through Next rewrites — Turbopack dev proxy buffers SSE).
+Server data enters UI via React Query cache, kept live by SSE **folded into cache** while visible. Hidden conversation tabs close their high-frequency SSE connection and invalidate the active agent's REST snapshots every 7s. SSE connects directly to FastAPI (not through Next rewrites — Turbopack dev proxy buffers SSE).
 
 ## Two SSE Providers (`lib/useEventStream.tsx`)
 
 | Provider / hook | Endpoint | Content | Subscribers |
 |---|---|---|---|
 | `EventStreamProvider` / `useEventStream` | `/api/system` | **Global broadcast**: cross-agent low-frequency lifecycle (spawn/update/label, page open/close, notice_posted/notice_resolved, **#663** task_created/task_updated, `cluster_update_started`; `GLOBAL_ROLES` total **10** roles, `shared/live_events.py`) | **Fold owner** (`useFoldOwner` — sole root writer; folds into `["agents"]`/`["notices"]`/`["agent-pages"]`/`["tasks"]`/`["fleet-graph"]` families, debounced 2s per family; central reconnect reconcile throttled to 1/30s), readers: `useAgents`, `useAgentPages`, `useAllPages`, `useNotices`, `useTasks`, `useFleetGraph` |
-| `AgentEventStreamProvider` / `useAgentEventStream` | `/api/system/all` | **Full throttled broadcast**: every event of every agent, batched (`data: [{...}]`), throttled ≤25 push/s, no server-side filtering | `useTimeline`, `useTokenUsage`, `usePendingMessages` |
+| `AgentEventStreamProvider` / `useAgentEventStream` | `/api/system/all?agents=<activeId>` | **Active-agent throttled stream**: selected agent plus `agent_id=0` system events, batched (`data: [{...}]`), throttled ≤10 push/s | `useTimeline`, `useTokenUsage`, `usePendingMessages` |
 
-The full stream `/api/system/all` is **always connected while authenticated** (not bound to activeId), frontend uses `isEventForThread` to internally filter by thread. Shared mechanism `useSseConnection` is identical for both, only the URL differs — multiple hooks share the same EventSource (old design had one connection per hook, resulting in N concurrent streams + weird middle banner). EventSource uses `withCredentials` to carry session cookie through gateway auth.
+The agent stream is connected while authenticated and visible. `activeId` changes re-key its URL; a null active id uses the unfiltered endpoint. The frontend still uses `isEventForThread` defensively. While the tab is hidden, the provider passes `null` to `useSseConnection`, closes EventSource, and emits `ConnectionEvent {type: "poll"}` every 7s; the three subscribers invalidate `timeline`, `token-usage`, and `pending` for the active agent. Becoming visible clears the interval and reopens SSE, whose `open` event reconciles REST state again. Multiple hooks share this one EventSource. EventSource uses `withCredentials` to carry the session cookie through gateway auth.
 
 ## Connection resilience (#648)
 
 - **Half-dead watchdog**: 45s without any frame (even heartbeats) = socket stuck in OPEN (graceful restart / proxy hop) → `bumpReconnect()` forces a clean reopen. Server sends a heartbeat frame roughly every 15s as liveness.
-- **CLOSED auto-reconnect**: unauthenticated streams never open; a CLOSED stream probes `/api/auth/check` — invalid session flips the auth context (AuthGuard → /login) and stays closed until login; valid session or failed probe → capped backoff reopen (`retryTimer` single-flight, `retryNonce` effect lever, 1s doubled to 30s, reset on open; separate from the global `reconnectNonce`). `onerror` dispatches CLOSED/CONNECTING/OPEN (unknown → throw); `ConnectionEvent` = open/reconnecting/closed/parse-failed. AlertsProvider mirrors gate/probe/backoff with independent state.
+- **CLOSED auto-reconnect**: unauthenticated streams never open; a CLOSED stream probes `/api/auth/check` — invalid session flips the auth context (AuthGuard → /login) and stays closed until login; valid session or failed probe → capped backoff reopen (`retryTimer` single-flight, `retryNonce` effect lever, 1s doubled to 30s, reset on open; separate from the global `reconnectNonce`). `onerror` dispatches CLOSED/CONNECTING/OPEN (unknown → throw); `ConnectionEvent` = open/poll/reconnecting/closed/parse-failed. AlertsProvider mirrors gate/probe/backoff with independent state.
 - **Cluster update Gate reload + reconnect**: global `cluster_update_started` is a hint emitted only after the persistent UI generation exists; `AppConnectionBanner` asks the current URL to reload through Gate. The root-mounted, auth-independent `GateMaintenanceProvider` polls Gate's same-origin `GET /__ava/deploy-state` as the missed-SSE fallback. Both share a module-level latch, so their race navigates once. Neither renders or times maintenance. The authenticated `/api/cluster/status` poll in `useClusterHealth` still distinguishes stranded pause and reconnects SSE/refetches agents on the real paused true→false gateway-bounce edge.
 - For the two system streams, watchdog and cluster update use the global store `reconnectNonce`; each CLOSED retry uses its own local `retryTimer` + `retryNonce` and does not re-key the other Provider. AlertsProvider has its own reconnect/watchdog and retry state.
 

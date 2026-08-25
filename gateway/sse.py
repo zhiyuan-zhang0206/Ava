@@ -8,11 +8,12 @@ Two streaming modes:
    (``data: {json}\n\n``). Native streaming: every ``code_delta`` is
    forwarded the moment it arrives, no buffering / batching.
 
-2. ``throttled_event_stream`` — all-events broadcast with batched throttling.
-   Pushes EVERY event for EVERY agent (no agent_id filter, no role filter),
-   draining Redis messages in batches and flushing at a fixed cadence
-   (default 25/sec). Each flush sends a JSON array of event raw payloads
-   as a single SSE data frame: ``data: [{...}, ...]\n\n``.
+2. ``throttled_event_stream`` — batched, optionally agent-filtered all-events
+   stream. With no filter it pushes every event for every agent; with a filter
+   it keeps the selected agents plus system-level ``agent_id == 0`` events.
+   There is no role filter. Redis messages are drained in batches and flushed
+   at a fixed cadence (default 10/sec). Each flush sends a JSON array of event
+   raw payloads as a single SSE data frame: ``data: [{...}, ...]\n\n``.
 
 Wire format for ``event_stream``: the SSE ``data:`` line is directly the
 ``model_dump_json()`` of an ``events.Event``. The frontend's ``JSON.parse``
@@ -226,6 +227,8 @@ async def _drain_redis_messages(
     pubsub,  # noqa: ANN001  # redis-asyncio PubSub
     request: Request,
     flush_interval: float,
+    *,
+    agent_filter: set[int] | None,
 ) -> tuple[list[str], bool]:
     """Drain all available messages from Redis within one flush window.
 
@@ -264,8 +267,10 @@ async def _drain_redis_messages(
         if not isinstance(raw, str):
             continue
         try:
-            EVENT_ADAPTER.validate_json(raw)
+            event = EVENT_ADAPTER.validate_json(raw)
         except ValidationError:
+            continue
+        if agent_filter is not None and event.agent_id != 0 and event.agent_id not in agent_filter:
             continue
         buffer.append(raw)
 
@@ -278,13 +283,15 @@ async def throttled_event_stream(
     *,
     channel: str | None = None,
     throttle_rate: float,
+    agent_filter: set[int] | None = None,
 ) -> AsyncGenerator[bytes, None]:
-    """Yield a throttled, batched SSE stream of ALL events.
+    """Yield a throttled, batched SSE stream of events.
 
-    Broadcast mode, no agent_id filter, no role filter. Events are
-    drained from Redis in batches and flushed at a fixed cadence
-    (``1 / throttle_rate`` seconds). Each flush sends a JSON array of
-    raw event payloads as a single SSE data frame:
+    With no ``agent_filter``, every agent's events pass. With a filter,
+    selected agents and system-level ``agent_id == 0`` events pass. There is
+    no role filter. Events are drained from Redis in batches and flushed at a
+    fixed cadence (``1 / throttle_rate`` seconds). Each flush sends a JSON
+    array of raw event payloads as a single SSE data frame:
 
         data: [{...}, {...}, ...]\n\n
 
@@ -298,6 +305,8 @@ async def throttled_event_stream(
         channel: Redis channel (default ``settings.data_plane.events_channel``).
         throttle_rate: SSE pushes per second — required (the sole caller passes
             ``settings.gateway.sse_throttle_rate``).
+        agent_filter: agent ids to forward. None forwards every agent; system-level
+            ``agent_id == 0`` events always pass.
 
     Yields:
         bytes: SSE frame (``data: [...]\n\n``).
@@ -323,7 +332,12 @@ async def throttled_event_stream(
 
         while True:
             try:
-                buffer, disconnected = await _drain_redis_messages(pubsub, request, flush_interval)
+                buffer, disconnected = await _drain_redis_messages(
+                    pubsub,
+                    request,
+                    flush_interval,
+                    agent_filter=agent_filter,
+                )
             except _REDIS_IO_ERRORS + _REDIS_ACL_ERRORS as exc:
                 _log.warning("sse throttle pubsub read failed: %r", exc)
                 yield _sse_batch_frame(
