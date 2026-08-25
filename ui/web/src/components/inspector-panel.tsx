@@ -469,6 +469,7 @@ function NoticeReplySection({
           key={notice.id}
           agentId={agentId}
           notice={notice}
+          showTimestamp
           onResolved={() => {
             void queryClient.invalidateQueries({ queryKey: inspectLiveQueryKey(agentId) });
             void queryClient.invalidateQueries({ queryKey: ["agent-inspect", agentId] });

@@ -9,6 +9,7 @@ import { SendButton } from "@/components/ui/send-button";
 import { api } from "@/lib/api";
 import { errMsg } from "@/lib/errors";
 import { PRIORITY_BG } from "@/lib/notices";
+import { formatAbsolute, formatRelative } from "@/lib/time";
 import type { OpenNotice, ResolveNoticeIn } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { FLEX, FLEX_1 } from "@/lib/layout";
@@ -27,7 +28,8 @@ import { FLEX, FLEX_1 } from "@/lib/layout";
  * fleet inbox renders it in its detail pane. The inbox drives keyboard cycling
  * (Up/Down over the open list when the reply box is empty) through `onCycle`, and
  * auto-advance-after-resolve through `onResolved`. The inspector passes neither
- * cycling callback, so those keys fall through unchanged there.
+ * cycling callback, so those keys fall through unchanged there. Created time is
+ * opt-in because the inbox already renders it in its agent context header.
  */
 export function OpenNoticeDetail({
   agentId,
@@ -35,6 +37,7 @@ export function OpenNoticeDetail({
   onResolved,
   onCycle,
   autoFocus = false,
+  showTimestamp = false,
   className,
 }: {
   agentId: number;
@@ -42,6 +45,7 @@ export function OpenNoticeDetail({
   onResolved?: () => void;
   onCycle?: (direction: -1 | 1) => void;
   autoFocus?: boolean;
+  showTimestamp?: boolean;
   className?: string;
 }) {
   const t = useTranslations("noticeDetail");
@@ -113,6 +117,14 @@ export function OpenNoticeDetail({
           <span className="text-[10px] text-muted-foreground">
             {requiresResponse ? "Decision" : "FYI"}
           </span>
+          {showTimestamp ? (
+            <>
+              <span aria-hidden className="text-[10px] text-muted-foreground">·</span>
+              <span className="text-[10px] text-muted-foreground">
+                {formatRelative(notice.created_at)}, {formatAbsolute(notice.created_at)}
+              </span>
+            </>
+          ) : null}
         </div>
         <h4 className="text-xs font-medium break-words">{notice.title}</h4>
         {notice.content && (
