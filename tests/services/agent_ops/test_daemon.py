@@ -25,6 +25,7 @@ import psycopg
 import pytest
 
 from services.agent_ops import daemon, health
+from shared.deploy_timing import NO_PROGRESS_TIMEOUT_S
 
 _REPO = Path(__file__).resolve().parents[3]
 
@@ -35,28 +36,37 @@ def _stub_pool() -> object:
     return object()
 
 
-def test_ops_components_expose_wedged_lock_and_active_op_saturation() -> None:
-    """The health response names a wedged control plane without treating capacity as failure."""
+def test_ops_components_degrade_after_no_progress_bound_plus_margin() -> None:
+    """The health response degrades 5 minutes after rollout progress stops."""
     now = 10_000.0
-    active_ops = {"cluster_fetch": ("cluster_fetch", now - health._WEDGE_AFTER_S - 2)}
+    wedge_after_s = NO_PROGRESS_TIMEOUT_S + 300.0
+    still_safe = health.ops_components(
+        now - wedge_after_s,
+        {"cluster_fetch": ("cluster_fetch", now - wedge_after_s)},
+        now=now,
+    )
+    active_ops = {"cluster_fetch": ("cluster_fetch", now - wedge_after_s - 2)}
 
-    assert health.ops_components(
-        now - health._WEDGE_AFTER_S - 1,
+    wedged = health.ops_components(
+        now - wedge_after_s - 1,
         active_ops,
         now=now,
-    ) == [
+    )
+
+    assert [record["status"] for record in still_safe] == ["ok", "ok", "ok"]
+    assert wedged == [
         {"name": "loop", "status": "ok", "progress": "serving /ops"},
         {
             "name": "update-lock",
             "status": "degraded",
-            "progress": f"held {health._WEDGE_AFTER_S + 1:.0f}s",
-            "detail": f"held for {health._WEDGE_AFTER_S + 1:.0f}s",
+            "progress": f"held {wedge_after_s + 1:.0f}s",
+            "detail": f"held for {wedge_after_s + 1:.0f}s",
         },
         {
             "name": "ops",
             "status": "degraded",
             "progress": "1 active",
-            "detail": f"cluster_fetch running for {health._WEDGE_AFTER_S + 2:.0f}s",
+            "detail": f"cluster_fetch running for {wedge_after_s + 2:.0f}s",
         },
     ]
     assert health.saturation(active_ops, 4) == 0.25

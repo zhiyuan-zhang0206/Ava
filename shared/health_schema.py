@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import json
 
+from shared.daemon_health import Liveness, LivenessGroup
+
 OK = "ok"
 DEGRADED = "degraded"
 DOWN = "down"
@@ -63,8 +65,6 @@ def render(
     stale signal for health sources without a ``Liveness`` or
     ``LivenessGroup`` instance.
     """
-    from shared.daemon_health import Liveness, LivenessGroup
-
     reasons = [
         f"{record['name']}: {record['detail'] if 'detail' in record else record['status']}"
         for record in components
