@@ -383,8 +383,20 @@ async def _run_in_subprocess(
             original, root_exit_task, reap_task, domain_close, reader_join_task
         )
         raise
-    except _exec_process.ExecTeardownError:
-        raise
+    except _exec_process.ExecTeardownError as exc:
+        # Cleanup failure is an exec outcome, not an agent-process failure.
+        return (
+            _ExecCrashed(
+                output=(
+                    f"[exec teardown failure] {exc}\n\n"
+                    "Partial output captured before teardown:\n\n"
+                    f"{stream.getvalue()}"
+                ),
+                exc=exc,
+                stream_cap=stream.cap(),
+            ),
+            None,
+        )
     except Exception as original:
         await _finish_failed_run(
             original, root_exit_task, reap_task, domain_close, reader_join_task

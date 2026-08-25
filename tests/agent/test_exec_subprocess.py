@@ -22,6 +22,7 @@ import psycopg
 import pytest
 from langchain_core.messages import HumanMessage
 
+from agent.graph import _exec_process
 from agent.graph._exec_result import (
     ExecChildError,
     _ExecCancelled,
@@ -254,6 +255,28 @@ async def test_subprocess_os_exit_without_envelope_is_crash(tmp_path: Path) -> N
     result = await _run(tmp_path, "import os\nos._exit(5)")
     assert isinstance(result, _ExecCrashed)
     assert "without writing a result envelope" in str(result.exc)
+
+
+async def test_teardown_failure_is_returned_as_crash_with_partial_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real_settle_resources = _exec_process.settle_resources
+    teardown_failure = RuntimeError("synthetic reader teardown failure")
+
+    async def _fail_after_settling(
+        *args: Any, **kwargs: Any
+    ) -> tuple[_exec_process.TeardownFailure, ...]:
+        assert not await real_settle_resources(*args, **kwargs)
+        return (_exec_process.TeardownFailure("reader_join", teardown_failure),)
+
+    monkeypatch.setattr(_exec_process, "settle_resources", _fail_after_settling)
+
+    result = await _run(tmp_path, "print('partial before teardown')")
+
+    assert isinstance(result, _ExecCrashed)
+    assert isinstance(result.exc, _exec_process.ExecTeardownError)
+    assert "partial before teardown" in result.output
+    assert "reader_join: RuntimeError: synthetic reader teardown failure" in result.output
 
 
 @pytest.mark.parametrize("exit_code", [5, 124])
