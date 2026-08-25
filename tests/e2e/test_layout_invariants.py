@@ -68,7 +68,7 @@ _FYI_NOTICE = {
     "id": 2,
     "agent_id": 1,
     "agent_label": "layout-test",
-    "title": "Ambient FYI",
+    "title": "轻提醒：" + "x" * 40,
     "content": "Just so you know.",
     "priority": "P3",
     "require_response": False,
@@ -394,6 +394,7 @@ def test_fleet_layout_invariants(
         # Inbox rows — the notice queue rows must fit their container.
         page.locator('[role="tab"]', has_text="Inbox").click()
         page.wait_for_timeout(1200)
+        assert _no_page_scroll(page), "I1: long-title inbox row widens the page"
         if _OVERRIDE_BASE_URL:
             # Deployed target: real data; rows exist in practice but don't
             # gate on them (an empty queue is legitimate state).

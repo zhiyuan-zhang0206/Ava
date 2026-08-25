@@ -105,7 +105,7 @@ export function FleetView() {
     // its content's max-content — main is a row-flex landmark, so without
     // flex-1 a short Inbox selection collapses the whole surface to the
     // content width (observed as the UI shrinking to the left ~60%).
-    <div className={cn("h-dvh bg-background text-foreground font-mono", FLEX, FLEX_COL, FLEX_1)}>
+    <div className={cn("h-dvh bg-background text-foreground font-mono", FLEX, FLEX_COL, FLEX_1, MIN_W_0)}>
       {isLarge ? (
         <DesktopLayout
           aliveCount={aliveCount}
@@ -279,7 +279,7 @@ const MobileLayout = memo(function MobileLayout({
 
       {/* Tab content — fills all available space above the tab bar.
            One surface mounted at a time (R4 layer 4: conditional render). */}
-      <div className={cn("relative", FLEX_1, MIN_H_0)}>
+      <div className={cn("relative", FLEX_1, MIN_H_0, MIN_W_0)}>
         {mobileTab === "agents" ? (
           <div className="absolute inset-0">
             <GraphView
