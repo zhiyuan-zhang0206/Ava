@@ -24,6 +24,11 @@ _SCHEME = "Bearer "
 _COOKIE_NAME = "ava_session"
 _DEFAULT_SESSION_TTL_SECONDS = 24 * 3600
 
+# User-Agent the managed-browser daemon sends on its gateway login, so the
+# sessions list can label its session rows and users can tell them apart from
+# their own browser sessions (and avoid revoking the wrong one).
+MANAGED_BROWSER_USER_AGENT = "ava-managed-browser"
+
 
 def bearer_header(secret: str) -> dict[str, str]:
     """The Authorization header a caller presents to an authenticated surface."""
@@ -80,3 +85,8 @@ def clear_cookie_header() -> dict[str, str]:
             "Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT"
         )
     }
+
+
+def is_managed_browser_user_agent(user_agent: str) -> bool:
+    """True when ``user_agent`` identifies the managed-browser daemon's login."""
+    return user_agent == MANAGED_BROWSER_USER_AGENT

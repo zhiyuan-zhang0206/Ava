@@ -29,11 +29,18 @@ from typing import Any
 import httpx
 import websockets
 
-from shared.cluster_auth import cookie_name
+from shared.cluster_auth import MANAGED_BROWSER_USER_AGENT, cookie_name
 
 # CDP endpoint timeouts: Chrome is local, so these only bound a wedged browser.
 _HTTP_TIMEOUT_S = 5.0
 _WS_TIMEOUT_S = 10.0
+
+# The cookie most recently handed to Chrome, as (name, value). The daemon's
+# early-refresh path checks it against the gateway after a gateway-URL
+# navigation, so a revoked or expired managed session heals immediately instead
+# of waiting out the next scheduled refresh tick. A one-element list keeps the
+# slot mutable without a `global` statement in the injector.
+_last_injected_cookie: list[tuple[str, str] | None] = [None]
 
 # IDs are per-connection in practice, but a monotonically increasing global id
 # is valid on any connection too and keeps the helper stateless.
@@ -41,10 +48,18 @@ _CDP_IDS = itertools.count(1)
 
 
 async def gateway_session_login(gateway_url: str, secret: str) -> tuple[str, str, int]:
-    """Log in and return ``(cookie_name, value, expires_unix)``."""
+    """Log in and return ``(cookie_name, value, expires_unix)``.
+
+    The login carries the managed-browser user-agent marker, so the gateway's
+    sessions list can label this session row as managed Chrome.
+    """
     url = f"{gateway_url.rstrip('/')}/api/auth/login"
     async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT_S) as client:
-        response = await client.post(url, json={"password": secret})
+        response = await client.post(
+            url,
+            json={"password": secret},
+            headers={"User-Agent": MANAGED_BROWSER_USER_AGENT},
+        )
     if response.status_code != 200:
         raise RuntimeError(f"gateway login failed with HTTP {response.status_code}")
 
@@ -125,3 +140,27 @@ async def inject_session_cookie(cdp_port: int, gateway_url: str, secret: str) ->
 
     if not result.get("success"):
         raise RuntimeError(f"Chrome rejected the gateway session cookie: {result}")
+    _last_injected_cookie[0] = (name, value)
+
+
+def last_injected_cookie() -> tuple[str, str] | None:
+    """The ``(name, value)`` of the most recently injected gateway cookie, or None."""
+    return _last_injected_cookie[0]
+
+
+async def gateway_session_is_valid(gateway_url: str, cookie_value: str) -> bool:
+    """Whether the gateway still accepts ``cookie_value`` as a live session.
+
+    Calls the auth-check endpoint (itself exempt from auth) with the cookie.
+    Any non-200 answer or an unauthenticated body counts as invalid; network
+    errors propagate to the caller, which retries on its next trigger.
+    """
+    url = f"{gateway_url.rstrip('/')}/api/auth/check"
+    async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT_S) as client:
+        response = await client.get(
+            url,
+            headers={"Cookie": f"{cookie_name()}={cookie_value}"},
+        )
+    if response.status_code != 200:
+        return False
+    return bool(response.json().get("authenticated"))

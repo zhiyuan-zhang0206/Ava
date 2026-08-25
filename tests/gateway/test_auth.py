@@ -208,6 +208,83 @@ def test_login_creates_current_server_side_session() -> None:
     assert sessions[0]["current"] is True
 
 
+def test_sessions_list_masks_non_current_ids() -> None:
+    """Only the request's current session keeps its full id; other rows show
+    the final 8 characters (the suffix the revoke endpoint accepts)."""
+    with TestClient(app) as client:
+        current = _login(client)
+        client.cookies.clear()
+        other = _login(client, user_agent="other-browser")
+        listed = client.get("/api/auth/sessions")
+
+    assert listed.status_code == 200
+    rows = listed.json()
+    assert len(rows) == 2
+    by_current = {row["current"]: row for row in rows}
+    assert by_current[True]["id"] == other  # the request's own cookie
+    assert by_current[False]["id"] == current[-8:]
+    assert by_current[False]["id"] != current  # full id never leaks for others
+
+
+def test_sessions_list_labels_managed_browser_sessions() -> None:
+    """The managed-browser daemon's login UA marks its session rows."""
+    with TestClient(app) as client:
+        _login(client, user_agent="ava-managed-browser")
+        client.cookies.clear()
+        _login(client, user_agent="test-browser")
+        rows = client.get("/api/auth/sessions").json()
+
+    managed = [row for row in rows if row["user_agent"] == "ava-managed-browser"]
+    normal = [row for row in rows if row["user_agent"] == "test-browser"]
+    assert len(managed) == 1 and len(normal) == 1
+    assert managed[0]["managed"] is True
+    assert normal[0]["managed"] is False
+
+
+def test_revoke_endpoint_accepts_masked_suffix() -> None:
+    """The sessions list shows masked ids; revoking one must still work."""
+    with TestClient(app) as client:
+        current = _login(client)
+        client.cookies.clear()
+        target = _login(client)
+        client.cookies.clear()
+        headers = _session_cookie(current)
+
+        listed = client.get("/api/auth/sessions", headers=headers).json()
+        target_row = next(row for row in listed if not row["current"] and row["id"] == target[-8:])
+        revoke = client.post(f"/api/auth/sessions/{target_row['id']}/revoke", headers=headers)
+        replay = client.get("/api/agents", headers=_session_cookie(target))
+
+    assert revoke.status_code == 200
+    assert replay.status_code == 401
+
+
+def test_revoke_endpoint_refuses_ambiguous_suffix(db_conn: psycopg.Connection) -> None:
+    """A suffix shared by more than one active session is refused, not revoked
+    wholesale."""
+    with TestClient(app) as client:
+        _login(client)
+        with db_conn.cursor() as cur:
+            cur.executemany(
+                "INSERT INTO web_sessions (id, expires_at) VALUES (%s, now() + interval '1 hour')",
+                [("first-12345678",), ("second-12345678",)],
+            )
+        db_conn.commit()
+        response = client.post("/api/auth/sessions/12345678/revoke")
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "session suffix is ambiguous"
+
+
+def test_revoke_endpoint_short_suffix_returns_404() -> None:
+    """Shorter-than-masked inputs are neither full ids nor valid suffixes."""
+    with TestClient(app) as client:
+        _login(client)
+        response = client.post("/api/auth/sessions/abcdefg/revoke")
+
+    assert response.status_code == 404
+
+
 def test_login_sets_cookie_flags_and_configured_ttl(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

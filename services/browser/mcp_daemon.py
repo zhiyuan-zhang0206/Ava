@@ -45,6 +45,7 @@ from contextlib import AsyncExitStack, suppress
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import anyio
 from mcp import ClientSession, StdioServerParameters, types
@@ -53,7 +54,11 @@ from mcp.shared.exceptions import MCPError
 from mcp.types import CONNECTION_CLOSED, REQUEST_TIMEOUT
 
 from services.browser.protocol import Request, Response
-from services.browser.session import inject_session_cookie
+from services.browser.session import (
+    gateway_session_is_valid,
+    inject_session_cookie,
+    last_injected_cookie,
+)
 from shared.config import settings
 from shared.log import logger
 from shared.machine import gateway_api_base
@@ -144,7 +149,10 @@ _UPSTREAM_WATCHDOG_TIMEOUT_S = 10.0
 
 # Gateway session cookie refresh: the default server-side lifetime is 24h;
 # refreshing every 6h leaves a comfortable margin and self-heals a lost,
-# expired, or revoked managed-browser session.
+# expired, or revoked managed-browser session. A navigation to a gateway URL
+# additionally triggers an immediate validity check (_spawn_verify), so a
+# revoked session heals on the next gateway page instead of waiting out the
+# interval.
 _SESSION_REFRESH_INTERVAL_S = 6 * 3600
 
 
@@ -251,6 +259,10 @@ class ChromeMcpDaemon:
         self, name: str, args: dict[str, Any], current_page: int | None
     ) -> tuple[types.CallToolResult, int | None]:
         page_scoped = name not in _MANAGEMENT_TOOLS
+        # A navigation to a gateway URL is the early-refresh trigger: the
+        # managed session's 401 surfaces exactly there, so check it right
+        # after the page loads instead of waiting out the refresh interval.
+        verify_after = _navigates_to_gateway(name, args)
 
         if page_scoped:
             # Re-pin to this connection's page so the call lands on the right tab.
@@ -269,10 +281,14 @@ class ChromeMcpDaemon:
                 # anything else fails fast instead of touching another client's tab.
                 if name == "navigate_page" and isinstance(args.get("url"), str):
                     result = await self._call("new_page", args)
+                    if verify_after and not result.is_error:
+                        _spawn_verify()
                     return result, (_selected_id(result) or current_page)
                 return _no_page_result(), current_page
 
         result = await self._call(name, args)
+        if verify_after and not result.is_error:
+            _spawn_verify()
         return result, self._next_page(name, args, result, current_page)
 
     @staticmethod
@@ -519,6 +535,76 @@ def _spawn_inject() -> None:
     task = asyncio.create_task(_inject_gateway_session_once())
     _inject_tasks.add(task)
     task.add_done_callback(_inject_tasks.discard)
+
+
+def _navigates_to_gateway(name: str, args: dict[str, Any]) -> bool:
+    """True when the call opens a URL under the gateway's own origin.
+
+    Gateway-served pages are exactly where a revoked or expired managed
+    session surfaces as a 401, so a navigation there is the early-refresh
+    trigger. Best effort: an unresolvable gateway base simply means no check.
+    """
+    if name not in ("navigate_page", "new_page"):
+        return False
+    url = args.get("url")
+    if not isinstance(url, str):
+        return False
+    try:
+        gateway_base = gateway_api_base()
+    except Exception:
+        return False
+    target = urlsplit(url)
+    gateway = urlsplit(gateway_base)
+    return target.scheme in ("http", "https") and (target.scheme, target.netloc) == (
+        gateway.scheme,
+        gateway.netloc,
+    )
+
+
+_verify_lock = asyncio.Lock()
+
+
+async def _verify_gateway_session_once() -> None:
+    """Re-inject the gateway session cookie when the stored one no longer
+    authenticates (revoked or expired), so a 401 heals on the next gateway
+    navigation instead of waiting out the refresh interval.
+
+    Best effort like ``_inject_gateway_session_once``: failures are logged and
+    left for the next trigger to retry. With no stored cookie (fresh daemon)
+    this falls back to a plain injection. Concurrent verifies are collapsed
+    onto the in-flight one — a single re-injection is enough.
+    """
+    if _verify_lock.locked():
+        return
+    async with _verify_lock:
+        params = _gateway_session_params()
+        if params is None:
+            return
+        gateway_url, _ = params
+        cookie = last_injected_cookie()
+        if cookie is None:
+            await _inject_gateway_session_once()
+            return
+        _, value = cookie
+        try:
+            valid = await gateway_session_is_valid(gateway_url, value)
+        except Exception as e:
+            logger.warning(f"[browser-mcp] gateway session validity check failed: {e}")
+            return
+        if not valid:
+            logger.info("[browser-mcp] gateway session no longer valid — refreshing early")
+            await _inject_gateway_session_once()
+
+
+# Fire-and-forget verify tasks are tracked like injections (RUF006).
+_verify_tasks: set[asyncio.Task[None]] = set()
+
+
+def _spawn_verify() -> None:
+    """Schedule a one-shot gateway-session validity check (best effort)."""
+    task = asyncio.create_task(_verify_gateway_session_once())
+    _verify_tasks.add(task)
+    task.add_done_callback(_verify_tasks.discard)
 
 
 async def _start_session_maintenance() -> tuple[asyncio.Event, asyncio.Task[None]]:
