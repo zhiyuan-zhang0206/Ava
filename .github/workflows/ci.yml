@@ -165,6 +165,59 @@ jobs:
       - name: Run pyright
         run: uv run pyright
 
+  backend-structure:
+    # The pre-commit-only lint + codegen freshness gates, promoted to CI (tech
+    # audit 2026-08-24 P1): ruff/pyright/migrations/clock run in backend-static,
+    # the frontend gates run in the frontend job, and everything else that
+    # guards structure, doc drift and generated-artifact freshness only ran as
+    # local pre-commit hooks — bypassable with --no-verify or a web edit. This
+    # job runs the exact same hooks via `pre-commit run --all-files` (the SKIP
+    # list is the subset already covered by other jobs), so a PR that skips
+    # pre-commit locally still meets every structural gate before merge. Runs
+    # when EITHER side changed: the codegen-freshness gates guard the
+    # backend-schema <-> frontend-generated-file contract, which a frontend-only
+    # edit can break.
+    name: backend structure (pre-commit lint + codegen freshness)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    needs: [classify]
+    if: ${{ needs.classify.outputs.frontend == 'true' || needs.classify.outputs.backend == 'true' }}
+    env:
+      AVA_DB_URL: postgresql://unused@127.0.0.1:1/unused
+      AVA_REDIS_URL: redis://127.0.0.1:1/0
+      # Hooks already covered by other jobs — backend-static runs
+      # ruff/ruff-format/pyright/lint-migrations/lint-clock-lattice, the
+      # frontend job runs tsc/eslint/vitest. Everything else in
+      # .pre-commit-config.yaml runs here.
+      SKIP: ruff,ruff-format,pyright,lint-migrations,lint-clock-lattice,frontend-tsc,frontend-eslint,frontend-vitest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: 0.10.2
+
+      - name: Install Python deps
+        run: uv sync --frozen
+
+      # types-codegen-fresh shells out to `npx openapi-typescript` inside
+      # ui/web (scripts/check-types-fresh.sh), so the node toolchain + deps
+      # are part of this job's surface, not just the frontend job's.
+      - name: Install Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ui/web/package-lock.json
+
+      - name: Install frontend deps (codegen freshness)
+        working-directory: ui/web
+        run: npm ci
+
+      - name: Run pre-commit structural gates (--all-files)
+        run: uv run pre-commit run --all-files
+
   backend-shard:
     name: backend shard (${{ matrix.group }}/8)
     runs-on: ubuntu-24.04
@@ -198,7 +251,7 @@ jobs:
         run: >
           uv run pytest tests/ -q --ignore=tests/e2e -m "not flaky" -n 4
           --splits 8 --group ${{ matrix.group }}
-          --cov=agent --cov=ava --cov=gateway --cov=shared --cov=ui
+          --cov=agent --cov=ava --cov=cli --cov=gateway --cov=shared --cov=ui
 
       - name: Upload coverage data
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -243,7 +296,7 @@ jobs:
       - name: Run flaky pytest bucket serially
         run: >
           uv run pytest tests/ -m flaky --ignore=tests/e2e -q
-          --cov=agent --cov=ava --cov=gateway --cov=shared --cov=ui
+          --cov=agent --cov=ava --cov=cli --cov=gateway --cov=shared --cov=ui
 
       - name: Upload coverage data
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -267,13 +320,13 @@ jobs:
     name: backend (pytest + pyright)
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    needs: [classify, backend-static, backend-shard, backend-serial]
+    needs: [classify, backend-static, backend-structure, backend-shard, backend-serial]
     if: ${{ always() && needs.classify.result == 'success' && needs.classify.outputs.backend == 'true' }}
     steps:
       - name: Verify shard results
-        if: ${{ needs.backend-static.result != 'success' || needs.backend-shard.result != 'success' || needs.backend-serial.result != 'success' }}
+        if: ${{ needs.backend-static.result != 'success' || needs.backend-structure.result != 'success' || needs.backend-shard.result != 'success' || needs.backend-serial.result != 'success' }}
         run: |
-          echo "a backend job did not succeed: static=${{ needs.backend-static.result }} shards=${{ needs.backend-shard.result }} serial=${{ needs.backend-serial.result }}"
+          echo "a backend job did not succeed: static=${{ needs.backend-static.result }} structure=${{ needs.backend-structure.result }} shards=${{ needs.backend-shard.result }} serial=${{ needs.backend-serial.result }}"
           exit 1
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -300,6 +353,16 @@ jobs:
           # five points of buffer for shard-drop/flake variance. Do not aim for
           # 100% — line coverage is not quality; this gate only sees shard data
           # that reached the combine step (including coverage-data-serial).
+          #
+          # Denominator (must match [tool.coverage.run].source in pyproject):
+          # agent/ava/cli/gateway/shared/ui — cli was added 2026-08-25 (tech
+          # audit P1; measured 82% standalone, projected combined ~88.6%).
+          # ops/services/ava_builtins stay EXCLUDED by decision, documented
+          # (pyproject): their measured standalone coverage (ops 48% via
+          # tests/ops; services/ava_builtins lower) would take the 85% gate
+          # below threshold even though their tests run in CI. The audit's
+          # per-risk-domain minimum-line gates for those packages are a
+          # tracked follow-up, not this gate.
           uv run coverage combine coverage-data-*
           uv run coverage xml
           uv run python -c "

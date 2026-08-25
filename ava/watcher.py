@@ -3,6 +3,7 @@ stay in-turn polling."""
 
 from __future__ import annotations
 
+import contextlib
 import datetime
 import hashlib
 import logging
@@ -341,12 +342,15 @@ def _spawn(
         output_path=output_path,
         keep=False,
     )
-    _sessions.send(session_id, line)
     # R1 (Task #1021): the watcher registry — this row is what the agent's boot
     # reconcile reads to rebuild a watcher whose session a stop/rollout reaped
-    # (#1014). The row must be written before the child can exit (the child
-    # deletes it on clean exit); a registry failure is warned about, never
-    # allowed to break the spawn it is only observing.
+    # (#1014). The row is written BEFORE the child starts, never after: a child
+    # that exits before its row lands would leave the row inserted after its
+    # clean-exit cleanup already ran — a permanent ghost "running" row the boot
+    # reconcile would read as "killed, should exist". Registering first closes
+    # that race, and a registry failure now FAILS the spawn instead of being
+    # swallowed (the old fail-soft left a live watcher the boot reconcile can
+    # never rebuild — the registry is the only record of "should exist").
     try:
         from shared.watcher_registry import register_watcher
 
@@ -364,12 +368,36 @@ def _spawn(
             template_version=TEMPLATE_VERSION,
         )
     except Exception:
-        logger.warning(
-            "[watcher] registry write failed for session %s — the boot reconcile "
-            "cannot rebuild this watcher if it is killed",
+        logger.error(
+            "[watcher] registry write failed for session %s — refusing to start "
+            "the watcher (the boot reconcile could never rebuild it)",
             session_id,
             exc_info=True,
         )
+        # Dispose the session we created but will not start; kill() also drops
+        # any registry row, so this is safe on every failure path.
+        with contextlib.suppress(Exception):
+            _sessions.kill(session_id)
+        raise
+    try:
+        _sessions.send(session_id, line)
+    except Exception:
+        # Compensating delete: a registered row whose child never started would
+        # be read by the next boot reconcile as "killed, should exist" and
+        # rebuilt forever. The row only exists because the spawn failed after
+        # registration, so it must not survive the failed spawn.
+        logger.error(
+            "[watcher] failed to start session %s after registering it — dropping the registry row",
+            session_id,
+            exc_info=True,
+        )
+        with contextlib.suppress(Exception):
+            from shared.watcher_registry import delete_watcher
+
+            delete_watcher(agent_id, session_id)
+        with contextlib.suppress(Exception):
+            _sessions.kill(session_id)
+        raise
     return session_id
 
 

@@ -44,7 +44,13 @@ import psycopg
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
-from services.im_bridge import copy as im_copy
+from shared.alerts_copy import (
+    ALERT_HEAD,
+    ALERT_JUMP_LINK,
+    ALERT_LANGUAGE_DEFAULT,
+    ALERT_LANGUAGES,
+    ALERT_TRIGGERED_AT,
+)
 from shared.config import settings
 from shared.daemon_health import health_port
 
@@ -357,15 +363,15 @@ def display_language(conn: psycopg.Connection) -> str:
 
     IM copy language follows the UI language (user ruling 2026-08-13: one
     language source, no separate IM field). Returns "zh" | "en"; a missing
-    row or an unknown value falls back to ``im_copy.ALERT_LANGUAGE_DEFAULT``
-    ("zh"). Only template/framework copy is translated — alert data never is.
+    row or an unknown value falls back to ``ALERT_LANGUAGE_DEFAULT`` ("zh").
+    Only template/framework copy is translated — alert data never is.
     """
 
     with conn.cursor() as cur:
         cur.execute("SELECT value FROM user_settings WHERE key = 'display.language'")
         row = cur.fetchone()
     raw = row[0] if row else None
-    return raw if raw in im_copy.ALERT_LANGUAGES else im_copy.ALERT_LANGUAGE_DEFAULT
+    return raw if raw in ALERT_LANGUAGES else ALERT_LANGUAGE_DEFAULT
 
 
 def notify_text(alert: dict[str, Any], lang: str | None = None) -> str:
@@ -377,20 +383,22 @@ def notify_text(alert: dict[str, Any], lang: str | None = None) -> str:
     variant. Every severity pushes
     (critical/warning/error — no severity gate).
 
-    Templates live in ``services/im_bridge/copy.py`` — the single source of
-    user-visible IM copy (governance ruling 2026-08-08). ``lang`` picks the
-    template language ("zh" | "en"); ``None`` (or an unknown value) falls back
-    to ``im_copy.ALERT_LANGUAGE_DEFAULT`` ("zh", user ruling 2026-08-13).
-    Alert labels/annotations data (severity, alertname, summary,
-    generator_url) passes through untranslated.
+    Templates live in ``shared/alerts_copy.py`` — the single source of
+    user-visible IM copy (governance ruling 2026-08-08; moved down from
+    services/im_bridge/copy.py by the 2026-08-25 tech-audit P1 so shared does
+    not import up into services). ``lang`` picks the template language
+    ("zh" | "en"); ``None`` (or an unknown value) falls back to
+    ``ALERT_LANGUAGE_DEFAULT`` ("zh", user ruling 2026-08-13). Alert
+    labels/annotations data (severity, alertname, summary, generator_url)
+    passes through untranslated.
     """
 
     labels: dict[str, str] = alert.get("labels") or {}
     severity = parse_severity(labels).upper()
     alertname = parse_alertname(labels)
     resolved = normalize_status(str(alert.get("status") or "")) == "resolved"
-    lang = lang if lang in im_copy.ALERT_LANGUAGES else im_copy.ALERT_LANGUAGE_DEFAULT
-    head = im_copy.ALERT_HEAD[lang]["resolved" if resolved else "firing"].format(
+    lang = lang if lang in ALERT_LANGUAGES else ALERT_LANGUAGE_DEFAULT
+    head = ALERT_HEAD[lang]["resolved" if resolved else "firing"].format(
         severity=severity, alertname=alertname
     )
     lines = [head]
@@ -401,8 +409,8 @@ def notify_text(alert: dict[str, Any], lang: str | None = None) -> str:
         lines.append(alert["generator_url"])
     start = format_local(parse_ts(alert.get("starts_at") or ""))
     if start:
-        lines.append(im_copy.ALERT_TRIGGERED_AT[lang].format(time=start))
+        lines.append(ALERT_TRIGGERED_AT[lang].format(time=start))
     base_url = frontend_base_url()
     if base_url:
-        lines.append(im_copy.ALERT_JUMP_LINK.format(url=base_url))
+        lines.append(ALERT_JUMP_LINK.format(url=base_url))
     return "\n".join(lines)

@@ -185,6 +185,17 @@ ignore_imports = [
     "services.agent_host.* -> agent.state",
 ]
 
+# The one reverse edge shared must never grow: `shared` is the bottom layer,
+# and `services` sits above it (daemons that import gateway). The alerts
+# module used to import services.im_bridge.copy for its IM templates — moved
+# down to shared/alerts_copy.py (tech audit 2026-08-24 P1); this contract
+# locks the direction so no new shared -> services edge can creep back in.
+[[tool.importlinter.contracts]]
+name = "shared must not import services"
+type = "forbidden"
+source_modules = ["shared"]
+forbidden_modules = ["services"]
+
 # Ops layer: shared < ops < {gateway, cli}. The ops module (Spec / Status /
 # controllers) sits above shared and is consumed by gateway + cli (and by the
 # services daemons, which become thin mains over the controllers) — but must never
@@ -377,7 +388,17 @@ filterwarnings = [
 ]
 
 [tool.coverage.run]
-source = ["agent", "ava", "cli", "gateway", "shared", "ava_builtins"]
+# Must match the CI shards' --cov= flags (ci.yml backend-shard / backend-serial).
+# agent/ava/gateway/shared/ui is the historical set; cli joined 2026-08-25
+# (tech audit P1 — measured 82% standalone with tests/cli).
+# ops/services/ava_builtins are deliberately excluded from the 85% gate: their
+# measured standalone coverage (ops 48% via tests/ops; services and
+# ava_builtins lower) would take the combined line-rate below threshold even
+# though their test suites DO run in every CI shard — the gate simply does not
+# score them. They remain high-incident domains (deploy/backup/watchdog/ops),
+# so per-risk-domain minimum-line gates for them are a tracked follow-up (tech
+# audit 2026-08-24 P1), not silently forgotten.
+source = ["agent", "ava", "cli", "gateway", "shared", "ui"]
 omit = [
     "*/__main__.py",
     "*/__init__.py",

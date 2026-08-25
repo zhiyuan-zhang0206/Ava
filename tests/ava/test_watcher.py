@@ -999,3 +999,74 @@ def test_reconcile_missing_session_still_rebuilds_cron(
     assert len(spawned) == 1
     assert statuses == [(_TEST_AGENT_BASE, 68, "rebuilt")]
     assert any("rebuilt as session 999" in a for a in actions)
+
+
+# ─── register-before-start (tech audit 2026-08-24 P1) ────────────────────────
+
+
+def test_spawn_registers_before_starting(_agent_row: int, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The registry row exists when the child starts — register-before-start
+    closes the ghost-row race: a child that exits before its row lands leaves
+    the row inserted after the child's clean-exit cleanup already ran, i.e. a
+    permanent 'running' row the boot reconcile reads as killed-should-exist."""
+    from ava.shell import sessions as _sessions
+
+    registered_at_start: list[bool] = []
+
+    def recording_send(_sid: int, _cmd: str) -> None:
+        # _spawn calls send AFTER registering — the row must already exist.
+        registered_at_start.append(any(r["session_id"] == _sid for r in _registry_rows(_agent_row)))
+
+    monkeypatch.setattr(_sessions, "send", recording_send)  # pyright: ignore[reportUnknownArgumentType]
+    wid = watcher.launch("import ava\n", timeout=120, name="test-reg-order")
+    try:
+        assert registered_at_start and registered_at_start[0] is True
+        assert any(r["session_id"] == wid for r in _registry_rows(_agent_row))
+    finally:
+        ava.shell.kill(wid)
+
+
+def test_spawn_fails_when_registry_write_fails(
+    _agent_row: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A registry write failure FAILS the spawn instead of fail-soft: the
+    watcher must not start if the boot reconcile could never rebuild it, and
+    the created session is disposed."""
+    from ava.shell import sessions as _sessions
+
+    started: list[str] = []
+    killed: list[int] = []
+    monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: started.append(_cmd))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_sessions, "kill", killed.append)  # pyright: ignore[reportUnknownArgumentType]
+
+    def _fail_registration(*_a: object, **_k: object) -> None:
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(
+        "shared.watcher_registry.register_watcher",
+        _fail_registration,  # pyright: ignore[reportUnknownArgumentType]
+    )
+    with pytest.raises(RuntimeError, match="db down"):
+        watcher.launch("import ava\n", timeout=120, name="test-reg-fail")
+    assert started == []  # the child never started
+    assert killed  # the created session was disposed
+    assert _registry_rows(_agent_row) == []  # no row leaked
+
+
+def test_spawn_compensates_row_when_start_fails(
+    _agent_row: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """If the child cannot be started after registration, the registry row is
+    dropped — a row whose session never ran would be read by the next boot
+    reconcile as killed-should-exist and rebuilt forever."""
+    from ava.shell import sessions as _sessions
+
+    before = len(_registry_rows(_agent_row))
+    monkeypatch.setattr(
+        _sessions,
+        "send",
+        lambda _id, _cmd: (_ for _ in ()).throw(RuntimeError("pty down")),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    )
+    with pytest.raises(RuntimeError, match="pty down"):
+        watcher.launch("import ava\n", timeout=120, name="test-reg-comp")
+    assert len(_registry_rows(_agent_row)) == before  # no row leaked

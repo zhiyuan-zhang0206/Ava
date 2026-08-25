@@ -107,3 +107,4 @@ okf-d3.html
 # (.commit_msg.txt) is a transient scratch file.
 /.commit_msg.txt
 /commit_msg.txt
+/.precommit-all.log

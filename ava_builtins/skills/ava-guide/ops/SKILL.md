@@ -295,7 +295,4 @@ or watchdog respawn can kill it; only its own `kill`, its shell exiting, or a
 machine reboot ends it. Orphan sessions are reclaimed as a periodic
 management task.
 
-### Reference
-
-Full detail: `shared/session_env.py`, `shared/session_backend.py`,
-`cli/commands/logs.py`.
+Full detail: `shared/session_env.py`, `shared/session_backend.py`, `cli/commands/logs.py`.
