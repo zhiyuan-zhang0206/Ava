@@ -1664,7 +1664,7 @@ groups:
       #        expected to take longer, so their calibrated warning/error
       #        thresholds are 5s/10s. Warning-first: no IM push
       #        (Insights-visible only). ──
-      - uid: ava-ops-gateway-latency-route-slow-warning
+      - uid: ava-ops-gw-latency-slow-warning
         title: "Gateway latency: slow route p95 above 5000ms"
         condition: D
         for: 5m
@@ -1672,7 +1672,7 @@ groups:
         execErrState: OK
         labels:
           severity: warning
-          ruleUID: ava-ops-gateway-latency-route-slow-warning
+          ruleUID: ava-ops-gw-latency-slow-warning
           metric: gateway_latency_route_slow_p95
           team: ava-ops
           notify_im: "false"
@@ -1735,7 +1735,7 @@ groups:
                   query:
                     params: [C]
 
-      - uid: ava-ops-gateway-latency-route-slow-error
+      - uid: ava-ops-gw-latency-slow-error
         title: "Gateway latency: slow route p95 above 10000ms"
         condition: D
         for: 5m
@@ -1743,7 +1743,7 @@ groups:
         execErrState: OK
         labels:
           severity: error
-          ruleUID: ava-ops-gateway-latency-route-slow-error
+          ruleUID: ava-ops-gw-latency-slow-error
           metric: gateway_latency_route_slow_p95
           team: ava-ops
           notify_im: "false"
