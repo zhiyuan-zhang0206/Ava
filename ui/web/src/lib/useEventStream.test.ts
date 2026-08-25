@@ -86,6 +86,10 @@ beforeEach(() => {
   mocks.checkAuth.mockReset();
   mocks.checkAuth.mockResolvedValue({ authenticated: true });
   vi.stubGlobal("EventSource", MockEventSource);
+  Object.defineProperty(document, "visibilityState", {
+    configurable: true,
+    value: "visible",
+  });
   // The Providers read reconnectNonce + activeId from the store and list them
   // in effect deps — reset both so each test starts from a known baseline.
   useStore.setState({ reconnectNonce: 0, activeId: null });
@@ -653,11 +657,10 @@ describe("EventStreamProvider half-dead watchdog", () => {
   });
 });
 
-// The all-events throttled broadcast shares all the connection machinery
+// The all-events throttled stream shares all the connection machinery
 // (useSseConnection) with the global broadcast — tested above. These tests
-// cover what differs: the URL is always /api/system/all (not tied to
-// activeId), the connection is always open, and agent switches don't
-// close/reopen it.
+// cover what differs: the URL follows activeId, agent switches re-key the
+// connection, and hidden tabs close SSE in favor of a slow poll signal.
 describe("AgentEventStreamProvider all-events broadcast URL", () => {
   function withAgentProvider() {
     const qc = new QueryClient({
@@ -676,40 +679,84 @@ describe("AgentEventStreamProvider all-events broadcast URL", () => {
     };
   }
 
-  it("always opens /api/system/all regardless of activeId", async () => {
+  it("activeId filters the /api/system/all URL", async () => {
     act(() => useStore.setState({ activeId: 7 }));
     void renderHook(() => useAgentEventStream(vi.fn(), vi.fn()), {
       wrapper: withAgentProvider(),
     });
     await waitForInstance();
-    expect(expectInstance().url).toContain("/api/system/all");
+    expect(expectInstance().url).toBe("/api/system/all?agents=7");
   });
 
-  it("activeId null → still opens connection (always-on broadcast)", async () => {
+  it("activeId null → opens the unfiltered all-events connection", async () => {
     act(() => useStore.setState({ activeId: null }));
     void renderHook(() => useAgentEventStream(vi.fn(), vi.fn()), {
       wrapper: withAgentProvider(),
     });
     await waitForInstance();
     expect(lastInstance).not.toBeNull();
-    expect(expectInstance().url).toContain("/api/system/all");
+    expect(expectInstance().url).toBe("/api/system/all");
   });
 
-  it("agent switch → does NOT close the connection (same broadcast serves all agents)", async () => {
+  it("agent switch → closes and reopens with the new filter", async () => {
     act(() => useStore.setState({ activeId: 1 }));
     void renderHook(() => useAgentEventStream(vi.fn(), vi.fn()), {
       wrapper: withAgentProvider(),
     });
     await waitForInstance();
     const first = expectInstance();
-    expect(first.url).toContain("/api/system/all");
+    expect(first.url).toBe("/api/system/all?agents=1");
 
     act(() => useStore.setState({ activeId: 2 }));
-    // The old connection should NOT be closed — agent switch doesn't re-key the URL
-    expect(first.readyState).not.toBe(MockEventSource.CLOSED);
-    // And a new EventSource should NOT be constructed (same URL, same provider)
-    // lastInstance should still be the same instance
-    expect(expectInstance()).toBe(first);
+    await waitFor(() => expect(expectInstance()).not.toBe(first));
+    expect(first.readyState).toBe(MockEventSource.CLOSED);
+    expect(expectInstance().url).toBe("/api/system/all?agents=2");
+  });
+
+  it("hidden tab closes SSE, polls subscribers every 7s, then reopens when visible", async () => {
+    act(() => useStore.setState({ activeId: 7 }));
+    const onConn = vi.fn<(ev: ConnectionEvent) => void>();
+    void renderHook(() => useAgentEventStream(vi.fn(), onConn), {
+      wrapper: withAgentProvider(),
+    });
+    await waitForInstance();
+    const first = expectInstance();
+
+    try {
+      vi.useFakeTimers();
+      act(() => {
+        Object.defineProperty(document, "visibilityState", {
+          configurable: true,
+          value: "hidden",
+        });
+        document.dispatchEvent(new Event("visibilitychange"));
+      });
+
+      expect(first.readyState).toBe(MockEventSource.CLOSED);
+      onConn.mockClear();
+      act(() => {
+        vi.advanceTimersByTime(7_000);
+      });
+      expect(onConn).toHaveBeenCalledWith({ type: "poll" });
+
+      onConn.mockClear();
+      act(() => {
+        Object.defineProperty(document, "visibilityState", {
+          configurable: true,
+          value: "visible",
+        });
+        document.dispatchEvent(new Event("visibilitychange"));
+      });
+
+      expect(expectInstance()).not.toBe(first);
+      expect(expectInstance().url).toBe("/api/system/all?agents=7");
+      act(() => {
+        vi.advanceTimersByTime(7_000);
+      });
+      expect(onConn).not.toHaveBeenCalledWith({ type: "poll" });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("calling useAgentEventStream outside its Provider → throws (fail-fast)", () => {

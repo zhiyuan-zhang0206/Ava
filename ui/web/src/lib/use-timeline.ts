@@ -66,11 +66,9 @@ function startsTurn(event: SystemEvent): boolean {
 }
 
 /** SSE connection state — UI uses it to show banners ("disconnected /
- *  reconnecting"). Derived from ConnectionEvent.type (excluding
- *  'parse-failed' — that's a per-event signal, not a health-state
- *  change). When new health variants are added, ConnectionState
- *  follows automatically. */
-export type ConnectionState = Exclude<ConnectionEvent["type"], "parse-failed">;
+ *  reconnecting"). Parse failures and hidden-tab poll ticks are signals,
+ *  not health-state changes. */
+export type ConnectionState = Exclude<ConnectionEvent["type"], "parse-failed" | "poll">;
 
 export interface UseTimelineResult {
   items: BackendTimelineItem[];
@@ -309,10 +307,9 @@ export function useTimeline(
   // Frame-batch delivery: the provider calls this ONCE per SSE frame with
   // every event in it, and the whole frame folds in one store set() (one
   // notification + one render) instead of one set() per event. This is the
-  // subscriber-level half of the busy-fleet fix — while several agents
-  // stream at once (the moment a live shell view is open) the all-events
-  // broadcast carries dozens of deltas per second, and the per-event path
-  // turned every one into a render/layout pass on the home page.
+  // subscriber-level half of the streaming render fix — one active agent can
+  // still produce many deltas per second, and the per-event path turned every
+  // one into a render/layout pass on the home page.
   const onSystemEventBatch = useCallback(
     (events: SystemEvent[]) => {
       // token_usage belongs to useTokenUsage's own per-event subscriber.
@@ -338,6 +335,11 @@ export function useTimeline(
   const onConnectionEvent = useCallback(
     (ev: ConnectionEvent) => {
       switch (ev.type) {
+        case "poll":
+          if (agentId != null) {
+            void queryClient.invalidateQueries({ queryKey: ["timeline", agentId] });
+          }
+          return;
         case "open":
           processConnectionEvent({ type: "open" });
           seenParseErrors.current.clear();

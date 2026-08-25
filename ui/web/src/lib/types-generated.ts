@@ -1197,17 +1197,20 @@ export interface paths {
         };
         /**
          * Get All Events
-         * @description Throttled all-events SSE broadcast — pushes EVERY event for EVERY agent,
-         *         no agent_id or role filtering.  Events are batched and flushed at the
-         *         cadence set by settings.gateway.sse_throttle_rate, each flush carrying a JSON array
+         * @description Throttled SSE stream with optional comma-separated agent filtering.
+         *
+         *         With no ``agents`` query, every event for every agent passes. With a query,
+         *         only the selected agents plus system-level ``agent_id == 0`` events pass.
+         *         There is no role filtering. Events are batched and flushed at the cadence
+         *         set by settings.gateway.sse_throttle_rate, each flush carrying a JSON array
          *         of raw event payloads.
          *
          *         Wire format: `data: [event_json, ...]
          *
          *     `
          *
-         *         This is the "push everything once" stream — the frontend subscribes to
-         *         this single connection and filters internally by agent_id / role.
+         *         The frontend subscribes once for the active agent and still filters by
+         *         agent_id / role defensively.
          */
         get: operations["get_all_events_api_system_all_get"];
         put?: never;
@@ -8381,7 +8384,9 @@ export interface operations {
     };
     get_all_events_api_system_all_get: {
         parameters: {
-            query?: never;
+            query?: {
+                agents?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -8395,6 +8400,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

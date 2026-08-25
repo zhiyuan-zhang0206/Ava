@@ -585,8 +585,8 @@ describe("useTimeline agentId switch", () => {
   });
 
   it("switched-away thread folds background SSE into its bucket; switch-back refetches to reconcile (item 8) and the merge keeps the in-flight bubble", async () => {
-    // The all-events stream carries thread A's events even while B is shown; they
-    // fold into A's parked bucket. Item 8 makes switch-back ALWAYS refetch to
+    // The store can receive an already-buffered thread A frame while B is shown;
+    // it folds into A's parked bucket. Item 8 makes switch-back ALWAYS refetch to
     // reconcile (a live bucket is not a freshness guarantee — an event missed
     // during a socket gap leaves it silently stale). The merge must NOT clobber
     // live content: mergeSnapshotWithStreaming rule 3 keeps the single in-flight
@@ -614,8 +614,8 @@ describe("useTimeline agentId switch", () => {
     rerender({ tid: 2 });
     await waitFor(() => expect(result.current.items).toEqual([]));
 
-    // Background SSE for the switched-away thread 1 folds into its bucket, not
-    // the active view (thread 2).
+    // A buffered SSE event for switched-away thread 1 folds into its bucket,
+    // not the active view (thread 2).
     pushEvent({ role: "chat_start", agent_id: 1, item_id: "2.0" });
     pushEvent({ role: "chat_delta", agent_id: 1, item_id: "2.0", content: "streamed while away" });
     expect(result.current.items).toEqual([]);
@@ -672,8 +672,8 @@ describe("useTimeline agentId switch", () => {
   });
 
   it("compact_done for a NON-active thread does not refetch the active thread (targets ev.agent_id)", async () => {
-    // compact_done arrives on the shared /all stream for every agent. It must
-    // NOT refetch the active thread — else a parked thread's compaction
+    // A buffered compact_done for a non-active agent must NOT refetch the active
+    // thread — else a just-parked thread's compaction
     // spuriously refetches whatever you're viewing.
     const showError = vi.fn();
     vi.mocked(api.getTimeline).mockResolvedValue(tlResp([]));
@@ -1078,6 +1078,26 @@ describe("useTimeline connectionState", () => {
     rerender({ tid: 3 });
     expect(result.current.connectionState).toBe("open");
     unmount();
+  });
+
+  it("poll invalidates the active timeline snapshot", async () => {
+    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    renderHook(() => useTimeline(42, vi.fn()), { wrapper });
+    await waitFor(() => expect(api.getTimeline).toHaveBeenCalledWith(42));
+    invalidateSpy.mockClear();
+
+    pushConnectionEvent({ type: "poll" });
+
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["timeline", 42] });
+  });
+
+  it("poll with no active agent does not invalidate a timeline snapshot", () => {
+    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    renderHook(() => useTimeline(null, vi.fn()), { wrapper });
+
+    pushConnectionEvent({ type: "poll" });
+
+    expect(invalidateSpy).not.toHaveBeenCalled();
   });
 
   it("parse-failed: first toast fires; subsequent same-error toasts deduped (no flood)", async () => {
