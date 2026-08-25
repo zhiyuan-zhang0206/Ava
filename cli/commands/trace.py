@@ -169,7 +169,13 @@ def _ship_files(
     total_lines = 0
     total_spans = 0
     shipped_files = 0
-    with httpx.Client(timeout=30.0) as client:
+    with httpx.Client(timeout=30.0, trust_env=False) as client:
+        # trust_env=False: the macOS system proxy (127.0.0.1:7897 VPN/clash) would
+        # otherwise intercept protobuf POSTs to the tailnet Tempo endpoint and
+        # answer 502 — the proxy handles JSON but mangles binary bodies. Same
+        # fix pattern as the cross-machine ops RPC (trust_env=False), and for
+        # the same reason: NO_PROXY does not bypass the macOS system-config
+        # branch httpx reads.
         for path in files:
             start = 0 if windowed else marks.get(path.name, 0)
             if start >= path.stat().st_size:
