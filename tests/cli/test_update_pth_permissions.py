@@ -104,7 +104,7 @@ def test_gateway_recovery_restores_pth_before_start(
         observed.append((kind, _read_mode(pth)))
         return SimpleNamespace(returncode=0)
 
-    def rollback_schema(_keep: set[str]) -> list[str]:
+    def rollback_schema(_keep: set[str], *, local_admin: bool = False) -> list[str]:
         return []
 
     def reset(_sha: str) -> None:
