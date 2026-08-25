@@ -235,6 +235,26 @@ def test_type_checking_sibling_import_is_not_flagged(scan_tmp) -> None:
     assert errs == []
 
 
+def test_out_of_repo_path_does_not_crash(scan_tmp, tmp_path_factory) -> None:
+    """A target outside _REPO_ROOT must not crash the run (bare relative_to used
+    to raise ValueError; the lint reports it by absolute path instead)."""
+    outside = tmp_path_factory.mktemp("outside")
+    (outside / "helper.py").write_text("VALUE = 1\n", encoding="utf-8")
+    bad = outside / "runner.py"
+    bad.write_text(
+        textwrap.dedent(
+            """\
+            #!/usr/bin/env python3
+            from helper import VALUE
+
+            print(VALUE)
+            """
+        ),
+        encoding="utf-8",
+    )
+    assert _lint.main([str(bad)]) == 1
+
+
 def test_main_returns_nonzero_on_violation(scan_tmp) -> None:
     _write(scan_tmp, "tools/helper.py", "VALUE = 1\n")
     bad = _write(scan_tmp, "tools/runner.py", _script("from helper import VALUE"))

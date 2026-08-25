@@ -176,7 +176,12 @@ def _scan_file(path: Path) -> list[str]:
         return []
     if not _is_script_mode(tree, src):
         return []
-    rel = path.relative_to(_REPO_ROOT).as_posix()
+    try:
+        rel = path.relative_to(_REPO_ROOT).as_posix()
+    except ValueError:
+        # Path not under repo — pre-commit usually passes absolute paths so this
+        # is rare; safety net so an out-of-tree target cannot crash the run.
+        rel = path.as_posix()
     d = path.parent
     type_checking = _type_checking_ids(tree)
     violations: list[str] = []
