@@ -12,7 +12,8 @@ Everything between `python -m agent` and the graph going live, split out of
 - boot phase 2 (`_build_data_plane`): the inbound Redis pub/sub listener + the
   SSE event publisher;
 - `_build_checkpointer`: the AsyncPostgresSaver (wrapped with loud-failure
-  checkpoint writes) + the startup claimed-inbound reconcile;
+  logging and optional N-step checkpoint throttling) + the startup
+  claimed-inbound reconcile;
 - `_build_graph`: the compiled graph + dangling tool_use repair + the
   plugin-scope config overlay + the effective-config snapshot.
 
@@ -89,6 +90,7 @@ from .startup import (
     _reconcile_claimed_inbounds_at_startup,
     _repair_dangling_tool_use_at_startup,
     _wrap_saver_writes_with_loud_failure,
+    _wrap_saver_writes_with_nstep_interval,
     _write_effective_config_to_restart_completed,
 )
 from .state import BaseAgentState, build_checkpoint_serde
@@ -375,8 +377,9 @@ async def _build_data_plane(agent_id: int) -> tuple[RedisInboundListener, AgentE
 async def _build_checkpointer(
     db_pool: AsyncConnectionPool[psycopg.AsyncConnection], agent_id: int
 ) -> AsyncPostgresSaver:
-    """Saver + reconcile: wrap checkpoint writes with loud failure, then
-    resolve any 'claimed' inbounds left by a previous process of this agent.
+    """Saver + reconcile: log every checkpoint write failure, optionally
+    throttle graph super-step checkpoints by the turn-scoped N-step interval,
+    then resolve any 'claimed' inbounds left by a previous process of this agent.
 
     LangGraph submits aput / aput_writes into a background executor and never
     propagates its failures; a conn that *dies during* aput goes silent. Wrap
@@ -398,6 +401,7 @@ async def _build_checkpointer(
     saver_pool = cast(AsyncConnectionPool[psycopg.AsyncConnection[DictRow]], db_pool)
     checkpointer = AsyncPostgresSaver(conn=saver_pool, serde=build_checkpoint_serde())
     _wrap_saver_writes_with_loud_failure(checkpointer, agent_id)
+    _wrap_saver_writes_with_nstep_interval(checkpointer, turn_settings.agent.checkpoint_interval)
     await _reconcile_claimed_inbounds_at_startup(db_pool, checkpointer, agent_id)
     _boot_timing.mark("db_reconcile")
     return checkpointer

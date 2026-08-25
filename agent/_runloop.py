@@ -20,6 +20,7 @@ This module owns:
 """
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from typing import cast
 
@@ -293,6 +294,7 @@ async def _invoke_graph_with_lifecycle_logging(
     # with the same messages and hitting the same fatal error in an infinite loop
     # (agent #1581 incident — DeepSeek stream stall with 616 messages).
     input_update: dict[str, object] = {}
+    checkpointer = cast(AsyncPostgresSaver, graph.checkpointer)  # pyright: ignore[reportUnknownMemberType]
     turn = 0
     while True:
         turn += 1
@@ -333,6 +335,14 @@ async def _invoke_graph_with_lifecycle_logging(
                     context=ctx,
                 )
                 await _trace_checkpoint.attach_trace_checkpoint_ref(graph, ctx, agent_id)
+                # The optional N-step flush is an instance monkey-patch, not a
+                # saver class method. Avoid triggering dynamic __getattr__
+                # implementations on alternate saver objects.
+                if "_ava_nstep_flush" in checkpointer.__dict__:
+                    flush = cast(
+                        Callable[[], Awaitable[None]], checkpointer.__dict__["_ava_nstep_flush"]
+                    )
+                    await flush()
             # exit_requested is guaranteed present: this invocation's input
             # wrote the channel. [] not .get() — a missing key is a bug.
             if result["exit_requested"]:
