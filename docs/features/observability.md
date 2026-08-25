@@ -2,7 +2,9 @@
 
 Every agent turn is a trace, every event is one stream, and one backend
 stack (LGTM) serves traces, logs, and metrics in a single UI — and backs the
-gateway's /ops + inspect endpoints.
+gateway's /ops + inspect endpoints. Why Tempo (over Jaeger / SigNoz / Zipkin)
+became the trace backend, and the 2026-08-11 rulings behind it, are recorded
+in [decisions/2026-08-11-otel-viewer-selection.md](../../decisions/2026-08-11-otel-viewer-selection.md).
 
 ## Why it matters
 
