@@ -129,7 +129,7 @@ consumers: see the comments at each emit point.
 | `host_started` | the hosted agent-runner finished process-scope boot and its dispatcher is live | noise | — | — | 90d | events |
 | `host_turn_uncancellable` | a hosted turn did not unwind after being cancelled — it is blocked where asyncio cannot interrupt it (a C call), so the host stopped waiting and exited. Carries the agent, how long the cancel was pending (waited_s), and the agent's real activity clock (last_active_at / idle_s from agents_meta, NOT the /api/agents field of the same name, which is MAX(inbound_messages.created_at) and goes stale during long turns — issue #183) so a slow shutdown is distinguishable from a genuine wedge. The turn resumes from its checkpoint on restart. Process mode had no equivalent because SIGKILL always lands | anomaly | — | — | 90d | events |
 | `node_enter` | LangGraph node entered — sink-filtered out of the events table (PR #1758); log files only | noise | — | — | 90d | file |
-| `node_exit` | LangGraph node exited | noise | node, outcome, duration_seconds, exc_name | — | 90d | events |
+| `node_exit` | LangGraph node exited | noise | count, nodes | — | 90d | events |
 | `process_exit` | agent process exited | noise | reason, pid | — | 90d | events |
 | `service_started` | gateway/daemon started | noise | name, pid | — | 90d | events |
 | `halt` | turn stopped (idle/compact/system) | noise | body | — | 90d | events |

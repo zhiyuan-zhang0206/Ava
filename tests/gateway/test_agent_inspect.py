@@ -2479,6 +2479,31 @@ def test_inspect_activity_sums_non_claim_nodes(
     assert act["active_rate"] == pytest.approx(35.0 / act["alive_seconds"], abs=1e-3)  # pyright: ignore[reportUnknownMemberType]
 
 
+def test_inspect_activity_sums_aggregated_node_exits(
+    db_conn: psycopg.Connection, fake_loki: _FakeLoki
+) -> None:
+    """New per-turn rows preserve the same active and exec duration totals."""
+    aid = _insert_agent(db_conn)
+    fake_loki.add(
+        event="node_exit",
+        agent_id=aid,
+        payload={
+            "count": 2,
+            "nodes": [
+                {"node": "llm", "outcome": "ok", "duration_seconds": 10.0},
+                {"node": "exec", "outcome": "ok", "duration_seconds": 20.0},
+            ],
+        },
+    )
+    db_conn.commit()
+
+    with TestClient(app) as client:
+        activity = client.get(f"/api/agents/{aid}/inspect").json()["activity"]
+
+    assert activity["active_seconds"] == 30.0
+    assert activity["exec_seconds"] == 20.0
+
+
 def test_inspect_activity_excludes_claim_node(
     db_conn: psycopg.Connection, fake_loki: _FakeLoki
 ) -> None:
