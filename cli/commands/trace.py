@@ -138,10 +138,28 @@ def _post_line(client: httpx.Client, target: _ShipTarget, line: str) -> int:
     re-serializes to protobuf — the exact wire shape Tempo's OTLP endpoint
     ingests.
     """
+    from base64 import b64encode
+
     from google.protobuf.json_format import Parse
     from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest
 
     request = Parse(line, ExportTraceServiceRequest())
+    for resource_spans in request.resource_spans:
+        for scope_spans in resource_spans.scope_spans:
+            for span in scope_spans.spans:
+                for attribute, expected_length in (
+                    ("trace_id", 16),
+                    ("span_id", 8),
+                    ("parent_span_id", 8),
+                ):
+                    value = getattr(span, attribute)
+                    if value and len(value) != expected_length:
+                        try:
+                            corrected = bytes.fromhex(b64encode(value).decode("ascii"))
+                        except ValueError:
+                            corrected = b""
+                        if len(corrected) == expected_length:
+                            setattr(span, attribute, corrected)
     body = request.SerializeToString()
     headers = {"Content-Type": "application/x-protobuf", **target.headers}
     resp = client.post(target.endpoint, content=body, headers=headers)
