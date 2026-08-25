@@ -20,15 +20,6 @@ from cli.commands._session_lifecycle import (
 from shared import stop_timing
 from shared.platform import IS_WINDOWS
 
-# `_repo` imported shared.config above, which ran dotenv_boot's eager
-# resolve_ava_home() — the ONLY reader of AVA_HOME_OVERRIDE. A stop spawned by
-# `ava cluster down/destroy` arrives with the hatch set (cluster_lifecycle.
-# _subprocess_env sets it so the child may address a home its checkout does not
-# own); now that it has been consumed, strip it so stop's own children (pg_ctl today, any
-# future Python subprocess) do not inherit the contradiction
-# exemption — the "cannot become ambient" boundary (F-s4-7).
-os.environ.pop("AVA_HOME_OVERRIDE", None)
-
 # The browser service runs a headed Chrome on a persistent login profile. An
 # in-place stop / backend update preserves it by default (keep_browser=True):
 # bouncing it pops a window, risks a session-restore prompt, and re-attaches CDP
@@ -376,6 +367,12 @@ def _do_stop(
     data plane anyway). When role is unset ('unknown'), conservatively take
     the gateway path — `ava stop` does not depend on completed setup.
     """
+    # `_repo` imported shared.config above, so dotenv_boot has already consumed
+    # AVA_HOME_OVERRIDE. Strip it only when stop actually runs: cluster down/destroy
+    # needs the exemption to enter this process, but pg_ctl and future Python children
+    # must not inherit it — the "cannot become ambient" boundary (F-s4-7).
+    os.environ.pop("AVA_HOME_OVERRIDE", None)
+
     # Dynamic lookup for monkeypatch-aware tests.
     import cli.commands as _ns
 
