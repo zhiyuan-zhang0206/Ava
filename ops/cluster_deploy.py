@@ -500,7 +500,7 @@ def spawn_update(  # noqa: PLR0915 — one pause-to-detached-child transaction
             f" && git fetch origin"
             f" && git checkout --force -B {_native_arg(branch)} {native_ref}"
             f" && git diff --quiet && git diff --cached --quiet"
-            f" && uv sync"
+            f" && python -m cli.commands._update_uv_sync"
             f" && (python -m cli.commands._installed_sha || ver>nul)"  # see that module
             f" && ({_restart_recovery_cmd(quiesce=quiesce, mode=mode, force_reap=force_reap)}) || ("
             f"echo [updater] checkout/sync or tree verification FAILED -- refusing to "

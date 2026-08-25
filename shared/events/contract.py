@@ -910,6 +910,11 @@ EVENTS: dict[str, EventSpec] = {
     "pgbouncer_repaired": _telemetry(
         "pgbouncer_repaired", "pgbouncer watchdog repair", tier="anomaly"
     ),
+    "editable_pth_repaired": _telemetry(
+        "editable_pth_repaired",
+        "poisoned editable-install pointer repaired to the prod source root",
+        tier="anomaly",
+    ),
     # labeler / trace housekeeping
     "label_generated": _telemetry("label_generated", "label auto-generated", tier="noise"),
     "label_generate_failed": _telemetry(

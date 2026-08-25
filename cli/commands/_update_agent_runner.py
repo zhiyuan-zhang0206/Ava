@@ -19,6 +19,7 @@ from pathlib import Path
 
 from cli.commands._repo import _repo_root
 from cli.commands._update_git import GitPullFailed, git_checkout_sha, git_resolve_origin_main
+from cli.commands._update_uv_sync import run_uv_sync
 from shared.exit_codes import RESTART_DECLINED_EXIT_CODE
 from shared.migrations import MigrationLayoutError, validate_migrations_at_ref
 from shared.platform_backend import get_backend as platform_backend
@@ -229,12 +230,7 @@ def _run_agent_runner_self_update_inner(
             print(f"  ✓ {from_sha[:7]} → {sha[:7]}")
 
             print("\n→ uv sync")
-            sync_result = subprocess.run(
-                ["uv", "sync"],
-                cwd=repo,
-                capture_output=False,
-                check=False,
-            )
+            sync_result = run_uv_sync(repo, runner=subprocess.run)
             if sync_result.returncode != 0:
                 print("  ✗ uv sync failed", file=sys.stderr)
                 return 1
@@ -266,7 +262,7 @@ def _run_agent_runner_self_update_inner(
             # The revert is another source switch — same window, same reason.
             with _source_switch_window():
                 git_checkout_sha(from_sha)
-                subprocess.run(["uv", "sync"], cwd=repo, capture_output=False, check=False)
+                run_uv_sync(repo, runner=subprocess.run)
             return 1
 
     # 3) preflight: probe gateway + register machine BEFORE stopping services.

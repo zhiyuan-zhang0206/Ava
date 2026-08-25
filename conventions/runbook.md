@@ -151,6 +151,38 @@ prod runtime and dev workspace are split at the filesystem level:
 | `$AVA_HOME/source/` (default `~/.ava/source/`) | **prod** — cwd of the long-running service sessions | git working tree; upgrades go through the CLI `ava cluster update` (`ava.self.update()` was removed 2026-08) |
 | `~/Ava/` | **dev clone** — root of worktree-driven development; dev worktrees live under `.worktrees/<task>/` (manual / agent-created) or `.claude/worktrees/<task>/` (Claude Code's native worktree tool) | freely checkout any branch, decoupled from prod |
 
+### Worktree uv iron rule (Task #1572)
+
+An editable install is a pointer stored in the **active virtualenv**, not a fact
+derived from the shell's current directory. Inside a worktree, every `uv`
+command must therefore discard an inherited `VIRTUAL_ENV`:
+
+```bash
+env -u VIRTUAL_ENV uv sync
+env -u VIRTUAL_ENV uv pip install -e .
+```
+
+On PowerShell, apply the same rule with `Remove-Item Env:VIRTUAL_ENV
+-ErrorAction SilentlyContinue` before `uv`. Never rely on `cd` alone to select
+the worktree's `.venv`.
+
+Before deleting a worktree, inspect every long-lived Ava virtualenv on the host:
+
+```bash
+find "$HOME/Ava/.venv" "$HOME/.ava/source/.venv" \
+  -name _editable_impl_ava.pth -print -exec sed -n '1p' {} \;
+```
+
+Each printed target must be its stable checkout root (`~/Ava` for the dev clone,
+the installed prod source for prod), never the worktree being removed. If one is
+wrong, do **not** delete the worktree: run `env -u VIRTUAL_ENV uv sync` from the
+affected stable checkout and recheck. `ava converge` / `ava start` independently
+assert and auto-repair the prod pointer, with an `editable_pth_repaired` warning
+event; the dev-clone pointer remains part of this mandatory deletion check. This
+is the operating half of the Task #1572 editable-`.pth` guard specification; the
+incident and escape analysis are in
+[`postmortems/0006`](../postmortems/0006-an-editable-install-is-a-cross-checkout-pointer.md).
+
 A typical small deployment runs the **gateway as a single-box unit** on an
 always-on host (`gateway,agent-runner`, one home `~/.ava`, code `~/.ava/source`,
 `main`'s own PG/Redis instance running **natively** via `pg_ctl` + `redis-server`

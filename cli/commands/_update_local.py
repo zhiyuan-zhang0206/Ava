@@ -33,6 +33,7 @@ import sys
 from pathlib import Path
 
 from cli.commands import _update_git as _git_mod
+from cli.commands import _update_uv_sync
 from cli.commands._repo import session_name
 from cli.commands._update_git import GitPullFailed, GitPullResult
 from cli.commands._update_recover import _recover_rc
@@ -208,12 +209,7 @@ def _checkout_and_sync(
 
     # 3) uv sync (new code may introduce dependencies)
     print("\n→ uv sync")
-    sync_result = _up_mod.subprocess.run(
-        ["uv", "sync"],
-        cwd=repo,
-        capture_output=False,
-        check=False,
-    )
+    sync_result = _update_uv_sync.run_uv_sync(repo, runner=_up_mod.subprocess.run)
     if sync_result.returncode != 0:
         print("  ✗ uv sync failed", file=sys.stderr)
         return _recover_rc(repo, pull_recover, preserve_frontend)

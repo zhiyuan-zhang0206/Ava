@@ -492,9 +492,11 @@ def test_the_native_update_chain_records_the_installed_sha_after_its_sync(
     cluster_mod.spawn_update()
 
     cmd = native_host.spawned[0][1]
+    sync_step = "python -m cli.commands._update_uv_sync"
     step = "(python -m cli.commands._installed_sha || ver>nul)"
+    assert sync_step in cmd
     assert step in cmd
-    assert cmd.index("uv sync") < cmd.index(step), "the bookmark must follow the sync"
+    assert cmd.index(sync_step) < cmd.index(step), "the bookmark must follow the sync"
     assert f"&& {step}" in cmd, "a failed uv sync must still short-circuit here"
 
 
