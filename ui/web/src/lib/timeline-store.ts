@@ -213,6 +213,7 @@ export interface TimelineState {
  *  (its React Query snapshot may still hot-restore within gcTime). Bounds the
  *  map so a fleet of chatty background agents can't grow it unbounded. */
 const MAX_PARKED_THREADS = 32;
+export const MAX_TIMELINE_ITEMS = 6_000;
 
 /** Evict least-recently-parked buckets until the map is within the cap. A Map
  *  preserves insertion order, and `switchThread` re-`set`s the just-parked
@@ -582,9 +583,17 @@ export const useTimelineStore = create<TimelineState>()((set, get) => ({
     set((s) => {
       const existing = new Set(s.items.map((it) => it.item_id));
       const fresh = older.filter((it) => !existing.has(it.item_id));
+      const merged = fresh.length ? sortByItemId([...fresh, ...s.items]) : s.items;
+      const reachedItemLimit = merged.length >= MAX_TIMELINE_ITEMS;
       return {
-        items: fresh.length ? sortByItemId([...fresh, ...s.items]) : s.items,
-        hasMoreOlder,
+        // Retain the newest end of the chronological list. If a fetched page
+        // crosses the cap, its farthest-back items are the ones discarded;
+        // current conversation content is never evicted by history loading.
+        items:
+          merged.length > MAX_TIMELINE_ITEMS
+            ? merged.slice(merged.length - MAX_TIMELINE_ITEMS)
+            : merged,
+        hasMoreOlder: reachedItemLimit ? false : hasMoreOlder,
         loadingOlder: false,
       };
     });

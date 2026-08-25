@@ -47,9 +47,12 @@ All roles carry `agent_id: int`. The extra fields below are the payload.
 | `llm_done` | LLM stream wraps up (UI reloads the timeline over the partial) | — |
 | `timeline_snapshot` | server-authoritative item list; wins over streamed partials on merge | `items`, `msg_count` |
 
-`item_id` is `f"{msg_idx}.{block_idx}"` — the stable key that lets the streaming
-frontend and the server timeline endpoint compute the *same* id for the same
-logical item, so the merge is by identity, not a timestamp heuristic.
+Live `item_id` is `f"{msg_idx}.{block_idx}"` — the stable key that lets the
+streaming frontend and the current server timeline segment compute the *same*
+id for the same logical item, so the merge is by identity, not a timestamp
+heuristic. Cold-loaded pre-compact history never enters the SSE merge path; it
+prefixes the local position with `s<rank>.<boundary_checkpoint_id>.` so retained
+segments stay globally distinct.
 
 ### Turn lifecycle (`agent/loop.py`, `agent/graph/_claim.py`)
 

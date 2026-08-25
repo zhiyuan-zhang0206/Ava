@@ -7,6 +7,7 @@ import {
   isEventForThread,
   mergeSnapshotWithStreaming,
   parseItemId,
+  parseItemIdParts,
   sortByItemId,
 } from "./timeline";
 import type { BackendTimelineItem, SystemEvent } from "./types";
@@ -58,6 +59,37 @@ describe("parseItemId", () => {
   });
 });
 
+describe("parseItemIdParts", () => {
+  it("parses current ids without changing the legacy parser", () => {
+    expect(parseItemIdParts("12.3")).toEqual({
+      rank: 0,
+      checkpointId: null,
+      msg: 12,
+      block: 3,
+    });
+    expect(parseItemId("12.3")).toEqual([12, 3]);
+  });
+
+  it("parses historical ids with rank and exact checkpoint identity", () => {
+    expect(
+      parseItemIdParts("s4.1f0b9b12-0000-6000-8000-000000000000.27.2"),
+    ).toEqual({
+      rank: 4,
+      checkpointId: "1f0b9b12-0000-6000-8000-000000000000",
+      msg: 27,
+      block: 2,
+    });
+    expect(parseItemId("s4.1f0b9b12-0000-6000-8000-000000000000.27.2")).toBeNull();
+  });
+
+  it("rejects malformed and non-positive historical ranks", () => {
+    expect(parseItemIdParts("_marker.compact_done")).toBeNull();
+    expect(parseItemIdParts("s0.cpid.1.0")).toBeNull();
+    expect(parseItemIdParts("s2..1.0")).toBeNull();
+    expect(parseItemIdParts("s2.cpid.x.0")).toBeNull();
+  });
+});
+
 describe("sortByItemId", () => {
   it("standard sort: ascending by msg_idx, then by block_idx within the same msg_idx", () => {
     const items: BackendTimelineItem[] = [
@@ -93,6 +125,26 @@ describe("sortByItemId", () => {
     const copy = [...items];
     sortByItemId(items);
     expect(items).toEqual(copy);
+  });
+
+  it("sorts older segment ranks before newer ranks and current items", () => {
+    const items: BackendTimelineItem[] = [
+      item({ item_id: "2.0" }),
+      item({ item_id: "s1.newer-checkpoint.3.0" }),
+      item({ item_id: "s2.older-checkpoint.5.1" }),
+      item({ item_id: "s2.older-checkpoint.5.0" }),
+      item({ item_id: "1.0" }),
+      item({ item_id: "s1.newer-checkpoint.1.0" }),
+    ];
+
+    expect(sortByItemId(items).map((entry) => entry.item_id)).toEqual([
+      "s2.older-checkpoint.5.0",
+      "s2.older-checkpoint.5.1",
+      "s1.newer-checkpoint.1.0",
+      "s1.newer-checkpoint.3.0",
+      "1.0",
+      "2.0",
+    ]);
   });
 });
 

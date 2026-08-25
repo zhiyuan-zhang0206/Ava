@@ -8,7 +8,7 @@ tags: []
 # Frontend UI data routers
 
 - **fleet_graph** (`/api/fleet/graph`) — weighted agent relationship graph; nodes carry canonical lifecycle `status` plus independent `liveness_state` from `agents_meta` and Prometheus counters, edges stitch frozen PG `events` + Loki
-- **timeline** (`/api/agents/{id}/timeline`) — agent timeline messages
+- **timeline** (`/api/agents/{id}/timeline`) — current checkpoint tail plus optional scroll-up pages from retained `compact_boundary` checkpoints. Current cursors are `msg.block`; history cursors are `s<rank>.<checkpoint_id>.<msg>.<block>`, resolved by checkpoint id and bounded by `AVA_TIMELINE_COMPACT_HISTORY` (`0` off / positive newest-N / `-1` all). Bad, missing, non-boundary, or depth-ineligible ids terminate empty rather than selecting another segment ([decision](../../decisions/2026-08-25-timeline-compact-history-pagination.md)).
 - **notices** (`/api/notices/*`) — `ava.ui.notify()` user notifications; rows carry `task_id` (`null` when unattached), driving notice→task linkage in the inspector
 - **pages** (`/api/pages`, `/api/agents/{id}/pages`) — `ava.ui.show/close` registered UI pages + the streaming reverse proxy for them (`/api/agents/{id}/pages/{name}/...` → the page server; browser never dials it directly)
 - **grafana** (`/grafana/*`, outside `/api`) — optional streaming reverse proxy to a co-located Grafana instance (`AVA_GRAFANA_PROXY_ENABLED`, `AVA_GRAFANA_HOST`/`AVA_GRAFANA_PORT`, default off → 404), auth-gated by the same cluster middleware, for dashboard iframes

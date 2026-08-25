@@ -11,10 +11,11 @@
 // Output: monotonically-appended BackendTimelineItem[]. The frontend
 // renders directly, no hidden state.
 //
-// **Stable id protocol** (2026-05-06): the backend computes
-// `item_id = f"{msg_idx}.{block_idx}"` for each item (the gateway
-// timeline endpoint and the streaming SSE events follow the same rule);
-// the frontend reducer and merge both index by id — so snapshot and
+// **Stable id protocol** (2026-05-06): the backend and streaming SSE compute
+// `item_id = f"{msg_idx}.{block_idx}"` for current items. Cold-loaded compact
+// history uses `s<rank>.<boundary_checkpoint_id>.<msg_idx>.<block_idx>` and
+// never participates in the live partial merge. The frontend reducer and
+// merge both index by the complete id — so snapshot and
 // streaming items align at the same logical position, merge is a direct
 // Map<id, item>, no more trail walks + timestamp heuristics (old
 // race bugs were rooted in timestamps not distinguishing "new streaming"
@@ -76,6 +77,48 @@ export function parseItemId(itemId: string): [number, number] | null {
   return [msgIdx, blockIdx];
 }
 
+export interface ItemIdParts {
+  /** 0 is the live/current segment; positive ranks are compact boundaries. */
+  rank: number;
+  checkpointId: string | null;
+  msg: number;
+  block: number;
+}
+
+/**
+ * Parse both stable-id wire shapes without widening parseItemId's current-
+ * segment-only contract. Historical ids carry their exact boundary identity;
+ * rank is only their presentational order and may shift after another compact.
+ */
+export function parseItemIdParts(itemId: string): ItemIdParts | null {
+  const current = parseItemId(itemId);
+  if (current !== null) {
+    const [msg, block] = current;
+    if (!Number.isInteger(msg) || !Number.isInteger(block) || msg < 0 || block < 0) {
+      return null;
+    }
+    return { rank: 0, checkpointId: null, msg, block };
+  }
+
+  const parts = itemId.split(".");
+  if (parts.length !== 4) return null;
+  const [segment, checkpointId, msgPart, blockPart] = parts;
+  if (!/^s[1-9]\d*$/.test(segment) || checkpointId.length === 0) return null;
+  const rank = Number(segment.slice(1));
+  const msg = Number(msgPart);
+  const block = Number(blockPart);
+  if (
+    !Number.isSafeInteger(rank) ||
+    !Number.isSafeInteger(msg) ||
+    !Number.isSafeInteger(block) ||
+    msg < 0 ||
+    block < 0
+  ) {
+    return null;
+  }
+  return { rank, checkpointId, msg, block };
+}
+
 /**
  * Stable insert for a NEW item by its numeric item_id — used by the
  * delta-creation paths. Unlike sortByItemId (which moves ephemeral
@@ -102,20 +145,20 @@ function insertItemById(items: BackendTimelineItem[], newItem: BackendTimelineIt
 }
 
 /**
- * Sort by item_id's msg_idx.block_idx, ephemeral markers at the end.
- * Used by mergeSnapshotWithStreaming and anywhere items need business-
- * order arrangement.
+ * Sort historical ranks oldest-first (sN ... s1), then the current segment;
+ * within each segment sort by msg/block. Ephemeral markers land at the end.
  */
 export function sortByItemId(items: BackendTimelineItem[]): BackendTimelineItem[] {
   return [...items].sort((a, b) => {
-    const pa = parseItemId(a.item_id);
-    const pb = parseItemId(b.item_id);
+    const pa = parseItemIdParts(a.item_id);
+    const pb = parseItemIdParts(b.item_id);
     // null (ephemeral) goes last; both null → 0 preserves relative order
     if (pa === null) return pb === null ? 0 : 1;
     if (pb === null) return -1;
-    // sort by msg_idx, then block_idx within the same msg_idx
-    if (pa[0] !== pb[0]) return pa[0] - pb[0];
-    return pa[1] - pb[1];
+    // Higher ranks are older and render first; current rank 0 renders last.
+    if (pa.rank !== pb.rank) return pb.rank - pa.rank;
+    if (pa.msg !== pb.msg) return pa.msg - pb.msg;
+    return pa.block - pb.block;
   });
 }
 

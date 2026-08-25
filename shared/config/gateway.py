@@ -115,6 +115,20 @@ class GatewaySettings(EnvSettings):
         },
     )
 
+    timeline_compact_history: int = Field(
+        default=0,
+        ge=-1,
+        alias="AVA_TIMELINE_COMPACT_HISTORY",
+        description="时间线允许向前加载的 compact 历史段数: 0 表示关闭, -1 表示无限, N 表示最近 N 段.",
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+            "per_agent": False,
+        },
+    )
+
     cluster_rpc_timeout_seconds: float = Field(
         default=30.0,
         alias="AVA_CLUSTER_RPC_TIMEOUT_SECONDS",

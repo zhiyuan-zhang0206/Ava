@@ -57,8 +57,11 @@ class TimelineItem(BaseModel):
     inbound_messages table only as ts anchor.
 
     `item_id` is the stable key coordinating frontend timeline with
-    streaming SSE; format `f"{msg_idx}.{block_idx}"` (msg_idx = position
-    in state.messages; for other message types block_idx=0). For an
+    streaming SSE; the current segment uses `f"{msg_idx}.{block_idx}"`
+    (msg_idx = position in state.messages; for other message types
+    block_idx=0). Cold-loaded compact history prefixes that local position
+    with `s<rank>.<boundary_checkpoint_id>.`; it never enters the live SSE
+    merge path. For an
     AIMessage, text/thinking are content blocks (block_idx = their content
     position) and each tool call gets `block_idx = <number of text/thinking
     content blocks> + <ordinal in msg.tool_calls>` — a provider-agnostic
@@ -208,6 +211,7 @@ def build_timeline_items(
     chat_anchors: list[InboundRow],
     *,
     start: int = 0,
+    segment_prefix: str = "",
 ) -> tuple[list[TimelineItem], int]:
     """Render state.messages into timeline items + return msg_count.
 
@@ -231,6 +235,10 @@ def build_timeline_items(
     msg_count is ALWAYS the full `len(messages)`, never the window length —
     the frontend's future-partial boundary (`msg_idx == msg_count`) depends
     on the full value. This is a hard invariant of the incremental design.
+
+    `segment_prefix` is reserved for cold-loaded compact history. It prefixes
+    every locally rendered `msg_idx.block_idx` after rendering, preserving the
+    same message dispatch while keeping historical ids globally distinct.
 
     Dispatch errors (unrecognized message shape) raise — fail-loud surfaces
     a missing branch immediately instead of a silently truncated timeline.
@@ -314,6 +322,11 @@ def build_timeline_items(
             items.extend(_ai_message_items(msg, msg_idx, next_ts))
         elif isinstance(msg, HumanMessage):
             items.append(_fallback_human_item(msg_idx, content, next_ts(msg)))
+    if segment_prefix:
+        items = [
+            item.model_copy(update={"item_id": f"{segment_prefix}.{item.item_id}"})
+            for item in items
+        ]
     return items, msg_count
 
 

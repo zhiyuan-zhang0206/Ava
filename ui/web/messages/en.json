@@ -325,6 +325,7 @@
     "streamingSuffix": " (streaming…)",
     "compactSummary": "Compact summary",
     "compactRequest": "Compact request",
+    "compactHistoryDivider": "Original history before compact",
     "human": "Human",
     "system": "System",
     "agent": "Agent {id}",
