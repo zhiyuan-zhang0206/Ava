@@ -106,7 +106,6 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("GET", "/api/alerts/stream"): RouteContract(
         note="SSE tail — subscribing mid-pause just idles; the UI's initial fetch covers the gap"
     ),
-    ("PATCH", "/api/alerts/read"): RouteContract(note="mark read — CAS, repeats are harmless"),
     ("POST", "/api/alerts"): RouteContract(
         pause=PauseSemantics.CONTROL_PLANE,
         note="Grafana Alertmanager webhook — upsert per (fingerprint, starts_at); a 503 exhausts Grafana retries and the alert is lost",

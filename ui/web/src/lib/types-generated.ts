@@ -2878,10 +2878,8 @@ export interface paths {
          * List Alerts
          * @description Unresolved-first alert history for the alert section.
          *
-         *     Unresolved instances float above resolved ones (a resolved alert that is
-         *     still unread no longer buries new firings — 2026-08-05 user ruling);
-         *     within a status class, unread rows come first, then newest start.
-         *     Default excludes read rows (``include_read=true`` brings them back).
+         *     Unresolved instances float above resolved ones (2026-08-05 user ruling);
+         *     within a status class, newest starts come first.
          *     ``meta.unresolved_count`` backs the top-bar badge and ``meta.total`` is
          *     the full match count.
          */
@@ -2930,28 +2928,6 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
-        trace?: never;
-    };
-    "/api/alerts/read": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        /**
-         * Mark Alerts Read
-         * @description Mark alerts read: ``{ids: [...]}`` or ``{all: true}`` (all wins).
-         *
-         *     Idempotent: already-read rows are not touched. Returns the count updated.
-         */
-        patch: operations["mark_alerts_read_api_alerts_read_patch"];
         trace?: never;
     };
     "/api/health": {
@@ -4016,8 +3992,6 @@ export interface components {
             generator_url: string;
             /** Source */
             source: string;
-            /** Read At */
-            read_at: string | null;
             /** Notified At */
             notified_at: string | null;
             /**
@@ -4108,8 +4082,6 @@ export interface components {
         AlertsListMeta: {
             /** Window */
             window: string;
-            /** Include Read */
-            include_read: boolean;
             /** Total */
             total: number;
             /** Unresolved Count */
@@ -4123,19 +4095,6 @@ export interface components {
             /** Alerts */
             alerts: components["schemas"]["AlertRow"][];
             meta: components["schemas"]["AlertsListMeta"];
-        };
-        /**
-         * AlertsReadRequest
-         * @description PATCH /api/alerts/read body — mark by ids, or everything.
-         */
-        AlertsReadRequest: {
-            /** Ids */
-            ids?: number[] | null;
-            /**
-             * All
-             * @default false
-             */
-            all: boolean;
         };
         /** Body_upload_files_api_agents__agent_id__uploads_post */
         Body_upload_files_api_agents__agent_id__uploads_post: {
@@ -10516,7 +10475,6 @@ export interface operations {
                 status?: ("unresolved" | "resolved") | null;
                 severity?: ("critical" | "warning" | "error") | null;
                 limit?: number;
-                include_read?: boolean;
             };
             header?: never;
             path?: never;
@@ -10593,41 +10551,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
-                };
-            };
-        };
-    };
-    mark_alerts_read_api_alerts_read_patch: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["AlertsReadRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: number;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

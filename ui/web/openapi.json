@@ -5141,7 +5141,7 @@
       },
       "get": {
         "summary": "List Alerts",
-        "description": "Unresolved-first alert history for the alert section.\n\nUnresolved instances float above resolved ones (a resolved alert that is\nstill unread no longer buries new firings — 2026-08-05 user ruling);\nwithin a status class, unread rows come first, then newest start.\nDefault excludes read rows (``include_read=true`` brings them back).\n``meta.unresolved_count`` backs the top-bar badge and ``meta.total`` is\nthe full match count.",
+        "description": "Unresolved-first alert history for the alert section.\n\nUnresolved instances float above resolved ones (2026-08-05 user ruling);\nwithin a status class, newest starts come first.\n``meta.unresolved_count`` backs the top-bar badge and ``meta.total`` is\nthe full match count.",
         "operationId": "list_alerts_api_alerts_get",
         "parameters": [
           {
@@ -5207,16 +5207,6 @@
               "default": 100,
               "title": "Limit"
             }
-          },
-          {
-            "name": "include_read",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "boolean",
-              "default": false,
-              "title": "Include Read"
-            }
           }
         ],
         "responses": {
@@ -5254,49 +5244,6 @@
             "content": {
               "application/json": {
                 "schema": {}
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/alerts/read": {
-      "patch": {
-        "summary": "Mark Alerts Read",
-        "description": "Mark alerts read: ``{ids: [...]}`` or ``{all: true}`` (all wins).\n\nIdempotent: already-read rows are not touched. Returns the count updated.",
-        "operationId": "mark_alerts_read_api_alerts_read_patch",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AlertsReadRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": {
-                    "type": "integer"
-                  },
-                  "type": "object",
-                  "title": "Response Mark Alerts Read Api Alerts Read Patch"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
               }
             }
           }
@@ -7096,18 +7043,6 @@
             "type": "string",
             "title": "Source"
           },
-          "read_at": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Read At"
-          },
           "notified_at": {
             "anyOf": [
               {
@@ -7144,7 +7079,6 @@
           "fingerprint",
           "generator_url",
           "source",
-          "read_at",
           "notified_at",
           "created_at",
           "updated_at"
@@ -7254,10 +7188,6 @@
             "type": "string",
             "title": "Window"
           },
-          "include_read": {
-            "type": "boolean",
-            "title": "Include Read"
-          },
           "total": {
             "type": "integer",
             "title": "Total"
@@ -7270,7 +7200,6 @@
         "type": "object",
         "required": [
           "window",
-          "include_read",
           "total",
           "unresolved_count"
         ],
@@ -7297,33 +7226,6 @@
         ],
         "title": "AlertsListResponse",
         "description": "Unresolved-first alert history + the count the UI badge shows."
-      },
-      "AlertsReadRequest": {
-        "properties": {
-          "ids": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "integer"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Ids"
-          },
-          "all": {
-            "type": "boolean",
-            "title": "All",
-            "default": false
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "title": "AlertsReadRequest",
-        "description": "PATCH /api/alerts/read body — mark by ids, or everything."
       },
       "Body_upload_files_api_agents__agent_id__uploads_post": {
         "properties": {

@@ -477,20 +477,17 @@ export const api = {
   // --- alerts (the system→human alert store, Task #1224) ---
   // Alert instances in the Alertmanager webhook shape, separate from Notice.
   // The SSE live tail (/api/alerts/stream) folds into the ["alerts"] cache;
-  // this fetch is the initial load + refetch fallback. Read alerts are
-  // excluded by default unless includeRead is set.
+  // this fetch is the initial load + refetch fallback.
   getAlerts: (params: {
     window?: AlertsWindow;
     status?: string;
     severity?: string;
-    includeRead?: boolean;
     limit?: number;
   } = {}): Promise<AlertsResponse> => {
     const q = new URLSearchParams();
     if (params.window) q.set("window", params.window);
     if (params.status) q.set("status", params.status);
     if (params.severity) q.set("severity", params.severity);
-    if (params.includeRead) q.set("include_read", "true");
     if (params.limit) q.set("limit", String(params.limit));
     const qs = q.toString();
     return f(`/api/alerts${qs ? `?${qs}` : ""}`).then(ok<AlertsResponse>);

@@ -15,7 +15,6 @@ channel — nothing here touches agent_notices.
   the top-bar badge.
 - ``GET /api/alerts/stream`` — SSE tail of every ingest (reuses the
   agent_events SSE machinery; broadcast mode, no agent filter).
-- ``PATCH /api/alerts/read`` — mark read by ids or everything.
 
 Auth split by consumer:
 - ``POST /api/alerts`` — the Grafana webhook. It bypasses the session/bearer
@@ -27,7 +26,7 @@ Auth split by consumer:
   plaintext), else the cluster-secret Bearer, else — when no webhook token is
   configured — loopback trust (Grafana is co-located with the gateway on the
   single-box posture). A remote caller without the token is always rejected.
-- ``GET`` / ``PATCH`` / ``/stream`` — the UI and the SDK: normal
+- ``GET`` / ``/stream`` — the UI and the SDK: normal
   session/Bearer auth via the app middleware, untouched here.
 """
 
@@ -49,7 +48,6 @@ from gateway.schemas.alerts import (
     AlertSeverity,
     AlertsListMeta,
     AlertsListResponse,
-    AlertsReadRequest,
     AlertStatus,
     AlertWebhookPayload,
 )
@@ -243,14 +241,11 @@ def list_alerts(
     status: AlertStatus | None = None,
     severity: AlertSeverity | None = None,
     limit: int = Query(default=100, ge=1, le=500),
-    include_read: bool = Query(default=False),  # noqa: FBT001 — FastAPI query param
 ) -> AlertsListResponse:
     """Unresolved-first alert history for the alert section.
 
-    Unresolved instances float above resolved ones (a resolved alert that is
-    still unread no longer buries new firings — 2026-08-05 user ruling);
-    within a status class, unread rows come first, then newest start.
-    Default excludes read rows (``include_read=true`` brings them back).
+    Unresolved instances float above resolved ones (2026-08-05 user ruling);
+    within a status class, newest starts come first.
     ``meta.unresolved_count`` backs the top-bar badge and ``meta.total`` is
     the full match count.
     """
@@ -264,20 +259,17 @@ def list_alerts(
     if severity is not None:
         where.append("severity = %s")
         params.append(severity)
-    if not include_read:
-        where.append("read_at IS NULL")
     where_sql = " AND ".join(where)
 
     # meta counts (one connection, two cheap queries):
-    # - unresolved: same window/severity scope, always unresolved, read state
-    #   ignored (the badge counts unresolved, read or not). Trivially 0 when
-    #   the caller already scopes to resolved.
+    # - unresolved: same window/severity scope, always unresolved. Trivially
+    #   0 when the caller already scopes to resolved.
     # - total: rows matching the filters before the limit.
     with request.app.state.db_pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
         if status == "resolved":
             unresolved_count = 0
         else:
-            base = [w for w in where if w not in ("status = %s", "read_at IS NULL")]
+            base = [w for w in where if w != "status = %s"]
             base.append("status = 'unresolved'")
             base_params: list[Any] = [since]
             if severity is not None:
@@ -292,9 +284,9 @@ def list_alerts(
 
         select_sql = (
             "SELECT id, status, severity, alertname, labels, annotations, starts_at, ends_at,"  # noqa: S608 — where_sql built from fixed fragments only
-            "       fingerprint, generator_url, source, read_at, notified_at, created_at, updated_at"
+            "       fingerprint, generator_url, source, notified_at, created_at, updated_at"
             f"  FROM alerts WHERE {where_sql}"
-            " ORDER BY (status = 'unresolved') DESC, (read_at IS NULL) DESC, starts_at DESC LIMIT %s"
+            " ORDER BY (status = 'unresolved') DESC, starts_at DESC LIMIT %s"
         )
         cur.execute(select_sql, (*params, limit))
         rows = [AlertRow(**r) for r in cur.fetchall()]
@@ -303,29 +295,7 @@ def list_alerts(
         alerts=rows,
         meta=AlertsListMeta(
             window=window,
-            include_read=include_read,
             total=total,
             unresolved_count=unresolved_count,
         ),
     )
-
-
-@router.patch("/api/alerts/read")
-def mark_alerts_read(body: AlertsReadRequest, request: Request) -> dict[str, int]:
-    """Mark alerts read: ``{ids: [...]}`` or ``{all: true}`` (all wins).
-
-    Idempotent: already-read rows are not touched. Returns the count updated.
-    """
-
-    with request.app.state.db_pool.connection() as conn, conn.cursor() as cur:
-        if body.all:
-            cur.execute("UPDATE alerts SET read_at = now() WHERE read_at IS NULL")
-        else:
-            assert body.ids is not None  # noqa: S101 — validator guarantees
-            cur.execute(
-                "UPDATE alerts SET read_at = now() WHERE id = ANY(%s) AND read_at IS NULL",
-                (body.ids,),
-            )
-        updated = cur.rowcount
-        conn.commit()
-    return {"updated": updated}

@@ -228,7 +228,7 @@ def upsert_alert(
             "  generator_url = EXCLUDED.generator_url,"
             "  updated_at = now()"
             " RETURNING id, status, severity, alertname, labels, annotations, starts_at,"
-            "           ends_at, fingerprint, generator_url, source, read_at, notified_at,"
+            "           ends_at, fingerprint, generator_url, source, notified_at,"
             "           created_at, updated_at, (xmax = 0) AS inserted",
             (
                 status,

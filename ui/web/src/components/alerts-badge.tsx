@@ -5,14 +5,15 @@
 // nothing unresolved — a zero badge is noise.
 
 import { Bell } from "lucide-react";
-
-import { cn } from "@/lib/utils";
+import { useTranslations } from "next-intl";
 import Link from "next/link";
 
 import { FLEX } from "@/lib/layout";
 import { useAlerts } from "@/lib/use-alerts";
+import { cn } from "@/lib/utils";
 
 export function AlertsBadge() {
+  const t = useTranslations("alerts");
   const { data } = useAlerts();
   const unresolved = data?.meta.unresolved_count ?? 0;
   if (unresolved === 0) return null;
@@ -20,7 +21,7 @@ export function AlertsBadge() {
   return (
     <Link
       href="/insights#alerts"
-      aria-label={`${unresolved} unresolved alerts`}
+      aria-label={t("unresolvedAlerts", { count: unresolved })}
       data-testid="alerts-badge"
       className={cn("relative size-8 items-center justify-center rounded-md transition-colors hover:bg-sidebar-accent", FLEX)}
     >
