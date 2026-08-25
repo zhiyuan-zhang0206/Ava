@@ -147,6 +147,15 @@ class GitPullFailed(Exception):  # noqa: N818
     """
 
 
+class LocalAdminSchemaConnectionError(RuntimeError):
+    """Recovery could not construct or open its local Postgres admin dial.
+
+    This exception is deliberately narrower than failures raised after
+    ``rollback_to`` begins: callers may conclude the schema is unchanged only
+    for this pre-mutation boundary.
+    """
+
+
 def _wait_index_lock_free(timeout_s: float = _INDEX_LOCK_WAIT_S) -> None:
     """Wait up to `timeout_s` for a concurrent git process to release
     `.git/index.lock`, then raise `GitPullFailed` if it is still held.
@@ -626,23 +635,33 @@ def rollback_schema_to(keep: set[str], *, local_admin: bool = False) -> list[str
         from shared.cluster import _swap_db, get_record, record_postgres_port
         from shared.paths import ava_home
 
-        record = get_record(ava_home())
-        if record is None:
-            raise RuntimeError(
-                "no cluster registry record — cannot open the local admin "
-                "connection for schema recovery"
-            )
-        db_name = urlsplit(settings.data_plane.db_url).path.lstrip("/")
-        if not db_name:
-            raise RuntimeError(
-                "AVA_DB_URL carries no database name — cannot target schema recovery"
-            )
-        admin_url = _swap_db(pg_admin_url(record_postgres_port(record)), db_name)
-        with psycopg.connect(
-            admin_url,
-            prepare_threshold=None,
-            **shared.db.PG_KEEPALIVE_KWARGS,
-        ) as conn:
+        def _connect_local_admin() -> psycopg.Connection:
+            record = get_record(ava_home())
+            if record is None:
+                raise LocalAdminSchemaConnectionError(
+                    "no cluster registry record for schema recovery"
+                )
+            db_name = urlsplit(settings.data_plane.db_url).path.lstrip("/")
+            if not db_name:
+                raise LocalAdminSchemaConnectionError(
+                    "AVA_DB_URL carries no database name for schema recovery"
+                )
+            admin_url = _swap_db(pg_admin_url(record_postgres_port(record)), db_name)
+            try:
+                return psycopg.connect(
+                    admin_url,
+                    prepare_threshold=None,
+                    **shared.db.PG_KEEPALIVE_KWARGS,
+                )
+            except Exception:
+                # Keep the cause out of rollout logs: libpq failures can include
+                # a connection URL. This type also proves rollback never began.
+                raise LocalAdminSchemaConnectionError(
+                    "could not open the local admin connection for schema recovery"
+                ) from None
+
+        conn = _connect_local_admin()
+        with conn:
             return _mig.rollback_to(conn, keep)
 
     # direct=True + unbounded=True: rollback_to holds the same SESSION advisory

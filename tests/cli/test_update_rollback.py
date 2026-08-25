@@ -304,7 +304,10 @@ def test_recover_local_admin_connection_failure_does_not_reset(
     """If the recovery-only admin socket itself is unavailable, report the
     gateway as down without resetting old code underneath the newer schema."""
     order, fake = _patch_recover(
-        monkeypatch, rollback=RuntimeError("local Postgres admin socket unavailable")
+        monkeypatch,
+        rollback=_git_mod.LocalAdminSchemaConnectionError(
+            "local Postgres admin socket unavailable"
+        ),
     )
 
     rc = _rec._recover_gateway_local(Path("/repo"), "FROMSHA", _SNAP, preserve_sessions=frozenset())
@@ -312,6 +315,26 @@ def test_recover_local_admin_connection_failure_does_not_reset(
     assert rc == 1
     assert order == ["rollback"]
     assert fake.calls == []
+
+
+def test_recover_post_commit_unlock_failure_reports_schema_unknown(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """An error after the rollback transaction may mean the schema already
+    changed. Never call that unchanged or reset code across the ambiguity."""
+    order, fake = _patch_recover(
+        monkeypatch, rollback=RuntimeError("advisory unlock failed after commit")
+    )
+
+    rc = _rec._recover_gateway_local(Path("/repo"), "FROMSHA", _SNAP, preserve_sessions=frozenset())
+
+    assert rc == 1
+    assert order == ["rollback"]
+    assert fake.calls == []
+    message = capsys.readouterr().err
+    assert "schema state is UNKNOWN" in message
+    assert "Verify the applied migration set" in message
+    assert "schema is unchanged" not in message
 
 
 def test_recover_git_reset_failure_returns_1(monkeypatch: pytest.MonkeyPatch) -> None:

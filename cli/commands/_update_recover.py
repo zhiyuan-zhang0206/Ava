@@ -18,7 +18,12 @@ from enum import StrEnum
 from pathlib import Path
 
 from cli.commands._update_fanout import ClusterOpPayload
-from cli.commands._update_git import GitPullFailed, git_reset_hard, rollback_schema_to
+from cli.commands._update_git import (
+    GitPullFailed,
+    LocalAdminSchemaConnectionError,
+    git_reset_hard,
+    rollback_schema_to,
+)
 from cli.commands._update_uv_sync import run_uv_sync
 from shared.exit_codes import SERVICES_NOT_READY_EXIT_CODE
 
@@ -117,6 +122,16 @@ def _recover_gateway_local(
         )
         _print_pre_update_data_snapshot_restore(data_snapshot)
         return 1
+    except LocalAdminSchemaConnectionError:
+        # This dedicated exception is raised only before rollback_to receives a
+        # connection, so unchanged schema is a justified conclusion.
+        print(
+            "  ✗✗ MANUAL INTERVENTION: local-admin schema recovery could not start; "
+            "schema is unchanged and code was NOT reset. The gateway is DOWN.",
+            file=sys.stderr,
+        )
+        _print_pre_update_data_snapshot_restore(data_snapshot)
+        return 1
     except MigrationError as exc:
         # A down failure aborts rollback_to's one batch transaction, leaving the
         # schema at the applied set the failed start left: equal to or a subset of
@@ -134,16 +149,17 @@ def _recover_gateway_local(
         )
         _print_pre_update_data_snapshot_restore(data_snapshot)
         return 1
-    except Exception as exc:  # fail-fast-ok: this boundary must preserve code/schema ordering
-        # Connection/registry failures happen before rollback_to can mutate the
-        # schema.  Never reset old code underneath the newer schema; report a
-        # determinate DOWN state instead of losing the recovery verdict to a
-        # traceback.  Name only the exception type because connection failures
-        # may embed a URL in their text.
+    except Exception as exc:  # fail-fast-ok: recovery must preserve code/schema ordering
+        # After rollback_to begins, an error can arrive after transaction commit
+        # (for example while releasing the advisory lock) or with an uncertain
+        # commit outcome. Never claim the schema remained unchanged, and never
+        # reset code across that ambiguity. Name only the exception type because
+        # connection failures may embed a URL in their text.
         print(
-            "  ✗✗ MANUAL INTERVENTION: local-admin schema recovery could not start "
-            f"({type(exc).__name__}); schema is unchanged and code was NOT reset. "
-            "The gateway is DOWN.",
+            f"  ✗✗ MANUAL INTERVENTION: schema rollback raised {type(exc).__name__}; "
+            "schema state is UNKNOWN and code was NOT reset. Verify the applied "
+            "migration set and schema before choosing reset or fix-forward. The "
+            "gateway is DOWN.",
             file=sys.stderr,
         )
         _print_pre_update_data_snapshot_restore(data_snapshot)

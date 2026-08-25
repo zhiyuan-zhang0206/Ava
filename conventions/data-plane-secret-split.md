@@ -55,6 +55,13 @@ socket as the instance administrator, so a failure after Postgres accepts the
 journaled password but before the parent adopts it can still roll migrations
 back, restore last-known-good code, and restart the gateway.
 
+Only failure to construct or open that local-admin connection proves rollback
+never began and the schema is unchanged. An unexpected error after rollback
+execution starts can arrive after commit or with an uncertain commit outcome;
+recovery leaves code on the new revision, reports schema state as unknown, and
+requires the operator to verify the applied migration set and schema before
+choosing reset or fix-forward.
+
 Fresh authenticated installs mint all three values at birth. Empty-bearer
 single-box clusters are intentionally a no-op: all data-plane credentials remain
 empty and local services stay unauthenticated.

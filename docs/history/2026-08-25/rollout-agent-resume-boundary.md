@@ -86,3 +86,18 @@ Postgres admin socket and targets the cluster database explicitly; normal
 operator rollback continues to use the runtime owner connection. A fault test
 injects failure after the Postgres mutation and requires local-admin rollback,
 git reset, dependency sync, and last-known-good start to complete in order.
+
+## Update: post-execution rollback failures are indeterminate
+
+The first recovery implementation caught every unexpected rollback exception
+as if the local-admin connection had never opened and declared the schema
+unchanged. That conclusion is only valid before `rollback_to` begins: its batch
+may commit before the advisory-unlock query raises, and a broken connection can
+make the commit outcome uncertain.
+
+Local-admin setup/connect failure now has a dedicated exception type. Only that
+pre-mutation exception reports unchanged schema. Any unexpected exception after
+rollback begins reports the schema state as unknown, keeps code on the new
+revision, and requires applied-set/schema verification before reset or
+fix-forward. A fault test raises after the rollback transaction commits but
+before lock cleanup and proves the schema may already be rolled back.
