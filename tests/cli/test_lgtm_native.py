@@ -186,6 +186,7 @@ def test_ensure_renders_configs_with_native_paths_and_loopback(
     assert "retention_period: 168h" in loki
     assert "disk_full_threshold: 0.95" in loki
     validate_loki_deploy_config(loki_config)
+    assert "max_query_series: 20000" in loki
     assert "query_timeout: 50s" in loki
     assert "max_entries_limit_per_query: 50001" in loki
     assert "split_queries_by_interval: 24h" in loki

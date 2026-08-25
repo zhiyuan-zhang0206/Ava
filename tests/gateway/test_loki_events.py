@@ -29,6 +29,7 @@ import yaml
 from gateway import loki_events, loki_events_cache, loki_query_budget
 from shared.loki_index_labels import (
     EVENT_STREAM_RETENTION,
+    LOKI_MAX_QUERY_SERIES,
     LOKI_QUERY_CONCURRENCY,
     WAL_DISK_FULL_THRESHOLD,
     LokiReadEra,
@@ -301,6 +302,7 @@ class TestGlobalQueryBudget:
         for config in configs:
             assert config["querier"]["max_concurrent"] == LOKI_QUERY_CONCURRENCY
             assert config["limits_config"]["retention_period"] == retention
+            assert config["limits_config"]["max_query_series"] == LOKI_MAX_QUERY_SERIES
             assert config["ingester"]["wal"]["disk_full_threshold"] == WAL_DISK_FULL_THRESHOLD
             validate_loki_deploy_config(config)
         assert loki_query_budget.LOKI_QUERY_CONCURRENCY == LOKI_QUERY_CONCURRENCY
@@ -308,18 +310,44 @@ class TestGlobalQueryBudget:
     def test_rejects_loki_deploy_config_drift(self) -> None:
         with pytest.raises(ValueError, match="retention_period"):
             validate_loki_deploy_config(
-                {"limits_config": {"retention_period": "96h"}, "querier": {"max_concurrent": 8}}
+                {
+                    "limits_config": {
+                        "retention_period": "96h",
+                        "max_query_series": 20000,
+                    },
+                    "querier": {"max_concurrent": 8},
+                }
             )
         with pytest.raises(ValueError, match="max_concurrent"):
             validate_loki_deploy_config(
-                {"limits_config": {"retention_period": "168h"}, "querier": {"max_concurrent": 8}}
+                {
+                    "limits_config": {
+                        "retention_period": "168h",
+                        "max_query_series": 20000,
+                    },
+                    "querier": {"max_concurrent": 8},
+                }
             )
         with pytest.raises(ValueError, match="disk_full_threshold"):
             validate_loki_deploy_config(
                 {
-                    "limits_config": {"retention_period": "168h"},
+                    "limits_config": {
+                        "retention_period": "168h",
+                        "max_query_series": 20000,
+                    },
                     "querier": {"max_concurrent": 4},
                     "ingester": {"wal": {"disk_full_threshold": 0.9}},
+                }
+            )
+        with pytest.raises(ValueError, match="max_query_series"):
+            validate_loki_deploy_config(
+                {
+                    "limits_config": {
+                        "retention_period": "168h",
+                        "max_query_series": 2000,
+                    },
+                    "querier": {"max_concurrent": 4},
+                    "ingester": {"wal": {"disk_full_threshold": 0.95}},
                 }
             )
 

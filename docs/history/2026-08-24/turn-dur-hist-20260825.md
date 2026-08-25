@@ -37,3 +37,39 @@ After deployment, the hourly maintenance daemon self-heals histogram coverage
 for 2026-08-17 through yesterday within one hour. The earlier 2026-08-14 through
 2026-08-16 ledger gap remains absent by design and therefore does not invent
 rows during the migration backfill.
+
+## Loki series-cap requirement (2026-08-25 production fix)
+
+The all-agents histogram query above returns one output series per distinct
+(agent_id, bucket) pair. Loki's query-frontend series limiter
+(`limits_config.max_query_series`, then 2000) counts those result series and
+rejects the query when the day is busy enough — measured 2026-08-25: the
+2026-08-24 query (133 agents, 29812 turns) produces 3061 series and was
+rejected with HTTP 400, which aborted the entire hourly rollup pass (nothing
+rolled, not just the histogram). The per-agent validation (agent 3269, 47
+buckets) had never exercised the merged shape.
+
+Fix: `max_query_series` raised 2000 → 20000 (both
+`deploy/lgtm/config/loki.yaml` and `deploy/lgtm/native/config/loki.yaml`),
+pinned by `shared/loki_index_labels.py:validate_loki_deploy_config` so a
+re-render cannot silently drift it back. 20000 keeps ~6.5x headroom over the
+busiest measured day while still blocking pathological ad-hoc fan-outs. The
+rollup query shape itself is unchanged.
+
+## Permanent ledger-histogram gaps (unrecoverable data)
+
+The migration backfills `turn_dur_hist` only where the frozen `events` archive
+still has rows: measured 2026-08-25, that is 2026-05-24..05-29 and
+2026-08-01..08-13 (33 of 43 agents). The following present ledger days keep
+turns but can never gain histograms, so whole-life coverage stays incomplete
+and the read path keeps its exact raw fallback for them:
+
+- 2026-06-02..07-31 — telemetry rows pruned from the `events` archive before
+  the migration (no turn_end rows remain), and Loki did not exist yet.
+- 2026-08-14, 08-16, 08-17, 08-18 and the 10 unbackfilled 2026-08-13 agents —
+  the post-cutover seam whose Loki data fell out of the 168h retention window
+  before the histogram feature shipped.
+
+These days are absent from every store (PG archive, Loki, JSONL mirror);
+nothing in code can recover them, and the coverage check deliberately counts
+them as incomplete rather than silently dropping them.
