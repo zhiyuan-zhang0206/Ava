@@ -25,6 +25,10 @@ EVENT_STREAM_RETENTION = timedelta(hours=168)
 # Must match deployed Loki `querier.max_concurrent`; render validation catches
 # drift before it ships (the 2026-08-18 incident).
 LOKI_QUERY_CONCURRENCY = 4
+# WAL disk-full write throttle (ingester.wal.disk_full_threshold, verified
+# against loki 3.7.6 `-verify-config`): 0.95 tolerates the data volume's
+# 89-91% oscillation while keeping a real disk-full guard.
+WAL_DISK_FULL_THRESHOLD = 0.95
 LEGACY_READ_MARGIN = timedelta(minutes=10)
 LEGACY_READ_EXPIRES_AT = INDEX_LABEL_CUTOVER_AT + EVENT_STREAM_RETENTION + LEGACY_READ_MARGIN
 _LOGQL_REGEX_META = frozenset(".\\*+?()|[]{}^$")
@@ -91,7 +95,7 @@ def _retention_period_str() -> str:
 
 
 def validate_loki_deploy_config(config: Mapping[str, object]) -> None:
-    """Reject rendered Loki retention or query-capacity drift."""
+    """Reject rendered Loki retention, query-capacity, or WAL-throttle drift."""
 
     raw_limits_config = config["limits_config"]
     raw_querier = config["querier"]
@@ -108,6 +112,24 @@ def validate_loki_deploy_config(config: Mapping[str, object]) -> None:
     if max_concurrent != LOKI_QUERY_CONCURRENCY:
         raise ValueError(
             f"Loki querier.max_concurrent must be {LOKI_QUERY_CONCURRENCY}, got {max_concurrent!r}"
+        )
+    # WAL disk-full throttle pin (2026-08-25, Task #1626): the upstream default
+    # (0.9) flapped against the ~90%-full data volume and dropped the audit
+    # event stream. Must stay explicitly pinned here so a re-render cannot
+    # silently fall back to the flapping default.
+    raw_ingester = config["ingester"]
+    if not isinstance(raw_ingester, Mapping):
+        raise TypeError("Loki deploy config must contain an ingester mapping")
+    ingester = cast(Mapping[str, object], raw_ingester)
+    raw_wal = ingester["wal"]
+    if not isinstance(raw_wal, Mapping):
+        raise TypeError("Loki deploy config must contain ingester.wal mapping")
+    wal = cast(Mapping[str, object], raw_wal)
+    threshold = wal["disk_full_threshold"]
+    if threshold != WAL_DISK_FULL_THRESHOLD:
+        raise ValueError(
+            "Loki ingester.wal.disk_full_threshold must be "
+            f"{WAL_DISK_FULL_THRESHOLD!r}, got {threshold!r}"
         )
 
 
