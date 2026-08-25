@@ -796,6 +796,139 @@ groups:
                   query:
                     params: [C]
 
+      # ── checkpoint_blobs physical high-water (Task #1545a) ──
+      # Plain VACUUM reclaims dead tuples but does not compact fragmented
+      # files. These rules surface the persistent physical size while there is
+      # still room to make an operator-led repack and disk-capacity decision.
+      - uid: ava-ops-checkpoint-blobs-warning
+        title: "checkpoint_blobs physical size above 2.5 GiB"
+        condition: D
+        for: 2h
+        noDataState: OK
+        execErrState: OK
+        labels:
+          severity: warning
+          ruleUID: ava-ops-checkpoint-blobs-warning
+          metric: checkpoint_blobs_physical_bytes
+          team: ava-ops
+        annotations:
+          summary: "checkpoint_blobs physical size {{ $values.C }} B is above 2.5 GiB"
+          description: >-
+            checkpoint_blobs is retaining more than 2.5 GiB of physical
+            storage after its plain vacuum pass. Decide whether a repack is
+            warranted and free disk before the statvfs emergency watermark.
+            This metric refreshes only during the 05:00-08:00 vacuum window
+            and on force runs.
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            queryType: ""
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              editorMode: code
+              expr: max(ava_checkpoint_table_sizes_blobs_bytes) > 2684354560
+              instant: true
+              range: false
+            relativeTimeRange:
+              from: 900
+              to: 0
+          - refId: C
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: C
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: reduce
+              expression: A
+              reducer: mean
+          - refId: D
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: D
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: threshold
+              expression: C
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [2684354560]
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+
+      - uid: ava-ops-checkpoint-blobs-error
+        title: "checkpoint_blobs physical size above 4 GiB"
+        condition: D
+        for: 2h
+        noDataState: OK
+        execErrState: OK
+        labels:
+          severity: error
+          ruleUID: ava-ops-checkpoint-blobs-error
+          metric: checkpoint_blobs_physical_bytes
+          team: ava-ops
+        annotations:
+          summary: "checkpoint_blobs physical size {{ $values.C }} B is above 4 GiB"
+          description: >-
+            checkpoint_blobs is retaining more than 4 GiB of physical storage
+            after its plain vacuum pass. Make the repack decision and free
+            disk before the statvfs emergency watermark. This metric refreshes
+            only during the 05:00-08:00 vacuum window and on force runs.
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            queryType: ""
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              editorMode: code
+              expr: max(ava_checkpoint_table_sizes_blobs_bytes) > 4294967296
+              instant: true
+              range: false
+            relativeTimeRange:
+              from: 900
+              to: 0
+          - refId: C
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: C
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: reduce
+              expression: A
+              reducer: mean
+          - refId: D
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: D
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: threshold
+              expression: C
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [4294967296]
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+
       # ── R11: Postgres connection saturation (issue #46) ──
       # Backends against the server's own max_connections, both read from the
       # postgresql receiver. This is where pool saturation surfaces: PgBouncer

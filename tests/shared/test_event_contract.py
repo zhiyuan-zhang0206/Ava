@@ -99,8 +99,33 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
 
     assert telemetry_events() == frozenset(_TELEMETRY_KINDS)
     # Main's exec_envelope raised this to 107; the resolution change moves two
-    # legacy markers to telemetry and adds three new resolution events.
-    assert len(_TELEMETRY_KINDS) == 112
+    # legacy markers to telemetry and adds three new resolution events +
+    # checkpoint_table_sizes (Task #1545a).
+    assert len(_TELEMETRY_KINDS) == 113
+
+
+def test_checkpoint_table_sizes_payload_and_metric_disposition() -> None:
+    """The post-vacuum table-size state is emitted as three absolute gauges."""
+    from shared.events.contract import payload_keys
+    from shared.telemetry_otlp import _METRIC_DISPOSITION
+
+    assert payload_keys("checkpoint_table_sizes") == (
+        "blobs_bytes",
+        "checkpoints_bytes",
+        "writes_bytes",
+    )
+    assert {
+        key: _METRIC_DISPOSITION[key]
+        for key in (
+            ("checkpoint_table_sizes", "blobs_bytes"),
+            ("checkpoint_table_sizes", "checkpoints_bytes"),
+            ("checkpoint_table_sizes", "writes_bytes"),
+        )
+    } == {
+        ("checkpoint_table_sizes", "blobs_bytes"): "gauge",
+        ("checkpoint_table_sizes", "checkpoints_bytes"): "gauge",
+        ("checkpoint_table_sizes", "writes_bytes"): "gauge",
+    }
 
 
 def test_category_for_kind() -> None:

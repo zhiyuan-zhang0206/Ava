@@ -428,6 +428,14 @@ class ResolutionStatus(TypedDict):
     window: str
 
 
+class CheckpointTableSizes(TypedDict):
+    """`checkpoint_table_sizes` payload — post-vacuum physical sizes."""
+
+    blobs_bytes: int
+    checkpoints_bytes: int
+    writes_bytes: int
+
+
 class GatewayLatency(TypedDict):
     """`gateway_latency` payload — gateway/_latency.py 60s aggregator.
 
@@ -1012,6 +1020,11 @@ EVENTS: dict[str, EventSpec] = {
         "absolute unresolved warning/error class counts over the daemon's fixed six-hour window",
         payload=ResolutionStatus,
         tier="noise",
+    ),
+    "checkpoint_table_sizes": _telemetry(
+        "checkpoint_table_sizes",
+        "checkpoint table physical sizes after each blob vacuum run",
+        payload=CheckpointTableSizes,
     ),
     # ── log (category=log) — registry.md §4, the bare-log fallback ──
     "log": EventSpec(

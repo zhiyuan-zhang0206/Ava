@@ -47,6 +47,8 @@ _EXPECTED_UIDS = {
     "ava-ops-delivery-stalled-backlog",
     "ava-ops-events-freshness",
     "ava-ops-gateway-metrics-silent",
+    "ava-ops-checkpoint-blobs-warning",
+    "ava-ops-checkpoint-blobs-error",
     "ava-ops-trace-disk-watermark",
     "ava-ops-llm-billing-quota",
     # slow-request layer (task #1399) — user-visible latency, warning-first
@@ -88,7 +90,7 @@ def _load_groups() -> list[dict[str, Any]]:
     assert [group["name"] for group in groups] == ["ava-ops", "ava-ops-slow"]
     assert [group["folder"] for group in groups] == ["Ava", "Ava"]
     assert [group["interval"] for group in groups] == ["1m", "5m"]
-    assert [len(group["rules"]) for group in groups] == [15, 7]
+    assert [len(group["rules"]) for group in groups] == [17, 7]
     return groups
 
 
@@ -278,6 +280,44 @@ def test_latency_rule_uses_prometheus_histogram() -> None:
     assert "ava_llm_usage_latency_milliseconds_bucket" in expr
     assert "[10m]" in expr
     assert _threshold_params(rules["ava-ops-llm-latency-p95"]) == [[60000]]
+
+
+def test_checkpoint_blobs_high_water_rules() -> None:
+    """OTLP table-size gauges warn before bloat reaches the disk emergency."""
+    rules = {r["uid"]: r for r in _load_rules()}
+    expectations: dict[str, tuple[str, int, str]] = {
+        "ava-ops-checkpoint-blobs-warning": (
+            "warning",
+            2684354560,
+            "max(ava_checkpoint_table_sizes_blobs_bytes) > 2684354560",
+        ),
+        "ava-ops-checkpoint-blobs-error": (
+            "error",
+            4294967296,
+            "max(ava_checkpoint_table_sizes_blobs_bytes) > 4294967296",
+        ),
+    }
+
+    for uid, (severity, threshold, expected_expr) in expectations.items():
+        rule = rules[uid]
+        exprs = _exprs(rule, "prometheus")
+        assert exprs == [expected_expr]
+        assert _exprs(rule, "loki") == []
+        assert rule["for"] == "2h"
+        assert rule["noDataState"] == "OK"
+        assert rule["execErrState"] == "OK"
+        assert _threshold_params(rule) == [[threshold]]
+        assert rule["labels"] == {
+            "severity": severity,
+            "ruleUID": uid,
+            "metric": "checkpoint_blobs_physical_bytes",
+            "team": "ava-ops",
+        }
+        description = rule["annotations"]["description"]
+        assert "repack" in description
+        assert "statvfs" in description
+        assert "05:00-08:00" in description
+        assert "force runs" in description
 
 
 def test_trace_watermark_rule_filters_degradation_action() -> None:
