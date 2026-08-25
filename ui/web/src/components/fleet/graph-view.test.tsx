@@ -78,6 +78,20 @@ function renderGraph(ui: React.ReactElement) {
   return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
 }
 
+function queryNodeLabel(id: number): HTMLElement | null {
+  return (
+    screen
+      .queryAllByText(`#${id}`)
+      .find((element) => element.tagName.toLowerCase() === "tspan") ?? null
+  );
+}
+
+function getNodeLabel(id: number): HTMLElement {
+  const label = queryNodeLabel(id);
+  if (!label) throw new Error(`node label #${id} not rendered`);
+  return label;
+}
+
 function richGraph(): FleetGraph {
   const seen = "2026-06-17T00:00:00Z";
   const nodes: FleetGraphNode[] = [
@@ -134,7 +148,7 @@ describe("GraphView", () => {
 
     // The simulation seeds positions asynchronously (tick -> rAF). Wait for the
     // node labels to land, which means positions populated and the SVG painted.
-    const label = await waitFor(() => screen.getByText("#1"), { timeout: 4000 });
+    const label = await waitFor(() => getNodeLabel(1), { timeout: 4000 });
 
     expect(screen.getByText("9 nodes · 8 edges")).toBeTruthy();
 
@@ -151,11 +165,47 @@ describe("GraphView", () => {
   it("has only a reset zoom control (no +/- buttons)", async () => {
     useFleetGraph.mockReturnValue(ok(richGraph()));
     renderGraph(<GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />);
-    await waitFor(() => screen.getByText("#1"), { timeout: 4000 });
+    await waitFor(() => getNodeLabel(1), { timeout: 4000 });
 
     expect(screen.getByLabelText("Reset zoom")).toBeTruthy();
     expect(screen.queryByLabelText("Zoom in")).toBeNull();
     expect(screen.queryByLabelText("Zoom out")).toBeNull();
+  });
+
+  it("explains status colors and activity-score sizing", () => {
+    useFleetGraph.mockReturnValue(ok(richGraph()));
+    renderGraph(<GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />);
+
+    const legend = screen.getByLabelText("Agent graph legend");
+    for (const label of ["Running", "Idling", "Terminated", "Offline"]) {
+      expect(legend.textContent).toContain(label);
+    }
+    expect(legend.textContent).toContain("size = activity score (24h window)");
+  });
+
+  it("keeps full node identities in native titles when zoom hides labels", async () => {
+    useFleetGraph.mockReturnValue(
+      ok({ nodes: [node(1, { label: "alpha" }), node(2)], edges: [] }),
+    );
+    const { container } = renderGraph(
+      <GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />,
+    );
+    await waitFor(() => getNodeLabel(1), { timeout: 4000 });
+
+    const titles = () =>
+      Array.from(container.querySelectorAll("svg title"), (title) => title.textContent);
+    expect(titles()).toEqual(expect.arrayContaining(["alpha (#1)", "#2"]));
+
+    const svg = container.querySelector("svg")!;
+    Object.defineProperty(svg, "createSVGPoint", {
+      value: () => ({ x: 0, y: 0, matrixTransform: () => ({ x: 200, y: 200 }) }),
+    });
+    for (let i = 0; i < 8; i += 1) {
+      fireEvent.wheel(svg, { deltaY: 100, clientX: 200, clientY: 200 });
+    }
+
+    await waitFor(() => expect(queryNodeLabel(1)).toBeNull());
+    expect(titles()).toEqual(expect.arrayContaining(["alpha (#1)", "#2"]));
   });
 
   it("selecting a node focuses it (non-identity transform); reset restores identity", async () => {
@@ -164,7 +214,7 @@ describe("GraphView", () => {
 
     // Node 2 has only one edge (→ node 1), so the neighbor bounding box is a
     // subset of the layout — zoom scale > 1 (non-identity).
-    const label = await waitFor(() => screen.getByText("#2"), { timeout: 4000 });
+    const label = await waitFor(() => getNodeLabel(2), { timeout: 4000 });
     // The content zoom layer is the only top-level <g> child of the <svg>.
     const zoomLayer = container.querySelector("svg > g")!;
     expect(zoomLayer.getAttribute("transform")).toBe("translate(0,0) scale(1)");
@@ -186,7 +236,7 @@ describe("GraphView", () => {
   it("wheel zoom is not capped (scale can exceed the old 4x limit)", async () => {
     useFleetGraph.mockReturnValue(ok(richGraph()));
     const { container } = renderGraph(<GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />);
-    await waitFor(() => screen.getByText("#1"), { timeout: 4000 });
+    await waitFor(() => getNodeLabel(1), { timeout: 4000 });
 
     const svg = container.querySelector("svg")!;
     const zoomLayer = container.querySelector("svg > g")!;
@@ -212,7 +262,7 @@ describe("GraphView", () => {
     // Render with agent 1 already selected.
     renderGraph(<GraphView selectedAgentId={1} onSelectAgent={onSelect} />);
 
-    const label = await waitFor(() => screen.getByText("#1"), { timeout: 4000 });
+    const label = await waitFor(() => getNodeLabel(1), { timeout: 4000 });
     const group = label.closest("g")!;
 
     // Click the already-selected node.
@@ -235,7 +285,7 @@ describe("GraphView", () => {
     const { container } = renderGraph(
       <GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />,
     );
-    await waitFor(() => screen.getByText("#1"), { timeout: 4000 });
+    await waitFor(() => getNodeLabel(1), { timeout: 4000 });
 
     const svg = container.querySelector(
       'svg[aria-label="Fleet relationship graph"]',
@@ -260,7 +310,7 @@ describe("GraphView", () => {
     const { container } = renderGraph(
       <GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />,
     );
-    await waitFor(() => screen.getByText("#1"), { timeout: 4000 });
+    await waitFor(() => getNodeLabel(1), { timeout: 4000 });
 
     const opacities = Array.from(
       container.querySelectorAll('svg[aria-label="Fleet relationship graph"] line'),
@@ -293,10 +343,10 @@ describe("GraphView", () => {
     const { container } = renderGraph(
       <GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />,
     );
-    await waitFor(() => screen.getByText("#1"), { timeout: 4000 });
+    await waitFor(() => getNodeLabel(1), { timeout: 4000 });
 
-    expect(screen.queryByText("#2")).toBeNull(); // terminated never renders
-    expect(screen.getByText("#3")).toBeTruthy(); // hibernating is live
+    expect(queryNodeLabel(2)).toBeNull(); // terminated never renders
+    expect(getNodeLabel(3)).toBeTruthy(); // hibernating is live
     expect(screen.getByText("2 nodes · 1 edges")).toBeTruthy();
     const svg = container.querySelector(
       'svg[aria-label="Fleet relationship graph"]',
@@ -336,7 +386,7 @@ describe("GraphView", () => {
       <GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />,
     );
 
-    const label = await waitFor(() => screen.getByText("#1"), { timeout: 4000 });
+    const label = await waitFor(() => getNodeLabel(1), { timeout: 4000 });
     const nodeGroup = label.closest("g")!;
     expect(nodeGroup.querySelector("circle")?.getAttribute("class")).toContain(
       "text-muted-foreground",
@@ -409,7 +459,7 @@ describe("GraphView", () => {
       <GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />,
     );
 
-    await waitFor(() => screen.getByText("#1"), { timeout: 4000 });
+    await waitFor(() => getNodeLabel(1), { timeout: 4000 });
 
     const svg = container.querySelector(
       'svg[aria-label="Fleet relationship graph"]',

@@ -75,6 +75,7 @@ export function radiusOf(score: number, maxScore: number, minR: number, maxR: nu
 // strictly positive and prevents a degenerate zero-area transform.
 const ZOOM_MIN = 0.001;
 const ZOOM_MAX = Infinity;
+export const LABEL_MIN_ZOOM = 0.45;
 
 // Label wrapping: each 6px mono glyph is ~3.6px wide. Horizontal and vertical
 // padding keep every rendered line inside the node; the id occupies line one.
@@ -86,9 +87,29 @@ export function wrapLabel(label: string, r: number): string[] {
   if (maxChars <= 0 || maxLabelLines === 0 || label.length === 0) return [];
 
   const lines: string[] = [];
-  for (let offset = 0; offset < label.length; offset += maxChars) {
-    lines.push(label.slice(offset, offset + maxChars));
+  let remaining = label.trim();
+  while (remaining.length > maxChars) {
+    if (remaining[maxChars] === " ") {
+      lines.push(remaining.slice(0, maxChars));
+      remaining = remaining.slice(maxChars + 1).trimStart();
+      continue;
+    }
+
+    const candidate = remaining.slice(0, maxChars);
+    const spaceIndex = candidate.lastIndexOf(" ");
+    const hyphenIndex = candidate.lastIndexOf("-");
+    const breakIndex = Math.max(spaceIndex, hyphenIndex);
+    if (breakIndex > 0) {
+      const includeBreak = candidate[breakIndex] === "-";
+      lines.push(candidate.slice(0, breakIndex + (includeBreak ? 1 : 0)).trimEnd());
+      remaining = remaining.slice(breakIndex + 1).trimStart();
+      continue;
+    }
+
+    lines.push(remaining.slice(0, maxChars));
+    remaining = remaining.slice(maxChars);
   }
+  if (remaining.length > 0) lines.push(remaining);
   if (lines.length <= maxLabelLines) return lines;
 
   const visibleLines = lines.slice(0, maxLabelLines);
@@ -110,6 +131,7 @@ export const ForceGraph = memo(function ForceGraph({
   resetParams,
   groups = FORCE_GROUPS,
   statsText,
+  legend,
   overlayLeft,
   ariaLabel = "Fleet graph",
 }: {
@@ -128,6 +150,8 @@ export const ForceGraph = memo(function ForceGraph({
   groups?: ForceGroup[];
   /** Stats bar text (bottom-left); omitted → no bar. */
   statsText?: string | null;
+  /** View-specific status / size legend (bottom-right); omitted → no panel. */
+  legend?: ReactNode;
   /** Extra control rendered beside the layout gear (e.g. the window selector). */
   overlayLeft?: ReactNode;
   ariaLabel?: string;
@@ -441,7 +465,8 @@ export const ForceGraph = memo(function ForceGraph({
               const isHovered = hovered?.id === n.id;
               const isRinged = selectedId === n.id;
               const fill = statusText[n.status] ?? "text-slate-400";
-              const labelLines = n.label ? wrapLabel(n.label, r) : [];
+              const showLabel = transform.k >= LABEL_MIN_ZOOM;
+              const labelLines = showLabel && n.label ? wrapLabel(n.label, r) : [];
               const totalTextLines = 1 + labelLines.length;
               const firstTextLineY = -((totalTextLines - 1) * LABEL_LINE_HEIGHT) / 2;
               const badgeR = Math.max(5, r * 0.4);
@@ -478,7 +503,7 @@ export const ForceGraph = memo(function ForceGraph({
                   }}
                   onMouseLeave={() => setHovered((cur) => (cur?.id === n.id ? null : cur))}
                 >
-                  {n.nodeTitle ? <title>{n.nodeTitle}</title> : null}
+                  <title>{n.nodeTitle ?? (n.label ? `${n.label} (#${n.id})` : `#${n.id}`)}</title>
                   {isRinged ? (
                     shape === "circle" ? (
                       <circle
@@ -529,24 +554,26 @@ export const ForceGraph = memo(function ForceGraph({
                       opacity={isHovered ? 1 : 0.92}
                     />
                   )}
-                  <text
-                    textAnchor="middle"
-                    dominantBaseline="central"
-                    className="fill-white text-[6px] font-mono font-semibold"
-                    stroke="rgba(0,0,0,0.35)"
-                    strokeWidth={0.75}
-                    paintOrder="stroke"
-                    style={{ pointerEvents: "none" }}
-                  >
-                    <tspan x={0} y={firstTextLineY} dominantBaseline="central">
-                      #{n.id}
-                    </tspan>
-                    {labelLines.map((line, index) => (
-                      <tspan key={index} x={0} dy={LABEL_LINE_HEIGHT} dominantBaseline="central">
-                        {line}
+                  {showLabel ? (
+                    <text
+                      textAnchor="middle"
+                      dominantBaseline="central"
+                      className="fill-white text-[6px] font-mono font-semibold"
+                      stroke="rgba(0,0,0,0.35)"
+                      strokeWidth={0.75}
+                      paintOrder="stroke"
+                      style={{ pointerEvents: "none" }}
+                    >
+                      <tspan x={0} y={firstTextLineY} dominantBaseline="central">
+                        #{n.id}
                       </tspan>
-                    ))}
-                  </text>
+                      {labelLines.map((line, index) => (
+                        <tspan key={index} x={0} dy={LABEL_LINE_HEIGHT} dominantBaseline="central">
+                          {line}
+                        </tspan>
+                      ))}
+                    </text>
+                  ) : null}
                   {/* Needs-you badge — pending require_response notices on this
                       node's owner, colored by top priority (tasks only). */}
                   {n.badge != null && n.badge.count > 0 ? (
@@ -585,6 +612,12 @@ export const ForceGraph = memo(function ForceGraph({
       {statsText != null ? (
         <div className="pointer-events-none absolute bottom-3 left-3 rounded-md border border-border bg-background/80 px-3 py-1.5 text-[10px] text-muted-foreground tabular-nums backdrop-blur">
           {statsText}
+        </div>
+      ) : null}
+
+      {legend != null ? (
+        <div className="pointer-events-none absolute bottom-3 right-3 rounded-md border border-border bg-background/80 px-3 py-1.5 text-[10px] text-muted-foreground backdrop-blur">
+          {legend}
         </div>
       ) : null}
 

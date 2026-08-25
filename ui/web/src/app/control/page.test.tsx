@@ -32,7 +32,7 @@ vi.mock("@/lib/api", () => ({
 }));
 
 import ControlPage from "./page";
-import { CONTROL_SECTIONS } from "./_sections";
+import { CONTROL_SCROLL_ID, CONTROL_SECTIONS } from "./_sections";
 
 afterEach(cleanup);
 
@@ -56,6 +56,14 @@ describe("ControlPage shell", () => {
     wrap(<ControlPage />);
     expect(screen.getByRole("heading", { name: "Control" })).toBeTruthy();
     expect(screen.getByRole("link", { name: /back to agents/i })).toBeTruthy();
+  });
+
+  it("uses the wider readable content column without forcing prose monospace", () => {
+    wrap(<ControlPage />);
+    const content = document.getElementById(CONTROL_SCROLL_ID)?.firstElementChild;
+
+    expect(content?.classList.contains("max-w-6xl")).toBe(true);
+    expect(content?.classList.contains("font-mono")).toBe(false);
   });
 
   it("renders every section heading + anchor at once (Ctrl-F / deep-link reachable)", () => {

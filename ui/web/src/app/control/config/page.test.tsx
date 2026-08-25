@@ -35,6 +35,20 @@ import type {
 
 import ConfigPage from "./page";
 
+const localStorageMock = (() => {
+  const store = new Map<string, string>();
+  return {
+    getItem: (key: string) => store.get(key) ?? null,
+    setItem: (key: string, value: string) => store.set(key, value),
+    removeItem: (key: string) => store.delete(key),
+    clear: () => store.clear(),
+  };
+})();
+Object.defineProperty(globalThis, "localStorage", {
+  value: localStorageMock,
+  writable: true,
+});
+
 afterEach(cleanup);
 
 function makeQc() {
@@ -354,6 +368,7 @@ const RESOLVED: ResolvedConfigView = {
 
 beforeEach(() => {
   vi.restoreAllMocks();
+  localStorage.clear();
   vi.spyOn(api, "getMachines").mockResolvedValue(MACHINES);
   vi.spyOn(api, "getSystemStatus").mockResolvedValue(STATUS);
   vi.spyOn(api, "getModels").mockResolvedValue(MODELS);
@@ -384,6 +399,40 @@ describe("ConfigPage tri-state", () => {
 });
 
 describe("ConfigPage render", () => {
+  it("collapses groups on demand and restores the per-device state", async () => {
+    vi.spyOn(api, "getConfig").mockResolvedValue(VIEW);
+    await renderSettled();
+
+    const heading = screen.getByRole("heading", { name: /LLM settings/ });
+    const toggle = within(heading).getByRole("button");
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(document.getElementById("config-field-log_level")).toBeNull();
+    expect(JSON.parse(localStorage.getItem("control.config.collapsedGroups")!)).toContain(
+      "config-llm",
+    );
+
+    cleanup();
+    wrap(<ConfigPage />);
+    const restoredHeading = await screen.findByRole("heading", { name: /LLM settings/ });
+    await waitFor(() =>
+      expect(within(restoredHeading).getByRole("button").getAttribute("aria-expanded")).toBe(
+        "false",
+      ),
+    );
+    expect(document.getElementById("config-field-log_level")).toBeNull();
+  });
+
+  it("ignores malformed collapsed-group storage", async () => {
+    localStorage.setItem("control.config.collapsedGroups", "not-json");
+    vi.spyOn(api, "getConfig").mockResolvedValue(VIEW);
+
+    await renderSettled();
+    expect(document.getElementById("config-field-log_level")).not.toBeNull();
+  });
+
   it("display-group headers render with raw case-preserved field labels", async () => {
     vi.spyOn(api, "getConfig").mockResolvedValue(VIEW);
     await renderSettled();
@@ -514,6 +563,30 @@ describe("ConfigPage render", () => {
     await renderSettled();
     expect(screen.getAllByText("CLI-only").length).toBeGreaterThan(0);
     expect(screen.queryByTestId("edit-build_sha")).toBeNull();
+    expect(within(screen.getByTitle("AVA_BUILD_SHA").closest("[id^='config-field-']")!).queryByText(/read-only/i)).toBeNull();
+  });
+
+  it("distinguishes editable values from runtime fields read-only on this machine", async () => {
+    vi.spyOn(api, "getConfig").mockResolvedValue({
+      ...VIEW,
+      fields: VIEW.fields.map((field) =>
+        field.name === "host_label" ? { ...field, remote_writable: false } : field,
+      ),
+    });
+    wrap(<ConfigPage />);
+
+    const editableValue = await screen.findByTitle("INFO");
+    expect(editableValue.className).toContain("hover:bg-muted/50");
+    expect(editableValue.className).toContain("cursor-text");
+
+    fireEvent.change(screen.getByLabelText("Machine"), {
+      target: { value: AGENT_RUNNER },
+    });
+    const hostLabel = await screen.findByTitle("AVA_HOST_LABEL");
+    await waitFor(() => expect(screen.queryByTestId("edit-host_label")).toBeNull());
+    const hostRow = hostLabel.closest<HTMLElement>("[id^='config-field-']")!;
+    expect(within(hostRow).getByText("Runtime")).toBeTruthy();
+    expect(within(hostRow).getByText(/read-only/i)).toBeTruthy();
   });
 
   it("hides non-actionable fields matched by env var (cluster secret)", async () => {
@@ -687,6 +760,21 @@ describe("ConfigPage enum select", () => {
         undefined,
       ),
     );
+  });
+
+  it("shows a disabled not-set placeholder for an empty enum value", async () => {
+    vi.spyOn(api, "getConfig").mockResolvedValue({
+      ...VIEW,
+      fields: VIEW.fields.map((field) =>
+        field.name === "nudge_cadence" ? { ...field, current_value: null } : field,
+      ),
+    });
+    wrap(<ConfigPage />);
+
+    const select = await screen.findByTestId<HTMLSelectElement>("select-nudge_cadence");
+    expect(select.value).toBe("");
+    expect(select.options[0].textContent).toBe("— not set —");
+    expect(select.options[0].disabled).toBe(true);
   });
 
   it("enum field is read-only text (no select) on a remote machine view", async () => {
@@ -1018,6 +1106,24 @@ describe("ConfigPage per-model resolution view", () => {
     expect(screen.getByTestId("per-model-value-auto_compact_fraction").textContent).toBe(
       "0.55",
     );
+    expect(screen.getByTestId("per-model-source-auto_compact_fraction").className).toContain(
+      "border-dashed",
+    );
+    expect(screen.getByTestId("per-model-source-auto_compact_fraction").className).toContain(
+      "text-muted-foreground/80",
+    );
+  });
+
+  it("shows a disabled loading placeholder before models resolve", async () => {
+    vi.spyOn(api, "getConfig").mockResolvedValue(VIEW);
+    vi.spyOn(api, "getModels").mockReturnValue(new Promise(() => undefined));
+    wrap(<ConfigPage />);
+
+    await screen.findByText("LOG LEVEL");
+    const select = screen.getByLabelText<HTMLSelectElement>("Model");
+    expect(select.value).toBe("");
+    expect(select.options[0].textContent).toBe("Loading…");
+    expect(select.options[0].disabled).toBe(true);
   });
 
   it("shows the layers a value shadowed, and nothing when the floor itself won", async () => {
@@ -1074,6 +1180,28 @@ describe("ConfigPage per-model resolution view", () => {
     // Only the linked row is highlighted.
     expect(document.getElementById("config-field-log_level")?.className).not.toContain(
       "ring-primary",
+    );
+  });
+
+  it("row link expands a persisted-collapsed group before revealing its editor", async () => {
+    localStorage.setItem(
+      "control.config.collapsedGroups",
+      JSON.stringify(["config-llm"]),
+    );
+    vi.spyOn(api, "getConfig").mockResolvedValue(VIEW);
+    wrap(<ConfigPage />);
+    await screen.findByTestId("per-model-goto-max_retries");
+    await waitFor(() =>
+      expect(document.getElementById("config-field-max_retries")).toBeNull(),
+    );
+
+    fireEvent.click(screen.getByTestId("per-model-goto-max_retries"));
+
+    await waitFor(() =>
+      expect(document.getElementById("config-field-max_retries")).not.toBeNull(),
+    );
+    expect(JSON.parse(localStorage.getItem("control.config.collapsedGroups")!)).not.toContain(
+      "config-llm",
     );
   });
 

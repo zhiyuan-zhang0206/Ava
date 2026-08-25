@@ -108,6 +108,17 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("TaskGraph (graph mode)", () => {
+  it("explains task status colors and uniform sizing", () => {
+    useTasks.mockReturnValue(ok(sampleTasks()));
+    render(<TaskGraph agents={agents()} selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />);
+
+    const legend = screen.getByLabelText("Task graph legend");
+    for (const label of ["Open", "In progress", "Done", "Cancelled"]) {
+      expect(legend.textContent).toContain(label);
+    }
+    expect(legend.textContent).toContain("uniform node size");
+  });
+
   it("renders only open/in-progress cards by default", async () => {
     useTasks.mockReturnValue(ok(sampleTasks()));
     render(<TaskGraph agents={agents()} selectedAgentId={null} onSelectAgent={vi.fn()} selectedTaskId={null} onSelectTask={vi.fn()} />);
@@ -180,7 +191,7 @@ describe("TaskGraph (graph mode)", () => {
     expect(screen.getByText("Done")).toBeTruthy(); // toggle button still visible
 
     // Click Done toggle to show done tasks.
-    fireEvent.click(screen.getByText("Done"));
+    fireEvent.click(screen.getByRole("button", { name: /^Done/ }));
     // Now the Done lane header and card should appear.
     await waitFor(() => expect(screen.getAllByText(/#3/).length).toBeGreaterThan(0), { timeout: 4000 });
   });
@@ -194,7 +205,7 @@ describe("TaskGraph (graph mode)", () => {
     expect(screen.queryByText(/#4/)).toBeNull();
 
     // Click the Done toggle to reveal Done tasks.
-    fireEvent.click(screen.getByText("Done"));
+    fireEvent.click(screen.getByRole("button", { name: /^Done/ }));
     await waitFor(() => expect(screen.getAllByText(/#4/).length).toBeGreaterThan(0), { timeout: 4000 });
   });
 
@@ -465,7 +476,7 @@ describe("TaskGraph needs-you (RCS cut 3)", () => {
     // Honest empty state: pending work exists but is status-hidden.
     expect(screen.getByText(/Pending decisions sit on Done\/Canceled tasks/)).toBeTruthy();
     // The full filter toolbar survives: reveal the hidden needy task via Done.
-    fireEvent.click(screen.getByText("Done"));
+    fireEvent.click(screen.getByRole("button", { name: /^Done/ }));
     await waitFor(() => expect(screen.getAllByText("fin").length).toBeGreaterThan(0), { timeout: 4000 });
   });
 
