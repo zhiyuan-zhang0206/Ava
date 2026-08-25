@@ -572,6 +572,9 @@ def test_services_for_role_gateway_excludes_ops(monkeypatch: pytest.MonkeyPatch)
     restarter / agent-runner-watchdog: agent-runner-only now (gateway has no
     agents to respawn; the gateway runs gateway-watchdog instead).
     """
+    # The exact roster includes the designated gateway's collector; pin its
+    # marker gate open so this capability-partition assertion is host-independent.
+    monkeypatch.setattr("ops.spec._otel_collector_gate_reason", lambda: None)
     sessions = {s.session for s in _cli._services_for_roles(frozenset({"gateway"}))}
     all_sessions = {s.session for s in _cli.build_services()}
     assert sessions == all_sessions - {
@@ -603,6 +606,9 @@ def test_services_for_role_agent_runner_subset(monkeypatch: pytest.MonkeyPatch) 
     # setting — pin it "available" so the roster is env-independent (CI hosts
     # lack the helper and would otherwise drop the service).
     monkeypatch.setattr("ops.spec._computer_mcp_gate_reason", lambda: None)
+    # This synthetic runner roster includes its relay collector; pin the gate
+    # open so the actual host's gateway marker cannot perturb the assertion.
+    monkeypatch.setattr("ops.spec._otel_collector_gate_reason", lambda: None)
     sessions = {s.session for s in _cli._services_for_roles(frozenset({"agent-runner"}))}
     assert sessions == {
         "ops",
@@ -624,6 +630,9 @@ def test_services_for_roles_single_box_unions_both(monkeypatch: pytest.MonkeyPat
     # computer-mcp's gate is the platform's permissions-helper capability, not a
     # setting — pin it "available" so the union is env-independent.
     monkeypatch.setattr("ops.spec._computer_mcp_gate_reason", lambda: None)
+    # The exact union includes the designated gateway's collector; pin its
+    # marker gate open so this capability-partition assertion is host-independent.
+    monkeypatch.setattr("ops.spec._otel_collector_gate_reason", lambda: None)
     sessions = {s.session for s in _cli._services_for_roles(frozenset({"gateway", "agent-runner"}))}
     all_sessions = {s.session for s in _cli.build_services()}
     # union = everything that is not gated out; browser + browser-mcp are off

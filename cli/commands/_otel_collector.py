@@ -618,6 +618,31 @@ def ensure_otel_collector(repo: Path, ava_home: Path, roles: MachineRoles | None
     _write_config(dest_dir / "config.yaml", generate_config(repo, ava_home, roles))
 
 
+def _reap_orphan_collector_session() -> None:
+    """Stop a collector that predates this gateway losing its LGTM marker.
+
+    The roster gate drops the collector from a non-LGTM gateway, so the
+    watchdog will not revive it, but a session started before the marker went
+    away keeps running until something stops it. Converge is the reconcile
+    point, so ``ava start`` and ``ava cluster update`` reach the gated roster.
+    Its force-kill fallback is the designed remedy for this operator-initiated
+    transition, so the backend logs an escalation at INFO instead of WARNING.
+    """
+    import cli.commands as _ns
+    from cli.commands._session_lifecycle import _graceful_kill_session
+    from shared.cluster import session_name
+
+    sess = session_name("otel-collector")
+    if not _ns._has_session(sess):
+        return
+    ok, mode = _graceful_kill_session(sess, expected=True)
+    print(
+        f"  ! otel-collector: reaped orphan session {sess} "
+        f"({'✓' if ok else '✗'} {mode}) — gateway no longer owns a collector",
+        file=sys.stderr,
+    )
+
+
 def ensure_otel_collector_step(ctx: ConvergeCtx) -> None:
     """Install a pure-runner relay or the designated LGTM host's collector."""
     marker = ctx.ava_home / "lgtm-host"
@@ -634,5 +659,6 @@ def ensure_otel_collector_step(ctx: ConvergeCtx) -> None:
                 "collector files were preserved",
                 file=sys.stderr,
             )
+        _reap_orphan_collector_session()
         return
     ensure_otel_collector(ctx.repo, ctx.ava_home, ctx.roles)

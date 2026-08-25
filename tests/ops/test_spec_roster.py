@@ -136,6 +136,60 @@ def _agent_runner_annotated(monkeypatch: pytest.MonkeyPatch) -> dict[str, str | 
     }
 
 
+def test_otel_collector_gated_on_gateway_without_lgtm_marker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = tmp_path / "gateway"
+    home.mkdir()
+    monkeypatch.setattr(spec, "gateway_observability_home", lambda: home)
+
+    annotated = {
+        service.session: reason
+        for service, reason in spec.services_for_capabilities_annotated(frozenset({"gateway"}))
+    }
+    reason = annotated["otel-collector"]
+    assert reason is not None
+    assert "lgtm-host" in reason
+
+    start = {service.session for service in spec.services_for_capabilities(frozenset({"gateway"}))}
+    assert "otel-collector" not in start
+
+
+def test_otel_collector_runs_on_gateway_with_lgtm_marker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = tmp_path / "gateway"
+    home.mkdir()
+    (home / "lgtm-host").touch()
+    monkeypatch.setattr(spec, "gateway_observability_home", lambda: home)
+
+    annotated = {
+        service.session: reason
+        for service, reason in spec.services_for_capabilities_annotated(frozenset({"gateway"}))
+    }
+    assert annotated["otel-collector"] is None
+    start = {service.session for service in spec.services_for_capabilities(frozenset({"gateway"}))}
+    assert "otel-collector" in start
+
+
+def test_otel_collector_runs_on_pure_runner(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = tmp_path / "runner"
+    home.mkdir()
+    monkeypatch.setattr(spec, "gateway_observability_home", lambda: None)
+
+    annotated = {
+        service.session: reason
+        for service, reason in spec.services_for_capabilities_annotated(frozenset({"agent-runner"}))
+    }
+    assert annotated["otel-collector"] is None
+    start = {
+        service.session for service in spec.services_for_capabilities(frozenset({"agent-runner"}))
+    }
+    assert "otel-collector" in start
+
+
 def test_browser_mcp_gated_out_without_af_unix(monkeypatch: pytest.MonkeyPatch) -> None:
     """A host with display + Chrome + npx but no AF_UNIX (a Windows agent-runner)
     keeps `browser` in the start roster and drops `browser-mcp` WITH a reason.
