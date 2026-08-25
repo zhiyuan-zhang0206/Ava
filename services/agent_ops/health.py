@@ -1,17 +1,18 @@
 """Health reporting for the agent-runner ops control plane.
 
-The 1800s wedge threshold is deliberately twice the 900s rollout no-progress
-bound and far above the 180s cluster-update dedup expectation. Health degrades
-only after work has outlived both existing safety budgets.
+The wedge threshold follows the rollout family's single no-progress bound with
+a five-minute margin. Health degrades only after work has outlived that shared
+safety budget and the margin for observation and recovery.
 """
 
 from __future__ import annotations
 
 import time
 
+from shared.deploy_timing import NO_PROGRESS_TIMEOUT_S
 from shared.health_schema import DEGRADED, OK, component
 
-_WEDGE_AFTER_S = 1800
+_WEDGE_AFTER_S = NO_PROGRESS_TIMEOUT_S + 300.0  # 900s no-progress bound + 5min margin = 1200s
 
 
 def ops_components(

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections.abc import Callable
 from typing import Any, cast
 
 import pytest
@@ -400,7 +401,7 @@ def test_run_gives_each_loop_its_own_progress_tracker(monkeypatch: pytest.Monkey
     pool = _RunPool()
     health = object()
     health_liveness: list[object] = []
-    health_components: list[Any] = []
+    health_components: list[Callable[[], list[dict[str, object]]]] = []
     received: dict[str, LoopProgress] = {}
 
     async def fake_start(_name: str, *, liveness: object, components: Any) -> object:
