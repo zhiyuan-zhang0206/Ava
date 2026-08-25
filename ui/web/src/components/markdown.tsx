@@ -7,6 +7,7 @@ import remarkGfm from "remark-gfm";
 import { CopyButton } from "@/components/copy-button";
 import { PythonCode } from "@/components/python-code";
 import { MIN_W_0 } from "@/lib/layout";
+import remarkAutolinkDelimiter from "@/lib/remark-autolink-delimiter";
 import remarkCjkLinkBoundary from "@/lib/remark-cjk-link-boundary";
 import { cn } from "@/lib/utils";
 
@@ -98,7 +99,11 @@ export const ChatMarkdown = memo(function ChatMarkdown({ content }: Props) {
   return (
     <div className={cn("chat-md font-sans", MIN_W_0)}>
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkCjkLinkBoundary]}
+        remarkPlugins={[
+          remarkGfm,
+          remarkCjkLinkBoundary,
+          remarkAutolinkDelimiter,
+        ]}
         urlTransform={urlTransform}
         components={components}
       >

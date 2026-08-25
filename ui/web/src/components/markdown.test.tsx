@@ -48,6 +48,52 @@ describe("ChatMarkdown", () => {
     expect(link.nextSibling?.textContent).toBe("。");
   });
 
+  it("renders a CJK-bounded literal URL inside strong", () => {
+    const { container } = render(
+      <ChatMarkdown content="**http://127.0.0.1:18025**。" />,
+    );
+
+    const link = container.querySelector("strong > a");
+    expect(link?.getAttribute("href")).toBe("http://127.0.0.1:18025");
+    expect(link?.textContent).toBe("http://127.0.0.1:18025");
+    expect(link?.parentElement?.nextSibling?.textContent).toBe("。");
+  });
+
+  it("renders a letter-bounded literal URL inside strong", () => {
+    const { container } = render(
+      <ChatMarkdown content="**http://127.0.0.1:18025**x" />,
+    );
+
+    const link = container.querySelector("strong > a");
+    expect(link?.getAttribute("href")).toBe("http://127.0.0.1:18025");
+    expect(link?.textContent).toBe("http://127.0.0.1:18025");
+    expect(link?.parentElement?.nextSibling?.textContent).toBe("x");
+  });
+
+  it("leaves delimiter characters in a bare literal URL", () => {
+    const { container } = render(
+      <ChatMarkdown content="http://example.com/a**b" />,
+    );
+
+    expect(container.querySelector("strong")).toBeNull();
+    const link = container.querySelector("a");
+    expect(link?.getAttribute("href")).toBe("http://example.com/a**b");
+    expect(link?.textContent).toBe("http://example.com/a**b");
+  });
+
+  it("renders a literal URL with query parameters inside strong", () => {
+    const { container } = render(
+      <ChatMarkdown content="**https://example.com/a?b=c&d=1**。" />,
+    );
+
+    const link = container.querySelector("strong > a");
+    expect(link?.getAttribute("href")).toBe(
+      "https://example.com/a?b=c&d=1",
+    );
+    expect(link?.textContent).toBe("https://example.com/a?b=c&d=1");
+    expect(link?.parentElement?.nextSibling?.textContent).toBe("。");
+  });
+
   it("keeps a Unicode ellipsis outside a literal autolink", () => {
     render(<ChatMarkdown content="https://ip.sb……" />);
 
