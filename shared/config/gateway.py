@@ -119,7 +119,11 @@ class GatewaySettings(EnvSettings):
         default=0,
         ge=-1,
         alias="AVA_TIMELINE_COMPACT_HISTORY",
-        description="时间线允许向前加载的 compact 历史段数: 0 表示关闭, -1 表示无限, N 表示最近 N 段.",
+        description=(
+            "Number of compact-history segments the timeline may load backward: "
+            "0 disables compact history, -1 allows all retained segments, and N "
+            "allows the newest N segments."
+        ),
         json_schema_extra={
             "restart_required": "gateway",
             "writable": True,
