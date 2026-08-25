@@ -183,6 +183,28 @@ describe("GraphView", () => {
     );
   });
 
+  it("wheel zoom is not capped (scale can exceed the old 4x limit)", async () => {
+    useFleetGraph.mockReturnValue(ok(richGraph()));
+    const { container } = renderGraph(<GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />);
+    await waitFor(() => screen.getByText("#1"), { timeout: 4000 });
+
+    const svg = container.querySelector("svg")!;
+    const zoomLayer = container.querySelector("svg > g")!;
+    // happy-dom drops WheelEvent client coordinates and its SVGPoint lacks
+    // matrixTransform, so supply the cursor location requested by the event.
+    Object.defineProperty(svg, "createSVGPoint", {
+      value: () => ({ x: 0, y: 0, matrixTransform: () => ({ x: 200, y: 200 }) }),
+    });
+    for (let i = 0; i < 12; i += 1) {
+      fireEvent.wheel(svg, { deltaY: -100, clientX: 200, clientY: 200 });
+    }
+
+    await waitFor(() => {
+      const scale = Number(zoomLayer.getAttribute("transform")?.match(/scale\(([^)]+)\)/)?.[1]);
+      expect(scale).toBeGreaterThan(4);
+    });
+  });
+
   it("clicking an already-selected node is a no-op (does not deselect)", async () => {
     useFleetGraph.mockReturnValue(ok(richGraph()));
     const onSelect = vi.fn();
