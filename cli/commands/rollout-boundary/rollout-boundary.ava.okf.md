@@ -22,7 +22,9 @@ tags:
   authentication: it targets this cluster's database through the gateway's
   local Postgres trust socket, so a partially applied credential transition
   cannot prevent last-known-good rollback. Manual `ava cluster rollback` keeps
-  using the runtime owner connection.
+  using the runtime owner connection. A dedicated pre-mutation connection error
+  proves unchanged schema; any unexpected error after rollback begins leaves
+  code on the new revision and reports schema state as unknown.
 
 ## Readiness and Phase B
 

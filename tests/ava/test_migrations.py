@@ -724,6 +724,41 @@ def test_rollback_to_aborts_all_downs_on_failure(
         db_conn.commit()
 
 
+def test_rollback_to_can_raise_after_the_batch_commits(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A post-yield advisory-unlock failure arrives after the rollback batch
+    commits. Callers must treat an unexpected exception as schema-ambiguous,
+    never as proof that the schema stayed unchanged."""
+    (tmp_path / f"{_SYN}.down.sql").write_text("DROP TABLE rollback_committed_t;")
+    monkeypatch.setattr("shared.migrations.MIGRATIONS_DIR", tmp_path)
+    with db_conn.cursor() as cur:
+        cur.execute("CREATE TABLE rollback_committed_t (id int)")
+        cur.execute("INSERT INTO schema_migrations (name) VALUES (%s)", (_SYN,))
+    db_conn.commit()
+
+    @contextmanager
+    def _fail_unlock_after_yield(_conn: psycopg.Connection) -> Generator[None, None, None]:
+        yield
+        raise RuntimeError("advisory unlock failed after commit")
+
+    monkeypatch.setattr("shared.migrations._schema_mutation_lock", _fail_unlock_after_yield)
+    try:
+        with pytest.raises(RuntimeError, match="unlock failed after commit"):
+            rollback_to(db_conn, {_BASELINE_NAME})
+
+        with db_conn.cursor() as cur:
+            cur.execute("SELECT name FROM schema_migrations WHERE name = %s", (_SYN,))
+            assert cur.fetchone() is None
+            cur.execute("SELECT to_regclass('rollback_committed_t')")
+            assert cur.fetchone() == (None,)
+    finally:
+        with db_conn.cursor() as cur:
+            cur.execute("DROP TABLE IF EXISTS rollback_committed_t")
+            cur.execute("DELETE FROM schema_migrations WHERE name = %s", (_SYN,))
+        db_conn.commit()
+
+
 # ─── migration-apply advisory lock (serializes concurrent appliers) ───────────
 
 
