@@ -89,8 +89,12 @@ ava lgtm off                # remove marker first, then stop deliberately
 `start.sh` and `stop.sh` are native-only. The launcher rejects a missing native
 binary, Grafana launch script, or missing/ambiguous home-scoped launchd plist;
 it bootstraps Loki, Prometheus, or Grafana unless both its launchd job is loaded
-and its HTTP listener answers. It checks that Grafana provisioned at least 18
-alert rules when its admin password file is available. A newly bootstrapped job
+and its HTTP listener answers. Before any Loki start or restart it runs
+`loki -config.file=$AVA_HOME/lgtm/native/config/loki.yaml -verify-config` and
+fails loudly if the rendered config is rejected — a bad `loki.yaml` field
+would otherwise crash-loop the launchd job (2026-08-25 incident). It checks
+that Grafana provisioned at least 18 alert rules when its admin password file
+is available. A newly bootstrapped job
 must answer within 30 seconds or the launcher fails loudly. Neither script
 touches the Docker daemon or compose.
 
