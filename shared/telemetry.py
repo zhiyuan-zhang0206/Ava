@@ -610,6 +610,25 @@ def _ensure_pipeline() -> _EventPipeline | None:
     return _state["pipeline"]
 
 
+def _as_utc(ts: datetime | None) -> datetime:
+    """Normalize one event timestamp onto the stream's single clock: UTC.
+
+    `emit()`'s default is `datetime.now(UTC)`; an explicit `ts` — the loguru
+    adapter passes loguru's local-zone record time, replay/migration passes
+    stored rows — is converted to UTC here so the Event and every
+    serialization of it (the JSONL mirror `ts` field, the OTLP body) carries
+    one offset. A naive `ts` is UTC by contract (the one-time-source rule);
+    treating it as local would mix clocks. The 2026-08-25 mirror audit: loguru
+    rows wrote +08:00 into the mirror while direct emits wrote +00:00, which
+    made any local-wall-clock filter of the mirror misread gateway telemetry
+    as missing since the UTC-day rollover (task #1638)."""
+    if ts is None:
+        return datetime.now(UTC)
+    if ts.tzinfo is None:
+        return ts.replace(tzinfo=UTC)
+    return ts.astimezone(UTC)
+
+
 def emit(
     category: Category,
     event_name: str,
@@ -637,10 +656,13 @@ def emit(
     (enqueue time — the drain thread runs outside the span context). `agent_id`
     falls back to the process-bound value (init_telemetry); explicit wins.
     `ts` defaults to the PROCESS clock at enqueue time (`datetime.now(UTC)`) —
-    the one time source for the entire stream. Callers pass an explicit `ts`
-    only for replayed/migrated rows; a DB-derived timestamp would silently
-    mix two clocks (W7 rewired the last DB-clock writers, heartbeat +
-    delivery watchdog, onto this path)."""
+    the one time source for the entire stream, and an explicit `ts` is
+    normalized to UTC before enqueue (`_as_utc`), so every serialization of
+    the Event (the JSONL mirror `ts` field, the OTLP body) carries one offset.
+    Callers pass an explicit `ts` only for loguru-adapter records (loguru
+    stamps local zone — normalized here) and replayed/migrated rows; a
+    DB-derived timestamp would silently mix two clocks (W7 rewired the last
+    DB-clock writers, heartbeat + delivery watchdog, onto this path)."""
     spec = EVENTS.get(event_name)
     if spec is None:
         raise ValueError(
@@ -660,7 +682,7 @@ def emit(
         trace_id, span_id = _capture_trace_ids()
         pipeline.enqueue(
             Event(
-                ts=ts or datetime.now(UTC),
+                ts=_as_utc(ts),
                 trace_id=trace_id,
                 span_id=span_id,
                 agent_id=agent_id if agent_id is not None else _ambient_agent_id(),
