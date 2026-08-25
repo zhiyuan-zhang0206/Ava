@@ -357,6 +357,33 @@ else:
 
 settings = Settings()
 
+
+def refresh_data_plane_settings() -> None:
+    """Re-read the unit's `.env` and rebuild `settings.data_plane` in place.
+
+    A long-lived process (the rollout orchestrator) builds its Settings
+    singleton once at startup. When the work it drives rewrites `.env` — most
+    notably a data-plane credential rotation migration run by the local leg's
+    child `ava start` (the 2026-08-25 secret split) — the singleton still
+    carries the pre-rotation values and every later data-plane write from this
+    process fails with SASL authentication. On 2026-08-25 the pin advance, the
+    compensating unpause and the update-lock release all died exactly that way,
+    stranding the cluster paused with a stale pin while the watchdog
+    force-checked-out the stale pin underneath the landed gateway.
+
+    This re-runs the boot env load (the cluster-env authority pass refreshes
+    the cluster-scope aliases from the new file) and rebuilds only the
+    data-plane sub-model in place, so existing `from shared.config import
+    settings` references see the fresh credentials without a process restart.
+    Other domains are left untouched: the rotation is a data-plane fact, and a
+    full singleton swap would surprise subsystems that cache a sub-model.
+    """
+    from shared.dotenv_boot import load_ava_env
+
+    load_ava_env()
+    settings.data_plane = DataPlaneSettings()  # pyright: ignore[reportCallIssue]
+
+
 # Cluster-common config an agent-runner fetches from the gateway via
 # GET /api/bootstrap. Derived from each field's ownership scope: the two cluster
 # scopes are distributed; host / agent fields are not.
