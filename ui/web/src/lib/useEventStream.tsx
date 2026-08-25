@@ -20,7 +20,7 @@
 //   filtering server-side — the frontend filters internally via
 //   isEventForThread. The timeline (useTimeline), token usage
 //   (useTokenUsage), and pending strip (usePendingMessages) subscribe
-//   here. Always connected (not tied to activeId).
+//   here. Always connected while authenticated (not tied to activeId).
 //
 // The batched format (`data: [{...}, {...}]`) is handled transparently:
 // the onmessage handler detects arrays and fans out each element as an
@@ -39,7 +39,8 @@
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 
-import { API_BASE } from "./api";
+import { API_BASE, api } from "./api";
+import { notifySessionInvalid, useAuth } from "./auth-context";
 import { useFoldOwner } from "./fold/owner";
 import { useStore } from "./store";
 import type { SystemEvent } from "./types";
@@ -56,12 +57,11 @@ const WATCHDOG_MS = 45_000;
 
 // SSE-connect-failure retry. EventSource auto-retries a *transient* network
 // drop on its own (readyState → CONNECTING, onerror fires repeatedly), but on a
-// non-2xx *response* — a 503 while the cluster is paused for a rollout, a 500, an
-// auth 401 — it gives up permanently (readyState → CLOSED, onerror fires once and
-// never again). That is a dead end: live updates never come back until a manual
-// page refresh. So on a CLOSED error we schedule our own reopen with capped
-// exponential backoff, single-flight (never stack timers), and reset the backoff
-// on a successful open. Invariant: as long as the page is alive, SSE reconnects.
+// non-2xx *response* — a 503 while the cluster is paused for a rollout or a 500 —
+// it gives up permanently (readyState → CLOSED, onerror fires once and never
+// again). A 401/403 stops through the session probe below; transient failures get
+// a capped exponential backoff, single-flight (never stack timers), and reset the
+// backoff on a successful open.
 const RECONNECT_BASE_MS = 1_000;
 const RECONNECT_MAX_MS = 30_000;
 
@@ -110,6 +110,7 @@ function useSseConnection(
   subscribersRef: React.RefObject<Set<Subscriber>>,
   onOpenChange: (open: boolean) => void,
 ): void {
+  const { status: authStatus } = useAuth();
   // reconnectNonce: bumping it (from the watchdog below, or from the
   // cluster-update-done detector in use-cluster-health) re-runs this
   // effect — cleanup closes the stale EventSource, the re-run opens a
@@ -125,7 +126,11 @@ function useSseConnection(
   const failCountRef = useRef(0);
 
   useEffect(() => {
-    if (url === null) {
+    if (url === null || authStatus !== "authenticated") {
+      // Not authenticated: keep the connection closed. EventSource cannot set an
+      // Authorization header, so an unauthenticated SSE GET 401s at the gateway —
+      // opening it would just feed the retry storm (Task #1635). When auth flips
+      // to "authenticated" (login), this effect re-runs and opens fresh.
       onOpenChange(false);
       return;
     }
@@ -142,6 +147,7 @@ function useSseConnection(
     // repeated parse errors mean the transport is corrupting frames — count
     // and force a reconnect at 3 (Task #951).
     let parseFailures = 0;
+    let disposed = false;
     const es = new EventSource(url, { withCredentials: true });
 
     // Half-dead-connection watchdog. Any frame (open / business event /
@@ -157,11 +163,11 @@ function useSseConnection(
       }, WATCHDOG_MS);
     };
 
-    // Capped-backoff reopen after a dead-end CLOSED error (below). Single-flight:
-    // one pending timer at a time — a second CLOSED before it fires is ignored, so
-    // a burst never becomes a reconnect storm. Bumping retryNonce re-runs this
-    // effect; cleanup closes the stale (already-CLOSED) EventSource and a fresh one
-    // opens.
+    // Capped-backoff reopen after a dead-end CLOSED error whose session probe is
+    // valid (below). Single-flight: one pending timer at a time — a second CLOSED
+    // before it fires is ignored, so a burst never becomes a reconnect storm.
+    // Bumping retryNonce re-runs this effect; cleanup closes the stale
+    // (already-CLOSED) EventSource and a fresh one opens.
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
     const scheduleReopen = () => {
       if (retryTimer !== null) return;
@@ -272,11 +278,30 @@ function useSseConnection(
       // would make the amber banner flicker and hurt UX.
       switch (es.readyState) {
         case EventSource.CLOSED:
-          // Dead end: the browser will NOT retry a CLOSED EventSource. Tell
-          // subscribers, then schedule our own backoff reopen so the connection
-          // comes back on its own once the server is answering again.
+          // A CLOSED EventSource hides its HTTP status. The middleware's 401 is
+          // the only auth rejection a credentialed SSE GET can receive (the
+          // origin-check 403 is state-changing-methods only); a 503/500 also
+          // closes the stream but is a server problem, not a session one. Probe
+          // the session instead of retrying blindly: an expired session must NOT
+          // reopen (Task #1635 — the 43k/24h 401 retry storm) — notify the auth
+          // context (AuthGuard redirects to /login) and let the authStatus gate
+          // above keep the stream closed until the user logs in again.
           for (const sub of subscribersRef.current) sub.conn({ type: "closed" });
-          scheduleReopen();
+          void api
+            .checkAuth()
+            .then((res) => {
+              if (disposed) return;
+              if (!res.authenticated) {
+                notifySessionInvalid();
+                return;
+              }
+              scheduleReopen();
+            })
+            .catch(() => {
+              if (disposed) return;
+              // Probe itself failed (gateway unreachable) — transient; keep retrying.
+              scheduleReopen();
+            });
           return;
         case EventSource.CONNECTING:
           // The browser is already auto-retrying — surface it, but do NOT also
@@ -294,14 +319,15 @@ function useSseConnection(
     };
 
     return () => {
+      disposed = true;
       if (watchdog !== null) clearTimeout(watchdog);
       if (retryTimer !== null) clearTimeout(retryTimer);
       es.close();
     };
-    // url + reconnectNonce + retryNonce are the levers (retryNonce is the local
-    // connect-failure backoff). subscribersRef / onOpenChange / bumpReconnect are
-    // stable identities included only to satisfy the lint.
-  }, [url, reconnectNonce, retryNonce, bumpReconnect, subscribersRef, onOpenChange]);
+    // url + authStatus + reconnectNonce + retryNonce are the levers (retryNonce is
+    // the local connect-failure backoff). subscribersRef / onOpenChange /
+    // bumpReconnect are stable identities included only to satisfy the lint.
+  }, [url, authStatus, reconnectNonce, retryNonce, bumpReconnect, subscribersRef, onOpenChange]);
 }
 
 /** Mint a stable `subscribe(onSystem, onConn)` over a subscriber Set. */
@@ -415,7 +441,7 @@ export function useEventStream(
 }
 
 // ---------------------------------------------------------------------------
-// All-events — full SYSTEM_ROLES for EVERY agent, throttled + always connected.
+// All-events — full SYSTEM_ROLES for EVERY agent, throttled + authenticated-only.
 // ---------------------------------------------------------------------------
 
 const AgentEventStreamContext = createContext<EventStreamContextValue | null>(null);
@@ -426,7 +452,7 @@ const NOOP_OPEN_CHANGE = (_open: boolean): void => undefined;
 
 /**
  * Provider for the all-events throttled broadcast (`/api/system/all`).
- * Always connected — not tied to `activeId`. The server pushes EVERY
+ * Always connected while authenticated — not tied to `activeId`. The server pushes EVERY
  * event for EVERY agent in a batched, throttled stream (max 25
  * pushes/sec). No server-side filtering — the frontend's per-consumer
  * `isEventForThread` guard handles agent routing.
@@ -438,7 +464,7 @@ export function AgentEventStreamProvider({
 }) {
   const subscribersRef = useRef<Set<Subscriber>>(new Set());
 
-  // Always connected to the all-events broadcast — no dependency on activeId.
+  // Always connected while authenticated — no dependency on activeId.
   useSseConnection(`${API_BASE}/api/system/all`, subscribersRef, NOOP_OPEN_CHANGE);
   const subscribe = useSubscribe(subscribersRef);
 

@@ -518,16 +518,20 @@ _AUTH_BYPASS_PATHS: frozenset[str] = frozenset(
         "/api/auth/login",
         "/api/auth/check",
         "/api/auth/logout",
-        # Alert webhook (Grafana embedded Alertmanager) — authenticated by
-        # its own token (X-Alerts-Token / X-Ops-Alerts-Token / cluster-secret
-        # Bearer / loopback trust) inside the router, not by the
-        # session/bearer middleware.
-        "/api/alerts",
         # /mcp authenticates revocable, scoped clients in its ASGI wrapper.
         # Starlette redirects the mount root to /mcp/, so both spellings must
         # bypass cluster auth. Cluster credentials are not MCP identities.
         "/mcp",
         "/mcp/",
+    }
+)
+_AUTH_BYPASS_METHOD_PATHS: frozenset[tuple[str, str]] = frozenset(
+    {
+        # Alert webhook (Grafana embedded Alertmanager) — authenticated by
+        # its own token (X-Alerts-Token / X-Ops-Alerts-Token / cluster-secret
+        # Bearer / loopback trust) inside the router, not by the
+        # session/bearer middleware. Alert reads still require cluster auth.
+        ("POST", "/api/alerts"),
     }
 )
 _STATE_CHANGING_METHODS: frozenset[str] = frozenset({"POST", "PUT", "PATCH", "DELETE"})
@@ -582,7 +586,14 @@ async def _cluster_auth_middleware(
     # (resurrect / terminate / restart / send-message) as "Failed to fetch".
     if request.method == "OPTIONS":
         return await call_next(request)
-    if request.url.path in _AUTH_BYPASS_PATHS:
+    if (
+        request.url.path in _AUTH_BYPASS_PATHS
+        or (
+            request.method,
+            request.url.path,
+        )
+        in _AUTH_BYPASS_METHOD_PATHS
+    ):
         return await call_next(request)
 
     # 1. Check session cookie
@@ -636,6 +647,16 @@ async def _cluster_auth_middleware(
     if x_secret and hmac.compare_digest(x_secret, secret):
         return await call_next(request)
 
+    # Task #1635: the frontend used to blind-retry 401'd SSE streams, producing a
+    # ~43k/24h storm; the fix stops that, so a 401 here now means a residual client
+    # (stale tab on an old bundle, script, SDK). uvicorn access logs are gated to
+    # WARNING, so without this line 401s are invisible — log client + UA to find them.
+    _log.warning(
+        "auth 401: path=%s client=%s ua=%s",
+        request.url.path,
+        request.client.host if request.client else "unknown",
+        request.headers.get("user-agent", "-"),
+    )
     return error_response(
         request,
         code="authentication_required",

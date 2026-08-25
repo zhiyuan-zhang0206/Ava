@@ -21,6 +21,7 @@ import React from "react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api } from "./api";
+import { AuthProvider } from "./auth-context";
 import { useStore } from "./store";
 import type { AgentRow, SystemEvent, WireAgentRow } from "./types";
 import { projectAgentStatus } from "./types";
@@ -38,6 +39,7 @@ vi.mock("./api", () => ({
     terminateAgent: vi.fn(),
     restartAgent: vi.fn(),
     resurrectAgent: vi.fn(),
+    checkAuth: vi.fn(),
   },
 }));
 
@@ -81,6 +83,10 @@ function deliverSseMessage(payload: unknown): void {
     { data: JSON.stringify(payload) } as MessageEvent,
   );
 }
+
+async function waitForEventSource(): Promise<void> {
+  await waitFor(() => expect(lastEventSource).not.toBeNull());
+}
 beforeAll(() => {
   // happy-dom ships a real EventSource that opens a TCP socket; stub
   // both globalThis and window so neither path attempts a connection.
@@ -105,11 +111,15 @@ let _qc: QueryClient;
 // event is delivered.
 function wrapper({ children }: { children: React.ReactNode }) {
   // Both the fold owner and any useAgents reader live inside
-  // <EventStreamProvider>.
+  // <AuthProvider> ⊃ <QueryClientProvider> ⊃ <EventStreamProvider>.
   return React.createElement(
-    QueryClientProvider,
-    { client: _qc },
-    React.createElement(EventStreamProvider, null, children),
+    AuthProvider,
+    null,
+    React.createElement(
+      QueryClientProvider,
+      { client: _qc },
+      React.createElement(EventStreamProvider, null, children),
+    ),
   );
 }
 
@@ -140,6 +150,7 @@ function setUrlSearch(search: string) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  lastEventSource = null;
   localStorageMock.clear();
   // Clear URL search
   setUrlSearch("");
@@ -153,6 +164,7 @@ beforeEach(() => {
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   vi.mocked(api.listAgents).mockResolvedValue(MOCK_AGENTS);
+  vi.mocked(api.checkAuth).mockResolvedValue({ authenticated: true });
 });
 afterEach(() => {
   cleanup();
@@ -984,6 +996,7 @@ describe("useAgents SSE merge (regression)", () => {
     await waitFor(() => {
       expect(result.current.agents).toEqual(MOCK_AGENTS);
     });
+    await waitForEventSource();
     const fetchesBefore = vi.mocked(api.listAgents).mock.calls.length;
 
     const newSnapshot: WireAgentRow = {
@@ -1027,6 +1040,7 @@ describe("useAgents SSE merge (regression)", () => {
     await waitFor(() => {
       expect(result.current.agents).toEqual(MOCK_AGENTS);
     });
+    await waitForEventSource();
     const fetchesBefore = vi.mocked(api.listAgents).mock.calls.length;
 
     const updated: AgentRow = { ...MOCK_AGENTS[0], status: "terminated" };
@@ -1061,6 +1075,7 @@ describe("useAgents SSE merge (regression)", () => {
     await waitFor(() => {
       expect(result.current.activeId).toBe(1);
     });
+    await waitForEventSource();
 
     await act(async () => {
       await result.current.spawn();
@@ -1118,6 +1133,7 @@ describe("useAgents SSE merge (regression)", () => {
     await waitFor(() => {
       expect(result.current.agents).toEqual(MOCK_AGENTS);
     });
+    await waitForEventSource();
 
     let p: Promise<number | null>;
     act(() => {
@@ -1184,6 +1200,7 @@ describe("useAgents SSE merge (regression)", () => {
     await waitFor(() => {
       expect(result.current.agents).toEqual(MOCK_AGENTS);
     });
+    await waitForEventSource();
 
     let p: Promise<number | null>;
     act(() => {
@@ -1234,7 +1251,7 @@ describe("useAgents SSE merge (regression)", () => {
     expect(result.current.pendingSpawnCount).toBe(0);
   });
 
-  it("agent_spawned before the initial list fetch lands → cache is NOT seeded (empty-cache guard)", () => {
+  it("agent_spawned before the initial list fetch lands → cache is NOT seeded (empty-cache guard)", async () => {
     // The fold (applyEvent → foldAgents) refuses to seed a one-agent partial
     // from an SSE event that races ahead of the initial list fetch: a lone
     // snapshot is not the whole fleet. Every ["agents"] writer converges onto
@@ -1245,6 +1262,7 @@ describe("useAgents SSE merge (regression)", () => {
       () => new Promise(() => { /* never resolves */ }),
     );
     const { result } = renderHook(() => useAgents(noop), { wrapper });
+    await waitForEventSource();
 
     const snapshot: AgentRow = { ...MOCK_AGENTS[0], agent_id: 7, label: "ghost" };
     act(() => {
@@ -1303,7 +1321,7 @@ describe("public three-state agent status projection", () => {
 });
 
 describe("fold owner reconnect reconcile", () => {
-  it("invalidates ALL queries when the global SSE connection (re)opens", () => {
+  it("invalidates ALL queries when the global SSE connection (re)opens", async () => {
     // The single central reconcile (fold owner inside EventStreamProvider): on
     // reopen, every cached view (agents, tasks, fleet-graph, notices, …) could
     // have missed events during the gap, so one bare invalidateQueries() marks
@@ -1311,7 +1329,7 @@ describe("fold owner reconnect reconcile", () => {
     // open" obligation.
     const invalidateSpy = vi.spyOn(_qc, "invalidateQueries");
     renderHook(() => undefined, { wrapper });
-    expect(lastEventSource).not.toBeNull();
+    await waitForEventSource();
 
     act(() => {
       lastEventSource?.onopen?.call(

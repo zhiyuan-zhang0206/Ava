@@ -10,13 +10,17 @@
 // Tests use renderHook's `wrapper` option to wrap each hook call in a
 // Provider.
 
-import { act, cleanup, renderHook } from "@testing-library/react";
+const mocks = vi.hoisted(() => ({ checkAuth: vi.fn() }));
+vi.mock("@/lib/api", () => ({ API_BASE: "", api: { checkAuth: mocks.checkAuth } }));
+
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createElement } from "react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useStore } from "./store";
+import { AuthProvider, useAuth } from "./auth-context";
 import { useFoldOwner } from "./fold/owner";
 import type { AgentRow } from "./types";
 import type { SystemEvent } from "./types";
@@ -69,8 +73,18 @@ class MockEventSource {
 
 let lastInstance: MockEventSource | null = null;
 
+function deferredAuthResult() {
+  let resolve!: (result: { authenticated: boolean }) => void;
+  const promise = new Promise<{ authenticated: boolean }>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
 beforeEach(() => {
   lastInstance = null;
+  mocks.checkAuth.mockReset();
+  mocks.checkAuth.mockResolvedValue({ authenticated: true });
   vi.stubGlobal("EventSource", MockEventSource);
   // The Providers read reconnectNonce + activeId from the store and list them
   // in effect deps — reset both so each test starts from a known baseline.
@@ -90,6 +104,10 @@ function expectInstance(): MockEventSource {
   return lastInstance;
 }
 
+async function waitForInstance(): Promise<void> {
+  await waitFor(() => expect(lastInstance).not.toBeNull());
+}
+
 // Helps renderHook wrap a hook into the Provider. agentId is passed via the wrapper factory.
 function withProvider() {
   // The R4 fold owner inside EventStreamProvider reads the query cache, so
@@ -99,9 +117,13 @@ function withProvider() {
   });
   return function Wrapper({ children }: { children: ReactNode }) {
     return createElement(
-      QueryClientProvider,
-      { client: qc },
-      createElement(EventStreamProvider, { children }),
+      AuthProvider,
+      null,
+      createElement(
+        QueryClientProvider,
+        { client: qc },
+        createElement(EventStreamProvider, { children }),
+      ),
     );
   };
 }
@@ -116,9 +138,13 @@ function withProviderAndClient() {
   // return value would otherwise trip @typescript-eslint/unbound-method.
   const wrapper = ({ children }: { children: ReactNode }) =>
     createElement(
-      QueryClientProvider,
-      { client: qc },
-      createElement(EventStreamProvider, { children }),
+      AuthProvider,
+      null,
+      createElement(
+        QueryClientProvider,
+        { client: qc },
+        createElement(EventStreamProvider, { children }),
+      ),
     );
   return { qc, wrapper };
 }
@@ -147,34 +173,38 @@ const baseAgent: AgentRow = {
 // -- tests ─────────────────────────────────────────────────────────────────
 
 describe("EventStreamProvider connection lifecycle", () => {
-  it("mount + open → subscriber receives onConnectionEvent({type:'open'})", () => {
+  it("mount + open → subscriber receives onConnectionEvent({type:'open'})", async () => {
     const onSystem = vi.fn();
     const onConn = vi.fn<(ev: ConnectionEvent) => void>();
 
     renderHook(() => useEventStream(onSystem, onConn), { wrapper: withProvider() });
+    await waitForInstance();
     act(() => expectInstance().fireOpen());
 
     expect(onConn).toHaveBeenCalledWith({ type: "open" });
     expect(onSystem).not.toHaveBeenCalled();
   });
 
-  it("provider always opens EventSource (global connection)", () => {
+  it("provider always opens EventSource (global connection)", async () => {
     renderHook(() => useEventStream(vi.fn(), vi.fn()), { wrapper: withProvider() });
+    await waitForInstance();
     expect(lastInstance).not.toBeNull();
     expect(expectInstance().url).toContain("/api/system");
   });
 
-  it("URL is /api/system (global broadcast)", () => {
+  it("URL is /api/system (global broadcast)", async () => {
     renderHook(() => useEventStream(vi.fn(), vi.fn()), { wrapper: withProvider() });
+    await waitForInstance();
     expect(expectInstance().url).toContain("/api/system");
   });
 
-  it("opens with withCredentials so the session cookie reaches the cross-origin gateway", () => {
+  it("opens with withCredentials so the session cookie reaches the cross-origin gateway", async () => {
     // Regression: the gateway requires auth and EventSource cannot send a
     // Bearer header, so a cross-origin SSE GET (:3000 -> :8000) must carry the
     // session cookie via withCredentials — otherwise it 401s and live updates
     // never connect ("SSE connection lost").
     renderHook(() => useEventStream(vi.fn(), vi.fn()), { wrapper: withProvider() });
+    await waitForInstance();
     expect(expectInstance().init?.withCredentials).toBe(true);
   });
 
@@ -189,11 +219,12 @@ describe("EventStreamProvider connection lifecycle", () => {
 });
 
 describe("EventStreamProvider onmessage", () => {
-  it("valid JSON → onSystemEvent receives the parsed event", () => {
+  it("valid JSON → onSystemEvent receives the parsed event", async () => {
     const onSystem = vi.fn();
     const onConn = vi.fn();
 
     renderHook(() => useEventStream(onSystem, onConn), { wrapper: withProvider() });
+    await waitForInstance();
     act(() => {
       expectInstance().fireOpen();
       expectInstance().fireMessage(
@@ -208,11 +239,12 @@ describe("EventStreamProvider onmessage", () => {
     });
   });
 
-  it("malformed JSON → onConnectionEvent({type:'parse-failed'}) (no more silent console.error)", () => {
+  it("malformed JSON → onConnectionEvent({type:'parse-failed'}) (no more silent console.error)", async () => {
     const onSystem = vi.fn();
     const onConn = vi.fn<(ev: ConnectionEvent) => void>();
 
     renderHook(() => useEventStream(onSystem, onConn), { wrapper: withProvider() });
+    await waitForInstance();
     act(() => {
       expectInstance().fireOpen();
       expectInstance().fireMessage("{not valid json");
@@ -229,10 +261,11 @@ describe("EventStreamProvider onmessage", () => {
     );
   });
 
-  it("non-string e.data (Blob etc.) → 'parse-failed', does not let String() itself crash", () => {
+  it("non-string e.data (Blob etc.) → 'parse-failed', does not let String() itself crash", async () => {
     const onConn = vi.fn<(ev: ConnectionEvent) => void>();
 
     renderHook(() => useEventStream(vi.fn(), onConn), { wrapper: withProvider() });
+    await waitForInstance();
     act(() => {
       expectInstance().fireOpen();
       expectInstance().fireMessage({ type: "Blob", size: 100 });
@@ -248,28 +281,34 @@ describe("EventStreamProvider onmessage", () => {
 });
 
 describe("EventStreamProvider onerror three-way readyState dispatch", () => {
-  it("readyState=CLOSED → onConnectionEvent({type:'closed'})", () => {
+  it("readyState=CLOSED → onConnectionEvent({type:'closed'})", async () => {
     const onConn = vi.fn<(ev: ConnectionEvent) => void>();
 
     renderHook(() => useEventStream(vi.fn(), onConn), { wrapper: withProvider() });
+    await waitForInstance();
     act(() => expectInstance().fireErrorWithReadyState(MockEventSource.CLOSED));
+    await act(async () => {
+      await Promise.resolve();
+    });
 
     expect(onConn).toHaveBeenCalledWith({ type: "closed" });
   });
 
-  it("readyState=CONNECTING → onConnectionEvent({type:'reconnecting'})", () => {
+  it("readyState=CONNECTING → onConnectionEvent({type:'reconnecting'})", async () => {
     const onConn = vi.fn<(ev: ConnectionEvent) => void>();
 
     renderHook(() => useEventStream(vi.fn(), onConn), { wrapper: withProvider() });
+    await waitForInstance();
     act(() => expectInstance().fireErrorWithReadyState(MockEventSource.CONNECTING));
 
     expect(onConn).toHaveBeenCalledWith({ type: "reconnecting" });
   });
 
-  it("readyState=OPEN → no notification (transient fault absorbed by the browser)", () => {
+  it("readyState=OPEN → no notification (transient fault absorbed by the browser)", async () => {
     const onConn = vi.fn<(ev: ConnectionEvent) => void>();
 
     renderHook(() => useEventStream(vi.fn(), onConn), { wrapper: withProvider() });
+    await waitForInstance();
     act(() => {
       expectInstance().fireOpen();
       onConn.mockClear();
@@ -279,33 +318,120 @@ describe("EventStreamProvider onerror three-way readyState dispatch", () => {
     expect(onConn).not.toHaveBeenCalled();
   });
 
-  it("unknown readyState → throws (fail-fast, no case _: catch-all)", () => {
+  it("unknown readyState → throws (fail-fast, no case _: catch-all)", async () => {
     const onConn = vi.fn<(ev: ConnectionEvent) => void>();
 
     renderHook(() => useEventStream(vi.fn(), onConn), { wrapper: withProvider() });
+    await waitForInstance();
     expect(() => {
       act(() => expectInstance().fireErrorWithReadyState(99));
     }).toThrow(/unknown EventSource readyState: 99/);
   });
 });
 
-describe("EventStreamProvider connect-failure backoff retry", () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
+describe("EventStreamProvider auth-gated connection", () => {
+  it("unauthenticated → no EventSource is constructed", async () => {
+    mocks.checkAuth.mockResolvedValue({ authenticated: false });
+
+    const { result } = renderHook(() => useAuth().status, { wrapper: withProvider() });
+
+    await waitFor(() => expect(result.current).toBe("unauthenticated"));
+    expect(lastInstance).toBeNull();
   });
+
+  it("CLOSED with an invalid session → notifySessionInvalid, NO reopen", async () => {
+    try {
+      const { result } = renderHook(
+        () => {
+          useEventStream(() => undefined, () => undefined);
+          return useAuth().status;
+        },
+        { wrapper: withProvider() },
+      );
+      await waitForInstance();
+      const first = expectInstance();
+      await waitFor(() => expect(result.current).toBe("authenticated"));
+
+      vi.useFakeTimers();
+      mocks.checkAuth.mockResolvedValue({ authenticated: false });
+      act(() => first.fireErrorWithReadyState(MockEventSource.CLOSED));
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      vi.useRealTimers();
+      await waitFor(() => expect(result.current).toBe("unauthenticated"));
+      vi.useFakeTimers();
+      act(() => {
+        vi.advanceTimersByTime(60_000);
+      });
+      expect(expectInstance()).toBe(first);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a late invalid CLOSED probe cannot invalidate a replacement provider", async () => {
+    const staleProbe = deferredAuthResult();
+    mocks.checkAuth
+      .mockResolvedValueOnce({ authenticated: true })
+      .mockReturnValueOnce(staleProbe.promise)
+      .mockResolvedValueOnce({ authenticated: true });
+
+    const firstMount = renderHook(
+      () => {
+        useEventStream(() => undefined, () => undefined);
+        return useAuth().status;
+      },
+      { wrapper: withProvider() },
+    );
+    await waitFor(() => expect(firstMount.result.current).toBe("authenticated"));
+    await waitForInstance();
+    act(() => expectInstance().fireErrorWithReadyState(MockEventSource.CLOSED));
+    firstMount.unmount();
+
+    lastInstance = null;
+    const replacement = renderHook(
+      () => {
+        useEventStream(() => undefined, () => undefined);
+        return useAuth().status;
+      },
+      { wrapper: withProvider() },
+    );
+    await waitFor(() => expect(replacement.result.current).toBe("authenticated"));
+    await waitForInstance();
+    const replacementSource = expectInstance();
+
+    await act(async () => {
+      staleProbe.resolve({ authenticated: false });
+      await staleProbe.promise;
+    });
+
+    expect(replacement.result.current).toBe("authenticated");
+    expect(expectInstance()).toBe(replacementSource);
+    expect(replacementSource.readyState).not.toBe(MockEventSource.CLOSED);
+  });
+});
+
+describe("EventStreamProvider connect-failure backoff retry", () => {
   afterEach(() => {
     vi.useRealTimers();
   });
 
-  it("dead-end CLOSED error schedules a backoff reopen (a fresh EventSource after the delay)", () => {
-    // A non-2xx response (503 during a rollout pause, 500, 401) makes the browser
-    // give up for good: readyState CLOSED, no auto-retry. Our own backoff must
-    // reopen it so live updates come back without a manual page refresh.
+  it("dead-end CLOSED error schedules a backoff reopen (a fresh EventSource after the delay)", async () => {
+    // A transient non-2xx response (503 during a rollout pause or 500) makes the
+    // browser give up for good: readyState CLOSED, no auto-retry. 401/403 stop
+    // through the session probe; valid sessions still reopen without a refresh.
     const onConn = vi.fn<(ev: ConnectionEvent) => void>();
     renderHook(() => useEventStream(vi.fn(), onConn), { wrapper: withProvider() });
+    await waitForInstance();
+    vi.useFakeTimers();
     const first = expectInstance();
 
     act(() => first.fireErrorWithReadyState(MockEventSource.CLOSED));
+    await act(async () => {
+      await Promise.resolve();
+    });
     expect(onConn).toHaveBeenCalledWith({ type: "closed" });
 
     // No immediate reconnect (backoff), then a NEW EventSource opens at the delay.
@@ -316,10 +442,12 @@ describe("EventStreamProvider connect-failure backoff retry", () => {
     expect(expectInstance()).not.toBe(first);
   });
 
-  it("CONNECTING error does NOT schedule a manual reopen (browser already auto-retries)", () => {
+  it("CONNECTING error does NOT schedule a manual reopen (browser already auto-retries)", async () => {
     // A transient network drop keeps readyState CONNECTING and the browser retries
     // on its own — scheduling our own reopen too would double up into a storm.
     renderHook(() => useEventStream(vi.fn(), vi.fn()), { wrapper: withProvider() });
+    await waitForInstance();
+    vi.useFakeTimers();
     const first = expectInstance();
 
     act(() => first.fireErrorWithReadyState(MockEventSource.CONNECTING));
@@ -329,12 +457,17 @@ describe("EventStreamProvider connect-failure backoff retry", () => {
     expect(expectInstance()).toBe(first);
   });
 
-  it("backoff grows across consecutive failures (2nd retry waits longer than the 1st)", () => {
+  it("backoff grows across consecutive failures (2nd retry waits longer than the 1st)", async () => {
     renderHook(() => useEventStream(vi.fn(), vi.fn()), { wrapper: withProvider() });
+    await waitForInstance();
+    vi.useFakeTimers();
     const first = expectInstance();
 
     // 1st failure → reopens after ~1s.
     act(() => first.fireErrorWithReadyState(MockEventSource.CLOSED));
+    await act(async () => {
+      await Promise.resolve();
+    });
     act(() => {
       vi.advanceTimersByTime(1_000);
     });
@@ -344,6 +477,9 @@ describe("EventStreamProvider connect-failure backoff retry", () => {
     // 2nd failure (the retry also failed) → the delay doubled: nothing at +1s, a
     // fresh EventSource only at +2s.
     act(() => second.fireErrorWithReadyState(MockEventSource.CLOSED));
+    await act(async () => {
+      await Promise.resolve();
+    });
     act(() => {
       vi.advanceTimersByTime(1_000);
     });
@@ -354,11 +490,16 @@ describe("EventStreamProvider connect-failure backoff retry", () => {
     expect(expectInstance()).not.toBe(second);
   });
 
-  it("a successful open resets the backoff (next failure retries at the base delay again)", () => {
+  it("a successful open resets the backoff (next failure retries at the base delay again)", async () => {
     renderHook(() => useEventStream(vi.fn(), vi.fn()), { wrapper: withProvider() });
+    await waitForInstance();
+    vi.useFakeTimers();
     const first = expectInstance();
 
     act(() => first.fireErrorWithReadyState(MockEventSource.CLOSED));
+    await act(async () => {
+      await Promise.resolve();
+    });
     act(() => {
       vi.advanceTimersByTime(1_000);
     });
@@ -368,6 +509,9 @@ describe("EventStreamProvider connect-failure backoff retry", () => {
 
     // A later failure retries at the base delay again (not the grown one).
     act(() => second.fireErrorWithReadyState(MockEventSource.CLOSED));
+    await act(async () => {
+      await Promise.resolve();
+    });
     act(() => {
       vi.advanceTimersByTime(1_000);
     });
@@ -376,7 +520,7 @@ describe("EventStreamProvider connect-failure backoff retry", () => {
 });
 
 describe("EventStreamProvider cleanup + thread switch", () => {
-  it("unmount → old EventSource closed, remount opens a new connection", () => {
+  it("unmount → old EventSource closed, remount opens a new connection", async () => {
     // renderHook's wrapper can't swap props dynamically; two independent
     // renderHook calls (mount #1, then mount #2) are equivalent:
     // instance #1 closes on unmount. Asserting the second mount picks
@@ -387,6 +531,7 @@ describe("EventStreamProvider cleanup + thread switch", () => {
     const { unmount } = renderHook(() => useEventStream(vi.fn(), vi.fn()), {
       wrapper: withProvider(),
     });
+    await waitForInstance();
     const first = expectInstance();
     expect(first.url).toContain("/api/system");
     expect(first.readyState).toBe(MockEventSource.CONNECTING);
@@ -395,10 +540,11 @@ describe("EventStreamProvider cleanup + thread switch", () => {
     expect(first.readyState).toBe(MockEventSource.CLOSED);
 
     renderHook(() => useEventStream(vi.fn(), vi.fn()), { wrapper: withProvider() });
+    await waitForInstance();
     expect(expectInstance().url).toContain("/api/system");
   });
 
-  it("multiple subscribers share one EventSource (core: no reconnect)", () => {
+  it("multiple subscribers share one EventSource (core: no reconnect)", async () => {
     // Multiple useEventStream calls in the same Provider → subscribers
     // share one connection. Test: both hooks receive the same message.
     const onSystem1 = vi.fn();
@@ -411,6 +557,7 @@ describe("EventStreamProvider cleanup + thread switch", () => {
       useEventStream(onSystem2, vi.fn());
     }
     renderHook(() => useTwoSubscribers(), { wrapper });
+    await waitForInstance();
 
     // Verify EventSource was constructed only once (lastInstance is global; unchanged means only one new call)
     const inst = expectInstance();
@@ -425,11 +572,12 @@ describe("EventStreamProvider cleanup + thread switch", () => {
 });
 
 describe("EventStreamProvider heartbeat frame", () => {
-  it("heartbeat frame is liveness-only — NOT fanned out as a business event", () => {
+  it("heartbeat frame is liveness-only — NOT fanned out as a business event", async () => {
     const onSystem = vi.fn();
     const onConn = vi.fn<(ev: ConnectionEvent) => void>();
 
     renderHook(() => useEventStream(onSystem, onConn), { wrapper: withProvider() });
+    await waitForInstance();
     act(() => {
       expectInstance().fireOpen();
       expectInstance().fireMessage(JSON.stringify({ role: "heartbeat" }));
@@ -443,10 +591,11 @@ describe("EventStreamProvider heartbeat frame", () => {
     );
   });
 
-  it("a real business event after a heartbeat still flows through", () => {
+  it("a real business event after a heartbeat still flows through", async () => {
     const onSystem = vi.fn();
 
     renderHook(() => useEventStream(onSystem, vi.fn()), { wrapper: withProvider() });
+    await waitForInstance();
     act(() => {
       expectInstance().fireOpen();
       expectInstance().fireMessage(JSON.stringify({ role: "heartbeat" }));
@@ -459,17 +608,16 @@ describe("EventStreamProvider heartbeat frame", () => {
 });
 
 describe("EventStreamProvider half-dead watchdog", () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-  });
   afterEach(() => {
     vi.useRealTimers();
   });
 
-  it("45s with NO frame → notifies reconnecting + bumps reconnectNonce", () => {
+  it("45s with NO frame → notifies reconnecting + bumps reconnectNonce", async () => {
     const onConn = vi.fn<(ev: ConnectionEvent) => void>();
 
     renderHook(() => useEventStream(vi.fn(), onConn), { wrapper: withProvider() });
+    await waitForInstance();
+    vi.useFakeTimers();
     act(() => expectInstance().fireOpen());
     onConn.mockClear();
 
@@ -482,10 +630,12 @@ describe("EventStreamProvider half-dead watchdog", () => {
     expect(useStore.getState().reconnectNonce).toBe(nonceBefore + 1);
   });
 
-  it("any frame (incl. heartbeat) resets the watchdog — no fire before 45s of silence", () => {
+  it("any frame (incl. heartbeat) resets the watchdog — no fire before 45s of silence", async () => {
     const onConn = vi.fn<(ev: ConnectionEvent) => void>();
 
     renderHook(() => useEventStream(vi.fn(), onConn), { wrapper: withProvider() });
+    await waitForInstance();
+    vi.useFakeTimers();
     act(() => expectInstance().fireOpen());
     onConn.mockClear();
     const nonceBefore = useStore.getState().reconnectNonce;
@@ -510,33 +660,47 @@ describe("EventStreamProvider half-dead watchdog", () => {
 // close/reopen it.
 describe("AgentEventStreamProvider all-events broadcast URL", () => {
   function withAgentProvider() {
+    const qc = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
     return function Wrapper({ children }: { children: ReactNode }) {
-      return createElement(AgentEventStreamProvider, { children });
+      return createElement(
+        AuthProvider,
+        null,
+        createElement(
+          QueryClientProvider,
+          { client: qc },
+          createElement(AgentEventStreamProvider, { children }),
+        ),
+      );
     };
   }
 
-  it("always opens /api/system/all regardless of activeId", () => {
+  it("always opens /api/system/all regardless of activeId", async () => {
     act(() => useStore.setState({ activeId: 7 }));
     void renderHook(() => useAgentEventStream(vi.fn(), vi.fn()), {
       wrapper: withAgentProvider(),
     });
+    await waitForInstance();
     expect(expectInstance().url).toContain("/api/system/all");
   });
 
-  it("activeId null → still opens connection (always-on broadcast)", () => {
+  it("activeId null → still opens connection (always-on broadcast)", async () => {
     act(() => useStore.setState({ activeId: null }));
     void renderHook(() => useAgentEventStream(vi.fn(), vi.fn()), {
       wrapper: withAgentProvider(),
     });
+    await waitForInstance();
     expect(lastInstance).not.toBeNull();
     expect(expectInstance().url).toContain("/api/system/all");
   });
 
-  it("agent switch → does NOT close the connection (same broadcast serves all agents)", () => {
+  it("agent switch → does NOT close the connection (same broadcast serves all agents)", async () => {
     act(() => useStore.setState({ activeId: 1 }));
     void renderHook(() => useAgentEventStream(vi.fn(), vi.fn()), {
       wrapper: withAgentProvider(),
     });
+    await waitForInstance();
     const first = expectInstance();
     expect(first.url).toContain("/api/system/all");
 
@@ -558,12 +722,13 @@ describe("AgentEventStreamProvider all-events broadcast URL", () => {
     errSpy.mockRestore();
   });
 
-  it("batched array frame → fans out each element as individual SystemEvent to subscribers", () => {
+  it("batched array frame → fans out each element as individual SystemEvent to subscribers", async () => {
     act(() => useStore.setState({ activeId: 42 }));
     const onSystem = vi.fn();
     void renderHook(() => useAgentEventStream(onSystem, vi.fn()), {
       wrapper: withAgentProvider(),
     });
+    await waitForInstance();
     act(() => {
       expectInstance().fireOpen();
       // Simulate a batched frame from /api/system/all
@@ -596,7 +761,7 @@ describe("AgentEventStreamProvider all-events broadcast URL", () => {
     });
   });
 
-  it("a throwing subscriber neither blocks other subscribers nor counts as parse-failed", () => {
+  it("a throwing subscriber neither blocks other subscribers nor counts as parse-failed", async () => {
     const onSystem = vi.fn();
     const onConn = vi.fn<(ev: ConnectionEvent) => void>();
     const onSystemBoom = vi.fn(() => {
@@ -611,6 +776,7 @@ describe("AgentEventStreamProvider all-events broadcast URL", () => {
     void renderHook(() => useDualSubscriber(), {
       wrapper: withAgentProvider(),
     });
+    await waitForInstance();
     const errSpy = vi.spyOn(console, "error");
     act(() => {
       expectInstance().fireMessage(
@@ -626,11 +792,12 @@ describe("AgentEventStreamProvider all-events broadcast URL", () => {
     expect(onConn).not.toHaveBeenCalled();
   });
 
-  it("non-object elements in a batch frame are dropped, not fanned out", () => {
+  it("non-object elements in a batch frame are dropped, not fanned out", async () => {
     const onSystem = vi.fn();
     void renderHook(() => useAgentEventStream(onSystem, vi.fn()), {
       wrapper: withAgentProvider(),
     });
+    await waitForInstance();
     act(() => {
       expectInstance().fireMessage(
         JSON.stringify([
@@ -648,11 +815,12 @@ describe("AgentEventStreamProvider all-events broadcast URL", () => {
     });
   });
 
-  it("batch with heartbeat inside → heartbeat skipped, rest fanned out", () => {
+  it("batch with heartbeat inside → heartbeat skipped, rest fanned out", async () => {
     const onSystem = vi.fn();
     void renderHook(() => useAgentEventStream(onSystem, vi.fn()), {
       wrapper: withAgentProvider(),
     });
+    await waitForInstance();
     act(() => {
       expectInstance().fireOpen();
       expectInstance().fireMessage(
@@ -679,13 +847,14 @@ describe("AgentEventStreamProvider all-events broadcast URL", () => {
     });
   });
 
-  it("batch subscriber gets the whole frame in ONE call; its per-event callback is not invoked", () => {
+  it("batch subscriber gets the whole frame in ONE call; its per-event callback is not invoked", async () => {
     const onSystem = vi.fn();
     const onBatch = vi.fn<(events: SystemEvent[]) => void>();
     void renderHook(
       () => useAgentEventStream(onSystem, vi.fn(), onBatch),
       { wrapper: withAgentProvider() },
     );
+    await waitForInstance();
     act(() => {
       expectInstance().fireOpen();
       expectInstance().fireMessage(
@@ -706,7 +875,7 @@ describe("AgentEventStreamProvider all-events broadcast URL", () => {
     expect(onSystem).not.toHaveBeenCalled();
   });
 
-  it("a throwing batch subscriber never starves per-event subscribers of the same frame", () => {
+  it("a throwing batch subscriber never starves per-event subscribers of the same frame", async () => {
     const onSystem = vi.fn();
     const onConn = vi.fn<(ev: ConnectionEvent) => void>();
     const onBatchBoom = vi.fn(() => {
@@ -719,6 +888,7 @@ describe("AgentEventStreamProvider all-events broadcast URL", () => {
     void renderHook(() => useDualSubscriber(), {
       wrapper: withAgentProvider(),
     });
+    await waitForInstance();
     const errSpy = vi.spyOn(console, "error");
     act(() => {
       expectInstance().fireMessage(
@@ -737,12 +907,13 @@ describe("AgentEventStreamProvider all-events broadcast URL", () => {
     expect(onConn).not.toHaveBeenCalled();
   });
 
-  it("single-event frame → batch subscriber receives a one-element array", () => {
+  it("single-event frame → batch subscriber receives a one-element array", async () => {
     const onBatch = vi.fn<(events: SystemEvent[]) => void>();
     void renderHook(
       () => useAgentEventStream(vi.fn(), vi.fn(), onBatch),
       { wrapper: withAgentProvider() },
     );
+    await waitForInstance();
     act(() => {
       expectInstance().fireOpen();
       expectInstance().fireMessage(
@@ -756,11 +927,12 @@ describe("AgentEventStreamProvider all-events broadcast URL", () => {
 
 
 describe("fold subscription lifecycle (Task #1033 regression)", () => {
-  it("fold subscription survives the Provider re-render that SSE onopen triggers", () => {
+  it("fold subscription survives the Provider re-render that SSE onopen triggers", async () => {
     const { qc, wrapper } = withProviderAndClient();
     // Seed the agents cache so the fold's empty-cache guard accepts the merge.
     qc.setQueryData(["agents"], []);
     renderHook(() => useEventStream(() => undefined, () => undefined), { wrapper });
+    await waitForInstance();
 
     // First open: onOpenChange(true) → setSseOpen(true) → Provider re-render.
     // Before the fix that re-render ran the fold effect's cleanup
@@ -795,12 +967,13 @@ describe("fold subscription lifecycle (Task #1033 regression)", () => {
     expect(result.current).toBe(first);
   });
 
-  it("reconnect reconcile throttles the full invalidate to one per 30s window", () => {
-    vi.useFakeTimers();
+  it("reconnect reconcile throttles the full invalidate to one per 30s window", async () => {
     try {
       const { qc, wrapper } = withProviderAndClient();
       const spy = vi.spyOn(qc, "invalidateQueries");
       renderHook(() => useEventStream(() => undefined, () => undefined), { wrapper });
+      await waitForInstance();
+      vi.useFakeTimers();
 
       // Initial open → the full repair invalidate fires.
       act(() => expectInstance().fireOpen());
