@@ -1896,6 +1896,8 @@ def test_gateway_local_update_starts_in_fresh_process(
     # longer needs a pty — the session PATH is forwarded authoritatively, so a plain
     # subprocess.run from the detached rollout works). --persist-services keeps this
     # internal restart from rewriting the operator's durable --disable-service marker.
+    # The restarter stays down until the orchestration finally unpauses this host,
+    # so agents cannot relaunch before gateway readiness and Phase B.
     # --no-readiness-gate: this leg's readiness question is answered at step 6.5 by the
     # off-box gateway gate, so the child must not also gate (and must not send a slow
     # non-gateway service into _recover_rc's rollback). See
@@ -1909,7 +1911,13 @@ def test_gateway_local_update_starts_in_fresh_process(
     # deploy/lgtm/config/grafana/provisioning straight from the checkout,
     # so the checkout above already refreshed it.
     assert cmds[2][0].endswith(".venv/bin/ava")  # pyright: ignore[reportUnknownMemberType]
-    assert cmds[2][1:] == ["start", "--persist-services", "--no-readiness-gate"]
+    assert cmds[2][1:] == [
+        "start",
+        "--persist-services",
+        "--no-readiness-gate",
+        "--disable-service",
+        "restarter",
+    ]
 
 
 def test_update_local_runs_in_process_orchestration(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -17,6 +17,8 @@ frontend-only fast path and the frontend session relaunch it shares:
 - `_boot_gateway_fresh` — `ava start` in a fresh subprocess so start loads the
   synced revision, not this stale interpreter (start applies pending migrations
   itself early in boot).
+- `_adopt_child_data_plane_credentials` — refresh the surviving orchestrator's
+  credential view after that child returns, before any pin or recovery DB write.
 - `_run_gateway_local_update` — the composed local leg; every failure recovers
   to last-known-good before returning non-zero (a KeyboardInterrupt included).
 
@@ -28,9 +30,12 @@ so `cli.commands(.update)._run_gateway_local_update` / `._run_frontend_only_upda
 
 from __future__ import annotations
 
+import os
 import shlex
 import sys
 from pathlib import Path
+
+from dotenv import dotenv_values
 
 from cli.commands import _update_git as _git_mod
 from cli.commands import _update_uv_sync
@@ -38,6 +43,10 @@ from cli.commands._repo import session_name
 from cli.commands._update_git import GitPullFailed, GitPullResult
 from cli.commands._update_recover import _recover_rc
 from cli.commands._update_report import _print_local_launch_failure_block
+from shared.cluster.derive import REDIS_PASSWORD_ENV
+from shared.config import settings
+from shared.config.data_plane import DataPlaneSettings
+from shared.paths import ava_home
 
 # `ava cluster update` restarts only the side that actually changed. A frontend-only
 # pull just rebuilds the ava-frontend session — no agent quiesce, no migration,
@@ -50,6 +59,45 @@ from cli.commands._update_report import _print_local_launch_failure_block
 # preflight shares one source of truth.
 
 _FRONTEND_SESSION = "frontend"
+_RESTARTER_SESSION = "restarter"
+
+_DATA_PLANE_CREDENTIAL_ENV_KEYS = (
+    "AVA_DB_URL",
+    "AVA_REDIS_URL",
+    "AVA_DB_ADMIN_PASSWORD",
+    "AVA_REDIS_ADMIN_PASSWORD",
+    REDIS_PASSWORD_ENV,
+)
+_DATA_PLANE_CREDENTIAL_FIELDS = (
+    "db_url",
+    "redis_url",
+    "db_admin_password",
+    "redis_admin_password",
+)
+
+
+def _adopt_child_data_plane_credentials() -> None:
+    """Adopt credentials a fresh ``ava start`` materialized in the unit env.
+
+    The rollout interpreter intentionally survives the checkout while the new
+    tree boots in a child process. That child can perform a one-time credential
+    migration and rewrite ``$AVA_HOME/.env``; child environment changes cannot
+    flow back into this parent. Refresh the credential-bearing environment and
+    the shared Settings singleton before the parent writes the cluster pin or
+    enters recovery, both of which open new data-plane connections.
+
+    Only credential fields cross this boundary. General config has no live
+    reload contract and is consumed by the fresh service processes instead.
+    """
+    values = dotenv_values(ava_home() / ".env")
+    for key in _DATA_PLANE_CREDENTIAL_ENV_KEYS:
+        value = values.get(key)
+        if value is not None:
+            os.environ[key] = value
+
+    refreshed = DataPlaneSettings()  # pyright: ignore[reportCallIssue] — required aliases come from the refreshed process env
+    for field in _DATA_PLANE_CREDENTIAL_FIELDS:
+        setattr(settings.data_plane, field, getattr(refreshed, field))
 
 
 def _refresh_builtin_skills(repo: Path) -> None:
@@ -237,10 +285,16 @@ def _boot_gateway_fresh(repo: Path, preserve_frontend: frozenset[str]) -> int:
     (and left running) on a backend-only change (restart_frontend=False),
     forwarded as `--disable-service` to the child.
 
-    --persist-services: preserve_frontend is a transient "leave frontend running"
-    for this restart, not a durable operator disable — don't let it rewrite the
-    watchdog's --disable-service marker (which would wrongly re-enable the
-    operator's durably-skipped services).
+    --persist-services: both the frontend preservation and the deferred restarter
+    are transient skips for this restart, not durable operator disables — don't
+    let them rewrite the watchdog's --disable-service marker (which would wrongly
+    re-enable the operator's durably-skipped services).
+
+    The restarter stays down until the orchestration's existing ``finally`` calls
+    ``unpause_local_cluster``. Starting it here lets agents marked ``restarting``
+    relaunch before the parent has verified gateway readiness, advanced the pin,
+    or completed Phase B. The gateway itself must start now so the readiness probe
+    can pass; deferring only the restarter separates those two boundaries.
 
     --no-readiness-gate: this leg's readiness question is answered at step 6.5 by
     `_gateway_ready.await_gateway_serving`, which asks it better — off-box,
@@ -256,7 +310,7 @@ def _boot_gateway_fresh(repo: Path, preserve_frontend: frozenset[str]) -> int:
     from cli.commands import update as _up_mod
 
     start_args = "start --persist-services --no-readiness-gate"
-    for session in preserve_frontend:
+    for session in sorted(preserve_frontend | {_RESTARTER_SESSION}):
         start_args += f" --disable-service {session}"
     ava_bin = str(repo / ".venv" / "bin" / "ava")
     return _up_mod.subprocess.run(
@@ -360,7 +414,13 @@ def _run_gateway_local_update(
 
         # 4) gateway boots with new code in a FRESH process so start loads the
         #    synced revision rather than this stale interpreter.
-        start_rc = _boot_gateway_fresh(repo, preserve_frontend)
+        # The child may rewrite data-plane credentials during start. A finally
+        # makes the parent adopt them even when SIGINT interrupts the wait and
+        # this function immediately enters the database-backed recovery path.
+        try:
+            start_rc = _boot_gateway_fresh(repo, preserve_frontend)
+        finally:
+            _adopt_child_data_plane_credentials()
     except KeyboardInterrupt:
         # An interrupt IS one of the "ANY failure below" the block comment above
         # covers, and it is the one that arrives without a return value to carry the

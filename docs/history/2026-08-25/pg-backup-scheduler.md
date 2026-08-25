@@ -17,3 +17,15 @@ This keeps a dump's timeout isolated from the watchdog while preserving
 catch-up after a missed schedule. A separate general scheduling abstraction was
 not added: one supervised daemon is sufficient for the only concrete job and
 does not pre-commit the remaining scheduling design.
+
+## Update: module launch boundary
+
+The first production rollout exposed that the service roster launched the
+scheduler with `python -m services.backup_scheduler.daemon`, while the module
+only defined `main()` and never invoked it. The process therefore exited cleanly
+before creating its pidfile, health listener, or first log record; the watchdog
+could only repeat the same empty launch.
+
+The module now calls `main()` under its `__main__` guard. A regression test runs
+the file with module semantics and observes the scheduler entrypoint, matching
+the service roster's real launch boundary rather than testing `run()` alone.
