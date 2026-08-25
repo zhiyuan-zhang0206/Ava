@@ -10,7 +10,13 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 from langgraph.checkpoint.base import CheckpointMetadata, empty_checkpoint
 from langgraph.checkpoint.postgres import PostgresSaver
 
-from shared.checkpoint import load_checkpoint_messages, load_checkpoint_messages_full
+from shared.checkpoint import (
+    list_compact_boundary_checkpoint_ids,
+    load_checkpoint_message_count,
+    load_checkpoint_messages,
+    load_checkpoint_messages_full,
+    load_checkpoint_messages_segment,
+)
 from shared.config import settings
 
 
@@ -174,3 +180,54 @@ def test_load_full_history_keeps_session_notes_and_summary(db_conn: psycopg.Conn
         "follow-up task",
         "follow-up answer",
     ]
+
+
+def test_load_checkpoint_messages_segment_resolves_exact_boundary_id(
+    db_conn: psycopg.Connection,
+) -> None:
+    older_id = _put_checkpoint(
+        "7",
+        [SystemMessage(content="system"), HumanMessage(content="older segment")],
+        metadata={"source": "input", "step": 1, "parents": {}, "compact_boundary": True},
+        version="1",
+    )
+    newer_id = _put_checkpoint(
+        "7",
+        [
+            SystemMessage(content="system"),
+            HumanMessage(content="newer summary"),
+            HumanMessage(content="newer segment"),
+        ],
+        metadata={"source": "input", "step": 2, "parents": {}, "compact_boundary": True},
+        version="2",
+    )
+    current_id = _put_checkpoint(
+        "7",
+        [SystemMessage(content="system"), HumanMessage(content="current segment")],
+        version="3",
+    )
+
+    assert list_compact_boundary_checkpoint_ids(7) == [newer_id, older_id]
+    assert _contents(load_checkpoint_messages_segment(7, newer_id)) == [
+        "newer summary",
+        "newer segment",
+    ]
+    assert _contents(load_checkpoint_messages_segment(7, older_id)) == ["older segment"]
+    assert load_checkpoint_messages_segment(7, current_id) == []
+    assert load_checkpoint_messages_segment(7, "00000000-0000-0000-0000-000000000000") == []
+    assert load_checkpoint_message_count(7) == 2
+
+
+def test_load_checkpoint_messages_segment_returns_empty_without_boundaries(
+    db_conn: psycopg.Connection,
+) -> None:
+    latest_id = _put_checkpoint(
+        "8",
+        [SystemMessage(content="system"), HumanMessage(content="current segment")],
+        version="1",
+    )
+
+    assert list_compact_boundary_checkpoint_ids(8) == []
+    assert load_checkpoint_messages_segment(8, latest_id) == []
+    assert load_checkpoint_message_count(8) == 2
+    assert load_checkpoint_message_count(9) == 0

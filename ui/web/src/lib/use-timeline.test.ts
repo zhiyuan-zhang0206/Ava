@@ -348,6 +348,30 @@ describe("useTimeline mount + initial fetch", () => {
     expect(api.getTimeline).not.toHaveBeenCalled();
   });
 
+  it("loadOlder uses the complete historical item id as its cursor", async () => {
+    const showError = vi.fn();
+    const historicalId = "s2.1f0b9b12-0000-6000-8000-000000000000.14.1";
+    vi.mocked(api.getTimeline)
+      .mockResolvedValueOnce(
+        tlResp(
+          [snapshotItem({ item_id: historicalId, kind: "agent_chat", payload: "old" })],
+          true,
+        ),
+      )
+      .mockResolvedValueOnce(tlResp([], false));
+    const { result } = renderHook(() => useTimeline(42, showError), { wrapper });
+    await waitFor(() => expect(result.current.items).toHaveLength(1));
+    vi.mocked(api.getTimeline).mockClear();
+
+    act(() => result.current.loadOlder());
+
+    await waitFor(() => expect(result.current.hasMoreOlder).toBe(false));
+    expect(api.getTimeline).toHaveBeenCalledWith(42, {
+      before: historicalId,
+      limit: 50,
+    });
+  });
+
   it("agentId=null sends no request and does not invoke switchThread (early return)", () => {
     // cover use-timeline.ts `if (agentId == null) return;` early-return guard.
     // Asserting that api is not called is not enough (enabled=false

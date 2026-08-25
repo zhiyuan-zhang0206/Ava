@@ -144,6 +144,86 @@ function makeItem(overrides: Partial<BackendTimelineItem> & Pick<BackendTimeline
   };
 }
 
+describe("compact history segment dividers", () => {
+  it("renders one localized divider between each compact summary and its raw history", () => {
+    const items = [
+      makeItem({
+        item_id: "s2.older-boundary.0.0",
+        kind: "system_marker",
+        source: "memory",
+        payload: "standing context",
+      }),
+      makeItem({
+        item_id: "s2.older-boundary.1.0",
+        kind: "inbound_compact_summary",
+        payload: "older summary",
+      }),
+      makeItem({ item_id: "s2.older-boundary.2.0", kind: "agent_chat", payload: "older" }),
+      makeItem({
+        item_id: "s1.newer-boundary.0.0",
+        kind: "inbound_compact_summary",
+        payload: "newer summary",
+      }),
+      makeItem({ item_id: "s1.newer-boundary.1.0", kind: "agent_chat", payload: "newer" }),
+      makeItem({ item_id: "1.0", kind: "agent_chat", payload: "current" }),
+    ];
+
+    const { container } = render(<TimelineView items={items} />);
+
+    const dividers = screen.getAllByTestId("compact-history-divider");
+    expect(dividers).toHaveLength(2);
+    expect(dividers.map((divider) => divider.dataset.segmentRank)).toEqual(["2", "1"]);
+    expect(screen.getAllByText("Original history before compact")).toHaveLength(2);
+
+    const timelineColumn = container.querySelector("[data-slot='scroll-area-viewport'] > div");
+    expect(timelineColumn).not.toBeNull();
+    const renderedOrder = Array.from(timelineColumn?.children ?? [])
+      .filter(
+        (node) =>
+          node.hasAttribute("data-item-id") ||
+          node.getAttribute("data-testid") === "compact-history-divider",
+      )
+      .map((node) =>
+        node.getAttribute("data-testid") === "compact-history-divider"
+          ? `divider:${node.getAttribute("data-segment-rank")}`
+          : node.getAttribute("data-item-id"),
+      );
+    expect(renderedOrder).toEqual([
+      "s2.older-boundary.0.0",
+      "s2.older-boundary.1.0",
+      "divider:2",
+      "s2.older-boundary.2.0",
+      "s1.newer-boundary.0.0",
+      "divider:1",
+      "s1.newer-boundary.1.0",
+      "1.0",
+    ]);
+  });
+
+  it("renders the divider before raw history when the oldest segment has no summary", () => {
+    const items = [
+      makeItem({ item_id: "s1.old-boundary.0.0", kind: "agent_chat", payload: "old" }),
+      makeItem({ item_id: "1.0", kind: "agent_chat", payload: "current" }),
+    ];
+
+    const { container } = render(<TimelineView items={items} />);
+    const timelineColumn = container.querySelector("[data-slot='scroll-area-viewport'] > div");
+    const renderedOrder = Array.from(timelineColumn?.children ?? [])
+      .filter(
+        (node) =>
+          node.hasAttribute("data-item-id") ||
+          node.getAttribute("data-testid") === "compact-history-divider",
+      )
+      .map((node) =>
+        node.getAttribute("data-testid") === "compact-history-divider"
+          ? "divider"
+          : node.getAttribute("data-item-id"),
+      );
+
+    expect(renderedOrder).toEqual(["divider", "s1.old-boundary.0.0", "1.0"]);
+  });
+});
+
 // Inter-agent / system inbound / compaction / framework-note markers default
 // collapsed now (system + agent chatter folds behind a one-line header). Their
 // body renders only once the header is clicked, so reveal every collapsed card
@@ -1202,6 +1282,48 @@ describe("load-older prepend anchor (#659)", () => {
         onLoadOlder={loadOlder}
       />,
     );
+    expect(viewport.scrollTop).toBe(350);
+  });
+
+  it("uses four-part historical ids for the prepend landing signal and exact anchor lookup", () => {
+    const loadOlder = vi.fn();
+    const recentHistoricalId = "s1.newer-boundary.1.0";
+    const items = [
+      makeItem({
+        item_id: "s1.newer-boundary.0.0",
+        kind: "inbound_compact_summary",
+        payload: "summary",
+      }),
+      makeItem({ item_id: recentHistoricalId, kind: "agent_chat", payload: "recent history" }),
+      makeItem({ item_id: "2.0", kind: "agent_chat", payload: "current" }),
+    ];
+    let moved = false;
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+      function (this: HTMLElement) {
+        if (this.dataset.itemId === recentHistoricalId) return rect(moved ? 250 : 0);
+        return rect(0);
+      },
+    );
+    const { rerender } = render(
+      <TimelineView items={items} hasMoreOlder onLoadOlder={loadOlder} />,
+    );
+    const viewport = screen.getByTestId("scroll-viewport");
+    viewport.scrollTop = 100;
+    viewport.dispatchEvent(new Event("scroll"));
+    expect(loadOlder).toHaveBeenCalledTimes(1);
+
+    moved = true;
+    rerender(
+      <TimelineView
+        items={[
+          makeItem({ item_id: "s2.older-boundary.1.0", kind: "agent_chat", payload: "older" }),
+          ...items,
+        ]}
+        hasMoreOlder
+        onLoadOlder={loadOlder}
+      />,
+    );
+
     expect(viewport.scrollTop).toBe(350);
   });
 

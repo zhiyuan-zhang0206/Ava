@@ -1126,9 +1126,9 @@ export interface paths {
          *     scroll-up history loading. `has_more` reports whether older items exist
          *     before the returned window.
          *
-         *     The full timeline is always built (one checkpoint blob); windowing only
-         *     trims the payload + the frontend render. A checkpoint read failure renders
-         *     an empty view + 200 (cold-load tolerance, see `shared.checkpoint`).
+         *     One checkpoint segment is built at a time; windowing trims the payload +
+         *     the frontend render. A checkpoint read failure renders an empty view + 200
+         *     (cold-load tolerance, see `shared.checkpoint`).
          */
         get: operations["get_timeline_api_agents__agent_id__timeline_get"];
         put?: never;
@@ -6825,8 +6825,11 @@ export interface components {
          *     inbound_messages table only as ts anchor.
          *
          *     `item_id` is the stable key coordinating frontend timeline with
-         *     streaming SSE; format `f"{msg_idx}.{block_idx}"` (msg_idx = position
-         *     in state.messages; for other message types block_idx=0). For an
+         *     streaming SSE; the current segment uses `f"{msg_idx}.{block_idx}"`
+         *     (msg_idx = position in state.messages; for other message types
+         *     block_idx=0). Cold-loaded compact history prefixes that local position
+         *     with `s<rank>.<boundary_checkpoint_id>.`; it never enters the live SSE
+         *     merge path. For an
          *     AIMessage, text/thinking are content blocks (block_idx = their content
          *     position) and each tool call gets `block_idx = <number of text/thinking
          *     content blocks> + <ordinal in msg.tool_calls>` — a provider-agnostic

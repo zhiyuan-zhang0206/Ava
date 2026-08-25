@@ -1033,6 +1033,24 @@ def test_gateway_session_ttl_defaults_to_one_day() -> None:
     assert GatewaySettings().session_ttl_seconds == 24 * 3600
 
 
+def test_timeline_compact_history_config_contract() -> None:
+    from shared.config import field_alias_map
+    from shared.config.gateway import GatewaySettings
+
+    field = GatewaySettings.model_fields["timeline_compact_history"]
+    extra = field.json_schema_extra
+
+    assert GatewaySettings().timeline_compact_history == 0
+    assert field_alias_map()["timeline_compact_history"] == "AVA_TIMELINE_COMPACT_HISTORY"
+    assert isinstance(extra, dict)
+    assert extra["restart_required"] == "gateway"
+    assert extra["writable"] is True
+    assert extra["scope"] == "cluster-pinned"
+    assert extra["per_agent"] is False
+    assert field.description is not None
+    assert any("\u4e00" <= char <= "\u9fff" for char in field.description)
+
+
 def test_skip_auth_alias_inverts_value(monkeypatch: pytest.MonkeyPatch) -> None:
     """AVA_SKIP_AUTH means "skip auth" — true must resolve to auth DISABLED.
 

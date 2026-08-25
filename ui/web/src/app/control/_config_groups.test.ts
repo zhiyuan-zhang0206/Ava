@@ -17,4 +17,8 @@ describe("config display grouping tables", () => {
     const overlap = [...HIDDEN_ENV_VARS].filter((v) => mapped.has(v));
     expect(overlap).toEqual([]);
   });
+
+  it("places compact-history depth with the general timeline controls", () => {
+    expect(GROUP_ENV_VARS["config-general"]).toContain("AVA_TIMELINE_COMPACT_HISTORY");
+  });
 });

@@ -108,6 +108,147 @@ def load_checkpoint_messages(agent_id: int) -> list[BaseMessage]:
     return ckpt["channel_values"].get("messages", [])
 
 
+def list_compact_boundary_checkpoint_ids(agent_id: int) -> list[str]:
+    """Return this agent's retained compact boundaries, newest first.
+
+    The descending position is the history segment's current display rank;
+    callers must still use the checkpoint id as the durable cursor identity.
+
+    Raises:
+        CheckpointReadError: the boundary index could not be read.
+    """
+    try:
+        with connect(
+            settings.data_plane.db_url,
+            autocommit=True,
+            prepare_threshold=None,
+        ) as conn:
+            rows = conn.execute(
+                "SELECT checkpoint_id FROM checkpoints"
+                " WHERE thread_id = %s AND metadata->>'compact_boundary' = 'true'"
+                " ORDER BY checkpoint_id DESC",
+                (str(agent_id),),
+            ).fetchall()
+    except Exception as exc:
+        raise CheckpointReadError(
+            f"compaction boundary index read failed for agent {agent_id}"
+        ) from exc
+    return [str(row[0]) for row in rows]
+
+
+def _msgpack_array_length(header: bytes) -> int:
+    """Read a MessagePack array length from its at-most-five-byte header."""
+    if not header:
+        raise ValueError("empty MessagePack header")
+    marker = header[0]
+    if 0x90 <= marker <= 0x9F:
+        return marker & 0x0F
+    if marker == 0xDC and len(header) >= 3:
+        return int.from_bytes(header[1:3], byteorder="big")
+    if marker == 0xDD and len(header) >= 5:
+        return int.from_bytes(header[1:5], byteorder="big")
+    raise ValueError(f"messages blob does not start with a MessagePack array: 0x{marker:02x}")
+
+
+def _message_count_from_blob_header(blob_type: object, header: object) -> int:
+    if blob_type != "msgpack":
+        raise ValueError(f"unexpected messages blob type: {blob_type!r}")
+    return _msgpack_array_length(bytes(cast(bytes, header)))
+
+
+def load_checkpoint_message_count(agent_id: int) -> int:
+    """Return the live checkpoint's messages length without loading the blob.
+
+    PostgresSaver stores each channel value in ``checkpoint_blobs``. Reading
+    only the first five bytes is enough to decode a MessagePack array header,
+    so a historical timeline page can preserve the authoritative current
+    ``msg_count`` without materializing a second checkpoint segment.
+
+    Raises:
+        CheckpointReadError: the latest messages header is unreadable or is
+            not the stable MessagePack array representation.
+    """
+    try:
+        with connect(
+            settings.data_plane.db_url,
+            autocommit=True,
+            prepare_threshold=None,
+        ) as conn:
+            row = conn.execute(
+                "SELECT b.type, substring(b.blob FROM 1 FOR 5)"
+                " FROM checkpoints c"
+                " LEFT JOIN checkpoint_blobs b"
+                " ON b.thread_id = c.thread_id"
+                " AND b.checkpoint_ns = c.checkpoint_ns"
+                " AND b.channel = 'messages'"
+                " AND b.version = c.checkpoint->'channel_versions'->>'messages'"
+                " WHERE c.thread_id = %s AND c.checkpoint_ns = ''"
+                " ORDER BY c.checkpoint_id DESC LIMIT 1",
+                (str(agent_id),),
+            ).fetchone()
+        if row is None or row[0] is None:
+            return 0
+        blob_type, header = row
+        return _message_count_from_blob_header(blob_type, header)
+    except Exception as exc:
+        raise CheckpointReadError(
+            f"checkpoint message count read failed for agent {agent_id}"
+        ) from exc
+
+
+def load_checkpoint_messages_segment(agent_id: int, checkpoint_id: str) -> list[BaseMessage]:
+    """Read one exact retained compaction segment without its system prompt.
+
+    A missing checkpoint or an id that is not currently a compact boundary
+    returns an empty segment. The checkpoint id, not its mutable newest-first
+    rank, is the authority: a stale rank can never redirect the cursor to
+    another segment's content.
+
+    Raises:
+        CheckpointReadError: the boundary blob exists but could not be read or
+            deserialized.
+    """
+    config: RunnableConfig = {"configurable": {"thread_id": str(agent_id)}}
+    serde = JsonPlusSerializer(allowed_msgpack_modules=STATIC_CHECKPOINT_MSGPACK_TYPES)
+    try:
+        with connect(
+            settings.data_plane.db_url,
+            autocommit=True,
+            prepare_threshold=None,
+            row_factory=cast(Any, dict_row),
+        ) as conn:
+            boundary = conn.execute(
+                "SELECT checkpoint_id FROM checkpoints"
+                " WHERE thread_id = %s AND checkpoint_id = %s"
+                " AND metadata->>'compact_boundary' = 'true'",
+                (str(agent_id), checkpoint_id),
+            ).fetchone()
+            if boundary is None:
+                return []
+            saver = PostgresSaver(conn=cast(Connection[DictRow], conn), serde=serde)
+            checkpoint_tuple = saver.get_tuple(
+                {
+                    **config,
+                    "configurable": {
+                        **config["configurable"],
+                        "checkpoint_id": checkpoint_id,
+                    },
+                }
+            )
+    except Exception as exc:
+        raise CheckpointReadError(
+            f"compaction segment read failed for agent {agent_id} checkpoint {checkpoint_id}"
+        ) from exc
+    if checkpoint_tuple is None:
+        return []
+    messages = checkpoint_tuple.checkpoint["channel_values"].get("messages", [])
+    if not messages:
+        return []
+    if not isinstance(messages[0], SystemMessage):
+        return []
+    return messages[1:]
+
+
 def load_checkpoint_messages_full(agent_id: int) -> list[BaseMessage]:
     """Reconstruct one agent's full history across compaction segments.
 

@@ -12,6 +12,7 @@ export {
   freezeReasoningClocks,
   mergeSnapshotWithStreaming,
   parseItemId,
+  parseItemIdParts,
   sortByItemId,
 } from "./fold/timeline";
 

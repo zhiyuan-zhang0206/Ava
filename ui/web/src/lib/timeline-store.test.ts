@@ -1182,6 +1182,46 @@ describe("prependOlder / load-older flags", () => {
     expect(s.hasMoreOlder).toBe(true);
   });
 
+  it("caps prepended history at 6000 newest items and stops older paging", () => {
+    const current = Array.from({ length: 5_999 }, (_, index) =>
+      item({ item_id: `${index + 1_000}.0`, payload: `current ${index}` }),
+    );
+    act(() => {
+      useTimelineStore.setState({ items: current, hasMoreOlder: true, loadingOlder: true });
+      useTimelineStore.getState().prependOlder(
+        [
+          item({ item_id: "s1.boundary.0.0", payload: "oldest dropped" }),
+          item({ item_id: "s1.boundary.1.0", payload: "nearest older kept" }),
+        ],
+        true,
+      );
+    });
+
+    const state = useTimelineStore.getState();
+    expect(state.items).toHaveLength(6_000);
+    expect(state.items[0].item_id).toBe("s1.boundary.1.0");
+    expect(state.items.some((entry) => entry.item_id === "s1.boundary.0.0")).toBe(false);
+    expect(state.hasMoreOlder).toBe(false);
+    expect(state.loadingOlder).toBe(false);
+  });
+
+  it("stops older paging when the retained timeline reaches exactly 6000 items", () => {
+    const current = Array.from({ length: 5_999 }, (_, index) =>
+      item({ item_id: `${index + 1_000}.0` }),
+    );
+    act(() => {
+      useTimelineStore.setState({ items: current, hasMoreOlder: true, loadingOlder: true });
+      useTimelineStore.getState().prependOlder(
+        [item({ item_id: "s1.boundary.0.0", payload: "last allowed older item" })],
+        true,
+      );
+    });
+
+    const state = useTimelineStore.getState();
+    expect(state.items).toHaveLength(6_000);
+    expect(state.hasMoreOlder).toBe(false);
+  });
+
   it("switchThread clears hasMoreOlder + loadingOlder (cold)", () => {
     act(() => {
       useTimelineStore.setState({ hasMoreOlder: true, loadingOlder: true });

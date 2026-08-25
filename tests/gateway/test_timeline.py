@@ -22,7 +22,7 @@ Coverage:
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import BaseMessage, HumanMessage
 
 from gateway.app import app
 from gateway.routers.timeline import _window_before
@@ -1557,3 +1557,447 @@ class TestBuildTimelineItemsStartOffset:
         assert msg_count == 2
         assert items[0].item_id == "1.0"
         assert items[0].inbound_id == 70598
+
+    def test_segment_prefix_keeps_local_message_and_block_positions(self):
+        from langchain_core.messages import AIMessage, HumanMessage
+
+        from shared.timeline import build_timeline_items
+
+        items, msg_count = build_timeline_items(
+            [
+                HumanMessage(content="older inbound"),
+                AIMessage(
+                    content=[
+                        {"type": "thinking", "thinking": "older reasoning", "index": 0},
+                        {"type": "text", "text": "older answer", "index": 1},
+                    ]
+                ),
+            ],
+            [],
+            segment_prefix="s2.1f0b9b12-0000-6000-8000-000000000000",
+        )
+
+        assert msg_count == 2
+        assert [item.item_id for item in items] == [
+            "s2.1f0b9b12-0000-6000-8000-000000000000.0.0",
+            "s2.1f0b9b12-0000-6000-8000-000000000000.1.0",
+            "s2.1f0b9b12-0000-6000-8000-000000000000.1.1",
+        ]
+
+
+class TestTimelineCompactHistory:
+    @staticmethod
+    def _summary(content: str) -> HumanMessage:
+        return HumanMessage(
+            content=content,
+            additional_kwargs={
+                "ava_msg_type": "compact_summary",
+                "ava_created_at": "2026-08-25T00:00:00+00:00",
+            },
+        )
+
+    @classmethod
+    def _segment(cls, name: str, item_count: int) -> list[BaseMessage]:
+        from langchain_core.messages import AIMessage, SystemMessage
+
+        return [
+            SystemMessage(content="system"),
+            cls._summary(f"{name} summary"),
+            *(AIMessage(content=f"{name} item {i}") for i in range(item_count)),
+        ]
+
+    @classmethod
+    def _current(cls, *messages: BaseMessage) -> list[BaseMessage]:
+        from langchain_core.messages import SystemMessage
+
+        return [SystemMessage(content="system"), cls._summary("current summary"), *messages]
+
+    @staticmethod
+    def _put_checkpoint(
+        agent_id: int,
+        messages: list[BaseMessage],
+        *,
+        version: str,
+        boundary: bool = False,
+    ) -> str:
+        from typing import cast
+
+        from langgraph.checkpoint.base import CheckpointMetadata, empty_checkpoint
+        from langgraph.checkpoint.postgres import PostgresSaver
+
+        from shared.config import settings
+
+        checkpoint = empty_checkpoint()
+        checkpoint["channel_values"] = {"messages": messages}
+        checkpoint["channel_versions"] = {"messages": version, "__start__": "1"}
+        metadata: dict[str, object] = {"source": "input", "step": int(version), "parents": {}}
+        if boundary:
+            metadata["compact_boundary"] = True
+        with PostgresSaver.from_conn_string(settings.data_plane.db_url) as saver:
+            saver.setup()
+            saved = saver.put(
+                config={"configurable": {"thread_id": str(agent_id), "checkpoint_ns": ""}},
+                checkpoint=checkpoint,
+                metadata=cast(CheckpointMetadata, metadata),
+                new_versions={"messages": version},
+            )
+        return str((saved.get("configurable") or {})["checkpoint_id"])
+
+    def test_initial_short_window_reports_history_only_when_enabled(
+        self,
+        db_conn: psycopg.Connection,
+        test_client: TestClient,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from langchain_core.messages import AIMessage
+
+        from shared.config import settings
+
+        tid = create_agent(db_conn)
+        self._put_checkpoint(tid, self._segment("history", 2), version="1", boundary=True)
+        self._put_checkpoint(
+            tid,
+            self._current(AIMessage(content="current item")),
+            version="2",
+        )
+
+        monkeypatch.setattr(settings.gateway, "timeline_compact_history", 0)
+        disabled = test_client.get(f"/api/agents/{tid}/timeline", params={"limit": 50}).json()
+        assert disabled["has_more"] is False
+
+        monkeypatch.setattr(settings.gateway, "timeline_compact_history", 1)
+        enabled = test_client.get(f"/api/agents/{tid}/timeline", params={"limit": 50}).json()
+        assert enabled["has_more"] is True
+        assert all(not item["item_id"].startswith("s") for item in enabled["items"])
+
+    def test_pages_within_segment_then_reaches_its_summary(
+        self,
+        db_conn: psycopg.Connection,
+        test_client: TestClient,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from langchain_core.messages import AIMessage
+
+        from shared.config import settings
+
+        tid = create_agent(db_conn)
+        boundary_id = self._put_checkpoint(
+            tid, self._segment("history", 5), version="1", boundary=True
+        )
+        self._put_checkpoint(
+            tid,
+            self._current(AIMessage(content="current item")),
+            version="2",
+        )
+        monkeypatch.setattr(settings.gateway, "timeline_compact_history", -1)
+
+        crossed = test_client.get(
+            f"/api/agents/{tid}/timeline", params={"before": "2.0", "limit": 2}
+        ).json()
+        assert [item["item_id"] for item in crossed["items"]] == [
+            f"s1.{boundary_id}.4.0",
+            f"s1.{boundary_id}.5.0",
+        ]
+        assert crossed["has_more"] is True
+
+        middle = test_client.get(
+            f"/api/agents/{tid}/timeline",
+            params={"before": f"s1.{boundary_id}.4.0", "limit": 2},
+        ).json()
+        assert [item["item_id"] for item in middle["items"]] == [
+            f"s1.{boundary_id}.2.0",
+            f"s1.{boundary_id}.3.0",
+        ]
+        assert middle["has_more"] is True
+
+        head = test_client.get(
+            f"/api/agents/{tid}/timeline",
+            params={"before": f"s1.{boundary_id}.2.0", "limit": 2},
+        ).json()
+        assert [item["item_id"] for item in head["items"]] == [
+            f"s1.{boundary_id}.0.0",
+            f"s1.{boundary_id}.1.0",
+        ]
+        assert head["items"][0]["kind"] == "inbound_compact_summary"
+        assert head["has_more"] is False
+
+    def test_depth_and_checkpoint_id_control_cross_segment_access(
+        self,
+        db_conn: psycopg.Connection,
+        test_client: TestClient,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from langchain_core.messages import AIMessage
+
+        from shared.config import settings
+
+        tid = create_agent(db_conn)
+        older_id = self._put_checkpoint(tid, self._segment("older", 2), version="1", boundary=True)
+        newer_id = self._put_checkpoint(tid, self._segment("newer", 2), version="2", boundary=True)
+        current_id = self._put_checkpoint(
+            tid,
+            self._current(AIMessage(content="current item")),
+            version="3",
+        )
+
+        monkeypatch.setattr(settings.gateway, "timeline_compact_history", 1)
+        blocked = test_client.get(
+            f"/api/agents/{tid}/timeline",
+            params={"before": f"s2.{older_id}.1.0", "limit": 50},
+        ).json()
+        assert blocked == {"items": [], "msg_count": 3, "has_more": False}
+
+        non_boundary = test_client.get(
+            f"/api/agents/{tid}/timeline",
+            params={"before": f"s1.{current_id}.1.0", "limit": 50},
+        ).json()
+        assert non_boundary == {"items": [], "msg_count": 3, "has_more": False}
+
+        invalid_rank = test_client.get(
+            f"/api/agents/{tid}/timeline",
+            params={"before": f"s0.{newer_id}.1.0", "limit": 50},
+        ).json()
+        assert invalid_rank == {"items": [], "msg_count": 3, "has_more": False}
+
+        monkeypatch.setattr(settings.gateway, "timeline_compact_history", -1)
+        stale_rank = test_client.get(
+            f"/api/agents/{tid}/timeline",
+            params={"before": f"s99.{newer_id}.2.0", "limit": 1},
+        ).json()
+        assert [item["item_id"] for item in stale_rank["items"]] == [f"s1.{newer_id}.1.0"]
+
+        head = test_client.get(
+            f"/api/agents/{tid}/timeline",
+            params={"before": f"s99.{newer_id}.2.0", "limit": 2},
+        ).json()
+        assert [item["item_id"] for item in head["items"]] == [
+            f"s1.{newer_id}.0.0",
+            f"s1.{newer_id}.1.0",
+        ]
+        assert head["has_more"] is True
+
+        crossed = test_client.get(
+            f"/api/agents/{tid}/timeline",
+            params={"before": f"s1.{newer_id}.1.0", "limit": 50},
+        ).json()
+        assert [item["item_id"] for item in crossed["items"]] == [
+            f"s2.{older_id}.0.0",
+            f"s2.{older_id}.1.0",
+            f"s2.{older_id}.2.0",
+        ]
+        assert crossed["has_more"] is False
+
+    def test_historical_page_does_not_deserialize_the_current_segment(
+        self,
+        db_conn: psycopg.Connection,
+        test_client: TestClient,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from langchain_core.messages import AIMessage
+
+        import gateway.routers.timeline as timeline_router
+        from shared.config import settings
+
+        tid = create_agent(db_conn)
+        boundary_id = self._put_checkpoint(
+            tid, self._segment("history", 2), version="1", boundary=True
+        )
+        self._put_checkpoint(
+            tid,
+            self._current(AIMessage(content="current item")),
+            version="2",
+        )
+        monkeypatch.setattr(settings.gateway, "timeline_compact_history", 1)
+
+        def fail_current_read(_agent_id: int) -> list[BaseMessage]:
+            raise AssertionError("historical paging must not deserialize the live segment")
+
+        monkeypatch.setattr(timeline_router, "load_checkpoint_messages", fail_current_read)
+
+        page = test_client.get(
+            f"/api/agents/{tid}/timeline",
+            params={"before": f"s1.{boundary_id}.2.0", "limit": 1},
+        )
+
+        assert page.status_code == 200
+        assert page.json()["msg_count"] == 3
+        assert [item["item_id"] for item in page.json()["items"]] == [f"s1.{boundary_id}.1.0"]
+
+    @pytest.mark.parametrize(
+        "before",
+        [
+            f"{'1' * 5000}.0",
+            f"s1.boundary.1.{'0' * 5000}",
+        ],
+    )
+    def test_oversized_numeric_cursor_is_terminal_not_500(
+        self,
+        db_conn: psycopg.Connection,
+        test_client: TestClient,
+        monkeypatch: pytest.MonkeyPatch,
+        before: str,
+    ) -> None:
+        from langchain_core.messages import AIMessage
+
+        from shared.config import settings
+
+        tid = create_agent(db_conn)
+        self._put_checkpoint(
+            tid,
+            self._current(AIMessage(content="current item")),
+            version="1",
+        )
+        monkeypatch.setattr(settings.gateway, "timeline_compact_history", -1)
+
+        response = test_client.get(
+            f"/api/agents/{tid}/timeline",
+            params={"before": before, "limit": 50},
+        )
+
+        assert response.status_code == 200
+        assert response.json() == {"items": [], "msg_count": 3, "has_more": False}
+
+    def test_missing_cross_segment_target_is_terminal_even_if_an_older_boundary_exists(
+        self,
+        db_conn: psycopg.Connection,
+        test_client: TestClient,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from langchain_core.messages import AIMessage
+
+        import gateway.routers.timeline as timeline_router
+        from shared.config import settings
+
+        tid = create_agent(db_conn)
+        self._put_checkpoint(
+            tid,
+            self._current(AIMessage(content="current item")),
+            version="1",
+        )
+        monkeypatch.setattr(settings.gateway, "timeline_compact_history", -1)
+
+        def boundary_ids(_agent_id: int) -> list[str]:
+            return ["missing-newer", "still-older"]
+
+        def missing_segment(_agent_id: int, _checkpoint_id: str) -> list[BaseMessage]:
+            return []
+
+        monkeypatch.setattr(timeline_router, "list_compact_boundary_checkpoint_ids", boundary_ids)
+        monkeypatch.setattr(timeline_router, "load_checkpoint_messages_segment", missing_segment)
+
+        page = test_client.get(
+            f"/api/agents/{tid}/timeline",
+            params={"before": "2.0", "limit": 50},
+        )
+
+        assert page.status_code == 200
+        assert page.json() == {"items": [], "msg_count": 3, "has_more": False}
+
+    def test_standing_note_cursor_crosses_from_current_segment(
+        self,
+        db_conn: psycopg.Connection,
+        test_client: TestClient,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from langchain_core.messages import AIMessage, HumanMessage
+
+        from shared.config import settings
+
+        tid = create_agent(db_conn)
+        boundary_id = self._put_checkpoint(
+            tid, self._segment("history", 1), version="1", boundary=True
+        )
+        standing_note = HumanMessage(
+            content="remember this",
+            additional_kwargs={
+                "ava_msg_type": "system_note",
+                "ava_note_tag": "memory",
+                "ava_created_at": "2026-08-25T00:00:01+00:00",
+            },
+        )
+        self._put_checkpoint(
+            tid,
+            self._current(standing_note, AIMessage(content="current item")),
+            version="2",
+        )
+        monkeypatch.setattr(settings.gateway, "timeline_compact_history", 1)
+
+        page = test_client.get(
+            f"/api/agents/{tid}/timeline", params={"before": "2.0", "limit": 50}
+        ).json()
+
+        assert [item["item_id"] for item in page["items"]] == [
+            f"s1.{boundary_id}.0.0",
+            f"s1.{boundary_id}.1.0",
+        ]
+        assert page["has_more"] is False
+
+    @pytest.mark.parametrize("damage", ["read_error", "missing", "malformed_message"])
+    def test_damaged_or_disappeared_segment_returns_terminal_empty_window(
+        self,
+        db_conn: psycopg.Connection,
+        test_client: TestClient,
+        monkeypatch: pytest.MonkeyPatch,
+        damage: str,
+    ) -> None:
+        from langchain_core.messages import AIMessage
+
+        import gateway.routers.timeline as timeline_router
+        from shared.checkpoint import CheckpointReadError
+        from shared.config import settings
+
+        tid = create_agent(db_conn)
+        self._put_checkpoint(
+            tid,
+            self._current(AIMessage(content="current item")),
+            version="1",
+        )
+        checkpoint_id = "1f0b9b12-0000-6000-8000-000000000000"
+        monkeypatch.setattr(settings.gateway, "timeline_compact_history", -1)
+
+        def boundary_ids(_agent_id: int) -> list[str]:
+            return [checkpoint_id]
+
+        monkeypatch.setattr(timeline_router, "list_compact_boundary_checkpoint_ids", boundary_ids)
+        if damage == "missing":
+
+            def missing_segment(_agent_id: int, _checkpoint_id: str) -> list[BaseMessage]:
+                return []
+
+            monkeypatch.setattr(
+                timeline_router,
+                "load_checkpoint_messages_segment",
+                missing_segment,
+            )
+        elif damage == "read_error":
+
+            def fail_read(_agent_id: int, _checkpoint_id: str) -> list[BaseMessage]:
+                raise CheckpointReadError("damaged boundary")
+
+            monkeypatch.setattr(timeline_router, "load_checkpoint_messages_segment", fail_read)
+        else:
+
+            def malformed_segment(_agent_id: int, _checkpoint_id: str) -> list[BaseMessage]:
+                return [
+                    HumanMessage(
+                        content="damaged inbound",
+                        additional_kwargs={
+                            "ava_msg_type": "inbound",
+                            "ava_inbound_id": "not-an-integer",
+                        },
+                    )
+                ]
+
+            monkeypatch.setattr(
+                timeline_router,
+                "load_checkpoint_messages_segment",
+                malformed_segment,
+            )
+
+        response = test_client.get(
+            f"/api/agents/{tid}/timeline",
+            params={"before": f"s1.{checkpoint_id}.1.0", "limit": 50},
+        )
+
+        assert response.status_code == 200
+        assert response.json() == {"items": [], "msg_count": 3, "has_more": False}

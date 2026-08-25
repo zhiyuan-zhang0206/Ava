@@ -70,11 +70,20 @@
 // - `./buttons`   — ForkButton + CopyButton
 // - `./row`       — TimelineRow (memo) + cardConfigFor (per-item config cache)
 // - `./overlays`  — LoadingOlderBadge / ColdLoadSpinner / ScrollToBottomButton
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { useTranslations } from "next-intl";
 
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useContentToggle, useContentToggleReset } from "@/lib/content-toggle-store";
-import { isReattachedTimelineContext } from "@/lib/timeline";
+import { isReattachedTimelineContext, parseItemIdParts } from "@/lib/timeline";
 import {
   POINTER_STICKY_THRESHOLDS,
   TOUCH_STICKY_THRESHOLDS,
@@ -84,12 +93,12 @@ import {
 } from "@/lib/sticky";
 import type { BackendTimelineItem } from "@/lib/types";
 import { useTimelineStore } from "@/lib/timeline-store";
-import { BAR_CLEAR_TOP_PADDING_CLASS, FLEX_1, MIN_H_0, OVERFLOW_HIDDEN } from "@/lib/layout";
+import { BAR_CLEAR_TOP_PADDING_CLASS, FLEX, FLEX_1, MIN_H_0, OVERFLOW_HIDDEN } from "@/lib/layout";
 import { cn } from "@/lib/utils";
 
 import { ConnectionNotice } from "@/components/connection-notice";
 import { TurnBlock } from "./run-block";
-import { classifyItem, groupIntoTurns } from "./runs";
+import { classifyItem, groupIntoTurns, type TimelineGroup } from "./runs";
 import { LoadingOlderBadge, ColdLoadSpinner, ScrollToBottomButton } from "./overlays";
 import { TimelineRow, cardConfigFor } from "./row";
 
@@ -132,6 +141,83 @@ interface Props {
 // a load-older fetch — a lookahead band so the previous window arrives
 // before the user reaches the very top.
 const LOAD_OLDER_TRIGGER_PX = 200;
+
+interface RenderGroup {
+  readonly group: TimelineGroup;
+  readonly indexOffset: number;
+  readonly dividerRank: number | null;
+}
+
+function segmentKey(item: BackendTimelineItem): string {
+  const parts = parseItemIdParts(item.item_id);
+  return parts && parts.rank > 0
+    ? `${parts.rank}:${parts.checkpointId ?? ""}`
+    : "current";
+}
+
+/** Keep collapsible runs inside one compact segment without changing items. */
+function groupTimelineSegments(items: readonly BackendTimelineItem[]): RenderGroup[] {
+  const result: RenderGroup[] = [];
+  let start = 0;
+  while (start < items.length) {
+    const key = segmentKey(items[start]);
+    const rank = parseItemIdParts(items[start].item_id)?.rank ?? 0;
+    let end = start + 1;
+    while (end < items.length && segmentKey(items[end]) === key) end += 1;
+    const segment = items.slice(start, end);
+    const summaryIndex = rank > 0
+      ? segment.findIndex((item) => item.kind === "inbound_compact_summary")
+      : -1;
+    const prefixGroups = summaryIndex > 0
+      ? groupIntoTurns(segment.slice(0, summaryIndex), {
+          collapseTurns: true,
+          liveIndex: null,
+        })
+      : [];
+    const summaryGroups = summaryIndex >= 0
+      ? groupIntoTurns(segment.slice(summaryIndex, summaryIndex + 1), {
+          collapseTurns: true,
+          liveIndex: null,
+        })
+      : [];
+    const rawStart = summaryIndex >= 0 ? summaryIndex + 1 : 0;
+    const rawGroups = groupIntoTurns(segment.slice(rawStart), {
+      collapseTurns: true,
+      liveIndex: null,
+    });
+    for (const group of prefixGroups) {
+      result.push({ group, indexOffset: start, dividerRank: null });
+    }
+    for (const group of summaryGroups) {
+      result.push({ group, indexOffset: start + summaryIndex, dividerRank: null });
+    }
+    rawGroups.forEach((group, groupIndex) => {
+      result.push({
+        group,
+        indexOffset: start + rawStart,
+        dividerRank: rank > 0 && groupIndex === 0 ? rank : null,
+      });
+    });
+    start = end;
+  }
+  return result;
+}
+
+function CompactHistoryDivider({ rank }: { readonly rank: number }) {
+  const t = useTranslations("timeline");
+  return (
+    <div
+      data-testid="compact-history-divider"
+      data-segment-rank={rank}
+      className={cn("items-center gap-2 py-1 text-[11px] text-muted-foreground/70", FLEX)}
+    >
+      <span aria-hidden="true" className={cn("h-px bg-border/60", FLEX_1)} />
+      <span aria-hidden="true" className="shrink-0">↑</span>
+      <span className="shrink-0">{t("compactHistoryDivider")}</span>
+      <span aria-hidden="true" className={cn("h-px bg-border/60", FLEX_1)} />
+    </div>
+  );
+}
 
 export function TimelineView({
   items,
@@ -764,7 +850,7 @@ export function TimelineView({
   // are always groupable — including in-progress / streaming items — so the first
   // streaming chunk lands directly inside a work block (no bare-then-wrap layout
   // shift). Primary/bare items break turns by classifyItem returning non-secondary.
-  const groups = groupIntoTurns(items, { collapseTurns: true, liveIndex: null });
+  const groups = groupTimelineSegments(items);
 
   const handleScrollToBottom = useCallback(() => {
     const viewport =
@@ -815,58 +901,58 @@ export function TimelineView({
           className={cn("mx-auto w-full px-4 pb-3 space-y-3", BAR_CLEAR_TOP_PADDING_CLASS)}
         >
           <ConnectionNotice />
-          {groups.map((group) => {
-            if (group.kind === "single") return renderRow(group.item, group.index);
-            // Every secondary run (even a single item) becomes a collapsible work
-            // block. The last turn auto-expands while the agent is active so the
-            // streaming item is visible. Run id = the first member's item_id
-            // (stable across streaming commits).
-            const turnId = group.items[0].item_id;
-            // The turn is "last" only when it is the last group overall — not just
-            // the last turn-kind group. When a primary item (e.g. agent_chat started by
-            // chat_start) follows this turn as a single group, the turn is no longer last
-            // and its live clock must stop immediately, not wait for turnActive to flip.
-            const isLastTurn = group === groups[groups.length - 1];
-            // "last" mode: the last turn auto-expands only while the agent
-            // is actively streaming (turnActive); once streaming completes
-            // the detail block auto-collapses. Non-last turns are always
-            // collapsed. A pinned user override (turnOverrides) wins over the
-            // default and stores the exact state the user last clicked into,
-            // so the choice survives the default flipping when streaming ends
-            // (#510: the old "membership = opposite of the default" set made
-            // the completed last turn permanently unexpandable).
-            const runExpanded = turnOverrides.has(turnId)
-              ? (turnOverrides.get(turnId) ?? false)
-              : effectiveDetailsMode === "all"
-                ? true
-                : effectiveDetailsMode === "last"
-                  ? isLastTurn && turnActive
-                  : false;
-            // An expanded turn renders with ALL its inner blocks expanded — the
-            // "one detail block open = everything inside visible" contract the
-            // user expects (#659). #756 (e2077a80) first did this; ff15af78
-            // split the streaming case from the click case so a user-clicked
-            // turn revealed only its child summaries (each inner block stayed
-            // collapsed for a per-category second click) — the "detail block
-            // only expands specific categories" complaint. Re-unified: any
-            // expanded turn — streaming auto-expand or a user click — expands
-            // its children. Per-card collapse is still available: clicking an
-            // inner card header pins that one card closed (a per-item
-            // override).
+          {groups.map((entry) => {
+            const group = entry.group;
+            const groupKey =
+              group.kind === "single" ? group.item.item_id : group.items[0].item_id;
+            const renderedGroup = (() => {
+              if (group.kind === "single") {
+                return renderRow(group.item, entry.indexOffset + group.index);
+              }
+              // Every secondary run (even a single item) becomes a collapsible work
+              // block. The last turn auto-expands while the agent is active so the
+              // streaming item is visible. Run id = the first member's item_id
+              // (stable across streaming commits).
+              const turnId = group.items[0].item_id;
+              // The turn is "last" only when it is the last group overall — not just
+              // the last turn-kind group. When a primary item follows this turn, the
+              // turn is no longer last and its live clock must stop immediately.
+              const isLastTurn = entry === groups[groups.length - 1];
+              const runExpanded = turnOverrides.has(turnId)
+                ? (turnOverrides.get(turnId) ?? false)
+                : effectiveDetailsMode === "all"
+                  ? true
+                  : effectiveDetailsMode === "last"
+                    ? isLastTurn && turnActive
+                    : false;
+              return (
+                <TurnBlock
+                  id={turnId}
+                  memberIds={group.items.map((it) => it.item_id)}
+                  summary={group.summary}
+                  expanded={runExpanded}
+                  onToggle={() => toggleTurn(turnId, runExpanded)}
+                  turnActive={turnActive && isLastTurn}
+                >
+                  {runExpanded
+                    ? group.items.map((it, i) =>
+                        renderRow(
+                          it,
+                          entry.indexOffset + group.startIndex + i,
+                          runExpanded,
+                        ),
+                      )
+                    : null}
+                </TurnBlock>
+              );
+            })();
             return (
-              <TurnBlock
-                key={`turn:${turnId}`}
-                id={turnId}
-                memberIds={group.items.map((it) => it.item_id)}
-                summary={group.summary}
-                expanded={runExpanded}
-                onToggle={() => toggleTurn(turnId, runExpanded)}
-                turnActive={turnActive && isLastTurn}
-              >
-                {runExpanded
-                  ? group.items.map((it, i) => renderRow(it, group.startIndex + i, runExpanded))
-                  : null}
-              </TurnBlock>
+              <Fragment key={`segment-group:${groupKey}`}>
+                {entry.dividerRank === null ? null : (
+                  <CompactHistoryDivider rank={entry.dividerRank} />
+                )}
+                {renderedGroup}
+              </Fragment>
             );
           })}
           <div ref={endRef} />

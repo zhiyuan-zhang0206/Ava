@@ -45,7 +45,7 @@ import { api } from "./api";
 import { errMsg } from "./errors";
 import { noteTurnStart } from "./interaction-timing";
 import { useTimelineStore } from "./timeline-store";
-import { isReattachedTimelineContext, parseItemId } from "./timeline";
+import { isReattachedTimelineContext, parseItemIdParts } from "./timeline";
 
 /** Base number of items fetched per scroll-up. Subsequent scroll-ups
  * fetch BASE * 2^olderFetchCount items (capped at 1000), so the window
@@ -388,7 +388,7 @@ export function useTimeline(
     // using either context item as `before` can return no historical tail and
     // permanently set hasMoreOlder=false.
     const oldest = st.items.find(
-      (it) => !isReattachedTimelineContext(it) && parseItemId(it.item_id) !== null,
+      (it) => !isReattachedTimelineContext(it) && parseItemIdParts(it.item_id) !== null,
     );
     if (!oldest) return;
     // Exponential growth: first fetch N, second 2N, third 4N, … capped at 1000.
