@@ -4,10 +4,18 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import cast
 
+import httpx
 import pytest
 
-from cli.commands.trace import TraceShipError, _load_watermark, cmd_trace_ship
+from cli.commands.trace import (
+    TraceShipError,
+    _load_watermark,
+    _post_line,
+    _ShipTarget,
+    cmd_trace_ship,
+)
 
 
 def test_load_watermark_drops_entries_for_missing_files(
@@ -58,6 +66,61 @@ def _otlp_line(span_name: str) -> str:
     from opentelemetry.exporter.otlp.proto.common.trace_encoder import encode_spans
 
     return json.dumps(MessageToDict(encode_spans(captured)), separators=(",", ":"))  # pyright: ignore[reportUnknownArgumentType]
+
+
+def test_post_line_converts_otlp_json_hex_ids_to_protobuf_bytes() -> None:
+    """OTLP/JSON IDs are hex, even though protobuf JSON treats bytes as base64."""
+    trace_id = "0123456789abcdef0123456789abcdef"
+    span_id = "0123456789abcdef"
+    posts: list[bytes] = []
+
+    class _Response:
+        def raise_for_status(self) -> None:
+            return None
+
+    class _Client:
+        def post(self, _endpoint: str, *, content: bytes, headers: dict[str, str]) -> _Response:
+            posts.append(content)
+            return _Response()
+
+    line = json.dumps(
+        {
+            "resourceSpans": [
+                {
+                    "scopeSpans": [
+                        {
+                            "spans": [
+                                {
+                                    "traceId": trace_id,
+                                    "spanId": span_id,
+                                    "parentSpanId": span_id,
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        }
+    )
+
+    client = cast(httpx.Client, _Client())
+    assert (
+        _post_line(
+            client,
+            _ShipTarget(endpoint="http://tempo.test/v1/traces", headers={}, label="tempo"),
+            line,
+        )
+        == 1
+    )
+
+    from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest
+
+    request = ExportTraceServiceRequest()
+    request.ParseFromString(posts[0])
+    span = request.resource_spans[0].scope_spans[0].spans[0]
+    assert span.trace_id == bytes.fromhex(trace_id)
+    assert span.span_id == bytes.fromhex(span_id)
+    assert span.parent_span_id == bytes.fromhex(span_id)
 
 
 def test_ship_disabled_raises(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
