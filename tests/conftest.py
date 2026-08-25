@@ -669,6 +669,19 @@ _PER_TEST_TRUNCATE_TABLES = (
 
 
 @pytest.fixture(autouse=True)
+def _restore_ava_home_override() -> Iterator[None]:
+    """Restore the checkout-contradiction exemption after every test.
+
+    The suite establishes AVA_HOME_OVERRIDE=1 before project imports, but tests
+    that exercise a real stop path may consume it. Tests that monkeypatch this
+    key restore the same original value ("1"), so both teardowns reassert the
+    session invariant regardless of their order.
+    """
+    yield
+    os.environ["AVA_HOME_OVERRIDE"] = "1"
+
+
+@pytest.fixture(autouse=True)
 def _otlp_export_off(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep the test session hermetic: the OTLP dual-write (shared.telemetry ->
     shared.telemetry_otlp, default ON since the 2026-08-11 stack decision) would
