@@ -337,6 +337,13 @@ export function applySystemEvent(
         }),
       );
     case "exec_output_chunk":
+      // A keepalive lets a mid-stream join that missed exec_start create the
+      // live output block. Once the block exists, retain the same reference so
+      // ~2Hz keepalives do not create re-render churn or append visible text.
+      if (ev.keepalive === true) {
+        if (items.some((it) => it.item_id === ev.item_id)) return items;
+        return appendDeltaById(items, ev.item_id, "code_output", "");
+      }
       // subprocess stdout/stderr streaming chunks — append to code_output
       // under the same item_id (same behavior as chat/code *_delta).
       // The final ExecOutput same-id upserts and replaces with the

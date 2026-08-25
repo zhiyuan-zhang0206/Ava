@@ -305,6 +305,41 @@ describe("applySystemEvent", () => {
     expect(items[0].codeStartedAt).toBeUndefined();
   });
 
+  it("a keepalive bootstraps an empty live output item after a mid-stream join", () => {
+    const items = applySystemEvent([], {
+      role: "exec_output_chunk",
+      item_id: "6.0",
+      agent_id: 1,
+      content: "keepalive payload must not render",
+      keepalive: true,
+    });
+
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
+      item_id: "6.0",
+      kind: "code_output",
+      payload: "",
+      partial: true,
+    });
+    expect(items[0].execStartedAt).toBeTypeOf("number");
+  });
+
+  it("a keepalive for an existing output item preserves the array reference", () => {
+    const before = [
+      item({ item_id: "6.0", kind: "code_output", payload: "existing", partial: true }),
+    ];
+
+    const after = applySystemEvent(before, {
+      role: "exec_output_chunk",
+      item_id: "6.0",
+      agent_id: 1,
+      content: "",
+      keepalive: true,
+    });
+
+    expect(after).toBe(before);
+  });
+
   // Regression (symptom: "Writing code for Xs" never appeared during
   // streaming): code_start used to run clearCodeClocks AFTER createStartItem,
   // stripping the fresh item's codeStartedAt in the same event and stamping

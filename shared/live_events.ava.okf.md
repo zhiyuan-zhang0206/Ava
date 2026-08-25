@@ -41,7 +41,7 @@ All roles carry `agent_id: int`. The extra fields below are the payload.
 | `reasoning_start` | first thinking content | `item_id` |
 | `reasoning_delta` | each thinking fragment | `item_id`, `content` |
 | `exec_start` | subprocess begins executing code | `item_id` |
-| `exec_output_chunk` | streamed stdout/stderr increment (UI appends) | `item_id`, `content` |
+| `exec_output_chunk` | streamed stdout/stderr increment, or an empty ~2Hz keepalive while a silent subprocess is alive (UI appends only real chunks) | `item_id`, `content`, `keepalive` (default `false`) |
 | `exec_output` | subprocess done (incl. cancelled partial); upsert on the same `item_id` | `item_id`, `content` |
 | `token_usage` | one LLM call finished (usage_metadata at end of stream) | `input_tokens`, `output_tokens`, `reasoning_tokens` |
 | `llm_done` | LLM stream wraps up (UI reloads the timeline over the partial) | — |

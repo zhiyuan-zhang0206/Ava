@@ -2,5 +2,6 @@
   "agent_id": 7,
   "role": "exec_output_chunk",
   "item_id": "6.0",
-  "content": "stdout chunk\n"
+  "content": "stdout chunk\n",
+  "keepalive": false
 }
