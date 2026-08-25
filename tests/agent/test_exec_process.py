@@ -288,6 +288,23 @@ async def test_dead_status_is_a_terminal_non_reaping_observation(
     proc.poll.assert_not_called()
 
 
+async def test_missing_process_is_a_terminal_non_reaping_observation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    identity = MagicMock()
+    identity.status.side_effect = psutil.NoSuchProcess(pid=556)
+    proc = MagicMock(pid=556)
+
+    monkeypatch.setattr("agent.graph._exec_process.IS_WINDOWS", False)
+    monkeypatch.setattr(
+        "agent.graph._exec_process.psutil.Process", MagicMock(return_value=identity)
+    )
+
+    await asyncio.wait_for(start_root_exit_observer(proc), timeout=1.0)
+
+    proc.poll.assert_not_called()
+
+
 async def test_repeated_cancellation_cannot_interrupt_resource_barrier() -> None:
     """A second cancellation during cleanup is consumed; after every owner
     settles, the outer operation still re-raises its original CancelledError."""
