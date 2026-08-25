@@ -17,7 +17,7 @@ import threading
 import time
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Literal, cast
 
@@ -39,8 +39,9 @@ from services.permission_watcher.events import (
 _LOGGER = logging.getLogger("ava.permission_watcher")
 
 RECUR_SILENCE = timedelta(hours=12)
+PENDING_STALE_AFTER = timedelta(hours=24)
 _RESOLVED_RETENTION = timedelta(hours=48)
-_ALERTS_URL = "http://127.0.0.1:8000/api/alerts"
+_DEFAULT_GATEWAY_PORT = 8000
 _ALERTS_TOKEN_ENV = "AVA_OPS_ALERTS_WEBHOOK_TOKEN"  # noqa: S105 — env key, not a token value
 _RETRY_BACKOFF_SECONDS = 2.0
 ENV_PATH = Path.home() / ".ava" / ".env"
@@ -48,6 +49,18 @@ STATE_PATH = Path.home() / ".ava" / "state" / "permission-watcher.json"
 
 AlertPoster = Callable[[dict[str, object]], None]
 PendingMode = Literal["full", "silent"]
+
+
+def _alerts_url() -> str:
+    try:
+        from shared.config import settings
+
+        gateway_port = settings.gateway.gateway_port
+    except Exception:
+        # launchd may start the host-global watcher without enough cluster
+        # environment for the full settings singleton to construct.
+        gateway_port = _DEFAULT_GATEWAY_PORT
+    return f"http://127.0.0.1:{gateway_port}/api/alerts"
 
 
 def _alerts_token(env_path: Path) -> str:
@@ -70,7 +83,7 @@ def post_alert(payload: dict[str, object], *, env_path: Path = ENV_PATH) -> None
     for attempt in range(2):
         try:
             response = httpx.post(
-                _ALERTS_URL,
+                _alerts_url(),
                 json=payload,
                 headers=headers,
                 timeout=10.0,
@@ -150,10 +163,19 @@ class PermissionWatcher:
         if not isinstance(pending, dict):
             raise TypeError("permission watcher state pending field is not an object")
         result: dict[str, PendingPermission] = {}
+        pending_cutoff = datetime.now(UTC) - PENDING_STALE_AFTER
         for key, value in cast(dict[object, object], pending).items():
             if not isinstance(key, str) or not isinstance(value, dict):
                 raise TypeError("permission watcher pending entry is malformed")
-            result[key] = PendingPermission.from_json(cast(dict[str, object], value))
+            incident = PendingPermission.from_json(cast(dict[str, object], value))
+            if incident.first_seen < pending_cutoff:
+                _LOGGER.info(
+                    "dropping stale pending incident: %s (first_seen %s)",
+                    key,
+                    incident.first_seen.isoformat(),
+                )
+                continue
+            result[key] = incident
         resolved = payload.get("resolved", {})
         if not isinstance(resolved, dict):
             raise TypeError("permission watcher state resolved field is not an object")
