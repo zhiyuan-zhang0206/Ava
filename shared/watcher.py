@@ -191,8 +191,11 @@ _MESSAGE = {message!r}
 # Announce the target on stdout (the watcher's session output + log): a
 # sleeping watcher is otherwise indistinguishable from a stuck one — the
 # session shows only the launch command. One line at startup is enough for a
-# one-shot (2026-08-25 false alarm, task #1620).
-print("[watcher] one-shot — fires at " + _WHEN.isoformat(), flush=True)
+# one-shot (2026-08-25 false alarm, task #1620). Printed in the machine's
+# local wall clock, matching the cron script's tz-aware display. ASCII only:
+# a C-locale stdout would raise UnicodeEncodeError on a non-ASCII character
+# and kill the watcher — the very silent death these lines prevent.
+print("[watcher] one-shot -> fires at " + _WHEN.astimezone().isoformat(), flush=True)
 
 while True:
     _delay = (_WHEN - _dt.datetime.now(_dt.UTC)).total_seconds()
@@ -253,14 +256,14 @@ while True:
     # stuck process on a Tuesday — task #1620).
     if _last is None:
         print(
-            "[watcher] cron " + _EXPR + " in " + str(_TZ) + " — next fire at "
+            "[watcher] cron " + _EXPR + " in " + str(_TZ) + " -> next fire at "
             + _fire.astimezone(_TZ).isoformat(),
             flush=True,
         )
     else:
         print(
             "[watcher] fired " + _last.astimezone(_TZ).isoformat()
-            + " — next fire at " + _fire.astimezone(_TZ).isoformat(),
+            + " -> next fire at " + _fire.astimezone(_TZ).isoformat(),
             flush=True,
         )
     while True:

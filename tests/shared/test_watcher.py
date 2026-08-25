@@ -380,13 +380,14 @@ def test_cron_script_announces_schedule_state(
     assert len(sent) == 3  # fire semantics unchanged by the prints
     lines = [ln for ln in out.splitlines() if "[watcher]" in ln]
     # One announcement per upcoming fire: a startup line for the first fire,
-    # then one line per fire naming the fired instant and the next fire. The
-    # loop breaks at the end_time check BEFORE printing after the last fire,
-    # so the final line's `next fire at` is the fire just executed.
+    # then one line per fire naming the fired instant and the next fire. Each
+    # line is printed before its sleep, so `next fire at` always names the
+    # fire the loop is about to execute; after the last fire the loop breaks
+    # at the end_time check and prints nothing more.
     assert len(lines) == 3
-    assert "cron */2 * * * * in UTC — next fire at 2026-08-20T23:58:00+00:00" in lines[0]
-    assert "fired 2026-08-20T23:58:00+00:00 — next fire at 2026-08-21T00:00:00+00:00" in lines[1]
-    assert "fired 2026-08-21T00:00:00+00:00 — next fire at 2026-08-21T00:02:00+00:00" in lines[2]
+    assert "cron */2 * * * * in UTC -> next fire at 2026-08-20T23:58:00+00:00" in lines[0]
+    assert "fired 2026-08-20T23:58:00+00:00 -> next fire at 2026-08-21T00:00:00+00:00" in lines[1]
+    assert "fired 2026-08-21T00:00:00+00:00 -> next fire at 2026-08-21T00:02:00+00:00" in lines[2]
 
 
 def test_at_script_announces_when(
@@ -401,4 +402,6 @@ def test_at_script_announces_when(
     out = capsys.readouterr().out
 
     assert len(sent) == 1  # fire semantics unchanged
-    assert f"[watcher] one-shot — fires at {when.isoformat()}" in out
+    # Printed in the machine's local wall clock (matches the cron script's
+    # tz-aware display); the isoformat with offset is the same instant.
+    assert f"[watcher] one-shot -> fires at {when.astimezone().isoformat()}" in out
