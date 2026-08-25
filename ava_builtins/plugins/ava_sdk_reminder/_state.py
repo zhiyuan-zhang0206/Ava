@@ -3,18 +3,21 @@ tests can import the schema and the matchers without triggering hook
 registration (importing `plugin.py` calls `register_plugin_state` + the hook
 registrations).
 
-Two detectors share one `reminded` set:
+Three reminder families share one `reminded` set:
 - Four code-cell categories (shell/wait/files/http): a regex scan over the
   executed code, checked in the after_exec hook.
+- Assumed-persistence NameErrors: the after_exec hook records one dynamic key
+  per undefined name that appeared in an earlier code cell.
 - One inbound category (agent_reply): scan the message tail for an inbound
   from another agent, checked in the before_llm hook (the agent may reply in
   plain text without ever running code, so the reminder must land before the
   reply is produced).
 
-`reminded` tracks which categories have already been hinted; `last_seen_compact`
-bookmarks the compact.version monotonic counter so the set re-arms (clears) after a
-compaction strips the messages that carried an earlier hint — the same lazy
-version-counter reset `ava_code` applies to its `injected_paths`.
+`reminded` tracks once-scoped categories and NameError names already hinted;
+`last_seen_compact` bookmarks the compact.version monotonic counter so the set
+re-arms (clears) after a compaction strips the messages that carried an earlier
+hint — the same lazy version-counter reset `ava_code` applies to its
+`injected_paths`.
 """
 
 from __future__ import annotations
@@ -27,12 +30,12 @@ from pydantic import BaseModel, Field
 class AvaSdkReminderState(BaseModel):
     """plugins.ava_sdk_reminder persistent state.
 
-    - reminded: categories already hinted this context window; each category
-      fires at most once. Cleared (re-armed) when a compaction advances the
-      version counter. No reducer (last-value): this plugin's two hooks
-      (after_exec for the code categories, before_llm for agent_reply) are the
-      only writers, never write in the same node run, and always commit the
-      full new set.
+    - reminded: once-scoped categories and dynamic NameError-name keys already
+      hinted this context window. Cleared (re-armed) when a compaction advances
+      the version counter. No reducer (last-value): this plugin's two hooks
+      (after_exec for code categories and NameErrors, before_llm for
+      agent_reply) are the only writers, never write in the same node run, and
+      always commit the full new set.
     - last_seen_compact: bookmark compared against the compact version
       counter; when it advances, the earlier hint lines have been summarized
       away, so reminded is cleared and the bookmark catches up.
