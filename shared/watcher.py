@@ -42,8 +42,10 @@ __all__ = [
 # behind, so a template fix reaches watchers that were already running when it
 # landed (the generated script is frozen at launch — a rollout does not rewrite
 # it). v1 = pre-#182 loop (no rollback guard); v2 = #182 loop (_last guard +
-# boundary re-check).
-TEMPLATE_VERSION = 2
+# boundary re-check); v3 = schedule-state announcement prints (a healthy cron
+# watcher sleeping toward its next fire was indistinguishable from a stuck one —
+# 2026-08-25 false alarm, task #1620).
+TEMPLATE_VERSION = 3
 
 
 # Cron
@@ -186,6 +188,12 @@ import time as _time
 _WHEN = _dt.datetime.fromisoformat({when_iso!r})
 _MESSAGE = {message!r}
 
+# Announce the target on stdout (the watcher's session output + log): a
+# sleeping watcher is otherwise indistinguishable from a stuck one — the
+# session shows only the launch command. One line at startup is enough for a
+# one-shot (2026-08-25 false alarm, task #1620).
+print("[watcher] one-shot — fires at " + _WHEN.isoformat(), flush=True)
+
 while True:
     _delay = (_WHEN - _dt.datetime.now(_dt.UTC)).total_seconds()
     if _delay <= 0:
@@ -237,6 +245,24 @@ while True:
         # (issue #182).
         _time.sleep((_last - _dt.datetime.now(_dt.UTC)).total_seconds() + 1.0)
         continue
+    # Announce the schedule state on stdout (the watcher's session output +
+    # log): a healthy watcher sleeping toward its next fire is otherwise
+    # indistinguishable from a stuck one — a session capture shows only the
+    # launch command. The `next fire` line is the first thing a debugger looks
+    # for (2026-08-25 false alarm: a healthy Monday-only cron was misread as a
+    # stuck process on a Tuesday — task #1620).
+    if _last is None:
+        print(
+            "[watcher] cron " + _EXPR + " in " + str(_TZ) + " — next fire at "
+            + _fire.astimezone(_TZ).isoformat(),
+            flush=True,
+        )
+    else:
+        print(
+            "[watcher] fired " + _last.astimezone(_TZ).isoformat()
+            + " — next fire at " + _fire.astimezone(_TZ).isoformat(),
+            flush=True,
+        )
     while True:
         _delay = (_fire - _dt.datetime.now(_dt.UTC)).total_seconds()
         if _delay <= 0:
