@@ -3,6 +3,9 @@
 - `_wrap_saver_writes_with_loud_failure` — monkey-patch checkpointer aput
   / aput_writes to log every failure as `checkpoint_write_failed` before
   re-raising (LangGraph internally swallows aput failures otherwise)
+- `_wrap_saver_writes_with_nstep_interval` — throttle checkpoint writes to
+  every Nth super-step while keeping aput_writes in lockstep and exposing a
+  final-state flush
 - `_reconcile_claimed_inbounds_at_startup` — finalize any 'claimed'
   inbound rows left behind by the previous process of this agent
 - `_write_effective_config_to_restart_completed` — write the freshly
@@ -17,10 +20,13 @@
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Awaitable, Callable, Sequence
+from typing import Any, cast
 
 from langchain_core.runnables import RunnableConfig
+from langgraph.checkpoint.base import ChannelVersions, Checkpoint, CheckpointMetadata
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+from langgraph.constants import PUSH
 from langgraph.graph.state import CompiledStateGraph
 from psycopg_pool import AsyncConnectionPool
 
@@ -67,6 +73,102 @@ def _wrap_saver_writes_with_loud_failure(checkpointer: AsyncPostgresSaver, agent
 
     checkpointer.aput = _logged_aput  # type: ignore[method-assign]
     checkpointer.aput_writes = _logged_aput_writes  # type: ignore[method-assign]
+
+
+def _wrap_saver_writes_with_nstep_interval(checkpointer: AsyncPostgresSaver, interval: int) -> None:
+    """Persist super-step checkpoints every ``interval`` steps.
+
+    The wrapper leaves input/fork checkpoints untouched. For skipped super-step
+    checkpoints it skips their channel and PUSH writes except for writes at the
+    next retained step. Those writes and retained checkpoints use the last
+    persisted config, so every parent and write target has a checkpoint row. A
+    completed turn flushes the latest skipped update through
+    ``_ava_nstep_flush``; a crash may instead replay up to ``interval - 1``
+    super-steps.
+
+    The caller installs loud-failure logging first, so these original methods
+    are the logging wrappers: every throttled write that fires, including the
+    final flush, still reports a checkpoint failure before re-raising.
+    """
+    if interval <= 1:
+        return
+
+    orig_aput = checkpointer.aput
+    orig_aput_writes = checkpointer.aput_writes
+    last_aput_step: int | None = None
+    last_persisted_config: RunnableConfig | None = None
+    last_skipped_aput: (
+        tuple[RunnableConfig, Checkpoint, CheckpointMetadata, ChannelVersions] | None
+    ) = None
+
+    async def _throttled_aput(
+        config: RunnableConfig,
+        checkpoint: Checkpoint,
+        metadata: CheckpointMetadata,
+        new_versions: ChannelVersions,
+    ) -> RunnableConfig:
+        nonlocal last_aput_step, last_persisted_config, last_skipped_aput
+
+        assert "step" in metadata  # noqa: S101
+        assert "source" in metadata  # noqa: S101
+        step = metadata["step"]
+        source = metadata["source"]
+        last_aput_step = step
+        # `loop` is graph.ainvoke's normal super-step path; `update` is the
+        # manual state-update path. Both must use the same durability interval.
+        if source not in ("loop", "update"):
+            saved_config = await orig_aput(
+                last_persisted_config or config, checkpoint, metadata, new_versions
+            )
+            last_persisted_config = saved_config
+            return saved_config
+
+        # AsyncPregelLoop advances its own checkpoint config without reading
+        # aput's return value. Feed every retained checkpoint the last real
+        # saver config explicitly, otherwise its parent points at a skipped
+        # (and therefore nonexistent) checkpoint row.
+        parent_config = last_persisted_config or config
+        if step % interval == 0:
+            saved_config = await orig_aput(parent_config, checkpoint, metadata, new_versions)
+            last_persisted_config = saved_config
+            last_skipped_aput = None
+            return saved_config
+
+        if last_persisted_config is None:
+            last_persisted_config = config
+        last_skipped_aput = (config, checkpoint, metadata, new_versions)
+        return last_persisted_config
+
+    async def _throttled_aput_writes(
+        config: RunnableConfig,
+        writes: Sequence[tuple[str, Any]],
+        task_id: str,
+        task_path: str = "",
+    ) -> None:
+        if last_aput_step is None:
+            await orig_aput_writes(config, writes, task_id, task_path)
+            return
+
+        write_step = (
+            last_aput_step if any(key == PUSH for key, _value in writes) else last_aput_step + 1
+        )
+        if write_step % interval == 0:
+            await orig_aput_writes(last_persisted_config or config, writes, task_id, task_path)
+
+    async def _flush_final() -> None:
+        nonlocal last_persisted_config, last_skipped_aput
+
+        if last_skipped_aput is None:
+            return
+        config, checkpoint, metadata, new_versions = last_skipped_aput
+        last_persisted_config = await orig_aput(
+            last_persisted_config or config, checkpoint, metadata, new_versions
+        )
+        last_skipped_aput = None
+
+    checkpointer.aput = _throttled_aput  # type: ignore[method-assign]
+    checkpointer.aput_writes = _throttled_aput_writes  # type: ignore[method-assign]
+    checkpointer._ava_nstep_flush = _flush_final  # type: ignore[attr-defined]
 
 
 async def _reconcile_claimed_inbounds_at_startup(
@@ -137,6 +239,10 @@ async def _repair_dangling_tool_use_at_startup(
     if not repairs:
         return
     await graph.aupdate_state(config, {"messages": repairs})
+    checkpointer = cast(AsyncPostgresSaver, graph.checkpointer)  # pyright: ignore[reportUnknownMemberType]
+    flush = getattr(checkpointer, "_ava_nstep_flush", None)
+    if flush is not None:
+        await cast(Callable[[], Awaitable[None]], flush)()
     logger.warning(
         "repaired dangling tool_use(s) from a hard-cancelled previous process",
         event="dangling_tool_use_repaired",
