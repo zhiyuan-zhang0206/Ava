@@ -26,7 +26,7 @@ Ava cluster HTTP API gateway—FastAPI service running on **port 8000** (loopbac
 - **Cluster ops API**: cluster, config, inventory, metrics, system and other management endpoints
 - **MCP control plane**: revocable scoped tokens guard default-off `/mcp`; cluster-authenticated `/api/mcp/clients` manages them
 - **Per-agent command views**: `GET /api/commands?agent_id=` resolves the agent's runner then asks its `agent_skill_view` op for the command catalog that runner discovers from its own converged load dir plus the agent's persisted cwd; an unavailable, unknown, or version-skewed runner falls back to the gateway-local catalog
-- **Authentication and browser-origin policy**: with a cluster secret, `/api/*` requires an opaque server-side session or bearer secret, except health and browser login/check/logout; auth can be disabled for tests. Login creates a TTL-bounded `web_sessions` row; middleware caches positive checks for 30 seconds and touches recent use once per minute. Active sessions can be listed, non-current ones revoked, and logout revokes the current one. Cookie-authenticated mutations with an `Origin` require an exact CORS allowlist match; bearer and originless callers are unaffected. Cookie `Secure` is explicit or derived from `gateway_url`. An EMPTY secret is the unauthenticated, loopback-only posture; `/api/bootstrap` registers agent-runners.
+- **Authentication and browser-origin policy**: server-side `web_sessions` + bearer-secret auth, exact-origin CORS checks, and the Secure cookie policy — [[web-sessions.ava.okf.md]].
 
 ## Architecture
 
@@ -56,10 +56,7 @@ Browser (frontend:3000) ──HTTP──▶ Gateway (:8000) ──▶ Postgres /
 
 ## Entry Points
 
-- `gateway/app.py` — FastAPI application definition, lifespan, middleware, route mounting
-- `gateway/alert_reconciliation.py` — fail-closed Grafana active-instance reconciliation for the alert store
-- `gateway/__main__.py` — `.venv/bin/python -m gateway` → uvicorn
-- `scripts/start_gateway.py` — canonical launch script (per `gateway/app.py` docstring)
+- Entry point inventory: [[entry-points.ava.okf.md]].
 
 ## Notes
 
