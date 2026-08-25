@@ -33,10 +33,15 @@ archive-era day has events but no ledger row leaves those durations out of the
 percentiles; extrema are unaffected because the archive distribution still
 supplies bounds.
 
-After deployment, the hourly maintenance daemon self-heals histogram coverage
-for 2026-08-17 through yesterday within one hour. The earlier 2026-08-14 through
-2026-08-16 ledger gap remains absent by design and therefore does not invent
-rows during the migration backfill.
+After deployment (with the raised cap live), the hourly maintenance daemon's
+first pass rerolls every retained dirty day — the `rollup_day_state` table is
+empty, so each retained day is dirty — writing histograms for 2026-08-19
+through yesterday (verified 2026-08-26: 08-19..08-24). A pass is bounded by
+`AVA_EVENTS_ROLLUP_PASS_DEADLINE_S`, so a cold catch-up can span two passes;
+days at or below the 168h retention floor are never recomputed. The earlier
+2026-08-14 through 2026-08-17 ledger gap remains absent by design (08-15 and
+08-17 have no ledger rows at all, verified in the DB 2026-08-26) and therefore
+does not invent rows during the migration backfill.
 
 ## Loki series-cap requirement (2026-08-25 production fix)
 
@@ -56,19 +61,25 @@ re-render cannot silently drift it back. 20000 keeps ~6.5x headroom over the
 busiest measured day while still blocking pathological ad-hoc fan-outs. The
 rollup query shape itself is unchanged.
 
+`max_query_series` is a static `limits_config` value — Loki does **not**
+hot-reload it. The deploy must explicitly restart the Loki process (the
+cluster-update service restart does this); until the restart the running
+process keeps the old 2000 cap and the rollup keeps aborting every hour.
+
 ## Permanent ledger-histogram gaps (unrecoverable data)
 
 The migration backfills `turn_dur_hist` only where the frozen `events` archive
 still has rows: measured 2026-08-25, that is 2026-05-24..05-29 and
-2026-08-01..08-13 (33 of 43 agents). The following present ledger days keep
-turns but can never gain histograms, so whole-life coverage stays incomplete
-and the read path keeps its exact raw fallback for them:
+2026-08-01..08-13 (33 of 43 agents). The following days can never gain
+histograms, so whole-life coverage stays incomplete and the read path keeps
+its exact raw fallback for them:
 
 - 2026-06-02..07-31 — telemetry rows pruned from the `events` archive before
   the migration (no turn_end rows remain), and Loki did not exist yet.
-- 2026-08-14, 08-16, 08-17, 08-18 and the 10 unbackfilled 2026-08-13 agents —
-  the post-cutover seam whose Loki data fell out of the 168h retention window
-  before the histogram feature shipped.
+- 2026-08-14, 08-15, 08-16, 08-17, 08-18 and the 10 unbackfilled 2026-08-13
+  agents — the post-cutover seam whose Loki data fell out of the 168h retention
+  window before the histogram feature shipped; 08-15 and 08-17 have no ledger
+  rows at all (verified in the DB 2026-08-26).
 
 These days are absent from every store (PG archive, Loki, JSONL mirror);
 nothing in code can recover them, and the coverage check deliberately counts
