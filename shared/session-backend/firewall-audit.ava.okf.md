@@ -23,11 +23,15 @@ reports "permitted" for a path with no rule and cannot detect a missing entry.
 The status renderer joins the manifest to that audit and reports every pattern,
 resolved path, and Allow/Block/Missing state.
 
-Reconciliation adds, unblocks, and prunes managed rules. The three
-`socketfilterfw` mutations were empirically verified without elevation on the
-macmini running macOS 15.3.1. A failed direct mutation is retried with bounded,
-non-interactive `sudo -n`; if that also fails, converge reports the exact manual
-command and continues rather than blocking unattended startup.
+Reconciliation prunes stale rules, then adds and unblocks managed rules.
+Mutations exit 0 without elevation on the macmini running macOS 15.3.1, but the
+daemon silently persists nothing for an add whose bundle identifier already has
+a rule (every uv interpreter shares identifier `-`), so every add is verified
+by re-reading `--listapps` and only confirmed rules are reported; failed
+mutations are retried with bounded, non-interactive `sudo -n`; if that also
+fails, converge reports the exact manual command (or points at the popup, for
+identifier-colliding families) and continues rather than blocking unattended
+startup.
 `cli/commands/_converge_firewall.py` uses the reconciler proactively, while
 `_gateway_ready.py` uses the same audit to explain an `OFF_BOX_UNREACHABLE`
 verdict — see [[cli/commands/commands.ava.okf.md]].

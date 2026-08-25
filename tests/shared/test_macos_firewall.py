@@ -4,21 +4,26 @@
 
 They prove the *decision*: given a `--getglobalstate` / `--listapps` answer, which
 verdict the audit reaches and which binaries it names. Mutation tests replace the
-subprocess seam, so no test changes the host firewall.
+subprocess seam with a fake daemon that persists mutations, so no test changes
+the host firewall.
 
 **No test here mutates a real firewall.** Read and mutation subprocess seams are
-stubbed. The latter pins the unprivileged-first path, re-verified on the macmini
-running macOS 15.3.1, and the fallback for versions that still require
-`sudo -n`.
+stubbed. The repair tests pin the unprivileged-first path (exit 0 as the
+ordinary user, re-verified on the macmini running macOS 15.3.1), the `sudo -n`
+fallback for versions that still require it, and — the regression this suite
+guards — the post-mutation verification: macOS 15.3.1's daemon *accepts* an
+`--add` whose bundle identifier already has a rule and persists nothing, so a
+repair that trusted the exit code would report "allowed" for rules that never
+existed.
 
 One thing *was* verified against the real tool during development, on the
 macmini running macOS 15.3.1: `allowlisted_paths()` parsed that host's genuine
 `--listapps` output into exactly the 8 rules the tool printed, and correctly
 found the running uv interpreter absent from them. `_LISTAPPS_OUTPUT` below is
 that real output, trimmed — so the parser is pinned against a true sample rather
-than an invented one. What could not be observed on that host is a live
-`RULES_MISSING`: its firewall is off, which the audit short-circuits on by
-design.
+than an invented one. A live `RULES_MISSING` (firewall on, off-box host) was
+also observed on that host in August 2026, including the daemon's silent
+no-op on identifier-colliding adds.
 """
 
 from __future__ import annotations
@@ -435,6 +440,58 @@ class _FakeProc:
         self.stdout = stdout
 
 
+def _render_apps(rules: dict[str, bool]) -> str:
+    """Render a rules dict back into `--listapps` shape."""
+    lines = [f"Total number of apps = {len(rules)}"]
+    for i, (path, allow) in enumerate(sorted(rules.items()), 1):
+        lines.append(f"{i} : {path}")
+        lines.append(f"             ({'Allow' if allow else 'Block'} incoming connections)")
+    return "\n".join(lines) + "\n"
+
+
+def _stub_mutating_daemon(
+    monkeypatch: pytest.MonkeyPatch,
+    rules: dict[str, bool],
+    *,
+    direct_rc: int = 0,
+    drop_adds: bool = False,
+) -> list[list[str]]:
+    """A fake ALF daemon that persists mutations, so repair's post-add
+    verification has something to see.
+
+    `direct_rc` simulates an older macOS that rejects the unprivileged mutation
+    (the `sudo -n` fallback then does the work); `drop_adds=True` simulates the
+    macOS 15.3.1 identifier-dedup no-op — every add exits 0 but the rule never
+    appears in `--listapps`.
+    """
+    state = dict(rules)
+    calls: list[list[str]] = []
+
+    def fake_query(*args: str) -> str | None:
+        if args == ("--getglobalstate",):
+            return "Firewall is enabled. (State = 1)"
+        if args == ("--listapps",):
+            return _render_apps(state)
+        raise AssertionError(f"unexpected query: {args}")
+
+    def fake_run(cmd: list[str], **_kw: object) -> _FakeProc:
+        calls.append(cmd)
+        privileged = cmd[:2] == ["sudo", "-n"]
+        verb, path = cmd[-2], cmd[-1]
+        rc = 0 if privileged or direct_rc == 0 else 1
+        if rc == 0 and not drop_adds:
+            if verb in {"--add", "--unblockapp"}:
+                state[path] = True
+            elif verb == "--remove":
+                state.pop(path, None)
+        return _FakeProc(rc=rc)
+
+    monkeypatch.setattr(fw, "_query", fake_query)
+    monkeypatch.setattr(fw, "run_bounded", fake_run)
+    monkeypatch.setattr(fw, "_VERIFY_RETRY_S", 0.0)
+    return calls
+
+
 def test_repair_allowlist_issues_both_verbs_per_binary(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -442,8 +499,7 @@ def test_repair_allowlist_issues_both_verbs_per_binary(
     alone would leave. Both are idempotent, so re-running is safe."""
     py = tmp_path / "python3.12"
     py.write_text("#!/bin/sh\n")
-    calls: list[list[str]] = []
-    monkeypatch.setattr(fw, "run_bounded", lambda _cmd, **_kw: calls.append(_cmd) or _FakeProc())  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    calls = _stub_mutating_daemon(monkeypatch, {})
     repair = fw.repair_allowlist((py,), rules={})
     assert repair.allowed == (py,)
     assert repair.failed == ()
@@ -457,13 +513,7 @@ def test_repair_falls_back_to_noninteractive_sudo_on_older_macos(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     py = _existing(tmp_path, "python3.12")
-    calls: list[list[str]] = []
-
-    def fake(cmd: list[str], **_kw: object) -> _FakeProc:
-        calls.append(cmd)
-        return _FakeProc(rc=0 if cmd[:2] == ["sudo", "-n"] else 1)
-
-    monkeypatch.setattr(fw, "run_bounded", fake)
+    calls = _stub_mutating_daemon(monkeypatch, {}, direct_rc=1)
     repair = fw.repair_allowlist((py,), rules={})
     assert repair.allowed == (py,)
     assert repair.failed == ()
@@ -479,14 +529,85 @@ def test_repair_reports_partial_failure(monkeypatch: pytest.MonkeyPatch, tmp_pat
     """A binary whose second verb failed is failed, not silently half-fixed."""
     py = tmp_path / "python3.12"
     py.write_text("#!/bin/sh\n")
+    state: dict[str, bool] = {}
+
+    def fake_query(*args: str) -> str | None:
+        if args == ("--getglobalstate",):
+            return "Firewall is enabled. (State = 1)"
+        if args == ("--listapps",):
+            return _render_apps(state)
+        raise AssertionError(f"unexpected query: {args}")
 
     def fake(cmd: list[str], **kw: object) -> _FakeProc:
-        return _FakeProc(rc=0 if cmd[-2] == "--add" else 1)
+        if cmd[-2] == "--add":
+            state[cmd[-1]] = True
+            return _FakeProc()
+        return _FakeProc(rc=1)
 
+    monkeypatch.setattr(fw, "_query", fake_query)
     monkeypatch.setattr(fw, "run_bounded", fake)
+    monkeypatch.setattr(fw, "_VERIFY_RETRY_S", 0.0)
     repair = fw.repair_allowlist((py,), rules={})
     assert repair.allowed == ()
     assert repair.failed == (py,)
+
+
+def test_repair_reports_silent_noop_as_failed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """macOS 15.3.1's daemon accepts an `--add` whose bundle identifier already
+    has a rule and persists nothing. Exit 0 must not be reported as allowed."""
+    py = tmp_path / "python3.12"
+    py.write_text("#!/bin/sh\n")
+    calls = _stub_mutating_daemon(monkeypatch, {}, drop_adds=True)
+    repair = fw.repair_allowlist((py,), rules={})
+    assert repair.allowed == ()
+    assert repair.failed == (py,)
+    assert calls == [
+        [fw.SOCKETFILTERFW, "--add", str(py)],
+        [fw.SOCKETFILTERFW, "--unblockapp", str(py)],
+    ]
+
+
+def test_repair_retries_verification_until_the_rule_appears(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The daemon persists asynchronously; verification re-reads instead of
+    giving up after the first read.
+
+    The fake daemon's persisted view lags the mutation by two reads: the rule
+    only shows up on the third `--listapps` read. A verification that read
+    once and gave up would report this repair failed, so the passing
+    assertions pin the retry loop as load-bearing.
+    """
+    py = tmp_path / "python3.12"
+    py.write_text("#!/bin/sh\n")
+    state: dict[str, bool] = {}
+    reads = 0
+
+    def fake_query(*args: str) -> str | None:
+        nonlocal reads
+        if args == ("--getglobalstate",):
+            return "Firewall is enabled. (State = 1)"
+        if args == ("--listapps",):
+            reads += 1
+            if reads >= 3:  # slow daemon: the persisted view catches up late
+                return _render_apps(state)
+            return "Total number of apps = 0\n"
+        raise AssertionError(f"unexpected query: {args}")
+
+    def fake(cmd: list[str], **_kw: object) -> _FakeProc:
+        if cmd[-2] == "--add":
+            state[cmd[-1]] = True
+        return _FakeProc()
+
+    monkeypatch.setattr(fw, "_query", fake_query)
+    monkeypatch.setattr(fw, "run_bounded", fake)
+    monkeypatch.setattr(fw, "_VERIFY_RETRY_S", 0.0)
+    repair = fw.repair_allowlist((py,), rules={})
+    assert repair.allowed == (py,)
+    assert repair.failed == ()
+    assert reads >= 3  # the retry loop is what made the repair succeed
 
 
 def test_prune_stale_rules_removes_managed_orphans(

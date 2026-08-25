@@ -24,22 +24,32 @@ filtered, so the gateway keeps answering `127.0.0.1` perfectly while every
 off-box dial is dropped. Nothing in the process notices, because nothing in the
 process is wrong.
 
-## Why repair is unprivileged-first
+## Why repair is unprivileged-first, and why it verifies
 
-Empirical verification on macOS 15.3.1 showed that all three manifest mutations
-(`--add`, `--unblockapp`, and `--remove`) succeed as the ordinary Ava user.
-Converge therefore calls `socketfilterfw` directly first. The commands are
-idempotent, so every start can repair a new version-stamped binary before its
-next bind without prompting.
+On macOS 15.3.1 the three manifest mutations (`--add`, `--unblockapp`, and
+`--remove`) exit 0 as the ordinary Ava user, so converge calls
+`socketfilterfw` directly first. But an exit code of 0 does **not** mean a rule
+persisted. The ALF daemon on macOS 15.3.1 deduplicates its rule store by the
+binary's bundle identifier: an `--add` for a path whose identifier already has
+a rule *anywhere* in the list is accepted, reported "update success", and
+persists nothing (daemon log: "Configuration ... is unchanged", the config is
+not saved). uv's ad-hoc linker-signed interpreters all share the identifier
+`-`, and adb shares `adb` with the legacy Android-SDK path, so exactly the
+version-stamped families this manifest manages can silently refuse every
+pre-add. Runtime verdicts are per-path, so the new version still triggers the
+"Allow incoming connections?" prompt on its first bind. Repair therefore
+re-reads `--listapps` after mutating and reports a rule as allowed only when
+it actually appears; a no-op degrades through `sudo -n` (which cannot help —
+the dedup is daemon-side, privilege-independent) to the exact manual commands.
 
-Other macOS releases may still reject an unprivileged mutation. That platform
-difference degrades through two bounded fallbacks: retry the same command with
-`sudo -n`, then report the exact manual `sudo` command when that also fails.
-`sudo -n` never opens a password prompt, so an unattended `ava start` cannot
-hang. An older host can optionally retain the narrow `AVA_FIREWALL` sudoers
-grant; without it, converge reports but does not crash. Queries
-(`--getglobalstate` and `--listapps`) remain unprivileged on every supported
-path.
+Other macOS releases may reject an unprivileged mutation outright. That
+platform difference degrades through two bounded fallbacks: retry the same
+command with `sudo -n`, then report the exact manual `sudo` command when that
+also fails. `sudo -n` never opens a password prompt, so an unattended
+`ava start` cannot hang. An older host can optionally retain the narrow
+`AVA_FIREWALL` sudoers grant; without it, converge reports but does not crash.
+Queries (`--getglobalstate` and `--listapps`) remain unprivileged on every
+supported path.
 
 ## Why `--listapps` and not `--getappblocked`
 
@@ -65,6 +75,7 @@ import re
 import shutil
 import socket
 import subprocess
+import time
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -72,6 +83,12 @@ from pathlib import Path
 from shared.proc import run_bounded
 
 SOCKETFILTERFW = "/usr/libexec/ApplicationFirewall/socketfilterfw"
+
+# After a mutation the daemon persists asynchronously; on macOS 15.3.1 a
+# successful add appears in `--listapps` within a second. Re-read up to
+# `_VERIFY_ATTEMPTS` times before declaring a mutation a no-op.
+_VERIFY_ATTEMPTS = 3
+_VERIFY_RETRY_S = 1.0
 
 # Both queries are pure reads that answer as an unprivileged user. Short timeout:
 # socketfilterfw talks to a local daemon and answers in milliseconds, and this
@@ -623,23 +640,58 @@ class FirewallRepair:
     removed: tuple[Path, ...] = ()
 
 
-def repair_allowlist(paths: tuple[Path, ...], *, rules: dict[str, bool]) -> FirewallRepair:
-    """Add Allow rules for every path in ``paths`` that lacks one.
+def _persisted_after(paths: tuple[Path, ...]) -> tuple[Path, ...]:
+    """Of ``paths``, which ones now have an Allow rule, re-reading ALF?
 
-    Mutating — direct first, as empirically verified on macOS 15.3.1, with
-    ``sudo -n`` as a fallback on platforms that reject that path. ``--add``
-    creates the rule; ``--unblockapp`` un-blocks a rule that exists in the Block
-    state, which ``--add`` alone would leave blocking. Both verbs are idempotent,
-    so re-running after a partial failure is safe. A path whose commands did not
-    all succeed lands in ``failed`` for the caller to report.
+    The daemon persists asynchronously, so the read is retried a bounded number
+    of times. A path that never appears is a *silent no-op*: the mutation exited
+    0 but the daemon persisted nothing (macOS 15.3.1 deduplicates by bundle
+    identifier, see the module docstring). Returning only confirmed paths keeps
+    ``repair_allowlist`` honest — it never claims a rule it cannot see.
+    """
+    for _ in range(_VERIFY_ATTEMPTS):
+        rules = allowlisted_paths()
+        if rules is not None:
+            present = tuple(p for p in paths if _covered(p, rules))
+            if len(present) == len(paths):
+                return present
+        time.sleep(_VERIFY_RETRY_S)
+    rules = allowlisted_paths()
+    if rules is None:
+        return ()
+    return tuple(p for p in paths if _covered(p, rules))
+
+
+def repair_allowlist(paths: tuple[Path, ...], *, rules: dict[str, bool]) -> FirewallRepair:
+    """Add Allow rules for every path in ``paths`` that lacks one, then verify.
+
+    Mutating — direct first, with ``sudo -n`` as a fallback on platforms that
+    reject that path. ``--add`` creates the rule; ``--unblockapp`` un-blocks a
+    rule that exists in the Block state, which ``--add`` alone would leave
+    blocking. Both verbs are idempotent, so re-running after a partial failure
+    is safe.
+
+    Success is only claimed for rules that a re-read of ``--listapps``
+    confirms: macOS 15's daemon accepts an ``--add`` for a path whose bundle
+    identifier already has a rule and persists nothing (exit 0, config
+    unchanged), so an exit-code check alone would report "allowed" for rules
+    that never existed. A path whose commands did not all succeed, or whose
+    rule cannot be confirmed, lands in ``failed`` for the caller to report.
     """
     missing = missing_allow_rules(paths, rules)
-    allowed: list[Path] = []
-    failed: list[Path] = []
-    for path in missing:
-        ok = all(_sudo_mutate(verb, str(path)) for verb in _REPAIR_VERBS)
-        (allowed if ok else failed).append(path)
-    return FirewallRepair(allowed=tuple(allowed), failed=tuple(failed))
+    if not missing:
+        return FirewallRepair()
+    attempted = tuple(
+        p for p in missing if all(_sudo_mutate(verb, str(p)) for verb in _REPAIR_VERBS)
+    )
+    if not attempted:
+        return FirewallRepair(failed=missing)
+    allowed = _persisted_after(attempted)
+    allowed_set = set(allowed)
+    return FirewallRepair(
+        allowed=allowed,
+        failed=tuple(p for p in missing if p not in allowed_set),
+    )
 
 
 def prune_stale_rules(rules: dict[str, bool]) -> FirewallRepair:
@@ -647,6 +699,11 @@ def prune_stale_rules(rules: dict[str, bool]) -> FirewallRepair:
 
     Hygiene only — an orphaned rule blocks nothing and prompts nothing — so a
     caller should stay quiet about failures when the grant is absent.
+
+    Callers run this *before* adding: a stale rule still holds its bundle
+    identifier, and macOS 15's daemon silently ignores an ``--add`` whose
+    identifier already has a rule. Removing the stale rule first lets the new
+    version's rule persist in the same pass.
     """
     removed: list[Path] = []
     for path in stale_manifest_rules(rules):
