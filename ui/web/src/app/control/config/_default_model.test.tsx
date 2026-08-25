@@ -55,6 +55,17 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("DefaultModelPanel", () => {
+  it("shows a disabled loading placeholder before the current model resolves", () => {
+    vi.mocked(api.getModels).mockReturnValue(new Promise(() => undefined));
+    vi.mocked(api.getDefaultModel).mockReturnValue(new Promise(() => undefined));
+    wrap();
+
+    const select = screen.getByTestId<HTMLSelectElement>("select-default-model");
+    expect(select.value).toBe("");
+    expect(select.options[0].textContent).toBe("Loading…");
+    expect(select.options[0].disabled).toBe(true);
+  });
+
   it("selects the stored default and groups options by provider", async () => {
     wrap();
     const select = await screen.findByTestId<HTMLSelectElement>("select-default-model");

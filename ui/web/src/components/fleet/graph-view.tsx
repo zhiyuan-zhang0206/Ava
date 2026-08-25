@@ -203,6 +203,24 @@ export function GraphView({
         setParams={setForceParams}
         resetParams={resetForceParams}
         statsText={`${nodes.length} nodes · ${edges.length} edges`}
+        legend={
+          <div aria-label="Agent graph legend" className="space-y-1">
+            <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
+              {([
+                ["running", "Running"],
+                ["idling", "Idling"],
+                ["terminated", "Terminated"],
+                ["offline", "Offline"],
+              ] as const).map(([status, label]) => (
+                <span key={status} className={cn("items-center gap-1.5", FLEX)}>
+                  <span className={cn("size-2 rounded-full bg-current", STATUS_TEXT[status])} />
+                  {label}
+                </span>
+              ))}
+            </div>
+            <p>size = activity score (24h window)</p>
+          </div>
+        }
         ariaLabel="Fleet relationship graph"
         overlayLeft={
           <select

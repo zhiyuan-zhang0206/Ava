@@ -18,6 +18,7 @@ const SRC_DIR = join(dirname(fileURLToPath(import.meta.url)), "..");
 // Files permitted to call localStorage.setItem directly. Each is an EPHEMERAL,
 // per-device selection deliberately kept out of the DB.
 const SETITEM_ALLOWLIST = new Set<string>([
+  "app/control/config/page.tsx", // control.config.collapsedGroups — per-device group disclosure state
   "components/fleet/fleet-view.tsx", // ava.fleet.mobileTab — current mobile tab
   "lib/use-agents.ts", // ava.active.agent_id — last-viewed agent
 ]);
@@ -51,9 +52,11 @@ function sourceFiles(): { rel: string; src: string }[] {
     .map((rel) => ({ rel, src: readFileSync(join(SRC_DIR, rel), "utf8") }));
 }
 
+const SOURCE_FILES = sourceFiles();
+
 describe("localStorage state policy", () => {
   it("only allowlisted files call localStorage.setItem", () => {
-    const offenders = sourceFiles()
+    const offenders = SOURCE_FILES
       .filter(({ src }) => /localStorage\.setItem\s*\(/.test(src))
       .map(({ rel }) => rel)
       .filter((rel) => !SETITEM_ALLOWLIST.has(rel));
@@ -61,7 +64,7 @@ describe("localStorage state policy", () => {
   });
 
   it("only allowlisted files use react-resizable-panels autoSaveId", () => {
-    const offenders = sourceFiles()
+    const offenders = SOURCE_FILES
       .filter(({ src }) => /autoSaveId\s*=/.test(src))
       .map(({ rel }) => rel)
       .filter((rel) => !AUTOSAVE_ALLOWLIST.has(rel));
@@ -70,7 +73,7 @@ describe("localStorage state policy", () => {
 
   it("every ava-namespaced storage key in the allowed files is on the allowlist", () => {
     const files = new Set([...SETITEM_ALLOWLIST, ...AUTOSAVE_ALLOWLIST]);
-    const byRel = new Map(sourceFiles().map(({ rel, src }) => [rel, src]));
+    const byRel = new Map(SOURCE_FILES.map(({ rel, src }) => [rel, src]));
     const found = new Set<string>();
     for (const f of files) {
       const src = byRel.get(f);
