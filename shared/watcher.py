@@ -44,8 +44,10 @@ __all__ = [
 # it). v1 = pre-#182 loop (no rollback guard); v2 = #182 loop (_last guard +
 # boundary re-check); v3 = schedule-state announcement prints (a healthy cron
 # watcher sleeping toward its next fire was indistinguishable from a stuck one —
-# 2026-08-25 false alarm, task #1620).
-TEMPLATE_VERSION = 3
+# 2026-08-25 false alarm, task #1620); v4 = orphan guard (a watcher child
+# hard-exits within seconds of its pty host dying — task #1726, 49/85 watchers
+# were multi-generation orphans still firing cron/at).
+TEMPLATE_VERSION = 4
 
 
 # Cron
