@@ -107,7 +107,7 @@ def test_should_bypass_pause_agrees_with_surface() -> None:
         ("GET", "/api/agents/42"),
         ("GET", "/api/agents/42/exited/extra"),  # exact match, not prefix
         ("GET", "/api/health"),
-        ("GET", "/api/pages/5-report/a/b"),
+        ("GET", "/pages/5-report/a/b"),
     ]
     for method, path in exempt:
         assert _pause_policy.should_bypass_pause(method, path), f"expected exempt: {method} {path}"
@@ -155,8 +155,8 @@ def test_unknown_route_defaults_to_non_idempotent() -> None:
     [
         ("/api/agents/{agent_id}/messages", "/api/agents/123/messages", True),
         ("/api/agents/{agent_id}/messages", "/api/agents/123/messages/x", False),
-        ("/api/pages/{page_key}/{rest:path}", "/api/pages/5-report/a/b/c", True),
-        ("/api/pages/{page_key}/{rest:path}", "/api/pages/5-report", False),
+        ("/pages/{page_key}/{rest:path}", "/pages/5-report/a/b/c", True),
+        ("/pages/{page_key}/{rest:path}", "/pages/5-report", False),
         ("/api/agents/{agent_id}/exited", "/api/agents/42/exited", True),
         ("/api/agents/{agent_id}/exited", "/api/agents/42/hibernating", False),
         ("/api/cluster/machines/{name}", "/api/cluster/machines/node-1", True),

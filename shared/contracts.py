@@ -329,8 +329,8 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ),
     # ── gateway/routers/pages.py ───────────────────────────────────
     ("GET", "/api/pages"): RouteContract(),
-    ("GET", "/api/pages/{page_key}"): RouteContract(note="page reverse proxy"),
-    ("GET", "/api/pages/{page_key}/{rest:path}"): RouteContract(note="page reverse proxy"),
+    ("GET", "/pages/{page_key}"): RouteContract(note="page reverse proxy"),
+    ("GET", "/pages/{page_key}/{rest:path}"): RouteContract(note="page reverse proxy"),
     ("POST", "/api/agents/{agent_id}/pages"): RouteContract(
         note="register page — upsert, repeats are harmless"
     ),
@@ -338,10 +338,6 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
         note="close page — CAS, repeats are harmless"
     ),
     ("GET", "/api/agents/{agent_id}/pages"): RouteContract(note="list open pages"),
-    ("GET", "/api/agents/{agent_id}/pages/{name}"): RouteContract(note="page reverse proxy"),
-    ("GET", "/api/agents/{agent_id}/pages/{name}/{rest:path}"): RouteContract(
-        note="page reverse proxy"
-    ),
     # ── gateway/routers/plugin_ui.py ───────────────────────────────────
     ("GET", "/api/plugin-ui/{plugin}"): RouteContract(
         note="plugin page mount — trailing-slash redirect"

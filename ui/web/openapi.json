@@ -1940,51 +1940,6 @@
             }
           }
         }
-      },
-      "get": {
-        "summary": "Proxy Page Root",
-        "description": "Trailing-slash canonicalization: `/pages/{name}` redirects to\n`/pages/{name}/` so the page's relative asset links resolve against the\npage directory, not the gateway API root.",
-        "operationId": "proxy_page_root_api_agents__agent_id__pages__name__get",
-        "parameters": [
-          {
-            "name": "agent_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Agent Id"
-            }
-          },
-          {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Name"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
       }
     },
     "/api/pages": {
@@ -2010,67 +1965,11 @@
         }
       }
     },
-    "/api/agents/{agent_id}/pages/{name}/{rest}": {
-      "get": {
-        "summary": "Proxy Page Get",
-        "description": "Legacy page URL — kept for links already handed out; new pages get\n`/api/pages/<id>-<name>/` from the registry.",
-        "operationId": "proxy_page_get_api_agents__agent_id__pages__name___rest__get",
-        "parameters": [
-          {
-            "name": "agent_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Agent Id"
-            }
-          },
-          {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Name"
-            }
-          },
-          {
-            "name": "rest",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Rest"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/pages/{page_key}": {
+    "/pages/{page_key}": {
       "get": {
         "summary": "Proxy Page Root New",
-        "description": "Trailing-slash canonicalization for the new URL: `/api/pages/1-foo`\nredirects to `/api/pages/1-foo/` so relative asset links resolve.",
-        "operationId": "proxy_page_root_new_api_pages__page_key__get",
+        "description": "Trailing-slash canonicalization: `/pages/1-foo` redirects to\n`/pages/1-foo/` so relative asset links resolve.",
+        "operationId": "proxy_page_root_new_pages__page_key__get",
         "parameters": [
           {
             "name": "page_key",
@@ -2104,11 +2003,11 @@
         }
       }
     },
-    "/api/pages/{page_key}/{rest}": {
+    "/pages/{page_key}/{rest}": {
       "get": {
         "summary": "Proxy Page Get New",
-        "description": "New page URL reverse-proxy: `/api/pages/<agent_id>-<name>/...`.\n\n404 for a malformed key, unknown/closed page, or missing agent — same\nsemantics as the legacy `/api/agents/{id}/pages/{name}/...` route.",
-        "operationId": "proxy_page_get_new_api_pages__page_key___rest__get",
+        "description": "Page URL reverse-proxy: `/pages/<agent_id>-<name>/...`.\n\n404 for a malformed key, unknown/closed page, or missing agent.",
+        "operationId": "proxy_page_get_new_pages__page_key___rest__get",
         "parameters": [
           {
             "name": "page_key",
@@ -11018,7 +10917,7 @@
           "closed_at"
         ],
         "title": "PageRow",
-        "description": "Single agent_pages row view — element of GET /api/agents/{aid}/pages +\nreturn of register/close endpoints.\n\n`url`: absolute gateway reverse-proxy URL\n(`http://<gateway>/api/pages/<id>-<name>/`) — the gateway serves\nthe page content, so this is the only address the browser needs; the\npage server's host:port stays inside the gateway."
+        "description": "Single agent_pages row view — element of GET /api/agents/{aid}/pages +\nreturn of register/close endpoints.\n\n`url`: absolute gateway reverse-proxy URL\n(`http://<gateway>/pages/<id>-<name>/`) — the gateway serves\nthe page content, so this is the only address the browser needs; the\npage server's host:port stays inside the gateway."
       },
       "PendingInbound": {
         "properties": {

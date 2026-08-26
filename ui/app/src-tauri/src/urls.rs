@@ -363,7 +363,7 @@ mod tests {
             Ok("https://box.local:3100/".to_string())
         );
         assert_eq!(
-            normalize_gateway_address("https://box.local:8000/api/pages/home"),
+            normalize_gateway_address("https://box.local:8000/pages/home"),
             Ok("https://box.local:8000/".to_string())
         );
     }

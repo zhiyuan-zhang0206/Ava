@@ -5,5 +5,5 @@
   "name": "cleanup",
   "port": 8765,
   "title": "Cleanup picker",
-  "url": "http://localhost:8000/api/pages/7-cleanup/"
+  "url": "http://localhost:8000/pages/7-cleanup/"
 }

@@ -360,7 +360,7 @@ class PageRow(BaseModel):
     return of register/close endpoints.
 
     `url`: absolute gateway reverse-proxy URL
-    (`http://<gateway>/api/pages/<id>-<name>/`) — the gateway serves
+    (`http://<gateway>/pages/<id>-<name>/`) — the gateway serves
     the page content, so this is the only address the browser needs; the
     page server's host:port stays inside the gateway."""
 
