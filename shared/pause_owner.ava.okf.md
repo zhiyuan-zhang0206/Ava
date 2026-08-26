@@ -21,6 +21,15 @@ no-op. Before unpausing, a fresh pending or live running local updater handoff
 blocks a stale deploy resume. Recovery clears only its captured exact journal
 after the normal no-live-owner proof and successful unpause.
 
+A rollout also ends a pause without a resume op: the Phase-B `ava start`
+returns the host to `idle` directly, and the gateway-local `finally` unpauses
+the co-located host itself. Both paths must record the journaled generation as
+`resumed` (the generation-scoped successful-finalize
+`pause_owner.finalize_natural_resume`), or the journal stays `paused` forever
+while the host serves — the 2026-08-26 residue. The finalize is generation-
+scoped by construction and never a force-clear: only a `paused` journal is
+transitioned, and only to its own generation.
+
 During the rollout that first adopts this protocol, the old receiver handled
 stop and therefore wrote no exact journal, while the still-old orchestrator may
 resume the newly updated receiver with an empty payload. Only an absent journal
