@@ -21,6 +21,7 @@ from cli.commands._converge_brew_pin import ensure_brew_pin
 from cli.commands._converge_firewall import ensure_firewall_allowlist
 from cli.commands._converge_frontend_env import ensure_no_frontend_env_overrides
 from cli.commands._converge_gate import ensure_gate
+from cli.commands._converge_legacy_permission_watcher import remove_legacy_permission_watcher
 from cli.commands._converge_os_jobs import (
     ensure_cluster_autostart,
     ensure_health_probe_cron,
@@ -412,36 +413,6 @@ def _reap_legacy_sessions_step(ctx: ConvergeCtx) -> None:  # noqa: ARG001
     _reap_legacy_sessions()
 
 
-def _remove_legacy_permission_watcher(ctx: ConvergeCtx) -> None:  # noqa: ARG001
-    """Boot out the removed macOS permission-prompt watcher LaunchAgent.
-
-    The TCC/ALF prompt observer was deleted 2026-08-26 (user ruling: drop all
-    TCC interception). Its KeepAlive launchd job pointed at the deleted
-    watcher.py, so after the next rollout it would crash-loop; this step boots
-    the job out and deletes its plist. One-shot: once both are gone every later
-    converge is a no-op.
-    """
-    from cli.commands._converge_gate import _bootout_and_wait, _job_loaded
-    from shared.platform import IS_MACOS
-
-    if not IS_MACOS:
-        return
-    label = "com.ava.permission-watcher"
-    plist = Path.home() / "Library" / "LaunchAgents" / f"{label}.plist"
-    if _job_loaded(label):
-        if not _bootout_and_wait(label):
-            print(
-                f"  ⚠ legacy permission-watcher launchd job {label} still loaded "
-                "after bootout — boot it out manually before `ava start`",
-                file=sys.stderr,
-            )
-            return  # keep the plist so the operator can see what is loaded
-        print("  · legacy permission-watcher launchd job booted out")
-    if plist.exists():
-        plist.unlink()
-        print("  · legacy permission-watcher plist removed")
-
-
 def _migrate_registry_keys_step(ctx: ConvergeCtx) -> None:  # noqa: ARG001
     """Idempotently normalize `clusters.json` to the migration-window form
     (name-keyed, compat name/db_name preserved). Reads already re-key by home;
@@ -655,7 +626,7 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
     # deleted watcher.py. No-op once the job and plist are gone.
     ConvergeStep(
         "legacy macOS permission-watcher removal",
-        _remove_legacy_permission_watcher,
+        remove_legacy_permission_watcher,
         host_global=True,
     ),
     # Warning-only assertion of the operator-approved Homebrew pins. Both roles

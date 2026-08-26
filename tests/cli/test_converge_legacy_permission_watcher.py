@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 import cli.commands._converge as cv
-import cli.commands._converge_gate as cg
+import cli.commands._converge_legacy_permission_watcher as clpw
 
 _LABEL = "com.ava.permission-watcher"
 
@@ -24,10 +24,20 @@ def _plist_path(tmp_path: Path) -> Path:
     return tmp_path / "Library" / "LaunchAgents" / f"{_LABEL}.plist"
 
 
+def _patch_macos(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pin the macOS branch so these tests exercise the step on every host
+    (CI is Linux; the real IS_MACOS would no-op the step there)."""
+    import shared.platform
+
+    monkeypatch.setattr(shared.platform, "IS_MACOS", True)
+
+
 def _fake_launchd(
     monkeypatch: pytest.MonkeyPatch, loaded: bool, bootout_ok: bool = True
 ) -> dict[str, int]:
-    """Stub launchd state; `loaded` stays true until a successful bootout."""
+    """Stub launchd state on a macOS host; `loaded` stays true until a
+    successful bootout."""
+    _patch_macos(monkeypatch)
     calls = {"bootout": 0}
 
     def fake_job_loaded(label: str) -> bool:
@@ -39,8 +49,8 @@ def _fake_launchd(
         calls["bootout"] += 1
         return bootout_ok
 
-    monkeypatch.setattr(cg, "_job_loaded", fake_job_loaded)
-    monkeypatch.setattr(cg, "_bootout_and_wait", fake_bootout_and_wait)
+    monkeypatch.setattr(clpw, "_job_loaded", fake_job_loaded)
+    monkeypatch.setattr(clpw, "_bootout_and_wait", fake_bootout_and_wait)
     return calls
 
 
@@ -65,6 +75,7 @@ def test_noop_on_non_macos(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> N
 
 
 def test_noop_when_nothing_loaded(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _patch_macos(monkeypatch)
     calls = _fake_launchd(monkeypatch, loaded=False)
     _patch_home(monkeypatch, tmp_path)
     _step().apply(_ctx(tmp_path))
