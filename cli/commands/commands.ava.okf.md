@@ -26,8 +26,7 @@ Two kinds of module live here, distinguished by filename:
 - **internal** (`_`-prefixed) — steps `start` / `update` call, never dispatched
   directly: `_cluster_instance` (per-cluster pg+redis bring-up), `_converge` /
   `_converge_spec` (the step contract) / `_converge_os_jobs` (the OS-scheduled
-  jobs) / `_converge_skills` / `_converge_firewall` /
-  `_converge_permission_watcher` (idempotent host wiring),
+  jobs) / `_converge_skills` / `_converge_firewall` (idempotent host wiring),
   `_update_git` /
   `_update_orchestration` / `_update_agent_runner` / `_update_uv_sync` /
   `_updater_lease` / `_update_recover` /
@@ -59,11 +58,6 @@ schema change catches the DB up on its own.
   [[shared/shared.ava.okf.md|Shared Libraries]].
 - The prod editable-install assertion and update write window are one lifecycle
   guard: [[editable-install-guard.ava.okf.md]].
-- `_converge_permission_watcher` installs the gateway host's
-  `com.ava.permission-watcher` LaunchAgent. An unchanged plist is a strict no-op;
-  a changed plist is bootstrapped under the logged-in user domain. The process is
-  outside the `ServiceSpec` roster because launchd owns its keepalive. See
-  [[services/permission_watcher/permission_watcher.ava.okf.md]].
 - `cli/enroll.py` and `cli/preflight.py` are routed **before** settings-gated
   imports in `main()`, so they work on a host with no usable config yet.
 - `cli/mcp_server.py` is the third top-level module a verb routes to
