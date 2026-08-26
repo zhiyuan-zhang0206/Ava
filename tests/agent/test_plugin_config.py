@@ -294,6 +294,95 @@ def test_validate_config_overlay_does_not_range_check_plugin_fields(isolated_reg
     validate_config_overlay({"marker": "any string"})
 
 
+@pytest.mark.parametrize("field", ["llm_model", "memory_recall_filter_model"])
+def test_validate_config_overlay_unknown_model_field_raises(
+    isolated_registry, unit_home, field: str
+):
+    """Every model-name overlay field rejects an unregistered id (same failure
+    class as the llm_model incident — an unregistered memory filter model would
+    crash the agent in the before_llm hook via build_chat_model)."""
+    with pytest.raises(InvalidConfigOverlay, match="not a registered model") as exc_info:
+        validate_config_overlay({field: "deepseek-v4-flash-vision"})
+
+    assert "deepseek-v4-flash-vision-exp" in str(exc_info.value)
+    assert field in str(exc_info.value)
+
+
+@pytest.mark.parametrize("field", ["llm_model", "memory_recall_filter_model"])
+def test_validate_config_overlay_registered_model_field_passes(
+    isolated_registry, unit_home, field: str
+):
+    validate_config_overlay({field: "claude-opus-4-6"})
+
+
+def test_validate_config_overlay_none_reasoning_effort_passes(isolated_registry, unit_home):
+    """None = unset (field is `str | None`); a None overlay is a legal no-op
+    that pre-PR validation accepted — the range check must not regress it."""
+    validate_config_overlay({"reasoning_effort": None})
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        # durations / timeouts — must be > 0 and finite
+        ("gemini_cache_timeout_seconds", 0.0),
+        ("gemini_cache_timeout_seconds", -1.0),
+        ("gemini_cache_timeout_seconds", float("nan")),
+        ("gemini_cache_timeout_seconds", float("inf")),
+        ("heartbeat_pause_max_seconds", float("inf")),
+        ("llm_stream_ttft_timeout_seconds", 0.0),
+        ("llm_stream_ttft_timeout_seconds", -1.0),
+        ("llm_stream_ttft_timeout_seconds", float("nan")),
+        ("llm_stream_inter_chunk_timeout_seconds", -1.0),
+        ("llm_stream_inter_chunk_timeout_seconds", float("inf")),
+        ("memory_recall_filter_timeout_seconds", 0.0),
+        ("memory_recall_filter_timeout_seconds", float("nan")),
+        # fractions — must be in (0, 1]
+        ("auto_compact_fraction", 0.0),
+        ("auto_compact_fraction", 1.5),
+        ("auto_compact_fraction", -0.1),
+        ("auto_compact_fraction", float("nan")),
+        ("auto_compact_fraction", float("inf")),
+        ("compact_reminder_fraction", 0.0),
+        ("compact_reminder_fraction", 1.5),
+        ("compact_reminder_fraction", -0.1),
+        # counts / budgets — must be >= 0
+        ("auto_compact_ceiling_tokens", -1),
+        ("claude_thinking_budget_tokens", -5),
+        ("history_dump_keep", -1),
+        ("memory_recall_filter_max_retries", -3),
+        ("memory_recall_inject_k", -1),
+        ("memory_recall_retrieve_k", -1),
+    ],
+)
+def test_validate_config_overlay_out_of_range_rejected(
+    isolated_registry, unit_home, field: str, value: object
+):
+    with pytest.raises(InvalidConfigOverlay, match=field):
+        validate_config_overlay({field: value})
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        # exactly-on-the-bound values are legal
+        ("auto_compact_fraction", 1.0),
+        ("auto_compact_ceiling_tokens", 0),
+        ("claude_thinking_budget_tokens", 0),
+        ("history_dump_keep", 0),
+        ("memory_recall_filter_max_retries", 0),
+        ("llm_stream_ttft_timeout_seconds", None),  # unset sentinel
+        ("llm_stream_ttft_timeout_seconds", 0.1),
+        ("auto_compact_fraction", 0.5),
+        ("compact_reminder_fraction", 0.3),
+    ],
+)
+def test_validate_config_overlay_boundary_values_accepted(
+    isolated_registry, unit_home, field: str, value: object
+):
+    validate_config_overlay({field: value})
+
+
 def test_apply_config_overlay_mutates_plugin_config(isolated_registry, unit_home):
     """After apply, get_plugin_config returns a new instance with marker overlaid."""
     _setup_overlayable_plugin()
