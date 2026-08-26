@@ -11,6 +11,7 @@ import ast
 import contextlib
 import os
 import sys
+import warnings
 from collections import Counter
 from typing import Any
 
@@ -125,7 +126,15 @@ def count_tool_calls(codes: list[str]) -> dict[str, int]:
     counts: Counter[str] = Counter()
     for code in codes:
         try:
-            tree = ast.parse(code)
+            with warnings.catch_warnings():
+                # The code is agent-written history, not the scanner's own:
+                # an invalid escape sequence in it (a non-raw-string regex,
+                # say) parses fine and changes no counts, but Python 3.12's
+                # SyntaxWarning would leak into the scan's stderr as
+                # "<unknown>:N" lines and ride along in the schedule ALERT
+                # message (observed 2026-08-27 00:00 run).
+                warnings.simplefilter("ignore", SyntaxWarning)
+                tree = ast.parse(code)
         except SyntaxError:
             continue
         for node in ast.walk(tree):

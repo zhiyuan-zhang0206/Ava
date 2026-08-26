@@ -494,3 +494,27 @@ def test_test_label_ids_matches_prefix_only(collect_mod: Any, db_conn: psycopg.C
         ids = collect_mod._test_label_ids(cur, [9001, 9002, 9003, 99999])
 
     assert ids == {9001}
+
+
+def test_count_tool_calls_ignores_syntax_warnings(
+    recwarn: pytest.WarningsRecorder,
+) -> None:
+    """Agent-written code with an invalid escape sequence (a non-raw-string
+    regex) parses fine and must not leak a SyntaxWarning into the scan's
+    stderr — where it rode along in the schedule ALERT message as
+    `<unknown>:N` lines (2026-08-27 00:00 run)."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("self_ev_record", REF_DIR / "record.py")
+    assert spec is not None and spec.loader is not None
+    record_mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(record_mod)
+
+    codes = [
+        "import ava\nava.files.write('x', 'y')",
+        "re.compile('a\\|b')",
+        "ava.shell.run('ls')",
+    ]
+    counts = record_mod.count_tool_calls(codes)
+    assert counts == {"ava.files.write": 1, "ava.shell.run": 1}
+    assert not [w for w in recwarn.list if issubclass(w.category, SyntaxWarning)]
