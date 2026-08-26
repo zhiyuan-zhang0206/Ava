@@ -12,7 +12,9 @@ Covered:
   hint as a separate system-note (leaving the exec-output message untouched) +
   marks; second hit no-ops; multi-category cell lists all in CATEGORIES order;
   a compaction re-arms; tail-shape / empty-code no-ops; the pure
-  detect_categories matcher. A sleep cell that already names `watcher` marks
+  detect_categories matcher — literal masking (string/comment/f-string spans
+  never trigger) and the content-only files trigger (listing/managing via
+  stdlib + content via ava.files never triggers). A sleep cell that already names `watcher` marks
   the wait category seen WITHOUT emitting (the agent is using the watcher
   primitive itself) while any other matched category still hints; the pure
   mentions_watcher matcher.
@@ -171,9 +173,32 @@ def _agent_inbound(content: str = "ping", source: str = "agent:7") -> AnyMessage
         ("open('f.txt')", ["files"]),
         ("p.read_text()", ["files"]),
         ("path.write_bytes(b'x')", ["files"]),
-        ("os.makedirs('d')", ["files"]),
+        ("os.makedirs('d')", []),  # managing dirs is not a content bypass
         ("shutil.copy('a', 'b')", ["files"]),
-        ("glob.glob('*.py')", ["files"]),
+        ("shutil.rmtree('d')", ["files"]),
+        ("shutil.which('git')", []),  # not a content op
+        ("glob.glob('*.py')", []),  # listing only
+        ("os.listdir('d')", []),
+        ("os.remove('f')", []),
+        ("os.unlink('f')", []),
+        # the user-reported false trigger: stdlib lists names, ava.files reads
+        # content -> no hint (2026-08-26 ruling).
+        ("import glob\nfor p in glob.glob('*.md'):\n    ava.files.read(p)", []),
+        ("os.listdir('d')\nava.files.read('f')", []),
+        # trigger words inside string/comment/f-string literals are masked
+        # (they grep/print examples, they do not touch files):
+        ("print(\"open('f')\")", []),
+        ("# open('f')", []),
+        ("s = 'glob.glob(\"*.py\")'", []),
+        ("import re\nre.compile(r'open\\(')", []),
+        ('f"open({x})"', []),
+        ("s = 'subprocess.run([\"ls\"])'", []),
+        ("s = 'time.sleep(1)'", []),
+        ("s = 'requests.get(\"u\")'", []),
+        # a real call beside a literal still fires; broken code falls back to
+        # the raw scan:
+        ("print('note')\nopen('f')", ["files"]),
+        ("open('f'", ["files"]),
         ("requests.get('http://x')", ["http"]),
         ("httpx.get('http://x')", ["http"]),
         ("urllib.request.urlopen('http://x')", ["http"]),
@@ -469,6 +494,36 @@ async def test_code_matches_nothing_is_noop(_loaded: Any):
     hook = _loaded.sdk_reminder_after_exec
     state = _state(_cell("total = sum(range(10))\nprint(total)"))
     result = await hook(state, _runtime(), _config())
+    assert result is None
+
+
+async def test_files_hint_not_fired_when_listing_via_stdlib_content_via_sdk(_loaded: Any):
+    """The user-reported false trigger (2026-08-26): a cell lists file names
+    with stdlib glob while reading content through ava.files — the files hint
+    must not fire, and nothing is marked."""
+    hook = _loaded.sdk_reminder_after_exec
+    code = "import glob\nfor p in glob.glob('*.md'):\n    ava.files.read(p)"
+    result = await hook(_state(_cell(code)), _runtime(), _config())
+    assert result is None
+
+
+async def test_files_hint_fires_for_direct_open_read(_loaded: Any):
+    """A cell that genuinely bypasses ava.files for content (open()) still
+    receives the files hint."""
+    hook = _loaded.sdk_reminder_after_exec
+    result = await hook(_state(_cell("data = open('f.txt').read()")), _runtime(), _config())
+    assert result is not None
+    [note] = result["messages"]
+    assert "ava.files" in note.content
+    assert result["ava_sdk_reminder__reminded"] == {"files"}
+
+
+async def test_hint_not_fired_for_trigger_words_in_string_literal(_loaded: Any):
+    """A cell whose only 'open(' occurrence sits inside a string literal (e.g.
+    a grep pattern or printed example) gets no files hint (literal masking)."""
+    hook = _loaded.sdk_reminder_after_exec
+    code = "for line in ava.shell.run(\"grep -rn 'open(' .\").splitlines():\n    print(line)"
+    result = await hook(_state(_cell(code)), _runtime(), _config())
     assert result is None
 
 

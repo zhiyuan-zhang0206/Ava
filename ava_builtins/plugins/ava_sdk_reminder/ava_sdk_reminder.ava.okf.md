@@ -35,7 +35,7 @@ a strongly-typed extractor on the langchain `ToolCall` TypedDict). Detects four 
 |----------|-------------------|-------------------------|
 | **Shell** | `subprocess.run/os.system` | `ava.shell.run(cmd)` |
 | **Wait** | `time.sleep(n)` loop polling | `ava.watcher` (`at`/`cron`/`launch`) |
-| **File** | `open()/shutil/os` file operations | `ava.files.read/write/edit/delete` |
+| **File** | `open()`/pathlib read-write/shutil content operations (listing/managing calls like `glob.glob`/`os.listdir`/`os.remove` do not trigger; string/comment literals are masked) | `ava.files.read/write/edit/delete` |
 | **HTTP** | `requests/httpx/urllib` requests | `ava.web.fetch([(url, prompt)])` / `ava.web.search([query])` |
 
 The four categories share `sdk_code_reminder_cadence`: `once_per_compaction` tracks each in the `reminded` set and re-arms after compact, while `every_time` emits after every matching cell. The reminder is injected as a `system_note_message` — the agent reads it as framework aside, not mistaking it for code output.
