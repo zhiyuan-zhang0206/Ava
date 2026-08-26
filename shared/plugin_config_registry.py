@@ -41,6 +41,7 @@ Usage (`ava_builtins/plugins/<name>/default_config.py`):
 """
 
 import json
+import math
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Literal, cast, overload
@@ -409,44 +410,114 @@ def resolve_overlay_targets(overlay: dict[str, object]) -> dict[str, tuple[str |
     return out
 
 
-def _validate_llm_model_range(value: object) -> str | None:
+def _validate_model_membership(value: object) -> str | None:
+    """A model-name overlay field must be a registered id (shared/lm/registry.py
+    MODELS, plugin-registered models included). An unregistered id would pass
+    the Pydantic str type check, persist, and crash the next boot at model
+    build (Task #1704 — the deepseek-v4-flash-vision incident)."""
     from shared.lm.registry import MODELS
 
     if isinstance(value, str) and value in MODELS:
         return None
     valid_models = ", ".join(sorted(MODELS))
-    return (
-        f"overlay key 'llm_model' value {value!r} is not a registered model; "
-        f"valid models: {valid_models}"
-    )
+    return f"value {value!r} is not a registered model; valid models: {valid_models}"
 
 
 def _validate_reasoning_effort_range(value: object) -> str | None:
     from shared.lm._effort import _EFFORT_VOCAB
 
+    # None = unset (the field is `str | None` and a None overlay is a no-op) —
+    # accepted, matching the pre-PR behavior.
+    if value is None:
+        return None
     valid_values = ("", *_EFFORT_VOCAB)
     if isinstance(value, str) and value in valid_values:
         return None
     rendered_values = ", ".join(repr(candidate) for candidate in valid_values)
-    return (
-        f"overlay key 'reasoning_effort' value {value!r} is not valid; "
-        f"valid values: {rendered_values}"
-    )
+    return f"value {value!r} is not valid; valid values: {rendered_values}"
 
 
+def _range_validator(
+    *,
+    gt: float | None = None,
+    ge: float | None = None,
+    le: float | None = None,
+) -> Callable[[object], str | None]:
+    """Numeric bound validator for overlay fields.
+
+    - None passes (a `T | None` field's unset sentinel — the type layer
+      already decided None is legal).
+    - NaN / ±Inf are rejected outright: a NaN timeout never fires (hang), an
+      Inf heartbeat limit defeats the cap, an Inf fraction is meaningless.
+    - Then the bounds apply: ``gt`` (strictly greater), ``ge`` (at least),
+      ``le`` (at most). All bounds inclusive-exclusive as named.
+
+    Non-numeric values (bool included) fall through — the Pydantic type
+    validation that runs before this step owns them.
+    """
+
+    def check(value: object) -> str | None:
+        if value is None:
+            return None
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+        if not math.isfinite(value):
+            return f"value {value!r} must be a finite number (NaN/Inf rejected)"
+        if gt is not None and value <= gt:
+            return f"value {value!r} must be greater than {gt}"
+        if ge is not None and value < ge:
+            return f"value {value!r} must be at least {ge}"
+        if le is not None and value > le:
+            return f"value {value!r} must be at most {le}"
+        return None
+
+    return check
+
+
+# Semantic range validators for framework overlay fields — Pydantic type
+# validation (above) accepts any string / any number, so fields whose legal
+# values form a named universe get an explicit range check here. Model-name
+# fields check MODELS membership (an unknown id would crash the next boot at
+# model build); numeric fields get finite + bound checks (NaN/Inf/negative
+# timeouts and out-of-window fractions would wedge or corrupt the runtime).
+# Plugin config fields are deliberately not range-checked (their schemas own
+# their semantics). The bound set below is the complete per_agent overlay
+# surface — every field with a universe is listed; the rest are bool / list /
+# Literal / free-form str, already fully enforced by their own types or the
+# field validators in shared/config/*.py.
 _FRAMEWORK_RANGE_VALIDATORS: dict[str, Callable[[object], str | None]] = {
-    "llm_model": _validate_llm_model_range,
+    # model-name universe
+    "llm_model": _validate_model_membership,
+    "memory_recall_filter_model": _validate_model_membership,
+    # reasoning-effort vocabulary ("" pins the provider default; None = unset)
     "reasoning_effort": _validate_reasoning_effort_range,
+    # durations / timeouts — strictly positive and finite
+    "gemini_cache_timeout_seconds": _range_validator(gt=0),
+    "heartbeat_pause_max_seconds": _range_validator(gt=0),
+    "llm_stream_inter_chunk_timeout_seconds": _range_validator(gt=0),
+    "llm_stream_ttft_timeout_seconds": _range_validator(gt=0),
+    "memory_recall_filter_timeout_seconds": _range_validator(gt=0),
+    # fractions — (0, 1]
+    "auto_compact_fraction": _range_validator(gt=0, le=1),
+    "compact_reminder_fraction": _range_validator(gt=0, le=1),
+    # counts / budgets — non-negative and finite
+    "auto_compact_ceiling_tokens": _range_validator(ge=0),
+    "claude_thinking_budget_tokens": _range_validator(ge=0),
+    "history_dump_keep": _range_validator(ge=0),
+    "memory_recall_filter_max_retries": _range_validator(ge=0),
+    "memory_recall_inject_k": _range_validator(ge=0),
+    "memory_recall_retrieve_k": _range_validator(ge=0),
 }
 
 
 def _validate_framework_overlay_ranges(updates: dict[str, object]) -> None:
     for field, value in updates.items():
-        if field not in _FRAMEWORK_RANGE_VALIDATORS:
+        validator = _FRAMEWORK_RANGE_VALIDATORS.get(field)
+        if validator is None:
             continue
-        error = _FRAMEWORK_RANGE_VALIDATORS[field](value)
+        error = validator(value)
         if error is not None:
-            raise InvalidConfigOverlay(error)
+            raise InvalidConfigOverlay(f"overlay key {field!r} {error}")
 
 
 def validate_config_overlay(overlay: dict[str, object]) -> None:
