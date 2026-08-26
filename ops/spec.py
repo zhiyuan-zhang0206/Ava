@@ -42,7 +42,7 @@ from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 
-from shared.cluster import fe_build_env
+from shared.cluster import frontend_service_cmd
 from shared.config import settings
 from shared.daemon_health import DaemonProbe, health_port, probe_daemon, probe_home
 from shared.log import logger
@@ -226,12 +226,6 @@ def build_services() -> tuple[ServiceSpec, ...]:
 
     _fe_port = app_port()
     _fe_url = f"http://localhost:{_fe_port}"
-    # NEXT_PUBLIC_GATEWAY_PORT must be injected on the build command line (not read
-    # from a unit .env, which never reaches the build subprocess). Shared with the
-    # frontend healthcheck respawn so the two build paths can't drift; rationale in
-    # shared.cluster.fe_build_env.
-    _fe_build_env = fe_build_env()
-
     # ── gateway-only services ───────────────────────────────────────────────
     # The gateway capability owns the data-plane-adjacent daemons: the HTTP
     # gateway, the frontend, and cluster-wide nudgers (heartbeat plus idle shell
@@ -346,25 +340,19 @@ def build_services() -> tuple[ServiceSpec, ...]:
         ),
         ServiceSpec(
             session="frontend",
-            # On Windows the supervisor runs this via `cmd /c` — the `&&` chain is
-            # what puts it on that branch — and cmd cannot do bash-style inline
+            # Single source for the launch command: shared.cluster.frontend_service_cmd
+            # — the watchdog respawn (services/healthchecks/frontend.py) builds the
+            # SAME string, so the two launch paths cannot drift (they did once: the
+            # respawn lost its `exec`, the session validator rejected the command,
+            # and a dead frontend could never self-heal). On Windows the supervisor
+            # runs the `&&` chain via `cmd /c` — cmd cannot do bash-style inline
             # `VAR=val cmd`; use `set "VAR=val" && ...` instead.
             # (NEXT_PUBLIC_* is build-time-inlined, so it must reach `npm run build`.)
             # Those inner quotes reach cmd intact only because the supervisor hands
             # the shell branch a verbatim command line: through a Popen argv list,
             # list2cmdline would escape them to \" , which cmd reads as a literal
             # backslash plus a quote toggle, setting a variable named `\`.
-            cmd=(
-                f'cd ui/web && set "{_fe_build_env}" && '
-                f"npm run build && npm run start -- -p {_fe_port}"
-                if IS_WINDOWS
-                # `exec` on the serve stage (POSIX): the build is a transient
-                # prelude, so the shell must hand its pid to `npm run start` —
-                # otherwise it outlives it and swallows the graceful-stop
-                # SIGTERM (shared.session_env.exec_into).
-                else f"cd ui/web && {_fe_build_env} npm run build && "
-                f"exec npm run start -- -p {_fe_port}"
-            ),
+            cmd=frontend_service_cmd(_fe_port),
             capabilities=_GATEWAY,
             # Next.js reaches data only through the gateway HTTP API — no pg client in
             # ui/web/package.json. Reviving it during a DB outage brings the

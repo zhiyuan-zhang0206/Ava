@@ -62,6 +62,9 @@ from shared.cluster.derive import (
     fe_build_env as fe_build_env,
 )
 from shared.cluster.derive import (
+    frontend_service_cmd as frontend_service_cmd,
+)
+from shared.cluster.derive import (
     home_label as home_label,
 )
 from shared.cluster.derive import (

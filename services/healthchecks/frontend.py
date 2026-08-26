@@ -3,7 +3,7 @@
 Checks whether the Next.js prod build server (port 3000) is alive:
 - `curl -fs http://localhost:3000` returns 2xx -> no-op
 - returns non-2xx / connection refused -> kill the ava-frontend session
-  session + restart `npm run build && npm run start`
+  session + restart `npm run build && exec npm run start -p 3001`
 
 Frontend differs from other services — `npm run start` exposes no PID
 hook, so probing goes through HTTP curl rather than pidfile + kill -0.
@@ -19,10 +19,9 @@ import subprocess
 import sys
 from pathlib import Path
 
-from shared.cluster import fe_build_env, session_name
+from shared.cluster import frontend_service_cmd, session_name
 from shared.config import settings
 from shared.log import init_gateway_process
-from shared.platform import IS_WINDOWS
 from shared.service_respawn import respawn_service
 
 _log = logging.getLogger("services.healthchecks.frontend")
@@ -88,22 +87,18 @@ def _restart() -> bool:
     port = urlsplit(_FRONTEND_URL).port or 3000
     # Both platforms route through respawn_service (the shared service-respawn
     # helper): it kills any stale session — on both backends during the
-    # legacy->native transition — and launches through the session backend. The
-    # env form must match the launcher: cmd.exe `/c` can't do bash-style inline
-    # `VAR=val cmd`, so Windows uses `set "VAR=val" && ...` (mirrors `ava start`'s
-    # ServiceSpec in cli/commands/_repo.py).
-    if IS_WINDOWS:
-        cmd = f'set "{fe_build_env()}" && npm run build && npm run start -- -p {port}'
-    else:
-        # `npm run build && npm run start` sequential — build is slow but
-        # guarantees the running prod is the latest code. Pass `-p <port>` so the
-        # respawn binds the cluster's allocated frontend port (Next.js defaults to
-        # 3000 otherwise — a watchdog restart would silently revert off-cluster).
-        # Prefix the build with the same NEXT_PUBLIC_GATEWAY_PORT as `ava start`'s
-        # ServiceSpec (shared.cluster.fe_build_env) — without it the build inherits
-        # whatever NEXT_PUBLIC_GATEWAY_PORT is frozen in the server env (a stale
-        # value bakes the wrong gateway port into the bundle, breaking login).
-        cmd = f"cd {frontend_dir.as_posix()} && {fe_build_env()} npm run build && npm run start -- -p {port}"
+    # legacy->native transition — and launches through the session backend.
+    # Single source for the launch command: shared.cluster.frontend_service_cmd
+    # builds the SAME string as `ava start`'s ServiceSpec (ops/spec.py), so a
+    # watchdog restart can never drift from the canonical command (the 2026-08-27
+    # prod outage: the respawn's missing `exec` made the session validator reject
+    # the command, so a dead frontend could never self-heal). `exec` on the serve
+    # stage hands the shell's pid to `npm run start`; `-p <port>` binds the
+    # cluster's allocated frontend port (Next.js defaults to 3000 otherwise — a
+    # watchdog restart would silently revert off-cluster); the NEXT_PUBLIC_*
+    # build-env prefix rides the command so a restart can never bake a stale
+    # gateway port into the bundle.
+    cmd = frontend_service_cmd(port, frontend_dir)
     # The session starts in ui/web/ (npm must run there), but the code it runs
     # belongs to the checkout above it — which is what the launch-site guard
     # judges. Passing the subdirectory as both made the guard compare
@@ -133,7 +128,7 @@ def main() -> None:
 
     # Session present but curl unreachable = most likely build in
     # progress or just-started not yet bound to the port (`npm run
-    # build && npm run start` first time ~30-60s). Cron ticks every
+    # build && exec npm run start` first time ~30-60s). Cron ticks every
     # minute; without this gate we would kill-session mid-build and
     # fall into an infinite restart loop. Trade-off: if the session is
     # truly hung (process there but hanging) this healthcheck also

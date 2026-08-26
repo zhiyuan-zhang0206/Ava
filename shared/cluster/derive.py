@@ -19,6 +19,7 @@ from urllib.parse import urlsplit
 from shared import cluster
 from shared.config import settings
 from shared.env_registry import REDIS_PASSWORD_ENV, health_port_env_aliases
+from shared.platform import IS_WINDOWS
 from shared.url_secret import url_with_port, url_with_userinfo
 
 # The db / Postgres-role / redis-ACL identifier a newly-born cluster uses. Fixed:
@@ -152,6 +153,43 @@ def fe_build_env() -> str:
     different (stale) gateway port than `ava start` did.
     """
     return f"NEXT_PUBLIC_GATEWAY_PORT={settings.gateway.gateway_port}"
+
+
+def frontend_service_cmd(port: int, frontend_dir: str | Path = "ui/web") -> str:
+    """The complete frontend service launch command — single source for BOTH
+    launch paths: the canonical ServiceSpec (``ops/spec.py``) and the watchdog
+    respawn (``services/healthchecks/frontend.py``). The two drifted once
+    (2026-08-27 prod outage: the respawn command lost its ``exec``, so the
+    session validator rejected it and a dead frontend could never self-heal);
+    this is the one place the command shape is authored.
+
+    ``exec`` on the serve stage (POSIX): the build is a transient prelude, so
+    the shell must hand its pid to ``npm run start`` — otherwise it outlives it
+    and swallows the graceful-stop SIGTERM (``shared.session_env.exec_into``
+    rejects a compound command whose final stage does not exec, which is what
+    made the drifted respawn unlaunchable). On Windows cmd.exe has no ``exec``;
+    the ``&&`` chain runs through ``cmd /c`` and winproc kills the process tree,
+    so the Windows shape carries ``set "VAR=val"`` instead of a bash inline env
+    prefix (cmd cannot do ``VAR=val cmd``).
+
+    Args:
+        port: the cluster-allocated frontend port. Passed explicitly — Next.js
+            defaults to 3000 otherwise, and a watchdog restart would silently
+            revert the app off-cluster.
+        frontend_dir: the directory to ``cd`` into before the build, as the
+            session sees it — the spec's session starts at the checkout root
+            (``ui/web``), the respawn's at the absolute ``ui/web`` path. The
+            build env prefix rides the command (NEXT_PUBLIC_* is build-time
+            inlined and never reaches the build from a unit .env); see
+            ``fe_build_env``.
+    """
+    frontend_dir = Path(frontend_dir).as_posix()
+    build_env = fe_build_env()
+    if IS_WINDOWS:
+        return (
+            f'cd {frontend_dir} && set "{build_env}" && npm run build && npm run start -- -p {port}'
+        )
+    return f"cd {frontend_dir} && {build_env} npm run build && exec npm run start -- -p {port}"
 
 
 def redis_admin_url() -> str:
