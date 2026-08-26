@@ -386,6 +386,14 @@ class ProcessExit(TypedDict):
     pid: int
 
 
+class AgentBootFailed(TypedDict):
+    """`agent_boot_failed` payload — agent/loop.py."""
+
+    model: str
+    error_type: str
+    error: str
+
+
 class RecallFilter(TypedDict):
     """`recall_filter` payload — _memory_filter.py; `body` = verdict text."""
 
@@ -854,6 +862,12 @@ EVENTS: dict[str, EventSpec] = {
     ),
     "launch_confirm_failed": _telemetry(
         "launch_confirm_failed", "launch confirm failed", tier="anomaly"
+    ),
+    "agent_boot_failed": _telemetry(
+        "agent_boot_failed",
+        "agent boot failed (process exits; crash-loop budget applies)",
+        payload=AgentBootFailed,
+        tier="anomaly",
     ),
     "launch_confirm_task_crashed": _telemetry(
         "launch_confirm_task_crashed", "launch confirm task crashed", tier="anomaly"

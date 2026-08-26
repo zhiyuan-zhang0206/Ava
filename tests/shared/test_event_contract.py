@@ -94,7 +94,8 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     (runner-observability staleness and OTLP recovery state) + exec_envelope
     (2026-08-24 runner batch R-4 — exec envelope transfer size/time cost) +
     editable_pth_repaired (Task #1572's prod editable-install repair audit) +
-    checkpoint_table_sizes (Task #1545a's post-vacuum absolute gauges).
+    checkpoint_table_sizes (Task #1545a's post-vacuum absolute gauges) +
+    agent_boot_failed (Task #1704's visible process-boot failure marker).
     Bump deliberately when adding a telemetry event, never to silence a
     drift."""
     from shared.telemetry import _TELEMETRY_KINDS
@@ -102,8 +103,9 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     assert telemetry_events() == frozenset(_TELEMETRY_KINDS)
     # Main's exec_envelope raised this to 107; the resolution change moves two
     # legacy markers to telemetry and adds three new resolution events;
-    # checkpoint_table_sizes and Task #1572's repair audit raise it to 114.
-    assert len(_TELEMETRY_KINDS) == 114
+    # checkpoint_table_sizes and Task #1572's repair audit raise it to 114;
+    # agent_boot_failed raises it to 115.
+    assert len(_TELEMETRY_KINDS) == 115
 
 
 def test_checkpoint_table_sizes_payload_and_metric_disposition() -> None:
@@ -179,6 +181,7 @@ def test_payload_keys_are_the_declared_attribute_contract() -> None:
     assert payload_keys("heartbeat_paused") == ("duration_s",)
     assert payload_keys("task_update") == ("status",)
     assert payload_keys("process_exit") == ("reason", "pid")
+    assert payload_keys("agent_boot_failed") == ("model", "error_type", "error")
     assert payload_keys("recall_filter") == ("body",)
     assert payload_keys("heartbeat_nudged") == ("idle_minutes",)
     assert payload_keys("delivery_stalled") == ("inbound_id", "age_s")

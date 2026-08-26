@@ -24,7 +24,7 @@ generated from it and never hand-synced. event_names that violate the naming rul
 | mechanism | table/channel | registered event_names | destination | retention |
 |------|------|-------------|------|------|
 | audit (category=audit) | `events` | 20 | events table | 365d+ |
-| telemetry (category=telemetry) | `events` | 114 | events table | 90d |
+| telemetry (category=telemetry) | `events` | 115 | events table | 90d |
 | log (category=log) | `events` | 6 | events table | 30d |
 | file-only (destination=file) | file log | 1 | file only (not the events table) | — |
 | SSE live | Redis → frontend (not persisted) | 28 role | live projection | ephemeral |
@@ -87,7 +87,7 @@ Emit sites and consumers: see the comments at each emit point.
 | `computer_session_end` | computer-use task session closed (idle timeout) | business | task_id, action_count, first_action_at, last_action_at, outcome | 365d | events |
 | `mcp_tool_call` | MCP tool invoked through the gateway /mcp endpoint (client-scoped, args redacted) | business | — | 365d | events |
 
-## 3. Telemetry events (category=telemetry, 114)
+## 3. Telemetry events (category=telemetry, 115)
 
 Telemetry-side event name resolution (`shared/log.py`): **explicit `event=` →
 `label=` fallback → default `"log"`**. Payload = logger extra fields + `msg`
@@ -154,6 +154,7 @@ consumers: see the comments at each emit point.
 | `respawn_phase2_launch` | restart phase 2 launch | noise | — | — | 90d | events |
 | `launch_confirm_extended` | launch confirm extended | noise | — | — | 90d | events |
 | `launch_confirm_failed` | launch confirm failed | anomaly | — | — | 90d | events |
+| `agent_boot_failed` | agent boot failed (process exits; crash-loop budget applies) | anomaly | model, error_type, error | — | 90d | events |
 | `launch_confirm_task_crashed` | launch confirm task crashed | anomaly | — | — | 90d | events |
 | `launch_force_terminated` | launch force-terminated | anomaly | — | — | 90d | events |
 | `launch_force_terminated_skipped` | launch force-terminate skipped | noise | — | — | 90d | events |
