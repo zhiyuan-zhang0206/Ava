@@ -1457,6 +1457,7 @@ def test_unfired_episode_recovers_without_resolve(
 def test_fired_episode_recovery_reuses_start_and_severity(
     _home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """A current marker with no open row falls back to its stable instance key."""
     started_at = datetime(2026, 8, 26, tzinfo=UTC)
     (_home / _cluster_health.ALERT_STATE_FILE).write_text(
         f"FAIL: gateway liveness\n{started_at.isoformat()}\nwarning"
@@ -1526,6 +1527,61 @@ def test_fired_episode_recovery_replays_open_row_fingerprint(
             "message": "all checks passing",
             "starts_at": row_start,
             "severity": "warning",
+            "fingerprint": "pre-convention-fingerprint",
+        }
+    ]
+
+
+def test_legacy_two_line_recovery_replays_open_row_fingerprint(
+    _home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A pre-upgrade marker still closes its severity-in-fingerprint row."""
+    import shared.db
+
+    marker_start = datetime(2026, 8, 26, tzinfo=UTC)
+    row_start = datetime(2026, 8, 5, tzinfo=UTC)
+    (_home / _cluster_health.ALERT_STATE_FILE).write_text(
+        f"FAIL: old persisted alert\n{marker_start.isoformat()}"
+    )
+    queries: list[str] = []
+
+    class _Cursor:
+        def __enter__(self) -> _Cursor:
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def execute(self, query: str) -> None:
+            queries.append(query)
+
+        def fetchall(self) -> list[tuple[str, datetime]]:
+            return [("pre-convention-fingerprint", row_start)]
+
+    class _Connection:
+        def __enter__(self) -> _Connection:
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def cursor(self) -> _Cursor:
+            return _Cursor()
+
+    monkeypatch.setattr(shared.db, "connect", _Connection)
+    edges: list[dict[str, object]] = []
+    monkeypatch.setattr(_health_alerts, "_ingest_alert", lambda **kw: edges.append(kw))  # pyright: ignore[reportUnknownArgumentType]
+
+    _health_alerts._alert_recovery(_home)
+
+    assert len(queries) == 1
+    assert "labels->>'alertname' = 'cluster health'" in queries[0]
+    assert edges == [
+        {
+            "status": "resolved",
+            "message": "all checks passing",
+            "starts_at": row_start,
+            "severity": "error",
             "fingerprint": "pre-convention-fingerprint",
         }
     ]
@@ -1612,6 +1668,7 @@ def test_alert_recovery_pre_w16_state_file_goes_direct(
 def test_alert_recovery_legacy_two_line_state_resolves(
     _home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """A legacy marker with no open row uses the same stable-key fallback."""
     started_at = datetime(2026, 8, 5, tzinfo=UTC)
     (_home / _cluster_health.ALERT_STATE_FILE).write_text(
         f"FAIL: old persisted alert\n{started_at.isoformat()}"
@@ -1626,6 +1683,7 @@ def test_alert_recovery_legacy_two_line_state_resolves(
             "status": "resolved",
             "message": "all checks passing",
             "starts_at": started_at,
+            "severity": "error",
         }
     ]
     assert not (_home / _cluster_health.ALERT_STATE_FILE).exists()
