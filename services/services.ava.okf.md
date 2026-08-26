@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Background Services
-description: 'Ava background service collection — roster services run in session backends and are health-checked by watchdog; macOS permissions-helper and permission-watcher are launchd-owned exceptions. Services are distributed by gateway / agent-runner capability.'
+description: 'Ava background service collection — roster services run in session backends and are health-checked by watchdog; the macOS permissions-helper is a launchd-owned exception. Services are distributed by gateway / agent-runner capability.'
 tags: []
 ---
 
@@ -11,9 +11,8 @@ tags: []
 Ava's background service collection—roster services are independent long-lived
 processes hosted in sessions and restarted by a watchdog health check every 60
 seconds. Agent interactive shells live in per-session pty hosts outside that
-roster. On macOS, permissions-helper and
-[[permission_watcher/permission_watcher.ava.okf.md|permission-watcher]] are
-launchd-owned exceptions with their own keepalive.
+roster. On macOS, the permissions-helper is a
+launchd-owned exception with its own keepalive.
 
 ## Grouped by Capability
 Each service declares which machine capabilities it runs on (`ServiceSpec.capabilities` in `ops/spec.py`); a machine runs every service whose capability set matches. The groupings reflect the **merged roster** of core entries + entries contributed by `_plugin_services()`; node ownership follows the code—a service registered by a plugin has its node under that plugin's subtree. Sub-trees are split accordingly into two groups; services that run on both sides stay at this layer:
@@ -23,15 +22,10 @@ Each service declares which machine capabilities it runs on (`ServiceSpec.capabi
 - **Both sides** (one instance each, stay at this layer):
   - [[watchdog.ava.okf.md|Watchdog]] — service health checks + schema/pin/pause self-healing; one instance per capability (`gateway-watchdog` + `agent-runner-watchdog`)
   - [[healthchecks.ava.okf.md|Healthchecks]] — health probes for each service; called by the corresponding capability's watchdog
-- **Host-global gateway exception**:
-  [[permission_watcher/permission_watcher.ava.okf.md|permission-watcher]] runs
-  under launchd rather than `ServiceSpec`, because it observes machine-wide macOS
-  permission prompts, records their lifecycle/cooldown in local state, and
-  delivers system alerts through the gateway ingest.
 
 ## Core Responsibilities
 - **Independent deployment**: each daemon starts via `.venv/bin/python -m services.<name>.daemon`, fully decoupled
-- **session management**: one session per roster service via the session backend (`shared/session_backend.py`), unified lifecycle — POSIX services are detached native process sessions (`shared/posixproc.py`); agent interactive shells / watchers are pty sessions in per-session detached hosts ([[shared/pty_sessions/pty_sessions.ava.okf.md|pty sessions]], outside the service roster; orchestration sessions run on the service backend); permissions-helper and permission-watcher use launchd
+- **session management**: one session per roster service via the session backend (`shared/session_backend.py`), unified lifecycle — POSIX services are detached native process sessions (`shared/posixproc.py`); agent interactive shells / watchers are pty sessions in per-session detached hosts ([[shared/pty_sessions/pty_sessions.ava.okf.md|pty sessions]], outside the service roster; orchestration sessions run on the service backend); the permissions-helper uses launchd
 - **watchdog keep-alive + self-healing**: runs the corresponding healthcheck every 60s, restarts on death; additionally runs five reconcile controllers in order (`ops/manager.py:build_controllers`): updater (reaps hung ava-updater sessions, agent-runner only) → pause (stranded-pause recovery, 120s timeout) → schema (schema version) → pin (cluster pin; agent-runner self-heals, gateway only alerts) → code
 - **Distributed by capability**: intersection of `ServiceSpec.capabilities` with the local machine's `machine_role()` determines which services run—gateway and agent-runner each run a different subset, each with its own watchdog instance
 

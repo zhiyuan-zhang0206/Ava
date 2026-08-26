@@ -458,8 +458,7 @@ CREATE TABLE alerts (
     ends_at      TIMESTAMPTZ,
     fingerprint  TEXT NOT NULL,
     generator_url TEXT NOT NULL DEFAULT '',
-    -- Provenance: 'grafana' (webhook default), 'health-probe', 'machine-probe',
-    -- 'permission-watcher'.
+    -- Provenance: 'grafana' (webhook default), 'health-probe', 'machine-probe'.
     source       TEXT NOT NULL DEFAULT 'grafana',
     notified_at  TIMESTAMPTZ,
     created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -470,7 +469,7 @@ CREATE TABLE alerts (
 );
 
 COMMENT ON COLUMN alerts.source IS
-    'Provenance: ''grafana'' (webhook default), ''health-probe'', ''machine-probe'', ''permission-watcher''.';
+    'Provenance: ''grafana'' (webhook default), ''health-probe'', ''machine-probe''.';
 
 CREATE INDEX alerts_status_starts_idx ON alerts (status, starts_at DESC);
 
