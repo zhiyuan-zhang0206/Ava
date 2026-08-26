@@ -552,6 +552,24 @@ class AgentPromptSettings(EnvSettings):
         },
     )
 
+    prompt_codeact_enabled: bool = Field(
+        default=False,
+        alias="AVA_SYSTEM_PROMPT_CODEACT",
+        description=(
+            "Inject a 'CodeAct \u2014 batch work into fewer calls' section: "
+            "pack several operations into one `execute_code` call (batch file "
+            "reads, fold branches into if-else logic) because each call is one "
+            "LLM API round-trip. Off by default \u2014 opt-in, unlike the "
+            "on-by-default behavioral sections."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     @field_validator(
         "sdk_disable",
         "sdk_expand_in_system_prompt",
