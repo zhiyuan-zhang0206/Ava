@@ -87,8 +87,9 @@ def test_migration_update_creates_and_verifies_pre_update_dump(
     backup_calls: list[float] = []
     verified: list[Path] = []
 
-    def _run_backup(*, timeout_s: float) -> Path:
+    def _run_backup(*, timeout_s: float, pre_update: bool) -> Path:
         backup_calls.append(timeout_s)
+        assert pre_update is True
         return dump
 
     monkeypatch.setattr(backup, "run_backup", _run_backup)
@@ -107,8 +108,9 @@ def test_pre_update_data_snapshot_wraps_backup_failure(
     """A migration-bearing rollout fails before the stop when pg_dump cannot run."""
     _patch_migration_sets(monkeypatch, {"baseline", "20260825T010101_expand"}, {"baseline"})
 
-    def _run_backup(*, timeout_s: float) -> Path:
+    def _run_backup(*, timeout_s: float, pre_update: bool) -> Path:
         _ = timeout_s
+        assert pre_update is True
         raise RuntimeError("pg_dump failed")
 
     monkeypatch.setattr(backup, "run_backup", _run_backup)
@@ -124,7 +126,8 @@ def test_pre_update_data_snapshot_never_exposes_backup_db_url(
     _patch_migration_sets(monkeypatch, {"baseline", "20260825T010101_expand"}, {"baseline"})
     db_url = "postgresql://ava:secret-token@db.example/ava"
 
-    def _run_backup(*, timeout_s: float) -> Path:
+    def _run_backup(*, timeout_s: float, pre_update: bool) -> Path:
+        _ = pre_update
         raise subprocess.TimeoutExpired(["pg_dump", "--dbname", db_url], timeout_s)
 
     monkeypatch.setattr(backup, "run_backup", _run_backup)
@@ -201,8 +204,9 @@ def test_pre_update_data_snapshot_holds_backup_lock_through_verification(
         finally:
             events.append("lock-exit")
 
-    def _run_backup(*, timeout_s: float) -> Path:
+    def _run_backup(*, timeout_s: float, pre_update: bool) -> Path:
         assert timeout_s == _git._PRE_UPDATE_DUMP_TIMEOUT_S
+        assert pre_update is True
         events.append("dump")
         return dump
 

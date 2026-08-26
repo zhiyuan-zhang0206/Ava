@@ -74,12 +74,16 @@ _log = logging.getLogger(__name__)
 
 BACKUP_HOUR = 3  # cluster time; the first tick at/after this hour runs the day's backup
 BACKUP_KEEP = 7  # a week of daily dumps: a bad migration found a day later must not have overwritten the last good copy
+_PRE_UPDATE_MARKER = "pre-update"  # filename kind segment for `ava cluster update` snapshots
 # Generous ceiling for one dump (the DB is far smaller); see the comment at the
 # subprocess.run call for why an unbounded pg_dump is not acceptable here.
 # 60 min: a full dump with checkpoint history takes about 6.3 min. This is
 # headroom against a stall, not an expected runtime.
 _DUMP_TIMEOUT_S = 60 * 60
-_NAME_RE = re.compile(r"^(?P<db>.+)-(?P<ts>\d{8}T\d{6}Z|\d{8}-\d{6})\.dump(?:\.gz\.enc)?$")
+_NAME_RE = re.compile(
+    r"^(?P<db>.+)-(?P<ts>\d{8}T\d{6}Z|\d{8}-\d{6})"
+    r"(?:\.(?P<kind>pre-update))?\.dump(?:\.gz\.enc)?$"
+)
 _TS_FORMAT = "%Y%m%dT%H%M%SZ"  # UTC, offset-bearing by construction
 _LEGACY_TS_FORMAT = "%Y%m%d-%H%M%S"  # pre-cutover names: wall clock, no offset
 _OFFSITE_ROOT = "Ava Backups"
@@ -159,6 +163,12 @@ def _managed_dumps(directory: Path) -> list[tuple[datetime, Path]]:
     return sorted(dumps)
 
 
+def _is_pre_update(path: Path) -> bool:
+    """Whether a managed dump is an update-kind snapshot rather than a daily dump."""
+    m = _NAME_RE.match(path.name)
+    return bool(m and m.group("kind"))
+
+
 def is_due(now: datetime) -> bool:
     """True once the cluster clock has passed BACKUP_HOUR with no dump for the
     current cluster day. `now` must be TZ-aware."""
@@ -171,11 +181,22 @@ def is_due(now: datetime) -> bool:
 
 
 def _prune(directory: Path) -> list[Path]:
-    """Delete managed dumps beyond the newest BACKUP_KEEP; return what was removed."""
+    """Delete managed dumps beyond retention: the newest BACKUP_KEEP daily dumps
+    plus the newest pre-update snapshot. Every migration-bearing `ava cluster
+    update` writes one snapshot into this same pool, so without a separate slot
+    the updates would silently shrink the daily window; the newest snapshot is
+    always the most recent full dump before a migration, so it is kept."""
+    dumps = _managed_dumps(directory)
+    dailies = [(ts, path) for ts, path in dumps if not _is_pre_update(path)]
+    snapshots = [(ts, path) for ts, path in dumps if _is_pre_update(path)]
+    keep = set(dailies[-BACKUP_KEEP:])
+    if snapshots:
+        keep.add(snapshots[-1])
     removed: list[Path] = []
-    for _ts, path in _managed_dumps(directory)[:-BACKUP_KEEP]:
-        path.unlink()
-        removed.append(path)
+    for ts, path in dumps:
+        if (ts, path) not in keep:
+            path.unlink()
+            removed.append(path)
     return removed
 
 
@@ -283,11 +304,16 @@ def _copy_offsite(artifact: Path) -> None:
         _log.exception("[backup] encrypted off-site copy failed; local artifact retained")
 
 
-def _available_target(directory: Path, dbname: str, now: datetime) -> Path:
-    """Return an unused managed dump path without replacing a prior snapshot."""
+def _available_target(directory: Path, dbname: str, now: datetime, *, pre_update: bool) -> Path:
+    """Return an unused managed dump path without replacing a prior snapshot.
+
+    `pre_update` marks an `ava cluster update` snapshot with a kind segment so
+    prune can give update-kind artifacts their own retention slot.
+    """
+    kind = f".{_PRE_UPDATE_MARKER}" if pre_update else ""
     for offset_s in range(_TARGET_NAME_ATTEMPTS):
         stamp = (now + timedelta(seconds=offset_s)).astimezone(UTC).strftime(_TS_FORMAT)
-        target = directory / f"{dbname}-{stamp}.dump.gz.enc"
+        target = directory / f"{dbname}-{stamp}{kind}.dump.gz.enc"
         if not target.exists():
             return target
     raise RuntimeError("could not choose a distinct backup filename within 60 seconds")
@@ -298,6 +324,7 @@ def run_backup(
     *,
     db_url: str | None = None,
     timeout_s: float = _DUMP_TIMEOUT_S,
+    pre_update: bool = False,
 ) -> Path:
     """Dump the cluster DB into backup_dir() and prune; return the dump path.
 
@@ -305,10 +332,12 @@ def run_backup(
     encrypted gzip artifact is published after every pipeline step succeeds.
 
     `timeout_s` lets bounded callers such as the pre-update snapshot use a
-    tighter ceiling than the daily backup default.
+    tighter ceiling than the daily backup default. `pre_update` names the
+    artifact `<db>-<ts>.pre-update.dump.gz.enc` so prune keeps it in its own
+    retention slot (newest one) instead of consuming a daily-dump slot.
     """
     with backup_lock():
-        return _run_backup(now, db_url=db_url, timeout_s=timeout_s)
+        return _run_backup(now, db_url=db_url, timeout_s=timeout_s, pre_update=pre_update)
 
 
 def _run_backup(
@@ -316,6 +345,7 @@ def _run_backup(
     *,
     db_url: str | None = None,
     timeout_s: float = _DUMP_TIMEOUT_S,
+    pre_update: bool = False,
 ) -> Path:
     """Write one managed dump while `backup_lock` is held."""
     now = _require_aware(now) if now is not None else datetime.now(UTC)
@@ -334,7 +364,7 @@ def _run_backup(
             stale.unlink()
     db_conninfo, password = _passwordless_conninfo(db_url)
     dbname = cast(str, conninfo_to_dict(db_url)["dbname"])
-    target = _available_target(directory, dbname, now)
+    target = _available_target(directory, dbname, now, pre_update=pre_update)
     stem = target.name.removesuffix(".dump.gz.enc")
     dump_partial = directory / f"{stem}.dump.partial"
     gzip_partial = directory / f"{stem}.dump.gz.partial"

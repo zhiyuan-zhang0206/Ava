@@ -92,7 +92,8 @@ checkpoint conversation must be proved.
 The gateway checks the existing Google Drive sync folder for a writable target.
 After local encryption succeeds and before local pruning, it copies the
 `.dump.gz.enc` artifact into `Ava Backups/<cluster-home-digest>/`, verifies its
-byte count, and retains the newest seven managed artifacts there. The Drive copy
+byte count, and retains the newest seven daily artifacts plus the newest
+pre-update snapshot there. The Drive copy
 is optional: an unavailable sync folder emits a warning but never discards the
 local artifact. Because only encrypted artifacts reach Drive, its access model
 does not expose database contents. An object store can replace this copy stage
