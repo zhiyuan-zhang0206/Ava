@@ -13,6 +13,7 @@ tests/agent/test_ava_fleet_plugin.py.)
 from __future__ import annotations
 
 import http.server
+import math
 import socket
 import socketserver
 import threading
@@ -147,6 +148,56 @@ class TestShow:
         with pytest.raises(InvalidPageName):
             ava.ui.show("")
 
+    def test_show_passes_integer_ttl_to_gateway(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        ava._boot._agent_id = spawn_agent()
+        captured: dict[str, object] = {}
+        monkeypatch.setattr(ava._gateway_client, "list_open_pages", lambda _aid: [])  # pyright: ignore[reportUnknownArgumentType]
+
+        def _register(agent_id: int, **kwargs: object) -> dict[str, object]:
+            captured.update(agent_id=agent_id, **kwargs)
+            return {
+                "id": 1,
+                "name": "timed",
+                "port": 12000,
+                "title": None,
+                "url": "http://gateway/page",
+            }
+
+        monkeypatch.setattr(ava._gateway_client, "register_page", _register)
+        ava.ui.show("timed", port=12000, ttl=12.9)
+        assert captured["ttl_seconds"] == 12
+
+    def test_show_without_ttl_omits_gateway_field(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        ava._boot._agent_id = spawn_agent()
+        captured: dict[str, object] = {}
+        monkeypatch.setattr(ava._gateway_client, "list_open_pages", lambda _aid: [])  # pyright: ignore[reportUnknownArgumentType]
+
+        def _register(_agent_id: int, **kwargs: object) -> dict[str, object]:
+            captured.update(kwargs)
+            return {
+                "id": 1,
+                "name": "plain",
+                "port": 12000,
+                "title": None,
+                "url": "http://gateway/page",
+            }
+
+        monkeypatch.setattr(ava._gateway_client, "register_page", _register)
+        ava.ui.show("plain", port=12000)
+        assert "ttl_seconds" not in captured
+
+
+@pytest.mark.parametrize("ttl", [0.0, -1.0, math.inf, math.nan])
+@pytest.mark.parametrize("api", ["show", "serve", "serve_markdown"])
+def test_page_apis_reject_invalid_ttl(api: str, ttl: float, tmp_path: Path) -> None:
+    ava._boot._agent_id = spawn_agent()
+    call = getattr(ava.ui, api)
+    args = ("content", "page") if api == "serve_markdown" else (str(tmp_path), "page")
+    if api == "show":
+        args = ("page",)
+    with pytest.raises(ValueError, match="ttl"):
+        call(*args, ttl=ttl)
+
 
 class TestClose:
     def test_close_marks_closed(self, db_conn: psycopg.Connection) -> None:
@@ -186,6 +237,26 @@ class TestServe:
         assert _open_pages(db_conn, ava._boot.agent_id()) == [
             ("srv", stub.port, "Served", str(tmp_path))
         ]
+
+    def test_serve_passes_ttl(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        ava._boot._agent_id = spawn_agent()
+        captured: dict[str, object] = {}
+        monkeypatch.setattr(ava._gateway_client, "list_open_pages", lambda _aid: [])  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr(ava.ui, "_wait_until_serving", lambda *_a, **_kw: True)  # pyright: ignore[reportUnknownArgumentType]
+
+        def _register(_agent_id: int, **kwargs: object) -> dict[str, object]:
+            captured.update(kwargs)
+            return {
+                "id": 1,
+                "name": "srv-ttl",
+                "port": 12000,
+                "title": None,
+                "url": "http://gateway/page",
+            }
+
+        monkeypatch.setattr(ava._gateway_client, "register_page", _register)
+        ava.ui.serve(str(tmp_path), "srv-ttl", port=12000, ttl=30)
+        assert captured["ttl_seconds"] == 30
 
     def test_serve_waits_for_server_to_come_up(
         self, db_conn: psycopg.Connection, tmp_path: Path
@@ -263,6 +334,24 @@ class TestServeMarkdown:
         assert not serve_dir.exists(), "close() cleans up the markdown temp dir"
         db_conn.rollback()
         assert _open_pages(db_conn, ava._boot.agent_id()) == []
+
+    def test_serve_markdown_forwards_ttl(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        captured: dict[str, object] = {}
+
+        def _serve(
+            _dir: str,
+            name: str,
+            port: int | None = None,
+            title: str | None = None,
+            *,
+            ttl: float | None = None,
+        ) -> ava.ui.Page:
+            captured.update(name=name, port=port, title=title, ttl=ttl)
+            return ava.ui.Page(id=1, name=name, port=port or 12000, title=title, url="x")
+
+        monkeypatch.setattr(ava.ui, "serve", _serve)
+        ava.ui.serve_markdown("# Hi", "md-ttl", ttl=45)
+        assert captured["ttl"] == 45
 
     def test_render_markdown_fenced_code_in_list_item(self) -> None:
         """A fenced code block nested inside a list item must render as a

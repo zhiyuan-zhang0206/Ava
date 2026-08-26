@@ -92,6 +92,32 @@ class DaemonSettings(EnvSettings):
         },
     )
 
+    page_default_ttl_seconds: float = Field(
+        default=86400.0,
+        alias="AVA_PAGE_DEFAULT_TTL_SECONDS",
+        description="Default lifetime in seconds for agent-published pages when the SDK does not specify ttl. The gateway applies this policy when it registers the page.",
+        json_schema_extra={
+            "capability": "gateway",
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    ttl_reaper_poll_interval_seconds: float = Field(
+        default=60.0,
+        alias="AVA_TTL_REAPER_POLL_INTERVAL_SECONDS",
+        description="Gateway TTL reaper poll interval in seconds for expired pages and explicitly time-limited persistent shell sessions.",
+        json_schema_extra={
+            "capability": "gateway",
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     health_probe_agent_min: int = Field(
         default=1,
         alias="AVA_HEALTH_PROBE_AGENT_MIN",

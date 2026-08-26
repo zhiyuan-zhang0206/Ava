@@ -552,6 +552,14 @@ def ensure_runner_role(identity: str, *, base_admin_url: str, runner_password: s
         conn.execute(
             pgsql.SQL("GRANT UPDATE ON agent_pages TO {}").format(pgsql.Identifier(RUNNER_ROLE))
         )
+        # ava.shell.sessions.new(ttl=) / run_background(ttl=) record their
+        # declared deadline directly from the runner process; the gateway TTL
+        # reaper (main identity) reads and deletes the rows.
+        conn.execute(
+            pgsql.SQL("GRANT INSERT ON agent_shell_ttls TO {}").format(
+                pgsql.Identifier(RUNNER_ROLE)
+            )
+        )
         for table in ("checkpoints", "checkpoint_blobs", "checkpoint_writes"):
             conn.execute(
                 pgsql.SQL("GRANT ALL ON {} TO {}").format(

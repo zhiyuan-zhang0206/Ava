@@ -100,7 +100,9 @@ def _open_rows(pool: ConnectionPool, host: str) -> list[_PageRow]:
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT id, agent_id, name, port, host, serve_dir, server_token, session_name "
-            "FROM agent_pages WHERE closed_at IS NULL AND serve_dir IS NOT NULL AND host = %s "
+            "FROM agent_pages "
+            "WHERE closed_at IS NULL AND expired_at IS NULL "
+            "AND serve_dir IS NOT NULL AND host = %s "
             "ORDER BY agent_id, name",
             (host,),
         )
@@ -112,7 +114,8 @@ def _closed_page_sessions(pool: ConnectionPool, host: str) -> list[str]:
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT session_name FROM agent_pages "
-            "WHERE closed_at IS NOT NULL AND serve_dir IS NOT NULL AND host = %s "
+            "WHERE (closed_at IS NOT NULL OR expired_at IS NOT NULL) "
+            "AND serve_dir IS NOT NULL AND host = %s "
             "AND session_name IS NOT NULL",
             (host,),
         )

@@ -503,9 +503,11 @@ def _wrapped_serve(
     name: str,
     port: int | None = None,
     title: str | None = None,
+    *,
+    ttl: float | None = None,
 ) -> Any:
     p = _resolve_for_cwd(dir)
-    return inner(str(p), name, port=port, title=title)
+    return inner(str(p), name, port=port, title=title, ttl=ttl)
 
 
 ava.extend.wrap("ui.serve", _wrapped_serve)

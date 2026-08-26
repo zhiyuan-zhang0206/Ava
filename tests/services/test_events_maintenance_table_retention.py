@@ -55,6 +55,7 @@ CREATE TABLE agent_pages (
     id BIGSERIAL PRIMARY KEY,
     agent_id BIGINT,
     closed_at TIMESTAMPTZ,
+    expired_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE TABLE agent_tasks (

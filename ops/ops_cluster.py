@@ -32,11 +32,12 @@ from ops.cluster import (
     unpause_local_cluster,
     update_check,
 )
-from ops.cluster_status import agent_shell_sessions, capture_shell
+from ops.cluster_status import agent_shell_sessions, capture_shell, kill_shell
 from ops.rpc_schemas import (
     AgentSkillViewResult,
     OpsCommandItem,
     ShellCaptureResult,
+    ShellKillResult,
     ShellProbeResult,
 )
 from shared import pause_owner, ui_update_state, updater_handoff
@@ -409,6 +410,17 @@ def shell_probe_op(agent_id: int) -> ShellProbeResult:
     on the gateway would always read empty for a remote agent).
     """
     return ShellProbeResult(shells=agent_shell_sessions(agent_id))
+
+
+def shell_kill_op(agent_id: int, session_id: int) -> ShellKillResult:
+    """Kill one persistent shell on this runner for TTL reclamation."""
+    match kill_shell(agent_id, session_id):
+        case "killed":
+            return ShellKillResult(mode="killed")
+        case "absent":
+            return ShellKillResult(mode="absent")
+        case mode:
+            raise AssertionError(f"unknown shell kill mode {mode!r}")
 
 
 def _agent_skill_view_inputs(pool: Any, agent_id: int) -> tuple[Path | None, list[str] | None]:

@@ -41,3 +41,4 @@ class PageRegisterRequest(BaseModel):
     port: int = Field(..., gt=0, lt=65536)
     title: str | None = Field(default=None, max_length=200)
     serve_dir: str | None = Field(default=None, max_length=4096)
+    ttl_seconds: int | None = Field(default=None, gt=0)
