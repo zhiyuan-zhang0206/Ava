@@ -147,6 +147,16 @@ def _add_pending_inbound(db: psycopg.Connection, aid: int, kind: str = "chat") -
     db.commit()
 
 
+def _add_pending_resurrect_inbound(db: psycopg.Connection, aid: int) -> None:
+    with db.cursor() as cur:
+        cur.execute(
+            "INSERT INTO inbound_messages (agent_id, content, kind, source) "
+            "VALUES (%s, '', 'resurrect', 'system')",
+            (aid,),
+        )
+    db.commit()
+
+
 def _add_claimed_inbound(db: psycopg.Connection, aid: int, kind: str = "chat") -> None:
     """A message the agent had CLAIMED (status 'claimed', not 'pending') and was
     mid-processing when it died — the one in hand at crash time. Distinct from a
@@ -748,6 +758,50 @@ class TestControllerReconcile:
         assert result.acted is True
         assert _row(db_conn, aid) == ("idling", None)  # resurrected + source cleared
         assert _last_resurrect_at(db_conn, aid) is not None  # backoff clock stamped
+        assert aid in [c.agent_id for c in launched_agents]  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+
+    def test_attempt_budget_stops_crash_resurrect_at_limit(
+        self,
+        db_conn: psycopg.Connection,
+        sync_pool: ConnectionPool,
+        launched_agents: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    ) -> None:
+        """Three unconsumed lifecycle rows prove three failed recoveries, so the
+        crash scan leaves the corpse alone instead of starting a fourth boot."""
+        aid = _corpse(db_conn, source="reaper")
+        _add_pending_inbound(db_conn, aid)
+        for _ in range(3):
+            _add_pending_resurrect_inbound(db_conn, aid)
+        launched_agents.clear()
+        controller = cr.CrashResurrectController(sync_pool)
+        controller._boot_pass_done = True
+
+        result = controller.reconcile("agent-runner")
+
+        assert result.acted is False
+        assert _row(db_conn, aid) == ("terminated", "reaper")
+        assert aid not in [c.agent_id for c in launched_agents]  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+
+    def test_attempt_budget_allows_crash_resurrect_below_limit(
+        self,
+        db_conn: psycopg.Connection,
+        sync_pool: ConnectionPool,
+        launched_agents: list,  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+    ) -> None:
+        """Two unconsumed lifecycle rows remain below the default budget, so an
+        eligible corpse still gets its third recovery attempt."""
+        aid = _corpse(db_conn, source="reaper")
+        _add_pending_inbound(db_conn, aid)
+        for _ in range(2):
+            _add_pending_resurrect_inbound(db_conn, aid)
+        launched_agents.clear()
+        controller = cr.CrashResurrectController(sync_pool)
+        controller._boot_pass_done = True
+
+        result = controller.reconcile("agent-runner")
+
+        assert result.acted is True
+        assert _row(db_conn, aid) == ("idling", None)
         assert aid in [c.agent_id for c in launched_agents]  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
 
     def test_resurrects_corpse_with_only_claimed_work(
