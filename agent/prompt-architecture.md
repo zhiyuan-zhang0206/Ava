@@ -86,7 +86,7 @@ Capabilities rather than standing as its own section.
   `AVA_SYSTEM_PROMPT_PREFER_SDK`): one line steering the agent to `ava.*` tools over
   plain-Python / raw-shell equivalents. Deliberately example-free — specific
   misuse patterns get addressed if logs show them.
-- **Core CodeAct batching** — `agent/graph/_system_prompt.py:_codeact_section`,
+- **Core CodeAct batching** — `agent/graph/_codeact.py:_codeact_section` (registered by `_system_prompt.py`),
   **off by default** via `settings.agent.prompt_codeact_enabled` (env
   `AVA_SYSTEM_PROMPT_CODEACT`): pack several operations into one `execute_code`
   call — batch file reads, fold branches into if-else logic — because each

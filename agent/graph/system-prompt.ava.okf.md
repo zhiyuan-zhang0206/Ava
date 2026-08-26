@@ -28,7 +28,7 @@ The system prompt carried in every LLM call, built **once per context window** �
 
 **Conduct group**:
 - `_prefer_sdk_section` — "Prefer SDK"
-- `_codeact_section` — "CodeAct — batch work into fewer calls": pack several operations into one `execute_code` call (batch file reads, fold branches into if-else logic) because each call is one LLM API round-trip. Toggle `AVA_SYSTEM_PROMPT_CODEACT` (default off — opt-in, unlike the on-by-default sections).
+- `_codeact_section` (in `agent/graph/_codeact.py`, registered by `_system_prompt`) — "CodeAct — batch work into fewer calls": pack several operations into one `execute_code` call (batch file reads, fold branches into if-else logic) because each call is one LLM API round-trip. Toggle `AVA_SYSTEM_PROMPT_CODEACT` (default off — opt-in, unlike the on-by-default sections).
 - `_keep_it_simple_section` — "Keep It Simple"
 - `_communication_style_section` — How verbose to be while working; `AVA_AGENT_COMMUNICATION_STYLE` selects `off` (default; section omitted entirely) / `oriented` (short progress reports while working) / `concise` (only speak at milestones) / `silent` (work silently, provide a complete summary at the end)
 - `_output_conciseness_section` — Output conciseness
